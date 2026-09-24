@@ -2,7 +2,7 @@
 
 - **Started:** 2026-09-24
 - **Status:** Active
-- **Last updated:** 2026-09-24, approval
+- **Last updated:** 2026-09-24, CAT-1 and CAT-4
 - **Goal:** Remove CortexKit's duplicate static model catalog while preserving correct subscription routing and per-model capabilities, and separately assess subscription-compatible discovery.
 
 ## Goal and constraints
@@ -29,10 +29,10 @@ Inspected 2026-09-24:
 
 | ID | Status | Scope | Depends on | Owner |
 | --- | --- | --- | --- | --- |
-| CAT-1 | Claimed | Establish SDK catalog source and per-model adapter compatibility contract | none | catalog session, 2026-09-24 |
+| CAT-1 | Done | Establish SDK catalog source and per-model adapter compatibility contract | none | catalog session, 2026-09-24 |
 | CAT-2 | Ready | Replace duplicate catalog with SDK-backed provider registration | CAT-1 | Unassigned |
 | CAT-3 | Ready | Validate package and Tron consumers; prepare controlled local adoption | CAT-2 | Unassigned |
-| CAT-4 | Claimed | Assess subscription-authenticated discovery and record a go/no-go decision | none | catalog session, 2026-09-24 |
+| CAT-4 | Done | Assess subscription-authenticated discovery and record a go/no-go decision | none | catalog session, 2026-09-24 |
 
 Follow the claim-on-main and isolated-worktree protocol before starting a task; keep cross-repository code commits and Tron plan handoffs explicitly linked.
 
@@ -74,6 +74,43 @@ Before any credential-bearing probe, obtain the required user authorization and 
 
 Record one outcome: supported and useful; unavailable for this auth mode; or inconclusive with a precise blocker. A useful endpoint may justify a separately scoped implementation using the SDK's existing model-refresh contract, with explicit stale/error behavior and account/credential fences. Do not silently turn this investigation into implementation or a persistent poller. SDK-supplied metadata is not an acceptable silent guess for unknown live IDs. CAT-1 through CAT-3 remain valuable even if discovery is unsupported.
 
+## Findings
+
+### CAT-1 findings
+
+- Catalog source (verified by a read-only script against SDK 0.87.1): the supported source is `anthropicProvider().getModels()` from `@earendil-works/pi-ai/providers/anthropic`, which returns 15 models. Registering a provider with the same ID replaces that provider's models; it does not merge them. A list read after registration can therefore be CortexKit's own transformed list. CAT-2 must capture the built-in list before registering, deep-clone each model before adapting it, and derive both the normal and the Claustrum registration from that one capture. It must never import the generated catalog data.
+- Metadata to preserve per model: `id`, `name`, `reasoning`, `thinkingLevelMap`, `input`, `inputLimits`, `cost` (with `tiers`), `promptCache`, `contextWindow`, `maxTokens`, `samplingParams`, `headers` and `compat`. CortexKit's proven adaptations are transport and auth only: the `cortexkit-anthropic-messages` API, the first-party base URL, the OAuth token and its stream. None of its static metadata overrides is otherwise needed.
+- The CortexKit converter (packages/pi/src/convert.ts in its checkout) has dedicated branches for Fable and Mythos, Sonnet 5, Opus 5 and Opus 5.5. Every other model gets generic token-budget thinking. SDK effort maps on models without a branch (Opus 4.6 and 4.7, Sonnet 4.6) are therefore not evidence that the generic path works for them.
+- Retirement (inspected): Gateway listing projects the current catalog. Pi resolves a missing saved default to an available fallback without rewriting it, and a restored session whose model is gone warns and falls back. Removal never rewrites history, but a later turn can run on the fallback model.
+
+| Model | Today | Decision (user, 2026-09-24) |
+| --- | --- | --- |
+| Fable 5 and 5.1, Opus 5, Sonnet 5, Opus 4.8, Opus 4.5 (latest), Sonnet 4.5 (latest) | Offered, static metadata | SDK metadata plus the existing converter branch |
+| Opus 5.5 | Offers Extra High and Max | Also offer Low, Medium and High if a request capture shows each effort sent; Minimal stays hidden because it cannot be told apart from Low |
+| Haiku 4.5, Opus 4.6, Opus 4.7, Sonnet 4.6 and the dated aliases for Haiku 4.5, Opus 4.5 and Sonnet 4.5 | Not offered | Add each only after a no-network capture proves the right thinking and effort shape; otherwise record why it is excluded |
+| Mythos 5 and 5.1 (not in the SDK) | Offered | Keep as labelled CortexKit additions, and remove each once the SDK lists it |
+
+### CAT-4 findings
+
+- Outcome: unavailable for this auth mode. Anthropic documents `GET /v1/models` for Console credentials (API key or workload identity) only. Claude Code skips it against the first-party endpoint. Anthropic's terms restrict subscription OAuth to Claude Code and its native apps. Even a successful response lists general API models (with capabilities, `created_at` and pagination, but no retirement field), not what a plan entitles.
+- Claude Code obtains subscription model choices from an internal bootstrap endpoint that carries no capability data. Using it would mean relying on an undocumented surface, so it was not pursued. No credentialed request was made.
+- Consequence: the pinned SDK catalog stays the model authority. A new model reaches Tron through an SDK update plus CAT-2's projection, not through live discovery.
+
 ## Handoff log
 
 Approved and committed at the user's request. No tasks claimed, code changed, packages installed, account probes made, or runtime transitions performed. The earlier rough effort estimate was provisional; CAT-1 must validate the metadata/adapter boundary before promising full model support.
+
+### CAT-1 · Done · 2026-09-24 · catalog session
+
+- Result: established the catalog source, the replacement hazard and each model's disposition; see the CAT-1 findings. The user decided the three open questions: the new models, Mythos and the Opus 5.5 levels.
+- Evidence: a read-only script against the pinned SDK (verified); the SDK types, the Pi docs `custom-provider.md` and `models.md`, and the CortexKit sources packages/pi/src/index.ts, packages/pi/src/convert.ts and packages/core/src/models.ts in its checkout (inspected). No live generation.
+- Changes: this commit (plan only).
+- Tasks added: none.
+- For the next agent: CAT-2 must put request-capture proof ahead of each newly added model and each restored Opus 5.5 level.
+
+### CAT-4 · Done · 2026-09-24 · catalog session
+
+- Result: unavailable for subscription OAuth; see the CAT-4 findings.
+- Evidence: Anthropic's Models API and authentication docs, Claude Code's gateway and legal docs, and the CortexKit sources (inspected). No credentialed probe.
+- Changes: this commit (plan only).
+- Tasks added: none.
