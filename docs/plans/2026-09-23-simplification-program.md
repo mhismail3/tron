@@ -2,7 +2,7 @@
 
 - **Started:** 2026-09-23
 - **Status:** Active
-- **Last updated:** 2026-09-24, observability scope exclusions removed
+- **Last updated:** 2026-09-24, V-0, S-COMMENTS-1, S-STRUCT-1, S-DOCS-1
 - **Goal:** Every file, module, abstraction, dependency, comment and test in Tron has a specific, visible reason to exist, with no change to what users see or do.
 
 Follow the [plan protocol](README.md#protocol) to claim tasks and hand off.
@@ -198,16 +198,23 @@ These apply on top of `AGENTS.md`, which wins on any conflict.
 
 | ID | Status | Scope | Depends on | Owner |
 | --- | --- | --- | --- | --- |
-| V-0 | Claimed | Baseline: run and time every focused and full suite (Gateway vitest, scripts `node --test` with the pinned Node, iOS `scripts/tron-ios-test`, Mac `xcodebuild test`); record pass state and wall times in a handoff entry for later comparison | none | simplification session, 2026-09-24 |
+| V-0 | Done | Baseline: run and time every focused and full suite (Gateway vitest, scripts `node --test` with the pinned Node, iOS `scripts/tron-ios-test`, Mac `xcodebuild test`); record pass state and wall times in a handoff entry for later comparison | none | simplification session, 2026-09-24 |
 | V-0-UX | Ready | UX baseline: list the user flows that must not change (launch, pair, open session, send, stream, scroll history, composer and keyboard, attachments, settings, automations, rebuild from source, rollback), with a simulator screenshot per key screen kept outside the repo and listed in the handoff | none | |
 | S-DEAD-1 | Ready | Repo-wide dead-code sweep with tools run ad hoc (not added to the repo): unused TS exports, files and dependencies; unused Swift declarations; unreferenced scripts, assets, docs and fixtures. Verify each hit by hand (runtime registration, RPC routing, reflection, generated code, CI, `scripts/tron`). Output one C-DEAD row per coherent deletion batch | V-0 | |
 | S-DEPS-1 | Ready | Dependency audit: every Gateway, relay, iOS and Mac dependency, what uses it, and whether platform API covers it. Output C-DEPS rows | V-0 | |
-| S-COMMENTS-1 | Claimed | Comment sweep method: grep patterns for comments that describe absence, narrate syntax or read as agent diaries; sample 50 hits to calibrate. Output the patterns plus per-area C-COMMENTS rows | none | simplification session, 2026-09-24 |
-| S-STRUCT-1 | Claimed | Structure sweep: every tracked file and directory needs a current owner and reason. Find one-off plans and reports, leftover fixtures (check `display-smoke/`), backup copies, config for tools no longer used (check `.codex` and `.pi`), docs for finished cutovers and tracked generated files. Check each against CI, `scripts/tron` and code references. Output C-STRUCT rows | none | simplification session, 2026-09-24 |
+| S-COMMENTS-1 | Done | Comment sweep method: grep patterns for comments that describe absence, narrate syntax or read as agent diaries; sample 50 hits to calibrate. Output the patterns plus per-area C-COMMENTS rows | none | simplification session, 2026-09-24 |
+| S-STRUCT-1 | Done | Structure sweep: every tracked file and directory needs a current owner and reason. Find one-off plans and reports, leftover fixtures (check `display-smoke/`), backup copies, config for tools no longer used (check `.codex` and `.pi`), docs for finished cutovers and tracked generated files. Check each against CI, `scripts/tron` and code references. Output C-STRUCT rows | none | simplification session, 2026-09-24 |
 | S-BUILD-1 | Ready | Build-output hygiene. On 2026-09-23 agents had left about 1,100 ad-hoc DerivedData folders in `/tmp` (11 GB, cleared by a restart), and each worktree keeps its own 1.2–3.8 GB build tree (35 GB across 24 worktrees) because `scripts/tron-ios-test` builds into the worktree. That file churn grew `fseventsd` to 49 GB, filled swap and stalled the live Gateway. Scope: where repo scripts and the `tron-ios` skill send build output, one owned location per purpose so agents stop inventing paths, and releasing build output when a worktree is released through the housekeeping procedure. Also: `packages/mac-app/scripts/bundle-gateway.sh` makes the staged payload under `packages/mac-app/Sources/Resources/Gateway` read-only, so `git worktree remove` fails partway through a merged worktree that has staged it (seen on two worktrees on 2026-09-23); release must handle that without force-deleting. Output C-BUILD rows | none | |
 | T-IOS-WATCHDOG-1 | Done | Make `withTestWatchdog` (`packages/ios-app/Tests/Support/TestWatchdog.swift`) end a test at its timeout even when the operation is blocked on a non-cancellable wait; today the task group waits for the stuck child, so the run stalls until `scripts/tron-ios-test`'s 180 s no-output or 20 min process deadline (seen 2026-09-24: 5–11 min runs from one hung test) | none | observability session, 2026-09-24 |
 | T-IOS-FLAKY-OPENING-1 | Ready | `ChatViewScrollHarnessTests.hostedOpeningRevealIsMonotonic` is flaky on unchanged `main` (failed 4 of 6 isolated runs on 2026-09-24; its monotonic-distance check allows only 0.035 pt of regression). Find whether the reveal genuinely regresses or the oracle samples frames nondeterministically, and fix the owner, not the tolerance | none | |
 | T-IOS-DEVICE-PROBE-1 | Needs scoping | Measure whether simulator test runs lose time to xcodebuild probing a paired, passcode-locked physical iPhone (`DTDKRemoteDeviceConnection … passcode protected` in `test.log`), and stop it for simulator destinations if it does | none | |
+| C-STRUCT-DELETE-1 | Ready | Delete the verified orphans in one change: `display-smoke/` (4 manual fixtures, no references outside this plan), the one-off `packages/gateway/docs/computer-use-image-g0.md` report (no inbound links; states the old Pi pin), and `packages/ios-app/docs/assets/tron-logo.png` (no references; a duplicate of the smoke photo). Re-run the reference searches and the documentation policy check | S-STRUCT-1 | |
+| C-DOCS-GW-1 | Ready | One owner for session-search and knowledge bounds: `packages/gateway/docs/session-search.md` has no inbound links and restates the Gateway README's "Session search" section; keep one owner and link the other, and do the same for the knowledge bounds stated in the README and `packages/gateway/docs/knowledge.md` | S-DOCS-1 | |
+| C-DOCS-PIN-1 | Ready | Correct stale Pi pins: the Gateway README (two places), `packages/gateway/docs/agent-home-reference-inventory.md`, `packages/gateway/docs/cutover-runbook.md` and `packages/mac-app/docs/agent-home-cutover.md` still say Pi 0.84.4 and `pi-subagents` 0.59.0; the pin is 0.87.1 and `pi-subagents` is runtime-installed, not a repository dependency | S-DOCS-1 | |
+| C-DOCS-OWNER-1 | Ready | Contributor facts owned once: the retired-architecture list, the iOS configuration matrix (four copies), the TronMac test commands (four copies) and the documentation-ownership list (in both `AGENTS.md` and `CONTRIBUTING.md`) keep one owner each and are linked elsewhere | S-DOCS-1 | |
+| C-DOCS-SPLIT-1 | Ready | Split the multi-thousand-word paragraphs in `packages/ios-app/docs/development.md`, `packages/ios-app/docs/architecture.md` and `events.md`, the Mac development doc and the Gateway README into titled subsections, deduplicating while splitting; content unchanged otherwise (one file per change, each under 800 changed lines) | S-DOCS-1 | |
+| C-COMMENTS-1 | Ready | Fix the four verified misleading comments: the Mac `TronColors.swift` header names a nonexistent iOS file and claims hex values match iOS when they differ; `PairingURLBuilder.swift` and its test name a nonexistent `PairingURLParser` (the consumer is `PairingInvitationParser`); `MenuBarItemBuilder.swift` cites a nonexistent "plan §A"; `OnboardingModels.swift` narrates removed behavior. Also the two weak Gateway and scripts cases in the S-COMMENTS-1 findings | S-COMMENTS-1 | |
+| C-COMMENTS-REFCHECK-1 | Needs approval | Extend `scripts/check-documentation-policy.py` to check backticked repository paths inside code comments, the only check that would have caught the stale palette reference (about 30 lines). Adds a CI rule, so the user decides | S-COMMENTS-1 | |
 | C-STRUCT-RULES-1 | Ready | Make the structure self-maintaining with the least mechanism: (1) a short `AGENTS.md` rule that whoever adds, moves or removes a file updates its references, owning doc and ownership notes in the same change and commits no temporary files; (2) a two-line "owns / does not own" note in each package's existing README or doc where missing; (3) only if S-STRUCT-1 finds recurring leftovers, one fast CI check for the patterns actually found | S-STRUCT-1 | |
 | S-GW-ROOT-1 | Ready | For each migration tool and cutover doc, determine whether it is complete on every supported install. Removal needs the user's approval; record the evidence and the question | V-0 | |
 | S-GW-SESS-1 | Ready | Split GW-SESS into sub-units (runtime slot, registry, projection, catalog, search, blobs, process activity, extensions projection); add one S-GW-SESS row per sub-unit with its file list | V-0 | |
@@ -230,7 +237,7 @@ These apply on top of `AGENTS.md`, which wins on any conflict.
 | S-MAC-NATIVE-1 | Ready | Scope MAC-NATIVE, including the C launcher | V-0 | |
 | S-RELAY-1 | Ready | Scope RELAY | V-0 | |
 | S-SCRIPTS-1 | Ready | Scope SCRIPTS: which scripts a maintainer or CI actually runs; the Python reinstall tools and their tests; the deploy helper excluding progress reporting | V-0 | |
-| S-DOCS-1 | Claimed | Docs: one owner per fact per `AGENTS.md`; flag docs that describe finished cutovers or duplicate another doc | none | simplification session, 2026-09-24 |
+| S-DOCS-1 | Done | Docs: one owner per fact per `AGENTS.md`; flag docs that describe finished cutovers or duplicate another doc | none | simplification session, 2026-09-24 |
 | S-XMOD-1 | Needs scoping | Cross-module duplication of the same capability across packages (redaction, bounds, JSON helpers, path validation, protocol constants), from candidates the area scopings report | all S-GW, S-IOS and S-MAC scoping rows | |
 | T-IOS-TEST-INFRA-1 | Needs scoping | Audit iOS test harness helpers after the iOS test audits, deleting helpers no remaining test uses | all iOS test-audit rows | |
 | V-FINAL | Needs scoping | Final check: full suites against V-0 times, V-0-UX flows re-checked, dead-code tools clean, every Done row has a handoff | all rows | |
@@ -261,3 +268,48 @@ These apply on top of `AGENTS.md`, which wins on any conflict.
 - Tasks added: none.
 - Kept on purpose: `expiryDoesNotWaitForNonCancellableOperation` asserts a real-time bound (under 2 s for a 50 ms deadline). The deadline is the behavior under test, and an injected clock would add a seam to every watchdog caller. A comment at the assertion says so.
 - For the next agent: the harness's opening-cover test (`openingCoverHidesNavigationBand`) was checked against the rule that a test must fail when the behavior breaks: with the cover fix reverted, 65–108 text pixels showed through the band in each of 3 runs.
+
+### V-0 · Done · 2026-09-24 · simplification session
+
+- Result: baseline pass state and wall times at `fd790fb53` on this Mac (the live Gateway running), for later comparison. All suites pass.
+- Evidence (verified):
+
+| Suite | Command | Result | Wall |
+| --- | --- | --- | --- |
+| Gateway, full | `nice -n 19 npx vitest run --maxWorkers=2` in `packages/gateway` | 179 files, 1,941 tests | 80 s |
+| Scripts, Node | `node --test scripts/*.test.mjs` (Node 22.22.0) | 67 tests | 133 s |
+| Scripts, shell | `scripts/tron-dev-toolchain.test.sh`, `scripts/verify-ci-toolchain.test.sh` | pass | about 1 s |
+| Mac reinstall tools | `python3 scripts/test-mac-reinstall.py` | 93 tests, 3 skipped | 2 s |
+| Launcher | `packages/mac-app/scripts/test-tron-gateway-launcher.sh` | pass | 271 s |
+| Mac payload scripts | `test-update-payload-fingerprint.sh`, `test-push-product-config.sh` | pass | under 1 s |
+| Push relay | `npx vitest run` in `packages/push-relay` | 6 files, 39 tests | 4 s |
+| iOS, full | `scripts/tron-ios-test run` after `build` | 1,889 Swift Testing tests in 139 suites plus XCTest | build 132 s, run 236 s |
+| Mac, full | `xcodebuild build-for-testing` then `test-without-building` (TronMac) | 316 tests in 48 suites | build 227 s, run 134 s |
+
+- Not run: `test-launchd-relaunch-fixture.sh` (opt-in, needs `TRON_RUN_LAUNCHD_FIXTURE=1`), and the payload verifier, npm and signed-payload smoke scripts, which need a staged Mac payload.
+- Changes: this commit (plan only).
+- For the next agent: the launcher shell test needs Node 22.22.0 on `PATH`, or it exits 2 immediately. `hostedOpeningRevealIsMonotonic` passed in this run; it remains T-IOS-FLAKY-OPENING-1.
+
+### S-COMMENTS-1 · Done · 2026-09-24 · simplification session (DeepSeek lane, checked by the supervisor)
+
+- Result: comment cleanup is nearly empty. Across 10,602 line-start comment lines, absence, syntax-narration and diary patterns reached at most 5% precision on a 50-hit sample, and no comment restates its next line. The real yield came from checking backticked names and paths against the repository: three of the four verified findings (C-COMMENTS-1). Plan task IDs, TODOs and dates in comments are absent, and the three dated comments are legitimate incident or verification evidence.
+- Evidence (verified by the supervisor): the Mac `TronColors.swift` header names a nonexistent iOS TronColors.swift, and `PairingURLParser` and "plan §A" appear nowhere else. The lane's tuned patterns and per-area counts are in its run output; they are method, not code.
+- Changes: this commit (plan only).
+- Tasks added: C-COMMENTS-1, C-COMMENTS-REFCHECK-1 (needs approval).
+- Kept on purpose: `MARK:` headers, the security comments in `bundle-gateway.sh`, and rationale comments that mention rejected alternatives.
+- For the next agent: about 38 comments claim cross-layer parity ("mirrors the Gateway's …"); only the Mac palette claim was checked. Area scopings should verify such claims in their own units.
+
+### S-STRUCT-1 · Done · 2026-09-24 · simplification session (DeepSeek lane, checked by the supervisor)
+
+- Result: the tree is mostly owned. Three orphans can go (C-STRUCT-DELETE-1), and `packages/gateway/docs/session-search.md` has no inbound links and duplicates the README (C-DOCS-GW-1).
+- Evidence (verified by the supervisor): reference searches outside `docs/plans/` return nothing for `display-smoke`, `tron-logo.png`, `computer-use-image-g0` or `session-search.md`.
+- Kept on purpose: `.codex/environments/environment.toml` (allowlisted by `scripts/check-agent-policy.sh`), `.pi/prompts/` (deliberately un-ignored), `config/GatewayProtocol.json` (the authored wire contract), and the cutover runbooks. Those are still referenced, and their removal is S-GW-ROOT-1's decision.
+- Changes: this commit (plan only).
+- Tasks added: C-STRUCT-DELETE-1. C-STRUCT-RULES-1 is now unblocked; its optional CI check has no recurring leftover pattern to target.
+
+### S-DOCS-1 · Done · 2026-09-24 · simplification session (DeepSeek lane, checked by the supervisor)
+
+- Result: the documentation's main debts are stale facts, repeated contributor facts, and very long paragraphs that are hard to navigate.
+- Evidence (verified by the supervisor): `0.84.4` still appears in the Gateway README (two places), the agent-home inventory, the cutover runbook and the agent-home cutover doc, while the pin is 0.87.1. The iOS configuration matrix and the TronMac test commands each appear in four files.
+- Changes: this commit (plan only).
+- Tasks added: C-DOCS-GW-1, C-DOCS-PIN-1, C-DOCS-OWNER-1, C-DOCS-SPLIT-1.
