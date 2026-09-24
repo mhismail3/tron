@@ -30,7 +30,7 @@ Inspected 2026-09-24:
 | ID | Status | Scope | Depends on | Owner |
 | --- | --- | --- | --- | --- |
 | CAT-1 | Done | Establish SDK catalog source and per-model adapter compatibility contract | none | catalog session, 2026-09-24 |
-| CAT-2 | Ready | Replace duplicate catalog with SDK-backed provider registration | CAT-1 | Unassigned |
+| CAT-2 | Claimed | Replace duplicate catalog with SDK-backed provider registration | CAT-1 | catalog session, 2026-09-24 |
 | CAT-3 | Ready | Validate package and Tron consumers; prepare controlled local adoption | CAT-2 | Unassigned |
 | CAT-4 | Done | Assess subscription-authenticated discovery and record a go/no-go decision | none | catalog session, 2026-09-24 |
 
