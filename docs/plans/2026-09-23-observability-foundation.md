@@ -2,7 +2,7 @@
 
 - **Started:** 2026-09-23
 - **Status:** Active
-- **Last updated:** 2026-09-24, L-8b
+- **Last updated:** 2026-09-24, user decisions
 - **Goal:** Every Tron process records the right signals automatically, in a known place, at a meaningful level, so a failure can be diagnosed in one pass from what was already recorded.
 
 Follow the [plan protocol](README.md#protocol) to claim tasks and hand off.
@@ -214,22 +214,22 @@ user reinstalls manually, so batch them for one reinstall.
 | L-8b | Blocked | Lower the session-search rebuild's peak transient heap: build the index in bounded units so peak post-GC heap stays under 150 MB on the cloned 5,381-session corpus with identical index coverage and results, and warm-up no more than 10% slower than the measured 155–159 s | L-8 | observability session (L-8b lane), 2026-09-24 |
 | L-8c | Needs scoping | Sessions owner: bound the session-search read path's peak heap (743.9 MiB post-GC) by bounded or streaming parsing of a session cut in `RuntimeRegistry.readSearchCut`, keeping full graph and branch validation; first record why 62 of 207 catalog sessions were not indexed | L-8b | |
 | L-9 | Done | Phone handling of a stalled or unreachable but live Gateway (proposal for the user) | L-7, L-10 | observability session (L-9 lane), 2026-09-24 |
-| L-9a | Needs approval | Phone labels a connection failure as "No path to this Mac" when attempts never opened a transport, and keeps "Reconnecting" otherwise; no timing change (option A in L-9 findings) | L-9 | |
+| L-9a | Claimed | Phone labels a connection failure as "No path to this Mac" when attempts never opened a transport, and keeps "Reconnecting" otherwise; no timing change (option A in L-9 findings) | L-9 | observability session (L-9a lane), 2026-09-24 |
 | L-9b | Needs approval | Choose stall tolerance (third missed pong, option B) or a shorter never-opened handshake (option D), after a few days of L-9a records | L-9a | |
 | L-10 | Done | iOS connect-failure records say whether the socket ever opened, and on which interface | none | observability session, 2026-09-24 |
 | L-15 | Done | Startup timing: stop to bound and bound to first startup phase | L-2 | observability session, 2026-09-24 |
 | L-15b | Done | Fix the dominant startup cost the L-15 records name on the next real restart (the user's rebuild) | L-15 | observability session (L-15b lane), 2026-09-24 |
-| L-15c | Ready | After the next real restart, read the `automation.recovery-step` and `session-search.warm` records and fix the measured owner of automation recovery's time | L-15b | |
+| L-15c | Claimed | After the next real restart, read the `automation.recovery-step` and `session-search.warm` records and fix the measured owner of automation recovery's time | L-15b | observability session (L-15c lane), 2026-09-24 |
 | L-16 | Done | Restart drain hangs on terminal-receipt persistence | none | observability session, 2026-09-24 |
-| L-17 | Needs approval | Judge a drain stalled by its oldest blocker without progress, not by any change in the blocker set | L-16 | |
-| L-18 | Needs approval | Decide whether a restart drain proceeds when only unresolved (blocked) persistence owners remain | L-16 | |
+| L-17 | Claimed | Judge a drain stalled by its oldest blocker without progress, not by any change in the blocker set | L-16 | observability session (drain lane), 2026-09-24 |
+| L-18 | Claimed | Decide whether a restart drain proceeds when only unresolved (blocked) persistence owners remain | L-16 | observability session (drain lane), 2026-09-24 |
 | L-19 | Done | `scripts/tron mac verify` fails on the live install after a source rebuild: "PID selected payload path mismatch" and "authenticated system.info identity/channel mismatch" on the Tailscale host. Find whether the install or the check is wrong | none | observability session (L-19 lane), 2026-09-24 |
 | L-19a | Done | Make `scripts/verify-mac-install.sh` admit a store payload the way the launcher does: drop the XcodeGen `codesign --verify` requirement from `payload_meets_current_runtime_contract` and accept the pinned upstream XcodeGen digest in the provenance check; correct `packages/mac-app/docs/development.md`; test in `scripts/test-mac-reinstall.py` | L-19 | observability session (L-19a lane), 2026-09-24 |
 | L-11 | Done | Remove duplicate payload validations within one deploy run | none | observability session (L-11 lane), 2026-09-24 |
 | L-12 | Done | Faster Node payload fingerprint with identical output | none | observability session (L-12 lane), 2026-09-24 |
 | L-13 | Done | Stage source payloads in the store and rename instead of copying twice | L-11 | observability session (L-13 lane), 2026-09-24 |
 | L-14 | Done | APFS clone copies and payload retention count | L-13 | observability session (L-14 lane), 2026-09-24 |
-| L-14b | Needs approval | Choose `MAX_RETAINED_VERSIONS` now that new payload versions are APFS clones (recommendation: keep 8) | L-14 | |
+| L-14b | Done | Choose `MAX_RETAINED_VERSIONS` now that new payload versions are APFS clones (recommendation: keep 8) | L-14 | user decision, 2026-09-24 |
 
 ## Task details
 
@@ -850,3 +850,10 @@ The 2026-09-23 17:33 UTC incident's records have rotated away, so its timeline i
 - Changes: this commit (plan only).
 - Tasks added: L-8c.
 - For the next agent: L-8c must first capture why each catalog session was left out, and correlate collection samples with read sizes, before changing the reader. The silent isolated startup on the grown clone may be worth a look, but it was not reproduced or diagnosed.
+
+### Decisions · Done · 2026-09-24 · user, recorded by the observability session
+
+- Result: the user decided the open approval rows after reinstalling the Mac app and rebuilding the Gateway and the iPhone app. L-17 is approved: a drain is stalled when its oldest blocker makes no progress for the stall limit, regardless of other blocker churn. L-18 is approved: a drain whose only remaining blockers are unresolved persistence owners proceeds and logs each owner at error. L-9a is approved with two states, "No path to this Mac" and "Reconnecting". L-14b: keep `MAX_RETAINED_VERSIONS` at 8, because new versions are APFS clones. On closing the plan, L-8c moves to the simplification program's sessions area and L-9b moves to a new proposed plan once L-9a has produced data.
+- Evidence (verified): after the reinstall, `scripts/tron mac verify` exits 0. `mac.jsonl`, `gateway-stderr.log` and launcher records in `deploy.jsonl` now exist. The first restart with the L-15b records (17:22:38 UTC) gives L-15c its evidence: automation recovery took 8.6 s, but its three parts sum to 1.2 s, and 7.4 s passed before `initialize()` started. The old process's shutdown ran into the 15 s forced exit (exit 1) with no step records.
+- Changes: this commit (plan only).
+- Tasks added: none.
