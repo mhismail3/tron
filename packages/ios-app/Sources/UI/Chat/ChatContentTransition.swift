@@ -288,7 +288,7 @@ enum ChatContentTransitionPolicy {
             : .smooth(duration: 0.22)
     }
 
-    static func notificationReplacementAnimation(reduceMotion: Bool) -> Animation? {
+    static func inPlaceContentReplacementAnimation(reduceMotion: Bool) -> Animation? {
         reduceMotion ? .linear(duration: 0.10) : .smooth(duration: notificationReplacementDuration)
     }
 

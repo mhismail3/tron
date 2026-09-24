@@ -259,6 +259,7 @@ enum ChatPhysicalTranscriptRowPolicy {
 enum ChatPhysicalTranscriptReplacementKind: Equatable {
     case none
     case notification
+    case promptContent
 }
 
 private struct ChatPhysicalPromptEntrance: Equatable {
@@ -278,7 +279,29 @@ enum ChatPhysicalTranscriptReplacementPolicy {
            !new.showsProgress {
             return .notification
         }
-        return .none
+        guard previous.isPromptLifecycle,
+              case .transcript(let item, _) = next.content,
+              item.isCanonicalUserPrompt else { return .none }
+        return .promptContent
+    }
+}
+
+private extension ChatPhysicalTranscriptRow {
+    var isPromptLifecycle: Bool {
+        switch content {
+        case .pending, .outgoing, .queued: true
+        case .transcript: false
+        }
+    }
+}
+
+private extension ChatTranscriptRenderItem {
+    var isCanonicalUserPrompt: Bool {
+        switch self {
+        case .transcript(let item): item.role == .user
+        case .message(let message): message.item.role == .user
+        case .toolRun, .notification: false
+        }
     }
 }
 
@@ -289,10 +312,15 @@ private struct ChatPhysicalTranscriptReplacementHost<Content: View>: View {
     let reduceMotion: Bool
     let hostedRecorder: (any ChatTranscriptHostedRecording)?
     let onPromptEntranceConsumed: (String) -> Void
+    let onPromptContentReplacement: (String) -> Void
     let onPromptEntranceSettled: (String) -> Void
-    @ViewBuilder let content: (ChatPhysicalTranscriptRow) -> Content
+    @ViewBuilder let content: (ChatPhysicalTranscriptRow, Bool, Bool) -> Content
 
     @State private var displayed: ChatPhysicalTranscriptRow
+    @State private var fadingPromptLifecycle: ChatPhysicalTranscriptRow?
+    @State private var promptReplacementProgress = 1.0
+    @State private var promptReplacementRevision = 0
+    @State private var replacedPromptSemanticID: String?
     @State private var retainedPromptEntrance: ChatPhysicalPromptEntrance?
     #if HOSTED_TEST
     @State private var hostedIdentity = UUID()
@@ -304,13 +332,15 @@ private struct ChatPhysicalTranscriptReplacementHost<Content: View>: View {
         promptEntrance: ChatPhysicalPromptEntrance?,
         hostedRecorder: (any ChatTranscriptHostedRecording)? = nil,
         onPromptEntranceConsumed: @escaping (String) -> Void,
+        onPromptContentReplacement: @escaping (String) -> Void,
         onPromptEntranceSettled: @escaping (String) -> Void,
-        @ViewBuilder content: @escaping (ChatPhysicalTranscriptRow) -> Content
+        @ViewBuilder content: @escaping (ChatPhysicalTranscriptRow, Bool, Bool) -> Content
     ) {
         self.row = row
         self.reduceMotion = reduceMotion
         self.hostedRecorder = hostedRecorder
         self.onPromptEntranceConsumed = onPromptEntranceConsumed
+        self.onPromptContentReplacement = onPromptContentReplacement
         self.onPromptEntranceSettled = onPromptEntranceSettled
         self.content = content
         _displayed = State(initialValue: row)
@@ -346,11 +376,24 @@ private struct ChatPhysicalTranscriptReplacementHost<Content: View>: View {
                     onPromptEntranceSettled(entrance.lifecycleID)
                 }
             ) {
-                content(displayed)
+                replacementContent
             }
         } else {
-            content(displayed)
+            replacementContent
         }
+    }
+
+    private var replacementContent: some View {
+        content(displayed, false, replacedPromptSemanticID == displayed.semanticID)
+            .opacity(promptReplacementProgress)
+            .overlay(alignment: .topLeading) {
+                if let fadingPromptLifecycle {
+                    content(fadingPromptLifecycle, true, true)
+                        .opacity(1 - promptReplacementProgress)
+                        .allowsHitTesting(false)
+                        .accessibilityHidden(true)
+                }
+            }
     }
 
     private func retarget(_ next: ChatPhysicalTranscriptRow) {
@@ -361,17 +404,47 @@ private struct ChatPhysicalTranscriptReplacementHost<Content: View>: View {
         switch kind {
         case .notification:
             var transaction = Transaction(animation:
-                ChatContentTransitionPolicy.notificationReplacementAnimation(
+                ChatContentTransitionPolicy.inPlaceContentReplacementAnimation(
                     reduceMotion: reduceMotion
                 ))
             transaction.admitsChatNotificationReplacementAnimation = true
             withTransaction(transaction) { displayed = next }
-        case .none:
-            // Canonical prompt payload replaces the lifecycle row atomically.
-            // Its stable physical identity prevents a second entrance.
+        case .promptContent:
+            // Keep the physical host, row geometry, and consumed entrance lease;
+            // only the old and new contents cross-fade inside that owner.
+            onPromptContentReplacement(next.semanticID)
+            replacedPromptSemanticID = next.semanticID
+            promptReplacementRevision &+= 1
+            let revision = promptReplacementRevision
             var transaction = Transaction()
             transaction.disablesAnimations = true
-            withTransaction(transaction) { displayed = next }
+            withTransaction(transaction) {
+                fadingPromptLifecycle = displayed
+                displayed = next
+                promptReplacementProgress = 0
+            }
+            withAnimation(
+                ChatContentTransitionPolicy.inPlaceContentReplacementAnimation(
+                    reduceMotion: reduceMotion
+                ),
+                completionCriteria: .logicallyComplete
+            ) {
+                promptReplacementProgress = 1
+            } completion: {
+                guard promptReplacementRevision == revision else { return }
+                fadingPromptLifecycle = nil
+            }
+        case .none:
+            // Other payloads remain atomic; stable physical identity prevents
+            // duplicate entrance and the scroll owner retains its geometry.
+            promptReplacementRevision &+= 1
+            var transaction = Transaction()
+            transaction.disablesAnimations = true
+            withTransaction(transaction) {
+                displayed = next
+                fadingPromptLifecycle = nil
+                promptReplacementProgress = 1
+            }
         }
     }
 }
@@ -708,12 +781,17 @@ struct ChatTranscriptScrollView<Earlier: View, Opening: View>: View {
             onPromptEntranceConsumed: { lifecycleID in
                 transcriptPresentation.consumeLifecycleEntrance(id: lifecycleID)
             },
+            onPromptContentReplacement: { semanticID in
+                transcriptPresentation.consumeTranscriptEntrance(id: semanticID)
+            },
             onPromptEntranceSettled: onEntranceSettled
-        ) { displayed in
+        ) { displayed, isReplacementOverlay, suppressEntrance in
             physicalRow(
                 displayed,
                 installed: installed,
-                terminalMaterializationID: terminalMaterializationID
+                terminalMaterializationID: terminalMaterializationID,
+                isReplacementOverlay: isReplacementOverlay,
+                suppressEntrance: suppressEntrance
             )
         }
         // The exact row target includes the complete affordance. The eager
@@ -730,7 +808,9 @@ struct ChatTranscriptScrollView<Earlier: View, Opening: View>: View {
     private func physicalRow(
         _ row: ChatPhysicalTranscriptRow,
         installed: InstalledChatTranscript,
-        terminalMaterializationID: String?
+        terminalMaterializationID: String?,
+        isReplacementOverlay: Bool = false,
+        suppressEntrance: Bool = false
     ) -> some View {
         switch row.content {
         case .transcript(let item, let isCommitted):
@@ -740,12 +820,15 @@ struct ChatTranscriptScrollView<Earlier: View, Opening: View>: View {
                 physicalID: row.id,
                 installed: installed,
                 isCommitted: isCommitted,
-                terminalMaterializationID: terminalMaterializationID
+                terminalMaterializationID: terminalMaterializationID,
+                isReplacementOverlay: isReplacementOverlay,
+                suppressEntrance: suppressEntrance
             )
         case .pending(let pending):
             pendingRow(
                 pending, renderedID: row.id, installed: installed,
-                terminalMaterializationID: terminalMaterializationID
+                terminalMaterializationID: terminalMaterializationID,
+                isReplacementOverlay: isReplacementOverlay
             )
         case .outgoing(let outgoing, let attachments):
             outgoingRow(
@@ -753,12 +836,14 @@ struct ChatTranscriptScrollView<Earlier: View, Opening: View>: View {
                 attachments: attachments,
                 renderedID: row.id,
                 installed: installed,
-                terminalMaterializationID: terminalMaterializationID
+                terminalMaterializationID: terminalMaterializationID,
+                isReplacementOverlay: isReplacementOverlay
             )
         case .queued(let entry):
             queuedRow(
                 entry, renderedID: row.id, installed: installed,
-                terminalMaterializationID: terminalMaterializationID
+                terminalMaterializationID: terminalMaterializationID,
+                isReplacementOverlay: isReplacementOverlay
             )
         }
     }
@@ -767,18 +852,20 @@ struct ChatTranscriptScrollView<Earlier: View, Opening: View>: View {
         _ pending: ChatPendingPromptPresentation,
         renderedID: String,
         installed: InstalledChatTranscript,
-        terminalMaterializationID: String?
+        terminalMaterializationID: String?,
+        isReplacementOverlay: Bool
     ) -> some View {
         let entranceSuppressed = transcriptPresentation.suppressesEntrances(for: installed.tag)
         return stableRow(
             semanticID: renderedID,
             installedTag: installed.tag,
             entranceState: .none,
-            terminalPhysicalID: renderedID == terminalMaterializationID ? renderedID : nil
+            terminalPhysicalID: isReplacementOverlay ? nil : (renderedID == terminalMaterializationID ? renderedID : nil),
+            publishesGeometry: !isReplacementOverlay
         ) {
             if pending.promptBehavior.isQueuedKind {
                 ChatQueuedMessageEntranceRow(
-                    animatesEntrance: admitsGeometryCallbacks
+                    animatesEntrance: !isReplacementOverlay && admitsGeometryCallbacks
                         && ChatPromptLifecycleTransitionPolicy.shouldAnimateQueueEntrance(
                         isReady: isReady,
                         entranceSuppressed: entranceSuppressed,
@@ -804,14 +891,16 @@ struct ChatTranscriptScrollView<Earlier: View, Opening: View>: View {
         attachments: [PendingAttachment],
         renderedID: String,
         installed: InstalledChatTranscript,
-        terminalMaterializationID: String?
+        terminalMaterializationID: String?,
+        isReplacementOverlay: Bool
     ) -> some View {
         stableRow(
             semanticID: renderedID,
             installedTag: installed.tag,
             entranceState: .none,
-            terminalPhysicalID: renderedID == terminalMaterializationID ? renderedID : nil,
-            lifecycleSettlementID: renderedID
+            terminalPhysicalID: isReplacementOverlay ? nil : (renderedID == terminalMaterializationID ? renderedID : nil),
+            lifecycleSettlementID: isReplacementOverlay ? nil : renderedID,
+            publishesGeometry: !isReplacementOverlay
         ) {
             ChatOutgoingSubmissionRow(
                 presentation: outgoing,
@@ -825,7 +914,8 @@ struct ChatTranscriptScrollView<Earlier: View, Opening: View>: View {
         _ entry: ChatQueuedMessageRenderEntry,
         renderedID: String,
         installed: InstalledChatTranscript,
-        terminalMaterializationID: String?
+        terminalMaterializationID: String?,
+        isReplacementOverlay: Bool
     ) -> some View {
         let entranceSuppressed = transcriptPresentation.suppressesEntrances(for: installed.tag)
         let messages = installed.queuedMessages
@@ -842,10 +932,11 @@ struct ChatTranscriptScrollView<Earlier: View, Opening: View>: View {
             semanticID: renderedID,
             installedTag: installed.tag,
             entranceState: .none,
-            terminalPhysicalID: renderedID == terminalMaterializationID ? renderedID : nil
+            terminalPhysicalID: isReplacementOverlay ? nil : (renderedID == terminalMaterializationID ? renderedID : nil),
+            publishesGeometry: !isReplacementOverlay
         ) {
             ChatQueuedMessageEntranceRow(
-                animatesEntrance: admitsGeometryCallbacks
+                animatesEntrance: !isReplacementOverlay && admitsGeometryCallbacks
                     && ChatPromptLifecycleTransitionPolicy.shouldAnimateQueueEntrance(
                     isReady: isReady,
                     entranceSuppressed: entranceSuppressed,
@@ -880,11 +971,15 @@ struct ChatTranscriptScrollView<Earlier: View, Opening: View>: View {
         physicalID: String,
         installed: InstalledChatTranscript,
         isCommitted: Bool,
-        terminalMaterializationID: String?
+        terminalMaterializationID: String?,
+        isReplacementOverlay: Bool,
+        suppressEntrance: Bool
     ) -> some View {
         let kind = ChatContentEntranceKind.classify(item)
         let entranceLayoutEpoch = scrollCoordinator.layoutEpoch
-        let state: ChatTranscriptEntranceState = canonicalSubmissionIDs.contains(semanticID)
+        let state: ChatTranscriptEntranceState = suppressEntrance
+                || isReplacementOverlay
+                || canonicalSubmissionIDs.contains(semanticID)
                 || !admitsGeometryCallbacks
             ? .none
             : transcriptPresentation.entranceState(for: semanticID)
@@ -893,9 +988,10 @@ struct ChatTranscriptScrollView<Earlier: View, Opening: View>: View {
             installedTag: installed.tag,
             entranceState: state,
             entranceKind: kind,
-            terminalPhysicalID: physicalID == terminalMaterializationID ? physicalID : nil
+            terminalPhysicalID: isReplacementOverlay ? nil : (physicalID == terminalMaterializationID ? physicalID : nil),
+            publishesGeometry: !isReplacementOverlay
         ) {
-            if canonicalSubmissionIDs.contains(semanticID) {
+            if isReplacementOverlay || canonicalSubmissionIDs.contains(semanticID) {
                 renderRow(item, installed: installed, isCommitted: isCommitted)
                     .padding(.bottom, ChatTranscriptLayoutConstants.rowSpacing)
             } else {
@@ -991,6 +1087,7 @@ struct ChatTranscriptScrollView<Earlier: View, Opening: View>: View {
         entranceKind: ChatContentEntranceKind = .assistantContent,
         terminalPhysicalID: String? = nil,
         lifecycleSettlementID: String? = nil,
+        publishesGeometry: Bool = true,
         @ViewBuilder content: () -> Content
     ) -> some View {
         let rowLayoutEpoch = scrollCoordinator.layoutEpoch
@@ -1006,7 +1103,8 @@ struct ChatTranscriptScrollView<Earlier: View, Opening: View>: View {
                     entranceAdmissionTag: entranceAdmissionTag
                 )
             } action: { sample in
-                guard scrollCoordinator.admitsViewportCallback(capturedActivation: sample.viewportActivation),
+                guard publishesGeometry,
+                      scrollCoordinator.admitsViewportCallback(capturedActivation: sample.viewportActivation),
                       admitsNativeCallbacks else { return }
                 scrollCoordinator.semanticFrameChanged(
                     renderedID: semanticID,

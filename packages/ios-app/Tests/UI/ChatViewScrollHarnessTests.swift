@@ -342,6 +342,92 @@ struct ChatViewScrollHarnessTests {
         }
     }
 
+    @Test("queued prompt cross-fades into its canonical user row without changing its host or geometry")
+    func queuedPromptCanonicalReplacementCrossFades() async throws {
+        try await withTestWatchdog(timeout: .seconds(20)) {
+            var initial = try SessionScenarioBuilder(seed: 1_263).openingTail(targetEncodedBytes: 10_000)
+            initial.phase = .running
+            initial.streaming = initial.transcript.last
+            initial.queueRevision += 1
+            initial.queuedItems = [
+                .init(id: "queued-prompt-operation", behavior: .steer, text: "A queued prompt", attachmentCount: 0)
+            ]
+            var canonicalTemplate = initial
+            canonicalTemplate.revision += 1
+            canonicalTemplate.eventSequence += 1
+            canonicalTemplate.queueRevision += 1
+            canonicalTemplate.queuedItems = []
+            canonicalTemplate.transcript.append(try decodeTranscriptFixture(
+                TranscriptItem.self,
+                from: JSONSerialization.data(withJSONObject: [
+                    "id": "queued-message-queued-prompt-operation", "parentId": NSNull(),
+                    "presentationId": "queued-prompt-operation", "timestamp": "2026-01-01T00:01:00Z",
+                    "kind": "message", "role": "user",
+                    "content": [["id": "queued-prompt-text", "ordinal": 0, "type": "text", "text": "A queued prompt"]]
+                ])
+            ))
+            canonicalTemplate.transcriptTotal = (canonicalTemplate.transcriptTotal ?? canonicalTemplate.transcript.count - 1) + 1
+            try await withHarness(snapshot: initial) { harness in
+                let queuedSample = try await harness.recorder.waitUntil {
+                    $0.observation.isReady && $0.nativeRows.contains {
+                        $0.physicalID == "queued-message-queued-prompt-operation" && $0.isVisible
+                    }
+                }
+                let queued = try #require(queuedSample.nativeRows.first {
+                    $0.physicalID == "queued-message-queued-prompt-operation" && $0.isVisible
+                })
+                let beforePixels = harness.renderedRowLuminance(in: queued.frame)
+                harness.replaceAuthoritativeSnapshot(canonicalTemplate)
+                let installed = try await harness.recorder.waitUntil {
+                    $0.nativeRows.contains { $0.semanticID == "queued-message-queued-prompt-operation" && $0.isVisible }
+                }
+                let target = try #require(installed.nativeRows.first {
+                    $0.semanticID == "queued-message-queued-prompt-operation" && $0.isVisible
+                })
+                #expect(target.physicalID == queued.physicalID)
+                #expect(target.instance == queued.instance)
+                let afterInstall = harness.recorder.samples.last?.frameIndex ?? installed.frameIndex
+                for _ in 0..<30 { try await harness.driveFrameBoundary() }
+                let frames = harness.recorder.samples.filter { $0.frameIndex >= queuedSample.frameIndex && $0.frameIndex <= afterInstall + 30 }
+                let rows = frames.compactMap { sample in
+                    sample.nativeRows.first {
+                        $0.physicalID == queued.physicalID && $0.instance == queued.instance
+                            && $0.isVisible && $0.frame.height > 1
+                    }
+                }
+                let pixelFrames = frames.compactMap { sample -> (PresentedFrameRecorder.NativeRow, [Double])? in
+                    guard let row = sample.nativeRows.first(where: {
+                        $0.physicalID == queued.physicalID && $0.instance == queued.instance
+                            && $0.isVisible && $0.frame.height > 1
+                    }) else { return nil }
+                    return (row, harness.renderedRowLuminance(in: row.frame))
+                }
+                #expect(rows.count >= 8)
+                let rectSteps = zip(rows, rows.dropFirst()).map {
+                    max(abs($1.frame.minY - $0.frame.minY), abs($1.frame.height - $0.frame.height))
+                }
+                let unavoidableHeightChange = abs(rows.last!.frame.height - queued.frame.height)
+                #expect(rectSteps.filter { $0 > 1 }.count <= (unavoidableHeightChange > 1 ? 1 : 0))
+                #expect(rectSteps.allSatisfy { $0 <= max(1, unavoidableHeightChange) })
+                let geometryChangeIndex = rectSteps.firstIndex(where: { $0 > 1 })
+                if let geometryChangeIndex {
+                    #expect(rows.dropFirst(geometryChangeIndex + 1).allSatisfy {
+                        abs($0.frame.minY - rows.last!.frame.minY) <= 1
+                            && abs($0.frame.height - rows.last!.frame.height) <= 1
+                    })
+                }
+                #expect(pixelFrames.count >= 4)
+                let endpoint = harness.renderedRowLuminance(in: pixelFrames.last?.0.frame ?? queued.frame)
+                let change = zip(beforePixels, endpoint).map { abs($1 - $0) }.reduce(0, +)
+                let changedFrameCount = pixelFrames.dropFirst().filter { row, pixels in
+                    zip(beforePixels, pixels).map { abs($1 - $0) }.reduce(0, +) > 0.02 * max(1, change)
+                }.count
+                #expect(changedFrameCount >= 3)
+                print("Queued→canonical frame evidence: queuedHeight=\(queued.frame.height), canonicalHeight=\(rows.last!.frame.height), maxRectStep=\(rectSteps.max() ?? 0), changedFrames=\(changedFrameCount), tailDistance=\(try harness.nativeTranscriptDistanceFromTail())")
+            }
+        }
+    }
+
     @Test("short streaming response remains above composer as it outgrows the viewport")
     func shortStreamingResponseClearsComposer() async throws {
         try await withTestWatchdog(timeout: .seconds(15)) {
@@ -674,6 +760,27 @@ struct ChatViewScrollHarnessTests {
                 #expect(canonical.physicalID == outgoing.physicalID)
                 #expect(canonical.instance == outgoing.instance)
                 #expect(abs(canonical.frame.maxY - outgoing.frame.maxY) <= 2)
+                let lifecycleHeight = outgoing.frame.height
+                let lifecycleOrigin = outgoing.frame.minY
+                let transitionEnd = ack.frameIndex + 16
+                for _ in 0..<16 { try await harness.driveFrameBoundary() }
+                let transitionSamples = harness.recorder.samples.filter {
+                    $0.frameIndex >= sent.frameIndex && $0.frameIndex <= transitionEnd
+                }
+                let transitionRows = transitionSamples.compactMap { sample in
+                    sample.nativeRows.first {
+                        $0.physicalID == outgoing.physicalID && $0.instance == outgoing.instance
+                    }
+                }
+                #expect(transitionRows.count >= 8)
+                #expect(transitionRows.allSatisfy { abs($0.frame.height - lifecycleHeight) <= 1 })
+                #expect(transitionRows.allSatisfy { abs($0.frame.minY - lifecycleOrigin) <= 1 })
+                let frameSteps = zip(transitionRows, transitionRows.dropFirst()).map { old, new in
+                    max(abs(new.frame.minY - old.frame.minY), abs(new.frame.height - old.frame.height))
+                }
+                #expect(frameSteps.allSatisfy { $0 <= 1 })
+                print("Lifecycle→canonical frame evidence: lifecycleHeight=\(lifecycleHeight), canonicalHeight=\(canonical.frame.height), maxRectStep=\(frameSteps.max() ?? 0), tailError=\(try harness.nativeTranscriptSignedTailError())")
+                #expect(try harness.nativeTranscriptDistanceFromTail() <= 2)
 
                 var response = acknowledged
                 response.transcript.append(try harnessAssistantMessage(
@@ -3354,6 +3461,10 @@ final class ChatViewScrollHarness {
     func renderedNavigationBandGrid() -> [Double] {
         let width = hostingController.view.bounds.width
         return renderedLuminance(in: CGRect(x: 72, y: 0, width: width - 144, height: 160), step: 3)
+    }
+
+    func renderedRowLuminance(in frame: CGRect) -> [Double] {
+        renderedLuminance(in: frame.intersection(hostingController.view.bounds), step: 3)
     }
 
     func renderedPixelGrid() -> [Double] {

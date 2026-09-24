@@ -1892,6 +1892,11 @@ struct ChatView: View {
             .padding(24)
             .frame(maxWidth: .infinity, maxHeight: .infinity)
             .background(Color.tronBackground)
+            .transition(.opacity.animation(
+                ChatContentTransitionPolicy.inPlaceContentReplacementAnimation(
+                    reduceMotion: reduceMotion
+                )
+            ))
         case .presented, .ready:
             EmptyView()
         }

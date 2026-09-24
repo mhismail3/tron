@@ -1658,7 +1658,7 @@ struct ChatTranscriptPresentationStoreTests {
                 from: pendingPhysical,
                 to: resolvedPhysical
             ) == .notification)
-            #expect(ChatContentTransitionPolicy.notificationReplacementAnimation(
+            #expect(ChatContentTransitionPolicy.inPlaceContentReplacementAnimation(
                 reduceMotion: false
             ) != nil)
 
@@ -1774,7 +1774,7 @@ struct ChatTranscriptPresentationStoreTests {
             #expect(ChatPhysicalTranscriptReplacementPolicy.replacement(
                 from: outgoingPhysical,
                 to: replacement
-            ) == .none)
+            ) == .promptContent)
             let queuedMessage = SessionSnapshot.QueuedMessage(
                 id: "operation-owned",
                 behavior: .steer,
@@ -1794,6 +1794,10 @@ struct ChatTranscriptPresentationStoreTests {
                 from: outgoingPhysical,
                 to: queuedPhysical
             ) == .none)
+            #expect(ChatPhysicalTranscriptReplacementPolicy.replacement(
+                from: queuedPhysical,
+                to: replacement
+            ) == .promptContent)
             let existingPhysicalID = try #require(
                 settled.committedLedger.items.first { $0.id != canonicalID }?.id
             )
