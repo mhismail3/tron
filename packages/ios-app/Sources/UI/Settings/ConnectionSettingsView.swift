@@ -206,6 +206,15 @@ struct ConnectionsSettingsView: View {
                     }
                 }
 
+                if let selected = model.profiles.selected, model.connectionState == .connected {
+                    QuickRebuildGroup(
+                        profile: selected,
+                        thisDevice: authorizedDevices.first {
+                            $0.profileID == selected.id && $0.device.id == selected.deviceId
+                        }
+                    )
+                }
+
             }
             .padding(.horizontal, 20)
             .padding(.vertical, 18)
