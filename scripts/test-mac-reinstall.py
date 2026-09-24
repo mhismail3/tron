@@ -1,6 +1,7 @@
 """Offline behavioral checks: real filesystem/journal, injected platform boundary."""
 import argparse
 import contextlib
+import hashlib
 import io
 import json
 import multiprocessing
@@ -66,6 +67,122 @@ launchctl() {
                         self.assertEqual(result.returncode, 0 if state == 'absent' else 1, result.stderr)
                         if state != 'absent':
                             self.assertIn(label, result.stdout)
+
+
+class XcodeGenRuntimeContractVerificationTests(unittest.TestCase):
+    """A store payload's pinned upstream XcodeGen must be admitted.
+
+    The launcher requires no signature on that executable, and a store payload
+    carries the pinned upstream binary unchanged, so admission rests on the
+    pinned digest instead of codesign. The boundary is extracted from the
+    verifier and run with injected platform commands, never a second copy of
+    its admission policy.
+    """
+
+    def setUp(self):
+        self.temp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.temp.cleanup)
+        self.root = Path(self.temp.name).resolve()
+        pins = {}
+        for line in (reinstall.REPO / 'config/ci-toolchain.env').read_text().splitlines():
+            if line.startswith('TRON_CI_XCODEGEN_') and '=' in line:
+                name, value = line.split('=', 1)
+                pins[name] = value
+        self.version = pins['TRON_CI_XCODEGEN_VERSION']
+        self.upstream_digest = pins['TRON_CI_XCODEGEN_BINARY_SHA256']
+
+    def verifier_fragment(self, start, end):
+        # A moved marker must fail here rather than run the whole verifier
+        # against this Mac.
+        source = (reinstall.REPO / 'scripts/verify-mac-install.sh').read_text()
+        self.assertIn(start, source)
+        self.assertIn(end, source)
+        return start + source.split(start, 1)[1].split(end, 1)[0]
+
+    def run_boundary(self, body, **environment):
+        script = ("set -u\nfailures=0\n"
+                  "pass() { printf 'PASS  %s\\n' \"$1\"; }\n"
+                  "fail() { printf 'FAIL  %s\\n' \"$1\"; failures=$((failures + 1)); }\n"
+                  + body + '\nexit "$failures"\n')
+        return subprocess.run(['/bin/bash', '-c', script], text=True, capture_output=True,
+                              env={**os.environ, **environment})
+
+    def stubs(self, codesign_exit, lipo_arches='x86_64 arm64'):
+        # The pinned upstream binary is unsigned, and lipo cannot read these
+        # text fixtures.
+        return (f"codesign() {{ return {codesign_exit}; }}\n"
+                f"lipo() {{ echo '{lipo_arches}'; }}\n")
+
+    def store_payload(self, version, symlink=False):
+        payload = Path(tempfile.mkdtemp(dir=self.root))
+        presets = payload / 'runtime/xcodegen/share/xcodegen/SettingPresets'
+        presets.mkdir(parents=True)
+        (presets / 'base.yml').write_text('name: base\n')
+        bin_dir = payload / 'runtime/xcodegen/bin'
+        bin_dir.mkdir()
+        executable = bin_dir / 'xcodegen'
+        executable.write_text(f'#!/bin/sh\n[ "$1" = --version ] && printf \'Version: %s\\n\' {version}\nexit 0\n')
+        executable.chmod(0o755)
+        if symlink:
+            target = payload / 'runtime/xcodegen/xcodegen-real'
+            executable.rename(target)
+            executable.symlink_to(target)
+        return payload, executable
+
+    def contract_boundary(self):
+        return (self.verifier_fragment('regular_file() {', '\nplist_value() {') + '\n'
+                + self.verifier_fragment('payload_meets_current_runtime_contract() {',
+                                         '\n# Resolve each identity independently.') + '\n'
+                + 'payload_meets_current_runtime_contract "$PAYLOAD" || exit 1\n')
+
+    def provenance_boundary(self):
+        return ('label=stable\nxcodegen="$PAYLOAD/runtime/xcodegen/bin/xcodegen"\n'
+                + self.verifier_fragment('  if codesign --verify --strict "$xcodegen"',
+                                         '\n  xcodegen_arches=') + '\n')
+
+    def test_unsigned_store_payload_with_the_pinned_digest_is_admitted(self):
+        payload, executable = self.store_payload(self.version)
+        # The fixture's digest stands in for the pinned upstream digest, so the
+        # verifier must read TRON_CI_XCODEGEN_BINARY_SHA256 rather than a literal.
+        digest = hashlib.sha256(executable.read_bytes()).hexdigest()
+        self.assertNotEqual(digest, self.upstream_digest)
+        result = self.run_boundary(self.stubs(1) + self.contract_boundary() + self.provenance_boundary(),
+                                   PAYLOAD=str(payload), TRON_CI_XCODEGEN_VERSION=self.version,
+                                   TRON_CI_XCODEGEN_BINARY_SHA256=digest)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertNotIn('FAIL', result.stdout)
+        # The PASS line also proves the extracted provenance assertion ran.
+        self.assertIn('stable XcodeGen signature valid or pinned upstream digest', result.stdout)
+
+    def test_symlinked_non_universal_or_wrong_version_xcodegen_is_refused(self):
+        cases = (
+            # The first case is the control: one harness must admit the store
+            # payload, so a broken harness cannot pass the refusals below.
+            ('store payload', self.version, 'x86_64 arm64', False, 0),
+            ('symlinked executable', self.version, 'x86_64 arm64', True, 1),
+            ('non-universal executable', self.version, 'arm64', False, 1),
+            ('wrong version', '0.0.0-fixture', 'x86_64 arm64', False, 1),
+        )
+        for name, version, arches, symlink, expected in cases:
+            with self.subTest(name):
+                payload, _ = self.store_payload(version, symlink=symlink)
+                result = self.run_boundary(self.stubs(1, arches) + self.contract_boundary(),
+                                           PAYLOAD=str(payload), TRON_CI_XCODEGEN_VERSION=self.version)
+                self.assertEqual(result.returncode, expected, result.stdout + result.stderr)
+
+    def test_xcodegen_provenance_requires_a_signature_or_the_pinned_digest(self):
+        payload, executable = self.store_payload(self.version)
+        self.assertNotEqual(hashlib.sha256(executable.read_bytes()).hexdigest(), self.upstream_digest)
+        cases = (
+            ('unsigned binary that is not the pinned upstream binary', 1, 1),
+            ('signed binary with a different digest', 0, 0),
+        )
+        for name, codesign_exit, expected in cases:
+            with self.subTest(name):
+                result = self.run_boundary(self.stubs(codesign_exit) + self.provenance_boundary(),
+                                           PAYLOAD=str(payload),
+                                           TRON_CI_XCODEGEN_BINARY_SHA256=self.upstream_digest)
+                self.assertEqual(result.returncode, expected, result.stdout + result.stderr)
 
 
 class RecoveryArchiveTests(unittest.TestCase):

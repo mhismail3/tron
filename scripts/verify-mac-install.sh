@@ -117,6 +117,12 @@ hash_payload() {
 # boundary here before treating that pointer as launchable; otherwise the
 # signed launcher correctly falls back to bundled while verification projects
 # the rejected external path and reports false identity failures.
+#
+# The XcodeGen boundary stops at structure, architecture and version: the
+# launcher requires no signature on that executable, and a store payload
+# carries the pinned upstream binary, which is unsigned. Requiring a signature
+# here rejects every valid external selection. verify_payload checks that
+# executable's provenance separately, as a signature or the pinned digest.
 payload_meets_current_runtime_contract() {
   local payload="$1"
   local xcodegen="$payload/runtime/xcodegen/bin/xcodegen"
@@ -130,7 +136,6 @@ payload_meets_current_runtime_contract() {
     && [[ -x "$xcodegen" ]] \
     && regular_file "$base_preset" \
     && ! find "$payload/runtime/xcodegen" -type l -print -quit | grep -q . \
-    && codesign --verify --strict "$xcodegen" >/dev/null 2>&1 \
     || return 1
   arches="$(lipo -archs "$xcodegen" 2>/dev/null || true)"
   [[ " $arches " == *" arm64 "* && " $arches " == *" x86_64 "* ]] \
@@ -211,9 +216,16 @@ verify_payload() {
   else
     fail "$label bundled XcodeGen toolchain is missing/substituted"
   fi
-  codesign --verify --strict "$xcodegen" >/dev/null 2>&1 \
-    && pass "$label bundled XcodeGen signature valid" \
-    || fail "$label bundled XcodeGen signature invalid"
+  # Release staging signs this executable with the app, but a store payload
+  # carries the pinned upstream binary unchanged and its linker-generated
+  # signature does not verify, so provenance is a signature or the pinned
+  # upstream digest.
+  if codesign --verify --strict "$xcodegen" >/dev/null 2>&1 \
+    || [[ "$(shasum -a 256 "$xcodegen" 2>/dev/null | awk '{print $1}')" == "$TRON_CI_XCODEGEN_BINARY_SHA256" ]]; then
+    pass "$label XcodeGen signature valid or pinned upstream digest"
+  else
+    fail "$label XcodeGen signature invalid and digest is not the pinned upstream binary"
+  fi
   xcodegen_arches="$(lipo -archs "$xcodegen" 2>/dev/null || true)"
   [[ " $xcodegen_arches " == *" arm64 "* && " $xcodegen_arches " == *" x86_64 "* ]] \
     && pass "$label bundled XcodeGen is universal arm64/x86_64" \

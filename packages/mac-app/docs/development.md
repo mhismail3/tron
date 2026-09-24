@@ -430,8 +430,11 @@ scripts/tron mac verify
 It fails unless Stable's Release-owned launchd PID is the sole 9847 listener,
 executes the validated active payload, and returns matching authenticated
 `system.info` channel/revision/fingerprint/epoch. Pointer admission mirrors the
-current required runtime contract, including the signed universal pinned
-XcodeGen tree, rather than accepting an older self-consistent fingerprint alone.
+current required runtime contract, including a symlink-free, universal and
+canonically versioned pinned XcodeGen tree, rather than accepting an older
+self-consistent fingerprint alone. That executable's provenance is a valid
+signature or the pinned upstream digest: a store payload carries the pinned
+upstream binary unchanged, and that binary is unsigned.
 An incompatible or invalid external selection may remain as bounded rollback
 history after a protocol or runtime-contract bump; verification accepts it only
 when both the launcher and live PID have rejected it in favor of the signed

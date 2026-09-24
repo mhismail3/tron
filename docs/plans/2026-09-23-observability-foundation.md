@@ -2,7 +2,7 @@
 
 - **Started:** 2026-09-23
 - **Status:** Active
-- **Last updated:** 2026-09-24, L-14
+- **Last updated:** 2026-09-24, L-19a
 - **Goal:** Every Tron process records the right signals automatically, in a known place, at a meaningful level, so a failure can be diagnosed in one pass from what was already recorded.
 
 Follow the [plan protocol](README.md#protocol) to claim tasks and hand off.
@@ -223,7 +223,7 @@ user reinstalls manually, so batch them for one reinstall.
 | L-17 | Needs approval | Judge a drain stalled by its oldest blocker without progress, not by any change in the blocker set | L-16 | |
 | L-18 | Needs approval | Decide whether a restart drain proceeds when only unresolved (blocked) persistence owners remain | L-16 | |
 | L-19 | Done | `scripts/tron mac verify` fails on the live install after a source rebuild: "PID selected payload path mismatch" and "authenticated system.info identity/channel mismatch" on the Tailscale host. Find whether the install or the check is wrong | none | observability session (L-19 lane), 2026-09-24 |
-| L-19a | Claimed | Make `scripts/verify-mac-install.sh` admit a store payload the way the launcher does: drop the XcodeGen `codesign --verify` requirement from `payload_meets_current_runtime_contract` and accept the pinned upstream XcodeGen digest in the provenance check; correct `packages/mac-app/docs/development.md`; test in `scripts/test-mac-reinstall.py` | L-19 | observability session (L-19a lane), 2026-09-24 |
+| L-19a | Done | Make `scripts/verify-mac-install.sh` admit a store payload the way the launcher does: drop the XcodeGen `codesign --verify` requirement from `payload_meets_current_runtime_contract` and accept the pinned upstream XcodeGen digest in the provenance check; correct `packages/mac-app/docs/development.md`; test in `scripts/test-mac-reinstall.py` | L-19 | observability session (L-19a lane), 2026-09-24 |
 | L-11 | Done | Remove duplicate payload validations within one deploy run | none | observability session (L-11 lane), 2026-09-24 |
 | L-12 | Done | Faster Node payload fingerprint with identical output | none | observability session (L-12 lane), 2026-09-24 |
 | L-13 | Done | Stage source payloads in the store and rename instead of copying twice | L-11 | observability session (L-13 lane), 2026-09-24 |
@@ -808,3 +808,12 @@ The 2026-09-23 17:33 UTC incident's records have rotated away, so its timeline i
 - Kept on purpose: the `copyPayload` parameter of `copyValidatedPayloadBase`, because the tamper regression test injects through it. `MAX_RETAINED_VERSIONS` stays 8 until the user decides.
 - Deviations: none beyond the review correction above.
 - For the next agent: the eight versions already stored (about 5.1 GB apparent) are full copies. Only versions staged after this change share blocks, so the store shrinks as retention replaces the old copies. Recommendation for L-14b: keep 8. Each new clone costs roughly its changed files (about 7 MB of `app/dist`) rather than about 650 MB.
+
+### L-19a · Done · 2026-09-24 · observability session (L-19a lane)
+
+- Result: `scripts/verify-mac-install.sh` admits a store payload the way the launcher does. `payload_meets_current_runtime_contract` checks XcodeGen's structure, architecture and version, but not its signature. The separate provenance check accepts either a valid signature, as on the copy inside the signed app, or the pinned upstream digest `TRON_CI_XCODEGEN_BINARY_SHA256`, which is how a store payload carries it. The check's wording no longer says "bundled" for an external payload. `packages/mac-app/docs/development.md` now states the real requirement.
+- Evidence (verified): on this Mac, `bash scripts/verify-mac-install.sh` went from exit 1 (58 PASS, 2 FAIL) to exit 0 (60 PASS). That includes "PID uses exact selected payload" and "authenticated system.info matches selected payload and channel". The store payload's XcodeGen digest equals the pin and `codesign` rejects it. The app-bundled copy has a different digest and a valid signature, so both branches of the provenance check are needed. `python3 scripts/test-mac-reinstall.py` went from 90 to 93 tests, all OK with 3 skipped. The new class checks that an unsigned payload with the pinned digest is admitted, and that a symlinked, non-universal or wrong-version XcodeGen is refused. Negative control: restoring the `codesign` requirement fails 2 of the 3.
+- Changes: this commit (`scripts/verify-mac-install.sh`, `scripts/test-mac-reinstall.py`, `packages/mac-app/docs/development.md`).
+- Tasks added: none.
+- Kept on purpose: `packages/mac-app/scripts/package-dmg.sh` still requires a verifying signature on the payload inside the signed app, where it is real.
+- For the next agent: `scripts/tron diagnose`'s `mac-verify` section is clean again on this install.
