@@ -2,7 +2,7 @@
 
 - **Started:** 2026-09-23
 - **Status:** Active
-- **Last updated:** 2026-09-24, L-9
+- **Last updated:** 2026-09-24, L-12
 - **Goal:** Every Tron process records the right signals automatically, in a known place, at a meaningful level, so a failure can be diagnosed in one pass from what was already recorded.
 
 Follow the [plan protocol](README.md#protocol) to claim tasks and hand off.
@@ -222,7 +222,7 @@ user reinstalls manually, so batch them for one reinstall.
 | L-18 | Needs approval | Decide whether a restart drain proceeds when only unresolved (blocked) persistence owners remain | L-16 | |
 | L-19 | Needs scoping | `scripts/tron mac verify` fails on the live install after a source rebuild: "PID selected payload path mismatch" and "authenticated system.info identity/channel mismatch" on the Tailscale host. Find whether the install or the check is wrong | none | |
 | L-11 | Done | Remove duplicate payload validations within one deploy run | none | observability session (L-11 lane), 2026-09-24 |
-| L-12 | Claimed | Faster Node payload fingerprint with identical output | none | observability session (L-12 lane), 2026-09-24 |
+| L-12 | Done | Faster Node payload fingerprint with identical output | none | observability session (L-12 lane), 2026-09-24 |
 | L-13 | Ready | Stage source payloads in the store and rename instead of copying twice | L-11 | |
 | L-14 | Needs scoping | APFS clone copies and payload retention count | L-13 | |
 
@@ -706,3 +706,13 @@ The 2026-09-23 17:33 UTC incident's records have rotated away, so its timeline i
 - Changes: this commit (plan only).
 - Tasks added: L-9a, L-9b.
 - For the next agent: nothing ships until the user answers the findings' questions.
+
+### L-12 · Done · 2026-09-24 · observability session (L-12 lane)
+
+- Result: `payloadFingerprint` reads files in sorted batches of 16 concurrent reads (named constant) instead of one at a time. The output is unchanged. The deploy helper remains the one owner of the Node side, and it does not call the launcher, which would make the helper depend on a compiled binary's location. `hash-gateway-payload.sh` now also rejects covered paths containing control bytes, as the Node helper and the launcher already did, so all three agree on what they refuse as well as on digests.
+- Evidence (verified): read-only against the live Stable payload (37,622 files), the median of three runs went from 2,585 ms sequential to 1,934 ms bounded, with the identical digest from both. The launcher shell test now compiles the launcher and checks that Node, the shell script and `--fingerprint` agree on a fixture with nested directories, an internal symlink and a 4 MiB file, and that all three reject a control byte in a path. Negative control: reversing the Node entry order changes the digest, and the equality check catches it. `node --test scripts/gateway-payload-deploy.test.mjs` passed 48/48 in 165 s; the new assertion rejects a control-byte file name. The launcher shell test passed in 5 min 16 s.
+- Changes: this commit (`scripts/gateway-payload-deploy.mjs` and its test, `hash-gateway-payload.sh`, the launcher shell test, the Gateway README payload section).
+- Tasks added: none.
+- Kept on purpose: sorted canonical lines, so the fingerprint format is unchanged.
+- Deviations: the gain is about 25% on this Mac, less than the gap to the launcher's measured 1.5–3.6 s suggested. The plan's 5.4–6.3 s figures were measured while the Mac was under load. The lane's first test run failed because the shared `node_modules` had been emptied (see L-1d).
+- For the next agent: L-13 removes a whole payload copy, which saves more than this change.

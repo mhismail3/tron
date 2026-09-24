@@ -56,6 +56,10 @@ make_payload() {
   cp "$root/runtime/node-arm64" "$root/runtime/xcodegen/bin/xcodegen"
   chmod 755 "$root/runtime/xcodegen/bin/xcodegen"
   printf '%s\n' 'PRODUCT_NAME: $TARGET_NAME' > "$root/runtime/xcodegen/share/xcodegen/SettingPresets/base.yml"
+  mkdir -p "$root/app/nested/one" "$root/runtime/nested/one"
+  printf 'nested fixture bytes\n' > "$root/app/nested/one/data.txt"
+  dd if=/dev/zero bs=1048576 count=4 2>/dev/null | tr '\\0' 'L' > "$root/runtime/nested/one/large.bin"
+  ln -s ../../nested/one/data.txt "$root/app/node_modules/.bin/nested-data"
   mkdir -p "$root/runtime/bin-arm64" "$root/runtime/bin-x64"
   ln -s ../node-arm64 "$root/runtime/bin-arm64/node"
   ln -s ../node-x64 "$root/runtime/bin-x64/node"
@@ -73,6 +77,34 @@ expected_bundle_fingerprint="$(sed -n 's/.*payloadFingerprint":"\([0-9a-f]*\)".*
 [[ "$("$HELPER" --fingerprint "$BUNDLE")" == "$expected_bundle_fingerprint" ]] || {
   echo "launcher fingerprint mode diverged from the canonical shell hash" >&2; exit 1;
 }
+node_fingerprint="$("$NODE_ROOT/bin/node" --input-type=module - "$REPO_ROOT/scripts/gateway-payload-deploy.mjs" "$BUNDLE" <<'NODE'
+import { pathToFileURL } from "node:url";
+const { payloadFingerprint } = await import(pathToFileURL(process.argv[2]));
+console.log(await payloadFingerprint(process.argv[3]));
+NODE
+)"
+[[ "$node_fingerprint" == "$expected_bundle_fingerprint" ]] || {
+  echo "Node fingerprint diverged from the canonical shell hash" >&2; exit 1;
+}
+control_path="$BUNDLE/app/control$(printf '\001')byte"
+chmod u+w "$BUNDLE/app"
+printf 'control path\n' > "$control_path"
+if "$HASH" "$BUNDLE" >/dev/null 2>&1; then
+  echo "canonical hash admitted a control byte in a payload path" >&2; exit 1
+fi
+if "$HELPER" --fingerprint "$BUNDLE" >/dev/null 2>&1; then
+  echo "launcher fingerprint admitted a control byte in a payload path" >&2; exit 1
+fi
+if "$NODE_ROOT/bin/node" --input-type=module - "$REPO_ROOT/scripts/gateway-payload-deploy.mjs" "$BUNDLE" >/dev/null 2>&1 <<'NODE'
+import { pathToFileURL } from "node:url";
+const { payloadFingerprint } = await import(pathToFileURL(process.argv[2]));
+await payloadFingerprint(process.argv[3]);
+NODE
+then
+  echo "Node fingerprint admitted a control byte in a payload path" >&2; exit 1
+fi
+rm "$control_path"
+chmod a-w "$BUNDLE/app"
 "$HELPER" --verify-payload "$BUNDLE" stable fixture fixture 0123456789abcdef0123456789abcdef01234567 || {
   echo "launcher payload verification mode rejected the valid fixture" >&2; exit 1;
 }

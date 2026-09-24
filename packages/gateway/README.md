@@ -926,7 +926,12 @@ registry during an update. Source-only updates require the package lock and depe
 to match the selected validated payload exactly and reuse that payload's complete fingerprinted
 `node_modules` tree. They never invoke npm or depend on registry availability, package-manager
 shutdown, or fresh native-module signatures; dependency changes require a newly signed app or
-artifact. The optional capture addon belongs to the installed Mac app beside its
+artifact. The deploy helper fingerprints sorted `app/**` and `runtime/**` entries using
+bounded batches of 16 file reads; the batch bound overlaps storage latency
+without issuing one read operation per file at once. Sorted canonical lines
+keep its SHA-256 byte-identical to the Mac payload hash script and launcher;
+all three reject control bytes in covered paths.
+The optional capture addon belongs to the installed Mac app beside its
 Native Host, outside the Gateway payload. Source-only updates neither require nor
 replace it; the capture loader checks its API version when explicitly opened.
 Native-client changes use a manual Mac app update. Artifact mode only promotes a

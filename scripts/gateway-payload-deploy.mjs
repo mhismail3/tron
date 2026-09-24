@@ -62,6 +62,8 @@ export const PINNED_NPM_VERSION = "10.9.4";
 export const PINNED_NPM_TREE_SHA256 = "adc24b0737566f66bc2ce18251f0bb8168c9cc9177c20fa3379cf129d6091cff";
 const LOCAL_CREDENTIAL_MAX_BYTES = 64 * 1024;
 const MAX_RETAINED_VERSIONS = 8;
+// Bounded reads keep storage latency overlapped without flooding the filesystem.
+const PAYLOAD_FINGERPRINT_READ_CONCURRENCY = 16;
 const REQUIREMENTS = [
   ["app/dist/index.js", 1_024, false],
   ["app/package.json", 1, false],
@@ -343,14 +345,16 @@ export async function payloadFingerprint(root) {
     ...(await regularFiles(root, "runtime")),
   ].sort((a, b) => Buffer.from(a.path).compare(Buffer.from(b.path)));
   const lines = [];
-  for (const entry of files) {
-    if (entry.target !== undefined) {
-      const digest = createHash("sha256").update(`${entry.target}\n`).digest("hex");
-      lines.push(`symlink:${digest}  ${entry.path}\n`);
-    } else {
+  for (let start = 0; start < files.length; start += PAYLOAD_FINGERPRINT_READ_CONCURRENCY) {
+    const batch = files.slice(start, start + PAYLOAD_FINGERPRINT_READ_CONCURRENCY);
+    lines.push(...await Promise.all(batch.map(async (entry) => {
+      if (entry.target !== undefined) {
+        const digest = createHash("sha256").update(`${entry.target}\n`).digest("hex");
+        return `symlink:${digest}  ${entry.path}\n`;
+      }
       const digest = createHash("sha256").update(await readFile(join(root, entry.path))).digest("hex");
-      lines.push(`${digest}  ${entry.path}\n`);
-    }
+      return `${digest}  ${entry.path}\n`;
+    })));
   }
   return createHash("sha256").update(lines.join("")).digest("hex");
 }

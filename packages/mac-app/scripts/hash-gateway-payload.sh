@@ -23,6 +23,11 @@ for npm_architecture in arm64 x64; do
     [[ "$npm_digest" == "$TRON_NODE_NPM_TREE_SHA256" ]] || { echo "runtime npm content is not from the pinned Node archive: $npm_architecture" >&2; exit 2; }
 done
 
+control_path="$(while IFS= read -r -d '' entry; do
+    if [[ "$entry" =~ [[:cntrl:]] ]]; then printf x; break; fi
+done < <(find "$ROOT/app" "$ROOT/runtime" -print0))"
+[[ -z "$control_path" ]] || { echo "payload path contains control bytes" >&2; exit 2; }
+
 for required in \
     app/dist/index.js app/package.json app/package-lock.json app/PushService.xcconfig \
     app/scripts/ensure-node-pty-helper.mjs app/scripts/gateway-payload-deploy.mjs \

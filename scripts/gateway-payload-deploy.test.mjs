@@ -425,6 +425,10 @@ test("payload fingerprints include safe internal node_modules symlinks", async (
     await addRuntimeNodeAliases(versionRoot);
     await writeFile(join(versionRoot, "manifest.json"), "{}\n");
     await payloadFingerprint(versionRoot);
+    const controlName = join(versionRoot, "app", "dist", "bad\u0001name");
+    await writeFile(controlName, "invalid path\n");
+    await assert.rejects(payloadFingerprint(versionRoot), /payload path contains control bytes/, "fingerprints reject control bytes in covered paths");
+    await rm(controlName);
     await rm(join(versionRoot, "runtime", "bin-arm64", "node"));
     await symlink("../node-x64", join(versionRoot, "runtime", "bin-arm64", "node"));
     await assert.rejects(payloadFingerprint(versionRoot), /runtime Node alias target is invalid/);
