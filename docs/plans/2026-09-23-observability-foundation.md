@@ -212,7 +212,7 @@ user reinstalls manually, so batch them for one reinstall.
 | L-8 | Needs scoping | Gateway idle heap growth | none | |
 | L-9 | Needs scoping | Phone handling of a stalled or unreachable but live Gateway (proposal for the user) | L-7, L-10 | |
 | L-10 | Done | iOS connect-failure records say whether the socket ever opened, and on which interface | none | observability session, 2026-09-24 |
-| L-15 | Ready | Startup timing: stop to bound and bound to first startup phase | L-2 | |
+| L-15 | Claimed | Startup timing: stop to bound and bound to first startup phase | L-2 | observability session, 2026-09-24 |
 | L-16 | Done | Restart drain hangs on terminal-receipt persistence | none | observability session, 2026-09-24 |
 | L-17 | Needs approval | Judge a drain stalled by its oldest blocker without progress, not by any change in the blocker set | L-16 | |
 | L-18 | Needs approval | Decide whether a restart drain proceeds when only unresolved (blocked) persistence owners remain | L-16 | |
