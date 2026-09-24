@@ -25,6 +25,55 @@ struct ProviderAuthCoordinatorTests {
         #expect(!ProviderAuthBrowserPolicy.supportsManualCallback(event: event, prompt: prompt("auth-stale", .text)))
         #expect(!ProviderAuthBrowserPolicy.supportsManualCallback(event: event, prompt: prompt("auth-current", .secret)))
         #expect(!ProviderAuthBrowserPolicy.supportsManualCallback(event: event, prompt: nil))
+        #expect(ProviderAuthBrowserPolicy.shouldCancelOperationWhenProviderSheetDisappears(sceneIsActive: true))
+        #expect(!ProviderAuthBrowserPolicy.shouldCancelOperationWhenProviderSheetDisappears(sceneIsActive: false))
+    }
+
+    @Test("a reopened provider sheet reattaches only its exact active operation")
+    func reopensExactProviderAuthOperation() async throws {
+        let harness = try await makeHarness()
+        let global = ProviderCatalogTarget.global
+        let session = ProviderCatalogTarget.session(id: "session-a")
+        harness.owner.installHostedAuthOperation("active-auth", target: global, providerID: "anthropic")
+
+        harness.owner.retireConnection()
+        #expect(harness.owner.activeOperationID(providerID: "anthropic", target: global) == "active-auth")
+        #expect(harness.owner.activeOperationID(providerID: "openai", target: global) == nil)
+        #expect(harness.owner.activeOperationID(providerID: "anthropic", target: session) == nil)
+
+        harness.owner.clearProfile()
+        #expect(harness.owner.activeOperationID(providerID: "anthropic", target: global) == nil)
+        await harness.client.close()
+    }
+
+    @Test("resumed OAuth URL and text prompt remain available to the reopened matching sheet")
+    func resumedManualOAuthPresentation() async throws {
+        let harness = try await makeHarness()
+        harness.owner.installHostedAuthOperation("auth-attempt", target: .global, providerID: "anthropic")
+        harness.owner.retireConnection()
+
+        harness.owner.handleEvent(.object([
+            "operationId": .string("auth-attempt"),
+            "event": .object([
+                "type": .string("auth_url"),
+                "url": .string("https://claude.example/authorize"),
+            ]),
+        ]))
+        harness.owner.handlePrompt(.object([
+            "operationId": .string("auth-attempt"),
+            "promptId": .string("manual-entry"),
+            "prompt": .object([
+                "type": .string("text"),
+                "message": .string("Paste the callback URL or code"),
+            ]),
+        ]))
+
+        let event = try #require(harness.owner.event)
+        let prompt = try #require(harness.owner.prompt)
+        #expect(harness.owner.activeOperationID(providerID: "anthropic", target: .global) == "auth-attempt")
+        #expect(ProviderAuthBrowserPolicy.supportsManualCallback(event: event, prompt: prompt))
+        #expect(harness.owner.activeOperationID(providerID: "anthropic", target: .session(id: "other")) == nil)
+        await harness.client.close()
     }
 
     @Test("target catalogs are isolated, publish atomically, and newest same-target reads win")

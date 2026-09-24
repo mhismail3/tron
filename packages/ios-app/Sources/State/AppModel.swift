@@ -273,6 +273,10 @@ final class AppModel {
     var defaultWorkspace: String?
     var authPrompt: AuthPromptState? { providerAuth.prompt }
     var authEvent: AuthEventState? { providerAuth.event }
+
+    func activeProviderAuthOperationID(providerID: String, target: ProviderCatalogTarget) -> String? {
+        providerAuth.activeOperationID(providerID: providerID, target: target)
+    }
     let noticeCenter: InAppNoticeCenter
     var visibleNotices: [InAppNoticeCenter.Notice] { noticeCenter.visibleNotices }
     var context: JSONValue? { sessionPresentation.context }

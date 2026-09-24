@@ -23,6 +23,10 @@ enum ProviderAuthBrowserPolicy {
         guard let prompt, prompt.operationId == event.operationId else { return false }
         return prompt.kind == .text || prompt.kind == .manualCode
     }
+
+    static func shouldCancelOperationWhenProviderSheetDisappears(sceneIsActive: Bool) -> Bool {
+        sceneIsActive
+    }
 }
 
 struct ProviderAuthEventState: Identifiable, Hashable {
@@ -246,6 +250,7 @@ final class ProviderAuthCoordinator {
     private var catalogByTarget: [ProviderCatalogTarget: ProviderCatalog] = [:]
     private var loadGenerationByTarget: [ProviderCatalogTarget: Int] = [:]
     private var targetByAuthOperation: [String: ProviderCatalogTarget] = [:]
+    private var providerByAuthOperation: [String: String] = [:]
     private var activeAuthOperationID: String?
     private var answeringPromptID: String?
     private var pendingBrowserCallbackByOperation: [String: ProviderOAuthCapturedCallback] = [:]
@@ -283,6 +288,13 @@ final class ProviderAuthCoordinator {
 
     func catalog(for target: ProviderCatalogTarget) -> ProviderCatalog? {
         catalogByTarget[target]
+    }
+
+    func activeOperationID(providerID: String, target: ProviderCatalogTarget) -> String? {
+        guard let operationID = activeAuthOperationID,
+              providerByAuthOperation[operationID] == providerID,
+              targetByAuthOperation[operationID] == target else { return nil }
+        return operationID
     }
 
     func preferredAvailableModel(for target: ProviderCatalogTarget) -> ModelRef? {
@@ -360,6 +372,7 @@ final class ProviderAuthCoordinator {
         // Retain every operation target admitted by this profile so even a
         // superseded operation can refresh its exact scope when it completes.
         targetByAuthOperation[response.operationId] = target
+        providerByAuthOperation[response.operationId] = providerID
         let quarantined = takeQuarantinedPresentation(for: response.operationId)
         guard authBeginGeneration == admittedBeginGeneration else {
             if let completion = quarantined?.completion {
@@ -562,6 +575,7 @@ final class ProviderAuthCoordinator {
         if submittingBrowserCallbackOperationID == id { submittingBrowserCallbackOperationID = nil }
         if response?.cancelled == true {
             targetByAuthOperation[id] = nil
+            providerByAuthOperation[id] = nil
         }
     }
 
@@ -705,8 +719,10 @@ final class ProviderAuthCoordinator {
         if clearCatalogs { catalogByTarget.removeAll() }
         if preserveActiveAuth, let activeAuthOperationID {
             targetByAuthOperation = targetByAuthOperation.filter { $0.key == activeAuthOperationID }
+            providerByAuthOperation = providerByAuthOperation.filter { $0.key == activeAuthOperationID }
         } else {
             targetByAuthOperation.removeAll()
+            providerByAuthOperation.removeAll()
             activeAuthOperationID = nil
             pendingBrowserCallbackByOperation.removeAll()
             event = nil
@@ -720,6 +736,7 @@ final class ProviderAuthCoordinator {
 
     private func retireAuthPresentation(operationID: String) {
         targetByAuthOperation[operationID] = nil
+        providerByAuthOperation[operationID] = nil
         if activeAuthOperationID == operationID {
             activeAuthOperationID = nil
             authPresentationGeneration &+= 1
@@ -832,6 +849,7 @@ final class ProviderAuthCoordinator {
             submittingBrowserCallbackOperationID = nil
         }
         let target = targetByAuthOperation.removeValue(forKey: completion.operationID)
+        providerByAuthOperation[completion.operationID] = nil
         return PreparedCompletion(completion: completion, profileGeneration: admittedProfileGeneration,
                                   presentationGeneration: admittedPresentationGeneration, wasActive: wasActiveOperation, target: target)
     }
@@ -952,9 +970,11 @@ final class ProviderAuthCoordinator {
     func installHostedAuthOperation(
         _ operationID: String,
         target: ProviderCatalogTarget,
+        providerID: String = "provider",
         active: Bool = true
     ) {
         targetByAuthOperation[operationID] = target
+        providerByAuthOperation[operationID] = providerID
         guard active else { return }
         authBeginGeneration &+= 1
         authPresentationGeneration &+= 1

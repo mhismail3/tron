@@ -247,6 +247,7 @@ enum ProviderUsageRefreshPresentation {
 struct ProviderConfigurationSheet: View {
     @Environment(AppModel.self) private var model
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.scenePhase) private var scenePhase
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.tronSettingsVisualTheme) private var settingsTheme
     @Environment(\.tronPresentationActivity) private var presentationActivity
@@ -330,6 +331,9 @@ struct ProviderConfigurationSheet: View {
         .interactiveDismissDisabled(disablesInteractiveDismissal)
         .onAppear {
             if owningProfileID == nil { owningProfileID = model.profiles.selected?.id }
+            if let operationID = model.activeProviderAuthOperationID(providerID: provider.id, target: target) {
+                activeOperationID = operationID
+            }
             beginAutomaticallyIfNeeded()
         }
         .onChange(of: model.profiles.selected?.id) { _, selectedProfileID in
@@ -349,7 +353,9 @@ struct ProviderConfigurationSheet: View {
         }
         .onDisappear {
             usageController.begin()
-            guard let operationID = activeOperationID else { return }
+            guard ProviderAuthBrowserPolicy.shouldCancelOperationWhenProviderSheetDisappears(
+                sceneIsActive: scenePhase == .active
+            ), let operationID = activeOperationID else { return }
             activeOperationID = nil
             Task { await model.cancelAuth(operationID: operationID) }
         }
@@ -548,9 +554,7 @@ struct ProviderConfigurationSheet: View {
     private func beginAutomaticallyIfNeeded() {
         guard !attemptedAutomaticBegin, let automaticMethod else { return }
         attemptedAutomaticBegin = true
-        // A pre-existing operation has no provider identity in the shared
-        // presentation state, so never adopt it as this sheet's operation.
-        guard currentOperationID == nil else { return }
+        guard activeOperationID == nil, currentOperationID == nil else { return }
         begin(automaticMethod)
     }
 

@@ -572,9 +572,12 @@ Because provider login can synchronously emit presentation or completion events 
 newest admitted operation and is synchronously revoked on failure, cancellation, or profile
 retirement. `auth.begin` carries a command ID, while the active operation belongs to the authenticated
 device identity rather than a disposable socket. Transient transport retirement clears prompt delivery
-but retains the operation/target; foreground or active reconnect calls `auth.resume`, which replays the
-Gateway's latest bounded state without restarting Pi login. Profile replacement still revokes all local
-authority. Prompt and browser callback submission are single-flight on iOS, and the Gateway treats bounded late
+but retains the operation/target/provider; foreground or active reconnect calls `auth.resume`, which replays the
+Gateway's latest bounded state without restarting Pi login. The matching provider sheet can reattach only to that
+provider and target, preventing duplicate automatic OAuth starts after a presentation is recreated. Leaving Tron
+for the external browser does not cancel the operation; active-scene sheet dismissal still cancels it, while a
+profile replacement revokes all local authority. The Gateway bounds login lifetime to 15 minutes. Prompt and
+browser callback submission are single-flight on iOS, and the Gateway treats bounded late
 auth acknowledgements as idempotent no-ops so completion/response reordering cannot surface a
 misleading operation-not-found error.
 

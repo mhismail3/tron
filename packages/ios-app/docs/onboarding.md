@@ -37,8 +37,12 @@ hidden while the native upward sheet gesture remains available.
    OAuth with an admitted loopback callback opens in `ASWebAuthenticationSession` on iPhone. If a provider
    emits an auth URL followed by a same-operation text/manual-code prompt but no secure callback capture,
    the sheet waits for that prompt, opens the URL in the external browser, and asks the user to return and
-   paste the callback URL or code into that operation's prompt. Other callback-less flows fail honestly;
-   they are not treated as manual entry. For Pi loopback redirects, a one-shot operation-owned iOS listener binds only the exact
+   paste the callback URL or code into that operation's prompt. Backgrounding for the external browser
+   preserves the device-owned Gateway operation; foreground reconnect resumes its exact event/prompt, and
+   reopening the same provider sheet reattaches only to the matching provider and target instead of starting
+   a second login. Dismissing the sheet while Tron is active still cancels that operation, and profile changes
+   revoke its presentation ownership. Other callback-less flows fail honestly; they are not treated as manual
+   entry. For Pi loopback redirects, a one-shot operation-owned iOS listener binds only the exact
    advertised localhost port/path, captures the bounded authorization response, and
    closes the system browser through the dedicated `com.tron.mobile.oauth` handoff. The complete
    redirect is submitted to Pi's existing manual-code interaction; providers without
