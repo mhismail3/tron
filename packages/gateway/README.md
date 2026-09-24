@@ -346,7 +346,9 @@ configurations for Anthropic OAuth, OpenAI Codex, OpenRouter, Kimi Coding, Z.ai
 (including its China endpoint), and OpenCode Go. Custom or overridden base URLs
 are reported unsupported; they are never sent to a first-party quota endpoint.
 Anthropic usage requires the active Anthropic OAuth credential and reads the
-subscription quota endpoint (`/api/oauth/usage`), not API-key billing. It reports
+subscription quota endpoint (`/api/oauth/usage`), not API-key billing. It admits
+CortexKit's `cortexkit-anthropic-messages` model API only at Anthropic's exact
+first-party API host, in addition to Pi's built-in `anthropic-messages` API. It reports
 provider-supplied 5-hour, weekly, model-scoped weekly, and optional extra-usage
 monthly limits; amounts/resets omitted by Anthropic remain absent rather than
 being inferred. API-key authentication is not advertised as subscription usage.

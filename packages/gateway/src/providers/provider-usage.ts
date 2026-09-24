@@ -77,7 +77,12 @@ export interface ProviderUsageOptions {
 
 const adapters: Record<string, Adapter> = {
   anthropic: {
-    id: "anthropic", shapes: [{ api: "anthropic-messages", baseUrl: "https://api.anthropic.com" }],
+    id: "anthropic", shapes: [
+      { api: "anthropic-messages", baseUrl: "https://api.anthropic.com" },
+      // CortexKit uses a distinct API ID, but targets Anthropic's first-party
+      // OAuth quota endpoint at this exact host.
+      { api: "cortexkit-anthropic-messages", baseUrl: "https://api.anthropic.com" },
+    ],
     endpoint: "https://api.anthropic.com/api/oauth/usage", source: "anthropic.oauth-usage", scope: "account", oauthOnly: true,
     headers: anthropicOAuthHeaders, parse: parseAnthropicOAuthUsage,
   },

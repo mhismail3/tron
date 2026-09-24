@@ -40,13 +40,13 @@ describe("provider.list usage support", () => {
     { provider: "opencode-go", id: "c", api: "openai-responses", baseUrl: "https://opencode.ai/zen/go/v1" },
   ];
   const anthropicModels = [
-    { provider: "anthropic", id: "claude-opus-5-5", api: "anthropic-messages", baseUrl: "https://api.anthropic.com" },
+    { provider: "anthropic", id: "claude-opus-5-5", api: "cortexkit-anthropic-messages", baseUrl: "https://api.anthropic.com" },
   ];
   let anthropicOAuth = true;
   const runtime = {
     getProviders: () => [
       { id: "opencode-go", name: "OpenCode Go", auth: { apiKey: {} }, baseUrl: undefined, getModels: () => goModels },
-      { id: "anthropic", name: "Anthropic (CortexKit OAuth)", auth: { apiKey: {}, oauth: {} }, baseUrl: undefined, getModels: () => anthropicModels },
+      { id: "anthropic", name: "Anthropic (CortexKit)", auth: { apiKey: {}, oauth: {} }, baseUrl: undefined, getModels: () => anthropicModels },
       { id: "ollama", name: "Ollama", auth: { apiKey: {} }, baseUrl: undefined, getModels: () => [] },
     ],
     getModels: (id: string) => id === "opencode-go" ? goModels : id === "anthropic" ? anthropicModels : [],

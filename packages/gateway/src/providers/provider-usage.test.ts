@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { ProviderUsageOwner } from "./provider-usage.js";
+import { ProviderUsageOwner, providerUsageSupported } from "./provider-usage.js";
 
 const model = (provider: string, baseUrl: string, api = "openai-completions") => ({ provider, id: "fixture", api, baseUrl });
 function runtime(provider: string, baseUrl: string, auth: unknown = { auth: { apiKey: "fixture-secret" } }, api = "openai-completions", oauth = false) {
@@ -46,6 +46,31 @@ describe("provider usage owner", () => {
     now += 1_000;
     await owner.read(fixture, "openrouter");
     expect(fetch).toHaveBeenCalledTimes(1);
+  });
+
+  it("admits the installed CortexKit API ID for its complete first-party model catalog", async () => {
+    // Mirrors the 1.23.1-tron.1 provider registration: every model uses
+    // cortexkit-anthropic-messages at Anthropic's first-party API host.
+    const ids = [
+      "claude-opus-5-5", "claude-opus-5", "claude-opus-4-8", "claude-opus-4-5",
+      "claude-sonnet-4-5", "claude-sonnet-5", "claude-fable-5", "claude-mythos-5",
+      "claude-fable-5-1", "claude-mythos-5-1",
+    ];
+    const models = ids.map((id) => ({
+      ...model("anthropic", "https://api.anthropic.com", "cortexkit-anthropic-messages"), id,
+    }));
+    const fixture = {
+      getModels: () => models,
+      getAuth: vi.fn(async () => ({ auth: { apiKey: "oauth-fixture-token" } })),
+      getProvider: () => undefined,
+      hasConfiguredAuth: () => true,
+      isUsingOAuth: () => true,
+    } as any;
+    expect(providerUsageSupported(fixture, "anthropic")).toBe(true);
+    const fetch = vi.fn(async () => response({ five_hour: { utilization: 23 } }));
+    const result = await new ProviderUsageOwner({ fetch }).read(fixture, "anthropic");
+    expect(result.providers[0]).toMatchObject({ status: "available", source: "anthropic.oauth-usage" });
+    expect(fetch).toHaveBeenCalledOnce();
   });
 
   it("projects Anthropic OAuth account windows, model limits and extra spend with exact credential headers", async () => {
