@@ -2,7 +2,7 @@
 
 - **Started:** 2026-09-23
 - **Status:** Active
-- **Last updated:** 2026-09-23, L-10 added
+- **Last updated:** 2026-09-24, L-11–L-16 added
 - **Goal:** Every Tron process records the right signals automatically, in a known place, at a meaningful level, so a failure can be diagnosed in one pass from what was already recorded.
 
 Follow the [plan protocol](README.md#protocol) to claim tasks and hand off.
@@ -55,6 +55,29 @@ code smaller than it found it.
 | Mac app | 14 `NSLog` calls | No file log; observer, LaunchAgent and update-flow transitions go unrecorded |
 | iOS | `DiagnosticCapture.swift`: user-started capture (300 s default, 600 s cap, 2,000 events, 480 KB). `GatewayLogsSettingsView` has Start/Stop/Export Capture buttons, a share button and warning/error filter pills | **Records only after you press start.** **Export regression (`3de94a570`):** export used to upload to the Gateway and copy the path; now it prepares a local file and needs a second tap on a `ShareLink` |
 | Gateway export store | `transport/diagnostic-export.ts`: `/tmp/tron-diagnostics`, 512 KB cap, keeps 10 | In `/tmp` (cleared on reboot) and separate from every other log |
+
+### Gateway source rebuild measurements (2026-09-23)
+
+Measured read-only against the live 585 MB, 32,330-file payload; no Gateway
+was rebuilt or restarted for these numbers. Only `app/dist` (6.9 MB) changes
+in a source rebuild; `app/node_modules` (316 MB) and `runtime` (268 MB) are
+carried over unchanged.
+
+| Step in `scripts/gateway-payload-deploy.mjs` | Cost | Runs per source rebuild |
+| --- | --- | --- |
+| Node `payloadFingerprint` (sequential reads) | 5.4–6.3 s | About 8 |
+| Launcher `--fingerprint` (C) | 1.5–3.6 s | 1, at launch |
+| `fs.cp` of the payload | 10.6 s, about 594 MB written | 2 |
+| Permission walk (mutable or immutable) | 1.9 s | 2 |
+| `tsc` | 4.5 s | 1 |
+
+The 11:12 UTC rebuild took about 2 min 40 s: about 63 s to compile and stage,
+about 40 s of promotion checks before the restart request, and 46 s from
+`gateway.stopping` to `gateway.listening`. Across four restarts, stop to
+`gateway.bound` took 7.6–25.5 s and bound to the first startup phase took
+10–26 s with no records in between. Eight retained versions hold about
+4.7 GB. The 08:22 UTC rebuild waited more than 7 minutes on
+`terminal-receipt-persistence=8` until the Gateway was sent SIGTERM.
 
 ## Plan rules
 
@@ -189,6 +212,12 @@ user reinstalls manually, so batch them for one reinstall.
 | L-8 | Needs scoping | Gateway idle heap growth | none | |
 | L-9 | Needs scoping | Phone handling of a stalled or unreachable but live Gateway (proposal for the user) | L-7, L-10 | |
 | L-10 | Ready | iOS connect-failure records say whether the socket ever opened, and on which interface | none | |
+| L-15 | Ready | Startup timing: stop to bound and bound to first startup phase | L-2 | |
+| L-16 | Needs scoping | Restart drain hangs on terminal-receipt persistence | none | |
+| L-11 | Ready | Remove duplicate payload validations within one deploy run | none | |
+| L-12 | Ready | Faster Node payload fingerprint with identical output | none | |
+| L-13 | Ready | Stage source payloads in the store and rename instead of copying twice | L-11 | |
+| L-14 | Needs scoping | APFS clone copies and payload retention count | L-13 | |
 
 ## Task details
 
@@ -385,6 +414,81 @@ user reinstalls manually, so batch them for one reinstall.
   records; add fields, not a new stream.
 - **Test:** a transport that never opens and one that opens but never answers
   hello produce distinguishable records.
+
+### L-15 — Startup timing
+
+- Two restart windows have no records today: stop to `gateway.bound`
+  (7.6–25.5 s) and `gateway.bound` to the first `gateway.startup-phase`
+  (10–26 s). The second covers `knowledgeStore.upgradeStorage()` and
+  `sessions.initialize()` in `packages/gateway/src/gateway-main.ts`; the
+  `timedStage` calls in `packages/gateway/src/sessions/runtime-registry.ts`
+  only log slow stages and logged none.
+- Record, in the L-2 format, the old process's exit (with shutdown duration),
+  the launcher's validation duration (with L-1b), process start to module
+  load complete, and each step between `gateway.bound` and
+  `gateway.listening`, each with `durationMs`.
+- Then find and fix the dominant cost, or add a task naming it. A CPU profile
+  may be taken only during a user-initiated restart or in an isolated home.
+- **Acceptance:** one restart's records account for at least 90% of stop to
+  `gateway.listening`.
+
+### L-16 — Restart drain hang
+
+- Scoping first. On 2026-09-23 at 08:22 UTC a source rebuild's restart waited
+  over 7 minutes with 8 operations in `terminal-receipt-persistence` and never
+  drained; SIGTERM then hit the shutdown cleanup grace with 4 owned operations
+  outstanding. Rebuilds with no active sessions drained in about 0.1 s.
+- Find why those receipts did not settle and whether the drain has a bound
+  and a visible reason. Any change to how long accepted work is waited for is
+  a user-visible behavior change and needs the user's approval.
+
+### L-11 — Duplicate payload validations
+
+- In `scripts/gateway-payload-deploy.mjs` one source rebuild runs a full
+  `validatePayload` or `payloadFingerprint` about 8 times. Remove only
+  repeats inside one run with no copy, rename or process boundary between
+  them: the `validatePayload` directly after computing the new fingerprint;
+  the recovery validation when it names the same selection already validated
+  as the build base; and `preflightPayload`'s validation when `promote` just
+  validated the same root.
+- Keep every check after a copy, the launcher's check and the post-restart
+  check. Do not weaken any fingerprint or signature check (see the staged
+  update controls plan).
+- **Tests:** in `scripts/gateway-payload-deploy.test.mjs`, count fingerprint
+  computations per source build and promotion; a tampered file after a copy
+  is still rejected.
+- **Acceptance:** about 15–20 s less before the restart request, measured
+  with L-1c's phase records.
+
+### L-12 — Faster payload fingerprint
+
+- `payloadFingerprint` reads and hashes 32k files one at a time (5.4–6.3 s);
+  the launcher computes the same value in 1.5–3.6 s. Read with bounded
+  concurrency, or call the launcher's `--fingerprint` mode, and keep one
+  owner for the algorithm.
+- The output must stay byte-identical to
+  `packages/mac-app/scripts/hash-gateway-payload.sh` and
+  `packages/mac-app/scripts/tron-gateway-launcher.c`.
+- **Tests:** equality across all three on a fixture payload, including
+  symlinks and control-byte rejection.
+
+### L-13 — One payload copy per source rebuild
+
+- `buildSourcePayload` copies the active payload to `tmpdir()`, then copies
+  the finished tree again into the store (10.6 s each). Stage in a private
+  directory under the channel root that retention cannot see, and `rename`
+  it into `versions/`.
+- **Tests:** a crash mid-staging leaves no visible version and a later run
+  removes the private directory; concurrent retention never deletes it.
+- **Acceptance:** one full copy per source rebuild.
+
+### L-14 — Clone copies and retention
+
+- Node's default copy writes about 594 MB per copy; `fs.cp` with
+  `COPYFILE_FICLONE` measured about zero added disk and the same time. Use
+  clones where the store is on APFS.
+- `MAX_RETAINED_VERSIONS` is 8 (about 4.7 GB without clones). Propose a count
+  for the user to decide; do not change it without approval.
 
 ## Handoff log
 
