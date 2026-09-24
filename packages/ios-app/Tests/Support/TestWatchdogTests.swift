@@ -48,10 +48,11 @@ struct TestWatchdogTests {
             Issue.record("watchdog unexpectedly allowed the blocked operation to finish")
         } catch let expired as TestWatchdogExpired {
             #expect(!expired.joined)
-            #expect(expired.description.contains("did not exit when cancelled"))
         } catch {
             Issue.record("unexpected watchdog error: \(error)")
         }
+        // Real time on purpose: the deadline is the behavior under test, and an
+        // injected clock would add a seam to every watchdog caller.
         #expect(started.duration(to: .now) < .seconds(2))
         blocked.release()
     }

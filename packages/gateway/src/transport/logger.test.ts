@@ -41,6 +41,14 @@ describe("GatewayLogger", () => {
     expect(new GatewayLogger(path).recent(1)[0]).toMatchObject({ runtimeEpoch: "epoch-1", commandId: "command_1" });
   });
 
+  it("sanitizes and bounds client-supplied correlation IDs", () => {
+    const logger = new GatewayLogger();
+    logger.log("warning", "RPC completed", { event: "rpc.completed", requestID: "id with spaces/".repeat(30) });
+    const requestID = logger.recent(1)[0]?.requestID ?? "";
+    expect(requestID).toMatch(/^[A-Za-z0-9._:-]+$/u);
+    expect(requestID.length).toBe(160);
+  });
+
   it("keeps a bounded lifecycle step name across restart", () => {
     const path = logPath();
     new GatewayLogger(path).log("info", "Gateway startup step session-registry took 8 ms", {
@@ -69,6 +77,19 @@ describe("GatewayLogger", () => {
     expect(logged.cause.cause).toBeUndefined();
   });
 
+  it("re-bounds and redacts a structured error restored from a persisted line", () => {
+    const path = logPath();
+    const oversized = { name: "Error", code: "EFAIL", message: `password=abc ${"m".repeat(5_000)}`, stack: "s".repeat(9_000),
+      cause: { name: "Error", message: "root", cause: { name: "Error", message: "hidden" } } };
+    writeFileSync(path, `${JSON.stringify({ timestamp: "2026-09-24T00:00:00.000Z", level: "error", message: "fault", error: oversized })}\n`);
+    const restored = new GatewayLogger(path).recent(1)[0]?.error;
+    expect(restored?.message).not.toContain("abc");
+    expect(Buffer.byteLength(restored?.message ?? "")).toBeLessThanOrEqual(1_000);
+    expect(Buffer.byteLength(restored?.stack ?? "")).toBeLessThanOrEqual(4_000);
+    expect(restored?.cause?.message).toBe("root");
+    expect(restored?.cause?.cause).toBeUndefined();
+  });
+
   it("keeps debug records out of the file and client tail but available to exports", () => {
     const path = logPath();
     const logger = new GatewayLogger(path);
@@ -77,7 +98,9 @@ describe("GatewayLogger", () => {
     expect(lines(path).map((record) => record.event)).toEqual(["connection.opened"]);
     expect(logger.recent().map((record) => record.event)).toEqual(["connection.opened"]);
     expect(logger.debugTail().map((record) => record.event)).toEqual(["rpc.completed"]);
-    expect(process.stdout.write).toHaveBeenCalledTimes(1);
+    const mirrored = vi.mocked(process.stdout.write).mock.calls.map(([chunk]) => String(chunk)).join("");
+    expect(mirrored).toContain("opened");
+    expect(mirrored).not.toContain("fast RPC");
   });
 
   it("bounds the debug buffer by count and bytes, evicting the oldest", () => {

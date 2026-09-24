@@ -323,7 +323,9 @@ two-phase `session.open`/`session.sync` handshake installs its authoritative tai
 exact initial transcript projection, and a physically verified viewport at the marker
 after transcript and queue rows. The positioning command targets the terminal physical row
 from that installed spine (including an admitted alias), while the marker remains the separate
-settlement oracle. Rows remain fully realizable beneath that opaque cover;
+settlement oracle. Rows remain fully realizable beneath that opaque cover, which also extends
+under the navigation bar because the transcript scrolls there, outside its safe frame
+(`ChatViewScrollHarnessTests.openingCoverHidesNavigationBand`);
 an opacity-zero lazy stack is never used as a layout gate. The eight-point positioning lift resolves behind that cover, and the cover is removed only after
 current non-lifted marker and geometry evidence, two physically unchanged presented frames regardless of duplicate SwiftUI observation callbacks, and consumption of
 the exact opening-target release. One still-covered frame then installs the settled transcript at zero opacity and an eight-point visual offset; the immutable commit rises while the cover fades in one cosmetic animation transaction. Physical settlement plus the next ready display-link frame, rather than animation completion, admits interaction, repair, paging, live projection intake, and the exact submission/layout authority. The cosmetic reveal remains `presented` until that frame revalidates the opening epoch, exact viewport activation, active scene, live presentation activity, mounted target, and installed runtime identity. Coverage retires even a final-frame attempt; a late scheduler return cannot publish ready or extension routes behind the cover. Same-target runtime replacement rejects an unfinished cut and resumes against current authority without reopening transport. A missing cosmetic completion therefore cannot strand the pulse or controls; Reduce Motion keeps only the short fade. Automatic projection intake remains

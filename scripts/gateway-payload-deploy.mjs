@@ -896,8 +896,7 @@ async function writeProgress(paths, state, commandId, error) {
 
 // ---------------------------------------------------------------------------
 // Deploy timeline (~/.tron/logs/deploy.jsonl). The helper rotates it once at
-// operation start; the launcher (observability L-1b) appends single-line
-// O_APPEND records. Diagnostics never fail or delay a deployment.
+// operation start. Diagnostics never fail or delay a deployment.
 
 /** A source rebuild writes about a dozen records (~3 KB); 1 MB holds hundreds
  * of deployments while staying far under the Gateway's 40 MB budget. */

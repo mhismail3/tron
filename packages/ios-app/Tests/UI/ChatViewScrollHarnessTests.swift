@@ -1061,6 +1061,8 @@ struct ChatViewScrollHarnessTests {
                         continue
                     }
                     if phase == .presented || phase == .ready { break }
+                    // `.revealing` is when positioned rows first exist beneath the
+                    // cover, so the check is vacuous unless it was sampled.
                     sawRevealing = sawRevealing || phase == .revealing
                     bands.append(harness.renderedNavigationBandGrid())
                     try await DisplayFrameScheduler.displayLink.nextFrame()
@@ -3345,7 +3347,26 @@ final class ChatViewScrollHarness {
         return value
     }
 
+    /// Luminance samples from the top of the chat, where the transcript
+    /// scrolls under the navigation bar outside the scroll view's safe frame.
+    /// The glass bar buttons are excluded: their material re-renders with
+    /// small pixel noise unrelated to what is beneath them.
+    func renderedNavigationBandGrid() -> [Double] {
+        let width = hostingController.view.bounds.width
+        return renderedLuminance(in: CGRect(x: 72, y: 0, width: width - 144, height: 160), step: 3)
+    }
+
     func renderedPixelGrid() -> [Double] {
+        let bounds = hostingController.view.bounds
+        // Skip the edges and the centered opening pulse, whose animation is not
+        // part of the reveal being measured.
+        let pulse = CGRect(x: bounds.midX - 48, y: bounds.midY - 48, width: 96, height: 96)
+        return renderedLuminance(in: bounds.insetBy(dx: 8, dy: 24), step: 12, excluding: pulse)
+    }
+
+    /// Average-channel luminance sampled every `step` points of `region`,
+    /// rendered at 1x from the current hierarchy.
+    private func renderedLuminance(in region: CGRect, step: Int, excluding hole: CGRect = .null) -> [Double] {
         let view = hostingController.view!
         view.setNeedsLayout()
         view.layoutIfNeeded()
@@ -3359,44 +3380,10 @@ final class ChatViewScrollHarness {
               let data = cgImage.dataProvider?.data,
               let bytes = CFDataGetBytePtr(data) else { return [] }
         let bytesPerPixel = cgImage.bitsPerPixel / 8
-        let rowBytes = cgImage.bytesPerRow
         var samples: [Double] = []
-        let center = CGPoint(x: CGFloat(cgImage.width) / 2, y: CGFloat(cgImage.height) / 2)
-        for y in stride(from: 24, to: cgImage.height - 24, by: 12) {
-            for x in stride(from: 8, to: cgImage.width - 8, by: 12) {
-                if abs(CGFloat(x) - center.x) < 48 && abs(CGFloat(y) - center.y) < 48 { continue }
-                let offset = y * rowBytes + x * bytesPerPixel
-                let red = Double(bytes[offset])
-                let green = Double(bytes[offset + 1])
-                let blue = Double(bytes[offset + 2])
-                samples.append((red + green + blue) / 3)
-            }
-        }
-        return samples
-    }
-
-    /// Luminance samples from the top of the chat, where the transcript
-    /// scrolls under the navigation bar outside the scroll view's safe frame.
-    /// The glass bar buttons are excluded: their material re-renders with
-    /// small pixel noise unrelated to what is beneath them.
-    func renderedNavigationBandGrid() -> [Double] {
-        let view = hostingController.view!
-        view.setNeedsLayout()
-        view.layoutIfNeeded()
-        let band = CGRect(x: 72, y: 0, width: view.bounds.width - 144, height: 160)
-        let format = UIGraphicsImageRendererFormat()
-        format.scale = 1
-        format.opaque = true
-        let image = UIGraphicsImageRenderer(size: band.size, format: format).image { _ in
-            view.drawHierarchy(in: view.bounds.offsetBy(dx: -band.minX, dy: 0), afterScreenUpdates: true)
-        }
-        guard let cgImage = image.cgImage,
-              let data = cgImage.dataProvider?.data,
-              let bytes = CFDataGetBytePtr(data) else { return [] }
-        let bytesPerPixel = cgImage.bitsPerPixel / 8
-        var samples: [Double] = []
-        for y in stride(from: 2, to: cgImage.height - 2, by: 3) {
-            for x in stride(from: 2, to: cgImage.width - 2, by: 3) {
+        for y in stride(from: Int(region.minY), to: Int(region.maxY), by: step) {
+            for x in stride(from: Int(region.minX), to: Int(region.maxX), by: step) {
+                if hole.contains(CGPoint(x: x, y: y)) { continue }
                 let offset = y * cgImage.bytesPerRow + x * bytesPerPixel
                 samples.append((Double(bytes[offset]) + Double(bytes[offset + 1]) + Double(bytes[offset + 2])) / 3)
             }

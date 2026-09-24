@@ -2,7 +2,7 @@
 
 - **Started:** 2026-09-23
 - **Status:** Active
-- **Last updated:** 2026-09-23, S-BUILD-1 added
+- **Last updated:** 2026-09-24, T-IOS-WATCHDOG-1 correction
 - **Goal:** Every file, module, abstraction, dependency, comment and test in Tron has a specific, visible reason to exist, with no change to what users see or do.
 
 Follow the [plan protocol](README.md#protocol) to claim tasks and hand off.
@@ -206,7 +206,7 @@ These apply on top of `AGENTS.md`, which wins on any conflict.
 | S-COMMENTS-1 | Ready | Comment sweep method: grep patterns for comments that describe absence, narrate syntax or read as agent diaries; sample 50 hits to calibrate. Output the patterns plus per-area C-COMMENTS rows | none | |
 | S-STRUCT-1 | Ready | Structure sweep: every tracked file and directory needs a current owner and reason. Find one-off plans and reports, leftover fixtures (check `display-smoke/`), backup copies, config for tools no longer used (check `.codex` and `.pi`), docs for finished cutovers and tracked generated files. Check each against CI, `scripts/tron` and code references. Output C-STRUCT rows | none | |
 | S-BUILD-1 | Ready | Build-output hygiene. On 2026-09-23 agents had left about 1,100 ad-hoc DerivedData folders in `/tmp` (11 GB, cleared by a restart), and each worktree keeps its own 1.2–3.8 GB build tree (35 GB across 24 worktrees) because `scripts/tron-ios-test` builds into the worktree. That file churn grew `fseventsd` to 49 GB, filled swap and stalled the live Gateway. Scope: where repo scripts and the `tron-ios` skill send build output, one owned location per purpose so agents stop inventing paths, and releasing build output when a worktree is released through the housekeeping procedure. Also: `packages/mac-app/scripts/bundle-gateway.sh` makes the staged payload under `packages/mac-app/Sources/Resources/Gateway` read-only, so `git worktree remove` fails partway through a merged worktree that has staged it (seen on two worktrees on 2026-09-23); release must handle that without force-deleting. Output C-BUILD rows | none | |
-| T-IOS-WATCHDOG-1 | Done | Make `withTestWatchdog` (`packages/ios-app/Tests/Support/TestWatchdog.swift`) end a test at its timeout even when the operation is blocked on a non-cancellable wait; today the task group waits for the stuck child, so the run stalls until `scripts/tron-ios-test`'s 180 s no-output or 20 min process deadline (seen 2026-09-24: 5–11 min runs from one hung test) | none || observability session, 2026-09-24 |
+| T-IOS-WATCHDOG-1 | Done | Make `withTestWatchdog` (`packages/ios-app/Tests/Support/TestWatchdog.swift`) end a test at its timeout even when the operation is blocked on a non-cancellable wait; today the task group waits for the stuck child, so the run stalls until `scripts/tron-ios-test`'s 180 s no-output or 20 min process deadline (seen 2026-09-24: 5–11 min runs from one hung test) | none | observability session, 2026-09-24 |
 | T-IOS-FLAKY-OPENING-1 | Ready | `ChatViewScrollHarnessTests.hostedOpeningRevealIsMonotonic` is flaky on unchanged `main` (failed 4 of 6 isolated runs on 2026-09-24; its monotonic-distance check allows only 0.035 pt of regression). Find whether the reveal genuinely regresses or the oracle samples frames nondeterministically, and fix the owner, not the tolerance | none | |
 | T-IOS-DEVICE-PROBE-1 | Needs scoping | Measure whether simulator test runs lose time to xcodebuild probing a paired, passcode-locked physical iPhone (`DTDKRemoteDeviceConnection … passcode protected` in `test.log`), and stop it for simulator destinations if it does | none | |
 | C-STRUCT-RULES-1 | Ready | Make the structure self-maintaining with the least mechanism: (1) a short `AGENTS.md` rule that whoever adds, moves or removes a file updates its references, owning doc and ownership notes in the same change and commits no temporary files; (2) a two-line "owns / does not own" note in each package's existing README or doc where missing; (3) only if S-STRUCT-1 finds recurring leftovers, one fast CI check for the patterns actually found | S-STRUCT-1 | |
@@ -252,3 +252,12 @@ These apply on top of `AGENTS.md`, which wins on any conflict.
 - Changes: this commit (`Tests/Support/TestWatchdog.swift`, `Tests/Support/TestWatchdogTests.swift`).
 - Tasks added: T-IOS-FLAKY-OPENING-1.
 - Kept on purpose: an operation that ignores cancellation is abandoned (it runs until the test process exits) rather than blocking the run; the failure message names that case.
+
+### T-IOS-WATCHDOG-1 correction · Done · 2026-09-24 · observability session
+
+- Result: corrects the T-IOS-WATCHDOG-1 entry and row. Its row had an extra table cell. One of its tests asserted failure-message wording, which the test bar excludes; that assertion is removed, because `joined == false` on the line above already asserts the outcome.
+- Evidence (verified): `TestWatchdogTests` 3/3 and `ChatViewScrollHarnessTests` 59/59 in one 69.5 s run. Full iOS run: 1,872 Swift Testing and 140 XCTest tests in 231 s. The only failure was the pre-existing `hostedOpeningRevealIsMonotonic`, which failed 2 of 6 isolated reruns and remains T-IOS-FLAKY-OPENING-1. The harness's two pixel samplers now share one `renderedLuminance`; by inspection the grid it samples for that test is unchanged.
+- Changes: this commit.
+- Tasks added: none.
+- Kept on purpose: `expiryDoesNotWaitForNonCancellableOperation` asserts a real-time bound (under 2 s for a 50 ms deadline). The deadline is the behavior under test, and an injected clock would add a seam to every watchdog caller. A comment at the assertion says so.
+- For the next agent: the harness's opening-cover test (`openingCoverHidesNavigationBand`) was checked against the rule that a test must fail when the behavior breaks: with the cover fix reverted, 65–108 text pixels showed through the band in each of 3 runs.

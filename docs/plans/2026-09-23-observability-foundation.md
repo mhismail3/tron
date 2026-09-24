@@ -2,7 +2,7 @@
 
 - **Started:** 2026-09-23
 - **Status:** Active
-- **Last updated:** 2026-09-24, L-7
+- **Last updated:** 2026-09-24, correction to L-2, L-1c, L-16, L-10, L-15 and L-7
 - **Goal:** Every Tron process records the right signals automatically, in a known place, at a meaningful level, so a failure can be diagnosed in one pass from what was already recorded.
 
 Follow the [plan protocol](README.md#protocol) to claim tasks and hand off.
@@ -594,3 +594,16 @@ user reinstalls manually, so batch them for one reinstall.
 - Tasks added: none.
 - Kept on purpose: the evidence stays in the message's key=value text beside the existing pressure fields rather than new record fields; only `durationMs` is structured. The record is written after the host probe resolves (at most 1 s later), so its timestamp trails the heartbeat slightly. Utilization is evidence, not attribution: a descheduled process can report either busy or idle time.
 - For the next agent: L-9 can use these records with L-10's connect records to separate a stalled Gateway from a dead path. L-8's heap growth scoping can compare `gcPauseMs` against heap figures in the same record.
+
+### L-2, L-1c, L-16, L-10, L-15, L-7 correction · Done · 2026-09-24 · observability session
+
+- Result: corrects the handoffs of L-2, L-1c, L-16, L-10, L-15 and L-7, whose evidence did not meet the simplification program's validation rules, which this plan follows. It adds before and after timings, the full suites, deletion searches and evidence labels. Three read-only reviewer passes checked those commits against the test bar and finding types. Their findings were confirmed by reading the code and fixed in this commit.
+- Fixes: `transport/logger.ts` bounded error fields in two near-identical places (`describeError` for live errors and `boundedError` for restored lines); both now use one `boundedErrorFields`. In `logger.test.ts`, the stdout check counted mock calls; it now asserts the debug text is never mirrored. L-2 had dropped the test for the 160-character correlation ID bound; it is restored as its own test. Restoring a persisted error had no test; a new one checks it is re-bounded and redacted. In `scripts/gateway-payload-deploy.mjs`, a comment said the launcher already appends to `deploy.jsonl`, which is untrue until L-1b; the clause is removed.
+- Evidence (verified): negative controls, each run against the new tests. Passing IDs through unsanitized fails 3 logger tests. Mirroring debug records to stdout fails the debug test. Restoring errors without re-bounding fails the restore test. Focused owner suites (`npx vitest run src/transport src/admin src/sessions src/index.test.ts src/config.test.ts`, Node 22.22.0): before, at `33a4ff336`, 83 files and 1,001 tests passed in 60.0 s; after, at `bce8253a2`, 85 files and 1,012 tests passed in 58.4 s. `node --test scripts/gateway-payload-deploy.test.mjs`: 42 tests in 170 s before, 47 in 160 s after. With this commit: logger and entrypoint tests 11/11. Full Gateway suite (`nice -n 19 npx vitest run --maxWorkers=2`): 176 files, 1,916/1,916, 93 s. All script tests (`node --test scripts/*.test.mjs`): 63/63 in 155 s, and both shell tests pass. Full iOS run (`scripts/tron-ios-test run`): 1,872 Swift Testing and 140 XCTest tests in 231 s. The only failure was the pre-existing flaky `hostedOpeningRevealIsMonotonic` (T-IOS-FLAKY-OPENING-1), which failed 2 of 6 isolated reruns.
+- Evidence (verified, deletion searches): `rg 'connection\.admitted\b'`, `rg 'rpc\.request\b'`, `rg MAX_FILE_BYTES` and `rg rotatedPath` outside `docs/plans/` return no L-2 remnants; the only `MAX_FILE_BYTES` hits are unrelated migration constants. `terminal-receipt-persistence` remains only for its five in-slot receipt owners and their tests, as L-16 intended.
+- Evidence (inspected, not reproduced): the L-10 URLSession delegate callbacks and the L-16 phone drain labels were not exercised on a device. iOS "before" timings were not recorded, because a second build tree would be needed (see S-BUILD-1).
+- Changes: this commit.
+- Tasks added: none.
+- Kept on purpose: `GatewayClient`'s `networkPath` initializer parameter (L-10) and `GatewayServer`'s `stallSampler` option with its sampler dependencies (L-7) are only ever set by tests. They stay because they are the only deterministic way to test those records: one shared path monitor cannot give two values in one parallel test process, and the heartbeat test needs a controlled sampler to prove the stall evidence reaches the record.
+- Deviations: the full Gateway suite was previously avoided on this Mac because it stalled the live Gateway (see L-1a). At lowest priority with two workers it ran in 93 s with no `gateway.event-loop-delay` record in the live log. The load average was about 5 before and 3.9 after.
+- For the next agent: run the full Gateway suite once before each handoff with `nice -n 19 npx vitest run --maxWorkers=2`, and stop it if the live log shows `gateway.event-loop-delay`. Record focused-suite timings before and after the change. L-1b should restore a comment in the deploy helper that names the launcher records once they exist.

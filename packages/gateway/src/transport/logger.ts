@@ -115,13 +115,21 @@ export function describeError(error: unknown, includeCause = true): LogError {
   if (!(error instanceof Error)) {
     return { name: "NonError", message: boundedBytes(shortenedPaths(String(error)), MAX_ERROR_MESSAGE_BYTES) };
   }
-  const code = (error as NodeJS.ErrnoException).code;
   return {
-    name: boundedDiagnosticID(error.name),
-    ...(typeof code === "string" ? { code: boundedDiagnosticID(code) } : {}),
-    message: boundedBytes(shortenedPaths(error.message), MAX_ERROR_MESSAGE_BYTES),
-    ...(error.stack ? { stack: boundedBytes(shortenedPaths(error.stack), MAX_STACK_BYTES) } : {}),
+    ...boundedErrorFields(error.name, (error as NodeJS.ErrnoException).code, error.message, error.stack, shortenedPaths),
     ...(includeCause && error.cause !== undefined ? { cause: describeError(error.cause, false) } : {}),
+  };
+}
+
+/** The one place error fields are bounded, for live errors and restored lines. */
+function boundedErrorFields(
+  name: string, code: unknown, message: string, stack: unknown, clean: (text: string) => string,
+): LogError {
+  return {
+    name: boundedDiagnosticID(name),
+    ...(typeof code === "string" ? { code: boundedDiagnosticID(code) } : {}),
+    message: boundedBytes(clean(message), MAX_ERROR_MESSAGE_BYTES),
+    ...(typeof stack === "string" && stack ? { stack: boundedBytes(clean(stack), MAX_STACK_BYTES) } : {}),
   };
 }
 
@@ -129,12 +137,7 @@ function boundedError(value: unknown): LogError | undefined {
   if (!value || typeof value !== "object") return undefined;
   const raw = value as Partial<LogError>;
   if (typeof raw.name !== "string" || typeof raw.message !== "string") return undefined;
-  const error: LogError = {
-    name: boundedDiagnosticID(raw.name),
-    ...(typeof raw.code === "string" ? { code: boundedDiagnosticID(raw.code) } : {}),
-    message: boundedBytes(redact(raw.message), MAX_ERROR_MESSAGE_BYTES),
-    ...(typeof raw.stack === "string" ? { stack: boundedBytes(redact(raw.stack), MAX_STACK_BYTES) } : {}),
-  };
+  const error = boundedErrorFields(raw.name, raw.code, raw.message, raw.stack, redact);
   const cause = raw.cause ? boundedError({ ...raw.cause, cause: undefined }) : undefined;
   return cause ? { ...error, cause } : error;
 }
