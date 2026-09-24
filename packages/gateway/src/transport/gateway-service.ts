@@ -694,7 +694,9 @@ export class GatewayService {
               drainRevision: drain.revision,
               drain,
             });
-          });
+            // Restart Now escalates a drain that already closed ordinary work
+            // admission; its receipt write is settlement of that accepted drain.
+          }, restartNow);
         } finally {
           // CommandReceiptStore has completed (or failed) its terminal write
           // attempt before this boundary. A failed receipt cannot reopen the

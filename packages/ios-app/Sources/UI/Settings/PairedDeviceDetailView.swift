@@ -15,7 +15,7 @@ struct PairedDeviceDetailView: View {
     @State private var statusReadGeneration = 0
     @State private var configuringSource = false
     @State private var confirmingInstall = false
-    @State private var fastDebugRebuild = true
+    @State private var fastDebugRebuild = false
     @State private var confirmingRevoke = false
     @State private var renameText: String = ""
     @State private var showingRename = false
@@ -296,7 +296,7 @@ struct PairedDeviceDetailView: View {
 
         if installSupported {
             Button {
-                fastDebugRebuild = true
+                fastDebugRebuild = false
                 confirmingInstall = true
             } label: {
                 HStack(spacing: 8) {

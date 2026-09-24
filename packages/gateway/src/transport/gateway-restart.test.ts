@@ -84,6 +84,21 @@ describe("Gateway administrative restart", () => {
     expect(requestRestart).toHaveBeenCalledWith(true);
   });
 
+  it("admits Restart Now after the drain has closed ordinary work admission", async () => {
+    vi.stubEnv("TRON_GATEWAY_SUPERVISED", "1");
+    vi.useFakeTimers();
+    const registry = new GatewayWorkRegistry("epoch", 8);
+    const requestRestart = vi.fn();
+    const gateway = service({ activeSessions: ["session-1"], workRegistry: registry, requestRestart });
+    await gateway.invoke(client, "gateway.restart", { commandId: "restart-command" });
+    expect(registry.isAdmissionOpen).toBe(false);
+
+    await expect(gateway.invoke(client, "gateway.restart", { commandId: "restart-now-command", restartNow: true }))
+      .resolves.toMatchObject({ scheduled: true, restartNow: true });
+    expect(requestRestart).toHaveBeenCalledWith(true);
+    expect(registry.size).toBe(0);
+  });
+
   it("refuses process replacement while a terminal PTY is alive", async () => {
     vi.stubEnv("TRON_GATEWAY_SUPERVISED", "1");
     const gateway = service({ activeTerminals: ["terminal-1"] });

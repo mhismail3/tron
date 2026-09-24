@@ -1838,8 +1838,9 @@ resource boundary; Tron does not pretend those SDK objects were explicitly dispo
 `gateway.drain.status` returns a bounded in-memory `AdministrativeDrainSnapshot` before
 and during a drain. The accepted `gateway.restart` response includes the same initial
 drain identity and revision while retaining its legacy fields; `{ commandId,
-restartNow: true }` can escalate an existing drain without waiting behind it. Its accepted
-receipt only acknowledges the request to stop waiting; a lost response is retried with the
+restartNow: true }` can escalate an existing drain without waiting behind it. Because the
+drain has already closed ordinary work admission, its receipt write is admitted as derived
+settlement work of that drain. Its accepted receipt only acknowledges the request to stop waiting; a lost response is retried with the
 same command ID and does not duplicate shutdown. Snapshots contain category counts, at most
 64 blocker summaries with session identity, category, state and age, omitted and suspect-projection counts,
 and monotonic revisions—never session/run IDs, prompts, output, paths, provider data, or

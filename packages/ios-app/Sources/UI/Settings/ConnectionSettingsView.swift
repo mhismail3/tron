@@ -811,19 +811,20 @@ struct GatewayConnectionDetailView: View {
             AdministrativeDrainPresentation.summary(snapshot),
             AdministrativeDrainPresentation.suspectSummary(snapshot),
         ].compactMap { $0 }.joined(separator: "\n")
-        return VStack(alignment: .leading, spacing: 8) {
-            TronValueRow(
-                icon: snapshot.phase == .failed ? "exclamationmark.triangle" : "hourglass",
-                title: "Restart drain",
-                detail: detail,
-                accent: snapshot.phase == .failed ? .tronError : .tronAmber
-            )
+        return TronValueRow(
+            icon: snapshot.phase == .failed ? "exclamationmark.triangle" : "hourglass",
+            title: "Restart drain",
+            detail: detail,
+            accent: snapshot.phase == .failed ? .tronError : .tronAmber
+        ) {
             if snapshot.phase == .preparing || snapshot.phase == .waiting {
-                Button("Restart Now", systemImage: "bolt.fill") {
-                    confirmingRestartNow = true
+                // The standard trailing settings pill; the confirmation sheet
+                // carries the destructive semantics of skipping the drain.
+                Button { confirmingRestartNow = true } label: {
+                    TronInlineActionLabel("Restart Now", accent: .tronEmerald)
+                        .fixedSize(horizontal: true, vertical: false)
                 }
-                .buttonStyle(.bordered)
-                .tint(.tronError)
+                .buttonStyle(.plain)
                 .accessibilityHint("Stops waiting for accepted work to finish")
             }
         }

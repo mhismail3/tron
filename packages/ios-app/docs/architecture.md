@@ -477,7 +477,7 @@ A restart response may be immediate or scheduled behind active runs. Connection 
 briefly poll the bounded drain projection only for an operation explicitly requested in that view;
 it shows fixed aggregate labels and retains nothing after the view's ownership ends. Drain phase,
 counts, and ages are diagnostic presentation only: `system.stopping` and the replacement handshake
-remain the sole reconnect and liveness authority. While a drain is preparing or waiting, Connection Settings offers an explicit, confirmed “Restart Now” command with `restartNow: true`; it goes through the same command-receipt owner and warns that unfinished work may have an unknown outcome. Assistant error pills preserve provider-authored details, except the provider's bare `Error Not Found` placeholder is expanded into actionable model/provider-connection guidance. Diagnostics routes current unsupported, busy,
+remain the sole reconnect and liveness authority. While a drain is preparing or waiting, Connection Settings offers an explicit, confirmed “Restart Now” command (the standard trailing pill on the Restart drain row) with `restartNow: true`; it goes through the same command-receipt owner and warns that unfinished work may have an unknown outcome. Assistant error pills preserve provider-authored details, except the provider's bare `Error Not Found` placeholder is expanded into actionable model/provider-connection guidance. Diagnostics routes current unsupported, busy,
 receipt, and transport action failures through the existing global error surface; lifecycle-retired
 cancellation remains silent. Unexpected process
 death is different: a surviving run marker projects the session as interrupted and Tron

@@ -319,12 +319,13 @@ action keeps that whole-module build. `scripts/tron-ios-device install` keeps
 optimization recompiles the entire app for any edit (measured 2026-09-23: about
 158 s versus 17 s for a one-file change). Its runtime is close to, but not
 identical to, the Profile build; capture performance evidence from Profile.
-For supervised UI iteration, the Rebuild and Install confirmation defaults to
-**Fast debug rebuild**. That immutable command choice uses the same `Tron
+The Rebuild and Install confirmation opens with **Fast debug rebuild** off, so
+the default install is the optimized build; turn it on for quick UI iteration.
+That immutable command choice uses the same `Tron
 Device` scheme, production-sandbox bundle identity, signing, and protocol
 checks, but passes `--fast-debug` to `scripts/tron-ios-device`, which also uses
 unoptimized Swift/Clang compilation, in-object debug symbols, and a separate
-`build/DerivedData-fast-debug` cache. Turning it off selects the optimized
+`build/DerivedData-fast-debug` cache. Leaving it off selects the optimized
 `build/DerivedData` path. This is not a Release install mode. Do not add
 `get-task-allow` manually or strip it from the development-signed artifact.
 `Tron Device`'s Run action is only a scheme convenience; the device helper's
