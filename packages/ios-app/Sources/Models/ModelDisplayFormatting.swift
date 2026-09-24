@@ -22,6 +22,16 @@ enum ModelDisplayFormatting {
         "xai": "xAI"
     ]
 
+    private static let modelAliases: [String: String] = [
+        "claude-fable-5-1": "Claude Fable 5.1",
+        "claude-mythos-5-1": "Claude Mythos 5.1",
+        "claude-opus-4-5": "Claude Opus 4.5",
+        "claude-opus-4-8": "Claude Opus 4.8",
+        "claude-opus-5-5": "Claude Opus 5.5",
+        "claude-sonnet-4-5": "Claude Sonnet 4.5",
+        "claude-sonnet-5": "Claude Sonnet 5"
+    ]
+
     private static let wordAliases: [String: String] = [
         "ai": "AI",
         "api": "API",
@@ -54,6 +64,7 @@ enum ModelDisplayFormatting {
     static func model(_ value: String) -> String {
         let clean = value.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !clean.isEmpty else { return "Unknown model" }
+        if let alias = modelAliases[normalizeKey(clean)] { return alias }
         return words(in: clean).map(formatWord).joined(separator: " ")
     }
 
