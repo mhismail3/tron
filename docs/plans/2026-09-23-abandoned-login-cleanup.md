@@ -36,7 +36,7 @@ These are investigation inputs, not a complete reproduction. Revalidate the depl
 | AUTH-3 | Done | Integrate iPhone resume, restart, and cancellation with authoritative ownership | AUTH-2 | worker, 2026-09-24 |
 | AUTH-4 | Ready | Verify cross-boundary cleanup and publish owning documentation | AUTH-2, AUTH-3 | Unassigned |
 
-Tasks cannot be claimed while this plan is Proposed. After approval, follow the claim-on-main and isolated-worktree procedure in `docs/plans/README.md`.
+This plan is approved and Active. Follow the claim-on-main and isolated-worktree procedure in `docs/plans/README.md`. AUTH-1 through AUTH-3 are Done; AUTH-4 owns the remaining cross-boundary and device verification.
 
 ## Task details
 

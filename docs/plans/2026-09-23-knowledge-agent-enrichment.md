@@ -26,7 +26,7 @@ Inspected 2026-09-23 on `main` at `be5da003c`; this is a focused owner-boundary 
 
 ## Plan rules
 
-- Tasks cannot be claimed until this proposal is approved, set Active, and committed. Claim each task on `main`, implement in its own isolated branch/worktree, and update this plan with the implementation commit.
+- This plan is approved and Active. Claim each task on `main`, implement in its own isolated branch/worktree, and update this plan with the implementation commit.
 - Evidence and interpretation remain distinct. Summary text is a model interpretation; provider-save dates and publication dates need field-specific source evidence. An ingestion timestamp is never an originating save date.
 - Never bind a fresh web-page summary to an old source digest merely because the URL matches. Capture refreshed evidence through the source owner first, or regenerate against the retained exact revision. Preserve historical evidence and original-save provenance.
 - Do not claim semantic correctness from schema validation. Verify structural safety at publication and evaluate content quality with a bounded human-reviewed pilot.
