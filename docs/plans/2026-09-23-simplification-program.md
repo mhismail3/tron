@@ -2,7 +2,7 @@
 
 - **Started:** 2026-09-23
 - **Status:** Active
-- **Last updated:** 2026-09-24, T-IOS-WATCHDOG-1 correction
+- **Last updated:** 2026-09-24, S-GW-SESS-SEARCH-1 added
 - **Goal:** Every file, module, abstraction, dependency, comment and test in Tron has a specific, visible reason to exist, with no change to what users see or do.
 
 Follow the [plan protocol](README.md#protocol) to claim tasks and hand off.
@@ -33,11 +33,10 @@ A wire contract or persisted format may change only if no live consumer exists.
 Prove that with a search of every consumer (Gateway, iOS, Mac, scripts,
 fixtures) and state it in the handoff.
 
-**Coordination:** the [observability foundation plan](2026-09-23-observability-foundation.md)
-replaces `transport/logger.ts`, `transport/diagnostic-export.ts`,
-`Support/DiagnosticCapture.swift`, `GatewayLogExport.swift`, the export parts of
-`GatewayLogsSettingsView`, and the deploy helper's progress reporting. Do not
-propose cleanup of those; note overlaps in the handoff instead.
+**Coordination:** the observability foundation plan closed on 2026-09-24
+(see [HISTORY](HISTORY.md)). Its logging, export and deploy-reporting code is now
+ordinary code for this program; the level policy, streams and event catalog it
+must keep are owned by `packages/gateway/docs/observability.md`.
 
 ## Context
 
@@ -212,6 +211,7 @@ These apply on top of `AGENTS.md`, which wins on any conflict.
 | C-STRUCT-RULES-1 | Ready | Make the structure self-maintaining with the least mechanism: (1) a short `AGENTS.md` rule that whoever adds, moves or removes a file updates its references, owning doc and ownership notes in the same change and commits no temporary files; (2) a two-line "owns / does not own" note in each package's existing README or doc where missing; (3) only if S-STRUCT-1 finds recurring leftovers, one fast CI check for the patterns actually found | S-STRUCT-1 | |
 | S-GW-ROOT-1 | Ready | For each migration tool and cutover doc, determine whether it is complete on every supported install. Removal needs the user's approval; record the evidence and the question | V-0 | |
 | S-GW-SESS-1 | Ready | Split GW-SESS into sub-units (runtime slot, registry, projection, catalog, search, blobs, process activity, extensions projection); add one S-GW-SESS row per sub-unit with its file list | V-0 | |
+| S-GW-SESS-SEARCH-1 | Needs scoping | Moved from observability L-8c: session-search warm-up peaks at 743.9 MiB post-GC heap (1.3 GB RSS) on a 207-session catalog because the canonical read and parse path (`RuntimeRegistry.readSearchCut`) materializes whole sessions up to its 64 MiB cap. First record why 62 of 207 catalog sessions were not indexed and correlate GC samples with read sizes; then bound or stream the parse while keeping full graph and branch validation. Acceptance: peak post-GC heap under 150 MB on a cloned corpus, identical indexed counts and ranked results, warm-up no more than 10% slower | none | |
 | T-GW-SESS-1 | Ready | Test audit of `runtime-registry.integration.test.ts` (10,560 lines): map each test to the requirement it protects; propose deletions, merges and rewrites | V-0 | |
 | S-GW-TRANS-1 | Ready | Scope GW-TRANS (server, gateway service, receipts, transcript leases), excluding code the observability plan replaces | V-0 | |
 | S-GW-KNOW-1 | Ready | Scope GW-KNOW | V-0 | |
