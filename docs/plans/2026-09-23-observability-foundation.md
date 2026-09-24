@@ -2,7 +2,7 @@
 
 - **Started:** 2026-09-23
 - **Status:** Active
-- **Last updated:** 2026-09-24, L-10
+- **Last updated:** 2026-09-24, L-15
 - **Goal:** Every Tron process records the right signals automatically, in a known place, at a meaningful level, so a failure can be diagnosed in one pass from what was already recorded.
 
 Follow the [plan protocol](README.md#protocol) to claim tasks and hand off.
@@ -212,7 +212,8 @@ user reinstalls manually, so batch them for one reinstall.
 | L-8 | Needs scoping | Gateway idle heap growth | none | |
 | L-9 | Needs scoping | Phone handling of a stalled or unreachable but live Gateway (proposal for the user) | L-7, L-10 | |
 | L-10 | Done | iOS connect-failure records say whether the socket ever opened, and on which interface | none | observability session, 2026-09-24 |
-| L-15 | Claimed | Startup timing: stop to bound and bound to first startup phase | L-2 | observability session, 2026-09-24 |
+| L-15 | Done | Startup timing: stop to bound and bound to first startup phase | L-2 | observability session, 2026-09-24 |
+| L-15b | Ready | Fix the dominant startup cost the L-15 records name on the next real restart (the user's rebuild) | L-15 | |
 | L-16 | Done | Restart drain hangs on terminal-receipt persistence | none | observability session, 2026-09-24 |
 | L-17 | Needs approval | Judge a drain stalled by its oldest blocker without progress, not by any change in the blocker set | L-16 | |
 | L-18 | Needs approval | Decide whether a restart drain proceeds when only unresolved (blocked) persistence owners remain | L-16 | |
@@ -574,3 +575,13 @@ user reinstalls manually, so batch them for one reinstall.
 - Tasks added: none here; the test-harness fixes this work exposed are rows in the simplification program.
 - Kept on purpose: `interfaces` is the device's current path from the app's single `NWPathMonitor` owner, not the socket's own route; per-task URLSession metrics arrive only after the task completes, after the record is written. The success record reads no socket metadata: an earlier draft awaited it and hung an existing test that holds a retired socket's metadata, which shows the await could delay admission.
 - For the next agent: the phone must be rebuilt to produce these fields. L-9 now has the evidence it needs to separate path failures from a stalled Gateway.
+
+### L-15 · Done · 2026-09-24 · observability session
+
+- Result: a restart's records now account for its time without gaps. `gateway.started` carries `durationMs` since process start; `gateway.startup-step` records (new `step` field) carry the time since the previous checkpoint: `modules`, `config-and-locks`, `devices`, `notifications`, `model-runtime`, `command-receipts`, `global-provider-resources`, `session-search-index`, `composition`, `listener-bind`, `knowledge-storage`, `session-registry`, `automation-recovery`, `blob-storage`, `knowledge-observation-recovery`, then `attention-recovery` after `gateway.listening`. `gateway.stopped` is each process's last record, with shutdown duration and exit code, including the forced 15 s exit.
+- Evidence: compiled this branch and ran `dist/index.js` in an isolated home on port 19951 with a clean environment, then SIGTERM: the steps summed to 518 of 522 ms from process start to `gateway.listening` (99.2%), and `gateway.stopped` recorded a 2 ms shutdown with exit 0. `npx vitest run src/transport/logger.test.ts src/index.test.ts`: 9/9, including a new test that `step` survives restart and is bounded. `npm run build` clean.
+- Evidence from the live Gateway before this change (restart at 2026-09-24 10:20:37 UTC): stop → next `gateway.started` 2.1 s, started → `gateway.bound` 3.2 s, bound → first startup phase 7.8 s, total 14.7 s to `gateway.listening`, with no records inside those gaps.
+- Changes: this commit (`gateway-main.ts`, `transport/logger.ts` `step` field, logger test, Gateway README logging section).
+- Tasks added: L-15b. The isolated home has almost no data, so its 0.5 s startup cannot name the real dominant cost; the next user rebuild's records will.
+- Deviations: the launcher's validation time is not recorded by itself; it is the gap from `gateway.stopped` to the next process start (`gateway.started` timestamp minus its `durationMs`) until L-1b adds launcher records. Isolated runs must clear inherited `PI_*` variables: this shell's `PI_SUBAGENTS_TEMP_ROOT` made the isolated Gateway treat the live `~/.tron/internal/subagents` (25,426 entries) as a legacy root and refuse to start.
+- For the next agent: after the user's next rebuild, sum the `gateway.startup-step` records of the new `runtimeEpoch` and fix or scope the largest step (L-15b). A CPU profile is allowed only during a user-initiated restart or in an isolated home.

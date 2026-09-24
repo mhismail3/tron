@@ -41,6 +41,18 @@ describe("GatewayLogger", () => {
     expect(new GatewayLogger(path).recent(1)[0]).toMatchObject({ runtimeEpoch: "epoch-1", commandId: "command_1" });
   });
 
+  it("keeps a bounded lifecycle step name across restart", () => {
+    const path = logPath();
+    new GatewayLogger(path).log("info", "Gateway startup step session-registry took 8 ms", {
+      event: "gateway.startup-step", step: "session-registry", durationMs: 8.4,
+    });
+    expect(new GatewayLogger(path).recent(1)[0]).toMatchObject({ event: "gateway.startup-step", step: "session-registry", durationMs: 8 });
+    const logger = new GatewayLogger();
+    logger.log("info", "step", { step: `bad step/${"x".repeat(100)}` });
+    expect(logger.recent(1)[0]?.step).toMatch(/^bad_step_x+$/u);
+    expect(logger.recent(1)[0]?.step?.length).toBe(64);
+  });
+
   it("records a bounded, redacted structured error with one level of cause", () => {
     const path = logPath();
     const logger = new GatewayLogger(path);

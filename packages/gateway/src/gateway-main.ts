@@ -51,6 +51,9 @@ import { delegatedArtifactRoot, delegatedProviderEnvironment, ensureDelegatedArt
 import { assertDelegatedRootCutoverReady } from "./sessions/delegated-root-migration.js";
 import { runtimeIdentity } from "./transport/runtime-identity.js";
 
+// Time since process start when this module's import graph finished loading
+// (performance.now() counts from the process time origin).
+const moduleGraphLoadedAt = performance.now();
 const config = await loadConfig();
 const delegatedRoot = delegatedArtifactRoot(config.tronHome);
 // Never switch the provider's root while retained artifacts are discoverable in
@@ -103,12 +106,32 @@ const logger = new GatewayLogger(join(config.tronHome, "logs", "gateway.jsonl"),
   logger.log(
     "info",
     `Gateway started (pid ${process.pid}, Node ${process.version}${identity.sourceRevision ? `, source ${identity.sourceRevision}` : ""})`,
-    { event: "gateway.started", source: "lifecycle" },
+    { event: "gateway.started", source: "lifecycle", durationMs: performance.now() },
   );
 }
+
+/*
+ * Startup accounting. Each checkpoint records the time since the previous one,
+ * so a restart's `gateway.startup-step` records add up to process start →
+ * listening without gaps: `modules` is process start to the loaded import
+ * graph, `config-and-locks` runs until the logger exists, and later steps
+ * name what just finished. `gateway.stopped` records the old process's
+ * shutdown; the remaining gap to the next `gateway.started` minus its
+ * `durationMs` is launchd and the launcher.
+ */
+let startupCheckpointAt = 0;
+function startupCheckpoint(step: string, at = performance.now()): void {
+  logger.log("info", `Gateway startup step ${step} took ${Math.round(at - startupCheckpointAt)} ms`, {
+    event: "gateway.startup-step", source: "lifecycle", step, durationMs: at - startupCheckpointAt,
+  });
+  startupCheckpointAt = at;
+}
+startupCheckpoint("modules", moduleGraphLoadedAt);
+startupCheckpoint("config-and-locks");
 let transport: GatewayServer;
 const devices = new DeviceStore(config.tronHome, config.machineId);
 await devices.initialize();
+startupCheckpoint("devices");
 const notifications = new NotificationService(
   new NotificationGrantStore(config.tronHome),
   new PushRelayClient(config.pushServiceOrigin),
@@ -120,6 +143,7 @@ const notifications = new NotificationService(
   }),
 );
 await notifications.initialize();
+startupCheckpoint("notifications");
 
 const modelRuntime = installKimiK3Policy(await ModelRuntime.create({
   authPath: join(config.agentDir, "auth.json"),
@@ -128,6 +152,7 @@ const modelRuntime = installKimiK3Policy(await ModelRuntime.create({
   refreshOnCreate: true,
   allowModelNetwork: false,
 }));
+startupCheckpoint("model-runtime");
 const trust = new TrustService(config.agentDir);
 const filesystem = new FilesystemService();
 const uploads = new UploadStore(config.tronHome, config.maxUploadBytes);
@@ -136,6 +161,7 @@ const settings = new SettingsService(config.agentDir, modelRuntime, false);
 const modelConfig = new ModelConfigService(config.agentDir);
 const receipts = new CommandReceiptStore(config.tronHome);
 await receipts.prune();
+startupCheckpoint("command-receipts");
 
 const workRegistry = new GatewayWorkRegistry();
 const auth = new AuthBroker(
@@ -153,6 +179,7 @@ const globalProviderResources = await GlobalProviderResources.create({
   log: (level, message) => logger.log(level, message, { event: "runtime.diagnostic", source: "resource-loader" }),
   broadcast: () => transport?.broadcast("providers.changed", {}),
 });
+startupCheckpoint("global-provider-resources");
 const connections = new ConnectionOwner(config.tronHome);
 const knowledgeCredentials = new MacKeychainConnectorCredentialStore();
 const jevClient = new JevDecisionClient(knowledgeCredentials);
@@ -218,6 +245,7 @@ try {
   sessionSearchIndex?.close();
   logger.log("warning", "Optional session search index is unavailable; chat remains available", { event: "session-search.index-unavailable", source: "search", error });
 }
+startupCheckpoint("session-search-index");
 const knowledgeStore = new KnowledgeStore(
   sessions.knowledgeWorkspace(),
   () => transport?.broadcast("knowledge.changed", {}),
@@ -314,8 +342,14 @@ let uploadStoragePressure: "normal" | "low" | "exhausted" = "normal";
 async function shutdown(reason: string, exitCode = 0): Promise<void> {
   if (stopping) return;
   stopping = true;
+  const stoppingAt = performance.now();
+  // The last record of this process: the next process's gateway.started
+  // follows after launchd and the launcher.
+  const recordStopped = (code: number): void => logger.log(code === 0 ? "info" : "warning", `Gateway stopped (exit ${code}) after ${Math.round(performance.now() - stoppingAt)} ms of shutdown`, {
+    event: "gateway.stopped", source: "lifecycle", code: String(code), durationMs: performance.now() - stoppingAt,
+  });
   logger.log("info", `Stopping gateway (${reason})`, { event: "gateway.stopping", source: "lifecycle" });
-  const forced = setTimeout(() => process.exit(1), 15_000);
+  const forced = setTimeout(() => { recordStopped(1); process.exit(1); }, 15_000);
   forced.unref();
   try {
     automations.beginDrain();
@@ -353,10 +387,12 @@ async function shutdown(reason: string, exitCode = 0): Promise<void> {
     await sessions.dispose();
     await releaseRuntimeLock();
     clearTimeout(forced);
+    recordStopped(exitCode);
     process.exit(exitCode);
   } catch (error) {
     logger.log("error", "Gateway shutdown failed", { event: "gateway.shutdown-failed", source: "lifecycle", error });
     await releaseRuntimeLock();
+    recordStopped(1);
     process.exit(1);
   }
 }
@@ -486,13 +522,17 @@ process.on("unhandledRejection", (error) => {
 
 const enrollmentTimer = setInterval(() => void devices.ensureEnrollment(), 60_000);
 enrollmentTimer.unref();
+startupCheckpoint("composition");
 await transport.listen(async () => {
+  startupCheckpoint("listener-bind");
   // This startup follows a user-initiated Gateway update. Keep Knowledge
   // unavailable on upgrade failure without disabling unrelated chat features.
   await knowledgeStore.upgradeStorage().catch((error: unknown) => {
     logger.log("warning", "Knowledge catalog upgrade reported an error; inspect Knowledge status. No reset was attempted.", { event: "knowledge.upgrade-failed", source: "knowledge", error });
   });
+  startupCheckpoint("knowledge-storage");
   await sessions.initialize((phase) => transport.setStartupPhase(phase));
+  startupCheckpoint("session-registry");
   sessionSearchWarmTask = (async () => {
     if (stopping || !sessionSearch) return;
     if (searchHelperCandidate && await admitSearchEmbeddingHelper(searchHelperCandidate)) {
@@ -503,11 +543,16 @@ await transport.listen(async () => {
   })().catch((error) => logger.log("warning", "Session search warm-up failed; lexical search will recover on demand", { event: "session-search.warm-failed", source: "search", error }));
   transport.setStartupPhase("automation-recovery");
   await automations.initialize();
+  startupCheckpoint("automation-recovery");
   transport.setStartupPhase("storage-warming");
   await sessions.initializeBlobStorage();
+  startupCheckpoint("blob-storage");
   await sessions.recoverKnowledgeObservation();
+  startupCheckpoint("knowledge-observation-recovery");
 });
+// Serving already; these records account for post-listen recovery work.
 await sessions.recoverCanonicalAttention();
+startupCheckpoint("attention-recovery");
 const maintainStorage = async (): Promise<void> => {
   try {
     const [status] = await Promise.all([

@@ -31,6 +31,8 @@ export interface LogRecord {
   sessionId?: string;
   connectionId?: string;
   commandId?: string;
+  /** A named lifecycle step, such as a startup checkpoint. */
+  step?: string;
   /** Sanitized transport request correlation; never a session or payload ID. */
   requestID?: string;
   method?: string;
@@ -47,6 +49,7 @@ export interface LogMetadata {
   sessionId?: string;
   connectionId?: string;
   commandId?: string;
+  step?: string;
   requestID?: string;
   method?: string;
   outcome?: string;
@@ -147,6 +150,7 @@ function normalizedFields(value: LogMetadata & { error?: unknown }, errorIsDescr
     ...(typeof value.sessionId === "string" ? { sessionId: boundedDiagnosticID(value.sessionId) } : {}),
     ...(typeof value.connectionId === "string" ? { connectionId: boundedDiagnosticID(value.connectionId) } : {}),
     ...(typeof value.commandId === "string" ? { commandId: boundedDiagnosticID(value.commandId) } : {}),
+    ...(typeof value.step === "string" ? { step: boundedDiagnosticID(value.step).slice(0, 64) } : {}),
     ...(typeof value.requestID === "string" ? { requestID: boundedDiagnosticID(value.requestID) } : {}),
     ...(typeof value.method === "string" ? { method: boundedMessage(value.method).slice(0, MAX_FIELD_CHARS) } : {}),
     ...(typeof value.outcome === "string" ? { outcome: boundedMessage(value.outcome).slice(0, 64) } : {}),

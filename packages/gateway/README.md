@@ -583,6 +583,14 @@ are fixed per event in code; there is no runtime level setting.
   debug. RPC completions under `SLOW_RPC_WARNING_MS` are debug; slower or
   failed ones warn. `rpc.error` is warning for `GatewayError` codes other than
   `internal` and error (with `error`) for unexpected faults.
+- Restarts are accounted without gaps. `gateway.started` carries the time since
+  process start. `gateway.startup-step` records (field `step`) each carry the
+  time since the previous checkpoint: `modules` (process start to the loaded
+  import graph), `config-and-locks`, then each startup owner through
+  `knowledge-observation-recovery` before `gateway.listening`, and
+  `attention-recovery` after it. `gateway.stopped` is a process's last record,
+  with its shutdown duration; the time from it to the next process start is
+  launchd and the launcher.
 
 A supervised payload validates its architecture-specific immutable `node` and
 technical `pi` command aliases before model services or extension packages load.
