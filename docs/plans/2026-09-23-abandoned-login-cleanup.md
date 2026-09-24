@@ -33,7 +33,7 @@ These are investigation inputs, not a complete reproduction. Revalidate the depl
 | --- | --- | --- | --- | --- |
 | AUTH-1 | Done | Reproduce abandoned admission and provider-resource retirement; settle the recovery contract | none | worker, 2026-09-24 |
 | AUTH-2 | Done | Implement Gateway-owned exact login recovery and replacement | AUTH-1 | worker, 2026-09-24 |
-| AUTH-3 | Ready | Integrate iPhone resume, restart, and cancellation with authoritative ownership | AUTH-2 | Unassigned |
+| AUTH-3 | Claimed | Integrate iPhone resume, restart, and cancellation with authoritative ownership | AUTH-2 | worker, 2026-09-24 |
 | AUTH-4 | Ready | Verify cross-boundary cleanup and publish owning documentation | AUTH-2, AUTH-3 | Unassigned |
 
 Tasks cannot be claimed while this plan is Proposed. After approval, follow the claim-on-main and isolated-worktree procedure in `docs/plans/README.md`.
