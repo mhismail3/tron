@@ -170,8 +170,16 @@ final class ProviderAuthCoordinator {
     private struct ModelParams: Codable { let sessionId: String?; let cursor: String?; let limit: Int }
     private struct ProviderResponse: Decodable { let providers: [ProviderSummary] }
     private struct ModelResponse: Decodable { let models: [ModelSummary]; let nextCursor: String? }
-    private struct BeginParams: Codable { let providerId, authType: String; let sessionId: String?; let commandId: String }
-    private struct BeginResponse: Decodable { let operationId: String }
+    private struct BeginParams: Codable {
+        let providerId, authType: String
+        let sessionId: String?
+        let commandId: String
+        let replaceOperationId: String?
+    }
+    /// `recovered` is additive: the Gateway recovers the active operation for
+    /// the same device/provider/auth-method/target instead of admitting another.
+    /// Its absence means a new admission, and Restart is offered only when true.
+    private struct BeginResponse: Decodable { let operationId: String; let recovered: Bool? }
     private struct RespondParams: Codable { let operationId, promptId, value: String }
     private struct RespondResponse: Decodable { let answered: Bool }
     private struct CallbackParams: Codable { let operationId, callbackId, query: String }
@@ -251,7 +259,13 @@ final class ProviderAuthCoordinator {
     private var loadGenerationByTarget: [ProviderCatalogTarget: Int] = [:]
     private var targetByAuthOperation: [String: ProviderCatalogTarget] = [:]
     private var providerByAuthOperation: [String: String] = [:]
+    private var authTypeByAuthOperation: [String: String] = [:]
     private var activeAuthOperationID: String?
+    private var recoveredAuthOperationID: String?
+    /// Cancellations whose acknowledgement was lost in transit. They are
+    /// retried on reconnect so an explicit Cancel is not silently dropped.
+    private var pendingCancellationOperationIDs: [String] = []
+    private static let maximumPendingCancellations = 4
     private var answeringPromptID: String?
     private var pendingBrowserCallbackByOperation: [String: ProviderOAuthCapturedCallback] = [:]
     private var submittingBrowserCallbackOperationID: String?
@@ -288,6 +302,13 @@ final class ProviderAuthCoordinator {
 
     func catalog(for target: ProviderCatalogTarget) -> ProviderCatalog? {
         catalogByTarget[target]
+    }
+
+    /// The active operation when the Gateway recovered it for a fresh begin, so
+    /// the presentation can offer Continue, Restart, or Cancel.
+    var activeRecoveredOperationID: String? {
+        guard let activeAuthOperationID, recoveredAuthOperationID == activeAuthOperationID else { return nil }
+        return activeAuthOperationID
     }
 
     func activeOperationID(providerID: String, target: ProviderCatalogTarget) -> String? {
@@ -350,7 +371,15 @@ final class ProviderAuthCoordinator {
         }
     }
 
-    func beginAuth(providerID: String, authType: String, target: ProviderCatalogTarget) async throws {
+    /// Begins, recovers, or (with `replacing`) restarts one provider login. A
+    /// fresh command is safe after an uncertain response: the Gateway recovers
+    /// the same-key operation, and a stale replacement ID recovers the successor.
+    func beginAuth(
+        providerID: String,
+        authType: String,
+        target: ProviderCatalogTarget,
+        replacing replacedOperationID: String? = nil
+    ) async throws {
         let admittedProfileGeneration = profileGeneration
         authBeginGeneration &+= 1
         let admittedBeginGeneration = authBeginGeneration
@@ -365,7 +394,8 @@ final class ProviderAuthCoordinator {
                 providerId: providerID,
                 authType: authType,
                 sessionId: target.sessionID,
-                commandId: uuidSource.next().uuidString
+                commandId: uuidSource.next().uuidString,
+                replaceOperationId: replacedOperationID
             )
         )
         try requireProfile(admittedProfileGeneration)
@@ -373,6 +403,7 @@ final class ProviderAuthCoordinator {
         // superseded operation can refresh its exact scope when it completes.
         targetByAuthOperation[response.operationId] = target
         providerByAuthOperation[response.operationId] = providerID
+        authTypeByAuthOperation[response.operationId] = authType
         let quarantined = takeQuarantinedPresentation(for: response.operationId)
         guard authBeginGeneration == admittedBeginGeneration else {
             if let completion = quarantined?.completion {
@@ -381,11 +412,12 @@ final class ProviderAuthCoordinator {
             throw CancellationError()
         }
         activeAuthOperationID = response.operationId
+        recoveredAuthOperationID = response.recovered == true ? response.operationId : nil
         prompt = nil
         event = ProviderAuthEventState(
             operationId: response.operationId,
             kind: .progress,
-            message: "Starting provider login…",
+            message: response.recovered == true ? "Resuming provider login…" : "Starting provider login…",
             links: [],
             url: nil,
             instructions: nil,
@@ -402,6 +434,16 @@ final class ProviderAuthCoordinator {
             try requireProfile(admittedProfileGeneration)
             guard authBeginGeneration == admittedBeginGeneration else { throw CancellationError() }
         }
+    }
+
+    /// Explicitly replaces the recovered active operation. The Gateway retires
+    /// it (invalidating its authorization link) before starting the successor.
+    func restartAuth() async throws {
+        guard let operationID = activeRecoveredOperationID,
+              let providerID = providerByAuthOperation[operationID],
+              let target = targetByAuthOperation[operationID],
+              let authType = authTypeByAuthOperation[operationID] else { return }
+        try await beginAuth(providerID: providerID, authType: authType, target: target, replacing: operationID)
     }
 
     func answerAuth(_ value: String) async throws {
@@ -483,6 +525,7 @@ final class ProviderAuthCoordinator {
     }
 
     func resumeAuthIfNeeded() async {
+        await retryPendingCancellations()
         guard let operationID = activeAuthOperationID else { return }
         do {
             let response: ResumeResponse = try await client.request(
@@ -559,12 +602,19 @@ final class ProviderAuthCoordinator {
         guard let id = operationID ?? prompt?.operationId ?? event?.operationId else { return }
         let admittedProfileGeneration = profileGeneration
         let response: CancelResponse?
+        var acknowledged = true
         do {
             response = try await client.request("auth.cancel", CancelParams(operationId: id))
+        } catch let failure as GatewayFailure where !failure.retryable {
+            // A definite rejection (including an already-retired operation)
+            // settles this cancellation; only uncertain delivery is retried.
+            response = nil
         } catch {
             response = nil
+            acknowledged = false
         }
         guard profileGeneration == admittedProfileGeneration else { return }
+        if !acknowledged { recordPendingCancellation(id) }
         if activeAuthOperationID == id {
             activeAuthOperationID = nil
             authPresentationGeneration &+= 1
@@ -576,6 +626,31 @@ final class ProviderAuthCoordinator {
         if response?.cancelled == true {
             targetByAuthOperation[id] = nil
             providerByAuthOperation[id] = nil
+            authTypeByAuthOperation[id] = nil
+        }
+    }
+
+    private func recordPendingCancellation(_ operationID: String) {
+        pendingCancellationOperationIDs.removeAll { $0 == operationID }
+        pendingCancellationOperationIDs.append(operationID)
+        // The Gateway timeout remains the final bound for an operation whose
+        // cancellation this bounded retry list had to drop.
+        if pendingCancellationOperationIDs.count > Self.maximumPendingCancellations {
+            pendingCancellationOperationIDs.removeFirst()
+        }
+    }
+
+    private func retryPendingCancellations() async {
+        let admittedProfileGeneration = profileGeneration
+        for operationID in pendingCancellationOperationIDs {
+            do {
+                let _: CancelResponse = try await client.request("auth.cancel", CancelParams(operationId: operationID))
+            } catch let failure as GatewayFailure where !failure.retryable {
+            } catch {
+                return
+            }
+            guard profileGeneration == admittedProfileGeneration else { return }
+            pendingCancellationOperationIDs.removeAll { $0 == operationID }
         }
     }
 
@@ -716,14 +791,21 @@ final class ProviderAuthCoordinator {
         authBeginGeneration &+= 1
         authPresentationGeneration &+= 1
         loadGenerationByTarget = loadGenerationByTarget.mapValues { $0 &+ 1 }
-        if clearCatalogs { catalogByTarget.removeAll() }
+        if clearCatalogs {
+            catalogByTarget.removeAll()
+            // Pending cancellations belong to the retired profile's Gateway.
+            pendingCancellationOperationIDs.removeAll()
+        }
         if preserveActiveAuth, let activeAuthOperationID {
             targetByAuthOperation = targetByAuthOperation.filter { $0.key == activeAuthOperationID }
             providerByAuthOperation = providerByAuthOperation.filter { $0.key == activeAuthOperationID }
+            authTypeByAuthOperation = authTypeByAuthOperation.filter { $0.key == activeAuthOperationID }
         } else {
             targetByAuthOperation.removeAll()
             providerByAuthOperation.removeAll()
+            authTypeByAuthOperation.removeAll()
             activeAuthOperationID = nil
+            recoveredAuthOperationID = nil
             pendingBrowserCallbackByOperation.removeAll()
             event = nil
         }
@@ -737,6 +819,7 @@ final class ProviderAuthCoordinator {
     private func retireAuthPresentation(operationID: String) {
         targetByAuthOperation[operationID] = nil
         providerByAuthOperation[operationID] = nil
+        authTypeByAuthOperation[operationID] = nil
         if activeAuthOperationID == operationID {
             activeAuthOperationID = nil
             authPresentationGeneration &+= 1
@@ -971,10 +1054,12 @@ final class ProviderAuthCoordinator {
         _ operationID: String,
         target: ProviderCatalogTarget,
         providerID: String = "provider",
+        authType: String = "oauth",
         active: Bool = true
     ) {
         targetByAuthOperation[operationID] = target
         providerByAuthOperation[operationID] = providerID
+        authTypeByAuthOperation[operationID] = authType
         guard active else { return }
         authBeginGeneration &+= 1
         authPresentationGeneration &+= 1
@@ -984,6 +1069,7 @@ final class ProviderAuthCoordinator {
     }
 
     var hostedActiveAuthOperationID: String? { activeAuthOperationID }
+    var hostedPendingCancellationOperationIDs: [String] { pendingCancellationOperationIDs }
     var hostedQuarantinedOperationCount: Int { quarantinedPresentationByOperation.count }
     var hostedQuarantinedOperationIDs: [String] { quarantinedOperationOrder }
     var hostedQuarantinedElementCount: Int { quarantinedElementCount }

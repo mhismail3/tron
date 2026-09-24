@@ -2,7 +2,7 @@
 
 - **Started:** 2026-09-23
 - **Status:** Active
-- **Last updated:** 2026-09-24, AUTH-2
+- **Last updated:** 2026-09-24, AUTH-3
 - **Goal:** Make interrupted provider login resumable or explicitly replaceable without accumulating abandoned operations or leaking provider resources.
 
 ## Goal and constraints
@@ -33,7 +33,7 @@ These are investigation inputs, not a complete reproduction. Revalidate the depl
 | --- | --- | --- | --- | --- |
 | AUTH-1 | Done | Reproduce abandoned admission and provider-resource retirement; settle the recovery contract | none | worker, 2026-09-24 |
 | AUTH-2 | Done | Implement Gateway-owned exact login recovery and replacement | AUTH-1 | worker, 2026-09-24 |
-| AUTH-3 | Claimed | Integrate iPhone resume, restart, and cancellation with authoritative ownership | AUTH-2 | worker, 2026-09-24 |
+| AUTH-3 | Done | Integrate iPhone resume, restart, and cancellation with authoritative ownership | AUTH-2 | worker, 2026-09-24 |
 | AUTH-4 | Ready | Verify cross-boundary cleanup and publish owning documentation | AUTH-2, AUTH-3 | Unassigned |
 
 Tasks cannot be claimed while this plan is Proposed. After approval, follow the claim-on-main and isolated-worktree procedure in `docs/plans/README.md`.
@@ -162,3 +162,13 @@ Approved for tracking and committed at the user's request. Before AUTH-1, accoun
 - Kept on purpose: Admission stays synchronous because `DeviceStore.admitDevice` requires a synchronous register; the settlement wait is deferred into the login chain instead. A callback port conflict falls back to manual code rather than failing the login. No protocol fixture exists for `auth.begin`, so none changed. The change is additive, and current iOS ignores `recovered`.
 - Deviations: The settlement boundary is Pi's login promise, not the provider's own promise. Pi hides the provider promise, so a listener-owning provider that ignores abort can still hold its port after the successor starts (see AUTH-1 findings). The successor's own listen failure stays bounded to that operation.
 - For the next agent: AUTH-3 consumes `recovered` and sends `replaceOperationId` for Restart. A restart that returns `busy` for an unsettled predecessor completes asynchronously as `auth.completed` failure with a retryable message, not as an RPC error.
+
+### AUTH-3 · Done · 2026-09-24 · worker
+
+- Result: iOS consumes the AUTH-2 contract. A fresh begin that the Gateway recovers shows Restart Login and Cancel Login above the replayed flow, which is the Continue path. Restart sends `replaceOperationId` for the exact recovered operation and explains that the old link becomes invalid, and the provider sheet adopts the successor so closing it cancels the live login. Cancellations lost in transit are retried on `auth.resume` (at most four, dropped on profile clear). Phone loopback listeners retired by any browser session are joined process-wide before a fixed port is rebound.
+- Evidence: `scripts/tron-ios-test build` succeeded. `scripts/tron-ios-test run --only-testing TronMobileTests/ProviderAuthCoordinatorTests --only-testing TronMobileTests/ProviderOAuthBrowserTests` passed 50/50 (three new tests). Negative control: without the cross-session listener join, the rebind test fails with `.unavailable`, reproducing the restart port race. `scripts/personal-info-guard.sh` and `scripts/check-documentation-policy.py` pass. `packages/ios-app/scripts/test-source-policy.sh` fails only on `Sources/App/HostedAccessibilityFixture.swift:34`, which fails the same way on unmodified `main`.
+- Changes: this commit (`ProviderAuthCoordinator.swift`, `AppModel.swift`, `AuthPromptSheet.swift`, `SetupComponents.swift`, `ProviderOAuthBrowser.swift`, tests, iOS architecture/development docs).
+- Tasks added: none.
+- Kept on purpose: No persisted begin command IDs. Gateway key recovery makes a fresh command after an uncertain begin or restart safe, so a durable receipt mirror would add state without protecting anything. Sheet dismissal policy is unchanged: it cancels only while the scene is active. Missing `recovered` decodes as a new admission (an additive field, no protocol bump), so Restart is never offered against an older Gateway.
+- Deviations: The new controls were not rendered in a simulator or on a device. Exercising them needs a Gateway with AUTH-2, and agents may not transition the running Gateway. That coverage moves to AUTH-4.
+- For the next agent: AUTH-4 needs a maintainer-run Gateway with AUTH-2 plus an iOS build with AUTH-3. The pre-existing source-policy failure should become its own task or be fixed by that file's owner.

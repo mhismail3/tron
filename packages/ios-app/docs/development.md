@@ -764,18 +764,22 @@ transport-detached prompt delivery with stable-operation resume, stale operation
 without surfacing a broker not-found error, profile-retirement rejection across parallel reads and
 pagination, operation-keyed prompt/event state, bounded event-before-response quarantine and promotion,
 manual-prompt versus callback-relay routing, stale response/cancellation safety, exact-target completion
-refresh, receipt-backed forced refresh/logout, event-only invalidation, and nested façade observation.
+refresh, recovered-begin presentation with exact `replaceOperationId` restart, bounded retry of
+unacknowledged cancellations on resume, receipt-backed forced refresh/logout, event-only invalidation,
+and nested façade observation.
 `ProviderOAuthBrowserTests` owns callback policy and listener construction: HTTPS authorization
 admission, exact provider/Gateway loopback descriptor agreement, IPv4/IPv6 loopback limits, simultaneous
 fixed-port POSIX binding to explicit loopback addresses, bounded GET parsing, encoded query
 preservation, and rejection of external destinations, bodies, absolute targets, wrong routes, fragments,
 and missing authorization results. Hosted tests exercise the real one-shot loopback socket with fragmented
-requests, exclusive ownership, and repeated cancellation/rebind verification, but do not open
+requests, exclusive ownership, repeated cancellation/rebind verification, and joining a listener retired by
+another browser session before its fixed port is rebound, but do not open
 `ASWebAuthenticationSession` or a provider login.
 Before release, perform a physical-device smoke against a disposable provider account: confirm the
 system authentication browser closes through the iPhone loopback handoff for Anthropic/OpenAI/OpenRouter,
 Radius completes through the query-only relay, temporary background/network replacement resumes the same
-operation, the selected Mac's canonical Pi `auth.json` becomes configured, and no callback query or token
+operation, closing and reopening the provider sheet after app termination shows Restart/Cancel for the same
+operation, Restart invalidates the old authorization link and completes through the new one, the selected Mac's canonical Pi `auth.json` becomes configured, and no callback query or token
 appears in Gateway/iOS logs. Never add real callback values or credentials to fixtures.
 `PackageConfigurationCoordinatorTests` owns typed target isolation,
 newest list/check admission, admitted-error handling, event-only invalidation, closed mutation

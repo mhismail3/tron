@@ -1073,6 +1073,106 @@ struct ProviderAuthCoordinatorTests {
         }
     }
 
+    @Test("a fresh begin that recovers an operation offers exact restart of that operation")
+    func recoveredBeginRestartsExactOperation() async throws {
+        try await runScenario {
+            let harness = try await makeHarness()
+            let target = ProviderCatalogTarget.session(id: "session-a")
+            let begin = Task {
+                try await harness.owner.beginAuth(providerID: "anthropic", authType: "oauth", target: target)
+            }
+            try await harness.socket.waitUntilSent(count: 2)
+            let beginRequest = try request(await harness.socket.sentFrames()[1])
+            #expect(beginRequest.method == "auth.begin")
+            #expect(beginRequest.params?["replaceOperationId"] == nil)
+            // The Gateway replays the recovered prompt before answering begin.
+            harness.owner.handlePrompt(promptPayload(operation: "recovered", prompt: "manual-code"))
+            await harness.socket.enqueue(response(
+                id: beginRequest.id,
+                result: .object(["operationId": .string("recovered"), "recovered": .bool(true)])
+            ))
+            try await begin.value
+            #expect(harness.owner.activeRecoveredOperationID == "recovered")
+            #expect(harness.owner.prompt?.operationId == "recovered")
+            #expect(harness.owner.activeOperationID(providerID: "anthropic", target: target) == "recovered")
+
+            let restart = Task { try await harness.owner.restartAuth() }
+            try await harness.socket.waitUntilSent(count: 3)
+            let restartRequest = try request(await harness.socket.sentFrames()[2])
+            #expect(restartRequest.method == "auth.begin")
+            #expect(restartRequest.params?["replaceOperationId"] == .string("recovered"))
+            #expect(restartRequest.params?["providerId"] == .string("anthropic"))
+            #expect(restartRequest.params?["authType"] == .string("oauth"))
+            #expect(restartRequest.params?["sessionId"] == .string("session-a"))
+            #expect(restartRequest.params?["commandId"] != beginRequest.params?["commandId"])
+            await harness.socket.enqueue(response(
+                id: restartRequest.id,
+                result: .object(["operationId": .string("successor"), "recovered": .bool(false)])
+            ))
+            try await restart.value
+            #expect(harness.owner.activeOperationID(providerID: "anthropic", target: target) == "successor")
+            #expect(harness.owner.activeRecoveredOperationID == nil)
+            #expect(harness.owner.prompt == nil)
+
+            // Restart is offered only for a recovered operation.
+            try await harness.owner.restartAuth()
+            #expect(await harness.socket.sentFrames().count == 3)
+            await harness.client.close()
+        }
+    }
+
+    @Test("an unacknowledged cancellation is retried on resume and a definite rejection settles it")
+    func unacknowledgedCancellationRetriesOnResume() async throws {
+        try await runScenario {
+            let harness = try await makeHarness()
+            harness.owner.installHostedAuthOperation("operation", target: .global)
+            let cancel = Task { await harness.owner.cancelAuth(operationID: "operation") }
+            try await harness.socket.waitUntilSent(count: 2)
+            let cancelRequest = try request(await harness.socket.sentFrames()[1])
+            await harness.socket.enqueue(errorResponse(
+                id: cancelRequest.id,
+                code: "disconnected",
+                message: "transport replaced",
+                retryable: true
+            ))
+            await cancel.value
+            #expect(harness.owner.hostedActiveAuthOperationID == nil)
+            #expect(harness.owner.hostedPendingCancellationOperationIDs == ["operation"])
+
+            harness.owner.retireConnection()
+            let resume = Task { await harness.owner.resumeAuthIfNeeded() }
+            try await harness.socket.waitUntilSent(count: 3)
+            let retry = try request(await harness.socket.sentFrames()[2])
+            #expect(retry.method == "auth.cancel")
+            #expect(retry.params?["operationId"] == .string("operation"))
+            await harness.socket.enqueue(errorResponse(
+                id: retry.id,
+                code: "not_found",
+                message: "Authentication operation was not found",
+                retryable: false
+            ))
+            await resume.value
+            #expect(harness.owner.hostedPendingCancellationOperationIDs.isEmpty)
+
+            // A different profile's Gateway never receives this profile's retries.
+            harness.owner.installHostedAuthOperation("other", target: .global)
+            let second = Task { await harness.owner.cancelAuth(operationID: "other") }
+            try await harness.socket.waitUntilSent(count: 4)
+            let secondRequest = try request(await harness.socket.sentFrames()[3])
+            await harness.socket.enqueue(errorResponse(
+                id: secondRequest.id,
+                code: "disconnected",
+                message: "transport replaced",
+                retryable: true
+            ))
+            await second.value
+            #expect(harness.owner.hostedPendingCancellationOperationIDs == ["other"])
+            harness.owner.clearProfile()
+            #expect(harness.owner.hostedPendingCancellationOperationIDs.isEmpty)
+            await harness.client.close()
+        }
+    }
+
     @Test("captured callback survives a retryable transport loss and submits after resume")
     func callbackRetriesAfterResume() async throws {
         try await runScenario {

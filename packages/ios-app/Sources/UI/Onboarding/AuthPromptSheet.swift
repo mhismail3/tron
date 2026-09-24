@@ -17,6 +17,11 @@ struct ProviderAuthFlowContent: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: TronSpacing.section) {
+            if let recovered = model.recoveredAuthOperationID,
+               model.authEvent?.operationId == recovered || model.authPrompt?.operationId == recovered {
+                RecoveredAuthControls(operationID: recovered)
+                    .transition(revealTransition)
+            }
             if let event = model.authEvent,
                event.kind == .authURL || model.authPrompt == nil {
                 AuthEventContent(event: event)
@@ -36,6 +41,58 @@ struct ProviderAuthFlowContent: View {
             reduceMotion ? .linear(duration: 0.12) : .snappy(duration: 0.24),
             value: contentKey
         )
+    }
+}
+
+/// Shown when the Gateway recovered an earlier login for this provider instead
+/// of starting another. The flow below continues it; Restart and Cancel are
+/// explicit because a reconnect or reopened sheet must never restart OAuth.
+private struct RecoveredAuthControls: View {
+    @Environment(AppModel.self) private var model
+    let operationID: String
+    @State private var working = false
+
+    var body: some View {
+        OnboardingCard {
+            VStack(alignment: .leading, spacing: TronSpacing.md) {
+                Text("Login already in progress")
+                    .font(TronTypography.sheetSectionHeader)
+                    .foregroundStyle(Color.tronTextPrimary)
+                    .accessibilityAddTraits(.isHeader)
+                TronCaption("Continue below, or restart to get a new login link. Restarting makes the previous authorization link invalid.")
+                HStack(spacing: TronSpacing.md) {
+                    Button { restart() } label: {
+                        Label("Restart Login", systemImage: "arrow.counterclockwise")
+                    }
+                    .buttonStyle(TronActionButtonStyle())
+                    Button { cancel() } label: {
+                        Label("Cancel Login", systemImage: "xmark")
+                    }
+                    .buttonStyle(TronActionButtonStyle(role: .destructive))
+                }
+                .disabled(working)
+            }
+        }
+    }
+
+    private func restart() {
+        guard !working else { return }
+        working = true
+        Task {
+            defer { working = false }
+            do { try await model.restartAuth() }
+            catch is CancellationError { }
+            catch { model.presentError(error) }
+        }
+    }
+
+    private func cancel() {
+        guard !working else { return }
+        working = true
+        Task {
+            defer { working = false }
+            await model.cancelAuth(operationID: operationID)
+        }
     }
 }
 

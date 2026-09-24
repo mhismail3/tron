@@ -274,6 +274,8 @@ final class AppModel {
     var authPrompt: AuthPromptState? { providerAuth.prompt }
     var authEvent: AuthEventState? { providerAuth.event }
 
+    var recoveredAuthOperationID: String? { providerAuth.activeRecoveredOperationID }
+
     func activeProviderAuthOperationID(providerID: String, target: ProviderCatalogTarget) -> String? {
         providerAuth.activeOperationID(providerID: providerID, target: target)
     }
@@ -3663,6 +3665,20 @@ final class AppModel {
         let admission = try requireCurrentGatewayConnection()
         do {
             try await providerAuth.beginAuth(providerID: providerID, authType: authType, target: target)
+            try requireConnection(admission)
+        } catch {
+            guard lifecycle.admits(admission) else {
+                providerAuth.clearProfile()
+                throw CancellationError()
+            }
+            throw error
+        }
+    }
+
+    func restartAuth() async throws {
+        let admission = try requireCurrentGatewayConnection()
+        do {
+            try await providerAuth.restartAuth()
             try requireConnection(admission)
         } catch {
             guard lifecycle.admits(admission) else {

@@ -634,6 +634,24 @@ final class ProviderOAuthBrowserSession: NSObject, ASWebAuthenticationPresentati
         }
     }
 
+    /// Listeners retired by any browser session in this process. A restarted
+    /// login gets a new view-owned session that may bind the same fixed provider
+    /// port, so every start joins earlier retirements before binding.
+    private static var retiringListeners: [ObjectIdentifier: ProviderOAuthLoopbackListener] = [:]
+
+    static func retire(_ listener: ProviderOAuthLoopbackListener) {
+        let id = ObjectIdentifier(listener)
+        retiringListeners[id] = listener
+        Task { @MainActor in
+            await listener.stopAndWait()
+            retiringListeners[id] = nil
+        }
+    }
+
+    static func joinRetiredListeners() async {
+        for listener in Array(retiringListeners.values) { await listener.stopAndWait() }
+    }
+
     private var webSession: ASWebAuthenticationSession?
     private var listener: ProviderOAuthLoopbackListener?
     private var captured: ProviderOAuthCapturedCallback?
@@ -653,6 +671,7 @@ final class ProviderOAuthBrowserSession: NSObject, ASWebAuthenticationPresentati
         let generation = UUID()
         activeGeneration = generation
         if let previousListener { await previousListener.stopAndWait() }
+        await Self.joinRetiredListeners()
         guard activeGeneration == generation, !Task.isCancelled else {
             throw CancellationError()
         }
@@ -732,7 +751,7 @@ final class ProviderOAuthBrowserSession: NSObject, ASWebAuthenticationPresentati
     }
 
     func cancel() {
-        retireCurrentSession()?.stop()
+        if let retired = retireCurrentSession() { Self.retire(retired) }
     }
 
     func presentationAnchor(for session: ASWebAuthenticationSession) -> ASPresentationAnchor {
@@ -745,7 +764,7 @@ final class ProviderOAuthBrowserSession: NSObject, ASWebAuthenticationPresentati
 
     private func finish(generation: UUID) {
         guard activeGeneration == generation else { return }
-        retireCurrentSession()?.stop()
+        if let retired = retireCurrentSession() { Self.retire(retired) }
     }
 
     @discardableResult

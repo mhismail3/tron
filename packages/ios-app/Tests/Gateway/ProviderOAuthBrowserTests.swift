@@ -50,6 +50,26 @@ struct ProviderOAuthBrowserTests {
     }
 
     @MainActor
+    @Test("a retired listener from another browser session is joined before its port is reused")
+    func retiredListenerJoinsBeforeRebind() async throws {
+        let reservation = try ProviderOAuthLoopbackListener.makeBoundSocket(family: AF_INET, port: 0)
+        let port = try boundPort(reservation, family: AF_INET)
+        Darwin.close(reservation)
+        let capture = ProviderOAuthCallbackCapture(id: "capture", host: "127.0.0.1", port: port, path: "/callback")
+
+        for iteration in 0..<20 {
+            let listener = ProviderOAuthLoopbackListener(capture: capture, handoffNonce: "nonce-\(iteration)") { _ in }
+            try await listener.start()
+            // A restarted login's sheet owns a fresh session; it must still
+            // wait for the previous session's non-blocking retirement.
+            ProviderOAuthBrowserSession.retire(listener)
+            await ProviderOAuthBrowserSession.joinRetiredListeners()
+            let rebound = try ProviderOAuthLoopbackListener.makeBoundSocket(family: AF_INET, port: port)
+            Darwin.close(rebound)
+        }
+    }
+
+    @MainActor
     @Test("one-shot listener accepts fragmented exact-path callback and releases its port")
     func oneShotListenerRoundTrip() async throws {
         let reservation = try ProviderOAuthLoopbackListener.makeBoundSocket(family: AF_INET, port: 0)

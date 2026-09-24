@@ -344,9 +344,15 @@ struct ProviderConfigurationSheet: View {
             usageController.begin(clear: true)
         }
         .onChange(of: currentOperationID) { previous, current in
-            if let previous, previous == activeOperationID, current == nil {
-                activeOperationID = nil
-                dismiss()
+            if let previous, previous == activeOperationID {
+                // Restart replaces this sheet's exact operation; adopt the
+                // successor so closing the sheet cancels the live login.
+                if let current {
+                    activeOperationID = current
+                } else {
+                    activeOperationID = nil
+                    dismiss()
+                }
             } else if activeOperationID == nil, beginningMethod != nil, let current {
                 activeOperationID = current
             }

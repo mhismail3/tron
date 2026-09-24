@@ -574,7 +574,15 @@ retirement. `auth.begin` carries a command ID, while the active operation belong
 device identity rather than a disposable socket. Transient transport retirement clears prompt delivery
 but retains the operation/target/provider; foreground or active reconnect calls `auth.resume`, which replays the
 Gateway's latest bounded state without restarting Pi login. The matching provider sheet can reattach only to that
-provider and target, preventing duplicate automatic OAuth starts after a presentation is recreated. Leaving Tron
+provider and target, preventing duplicate automatic OAuth starts after a presentation is recreated. When the app
+has lost that operation ID (process loss or a fresh coordinator), a new `auth.begin` recovers the Gateway's active
+operation for the same device/provider/auth-method/target and answers `recovered: true`; the sheet then shows
+**Restart Login** and **Cancel Login** above the replayed flow, which is itself the Continue path. Restart sends
+`replaceOperationId` for that exact operation, warns that the previous authorization link becomes invalid, and the
+sheet adopts the successor so closing it cancels the live login. Because recovery is keyed on the Gateway, a fresh
+command after an uncertain begin or restart response cannot admit a duplicate. A cancellation whose
+acknowledgement was lost in transit is kept in a bounded four-entry list and retried on `auth.resume`; a definite
+rejection settles it and profile clearing drops it. Leaving Tron
 for the external browser does not cancel the operation; active-scene sheet dismissal still cancels it, while a
 profile replacement revokes all local authority. The Gateway bounds login lifetime to 15 minutes. Prompt and
 browser callback submission are single-flight on iOS, and the Gateway treats bounded late
@@ -587,7 +595,9 @@ to `127.0.0.1` and/or `::1` (`IPV6_V6ONLY`) before browser presentation. Network
 `NWListener` local-endpoint path fails with physical-device `EINVAL`, while wildcard listeners would expose
 callback bearer data to non-loopback interfaces. One dedicated serial socket queue owns nonblocking
 accept/read/write work, Dispatch-source cancellation closes descriptors before restart admission, and a
-browser-session generation rejects callbacks from replaced system sessions. The socket owner admits at most
+browser-session generation rejects callbacks from replaced system sessions. A browser session is view-owned, so a
+restarted login can bind the same fixed port from a new session; retired listeners are registered process-wide
+and every start joins them before binding, otherwise the rebind races the previous close and fails. The socket owner admits at most
 eight clients, retires incomplete headers after five seconds, accepts one bounded exact-path GET, and uses a nonce-only
 `com.tron.mobile.oauth` redirect to close `ASWebAuthenticationSession`; authorization codes never enter the
 custom-scheme URL. iOS forwards the complete callback URL only to the matching Pi `manual_code`
