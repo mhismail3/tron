@@ -223,7 +223,7 @@ user reinstalls manually, so batch them for one reinstall.
 | L-19 | Needs scoping | `scripts/tron mac verify` fails on the live install after a source rebuild: "PID selected payload path mismatch" and "authenticated system.info identity/channel mismatch" on the Tailscale host. Find whether the install or the check is wrong | none | |
 | L-11 | Done | Remove duplicate payload validations within one deploy run | none | observability session (L-11 lane), 2026-09-24 |
 | L-12 | Done | Faster Node payload fingerprint with identical output | none | observability session (L-12 lane), 2026-09-24 |
-| L-13 | Ready | Stage source payloads in the store and rename instead of copying twice | L-11 | |
+| L-13 | Claimed | Stage source payloads in the store and rename instead of copying twice | L-11 | observability session (L-13 lane), 2026-09-24 |
 | L-14 | Needs scoping | APFS clone copies and payload retention count | L-13 | |
 
 ## Task details
