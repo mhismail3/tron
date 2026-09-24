@@ -1852,7 +1852,7 @@ positional “Item” labels. The overview derives stable row titles, subtitles,
 and identities once per admitted resource revision, then reuses that projection
 while scrolling; large resource groups use the static scroll surface. Reload is owned by that sheet and publishes visible progress; the canonical
 `session.resourcesChanged` revision is the sole post-mutation read owner, so mutation and projection loads cannot race one shared busy flag.
-Packages starts with resource scope, inventory counts, and a project-trust route when applicable,
+Packages starts with resource scope and inventory counts (Project Trust is its sibling Settings row, not repeated inside),
 then installed packages, a standalone Install Package action,
 then inline Skills, Prompts and Themes containers using Manage Session's emerald/cyan/teal resource
 accents. Resolved extensions are not duplicated beneath the installed list. Opaque, no-space source

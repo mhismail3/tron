@@ -276,24 +276,8 @@ struct PackagesSettingsView: View {
             accent: .tronBlue,
             surfaceStyle: .glass
         ) {
+            // Project Trust is one Settings row beside Packages, not repeated here.
             TronValueRow(icon: "scope", title: "Scope", value: projectCWD == nil ? "Global resources" : "Current project")
-            if let projectCWD {
-                TronSettingsDivider(accent: .tronBlue)
-                TronProgressiveSheetLink(
-                    accessibilityLabel: "Project Trust",
-                    identity: "settings.available-resources.project-trust",
-                    accent: .tronBlue
-                ) {
-                    TrustSettingsView(target: TrustTarget(cwd: projectCWD))
-                } label: {
-                    TronSettingsRow(
-                        icon: "checkmark.shield",
-                        title: "Project Trust",
-                        subtitle: "Review whether project-local resources may load",
-                        accent: .tronBlue
-                    )
-                }
-            }
         }
     }
 
