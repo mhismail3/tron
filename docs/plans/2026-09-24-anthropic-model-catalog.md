@@ -29,10 +29,10 @@ Inspected 2026-09-24:
 
 | ID | Status | Scope | Depends on | Owner |
 | --- | --- | --- | --- | --- |
-| CAT-1 | Ready | Establish SDK catalog source and per-model adapter compatibility contract | none | Unassigned |
+| CAT-1 | Claimed | Establish SDK catalog source and per-model adapter compatibility contract | none | catalog session, 2026-09-24 |
 | CAT-2 | Ready | Replace duplicate catalog with SDK-backed provider registration | CAT-1 | Unassigned |
 | CAT-3 | Ready | Validate package and Tron consumers; prepare controlled local adoption | CAT-2 | Unassigned |
-| CAT-4 | Needs scoping | Assess subscription-authenticated discovery and record a go/no-go decision | none | Unassigned |
+| CAT-4 | Claimed | Assess subscription-authenticated discovery and record a go/no-go decision | none | catalog session, 2026-09-24 |
 
 Follow the claim-on-main and isolated-worktree protocol before starting a task; keep cross-repository code commits and Tron plan handoffs explicitly linked.
 
