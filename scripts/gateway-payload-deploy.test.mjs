@@ -49,7 +49,151 @@ import {
   stagedCandidate,
   runBounded,
   PINNED_XCODEGEN_VERSION,
+  candidateStartupFailure,
+  createDeployTimeline,
+  rotateDeployLog,
+  DEPLOY_LOG_MAX_BYTES,
 } from "./gateway-payload-deploy.mjs";
+
+async function deployRecords(home) {
+  return (await readFile(join(home, "logs", "deploy.jsonl"), "utf8")).trim().split("\n").map((line) => JSON.parse(line));
+}
+
+test("deploy timeline records each phase with the duration of the phase it ends", async () => {
+  const home = await mkdtemp(join(tmpdir(), "tron-deploy-timeline-"));
+  try {
+    let clock = 0;
+    const timeline = createDeployTimeline(home, "command-1", { now: () => clock });
+    timeline.enter("starting");
+    clock = 1_500; timeline.enter("building");
+    clock = 64_000; timeline.enter("staging");
+    clock = 65_000; timeline.enter("promoting");
+    clock = 105_000; timeline.enter("draining");
+    clock = 105_400; timeline.mark("deploy.old-process-exited", "exited");
+    clock = 151_000; timeline.enter("ready");
+    clock = 999_000; timeline.enter("failure", new Error("late"));
+    const records = await deployRecords(home);
+    assert.deepEqual(records.map((record) => [record.event, record.durationMs]), [
+      ["deploy.starting", undefined],
+      ["deploy.building", 1_500],
+      ["deploy.staging", 62_500],
+      ["deploy.promoting", 1_000],
+      ["deploy.draining", 40_000],
+      ["deploy.old-process-exited", 400],
+      ["deploy.ready", 46_000],
+      ["deploy.finished", 151_000],
+    ], "no record after the terminal state");
+    for (const record of records) {
+      assert.equal(record.commandId, "command-1");
+      assert.equal(record.process, "deploy");
+      assert.equal(record.source, "deploy");
+      assert.equal(record.level, "info");
+    }
+    assert.equal(records.at(-1).outcome, "success");
+  } finally { await rm(home, { recursive: true, force: true }); }
+});
+
+test("deploy timeline levels failures by operation and closes once", async () => {
+  const home = await mkdtemp(join(tmpdir(), "tron-deploy-failure-"));
+  try {
+    const update = createDeployTimeline(home, "update-1", { now: () => 0 });
+    update.enter("promoting");
+    update.enter("rolled-back", new Error("New build crashed at startup: ERR_MODULE_NOT_FOUND: <payload>/app/dist/x.js"));
+    update.finish("failure", new Error("again"));
+    const rollback = createDeployTimeline(home, "rollback-1", { operation: "rollback", now: () => 0 });
+    rollback.enter("rollback");
+    rollback.enter("rolled-back");
+    const records = await deployRecords(home);
+    assert.deepEqual(records.map((record) => [record.commandId, record.event, record.level, record.outcome]), [
+      ["update-1", "deploy.promoting", "info", undefined],
+      ["update-1", "deploy.rolled-back", "error", undefined],
+      ["update-1", "deploy.finished", "error", "failure"],
+      ["rollback-1", "deploy.rollback", "info", undefined],
+      ["rollback-1", "deploy.rolled-back", "info", undefined],
+      ["rollback-1", "deploy.finished", "info", "success"],
+    ]);
+    assert.match(records[1].error.message, /ERR_MODULE_NOT_FOUND/u);
+  } finally { await rm(home, { recursive: true, force: true }); }
+});
+
+test("deploy log rotates at operation start above its cap and never throws", async () => {
+  const home = await mkdtemp(join(tmpdir(), "tron-deploy-rotate-"));
+  try {
+    await mkdir(join(home, "logs"));
+    const path = join(home, "logs", "deploy.jsonl");
+    await writeFile(path, "x".repeat(DEPLOY_LOG_MAX_BYTES));
+    rotateDeployLog(home);
+    assert.equal((await lstat(path)).size, DEPLOY_LOG_MAX_BYTES, "at the cap is kept");
+    await writeFile(path, "x".repeat(DEPLOY_LOG_MAX_BYTES + 1));
+    rotateDeployLog(home);
+    await assert.rejects(lstat(path));
+    assert.equal((await lstat(`${path}.1`)).size, DEPLOY_LOG_MAX_BYTES + 1);
+    // An unwritable log never fails the deployment.
+    await rm(join(home, "logs"), { recursive: true });
+    await writeFile(join(home, "logs"), "not a directory");
+    createDeployTimeline(home, "command-1").enter("starting");
+    rotateDeployLog(home);
+  } finally { await rm(home, { recursive: true, force: true }); }
+});
+
+test("a candidate's own startup crash becomes the deploy failure cause", async () => {
+  const home = await mkdtemp(join(tmpdir(), "tron-startup-cause-"));
+  try {
+    await mkdir(join(home, "logs"));
+    const since = "2026-09-24T10:00:00.000Z";
+    const candidate = { runtimeEpoch: "epoch-new", version: "v-new" };
+    const fatal = (timestamp, runtimeEpoch, payloadVersion, error) => JSON.stringify({
+      timestamp, level: "error", event: "gateway.fatal-startup", message: "Gateway failed during startup", runtimeEpoch, payloadVersion, error,
+    });
+    assert.equal(await candidateStartupFailure(home, candidate, since), undefined, "no logs");
+    await writeFile(join(home, "logs", "gateway.jsonl"), [
+      // Before the restart, another payload, and a malformed line are ignored.
+      fatal("2026-09-24T09:59:59.000Z", "epoch-new", "v-new", { name: "Error", code: "OLD", message: "stale" }),
+      fatal("2026-09-24T10:00:05.000Z", "epoch-other", "v-other", { name: "Error", code: "OTHER", message: "other" }),
+      '{"event":"gateway.fatal-startup", broken',
+      JSON.stringify({ timestamp: "2026-09-24T10:00:06.000Z", level: "info", event: "gateway.started", runtimeEpoch: "epoch-new" }),
+      "",
+    ].join("\n"));
+    assert.equal(await candidateStartupFailure(home, candidate, since), undefined, "no matching crash");
+    await writeFile(join(home, "logs", "deploy.jsonl"), `${JSON.stringify({
+      timestamp: "2026-09-24T10:00:07.000Z", level: "error", event: "launcher.candidate-rolled-back",
+      message: "Candidate v-new exited during startup; restored v-old", payloadVersion: "v-new",
+    })}\n`);
+    assert.equal(await candidateStartupFailure(home, candidate, since),
+      "New build was rolled back by the launcher: Candidate v-new exited during startup; restored v-old");
+    // A Gateway crash names the failing file, so it wins over the launcher record.
+    await writeFile(join(home, "logs", "gateway.jsonl"), `${fatal("2026-09-24T10:00:06.500Z", "epoch-new", "v-new", {
+      name: "Error", code: "ERR_MODULE_NOT_FOUND",
+      message: "Cannot find module '<payload>/dist/transport/connection-policy.js' imported from <payload>/dist/gateway-main.js",
+    })}\n`, { flag: "a" });
+    assert.equal(await candidateStartupFailure(home, candidate, since),
+      "New build crashed at startup: ERR_MODULE_NOT_FOUND: Cannot find module '<payload>/dist/transport/connection-policy.js' imported from <payload>/dist/gateway-main.js");
+    // A wrapped startup error reports its root cause; matching by payload version alone works.
+    await writeFile(join(home, "logs", "gateway.jsonl"), `${fatal("2026-09-24T10:00:08.000Z", undefined, "v-new", {
+      name: "Error", message: "startup failed", cause: { name: "Error", code: "EACCES", message: "permission denied" },
+    })}\n`, { flag: "a" });
+    assert.equal(await candidateStartupFailure(home, candidate, since), "New build crashed at startup: EACCES: permission denied");
+    assert.equal(await candidateStartupFailure(home, candidate, "not a date"), undefined);
+  } finally { await rm(home, { recursive: true, force: true }); }
+});
+
+test("startup cause lookup reads only a bounded tail and drops its partial first line", async () => {
+  const home = await mkdtemp(join(tmpdir(), "tron-startup-tail-"));
+  try {
+    await mkdir(join(home, "logs"));
+    const record = (message) => JSON.stringify({
+      timestamp: "2026-09-24T10:00:01.000Z", level: "error", event: "gateway.fatal-startup",
+      message, runtimeEpoch: "epoch-new", error: { name: "Error", code: "E", message },
+    });
+    // The early crash is pushed out of the 256 KB tail by later records.
+    const filler = Array.from({ length: 3_000 }, (_, index) => JSON.stringify({ timestamp: "2026-09-24T10:00:02.000Z", level: "info", event: "noise", message: `n-${index}-${"z".repeat(100)}` }));
+    await writeFile(join(home, "logs", "gateway.jsonl"), [record("early"), ...filler].join("\n"));
+    assert.equal(await candidateStartupFailure(home, { runtimeEpoch: "epoch-new" }, "2026-09-24T10:00:00.000Z"), undefined);
+    await writeFile(join(home, "logs", "gateway.jsonl"), `\n${record("late")}\n`, { flag: "a" });
+    assert.equal(await candidateStartupFailure(home, { runtimeEpoch: "epoch-new" }, "2026-09-24T10:00:00.000Z"),
+      "New build crashed at startup: E: late");
+  } finally { await rm(home, { recursive: true, force: true }); }
+});
 
 test("deployment timeout defaults to a valid bounded millisecond value", () => {
   assert.equal(deploymentTimeoutMs({}), 60_000);
@@ -1331,6 +1475,14 @@ test("apply accepts only bounded update controls and fails closed for source mod
   try {
     await assert.rejects(applyPayload({ channel: "dev", mode: "source", commandId: "command-1" }), /cannot update dev/);
     await assert.rejects(applyPayload({ channel: "stable", mode: "source", commandId: "command-1" }), /trusted Gateway update config/);
+    // The acknowledged request leaves one closed timeline for its command.
+    const timeline = (await readFile(join(isolatedHome, "logs", "deploy.jsonl"), "utf8")).trim().split("\n").map((line) => JSON.parse(line));
+    assert.deepEqual(timeline.map((record) => [record.event, record.commandId, record.level]), [
+      ["deploy.starting", "command-1", "info"],
+      ["deploy.failure", "command-1", "error"],
+      ["deploy.finished", "command-1", "error"],
+    ]);
+    assert.match(timeline[1].error.message, /trusted Gateway update config/u);
   } finally {
     if (supervised === undefined) delete process.env.TRON_GATEWAY_SUPERVISED;
     else process.env.TRON_GATEWAY_SUPERVISED = supervised;

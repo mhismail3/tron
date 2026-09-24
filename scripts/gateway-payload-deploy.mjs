@@ -7,7 +7,7 @@
 import { createHash, randomUUID } from "node:crypto";
 import { constants as fsConstants } from "node:fs";
 import { createRequire } from "node:module";
-import { existsSync, lstatSync, realpathSync, statSync } from "node:fs";
+import { appendFileSync, existsSync, lstatSync, mkdirSync, realpathSync, renameSync, statSync } from "node:fs";
 import { spawn } from "node:child_process";
 import { homedir, networkInterfaces, tmpdir } from "node:os";
 import { dirname, isAbsolute, join, relative, resolve } from "node:path";
@@ -891,6 +891,184 @@ async function writeProgress(paths, state, commandId, error) {
     schema: SCHEMA, kind: "tron-gateway-update-progress", channel: paths.channel, state,
     commandId, ...(error ? { error: failureText(error) } : {}), updatedAt: new Date().toISOString(),
   });
+  paths.timeline?.enter(state, error);
+}
+
+// ---------------------------------------------------------------------------
+// Deploy timeline (~/.tron/logs/deploy.jsonl). The helper rotates it once at
+// operation start; the launcher (observability L-1b) appends single-line
+// O_APPEND records. Diagnostics never fail or delay a deployment.
+
+/** A source rebuild writes about a dozen records (~3 KB); 1 MB holds hundreds
+ * of deployments while staying far under the Gateway's 40 MB budget. */
+export const DEPLOY_LOG_MAX_BYTES = 1_048_576;
+/** Only the newest part of each log can hold a crash from this attempt. */
+const STARTUP_CAUSE_TAIL_BYTES = 256 * 1_024;
+/** In an update, "rollback" and "rolled-back" mean the candidate failed; in a
+ * user-requested rollback they are the requested work. */
+const DEPLOY_OPERATION_STATES = {
+  update: { success: "ready", failed: new Set(["failure", "rollback", "rolled-back"]), terminal: new Set(["ready", "failure", "rolled-back"]) },
+  rollback: { success: "rolled-back", failed: new Set(["failure"]), terminal: new Set(["rolled-back", "failure"]) },
+};
+
+function deployLogPath(home) {
+  return join(home, "logs", "deploy.jsonl");
+}
+
+function appendDeployRecord(home, level, event, message, fields = {}) {
+  try {
+    const record = {
+      timestamp: new Date().toISOString(), level, event, source: "deploy", process: "deploy",
+      message: failureText(message, 2_000), ...fields,
+    };
+    mkdirSync(join(home, "logs"), { recursive: true, mode: 0o700 });
+    appendFileSync(deployLogPath(home), `${JSON.stringify(record)}\n`, { mode: 0o600 });
+  } catch {
+    // The deployment result is authoritative in update-progress.json.
+  }
+}
+
+export function rotateDeployLog(home, maximumBytes = DEPLOY_LOG_MAX_BYTES) {
+  try {
+    const path = deployLogPath(home);
+    if (existsSync(path) && statSync(path).size > maximumBytes) renameSync(path, `${path}.1`);
+  } catch {
+    // Rotation is best effort; appends continue on the existing file.
+  }
+}
+
+function describeDeployError(error) {
+  return {
+    name: error instanceof Error ? error.name : "Error",
+    message: failureText(error, 1_000),
+  };
+}
+
+/**
+ * Records each progress state as `deploy.<state>` carrying the duration of the
+ * phase it ends, point events such as the old process exiting, and one
+ * `deploy.finished` with the total. Durations use a monotonic clock.
+ */
+export function createDeployTimeline(home, commandId, { operation = "update", now = () => performance.now() } = {}) {
+  const states = DEPLOY_OPERATION_STATES[operation];
+  if (!states) throw new Error("invalid deploy timeline operation");
+  const startedAt = now();
+  let phase;
+  let phaseStartedAt = startedAt;
+  let finished = false;
+  const since = (start) => Math.max(0, Math.round(now() - start));
+  const timeline = {
+    enter(state, error) {
+      if (finished) return;
+      const previous = phase;
+      const durationMs = since(phaseStartedAt);
+      appendDeployRecord(
+        home,
+        states.failed.has(state) ? "error" : "info",
+        `deploy.${state}`,
+        previous ? `Deploy ${state} after ${previous} took ${durationMs} ms` : `Deploy ${state}`,
+        {
+          commandId,
+          ...(previous ? { durationMs } : {}),
+          ...(error === undefined ? {} : { error: describeDeployError(error) }),
+        },
+      );
+      phase = state;
+      phaseStartedAt = now();
+      if (states.terminal.has(state)) timeline.finish(state, error);
+    },
+    mark(event, message) {
+      if (finished) return;
+      appendDeployRecord(home, "info", event, message, { commandId, durationMs: since(phaseStartedAt) });
+    },
+    finish(state, error) {
+      if (finished) return;
+      finished = true;
+      const success = state === states.success;
+      const durationMs = since(startedAt);
+      appendDeployRecord(
+        home,
+        success ? "info" : "error",
+        "deploy.finished",
+        `Deploy finished (${state}) in ${durationMs} ms`,
+        {
+          commandId, durationMs, outcome: success ? "success" : "failure",
+          ...(error === undefined ? {} : { error: describeDeployError(error) }),
+        },
+      );
+    },
+  };
+  return timeline;
+}
+
+/** Attaches the timeline that every progress write of this operation reports to. */
+function attachDeployTimeline(paths, commandId, operation = "update") {
+  rotateDeployLog(paths.home);
+  paths.timeline = createDeployTimeline(paths.home, commandId, { operation });
+  return paths.timeline;
+}
+
+async function readTail(path, maximumBytes) {
+  let handle;
+  try {
+    handle = await open(path, "r");
+    const { size } = await handle.stat();
+    const length = Math.min(size, maximumBytes);
+    const buffer = Buffer.alloc(length);
+    await handle.read(buffer, 0, length, size - length);
+    const text = buffer.toString("utf8");
+    // A tail that starts mid-record drops its first partial line.
+    return length < size ? text.slice(text.indexOf("\n") + 1) : text;
+  } catch {
+    return "";
+  } finally {
+    await handle?.close().catch(() => {});
+  }
+}
+
+function startupCauseText(record) {
+  if (record.event === "gateway.fatal-startup") {
+    const error = record.error && typeof record.error === "object" ? record.error : {};
+    // A loading error carries its own code; a wrapped startup error keeps its
+    // root reason one level down.
+    const root = typeof error.code === "string" || !error.cause || typeof error.cause !== "object" ? error : error.cause;
+    const code = typeof root.code === "string" ? `${root.code}: ` : "";
+    const detail = typeof root.message === "string" ? root.message : String(record.message ?? "");
+    return `New build crashed at startup: ${code}${detail}`;
+  }
+  return `New build was rolled back by the launcher: ${String(record.message ?? "")}`;
+}
+
+/**
+ * The cause a candidate recorded for its own failed start: the newest
+ * `gateway.fatal-startup` (Gateway entrypoint) or `launcher.candidate-rolled-back`
+ * (launcher) record at or after `since` whose `runtimeEpoch` or
+ * `payloadVersion` names the candidate. A Gateway crash is preferred because it
+ * names the failing file. Undefined when nothing matches, so the caller keeps
+ * its generic message.
+ */
+export async function candidateStartupFailure(home, candidate, since) {
+  const sinceMs = Date.parse(since);
+  if (!Number.isFinite(sinceMs)) return undefined;
+  const matches = [];
+  for (const path of [join(home, "logs", "gateway.jsonl"), deployLogPath(home)]) {
+    for (const line of (await readTail(path, STARTUP_CAUSE_TAIL_BYTES)).split("\n")) {
+      if (!line.includes("gateway.fatal-startup") && !line.includes("launcher.candidate-rolled-back")) continue;
+      let record;
+      try { record = JSON.parse(line); } catch { continue; }
+      if (!record || typeof record !== "object") continue;
+      if (record.event !== "gateway.fatal-startup" && record.event !== "launcher.candidate-rolled-back") continue;
+      const timestamp = Date.parse(record.timestamp);
+      if (!Number.isFinite(timestamp) || timestamp < sinceMs) continue;
+      const namesCandidate = (typeof candidate.runtimeEpoch === "string" && record.runtimeEpoch === candidate.runtimeEpoch)
+        || (typeof candidate.version === "string" && record.payloadVersion === candidate.version);
+      if (namesCandidate) matches.push({ record, timestamp });
+    }
+  }
+  if (matches.length === 0) return undefined;
+  const crashes = matches.filter(({ record }) => record.event === "gateway.fatal-startup");
+  const chosen = (crashes.length > 0 ? crashes : matches).sort((left, right) => right.timestamp - left.timestamp)[0];
+  return failureText(startupCauseText(chosen.record), 1_024);
 }
 
 function homeForChannel(channel, explicit) {
@@ -1775,6 +1953,7 @@ async function promote({ paths, channel, version, expectedFingerprint, host, por
     // publishing again would overwrite the real rollback pointer with itself.
     let published = candidateAlreadyPublished;
     let oldProcessGone = false;
+    let restartRequestedAt;
     try {
       if (!unchanged) {
         await writePendingAttempt(paths, target, prior);
@@ -1784,6 +1963,7 @@ async function promote({ paths, channel, version, expectedFingerprint, host, por
         published = true;
       }
       await writeState(paths, { ...stateBase, state: deploymentTransition("prepared", "published") });
+      restartRequestedAt = new Date().toISOString();
       await requestRestart({ host, port, token, timeoutMs, commandId: stateBase.commandId });
       await writeState(paths, { ...stateBase, state: "draining" });
       await writeProgress(paths, "draining", stateBase.commandId);
@@ -1794,7 +1974,10 @@ async function promote({ paths, channel, version, expectedFingerprint, host, por
         oldEpoch: before.runtimeEpoch,
         relaunchLimitMs: timeoutMs,
         startupLimitMs: STARTUP_LIMIT_MS,
-        onDrainComplete: () => { oldProcessGone = true; },
+        onDrainComplete: () => {
+          oldProcessGone = true;
+          paths.timeline?.mark("deploy.old-process-exited", "Previous Gateway process exited after draining");
+        },
       });
       // /health admits warmup only; authenticated system.info is the promotion proof.
       const confirmed = requireAuthenticatedRuntimeInfo(
@@ -1814,6 +1997,12 @@ async function promote({ paths, channel, version, expectedFingerprint, host, por
       return { state: "ready", manifest, health: confirmed };
     } catch (caught) {
       const error = caught instanceof Error ? caught : new Error(String(caught));
+      // A candidate that crashed or was rolled back by the launcher recorded
+      // why; lead with that instead of the generic readiness timeout.
+      if (restartRequestedAt !== undefined) {
+        const cause = await candidateStartupFailure(paths.home, manifest, restartRequestedAt).catch(() => undefined);
+        if (cause) error.message = `${cause}. ${error.message}`;
+      }
       if (published) {
         try {
           await writeState(paths, { ...stateBase, state: deploymentTransition("published", "failed"), error: String(error?.message ?? error) });
@@ -2258,10 +2447,8 @@ export function commandTimeoutMs(raw) {
   return timeoutMs;
 }
 
-async function applyPayloadInternal(request) {
-  const value = validateApplyRequest(request);
-  const home = homeForChannel(value.channel, process.env.TRON_DATA_DIR);
-  const paths = store(home, value.channel);
+async function applyPayloadInternal(value, paths) {
+  const home = paths.home;
   let version = value.mode === "source" ? undefined : await stagedCandidate(paths, value.candidateVersion, value.candidateFingerprint);
   let selectedMode = "artifact";
   const config = version === undefined || value.mode === "source" ? await readUpdateConfig(paths) : undefined;
@@ -2321,9 +2508,10 @@ export async function applyPayload(request) {
   const home = homeForChannel(value.channel, process.env.TRON_DATA_DIR);
   const paths = store(home, value.channel);
   return withOperationLock(paths, async () => {
+    const timeline = attachDeployTimeline(paths, value.commandId);
     await writeProgress(paths, "starting", value.commandId);
     try {
-      return await applyPayloadInternal(value);
+      return await applyPayloadInternal(value, paths);
     } catch (error) {
       // Every acknowledged detached request gets one terminal bounded result,
       // including malformed config, unavailable npm, and pre-build failures.
@@ -2332,6 +2520,9 @@ export async function applyPayload(request) {
       if (error?.automaticRollbackCompleted !== true) {
         await writeProgress(paths, "failure", value.commandId, error?.message ?? error).catch(() => {});
       }
+      // Every terminal path closes the timeline exactly once, including a
+      // "rollback" state whose recovery did not complete.
+      timeline.finish("failure", error);
       throw error;
     }
   });
@@ -2491,6 +2682,7 @@ async function main() {
     if (process.env.TRON_GATEWAY_SUPERVISED === "1" && process.env.TRON_GATEWAY_CHANNEL !== channel) {
       throw new Error(`Gateway ${process.env.TRON_GATEWAY_CHANNEL ?? "unknown"} runtime cannot roll back ${channel}`);
     }
+    attachDeployTimeline(paths, callerCommandId, "rollback");
     await writeProgress(paths, "rollback", callerCommandId);
     try {
       result = await withOperationLock(paths, () => rollback({ ...options, commandId: callerCommandId }));

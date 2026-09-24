@@ -2,7 +2,7 @@
 
 - **Started:** 2026-09-23
 - **Status:** Active
-- **Last updated:** 2026-09-24, L-2
+- **Last updated:** 2026-09-24, L-1c
 - **Goal:** Every Tron process records the right signals automatically, in a known place, at a meaningful level, so a failure can be diagnosed in one pass from what was already recorded.
 
 Follow the [plan protocol](README.md#protocol) to claim tasks and hand off.
@@ -200,7 +200,7 @@ user reinstalls manually, so batch them for one reinstall.
 | --- | --- | --- | --- | --- |
 | L-0 | Done | Payload import containment | none | planning session, 2026-09-23 |
 | L-1a | Done | Gateway startup-fatal record | none | observability-L-1a session, 2026-09-23 |
-| L-1c | Claimed | Deploy timeline and real failure cause | L-1a | observability session, 2026-09-24 |
+| L-1c | Done | Deploy timeline and real failure cause | L-1a | observability session, 2026-09-24 |
 | L-2 | Done | Gateway levels, debug buffer, retention, record format | none | observability-L-2 session, 2026-09-24 |
 | L-3 | Ready | iOS always-on recording replaces Diagnostic Capture; one-tap export | L-2 | |
 | L-1b | Ready | Launcher records | none | |
@@ -518,3 +518,13 @@ user reinstalls manually, so batch them for one reinstall.
 - Kept on purpose: synchronous append (no measurement showed event-loop cost). Stdout/stderr mirroring stays until L-1d. `diagnostic-export` storage stays in `/tmp/tron-diagnostics`; L-3 moves it. `GlobalProviderResources` diagnostics still interpolate error text into messages; they are not `catch`-site faults of the transport and were left for the event catalog pass (L-6).
 - Deviations: `rpc.request` no longer existed on `main`, and fast successful `rpc.completed` was already omitted rather than info, so those rows became "record fast successes at debug". Fast successful `session.stage` records were omitted before; they are now debug. `connection.admitted` is deleted; `connection.opened` is emitted at hello with the admission-to-hello duration. `rpc.error` is warning for every `GatewayError` code except `internal`, not only `busy`, per the level policy that caller mistakes are warnings. `describeError` moved from `index.ts` into the logger so the entrypoint and writer share one bound.
 - For the next agent: the running Gateway adopts this only after the user rebuilds it. L-1d, L-3, L-4, L-6, L-7 and L-15 are unblocked. L-6 should record one day's measured volume once a rebuilt Gateway has run for a day.
+
+### L-1c · Done · 2026-09-24 · observability session
+
+- Result: `scripts/gateway-payload-deploy.mjs` appends a per-operation timeline to `~/.tron/logs/deploy.jsonl` (one `deploy.<state>` per progress state carrying the ended phase's `durationMs`, `deploy.old-process-exited` when the drained process disappears, one `deploy.finished` with total and outcome, all with `commandId`), rotated to `.1` above 1 MB at operation start. When a promoted candidate fails after its restart request, `promote` looks up the candidate's own `gateway.fatal-startup` or `launcher.candidate-rolled-back` record (newest 256 KB of `gateway.jsonl` and `deploy.jsonl`, at or after the restart request, matched by `runtimeEpoch` or `payloadVersion`) and leads the error with it, so `update-progress.json` and the app's Deployment error row read "New build crashed at startup: ERR_MODULE_NOT_FOUND: …".
+- Evidence: `node --test scripts/gateway-payload-deploy.test.mjs` with Node 22.22.0: 47/47 (five new tests: phase durations with an injected clock and nothing after the terminal state; failure levels per operation and a single close; rotation at and above the cap and a never-throwing unwritable log; cause matching by epoch or version, time window, crash preferred over launcher record, wrapped root cause; bounded tail with partial first line). The existing apply test now asserts the real `applyPayload` failure path writes starting → failure → finished for its command. Negative controls: disconnecting `writeProgress` from the timeline fails the apply test; removing the crash preference fails the cause test. Acceptance: compiled this branch's Gateway, deleted `dist/transport/connection-policy.js`, ran `dist/index.js` in an isolated home (exit 1), and `candidateStartupFailure` on that home returned "New build crashed at startup: ERR_MODULE_NOT_FOUND: Cannot find module '…/dist/transport/connection-policy.js' imported from …/dist/transport/server.js"; a different epoch/version returned nothing.
+- Changes: this commit (`gateway-payload-deploy.mjs`, its tests, Gateway README update section).
+- Tasks added: none.
+- Kept on purpose: the lookup reads only the active `gateway.jsonl`, not rotated segments; a crash from this attempt is written seconds earlier. A user-requested rollback gets its own timeline in which `rollback`/`rolled-back` are info and `rolled-back` is success. The four-line wiring inside `promote`'s catch is not covered by an automated test because `promote` needs a live authenticated listener; it was reviewed by reading and proven through the acceptance run of its lookup.
+- Deviations: in the acceptance run the payload root was under `/tmp`, so the recorded path reads `/private<payload>/…` (the process resolved `/private/tmp` while `TRON_GATEWAY_PAYLOAD_ROOT` named `/tmp`). Production payload roots are not symlinked, as L-1a's evidence shows `<payload>/…`.
+- For the next agent: the helper that runs a rebuild is the running build's, so this takes effect from the second rebuild after it lands. L-1b's launcher records must carry the candidate's `payloadVersion` (and `runtimeEpoch` when known) for the lookup to match; its message becomes the text after "New build was rolled back by the launcher:". L-5 and L-11 can now read phase durations from `deploy.jsonl`.
