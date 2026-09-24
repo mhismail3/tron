@@ -558,53 +558,21 @@ a failure elsewhere in the graph cannot prevent the record.
 
 ### Logging
 
-`GatewayLogger` (`src/transport/logger.ts`) is the one writer. Levels mean who
-needs to look: **error** (a user-visible failure, lost work or a broken
-invariant), **warning** (degraded but handled: retries, bounds hit, slow work
-over a named threshold, caller mistakes and `busy` backpressure), **info** (one
-line per lifecycle or state boundary) and **debug** (per-request detail). Levels
-are fixed per event in code; there is no runtime level setting.
+`GatewayLogger` (`src/transport/logger.ts`) is the one writer. What each level
+means, every stream and its rotation cap, the retention budgets and the event
+catalog are owned by [`docs/observability.md`](docs/observability.md).
 
-- Info and above append to `~/.tron/logs/gateway.jsonl`, rotated through eight
-  5 MB numbered segments (`gateway.jsonl`, `.1` … `.7`; the user-chosen 40 MB
-  budget). Segment size is tracked in memory, not stat'ed per record. The
-  newest 1,000 persisted records are served by `system.logs`.
-- The Mac app writes `~/.tron/logs/mac.jsonl` with its own `TronLog` writer,
-  four 1 MiB segments and a bounded in-memory debug buffer. It never shares
-  rotation with the Gateway process.
-- When `TRON_GATEWAY_SUPERVISED=1`, persisted records are not mirrored to
-  stdout/stderr. The C launcher redirects supervised stderr to
-  `<Tron home>/logs/gateway-stderr.log` before executing Node, capturing launcher
-  and Node startup failures; mirroring would duplicate the canonical JSONL stream
-  there. Unsupervised foreground runs continue mirroring records.
-- Debug never reaches disk. It lives in a bounded memory buffer (4,000 records
-  or 2 MB) that `system.logs.export` appends to the exported snapshot.
+- `system.logs` serves the newest 1,000 persisted records (info and above).
+  Debug never reaches disk; it lives in a bounded in-memory buffer that
+  `system.logs.export` appends to the exported snapshot (see
+  [Diagnostic bundle](#diagnostic-bundle)).
 - Each record carries `timestamp`, `level`, `event`, `source`, a redacted
   `message`, and the writer-stamped `process`, `runtimeEpoch` and
   `payloadVersion`. Call sites add correlation (`sessionId`, `connectionId`,
   `commandId`, `requestID`, `method`, `outcome`, `code`, `reason`,
-  `durationMs`) as fields rather than message text, and pass a thrown value as
-  `error`; the writer stores a bounded, redacted `{name, code, message, stack}`
-  with one level of `cause`.
-- `gateway.started` is recorded once per process. Admission and hello form one
-  `connection.opened`; the Mac app's local probe connections open and close at
-  debug. RPC completions under `SLOW_RPC_WARNING_MS` are debug; slower or
-  failed ones warn. `rpc.error` is warning for `GatewayError` codes other than
-  `internal` and error (with `error`) for unexpected faults.
-- Restarts are accounted without gaps. `gateway.started` carries the time since
-  process start. `gateway.startup-step` records (field `step`) each carry the
-  time since the previous checkpoint: `modules` (process start to the loaded
-  import graph), `config-and-locks`, then each startup owner through
-  `knowledge-observation-recovery` before `gateway.listening`, and
-  `attention-recovery` after it. The parts of `automation-recovery` are
-  separate `automation.recovery-step` records (`store`, `reconcile-targets`,
-  `scheduler-recover`), so one restart's startup steps still sum without double
-  counting; reconciliation's message names how many targets it checked and the
-  slowest target's kind and duration, never its path or ID. Session search warms
-  concurrently with recovery; its `session-search.warm` record carries the
-  warm-up's `durationMs`, so its start is the timestamp minus that duration.
-  `gateway.stopped` is a process's last record, with its shutdown duration; the
-  time from it to the next process start is launchd and the launcher.
+  `durationMs`, `step`) as fields rather than message text, and pass a thrown
+  value as `error`; the writer stores a bounded, redacted
+  `{name, code, message, stack}` with one level of `cause`.
 
 ### Diagnostic bundle
 
@@ -749,7 +717,7 @@ Authenticated `system.logs.export` is a user-requested diagnostics projection: i
 bounded already-redacted snapshot and command ID, appends the newest Gateway debug records (at most
 1 MB), writes a server-chosen `<device-hash>-<timestamp>.jsonl` file under
 `~/.tron/logs/device-exports/` inside a 0700 directory, and retains only the newest ten exports.
-Files are 0600. It never accepts a client filesystem path, reads session content, or creates a public upload. Gateway RPC diagnostics retain bounded structured `method`, `requestID`, `outcome`, `code`, and `durationMs` fields; catalog stage records additionally carry a process-local `workID` and scope so shared materialization cannot be misattributed to one caller. Request IDs are sanitized transport IDs only, and stage timing uses monotonic durations. Fast successful stages are debug records, kept only in the in-memory buffer. Catalog admission and viewer capacity/retirement failures additionally carry fixed privacy-safe `reason` codes; arbitrary exception messages, error details and request parameters are not copied into those fields.
+Files are 0600. It never accepts a client filesystem path, reads session content, or creates a public upload. Gateway RPC diagnostics retain bounded structured `method`, `requestID`, `outcome`, `code`, and `durationMs` fields; catalog stage records additionally carry a process-local `workID` and scope so shared materialization cannot be misattributed to one caller. Request IDs are sanitized transport IDs only, and stage timing uses monotonic durations. Catalog admission and viewer capacity/retirement failures additionally carry fixed privacy-safe `reason` codes; arbitrary exception messages, error details and request parameters are not copied into those fields.
 
 - `GET /health` — unauthenticated readiness and compatibility metadata. The bound listener reports `starting`, `catalog-warming`, `attention-recovery`, `automation-recovery`, or `storage-warming` with HTTP 503 until all startup prerequisites complete, then reports `ok` with HTTP 200; every other HTTP route and WebSocket upgrade remains retryable `busy`/503 during warmup and does not enter session APIs.
 - `POST /v1/pair` — rate-limited one-time enrollment exchange
@@ -979,16 +947,11 @@ newest 256 KB of `logs/gateway.jsonl` and `logs/deploy.jsonl` for a `gateway.fat
 `launcher.candidate-rolled-back` record at or after that request whose `runtimeEpoch` or
 `payloadVersion` names the candidate, and leads the reported error with it (for example "New build
 crashed at startup: ERR_MODULE_NOT_FOUND: …"); a Gateway crash is preferred over a launcher record.
-Each helper operation also appends its timeline to `logs/deploy.jsonl`: one `deploy.<state>` record
-per progress state carrying the duration of the phase it ended, `deploy.old-process-exited` when the
-drained process disappears, and one `deploy.finished` with the total and outcome, all with the
-command ID. The C launcher appends its own records to that same file: `launcher.candidate-launched`
-(info) when a published candidate consumes its single launch attempt, `launcher.candidate-rolled-back`
-(error) carrying the candidate and restored versions when that candidate did not commit,
-`launcher.bundled-fallback` (warning) naming the refused selection and the bundled payload that runs
-instead, and `launcher.selection-rejected` (warning) when a pending attempt marker cannot be
-reconciled with the selection, so nothing launches. The helper rotates that file to `deploy.jsonl.1`
-above 1 MB at operation start; log failures never affect a deployment. The mutation is usable only
+Each helper operation appends its timeline to `logs/deploy.jsonl`, and the C
+launcher appends its own `launcher.*` records to that same file, so a rollback's
+cause outlives the process that produced it. The events, levels and rotation cap
+of both streams are owned by [`docs/observability.md`](docs/observability.md);
+log failures never affect a deployment. The mutation is usable only
 when the helper is configured, in which case `gateway-update.v1` appears in capabilities. Candidate transition health uses a 60-second default deadline; an owned decimal-millisecond override is admitted only from 2,000 through 300,000 milliseconds.
 
 A separate supervised macOS control plane advertises `ios-device-install.v3`. After configuring the source checkout in Settings, bind the intended phone from the Mac (after the Gateway payload containing this contract is manually installed) with `scripts/tron-ios-device-bind.mjs --device-id <paired-device-id> --target-identifier <CoreDevice-identifier>`. Obtain the latter from `xcrun devicectl list devices`; obtain the former with the read-only `scripts/tron-ios-device-bind.mjs --list`, which prints paired IDs, names, and creation timestamps. Confirm the intended pairing explicitly when names are duplicated. The helper defaults to Stable's local Tailscale address and port 9847; `--channel dev` selects the separate Debug home and loopback port 9848. Local credential reads reuse the existing bounded, no-symlink credential reader. `--host` accepts only `tailscale` or `127.0.0.1`, never a remote hostname. Receipt-backed `device.install.config` binds one authorized Gateway device to a validated Tron source checkout; it never accepts a physical target from iOS. The one-time Mac-local `scripts/tron-ios-device-bind.mjs` command calls the local-only `device.install.target.bind` operation with the intended CoreDevice identifier after `devicectl` discovery; the Gateway verifies that exact target is connected and has Developer Mode enabled, then persists the owner-only binding. At install admission the Mac revalidates that exact binding and fails closed if it is unavailable or changed; it never substitutes another physical device. CoreDevice identifiers, serials, UDIDs, and complete discovery documents remain owner-only Mac state. The per-device configuration is stored under `gateway/ios-device-installs/` with mode `0600`; source roots must be absolute, symlink-free directories containing the canonical iOS project, pinned-toolchain configuration, fixed install helper, artifact validator, and protocol validator. Config/status reads revalidate paired-device authority and never accept an executable, scheme, build configuration, bundle ID, or arbitrary command from RPC; only the authenticated local Mac binding operation accepts a validated CoreDevice identifier.

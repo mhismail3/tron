@@ -377,18 +377,16 @@ matched captures rather than enabling it during normal use.
 
 ### Always-on diagnostics
 
-The app continuously records bounded lifecycle, RPC-completion, catalog, and
-slow-operation records. The actor-owned memory ring holds at most 2,000 records
-or 512 KiB; info and above are batched to
-`Library/Caches/Logs/app.jsonl` plus one prior segment, each capped at half the
-10 MiB total budget. Batches flush every five seconds, on backgrounding, and
-immediately for errors. Per-RPC completions are
-debug-only; payloads, prompts, transcript contents, frames, and render events
-are excluded. Logs retains this local record stream across relaunches.
+The app continuously records bounded lifecycle, connection, session-open and
+sync failures, upload failures, catalog incidents, and slow operations. What is
+recorded and at which level, where each record stream lives, its rotation and
+retention caps, and the privacy rules are owned by
+[observability](../../gateway/docs/observability.md). Logs retains this local
+record stream across relaunches.
 
 Choose **Settings → Logs → Export Diagnostics** once. A connected Gateway
 advertising `diagnostic-export.v1` receives the bounded JSONL bundle and saves
-it under `~/.tron/logs/device-exports/`; Tron copies the returned path and
+it in its device-export store; Tron copies the returned path and
 shows confirmation. If disconnected or upload fails, the same action opens the
 native share sheet with a bounded local JSONL bundle; upload failures are
 recorded as warning events. The first JSON record carries capture time, Gateway

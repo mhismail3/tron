@@ -4,12 +4,9 @@
 
 The wrapper writes redacted shared-format JSONL to `<Tron home>/logs/mac.jsonl`
 through `TronLog`; its serial utility queue keeps filesystem work off the main
-actor. Four 1 MiB segments retain several days of this low-volume lifecycle
-stream, while debug records stay in a bounded in-memory buffer. Warning and
-error records are also mirrored to `os.Logger` (`com.tron.mac`). The writer
-records app start identity, observer transitions, LaunchAgent outcomes, update
-flow states with their command IDs, and wizard step outcomes. The Gateway owns
-its separate `gateway.jsonl` rotation.
+actor. The events it records and their levels, the stream's rotation cap, the
+privacy rules and the retention budgets are owned by
+[observability](../../gateway/docs/observability.md).
 
 `Tron.app` is the installer, supervisor, pairing surface, and menu-bar status UI
 for the always-running Tron agent. The Login Item launches a minimal universal C
@@ -230,11 +227,10 @@ pause and uninstall therefore unregister the job before intentional stoppage. Ma
 LaunchAgents advertise `TRON_GATEWAY_SUPERVISED=1`; planned restart and handled
 supervised signals exit 75 so direct foreground restart controls still fail closed.
 When supervised, the C launcher resolves the selected Tron home and redirects
-stderr to `<Tron home>/logs/gateway-stderr.log` before executing Node. The Gateway
-records remain canonical in `gateway.jsonl` and are not mirrored while supervised.
-Mac app startup maintenance truncates this stderr file only above 1 MiB: it is
-reserved for rare launcher and Node abort text, not the volume-heavy Gateway
-record stream.
+stderr before executing Node, so launcher messages and Node aborts survive the
+process that produced them. That stream, the Gateway's own
+`gateway.jsonl` rotation, and every cap are owned by
+[observability](../../gateway/docs/observability.md).
 Quitting `Tron.app` does not stop accepted work. Quit and async command/uninstall
 exits request AppKit termination through `ApplicationTermination` on the main
 run loop, outside the main dispatch queue. AppKit's `.terminateLater` nested loop

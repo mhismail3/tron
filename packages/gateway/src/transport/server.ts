@@ -40,6 +40,9 @@ function rpcFailureLevel(error: unknown): "warning" | "error" {
 
 /** Per-RPC completions under this bound are debug detail; slower ones warn. */
 const SLOW_RPC_WARNING_MS = 1_000;
+/** A heartbeat this late means the event loop stalled long enough for clients
+ * to notice; shorter timer jitter is normal and not recorded. */
+const EVENT_LOOP_DELAY_WARNING_MS = 1_000;
 
 function diagnosticErrorCode(error: unknown): string {
   if (error instanceof GatewayError) return error.code;
@@ -596,7 +599,7 @@ export class GatewayServer {
       // Every heartbeat closes a window, so a delayed record's GC and
       // utilization cover exactly the delayed interval.
       const stallWindow = this.stallSampler.closeWindow();
-      if (timerDelayMs >= 1_000) {
+      if (timerDelayMs >= EVENT_LOOP_DELAY_WARNING_MS) {
         const pressure = this.pressureDiagnostic();
         void this.stallSampler.hostMemory().then((host) => {
           this.options.logger.log("warning", `Gateway event loop delayed heartbeat by ${timerDelayMs}ms (${pressure} ${formatStallEvidence(stallWindow, host)})`, {

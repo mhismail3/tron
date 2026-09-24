@@ -3,8 +3,8 @@ import { homedir } from "node:os";
 import { dirname } from "node:path";
 
 /*
- * Level policy (see docs/plans/2026-09-23-observability-foundation.md until the
- * event catalog lands): error means someone should look; warning is degraded
+ * Level policy (owned by packages/gateway/docs/observability.md): error means
+ * someone should look; warning is degraded
  * but handled; info reconstructs a timeline; debug is per-request detail kept
  * only in the in-memory buffer that diagnostic exports include.
  */

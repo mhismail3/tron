@@ -116,6 +116,9 @@ or state test; use the narrowest integration case that can reproduce the boundar
 Reserve full end-to-end suites for final cross-module/release checkpoints or an
 explicit maintainer request.
 
+When closing an incident, name the signal that would have diagnosed it in one
+step. If that signal was missing, add it at the right level, with its test and
+its row in `packages/gateway/docs/observability.md`, in the same change.
 
 ```bash
 # Gateway

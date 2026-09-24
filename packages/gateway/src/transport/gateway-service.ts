@@ -98,6 +98,8 @@ function projectKnowledgeObjectChunk(value: unknown): JsonValue {
 
 const thinkingLevels = ["off", "minimal", "low", "medium", "high", "xhigh", "max"] as const;
 const PROVIDER_CATALOG_MAX_ITEMS = 1_000;
+/** A session open slower than this is visible to the user as a stalled chat. */
+const SLOW_SESSION_OPEN_WARNING_MS = 1_000;
 const PROVIDER_CATALOG_MAX_STRING_BYTES = 4 * 1_048_576;
 const PROVIDER_CATALOG_MAX_FIELD_CHARACTERS = 100_000;
 
@@ -988,7 +990,7 @@ export class GatewayService {
         client.establishSynchronization(canonicalSessionId, snapshot);
         const completedAt = performance.now();
         this.dependencies.logger.log(
-          completedAt - startedAt >= 1_000 ? "warning" : "info",
+          completedAt - startedAt >= SLOW_SESSION_OPEN_WARNING_MS ? "warning" : "info",
           `Session open prepared in ${Math.max(0, Math.round(completedAt - startedAt))}ms (acquire ${Math.max(0, Math.round(acquiredAt - startedAt))}ms, snapshot ${Math.max(0, Math.round(completedAt - acquiredAt))}ms)`,
           { event: "session.open.prepared", source: "sessions", sessionId: canonicalSessionId, durationMs: completedAt - startedAt },
         );

@@ -2,7 +2,7 @@
 
 - **Started:** 2026-09-23
 - **Status:** Active
-- **Last updated:** 2026-09-24, L-3b
+- **Last updated:** 2026-09-24, L-6
 - **Goal:** Every Tron process records the right signals automatically, in a known place, at a meaningful level, so a failure can be diagnosed in one pass from what was already recorded.
 
 Follow the [plan protocol](README.md#protocol) to claim tasks and hand off.
@@ -208,7 +208,7 @@ user reinstalls manually, so batch them for one reinstall.
 | L-1d | Done | Out-of-band stderr capture | L-2 | observability session (L-1d lane), 2026-09-24 |
 | L-4 | Done | Mac app file logging | L-2 | observability session (L-4 lane), 2026-09-24 |
 | L-5 | Done | `scripts/tron diagnose` collector | L-1c, L-2 | observability session (L-5 lane), 2026-09-24 |
-| L-6 | Claimed | Event catalog and the incident rule | L-2 | observability session (L-6 lane), 2026-09-24 |
+| L-6 | Done | Event catalog and the incident rule | L-2 | observability session (L-6 lane), 2026-09-24 |
 | L-7 | Done | Stall cause in event-loop-delay records | L-2 | observability session, 2026-09-24 |
 | L-8 | Done | Gateway idle heap growth | none | observability session (L-8 lane), 2026-09-24 |
 | L-8b | Claimed | Lower the session-search rebuild's peak transient heap: build the index in bounded units so peak post-GC heap stays under 150 MB on the cloned 5,381-session corpus with identical index coverage and results, and warm-up no more than 10% slower than the measured 155–159 s | L-8 | observability session (L-8b lane), 2026-09-24 |
@@ -830,3 +830,13 @@ The 2026-09-23 17:33 UTC incident's records have rotated away, so its timeline i
 - Tasks added: none.
 - Kept on purpose: `AppLog` bounds `code` and `profileID` without redacting them, because both are identifiers from a fixed vocabulary, not free text. `mergePersisted` relabels retained rows as "iOS client · Retained", as before L-3.
 - For the next agent: takes effect after the user rebuilds the iPhone app.
+
+### L-6 · Done · 2026-09-24 · observability session (L-6 lane)
+
+- Result: `packages/gateway/docs/observability.md` is the single owner of the level policy, every stream (writer, rotation owner, caps), retention budgets and measured volume, the privacy rules and the event catalog. The catalog has 99 rows, each naming its emitting file: Gateway 61, deploy 3, launcher 4, Mac 13, iOS `AppLog` 11, and the iOS incident store 7. The duplicated inventories in the Gateway README logging and deploy sections, the Mac architecture doc and the iOS development and events docs were deleted and replaced with links. The README keeps the reader contracts it owns. `AGENTS.md` gained the incident rule under Validation.
+- Evidence (verified): the catalog was built by grepping every emitter and set-diffed against the code in both directions. The only literals missing from it, `gateway.fault` and `auth.failed`, occur only in `logger.test.ts`. Measured Gateway volume: 187 records and about 77 KB in the first 6 h after the L-2 build went live, about 300 KB a day, so the 40 MB budget holds months. iOS and Mac volumes wait for installed builds. `python3 scripts/check-documentation-policy.py` passed. The full Gateway suite (`nice -n 19`, 2 workers) passed 177 files and 1,928/1,928 after the constant changes below.
+- Changes: this commit (new `observability.md`, `AGENTS.md`, the Gateway README, `packages/mac-app/docs/architecture.md`, `packages/ios-app/docs/development.md` and `events.md`; in `transport/server.ts` and `transport/gateway-service.ts`, the two level-promoting thresholds became named constants, `EVENT_LOOP_DELAY_WARNING_MS` and `SLOW_SESSION_OPEN_WARNING_MS`, with their reasons; `transport/logger.ts`'s level-policy comment now points to the new doc).
+- Tasks added: none.
+- Kept on purpose: `runtime.diagnostic` (global provider resources) keeps one event name at two levels: error for a reload or extension load failure, warning for one provider's refresh failure. Each level fits its condition, and the catalog states both.
+- Deviations: supervisor review added the two named constants and the comment fix, which the lane had only reported.
+- For the next agent: record iOS and Mac daily volumes in the catalog once those builds are installed. The plan changes a cap only if it holds less than 14 days on the Mac or 7 days on iOS.
