@@ -573,6 +573,10 @@ catalog are owned by [`docs/observability.md`](docs/observability.md).
   `durationMs`, `step`) as fields rather than message text, and pass a thrown
   value as `error`; the writer stores a bounded, redacted
   `{name, code, message, stack}` with one level of `cause`.
+- `gateway.startup-step` records each interval between startup checkpoints,
+  adding to process start through listener readiness without double counting.
+  `gateway.shutdown-step` names and times every awaited shutdown operation so a
+  forced exit can be attributed to its owner.
 
 ### Diagnostic bundle
 
@@ -2146,9 +2150,12 @@ open a real PTY so packaging cannot silently ship a non-executable helper.
 When advertised as `session-search.v1`, `session.search` performs bounded
 canonical-message lexical retrieval and `session.search.anchor` validates the
 entry/file/branch revision before returning an exact transcript page. Search
-uses a disposable Gateway-owned postings database; canonical JSONL remains the
-only transcript authority. Open sessions are read through their existing
-RuntimeSlot, while cold files undergo complete graph validation before branch
+uses a disposable Gateway-owned postings database; each process discards the
+previous index before rebuilding it from canonical JSONL, which remains the
+only transcript authority. Warm-up starts after session-registry recovery and
+before automation recovery; startup never integrity-checks an index it will
+discard. Open sessions are read through their existing RuntimeSlot, while cold
+files undergo complete graph validation before branch
 selection. The index excludes tool, thinking, hidden, delegated, and abandoned
 content and reports partial coverage for malformed or interrupted files. Local
 semantic ranking and Jev reranking are separate explicit readiness/consent

@@ -85,7 +85,10 @@ The script:
 6. creates exact relative `runtime/bin-{arm64,x64}` command aliases for the
    corresponding checked Node binaries and the bundled backing SDK CLI;
 7. stages the launcher into the single Stable Login Item skeleton;
-8. hashes every regular file and safe internal symlink under `app/**` (including
+8. the launcher exports `TRON_GATEWAY_SEARCH_EMBEDDING_HELPER` as the signed
+   helper in app `Contents/Resources`; the Gateway still admits it through its
+   signature check, independently of the selected source payload version;
+9. hashes every regular file and safe internal symlink under `app/**` (including
    the complete production `node_modules` tree) and `runtime/**` with the
    launcher's bounded in-process hasher, then writes that fingerprint into the
    bundled `manifest.json` and stamps a runtime epoch. The shell hash helper

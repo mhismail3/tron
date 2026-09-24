@@ -1082,9 +1082,17 @@ int main(int argc, char **argv) {
 #else
 #error Unsupported macOS architecture
 #endif
-    char runtimeBin[PATH_MAX], childPath[PATH_MAX];
+    char runtimeBin[PATH_MAX], childPath[PATH_MAX], resourcesRoot[PATH_MAX], searchHelper[PATH_MAX];
     const char *inheritedPath = getenv("PATH");
     if (snprintf(runtimeBin, sizeof(runtimeBin), "%s/runtime/bin-%s", selectedPayloadRoot, runtimeArchitecture) >= (int)sizeof(runtimeBin) ||
+        snprintf(resourcesRoot, sizeof(resourcesRoot), "%s", bundledRoot) >= (int)sizeof(resourcesRoot)) {
+        fputs("Tron could not resolve its bundled search helper path.\n", stderr);
+        return 70;
+    }
+    char *resourcesSeparator = strrchr(resourcesRoot, '/');
+    if (resourcesSeparator == NULL) return 70;
+    *resourcesSeparator = '\0';
+    if (snprintf(searchHelper, sizeof(searchHelper), "%s/TronSearchEmbeddingHelper", resourcesRoot) >= (int)sizeof(searchHelper) ||
         snprintf(childPath, sizeof(childPath), "%s%s%s", runtimeBin,
                  inheritedPath == NULL || inheritedPath[0] == '\0' ? "" : ":", inheritedPath == NULL ? "" : inheritedPath) >= (int)sizeof(childPath) ||
         setenv("PATH", childPath, 1) != 0) {
@@ -1097,6 +1105,7 @@ int main(int argc, char **argv) {
         setenv("TRON_GATEWAY_RUNTIME_EPOCH", selectedIdentity.runtimeEpoch, 1) != 0 ||
         setenv("TRON_GATEWAY_PAYLOAD_ROOT", selectedPayloadRoot, 1) != 0 ||
         setenv("TRON_GATEWAY_BUNDLED_PAYLOAD_ROOT", bundledRoot, 1) != 0 ||
+        setenv("TRON_GATEWAY_SEARCH_EMBEDDING_HELPER", searchHelper, 1) != 0 ||
         setenv("TRON_GATEWAY_SUPERVISED", "1", 1) != 0 ||
         setenv("TRON_GATEWAY_UPDATE_HELPER", helper, 1) != 0) {
         fputs("Tron could not export Gateway payload identity.\n", stderr);

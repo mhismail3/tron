@@ -1,6 +1,6 @@
 import { DatabaseSync } from "node:sqlite";
-import { chmod, mkdir, rename } from "node:fs/promises";
-import { renameSync, rmSync, statSync } from "node:fs";
+import { chmod, mkdir, rm } from "node:fs/promises";
+import { chmodSync, rmSync, statSync } from "node:fs";
 import { dirname } from "node:path";
 import { createHash } from "node:crypto";
 import {
@@ -110,17 +110,9 @@ export class SessionSearchIndex {
 
   static async open(path: string, options: { maxStorageBytes?: number } = {}): Promise<SessionSearchIndex> {
     await mkdir(dirname(path), { recursive: true, mode: 0o700 });
-    let index: SessionSearchIndex;
-    try {
-      const candidate = new SessionSearchIndex(path, options.maxStorageBytes);
-      const integrity = candidate.database.prepare("PRAGMA integrity_check").get() as { integrity_check?: string } | undefined;
-      if (integrity?.integrity_check !== "ok") { candidate.close(); throw new Error("Session search SQLite integrity check failed"); }
-      if (candidate.storageBytes() > candidate.maxStorageBytes) candidate.recreate("oversized");
-      index = candidate;
-    } catch {
-      try { await rename(path, `${path}.corrupt-${Date.now()}`); } catch { /* no prior usable file */ }
-      index = new SessionSearchIndex(path, options.maxStorageBytes);
-    }
+    await Promise.all([path, `${path}-wal`, `${path}-shm`].map(file => rm(file, { force: true })));
+    const index = new SessionSearchIndex(path, options.maxStorageBytes);
+    if (index.storageBytes() > index.maxStorageBytes) index.recreate();
     await chmod(path, 0o600);
     return index;
   }
@@ -156,7 +148,7 @@ export class SessionSearchIndex {
       this.database.prepare("INSERT INTO control(id,value) VALUES(1,?) ON CONFLICT(id) DO UPDATE SET value=excluded.value").run(this.indexRevision);
       this.database.exec("COMMIT");
       if (this.storageBytes() > this.maxStorageBytes) {
-        this.recreate("overflow");
+        this.recreate();
         throw new Error("Session search index storage bound exceeded; disposable index was recreated");
       }
     } catch (error) {
@@ -167,20 +159,14 @@ export class SessionSearchIndex {
 
   clear(): void {
     this.assertOpen();
-    this.database.exec("DELETE FROM sessions");
-    if (this.storageBytes() > this.maxStorageBytes) {
-      this.recreate("clear");
-      return;
-    }
-    this.indexRevision = digest({ previous: this.indexRevision, clear: true });
-    this.database.prepare("INSERT INTO control(id,value) VALUES(1,?) ON CONFLICT(id) DO UPDATE SET value=excluded.value").run(this.indexRevision);
+    this.recreate();
   }
 
   remove(sessionID: string): void {
     this.assertOpen();
     this.database.prepare("DELETE FROM sessions WHERE session_id = ?").run(sessionID);
     if (this.storageBytes() > this.maxStorageBytes) {
-      this.recreate("remove");
+      this.recreate();
       return;
     }
     this.indexRevision = digest({ previous: this.indexRevision, removed: sessionID });
@@ -254,12 +240,12 @@ export class SessionSearchIndex {
 
   close(): void { if (!this.closed) { this.closed = true; this.database.close(); } }
 
-  private recreate(reason: string): void {
+  private recreate(): void {
     this.database.close();
-    try { renameSync(this.path, `${this.path}.${reason}-${Date.now()}`); }
-    catch { rmSync(this.path, { force: true }); }
+    for (const file of [this.path, `${this.path}-wal`, `${this.path}-shm`]) rmSync(file, { force: true });
     this.database = new DatabaseSync(this.path, { allowExtension: false, enableForeignKeyConstraints: true });
     this.configureDatabase();
+    chmodSync(this.path, 0o600);
     this.indexRevision = "empty";
   }
 

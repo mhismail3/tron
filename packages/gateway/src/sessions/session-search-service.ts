@@ -76,6 +76,7 @@ interface SemanticVector {
 export class SessionSearchService {
   private initialized = false;
   private initializing: Promise<void> | undefined;
+  private readonly warmupAbort = new AbortController();
   private policy: SessionSearchPolicy = DEFAULT_POLICY;
   private semanticClient: SessionSearchEmbeddingClient | undefined;
   private readonly semanticVectors = new Map<string, SemanticVector>();
@@ -155,16 +156,18 @@ export class SessionSearchService {
   getPolicy(): SessionSearchPolicy { return { ...this.policy }; }
 
   async warm(): Promise<void> {
-    await this.initialize();
-    this.startSemanticIndexing();
+    await this.initialize(this.warmupAbort.signal);
+    if (!this.warmupAbort.signal.aborted) this.startSemanticIndexing();
   }
 
   async initialize(signal?: AbortSignal): Promise<void> {
     if (this.initialized) return;
-    if (!this.initializing) this.initializing = this.rebuild().finally(() => { this.initializing = undefined; this.startSemanticIndexing(); });
+    if (!this.initializing) this.initializing = this.rebuild().finally(() => { this.initializing = undefined; if (!this.warmupAbort.signal.aborted) this.startSemanticIndexing(); });
     await awaitWithAbort(this.initializing, signal);
-    this.initialized = true;
+    if (!this.warmupAbort.signal.aborted) this.initialized = true;
   }
+
+  cancelWarmup(): void { this.warmupAbort.abort(); }
 
   async search(request: SessionSearchRequest, signal?: AbortSignal): Promise<SessionSearchResponse> {
     const query = boundedQuery(request.query);
@@ -310,7 +313,9 @@ export class SessionSearchService {
 
   async close(): Promise<void> {
     this.sessions.setSearchInvalidator(() => {});
+    this.cancelWarmup();
     this.semanticAbort.abort();
+    await this.initializing?.catch(() => {});
     if (this.semanticTask) await this.semanticTask.catch(() => {});
     if (this.dirtyRefresh) await this.dirtyRefresh.catch(() => {});
     await this.semanticTail.catch(() => {});
@@ -334,7 +339,9 @@ export class SessionSearchService {
     this.coverageReason = undefined;
     const corpusFacts: string[] = [];
     for (const session of catalog.sessions) {
+      if (this.warmupAbort.signal.aborted) return;
       const document = await this.loadDocument(session.id);
+      if (this.warmupAbort.signal.aborted) return;
       if (!document) { this.coverageOmittedSessions += 1; this.coverageReason = "One or more canonical sessions could not be admitted for search"; continue; }
       corpusFacts.push(`${document.sessionId}:${document.branchDigest}`);
       try { this.index.replace(document); }

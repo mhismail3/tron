@@ -1,5 +1,5 @@
 import { homedir } from "node:os";
-import { dirname, join } from "node:path";
+import { join } from "node:path";
 import { existsSync } from "node:fs";
 import { ModelRuntime, SettingsManager } from "@earendil-works/pi-coding-agent";
 import { loadConfig } from "./config.js";
@@ -27,6 +27,7 @@ import { NotificationGrantStore } from "./notifications/grant-store.js";
 import { PushRelayClient } from "./notifications/relay-client.js";
 import { NotificationService } from "./notifications/notification-service.js";
 import { handledSignalExitCode, SUPERVISOR_RELAUNCH_EXIT_CODE } from "./lifecycle/supervisor-exit-policy.js";
+import { shutdownStep } from "./lifecycle/shutdown-step.js";
 import { configureAgentBinEnvironment, configureSupervisedNodeCommandEnvironment } from "./runtime/node-command-environment.js";
 import { AutomationStore } from "./automations/automation-store.js";
 import { AutomationScheduler } from "./automations/automation-scheduler.js";
@@ -231,9 +232,9 @@ const sessions = new RuntimeRegistry({
     );
   },
 });
-const bundledSearchHelper = join(dirname(dirname(process.execPath)), "TronSearchEmbeddingHelper");
 const developmentHelperOverride = process.env.NODE_ENV === "development" ? process.env.TRON_SEARCH_EMBEDDING_HELPER : undefined;
-const searchHelperCandidate = developmentHelperOverride ?? (existsSync(bundledSearchHelper) ? bundledSearchHelper : undefined);
+const bundledSearchHelper = process.env.TRON_GATEWAY_SEARCH_EMBEDDING_HELPER;
+const searchHelperCandidate = developmentHelperOverride ?? (bundledSearchHelper && existsSync(bundledSearchHelper) ? bundledSearchHelper : undefined);
 let sessionSearch: SessionSearchService | undefined;
 let sessionSearchIndex: SessionSearchIndex | undefined;
 try {
@@ -346,6 +347,12 @@ let stopping = false;
 let sessionSearchWarmTask: Promise<void> | undefined;
 let storageMaintenanceTimer: NodeJS.Timeout | undefined;
 let uploadStoragePressure: "normal" | "low" | "exhausted" = "normal";
+function recordShutdownStep(step: string, durationMs: number): void {
+  logger.log("info", `Gateway shutdown step ${step} took ${Math.round(durationMs)} ms`, {
+    event: "gateway.shutdown-step", source: "lifecycle", step, durationMs,
+  });
+}
+
 async function shutdown(reason: string, exitCode = 0): Promise<void> {
   if (stopping) return;
   stopping = true;
@@ -361,13 +368,14 @@ async function shutdown(reason: string, exitCode = 0): Promise<void> {
   try {
     automations.beginDrain();
     workRegistry.beginDrain();
+    sessionSearch?.cancelWarmup();
     if (storageMaintenanceTimer) clearInterval(storageMaintenanceTimer);
     storageMaintenanceTimer = undefined;
-    await transport.close();
-    await Promise.allSettled([
+    await shutdownStep("transport-close", () => transport.close(), recordShutdownStep);
+    await shutdownStep("cancellation", async () => { await Promise.allSettled([
       automations.requestShutdownCancellation(),
       workRegistry.requestCancellation(),
-    ]);
+    ]); }, recordShutdownStep);
     // Administrative restart already waited without a deadline. Signal/error
     // shutdown gets only a short cleanup grace; failure cannot reopen admission.
     let cleanupTimer!: NodeJS.Timeout;
@@ -375,7 +383,7 @@ async function shutdown(reason: string, exitCode = 0): Promise<void> {
       cleanupTimer = setTimeout(resolve, 2_000);
       cleanupTimer.unref();
     });
-    await Promise.race([workRegistry.waitUntilSettled(), cleanupGrace]);
+    await shutdownStep("work-settle", () => Promise.race([workRegistry.waitUntilSettled(), cleanupGrace]), recordShutdownStep);
     clearTimeout(cleanupTimer);
     if (workRegistry.size > 0) {
       logger.log(
@@ -384,15 +392,15 @@ async function shutdown(reason: string, exitCode = 0): Promise<void> {
         { event: "gateway.shutdown-cleanup-expired", source: "lifecycle" },
       );
     }
-    terminal.dispose();
-    notifications.dispose();
-    knowledge.dispose();
-    await automations.dispose();
-    await sessionSearchWarmTask?.catch(() => {});
+    await shutdownStep("terminal-dispose", async () => { terminal.dispose(); }, recordShutdownStep);
+    await shutdownStep("notifications-dispose", async () => { notifications.dispose(); }, recordShutdownStep);
+    await shutdownStep("knowledge-dispose", async () => { knowledge.dispose(); }, recordShutdownStep);
+    await shutdownStep("automations-dispose", () => automations.dispose(), recordShutdownStep);
+    await shutdownStep("search-warm-settle", async () => { await sessionSearchWarmTask?.catch(() => {}); }, recordShutdownStep);
     sessionSearchWarmTask = undefined;
-    await sessionSearch?.close();
-    await sessions.dispose();
-    await releaseRuntimeLock();
+    await shutdownStep("search-close", async () => { await sessionSearch?.close(); }, recordShutdownStep);
+    await shutdownStep("sessions-dispose", () => sessions.dispose(), recordShutdownStep);
+    await shutdownStep("runtime-lock-release", () => releaseRuntimeLock(), recordShutdownStep);
     clearTimeout(forced);
     recordStopped(exitCode);
     process.exit(exitCode);
@@ -565,7 +573,12 @@ await transport.listen(async () => {
     if (searchHelperCandidate && await admitSearchEmbeddingHelper(searchHelperCandidate)) {
       if (stopping) return;
       sessionSearch.setSemanticClient(new NaturalLanguageEmbeddingClient(searchHelperCandidate));
-    } else if (searchHelperCandidate) logger.log("warning", "Signed NaturalLanguage search helper admission failed; semantic search remains unavailable", { event: "session-search.helper-unavailable", source: "search" });
+    } else {
+      logger.log("warning", searchHelperCandidate
+        ? "Signed NaturalLanguage search helper admission failed; semantic search remains unavailable"
+        : "NaturalLanguage search helper is unavailable; semantic search remains unavailable",
+      { event: "session-search.helper-unavailable", source: "search" });
+    }
     if (!stopping) {
       await sessionSearch.warm();
       const durationMs = performance.now() - warmStartedAt;
@@ -573,7 +586,9 @@ await transport.listen(async () => {
         event: "session-search.warm", source: "search", durationMs,
       });
     }
-  })().catch((error) => logger.log("warning", "Session search warm-up failed; lexical search will recover on demand", { event: "session-search.warm-failed", source: "search", error }));
+  })().catch((error) => {
+    if (!stopping) logger.log("warning", "Session search warm-up failed; lexical search will recover on demand", { event: "session-search.warm-failed", source: "search", error });
+  });
   transport.setStartupPhase("automation-recovery");
   await automations.initialize();
   startupCheckpoint("automation-recovery");

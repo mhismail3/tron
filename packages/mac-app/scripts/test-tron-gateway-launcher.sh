@@ -22,7 +22,9 @@ EXPECTED_NODE_VERSION="$(<"$REPO_ROOT/.node-version")"
     && "$($NODE_ROOT/bin/node --version 2>/dev/null || true)" == "v$EXPECTED_NODE_VERSION" \
     && -f "$NODE_ROOT/lib/node_modules/npm/package.json" ]] \
   || { echo "TRON_NODE_ROOT or PATH must select the pinned official Node $EXPECTED_NODE_VERSION toolchain" >&2; exit 2; }
-mkdir -p "$(dirname "$HELPER")" "$BUNDLE"
+mkdir -p "$(dirname "$HELPER")" "$BUNDLE" "$APP_ROOT/Resources"
+printf '%s\n' 'fixture helper' > "$APP_ROOT/Resources/TronSearchEmbeddingHelper"
+SEARCH_HELPER="$(realpath "$APP_ROOT/Resources/TronSearchEmbeddingHelper")"
 xcrun --sdk macosx clang -O2 -Wall -Wextra -Werror -Wno-deprecated-declarations \
   -arch arm64 -arch x86_64 -mmacosx-version-min=15.0 \
   "$SCRIPT_DIR/tron-gateway-launcher.c" -o "$HELPER"
@@ -43,7 +45,7 @@ make_payload() {
   printf '%s\n' '#!/usr/bin/env node' > "$root/app/node_modules/@earendil-works/pi-coding-agent/dist/cli.js"
   chmod 755 "$root/app/node_modules/@earendil-works/pi-coding-agent/dist/cli.js"
   ln -s ../@earendil-works/pi-coding-agent/dist/cli.js "$root/app/node_modules/.bin/pi"
-  printf '%s\n' '#!/bin/sh' '[ -n "$TRON_GATEWAY_BUNDLED_PAYLOAD_ROOT" ] || exit 9' '[ "$(command -v npm)" = "$TRON_GATEWAY_PAYLOAD_ROOT/runtime/bin-arm64/npm" ] || exit 11' '[ "${TRON_FIXTURE_WRITE_STDERR:-0}" != 1 ] || printf "fixture Gateway stderr\\n" >&2' 'printf "%s\\n" "$TRON_GATEWAY_PAYLOAD_ROOT"' 'exit 0' > "$root/runtime/node-arm64"
+  printf '%s\n' '#!/bin/sh' '[ -n "$TRON_GATEWAY_BUNDLED_PAYLOAD_ROOT" ] || exit 9' '[ "$(command -v npm)" = "$TRON_GATEWAY_PAYLOAD_ROOT/runtime/bin-arm64/npm" ] || exit 11' "[ \"\$TRON_GATEWAY_SEARCH_EMBEDDING_HELPER\" = \"$SEARCH_HELPER\" ] || { printf 'search helper mismatch: %s\\n' \"\$TRON_GATEWAY_SEARCH_EMBEDDING_HELPER\" >&2; exit 12; }" '[ "${TRON_FIXTURE_WRITE_STDERR:-0}" != 1 ] || printf "fixture Gateway stderr\\n" >&2' 'printf "%s\\n" "$TRON_GATEWAY_PAYLOAD_ROOT"' 'exit 0' > "$root/runtime/node-arm64"
   # Keep each fake runtime over the canonical minimum size without embedding
   # NUL bytes that would make the shell fixture itself invalid.
   dd if=/dev/zero bs=1024 count=1025 2>/dev/null | tr '\\0' '#' >> "$root/runtime/node-arm64"

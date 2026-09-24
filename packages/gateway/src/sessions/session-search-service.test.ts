@@ -45,6 +45,48 @@ async function realService(embedding?: SessionSearchEmbeddingClient, sessions = 
 }
 
 describe("SessionSearchService backend seams", () => {
+  it("stops a rebuilding warm-up after the in-flight session when closed", async () => {
+    let readCount = 0;
+    let firstReadStarted!: () => void;
+    let releaseFirstRead!: () => void;
+    const started = new Promise<void>(resolve => { firstReadStarted = resolve; });
+    const blocked = new Promise<void>(resolve => { releaseFirstRead = resolve; });
+    const sessions = {
+      setSearchInvalidator: () => {},
+      catalog: async () => ({ sessions: [{ id: "one" }, { id: "two" }, { id: "three" }] }),
+      readSearchCut: async () => {
+        readCount += 1;
+        if (readCount === 1) { firstReadStarted(); await blocked; }
+        return { summary: { id: "one", name: "Fixture", firstMessage: "Fixture", cwd: "/tmp", modified: new Date("2026-01-01T00:00:00Z") }, entries, fileIdentity: "file-1", leafEntryId: "semantic" };
+      },
+    } as any;
+    const root = await mkdtemp(join(tmpdir(), "tron-search-close-warmup-")); roots.push(root);
+    const index = await SessionSearchIndex.open(join(root, "index.sqlite"));
+    const service = new SessionSearchService(sessions, index);
+    const warming = service.warm().catch(() => {});
+    await started;
+    const closing = service.close();
+    releaseFirstRead();
+    await Promise.all([warming, closing]);
+    expect(readCount).toBe(1);
+
+    // Negative control: without cancellation, the same catalog requires all reads.
+    let controlReads = 0;
+    const controlSessions = {
+      setSearchInvalidator: () => {},
+      catalog: async () => ({ sessions: [{ id: "one" }, { id: "two" }, { id: "three" }] }),
+      readSearchCut: async () => {
+        controlReads += 1;
+        return { summary: { id: "one", name: "Fixture", firstMessage: "Fixture", cwd: "/tmp", modified: new Date("2026-01-01T00:00:00Z") }, entries, fileIdentity: `file-${controlReads}`, leafEntryId: "semantic" };
+      },
+    } as any;
+    const controlIndex = await SessionSearchIndex.open(join(root, "control.sqlite"));
+    const control = new SessionSearchService(controlSessions, controlIndex);
+    await control.warm();
+    expect(controlReads).toBe(3);
+    await control.close();
+  });
+
   it("fuses semantic candidates before the final result cap", async () => {
     const embedding = new FixtureEmbedding();
     const { index, service } = await realService(embedding);

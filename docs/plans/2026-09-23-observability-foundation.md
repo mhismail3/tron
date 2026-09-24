@@ -2,7 +2,7 @@
 
 - **Started:** 2026-09-23
 - **Status:** Active
-- **Last updated:** 2026-09-24, L-9a
+- **Last updated:** 2026-09-24, L-15c
 - **Goal:** Every Tron process records the right signals automatically, in a known place, at a meaningful level, so a failure can be diagnosed in one pass from what was already recorded.
 
 Follow the [plan protocol](README.md#protocol) to claim tasks and hand off.
@@ -219,7 +219,7 @@ user reinstalls manually, so batch them for one reinstall.
 | L-10 | Done | iOS connect-failure records say whether the socket ever opened, and on which interface | none | observability session, 2026-09-24 |
 | L-15 | Done | Startup timing: stop to bound and bound to first startup phase | L-2 | observability session, 2026-09-24 |
 | L-15b | Done | Fix the dominant startup cost the L-15 records name on the next real restart (the user's rebuild) | L-15 | observability session (L-15b lane), 2026-09-24 |
-| L-15c | Claimed | After the next real restart, read the `automation.recovery-step` and `session-search.warm` records and fix the measured owner of automation recovery's time | L-15b | observability session (L-15c lane), 2026-09-24 |
+| L-15c | Done | After the next real restart, read the `automation.recovery-step` and `session-search.warm` records and fix the measured owner of automation recovery's time | L-15b | observability session (L-15c lane), 2026-09-24 |
 | L-16 | Done | Restart drain hangs on terminal-receipt persistence | none | observability session, 2026-09-24 |
 | L-17 | Done | Judge a drain stalled by its oldest blocker without progress, not by any change in the blocker set | L-16 | observability session (drain lane), 2026-09-24 |
 | L-18 | Done | Decide whether a restart drain proceeds when only unresolved (blocked) persistence owners remain | L-16 | observability session (drain lane), 2026-09-24 |
@@ -878,3 +878,16 @@ The 2026-09-23 17:33 UTC incident's records have rotated away, so its timeline i
 - Tasks added: none.
 - Evidence (not yet verified): the URLSession transport-opening callbacks have not been exercised on a device, and the new label needs a real network outage to be seen.
 - For the next agent: once this iPhone build is installed, a few days of `gateway.connection` records decide L-9b, which moves to a new proposed plan when this plan closes.
+
+### L-15c · Done · 2026-09-24 · observability session (L-15c lane)
+
+- Result: the 2026-09-24 17:22 UTC restart's records named three defects, all fixed.
+  1. Startup: 7.4 s of automation recovery's 8.6 s passed before `initialize()` started. The session-search warm-up task runs synchronously until its first real await, into `SessionSearchIndex.clear()`. That cascaded `DELETE FROM sessions` through the passages and term tables of a 394 MB SQLite file. Opening the file also ran a synchronous `PRAGMA integrity_check`. The index is disposable, and every process rebuilds it before anything reads it. `open` now starts from a fresh empty file (the previous database and its sidecars are removed unchecked), and `clear()` on a populated index recreates the file.
+  2. Semantic search was silently off. The Gateway looked for `TronSearchEmbeddingHelper` beside its runtime, where no payload has ever had it. The launcher now exports the app's `Resources/TronSearchEmbeddingHelper` path as `TRON_GATEWAY_SEARCH_EMBEDDING_HELPER`, and the signature admission check is unchanged. A missing helper now logs `session-search.helper-unavailable`.
+  3. Shutdown: a restart during the roughly 2-minute warm-up waited on the warm task until the 15 s forced exit (exit 1). The rebuild now stops between sessions when shutdown cancels it, and shutdown records a `gateway.shutdown-step` with `durationMs` for each awaited step, so a slow shutdown names its step.
+- Evidence (verified): on an APFS clone of the real index, `open()` plus `clear()` went from 14,185 ms (5,656 ms open, 8,529 ms clear) to 5.8 ms. The supervisor measured 4,755 and 8,092 ms separately. Focused tests went from 16 to 20 and cover: a populated index reopens empty and usable; clearing a populated index leaves it empty; a rebuild stops within one session of cancellation; shutdown steps are recorded with a controlled clock. Each has a negative control. The launcher shell test passed. The full Gateway suite (`nice -n 19`, 2 workers) passed 179 files and 1,941/1,941, with no live `gateway.event-loop-delay`.
+- Evidence (inspected): searches and anchors await initialization before reading the index. Semantic vectors live in memory, and the allowance ledger is a separate database, unchanged. Nothing in the index must survive a restart.
+- Changes: this commit (`session-search-index.ts`, `session-search-service.ts` and their tests; new `shutdown-step.ts` and its test in `packages/gateway/src/lifecycle/`; `gateway-main.ts`; the launcher and its shell test; the Gateway README, `packages/mac-app/docs/development.md` and the observability catalog).
+- Tasks added: none.
+- Deviations: supervisor review sent back the lane's first version, which moved warm-up after `gateway.listening`. That would only have moved the 8 s event-loop block to the moment phones reconnect, against an 8 s pong deadline. The lane's one-table reproduction (51 ms) had missed the real schema's cascade.
+- For the next agent: the index and shutdown fixes arrive with a Gateway rebuild. Semantic search also needs a Mac app reinstall, because the launcher exports the helper path. The first restart after both should show `session-search-index` near zero, `automation-recovery` near its 1.2 s of parts, and `gateway.shutdown-step` records.

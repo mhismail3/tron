@@ -16,13 +16,47 @@ function document(): SearchIndexDocument {
 }
 
 describe("SessionSearchIndex", () => {
-  it("rebuilds a corrupt disposable index while preserving an honest empty capability", async () => {
+  it("discards an unreadable disposable index before constructing a fresh capability", async () => {
     const root = await mkdtemp(join(tmpdir(), "tron-search-corrupt-")); roots.push(root);
     const path = join(root, "index.sqlite");
     await writeFile(path, Buffer.from("not a sqlite database"));
     const index = await SessionSearchIndex.open(path);
     expect(index.stats()).toMatchObject({ state: "complete", sessionsIndexed: 0, passagesIndexed: 0, indexRevision: "empty" });
     expect(index.candidates("violet", 10)).toEqual([]);
+    index.close();
+  });
+
+  it("reopens a populated disposable index empty and usable", async () => {
+    const root = await mkdtemp(join(tmpdir(), "tron-search-reopen-empty-")); roots.push(root);
+    const path = join(root, "index.sqlite");
+    const original = await SessionSearchIndex.open(path);
+    original.replace(document());
+    // Negative control: prove the old index really held a candidate before restart.
+    expect(original.candidates("violet", 10)).toHaveLength(1);
+    original.close();
+
+    const reopened = await SessionSearchIndex.open(path);
+    expect(reopened.stats()).toMatchObject({ state: "complete", sessionsIndexed: 0, passagesIndexed: 0, indexRevision: "empty" });
+    expect(reopened.candidates("violet", 10)).toEqual([]);
+    reopened.replace(document());
+    expect(reopened.candidates("violet", 10)).toHaveLength(1);
+    reopened.close();
+  });
+
+  it("clears a populated disposable index by recreation and remains usable", async () => {
+    const root = await mkdtemp(join(tmpdir(), "tron-search-clear-empty-")); roots.push(root);
+    const path = join(root, "index.sqlite");
+    const index = await SessionSearchIndex.open(path);
+    index.replace(document());
+    // Negative control: prove clear must remove actual populated content.
+    expect(index.candidates("violet", 10)).toHaveLength(1);
+
+    index.clear();
+    expect(index.stats()).toMatchObject({ sessionsIndexed: 0, passagesIndexed: 0, indexRevision: "empty" });
+    expect(index.candidates("violet", 10)).toEqual([]);
+    expect(statSync(path).mode & 0o777).toBe(0o600);
+    index.replace(document());
+    expect(index.candidates("violet", 10)).toHaveLength(1);
     index.close();
   });
 
