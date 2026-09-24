@@ -4,24 +4,47 @@ import { randomUUID } from "node:crypto";
 import { join } from "node:path";
 import { GatewayError } from "../errors.js";
 import { AsyncMutex } from "../util/async-mutex.js";
+import type { LogRecord } from "./logger.js";
 
 const DIAGNOSTIC_DIRECTORY = "/tmp/tron-diagnostics";
 const MAX_EXPORT_BYTES = 512 * 1024;
 const MAX_RETAINED_EXPORTS = 10;
+/** Newest Gateway debug records appended to an export, bounded separately
+ * from the client's own content. */
+const MAX_DEBUG_SECTION_BYTES = 1_024 * 1_024;
 const diagnosticExportMutex = new AsyncMutex();
 
 /** Writes an explicitly requested, bounded diagnostic snapshot outside the
  * canonical data directory. The path is server-owned and never client input. */
 export function exportDiagnosticSnapshot(
   content: string,
+  debugRecords: readonly LogRecord[] = [],
   now = new Date(),
   directory = DIAGNOSTIC_DIRECTORY,
 ): Promise<{ path: string; exportedAt: string }> {
-  return diagnosticExportMutex.run(() => exportDiagnosticSnapshotImpl(content, now, directory));
+  return diagnosticExportMutex.run(() => exportDiagnosticSnapshotImpl(content, debugRecords, now, directory));
+}
+
+/** The Gateway's debug buffer never reaches its persisted log; exports are
+ * the one place it is kept. Newest records win when the section is full. */
+function debugSection(records: readonly LogRecord[]): string {
+  if (records.length === 0) return "";
+  const lines: string[] = [];
+  let bytes = 0;
+  for (let index = records.length - 1; index >= 0; index -= 1) {
+    const line = JSON.stringify(records[index]);
+    const lineBytes = Buffer.byteLength(line) + 1;
+    if (bytes + lineBytes > MAX_DEBUG_SECTION_BYTES) break;
+    lines.push(line);
+    bytes += lineBytes;
+  }
+  lines.reverse();
+  return `\n\n--- Gateway debug buffer (${lines.length} of ${records.length} records) ---\n${lines.join("\n")}\n`;
 }
 
 async function exportDiagnosticSnapshotImpl(
   content: string,
+  debugRecords: readonly LogRecord[],
   now: Date,
   directory: string,
 ): Promise<{ path: string; exportedAt: string }> {
@@ -47,7 +70,7 @@ async function exportDiagnosticSnapshotImpl(
   await chmod(directory, 0o700);
   const path = join(directory, `logs-${now.getTime()}-${randomUUID()}.txt`);
   try {
-    await writeFile(path, content, { encoding: "utf8", flag: "wx", mode: 0o600 });
+    await writeFile(path, content + debugSection(debugRecords), { encoding: "utf8", flag: "wx", mode: 0o600 });
     await chmod(path, 0o600);
     await pruneDiagnosticSnapshots(path, directory);
     return { path, exportedAt: now.toISOString() };

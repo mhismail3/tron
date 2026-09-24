@@ -2,7 +2,7 @@
 
 - **Started:** 2026-09-23
 - **Status:** Active
-- **Last updated:** 2026-09-24, L-11–L-16 added
+- **Last updated:** 2026-09-24, L-2
 - **Goal:** Every Tron process records the right signals automatically, in a known place, at a meaningful level, so a failure can be diagnosed in one pass from what was already recorded.
 
 Follow the [plan protocol](README.md#protocol) to claim tasks and hand off.
@@ -201,7 +201,7 @@ user reinstalls manually, so batch them for one reinstall.
 | L-0 | Done | Payload import containment | none | planning session, 2026-09-23 |
 | L-1a | Done | Gateway startup-fatal record | none | observability-L-1a session, 2026-09-23 |
 | L-1c | Ready | Deploy timeline and real failure cause | L-1a | |
-| L-2 | Claimed | Gateway levels, debug buffer, retention, record format | none | observability-L-2 session, 2026-09-24 |
+| L-2 | Done | Gateway levels, debug buffer, retention, record format | none | observability-L-2 session, 2026-09-24 |
 | L-3 | Ready | iOS always-on recording replaces Diagnostic Capture; one-tap export | L-2 | |
 | L-1b | Ready | Launcher records | none | |
 | L-1d | Ready | Out-of-band stderr capture | L-2 | |
@@ -508,3 +508,13 @@ user reinstalls manually, so batch them for one reinstall.
 - Tasks added: none.
 - Deviations: the shim installs no global `uncaughtException`/`unhandledRejection` handlers, because `gateway-main.ts` already installs them once running and errors before that reject the import the shim awaits. `resolveTronHome` moved from `config.ts` into `packages/gateway/src/tron-home.ts` so the shim avoids `config.ts`'s third-party imports; `boundedMessage` is now exported from the logger for reuse. Payload and home path prefixes are shortened before redaction, because the standard redaction replaces whole `/Users/...` paths and would hide the failing file. One level of `cause` is recorded because wrapped startup errors carry their root reason there.
 - For the next agent: run the full Gateway suite only when the live Gateway is idle or on another machine; focused owner tests are the default. L-1c can now read `gateway.fatal-startup` records for the candidate's `runtimeEpoch` or `payloadVersion`. Keep the entrypoint above 1,024 bytes; the installed launcher enforces that minimum.
+
+### L-2 · Done · 2026-09-24 · observability-L-2 session
+
+- Result: `GatewayLogger` has four levels. Debug stays in a bounded memory buffer (4,000 records or 2 MB) that `system.logs.export` appends to the exported snapshot; info and above persist to eight 5 MB numbered segments with in-memory size tracking. Records carry writer-stamped `process`, `runtimeEpoch` and `payloadVersion`, correlation fields (`sessionId`, `connectionId`, `commandId`) and a bounded, redacted structured `error`. `gateway.started` is recorded once per process. The starting level table is applied to the events that exist.
+- Evidence: `npx vitest run src/transport src/admin src/index.test.ts src/config.test.ts` with Node 22.22.0: 41 files, 360/360. `npm run build` clean. New `logger.test.ts` (7) covers record format, structured error bounds, debug excluded from file and tail, debug buffer count/byte eviction, 8 × 5 MB rotation (~48 MB written, 40 MB kept, oldest gone) and tail restore from the newest segments. Negative controls: persisting debug fails the debug test; disabling rotation fails the rotation test. The full Gateway suite was not run (live Gateway on this Mac; see L-1a).
+- Changes: this commit (`logger.ts`, `server.ts`, `gateway-main.ts`, `gateway-service.ts`, `diagnostic-export.ts`, `index.ts`, tests, Gateway README logging section).
+- Tasks added: none.
+- Kept on purpose: synchronous append (no measurement showed event-loop cost). Stdout/stderr mirroring stays until L-1d. `diagnostic-export` storage stays in `/tmp/tron-diagnostics`; L-3 moves it. `GlobalProviderResources` diagnostics still interpolate error text into messages; they are not `catch`-site faults of the transport and were left for the event catalog pass (L-6).
+- Deviations: `rpc.request` no longer existed on `main`, and fast successful `rpc.completed` was already omitted rather than info, so those rows became "record fast successes at debug". Fast successful `session.stage` records were omitted before; they are now debug. `connection.admitted` is deleted; `connection.opened` is emitted at hello with the admission-to-hello duration. `rpc.error` is warning for every `GatewayError` code except `internal`, not only `busy`, per the level policy that caller mistakes are warnings. `describeError` moved from `index.ts` into the logger so the entrypoint and writer share one bound.
+- For the next agent: the running Gateway adopts this only after the user rebuilds it. L-1d, L-3, L-4, L-6, L-7 and L-15 are unblocked. L-6 should record one day's measured volume once a rebuilt Gateway has run for a day.

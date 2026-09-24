@@ -156,7 +156,7 @@ describe("WebSocket connection and outbound capacity", () => {
     });
     await new Promise<void>((resolve) => socket.once("open", () => resolve()));
     socket.send(JSON.stringify({ type: "hello", protocolVersion: 5 }));
-    await waitUntil(() => logger.log.mock.calls.some((call) => call[2]?.event === "connection.handshake"));
+    await waitUntil(() => logger.log.mock.calls.some((call) => call[2]?.event === "connection.opened"));
 
     const prepareBroadcastFrame = vi.spyOn(gateway as any, "prepareBroadcastFrame");
     const sendOutcome = vi.spyOn(gateway as any, "sendOutcome");
@@ -461,7 +461,7 @@ describe("WebSocket connection and outbound capacity", () => {
     target.send(JSON.stringify({ type: "hello", protocolVersion: 5 }));
     local.send(JSON.stringify({ type: "hello", protocolVersion: 5 }));
     await waitUntil(() => localFrames.some((frame) => frame.type === "hello")
-      && logger.log.mock.calls.filter((call) => call[2]?.event === "connection.handshake").length === 2);
+      && logger.log.mock.calls.filter((call) => call[2]?.event === "connection.opened").length === 2);
 
     const closed = new Promise<number>((resolve) => target.once("close", (code) => resolve(code)));
     await devices.revoke(paired.deviceId, () => gateway.disconnectDevice(paired.deviceId));
@@ -832,18 +832,18 @@ describe("WebSocket connection and outbound capacity", () => {
     gateway.broadcast("test.event", { oversized: "x".repeat(10_000) });
     expect(await closed).toBe(1013);
     await waitUntil(() => logger.log.mock.calls.some((call) => call[2]?.event === "connection.closed"));
-    const admission = logger.log.mock.calls.find((call) => call[2]?.event === "connection.admitted");
-    const correlation = /Client ([0-9a-f-]+) connection admitted/u.exec(admission?.[1])?.[1];
+    const opened = logger.log.mock.calls.find((call) => call[2]?.event === "connection.opened");
+    const correlation = opened?.[2]?.connectionId as string | undefined;
     expect(correlation).toBeTruthy();
     expect(logger.log.mock.calls).toContainEqual([
       "warning",
       expect.stringContaining(`Closing client ${correlation} at outbound queue capacity`),
-      { event: "connection.outbound-capacity", source: "transport" },
+      { event: "connection.outbound-capacity", source: "transport", connectionId: correlation },
     ]);
     expect(logger.log.mock.calls).toContainEqual([
-      "info",
+      expect.stringMatching(/^(?:info|debug)$/u),
       expect.stringContaining(`Client ${correlation} connection closed`),
-      { event: "connection.closed", source: "transport" },
+      expect.objectContaining({ event: "connection.closed", source: "transport", connectionId: correlation }),
     ]);
     const closeMessage = logger.log.mock.calls.find((call) => call[2]?.event === "connection.closed")?.[1] as string;
     expect(closeMessage).toContain("WebSocket close 1013: client outbound capacity exceeded");

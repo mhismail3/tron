@@ -438,7 +438,7 @@ export class GatewayService {
             throw new GatewayError("invalid_request", "Log export accepts only content and commandId");
           }
           const content = boundedText(params.content, "content", 512 * 1024);
-          return safeJson(await exportDiagnosticSnapshot(content));
+          return safeJson(await exportDiagnosticSnapshot(content, this.dependencies.logger.debugTail()));
         });
       case "uploads.status":
         if (Object.keys(params).length > 0) throw new GatewayError("invalid_request", "Upload status accepts no parameters");
@@ -982,7 +982,7 @@ export class GatewayService {
         this.dependencies.logger.log(
           completedAt - startedAt >= 1_000 ? "warning" : "info",
           `Session open prepared in ${Math.max(0, Math.round(completedAt - startedAt))}ms (acquire ${Math.max(0, Math.round(acquiredAt - startedAt))}ms, snapshot ${Math.max(0, Math.round(completedAt - acquiredAt))}ms)`,
-          { event: "session.open.prepared", source: "sessions" },
+          { event: "session.open.prepared", source: "sessions", sessionId: canonicalSessionId, durationMs: completedAt - startedAt },
         );
         return safeJson({
           session: snapshot,
@@ -1269,15 +1269,15 @@ export class GatewayService {
           } catch (error) {
             this.dependencies.logger.log(
               "warning",
-              `Session abort did not settle (session ${sessionId}, kind ${kind}, operation ${operationId ?? "unspecified"}): ${error instanceof Error ? error.message : String(error)}`,
-              { event: "session.abort.unsettled", source: "sessions" },
+              `Session abort did not settle (kind ${kind}, operation ${operationId ?? "unspecified"})`,
+              { event: "session.abort.unsettled", source: "sessions", sessionId, error },
             );
             throw error;
           }
           this.dependencies.logger.log(
             "info",
-            `Session abort settled (session ${sessionId}, kind ${kind}, operation ${operationId ?? "unspecified"})`,
-            { event: "session.abort.settled", source: "sessions" },
+            `Session abort settled (kind ${kind}, operation ${operationId ?? "unspecified"})`,
+            { event: "session.abort.settled", source: "sessions", sessionId },
           );
           return { aborted: true };
         }, true);

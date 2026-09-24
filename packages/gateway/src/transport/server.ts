@@ -31,6 +31,15 @@ function diagnosticRequestID(value: string): string {
   return value.replace(/[^A-Za-z0-9._:-]/gu, "_").slice(0, 160);
 }
 
+// A caller mistake or expected backpressure is handled (warning); only an
+// unexpected fault or an internal error means someone should look (error).
+function rpcFailureLevel(error: unknown): "warning" | "error" {
+  return error instanceof GatewayError && error.code !== "internal" ? "warning" : "error";
+}
+
+/** Per-RPC completions under this bound are debug detail; slower ones warn. */
+const SLOW_RPC_WARNING_MS = 1_000;
+
 function diagnosticErrorCode(error: unknown): string {
   if (error instanceof GatewayError) return error.code;
   if (error instanceof Error) return "exception";
@@ -1146,7 +1155,10 @@ export class GatewayServer {
         return;
       }
       if (!this.ready || this.shuttingDown) {
-        this.options.logger.log("warning", "Rejected socket upgrade while gateway is unavailable", { event: "connection.rejected", source: "transport" });
+        // Expected during startup warmup and shutdown; clients retry.
+        this.options.logger.log("info", `Rejected socket upgrade while gateway is ${this.shuttingDown ? "shutting down" : "warming up"}`, {
+          event: "connection.rejected", source: "transport", reason: this.shuttingDown ? "shutting_down" : "warming_up",
+        });
         socket.write("HTTP/1.1 503 Service Unavailable\r\nConnection: close\r\n\r\n");
         socket.destroy();
         return;
@@ -1225,7 +1237,7 @@ export class GatewayServer {
         this.options.logger.log(
           "warning",
           `Closing client ${connection.id} at outbound queue capacity (queuedFrames=${snapshot.queuedFrames} queuedBytes=${snapshot.queuedBytes} maximumFrames=${snapshot.maximumFrames} maximumBytes=${snapshot.maximumBytes} frameHighWater=${snapshot.frameHighWater} byteHighWater=${snapshot.byteHighWater} wsBufferedBytes=${socket.bufferedAmount} nextBytes=${nextBytes}; ${this.pressureDiagnostic()})`,
-          { event: "connection.outbound-capacity", source: "transport" },
+          { event: "connection.outbound-capacity", source: "transport", connectionId: connection.id },
         );
         this.closeFailedConnection(connection, 1013, "client outbound capacity exceeded");
       },
@@ -1234,8 +1246,8 @@ export class GatewayServer {
         connection.closeInitiated = true;
         this.options.logger.log(
           "error",
-          `Client ${connection.id} outbound write failed after ${snapshot.completedFrames}/${snapshot.acceptedFrames} frames: ${error.message}`,
-          { event: "connection.write-error", source: "transport" },
+          `Client ${connection.id} outbound write failed after ${snapshot.completedFrames}/${snapshot.acceptedFrames} frames`,
+          { event: "connection.write-error", source: "transport", connectionId: connection.id, error },
         );
         this.retireConnectionWork(connection);
         socket.terminate();
@@ -1269,7 +1281,6 @@ export class GatewayServer {
       helloTimer: setTimeout(() => this.closeFailedConnection(connection, 1008, "hello required"), GATEWAY_CONNECTION_POLICY.helloDeadlineMs),
     };
     this.clients.set(connection.id, connection);
-    this.options.logger.log("info", `Client ${connection.id} connection admitted (${isLocal ? "local" : "paired"})`, { event: "connection.admitted", source: "transport" });
     socket.on("message", (data, binary) => {
       connection.unansweredHeartbeats = 0;
       connection.lastInboundAt = performance.now();
@@ -1310,7 +1321,13 @@ export class GatewayServer {
       if (protocol < MIN_PROTOCOL_VERSION || protocol > PROTOCOL_VERSION) return this.closeFailedConnection(connection, 1008, "protocol version mismatch");
       connection.ready = true;
       connection.presentationOnly = (frame as Record<string, unknown>).clientRole === "mobile";
-      this.options.logger.log("info", `Client ${connection.id} handshake accepted (${connection.presentationOnly ? "mobile" : "local"})`, { event: "connection.handshake", source: "transport" });
+      // Admission and handshake are one `connection.opened` record. The Mac
+      // app's local probes reconnect constantly, so they are debug detail.
+      this.options.logger.log(
+        connection.isLocal ? "debug" : "info",
+        `Client ${connection.id} connection opened (${connection.isLocal ? "local" : "paired"}, ${connection.presentationOnly ? "mobile" : "local"} role) after ${Math.max(0, Math.round(performance.now() - connection.admittedAt))}ms`,
+        { event: "connection.opened", source: "transport", connectionId: connection.id },
+      );
       clearTimeout(connection.helloTimer);
       this.send(connection, { type: "hello", ...this.options.service.info() as Record<string, JsonValue> });
       return;
@@ -1372,6 +1389,14 @@ export class GatewayServer {
     const requestId = frame.id;
     const diagnosticID = diagnosticRequestID(requestId);
     const rpcStartedAt = performance.now();
+    const params = frame.params && typeof frame.params === "object" && !Array.isArray(frame.params)
+      ? frame.params as Record<string, unknown>
+      : {};
+    // Correlation only: identifiers the client already chose, never payload.
+    const rpcCorrelation = {
+      ...(typeof params.sessionId === "string" ? { sessionId: params.sessionId } : {}),
+      ...(typeof params.commandId === "string" ? { commandId: params.commandId } : {}),
+    };
     let rpcOutcome: "success" | "failure" = "failure";
     const synchronizationOwners: SynchronizationOwner[] = [];
     const synchronizationCompletions: SynchronizationCompletion[] = [];
@@ -1755,9 +1780,13 @@ export class GatewayServer {
       }
     } catch (error) {
       if (!requestController.signal.aborted) {
-        this.options.logger.log("error", `RPC ${frame.method} for client ${connection.id} failed`, {
+        const level = rpcFailureLevel(error);
+        this.options.logger.log(level, `RPC ${frame.method} for client ${connection.id} failed`, {
           event: "rpc.error", source: "transport", method: frame.method, requestID: diagnosticID,
+          connectionId: connection.id, ...rpcCorrelation,
           code: diagnosticErrorCode(error), outcome: "failure",
+          // Structured detail only for faults; a caller mistake keeps its code.
+          ...(level === "error" ? { error } : {}),
           ...(error instanceof GatewayError && error.diagnosticReason ? { reason: error.diagnosticReason } : {}),
         });
       }
@@ -1794,16 +1823,14 @@ export class GatewayServer {
       connection.inFlight.delete(frame.id);
       connection.requestControllers.delete(frame.id);
       const durationMs = Math.max(0, Math.round(performance.now() - rpcStartedAt));
-      if (rpcOutcome === "failure" || durationMs >= 1_000) {
-        this.options.logger.log(
-          "warning",
-          `RPC ${frame.method} for client ${connection.id} completed in ${durationMs}ms (${rpcOutcome})`,
-          {
-            event: "rpc.completed", source: "transport", method: frame.method,
-            requestID: diagnosticID, outcome: rpcOutcome, durationMs,
-          },
-        );
-      }
+      this.options.logger.log(
+        rpcOutcome === "failure" || durationMs >= SLOW_RPC_WARNING_MS ? "warning" : "debug",
+        `RPC ${frame.method} for client ${connection.id} completed in ${durationMs}ms (${rpcOutcome})`,
+        {
+          event: "rpc.completed", source: "transport", method: frame.method,
+          requestID: diagnosticID, connectionId: connection.id, ...rpcCorrelation, outcome: rpcOutcome, durationMs,
+        },
+      );
     }
   }
 
@@ -1901,9 +1928,10 @@ export class GatewayServer {
     const outbound = connection.outbound.snapshot();
     connection.outbound.retire();
     this.options.logger.log(
-      "info",
+      connection.isLocal ? "debug" : "info",
       `Client ${connection.id} connection closed after ${Math.max(0, Math.round(closedAt - connection.admittedAt))}ms (${detail}; ${outbound.completedFrames}/${outbound.acceptedFrames} outbound frames completed, ${outbound.queuedBytes} queued bytes; lastInboundAgeMs=${progressAge(connection.lastInboundAt, closedAt)} lastWriteProgressAgeMs=${progressAge(connection.lastWriteProgressAt, closedAt)} queuedFrames=${outbound.queuedFrames} queuedBytes=${outbound.queuedBytes} completedFrames=${outbound.completedFrames})`,
-      { event: "connection.closed", source: "transport" },
+      { event: "connection.closed", source: "transport", connectionId: connection.id,
+        durationMs: Math.max(0, closedAt - connection.admittedAt) },
     );
     clearTimeout(connection.closeDeadline);
     this.retireConnectionWork(connection);

@@ -1,12 +1,36 @@
 import { appendFileSync, existsSync, mkdirSync, readFileSync, renameSync, statSync, unlinkSync } from "node:fs";
+import { homedir } from "node:os";
 import { dirname } from "node:path";
+
+/*
+ * Level policy (see docs/plans/2026-09-23-observability-foundation.md until the
+ * event catalog lands): error means someone should look; warning is degraded
+ * but handled; info reconstructs a timeline; debug is per-request detail kept
+ * only in the in-memory buffer that diagnostic exports include.
+ */
+export type LogLevel = "debug" | "info" | "warning" | "error";
+
+export interface LogError {
+  name: string;
+  code?: string;
+  message: string;
+  stack?: string;
+  cause?: LogError;
+}
 
 export interface LogRecord {
   timestamp: string;
-  level: "info" | "warning" | "error";
+  level: LogLevel;
   message: string;
   event?: string;
   source?: string;
+  /** Stamped by the writer, never by call sites. */
+  process?: "gateway";
+  runtimeEpoch?: string;
+  payloadVersion?: string;
+  sessionId?: string;
+  connectionId?: string;
+  commandId?: string;
   /** Sanitized transport request correlation; never a session or payload ID. */
   requestID?: string;
   method?: string;
@@ -14,12 +38,43 @@ export interface LogRecord {
   code?: string;
   reason?: string;
   durationMs?: number;
+  error?: LogError;
 }
 
-const MAX_RECORDS = 1_000;
-const MAX_MESSAGE_BYTES = 2_000;
-const MAX_FILE_BYTES = 1_048_576;
+export interface LogMetadata {
+  event?: string;
+  source?: string;
+  sessionId?: string;
+  connectionId?: string;
+  commandId?: string;
+  requestID?: string;
+  method?: string;
+  outcome?: string;
+  code?: string;
+  reason?: string;
+  durationMs?: number;
+  /** Any thrown value; the writer bounds and redacts it. */
+  error?: unknown;
+}
 
+export interface LoggerIdentity {
+  runtimeEpoch?: string | undefined;
+  payloadVersion?: string | undefined;
+}
+
+/** Records served to iOS and `recent()`: persisted levels only. */
+const PERSISTED_TAIL_RECORDS = 1_000;
+/** Debug detail for exports: enough for several minutes of busy RPC traffic. */
+const DEBUG_BUFFER_MAX_RECORDS = 4_000;
+const DEBUG_BUFFER_MAX_BYTES = 2 * 1_024 * 1_024;
+/** User-chosen Gateway retention (2026-09-23): 8 segments × 5 MB = 40 MB. */
+const SEGMENT_MAX_BYTES = 5 * 1_024 * 1_024;
+const SEGMENT_COUNT = 8;
+const MAX_MESSAGE_BYTES = 2_000;
+const MAX_ERROR_MESSAGE_BYTES = 1_000;
+const MAX_STACK_BYTES = 4_000;
+const MAX_FIELD_CHARS = 160;
+const PERSISTED_LEVELS: ReadonlySet<LogLevel> = new Set(["info", "warning", "error"]);
 
 function redact(value: string): string {
   return value
@@ -29,83 +84,185 @@ function redact(value: string): string {
     .replace(/\/private\/var\/[^\s'"]+/gu, "[PRIVATE_PATH]");
 }
 
+function boundedBytes(value: string, maximum: number): string {
+  const bytes = Buffer.from(value, "utf8");
+  if (bytes.length <= maximum) return value;
+  return `${bytes.subarray(0, maximum - 3).toString("utf8").replace(/\uFFFD$/u, "")}…`;
+}
+
 export function boundedMessage(value: string): string {
-  const redacted = redact(value);
-  const bytes = Buffer.from(redacted, "utf8");
-  if (bytes.length <= MAX_MESSAGE_BYTES) return redacted;
-  return `${bytes.subarray(0, MAX_MESSAGE_BYTES - 3).toString("utf8").replace(/\uFFFD$/u, "")}…`;
+  return boundedBytes(redact(value), MAX_MESSAGE_BYTES);
 }
 
 function boundedDiagnosticID(value: string): string {
-  return value.replace(/[^A-Za-z0-9._:-]/gu, "_").slice(0, 160);
+  return value.replace(/[^A-Za-z0-9._:-]/gu, "_").slice(0, MAX_FIELD_CHARS);
 }
 
+// Payload and home prefixes are shortened before the standard redaction, which
+// would otherwise replace whole paths and hide which file an error names.
+function shortenedPaths(value: string): string {
+  const payloadRoot = process.env.TRON_GATEWAY_PAYLOAD_ROOT;
+  const withPayload = payloadRoot ? value.replaceAll(payloadRoot, "<payload>") : value;
+  return redact(withPayload.replaceAll(homedir(), "~"));
+}
+
+/** Bounded, redacted error shape. One level of `cause` keeps the root reason
+ * of a wrapped error while bounding the record. */
+export function describeError(error: unknown, includeCause = true): LogError {
+  if (!(error instanceof Error)) {
+    return { name: "NonError", message: boundedBytes(shortenedPaths(String(error)), MAX_ERROR_MESSAGE_BYTES) };
+  }
+  const code = (error as NodeJS.ErrnoException).code;
+  return {
+    name: boundedDiagnosticID(error.name),
+    ...(typeof code === "string" ? { code: boundedDiagnosticID(code) } : {}),
+    message: boundedBytes(shortenedPaths(error.message), MAX_ERROR_MESSAGE_BYTES),
+    ...(error.stack ? { stack: boundedBytes(shortenedPaths(error.stack), MAX_STACK_BYTES) } : {}),
+    ...(includeCause && error.cause !== undefined ? { cause: describeError(error.cause, false) } : {}),
+  };
+}
+
+function boundedError(value: unknown): LogError | undefined {
+  if (!value || typeof value !== "object") return undefined;
+  const raw = value as Partial<LogError>;
+  if (typeof raw.name !== "string" || typeof raw.message !== "string") return undefined;
+  const error: LogError = {
+    name: boundedDiagnosticID(raw.name),
+    ...(typeof raw.code === "string" ? { code: boundedDiagnosticID(raw.code) } : {}),
+    message: boundedBytes(redact(raw.message), MAX_ERROR_MESSAGE_BYTES),
+    ...(typeof raw.stack === "string" ? { stack: boundedBytes(redact(raw.stack), MAX_STACK_BYTES) } : {}),
+  };
+  const cause = raw.cause ? boundedError({ ...raw.cause, cause: undefined }) : undefined;
+  return cause ? { ...error, cause } : error;
+}
+
+/** Normalizes call-site metadata or a persisted line into one bounded shape. */
+function normalizedFields(value: LogMetadata & { error?: unknown }, errorIsDescribed: boolean): Omit<LogRecord, "timestamp" | "level" | "message"> {
+  const error = value.error === undefined
+    ? undefined
+    : errorIsDescribed ? boundedError(value.error) : describeError(value.error);
+  return {
+    ...(typeof value.event === "string" ? { event: boundedMessage(value.event).slice(0, MAX_FIELD_CHARS) } : {}),
+    ...(typeof value.source === "string" ? { source: boundedMessage(value.source).slice(0, 64) } : {}),
+    ...(typeof value.sessionId === "string" ? { sessionId: boundedDiagnosticID(value.sessionId) } : {}),
+    ...(typeof value.connectionId === "string" ? { connectionId: boundedDiagnosticID(value.connectionId) } : {}),
+    ...(typeof value.commandId === "string" ? { commandId: boundedDiagnosticID(value.commandId) } : {}),
+    ...(typeof value.requestID === "string" ? { requestID: boundedDiagnosticID(value.requestID) } : {}),
+    ...(typeof value.method === "string" ? { method: boundedMessage(value.method).slice(0, MAX_FIELD_CHARS) } : {}),
+    ...(typeof value.outcome === "string" ? { outcome: boundedMessage(value.outcome).slice(0, 64) } : {}),
+    ...(typeof value.reason === "string" ? { reason: boundedDiagnosticID(value.reason).slice(0, 64) } : {}),
+    ...(typeof value.code === "string" ? { code: boundedMessage(value.code).slice(0, 64) } : {}),
+    ...(typeof value.durationMs === "number" && Number.isFinite(value.durationMs)
+      ? { durationMs: Math.max(0, Math.min(Number.MAX_SAFE_INTEGER, Math.round(value.durationMs))) }
+      : {}),
+    ...(error ? { error } : {}),
+  };
+}
+
+/**
+ * The Gateway's single log writer. Info and above append to numbered JSONL
+ * segments and a bounded tail served to clients; debug stays in a separate
+ * bounded memory buffer that only diagnostic exports read.
+ */
 export class GatewayLogger {
   private readonly records: LogRecord[] = [];
+  private readonly debugRecords: Array<{ record: LogRecord; bytes: number }> = [];
+  private debugBytes = 0;
   private readonly path: string | undefined;
+  private readonly identity: Pick<LogRecord, "runtimeEpoch" | "payloadVersion">;
+  /** Tracked in memory so each append avoids a stat call. */
+  private activeBytes: number | undefined;
 
-  constructor(path?: string) {
+  constructor(path?: string, identity: LoggerIdentity = {}) {
     this.path = path;
+    this.identity = {
+      ...(identity.runtimeEpoch ? { runtimeEpoch: boundedDiagnosticID(identity.runtimeEpoch) } : {}),
+      ...(identity.payloadVersion ? { payloadVersion: boundedDiagnosticID(identity.payloadVersion) } : {}),
+    };
     this.loadPersisted();
   }
 
-  log(level: LogRecord["level"], message: string, metadata: { event?: string; source?: string; requestID?: string; method?: string; outcome?: string; code?: string; reason?: string; durationMs?: number } = {}): void {
+  log(level: LogLevel, message: string, metadata: LogMetadata = {}): void {
     const record: LogRecord = {
       timestamp: new Date().toISOString(),
       level,
       message: boundedMessage(message),
-      ...(metadata.event ? { event: boundedMessage(metadata.event) } : {}),
-      ...(metadata.source ? { source: boundedMessage(metadata.source) } : {}),
-      ...(metadata.requestID ? { requestID: boundedDiagnosticID(metadata.requestID) } : {}),
-      ...(metadata.method ? { method: boundedMessage(metadata.method).slice(0, 160) } : {}),
-      ...(metadata.outcome ? { outcome: boundedMessage(metadata.outcome).slice(0, 64) } : {}),
-      ...(metadata.reason ? { reason: boundedDiagnosticID(metadata.reason).slice(0, 64) } : {}),
-      ...(metadata.code ? { code: boundedMessage(metadata.code).slice(0, 64) } : {}),
-      ...(metadata.durationMs !== undefined ? { durationMs: Math.max(0, Math.min(Number.MAX_SAFE_INTEGER, Math.round(metadata.durationMs))) } : {}),
+      process: "gateway",
+      ...this.identity,
+      ...normalizedFields(metadata, false),
     };
+    if (level === "debug") {
+      this.retainDebug(record);
+      return;
+    }
     this.records.push(record);
-    if (this.records.length > MAX_RECORDS) this.records.splice(0, this.records.length - MAX_RECORDS);
+    if (this.records.length > PERSISTED_TAIL_RECORDS) this.records.splice(0, this.records.length - PERSISTED_TAIL_RECORDS);
     this.persist(record);
     const output = `[${record.timestamp}] ${level.toUpperCase()}${record.event ? ` ${record.event}` : ""} ${record.message}\n`;
     if (level === "error") process.stderr.write(output);
     else process.stdout.write(output);
   }
 
+  /** Persisted levels only; debug detail is reachable through exports. */
   recent(limit = 200): LogRecord[] {
-    return this.records.slice(-Math.max(1, Math.min(limit, MAX_RECORDS)));
+    return this.records.slice(-Math.max(1, Math.min(limit, PERSISTED_TAIL_RECORDS)));
+  }
+
+  /** The in-memory debug buffer, oldest first, for diagnostic exports. */
+  debugTail(): LogRecord[] {
+    return this.debugRecords.map((entry) => entry.record);
+  }
+
+  private retainDebug(record: LogRecord): void {
+    const bytes = Buffer.byteLength(JSON.stringify(record));
+    this.debugRecords.push({ record, bytes });
+    this.debugBytes += bytes;
+    while (this.debugRecords.length > DEBUG_BUFFER_MAX_RECORDS || this.debugBytes > DEBUG_BUFFER_MAX_BYTES) {
+      const evicted = this.debugRecords.shift();
+      if (!evicted) break;
+      this.debugBytes -= evicted.bytes;
+    }
   }
 
   private loadPersisted(): void {
     if (!this.path) return;
     try {
-      for (const candidate of [this.rotatedPath(), this.path]) {
+      // Newest segments hold the tail; read until the tail is full, then
+      // restore chronological order.
+      const newestFirst: LogRecord[] = [];
+      for (let index = 0; index < SEGMENT_COUNT && newestFirst.length < PERSISTED_TAIL_RECORDS; index += 1) {
+        const candidate = this.segmentPath(index);
         if (!existsSync(candidate)) continue;
-        const lines = readFileSync(candidate, "utf8").split("\n").filter(Boolean).slice(-MAX_RECORDS);
-        for (const line of lines) {
-          try {
-            const value = JSON.parse(line) as Partial<LogRecord>;
-            if (typeof value.timestamp !== "string" || !["info", "warning", "error"].includes(value.level ?? "") || typeof value.message !== "string") continue;
-            this.records.push({
-              timestamp: value.timestamp,
-              level: value.level as LogRecord["level"],
-              message: boundedMessage(value.message),
-              ...(typeof value.event === "string" ? { event: boundedMessage(value.event) } : {}),
-              ...(typeof value.source === "string" ? { source: boundedMessage(value.source) } : {}),
-              ...(typeof value.requestID === "string" ? { requestID: boundedDiagnosticID(value.requestID) } : {}),
-              ...(typeof value.method === "string" ? { method: boundedMessage(value.method).slice(0, 160) } : {}),
-              ...(typeof value.outcome === "string" ? { outcome: boundedMessage(value.outcome).slice(0, 64) } : {}),
-              ...(typeof value.reason === "string" ? { reason: boundedDiagnosticID(value.reason).slice(0, 64) } : {}),
-              ...(typeof value.code === "string" ? { code: boundedMessage(value.code).slice(0, 64) } : {}),
-              ...(typeof value.durationMs === "number" ? { durationMs: Math.max(0, Math.min(Number.MAX_SAFE_INTEGER, Math.round(value.durationMs))) } : {}),
-            });
-          } catch {
-            // Ignore a partial final line or malformed historical record.
-          }
+        const lines = readFileSync(candidate, "utf8").split("\n").filter(Boolean);
+        for (let line = lines.length - 1; line >= 0 && newestFirst.length < PERSISTED_TAIL_RECORDS; line -= 1) {
+          const record = this.parsePersisted(lines[line]!);
+          if (record) newestFirst.push(record);
         }
       }
-      if (this.records.length > MAX_RECORDS) this.records.splice(0, this.records.length - MAX_RECORDS);
+      this.records.push(...newestFirst.reverse());
     } catch {
       // Diagnostics must never prevent Gateway startup.
+    }
+  }
+
+  private parsePersisted(line: string): LogRecord | undefined {
+    try {
+      const value = JSON.parse(line) as Partial<LogRecord>;
+      if (typeof value.timestamp !== "string" || !PERSISTED_LEVELS.has(value.level as LogLevel) || typeof value.message !== "string") {
+        return undefined;
+      }
+      return {
+        timestamp: value.timestamp,
+        level: value.level as LogLevel,
+        message: boundedMessage(value.message),
+        ...(value.process === "gateway" ? { process: "gateway" as const } : {}),
+        ...(typeof value.runtimeEpoch === "string" ? { runtimeEpoch: boundedDiagnosticID(value.runtimeEpoch) } : {}),
+        ...(typeof value.payloadVersion === "string" ? { payloadVersion: boundedDiagnosticID(value.payloadVersion) } : {}),
+        ...normalizedFields(value as LogMetadata, true),
+      };
+    } catch {
+      // Ignore a partial final line or malformed historical record.
+      return undefined;
     }
   }
 
@@ -114,18 +271,30 @@ export class GatewayLogger {
     try {
       mkdirSync(dirname(this.path), { recursive: true, mode: 0o700 });
       const line = `${JSON.stringify(record)}\n`;
-      if (existsSync(this.path) && statSync(this.path).size + Buffer.byteLength(line) > MAX_FILE_BYTES) {
-        const rotated = this.rotatedPath();
-        try { unlinkSync(rotated); } catch { /* no prior rotation */ }
-        renameSync(this.path, rotated);
+      const lineBytes = Buffer.byteLength(line);
+      if (this.activeBytes === undefined) {
+        this.activeBytes = existsSync(this.path) ? statSync(this.path).size : 0;
       }
+      if (this.activeBytes > 0 && this.activeBytes + lineBytes > SEGMENT_MAX_BYTES) this.rotate();
       appendFileSync(this.path, line, { mode: 0o600 });
+      this.activeBytes += lineBytes;
     } catch {
-      // Stdout/stderr remains the fallback diagnostic sink.
+      // Re-measure after any failure; stdout/stderr remains the fallback sink.
+      this.activeBytes = undefined;
     }
   }
 
-  private rotatedPath(): string {
-    return `${this.path ?? "gateway.log"}.1`;
+  /** Shifts gateway.jsonl → .1 → … → .7, discarding the oldest segment. */
+  private rotate(): void {
+    try { unlinkSync(this.segmentPath(SEGMENT_COUNT - 1)); } catch { /* fewer segments exist */ }
+    for (let index = SEGMENT_COUNT - 2; index >= 0; index -= 1) {
+      try { renameSync(this.segmentPath(index), this.segmentPath(index + 1)); } catch { /* gap in the sequence */ }
+    }
+    this.activeBytes = 0;
+  }
+
+  private segmentPath(index: number): string {
+    const base = this.path ?? "gateway.jsonl";
+    return index === 0 ? base : `${base}.${index}`;
   }
 }

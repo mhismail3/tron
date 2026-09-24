@@ -132,7 +132,7 @@ describe("Gateway HTTP admission and retirement", () => {
     releaseAuthentication();
     await bounded(closing, "pending upgrade close");
     expect(invoke).not.toHaveBeenCalled();
-    expect(logger.log.mock.calls.some((call) => call[2]?.event === "connection.handshake")).toBe(false);
+    expect(logger.log.mock.calls.some((call) => call[2]?.event === "connection.opened")).toBe(false);
     socket.terminate();
   });
 

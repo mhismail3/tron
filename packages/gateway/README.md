@@ -553,8 +553,36 @@ the entrypoint appends one `gateway.fatal-startup` error record to
 `gateway.jsonl`, with the error (and one level of cause), runtime epoch and
 payload version, then exits non-zero. Payload and home path prefixes are
 shortened before redaction so the record names the failing file. The entrypoint
-imports only Node built-ins, `tron-home.ts` and the logger's bounding helper, so
+imports only Node built-ins, `tron-home.ts` and the logger's error helper, so
 a failure elsewhere in the graph cannot prevent the record.
+
+### Logging
+
+`GatewayLogger` (`src/transport/logger.ts`) is the one writer. Levels mean who
+needs to look: **error** (a user-visible failure, lost work or a broken
+invariant), **warning** (degraded but handled: retries, bounds hit, slow work
+over a named threshold, caller mistakes and `busy` backpressure), **info** (one
+line per lifecycle or state boundary) and **debug** (per-request detail). Levels
+are fixed per event in code; there is no runtime level setting.
+
+- Info and above append to `~/.tron/logs/gateway.jsonl`, rotated through eight
+  5 MB numbered segments (`gateway.jsonl`, `.1` … `.7`; the user-chosen 40 MB
+  budget). Segment size is tracked in memory, not stat'ed per record. The
+  newest 1,000 persisted records are served by `system.logs`.
+- Debug never reaches disk. It lives in a bounded memory buffer (4,000 records
+  or 2 MB) that `system.logs.export` appends to the exported snapshot.
+- Each record carries `timestamp`, `level`, `event`, `source`, a redacted
+  `message`, and the writer-stamped `process`, `runtimeEpoch` and
+  `payloadVersion`. Call sites add correlation (`sessionId`, `connectionId`,
+  `commandId`, `requestID`, `method`, `outcome`, `code`, `reason`,
+  `durationMs`) as fields rather than message text, and pass a thrown value as
+  `error`; the writer stores a bounded, redacted `{name, code, message, stack}`
+  with one level of `cause`.
+- `gateway.started` is recorded once per process. Admission and hello form one
+  `connection.opened`; the Mac app's local probe connections open and close at
+  debug. RPC completions under `SLOW_RPC_WARNING_MS` are debug; slower or
+  failed ones warn. `rpc.error` is warning for `GatewayError` codes other than
+  `internal` and error (with `error`) for unexpected faults.
 
 A supervised payload validates its architecture-specific immutable `node` and
 technical `pi` command aliases before model services or extension packages load.
@@ -678,9 +706,10 @@ For failure-boundary interpretation, evidence collection, and regression
 expectations, see [connection resilience and diagnosis](docs/connection-resilience.md).
 
 Authenticated `system.logs.export` is a user-requested diagnostics projection: it accepts only a
-bounded already-redacted snapshot and command ID, writes a server-chosen owner-only 0600 file under
+bounded already-redacted snapshot and command ID, appends the newest Gateway debug records (at most
+1 MB), writes a server-chosen owner-only 0600 file under
 `/tmp/tron-diagnostics` inside a 0700 directory, and retains only the newest ten exports. It never
-accepts a client filesystem path, reads session content, or creates a public upload. Gateway RPC diagnostics retain bounded structured `method`, `requestID`, `outcome`, `code`, and `durationMs` fields; catalog stage records additionally carry a process-local `workID` and scope so shared materialization cannot be misattributed to one caller. Request IDs are sanitized transport IDs only, and stage timing uses monotonic durations. Fast successful stages remain omitted to keep routine logging lightweight. Catalog admission and viewer capacity/retirement failures additionally carry fixed privacy-safe `reason` codes; arbitrary exception messages, error details and request parameters are not copied into those fields.
+accepts a client filesystem path, reads session content, or creates a public upload. Gateway RPC diagnostics retain bounded structured `method`, `requestID`, `outcome`, `code`, and `durationMs` fields; catalog stage records additionally carry a process-local `workID` and scope so shared materialization cannot be misattributed to one caller. Request IDs are sanitized transport IDs only, and stage timing uses monotonic durations. Fast successful stages are debug records, kept only in the in-memory buffer. Catalog admission and viewer capacity/retirement failures additionally carry fixed privacy-safe `reason` codes; arbitrary exception messages, error details and request parameters are not copied into those fields.
 
 - `GET /health` — unauthenticated readiness and compatibility metadata. The bound listener reports `starting`, `catalog-warming`, `attention-recovery`, `automation-recovery`, or `storage-warming` with HTTP 503 until all startup prerequisites complete, then reports `ok` with HTTP 200; every other HTTP route and WebSocket upgrade remains retryable `busy`/503 during warmup and does not enter session APIs.
 - `POST /v1/pair` — rate-limited one-time enrollment exchange

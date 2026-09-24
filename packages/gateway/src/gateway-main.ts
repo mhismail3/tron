@@ -49,6 +49,7 @@ import { ConnectionOwner } from "./integrations/connection-owner.js";
 import { createMcpAdapter } from "./integrations/mcp-adapter.js";
 import { delegatedArtifactRoot, delegatedProviderEnvironment, ensureDelegatedArtifactRoot } from "./sessions/delegated-provider.js";
 import { assertDelegatedRootCutoverReady } from "./sessions/delegated-root-migration.js";
+import { runtimeIdentity } from "./transport/runtime-identity.js";
 
 const config = await loadConfig();
 const delegatedRoot = delegatedArtifactRoot(config.tronHome);
@@ -91,7 +92,20 @@ process.env.PI_CODING_AGENT ??= "true";
 process.env.AI_AGENT ??= "pi";
 process.env.PI_SKIP_VERSION_CHECK ??= "1";
 
-const logger = new GatewayLogger(join(config.tronHome, "logs", "gateway.jsonl"));
+/** Session stages under this bound are debug detail; slower ones warn. */
+const SLOW_SESSION_STAGE_MS = 1_000;
+const logger = new GatewayLogger(join(config.tronHome, "logs", "gateway.jsonl"), {
+  runtimeEpoch: process.env.TRON_GATEWAY_RUNTIME_EPOCH,
+  payloadVersion: process.env.TRON_GATEWAY_PAYLOAD_VERSION,
+});
+{
+  const identity = runtimeIdentity();
+  logger.log(
+    "info",
+    `Gateway started (pid ${process.pid}, Node ${process.version}${identity.sourceRevision ? `, source ${identity.sourceRevision}` : ""})`,
+    { event: "gateway.started", source: "lifecycle" },
+  );
+}
 let transport: GatewayServer;
 const devices = new DeviceStore(config.tronHome, config.machineId);
 await devices.initialize();
@@ -159,8 +173,8 @@ const sessions = new RuntimeRegistry({
   beforeSessionRekey: (previousId, nextId) => automations.rekeySessionTarget(previousId, nextId),
   beforeSessionDelete: (sessionId) => automations.blockSessionTarget(sessionId),
   sessionClosed: (sessionId) => transport?.revokeSessionTerminals(sessionId),
-  persistenceDiagnostic: (sessionId, code) => logger.log("warning", `Session ${sessionId} persistence diagnostic`, {
-    event: code, source: "session",
+  persistenceDiagnostic: (sessionId, code) => logger.log("warning", "Session persistence diagnostic", {
+    event: code, source: "session", sessionId,
   }),
   machineId: config.machineId,
   notifications,
@@ -178,13 +192,12 @@ const sessions = new RuntimeRegistry({
     { event: "extension.artifact-rejected", source: "sessions" },
   ),
   stageTiming: (stage, durationMs, outcome, metadata) => {
-    if (durationMs < 250 && outcome === "success") return;
     const context = [
       metadata?.workID ? `workID=${metadata.workID}` : undefined,
       metadata?.scope ? `scope=${metadata.scope}` : undefined,
     ].filter(Boolean).join(" ");
     logger.log(
-      durationMs >= 1_000 || outcome === "failure" ? "warning" : "info",
+      durationMs >= SLOW_SESSION_STAGE_MS || outcome === "failure" ? "warning" : "debug",
       `Session stage ${stage} completed in ${durationMs}ms (${outcome})${context ? ` ${context}` : ""}`,
       { event: "session.stage", source: "sessions" },
     );
@@ -199,11 +212,11 @@ try {
   sessionSearchIndex = await SessionSearchIndex.open(join(config.tronHome, "gateway", "session-search.sqlite"));
   let sessionSearchAllowance: SessionSearchAllowanceLedger | undefined;
   try { sessionSearchAllowance = await SessionSearchAllowanceLedger.open(join(config.tronHome, "gateway", "session-search-jev-allowance.sqlite")); }
-  catch (error) { logger.log("warning", `Optional Jev allowance is unavailable; remote ranking disabled (${error instanceof Error ? error.message : String(error)})`, { event: "session-search.jev-ledger-unavailable", source: "search" }); }
+  catch (error) { logger.log("warning", "Optional Jev allowance is unavailable; remote ranking disabled", { event: "session-search.jev-ledger-unavailable", source: "search", error }); }
   sessionSearch = new SessionSearchService(sessions, sessionSearchIndex, jevClient, sessionSearchAllowance);
 } catch (error) {
   sessionSearchIndex?.close();
-  logger.log("warning", `Optional session search index is unavailable; chat remains available (${error instanceof Error ? error.message : String(error)})`, { event: "session-search.index-unavailable", source: "search" });
+  logger.log("warning", "Optional session search index is unavailable; chat remains available", { event: "session-search.index-unavailable", source: "search", error });
 }
 const knowledgeStore = new KnowledgeStore(
   sessions.knowledgeWorkspace(),
@@ -342,7 +355,7 @@ async function shutdown(reason: string, exitCode = 0): Promise<void> {
     clearTimeout(forced);
     process.exit(exitCode);
   } catch (error) {
-    logger.log("error", error instanceof Error ? error.message : String(error), { event: "gateway.shutdown-failed", source: "lifecycle" });
+    logger.log("error", "Gateway shutdown failed", { event: "gateway.shutdown-failed", source: "lifecycle", error });
     await releaseRuntimeLock();
     process.exit(1);
   }
@@ -399,7 +412,7 @@ function requestRestart(restartNow = false): void {
     logger.log("info", "Gateway restart drain completed", { event: "gateway.restart-drain.completed", source: "lifecycle" });
     await shutdown("requested restart", SUPERVISOR_RELAUNCH_EXIT_CODE);
   })().catch((error) => {
-    logger.log("error", error instanceof Error ? error.message : String(error), { event: "gateway.restart-drain-failed", source: "lifecycle" });
+    logger.log("error", "Gateway restart drain failed", { event: "gateway.restart-drain-failed", source: "lifecycle", error });
     void shutdown("restart drain failed", 1);
   });
 }
@@ -408,7 +421,7 @@ function logDrainBlockers(snapshot: ReturnType<typeof sessions.administrativeDra
   const blockers = snapshot.blockers.map(({ sessionId, category, state, ageMs }) => ({
     ...(sessionId ? { sessionId } : {}), category, state, ageMs: ageMs ?? null,
   }));
-  logger.log("warning", `Gateway restart waiting on ${snapshot.blockerCount} operation(s): ${JSON.stringify(blockers)}`, {
+  logger.log("info", `Gateway restart waiting on ${snapshot.blockerCount} operation(s): ${JSON.stringify(blockers)}`, {
     event: "gateway.restart-drain.waiting", source: "lifecycle",
   });
 }
@@ -464,11 +477,11 @@ const supervised = process.env.TRON_GATEWAY_SUPERVISED === "1";
 process.once("SIGTERM", () => void shutdown("SIGTERM", handledSignalExitCode(supervised, requestedRestart !== undefined)));
 process.once("SIGINT", () => void shutdown("SIGINT", handledSignalExitCode(supervised, requestedRestart !== undefined)));
 process.on("uncaughtException", (error) => {
-  logger.log("error", `Uncaught exception: ${error.message}`, { event: "process.uncaught-exception", source: "process" });
+  logger.log("error", "Uncaught exception", { event: "process.uncaught-exception", source: "process", error });
   void shutdown("uncaught exception", 1);
 });
 process.on("unhandledRejection", (error) => {
-  logger.log("error", `Unhandled rejection: ${error instanceof Error ? error.message : String(error)}`, { event: "process.unhandled-rejection", source: "process" });
+  logger.log("error", "Unhandled rejection", { event: "process.unhandled-rejection", source: "process", error });
 });
 
 const enrollmentTimer = setInterval(() => void devices.ensureEnrollment(), 60_000);
@@ -476,8 +489,8 @@ enrollmentTimer.unref();
 await transport.listen(async () => {
   // This startup follows a user-initiated Gateway update. Keep Knowledge
   // unavailable on upgrade failure without disabling unrelated chat features.
-  await knowledgeStore.upgradeStorage().catch(() => {
-    logger.log("warning", "Knowledge catalog upgrade reported an error; inspect Knowledge status. No reset was attempted.", { event: "knowledge.upgrade-failed", source: "knowledge" });
+  await knowledgeStore.upgradeStorage().catch((error: unknown) => {
+    logger.log("warning", "Knowledge catalog upgrade reported an error; inspect Knowledge status. No reset was attempted.", { event: "knowledge.upgrade-failed", source: "knowledge", error });
   });
   await sessions.initialize((phase) => transport.setStartupPhase(phase));
   sessionSearchWarmTask = (async () => {
@@ -487,7 +500,7 @@ await transport.listen(async () => {
       sessionSearch.setSemanticClient(new NaturalLanguageEmbeddingClient(searchHelperCandidate));
     } else if (searchHelperCandidate) logger.log("warning", "Signed NaturalLanguage search helper admission failed; semantic search remains unavailable", { event: "session-search.helper-unavailable", source: "search" });
     if (!stopping) await sessionSearch.warm();
-  })().catch((error) => logger.log("warning", `Session search warm-up failed; lexical search will recover on demand (${error instanceof Error ? error.message : String(error)})`, { event: "session-search.warm-failed", source: "search" }));
+  })().catch((error) => logger.log("warning", "Session search warm-up failed; lexical search will recover on demand", { event: "session-search.warm-failed", source: "search", error }));
   transport.setStartupPhase("automation-recovery");
   await automations.initialize();
   transport.setStartupPhase("storage-warming");
@@ -511,11 +524,11 @@ const maintainStorage = async (): Promise<void> => {
       );
       uploadStoragePressure = status.storagePressure;
     }
-  } catch {
+  } catch (error) {
     logger.log(
       "warning",
       "Bounded artifact maintenance failed and will retry",
-      { event: "storage.maintenance-failed", source: "storage" },
+      { event: "storage.maintenance-failed", source: "storage", error },
     );
   }
 };
