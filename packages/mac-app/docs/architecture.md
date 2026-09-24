@@ -218,6 +218,12 @@ LaunchAgent uses Boolean `KeepAlive=true`, `RunAtLoad=true`, and a throttle inte
 pause and uninstall therefore unregister the job before intentional stoppage. Managed
 LaunchAgents advertise `TRON_GATEWAY_SUPERVISED=1`; planned restart and handled
 supervised signals exit 75 so direct foreground restart controls still fail closed.
+When supervised, the C launcher resolves the selected Tron home and redirects
+stderr to `<Tron home>/logs/gateway-stderr.log` before executing Node. The Gateway
+records remain canonical in `gateway.jsonl` and are not mirrored while supervised.
+Mac app startup maintenance truncates this stderr file only above 1 MiB: it is
+reserved for rare launcher and Node abort text, not the volume-heavy Gateway
+record stream.
 Quitting `Tron.app` does not stop accepted work. Quit and async command/uninstall
 exits request AppKit termination through `ApplicationTermination` on the main
 run loop, outside the main dispatch queue. AppKit's `.terminateLater` nested loop

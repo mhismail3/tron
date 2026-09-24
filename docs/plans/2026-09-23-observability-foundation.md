@@ -2,7 +2,7 @@
 
 - **Started:** 2026-09-23
 - **Status:** Active
-- **Last updated:** 2026-09-24, L-3
+- **Last updated:** 2026-09-24, L-1d
 - **Goal:** Every Tron process records the right signals automatically, in a known place, at a meaningful level, so a failure can be diagnosed in one pass from what was already recorded.
 
 Follow the [plan protocol](README.md#protocol) to claim tasks and hand off.
@@ -205,7 +205,7 @@ user reinstalls manually, so batch them for one reinstall.
 | L-3 | Done | iOS always-on recording replaces Diagnostic Capture; one-tap export | L-2 | observability session (L-3 lane), 2026-09-24 |
 | L-3b | Needs scoping | The phone has two persisted diagnostic stores, `AppLog` and `IOSClientDiagnosticStore` (catalog and connection records). Decide whether one owner should hold both | L-3 | |
 | L-1b | Done | Launcher records | none | observability session (L-1b lane), 2026-09-24 |
-| L-1d | Claimed | Out-of-band stderr capture | L-2 | observability session (L-1d lane), 2026-09-24 |
+| L-1d | Done | Out-of-band stderr capture | L-2 | observability session (L-1d lane), 2026-09-24 |
 | L-4 | Ready | Mac app file logging | L-2 | |
 | L-5 | Done | `scripts/tron diagnose` collector | L-1c, L-2 | observability session (L-5 lane), 2026-09-24 |
 | L-6 | Ready | Event catalog and the incident rule | L-2 | |
@@ -745,3 +745,13 @@ The 2026-09-23 17:33 UTC incident's records have rotated away, so its timeline i
   - catalog records duplicating `IOSClientDiagnosticStore`;
   - rows with empty message bodies.
 - For the next agent: the phone adopts this only after the user rebuilds the iPhone app, and the Gateway storage move only after a Gateway rebuild. Measure one day's `app.jsonl` volume for L-6's catalog.
+
+### L-1d · Done · 2026-09-24 · observability session (L-1d lane)
+
+- Result: out-of-band output is captured by the owner that knows the Tron home. When `TRON_GATEWAY_SUPERVISED=1`, the C launcher opens `<Tron home>/logs/gateway-stderr.log` (append, `O_NOFOLLOW`, mode 0600) and redirects its stderr there before starting Node. The launcher's own messages and any Node abort go to that file. If opening it fails, the inherited stderr is kept and the launch proceeds unchanged; `--version` and `--fingerprint` never redirect. When supervised, `GatewayLogger` no longer mirrors records to stdout or stderr, since the JSONL file is canonical. Foreground runs still mirror. Mac startup maintenance empties the stderr file when it exceeds 1 MiB.
+- Evidence (verified): Gateway logger tests passed 10/10 in 2.1 s before and 12/12 in 2.2 s after. They assert the written text, not mock call counts. The launcher shell test passed in 304 s: a supervised launch's stderr lands in the file, a foreground or `--version` run creates no file, and an unwritable logs directory still launches. Negative controls: disabling the redirect, redirecting in `--version`, and aborting when the open fails each fail their test, as do disabling supervised suppression and disabling foreground mirroring. Focused Mac tests passed 26/26, covering truncation above the cap and preservation below it; raising the cap and removing the size guard each fail. Full Mac suite (`xcodebuild test-without-building`): 315 tests in 47 suites passed in 124 s, after a 261 s build.
+- Changes: this commit (the launcher and its shell test; `transport/logger.ts` and its test; `MacAppStartupMaintenance.swift` and its test; the Gateway README logging section; `packages/mac-app/docs/architecture.md`).
+- Tasks added: none.
+- Kept on purpose: foreground mirroring for unsupervised runs. The 1 MiB cap reflects that the file holds only rare launcher and Node abort text.
+- Deviations: the plan put `StandardErrorPath` in the LaunchAgent plist. launchd takes that path literally, with no `~` expansion, and the plist is a static file in the app bundle, so it cannot name a per-user home. The launcher now owns the redirect instead; supervisor review caught this before merge. During the lane's first Mac build, `bundle-gateway.sh` ran `npm ci` through the worktree's `node_modules` symlink and emptied the main checkout's Gateway dependencies. The supervisor restored them with `npm ci`, using the pinned npm and the lockfile (the same 187 packages; the Pi SDK check passes). Lanes that build the Mac app must have their own real `node_modules`, never a symlink.
+- For the next agent: takes effect only after the user reinstalls the Mac app; batch it with L-1b and L-4.

@@ -569,6 +569,11 @@ are fixed per event in code; there is no runtime level setting.
   5 MB numbered segments (`gateway.jsonl`, `.1` … `.7`; the user-chosen 40 MB
   budget). Segment size is tracked in memory, not stat'ed per record. The
   newest 1,000 persisted records are served by `system.logs`.
+- When `TRON_GATEWAY_SUPERVISED=1`, persisted records are not mirrored to
+  stdout/stderr. The C launcher redirects supervised stderr to
+  `<Tron home>/logs/gateway-stderr.log` before executing Node, capturing launcher
+  and Node startup failures; mirroring would duplicate the canonical JSONL stream
+  there. Unsupervised foreground runs continue mirroring records.
 - Debug never reaches disk. It lives in a bounded memory buffer (4,000 records
   or 2 MB) that `system.logs.export` appends to the exported snapshot.
 - Each record carries `timestamp`, `level`, `event`, `source`, a redacted

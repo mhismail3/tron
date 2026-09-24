@@ -61,6 +61,35 @@ struct MacAppStartupMaintenanceTests {
         )
     }
 
+    @Test("startup truncates an oversized Gateway stderr log")
+    func oversizedGatewayStderrIsTruncated() async throws {
+        let tmp = TestTempDir.make()
+        defer { TestTempDir.cleanup(tmp) }
+        let stderrLog = tmp.appendingPathComponent("logs/gateway-stderr.log")
+        try FileManager.default.createDirectory(at: stderrLog.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try Data(repeating: 0x78, count: 1_048_577).write(to: stderrLog)
+        let setup = Self.makeSetup(tmp: tmp, currentVersion: MacAppVersionIdentity(canonicalVersion: "1", buildNumber: "1"))
+
+        _ = await MacAppStartupMaintenance.run(setup: setup, controller: nil, context: .wizardCompletion)
+
+        #expect(try Data(contentsOf: stderrLog).isEmpty)
+    }
+
+    @Test("startup preserves a Gateway stderr log below the maintenance cap")
+    func gatewayStderrBelowCapIsPreserved() async throws {
+        let tmp = TestTempDir.make()
+        defer { TestTempDir.cleanup(tmp) }
+        let stderrLog = tmp.appendingPathComponent("logs/gateway-stderr.log")
+        try FileManager.default.createDirectory(at: stderrLog.deletingLastPathComponent(), withIntermediateDirectories: true)
+        let contents = Data(repeating: 0x78, count: 1_048_575)
+        try contents.write(to: stderrLog)
+        let setup = Self.makeSetup(tmp: tmp, currentVersion: MacAppVersionIdentity(canonicalVersion: "1", buildNumber: "1"))
+
+        _ = await MacAppStartupMaintenance.run(setup: setup, controller: nil, context: .wizardCompletion)
+
+        #expect(try Data(contentsOf: stderrLog) == contents)
+    }
+
     @Test("version marker round-trips JSON")
     func versionMarkerRoundTrips() throws {
         let tmp = TestTempDir.make()

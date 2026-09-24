@@ -628,6 +628,15 @@ static int selected_home(char *home, size_t capacity) {
     return snprintf(home, capacity, "%s/%s", homeDirectory, name) >= (int)capacity ? -1 : 0;
 }
 
+static void redirect_supervised_stderr(const char *home) {
+    char path[PATH_MAX];
+    if (snprintf(path, sizeof(path), "%s/logs/gateway-stderr.log", home) >= (int)sizeof(path)) return;
+    int descriptor = open(path, O_WRONLY | O_CREAT | O_APPEND | O_NOFOLLOW, 0600);
+    if (descriptor < 0) return;
+    (void)dup2(descriptor, STDERR_FILENO);
+    close(descriptor);
+}
+
 static int read_selection(const char *path, const char *channel, char *version, size_t versionCapacity,
                           char *fingerprint, size_t fingerprintCapacity) {
     char selection[MAX_MANIFEST_BYTES + 1], kind[64], selectedChannel[64];
@@ -990,6 +999,13 @@ int main(int argc, char **argv) {
         return 0;
     }
 
+    const char *supervision = getenv("TRON_GATEWAY_SUPERVISED");
+    int supervised = supervision != NULL && strcmp(supervision, "1") == 0;
+    int versionMode = argc > 1 && strcmp(argv[1], "--version") == 0;
+    char home[PATH_MAX];
+    int homeResolved = selected_home(home, sizeof(home)) == 0;
+    if (supervised && !versionMode && homeResolved) redirect_supervised_stderr(home);
+
     char executable[PATH_MAX];
     if (executable_path(executable, sizeof(executable)) != 0) {
         fputs("Tron could not resolve its gateway launcher path.\n", stderr);
@@ -1007,7 +1023,7 @@ int main(int argc, char **argv) {
         return 78;
     }
 
-    char node[PATH_MAX], entrypoint[PATH_MAX], helper[PATH_MAX], home[PATH_MAX];
+    char node[PATH_MAX], entrypoint[PATH_MAX], helper[PATH_MAX];
     PayloadIdentity selectedIdentity;
     char selectedPayloadRoot[PATH_MAX];
     const char *channel = getenv("TRON_GATEWAY_CHANNEL");
@@ -1021,7 +1037,7 @@ int main(int argc, char **argv) {
     char admittedChannelRoot[PATH_MAX];
     char deployLogPath[PATH_MAX] = {0};
     int externalState = 1;
-    if (selected_home(home, sizeof(home)) == 0) {
+    if (homeResolved) {
         // A home whose log path does not fit loses its launcher records only.
         if (snprintf(deployLogPath, sizeof(deployLogPath), "%s/logs/deploy.jsonl", home) >= (int)sizeof(deployLogPath)) deployLogPath[0] = '\0';
         externalState = admit_channel_root(home, channel, admittedChannelRoot);

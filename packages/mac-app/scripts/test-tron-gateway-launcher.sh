@@ -43,7 +43,7 @@ make_payload() {
   printf '%s\n' '#!/usr/bin/env node' > "$root/app/node_modules/@earendil-works/pi-coding-agent/dist/cli.js"
   chmod 755 "$root/app/node_modules/@earendil-works/pi-coding-agent/dist/cli.js"
   ln -s ../@earendil-works/pi-coding-agent/dist/cli.js "$root/app/node_modules/.bin/pi"
-  printf '%s\n' '#!/bin/sh' '[ -n "$TRON_GATEWAY_BUNDLED_PAYLOAD_ROOT" ] || exit 9' '[ "$(command -v npm)" = "$TRON_GATEWAY_PAYLOAD_ROOT/runtime/bin-arm64/npm" ] || exit 11' 'printf "%s\\n" "$TRON_GATEWAY_PAYLOAD_ROOT"' 'exit 0' > "$root/runtime/node-arm64"
+  printf '%s\n' '#!/bin/sh' '[ -n "$TRON_GATEWAY_BUNDLED_PAYLOAD_ROOT" ] || exit 9' '[ "$(command -v npm)" = "$TRON_GATEWAY_PAYLOAD_ROOT/runtime/bin-arm64/npm" ] || exit 11' '[ "${TRON_FIXTURE_WRITE_STDERR:-0}" != 1 ] || printf "fixture Gateway stderr\\n" >&2' 'printf "%s\\n" "$TRON_GATEWAY_PAYLOAD_ROOT"' 'exit 0' > "$root/runtime/node-arm64"
   # Keep each fake runtime over the canonical minimum size without embedding
   # NUL bytes that would make the shell fixture itself invalid.
   dd if=/dev/zero bs=1024 count=1025 2>/dev/null | tr '\\0' '#' >> "$root/runtime/node-arm64"
@@ -229,6 +229,26 @@ chmod -R a-w "$TMP/home/.tron"
 valid="$(HOME="$TMP/home" "$HELPER" --version)"
 EXTERNAL_REAL="$(cd "$EXTERNAL" && pwd -P)"
 [[ "$valid" == "$EXTERNAL_REAL" ]] || { echo "valid fixture did not select external payload: $valid" >&2; exit 1; }
+
+STDERR_LOG="$TMP/home/.tron/logs/gateway-stderr.log"
+chmod u+w "$TMP/home/.tron/logs"
+rm -f "$STDERR_LOG"
+supervised_result="$(HOME="$TMP/home" TRON_GATEWAY_SUPERVISED=1 TRON_FIXTURE_WRITE_STDERR=1 "$HELPER")"
+[[ "$supervised_result" == "$EXTERNAL_REAL" ]] || { echo "supervised launcher failed to start the selected payload: $supervised_result" >&2; exit 1; }
+grep -q '^fixture Gateway stderr$' "$STDERR_LOG" || { echo "supervised payload stderr was not captured in Tron home" >&2; exit 1; }
+rm "$STDERR_LOG"
+version_result="$(HOME="$TMP/home" TRON_GATEWAY_SUPERVISED=1 "$HELPER" --version)"
+[[ "$version_result" == "$EXTERNAL_REAL" && ! -e "$STDERR_LOG" ]] || { echo "--version unexpectedly created the stderr capture" >&2; exit 1; }
+foreground_stderr="$TMP/foreground.stderr"
+foreground_result="$(env -u TRON_GATEWAY_SUPERVISED HOME="$TMP/home" TRON_FIXTURE_WRITE_STDERR=1 "$HELPER" 2>"$foreground_stderr")"
+[[ "$foreground_result" == "$EXTERNAL_REAL" && ! -e "$STDERR_LOG" ]] || { echo "non-supervised launcher unexpectedly created the stderr capture" >&2; exit 1; }
+grep -q '^fixture Gateway stderr$' "$foreground_stderr" || { echo "non-supervised payload stderr was not inherited" >&2; exit 1; }
+chmod 500 "$TMP/home/.tron/logs"
+unwritable_result="$(HOME="$TMP/home" TRON_GATEWAY_SUPERVISED=1 TRON_FIXTURE_WRITE_STDERR=1 "$HELPER" 2>"$TMP/unwritable-logs.stderr")"
+chmod 700 "$TMP/home/.tron/logs"
+[[ "$unwritable_result" == "$EXTERNAL_REAL" && ! -e "$STDERR_LOG" ]] || { echo "unwritable stderr directory prevented payload launch" >&2; exit 1; }
+grep -q '^fixture Gateway stderr$' "$TMP/unwritable-logs.stderr" || { echo "failed stderr capture did not preserve inherited stderr" >&2; exit 1; }
+chmod a-w "$TMP/home/.tron/logs"
 BUNDLE_REAL="$(cd "$BUNDLE" && pwd -P)"
 # A previously selected, internally valid payload from another wire generation
 # must be ignored after a Mac app replacement so the bundled lockstep Gateway
@@ -486,4 +506,4 @@ assert record["payloadVersion"] == "v3" and record["runtimeEpoch"] == epoch, rec
 assert "v3" in record["message"] and "v1" in record["message"], record
 PY
 
-printf 'launcher fixture: valid external fingerprint and bundled migration root pass; tampered payload uses trusted bundled fallback; pending candidate crash-rolls back; committed candidate persists; held locks fail closed; stale locks recover; malformed markers fail closed; refused selections and the rolled-back candidate are recorded for the deploy helper\n'
+printf 'launcher fixture: supervised stderr capture, foreground/version no-capture, unwritable-log launch, payload selection and fingerprint, fallback, candidate rollback and commit, lock recovery, and deploy-cause records pass\n'

@@ -208,6 +208,7 @@ export class GatewayLogger {
     this.records.push(record);
     if (this.records.length > PERSISTED_TAIL_RECORDS) this.records.splice(0, this.records.length - PERSISTED_TAIL_RECORDS);
     this.persist(record);
+    if (process.env.TRON_GATEWAY_SUPERVISED === "1") return;
     const output = `[${record.timestamp}] ${level.toUpperCase()}${record.event ? ` ${record.event}` : ""} ${record.message}\n`;
     if (level === "error") process.stderr.write(output);
     else process.stdout.write(output);

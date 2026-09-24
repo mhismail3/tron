@@ -75,11 +75,14 @@ enum MacAppStartupMaintenanceResult: Equatable, Sendable {
 }
 
 enum MacAppStartupMaintenance {
+    private static let gatewayStderrMaxBytes = 1_048_576
+
     static func run(
         setup: EnvironmentSetup,
         controller: MenuBarController?,
         context: MacAppStartupContext
     ) async -> MacAppStartupMaintenanceResult {
+        truncateGatewayStderr(at: setup.tronHome)
         let currentVersion = setup.currentAppVersion()
         let startupMode = setup.resolvedStartupMode(
             command: .normal,
@@ -168,6 +171,15 @@ enum MacAppStartupMaintenance {
             break
         }
         return .restarted(outcome)
+    }
+
+    private static func truncateGatewayStderr(at tronHome: URL) {
+        let stderrLog = tronHome.appendingPathComponent("logs/gateway-stderr.log", isDirectory: false)
+        guard let attributes = try? FileManager.default.attributesOfItem(atPath: stderrLog.path),
+              let size = attributes[.size] as? NSNumber,
+              size.intValue > gatewayStderrMaxBytes else { return }
+        // Launcher and Node abort text is rare and small; this file is not the canonical, volume-heavy Gateway JSONL stream.
+        try? Data().write(to: stderrLog)
     }
 
     private static func restartSkipReason(
