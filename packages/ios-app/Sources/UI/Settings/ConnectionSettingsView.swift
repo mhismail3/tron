@@ -5,7 +5,7 @@ private extension DashboardServerConnectionState {
     var color: Color {
         switch self {
         case .connected: .tronEmerald
-        case .connecting, .reconnecting, .restarting: .tronAmber
+        case .connecting, .reconnecting, .noPath, .restarting: .tronAmber
         case .offline, .identityMismatch: .tronError
         case .disabled, .stale, .blocked, .needsVerification: .tronSlate
         }
@@ -14,7 +14,7 @@ private extension DashboardServerConnectionState {
     var icon: String {
         switch self {
         case .connected: "checkmark.circle.fill"
-        case .connecting, .reconnecting: "arrow.triangle.2.circlepath"
+        case .connecting, .reconnecting, .noPath: "arrow.triangle.2.circlepath"
         case .restarting: "arrow.clockwise.circle.fill"
         case .offline, .identityMismatch: "exclamationmark.triangle.fill"
         case .disabled: "pause.circle.fill"

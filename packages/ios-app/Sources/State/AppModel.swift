@@ -579,7 +579,7 @@ final class AppModel {
                     state = switch lifecycle.connectionState {
                     case .connected: .connected
                     case .connecting: .connecting
-                    case .reconnecting: .reconnecting
+                    case .reconnecting: lifecycle.noPathPresentation.map { .noPath($0.interface) } ?? .reconnecting
                     case .restarting: .restarting
                     case .offline: .offline
                     case .unpaired: .offline
@@ -1281,7 +1281,7 @@ final class AppModel {
             switch connectionState {
             case .connected: return .connected
             case .connecting: return .connecting
-            case .reconnecting: return .reconnecting
+            case .reconnecting: return lifecycle.noPathPresentation.map { .noPath($0.interface) } ?? .reconnecting
             case .restarting: return .restarting
             case .offline: return .offline
             case .unpaired, .unauthorized: return .stale
@@ -1408,19 +1408,23 @@ final class AppModel {
                   self.connectionState != .unpaired,
                   self.connectionState != .unauthorized else { return }
             self.recoveryDisplayNoticeEpisode = episode
-            self.noticeCenter.post(
-                .init(
-                    id: self.uuidSource.next(),
-                    replacement: InAppNoticeReplacement(key: .gatewayRecovery, scope: .app),
-                    scope: .app,
-                    role: .warning,
-                    priority: .high,
-                    title: "Gateway connection unavailable",
-                    message: "Your conversation and draft are retained. Retry Connection and Logs are available in Settings.",
-                    lifetime: .automatic(.seconds(8))
-                )
-            )
+            self.postRecoveryNotice()
         }
+    }
+
+    private func postRecoveryNotice() {
+        noticeCenter.post(
+            .init(
+                id: uuidSource.next(),
+                replacement: InAppNoticeReplacement(key: .gatewayRecovery, scope: .app),
+                scope: .app,
+                role: .warning,
+                priority: .high,
+                title: lifecycle.noPathPresentation?.label ?? "Gateway connection unavailable",
+                message: "Your conversation and draft are retained. Retry Connection and Logs are available in Settings.",
+                lifetime: .automatic(.seconds(8))
+            )
+        )
     }
 
     private func finishRecoveryDisplayEpisode() {
@@ -4672,6 +4676,11 @@ extension AppModel: CustomModelConfigurationCoordinatorDelegate {
 }
 
 extension AppModel: GatewayLifecycleProjectionDelegate {
+    func lifecycleConnectionFailurePresentationDidChange() {
+        guard recoveryDisplayNoticeEpisode != nil else { return }
+        postRecoveryNotice()
+    }
+
     func lifecycleRecordDiagnostic(event: String, message: String) {
         if event == "reconnect.failure" || event == "reconnect.exhausted" || event == "reconnect.stopped" {
             beginRecoveryDisplayEpisodeIfNeeded()

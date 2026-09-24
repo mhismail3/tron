@@ -110,9 +110,10 @@ enum DashboardActivityClock {
     static let refreshInterval: TimeInterval = 1
 }
 
-enum DashboardServerConnectionState: Equatable, Sendable {
+enum DashboardServerConnectionState: Hashable, Sendable {
     case connecting
     case reconnecting
+    case noPath(String?)
     case restarting
     case connected
     case offline
@@ -126,6 +127,7 @@ enum DashboardServerConnectionState: Equatable, Sendable {
         switch self {
         case .connecting: "Connecting"
         case .reconnecting: "Reconnecting"
+        case .noPath(let interface): GatewayNoPathPresentation(interface: interface).label
         case .restarting: "Restarting"
         case .connected: "Connected"
         case .offline: "Offline"
@@ -148,10 +150,17 @@ enum DashboardProjectionRetentionPolicy {
         incomingSessionCount: Int,
         state: DashboardServerConnectionState
     ) -> Bool {
-        profileExists
+        let unavailable: Bool
+        switch state {
+        case .connecting, .reconnecting, .noPath, .restarting, .offline, .stale:
+            unavailable = true
+        default:
+            unavailable = false
+        }
+        return profileExists
             && existingSessionCount > 0
             && incomingSessionCount == 0
-            && [.connecting, .reconnecting, .restarting, .offline, .stale].contains(state)
+            && unavailable
     }
 }
 

@@ -682,6 +682,8 @@ struct DashboardStateOwnerTests {
     func connectionStatusLabels() {
         #expect(DashboardServerConnectionState.connected.label == "Connected")
         #expect(DashboardServerConnectionState.reconnecting.label == "Reconnecting")
+        #expect(DashboardServerConnectionState.noPath("Wi-Fi").label == "No path to this Mac over Wi-Fi")
+        #expect(DashboardServerConnectionState.noPath(nil).label == "No path to this Mac")
         #expect(DashboardServerConnectionState.restarting.label == "Restarting")
         #expect(DashboardServerConnectionState.identityMismatch.label == "Identity changed")
         #expect(DashboardServerConnectionState.disabled.label == "Disabled")

@@ -436,6 +436,103 @@ struct AppModelReconnectTests {
         }
     }
 
+    @Test("two never-opened connect failures publish no-path until a handshake succeeds")
+    func twoNeverOpenedFailuresPublishNoPath() async throws {
+        let clock = ManualClock()
+        let recoveryClock = ManualClock()
+        let sockets = (0..<3).map { _ in ScriptedGatewaySocket() }
+        for socket in sockets.prefix(2) {
+            await socket.failNextSend(GatewayFailure(
+                code: "timeout", message: "synthetic timeout", retryable: true, details: nil
+            ))
+        }
+        try await withFixture(
+            sockets: sockets, clock: clock,
+            units: SequenceReconnectUnits(Array(repeating: 0, count: 20)), recoveryClock: recoveryClock
+        ) { fixture in
+            let start = Task { await fixture.model.start() }
+            try await clock.waitUntilSleeping(count: 1)
+            await start.value
+            #expect(fixture.model.dashboardServerState(for: "gateway") == .reconnecting)
+
+            clock.advance(by: .seconds(60))
+            try await sockets[1].waitUntilSendInvoked(count: 1)
+            for _ in 0..<100 where fixture.model.dashboardServerState(for: "gateway") != .noPath(nil) {
+                await Task.yield()
+            }
+            #expect(fixture.model.dashboardServerState(for: "gateway") == .noPath(nil))
+            try await recoveryClock.waitUntilSleeping(count: 1, duration: .seconds(2))
+            recoveryClock.advance(by: .seconds(2))
+            for _ in 0..<10 { await Task.yield() }
+            let noPathNotice = try #require(fixture.model.visibleNotices.first { $0.replacement?.key == .gatewayRecovery })
+            #expect(noPathNotice.title == "No path to this Mac")
+
+            try await clock.waitUntilSleeping(count: 1)
+            await sockets[2].enqueue(helloFrame())
+            clock.advance(by: .seconds(60))
+            try await sockets[2].waitUntilSent(count: 1)
+            while fixture.model.connectionState != .connected {
+                await Task.yield()
+            }
+            #expect(fixture.model.dashboardServerState(for: "gateway") == .connected)
+        }
+    }
+
+    @Test("stale scripted connect failures cannot relabel a newer connected attempt")
+    func staleConnectFailureClassificationIsFenced() async throws {
+        let clock = ManualClock()
+        let sockets = (0..<4).map { _ in ScriptedGatewaySocket() }
+        let factory = ScriptedGatewaySocketFactory(sockets: sockets)
+        let client = GatewayClient(socketFactory: factory.factory, clock: clock.clock)
+        let profile = GatewayProfile(
+            id: "gateway", label: "Mac", host: "gateway.test", port: 9_847,
+            machineId: "machine", deviceId: "device"
+        )
+        await sockets[0].enqueue(helloFrame())
+        _ = try await client.connectForLifecycle(profile: profile, token: "token")
+
+        var classifier = GatewayConnectionFailureClassifier()
+        var lateFailures: [(generation: Int, diagnostic: GatewayConnectionDiagnostic)] = []
+        for index in 1...2 {
+            let generation = classifier.beginAttempt()
+            let diagnosticSequence = await client.latestDiagnosticSequence()
+            await sockets[index].failNextSend(GatewayFailure(
+                code: "timeout", message: "synthetic timeout", retryable: true, details: nil
+            ))
+            do {
+                _ = try await client.reconnectForLifecycle(
+                    profile: profile, token: "token", attemptID: "stale-\(index)"
+                )
+                Issue.record("Scripted handshake unexpectedly succeeded")
+            } catch { }
+            let diagnostic = try #require(await client.latestHandshakeDiagnostic(after: diagnosticSequence))
+            #expect(diagnostic.stage == .transportOpen)
+            #expect(diagnostic.handshake?.transportOpened == false)
+            lateFailures.append((generation, diagnostic))
+        }
+
+        await sockets[3].enqueue(helloFrame())
+        _ = try await client.reconnectForLifecycle(profile: profile, token: "token", attemptID: "newer")
+        classifier.reset()
+        #expect(classifier.noPath == nil)
+        for failure in lateFailures {
+            let applied = classifier.failedAttempt(
+                failure.diagnostic,
+                code: "timeout",
+                attemptGeneration: failure.generation
+            )
+            #expect(!applied)
+        }
+        #expect(classifier.noPath == nil)
+
+        var negativeControl = GatewayConnectionFailureClassifier()
+        for failure in lateFailures {
+            _ = negativeControl.failedAttempt(failure.diagnostic, code: "timeout")
+        }
+        #expect(negativeControl.noPath != nil)
+        await client.close()
+    }
+
     @Test("transient failures keep retrying with capped backoff until a handshake succeeds")
     func retriesTenFailuresThenConnects() async throws {
         let clock = ManualClock()
@@ -928,6 +1025,7 @@ struct AppModelReconnectTests {
         displayClock.advance(by: .seconds(2))
         for _ in 0..<10 { await Task.yield() }
         let warning = try #require(model.visibleNotices.first { $0.replacement?.key == .gatewayRecovery })
+        #expect(warning.title == "Gateway connection unavailable")
         #expect(warning.lifetime == .automatic(.seconds(8)))
         #expect(warning.message?.contains("Settings") == true)
         let target = try #require(model.mountedPresentationTarget)
@@ -1228,9 +1326,10 @@ struct AppModelReconnectTests {
         sockets: [ScriptedGatewaySocket],
         clock: ManualClock,
         units: SequenceReconnectUnits,
+        recoveryClock: ManualClock? = nil,
         operation: @escaping @MainActor @Sendable (ReconnectFixture) async throws -> Void
     ) async throws {
-        let fixture = makeFixture(sockets: sockets, clock: clock, units: units)
+        let fixture = makeFixture(sockets: sockets, clock: clock, units: units, recoveryClock: recoveryClock)
         do {
             try await withTestWatchdog {
                 try await operation(fixture)
@@ -1245,7 +1344,8 @@ struct AppModelReconnectTests {
     private func makeFixture(
         sockets: [ScriptedGatewaySocket],
         clock: ManualClock,
-        units: SequenceReconnectUnits
+        units: SequenceReconnectUnits,
+        recoveryClock: ManualClock? = nil
     ) -> ReconnectFixture {
         let suiteName = "AppModelReconnectTests.\(UUID().uuidString)"
         let defaults = UserDefaults(suiteName: suiteName)!
@@ -1269,6 +1369,7 @@ struct AppModelReconnectTests {
             profiles: store,
             cache: SnapshotCache(root: cacheRoot),
             clock: clock.clock,
+            recoveryDisplayClock: recoveryClock?.clock ?? .continuous,
             reconnectDelayPolicy: ReconnectDelayPolicy(nextUnitInterval: units.next),
             profileTokenLookup: { _ in "token" }
         )

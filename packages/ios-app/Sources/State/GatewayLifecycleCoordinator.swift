@@ -28,10 +28,12 @@ protocol GatewayLifecycleProjectionDelegate: AnyObject, Sendable {
     func lifecycleRetireProjection(final: Bool) async
     func lifecycleSurface(_ error: Error)
     func lifecycleRecordDiagnostic(event: String, message: String)
+    func lifecycleConnectionFailurePresentationDidChange()
 }
 
 extension GatewayLifecycleProjectionDelegate {
     func lifecycleRecordDiagnostic(event: String, message: String) {}
+    func lifecycleConnectionFailurePresentationDidChange() {}
 }
 
 @MainActor
@@ -116,6 +118,9 @@ final class GatewayLifecycleCoordinator {
     private var projectionFailureGeneration: Int?
     private var nonRetryableRecoveryFailure = false
     private var networkPathSatisfied = true
+    private var connectionFailureClassifier = GatewayConnectionFailureClassifier()
+
+    var noPathPresentation: GatewayNoPathPresentation? { connectionFailureClassifier.noPath }
 
     init(
         client: GatewayClient,
@@ -429,7 +434,10 @@ final class GatewayLifecycleCoordinator {
     ) async {
         guard admitsEvent(connectionID: deliveredConnectionID) else { return }
         if countsAsTransportFailure {
-            delegate?.lifecycleRecordDiagnostic(event: "reconnect.failure", message: "code=\(GatewayDiagnosticFailure.normalizedCode(reason))")
+            let code = GatewayDiagnosticFailure.normalizedCode(reason)
+            connectionFailureClassifier.failedAttempt(nil, code: code)
+            delegate?.lifecycleConnectionFailurePresentationDidChange()
+            delegate?.lifecycleRecordDiagnostic(event: "reconnect.failure", message: "code=\(code)")
         }
         if activatedConnectionID == deliveredConnectionID || deliveredConnectionID == nil {
             activatedConnectionID = nil
@@ -798,8 +806,14 @@ final class GatewayLifecycleCoordinator {
         awaitProjection: Bool = true
     ) async {
         guard admits(admission) else { return }
+        let connectAttemptGeneration = connectionAdmissionGeneration
+        let failurePresentationGeneration = connectionFailureClassifier.beginAttempt()
         activatedConnectionID = nil
         connectionState = .connecting
+        let diagnosticSequence = await client.latestDiagnosticSequence()
+        guard admits(admission),
+              connectionAdmissionGeneration == connectAttemptGeneration,
+              connectionState == .connecting else { return }
         var establishedConnectionID: Int?
         var reconciliationAdmission: Admission?
         do {
@@ -819,6 +833,7 @@ final class GatewayLifecycleCoordinator {
             reconnectSchedule.reset()
             nonRetryableRecoveryFailure = false
             connectionState = .connected
+            connectionFailureClassifier.reset()
             restartWatchdogTask?.cancel()
             restartWatchdogTask = nil
             restartRequested = false
@@ -892,7 +907,8 @@ final class GatewayLifecycleCoordinator {
                 if activatedConnectionID == establishedConnectionID { activatedConnectionID = nil }
                 if connectionID == establishedConnectionID { connectionID = nil }
             }
-            guard admitsGeneration(admission.generation),
+            guard admits(admission),
+                  connectionAdmissionGeneration == connectAttemptGeneration,
                   connectionID == nil || connectionID == establishedConnectionID else { return }
             if Task.isCancelled, pairingAttemptID == nil { return }
             if let pairingAttemptID, (try? requirePairingAttempt(pairingAttemptID)) == nil { return }
@@ -921,6 +937,17 @@ final class GatewayLifecycleCoordinator {
                     event: "reconnect.failure",
                     message: "code=\(GatewayDiagnosticFailure.code(error))"
                 )
+                let diagnostic = await client.latestHandshakeDiagnostic(after: diagnosticSequence)
+                guard admits(admission),
+                      connectionAdmissionGeneration == connectAttemptGeneration,
+                      connectionState == .reconnecting else { return }
+                if connectionFailureClassifier.failedAttempt(
+                    diagnostic,
+                    code: GatewayDiagnosticFailure.code(error),
+                    attemptGeneration: failurePresentationGeneration
+                ) {
+                    delegate?.lifecycleConnectionFailurePresentationDidChange()
+                }
                 scheduleReconnect()
             }
         }
@@ -1034,6 +1061,13 @@ final class GatewayLifecycleCoordinator {
                         event: "reconnect.attempt",
                         message: "attempt=\(attemptGeneration) loop=\(loopID) retry=\(retry) actualDelayMs=\(diagnosticMilliseconds(delayStartedAt.duration(to: startedAt))) state=\(self.restartRequested ? "restarting" : "reconnecting")"
                     )
+                    let failurePresentationGeneration = self.connectionFailureClassifier.beginAttempt()
+                    let connectionStateAtAttempt = self.connectionState
+                    let diagnosticSequence = await self.client.latestDiagnosticSequence()
+                    guard self.admitsReconnect(
+                        lifecycleGeneration: lifecycleGeneration,
+                        attemptGeneration: attemptGeneration
+                    ), self.connectionState == connectionStateAtAttempt else { return }
                     var establishedConnectionID: Int?
                     var reconciliationAggregateAdmission: Admission?
                     guard let profile = self.profiles.selected,
@@ -1085,6 +1119,7 @@ final class GatewayLifecycleCoordinator {
                         self.restartWatchdogTask = nil
                         self.restartRequested = false
                         self.connectionState = .connected
+                        self.connectionFailureClassifier.reset()
                         self.hasResolvedLaunchState = true
                         self.delegate?.lifecycleRecordDiagnostic(event: "reconnect.connected",
                             message: "attempt=\(attemptGeneration) loop=\(loopID) retry=\(retry) connectionID=\(connection.id) handshakeMs=\(diagnosticMilliseconds(startedAt.duration(to: clock.now())))")
@@ -1284,7 +1319,24 @@ final class GatewayLifecycleCoordinator {
                             lifecycleGeneration: lifecycleGeneration,
                             attemptGeneration: attemptGeneration
                         ) else { return }
-                        self.connectionState = self.restartRequested ? .restarting : .reconnecting
+                        let failedState: GatewayConnectionState = self.restartRequested ? .restarting : .reconnecting
+                        self.connectionState = failedState
+                        self.delegate?.lifecycleRecordDiagnostic(
+                            event: "reconnect.failure",
+                            message: "attempt=\(attemptGeneration) loop=\(loopID) retry=\(retry) code=\(GatewayDiagnosticFailure.code(error)) durationMs=\(diagnosticMilliseconds(startedAt.duration(to: clock.now())))"
+                        )
+                        let diagnostic = await self.client.latestHandshakeDiagnostic(after: diagnosticSequence)
+                        guard self.admitsReconnect(
+                            lifecycleGeneration: lifecycleGeneration,
+                            attemptGeneration: attemptGeneration
+                        ), self.connectionState == failedState else { return }
+                        if self.connectionFailureClassifier.failedAttempt(
+                            diagnostic,
+                            code: GatewayDiagnosticFailure.code(error),
+                            attemptGeneration: failurePresentationGeneration
+                        ) {
+                            self.delegate?.lifecycleConnectionFailurePresentationDidChange()
+                        }
                         guard self.networkPathSatisfied else {
                             self.finishReconnect(
                                 lifecycleGeneration: lifecycleGeneration,
@@ -1293,8 +1345,6 @@ final class GatewayLifecycleCoordinator {
                             return
                         }
                         self.reconnectCanBeAccelerated = true
-                        self.delegate?.lifecycleRecordDiagnostic(event: "reconnect.failure",
-                            message: "attempt=\(attemptGeneration) loop=\(loopID) retry=\(retry) code=\(GatewayDiagnosticFailure.code(error)) durationMs=\(diagnosticMilliseconds(startedAt.duration(to: clock.now())))")
                         delayStartedAt = clock.now()
                         self.delegate?.lifecycleRecordDiagnostic(event: "reconnect.delay",
                             message: "attempt=\(attemptGeneration) loop=\(loopID) retry=\(retry + 1)")

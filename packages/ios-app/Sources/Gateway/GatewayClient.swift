@@ -561,6 +561,12 @@ actor GatewayClient {
 
     func diagnostics() -> [GatewayConnectionDiagnostic] { connectionDiagnostics }
 
+    func latestDiagnosticSequence() -> Int { diagnosticSequence }
+
+    func latestHandshakeDiagnostic(after sequence: Int) -> GatewayConnectionDiagnostic? {
+        connectionDiagnostics.first { $0.sequence > sequence && $0.handshake != nil }
+    }
+
     func installAppLog(_ log: AppLog?) {
         appLog = log
     }

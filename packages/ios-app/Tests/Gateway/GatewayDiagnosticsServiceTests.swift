@@ -462,6 +462,142 @@ struct GatewayDiagnosticsServiceTests {
         #expect(firstRecord.record.message.contains("platformCode=-1001"))
     }
 
+    @Test("two never-opened attempts report the known path while one is insufficient")
+    func noPathRequiresTwoNeverOpenedAttempts() {
+        var classifier = GatewayConnectionFailureClassifier()
+        let neverOpened = connectionDiagnostic(
+            stage: .transportOpen,
+            handshake: GatewayHandshakeDiagnostic(
+                transportOpened: false, transportOpenMilliseconds: nil,
+                waitedForConnectivity: true, networkInterfaces: "wifi,other"
+            )
+        )
+        classifier.failedAttempt(neverOpened, code: "timeout")
+        #expect(classifier.noPath == nil)
+        classifier.failedAttempt(neverOpened, code: "timeout")
+        #expect(classifier.noPath?.label == "No path to this Mac over Wi-Fi")
+
+        var negativeControl = GatewayConnectionFailureClassifier()
+        let opened = connectionDiagnostic(
+            stage: .helloReceive,
+            handshake: GatewayHandshakeDiagnostic(
+                transportOpened: true, transportOpenMilliseconds: 42,
+                waitedForConnectivity: false, networkInterfaces: "wifi,other"
+            )
+        )
+        negativeControl.failedAttempt(opened, code: "timeout")
+        negativeControl.failedAttempt(neverOpened, code: "timeout")
+        #expect(negativeControl.noPath == nil)
+    }
+
+    @Test("opened and ping-timeout recovery episodes stay reconnecting and success resets classification")
+    func reconnectingEpisodesAndReset() {
+        var openedClassifier = GatewayConnectionFailureClassifier()
+        let opened = connectionDiagnostic(
+            stage: .helloReceive,
+            handshake: GatewayHandshakeDiagnostic(
+                transportOpened: true, transportOpenMilliseconds: 42,
+                waitedForConnectivity: false, networkInterfaces: "wifi"
+            )
+        )
+        openedClassifier.failedAttempt(opened, code: "timeout")
+        openedClassifier.failedAttempt(connectionDiagnostic(
+            stage: .transportOpen,
+            handshake: GatewayHandshakeDiagnostic(
+                transportOpened: false, transportOpenMilliseconds: nil,
+                waitedForConnectivity: false, networkInterfaces: "wifi"
+            )
+        ), code: "timeout")
+        #expect(openedClassifier.noPath == nil)
+
+        var pingClassifier = GatewayConnectionFailureClassifier()
+        pingClassifier.failedAttempt(nil, code: "ping_timeout")
+        pingClassifier.failedAttempt(connectionDiagnostic(
+            stage: .transportOpen,
+            handshake: GatewayHandshakeDiagnostic(
+                transportOpened: false, transportOpenMilliseconds: nil,
+                waitedForConnectivity: false, networkInterfaces: "wifi"
+            )
+        ), code: "timeout")
+        pingClassifier.failedAttempt(connectionDiagnostic(
+            stage: .transportOpen,
+            handshake: GatewayHandshakeDiagnostic(
+                transportOpened: false, transportOpenMilliseconds: nil,
+                waitedForConnectivity: false, networkInterfaces: "wifi"
+            )
+        ), code: "timeout")
+        #expect(pingClassifier.noPath == nil)
+        pingClassifier.reset()
+        #expect(pingClassifier.noPath == nil)
+        #expect(pingClassifier.consecutiveNeverOpened == 0)
+
+        var negativeControl = GatewayConnectionFailureClassifier()
+        negativeControl.failedAttempt(connectionDiagnostic(
+            stage: .transportOpen,
+            handshake: GatewayHandshakeDiagnostic(
+                transportOpened: false, transportOpenMilliseconds: nil,
+                waitedForConnectivity: false, networkInterfaces: nil
+            )
+        ), code: "timeout")
+        negativeControl.failedAttempt(connectionDiagnostic(
+            stage: .transportOpen,
+            handshake: GatewayHandshakeDiagnostic(
+                transportOpened: false, transportOpenMilliseconds: nil,
+                waitedForConnectivity: false, networkInterfaces: nil
+            )
+        ), code: "timeout")
+        #expect(negativeControl.noPath?.label == "No path to this Mac")
+    }
+
+    private func connectionDiagnostic(
+        stage: GatewayConnectionDiagnosticStage,
+        handshake: GatewayHandshakeDiagnostic
+    ) -> GatewayConnectionDiagnostic {
+        GatewayConnectionDiagnostic(
+            sequence: 1,
+            timestamp: "2026-08-16T01:00:00Z",
+            profileID: "stable",
+            profileLabel: "Stable",
+            stage: stage,
+            outcome: .failure,
+            durationMilliseconds: 15,
+            reason: .timeout,
+            platformCode: nil,
+            handshake: handshake
+        )
+    }
+
+    @Test("late failure classification cannot overwrite a connected presentation")
+    func staleFailureClassificationAfterConnectionIsIgnored() {
+        var classifier = GatewayConnectionFailureClassifier()
+        let staleAttempt = classifier.beginAttempt()
+        let neverOpened = connectionDiagnostic(
+            stage: .transportOpen,
+            handshake: GatewayHandshakeDiagnostic(
+                transportOpened: false, transportOpenMilliseconds: nil,
+                waitedForConnectivity: false, networkInterfaces: "wifi"
+            )
+        )
+        let firstFailureApplied = classifier.failedAttempt(
+            neverOpened, code: "timeout", attemptGeneration: staleAttempt
+        )
+        #expect(firstFailureApplied)
+        #expect(classifier.noPath == nil)
+
+        // A newer successful connection retires the old attempt's publication right.
+        classifier.reset()
+        let staleFailureApplied = classifier.failedAttempt(
+            neverOpened, code: "timeout", attemptGeneration: staleAttempt
+        )
+        #expect(!staleFailureApplied)
+        #expect(classifier.noPath == nil)
+
+        var negativeControl = GatewayConnectionFailureClassifier()
+        _ = negativeControl.failedAttempt(neverOpened, code: "timeout")
+        _ = negativeControl.failedAttempt(neverOpened, code: "timeout")
+        #expect(negativeControl.noPath != nil)
+    }
+
     @Test("close and HTTP metadata remain separate numeric fields")
     func transportMetadataRemainsTypedAndSeparate() {
         let close = GatewayConnectionDiagnostic(

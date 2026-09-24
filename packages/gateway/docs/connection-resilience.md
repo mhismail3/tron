@@ -68,11 +68,16 @@ owner of accepted commands; mobile reconnect never replays a prompt blindly.
   paths rather than duplicating HTTP counters.
 - **Mobile recovery:** while foregrounded with a satisfied network path, one
   reconnect owner retries transient failures indefinitely with a 2-second initial
-  delay, 1.7× progression, a 15-second cap, and 20% jitter. Background and no-path
-  states pause attempts; foreground, path return, and explicit Retry accelerate
-  one pending delay. Only authentication, authorization, protocol, and identity
+  delay, 1.7× progression, a 15-second cap, and 20% jitter. Background and
+  unsatisfied network paths pause attempts; foreground, path return, and explicit
+  Retry accelerate one pending delay. Only authentication, authorization, protocol, and identity
   failures stop automatic recovery. Each handshake has the shared 15-second
-  deadline. Last-good projections and mutation receipts remain intact.
+  deadline. Last-good projections and mutation receipts remain intact. After two
+  consecutive failed handshakes whose `transport-open` record says
+  `transportOpened=false`, the dashboard labels the server **No path to this Mac**
+  and names the current interface when known. A handshake that opened a transport,
+  or an episode that began with `ping_timeout`, stays **Reconnecting**. A successful
+  connection resets this presentation; retry timing and ownership do not change.
 
 - **Administrative restart:** `gateway.restart` normally drains accepted work.
   It restarts through the existing bounded shutdown path if the drain makes no

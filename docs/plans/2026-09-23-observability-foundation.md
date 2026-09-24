@@ -2,7 +2,7 @@
 
 - **Started:** 2026-09-23
 - **Status:** Active
-- **Last updated:** 2026-09-24, L-17 and L-18
+- **Last updated:** 2026-09-24, L-9a
 - **Goal:** Every Tron process records the right signals automatically, in a known place, at a meaningful level, so a failure can be diagnosed in one pass from what was already recorded.
 
 Follow the [plan protocol](README.md#protocol) to claim tasks and hand off.
@@ -214,7 +214,7 @@ user reinstalls manually, so batch them for one reinstall.
 | L-8b | Blocked | Lower the session-search rebuild's peak transient heap: build the index in bounded units so peak post-GC heap stays under 150 MB on the cloned 5,381-session corpus with identical index coverage and results, and warm-up no more than 10% slower than the measured 155–159 s | L-8 | observability session (L-8b lane), 2026-09-24 |
 | L-8c | Needs scoping | Sessions owner: bound the session-search read path's peak heap (743.9 MiB post-GC) by bounded or streaming parsing of a session cut in `RuntimeRegistry.readSearchCut`, keeping full graph and branch validation; first record why 62 of 207 catalog sessions were not indexed | L-8b | |
 | L-9 | Done | Phone handling of a stalled or unreachable but live Gateway (proposal for the user) | L-7, L-10 | observability session (L-9 lane), 2026-09-24 |
-| L-9a | Claimed | Phone labels a connection failure as "No path to this Mac" when attempts never opened a transport, and keeps "Reconnecting" otherwise; no timing change (option A in L-9 findings) | L-9 | observability session (L-9a lane), 2026-09-24 |
+| L-9a | Done | Phone labels a connection failure as "No path to this Mac" when attempts never opened a transport, and keeps "Reconnecting" otherwise; no timing change (option A in L-9 findings) | L-9 | observability session (L-9a lane), 2026-09-24 |
 | L-9b | Needs approval | Choose stall tolerance (third missed pong, option B) or a shorter never-opened handshake (option D), after a few days of L-9a records | L-9a | |
 | L-10 | Done | iOS connect-failure records say whether the socket ever opened, and on which interface | none | observability session, 2026-09-24 |
 | L-15 | Done | Startup timing: stop to bound and bound to first startup phase | L-2 | observability session, 2026-09-24 |
@@ -868,3 +868,13 @@ The 2026-09-23 17:33 UTC incident's records have rotated away, so its timeline i
 - Kept on purpose: the stall outcome, which is a supervised restart, and Restart Now.
 - Deviations: the snapshot carries at most 64 blocker summaries, so with more than 64 unresolved owners the immediate path is not taken and the drain falls back to the stall bound. That is bounded and acceptable.
 - For the next agent: the next stuck drain's `gateway.restart-drain.stalled` record names the blocker that decided it.
+
+### L-9a · Done · 2026-09-24 · observability session (L-9a lane)
+
+- Result: after two consecutive failed connect attempts that never opened a transport (L-10's `transport-open` stage or `transportOpened=false`), the phone's connection label and notice read "No path to this Mac", adding the interface when known ("… over Wi-Fi"). Retry is kept. Any attempt that opened a transport, or an episode that began with a `ping_timeout`, keeps "Reconnecting". A successful connect resets it. Reconnect timing and policy are unchanged. `GatewayConnectionFailureClassifier` is owned by `GatewayLifecycleCoordinator`.
+- Evidence (verified): the focused suites (`AppModelReconnectTests`, `GatewayDiagnosticsServiceTests`, `DashboardStateOwnerTests`, `GatewayClientTransportTests` and the lifecycle suites) passed 158 tests. They cover the two-attempt threshold, an opened transport, `ping_timeout`, the reset, the label and notice text, and a stale attempt's late classification being rejected after a newer attempt connected. Each has a negative control. Full iOS run: 1,885 tests in 139 suites passed in 228 s. A dark-mode render of the label reads "No path to this Mac over Wi-Fi".
+- Evidence (inspected): supervisor review found actor awaits the lane had added in the coordinator's admission-ordered connect and failure paths with no re-check afterwards. Each await is now followed by an admission, attempt-generation and connection-state check before connecting or publishing.
+- Changes: this commit (`GatewayLifecycleCoordinator.swift`, `GatewayClient.swift`, `GatewayDiagnosticsService.swift`, `AppModel.swift`, `DashboardGatewayConnectionPool.swift`, `DashboardStateOwners.swift`, `ConnectionSettingsView.swift`; their tests; `packages/gateway/docs/connection-resilience.md` and `packages/ios-app/docs/architecture.md`).
+- Tasks added: none.
+- Evidence (not yet verified): the URLSession transport-opening callbacks have not been exercised on a device, and the new label needs a real network outage to be seen.
+- For the next agent: once this iPhone build is installed, a few days of `gateway.connection` records decide L-9b, which moves to a new proposed plan when this plan closes.

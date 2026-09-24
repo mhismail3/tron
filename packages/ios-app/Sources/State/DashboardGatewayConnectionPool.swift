@@ -58,6 +58,7 @@ final class DashboardGatewayConnectionPool {
         var refreshRequestGeneration: Int
         var refreshRetryAttempt: Int
         var refreshFailedAttempts: Int
+        var connectionFailureClassifier: GatewayConnectionFailureClassifier
     }
 
     weak var delegate: (any DashboardGatewayConnectionPoolDelegate)?
@@ -302,7 +303,8 @@ final class DashboardGatewayConnectionPool {
             refreshSatisfiedGeneration: 0,
             refreshRequestGeneration: 0,
             refreshRetryAttempt: 0,
-            refreshFailedAttempts: 0
+            refreshFailedAttempts: 0,
+            connectionFailureClassifier: GatewayConnectionFailureClassifier()
         )
         publish(profileID: profile.id)
         let task = Task { @MainActor [weak self] in
@@ -310,6 +312,9 @@ final class DashboardGatewayConnectionPool {
             guard let self,
                   !Task.isCancelled,
                   self.isCurrent(profileID: profile.id, client: client, generation: generation) else { return }
+            let failurePresentationGeneration = self.entries[profile.id]?.connectionFailureClassifier.beginAttempt()
+            let diagnosticSequence = await client.latestDiagnosticSequence()
+            guard self.isCurrent(profileID: profile.id, client: client, generation: generation) else { return }
             do {
                 let info = try await client.connect(profile: profile, token: token)
                 guard Self.admitsIdentity(info, for: profile) else {
@@ -324,6 +329,7 @@ final class DashboardGatewayConnectionPool {
                 guard let connectionID, !Task.isCancelled,
                       self.isCurrent(profileID: profile.id, client: client, generation: generation) else { return }
                 self.entries[profile.id]?.reconnectSchedule.reset()
+                self.entries[profile.id]?.connectionFailureClassifier.reset()
                 self.entries[profile.id]?.connectionID = connectionID
                 self.entries[profile.id]?.gatewayInfo = info
                 self.entries[profile.id]?.state = .connecting
@@ -358,10 +364,21 @@ final class DashboardGatewayConnectionPool {
             } catch {
                 guard !Task.isCancelled,
                       self.isCurrent(profileID: profile.id, client: client, generation: generation) else { return }
+                let diagnostic = await client.latestHandshakeDiagnostic(after: diagnosticSequence)
+                guard self.isCurrent(profileID: profile.id, client: client, generation: generation) else { return }
+                if let failurePresentationGeneration {
+                    _ = self.entries[profile.id]?.connectionFailureClassifier.failedAttempt(
+                        diagnostic,
+                        code: GatewayDiagnosticFailure.code(error),
+                        attemptGeneration: failurePresentationGeneration
+                    )
+                }
+                let failedState = self.entries[profile.id]?.connectionFailureClassifier.noPath
+                    .map { DashboardServerConnectionState.noPath($0.interface) } ?? .reconnecting
                 self.retireConnectionEpoch(
                     profileID: profile.id,
                     generation: generation,
-                    state: .reconnecting
+                    state: failedState
                 )
                 self.scheduleReconnect(profileID: profile.id, generation: generation)
             }
@@ -445,6 +462,7 @@ final class DashboardGatewayConnectionPool {
         case "transport.disconnected":
             guard isCurrent(profileID: profileID, client: entry.client, generation: generation),
                   entries[profileID]?.connectionID == delivery.connectionID else { return }
+            entries[profileID]?.connectionFailureClassifier.failedAttempt(nil, code: "transport")
             retireConnectionEpoch(profileID: profileID, generation: generation, state: .reconnecting)
             scheduleReconnect(profileID: profileID, generation: generation)
         case "system.stopping":
@@ -529,6 +547,9 @@ final class DashboardGatewayConnectionPool {
                 guard !Task.isCancelled,
                       let entry = self.entries[profileID],
                       entry.generation == generation else { return }
+                let failurePresentationGeneration = self.entries[profileID]?.connectionFailureClassifier.beginAttempt()
+                let diagnosticSequence = await entry.client.latestDiagnosticSequence()
+                guard self.isCurrent(profileID: profileID, client: entry.client, generation: generation) else { return }
                 do {
                     let identity = try await entry.client.reconnectForLifecycle(
                         profile: entry.profile, token: entry.token,
@@ -550,6 +571,7 @@ final class DashboardGatewayConnectionPool {
                     guard self.isCurrent(profileID: profileID, client: entry.client, generation: generation) else { return }
                     self.entries[profileID]?.gatewayInfo = info
                     entry.reconnectSchedule.reset()
+                    self.entries[profileID]?.connectionFailureClassifier.reset()
                     self.entries[profileID]?.state = .connecting
                     self.publish(profileID: profileID)
                     let connectionID = identity.id
@@ -573,7 +595,18 @@ final class DashboardGatewayConnectionPool {
                     guard !Task.isCancelled,
                           self.isCurrent(profileID: profileID, client: entry.client, generation: generation) else { return }
                     guard self.isCurrent(profileID: profileID, client: entry.client, generation: generation) else { return }
-                    self.entries[profileID]?.state = .reconnecting
+                    let diagnostic = await entry.client.latestHandshakeDiagnostic(after: diagnosticSequence)
+                    guard self.isCurrent(profileID: profileID, client: entry.client, generation: generation) else { return }
+                    if let failurePresentationGeneration {
+                        _ = self.entries[profileID]?.connectionFailureClassifier.failedAttempt(
+                            diagnostic,
+                            code: GatewayDiagnosticFailure.code(error),
+                            attemptGeneration: failurePresentationGeneration
+                        )
+                    }
+                    let failedState = self.entries[profileID]?.connectionFailureClassifier.noPath
+                        .map { DashboardServerConnectionState.noPath($0.interface) } ?? .reconnecting
+                    self.entries[profileID]?.state = failedState
                     self.publish(profileID: profileID)
                     shouldWait = true
                 }
