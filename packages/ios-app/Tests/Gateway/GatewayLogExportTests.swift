@@ -26,17 +26,40 @@ struct GatewayLogExportTests {
         for field in ["method=", "requestID=", "code=", "durationMs=", "/Users/private"] { #expect(!rejected.contains(field)) }
     }
 
-    @Test("share availability explains empty, loading, and unsupported states")
-    func shareAvailability() {
-        #expect(GatewayLogShareAvailability.resolve(hasVisibleLogs: false)
-            == .unavailable("No logs are available to share yet."))
-        #expect(GatewayLogShareAvailability.resolve(hasVisibleLogs: true) == .available)
-    }
-
     private func record(at date: Date = .now, message: String = "queuedBytes=44", event: String = "gateway.connection") -> GatewayProfileLogRecord {
         GatewayProfileLogRecord(profileID: "fixture:ios-client", profileLabel: "Private customer label",
             record: GatewayLogRecord(timestamp: GatewayTimestamp.preciseString(from: date), level: "warning",
                 message: message, event: event, source: "ios-client"))
+    }
+
+    @Test("diagnostic JSONL export includes app provenance and redacts private log content")
+    func diagnosticJSONL() throws {
+        let row = record(at: Date(timeIntervalSince1970: 1_767_225_600), message: "path=/Users/private/token authorization=Bearer secret")
+        let local = AppLogRecord(
+            timestamp: "2026-01-01T00:00:00Z", level: "info", event: "app.started",
+            source: "lifecycle", message: "build=fixture", process: "ios", requestID: nil,
+            durationMs: nil, outcome: nil, code: nil, profileID: nil, connectionID: nil,
+            lifecycleGeneration: nil
+        )
+        let metadata = GatewayLogCaptureMetadata(
+            capturedAt: "fixture-load", representedFrom: "2026-01-01T00:00:00Z",
+            representedThrough: "2026-01-01T00:00:01Z", appBuildIdentity: "fixture-build",
+            gatewayIdentities: ["fixture": "runtime=fixture-epoch sourceRevision=abcdef"],
+            sourceStatuses: ["fixture": "failed-retained"]
+        )
+        let text = GatewayLogExport.jsonLines(records: [row], metadata: metadata, appRecords: [local])
+        let lines = text.split(separator: "\n")
+        #expect(lines.count == 3)
+        #expect(text.contains("diagnostics.exported"))
+        #expect(text.contains("\"process\":\"gateway\""))
+        #expect(text.contains("app.started"))
+        let head = try JSONDecoder().decode(AppLogRecord.self, from: Data(lines[0].utf8))
+        #expect(head.message.contains("failed-retained"))
+        #expect(head.message.contains("runtime=fixture-epoch"))
+        #expect(head.message.contains("representedFrom=2026-01-01T00:00:00.000Z"))
+        #expect(!text.contains("/Users/private"))
+        #expect(!text.contains("secret"))
+        for line in lines { _ = try JSONDecoder().decode(AppLogRecord.self, from: Data(line.utf8)) }
     }
 
     @Test("export bounds describe exactly the copied subset and redact every rendered row")
@@ -60,53 +83,161 @@ struct GatewayLogExportTests {
     }
 
     @MainActor
-    @Test("AppModel exports capture and retained logs locally while Gateway is disconnected")
+    @Test("one-tap export shares a bounded local bundle while Gateway is disconnected")
     func appModelOfflineExports() async throws {
         let socket = ScriptedGatewaySocket()
         let client = GatewayClient(socketFactory: ScriptedGatewaySocketFactory(socket: socket).factory)
         let cacheRoot = FileManager.default.temporaryDirectory.appending(path: "diagnostic-cache-\(UUID().uuidString)")
         let artifactRoot = FileManager.default.temporaryDirectory.appending(path: "diagnostic-artifact-\(UUID().uuidString)")
         let store = SessionExportArtifactStore(root: artifactRoot, maximumBytes: 4_096, maximumTotalBytes: 8_192, maximumArtifacts: 3)
+        let appLogURL = FileManager.default.temporaryDirectory.appending(path: "diagnostic-app-log-\(UUID().uuidString).jsonl")
         let model = AppModel(
             client: client,
             cache: SnapshotCache(root: cacheRoot),
-            exportArtifacts: store
+            exportArtifacts: store,
+            appLog: AppLog(fileURL: appLogURL)
         )
         defer {
             try? FileManager.default.removeItem(at: cacheRoot)
             try? FileManager.default.removeItem(at: artifactRoot)
+            try? FileManager.default.removeItem(at: appLogURL)
+            try? FileManager.default.removeItem(at: appLogURL.appendingPathExtension("1"))
             Task { await model.teardown(); await client.close() }
         }
         await client.close()
-        _ = model.startDiagnosticCapture(duration: .seconds(1))
-        #expect(model.stopDiagnosticCapture() != nil)
 
-        let captureURL = try await model.exportDiagnosticCapture()
-        let capture = try String(contentsOf: captureURL, encoding: .utf8)
-        #expect(capture.contains("Tron Diagnostic Capture"))
-        #expect(capture.contains("not-requested-retained") == false)
-
-        let retained = GatewayLogExport.text(
+        let retained = GatewayLogExport.jsonLines(
             records: [record(message: "path=/Users/private/token authorization=Bearer secret")],
             metadata: GatewayLogCaptureMetadata(
                 capturedAt: "fixture-load", representedFrom: "old", representedThrough: "new",
                 appBuildIdentity: "fixture", gatewayIdentities: ["fixture": "runtime=fixture"],
                 sourceStatuses: ["fixture": "failed-retained"]
-            )
+            ),
+            appRecords: []
         )
-        let logsURL = try await model.exportGatewayLogs(retained)
+        let result = try await model.exportDiagnostics(retained)
+        guard case .share(let logsURL) = result else { Issue.record("disconnected export uploaded"); return }
         let logs = try String(contentsOf: logsURL, encoding: .utf8)
-        #expect(logs.contains("failed-retained"))
-        #expect(logs.contains("runtime=fixture"))
+        #expect(logs.contains("diagnostics.exported"))
+        #expect(logs.contains("\"process\":\"gateway\""))
         #expect(!logs.contains("/Users/private"))
         #expect(!logs.contains("secret"))
         #expect(await socket.sentFrames().isEmpty)
 
-        await model.discardExportArtifact(captureURL)
         await model.discardExportArtifact(logsURL)
     }
 
-    @Test("artifact retirement releases the bounded ShareLink lease")
+    @MainActor
+    @Test("connected diagnostics export uses the advertised Gateway capability")
+    func connectedExportIsSaved() async throws {
+        let socket = ScriptedGatewaySocket()
+        let client = GatewayClient(socketFactory: ScriptedGatewaySocketFactory(socket: socket).factory)
+        let cacheRoot = FileManager.default.temporaryDirectory.appending(path: "diagnostic-cache-\(UUID().uuidString)")
+        let appLogURL = FileManager.default.temporaryDirectory.appending(path: "diagnostic-app-log-\(UUID().uuidString).jsonl")
+        let suite = "GatewayLogExport.connected.\(UUID())"
+        let defaults = try #require(UserDefaults(suiteName: suite))
+        let profiles = GatewayProfileStore(defaults: defaults)
+        let profile = GatewayProfile(id: "machine", label: "Mac", host: "gateway.test", port: 9_847,
+            machineId: "machine", deviceId: "device")
+        try profiles.save(profile, token: "token", selecting: true)
+        let model = AppModel(client: client, profiles: profiles, cache: SnapshotCache(root: cacheRoot), appLog: AppLog(fileURL: appLogURL))
+        defer {
+            try? FileManager.default.removeItem(at: cacheRoot)
+            try? FileManager.default.removeItem(at: appLogURL)
+            try? FileManager.default.removeItem(at: appLogURL.appendingPathExtension("1"))
+            defaults.removePersistentDomain(forName: suite)
+            Task { await model.teardown(); await client.close() }
+        }
+        await socket.enqueue(Data(#"{"type":"hello","gatewayVersion":"1","piVersion":"1","protocolVersion":5,"minProtocolVersion":5,"machineId":"machine","machineName":"Mac","gatewayChannel":"stable","capabilities":["diagnostic-export.v1"]}"#.utf8))
+        let responder = respondToConnectedExport(socket, failure: false)
+        await model.start()
+        #expect(model.diagnosticsAreReady)
+        let exporting = Task { try await model.exportDiagnostics("fixture-jsonl") }
+        let request = try #require(await responder.value)
+        let result = try await exporting.value
+        guard case .saved(let path) = result else { Issue.record("connected export did not return saved path"); return }
+        #expect(path == "/tmp/device-exports/fixture.jsonl")
+        #expect(request.method == "system.logs.export")
+        await model.appLog.flush()
+    }
+
+    @MainActor
+    @Test("connected export failure is logged and falls back to local sharing")
+    func failedUploadSharesAndRecordsWarning() async throws {
+        let socket = ScriptedGatewaySocket()
+        let client = GatewayClient(socketFactory: ScriptedGatewaySocketFactory(socket: socket).factory)
+        let cacheRoot = FileManager.default.temporaryDirectory.appending(path: "diagnostic-cache-\(UUID().uuidString)")
+        let artifactRoot = FileManager.default.temporaryDirectory.appending(path: "diagnostic-artifact-\(UUID().uuidString)")
+        let appLogURL = FileManager.default.temporaryDirectory.appending(path: "diagnostic-app-log-\(UUID().uuidString).jsonl")
+        let suite = "GatewayLogExport.failed.\(UUID())"
+        let defaults = try #require(UserDefaults(suiteName: suite))
+        let profiles = GatewayProfileStore(defaults: defaults)
+        let profile = GatewayProfile(id: "machine", label: "Mac", host: "gateway.test", port: 9_847,
+            machineId: "machine", deviceId: "device")
+        try profiles.save(profile, token: "token", selecting: true)
+        let model = AppModel(client: client, profiles: profiles, cache: SnapshotCache(root: cacheRoot),
+            exportArtifacts: SessionExportArtifactStore(root: artifactRoot, maximumBytes: 4_096, maximumTotalBytes: 8_192, maximumArtifacts: 3),
+            appLog: AppLog(fileURL: appLogURL))
+        defer {
+            try? FileManager.default.removeItem(at: cacheRoot)
+            try? FileManager.default.removeItem(at: artifactRoot)
+            try? FileManager.default.removeItem(at: appLogURL)
+            try? FileManager.default.removeItem(at: appLogURL.appendingPathExtension("1"))
+            defaults.removePersistentDomain(forName: suite)
+            Task { await model.teardown(); await client.close() }
+        }
+        await socket.enqueue(Data(#"{"type":"hello","gatewayVersion":"1","piVersion":"1","protocolVersion":5,"minProtocolVersion":5,"machineId":"machine","machineName":"Mac","gatewayChannel":"stable","capabilities":["diagnostic-export.v1"]}"#.utf8))
+        let responder = respondToConnectedExport(socket, failure: true)
+        await model.start()
+        #expect(model.diagnosticsAreReady)
+        let exporting = Task { try await model.exportDiagnostics("fixture-jsonl") }
+        let request = try #require(await responder.value)
+        let result = try await exporting.value
+        guard case .share(let file) = result else { Issue.record("failed upload did not fall back to share"); return }
+        let contents = try String(contentsOf: file, encoding: .utf8)
+        #expect(contents == "fixture-jsonl")
+        let records = await model.appLog.snapshot()
+        #expect(records.contains { $0.event == "diagnostics.upload-failed" && $0.level == "warning" && $0.message.contains("code=timeout") })
+        await model.discardExportArtifact(file)
+        await model.appLog.flush()
+    }
+
+    private struct ExportRequest: Decodable { let id: String; let method: String }
+
+    private func respondToConnectedExport(_ socket: ScriptedGatewaySocket, failure: Bool) -> Task<ExportRequest?, Never> {
+        Task {
+            var index = 1
+            for _ in 0..<64 {
+                do { try await socket.waitUntilSent(count: index + 1) } catch { return nil }
+                let frames = await socket.sentFrames()
+                guard index < frames.count,
+                      let request = try? JSONDecoder().decode(ExportRequest.self, from: frames[index]) else {
+                    index += 1
+                    continue
+                }
+                if request.method == "system.logs.export" {
+                    let result: [String: Any] = failure
+                        ? ["code": "timeout", "message": "fixture failure", "retryable": true]
+                        : ["path": "/tmp/device-exports/fixture.jsonl", "exportedAt": "2026-01-01T00:00:00Z"]
+                    await socket.enqueue(response(id: request.id, ok: !failure, result: result))
+                    return request
+                }
+                await socket.enqueue(response(id: request.id, ok: false,
+                    result: ["code": "unsupported", "message": "unneeded fixture request", "retryable": false]))
+                index += 1
+            }
+            return nil
+        }
+    }
+
+    private func response(id: String, ok: Bool, result: [String: Any]) -> Data {
+        let object: [String: Any] = ok
+            ? ["type": "response", "id": id, "ok": true, "result": result]
+            : ["type": "response", "id": id, "ok": false, "error": result]
+        return try! JSONSerialization.data(withJSONObject: object)
+    }
+
+    @Test("artifact retirement releases the bounded diagnostics share lease")
     func artifactRetirement() async throws {
         let root = FileManager.default.temporaryDirectory.appending(path: "diagnostic-artifact-\(UUID().uuidString)")
         let store = SessionExportArtifactStore(root: root, maximumBytes: 4_096, maximumTotalBytes: 8_192, maximumArtifacts: 1)
@@ -122,12 +253,24 @@ struct GatewayLogExportTests {
     }
 
     @Test("server uploads remain UTF-8 safe and bounded")
-    func uploadBounds() {
-        let source = String(repeating: "é", count: GatewayLogExport.maximumUploadBytes)
+    func uploadBounds() throws {
+        let encoder = JSONEncoder()
+        let head = AppLogRecord(timestamp: "2026-01-01T00:00:00Z", level: "info", event: "diagnostics.exported",
+            source: "lifecycle", message: "header=true", process: "ios", requestID: nil, durationMs: nil,
+            outcome: nil, code: nil, profileID: nil, connectionID: nil, lifecycleGeneration: nil)
+        let large = AppLogRecord(timestamp: "2026-01-01T00:00:00Z", level: "info", event: "fixture.large",
+            source: "test", message: String(repeating: "é", count: 400), process: "ios", requestID: nil,
+            durationMs: nil, outcome: nil, code: nil, profileID: nil, connectionID: nil, lifecycleGeneration: nil)
+        let source = ([head] + Array(repeating: large, count: 1_000)).compactMap { try? encoder.encode($0) }
+            .map { String(decoding: $0, as: UTF8.self) }.joined(separator: "\n") + "\n"
         let upload = GatewayLogExport.uploadText(source)
         #expect(upload.utf8.count <= GatewayLogExport.maximumUploadBytes)
-        #expect(upload.contains("diagnostic export truncated"))
+        #expect(upload.contains("diagnostics.truncated"))
         #expect(String(decoding: upload.data(using: .utf8)!, as: UTF8.self) == upload)
+        let lines = upload.split(separator: "\n")
+        #expect(try JSONDecoder().decode(AppLogRecord.self, from: Data(try #require(lines.first).utf8)).event == "diagnostics.exported")
+        #expect(try JSONDecoder().decode(AppLogRecord.self, from: Data(try #require(lines.last).utf8)).event == "diagnostics.truncated")
+        for line in lines { _ = try JSONDecoder().decode(AppLogRecord.self, from: Data(line.utf8)) }
         #expect(GatewayLogExport.uploadText("small") == "small")
     }
 

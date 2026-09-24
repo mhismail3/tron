@@ -411,7 +411,7 @@ struct SessionShellView: View {
                 initialHistoryEntryID: route.initialHistoryEntryID,
                 initialSearchResult: route.initialSearchResult,
                 onForkCreated: present,
-                performanceSignposts: model.performanceSignpostsForCapture
+                performanceSignposts: model.performanceSignposts
             )
             .toolbar(.visible, for: .navigationBar)
             .id(route.id)

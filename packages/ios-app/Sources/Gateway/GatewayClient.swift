@@ -545,7 +545,7 @@ actor GatewayClient {
     private var diagnosticSequence = 0
     private var firstDiagnosticSequenceByEpisode: [String: Int] = [:]
     private let diagnosticStore: IOSClientDiagnosticStore?
-    private var diagnosticCaptureSink: (any DiagnosticCaptureRPCSink)?
+    private var appLog: AppLog?
     nonisolated let diagnosticOwnerID = UUID().uuidString
     private var generation = 0
     private var profile: GatewayProfile?
@@ -561,10 +561,8 @@ actor GatewayClient {
 
     func diagnostics() -> [GatewayConnectionDiagnostic] { connectionDiagnostics }
 
-    /// Installs the opt-in capture sink before normal app work starts. A nil
-    /// sink is the cheap production path and retains no request observations.
-    func installDiagnosticCaptureSink(_ sink: (any DiagnosticCaptureRPCSink)?) {
-        diagnosticCaptureSink = sink
+    func installAppLog(_ log: AppLog?) {
+        appLog = log
     }
 
     /// Joins projection-level catalog records to the request diagnostic already
@@ -578,19 +576,18 @@ actor GatewayClient {
     ) {
         let duration = diagnosticMilliseconds(request.startedAt.duration(to: clock.now()))
         let code = error.map(Self.diagnosticCode)
-        if diagnosticCaptureSink?.isCapturing == true {
-            diagnosticCaptureSink?.recordRPC(
-                method: request.method,
-                requestID: request.requestID,
-                requestStartedAt: request.startedAt,
-                outcome: outcome.rawValue,
-                code: code,
-                durationMilliseconds: duration,
-                profileID: request.profileID,
-                connectionID: request.connectionID,
-                purpose: request.diagnosticPurpose,
-                page: request.diagnosticPage
-            )
+        if let appLog {
+            Task {
+                await appLog.recordRPC(
+                    method: request.method,
+                    requestID: request.requestID,
+                    outcome: outcome.rawValue,
+                    code: code,
+                    durationMilliseconds: duration,
+                    profileID: request.profileID,
+                    connectionID: request.connectionID
+                )
+            }
         }
         let incidentID = outcome == .success ? nil : "rpc:\(request.requestID)"
         guard request.method == "session.list" else { return }
@@ -734,7 +731,7 @@ actor GatewayClient {
         performanceSignposts: any PerformanceSignposting = SystemPerformanceSignposts.shared,
         eventBufferPolicy: GatewayEventBufferPolicy = .default,
         diagnosticStore: IOSClientDiagnosticStore? = nil,
-        diagnosticCaptureSink: (any DiagnosticCaptureRPCSink)? = nil,
+        appLog: AppLog? = nil,
         networkPath: @escaping @Sendable () -> String? = { GatewayNetworkPathSnapshot.shared.current }
     ) {
         self.networkPath = networkPath
@@ -748,7 +745,7 @@ actor GatewayClient {
         self.boundedHTTPUploadTransport = boundedHTTPUploadTransport
         self.boundedHTTPFileTransport = boundedHTTPFileTransport
         self.performanceSignposts = performanceSignposts
-        self.diagnosticCaptureSink = diagnosticCaptureSink
+        self.appLog = appLog
         let eventHub = GatewayEventHub(policy: eventBufferPolicy, clock: clock)
         self.eventHub = eventHub
         events = GatewayEventStream(hub: eventHub)

@@ -18,12 +18,22 @@ async function root(): Promise<string> {
 describe("diagnostic export", () => {
   it("writes a private server-owned file and returns its path", async () => {
     const directory = await root();
-    const result = await exportDiagnosticSnapshot("Tron diagnostics\nsynthetic", [], new Date("2026-01-02T03:04:05.000Z"), directory);
-    expect(result.path.startsWith(`${directory}/logs-`)).toBe(true);
+    const result = await exportDiagnosticSnapshot("Tron diagnostics\nsynthetic", [], new Date("2026-01-02T03:04:05.000Z"), directory, "device-id");
+    expect(result.path).toMatch(new RegExp(`^${directory}/[a-f0-9]{32}-2026-01-02T03-04-05-000Z\\.jsonl$`));
     expect(result.exportedAt).toBe("2026-01-02T03:04:05.000Z");
     expect(await readFile(result.path, "utf8")).toBe("Tron diagnostics\nsynthetic");
     expect((await stat(result.path)).mode & 0o777).toBe(0o600);
     expect((await stat(directory)).mode & 0o777).toBe(0o700);
+  });
+
+  it("separates export filenames by required device identity", async () => {
+    const directory = await root();
+    const now = new Date("2026-01-02T03:04:05.000Z");
+    const first = await exportDiagnosticSnapshot("first", [], now, directory, "device-one");
+    const second = await exportDiagnosticSnapshot("second", [], now, directory, "device-two");
+    expect(first.path).not.toBe(second.path);
+    expect(await readFile(first.path, "utf8")).toBe("first");
+    expect(await readFile(second.path, "utf8")).toBe("second");
   });
 
   it("appends the newest Gateway debug records after the client content", async () => {
@@ -31,23 +41,23 @@ describe("diagnostic export", () => {
     const records = Array.from({ length: 3 }, (_, index) => ({
       timestamp: "2026-01-02T03:04:05.000Z", level: "debug" as const, message: `debug-${index}`, event: "rpc.completed",
     }));
-    const result = await exportDiagnosticSnapshot("client", records, new Date(), directory);
+    const result = await exportDiagnosticSnapshot("client", records, new Date(), directory, "device-id");
     const text = await readFile(result.path, "utf8");
-    expect(text.startsWith("client\n\n--- Gateway debug buffer (3 of 3 records) ---\n")).toBe(true);
+    expect(text.startsWith("client\n{\"timestamp\":\"2026-01-02T03:04:05.000Z\",\"level\":\"debug\",\"message\":\"debug-0\",\"event\":\"rpc.completed\"}\n")).toBe(true);
     expect(text.indexOf("debug-0")).toBeLessThan(text.indexOf("debug-2"));
   });
 
   it("rejects content over the byte bound without creating a file", async () => {
     const directory = await root();
-    await expect(exportDiagnosticSnapshot("x".repeat(diagnosticExportPolicy.maxBytes + 1), [], new Date(), directory))
+    await expect(exportDiagnosticSnapshot("x".repeat(diagnosticExportPolicy.maxBytes + 1), [], new Date(), directory, "device-id"))
       .rejects.toThrow("exceeds the size limit");
-    expect((await readdir(directory)).filter((name) => name.endsWith(".txt"))).toEqual([]);
+    expect((await readdir(directory)).filter((name) => name.endsWith(".jsonl"))).toEqual([]);
   });
 
   it("fails closed when the destination is not private", async () => {
     const directory = await root();
     await chmod(directory, 0o755);
-    await expect(exportDiagnosticSnapshot("synthetic", [], new Date(), directory))
+    await expect(exportDiagnosticSnapshot("synthetic", [], new Date(), directory, "device-id"))
       .rejects.toMatchObject({ code: "conflict" });
   });
 
@@ -57,7 +67,7 @@ describe("diagnostic export", () => {
     const link = join(directory, "diagnostics-link");
     await mkdir(target, { recursive: true, mode: 0o700 });
     await symlink(target, link);
-    await expect(exportDiagnosticSnapshot("synthetic", [], new Date(), link))
+    await expect(exportDiagnosticSnapshot("synthetic", [], new Date(), link, "device-id"))
       .rejects.toMatchObject({ code: "conflict" });
     expect((await readdir(target))).toEqual([]);
   });
@@ -65,9 +75,9 @@ describe("diagnostic export", () => {
   it("retains only the bounded newest exports", async () => {
     const directory = await root();
     for (let index = 0; index < diagnosticExportPolicy.maxRetained + 2; index += 1) {
-      await exportDiagnosticSnapshot(`export-${index}`, [], new Date(1_700_000_000_000 + index * 1_000), directory);
+      await exportDiagnosticSnapshot(`export-${index}`, [], new Date(1_700_000_000_000 + index * 1_000), directory, "device-id");
     }
-    const files = (await readdir(directory)).filter((name) => name.endsWith(".txt"));
+    const files = (await readdir(directory)).filter((name) => name.endsWith(".jsonl"));
     expect(files).toHaveLength(diagnosticExportPolicy.maxRetained);
     const contents = await Promise.all(files.map((file) => readFile(join(directory, file), "utf8")));
     expect(contents).toContain("export-11");

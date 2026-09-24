@@ -1,12 +1,11 @@
 import { chmod, lstat, mkdir, readdir, rm, stat, writeFile } from "node:fs/promises";
 import type { Stats } from "node:fs";
-import { randomUUID } from "node:crypto";
+import { createHash } from "node:crypto";
 import { join } from "node:path";
 import { GatewayError } from "../errors.js";
 import { AsyncMutex } from "../util/async-mutex.js";
 import type { LogRecord } from "./logger.js";
 
-const DIAGNOSTIC_DIRECTORY = "/tmp/tron-diagnostics";
 const MAX_EXPORT_BYTES = 512 * 1024;
 const MAX_RETAINED_EXPORTS = 10;
 /** Newest Gateway debug records appended to an export, bounded separately
@@ -18,11 +17,12 @@ const diagnosticExportMutex = new AsyncMutex();
  * canonical data directory. The path is server-owned and never client input. */
 export function exportDiagnosticSnapshot(
   content: string,
-  debugRecords: readonly LogRecord[] = [],
-  now = new Date(),
-  directory = DIAGNOSTIC_DIRECTORY,
+  debugRecords: readonly LogRecord[],
+  now: Date,
+  directory: string,
+  deviceIdentity: string,
 ): Promise<{ path: string; exportedAt: string }> {
-  return diagnosticExportMutex.run(() => exportDiagnosticSnapshotImpl(content, debugRecords, now, directory));
+  return diagnosticExportMutex.run(() => exportDiagnosticSnapshotImpl(content, debugRecords, now, directory, deviceIdentity));
 }
 
 /** The Gateway's debug buffer never reaches its persisted log; exports are
@@ -39,7 +39,7 @@ function debugSection(records: readonly LogRecord[]): string {
     bytes += lineBytes;
   }
   lines.reverse();
-  return `\n\n--- Gateway debug buffer (${lines.length} of ${records.length} records) ---\n${lines.join("\n")}\n`;
+  return `${lines.length === 0 ? "" : "\n"}${lines.join("\n")}\n`;
 }
 
 async function exportDiagnosticSnapshotImpl(
@@ -47,6 +47,7 @@ async function exportDiagnosticSnapshotImpl(
   debugRecords: readonly LogRecord[],
   now: Date,
   directory: string,
+  deviceIdentity: string,
 ): Promise<{ path: string; exportedAt: string }> {
   if (Buffer.byteLength(content, "utf8") > MAX_EXPORT_BYTES) {
     throw new GatewayError("invalid_request", "Diagnostic snapshot exceeds the size limit");
@@ -68,7 +69,9 @@ async function exportDiagnosticSnapshotImpl(
     throw new GatewayError("conflict", "Diagnostic export storage is not private", true);
   }
   await chmod(directory, 0o700);
-  const path = join(directory, `logs-${now.getTime()}-${randomUUID()}.txt`);
+  const deviceHash = createHash("sha256").update(deviceIdentity).digest("hex").slice(0, 32);
+  const timestamp = now.toISOString().replace(/[:.]/g, "-");
+  const path = join(directory, `${deviceHash}-${timestamp}.jsonl`);
   try {
     await writeFile(path, content + debugSection(debugRecords), { encoding: "utf8", flag: "wx", mode: 0o600 });
     await chmod(path, 0o600);
@@ -91,7 +94,7 @@ async function exportDiagnosticSnapshotImpl(
 async function pruneDiagnosticSnapshots(newPath: string, directory: string): Promise<void> {
   const entries = await readdir(directory, { withFileTypes: true });
   const files = await Promise.all(entries
-    .filter((entry) => entry.isFile() && entry.name.startsWith("logs-") && entry.name.endsWith(".txt"))
+    .filter((entry) => entry.isFile() && /^[a-f0-9]{32}-.*\.jsonl$/.test(entry.name))
     .map(async (entry) => {
       const path = join(directory, entry.name);
       try { return { path, mtime: (await stat(path)).mtimeMs }; }
@@ -104,7 +107,6 @@ async function pruneDiagnosticSnapshots(newPath: string, directory: string): Pro
 }
 
 export const diagnosticExportPolicy = {
-  directory: DIAGNOSTIC_DIRECTORY,
   maxBytes: MAX_EXPORT_BYTES,
   maxRetained: MAX_RETAINED_EXPORTS,
 };

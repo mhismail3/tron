@@ -44,19 +44,16 @@ struct PerformanceMetrics: Equatable, Sendable {
 struct PerformanceInterval: Sendable {
     let operation: PerformanceOperation
     let state: OSSignpostIntervalState?
-    let captureToken: UUID?
-    let captureStarted: ContinuousClock.Instant?
+    let measuredStart: ContinuousClock.Instant?
 
     init(
         operation: PerformanceOperation,
         state: OSSignpostIntervalState? = nil,
-        captureToken: UUID? = nil,
-        captureStarted: ContinuousClock.Instant? = nil
+        measuredStart: ContinuousClock.Instant? = nil
     ) {
         self.operation = operation
         self.state = state
-        self.captureToken = captureToken
-        self.captureStarted = captureStarted
+        self.measuredStart = measuredStart
     }
 }
 

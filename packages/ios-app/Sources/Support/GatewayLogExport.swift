@@ -1,22 +1,68 @@
 import Foundation
 
-enum GatewayLogShareAvailability: Equatable {
-    case available
-    case unavailable(String)
-
-    static func resolve(hasVisibleLogs: Bool) -> Self {
-        guard hasVisibleLogs else { return .unavailable("No logs are available to share yet.") }
-        // A visible projection can always be written to a bounded local
-        // artifact. Sharing never requires Gateway readiness or a remote
-        // diagnostic export RPC.
-        return .available
-    }
-}
-
 /// Copy is a bounded diagnostic projection, never a transcript or credential
 /// export. Profile labels are user-entered text, so use per-copy opaque aliases.
 enum GatewayLogExport {
     static let maximumUploadBytes = 512 * 1024
+
+    static func jsonLines(
+        records: [GatewayProfileLogRecord], metadata: GatewayLogCaptureMetadata,
+        appRecords: [AppLogRecord]
+    ) -> String {
+        let gatewayRecords = records.prefix(1_000).map { item in
+            let value = item.record
+            return AppLogRecord(
+                timestamp: IOSClientDiagnosticBuffer.redactedMessage(value.timestamp),
+                level: value.level, event: IOSClientDiagnosticBuffer.redactedMessage(value.event ?? "gateway.log"),
+                source: IOSClientDiagnosticBuffer.redactedMessage(value.source ?? "gateway"),
+                message: IOSClientDiagnosticBuffer.redactedMessage(value.message), process: "gateway",
+                requestID: value.requestID, durationMs: value.durationMs, outcome: value.outcome,
+                code: value.code, profileID: nil, connectionID: nil, lifecycleGeneration: nil
+            )
+        }
+        let metadata = metadata.withBounds(records: Array(records.prefix(1_000)))
+        func owner(_ id: String) -> String {
+            id.hasSuffix(":ios-client") ? String(id.dropLast(":ios-client".count)) : id
+        }
+        let owners = Set(records.prefix(1_000).map { owner($0.profileID) })
+            .union(metadata.sourceStatuses.keys).union(metadata.gatewayIdentities.keys).sorted()
+        let metadataLines = owners.enumerated().map { index, id in
+            let alias = "source-\(index + 1)"
+            let status = metadata.sourceStatuses[id] ?? "local-or-retained"
+            let identity = IOSClientDiagnosticBuffer.redactedMessage(metadata.gatewayIdentities[id] ?? "unknown")
+            return "\(alias).status=\(status) \(alias).gateway=\(identity)"
+        }
+        let appStarted = AppLogRecord(
+            timestamp: GatewayTimestamp.preciseString(from: .now), level: "info",
+            event: "diagnostics.exported", source: "lifecycle",
+            message: ([
+                "copiedAt=\(GatewayTimestamp.preciseString(from: .now))",
+                "loadedAt=\(metadata.capturedAt)",
+                "representedFrom=\(metadata.representedFrom ?? "unknown")",
+                "representedThrough=\(metadata.representedThrough ?? "unknown")",
+                "appBuild=\(IOSClientDiagnosticBuffer.redactedMessage(metadata.appBuildIdentity))",
+                "appSourceRevision=\(safeToken(metadata.appSourceRevision) ?? "unknown")",
+                "os=\(ProcessInfo.processInfo.operatingSystemVersionString)"
+            ] + metadataLines).joined(separator: " "),
+            process: "ios", requestID: nil, durationMs: nil, outcome: nil, code: nil,
+            profileID: nil, connectionID: nil, lifecycleGeneration: nil
+        )
+        let encoder = JSONEncoder()
+        let localRecords = appRecords.map { value in
+            AppLogRecord(
+                timestamp: IOSClientDiagnosticBuffer.redactedMessage(value.timestamp), level: value.level,
+                event: IOSClientDiagnosticBuffer.redactedMessage(value.event),
+                source: IOSClientDiagnosticBuffer.redactedMessage(value.source),
+                message: IOSClientDiagnosticBuffer.redactedMessage(value.message), process: "ios",
+                requestID: value.requestID, durationMs: value.durationMs, outcome: value.outcome,
+                code: value.code, profileID: value.profileID, connectionID: value.connectionID,
+                lifecycleGeneration: value.lifecycleGeneration
+            )
+        }
+        let lines = ([appStarted] + localRecords + gatewayRecords).prefix(1_000)
+            .compactMap { try? encoder.encode($0) }.map { String(decoding: $0, as: UTF8.self) }
+        return lines.joined(separator: "\n") + (lines.isEmpty ? "" : "\n")
+    }
 
     static func text(
         records: [GatewayProfileLogRecord],
@@ -68,13 +114,27 @@ enum GatewayLogExport {
     /// removing its identifying header.
     static func uploadText(_ text: String) -> String {
         guard text.utf8.count > maximumUploadBytes else { return text }
-        let marker = "[diagnostic export truncated at 512 KiB]"
-        let prefixLimit = maximumUploadBytes - marker.utf8.count - 1
-        // Decoding an arbitrary byte prefix can insert U+FFFD for a split
-        // multibyte scalar, making the result exceed the byte bound. Trim the
-        // decoded scalar boundary before appending the marker.
-        var prefix = String(decoding: text.utf8.prefix(prefixLimit), as: UTF8.self)
-        while prefix.utf8.count > prefixLimit { prefix.removeLast() }
-        return "\(prefix)\n\(marker)"
+        let marker = AppLogRecord(
+            timestamp: GatewayTimestamp.preciseString(from: .now), level: "warning",
+            event: "diagnostics.truncated", source: "lifecycle",
+            message: "byteLimit=\(maximumUploadBytes)", process: "ios", requestID: nil,
+            durationMs: nil, outcome: nil, code: nil, profileID: nil,
+            connectionID: nil, lifecycleGeneration: nil
+        )
+        guard let markerData = try? JSONEncoder().encode(marker) else { return "" }
+        let markerLine = markerData + Data([0x0A])
+        let prefixLimit = maximumUploadBytes - markerLine.count
+        var prefixLines: [String] = []
+        var prefixBytes = 0
+        for rawLine in text.split(separator: "\n") {
+            let line = String(rawLine)
+            guard let data = line.data(using: .utf8),
+                  (try? JSONDecoder().decode(AppLogRecord.self, from: data)) != nil else { break }
+            guard prefixBytes + data.count + 1 <= prefixLimit else { break }
+            prefixLines.append(line)
+            prefixBytes += data.count + 1
+        }
+        let prefix = prefixLines.isEmpty ? "" : prefixLines.joined(separator: "\n") + "\n"
+        return prefix + String(decoding: markerLine, as: UTF8.self)
     }
 }

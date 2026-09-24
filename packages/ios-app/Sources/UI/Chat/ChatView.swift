@@ -2117,10 +2117,6 @@ struct ChatView: View {
                 retainedPresentation: retainsVisiblePresentation,
                 state: interactionTraceState()
             )
-            model.diagnosticCapture.recordCausal(
-                name: "opening.authority", profileID: model.profiles.selected?.id,
-                connectionID: model.diagnosticConnectionID
-            )
             // Presence follows exact synchronized route authority, not scroll
             // positioning. The composer can admit work before a large retained
             // transcript reaches its first ready frame.
@@ -2165,10 +2161,6 @@ struct ChatView: View {
                 context: ensureInteractionTraceContext(),
                 retainedPresentation: retainsVisiblePresentation,
                 state: interactionTraceState(installed: installed)
-            )
-            model.diagnosticCapture.recordCausal(
-                name: "opening.projection", count: installed.sourceWindow.ids.count,
-                profileID: model.profiles.selected?.id, connectionID: model.diagnosticConnectionID
             )
             if retainedPinnedRevalidation {
                 guard !Task.isCancelled,
@@ -2245,17 +2237,10 @@ struct ChatView: View {
                         context: traceContext,
                         state: interactionTraceState()
                     )
-                    model.diagnosticCapture.recordCausal(
-                        name: "opening.failed", outcome: "settlement",
-                        count: reasons.count,
-                        profileID: model.profiles.selected?.id, connectionID: model.diagnosticConnectionID
+                    await model.appLog.recordCausal(
+                        name: "opening.failed", outcome: "failure", level: "warning",
+                        details: reasons.map { String(describing: $0) }.joined(separator: ";")
                     )
-                    for reason in reasons {
-                        model.diagnosticCapture.recordCausal(
-                            name: "opening.failure.\(reason.rawValue)", outcome: "settlement",
-                            profileID: model.profiles.selected?.id, connectionID: model.diagnosticConnectionID
-                        )
-                    }
                     _ = sessionPresentation.open.fail(
                         sessionID: sessionID,
                         epoch: epoch,
@@ -2514,10 +2499,6 @@ struct ChatView: View {
                 context: context,
                 state: interactionTraceState()
             )
-            model.diagnosticCapture.recordCausal(
-                name: "opening.first-ready", outcome: "success",
-                profileID: model.profiles.selected?.id, connectionID: model.diagnosticConnectionID
-            )
             scheduleOpeningTraceCheckpoints(
                 context: context,
                 epoch: epoch,
@@ -2674,10 +2655,6 @@ struct ChatView: View {
             context: context,
             state: interactionTraceState()
         )
-        model.diagnosticCapture.recordCausal(
-            name: "opening.positioning-began", profileID: model.profiles.selected?.id,
-            connectionID: model.diagnosticConnectionID
-        )
         let positioned = await scrollCoordinator.positionOpeningTail(
             targetRenderedID: targetRenderedID,
             physicalTargetID: physicalTargetID
@@ -2687,10 +2664,6 @@ struct ChatView: View {
             context: context,
             positioningSucceeded: positioned,
             state: interactionTraceState()
-        )
-        model.diagnosticCapture.recordCausal(
-            name: "opening.positioning-ended", outcome: positioned ? "success" : "failure",
-            profileID: model.profiles.selected?.id, connectionID: model.diagnosticConnectionID
         )
         if positioned { performanceTracker.settleScroll() }
         return positioned

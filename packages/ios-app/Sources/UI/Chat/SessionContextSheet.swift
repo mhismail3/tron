@@ -374,7 +374,7 @@ struct SessionContextSheet: View {
         .presentationDragIndicator(.hidden)
         .tint(Color.tronEmerald)
         .tronConfigurationSliderHost(sliderPresentation)
-        .environment(\.configurationSliderSignposts, model.performanceSignpostsForCapture)
+        .environment(\.configurationSliderSignposts, model.performanceSignposts)
         .onAppear {
             if initialHistoryEntryID != nil, destination == nil {
                 // Evidence routes enter the same managed history owner as a

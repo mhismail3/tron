@@ -2,7 +2,7 @@
 
 - **Started:** 2026-09-23
 - **Status:** Active
-- **Last updated:** 2026-09-24, L-12
+- **Last updated:** 2026-09-24, L-3
 - **Goal:** Every Tron process records the right signals automatically, in a known place, at a meaningful level, so a failure can be diagnosed in one pass from what was already recorded.
 
 Follow the [plan protocol](README.md#protocol) to claim tasks and hand off.
@@ -202,7 +202,8 @@ user reinstalls manually, so batch them for one reinstall.
 | L-1a | Done | Gateway startup-fatal record | none | observability-L-1a session, 2026-09-23 |
 | L-1c | Done | Deploy timeline and real failure cause | L-1a | observability session, 2026-09-24 |
 | L-2 | Done | Gateway levels, debug buffer, retention, record format | none | observability-L-2 session, 2026-09-24 |
-| L-3 | Claimed | iOS always-on recording replaces Diagnostic Capture; one-tap export | L-2 | observability session (L-3 lane), 2026-09-24 |
+| L-3 | Done | iOS always-on recording replaces Diagnostic Capture; one-tap export | L-2 | observability session (L-3 lane), 2026-09-24 |
+| L-3b | Needs scoping | The phone has two persisted diagnostic stores, `AppLog` and `IOSClientDiagnosticStore` (catalog and connection records). Decide whether one owner should hold both | L-3 | |
 | L-1b | Done | Launcher records | none | observability session (L-1b lane), 2026-09-24 |
 | L-1d | Claimed | Out-of-band stderr capture | L-2 | observability session (L-1d lane), 2026-09-24 |
 | L-4 | Ready | Mac app file logging | L-2 | |
@@ -716,3 +717,31 @@ The 2026-09-23 17:33 UTC incident's records have rotated away, so its timeline i
 - Kept on purpose: sorted canonical lines, so the fingerprint format is unchanged.
 - Deviations: the gain is about 25% on this Mac, less than the gap to the launcher's measured 1.5–3.6 s suggested. The plan's 5.4–6.3 s figures were measured while the Mac was under load. The lane's first test run failed because the shared `node_modules` had been emptied (see L-1d).
 - For the next agent: L-13 removes a whole payload copy, which saves more than this change.
+
+### L-3 · Done · 2026-09-24 · observability session (L-3 lane)
+
+- Result: Diagnostic Capture is gone. The phone always records through one `AppLog` actor, a shared instance injected into `AppModel`.
+  - Memory: a ring of 2,000 records or 512 KB holds every level.
+  - Disk: info and above are appended in batches to `Library/Caches/Logs/app.jsonl`, flushed every 5 s, on backgrounding and on any error. The file rotates across two segments, `app.jsonl` and `app.jsonl.1`, of half the user's 10 MB budget each.
+  - Restore: after a relaunch the ring is restored lazily from the file's tail inside the actor, so launch does no synchronous I/O.
+  - What it records: app start (version, build, OS), foreground and background, connection state changes (with the Gateway runtime epoch), reconnect lifecycle events, pairing results, session-open and sync failures with their code, one `opening.failed` warning with the settlement reasons, and signpost-measured operations over 250 ms. RPC completions are debug and stay in memory only.
+  - Export: the Logs screen's capture menu and two-step share are replaced by one Export Diagnostics button. When the Gateway advertises `diagnostic-export.v1`, it uploads a JSONL bundle and copies the saved path. The bundle has a metadata header (Gateway identities, per-server source statuses, the represented window), the phone's records and the Gateway log tail the app holds. If the upload fails, it records `diagnostics.upload-failed` and presents the share sheet in the same tap.
+  - Gateway side: exports are stored under `<Tron home>/logs/device-exports/` as `<device-hash>-<timestamp>.jsonl`, with the same size cap, count retention and private permissions. The RPC response shape `{ path, exportedAt }` is unchanged.
+- Evidence (verified): focused iOS suites `AppLogTests`, `GatewayLogExportTests`, `GatewayClientTransportTests` and `AppModelPerformanceSignpostTests` passed 97 tests in 4.9 s. They cover ring count and byte bounds, relaunch restore, debug records not persisted, segment rotation, connected upload returning the saved path, and upload failure falling back to sharing with a warning. Full iOS run (`scripts/tron-ios-test run`): 1,879 tests in 139 suites passed in 232 s. Gateway `diagnostic-export.test.ts` passed 7/7. The full Gateway suite (`nice -n 19`, 2 workers) passed 177 files, 1,926/1,926, in 84 s, with no live `gateway.event-loop-delay`. Negative controls failed their tests: the connected-upload assertion, the upload-warning assertion, the Gateway file extension and the AppLog byte bound. Dark-mode renders of the Logs screen from the unchanged and the changed code show the capture control removed and export as one button; the list, detail and filter pills are unchanged.
+- Evidence (not recorded): the before-change focused iOS run's pass count and time were lost to truncated output. There was no live phone-to-Mac export smoke test; upload is covered by scripted-socket tests and Gateway unit tests.
+- Changes: this commit (new `AppLog.swift` and its tests; `AppModel`, `GatewayClient`, `TronMobileApp`, `GatewayLogExport`, `PerformanceSignposts`, `ChatView`, the settings and chat call sites; `GatewayLogsSettingsView`; `diagnostic-export.ts`, `gateway-service.ts` and the export test; `DiagnosticCapture.swift` and its tests deleted; iOS `architecture.md`, `development.md` and `events.md`, and the Gateway README export contract).
+- Tasks added: L-3b.
+- Kept on purpose: `IOSClientDiagnosticStore` still owns catalog and connection records, which L-10 extended. `AppLog` does not duplicate them (see L-3b). The per-step opening records that existed only during a capture were removed, because they were debug-level detail with no always-on value.
+- Deviations: supervisor review sent the first version back with eleven findings, all fixed in this commit:
+  - a synchronous read of the whole 10 MB file at launch;
+  - a new `AppLog` per `AppModel` and per test;
+  - truncation instead of rotation;
+  - a test that deleted the whole temp directory;
+  - dropped session-open failure records, plus an empty loop left behind;
+  - a silently swallowed upload failure;
+  - lost export metadata;
+  - a truncation marker that broke JSONL;
+  - a `TRON_HOME ?? cwd` fallback and a default device identity in the Gateway;
+  - catalog records duplicating `IOSClientDiagnosticStore`;
+  - rows with empty message bodies.
+- For the next agent: the phone adopts this only after the user rebuilds the iPhone app, and the Gateway storage move only after a Gateway rebuild. Measure one day's `app.jsonl` volume for L-6's catalog.

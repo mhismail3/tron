@@ -33,12 +33,10 @@ struct GatewayLogsSettingsView: View {
     @State private var hasLoaded = false
     @State private var loadGeneration = 0
     @State private var copySucceeded = false
-    @State private var shareSucceeded = false
-    @State private var shareInFlight = false
-    @State private var shareGeneration = 0
-    @State private var captureExportInFlight = false
-    @State private var captureExportGeneration = 0
-    @State private var preparedShare: PreparedDiagnosticShare?
+    @State private var exportInFlight = false
+    @State private var exportGeneration = 0
+    @State private var shareURL: DiagnosticShareFile?
+    @State private var exportArtifactURL: URL?
     @State private var captureMetadata = GatewayLogCaptureMetadata.empty
     @State private var loadCoordinator = GatewayLogsLoadCoordinator()
 
@@ -112,85 +110,40 @@ struct GatewayLogsSettingsView: View {
                 .disabled(visibleItems.isEmpty)
                 .accessibilityLabel("Copy visible logs")
 
-                Menu {
-                    if case .capturing = model.diagnosticCaptureState {
-                        Button { stopDiagnosticCapture() } label: {
-                            Label("Stop Diagnostic Capture", systemImage: "stop.fill")
-                        }
-                    } else {
-                        Button { startDiagnosticCapture() } label: {
-                            Label("Start Diagnostic Capture", systemImage: "record.circle")
-                        }
+                Button { exportDiagnostics() } label: {
+                    Group {
+                        if exportInFlight { ProgressView().controlSize(.small) }
+                        else { Image(systemName: "square.and.arrow.up") }
                     }
-                    if model.diagnosticCaptureReport != nil {
-                        Button { exportDiagnosticCapture() } label: {
-                            Label("Export Diagnostic Capture", systemImage: "waveform.path.ecg")
-                        }
-                        .disabled(captureExportInFlight)
-                    }
-                } label: {
-                    Image(systemName: "waveform.path.ecg")
-                        .font(TronTypography.buttonSM)
-                        .tronSettingsAccent()
+                    .font(TronTypography.buttonSM)
+                    .tronSettingsAccent()
                 }
-                .accessibilityLabel("Diagnostic Capture")
-
-                if let preparedShare {
-                    ShareLink(item: preparedShare.url) {
-                        Image(systemName: shareSucceeded ? "checkmark" : "square.and.arrow.up")
-                            .font(TronTypography.buttonSM)
-                            .tronSettingsAccent()
-                            .contentTransition(.symbolEffect(.replace.downUp))
-                    }
-                    .accessibilityLabel("Share logs")
-                } else {
-                    Button { beginShare() } label: {
-                        Group {
-                            if shareInFlight {
-                                ProgressView()
-                                    .controlSize(.small)
-                            } else {
-                                Image(systemName: "square.and.arrow.up")
-                                    .contentTransition(.symbolEffect(.replace.downUp))
-                            }
-                        }
-                        .font(TronTypography.buttonSM)
-                        .tronSettingsAccent()
-                    }
-                    .disabled(visibleItems.isEmpty || shareInFlight)
-                    .accessibilityLabel(shareInFlight ? "Preparing logs" : "Prepare logs to share")
-                }
+                .disabled(visibleItems.isEmpty || exportInFlight)
+                .accessibilityLabel("Export Diagnostics")
             }
         }
         .sensoryFeedback(.success, trigger: copySucceeded)
-        .sensoryFeedback(.success, trigger: shareSucceeded)
+        .sheet(item: $shareURL, onDismiss: {
+            if let url = exportArtifactURL {
+                exportArtifactURL = nil
+                Task { await model.discardExportArtifact(url) }
+            }
+        }) { file in DiagnosticActivitySheet(url: file.url) }
         .onChange(of: presentationActivity.allowsPresentationPublication) { _, active in
             guard !active else { return }
-            // The accepted export mutation continues, but this surface must
-            // not leave stale presentation work publishing after its lease
-            // retires. The next active task performs a fresh bounded load.
             loadGeneration &+= 1
             loadCoordinator.cancel()
             loading = false
-            shareGeneration &+= 1
-            shareInFlight = false
-            shareSucceeded = false
-            retirePreparedShare()
-            captureExportGeneration &+= 1
-            captureExportInFlight = false
+            exportGeneration &+= 1
+            exportInFlight = false
         }
         .onDisappear {
             loadGeneration &+= 1
             loadCoordinator.cancel()
             loading = false
-            shareGeneration &+= 1
-            shareInFlight = false
-            shareSucceeded = false
-            retirePreparedShare()
-            captureExportGeneration &+= 1
-            captureExportInFlight = false
+            exportGeneration &+= 1
+            exportInFlight = false
         }
-        .onChange(of: model.diagnosticCaptureRevision) { _, _ in }
         .task(id: PresentationActivityTaskID(
             source: automaticLoadID,
             presentationActive: presentationActivity.allowsPresentationPublication
@@ -247,16 +200,6 @@ struct GatewayLogsSettingsView: View {
     private var logSummary: some View {
         VStack(alignment: .leading, spacing: 4) {
             Text("\(visibleItems.count) entries · Newest entries first")
-            switch model.diagnosticCaptureState {
-            case .capturing(let elapsed, let count):
-                Text("Diagnostic Capture active · \(elapsed / 1_000)s · \(count) events")
-                    .foregroundStyle(Color.tronEmerald)
-            case .completed:
-                Text("Diagnostic Capture ready to export")
-                    .foregroundStyle(Color.tronEmerald)
-            case .idle:
-                EmptyView()
-            }
         }
             .font(TronTypography.caption)
             .foregroundStyle(Color.tronTextMuted)
@@ -265,59 +208,41 @@ struct GatewayLogsSettingsView: View {
             .padding(.vertical, 10)
     }
 
-    private func startDiagnosticCapture() {
-        guard !captureExportInFlight else { return }
-        _ = model.startDiagnosticCapture()
-    }
-
-    private func stopDiagnosticCapture() {
-        _ = model.stopDiagnosticCapture()
-    }
-
-    private func exportDiagnosticCapture() {
-        guard !captureExportInFlight,
-              model.diagnosticCaptureReport != nil,
-              presentationActivity.allowsPresentationPublication else { return }
-        captureExportGeneration &+= 1
-        let generation = captureExportGeneration
+    private func exportDiagnostics() {
+        guard !exportInFlight, presentationActivity.allowsPresentationPublication,
+              !visibleItems.isEmpty else { return }
+        exportGeneration &+= 1
+        let generation = exportGeneration
         let activity = presentationActivity
-        captureExportInFlight = true
+        let records = recordIndex.records
+        let metadata = captureMetadata
+        exportInFlight = true
         Task { @MainActor in
-            defer {
-                if generation == captureExportGeneration { captureExportInFlight = false }
-            }
+            defer { if generation == exportGeneration { exportInFlight = false } }
             do {
-                let path = try await model.exportDiagnosticCapture()
-                guard generation == captureExportGeneration,
-                      presentationActivity == activity,
-                      activity.allowsPresentationPublication,
-                      !Task.isCancelled else {
-                    await model.discardExportArtifact(path)
-                    return
+                let appRecords = await model.appLog.snapshot()
+                let text = GatewayLogExport.uploadText(GatewayLogExport.jsonLines(
+                    records: records, metadata: metadata, appRecords: appRecords
+                ))
+                switch try await model.exportDiagnostics(text) {
+                case .saved(let path):
+                    guard generation == exportGeneration, presentationActivity == activity,
+                          activity.allowsPresentationPublication else { return }
+                    UIPasteboard.general.string = path
+                    model.postNotice("Diagnostics saved on Mac · path copied", role: .success, lifetime: .standard, priority: .low)
+                case .share(let url):
+                    guard generation == exportGeneration, presentationActivity == activity,
+                          activity.allowsPresentationPublication else {
+                        await model.discardExportArtifact(url)
+                        return
+                    }
+                    exportArtifactURL = url
+                    shareURL = DiagnosticShareFile(url: url)
                 }
-                // Publish without another await after admission. Cleanup must
-                // not let a covered or superseded request publish on return.
-                retirePreparedShare()
-                preparedShare = PreparedDiagnosticShare(url: path)
-                model.postNotice(
-                    "Diagnostic capture is ready to share",
-                    role: .success, lifetime: .standard, priority: .low
-                )
-            } catch is CancellationError {
-                return
             } catch {
-                guard generation == captureExportGeneration,
-                      presentationActivity == activity,
+                guard generation == exportGeneration, presentationActivity == activity,
                       activity.allowsPresentationPublication else { return }
-                // Sharing is an explicit export action. Keep failures as a
-                // transient toast and never route them into the persistent
-                // diagnostic-error surface or a stale prepared artifact.
-                model.postNotice(
-                    "Diagnostic capture could not be exported. Try again.",
-                    role: .error,
-                    lifetime: .standard,
-                    priority: .normal
-                )
+                model.postNotice("Diagnostics could not be exported. Try again.", role: .error, lifetime: .standard, priority: .normal)
             }
         }
     }
@@ -393,75 +318,6 @@ struct GatewayLogsSettingsView: View {
         }
     }
 
-    private func beginShare() {
-        guard !shareInFlight, presentationActivity.allowsPresentationPublication else { return }
-        switch GatewayLogShareAvailability.resolve(hasVisibleLogs: !visibleItems.isEmpty) {
-        case .available:
-            break
-        case .unavailable(let message):
-            model.postNotice(message, role: .error, lifetime: .standard, priority: .normal)
-            return
-        }
-        shareGeneration &+= 1
-        let generation = shareGeneration
-        let activity = presentationActivity
-        let text = GatewayLogExport.uploadText(GatewayLogExport.text(
-            records: visibleItems.map(\.record), metadata: captureMetadata
-        ))
-        shareSucceeded = false
-        shareInFlight = true
-        Task { @MainActor in
-            do {
-                let path = try await model.exportGatewayLogs(text)
-                guard generation == shareGeneration,
-                      presentationActivity == activity,
-                      activity.allowsPresentationPublication,
-                      !Task.isCancelled else {
-                    await model.discardExportArtifact(path)
-                    return
-                }
-                retirePreparedShare()
-                preparedShare = PreparedDiagnosticShare(url: path)
-                shareInFlight = false
-                shareSucceeded = true
-                model.postNotice(
-                    "Logs are ready to share",
-                    role: .success,
-                    lifetime: .standard,
-                    priority: .low
-                )
-                try? await Task.sleep(for: .milliseconds(700))
-                guard generation == shareGeneration,
-                      presentationActivity == activity else { return }
-                shareSucceeded = false
-            } catch is CancellationError {
-                guard generation == shareGeneration else { return }
-                shareInFlight = false
-                shareSucceeded = false
-            } catch {
-                guard generation == shareGeneration else { return }
-                shareInFlight = false
-                shareSucceeded = false
-                guard presentationActivity == activity,
-                      activity.allowsPresentationPublication else { return }
-                // A failed share must not expose a persistent error sheet or
-                // retain a partial artifact; only a bounded toast is appropriate.
-                model.postNotice(
-                    "Logs could not be shared. Try again.",
-                    role: .error,
-                    lifetime: .standard,
-                    priority: .normal
-                )
-            }
-        }
-    }
-
-    private func retirePreparedShare() {
-        guard let prepared = preparedShare else { return }
-        preparedShare = nil
-        Task { await model.discardExportArtifact(prepared.url) }
-    }
-
     private func accent(for level: String) -> Color {
         switch level {
         case "error": .tronError
@@ -472,9 +328,19 @@ struct GatewayLogsSettingsView: View {
     }
 }
 
-private struct PreparedDiagnosticShare: Identifiable {
+private struct DiagnosticShareFile: Identifiable {
     let url: URL
     var id: URL { url }
+}
+
+private struct DiagnosticActivitySheet: UIViewControllerRepresentable {
+    let url: URL
+
+    func makeUIViewController(context: Context) -> UIActivityViewController {
+        UIActivityViewController(activityItems: [url], applicationActivities: nil)
+    }
+
+    func updateUIViewController(_ controller: UIActivityViewController, context: Context) {}
 }
 
 struct GatewayLogsLoadID: Hashable {

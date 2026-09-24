@@ -1,4 +1,5 @@
 import { abortableRead } from "../util/abortable-read.js";
+import { join } from "node:path";
 import { performance } from "node:perf_hooks";
 import type { AuthType } from "@earendil-works/pi-ai";
 import type { ModelRuntime } from "@earendil-works/pi-coding-agent";
@@ -438,7 +439,14 @@ export class GatewayService {
             throw new GatewayError("invalid_request", "Log export accepts only content and commandId");
           }
           const content = boundedText(params.content, "content", 512 * 1024);
-          return safeJson(await exportDiagnosticSnapshot(content, this.dependencies.logger.debugTail()));
+          const tronHome = this.dependencies.config.tronHome;
+          return safeJson(await exportDiagnosticSnapshot(
+            content,
+            this.dependencies.logger.debugTail(),
+            new Date(),
+            join(tronHome, "logs", "device-exports"),
+            client.identity,
+          ));
         });
       case "uploads.status":
         if (Object.keys(params).length > 0) throw new GatewayError("invalid_request", "Upload status accepts no parameters");

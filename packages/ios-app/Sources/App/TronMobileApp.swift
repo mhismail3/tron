@@ -143,8 +143,15 @@ struct TronMobileApp: App {
                     await model.start(sceneIsActive: scenePhase == .active)
                     await reconcilePushNotifications()
                 }
-                .onChange(of: model.connectionState) { _, _ in
-                    Task { await reconcilePushNotifications() }
+                .onChange(of: model.connectionState) { old, new in
+                    Task {
+                        await model.appLog.recordCausal(
+                            name: "connection.state-changed", outcome: String(describing: new),
+                            connectionID: model.diagnosticConnectionID,
+                            details: "old=\(old) new=\(new) gatewayEpoch=\(model.gatewayInfo?.runtimeEpoch ?? "unknown")"
+                        )
+                        await reconcilePushNotifications()
+                    }
                 }
                 .onChange(of: model.profileRevision) { _, _ in
                     Task { await reconcilePushNotifications() }

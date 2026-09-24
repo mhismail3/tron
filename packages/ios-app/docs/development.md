@@ -375,20 +375,27 @@ produce large traces, and it does not replace Time Profiler, SwiftUI, or
 signpost correlation. Treat its output as a bounded deep-dive and compare
 matched captures rather than enabling it during normal use.
 
-### Opt-in normal-use capture
+### Always-on diagnostics
 
-For a slowdown that only appears during real work, keep using the ordinary
-optimized app and open **Settings → Logs → Diagnostic Capture → Start** just
-before reproducing it. Stop immediately afterward, then choose **Export
-Diagnostic Capture** and share the copied path with the matching Logs export.
-The capture is local and process-lifetime only: five minutes by default, ten
-minutes maximum, 2,000 events, and 480 KiB. It records operation elapsed time,
-Gateway RPC method/request correlation, catalog results, and chat opening
-milestones; it never records prompts, transcript text, paths, credentials,
-frames, or payloads. No capture task or event retention runs while it is off.
-Use the exported timestamps and request IDs to rank the slow boundary, inspect
-that boundary in Instruments when needed, make one causal fix, and repeat the
-same interaction under matched conditions. A capture is evidence for diagnosis,
+The app continuously records bounded lifecycle, RPC-completion, catalog, and
+slow-operation records. The actor-owned memory ring holds at most 2,000 records
+or 512 KiB; info and above are batched to
+`Library/Caches/Logs/app.jsonl` plus one prior segment, each capped at half the
+10 MiB total budget. Batches flush every five seconds, on backgrounding, and
+immediately for errors. Per-RPC completions are
+debug-only; payloads, prompts, transcript contents, frames, and render events
+are excluded. Logs retains this local record stream across relaunches.
+
+Choose **Settings → Logs → Export Diagnostics** once. A connected Gateway
+advertising `diagnostic-export.v1` receives the bounded JSONL bundle and saves
+it under `~/.tron/logs/device-exports/`; Tron copies the returned path and
+shows confirmation. If disconnected or upload fails, the same action opens the
+native share sheet with a bounded local JSONL bundle; upload failures are
+recorded as warning events. The first JSON record carries capture time, Gateway
+runtime identities, per-source statuses, and the represented log window. Use
+timestamps and request IDs to rank the slow boundary, inspect that boundary in Instruments
+when needed, make one causal fix, and repeat the
+same interaction under matched conditions. An export is evidence for diagnosis,
 not proof of a physical-device speedup; retain the focused regression and
 matched device measurements for that claim.
 
@@ -422,7 +429,7 @@ for session-scoped facts, not the hosted-only AppModel selection conveniences.
 
 ## Connection recovery diagnostics
 
-The WebSocket hello attempt has one monotonic deadline covering both the hello send and receive. Its exact socket is closed before a timed-out or canceled operation is joined. Foreground liveness waits ten seconds between independent probes and observes each pong callback with an eight-second bound; successful probes are not logged. Logs can be opened and refreshed while Connecting, Reconnecting, or Offline: the bounded process-local iOS connection ring is shown immediately with profile ownership, stage, outcome, duration, fixed retirement reason, typed numeric closeCode/HTTP status metadata (kept separate and exact to the retired epoch), and overflow count where applicable, while unavailable Gateway records are retained as stale. Separately, production composes a device-local incident store for ordinary relaunch recovery: it persists only structurally admitted iOS connection/client-work records, bounded to 96 rows, 96 KiB, and seven days. The store reserves the first warning/error of up to eight recently observed, validated client/attempt identities alongside the newest window, under both count and byte pressure; an older incident on the same profile cannot replace the current incident's first cause. The optional incident identity is native diagnostic metadata, not a canonical session/credential record. The persistence mailbox retains newest occurrence timestamps under stalled-writer pressure; it contains no URLs, tokens, prompts, or arbitrary transport error text, and persistence failure cannot affect transport or presentation. Remote log RPCs are skipped until diagnostic readiness so opening Logs cannot interfere with hello; cached remote rows remain visible. Probe durations measure the actual pong wait and transport durations measure the retired epoch's age. Native URL-loading error codes survive failure normalization; intentional cancellation is categorized separately. Failed HTTP upgrades distinguish 401 credentials, 403 permission, and retryable 503 capacity/unavailability. Close codes remain platform-supplied facts: URLSession can report 1005/1006 instead of the peer's exact close frame, so logs never invent that missing code. A bounded dynamic-JSON rejection records a typed `decode_limit` incident before strict transport retirement, including the fixed limit kind, observed/maximum bound, sanitized source path, inbound frame byte count, and existing client/attempt/connection/profile ownership. It does not relax decoding or recover a malformed request locally. Separately, `response_too_large` from a confirmed mutation or its receipt read is an `outcome_unknown`, not proof of execution failure: the command may have completed before response projection was rejected. Its stable command identity is retained and iOS does not replay it or restore a possibly accepted send as definitely failed. Logs export capture time, represented bounds, app build, Gateway identity, and per-source freshness/status so retained local rows and failed remote sources are explicit rather than presented as fresh Gateway state. When visible rows exist, the Logs Share action remains available while capability data is loading or unsupported; tapping it explains the unavailable state with a transient notice instead of silently doing nothing. A successful receipt is the only point that copies the server path, and presentation retirement clears stale pending feedback without canceling the accepted mutation.
+The WebSocket hello attempt has one monotonic deadline covering both the hello send and receive. Its exact socket is closed before a timed-out or canceled operation is joined. Foreground liveness waits ten seconds between independent probes and observes each pong callback with an eight-second bound; successful probes are not logged. Logs can be opened and refreshed while Connecting, Reconnecting, or Offline: the bounded process-local iOS connection ring is shown immediately with profile ownership, stage, outcome, duration, fixed retirement reason, typed numeric closeCode/HTTP status metadata (kept separate and exact to the retired epoch), and overflow count where applicable, while unavailable Gateway records are retained as stale. Separately, production composes a device-local incident store for ordinary relaunch recovery: it persists only structurally admitted iOS connection/client-work records, bounded to 96 rows, 96 KiB, and seven days. The store reserves the first warning/error of up to eight recently observed, validated client/attempt identities alongside the newest window, under both count and byte pressure; an older incident on the same profile cannot replace the current incident's first cause. The optional incident identity is native diagnostic metadata, not a canonical session/credential record. The persistence mailbox retains newest occurrence timestamps under stalled-writer pressure; it contains no URLs, tokens, prompts, or arbitrary transport error text, and persistence failure cannot affect transport or presentation. Remote log RPCs are skipped until diagnostic readiness so opening Logs cannot interfere with hello; cached remote rows remain visible. Probe durations measure the actual pong wait and transport durations measure the retired epoch's age. Native URL-loading error codes survive failure normalization; intentional cancellation is categorized separately. Failed HTTP upgrades distinguish 401 credentials, 403 permission, and retryable 503 capacity/unavailability. Close codes remain platform-supplied facts: URLSession can report 1005/1006 instead of the peer's exact close frame, so logs never invent that missing code. A bounded dynamic-JSON rejection records a typed `decode_limit` incident before strict transport retirement, including the fixed limit kind, observed/maximum bound, sanitized source path, inbound frame byte count, and existing client/attempt/connection/profile ownership. It does not relax decoding or recover a malformed request locally. Separately, `response_too_large` from a confirmed mutation or its receipt read is an `outcome_unknown`, not proof of execution failure: the command may have completed before response projection was rejected. Its stable command identity is retained and iOS does not replay it or restore a possibly accepted send as definitely failed. Logs export capture time, represented bounds, app build, Gateway identity, and per-source freshness/status so retained local rows and failed remote sources are explicit rather than presented as fresh Gateway state. Export Diagnostics uses the advertised capability only after the Gateway is ready; a missing capability, disconnect, or upload failure takes the local share-sheet path. A successful export response copies the server path, and presentation retirement fences stale feedback without canceling the accepted upload.
 
 Automatic recovery is owned by each connection lifecycle and continues indefinitely for retryable transport failures while the app is foregrounded on a satisfied network path. Both the primary lifecycle and dashboard pool use `GatewayReconnectSchedule`: nominal delays progress from 2 seconds by ×1.7 to a 15-second cap, each independently jittered within 80–120%. Foreground activation, path return, and explicit Retry accelerate a single pending delay; background retirement and an unsatisfied path pause retry admission, including when the path drops while a socket is active and that socket later retires. Authentication, permission, protocol, and identity failures stop automatic attempts until explicit Retry. A failed `session.list` read follows the same capped jitter curve while its exact connection remains current, without needing another catalog invalidation; read failures marked nonretryable stop, while the unavailable notice appears once after the third failure. Revision movement remains bounded to its existing immediate traversal attempts. Retryable failures remain Reconnecting, while Offline denotes stopped recovery. Each handshake retains its monotonic 15-second deadline; the maintenance restart watchdog changes a stalled restart to Reconnecting and resumes retry rather than exhausting an allowance. Initial connect and profile switches still claim one admission before cache I/O and retain it through hello; exact lifecycle/connection generations fence stale completion, and canceled cache reads cannot replace the resumed authoritative catalog. Accepted domain mutations keep their receipt/possibly-sent ownership and never re-arm transport recovery. Recovery presentation retains the mounted Chat rows, route, draft, keyboard, and scroll identity, and cannot enable Send while `admitsLiveSessionCommands` is false. Optional provider/settings/device/catalog refreshes run through their existing owners after mounted authority and transport readiness.
 
@@ -799,11 +806,11 @@ background retirement clears readiness before the transport changes. The visible
 structured refresh to that completion generation, generation-gates stale results, retains its last
 useful bounded rows on an automatic empty read, and merges fresh profiles with retained rows for any
 profile whose reconnect-time diagnostics request failed. Manual refresh may admit a confirmed empty
-successful result. Share exports that same redacted visible snapshot to a bounded device-local
-artifact, so retained remote rows remain shareable while offline or while a Gateway is stale; no
-diagnostic export RPC is issued or retried. The native ShareLink is presented only while the captured
-presentation activity remains current; retiring that presentation releases the artifact after the
-system share flow ends. Artifact-write failures are transient notices and never retain a partial file. DTO fields and per-profile failure metadata remain in the service/state boundary,
+successful result. Export Diagnostics packages the redacted visible Gateway tail with local AppLog records and build/OS
+identity. A connected compatible Gateway stores it in its private diagnostics directory and returns a
+path; the app copies that path. Offline or failed uploads open the native share sheet immediately with
+a bounded local artifact. Export work is fenced to the current presentation activity; artifact-write
+failures are transient notices and never retain a partial file. DTO fields and per-profile failure metadata remain in the service/state boundary,
 while log level color, compact metadata/date formatting, and Tron-styled loading/empty presentation remain in
 the dedicated logs UI. `WorkspaceInspectionServiceTests` own the separate session-bound
 `workspace-inspector.v1` wire, the capability-gated `workspace-history-diff.v1` commit/file request,
@@ -1301,13 +1308,10 @@ six warmed CPU/run-loop-delivery samples after two warmups. It uses the shipping
 ease-in-out expansion/collapse curve; keep that workload aligned with the container when
 investigating perceived morph smoothness. Run with
 `scripts/tron-ios-test run --only-testing TronMobileTests/ContextWindowSliderMotionTests`.
-The shared slider presentation also emits `configurationSliderExpand` and `configurationSliderCollapse`
-intervals through the existing Diagnostic Capture and Instruments signpost owners. They record only elapsed
-time and success/cancellation: no settings values, content, per-frame logs, polling, or extra display link.
-Replacement, close interruption, and surface retirement finish only the exact current measurement once.
-To investigate an intermittent hitch, start Diagnostic Capture in Settings → Logs, exercise both sliders,
-then stop and export the capture; the intervals identify slow transitions for correlation with Instruments.
-Elapsed transition time alone cannot establish GPU frame smoothness.
+The shared slider presentation emits `configurationSliderExpand` and `configurationSliderCollapse`
+Intervals through Instruments signposts; AppLog retains only transitions beyond its named slow-operation
+threshold. They record elapsed time and success/failure, not settings values, content, per-frame logs,
+polling, or an extra display link. Elapsed transition time alone cannot establish GPU frame smoothness.
 These simulator/test-process measurements do not establish device GPU frame time or release
 performance. Its temporary window and display link are owned and released by the test.
 Try narrow sheets, both appearances, large text, VoiceOver adjustment/escape, and Reduce Motion.
@@ -1663,4 +1667,4 @@ defaults, logs, or UserDefaults.
 
 ### Diagnostic source identity
 
-The app build stamps `TronBuildIdentity.json` into its signed resources with the source commit and dirty state. Logs Share uses that app identity independently of the connected Gateway revision. Export retains only bounded RPC method/request IDs, outcome, code, fixed admission reason, and duration; it never serializes request parameters or arbitrary error details. Missing build identity is reported as unknown.
+The app build stamps `TronBuildIdentity.json` into its signed resources with the source commit and dirty state. Export Diagnostics includes that app identity independently of the connected Gateway revision. The JSONL bundle retains only bounded RPC method/request IDs, outcome, code, and duration; it never serializes request parameters or arbitrary error details. Missing build identity is reported as unknown.

@@ -81,6 +81,21 @@ enum SessionMountedAuthorityPolicy {
     }
 }
 
+enum DiagnosticExportResult {
+    case saved(String)
+    case share(URL)
+}
+
+private struct DiagnosticExportRequest: Encodable {
+    let commandId: String
+    let content: String
+}
+
+private struct DiagnosticExportResponse: Decodable {
+    let path: String
+    let exportedAt: String
+}
+
 @MainActor
 @Observable
 final class AppModel {
@@ -179,9 +194,8 @@ final class AppModel {
     private let reconnectDelayPolicy: ReconnectDelayPolicy
     private let recoveryDisplayClock: MonotonicClock
     private let uuidSource: UUIDSource
-    private let performanceSignposts: any PerformanceSignposting
-    let diagnosticCapture: DiagnosticCaptureCoordinator
-    var performanceSignpostsForCapture: any PerformanceSignposting { performanceSignposts }
+    let performanceSignposts: any PerformanceSignposting
+    let appLog: AppLog
     var diagnosticConnectionID: Int? { gatewayConnectionID }
     var knowledgePresentationIdentity: KnowledgePresentationIdentity {
         KnowledgePresentationIdentity(profileID: lifecycle.selectedProfileID, lifecycleGeneration: lifecycle.generationAdmission?.generation, connectionID: gatewayConnectionID)
@@ -302,11 +316,6 @@ final class AppModel {
     /// never raw scene activation, a transient connected state, or reconciliation start.
     private(set) var diagnosticsReadinessGeneration = 0
     private(set) var diagnosticsAreReady = false
-    private(set) var diagnosticCaptureRevision = 0
-    var diagnosticCaptureState: DiagnosticCaptureState { diagnosticCapture.state }
-    var diagnosticCaptureReport: DiagnosticCaptureReport? {
-        diagnosticCapture.state == .completed ? diagnosticCapture.report : nil
-    }
     var commands: [CommandInfo] { sessionPresentation.commands }
     var commandCatalogTarget: SessionPresentationIdentity? { sessionPresentation.commandCatalogTarget }
     var resources: JSONValue? { sessionPresentation.resources }
@@ -455,7 +464,8 @@ final class AppModel {
         extensionInteractionDrafts: ExtensionInteractionDraftStore = ExtensionInteractionDraftStore(),
         exportArtifacts: SessionExportArtifactStore = SessionExportArtifactStore(),
         diagnosticStore: IOSClientDiagnosticStore? = nil,
-        notificationInbox: NotificationInboxCoordinator = NotificationInboxCoordinator()
+        notificationInbox: NotificationInboxCoordinator = NotificationInboxCoordinator(),
+        appLog: AppLog = .shared
     ) {
         self.notificationInbox = notificationInbox
         let resolvedPairingCommit = pairingCommit ?? { profile, token in
@@ -468,13 +478,12 @@ final class AppModel {
             profiles.token(for: profile)
         }
         let noticeCenter = InAppNoticeCenter(clock: clock)
-        let diagnosticCapture = DiagnosticCaptureCoordinator(clock: clock)
-        let captureSignposts = DiagnosticCaptureSignposts(base: performanceSignposts, capture: diagnosticCapture)
+        let appLogSignposts = AppLogSignposts(base: performanceSignposts, log: appLog)
         let dashboardConnections = DashboardGatewayConnectionPool(clientFactory: {
             GatewayClient(
-                performanceSignposts: captureSignposts,
+                performanceSignposts: appLogSignposts,
                 diagnosticStore: diagnosticStore,
-                diagnosticCaptureSink: diagnosticCapture
+                appLog: appLog
             )
         }, clock: clock, reconnectDelayPolicy: reconnectDelayPolicy)
         let lifecycle = GatewayLifecycleCoordinator(
@@ -492,7 +501,7 @@ final class AppModel {
             client: client,
             lifecycle: lifecycle,
             clock: clock,
-            performanceSignposts: captureSignposts
+            performanceSignposts: appLogSignposts
         )
         let sessionMutations = SessionMutationService(
             client: client,
@@ -521,7 +530,7 @@ final class AppModel {
         )
         let sessionPresentation = SessionPresentationStore(
             client: client,
-            performanceSignposts: captureSignposts,
+            performanceSignposts: appLogSignposts,
             clock: clock
         )
         let terminal = TerminalCoordinator(
@@ -530,7 +539,7 @@ final class AppModel {
             mutationExecutor: mutationExecutor,
             uuidSource: uuidSource,
             clock: clock,
-            performanceSignposts: captureSignposts,
+            performanceSignposts: appLogSignposts,
             installedSubscriptionToken: { sessionPresentation.installedSubscriptionToken(for: $0) }
         )
         let composerDrafts = ComposerDraftCoordinator(
@@ -682,8 +691,8 @@ final class AppModel {
         self.reconnectDelayPolicy = reconnectDelayPolicy
         self.recoveryDisplayClock = recoveryDisplayClock
         self.uuidSource = uuidSource
-        self.performanceSignposts = captureSignposts
-        self.diagnosticCapture = diagnosticCapture
+        self.performanceSignposts = appLogSignposts
+        self.appLog = appLog
         self.exportArtifacts = exportArtifacts
         self.diagnosticStore = diagnosticStore
         self.metricKitDiagnostics = diagnosticStore.map { IOSMetricKitDiagnostics(store: $0) }
@@ -1466,7 +1475,13 @@ final class AppModel {
     }
 
     func start(sceneIsActive: Bool = true) async {
-        await client.installDiagnosticCaptureSink(diagnosticCapture)
+        await client.installAppLog(appLog)
+        let appVersion = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "unknown"
+        let build = Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? "unknown"
+        await appLog.recordCausal(
+            name: "app.started", outcome: "success",
+            details: "appVersion=\(appVersion) build=\(build) os=\(ProcessInfo.processInfo.operatingSystemVersionString)"
+        )
         sceneAllowsCatalogRefresh = sceneIsActive
         pushNavigationActivationReady = sceneIsActive
         await lifecycle.start()
@@ -1477,6 +1492,7 @@ final class AppModel {
     }
 
     func becameInactive() {
+        Task { await appLog.recordCausal(name: "app.backgrounded", outcome: "success"); await appLog.flush() }
         pushNavigationActivationReady = false
         pushNavigationActivationGeneration &+= 1
         noticeCenter.setBackgrounded(true)
@@ -1489,6 +1505,7 @@ final class AppModel {
         pushNavigationActivationGeneration &+= 1
         let activationGeneration = pushNavigationActivationGeneration
         noticeCenter.setBackgrounded(false)
+        Task { await appLog.recordCausal(name: "app.foregrounded", outcome: "success") }
         let requiresRetirementBarrier = lifecycle.routeActivationRequiresRetirementBarrier
         let lifecycleTask = lifecycle.becameActive()
         return Task { @MainActor [weak self] in
@@ -1540,6 +1557,10 @@ final class AppModel {
         do {
             try await lifecycle.pair(invitation, selectingProfile: selectingProfile)
         } catch {
+            await appLog.recordCausal(
+                name: "pairing.result", outcome: "failure", level: "warning",
+                details: "code=\((error as? GatewayFailure)?.code ?? "unknown")"
+            )
             // The credential commit can succeed immediately before a later
             // handshake/projection failure. Reconcile the old pool even when
             // pairing reports failure so two same-machine profiles never stay
@@ -1548,6 +1569,7 @@ final class AppModel {
             reconcileDashboardConnections()
             throw error
         }
+        await appLog.recordCausal(name: "pairing.result", outcome: "success")
         profileRevision &+= 1
         reconcileDashboardConnections()
     }
@@ -1752,12 +1774,6 @@ final class AppModel {
             retryBudget: DashboardCatalogRetryPolicy.unavailableNoticeAfterFailures
         )
         if let record = iosClientDiagnostics.records.first { diagnosticStore?.record(record) }
-        diagnosticCapture.recordCausal(
-            name: "catalog.\(outcome)", outcome: outcome,
-            durationMilliseconds: durationMilliseconds, count: pageCount,
-            profileID: key.profileID, connectionID: key.connectionID,
-            lifecycleGeneration: key.lifecycleGeneration, requestID: requestID
-        )
     }
 
     private func showCatalogFailure(
@@ -2381,6 +2397,13 @@ final class AppModel {
         var sourceStatuses = Dictionary(uniqueKeysWithValues: profileSnapshot.map { ($0.id, "pending") })
         sourceStatuses["ios-client"] = "current-and-retained-local"
         var loaded = Array(iosClientDiagnostics.records.prefix(limit))
+        loaded.append(contentsOf: await appLog.snapshot().map { value in
+            GatewayProfileLogRecord(profileID: "ios-client", profileLabel: "This iPhone", record: GatewayLogRecord(
+                timestamp: value.timestamp, level: value.level, message: value.message,
+                event: value.event, source: value.source, requestID: value.requestID,
+                code: value.code, outcome: value.outcome, durationMs: value.durationMs
+            ))
+        })
         loaded.append(contentsOf: (await client.diagnostics()).map(IOSClientDiagnosticBuffer.logRecord))
         loaded.append(contentsOf: eventConsumerDiagnostics.values.map {
             IOSClientDiagnosticBuffer.logRecord($0)
@@ -2424,46 +2447,25 @@ final class AppModel {
     }
 
     @discardableResult
-    func startDiagnosticCapture(duration: Duration = DiagnosticCaptureCoordinator.defaultDuration) -> Bool {
-        let started = diagnosticCapture.start(
-            duration: duration,
-            profileID: profiles.selected?.id,
-            connectionID: gatewayConnectionID,
-            lifecycleGeneration: lifecycle.currentLifecycleGeneration
-        ) { [weak self] in
-            Task { @MainActor [weak self] in self?.diagnosticCaptureRevision &+= 1 }
+    func exportDiagnostics(_ text: String) async throws -> DiagnosticExportResult {
+        if diagnosticsAreReady, gatewayInfo?.capabilities.contains("diagnostic-export.v1") == true {
+            do {
+                let value: JSONValue = try await client.requestValue(
+                    "system.logs.export",
+                    DiagnosticExportRequest(commandId: UUID().uuidString, content: text)
+                )
+                let result = try JSONDecoder().decode(DiagnosticExportResponse.self, from: JSONEncoder().encode(value))
+                return .saved(result.path)
+            } catch is CancellationError {
+                throw CancellationError()
+            } catch {
+                await appLog.recordCausal(
+                    name: "diagnostics.upload-failed", outcome: "failure", level: "warning",
+                    details: "code=\(GatewayDiagnosticFailure.code(error))"
+                )
+            }
         }
-        diagnosticCaptureRevision &+= 1
-        return started
-    }
-
-    @discardableResult
-    func stopDiagnosticCapture() -> DiagnosticCaptureReport? {
-        let report = diagnosticCapture.stop()
-        diagnosticCaptureRevision &+= 1
-        return report
-    }
-
-    /// Exports the immutable capture and current device-local diagnostics to a
-    /// bounded artifact. Remote log rows are not required: an unavailable or
-    /// stale Gateway is represented by the source-status metadata on the Logs
-    /// projection rather than by a failed export prerequisite.
-    func exportDiagnosticCapture() async throws -> URL {
-        guard let report = diagnosticCaptureReport else { throw CancellationError() }
-        let local = await loadGatewayLogsResult(limit: 1_000, includeRemote: false)
-        let localLogs = GatewayLogExport.text(
-            records: local.records,
-            metadata: local.metadata
-        )
-        let text = GatewayLogExport.uploadText("Tron capture and local diagnostics\n\n\(report.text)\n\n\(localLogs)")
-        return try await exportLocalDiagnosticArtifact(text, suggestedName: "tron-diagnostic-capture.txt")
-    }
-
-    /// Writes the already-redacted Logs projection to a bounded local artifact.
-    /// Remote rows remain exportable after they have been retained in the iOS
-    /// projection, and an offline or stale Gateway cannot delay or fail sharing.
-    func exportGatewayLogs(_ text: String) async throws -> URL {
-        try await exportLocalDiagnosticArtifact(text, suggestedName: "tron-gateway-logs.txt")
+        return .share(try await exportLocalDiagnosticArtifact(text, suggestedName: "tron-diagnostics.jsonl"))
     }
 
     private func exportLocalDiagnosticArtifact(_ text: String, suggestedName: String) async throws -> URL {
@@ -3161,18 +3163,30 @@ final class AppModel {
         #else
         let hostedAdmission = true
         #endif
-        return try await composerDrafts.openMountedPresentation(
-            scope: scope,
-            lifecycleGeneration: admission.generation,
-            open: { try await sessionPresentation.open(id) },
-            finalAdmission: { _ in
-                try requireLifecycle(admission)
-                guard hostedAdmission,
-                      lifecycle.selectedProfileID == profileID else { throw CancellationError() }
-            },
-            revokePresentation: sessionPresentation.revokeIntake,
-            closePresentation: sessionPresentation.close
-        )
+        do {
+            return try await composerDrafts.openMountedPresentation(
+                scope: scope,
+                lifecycleGeneration: admission.generation,
+                open: { try await sessionPresentation.open(id) },
+                finalAdmission: { _ in
+                    try requireLifecycle(admission)
+                    guard hostedAdmission,
+                          lifecycle.selectedProfileID == profileID else { throw CancellationError() }
+                },
+                revokePresentation: sessionPresentation.revokeIntake,
+                closePresentation: sessionPresentation.close
+            )
+        } catch is CancellationError {
+            throw CancellationError()
+        } catch {
+            await appLog.recordCausal(
+                name: "session.open.failure", outcome: "failure",
+                profileID: profileID, connectionID: admission.connectionID,
+                lifecycleGeneration: admission.generation, level: "warning",
+                details: "code=\(GatewayDiagnosticFailure.code(error))"
+            )
+            throw error
+        }
     }
 
     /// Replaces one transiently malformed mounted projection with a fresh
@@ -3184,6 +3198,12 @@ final class AppModel {
             throw CancellationError()
         }
         guard await sessionPresentation.reconnectMountedPresentation() else {
+            await appLog.recordCausal(
+                name: "session.sync.failure", outcome: "failure",
+                profileID: lifecycle.selectedProfileID, connectionID: gatewayConnectionID,
+                lifecycleGeneration: lifecycle.currentLifecycleGeneration, level: "warning",
+                details: "code=sync_failed"
+            )
             throw GatewayFailure(
                 code: "sync_failed",
                 message: "Tron could not refresh this conversation.",
@@ -4656,7 +4676,19 @@ extension AppModel: GatewayLifecycleProjectionDelegate {
         if event == "reconnect.failure" || event == "reconnect.exhausted" || event == "reconnect.stopped" {
             beginRecoveryDisplayEpisodeIfNeeded()
         }
-        guard ["scene.foreground", "scene.background", "reconnect.scheduled", "reconnect.attempt", "reconnect.failure", "reconnect.delay", "reconnect.connected", "reconnect.exhausted", "reconnect.stopped", "path.changed", "detail.tap", "detail.preparation"].contains(event) else { return }
+        let recordedEvents = ["scene.foreground", "scene.background", "reconnect.scheduled", "reconnect.attempt", "reconnect.failure", "reconnect.delay", "reconnect.connected", "reconnect.exhausted", "reconnect.stopped", "path.changed", "detail.tap", "detail.preparation"]
+        guard recordedEvents.contains(event) else { return }
+        if event != "detail.tap", event != "detail.preparation" {
+            Task {
+                await appLog.recordCausal(
+                    name: event, outcome: event.hasSuffix("failure") || event == "reconnect.exhausted" ? "failure" : "success",
+                    profileID: profiles.selected?.id, connectionID: lifecycle.connectionID,
+                    lifecycleGeneration: lifecycle.currentLifecycleGeneration,
+                    level: event.hasSuffix("failure") || event == "reconnect.exhausted" ? "warning" : "info",
+                    details: message
+                )
+            }
+        }
         iosClientDiagnostics.recordLifecycle(
             event: "gateway.lifecycle",
             message: "kind=\(event) clientID=\(client.diagnosticOwnerID) \(message)",

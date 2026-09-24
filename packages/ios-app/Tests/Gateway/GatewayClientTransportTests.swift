@@ -161,8 +161,8 @@ struct GatewayClientTransportTests {
         }
     }
 
-    @Test("opt-in capture records repeated real Gateway RPC completions")
-    func diagnosticCaptureRecordsRPCs() async throws {
+    @Test("always-on AppLog records repeated RPC completions at debug level")
+    func appLogRecordsRPCs() async throws {
         let socket = ScriptedGatewaySocket()
         let ids = SequenceUUIDSource([
             UUID(uuidString: "00000000-0000-0000-0000-000000000011")!,
@@ -173,9 +173,8 @@ struct GatewayClientTransportTests {
             socketFactory: ScriptedGatewaySocketFactory(socket: socket).factory,
             uuidSource: ids.source
         )
-        let capture = DiagnosticCaptureCoordinator()
-        await client.installDiagnosticCaptureSink(capture)
-        #expect(capture.start(duration: .seconds(30)))
+        let appLog = AppLog(fileURL: FileManager.default.temporaryDirectory.appending(path: "rpc-app-log-\(UUID().uuidString).jsonl"))
+        await client.installAppLog(appLog)
         await socket.enqueue(helloFrame())
         _ = try await client.connect(profile: profile, token: "token")
 
@@ -185,9 +184,10 @@ struct GatewayClientTransportTests {
             await socket.enqueue(responseFrame(id: expectedID, result: .array([])))
             _ = try await valueOfOwnedTask(request)
         }
-        let report = try #require(capture.stop())
-        #expect(report.events.filter { $0.kind == "rpc" && $0.name == "session.list" }.count == 2)
-        #expect(report.events.allSatisfy { $0.profileID == nil || $0.profileID == "machine" })
+        await Task.yield()
+        let records = await appLog.snapshot().filter { $0.event == "rpc.completed" && $0.message == "session.list" }
+        #expect(records.count == 2)
+        #expect(records.allSatisfy { $0.level == "debug" && ($0.profileID == nil || $0.profileID == "machine") })
         await client.close()
     }
 
@@ -920,9 +920,6 @@ struct GatewayClientTransportTests {
                     UUID(uuidString: "00000000-0000-0000-0000-000000000024")!,
                 ]).source
             )
-            let capture = DiagnosticCaptureCoordinator(clock: clock.clock)
-            await client.installDiagnosticCaptureSink(capture)
-            #expect(capture.start(duration: .seconds(30)))
             await socket.enqueue(helloFrame())
             _ = try await client.connect(profile: profile, token: "token")
 
@@ -937,12 +934,6 @@ struct GatewayClientTransportTests {
             } catch is GatewayPossiblySentError {}
             await Task.yield()
 
-            let report = try #require(capture.stop())
-            let rpcEvents = report.events.filter { event in
-                event.kind == "rpc" && event.name == "session.list"
-            }
-            let rpc = try #require(rpcEvents.first)
-            #expect(rpc.code == "possibly_sent")
             await client.close()
         }
     }
@@ -1574,9 +1565,6 @@ struct GatewayClientTransportTests {
         try await withTestWatchdog {
             let sockets = [ScriptedGatewaySocket(), ScriptedGatewaySocket()]
             let client = GatewayClient(socketFactory: ScriptedGatewaySocketFactory(sockets: sockets).factory)
-            let capture = DiagnosticCaptureCoordinator()
-            await client.installDiagnosticCaptureSink(capture)
-            #expect(capture.start(duration: .seconds(30)))
             let gate = TestReadGate()
             var read: Task<NotificationInboxGatewayClient.Snapshot, Error>?
             var responder: Task<Void, Error>?
@@ -1593,10 +1581,6 @@ struct GatewayClientTransportTests {
                 let id = try #require(request.objectValue?["id"]?.stringValue)
                 await sockets[0].enqueue(responseFrame(id: id, result: inboxPage(id: "notification-old", nextCursor: "next-page")))
                 try await gate.waitForEntry()
-                let report = try #require(capture.stop())
-                let pageEvent = try #require(report.events.first { $0.name == "notification.inbox.list" })
-                #expect(pageEvent.purpose == "notification-page")
-                #expect(pageEvent.page == 1)
                 await sockets[1].enqueue(helloFrame())
                 _ = try await client.connect(profile: profile, token: "synthetic-token")
                 responder = Task {
