@@ -588,9 +588,15 @@ are fixed per event in code; there is no runtime level setting.
   time since the previous checkpoint: `modules` (process start to the loaded
   import graph), `config-and-locks`, then each startup owner through
   `knowledge-observation-recovery` before `gateway.listening`, and
-  `attention-recovery` after it. `gateway.stopped` is a process's last record,
-  with its shutdown duration; the time from it to the next process start is
-  launchd and the launcher.
+  `attention-recovery` after it. The parts of `automation-recovery` are
+  separate `automation.recovery-step` records (`store`, `reconcile-targets`,
+  `scheduler-recover`), so one restart's startup steps still sum without double
+  counting; reconciliation's message names how many targets it checked and the
+  slowest target's kind and duration, never its path or ID. Session search warms
+  concurrently with recovery; its `session-search.warm` record carries the
+  warm-up's `durationMs`, so its start is the timestamp minus that duration.
+  `gateway.stopped` is a process's last record, with its shutdown duration; the
+  time from it to the next process start is launchd and the launcher.
 
 A supervised payload validates its architecture-specific immutable `node` and
 technical `pi` command aliases before model services or extension packages load.

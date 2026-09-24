@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { AutomationService } from "./automation-service.js";
 import { admitAutomationCreateInput } from "./automation-contract.js";
 
@@ -44,6 +44,40 @@ describe("Automation target contract", () => {
       ...base,
       trigger: { kind: "interval", everySeconds: 86_400, anchorAt: "2026-01-01T00:00:00.000Z" },
     }, { kind: "mobile" }).trigger).toMatchObject({ everySeconds: 86_400 });
+  });
+});
+
+describe("AutomationService startup timing", () => {
+  afterEach(() => { vi.restoreAllMocks(); });
+
+  it("reports each recovery part and the slowest target kind without target identifiers", async () => {
+    const records = [
+      { id: "automation-one", activation: "draft", target: { kind: "workspace", cwd: "/private/workspace" } },
+      { id: "automation-two", activation: "draft", target: { kind: "existingSession", sessionId: "private-session" } },
+    ];
+    let clock = 0;
+    vi.spyOn(performance, "now").mockImplementation(() => (clock += 10));
+    const steps: unknown[][] = [];
+    const service = new AutomationService(
+      { initialize: async () => {}, snapshot: () => records } as any,
+      { recover: async () => {}, start: () => {} } as any,
+      {
+        requirePersistedUserSession: async () => {},
+        requireResolvedAutomationWorkspace: async () => "/canonical",
+        workspaceForSession: async () => "/canonical",
+      },
+      undefined,
+      (...step) => { steps.push(step); },
+    );
+
+    await service.initialize();
+
+    expect(steps).toEqual([
+      ["store", 10],
+      ["reconcile-targets", 50, "recordsChecked=2 slowestTargetMs=10 slowestTargetKind=workspace"],
+      ["scheduler-recover", 10],
+    ]);
+    expect(JSON.stringify(steps)).not.toContain("private");
   });
 });
 

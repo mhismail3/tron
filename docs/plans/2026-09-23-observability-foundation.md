@@ -2,7 +2,7 @@
 
 - **Started:** 2026-09-23
 - **Status:** Active
-- **Last updated:** 2026-09-24, L-11
+- **Last updated:** 2026-09-24, L-15b
 - **Goal:** Every Tron process records the right signals automatically, in a known place, at a meaningful level, so a failure can be diagnosed in one pass from what was already recorded.
 
 Follow the [plan protocol](README.md#protocol) to claim tasks and hand off.
@@ -213,7 +213,8 @@ user reinstalls manually, so batch them for one reinstall.
 | L-9 | Needs scoping | Phone handling of a stalled or unreachable but live Gateway (proposal for the user) | L-7, L-10 | |
 | L-10 | Done | iOS connect-failure records say whether the socket ever opened, and on which interface | none | observability session, 2026-09-24 |
 | L-15 | Done | Startup timing: stop to bound and bound to first startup phase | L-2 | observability session, 2026-09-24 |
-| L-15b | Claimed | Fix the dominant startup cost the L-15 records name on the next real restart (the user's rebuild) | L-15 | observability session (L-15b lane), 2026-09-24 |
+| L-15b | Done | Fix the dominant startup cost the L-15 records name on the next real restart (the user's rebuild) | L-15 | observability session (L-15b lane), 2026-09-24 |
+| L-15c | Ready | After the next real restart, read the `automation.recovery-step` and `session-search.warm` records and fix the measured owner of automation recovery's time | L-15b | |
 | L-16 | Done | Restart drain hangs on terminal-receipt persistence | none | observability session, 2026-09-24 |
 | L-17 | Needs approval | Judge a drain stalled by its oldest blocker without progress, not by any change in the blocker set | L-16 | |
 | L-18 | Needs approval | Decide whether a restart drain proceeds when only unresolved (blocked) persistence owners remain | L-16 | |
@@ -618,3 +619,14 @@ user reinstalls manually, so batch them for one reinstall.
 - Kept on purpose: the recovery validation in `promote`. It validates the prior or previous selection, which is not the candidate validated for promotion, so it is not a repeat. Every check after a copy, the launcher's check and the post-restart identity check are also unchanged.
 - Deviations: the plan's count tests were not added. The helper has no fingerprint injection point, and adding one only for a test is a test-only seam, which the simplification rules forbid. The removals are covered by the behavior test above and by reading the code.
 - For the next agent: L-1c's `deploy.jsonl` phase durations from the second rebuild after this lands can confirm the saving. L-13 is unblocked.
+
+### L-15b · Done · 2026-09-24 · observability session (L-15b lane)
+
+- Result: the dominant cost is named but not yet explained, so this adds the signal that will explain it rather than a speculative fix. The user's 2026-09-24 12:27 UTC rebuild was the first restart with L-15's records. They accounted for 21.96 s from process start to `gateway.listening`, and all but about 1.4 s of the 23.3 s from stop to listening (acceptance met). `automation-recovery` took 14,746 ms (67%), `session-search-index` 4,243 ms, `blob-storage` 965 ms, `modules` 680 ms and `global-provider-resources` 665 ms. `attention-recovery` took 1,241 ms after listening. `AutomationService.initialize` now reports its three parts as `automation.recovery-step` records: `store`, `reconcile-targets` (with the number of targets checked and the slowest target's kind and duration, never its path or ID) and `scheduler-recover`. The concurrent session-search warm-up records `session-search.warm` with its duration. The parts use their own event, so a restart's `gateway.startup-step` records still sum without double counting.
+- Evidence (verified): isolated run in a fresh home with APFS clones of the automation store (3 records) and the session tree (5,381 files), on a non-default port with a clean environment. Automation recovery took 61 ms: store 5 ms, reconciliation 52 ms (two session targets of 28 and 12 ms, one workspace target of 12 ms), scheduler 0 ms. The live 14.7 s did not reproduce, because the isolated registry did not admit the target session the way production does. Cloning more of `~/.tron` would have copied credentials and settings, so it was not done. Focused tests `npx vitest run src/automations src/transport/logger.test.ts src/index.test.ts`: 12 files, 79/79. Full Gateway suite (`nice -n 19`, 2 workers): 176 files, 1,917/1,917, 96 s, with no live `gateway.event-loop-delay`. Negative control: dropping the reconciliation evidence fails `reports each recovery part and the slowest target kind without target identifiers`.
+- Evidence (inferred): candidates for the live cost are live session admission in `requirePersistedUserSession`, whose `attentionEntryStillAdmitted` walks a session's structure, and contention with the session-search warm-up, which starts just before and opens a SQLite index of about 394 MB.
+- Changes: this commit (`automations/automation-service.ts` and its test, `gateway-main.ts`, the Gateway README logging section).
+- Tasks added: L-15c.
+- Kept on purpose: startup order. Automations still recover before `gateway.listening`, and nothing is deferred.
+- Deviations: supervisor review changed the lane's first version. That version added three automation-only fields to the shared log record format, used a `now` option that only tests set, and emitted the parts as `gateway.startup-step` records that double count. The evidence now stays in the message text, following L-7's precedent, and the test controls `performance.now` directly.
+- For the next agent: after the user's next restart, L-15c reads the new records for that `runtimeEpoch` and fixes whichever part dominates. A CPU profile is allowed only during a user-initiated restart or in an isolated home.

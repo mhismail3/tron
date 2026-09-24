@@ -332,7 +332,13 @@ const automationScheduler = new AutomationScheduler(automationStore, automationE
     });
   },
 });
-automations = new AutomationService(automationStore, automationScheduler, sessions);
+// Parts of the `automation-recovery` startup step, as a separate event so the
+// startup steps of one restart still sum without double counting.
+automations = new AutomationService(automationStore, automationScheduler, sessions, undefined, (step, durationMs, detail) => {
+  logger.log("info", `Automation recovery ${step} took ${Math.round(durationMs)} ms${detail ? ` (${detail})` : ""}`, {
+    event: "automation.recovery-step", source: "automations", step, durationMs,
+  });
+});
 automationToolOperations = new GatewayScheduleToolOperations(automations, receipts);
 
 let stopping = false;
@@ -535,11 +541,18 @@ await transport.listen(async () => {
   startupCheckpoint("session-registry");
   sessionSearchWarmTask = (async () => {
     if (stopping || !sessionSearch) return;
+    const warmStartedAt = performance.now();
     if (searchHelperCandidate && await admitSearchEmbeddingHelper(searchHelperCandidate)) {
       if (stopping) return;
       sessionSearch.setSemanticClient(new NaturalLanguageEmbeddingClient(searchHelperCandidate));
     } else if (searchHelperCandidate) logger.log("warning", "Signed NaturalLanguage search helper admission failed; semantic search remains unavailable", { event: "session-search.helper-unavailable", source: "search" });
-    if (!stopping) await sessionSearch.warm();
+    if (!stopping) {
+      await sessionSearch.warm();
+      const durationMs = performance.now() - warmStartedAt;
+      logger.log("info", `Session search warm-up took ${Math.round(durationMs)} ms`, {
+        event: "session-search.warm", source: "search", durationMs,
+      });
+    }
   })().catch((error) => logger.log("warning", "Session search warm-up failed; lexical search will recover on demand", { event: "session-search.warm-failed", source: "search", error }));
   transport.setStartupPhase("automation-recovery");
   await automations.initialize();

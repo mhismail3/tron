@@ -23,18 +23,31 @@ export interface AutomationPage {
   items: AutomationSummary[];
 }
 
+/** One timed part of startup recovery; `detail` is key=value evidence with no
+ * target paths or identifiers. */
+export type AutomationRecoveryStep = (
+  step: "store" | "reconcile-targets" | "scheduler-recover", durationMs: number, detail?: string,
+) => void;
+
 export class AutomationService {
   constructor(
     readonly store: AutomationStore,
     readonly scheduler: AutomationScheduler,
     private readonly targets: AutomationTargetValidator,
     private readonly timelinePages = new AutomationTimelinePaginationStore(),
+    private readonly onRecoveryStep: AutomationRecoveryStep = () => {},
   ) {}
 
   async initialize(): Promise<void> {
+    let startedAt = performance.now();
     await this.store.initialize();
-    await this.reconcileTargets();
+    this.onRecoveryStep("store", performance.now() - startedAt);
+    startedAt = performance.now();
+    const reconciliation = await this.reconcileTargets();
+    this.onRecoveryStep("reconcile-targets", performance.now() - startedAt, reconciliation);
+    startedAt = performance.now();
     await this.scheduler.recover();
+    this.onRecoveryStep("scheduler-recover", performance.now() - startedAt);
     this.scheduler.start();
   }
 
@@ -200,9 +213,16 @@ export class AutomationService {
     else await this.targets.requireResolvedAutomationWorkspace(target.cwd);
   }
 
-  private async reconcileTargets(): Promise<void> {
+  /** Returns key=value evidence naming how many targets were checked and the
+   * slowest target's kind and duration. */
+  private async reconcileTargets(): Promise<string> {
+    let recordsChecked = 0;
+    let slowestTargetDurationMs = 0;
+    let slowestTargetKind: "workspace" | "session" | undefined;
     for (const record of this.store.snapshot()) {
       if (record.activation === "completed") continue;
+      const targetStartedAt = performance.now();
+      recordsChecked += 1;
       if (record.target.kind === "workspace") {
         try {
           await this.targets.requireResolvedAutomationWorkspace(record.target.cwd);
@@ -214,6 +234,11 @@ export class AutomationService {
             "target-workspace-unavailable",
           );
         }
+        const durationMs = performance.now() - targetStartedAt;
+        if (durationMs > slowestTargetDurationMs) {
+          slowestTargetDurationMs = durationMs;
+          slowestTargetKind = "workspace";
+        }
         continue;
       }
       try {
@@ -222,6 +247,13 @@ export class AutomationService {
         if (error instanceof GatewayError && (error.code === "busy" || error.code === "internal")) throw error;
         await this.store.blockTarget(record.target.sessionId, "target-session-unavailable");
       }
+      const durationMs = performance.now() - targetStartedAt;
+      if (durationMs > slowestTargetDurationMs) {
+        slowestTargetDurationMs = durationMs;
+        slowestTargetKind = "session";
+      }
     }
+    return `recordsChecked=${recordsChecked}`
+      + (slowestTargetKind === undefined ? "" : ` slowestTargetMs=${Math.round(slowestTargetDurationMs)} slowestTargetKind=${slowestTargetKind}`);
   }
 }
