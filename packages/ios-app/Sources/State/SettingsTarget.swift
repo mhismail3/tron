@@ -182,7 +182,7 @@ struct ScopedSettingsDraftStore<Draft: Equatable> {
     }
 }
 
-struct RuntimeBehaviorLoadID: Hashable {
+struct AgentDefaultsLoadID: Hashable {
     let settingsTarget: SettingsTarget?
     let providerTarget: ProviderCatalogTarget
     let settingsInvalidationGeneration: Int

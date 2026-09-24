@@ -19,7 +19,7 @@ describe("SettingsService", () => {
     const service = new SettingsService(agentDir, runtime);
     const global = { cwd, scope: "global" as const, projectTrusted: false };
     const project = { cwd, scope: "project" as const, projectTrusted: true };
-    await service.update({ modelContextWindows: { "context-test/large": 1_000_000 }, hideThinkingBlock: true }, global);
+    await service.update({ modelContextWindows: { "context-test/large": 1_000_000 }, steeringMode: "all" }, global);
     await Promise.all([
       service.update({ modelContextWindows: { "context-test/large": 900_000 } }, global),
       service.update({ modelContextWindows: { "context-test/other/alias": 100_000 } }, global),
@@ -38,7 +38,7 @@ describe("SettingsService", () => {
     await expect(service.update({ modelContextWindows: { "missing/model": 100_000 } }, global)).rejects.toMatchObject({ code: "not_found" });
     await expect(service.update({ modelContextWindows: { "context-test/large": 100_000 } }, { ...project, projectTrusted: false })).rejects.toMatchObject({ code: "trust_required" });
     await service.update({ modelContextWindows: { "context-test/large": null } }, global);
-    expect(JSON.parse(await readFile(path, "utf8"))).toMatchObject({ hideThinkingBlock: true, modelContextWindows: { "context-test/other/alias": 100_000 } });
+    expect(JSON.parse(await readFile(path, "utf8"))).toMatchObject({ steeringMode: "all", modelContextWindows: { "context-test/other/alias": 100_000 } });
   });
 
   it("projects the same scoped compaction minimum used for context preference writes", async () => {
@@ -78,17 +78,13 @@ describe("SettingsService", () => {
     const service = new SettingsService(agentDir, models);
     await service.update({
       compaction: { enabled: false, reserveTokens: 20_000, keepRecentTokens: 10_000 },
-      branchSummary: { reserveTokens: 8_000, skipPrompt: true },
+      branchSummary: { reserveTokens: 8_000 },
       retry: { enabled: true, maxRetries: 4, provider: { timeoutMs: 90_000, maxRetries: 2, maxRetryDelayMs: 10_000 } },
       thinkingBudgets: { minimal: 512, high: 8_192 },
       transport: "websocket",
-      hideThinkingBlock: true,
-      showCacheMissNotices: true,
       steeringMode: "one-at-a-time",
       followUpMode: "all",
       sessionDir: "/tmp/sessions",
-      markdown: { codeBlockIndent: "  ", mermaid: "final" },
-      warnings: { anthropicExtraUsage: false },
       extensions: ["/tmp/extension.ts"],
       packages: [{ source: "npm:test", autoload: false, skills: ["**"] }],
     }, { cwd, scope: "global", projectTrusted: false });
@@ -102,13 +98,34 @@ describe("SettingsService", () => {
       instructions: "",
       source: { enabled: "global", reserveTokens: "global", keepRecentTokens: "global", thinkingLevel: "default", instructions: "default" },
     });
-    expect(document.effective.branchSummary).toEqual({ reserveTokens: 8_000, skipPrompt: true });
+    expect(document.effective.branchSummary).toEqual({ reserveTokens: 8_000 });
     expect(document.effective.transport).toBe("websocket");
     expect(document.effective.sessionDir).toBe("/tmp/sessions");
     expect(JSON.parse(await readFile(join(agentDir, "settings.json"), "utf8"))).toMatchObject({
       extensions: ["/tmp/extension.ts"],
       packages: [{ source: "npm:test", autoload: false, skills: ["**"] }],
     });
+  });
+
+  it("neither writes nor projects terminal-only settings that no Tron surface consumes", async () => {
+    const agentDir = await mkdtemp(join(tmpdir(), "tron-terminal-settings-"));
+    const models = await ModelRuntime.create({ authPath: join(agentDir, "auth.json"), modelsPath: null, refreshOnCreate: false });
+    const service = new SettingsService(agentDir, models);
+    const retired = {
+      hideThinkingBlock: true,
+      showCacheMissNotices: true,
+      enableSkillCommands: false,
+      markdown: { codeBlockIndent: "\t", mermaid: "off" },
+      warnings: { anthropicExtraUsage: false },
+      enableAnalytics: true,
+    };
+    const document = await service.update({ ...retired, steeringMode: "all" }, { cwd: agentDir, scope: "global", projectTrusted: false }) as { effective: Record<string, unknown> };
+    expect(JSON.parse(await readFile(join(agentDir, "settings.json"), "utf8"))).toEqual({ steeringMode: "all" });
+    for (const key of ["hideThinkingBlock", "showCacheMissNotices", "enableSkillCommands", "markdown", "warnings"]) {
+      expect(document.effective).not.toHaveProperty(key);
+    }
+    expect(document.effective.branchSummary).toEqual({ reserveTokens: 16_384 });
+    expect(document.effective.telemetry).toEqual({ install: true });
   });
 
   it("resolves compaction policy by scope and validates bounded focus instructions", async () => {
@@ -155,7 +172,7 @@ describe("SettingsService", () => {
     await writeFile(settingsPath, original);
 
     await expect(service.update(
-      { hideThinkingBlock: true },
+      { steeringMode: "all" },
       { cwd, scope: "global", projectTrusted: false },
     )).rejects.toMatchObject({ code: "conflict" });
     expect(await readFile(settingsPath, "utf8")).toBe(original);
@@ -165,7 +182,7 @@ describe("SettingsService", () => {
     const projectOriginal = JSON.stringify({ marker: "project" });
     await writeFile(join(projectPath, "settings.json"), projectOriginal);
     await expect(service.update(
-      { hideThinkingBlock: true },
+      { steeringMode: "all" },
       { cwd, scope: "project", projectTrusted: true },
     )).rejects.toMatchObject({ code: "conflict" });
     expect(await readFile(join(projectPath, "settings.json"), "utf8")).toBe(projectOriginal);
@@ -173,13 +190,13 @@ describe("SettingsService", () => {
     await service.update({ compaction: { thinkingLevel: "inherit" } }, { cwd, scope: "global", projectTrusted: false });
     const invalidProject = JSON.stringify({ compaction: { keepRecentTokens: -1 }, marker: "project" });
     await writeFile(join(projectPath, "settings.json"), invalidProject);
-    await expect(service.update({ hideThinkingBlock: true }, { cwd, scope: "project", projectTrusted: true }))
+    await expect(service.update({ steeringMode: "all" }, { cwd, scope: "project", projectTrusted: true }))
       .rejects.toMatchObject({ code: "conflict" });
     expect(await readFile(join(projectPath, "settings.json"), "utf8")).toBe(invalidProject);
 
     await writeFile(settingsPath, '{"compaction":');
     await writeFile(join(projectPath, "settings.json"), projectOriginal);
-    await expect(service.update({ hideThinkingBlock: true }, { cwd, scope: "project", projectTrusted: true }))
+    await expect(service.update({ steeringMode: "all" }, { cwd, scope: "project", projectTrusted: true }))
       .rejects.toMatchObject({ code: "conflict" });
     expect(await readFile(join(projectPath, "settings.json"), "utf8")).toBe(projectOriginal);
   });
@@ -197,7 +214,7 @@ describe("SettingsService", () => {
     await writeFile(settingsPath, original);
     expect(() => service.get(cwd, false)).toThrow(/collection limit/);
     await expect(service.update(
-      { hideThinkingBlock: true },
+      { steeringMode: "all" },
       { cwd, scope: "global", projectTrusted: false },
     )).rejects.toThrow(/collection limit/);
     expect(await readFile(settingsPath, "utf8")).toBe(original);
@@ -205,13 +222,13 @@ describe("SettingsService", () => {
     const exactMembers = Object.fromEntries(Array.from({ length: 999 }, (_, index) => [`unknown-${index}`, index]));
     await writeFile(settingsPath, JSON.stringify(exactMembers));
     await expect(service.update(
-      { hideThinkingBlock: true },
+      { steeringMode: "all" },
       { cwd, scope: "global", projectTrusted: false },
     )).resolves.toBeDefined();
     const admitted = JSON.parse(await readFile(settingsPath, "utf8")) as Record<string, unknown>;
     expect(Object.keys(admitted)).toHaveLength(1_000);
     expect(admitted["unknown-998"]).toBe(998);
-    expect(admitted.hideThinkingBlock).toBe(true);
+    expect(admitted.steeringMode).toBe("all");
 
     let nested: Record<string, unknown> = { value: true };
     for (let depth = 0; depth < 12; depth += 1) nested = { nested };

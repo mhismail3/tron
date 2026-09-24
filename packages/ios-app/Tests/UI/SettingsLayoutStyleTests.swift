@@ -107,19 +107,19 @@ final class SettingsLayoutStyleTests: XCTestCase {
         await model.teardown(); await client.close(); try? FileManager.default.removeItem(at: root)
     }
 
-    func testRuntimeBehaviorRendersInlineDefaults() async throws {
+    func testAgentDefaultsRendersInlineDefaults() async throws {
         let socket = ScriptedGatewaySocket()
         let client = GatewayClient(socketFactory: ScriptedGatewaySocketFactory(sockets: [socket]).factory)
         let root = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString)
         let model = AppModel(client: client, cache: SnapshotCache(root: root))
         do {
             for scheme in [ColorScheme.light, .dark] {
-                try await withHost(NavigationStack { RuntimeBehaviorSettingsView(projectCWD: nil) }
+                try await withHost(NavigationStack { AgentDefaultsSettingsView(projectCWD: nil) }
                     .environment(model).tronPresentation().tronSettingsLayout().tronSettingsVisualTheme(accent: .tronPurple),
                     size: CGSize(width: 440, height: 900), scheme: scheme) { host in
                     // Interaction is exercised by the HOSTED_TEST UI journey; this
                     // native layout fixture does not expose a complete AX tree.
-                    attach(image(host), name: "runtime-behavior-inline-defaults-\(scheme)")
+                    attach(image(host), name: "agent-defaults-inline-defaults-\(scheme)")
                 }
                 try await withHost(NavigationStack { ProvidersSettingsView(sessionID: nil) }
                     .environment(model).tronPresentation().tronSettingsLayout().tronSettingsVisualTheme(accent: .tronEmerald),
@@ -221,24 +221,6 @@ final class SettingsLayoutStyleTests: XCTestCase {
             XCTAssertGreaterThanOrEqual(paintedRows, 90)
             attach(bitmap, name: "empty-resource-containers")
         }
-    }
-
-    func testCodeBlockIndentPresetsKeepExactWhitespaceAndDefault() {
-        let baseline = RuntimeBehaviorDraft()
-        XCTAssertEqual(baseline.codeIndent, "  ")
-        XCTAssertEqual(CodeBlockIndentOption.allCases.map(\.rawValue), ["", "  ", "    ", "        ", "\t"])
-        XCTAssertEqual(CodeBlockIndentOption.twoSpaces.label, "2 spaces (Default)")
-        for option in CodeBlockIndentOption.allCases {
-            var draft = baseline
-            draft.codeIndent = option.rawValue
-            let expected: JSONValue = option == .twoSpaces ? .object([:])
-                : .object(["markdown": .object(["codeBlockIndent": .string(option.rawValue)])])
-            XCTAssertEqual(draft.patch(comparedTo: baseline), expected)
-        }
-        var custom = baseline
-        custom.codeIndent = "   "
-        XCTAssertEqual(custom.patch(comparedTo: custom), .object([:]),
-                       "Opening the preset selector must not silently rewrite a saved custom indent")
     }
 
     func testFreeTextSettingsUseEmptyPlaceholderWithoutChangingValues() async throws {

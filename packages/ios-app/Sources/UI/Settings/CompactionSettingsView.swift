@@ -6,6 +6,7 @@ struct CompactionSettingsDraft: Equatable {
     var instructions = ""
     var reserveTokens = 16_384
     var keepRecentTokens = 20_000
+    var branchReserveTokens = 16_384
     var restoreStandardRequested = false
     enum GenerationField: Hashable { case thinking, focus }
     var useGlobalFields: Set<GenerationField> = []
@@ -62,7 +63,11 @@ struct CompactionSettingsDraft: Equatable {
         else if instructions != baseline.instructions || restoreStandardRequested || baseline.useGlobalFields.contains(.focus) { compaction["instructions"] = .string(instructions) }
         if reserveTokens != baseline.reserveTokens { compaction["reserveTokens"] = .number(Double(reserveTokens)) }
         if keepRecentTokens != baseline.keepRecentTokens { compaction["keepRecentTokens"] = .number(Double(keepRecentTokens)) }
-        return .object(compaction.isEmpty ? [:] : ["compaction": .object(compaction)])
+        var patch: [String: JSONValue] = compaction.isEmpty ? [:] : ["compaction": .object(compaction)]
+        if branchReserveTokens != baseline.branchReserveTokens {
+            patch["branchSummary"] = .object(["reserveTokens": .number(Double(branchReserveTokens))])
+        }
+        return .object(patch)
     }
 }
 
@@ -135,13 +140,16 @@ struct CompactionSettingsView: View {
                 }
                 .tronSettingsCaption("Focus is captured when a summary starts. It does not change an active summary, chat, or branch summaries. Restore leaves automatic compaction and token budgets unchanged."
                     + (supportsPolicy ? "" : "\nThis Gateway does not expose configurable summary thinking and focus."))
-                TronSettingsGroup("Context Budgets", detail: "Token allowances for future compactions.", accent: .tronPurple) {
+                TronSettingsGroup("Context Budgets", detail: "Token allowances for future summaries.", accent: .tronPurple) {
                     VStack(spacing: 0) {
                         TronNumberSettingRow(icon: "gauge.with.dots.needle.33percent", title: "Reserve Tokens",
                                              detail: "Response headroom", value: editing.reserveTokens, accent: .tronPurple)
                         TronSettingsDivider(accent: .tronPurple)
                         TronNumberSettingRow(icon: "text.line.last.and.arrowtriangle.forward", title: "Keep Recent Tokens",
                                              detail: "Recent history retained verbatim", value: editing.keepRecentTokens, accent: .tronPurple)
+                        TronSettingsDivider(accent: .tronPurple)
+                        TronNumberSettingRow(icon: "arrow.triangle.branch", title: "Branch Summary Reserve",
+                                             detail: "Headroom when summarizing a branch you leave", value: editing.branchReserveTokens, accent: .tronPurple)
                     }
                 }
             }
@@ -202,13 +210,15 @@ struct CompactionSettingsView: View {
     }
 
     private func projectionDraft(target: SettingsTarget) -> CompactionSettingsDraft? {
-        guard let compaction = model.settings(for: target)?.objectValue?["effective"]?.objectValue?["compaction"]?.objectValue else { return nil }
+        guard let effective = model.settings(for: target)?.objectValue?["effective"]?.objectValue,
+              let compaction = effective["compaction"]?.objectValue else { return nil }
         return CompactionSettingsDraft(
             enabled: compaction.bool("enabled", fallback: true),
             thinkingLevel: compaction.string("thinkingLevel", fallback: "inherit"),
             instructions: compaction.string("instructions", fallback: ""),
             reserveTokens: compaction.int("reserveTokens", fallback: 16_384),
-            keepRecentTokens: compaction.int("keepRecentTokens", fallback: 20_000)
+            keepRecentTokens: compaction.int("keepRecentTokens", fallback: 20_000),
+            branchReserveTokens: effective["branchSummary"]?.objectValue?.int("reserveTokens", fallback: 16_384) ?? 16_384
         )
     }
 

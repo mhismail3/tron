@@ -237,6 +237,14 @@ the Gateway is stopped and restarted; the runtime also snapshots the admitted
 session directory at startup so an out-of-band settings edit cannot redirect
 new work around the ownership lock.
 
+`settings.get`/`settings.update` expose only SDK settings the embedded runtime
+or a Tron client consumes. Terminal-only presentation settings (thinking-block
+hiding, cache-miss notices, skill-command autocomplete, markdown rendering, the
+Anthropic extra-usage warning, analytics, and the branch-summary skip prompt) are
+not projected, and `settings.update` ignores them; values already in `settings.json` are left
+untouched. `telemetry.install` remains because the SDK uses it to gate provider
+attribution headers.
+
 ### Agent-home migration preflight
 
 `scripts/tron agent-home-preflight --source <absolute-path> --destination
@@ -1297,7 +1305,7 @@ canonical `cwd`; its SDK has no Git/worktree creation option. Persisted worktree
 for later sessions and are never silently deleted with a session.
 ### Model context windows
 
-`context-window.v1` exposes a model-qualified context budget in Models and Defaults
+`context-window.v1` exposes a model-qualified context budget in Agent Defaults
 and Manage Session. `model.list` retains the SDK's configured `contextWindow` and
 adds optional `contextWindowLimits` (`minimum`, `maximum`, `default`, and an optional
 `longContextThreshold`). The catalog minimum uses standard compaction headroom;

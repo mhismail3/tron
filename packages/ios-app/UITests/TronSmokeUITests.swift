@@ -22,16 +22,16 @@ final class TronSmokeUITests: XCTestCase {
                            "Only the progressive settings shell owns dismissal")
             keepScreenshot(named: "settings-\(title)-single-done-light")
             done.allElementsBoundByIndex.first(where: \.isHittable)?.tap()
-            XCTAssertTrue(app.buttons["Runtime Behavior"].waitForExistence(timeout: 3))
+            XCTAssertTrue(app.buttons["Agent Defaults"].waitForExistence(timeout: 3))
             app.terminate()
         }
     }
 
     @MainActor
-    func testRuntimeBehaviorThinkingSliderOpensAfterDefaultsConsolidation() {
+    func testAgentDefaultsThinkingSliderOpensAfterDefaultsConsolidation() {
         continueAfterFailure = false
         let app = XCUIApplication()
-        app.launchArguments = ["-tron-runtime-settings-fixture"]
+        app.launchArguments = ["-tron-agent-defaults-fixture"]
         app.launch()
         defer { app.terminate() }
         let control = app.buttons.matching(identifier: "thinking-level-control")
@@ -40,7 +40,7 @@ final class TronSmokeUITests: XCTestCase {
         XCTAssertTrue(control.isEnabled)
         control.tap()
         XCTAssertTrue(app.descendants(matching: .any).matching(identifier: "thinking-level-slider").firstMatch.waitForExistence(timeout: 3))
-        keepScreenshot(named: "runtime-behavior-thinking-editor-fixture")
+        keepScreenshot(named: "agent-defaults-thinking-editor-fixture")
     }
 
     @MainActor

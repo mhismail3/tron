@@ -85,8 +85,8 @@ struct TronMobileApp: App {
                     .tronPresentation()
                     .tronSettingsLayout()
                     .preferredColorScheme(.light)
-            } else if ProcessInfo.processInfo.arguments.contains("-tron-runtime-settings-fixture") {
-                NavigationStack { RuntimeBehaviorSettingsView(projectCWD: nil) }
+            } else if ProcessInfo.processInfo.arguments.contains("-tron-agent-defaults-fixture") {
+                NavigationStack { AgentDefaultsSettingsView(projectCWD: nil) }
                     .environment(hostedModel)
                     .tronPresentation()
                     .tronSettingsLayout()

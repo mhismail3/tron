@@ -113,8 +113,8 @@ final class ConfigurationAutosaveTests: XCTestCase {
 
     func testProjectionInstallationAndOldScopeBindingNeverAutosave() async {
         let model = AppModel()
-        var value = RuntimeBehaviorDraft()
-        var store = ScopedSettingsDraftStore<RuntimeBehaviorDraft>()
+        var value = AgentDefaultsDraft()
+        var store = ScopedSettingsDraftStore<AgentDefaultsDraft>()
         store.install(value, for: .global)
         let binding = SettingsAutosave.binding(
             draft: Binding(get: { value }, set: { value = $0 }),
@@ -126,8 +126,8 @@ final class ConfigurationAutosaveTests: XCTestCase {
         store.install(value, for: .global)
         XCTAssertFalse(model.configurationAutosave.hasPending(global))
         let project = SettingsTarget.project(cwd: "/workspace/example")
-        _ = store.draftForScopeSwitch(current: value, from: .global, to: project, default: RuntimeBehaviorDraft())
-        _ = store.draftForScopeSwitch(current: RuntimeBehaviorDraft(), from: project, to: .global, default: RuntimeBehaviorDraft())
+        _ = store.draftForScopeSwitch(current: value, from: .global, to: project, default: AgentDefaultsDraft())
+        _ = store.draftForScopeSwitch(current: AgentDefaultsDraft(), from: project, to: .global, default: AgentDefaultsDraft())
         var stale = value
         stale.retryCount = 99
         binding.wrappedValue = stale
@@ -138,8 +138,8 @@ final class ConfigurationAutosaveTests: XCTestCase {
 
     func testRetiredInputBindingCannotSubmitBeforeTheFacadeProfileRevisionUpdates() async {
         let model = AppModel()
-        var value = RuntimeBehaviorDraft()
-        var store = ScopedSettingsDraftStore<RuntimeBehaviorDraft>()
+        var value = AgentDefaultsDraft()
+        var store = ScopedSettingsDraftStore<AgentDefaultsDraft>()
         store.install(value, for: .global)
         let binding = SettingsAutosave.binding(
             draft: Binding(get: { value }, set: { value = $0 }),

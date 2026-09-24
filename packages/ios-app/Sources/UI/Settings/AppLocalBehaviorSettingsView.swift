@@ -46,7 +46,7 @@ struct AppLocalBehaviorSettingsView: View {
             .padding(.vertical, 18)
         }
         .tronScrollEdgeChrome()
-        .tronNavigationTitle("App Settings")
+        .tronNavigationTitle("Sessions")
     }
 
     private func retentionLabel(_ minutes: Int) -> String {

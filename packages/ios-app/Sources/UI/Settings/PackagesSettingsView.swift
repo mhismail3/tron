@@ -215,7 +215,7 @@ struct PackagesSettingsView: View {
             .padding(.vertical, 18)
         }
         .tronScrollEdgeChrome()
-        .tronNavigationTitle("Available Resources")
+        .tronNavigationTitle("Packages")
         .toolbar {
             ToolbarItem(placement: .topBarLeading) {
                 TronReloadToolbarButton(isReloading: reloading, action: reload)

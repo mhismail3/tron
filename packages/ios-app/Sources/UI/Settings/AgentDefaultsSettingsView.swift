@@ -1,29 +1,9 @@
 import SwiftUI
 
-enum CodeBlockIndentOption: String, CaseIterable {
-    case none = ""
-    case twoSpaces = "  "
-    case fourSpaces = "    "
-    case eightSpaces = "        "
-    case tab = "\t"
-
-    var label: String {
-        switch self {
-        case .none: "None"
-        case .twoSpaces: "2 spaces (Default)"
-        case .fourSpaces: "4 spaces"
-        case .eightSpaces: "8 spaces"
-        case .tab: "1 tab"
-        }
-    }
-}
-
-struct RuntimeBehaviorDraft: Equatable {
+struct AgentDefaultsDraft: Equatable {
     var transport = "auto"
     var steeringMode = "one-at-a-time"
     var followUpMode = "one-at-a-time"
-    var branchReserve = 16_384
-    var branchSkipPrompt = false
     var retryEnabled = true
     var selectedModel: ModelRef?
     var thinking = "medium"
@@ -37,26 +17,15 @@ struct RuntimeBehaviorDraft: Equatable {
     var providerRetryDelay = 30_000
     var httpIdleTimeout = 300_000
     var websocketTimeout = 10_000
-    var hideThinking = false
-    var cacheNotices = false
     var resizeImages = true
     var blockImages = false
-    var skillCommands = true
-    var installTelemetry = true
-    var analytics = false
-    var mermaid = "final"
-    var codeIndent = CodeBlockIndentOption.twoSpaces.rawValue
-    var anthropicWarning = true
+    var providerAttribution = true
 
     func patch(comparedTo baseline: Self) -> JSONValue {
         var patch: [String: JSONValue] = [:]
         if transport != baseline.transport { patch["transport"] = .string(transport) }
         if steeringMode != baseline.steeringMode { patch["steeringMode"] = .string(steeringMode) }
         if followUpMode != baseline.followUpMode { patch["followUpMode"] = .string(followUpMode) }
-        var branch: [String: JSONValue] = [:]
-        if branchReserve != baseline.branchReserve { branch["reserveTokens"] = .number(Double(branchReserve)) }
-        if branchSkipPrompt != baseline.branchSkipPrompt { branch["skipPrompt"] = .bool(branchSkipPrompt) }
-        if !branch.isEmpty { patch["branchSummary"] = .object(branch) }
         if thinking != baseline.thinking { patch["defaultThinkingLevel"] = .string(thinking) }
         if selectedModel != baseline.selectedModel {
             if let selectedModel {
@@ -87,34 +56,23 @@ struct RuntimeBehaviorDraft: Equatable {
         if !retry.isEmpty { patch["retry"] = .object(retry) }
         if httpIdleTimeout != baseline.httpIdleTimeout { patch["httpIdleTimeoutMs"] = .number(Double(httpIdleTimeout)) }
         if websocketTimeout != baseline.websocketTimeout { patch["websocketConnectTimeoutMs"] = .number(Double(websocketTimeout)) }
-        if hideThinking != baseline.hideThinking { patch["hideThinkingBlock"] = .bool(hideThinking) }
-        if cacheNotices != baseline.cacheNotices { patch["showCacheMissNotices"] = .bool(cacheNotices) }
         var images: [String: JSONValue] = [:]
         if resizeImages != baseline.resizeImages { images["autoResize"] = .bool(resizeImages) }
         if blockImages != baseline.blockImages { images["blockImages"] = .bool(blockImages) }
         if !images.isEmpty { patch["images"] = .object(images) }
-        if skillCommands != baseline.skillCommands { patch["enableSkillCommands"] = .bool(skillCommands) }
-        var markdown: [String: JSONValue] = [:]
-        if codeIndent != baseline.codeIndent { markdown["codeBlockIndent"] = .string(codeIndent) }
-        if mermaid != baseline.mermaid { markdown["mermaid"] = .string(mermaid) }
-        if !markdown.isEmpty { patch["markdown"] = .object(markdown) }
-        if anthropicWarning != baseline.anthropicWarning {
-            patch["warnings"] = .object(["anthropicExtraUsage": .bool(anthropicWarning)])
-        }
-        if installTelemetry != baseline.installTelemetry { patch["enableInstallTelemetry"] = .bool(installTelemetry) }
-        if analytics != baseline.analytics { patch["enableAnalytics"] = .bool(analytics) }
+        if providerAttribution != baseline.providerAttribution { patch["enableInstallTelemetry"] = .bool(providerAttribution) }
         return .object(patch)
     }
 }
 
-struct RuntimeBehaviorSettingsView: View {
+struct AgentDefaultsSettingsView: View {
     @Environment(AppModel.self) private var model
     @Environment(\.tronPresentationActivity) private var presentationActivity
     let projectCWD: String?
     let projectSessionID: String?
     @State private var scope: SettingsScope = .global
-    @State private var draft = RuntimeBehaviorDraft()
-    @State private var drafts = ScopedSettingsDraftStore<RuntimeBehaviorDraft>()
+    @State private var draft = AgentDefaultsDraft()
+    @State private var drafts = ScopedSettingsDraftStore<AgentDefaultsDraft>()
     @State private var loadGeneration = 0
     @State private var sliderPresentation = ConfigurationSliderPresentation()
 
@@ -132,20 +90,6 @@ struct RuntimeBehaviorSettingsView: View {
                 scopeGroup
                 modelDefaultsSection
                 if let target = settingsTarget { SettingsAutosaveNotice(key: .settings(target, sessionID: target.scope == .project ? projectSessionID : nil)) }
-                TronSettingsGroup("Provider Transport", accent: .tronCyan, surfaceStyle: .glass) {
-                    VStack(spacing: 0) {
-                        choiceRow("network", "Transport", transportLabel, accent: .tronCyan) {
-                            Button("Automatic") { editing.update { $0.transport = "auto" } }
-                            Button("Server-Sent Events") { editing.update { $0.transport = "sse" } }
-                            Button("WebSocket") { editing.update { $0.transport = "websocket" } }
-                            Button("Cached WebSocket") { editing.update { $0.transport = "websocket-cached" } }
-                        }
-                        TronSettingsDivider(accent: .tronCyan)
-                        numberRow("timer", "HTTP idle timeout", "Milliseconds", value: editing.httpIdleTimeout, accent: .tronCyan)
-                        TronSettingsDivider(accent: .tronCyan)
-                        numberRow("bolt.horizontal", "WebSocket timeout", "Milliseconds", value: editing.websocketTimeout, accent: .tronCyan)
-                    }
-                }
                 TronSettingsGroup("Message Queue", accent: .tronPurple, surfaceStyle: .glass) {
                     VStack(spacing: 0) {
                         choiceRow("arrow.turn.up.right", "Steering delivery", queueLabel(draft.steeringMode), accent: .tronPurple) {
@@ -159,17 +103,11 @@ struct RuntimeBehaviorSettingsView: View {
                         }
                     }
                 }
-                TronSettingsGroup("Branch Summaries", accent: .tronTeal, surfaceStyle: .glass) {
+                TronSettingsGroup("Image Input", accent: .tronTeal, surfaceStyle: .glass) {
                     VStack(spacing: 0) {
-                        numberRow("arrow.triangle.branch", "Branch summary reserve", "Tokens reserved for branch summaries", value: editing.branchReserve, accent: .tronTeal)
+                        TronToggleRow(icon: "photo", title: "Resize large images", detail: "Reduce oversized images before upload", accent: .tronTeal, isOn: editing.resizeImages)
                         TronSettingsDivider(accent: .tronTeal)
-                        TronToggleRow(
-                            icon: "text.bubble",
-                            title: "Skip branch-summary prompt",
-                            detail: "Skip the optional branch-summary instruction",
-                            accent: .tronTeal,
-                            isOn: editing.branchSkipPrompt
-                        )
+                        TronToggleRow(icon: "photo.slash", title: "Block images", detail: "Prevent image input from reaching providers", accent: .tronTeal, isOn: editing.blockImages)
                     }
                 }
                 TronSettingsGroup("Retry", accent: .tronAmber, surfaceStyle: .glass) {
@@ -193,43 +131,28 @@ struct RuntimeBehaviorSettingsView: View {
                         numberRow("timer", "Maximum provider delay", "Delay cap in milliseconds", value: editing.providerRetryDelay, accent: .tronAmber)
                     }
                 }
-                TronSettingsGroup("Conversation", surfaceStyle: .glass) {
+                TronSettingsGroup("Provider Transport", accent: .tronCyan, surfaceStyle: .glass) {
                     VStack(spacing: 0) {
-                        toggleRows
-                    }
-                }
-                TronSettingsGroup("Markdown", accent: .tronPurple, surfaceStyle: .glass) {
-                    VStack(spacing: 0) {
-                        choiceRow("flowchart", "Mermaid diagrams", mermaidLabel, accent: .tronPurple) {
-                            Button("Off") { editing.update { $0.mermaid = "off" } }
-                            Button("Completed responses") { editing.update { $0.mermaid = "final" } }
-                            Button("While streaming") { editing.update { $0.mermaid = "streaming" } }
+                        choiceRow("network", "Transport", transportLabel, accent: .tronCyan) {
+                            Button("Automatic") { editing.update { $0.transport = "auto" } }
+                            Button("Server-Sent Events") { editing.update { $0.transport = "sse" } }
+                            Button("WebSocket") { editing.update { $0.transport = "websocket" } }
+                            Button("Cached WebSocket") { editing.update { $0.transport = "websocket-cached" } }
                         }
-                        TronSettingsDivider(accent: .tronPurple)
-                        choiceRow("chevron.left.forwardslash.chevron.right", "Code block indent",
-                                  CodeBlockIndentOption(rawValue: draft.codeIndent)?.label ?? "Custom",
-                                  accent: .tronPurple) {
-                            ForEach(CodeBlockIndentOption.allCases, id: \.self) { option in
-                                Button {
-                                    editing.update { $0.codeIndent = option.rawValue }
-                                } label: {
-                                    if draft.codeIndent == option.rawValue {
-                                        Label(option.label, systemImage: "checkmark")
-                                    } else {
-                                        Text(option.label)
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-                TronSettingsGroup("Privacy and Warnings", accent: .tronSlate, surfaceStyle: .glass) {
-                    VStack(spacing: 0) {
-                        TronToggleRow(icon: "chart.bar", title: "Installation telemetry", accent: .tronSlate, isOn: editing.installTelemetry)
-                        TronSettingsDivider(accent: .tronSlate)
-                        TronToggleRow(icon: "waveform.path.ecg", title: "Anonymous analytics", accent: .tronSlate, isOn: editing.analytics)
-                        TronSettingsDivider(accent: .tronSlate)
-                        TronToggleRow(icon: "exclamationmark.triangle", title: "Anthropic extra-usage warning", accent: .tronSlate, isOn: editing.anthropicWarning)
+                        TronSettingsDivider(accent: .tronCyan)
+                        numberRow("timer", "HTTP idle timeout", "Milliseconds", value: editing.httpIdleTimeout, accent: .tronCyan)
+                        TronSettingsDivider(accent: .tronCyan)
+                        numberRow("bolt.horizontal", "WebSocket timeout", "Milliseconds", value: editing.websocketTimeout, accent: .tronCyan)
+                        TronSettingsDivider(accent: .tronCyan)
+                        // The SDK's install-telemetry setting only gates provider
+                        // attribution headers in Tron; its terminal install ping never runs.
+                        TronToggleRow(
+                            icon: "tag",
+                            title: "Provider attribution",
+                            detail: "Send Pi attribution headers to OpenRouter, NVIDIA, and Cloudflare",
+                            accent: .tronCyan,
+                            isOn: editing.providerAttribution
+                        )
                     }
                 }
             }
@@ -239,10 +162,10 @@ struct RuntimeBehaviorSettingsView: View {
         .tronScrollEdgeChrome()
         .tronConfigurationSliderHost(sliderPresentation)
         .environment(\.configurationSliderSignposts, model.performanceSignpostsForCapture)
-        .tronNavigationTitle("Runtime Behavior")
-        .tronSettingsAutosave(draft: $draft, store: $drafts, initial: RuntimeBehaviorDraft())
+        .tronNavigationTitle("Agent Defaults")
+        .tronSettingsAutosave(draft: $draft, store: $drafts, initial: AgentDefaultsDraft())
         .task(id: PresentationActivityTaskID(
-            source: RuntimeBehaviorLoadID(
+            source: AgentDefaultsLoadID(
                 settingsTarget: settingsTarget,
                 providerTarget: catalogTarget,
                 settingsInvalidationGeneration: model.settingsInvalidationGeneration,
@@ -340,19 +263,6 @@ struct RuntimeBehaviorSettingsView: View {
         }
     }
 
-    @ViewBuilder private var toggleRows: some View {
-        let editing = editBinding
-        TronToggleRow(icon: "brain", title: "Hide thinking blocks", detail: "Keep model reasoning out of the transcript", isOn: editing.hideThinking)
-        TronSettingsDivider()
-        TronToggleRow(icon: "bell", title: "Show cache-miss notices", detail: "Surface provider cache misses in chat", isOn: editing.cacheNotices)
-        TronSettingsDivider()
-        TronToggleRow(icon: "photo", title: "Resize large images", detail: "Reduce oversized images before upload", isOn: editing.resizeImages)
-        TronSettingsDivider()
-        TronToggleRow(icon: "photo.slash", title: "Block images", detail: "Prevent image input from reaching providers", isOn: editing.blockImages)
-        TronSettingsDivider()
-        TronToggleRow(icon: "command", title: "Enable skill commands", detail: "Expose installed skills as slash commands", isOn: editing.skillCommands)
-    }
-
     private func choiceRow<Content: View>(_ icon: String, _ title: String, _ value: String, accent: Color = .tronEmerald, @ViewBuilder choices: @escaping () -> Content) -> some View {
         TronSelectionRow(icon: icon, title: title, value: value, accent: accent, choices: choices)
     }
@@ -365,15 +275,12 @@ struct RuntimeBehaviorSettingsView: View {
         switch draft.transport { case "sse": "Server-Sent Events"; case "websocket": "WebSocket"; case "websocket-cached": "Cached WebSocket"; default: "Automatic" }
     }
     private func queueLabel(_ value: String) -> String { value == "all" ? "Deliver all" : "One at a time" }
-    private var mermaidLabel: String {
-        switch draft.mermaid { case "off": "Off"; case "final": "Completed responses"; case "streaming": "While streaming"; default: draft.mermaid }
-    }
 
     private var settingsTarget: SettingsTarget? {
         SettingsTarget(scope: scope, projectCWD: projectCWD)
     }
 
-    private var editBinding: Binding<RuntimeBehaviorDraft> {
+    private var editBinding: Binding<AgentDefaultsDraft> {
         let target = settingsTarget
         return SettingsAutosave.binding(draft: $draft, store: $drafts, model: model, target: target,
             sessionID: target?.scope == .project ? projectSessionID : nil,
@@ -396,7 +303,7 @@ struct RuntimeBehaviorSettingsView: View {
             current: draft,
             from: settingsTarget,
             to: newTarget,
-            default: RuntimeBehaviorDraft()
+            default: AgentDefaultsDraft()
         )
         scope = newScope
         draft = nextDraft
@@ -429,10 +336,10 @@ struct RuntimeBehaviorSettingsView: View {
         draft = loaded
     }
 
-    private func projectionDraft(target: SettingsTarget, catalogTarget: ProviderCatalogTarget) -> RuntimeBehaviorDraft? {
+    private func projectionDraft(target: SettingsTarget, catalogTarget: ProviderCatalogTarget) -> AgentDefaultsDraft? {
         guard let root = model.settings(for: target)?.objectValue,
               let value = root["effective"]?.objectValue else { return nil }
-        var loaded = RuntimeBehaviorDraft()
+        var loaded = AgentDefaultsDraft()
         if let object = value["defaultModel"]?.objectValue,
            let provider = object["provider"]?.stringValue,
            let id = object["id"]?.stringValue {
@@ -452,10 +359,6 @@ struct RuntimeBehaviorSettingsView: View {
         loaded.transport = value.string("transport", fallback: loaded.transport)
         loaded.steeringMode = value.string("steeringMode", fallback: loaded.steeringMode)
         loaded.followUpMode = value.string("followUpMode", fallback: loaded.followUpMode)
-        if let branch = value["branchSummary"]?.objectValue {
-            loaded.branchReserve = branch.int("reserveTokens", fallback: loaded.branchReserve)
-            loaded.branchSkipPrompt = branch.bool("skipPrompt", fallback: loaded.branchSkipPrompt)
-        }
         if let retry = value["retry"]?.objectValue {
             loaded.retryEnabled = retry.bool("enabled", fallback: loaded.retryEnabled)
             loaded.retryCount = retry.int("maxRetries", fallback: loaded.retryCount)
@@ -468,23 +371,12 @@ struct RuntimeBehaviorSettingsView: View {
         }
         loaded.httpIdleTimeout = value.int("httpIdleTimeoutMs", fallback: loaded.httpIdleTimeout)
         loaded.websocketTimeout = value.int("websocketConnectTimeoutMs", fallback: loaded.websocketTimeout)
-        loaded.hideThinking = value.bool("hideThinkingBlock", fallback: loaded.hideThinking)
-        loaded.cacheNotices = value.bool("showCacheMissNotices", fallback: loaded.cacheNotices)
         if let images = value["images"]?.objectValue {
             loaded.resizeImages = images.bool("autoResize", fallback: loaded.resizeImages)
             loaded.blockImages = images.bool("blockImages", fallback: loaded.blockImages)
         }
-        loaded.skillCommands = value.bool("enableSkillCommands", fallback: loaded.skillCommands)
-        if let markdown = value["markdown"]?.objectValue {
-            loaded.mermaid = markdown.string("mermaid", fallback: loaded.mermaid)
-            loaded.codeIndent = markdown.string("codeBlockIndent", fallback: loaded.codeIndent)
-        }
-        if let warnings = value["warnings"]?.objectValue {
-            loaded.anthropicWarning = warnings.bool("anthropicExtraUsage", fallback: loaded.anthropicWarning)
-        }
         if let telemetry = value["telemetry"]?.objectValue {
-            loaded.installTelemetry = telemetry.bool("install", fallback: loaded.installTelemetry)
-            loaded.analytics = telemetry.bool("analytics", fallback: loaded.analytics)
+            loaded.providerAttribution = telemetry.bool("install", fallback: loaded.providerAttribution)
         }
         return loaded
     }

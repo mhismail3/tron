@@ -5,34 +5,34 @@ import Testing
 struct SettingsDraftStoreTests {
     @Test("default settings reload identity includes the active provider target")
     func providerTargetIdentity() {
-        let global = RuntimeBehaviorLoadID(
+        let global = AgentDefaultsLoadID(
             settingsTarget: .global,
             providerTarget: .global,
             settingsInvalidationGeneration: 0,
             providerInvalidationGeneration: 0, foregroundGeneration: 0
         )
-        let project = RuntimeBehaviorLoadID(
+        let project = AgentDefaultsLoadID(
             settingsTarget: .project(cwd: "/workspace/project"),
             providerTarget: .session(id: "session-a"),
             settingsInvalidationGeneration: 0,
             providerInvalidationGeneration: 0, foregroundGeneration: 0
         )
         #expect(global != project)
-        #expect(global != RuntimeBehaviorLoadID(
+        #expect(global != AgentDefaultsLoadID(
             settingsTarget: .global,
             providerTarget: .global,
             settingsInvalidationGeneration: 0,
             providerInvalidationGeneration: 1, foregroundGeneration: 0
         ))
-        #expect(global != RuntimeBehaviorLoadID(settingsTarget: .global, providerTarget: .global,
+        #expect(global != AgentDefaultsLoadID(settingsTarget: .global, providerTarget: .global,
             settingsInvalidationGeneration: 0, providerInvalidationGeneration: 0, foregroundGeneration: 1))
     }
 
     @Test("settings patches contain only changed fields")
     func changedFieldsOnly() {
-        var runtime = RuntimeBehaviorDraft()
+        var runtime = AgentDefaultsDraft()
         runtime.providerRetryCount = 7
-        let runtimePatch = runtime.patch(comparedTo: RuntimeBehaviorDraft()).objectValue
+        let runtimePatch = runtime.patch(comparedTo: AgentDefaultsDraft()).objectValue
         #expect(runtimePatch?.count == 1)
         #expect(runtimePatch?["retry"]?.objectValue?.count == 1)
         #expect(runtimePatch?["retry"]?.objectValue?["provider"]?.objectValue == [
@@ -46,9 +46,9 @@ struct SettingsDraftStoreTests {
             "skills": .array([.string("/project/skill")])
         ])
 
-        var defaults = RuntimeBehaviorDraft()
+        var defaults = AgentDefaultsDraft()
         defaults.retryEnabled = false
-        let defaultsPatch = defaults.patch(comparedTo: RuntimeBehaviorDraft()).objectValue
+        let defaultsPatch = defaults.patch(comparedTo: AgentDefaultsDraft()).objectValue
         #expect(defaultsPatch == [
             "retry": .object(["enabled": .bool(false)])
         ])
@@ -57,7 +57,7 @@ struct SettingsDraftStoreTests {
     @Test("context window defaults patch only changed model keys and supports scope reset")
     func modelContextWindowPatch() {
         let model = ModelRef(provider: "openai-codex", id: "gpt-6-astra")
-        var baseline = RuntimeBehaviorDraft()
+        var baseline = AgentDefaultsDraft()
         baseline.modelContextWindows[model.contextWindowKey] = 272_000
         var edited = baseline
         edited.modelContextWindows["other/model"] = 128_000
@@ -73,7 +73,7 @@ struct SettingsDraftStoreTests {
     @Test("context drafts retain other models and reveal inheritance without writing it")
     func contextWindowInheritance() {
         let model = ModelRef(provider: "p", id: "m"); let other = ModelRef(provider: "p", id: "other")
-        var baseline = RuntimeBehaviorDraft()
+        var baseline = AgentDefaultsDraft()
         baseline.modelContextWindows = [model.contextWindowKey: 500_000, other.contextWindowKey: 100_000]
         baseline.inheritedModelContextWindows = [model.contextWindowKey: 272_000]
         var draft = baseline
@@ -110,6 +110,16 @@ struct SettingsDraftStoreTests {
         #expect(standard.patch(comparedTo: CompactionSettingsDraft()).objectValue?["compaction"]?.objectValue == [
             "thinkingLevel": .string("inherit"), "instructions": .string("")
         ])
+    }
+
+    @Test("branch summary reserve patches its own settings key beside compaction")
+    func branchSummaryReservePatch() {
+        var edited = CompactionSettingsDraft()
+        edited.branchReserveTokens = 8_192
+        #expect(edited.patch(comparedTo: CompactionSettingsDraft()).objectValue == [
+            "branchSummary": .object(["reserveTokens": .number(8_192)])
+        ])
+        #expect(edited.patch(comparedTo: edited).objectValue?.isEmpty == true)
     }
 
     @Test("project compaction overrides can be deleted without changing budgets")
@@ -274,11 +284,11 @@ struct SettingsDraftStoreTests {
     @Test("runtime drafts preserve independent global and project edits")
     func runtimeDraftTargets() {
         let project = SettingsTarget.project(cwd: "/workspace/project")
-        var store = ScopedSettingsDraftStore<RuntimeBehaviorDraft>()
-        var global = RuntimeBehaviorDraft()
+        var store = ScopedSettingsDraftStore<AgentDefaultsDraft>()
+        var global = AgentDefaultsDraft()
         global.transport = "sse"
         store.update(global, for: .global)
-        var projectDraft = RuntimeBehaviorDraft()
+        var projectDraft = AgentDefaultsDraft()
         projectDraft.retryCount = 9
         store.update(projectDraft, for: project)
 

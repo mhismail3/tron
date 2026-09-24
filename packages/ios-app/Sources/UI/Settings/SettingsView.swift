@@ -30,10 +30,17 @@ struct SettingsView: View {
         NavigationStack {
             ScrollView(.vertical, showsIndicators: true) {
                 VStack(spacing: 18) {
-                    // Keep navigation groups aligned with ownership: app-local
-                    // preferences never sit beside agent policy, and integrations
-                    // expose the owner-specific routes instead of one catch-all page.
-                    TronSettingsGroup("App & Connections", accent: .tronEmerald) {
+                    // Groups follow what the user is configuring: this phone, the
+                    // agent and its models, what the agent can load or reach, then
+                    // maintenance. App-local preferences never sit beside Mac policy.
+                    TronSettingsGroup("This iPhone", accent: .tronEmerald) {
+                        settingsLink(
+                            "Connections",
+                            summary: "Pair and manage Mac gateways",
+                            icon: "desktopcomputer",
+                            accent: .tronEmerald
+                        ) { ConnectionsSettingsView() }
+                        settingsDivider(accent: .tronEmerald)
                         settingsLink(
                             "Appearance",
                             summary: "Theme, type scale, and visual preferences",
@@ -42,76 +49,66 @@ struct SettingsView: View {
                         ) { AppearanceSettingsView() }
                         settingsDivider(accent: .tronEmerald)
                         settingsLink(
-                            "App Settings",
-                            summary: "Local presentation and behavior preferences",
+                            "Sessions",
+                            summary: "Dashboard list and subagent activity",
                             icon: "slider.horizontal.2.square",
                             accent: .tronEmerald
                         ) { AppLocalBehaviorSettingsView() }
-                        settingsDivider(accent: .tronEmerald)
-                        settingsLink(
-                            "Connections",
-                            summary: "Pair and manage Mac gateways",
-                            icon: "desktopcomputer",
-                            accent: .tronEmerald
-                        ) { ConnectionsSettingsView() }
                     }
 
-                    TronSettingsGroup("Agent Behavior", accent: .tronPurple) {
-                        settingsLink("Runtime Behavior", summary: "Models, defaults, prompt delivery, and retry behavior", icon: "gearshape.2", accent: .tronPurple) {
-                            RuntimeBehaviorSettingsView(projectCWD: projectCWD, projectSessionID: projectSessionID)
-                        }
-                        settingsDivider(accent: .tronPurple)
-                        settingsLink("Compaction", summary: "Automatic summaries, focus, and context budgets", icon: "arrow.triangle.2.circlepath", accent: .tronPurple) {
-                            CompactionSettingsView(projectCWD: projectCWD, projectSessionID: projectSessionID)
-                        }
-                        settingsDivider(accent: .tronPurple)
-                        settingsLink("Available Resources", summary: "Resolved resources and installed package management", icon: "shippingbox", accent: .tronPurple) {
-                            PackagesSettingsView(projectCWD: projectCWD)
-                        }
-                    }
-
-                    TronSettingsGroup("Integrations", accent: .tronCyan) {
-                        settingsLink("Model Providers", summary: "Provider accounts and authentication", icon: "key", accent: .tronCyan) {
+                    TronSettingsGroup("Agent", accent: .tronPurple) {
+                        settingsLink("Model Providers", summary: "Provider accounts and authentication", icon: "key", accent: .tronPurple) {
                             ProvidersSettingsView(sessionID: projectSessionID)
                         }
-                        settingsDivider(accent: .tronCyan)
-                        settingsLink(
-                            "Custom Models",
-                            summary: "Saved model definitions and aliases",
-                            icon: "slider.horizontal.3",
-                            accent: .tronCyan
-                        ) { CustomModelsSettingsView() }
-                        settingsDivider(accent: .tronCyan)
-                        settingsLink("Connected Services", summary: "Accounts and service capabilities", icon: "link", accent: .tronCyan) {
-                            IntegrationsSettingsView(surface: .connectedServices)
+                        settingsDivider(accent: .tronPurple)
+                        settingsLink("Custom Models", summary: "Saved model definitions and aliases", icon: "slider.horizontal.3", accent: .tronPurple) {
+                            CustomModelsSettingsView()
+                        }
+                        settingsDivider(accent: .tronPurple)
+                        settingsLink("Agent Defaults", summary: "Model, message delivery, images, and retries", icon: "gearshape.2", accent: .tronPurple) {
+                            AgentDefaultsSettingsView(projectCWD: projectCWD, projectSessionID: projectSessionID)
+                        }
+                        settingsDivider(accent: .tronPurple)
+                        settingsLink("Compaction", summary: "Summaries, focus, and token budgets", icon: "arrow.triangle.2.circlepath", accent: .tronPurple) {
+                            CompactionSettingsView(projectCWD: projectCWD, projectSessionID: projectSessionID)
+                        }
+                    }
+
+                    TronSettingsGroup("Tools & Extensions", accent: .tronCyan) {
+                        settingsLink("Packages", summary: "Installed packages, skills, prompts, and themes", icon: "shippingbox", accent: .tronCyan) {
+                            PackagesSettingsView(projectCWD: projectCWD)
                         }
                         settingsDivider(accent: .tronCyan)
                         settingsLink("MCP Servers", summary: "Tools-only local and remote MCP connections", icon: "server.rack", accent: .tronCyan) {
                             IntegrationsSettingsView(surface: .mcpServers)
                         }
-                    }
-
-                    TronSettingsGroup("Workspace & Diagnostics", accent: .tronBlue) {
-                        settingsLink("Locations and Overrides", summary: "Additional resource paths and advanced Mac settings", icon: "folder.badge.gearshape", accent: .tronBlue) {
-                            ResourceSettingsView(projectCWD: projectCWD)
+                        settingsDivider(accent: .tronCyan)
+                        settingsLink("Connected Services", summary: "Accounts and service capabilities", icon: "link", accent: .tronCyan) {
+                            IntegrationsSettingsView(surface: .connectedServices)
                         }
+                        settingsDivider(accent: .tronCyan)
                         if scope == .project {
-                            settingsDivider(accent: .tronBlue)
-                            settingsLink("Project Trust", summary: "Review executable workspace resource trust", icon: "checkmark.shield", accent: .tronBlue) {
+                            settingsLink("Project Trust", summary: "Review executable workspace resource trust", icon: "checkmark.shield", accent: .tronCyan) {
                                 TrustSettingsView(target: projectCWD.flatMap(TrustTarget.init(cwd:)))
                             }
-                        }
-                        if scope == .dashboard {
-                            settingsDivider(accent: .tronBlue)
-                            settingsLink("Project Trust", summary: "Set the default policy for project-local resources", icon: "checkmark.shield", accent: .tronBlue) {
+                        } else {
+                            settingsLink("Project Trust", summary: "Set the default policy for project-local resources", icon: "checkmark.shield", accent: .tronCyan) {
                                 TrustSettingsView(target: nil, allowsGlobalDefault: true)
                             }
-                            settingsDivider(accent: .tronBlue)
+                        }
+                        settingsDivider(accent: .tronCyan)
+                        settingsLink("Locations and Overrides", summary: "Extra paths, shell, npm, and proxy", icon: "folder.badge.gearshape", accent: .tronCyan) {
+                            ResourceSettingsView(projectCWD: projectCWD)
+                        }
+                    }
+
+                    TronSettingsGroup("Data & Diagnostics", accent: .tronBlue) {
+                        if scope == .dashboard {
                             settingsLink("Import", summary: "Restore a session export", icon: "tray.and.arrow.down", accent: .tronBlue) {
                                 ImportSettingsView(onImported: onImported)
                             }
+                            settingsDivider(accent: .tronBlue)
                         }
-                        settingsDivider(accent: .tronBlue)
                         settingsLink("Logs", summary: "Recent diagnostics from paired Mac gateways", icon: "text.alignleft", accent: .tronBlue) {
                             GatewayLogsSettingsView()
                         }

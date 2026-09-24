@@ -143,18 +143,15 @@ export class SettingsService {
         thinkingBudgets: manager.getThinkingBudgets() ?? null,
         transport: manager.getTransport(),
         compaction: { ...manager.getCompactionSettings(), ...compactionPolicy },
-        branchSummary: manager.getBranchSummarySettings(),
+        branchSummary: { reserveTokens: manager.getBranchSummarySettings().reserveTokens },
         retry: { ...rawRetry, provider: manager.getProviderRetrySettings() },
         httpIdleTimeoutMs: manager.getHttpIdleTimeoutMs(),
         websocketConnectTimeoutMs: manager.getWebSocketConnectTimeoutMs() ?? null,
         steeringMode: manager.getSteeringMode(),
         followUpMode: manager.getFollowUpMode(),
-        hideThinkingBlock: manager.getHideThinkingBlock(),
-        showCacheMissNotices: manager.getShowCacheMissNotices(),
         defaultProjectTrust: manager.getDefaultProjectTrust(),
         images: { autoResize: manager.getImageAutoResize(), blockImages: manager.getBlockImages() },
         enabledModels: manager.getEnabledModels() ?? null,
-        enableSkillCommands: manager.getEnableSkillCommands(),
         shellPath: manager.getShellPath() ?? null,
         shellCommandPrefix: manager.getShellCommandPrefix() ?? null,
         npmCommand: manager.getNpmCommand() ?? null,
@@ -166,15 +163,10 @@ export class SettingsService {
           themes: manager.getThemePaths(),
           packages: manager.getPackages(),
         },
-        markdown: {
-          codeBlockIndent: manager.getCodeBlockIndent(),
-          mermaid: manager.getMermaidRenderingMode(),
-        },
-        warnings: manager.getWarnings(),
-        telemetry: {
-          install: manager.getEnableInstallTelemetry(),
-          analytics: manager.getEnableAnalytics(),
-        },
+        // Tron's SDK host reads install telemetry only as provider attribution
+        // headers. Terminal-only presentation, warning and analytics settings are
+        // deliberately not editable here because no Tron surface consumes them.
+        telemetry: { install: manager.getEnableInstallTelemetry() },
         httpProxyConfigured: typeof effective.httpProxy === "string" && effective.httpProxy.length > 0,
         terminalOnly: {
           theme: manager.getThemeSetting() ?? null,
@@ -300,7 +292,6 @@ export class SettingsService {
     });
     if ("branchSummary" in patch) next.branchSummary = this.nested(next.branchSummary, patch.branchSummary, "branchSummary", {
       reserveTokens: (value) => integer(value, "branchSummary.reserveTokens", 1_024, 1_000_000),
-      skipPrompt: (value) => boolean(value, "branchSummary.skipPrompt"),
     });
     if ("retry" in patch) {
       const retry = object(patch.retry, "retry");
@@ -320,15 +311,12 @@ export class SettingsService {
     if ("websocketConnectTimeoutMs" in patch) setNullable(next, "websocketConnectTimeoutMs", patch.websocketConnectTimeoutMs === null ? null : integer(patch.websocketConnectTimeoutMs, "websocketConnectTimeoutMs", 1_000, 300_000));
     if ("steeringMode" in patch) next.steeringMode = oneOf(patch.steeringMode, "steeringMode", ["all", "one-at-a-time"] as const);
     if ("followUpMode" in patch) next.followUpMode = oneOf(patch.followUpMode, "followUpMode", ["all", "one-at-a-time"] as const);
-    if ("hideThinkingBlock" in patch) next.hideThinkingBlock = boolean(patch.hideThinkingBlock, "hideThinkingBlock");
-    if ("showCacheMissNotices" in patch) next.showCacheMissNotices = boolean(patch.showCacheMissNotices, "showCacheMissNotices");
     if ("defaultProjectTrust" in patch) next.defaultProjectTrust = oneOf(patch.defaultProjectTrust, "defaultProjectTrust", ["ask", "always", "never"] as const);
     if ("images" in patch) next.images = this.nested(next.images, patch.images, "images", {
       autoResize: (value) => boolean(value, "images.autoResize"),
       blockImages: (value) => boolean(value, "images.blockImages"),
     });
     if ("enabledModels" in patch) setNullable(next, "enabledModels", patch.enabledModels === null ? null : arrayOfStrings(patch.enabledModels, "enabledModels", 500));
-    if ("enableSkillCommands" in patch) next.enableSkillCommands = boolean(patch.enableSkillCommands, "enableSkillCommands");
     if ("shellPath" in patch) setNullable(next, "shellPath", nullableString(patch.shellPath, "shellPath", 4_096));
     if ("shellCommandPrefix" in patch) setNullable(next, "shellCommandPrefix", nullableString(patch.shellCommandPrefix, "shellCommandPrefix", 4_096));
     if ("npmCommand" in patch) setNullable(next, "npmCommand", patch.npmCommand === null ? null : arrayOfStrings(patch.npmCommand, "npmCommand", 20));
@@ -349,16 +337,8 @@ export class SettingsService {
       if (!Array.isArray(patch.packages) || patch.packages.length > 500) throw new GatewayError("invalid_request", "packages must be an array with at most 500 entries");
       next.packages = patch.packages.map((value, index) => validatePackageSource(value, `packages[${index}]`));
     }
-    if ("markdown" in patch) next.markdown = this.nested(next.markdown, patch.markdown, "markdown", {
-      codeBlockIndent: (value) => rawString(value, "markdown.codeBlockIndent", 32),
-      mermaid: (value) => oneOf(value, "markdown.mermaid", ["off", "final", "streaming"] as const),
-    });
-    if ("warnings" in patch) next.warnings = this.nested(next.warnings, patch.warnings, "warnings", {
-      anthropicExtraUsage: (value) => boolean(value, "warnings.anthropicExtraUsage"),
-    });
     if ("httpProxy" in patch) setNullable(next, "httpProxy", nullableString(patch.httpProxy, "httpProxy", 4_096));
     if ("enableInstallTelemetry" in patch) next.enableInstallTelemetry = boolean(patch.enableInstallTelemetry, "enableInstallTelemetry");
-    if ("enableAnalytics" in patch) next.enableAnalytics = boolean(patch.enableAnalytics, "enableAnalytics");
     return next;
   }
 

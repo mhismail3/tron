@@ -151,7 +151,7 @@ cancellation retires them. Protocol-v5 clients require the complete attention an
 and do not attach to earlier Gateways. The local snapshot cache remains
 display-only, and projections written before attention fields existed decode as
 read rather than inventing unread state. The dashboard groups user
-sessions by workspace and renders ten per workspace by default. Settings → App Settings → **Chats per project**
+sessions by workspace and renders ten per workspace by default. Settings → Sessions → **Chats per project**
 configures 1–100 through the iPhone-local `AppLocalBehaviorSettings` owner; the same count governs Show more
 batches and the Show less baseline. The preference does not change Gateway catalog limits or Recent Activity
 ordering. Dashboard reconciliation applies changes when visible, resets project pagination to the new baseline,
@@ -634,7 +634,7 @@ sequence/runtime-generation reconciliation prevents a delayed compaction snapsho
 from resurrecting a completed operation. `SettingsDraftStoreTests` and
 `SessionSnapshotEventAdmissionTests` cover reset, bounds, decoding and retirement.
 
-Runtime Behavior's Model Defaults section exposes a separate forced-refresh action row below its
+Agent Defaults' Model Defaults section exposes a separate forced-refresh action row below its
 model controls for the displayed catalog target, reloads successful updates and cached fallbacks
 before reporting provider failures or timeout, and
 never mutates the settings draft, saved defaults, or credentials. Models with
@@ -1314,8 +1314,10 @@ very tall scrolling collections use the shared static scroll surface instead:
 it preserves tint, border, geometry, and hit regions without installing a live
 backdrop filter for every row or a multi-screen card. Long settings screens use
 lazy outer stacks, while their small divider-owned sections remain eager. The main Settings sheet places its
-divider-owned rows in four category containers rather than one backdrop per destination: emerald App &
-Connections, purple Agent Behavior, cyan Integrations, and blue Workspace & Diagnostics. Row icons and dividers use the owning
+divider-owned rows in four category containers rather than one backdrop per destination, grouped by what the user
+configures: emerald This iPhone (Connections, Appearance, Sessions), purple Agent (Model Providers,
+Custom Models, Agent Defaults, Compaction), cyan Tools & Extensions (Packages, MCP Servers, Connected
+Services, Project Trust, Locations and Overrides), and blue Data & Diagnostics (dashboard-only Import, Logs). Row icons and dividers use the owning
 container accent. Connections retains the authorized-device detail identity across a server switch and refreshes its content in place; a transient device-list projection cannot dismiss the nested settings stack. Each progressive destination installs that row accent as an environment-owned visual theme
 for ordinary titles, controls, icons, dividers, fields, and containers, including nested sheets; informational
 text cards mix the same hue toward slate. Settings action text resolves to white against dark Liquid Glass and to
@@ -1715,7 +1717,7 @@ model card's final row. The leading native toolbar group contains only Rename Se
 Terminal icons, mirroring the dashboard's grouped actions, while Done stays trailing.
 Rename keeps the dashboard's clearable native text-entry alert and trimmed nonempty admission.
 The model action opens the progressive searchable `ModelPicker` with purple title, controls,
-and cards. Its sheet title is **Models**, also used by the picker within Settings → Runtime Behavior → Model Defaults;
+and cards. Its sheet title is **Models**, also used by the picker within Settings → Agent Defaults → Model Defaults;
 the parent settings destination retains its existing name. The model card scopes the same purple theme to
 its inline controls and nested sheets. An in-flight choice appears immediately without replacing canonical authority.
 Context-window model/revision guards, Thinking's available-level list, and compaction
@@ -1729,7 +1731,7 @@ draft. Completion rechecks the live presentation registry as well as the exact e
 so a retired surface cannot publish during its closing animation. Live Thinking revalidates
 session/model/runtime, idle phase, available levels and the displayed base value before
 submission, retaining the existing serialized/idempotent mutation and rollback owner.
-The shared Runtime Behavior Model Defaults controls keep local slider drafts until dismissal, then submit the
+The shared Agent Defaults Model Defaults controls keep local slider drafts until dismissal, then submit the
 single final change through settings autosave. Their information subtitles describe behavior rather
 than repeating the chosen value. Model Catalog has a distinct list icon and a trailing Refresh capsule. Defaults keep the full model-independent
 thinking list, not a live model's subset. Exact settings-target row identity and binding admission
@@ -1832,7 +1834,7 @@ positional “Item” labels. The overview derives stable row titles, subtitles,
 and identities once per admitted resource revision, then reuses that projection
 while scrolling; large resource groups use the static scroll surface. Reload is owned by that sheet and publishes visible progress; the canonical
 `session.resourcesChanged` revision is the sole post-mutation read owner, so mutation and projection loads cannot race one shared busy flag.
-Available Resources starts with resource scope, inventory counts, and a project-trust route when applicable,
+Packages starts with resource scope, inventory counts, and a project-trust route when applicable,
 then installed packages, a standalone Install Package action,
 then inline Skills, Prompts and Themes containers using Manage Session's emerald/cyan/teal resource
 accents. Resolved extensions are not duplicated beneath the installed list. Opaque, no-space source
@@ -1843,7 +1845,7 @@ skill name from its directory. Raw paths, IDs and metadata remain untouched. Sha
 information appears once as a category caption, not repeated in each row; mixed sources retain row
 provenance. Empty categories use captions rather than empty info cards. Scope counts describe inventory,
 not tools loaded into every existing conversation. Full technical resource data remains available separately, including extension-only
-or additive categories. Locations and Overrides is a separate sibling sheet in Workspace & Diagnostics, retaining optional discovery paths, advanced Mac overrides and autosave. Session storage remains
+or additive categories. Locations and Overrides is a separate sibling sheet in Tools & Extensions, retaining optional discovery paths, advanced Mac overrides and autosave. Session storage remains
 Gateway-owned and is not exposed as a location override. Package catalog admission failures remain
 local to the Packages sheet, preserving the sheet while presenting a bounded retry
 state instead of routing a projection error through a global modal alert. Visible Settings reads include
@@ -1930,7 +1932,7 @@ so covered or replaced work cannot publish. Workspace folder/Go Up replacements 
 path-keyed 160ms fade at the row owner (disabled for Reduce Motion); loading, polling
 errors and stale responses are not animation triggers.
 
-Runtime Behavior's code-block indent uses a selected-value menu: None, 2 spaces (Default), 4 spaces, 8 spaces, or 1 tab. Selection writes the exact whitespace prefix through the existing autosave binding; an existing non-preset prefix remains unchanged and is labeled Custom until the user chooses a preset.
+Agent Defaults holds Model Defaults, Message Queue, Image Input, Retry, and Provider Transport (including the provider-attribution toggle backed by the SDK's install-telemetry setting). Branch-summary reserve lives with the other summary budgets in Compaction. Terminal-only SDK settings (thinking-block hiding, cache-miss notices, skill-command autocomplete, markdown rendering, Anthropic extra-usage warning, analytics, branch-summary skip prompt) have no Tron consumer and are not shown.
 Free-text settings show a muted gray `(empty)` placeholder when their value is empty; the placeholder never changes saved text, and whitespace remains an authored value.
 Context slider endpoint labels are bold monospace; Default remains purple/semibold in
 the code face. Its title and endpoint labels are white in dark mode. Custom Models uses
