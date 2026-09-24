@@ -202,22 +202,22 @@ user reinstalls manually, so batch them for one reinstall.
 | L-1a | Done | Gateway startup-fatal record | none | observability-L-1a session, 2026-09-23 |
 | L-1c | Done | Deploy timeline and real failure cause | L-1a | observability session, 2026-09-24 |
 | L-2 | Done | Gateway levels, debug buffer, retention, record format | none | observability-L-2 session, 2026-09-24 |
-| L-3 | Ready | iOS always-on recording replaces Diagnostic Capture; one-tap export | L-2 | |
-| L-1b | Ready | Launcher records | none | |
+| L-3 | Claimed | iOS always-on recording replaces Diagnostic Capture; one-tap export | L-2 | observability session (L-3 lane), 2026-09-24 |
+| L-1b | Claimed | Launcher records | none | observability session (L-1b lane), 2026-09-24 |
 | L-1d | Ready | Out-of-band stderr capture | L-2 | |
 | L-4 | Ready | Mac app file logging | L-2 | |
-| L-5 | Ready | `scripts/tron diagnose` collector | L-1c, L-2 | |
+| L-5 | Claimed | `scripts/tron diagnose` collector | L-1c, L-2 | observability session (L-5 lane), 2026-09-24 |
 | L-6 | Ready | Event catalog and the incident rule | L-2 | |
 | L-7 | Done | Stall cause in event-loop-delay records | L-2 | observability session, 2026-09-24 |
 | L-8 | Needs scoping | Gateway idle heap growth | none | |
 | L-9 | Needs scoping | Phone handling of a stalled or unreachable but live Gateway (proposal for the user) | L-7, L-10 | |
 | L-10 | Done | iOS connect-failure records say whether the socket ever opened, and on which interface | none | observability session, 2026-09-24 |
 | L-15 | Done | Startup timing: stop to bound and bound to first startup phase | L-2 | observability session, 2026-09-24 |
-| L-15b | Ready | Fix the dominant startup cost the L-15 records name on the next real restart (the user's rebuild) | L-15 | |
+| L-15b | Claimed | Fix the dominant startup cost the L-15 records name on the next real restart (the user's rebuild) | L-15 | observability session (L-15b lane), 2026-09-24 |
 | L-16 | Done | Restart drain hangs on terminal-receipt persistence | none | observability session, 2026-09-24 |
 | L-17 | Needs approval | Judge a drain stalled by its oldest blocker without progress, not by any change in the blocker set | L-16 | |
 | L-18 | Needs approval | Decide whether a restart drain proceeds when only unresolved (blocked) persistence owners remain | L-16 | |
-| L-11 | Ready | Remove duplicate payload validations within one deploy run | none | |
+| L-11 | Claimed | Remove duplicate payload validations within one deploy run | none | observability session (L-11 lane), 2026-09-24 |
 | L-12 | Ready | Faster Node payload fingerprint with identical output | none | |
 | L-13 | Ready | Stage source payloads in the store and rename instead of copying twice | L-11 | |
 | L-14 | Needs scoping | APFS clone copies and payload retention count | L-13 | |
