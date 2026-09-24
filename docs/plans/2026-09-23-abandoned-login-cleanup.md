@@ -32,7 +32,7 @@ These are investigation inputs, not a complete reproduction. Revalidate the depl
 | ID | Status | Scope | Depends on | Owner |
 | --- | --- | --- | --- | --- |
 | AUTH-1 | Done | Reproduce abandoned admission and provider-resource retirement; settle the recovery contract | none | worker, 2026-09-24 |
-| AUTH-2 | Ready | Implement Gateway-owned exact login recovery and replacement | AUTH-1 | Unassigned |
+| AUTH-2 | Claimed | Implement Gateway-owned exact login recovery and replacement | AUTH-1 | worker, 2026-09-24 |
 | AUTH-3 | Ready | Integrate iPhone resume, restart, and cancellation with authoritative ownership | AUTH-2 | Unassigned |
 | AUTH-4 | Ready | Verify cross-boundary cleanup and publish owning documentation | AUTH-2, AUTH-3 | Unassigned |
 
