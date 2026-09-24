@@ -2,7 +2,7 @@
 
 - **Started:** 2026-09-24
 - **Status:** Active
-- **Last updated:** 2026-09-24, CAT-1 and CAT-4
+- **Last updated:** 2026-09-24, CAT-2
 - **Goal:** Remove CortexKit's duplicate static model catalog while preserving correct subscription routing and per-model capabilities, and separately assess subscription-compatible discovery.
 
 ## Goal and constraints
@@ -30,8 +30,8 @@ Inspected 2026-09-24:
 | ID | Status | Scope | Depends on | Owner |
 | --- | --- | --- | --- | --- |
 | CAT-1 | Done | Establish SDK catalog source and per-model adapter compatibility contract | none | catalog session, 2026-09-24 |
-| CAT-2 | Claimed | Replace duplicate catalog with SDK-backed provider registration | CAT-1 | catalog session, 2026-09-24 |
-| CAT-3 | Ready | Validate package and Tron consumers; prepare controlled local adoption | CAT-2 | Unassigned |
+| CAT-2 | Done | Replace duplicate catalog with SDK-backed provider registration | CAT-1 | catalog session, 2026-09-24 |
+| CAT-3 | Claimed | Validate package and Tron consumers; prepare controlled local adoption | CAT-2 | catalog session, 2026-09-24 |
 | CAT-4 | Done | Assess subscription-authenticated discovery and record a go/no-go decision | none | catalog session, 2026-09-24 |
 
 Follow the claim-on-main and isolated-worktree protocol before starting a task; keep cross-repository code commits and Tron plan handoffs explicitly linked.
@@ -114,3 +114,20 @@ Approved and committed at the user's request. No tasks claimed, code changed, pa
 - Evidence: Anthropic's Models API and authentication docs, Claude Code's gateway and legal docs, and the CortexKit sources (inspected). No credentialed probe.
 - Changes: this commit (plan only).
 - Tasks added: none.
+
+### CAT-2 · Done · 2026-09-24 · catalog session
+
+- Result: CortexKit builds its Anthropic catalog from one snapshot of the pinned SDK's `anthropicProvider().getModels()`, taken before registration and deep-cloned for each registration (normal and the still-disabled Claustrum). A converter-proven allowlist filters it. Only the transport and auth identity are adapted; every SDK metadata field is kept. The static model list is deleted.
+- Models and levels (user decisions, 2026-09-24):
+  - Added: Haiku 4.5 and its dated alias, plus dated Opus 4.5 and Sonnet 4.5. They use the budget path, offering Off through High.
+  - Mythos 5 and 5.1: kept as labelled additions, to be removed once the SDK lists them.
+  - Excluded: Opus 4.6, Opus 4.7 and Sonnet 4.6. The SDK sends adaptive effort for them, while the converter would send token budgets.
+  - Fable, Mythos, Opus 5 and Sonnet 5: now offer Low through Max, with each level sent as its own effort value. By the user's choice to fix the converter, adaptive Minimal is sent as Low, as the SDK does. Minimal is hidden where it would duplicate Low. Off is hidden where those models always think.
+  - Opus 5.5: Low through Max, each proven distinct.
+  - Opus 4.8: keeps its previous budget levels. The SDK's Extra High and Max stay hidden, because the SDK marks it adaptive and CortexKit sends budgets.
+- Evidence (verified): pi tests went from 138 in 2.36 s before to 144 in 2.38 s after. A table-driven, no-network request matrix over the real projected catalog checks each included model at each offered level for the right shape (effort, a budget, or nothing for Off), a valid value, and distinct values across levels. Build, typecheck, lint and the pre-commit Biome hook pass. Negative controls, each failing its test: removing the adaptive null overrides, removing the budget null overrides, reusing a projected list, and dropping an allowlist entry.
+- Evidence (not established): no live generation was tried, and catalog presence does not prove the subscription can use a model.
+- Changes: CortexKit commit `9bfd6cc` (branch `tron/cat-2`, fast-forwarded into the local CortexKit `main`; not published or installed). Tron: this plan entry.
+- Tasks added: none.
+- Deviations: supervisor review twice sent back the lane's version. The first copied SDK level maps the converter cannot honor: Minimal sent as an invalid effort, and Max silently falling to a medium budget on Opus 4.8. The second held the converter to exact SDK wire values, which the SDK's own mid-conversation behavior makes wrong for CortexKit.
+- For the next agent: CAT-3 checks Gateway listing, native selection and consumer formatting, then builds `1.23.1-tron.4`. Follow-up in CortexKit: an adaptive converter branch for Opus 4.8, 4.6 and 4.7 and Sonnet 4.6 would let those models and levels in.
