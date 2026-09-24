@@ -28,7 +28,7 @@ xcrun --sdk macosx clang -O2 -Wall -Wextra -Werror -Wno-deprecated-declarations 
   "$SCRIPT_DIR/tron-gateway-launcher.c" -o "$HELPER"
 
 make_payload() {
-  local root="$1" version="$2" marker="$3" fingerprint
+  local root="$1" version="$2" marker="$3" epoch="${4:-01234567-89ab-cdef-0123-456789abcdef}" fingerprint
   mkdir -p "$root/app/dist" "$root/app/scripts" "$root/app/node_modules" "$root/runtime"
   printf '#!/bin/sh\nprintf "%%s\\n" "$TRON_GATEWAY_PAYLOAD_ROOT"\nexit 0\n' > "$root/app/dist/index.js"
   dd if=/dev/zero bs=1024 count=2 2>/dev/null | tr '\\0' '#' >> "$root/app/dist/index.js"
@@ -64,7 +64,7 @@ make_payload() {
   ln -s ../../app/node_modules/.bin/pi "$root/runtime/bin-arm64/pi"
   ln -s ../../app/node_modules/.bin/pi "$root/runtime/bin-x64/pi"
   fingerprint="$("$HASH" "$root")"
-  printf '{"schema":1,"kind":"tron-gateway-payload","channel":"stable","version":"%s","gatewayVersion":"fixture","protocolVersion":"5","minProtocolVersion":"5","nodeVersion":"fixture","sourceRevision":"0123456789abcdef0123456789abcdef01234567","runtimeEpoch":"01234567-89ab-cdef-0123-456789abcdef","payloadFingerprint":"%s","dependencyTreeCoverage":"app/** and runtime/** regular files"}\n' "$version" "$fingerprint" > "$root/manifest.json"
+  printf '{"schema":1,"kind":"tron-gateway-payload","channel":"stable","version":"%s","gatewayVersion":"fixture","protocolVersion":"5","minProtocolVersion":"5","nodeVersion":"fixture","sourceRevision":"0123456789abcdef0123456789abcdef01234567","runtimeEpoch":"%s","payloadFingerprint":"%s","dependencyTreeCoverage":"app/** and runtime/** regular files"}\n' "$version" "$epoch" "$fingerprint" > "$root/manifest.json"
   chmod -R a-w "$root"
 }
 
@@ -182,6 +182,16 @@ EXTERNAL="$TMP/home/.tron/gateway/payloads/stable/versions/v2"
 make_payload "$EXTERNAL" v2 external
 mkdir -p "$(dirname "$EXTERNAL")"
 printf '{"schema":1,"kind":"tron-gateway-selection","channel":"stable","version":"v2","payloadFingerprint":"%s"}\n' "$(sed -n 's/.*payloadFingerprint":"\([0-9a-f]*\)".*/\1/p' "$EXTERNAL/manifest.json")" > "$TMP/home/.tron/gateway/payloads/stable/current.json"
+# The launcher appends its own records to the deploy timeline the helper owns.
+# This fixture keeps that file writable while the payload store stays read-only.
+LAUNCHER_LOG="$TMP/home/.tron/logs/deploy.jsonl"
+mkdir -p "$(dirname "$LAUNCHER_LOG")"
+: > "$LAUNCHER_LOG"
+reset_launcher_log() {
+  chmod u+w "$LAUNCHER_LOG"
+  : > "$LAUNCHER_LOG"
+}
+BUNDLED_EPOCH="$(sed -n 's/.*"runtimeEpoch":"\([^"]*\)".*/\1/p' "$BUNDLE/manifest.json")"
 chmod -R a-w "$TMP/home/.tron"
 
 valid="$(HOME="$TMP/home" "$HELPER" --version)"
@@ -207,10 +217,26 @@ with open(path, "w", encoding="utf-8") as handle:
     json.dump(manifest, handle, separators=(",", ":"))
     handle.write("\n")
 PY
-printf '{"schema":1,"kind":"tron-gateway-selection","channel":"stable","version":"v3-protocol","payloadFingerprint":"%s"}\n' "$(sed -n 's/.*payloadFingerprint":"\([0-9a-f]*\)".*/\1/p' "$INCOMPATIBLE/manifest.json")" > "$TMP/home/.tron/gateway/payloads/stable/current.json"
+INCOMPATIBLE_FINGERPRINT="$(sed -n 's/.*payloadFingerprint":"\([0-9a-f]*\)".*/\1/p' "$INCOMPATIBLE/manifest.json")"
+printf '{"schema":1,"kind":"tron-gateway-selection","channel":"stable","version":"v3-protocol","payloadFingerprint":"%s"}\n' "$INCOMPATIBLE_FINGERPRINT" > "$TMP/home/.tron/gateway/payloads/stable/current.json"
 chmod -R a-w "$TMP/home"
+reset_launcher_log
 incompatible_result="$(HOME="$TMP/home" "$HELPER" --version 2> "$TMP/incompatible-error")"
 [[ "$incompatible_result" == "$BUNDLE_REAL" ]] || { echo "incompatible selected protocol did not use bundled migration fallback: $incompatible_result" >&2; exit 1; }
+python3 - "$LAUNCHER_LOG" "$INCOMPATIBLE_FINGERPRINT" "$BUNDLED_EPOCH" <<'PY'
+import json, sys
+# A refused external selection leaves one bundled-fallback record naming the
+# refused selection, why it was refused, and the payload that runs instead.
+path, fingerprint, epoch = sys.argv[1:]
+with open(path, encoding="utf-8") as handle:
+    records = [json.loads(line) for line in handle if line.strip()]
+assert len(records) == 1, records
+record = records[0]
+assert (record["event"], record["level"], record["source"], record["process"]) == ("launcher.bundled-fallback", "warning", "launcher", "launcher"), record
+assert record["payloadVersion"] == "fixture" and record["runtimeEpoch"] == epoch, record
+assert "v3-protocol" in record["message"] and fingerprint in record["message"], record
+assert "failed validation" in record["message"] and "using bundled payload fixture" in record["message"], record
+PY
 chmod -R u+w "$TMP/home"
 printf '{"schema":1,"kind":"tron-gateway-selection","channel":"stable","version":"v2","payloadFingerprint":"%s"}\n' "$(sed -n 's/.*payloadFingerprint":"\([0-9a-f]*\)".*/\1/p' "$EXTERNAL/manifest.json")" > "$TMP/home/.tron/gateway/payloads/stable/current.json"
 chmod -R a-w "$TMP/home"
@@ -281,19 +307,60 @@ chmod -R u+w "$TMP/home"
 PREVIOUS="$TMP/home/.tron/gateway/payloads/stable/versions/v1"
 CANDIDATE="$TMP/home/.tron/gateway/payloads/stable/versions/v3"
 make_payload "$PREVIOUS" v1 previous
-make_payload "$CANDIDATE" v3 candidate
+CANDIDATE_EPOCH="fedcba98-7654-3210-fedc-ba9876543210"
+make_payload "$CANDIDATE" v3 candidate "$CANDIDATE_EPOCH"
 CANDIDATE_FINGERPRINT="$(sed -n 's/.*payloadFingerprint":"\([0-9a-f]*\)".*/\1/p' "$CANDIDATE/manifest.json")"
 PREVIOUS_FINGERPRINT="$(sed -n 's/.*payloadFingerprint":"\([0-9a-f]*\)".*/\1/p' "$PREVIOUS/manifest.json")"
 printf '{"schema":1,"kind":"tron-gateway-selection","channel":"stable","version":"v3","payloadFingerprint":"%s"}\n' "$CANDIDATE_FINGERPRINT" > "$TMP/home/.tron/gateway/payloads/stable/current.json"
 printf '{"schema":1,"kind":"tron-gateway-pending-attempt","channel":"stable","attempt":"pending","version":"v3","payloadFingerprint":"%s","previousVersion":"v1","previousFingerprint":"%s"}\n' "$CANDIDATE_FINGERPRINT" "$PREVIOUS_FINGERPRINT" > "$TMP/home/.tron/gateway/payloads/stable/pending-attempt.json"
 chmod -R a-w "$TMP/home"
 chmod u+w "$TMP/home/.tron/gateway/payloads/stable"
+reset_launcher_log
 first_attempt="$(HOME="$TMP/home" "$HELPER" --version)"
 CANDIDATE_REAL="$(cd "$CANDIDATE" && pwd -P)"
 [[ "$first_attempt" == "$CANDIDATE_REAL" ]] || { echo "pending candidate did not receive its first launch: $first_attempt" >&2; exit 1; }
 second_attempt="$(HOME="$TMP/home" "$HELPER" --version)"
 PREVIOUS_REAL="$(cd "$PREVIOUS" && pwd -P)"
 [[ "$second_attempt" == "$PREVIOUS_REAL" ]] || { echo "pending candidate did not roll back on second launch: $second_attempt" >&2; exit 1; }
+python3 - "$LAUNCHER_LOG" "$CANDIDATE_EPOCH" <<'PY'
+import json, sys
+# A candidate that consumed its attempt and then failed leaves one launch
+# record and one rollback record naming the candidate and the restored version.
+path, candidate_epoch = sys.argv[1:]
+with open(path, encoding="utf-8") as handle:
+    records = [json.loads(line) for line in handle if line.strip()]
+assert len(records) == 2, records
+launched, rolled_back = records
+assert (launched["event"], launched["level"], launched["source"], launched["process"]) == ("launcher.candidate-launched", "info", "launcher", "launcher"), launched
+assert launched["payloadVersion"] == "v3" and launched["runtimeEpoch"] == candidate_epoch, launched
+assert (rolled_back["event"], rolled_back["level"], rolled_back["source"], rolled_back["process"]) == ("launcher.candidate-rolled-back", "error", "launcher", "launcher"), rolled_back
+assert rolled_back["payloadVersion"] == "v3" and rolled_back["runtimeEpoch"] == candidate_epoch, rolled_back
+assert "v3" in rolled_back["message"] and "v1" in rolled_back["message"], rolled_back
+assert rolled_back["timestamp"].endswith("Z") and "T" in rolled_back["timestamp"], rolled_back
+PY
+# The deploy helper looks this real record up to name the failed candidate.
+cat > "$TMP/launcher-cause-check.mjs" <<'JS'
+const { candidateStartupFailure } = await import(process.argv[2]);
+const [home, epoch] = process.argv.slice(3);
+const since = "2000-01-01T00:00:00.000Z";
+const lookup = async (candidate) => (await candidateStartupFailure(home, candidate, since)) ?? null;
+console.log(JSON.stringify({
+  byVersion: await lookup({ version: "v3" }),
+  byEpoch: await lookup({ runtimeEpoch: epoch }),
+  unrelated: await lookup({ version: "v9", runtimeEpoch: "00000000-0000-0000-0000-000000000000" }),
+}));
+JS
+LAUNCHER_CAUSE="$("$NODE_ROOT/bin/node" "$TMP/launcher-cause-check.mjs" "$REPO_ROOT/scripts/gateway-payload-deploy.mjs" "$TMP/home/.tron" "$CANDIDATE_EPOCH")"
+python3 - "$LAUNCHER_CAUSE" <<'PY'
+import json, sys
+# The reported deploy error leads with the launcher's own rollback record.
+result = json.loads(sys.argv[1])
+for key in ("byVersion", "byEpoch"):
+    cause = result[key]
+    assert cause is not None and cause.startswith("New build was rolled back by the launcher: "), result
+    assert "v3" in cause and "v1" in cause, result
+assert result["unrelated"] is None, result
+PY
 # Once the authenticated helper atomically commits under the shared attempt
 # lock, a concurrent/subsequent launcher must preserve the candidate.
 chmod -R u+w "$TMP/home"
@@ -342,11 +409,49 @@ stale_recovery="$(HOME="$TMP/home" "$HELPER" --version)"
 # launcher must fail closed rather than execute the currently selected candidate.
 printf '{"schema":1,"kind":"tron-gateway-selection","channel":"stable","version":"v3","payloadFingerprint":"%s"}\n' "$CANDIDATE_FINGERPRINT" > "$TMP/home/.tron/gateway/payloads/stable/current.json"
 printf '{"schema":1,"kind":"tron-gateway-pending-attempt","channel":"stable","attempt":"launched"}\n' > "$TMP/home/.tron/gateway/payloads/stable/pending-attempt.json"
+reset_launcher_log
 set +e
 HOME="$TMP/home" "$HELPER" --version > "$TMP/malformed-result" 2> "$TMP/malformed-error"
 MALFORMED_STATUS=$?
 set -e
 [[ "$MALFORMED_STATUS" -eq 75 ]] || { echo "malformed attempt marker did not return retry status: $MALFORMED_STATUS" >&2; exit 1; }
 [[ ! -s "$TMP/malformed-result" ]] || { echo "malformed attempt marker executed a payload" >&2; exit 1; }
+python3 - "$LAUNCHER_LOG" <<'PY'
+import json, sys
+# A malformed marker refuses the pending selection with one record and no
+# payload identity, because no readable version named one.
+with open(sys.argv[1], encoding="utf-8") as handle:
+    records = [json.loads(line) for line in handle if line.strip()]
+assert len(records) == 1, records
+record = records[0]
+assert (record["event"], record["level"], record["source"], record["process"]) == ("launcher.selection-rejected", "warning", "launcher", "launcher"), record
+assert "payloadVersion" not in record and "runtimeEpoch" not in record, record
+assert "malformed" in record["message"], record
+PY
 
-printf 'launcher fixture: valid external fingerprint and bundled migration root pass; tampered payload uses trusted bundled fallback; pending candidate crash-rolls back; committed candidate persists; held locks fail closed; stale locks recover; malformed markers fail closed\n'
+# An attempt marker naming a candidate the store no longer selects refuses the
+# pending selection with the version that marker claimed.
+printf '{"schema":1,"kind":"tron-gateway-selection","channel":"stable","version":"v1","payloadFingerprint":"%s"}\n' "$PREVIOUS_FINGERPRINT" > "$TMP/home/.tron/gateway/payloads/stable/current.json"
+printf '{"schema":1,"kind":"tron-gateway-pending-attempt","channel":"stable","attempt":"launched","version":"v3","payloadFingerprint":"%s","previousVersion":"v1","previousFingerprint":"%s"}\n' "$CANDIDATE_FINGERPRINT" "$PREVIOUS_FINGERPRINT" > "$TMP/home/.tron/gateway/payloads/stable/pending-attempt.json"
+reset_launcher_log
+set +e
+HOME="$TMP/home" "$HELPER" --version > "$TMP/mismatch-result" 2> "$TMP/mismatch-error"
+MISMATCH_STATUS=$?
+set -e
+[[ "$MISMATCH_STATUS" -eq 75 ]] || { echo "mismatched attempt marker did not return retry status: $MISMATCH_STATUS" >&2; exit 1; }
+[[ ! -s "$TMP/mismatch-result" ]] || { echo "mismatched attempt marker executed a payload" >&2; exit 1; }
+python3 - "$LAUNCHER_LOG" "$CANDIDATE_EPOCH" <<'PY'
+import json, sys
+# The refused marker names the candidate it claimed and the selection it
+# disagrees with; neither payload runs.
+path, epoch = sys.argv[1:]
+with open(path, encoding="utf-8") as handle:
+    records = [json.loads(line) for line in handle if line.strip()]
+assert len(records) == 1, records
+record = records[0]
+assert (record["event"], record["level"], record["source"], record["process"]) == ("launcher.selection-rejected", "warning", "launcher", "launcher"), record
+assert record["payloadVersion"] == "v3" and record["runtimeEpoch"] == epoch, record
+assert "v3" in record["message"] and "v1" in record["message"], record
+PY
+
+printf 'launcher fixture: valid external fingerprint and bundled migration root pass; tampered payload uses trusted bundled fallback; pending candidate crash-rolls back; committed candidate persists; held locks fail closed; stale locks recover; malformed markers fail closed; refused selections and the rolled-back candidate are recorded for the deploy helper\n'

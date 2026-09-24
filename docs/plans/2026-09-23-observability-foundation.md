@@ -2,7 +2,7 @@
 
 - **Started:** 2026-09-23
 - **Status:** Active
-- **Last updated:** 2026-09-24, L-5
+- **Last updated:** 2026-09-24, L-1b
 - **Goal:** Every Tron process records the right signals automatically, in a known place, at a meaningful level, so a failure can be diagnosed in one pass from what was already recorded.
 
 Follow the [plan protocol](README.md#protocol) to claim tasks and hand off.
@@ -203,7 +203,7 @@ user reinstalls manually, so batch them for one reinstall.
 | L-1c | Done | Deploy timeline and real failure cause | L-1a | observability session, 2026-09-24 |
 | L-2 | Done | Gateway levels, debug buffer, retention, record format | none | observability-L-2 session, 2026-09-24 |
 | L-3 | Claimed | iOS always-on recording replaces Diagnostic Capture; one-tap export | L-2 | observability session (L-3 lane), 2026-09-24 |
-| L-1b | Claimed | Launcher records | none | observability session (L-1b lane), 2026-09-24 |
+| L-1b | Done | Launcher records | none | observability session (L-1b lane), 2026-09-24 |
 | L-1d | Ready | Out-of-band stderr capture | L-2 | |
 | L-4 | Ready | Mac app file logging | L-2 | |
 | L-5 | Done | `scripts/tron diagnose` collector | L-1c, L-2 | observability session (L-5 lane), 2026-09-24 |
@@ -651,3 +651,19 @@ user reinstalls manually, so batch them for one reinstall.
 - Kept on purpose: `runCommand`, `readHealth`, `now` and `tronHome` are options of `collectDiagnosticBundle`. Tests set them to stay hermetic, and `tronHome` also follows the Gateway's home resolution. The command reads device exports only from `~/.tron/logs/device-exports/`, which L-3 creates; there is no fallback to `/tmp`.
 - Deviations: the redaction rules are shared by building the collector into the Gateway package, not as a separate `scripts/` file, so it imports the writer's rules and home resolver at source level. Supervisor review then made three changes. The process filter was narrowed from anything under the Tron home to Gateway payload processes, the app and the native host, because agent process arguments can carry prompt text. Paired-device names were dropped (the ID hash and peer name are enough). `CONTRIBUTING.md` now points to the README section instead of repeating it.
 - For the next agent: L-6's catalog should list the collector's sections. When L-4 adds `mac.jsonl`, the `logs` section includes it without change.
+
+### L-1b · Done · 2026-09-24 · observability session (L-1b lane)
+
+- Result: the C launcher appends single-line records in the shared format to the Tron home's `logs/deploy.jsonl`. Each record is one `O_APPEND | O_NOFOLLOW` write of at most 4 KB, created with mode 0600 and JSON-escaped, and any logging failure is silently ignored. There is one record per decision:
+  - `launcher.candidate-launched` (info): a pending candidate consumed its single attempt.
+  - `launcher.candidate-rolled-back` (error): the candidate did not commit and the previous selection was restored. It carries the candidate's `payloadVersion` and the `runtimeEpoch` read from its manifest.
+  - `launcher.bundled-fallback` (warning): an admitted store's selection was refused. It names that selection's version, fingerprint and reason, and the bundled payload that ran.
+  - `launcher.selection-rejected` (warning): the pending attempt marker was unreadable, malformed, mismatched or locked, so nothing launched (exit 75).
+
+  A fresh install with no external store records nothing. Exit codes and stderr text are unchanged.
+- Evidence (verified): `bash packages/mac-app/scripts/test-tron-gateway-launcher.sh` exited 0 in 5 min 08 s before, 5 min 17 s after, and 4 min 28 s on the final source (under load from parallel lanes). The shell test asserts each record's event, level, identity fields and message. In the rollback case it feeds the real launcher output to `candidateStartupFailure`, which returns "New build was rolled back by the launcher: Candidate v3 exited during startup; restored v1" when matched by version and when matched by epoch, and nothing for an unrelated candidate. A new mismatch case (marker names v3, selection names v1) exits 75 without launching and leaves one `selection-rejected` record. Five negative controls, each failing the script: removing the bundled-fallback record, removing the rolled-back record, stamping the rollback with the previous payload's epoch, and suppressing each of the two `selection-rejected` paths. The launcher compiles cleanly with `-Wall -Wextra -Werror` for arm64 and x86_64. `node --test scripts/gateway-payload-deploy.test.mjs` passed 47/47; only a comment changed there.
+- Changes: this commit (the launcher, its shell test, the deploy-timeline comment in `scripts/gateway-payload-deploy.mjs`, the Gateway README deploy section).
+- Tasks added: none.
+- Kept on purpose: records are written only for decisions, not for every healthy launch. The refused selection's claimed identity is recorded even though it is untrusted, because it names what did not run.
+- Deviations: the plan did not say which condition emits `selection-rejected` and which emits `bundled-fallback`. By supervisor decision, a refused store selection that falls back emits only `bundled-fallback`, and a refused pending attempt that launches nothing emits `selection-rejected`.
+- For the next agent: this takes effect only in a Mac app build the user reinstalls; batch it with L-1d and L-4. Until then, L-1c's lookup still finds `gateway.fatal-startup` records but no launcher records.

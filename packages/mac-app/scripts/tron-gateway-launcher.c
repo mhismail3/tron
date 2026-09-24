@@ -645,15 +645,147 @@ static int read_selection(const char *path, const char *channel, char *version, 
     return 0;
 }
 
-static int recover_pending_attempt_unlocked(const char *channelRoot, const char *channel) {
+/** A refused selection: what the store claimed, and why the launcher refused
+ * it. The launcher records it because the refused payload is not what ran. */
+typedef struct {
+    char version[MAX_COMPONENT_BYTES];
+    char fingerprint[65];
+    const char *reason;
+} RefusedSelection;
+
+/* A refused record is not trusted, but the identity it claims still names the
+ * payload the launcher record is about. */
+static void claimed_identity(const char *json, RefusedSelection *refused) {
+    char version[128], fingerprint[65];
+    refused->version[0] = '\0';
+    refused->fingerprint[0] = '\0';
+    if (json_string(json, "version", version, sizeof(version)) == 0 && valid_component(version, 128)) {
+        snprintf(refused->version, sizeof(refused->version), "%s", version);
+    }
+    if (json_string(json, "payloadFingerprint", fingerprint, sizeof(fingerprint)) == 0 && valid_fingerprint(fingerprint)) {
+        snprintf(refused->fingerprint, sizeof(refused->fingerprint), "%s", fingerprint);
+    }
+}
+
+/* The attempt marker carries no runtime epoch, so the candidate's own manifest
+ * is read to correlate the record with the Gateway's startup records. */
+static void candidate_epoch(const char *channelRoot, const char *version, char *output, size_t capacity) {
+    char path[PATH_MAX], manifest[MAX_MANIFEST_BYTES + 1], epoch[MAX_COMPONENT_BYTES];
+    output[0] = '\0';
+    if (version == NULL || version[0] == '\0' ||
+        snprintf(path, sizeof(path), "%s/versions/%s/manifest.json", channelRoot, version) >= (int)sizeof(path) ||
+        bounded_file(path, manifest, sizeof(manifest)) != 0 ||
+        json_string(manifest, "runtimeEpoch", epoch, sizeof(epoch)) != 0 || !valid_uuid(epoch)) return;
+    snprintf(output, capacity, "%s", epoch);
+}
+
+static size_t json_escape(char *output, size_t capacity, const char *text) {
+    size_t length = 0;
+    if (capacity == 0) return 0;
+    for (const unsigned char *cursor = (const unsigned char *)text; *cursor != '\0'; ++cursor) {
+        char escaped[7];
+        if (*cursor == '"') snprintf(escaped, sizeof(escaped), "\\\"");
+        else if (*cursor == '\\') snprintf(escaped, sizeof(escaped), "\\\\");
+        else if (*cursor == '\n') snprintf(escaped, sizeof(escaped), "\\n");
+        else if (*cursor == '\r') snprintf(escaped, sizeof(escaped), "\\r");
+        else if (*cursor == '\t') snprintf(escaped, sizeof(escaped), "\\t");
+        else if (*cursor < 0x20 || *cursor == 0x7f) snprintf(escaped, sizeof(escaped), "\\u%04x", (unsigned int)*cursor);
+        else { escaped[0] = (char)*cursor; escaped[1] = '\0'; }
+        size_t piece = strlen(escaped);
+        if (length + piece + 1 > capacity) break;
+        memcpy(output + length, escaped, piece);
+        length += piece;
+    }
+    output[length] = '\0';
+    return length;
+}
+
+static void launcher_timestamp(char *output, size_t capacity) {
+    struct timespec now;
+    struct tm broken;
+    output[0] = '\0';
+    if (clock_gettime(CLOCK_REALTIME, &now) != 0 || gmtime_r(&now.tv_sec, &broken) == NULL) return;
+    snprintf(output, capacity, "%04d-%02d-%02dT%02d:%02d:%02d.%03dZ",
+             broken.tm_year + 1900, broken.tm_mon + 1, broken.tm_mday,
+             broken.tm_hour, broken.tm_min, broken.tm_sec, (int)(now.tv_nsec / 1000000));
+}
+
+/* Launcher records join the deploy timeline the helper owns: one JSON line per
+ * decision, appended in a single O_APPEND write so its reader never sees a
+ * partial record. Recording never changes or delays a launch. */
+#define LAUNCHER_RECORD_MAX_BYTES 4096
+
+static void launcher_record(const char *logPath, const char *level, const char *event, const char *message,
+                            const char *payloadVersion, const char *runtimeEpoch) {
+    if (logPath == NULL || logPath[0] == '\0') return;
+    char timestamp[32], escapedMessage[1024], escapedVersion[256], escapedEpoch[256];
+    launcher_timestamp(timestamp, sizeof(timestamp));
+    if (timestamp[0] == '\0') return;
+    json_escape(escapedMessage, sizeof(escapedMessage), message == NULL ? "" : message);
+    json_escape(escapedVersion, sizeof(escapedVersion), payloadVersion == NULL ? "" : payloadVersion);
+    json_escape(escapedEpoch, sizeof(escapedEpoch), runtimeEpoch == NULL ? "" : runtimeEpoch);
+    char record[LAUNCHER_RECORD_MAX_BYTES];
+    int length = snprintf(record, sizeof(record),
+        "{\"timestamp\":\"%s\",\"level\":\"%s\",\"event\":\"%s\",\"source\":\"launcher\",\"message\":\"%s\",\"process\":\"launcher\"",
+        timestamp, level, event, escapedMessage);
+    if (length < 0 || (size_t)length >= sizeof(record)) return;
+    if (payloadVersion != NULL && payloadVersion[0] != '\0') {
+        int appended = snprintf(record + length, sizeof(record) - (size_t)length, ",\"payloadVersion\":\"%s\"", escapedVersion);
+        if (appended < 0 || (size_t)(length + appended) >= sizeof(record)) return;
+        length += appended;
+    }
+    if (runtimeEpoch != NULL && runtimeEpoch[0] != '\0') {
+        int appended = snprintf(record + length, sizeof(record) - (size_t)length, ",\"runtimeEpoch\":\"%s\"", escapedEpoch);
+        if (appended < 0 || (size_t)(length + appended) >= sizeof(record)) return;
+        length += appended;
+    }
+    int appended = snprintf(record + length, sizeof(record) - (size_t)length, "}\n");
+    if (appended < 0 || (size_t)(length + appended) >= sizeof(record)) return;
+    length += appended;
+    int fd = open(logPath, O_WRONLY | O_CREAT | O_APPEND | O_NOFOLLOW, 0600);
+    if (fd < 0) return;
+    (void)write(fd, record, (size_t)length);
+    (void)close(fd);
+}
+
+/* A refused pending selection ends the launch with exit 75, so its record is
+ * the only durable evidence of why nothing ran. */
+static int rejected_pending_selection(const char *logPath, const char *channelRoot, const RefusedSelection *refused) {
+    char epoch[MAX_COMPONENT_BYTES];
+    candidate_epoch(channelRoot, refused->version, epoch, sizeof(epoch));
+    launcher_record(logPath, "warning", "launcher.selection-rejected", refused->reason,
+                    refused->version[0] == '\0' ? NULL : refused->version,
+                    epoch[0] == '\0' ? NULL : epoch);
+    return -1;
+}
+
+/* The bundled fallback names the refused selection, why it was refused, and the
+ * payload that runs instead, because the store's selection is not what ran. */
+static void bundled_fallback_message(const RefusedSelection *refused, const char *bundledVersion, char *output, size_t capacity) {
+    char selection[256];
+    if (refused->version[0] != '\0' && refused->fingerprint[0] != '\0') {
+        snprintf(selection, sizeof(selection), "External selection %s (fingerprint %s)", refused->version, refused->fingerprint);
+    } else if (refused->version[0] != '\0') {
+        snprintf(selection, sizeof(selection), "External selection %s", refused->version);
+    } else {
+        snprintf(selection, sizeof(selection), "External selection");
+    }
+    snprintf(output, capacity, "%s refused because %s; using bundled payload %s", selection, refused->reason, bundledVersion);
+}
+
+static int recover_pending_attempt_unlocked(const char *channelRoot, const char *channel, const char *logPath) {
     char markerPath[PATH_MAX], marker[MAX_MANIFEST_BYTES + 1];
     if (snprintf(markerPath, sizeof(markerPath), "%s/pending-attempt.json", channelRoot) >= (int)sizeof(markerPath)) return -1;
     if (bounded_file(markerPath, marker, sizeof(marker)) != 0) {
-        return access(markerPath, F_OK) != 0 && errno == ENOENT ? 0 : -1;
+        if (access(markerPath, F_OK) != 0 && errno == ENOENT) return 0;
+        RefusedSelection refused = { { 0 }, { 0 }, "Pending attempt marker is unreadable; not launching" };
+        return rejected_pending_selection(logPath, channelRoot, &refused);
     }
+    RefusedSelection refused = { { 0 }, { 0 }, "Pending attempt marker is malformed; not launching" };
+    claimed_identity(marker, &refused);
     const char *keys[] = {"schema", "kind", "channel", "attempt", "version", "payloadFingerprint", "previousVersion", "previousFingerprint"};
     for (size_t index = 0; index < sizeof(keys) / sizeof(keys[0]); ++index) {
-        if (json_key_count(marker, keys[index]) != 1) return -1;
+        if (json_key_count(marker, keys[index]) != 1) return rejected_pending_selection(logPath, channelRoot, &refused);
     }
     char kind[64], markerChannel[64], attempt[32], candidateVersion[MAX_COMPONENT_BYTES], candidateFingerprint[65];
     char previousVersion[MAX_COMPONENT_BYTES], previousFingerprint[65];
@@ -666,11 +798,19 @@ static int recover_pending_attempt_unlocked(const char *channelRoot, const char 
         json_string(marker, "previousVersion", previousVersion, sizeof(previousVersion)) != 0 ||
         json_string(marker, "previousFingerprint", previousFingerprint, sizeof(previousFingerprint)) != 0 ||
         !valid_component(candidateVersion, MAX_COMPONENT_BYTES - 1) || !valid_component(previousVersion, MAX_COMPONENT_BYTES - 1) ||
-        !valid_fingerprint(candidateFingerprint) || !valid_fingerprint(previousFingerprint)) return -1;
+        !valid_fingerprint(candidateFingerprint) || !valid_fingerprint(previousFingerprint)) return rejected_pending_selection(logPath, channelRoot, &refused);
     char currentPath[PATH_MAX], currentVersion[MAX_COMPONENT_BYTES], currentFingerprint[65];
     if (snprintf(currentPath, sizeof(currentPath), "%s/current.json", channelRoot) >= (int)sizeof(currentPath)
-        || read_selection(currentPath, channel, currentVersion, sizeof(currentVersion), currentFingerprint, sizeof(currentFingerprint)) != 0
-        || strcmp(currentVersion, candidateVersion) != 0 || strcmp(currentFingerprint, candidateFingerprint) != 0) return -1;
+        || read_selection(currentPath, channel, currentVersion, sizeof(currentVersion), currentFingerprint, sizeof(currentFingerprint)) != 0) {
+        refused.reason = "Current selection is unreadable; not launching the pending candidate";
+        return rejected_pending_selection(logPath, channelRoot, &refused);
+    }
+    if (strcmp(currentVersion, candidateVersion) != 0 || strcmp(currentFingerprint, candidateFingerprint) != 0) {
+        char mismatch[512];
+        snprintf(mismatch, sizeof(mismatch), "Attempt marker names %s but the selection names %s; not launching", candidateVersion, currentVersion);
+        refused.reason = mismatch;
+        return rejected_pending_selection(logPath, channelRoot, &refused);
+    }
 
     // A committed candidate was authenticated and selected by the helper.
     // Removing the marker under the shared lock makes relaunch idempotent.
@@ -693,6 +833,12 @@ static int recover_pending_attempt_unlocked(const char *channelRoot, const char 
         int written = fd >= 0 && write(fd, launched, (size_t)length) == length && fsync(fd) == 0;
         if (fd >= 0 && close(fd) != 0) written = 0;
         if (!written || rename(temporary, markerPath) != 0) { unlink(temporary); return -1; }
+        // The candidate now owns the store's single launch attempt.
+        char candidateEpoch[MAX_COMPONENT_BYTES], launchedMessage[256];
+        candidate_epoch(channelRoot, candidateVersion, candidateEpoch, sizeof(candidateEpoch));
+        snprintf(launchedMessage, sizeof(launchedMessage), "Candidate %s received its single launch attempt", candidateVersion);
+        launcher_record(logPath, "info", "launcher.candidate-launched", launchedMessage, candidateVersion,
+                        candidateEpoch[0] == '\0' ? NULL : candidateEpoch);
         return 0;
     }
 
@@ -710,10 +856,16 @@ static int recover_pending_attempt_unlocked(const char *channelRoot, const char 
     if (close(fd) != 0) result = 0;
     if (!result || rename(temporary, currentPath) != 0) { unlink(temporary); return -1; }
     if (unlink(markerPath) != 0 && errno != ENOENT) return -1;
+    // The candidate consumed its attempt without committing, so the previous selection was restored.
+    char candidateEpoch[MAX_COMPONENT_BYTES], rolledBackMessage[256];
+    candidate_epoch(channelRoot, candidateVersion, candidateEpoch, sizeof(candidateEpoch));
+    snprintf(rolledBackMessage, sizeof(rolledBackMessage), "Candidate %s exited during startup; restored %s", candidateVersion, previousVersion);
+    launcher_record(logPath, "error", "launcher.candidate-rolled-back", rolledBackMessage, candidateVersion,
+                    candidateEpoch[0] == '\0' ? NULL : candidateEpoch);
     return 1;
 }
 
-static int recover_pending_attempt(const char *channelRoot, const char *channel) {
+static int recover_pending_attempt(const char *channelRoot, const char *channel, const char *logPath) {
     char markerPath[PATH_MAX], lockPath[PATH_MAX];
     if (snprintf(markerPath, sizeof(markerPath), "%s/pending-attempt.json", channelRoot) >= (int)sizeof(markerPath)
         || access(markerPath, F_OK) != 0
@@ -721,7 +873,7 @@ static int recover_pending_attempt(const char *channelRoot, const char *channel)
     int observedFreshLock = 0;
     for (int attempt = 0; attempt < 200; ++attempt) {
         if (mkdir(lockPath, 0700) == 0) {
-            int result = recover_pending_attempt_unlocked(channelRoot, channel);
+            int result = recover_pending_attempt_unlocked(channelRoot, channel, logPath);
             (void)rmdir(lockPath);
             return result;
         }
@@ -742,7 +894,8 @@ static int recover_pending_attempt(const char *channelRoot, const char *channel)
     // A pending candidate is not admissible without exclusive ownership of
     // its attempt marker. Exit and let the supervisor retry; a later launch
     // can remove a stale lock and run the existing rollback/commit recovery.
-    return -1;
+    RefusedSelection refused = { { 0 }, { 0 }, "Pending attempt lock is held; not launching an uncommitted payload" };
+    return rejected_pending_selection(logPath, channelRoot, &refused);
 }
 
 /* Return 1 only when the external store/channel is genuinely absent. Any
@@ -767,28 +920,42 @@ static int admit_channel_root(const char *home, const char *channel, char *admit
     return 0;
 }
 
-static int external_payload(const char *channelRoot, const char *channel, char *node, char *entrypoint, char *helper, char *selectedRoot, PayloadIdentity *selectedIdentity) {
+static int external_payload(const char *channelRoot, const char *channel, char *node, char *entrypoint, char *helper, char *selectedRoot, PayloadIdentity *selectedIdentity, RefusedSelection *refused) {
     char versionsPath[PATH_MAX], versionsRoot[PATH_MAX], currentPath[PATH_MAX];
     char selection[MAX_MANIFEST_BYTES + 1], version[128], fingerprint[65], selectedChannel[64];
     if (snprintf(versionsPath, sizeof(versionsPath), "%s/versions", channelRoot) >= (int)sizeof(versionsPath) ||
         !regular_directory_path(versionsPath) || realpath(versionsPath, versionsRoot) == NULL || !path_is_under(channelRoot, versionsRoot) ||
         snprintf(currentPath, sizeof(currentPath), "%s/current.json", channelRoot) >= (int)sizeof(currentPath) ||
-        bounded_file(currentPath, selection, sizeof(selection)) != 0 || json_schema_one(selection) != 0) return -1;
+        bounded_file(currentPath, selection, sizeof(selection)) != 0 || json_schema_one(selection) != 0) {
+        refused->reason = "the selection record is unreadable";
+        return -1;
+    }
+    claimed_identity(selection, refused);
     const char *selectionKeys[] = {"schema", "kind", "channel", "version", "payloadFingerprint"};
     for (size_t index = 0; index < sizeof(selectionKeys) / sizeof(selectionKeys[0]); ++index) {
-        if (json_key_count(selection, selectionKeys[index]) != 1) return -1;
+        if (json_key_count(selection, selectionKeys[index]) != 1) { refused->reason = "the selection record is malformed"; return -1; }
     }
     char kind[64];
     if (json_string(selection, "kind", kind, sizeof(kind)) != 0 || strcmp(kind, "tron-gateway-selection") != 0 ||
         json_string(selection, "channel", selectedChannel, sizeof(selectedChannel)) != 0 ||
         json_string(selection, "version", version, sizeof(version)) != 0 ||
         json_string(selection, "payloadFingerprint", fingerprint, sizeof(fingerprint)) != 0 ||
-        strcmp(selectedChannel, channel) != 0 || !valid_component(version, 128) || !valid_fingerprint(fingerprint)) return -1;
+        strcmp(selectedChannel, channel) != 0 || !valid_component(version, 128) || !valid_fingerprint(fingerprint)) {
+        refused->reason = "the selection record is invalid";
+        return -1;
+    }
     char payload[PATH_MAX], payloadRoot[PATH_MAX];
     if (snprintf(payload, sizeof(payload), "%s/%s", versionsRoot, version) >= (int)sizeof(payload) ||
         realpath(payload, payloadRoot) == NULL || !path_is_under(versionsRoot, payloadRoot) ||
-        snprintf(selectedRoot, PATH_MAX, "%s", payloadRoot) >= PATH_MAX) return -1;
-    return validate_payload(payloadRoot, channel, version, fingerprint, node, entrypoint, helper, selectedIdentity);
+        snprintf(selectedRoot, PATH_MAX, "%s", payloadRoot) >= PATH_MAX) {
+        refused->reason = "the selected payload root is unavailable";
+        return -1;
+    }
+    if (validate_payload(payloadRoot, channel, version, fingerprint, node, entrypoint, helper, selectedIdentity) != 0) {
+        refused->reason = "the selected payload failed validation";
+        return -1;
+    }
+    return 0;
 }
 
 int main(int argc, char **argv) {
@@ -852,20 +1019,25 @@ int main(int argc, char **argv) {
         return 78;
     }
     char admittedChannelRoot[PATH_MAX];
-    int externalState = selected_home(home, sizeof(home)) == 0
-        ? admit_channel_root(home, channel, admittedChannelRoot)
-        : 1;
+    char deployLogPath[PATH_MAX] = {0};
+    int externalState = 1;
+    if (selected_home(home, sizeof(home)) == 0) {
+        // A home whose log path does not fit loses its launcher records only.
+        if (snprintf(deployLogPath, sizeof(deployLogPath), "%s/logs/deploy.jsonl", home) >= (int)sizeof(deployLogPath)) deployLogPath[0] = '\0';
+        externalState = admit_channel_root(home, channel, admittedChannelRoot);
+    }
     if (externalState < 0) {
         fprintf(stderr, "Tron Gateway external payload store is unsafe or invalid.\n");
         return 78;
     }
     int external = 0;
+    RefusedSelection refused = { { 0 }, { 0 }, "it did not validate" };
     if (externalState == 0) {
-        if (recover_pending_attempt(admittedChannelRoot, channel) < 0) {
+        if (recover_pending_attempt(admittedChannelRoot, channel, deployLogPath) < 0) {
             fprintf(stderr, "Tron Gateway candidate attempt is locked; retrying without launching an uncommitted payload.\n");
             return 75;
         }
-        external = external_payload(admittedChannelRoot, channel, node, entrypoint, helper, selectedPayloadRoot, &selectedIdentity) == 0;
+        external = external_payload(admittedChannelRoot, channel, node, entrypoint, helper, selectedPayloadRoot, &selectedIdentity, &refused) == 0;
         if (!external) {
             // The external root was safely admitted, but its current selection
             // or payload no longer validates. Never execute it; retain the
@@ -873,10 +1045,19 @@ int main(int argc, char **argv) {
             fprintf(stderr, "Tron Gateway external payload selection is invalid; using bundled payload.\n");
         }
     }
-    if (!external && snprintf(selectedPayloadRoot, sizeof(selectedPayloadRoot), "%s", bundledRoot) >= (int)sizeof(selectedPayloadRoot)) return 70;
-    if (!external && validate_payload(bundledRoot, NULL, NULL, NULL, node, entrypoint, helper, &selectedIdentity) != 0) {
-        fprintf(stderr, "Tron Gateway payload is incomplete or invalid at %s. Reinstall Tron.\n", bundledRoot);
-        return 78;
+    if (!external) {
+        if (snprintf(selectedPayloadRoot, sizeof(selectedPayloadRoot), "%s", bundledRoot) >= (int)sizeof(selectedPayloadRoot)) return 70;
+        if (validate_payload(bundledRoot, NULL, NULL, NULL, node, entrypoint, helper, &selectedIdentity) != 0) {
+            fprintf(stderr, "Tron Gateway payload is incomplete or invalid at %s. Reinstall Tron.\n", bundledRoot);
+            return 78;
+        }
+        if (externalState == 0) {
+            // An admitted store's selection was refused above, so the bundled payload is the fallback.
+            char fallbackMessage[512];
+            bundled_fallback_message(&refused, selectedIdentity.version, fallbackMessage, sizeof(fallbackMessage));
+            launcher_record(deployLogPath, "warning", "launcher.bundled-fallback", fallbackMessage,
+                            selectedIdentity.version, selectedIdentity.runtimeEpoch);
+        }
     }
 #if defined(__arm64__)
     const char *runtimeArchitecture = "arm64";

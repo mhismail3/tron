@@ -896,7 +896,8 @@ async function writeProgress(paths, state, commandId, error) {
 
 // ---------------------------------------------------------------------------
 // Deploy timeline (~/.tron/logs/deploy.jsonl). The helper rotates it once at
-// operation start. Diagnostics never fail or delay a deployment.
+// operation start, and the C launcher appends its own `launcher.*` records to
+// the same file. Diagnostics never fail or delay a deployment.
 
 /** A source rebuild writes about a dozen records (~3 KB); 1 MB holds hundreds
  * of deployments while staying far under the Gateway's 40 MB budget. */
