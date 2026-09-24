@@ -1482,8 +1482,8 @@ async function requestRestart({ host, port, token, timeoutMs, commandId }) {
   return authenticatedRequest({ host, port, token, timeoutMs, method: "gateway.restart", params: { commandId } });
 }
 
-export async function preflightPayload(root, runCommand = runBounded, timeoutMs = 30_000) {
-  const manifest = await validatePayload(root, {}, true);
+export async function preflightPayload(root, runCommand = runBounded, timeoutMs = 30_000, validatedManifest) {
+  const manifest = validatedManifest ?? await validatePayload(root, {}, true);
   const runtime = join(root, process.arch === "arm64" ? "runtime/node-arm64" : "runtime/node-x64");
   const entrypoint = join(root, "app", "dist", "index.js");
   await runCommand(runtime, ["--check", entrypoint], { timeoutMs, maxOutputBytes: 64 * 1024 });
@@ -1924,7 +1924,7 @@ async function promote({ paths, channel, version, expectedFingerprint, host, por
     const before = boundary.info;
     const oldProcess = boundary.process;
     const replacementBoundary = replacement ?? productionReplacementDependencies({ channel, host, port, token, timeoutMs });
-    await preflightPayload(targetRoot, runBounded, Math.min(timeoutMs, 30_000));
+    await preflightPayload(targetRoot, runBounded, Math.min(timeoutMs, 30_000), manifest);
     const target = { schema: SCHEMA, kind: SELECTION_KIND, channel, version, payloadFingerprint: manifest.payloadFingerprint };
     const priorDeploymentState = await readOptional(paths.state);
     const debugProvenance = priorDeploymentState?.candidateOrigin === "debug"
@@ -2268,7 +2268,9 @@ export async function buildSourcePayload({ paths, config, candidateVersion, time
       };
       payloadManifest(manifest, { channel: paths.channel, version });
       await atomicJson(join(temporary, "manifest.json"), manifest);
-      await validatePayload(temporary, { channel: paths.channel, version, payloadFingerprint: fingerprint }, true);
+      // Structure, import containment and manifest must pass before anything
+      // is published; the fingerprint was computed from these files just above.
+      await validatePayload(temporary, { channel: paths.channel, version, payloadFingerprint: fingerprint }, false);
       // Compilation and payload copying above are private and do not hold the
       // channel lock. Publication is one serialized transaction:
       // immutable finalization, rename, candidate state, and retention all

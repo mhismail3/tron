@@ -1,5 +1,5 @@
 import { strict as assert } from "node:assert";
-import { chmod, cp, lstat, mkdir, mkdtemp, readFile, readlink, readdir, realpath, rename, rm, symlink, writeFile } from "node:fs/promises";
+import { chmod, cp, lstat, mkdir, mkdtemp, readFile, readlink, readdir, realpath, rename, rm, stat, symlink, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { tmpdir } from "node:os";
 import { test } from "node:test";
@@ -596,55 +596,60 @@ test("source runtime base copy rejects a projection changed after admission", as
   } finally { await rm(root, { recursive: true, force: true }); }
 });
 
+async function makeSourceBuildFixture(root) {
+  const store = await paths(root);
+  const sourceRoot = join(root, "source");
+  const gatewayRoot = join(sourceRoot, "packages", "gateway");
+  await mkdir(join(gatewayRoot, "src"), { recursive: true });
+  await mkdir(join(sourceRoot, "scripts"), { recursive: true });
+  await mkdir(join(gatewayRoot, "scripts"), { recursive: true });
+  await mkdir(join(sourceRoot, "packages", "mac-app", "Sources", "Resources"), { recursive: true });
+  await writeFile(join(sourceRoot, "scripts", "gateway-payload-deploy.mjs"), "// trusted updater\n");
+  await writeFile(join(gatewayRoot, "scripts", "ensure-node-pty-helper.mjs"), "// trusted helper\n");
+  const sourceFiles = {
+    "package.json": JSON.stringify({ version: "1.0.0" }),
+    "package-lock.json": `${JSON.stringify({ lockfileVersion: 3, packages: { "": { version: "1.0.0" } } })}\n`,
+    "tsconfig.json": "{}\n",
+    "src/index.ts": "export const source = true;\n",
+  };
+  for (const [path, content] of Object.entries(sourceFiles)) {
+    await writeFile(join(gatewayRoot, path), content);
+  }
+  const versionRoot = join(store.versionsRoot, "active");
+  await mkdir(join(versionRoot, "app", "dist"), { recursive: true });
+  await mkdir(join(versionRoot, "app", "scripts"), { recursive: true });
+  await mkdir(join(versionRoot, "app", "node_modules"), { recursive: true });
+  await mkdir(join(versionRoot, "runtime"), { recursive: true });
+  await writeFile(join(versionRoot, "app", "dist", "index.js"), `${"x".repeat(1_024)}\n`);
+  await writeFile(join(versionRoot, "app", "package.json"), sourceFiles["package.json"]);
+  await writeFile(join(versionRoot, "app", "package-lock.json"), sourceFiles["package-lock.json"]);
+  await writeFile(join(versionRoot, "app", "PushService.xcconfig"), "TRON_PUSH_SERVICE_ORIGIN = https:/$()/push.example.test\n");
+  await writeFile(join(versionRoot, "app", "scripts", "ensure-node-pty-helper.mjs"), "// helper\n");
+  await writeFile(join(versionRoot, "app", "scripts", "gateway-payload-deploy.mjs"), "// updater\n");
+  await writeFile(join(versionRoot, "app", "node_modules", "dependency-marker"), "validated active dependency tree\n");
+  await mkdir(join(versionRoot, "app", "node_modules", "@earendil-works", "pi-coding-agent", "dist"), { recursive: true });
+  await mkdir(join(versionRoot, "app", "node_modules", ".bin"), { recursive: true });
+  await writeFile(join(versionRoot, "app", "node_modules", "@earendil-works", "pi-coding-agent", "package.json"), JSON.stringify({ name: "@earendil-works/pi-coding-agent", bin: { pi: "dist/cli.js" } }));
+  await writeFile(join(versionRoot, "app", "node_modules", "@earendil-works", "pi-coding-agent", "dist", "cli.js"), "#!/usr/bin/env node\n");
+  await chmod(join(versionRoot, "app", "node_modules", "@earendil-works", "pi-coding-agent", "dist", "cli.js"), 0o755);
+  await symlink("../@earendil-works/pi-coding-agent/dist/cli.js", join(versionRoot, "app", "node_modules", ".bin", "pi"));
+  await writeFile(join(versionRoot, "runtime", "node-arm64"), "n".repeat(1_048_576));
+  await writeFile(join(versionRoot, "runtime", "node-x64"), "n".repeat(1_048_576));
+  await chmod(join(versionRoot, "runtime", "node-arm64"), 0o755);
+  await chmod(join(versionRoot, "runtime", "node-x64"), 0o755);
+  await addRuntimeNodeAliases(versionRoot);
+  const fingerprint = await payloadFingerprint(versionRoot);
+  const activeManifest = { schema: 1, kind: "tron-gateway-payload", channel: "stable", version: "active", gatewayVersion: "1", protocolVersion: "5", minProtocolVersion: "5", nodeVersion: "22", sourceRevision: "source", runtimeEpoch: "epoch", payloadFingerprint: fingerprint, dependencyTreeCoverage: "app/** and runtime/** regular files" };
+  await writeFile(join(versionRoot, "manifest.json"), `${JSON.stringify(activeManifest)}\n`);
+  await mkdir(store.channelRoot, { recursive: true });
+  await writeFile(store.current, `${JSON.stringify(selection("active", fingerprint))}\n`);
+  return { store, sourceRoot, gatewayRoot, sourceFiles };
+}
+
 test("source builds compile privately and leave the trusted source tree unchanged", async () => {
   const root = await realpath(await mkdtemp(join(tmpdir(), "tron-source-private-build-")));
   try {
-    const store = await paths(root);
-    const sourceRoot = join(root, "source");
-    const gatewayRoot = join(sourceRoot, "packages", "gateway");
-    await mkdir(join(gatewayRoot, "src"), { recursive: true });
-    await mkdir(join(sourceRoot, "scripts"), { recursive: true });
-    await mkdir(join(gatewayRoot, "scripts"), { recursive: true });
-    await mkdir(join(sourceRoot, "packages", "mac-app", "Sources", "Resources"), { recursive: true });
-    await writeFile(join(sourceRoot, "scripts", "gateway-payload-deploy.mjs"), "// trusted updater\n");
-    await writeFile(join(gatewayRoot, "scripts", "ensure-node-pty-helper.mjs"), "// trusted helper\n");
-    const sourceFiles = {
-      "package.json": JSON.stringify({ version: "1.0.0" }),
-      "package-lock.json": `${JSON.stringify({ lockfileVersion: 3, packages: { "": { version: "1.0.0" } } })}\n`,
-      "tsconfig.json": "{}\n",
-      "src/index.ts": "export const source = true;\n",
-    };
-    for (const [path, content] of Object.entries(sourceFiles)) {
-      await writeFile(join(gatewayRoot, path), content);
-    }
-    const versionRoot = join(store.versionsRoot, "active");
-    await mkdir(join(versionRoot, "app", "dist"), { recursive: true });
-    await mkdir(join(versionRoot, "app", "scripts"), { recursive: true });
-    await mkdir(join(versionRoot, "app", "node_modules"), { recursive: true });
-    await mkdir(join(versionRoot, "runtime"), { recursive: true });
-    await writeFile(join(versionRoot, "app", "dist", "index.js"), `${"x".repeat(1_024)}\n`);
-    await writeFile(join(versionRoot, "app", "package.json"), sourceFiles["package.json"]);
-    await writeFile(join(versionRoot, "app", "package-lock.json"), sourceFiles["package-lock.json"]);
-    await writeFile(join(versionRoot, "app", "PushService.xcconfig"), "TRON_PUSH_SERVICE_ORIGIN = https:/$()/push.example.test\n");
-    await writeFile(join(versionRoot, "app", "scripts", "ensure-node-pty-helper.mjs"), "// helper\n");
-    await writeFile(join(versionRoot, "app", "scripts", "gateway-payload-deploy.mjs"), "// updater\n");
-    await writeFile(join(versionRoot, "app", "node_modules", "dependency-marker"), "validated active dependency tree\n");
-    await mkdir(join(versionRoot, "app", "node_modules", "@earendil-works", "pi-coding-agent", "dist"), { recursive: true });
-    await mkdir(join(versionRoot, "app", "node_modules", ".bin"), { recursive: true });
-    await writeFile(join(versionRoot, "app", "node_modules", "@earendil-works", "pi-coding-agent", "package.json"), JSON.stringify({ name: "@earendil-works/pi-coding-agent", bin: { pi: "dist/cli.js" } }));
-    await writeFile(join(versionRoot, "app", "node_modules", "@earendil-works", "pi-coding-agent", "dist", "cli.js"), "#!/usr/bin/env node\n");
-    await chmod(join(versionRoot, "app", "node_modules", "@earendil-works", "pi-coding-agent", "dist", "cli.js"), 0o755);
-    await symlink("../@earendil-works/pi-coding-agent/dist/cli.js", join(versionRoot, "app", "node_modules", ".bin", "pi"));
-    await writeFile(join(versionRoot, "runtime", "node-arm64"), "n".repeat(1_048_576));
-    await writeFile(join(versionRoot, "runtime", "node-x64"), "n".repeat(1_048_576));
-    await chmod(join(versionRoot, "runtime", "node-arm64"), 0o755);
-    await chmod(join(versionRoot, "runtime", "node-x64"), 0o755);
-    await addRuntimeNodeAliases(versionRoot);
-    const fingerprint = await payloadFingerprint(versionRoot);
-    const activeManifest = { schema: 1, kind: "tron-gateway-payload", channel: "stable", version: "active", gatewayVersion: "1", protocolVersion: "5", minProtocolVersion: "5", nodeVersion: "22", sourceRevision: "source", runtimeEpoch: "epoch", payloadFingerprint: fingerprint, dependencyTreeCoverage: "app/** and runtime/** regular files" };
-    await writeFile(join(versionRoot, "manifest.json"), `${JSON.stringify(activeManifest)}\n`);
-    await mkdir(store.channelRoot, { recursive: true });
-    await writeFile(store.current, `${JSON.stringify(selection("active", fingerprint))}\n`);
+    const { store, sourceRoot, gatewayRoot, sourceFiles } = await makeSourceBuildFixture(root);
     const before = new Map(await Promise.all(Object.keys(sourceFiles).map(async (path) => [path, await readFile(join(gatewayRoot, path))])));
     const commands = [];
     const result = await buildSourcePayload({
@@ -686,6 +691,25 @@ test("source builds compile privately and leave the trusted source tree unchange
       join(store.versionsRoot, "candidate", "runtime", "xcodegen"),
       join(store.versionsRoot, "candidate", "runtime"),
     ]) await chmod(directory, 0o755);
+  } finally { await makeTreeWritable(root); await rm(root, { recursive: true, force: true }); }
+});
+
+// A source build that compiles to an import outside app/ must fail before it
+// is published, so it never becomes a selectable candidate.
+test("source builds reject compiled imports that are not shipped before publication", async () => {
+  const root = await realpath(await mkdtemp(join(tmpdir(), "tron-source-unshipped-import-")));
+  try {
+    const { store, sourceRoot } = await makeSourceBuildFixture(root);
+    await assert.rejects(buildSourcePayload({
+      paths: store, config: { sourceRoot }, candidateVersion: "candidate",
+      runCommand: async (tool, args) => {
+        if (!(tool === process.execPath && args[0].endsWith("/tsc"))) throw new Error("unexpected external command");
+        await mkdir(args.at(-1), { recursive: true });
+        await writeFile(join(args.at(-1), "index.js"), `import "./missing.js";\n${"c".repeat(1_024)}\n`);
+      },
+    }), /imports \.\/missing\.js, which is not shipped/);
+    assert.equal(await stat(join(store.versionsRoot, "candidate")).catch(() => undefined), undefined);
+    assert.equal(await readFile(store.state, "utf8").catch(() => undefined), undefined);
   } finally { await makeTreeWritable(root); await rm(root, { recursive: true, force: true }); }
 });
 

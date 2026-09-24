@@ -1938,7 +1938,7 @@ artifact. Preflight loads every host-architecture native module before
 pointer publication, and a failed first external candidate restores the validated
 bundled fallback rather than requiring a `previous.json` pointer. Notification state stays
 outside payload version directories. Payload staging,
-promotion, and rollback use `scripts/gateway-payload-deploy.mjs`. Restart requests use the authenticated drain-aware Gateway protocol; direct self-stop
+promotion, and rollback use `scripts/gateway-payload-deploy.mjs`. A source build reuses its computed fingerprint for the resulting manifest, and promotion reuses its validated candidate manifest for preflight; copies, launcher admission, and post-restart identity checks still verify their own payload boundaries. Restart requests use the authenticated drain-aware Gateway protocol; direct self-stop
 is rejected. Clients receive `system.stopping`, reconnect with bounded backoff, and replace
 live state from a new authoritative snapshot. Staging preserves package-manager relative
 symlinks verbatim so copied artifacts remain self-contained; cleanup never follows links,

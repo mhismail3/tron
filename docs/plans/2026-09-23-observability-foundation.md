@@ -2,7 +2,7 @@
 
 - **Started:** 2026-09-23
 - **Status:** Active
-- **Last updated:** 2026-09-24, correction to L-2, L-1c, L-16, L-10, L-15 and L-7
+- **Last updated:** 2026-09-24, L-11
 - **Goal:** Every Tron process records the right signals automatically, in a known place, at a meaningful level, so a failure can be diagnosed in one pass from what was already recorded.
 
 Follow the [plan protocol](README.md#protocol) to claim tasks and hand off.
@@ -217,7 +217,7 @@ user reinstalls manually, so batch them for one reinstall.
 | L-16 | Done | Restart drain hangs on terminal-receipt persistence | none | observability session, 2026-09-24 |
 | L-17 | Needs approval | Judge a drain stalled by its oldest blocker without progress, not by any change in the blocker set | L-16 | |
 | L-18 | Needs approval | Decide whether a restart drain proceeds when only unresolved (blocked) persistence owners remain | L-16 | |
-| L-11 | Claimed | Remove duplicate payload validations within one deploy run | none | observability session (L-11 lane), 2026-09-24 |
+| L-11 | Done | Remove duplicate payload validations within one deploy run | none | observability session (L-11 lane), 2026-09-24 |
 | L-12 | Ready | Faster Node payload fingerprint with identical output | none | |
 | L-13 | Ready | Stage source payloads in the store and rename instead of copying twice | L-11 | |
 | L-14 | Needs scoping | APFS clone copies and payload retention count | L-13 | |
@@ -607,3 +607,14 @@ user reinstalls manually, so batch them for one reinstall.
 - Kept on purpose: `GatewayClient`'s `networkPath` initializer parameter (L-10) and `GatewayServer`'s `stallSampler` option with its sampler dependencies (L-7) are only ever set by tests. They stay because they are the only deterministic way to test those records: one shared path monitor cannot give two values in one parallel test process, and the heartbeat test needs a controlled sampler to prove the stall evidence reaches the record.
 - Deviations: the full Gateway suite was previously avoided on this Mac because it stalled the live Gateway (see L-1a). At lowest priority with two workers it ran in 93 s with no `gateway.event-loop-delay` record in the live log. The load average was about 5 before and 3.9 after.
 - For the next agent: run the full Gateway suite once before each handoff with `nice -n 19 npx vitest run --maxWorkers=2`, and stop it if the live log shows `gateway.event-loop-delay`. Record focused-suite timings before and after the change. L-1b should restore a comment in the deploy helper that names the launcher records once they exist.
+
+### L-11 · Done · 2026-09-24 · observability session (L-11 lane)
+
+- Result: one source rebuild computes one fewer `payloadFingerprint`, and one promotion computes one fewer. `buildSourcePayload` still validates the staged payload's structure, import containment and manifest before publication, but no longer recomputes the fingerprint it computed a few lines earlier from the same files (`validatePayload(..., false)`). `promote` passes its already-validated candidate manifest to `preflightPayload`. The target is immutable and the store lock is held between the two.
+- Evidence (verified): `node --test scripts/gateway-payload-deploy.test.mjs` (Node 22.22.0) went from 47/47 in 4 min 20 s before, run in parallel with other lanes, to 48/48 in 140 s after. The new test, `source builds reject compiled imports that are not shipped before publication`, checks that such a build fails, that no `versions/candidate` directory exists and that no deployment state was written. Negative control: the implementing lane's first version dropped the whole `validatePayload` call. That version fails the new test, because an unshipped import (the L-0 check) would have been published into the store before promotion rejected it. The existing test `source runtime base copy rejects a projection changed after admission` still proves that a file tampered after a copy is rejected.
+- Evidence (inferred): at the measured 5.4–6.3 s per fingerprint, this saves about 6 s per source build and about 6 s per promotion. That is less than the plan's 15–20 s estimate, which assumed three removable repeats. It is not yet measured with deploy phase records.
+- Changes: this commit (`scripts/gateway-payload-deploy.mjs`, its test, the Gateway README payload section).
+- Tasks added: none.
+- Kept on purpose: the recovery validation in `promote`. It validates the prior or previous selection, which is not the candidate validated for promotion, so it is not a repeat. Every check after a copy, the launcher's check and the post-restart identity check are also unchanged.
+- Deviations: the plan's count tests were not added. The helper has no fingerprint injection point, and adding one only for a test is a test-only seam, which the simplification rules forbid. The removals are covered by the behavior test above and by reading the code.
+- For the next agent: L-1c's `deploy.jsonl` phase durations from the second rebuild after this lands can confirm the saving. L-13 is unblocked.
