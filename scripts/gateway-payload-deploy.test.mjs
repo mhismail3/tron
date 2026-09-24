@@ -1,4 +1,5 @@
 import { strict as assert } from "node:assert";
+import { watch } from "node:fs";
 import { chmod, cp, lstat, mkdir, mkdtemp, readFile, readlink, readdir, realpath, rename, rm, stat, symlink, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { tmpdir } from "node:os";
@@ -27,6 +28,7 @@ import {
   buildSourcePayload,
   resolveSourcePayloadBase,
   copyValidatedPayloadBase,
+  cleanupPayloadVersions,
   captureReusableSourcePackage,
   withGatewaySourceBuildLock,
   preflightPayload,
@@ -655,6 +657,7 @@ test("source builds compile privately and leave the trusted source tree unchange
   try {
     const { store, sourceRoot, gatewayRoot, sourceFiles } = await makeSourceBuildFixture(root);
     const before = new Map(await Promise.all(Object.keys(sourceFiles).map(async (path) => [path, await readFile(join(gatewayRoot, path))])));
+    const tempStagingBefore = (await readdir(tmpdir())).filter((name) => name.startsWith("tron-gateway-source-staging-"));
     const commands = [];
     const result = await buildSourcePayload({
       paths: store, config: { sourceRoot }, candidateVersion: "candidate",
@@ -668,6 +671,8 @@ test("source builds compile privately and leave the trusted source tree unchange
     });
     assert.equal(result.manifest.version, "candidate");
     assert.equal(commands.length, 1);
+    assert.deepEqual((await readdir(tmpdir())).filter((name) => name.startsWith("tron-gateway-source-staging-")), tempStagingBefore);
+    assert.deepEqual((await readdir(store.channelRoot)).filter((name) => name.startsWith(".source-staging-")), []);
     assert.equal(commands[0].tool, process.execPath);
     assert.equal(commands[0].args.includes("run"), false);
     assert.equal(await readFile(join(gatewayRoot, "dist", "index.js")).catch(() => undefined), undefined);
@@ -700,6 +705,57 @@ test("source builds compile privately and leave the trusted source tree unchange
 
 // A source build that compiles to an import outside app/ must fail before it
 // is published, so it never becomes a selectable candidate.
+test("source builds remove crash leftovers and discard failed private staging without publishing", async () => {
+  const root = await realpath(await mkdtemp(join(tmpdir(), "tron-source-staging-crash-")));
+  try {
+    const { store, sourceRoot } = await makeSourceBuildFixture(root);
+    const stale = join(store.channelRoot, ".source-staging-crashed-build");
+    await mkdir(join(stale, "payload", "app"), { recursive: true });
+    await writeFile(join(stale, "payload", "app", "partial"), "partial copy");
+
+    await assert.rejects(buildSourcePayload({
+      paths: store, config: { sourceRoot }, candidateVersion: "failed-candidate",
+      runCommand: async (tool, args) => {
+        await mkdir(args.at(-1), { recursive: true });
+      },
+    }), /source compiler output is incomplete|ENOENT/);
+    assert.equal(await stat(join(store.versionsRoot, "failed-candidate")).catch(() => undefined), undefined);
+    assert.equal(await stat(stale).catch(() => undefined), undefined);
+    assert.deepEqual((await readdir(store.channelRoot)).filter((name) => name.startsWith(".source-staging-")), []);
+  } finally { await makeTreeWritable(root); await rm(root, { recursive: true, force: true }); }
+});
+
+test("concurrent retention ignores a live source staging directory", async () => {
+  const root = await realpath(await mkdtemp(join(tmpdir(), "tron-source-staging-retention-")));
+  try {
+    const { store, sourceRoot } = await makeSourceBuildFixture(root);
+    let retained;
+    const retentionDone = new Promise((resolve, reject) => {
+      const watcher = watch(store.channelRoot, async (_event, name) => {
+        if (!String(name).startsWith(".source-staging-")) return;
+        watcher.close();
+        const staging = join(store.channelRoot, String(name));
+        try {
+          await cleanupPayloadVersions(store);
+          retained = await stat(staging);
+          resolve();
+        } catch (error) { reject(error); }
+      });
+    });
+    const build = buildSourcePayload({
+      paths: store, config: { sourceRoot }, candidateVersion: "retention-candidate",
+      runCommand: async (tool, args) => {
+        await mkdir(args.at(-1), { recursive: true });
+        await writeFile(join(args.at(-1), "index.js"), `${"c".repeat(1_024)}\n`);
+      },
+    });
+    await retentionDone;
+    assert.ok(retained.isDirectory());
+    const result = await build;
+    assert.equal(result.manifest.version, "retention-candidate");
+  } finally { await makeTreeWritable(root); await rm(root, { recursive: true, force: true }); }
+});
+
 test("source builds reject compiled imports that are not shipped before publication", async () => {
   const root = await realpath(await mkdtemp(join(tmpdir(), "tron-source-unshipped-import-")));
   try {

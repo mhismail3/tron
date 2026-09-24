@@ -924,8 +924,13 @@ being stored in `gateway/update-config.json`. It invokes no client-supplied comm
 path. The LaunchAgent-owned helper reads that projection only: source mode invokes the
 repository's local TypeScript compiler with its checked-in config and a private temporary
 `outDir` (it never writes the trusted repository's `packages/gateway/dist`), then stages
-only verified output. The trusted source checkout must already have its lockfile-pinned
-Gateway development dependencies installed (prepare them with `cd packages/gateway && npm ci`
+only verified output. The helper copies the active payload once into a private
+`.source-staging-*` directory directly under the channel root, outside `versions/`
+and its retention scan. A per-channel source-build lock keeps cleanup of crash-left
+staging directories from touching a live build; validated staging is atomically
+renamed into `versions/` inside the store-locked publication transaction. The trusted
+source checkout must already have its lockfile-pinned Gateway development dependencies
+installed (prepare them with `cd packages/gateway && npm ci`
 before requesting a source rebuild); the helper never installs dependencies or contacts the
 registry during an update. Source-only updates require the package lock and dependency declarations
 to match the selected validated payload exactly and reuse that payload's complete fingerprinted

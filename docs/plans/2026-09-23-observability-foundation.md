@@ -2,7 +2,7 @@
 
 - **Started:** 2026-09-23
 - **Status:** Active
-- **Last updated:** 2026-09-24, L-1d
+- **Last updated:** 2026-09-24, L-13
 - **Goal:** Every Tron process records the right signals automatically, in a known place, at a meaningful level, so a failure can be diagnosed in one pass from what was already recorded.
 
 Follow the [plan protocol](README.md#protocol) to claim tasks and hand off.
@@ -224,7 +224,7 @@ user reinstalls manually, so batch them for one reinstall.
 | L-19 | Needs scoping | `scripts/tron mac verify` fails on the live install after a source rebuild: "PID selected payload path mismatch" and "authenticated system.info identity/channel mismatch" on the Tailscale host. Find whether the install or the check is wrong | none | |
 | L-11 | Done | Remove duplicate payload validations within one deploy run | none | observability session (L-11 lane), 2026-09-24 |
 | L-12 | Done | Faster Node payload fingerprint with identical output | none | observability session (L-12 lane), 2026-09-24 |
-| L-13 | Claimed | Stage source payloads in the store and rename instead of copying twice | L-11 | observability session (L-13 lane), 2026-09-24 |
+| L-13 | Done | Stage source payloads in the store and rename instead of copying twice | L-11 | observability session (L-13 lane), 2026-09-24 |
 | L-14 | Needs scoping | APFS clone copies and payload retention count | L-13 | |
 
 ## Task details
@@ -755,3 +755,13 @@ The 2026-09-23 17:33 UTC incident's records have rotated away, so its timeline i
 - Kept on purpose: foreground mirroring for unsupervised runs. The 1 MiB cap reflects that the file holds only rare launcher and Node abort text.
 - Deviations: the plan put `StandardErrorPath` in the LaunchAgent plist. launchd takes that path literally, with no `~` expansion, and the plist is a static file in the app bundle, so it cannot name a per-user home. The launcher now owns the redirect instead; supervisor review caught this before merge. During the lane's first Mac build, `bundle-gateway.sh` ran `npm ci` through the worktree's `node_modules` symlink and emptied the main checkout's Gateway dependencies. The supervisor restored them with `npm ci`, using the pinned npm and the lockfile (the same 187 packages; the Pi SDK check passes). Lanes that build the Mac app must have their own real `node_modules`, never a symlink.
 - For the next agent: takes effect only after the user reinstalls the Mac app; batch it with L-1b and L-4.
+
+### L-13 · Done · 2026-09-24 · observability session (L-13 lane)
+
+- Result: a source rebuild copies the active payload once, into a private `.source-staging-*` directory directly under the channel root, which is outside `versions/` and its retention scan. The staged tree is then validated and renamed into `versions/` inside the existing store-locked publication transaction. A new per-channel source-build lock (`.source-build.lock`, using `proper-lockfile` like the other locks) is held while staging, not while compiling, and lets the next build remove a crash's leftover staging directory without mistaking a live build's directory for stale. The `/tmp` staging directory and the second full copy are gone.
+- Evidence (verified): with `node --test scripts/gateway-payload-deploy.test.mjs`, the focused source-build tests went from 3/3 in 18 s to 5/5 in 37 s, and the whole file passed 50/50 in 167 s. New tests cover four cases. A failing compile after staging exists publishes nothing and removes the staging directory. A crash's leftover staging directory is removed by the next build, and no version becomes visible. Retention during a live build leaves that build's staging directory alone. A successful build creates no `/tmp` staging directory and leaves no staging behind. Each test was negative-controlled.
+- Evidence (inspected, inferred): `copyValidatedPayloadBase` is now the only full copy. At the plan's measured 10.6 s and about 594 MB per copy, each source rebuild saves about 10.6 s and 594 MB of writes.
+- Changes: this commit (`scripts/gateway-payload-deploy.mjs` and its test, the Gateway README update section).
+- Tasks added: none.
+- Kept on purpose: every validation L-11 kept, the post-copy fingerprint check, and the publication transaction's single store lock. A crash's leftover now stays in the Tron home until the next build, rather than in `/tmp` until reboot.
+- For the next agent: L-14 is unblocked. After the user's second rebuild with this change, the `deploy.jsonl` phase durations will show the combined L-11, L-12 and L-13 saving.

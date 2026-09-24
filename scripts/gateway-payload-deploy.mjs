@@ -788,6 +788,20 @@ async function withStoreLock(paths, operation) {
   try { return await operation(); } finally { await release(); }
 }
 
+async function withSourcePayloadBuildLock(paths, operation) {
+  await assertStoreRoots(paths);
+  await mkdir(paths.channelRoot, { recursive: true, mode: 0o700 });
+  await assertStoreRoots(paths);
+  const lockPath = join(paths.channelRoot, ".source-build.lock");
+  const handle = await open(lockPath, "a", 0o600);
+  await handle.close();
+  const release = await lockfile.lock(lockPath, {
+    realpath: false,
+    retries: { retries: 100, minTimeout: 25, maxTimeout: 250 },
+  });
+  try { return await operation(); } finally { await release(); }
+}
+
 async function withOperationLock(paths, operation) {
   await assertStoreRoots(paths);
   await mkdir(paths.channelRoot, { recursive: true, mode: 0o700 });
@@ -2219,6 +2233,16 @@ async function stageConfiguredArtifact(paths, config, requestedVersion) {
   return result.manifest.version;
 }
 
+async function removeStaleSourcePayloadStaging(paths) {
+  const entries = await readdir(paths.channelRoot, { withFileTypes: true });
+  for (const entry of entries) {
+    if (!entry.name.startsWith(".source-staging-") || !entry.isDirectory() || entry.isSymbolicLink()) continue;
+    const stalePath = join(paths.channelRoot, entry.name);
+    await makeMutable(stalePath);
+    await rm(stalePath, { recursive: true, force: true });
+  }
+}
+
 export async function buildSourcePayload({ paths, config, candidateVersion, timeoutMs = 120_000, runCommand = runBounded, environment = process.env }) {
   const active = await resolveSourcePayloadBase(paths, config, environment);
   const gatewayRoot = join(config.sourceRoot, "packages", "gateway");
@@ -2226,7 +2250,6 @@ export async function buildSourcePayload({ paths, config, candidateVersion, time
   // the package build script here: its configured outDir is the trusted source
   // tree's packages/gateway/dist, which must remain byte-for-byte unchanged.
   const compilerOutput = await mkdtemp(join(tmpdir(), "tron-gateway-source-build-"));
-  let privateStaging;
   try {
     let source;
     await withGatewaySourceBuildLock(config.sourceRoot, async () => {
@@ -2245,76 +2268,78 @@ export async function buildSourcePayload({ paths, config, candidateVersion, time
     const version = candidateVersion ?? `${source.sourcePackage.version}-source-${Date.now()}`;
     if (!validComponent(version, 128)) throw new Error("source build produced an invalid candidate version");
     const target = join(paths.versionsRoot, version);
-    // Keep the expensive private copy outside the channel projection. A
-    // staging directory under versionsRoot would be visible to retention and
-    // could be removed by a concurrent updater.
-    const temporaryParent = await mkdtemp(join(tmpdir(), "tron-gateway-source-staging-"));
-    const temporary = join(temporaryParent, "payload");
-    try {
-      await copyValidatedPayloadBase(active, temporary);
-      await makeMutable(temporary);
-      await rm(join(temporary, "app", "dist"), { recursive: true, force: true });
-      await verifiedSourceCompilerOutput(compilerOutput);
-      await cp(compilerOutput, join(temporary, "app", "dist"), { recursive: true, errorOnExist: true, force: false });
-      await writeFile(join(temporary, "app", "package.json"), source.packageBytes);
-      await writeFile(join(temporary, "app", "package-lock.json"), source.lockBytes);
-      if (await validatePayloadPushConfiguration(temporary, paths.channel) !== activePushConfiguration) {
-        throw new Error("source update changed the active product PushService.xcconfig");
+    return await withSourcePayloadBuildLock(paths, async () => {
+      // The build lock is separate from the store lock: it serializes source
+      // staging so a later build can safely reap crash leftovers without ever
+      // mistaking a live builder's directory for stale data.
+      await removeStaleSourcePayloadStaging(paths);
+      const stagingParent = await mkdtemp(join(paths.channelRoot, ".source-staging-"));
+      const temporary = join(stagingParent, "payload");
+      try {
+        await copyValidatedPayloadBase(active, temporary);
+        await makeMutable(temporary);
+        await rm(join(temporary, "app", "dist"), { recursive: true, force: true });
+        await verifiedSourceCompilerOutput(compilerOutput);
+        await cp(compilerOutput, join(temporary, "app", "dist"), { recursive: true, errorOnExist: true, force: false });
+        await writeFile(join(temporary, "app", "package.json"), source.packageBytes);
+        await writeFile(join(temporary, "app", "package-lock.json"), source.lockBytes);
+        if (await validatePayloadPushConfiguration(temporary, paths.channel) !== activePushConfiguration) {
+          throw new Error("source update changed the active product PushService.xcconfig");
+        }
+        // The updater and helper are part of the trusted source revision, not
+        // stale files inherited from whichever payload happened to be active.
+        await copyTrustedSourceScripts(config.sourceRoot, temporary);
+        const fingerprint = await payloadFingerprint(temporary);
+        const manifest = {
+          ...active.manifest,
+          schema: SCHEMA, kind: KIND, channel: paths.channel, version,
+          gatewayVersion: source.sourcePackage.version, sourceRevision: await gitRevision(config.sourceRoot),
+          runtimeEpoch: randomUUID(), payloadFingerprint: fingerprint,
+        };
+        payloadManifest(manifest, { channel: paths.channel, version });
+        await atomicJson(join(temporary, "manifest.json"), manifest);
+        // Structure, import containment and manifest must pass before anything
+        // is published; the fingerprint was computed from these files just above.
+        await validatePayload(temporary, { channel: paths.channel, version, payloadFingerprint: fingerprint }, false);
+        // Compilation and payload copying above are private and do not hold the
+        // channel lock. Publication is one serialized transaction:
+        // immutable finalization, rename, candidate state, and retention all
+        // observe the same channel snapshot. applyPayload holds only the
+        // distinct operation lock, so this cannot recursively deadlock it.
+        return await withStoreLock(paths, async () => {
+          try {
+            await access(target);
+            throw new Error(`version ${version} already exists`);
+          } catch (error) {
+            if (error?.code !== "ENOENT") throw error;
+          }
+          await mkdir(paths.versionsRoot, { recursive: true, mode: 0o700 });
+          await makeImmutable(temporary);
+          // The rename removes the entry from its private parent; keep the tree
+          // root writable until it has reached versions/, then seal it there.
+          await chmod(temporary, 0o755);
+          await chmod(stagingParent, 0o700);
+          try { await rename(temporary, target); } catch (error) {
+            if (error?.code === "EEXIST") throw new Error(`version ${version} already exists`);
+            throw error;
+          }
+          await chmod(target, 0o555);
+          await writeState(paths, {
+            state: "prepared", channel: paths.channel, version, payloadFingerprint: fingerprint,
+            sourceRevision: manifest.sourceRevision, runtimeEpoch: manifest.runtimeEpoch,
+            candidateIdentity: {
+              version, gatewayVersion: manifest.gatewayVersion, sourceRevision: manifest.sourceRevision,
+              runtimeEpoch: manifest.runtimeEpoch, payloadFingerprint: fingerprint,
+            },
+          });
+          await cleanupPayloadVersionsUnlocked(paths);
+          return { root: target, manifest };
+        });
+      } finally {
+        await makeMutable(stagingParent).catch(() => {});
+        await rm(stagingParent, { recursive: true, force: true });
       }
-      // The updater and helper are part of the trusted source revision, not
-      // stale files inherited from whichever payload happened to be active.
-      await copyTrustedSourceScripts(config.sourceRoot, temporary);
-      const fingerprint = await payloadFingerprint(temporary);
-      const manifest = {
-        ...active.manifest,
-        schema: SCHEMA, kind: KIND, channel: paths.channel, version,
-        gatewayVersion: source.sourcePackage.version, sourceRevision: await gitRevision(config.sourceRoot),
-        runtimeEpoch: randomUUID(), payloadFingerprint: fingerprint,
-      };
-      payloadManifest(manifest, { channel: paths.channel, version });
-      await atomicJson(join(temporary, "manifest.json"), manifest);
-      // Structure, import containment and manifest must pass before anything
-      // is published; the fingerprint was computed from these files just above.
-      await validatePayload(temporary, { channel: paths.channel, version, payloadFingerprint: fingerprint }, false);
-      // Compilation and payload copying above are private and do not hold the
-      // channel lock. Publication is one serialized transaction:
-      // immutable finalization, rename, candidate state, and retention all
-      // observe the same channel snapshot. applyPayload holds only the
-      // distinct operation lock, so this cannot recursively deadlock it.
-      return await withStoreLock(paths, async () => {
-        try {
-          await access(target);
-          throw new Error(`version ${version} already exists`);
-        } catch (error) {
-          if (error?.code !== "ENOENT") throw error;
-        }
-        privateStaging = join(paths.versionsRoot, `.source-staging-${version}-${process.pid}-${randomUUID()}`);
-        await mkdir(paths.versionsRoot, { recursive: true, mode: 0o700 });
-        await cp(temporary, privateStaging, {
-          recursive: true, errorOnExist: true, force: false, verbatimSymlinks: true,
-        });
-        await makeImmutable(privateStaging);
-        try { await rename(privateStaging, target); } catch (error) {
-          if (error?.code === "EEXIST") throw new Error(`version ${version} already exists`);
-          throw error;
-        }
-        await writeState(paths, {
-          state: "prepared", channel: paths.channel, version, payloadFingerprint: fingerprint,
-          sourceRevision: manifest.sourceRevision, runtimeEpoch: manifest.runtimeEpoch,
-          candidateIdentity: {
-            version, gatewayVersion: manifest.gatewayVersion, sourceRevision: manifest.sourceRevision,
-            runtimeEpoch: manifest.runtimeEpoch, payloadFingerprint: fingerprint,
-          },
-        });
-        await cleanupPayloadVersionsUnlocked(paths);
-        return { root: target, manifest };
-      });
-    } catch (error) {
-      if (privateStaging) await rm(privateStaging, { recursive: true, force: true });
-      throw error;
-    } finally {
-      await rm(temporaryParent, { recursive: true, force: true });
-    }
+    });
   } finally {
     await rm(compilerOutput, { recursive: true, force: true });
   }
