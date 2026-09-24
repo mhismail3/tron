@@ -206,11 +206,11 @@ user reinstalls manually, so batch them for one reinstall.
 | L-3b | Needs scoping | The phone has two persisted diagnostic stores, `AppLog` and `IOSClientDiagnosticStore` (catalog and connection records). Decide whether one owner should hold both | L-3 | |
 | L-1b | Done | Launcher records | none | observability session (L-1b lane), 2026-09-24 |
 | L-1d | Done | Out-of-band stderr capture | L-2 | observability session (L-1d lane), 2026-09-24 |
-| L-4 | Ready | Mac app file logging | L-2 | |
+| L-4 | Claimed | Mac app file logging | L-2 | observability session (L-4 lane), 2026-09-24 |
 | L-5 | Done | `scripts/tron diagnose` collector | L-1c, L-2 | observability session (L-5 lane), 2026-09-24 |
 | L-6 | Ready | Event catalog and the incident rule | L-2 | |
 | L-7 | Done | Stall cause in event-loop-delay records | L-2 | observability session, 2026-09-24 |
-| L-8 | Needs scoping | Gateway idle heap growth | none | |
+| L-8 | Claimed | Gateway idle heap growth | none | observability session (L-8 lane), 2026-09-24 |
 | L-9 | Done | Phone handling of a stalled or unreachable but live Gateway (proposal for the user) | L-7, L-10 | observability session (L-9 lane), 2026-09-24 |
 | L-9a | Needs approval | Phone labels a connection failure as "No path to this Mac" when attempts never opened a transport, and keeps "Reconnecting" otherwise; no timing change (option A in L-9 findings) | L-9 | |
 | L-9b | Needs approval | Choose stall tolerance (third missed pong, option B) or a shorter never-opened handshake (option D), after a few days of L-9a records | L-9a | |
@@ -221,11 +221,11 @@ user reinstalls manually, so batch them for one reinstall.
 | L-16 | Done | Restart drain hangs on terminal-receipt persistence | none | observability session, 2026-09-24 |
 | L-17 | Needs approval | Judge a drain stalled by its oldest blocker without progress, not by any change in the blocker set | L-16 | |
 | L-18 | Needs approval | Decide whether a restart drain proceeds when only unresolved (blocked) persistence owners remain | L-16 | |
-| L-19 | Needs scoping | `scripts/tron mac verify` fails on the live install after a source rebuild: "PID selected payload path mismatch" and "authenticated system.info identity/channel mismatch" on the Tailscale host. Find whether the install or the check is wrong | none | |
+| L-19 | Claimed | `scripts/tron mac verify` fails on the live install after a source rebuild: "PID selected payload path mismatch" and "authenticated system.info identity/channel mismatch" on the Tailscale host. Find whether the install or the check is wrong | none | observability session (L-19 lane), 2026-09-24 |
 | L-11 | Done | Remove duplicate payload validations within one deploy run | none | observability session (L-11 lane), 2026-09-24 |
 | L-12 | Done | Faster Node payload fingerprint with identical output | none | observability session (L-12 lane), 2026-09-24 |
 | L-13 | Done | Stage source payloads in the store and rename instead of copying twice | L-11 | observability session (L-13 lane), 2026-09-24 |
-| L-14 | Needs scoping | APFS clone copies and payload retention count | L-13 | |
+| L-14 | Claimed | APFS clone copies and payload retention count | L-13 | observability session (L-14 lane), 2026-09-24 |
 
 ## Task details
 
