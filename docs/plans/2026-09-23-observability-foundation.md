@@ -2,7 +2,7 @@
 
 - **Started:** 2026-09-23
 - **Status:** Active
-- **Last updated:** 2026-09-24, L-1b
+- **Last updated:** 2026-09-24, L-9
 - **Goal:** Every Tron process records the right signals automatically, in a known place, at a meaningful level, so a failure can be diagnosed in one pass from what was already recorded.
 
 Follow the [plan protocol](README.md#protocol) to claim tasks and hand off.
@@ -210,7 +210,9 @@ user reinstalls manually, so batch them for one reinstall.
 | L-6 | Ready | Event catalog and the incident rule | L-2 | |
 | L-7 | Done | Stall cause in event-loop-delay records | L-2 | observability session, 2026-09-24 |
 | L-8 | Needs scoping | Gateway idle heap growth | none | |
-| L-9 | Claimed | Phone handling of a stalled or unreachable but live Gateway (proposal for the user) | L-7, L-10 | observability session (L-9 lane), 2026-09-24 |
+| L-9 | Done | Phone handling of a stalled or unreachable but live Gateway (proposal for the user) | L-7, L-10 | observability session (L-9 lane), 2026-09-24 |
+| L-9a | Needs approval | Phone labels a connection failure as "No path to this Mac" when attempts never opened a transport, and keeps "Reconnecting" otherwise; no timing change (option A in L-9 findings) | L-9 | |
+| L-9b | Needs approval | Choose stall tolerance (third missed pong, option B) or a shorter never-opened handshake (option D), after a few days of L-9a records | L-9a | |
 | L-10 | Done | iOS connect-failure records say whether the socket ever opened, and on which interface | none | observability session, 2026-09-24 |
 | L-15 | Done | Startup timing: stop to bound and bound to first startup phase | L-2 | observability session, 2026-09-24 |
 | L-15b | Done | Fix the dominant startup cost the L-15 records name on the next real restart (the user's rebuild) | L-15 | observability session (L-15b lane), 2026-09-24 |
@@ -520,6 +522,35 @@ user reinstalls manually, so batch them for one reinstall.
 - `MAX_RETAINED_VERSIONS` is 8 (about 4.7 GB without clones). Propose a count
   for the user to decide; do not change it without approval.
 
+## Findings
+
+### L-9 findings
+
+Current behavior (inspected, with file references in the L-9 handoff source):
+
+- The phone pings every 10 s and needs a pong within 8 s (`GatewayConnectionPolicy.swift`). A miss closes the socket, so any Gateway stall longer than about 8 s becomes a reconnect, and a dead socket is detected within about 18 s.
+- Reconnect delay starts at 2 s, grows by 1.7× per attempt with 20% jitter, and is capped at 15 s. Each attempt can take up to the 15 s handshake deadline.
+- The user sees "Reconnecting", a "Gateway connection unavailable" notice after 2 s, and "Session list unavailable" after 3 catalog failures.
+
+With L-10, a failed connect says whether the transport ever opened. With L-7, a Mac-side stall carries its cause. A person can now tell a dead path (every attempt ends at `transport-open` with `transportOpened=false`, and the Mac has no `connection.opened`) from a stalled Gateway (a `ping_timeout` or `hello-receive` failure during a `gateway.event-loop-delay`). The phone cannot see the Mac-side evidence while disconnected.
+
+| Option | Change | Detection versus spurious reconnects | Size |
+| --- | --- | --- | --- |
+| A | After two failures that never opened a transport, show "No path to this Mac" with the interfaces and Retry; otherwise keep "Reconnecting" | No timing change and no new reconnects; only the explanation changes | about 200 lines |
+| B | Tear down only after three consecutive missed pongs, like the Gateway's own rule | Stalls of 6–36 s stop causing reconnects; dead-socket detection moves from about 18 s to about 64 s | about 150 lines, plus the connection-contract fixture |
+| C | Keep the connection through liveness misses until a write fails or 60 s of inactivity | Fewest reconnects, but a half-open Tailscale path can hang for minutes; it reverses a documented design rule | 300+ lines; not recommended |
+| D | Give up on a transport that has not opened after about 5 s | Catches a healed path about 10 s sooner per cycle, but roughly doubles attempts during an outage | about 80 lines |
+
+Recommendation: ship A first (L-9a). It changes no timing and produces the records that decide between B and D (L-9b). Questions for the user:
+
+1. Is two-state wording acceptable, or should it stay one neutral state?
+2. Once A's data is in, which matters more: fewer spurious reconnects (B) or the earliest reconnect after a path heals (D)?
+3. Should the phone show the Mac's stall evidence in its own Logs after reconnecting?
+4. May client liveness add a value to the shared connection-contract fixture?
+5. Under B, is fencing work for up to 64 s during a stall acceptable?
+
+The 2026-09-23 17:33 UTC incident's records have rotated away, so its timeline is inferred from the code: missed pongs tore down a healthy socket, then attempts that never opened failed until Tailscale fell back to its relay.
+
 ## Handoff log
 
 ### L-0 · Done · 2026-09-23 · planning session
@@ -667,3 +698,11 @@ user reinstalls manually, so batch them for one reinstall.
 - Kept on purpose: records are written only for decisions, not for every healthy launch. The refused selection's claimed identity is recorded even though it is untrusted, because it names what did not run.
 - Deviations: the plan did not say which condition emits `selection-rejected` and which emits `bundled-fallback`. By supervisor decision, a refused store selection that falls back emits only `bundled-fallback`, and a refused pending attempt that launches nothing emits `selection-rejected`.
 - For the next agent: this takes effect only in a Mac app build the user reinstalls; batch it with L-1d and L-4. Until then, L-1c's lookup still finds `gateway.fatal-startup` records but no launcher records.
+
+### L-9 · Done · 2026-09-24 · observability session (L-9 lane)
+
+- Result: scoping only. The proposal is in the L-9 findings above. L-9a (option A) and L-9b (B or D) were added as Needs approval, because both change what the user sees or when the app reconnects.
+- Evidence (inspected): the phone's liveness, reconnect, notice and diagnostics owners in `packages/ios-app/Sources/Gateway` and `packages/ios-app/Sources/State`, the Gateway heartbeat in `packages/gateway/src/transport/server.ts`, and `packages/gateway/docs/connection-resilience.md`. The 2026-09-23 17:33 UTC records had rotated out of `gateway.jsonl.1`, so that timeline is inferred.
+- Changes: this commit (plan only).
+- Tasks added: L-9a, L-9b.
+- For the next agent: nothing ships until the user answers the findings' questions.
