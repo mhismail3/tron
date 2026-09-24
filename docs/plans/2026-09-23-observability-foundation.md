@@ -2,7 +2,7 @@
 
 - **Started:** 2026-09-23
 - **Status:** Active
-- **Last updated:** 2026-09-24, L-1c
+- **Last updated:** 2026-09-24, L-16
 - **Goal:** Every Tron process records the right signals automatically, in a known place, at a meaningful level, so a failure can be diagnosed in one pass from what was already recorded.
 
 Follow the [plan protocol](README.md#protocol) to claim tasks and hand off.
@@ -213,7 +213,9 @@ user reinstalls manually, so batch them for one reinstall.
 | L-9 | Needs scoping | Phone handling of a stalled or unreachable but live Gateway (proposal for the user) | L-7, L-10 | |
 | L-10 | Ready | iOS connect-failure records say whether the socket ever opened, and on which interface | none | |
 | L-15 | Ready | Startup timing: stop to bound and bound to first startup phase | L-2 | |
-| L-16 | Claimed | Restart drain hangs on terminal-receipt persistence | none | observability session, 2026-09-24 |
+| L-16 | Done | Restart drain hangs on terminal-receipt persistence | none | observability session, 2026-09-24 |
+| L-17 | Needs approval | Judge a drain stalled by its oldest blocker without progress, not by any change in the blocker set | L-16 | |
+| L-18 | Needs approval | Decide whether a restart drain proceeds when only unresolved (blocked) persistence owners remain | L-16 | |
 | L-11 | Ready | Remove duplicate payload validations within one deploy run | none | |
 | L-12 | Ready | Faster Node payload fingerprint with identical output | none | |
 | L-13 | Ready | Stage source payloads in the store and rename instead of copying twice | L-11 | |
@@ -442,6 +444,31 @@ user reinstalls manually, so batch them for one reinstall.
   and a visible reason. Any change to how long accepted work is waited for is
   a user-visible behavior change and needs the user's approval.
 
+### L-17 — Stall judged per blocker (needs the user's approval)
+
+- Today the drain is "stalled" only after 180 s with no change at all in its
+  blocker fingerprint (`DRAIN_STALL_LIMIT_MS` in `gateway-main.ts`). Any
+  admission, settlement or progress of any blocker resets it, so a drain with
+  one permanently stuck entry plus unrelated activity (subagents finishing,
+  new receipts) never stalls. This matches the 2026-09-23 08:22 incident,
+  which waited over 7 minutes without the stall firing.
+- Proposal: stall when the oldest blocker has made no progress for the
+  limit, regardless of other churn. This shortens how long accepted work is
+  waited for in that case, so it ships only with the user's approval.
+
+### L-18 — Unresolved persistence owners (needs the user's approval)
+
+- A canonical write that stays uncertain past its 20 s retry window
+  (`retryDurableWrite` in `runtime-slot.ts`) and a failed extension receipt
+  keep their `terminal-receipt-persistence` work entry for the life of the
+  process by design: nothing may claim the write resolved. The slot already
+  reports those writes as `suspect`, but the work entry still blocks the drain,
+  so only the stall bound or Restart Now ends it. A restart and recovery is
+  the documented way to resolve them.
+- Decide whether a drain whose only remaining blockers are such unresolved
+  owners proceeds (logging each at error) instead of waiting for the stall
+  bound. This changes how long accepted work is waited for.
+
 ### L-11 — Duplicate payload validations
 
 - In `scripts/gateway-payload-deploy.mjs` one source rebuild runs a full
@@ -528,3 +555,13 @@ user reinstalls manually, so batch them for one reinstall.
 - Kept on purpose: the lookup reads only the active `gateway.jsonl`, not rotated segments; a crash from this attempt is written seconds earlier. A user-requested rollback gets its own timeline in which `rollback`/`rolled-back` are info and `rolled-back` is success. The four-line wiring inside `promote`'s catch is not covered by an automated test because `promote` needs a live authenticated listener; it was reviewed by reading and proven through the acceptance run of its lookup.
 - Deviations: in the acceptance run the payload root was under `/tmp`, so the recorded path reads `/private<payload>/…` (the process resolved `/private/tmp` while `TRON_GATEWAY_PAYLOAD_ROOT` named `/tmp`). Production payload roots are not symlinked, as L-1a's evidence shows `<payload>/…`.
 - For the next agent: the helper that runs a rebuild is the running build's, so this takes effect from the second rebuild after it lands. L-1b's launcher records must carry the candidate's `payloadVersion` (and `runtimeEpoch` when known) for the lookup to match; its message becomes the text after "New build was rolled back by the launcher:". L-5 and L-11 can now read phase durations from `deploy.jsonl`.
+
+### L-16 · Done · 2026-09-24 · observability session
+
+- Result: scoping plus one diagnostic fix. The 2026-09-23 08:22 logs had already rotated away, so that incident's exact blockers cannot be recovered; the findings below are from the code. Receipt-backed RPCs now register their whole execution as a distinct `rpc-mutation` work kind carrying the method and session, and drain blocker summaries, `gateway.restart-drain.waiting` records and the phone's drain row name them ("2 running requests"). The phone also labels `knowledge-observation`, which it previously counted as "other".
+- Findings: (1) `terminal-receipt-persistence` was shared by six owners, one of which, `GatewayService.mutation`, spans the entire execution of every receipt-backed RPC. `session.compact`, `session.navigate` (branch summary), `session.bash` and `packages.update` can run for minutes, so "8 terminal-receipt-persistence, settling" could have been eight executing requests shown as completion receipts. (2) The drain bound is the 180 s no-progress stall plus Restart Now (which works since `e142de727`), but any blocker churn resets the stall (L-17). (3) Unresolved canonical writes and failed extension receipts hold their work entry for the process lifetime by design (L-18). (4) The waiting record listed only category, state and age, so no incident could name the owner; it now includes the method for requests.
+- Evidence: `npx vitest run src/transport src/admin src/sessions` with Node 22.22.0: 82 files, 979/979, 50 s. New tests: `administrative-drain-snapshot.test.ts` (an executing request is an active `rpc-mutation` blocker with its method and session; receipt persistence stays `settling` without a method) and a `gateway-restart.test.ts` case (a pending `session.rename` is admitted as `rpc-mutation` with method and session). Negative control: restoring the old kind and dropping `method` from summaries fails both. iOS: `scripts/tron-ios-test run --only-testing TronMobileTests/GatewayUpdateControlPlaneTests` 11/11 with the new label assertion.
+- Changes: this commit (`gateway-service.ts`, `gateway-work-registry.ts`, `runtime-registry.ts`, `protocol/types.ts`, `gateway-main.ts`, iOS drain labels, tests, Gateway README drain snapshot).
+- Tasks added: L-17 and L-18, both needing the user's approval because they change how long accepted work is waited for.
+- Kept on purpose: no change to what the drain waits for or for how long. The five in-slot receipt owners keep `terminal-receipt-persistence`; they are receipt or marker persistence.
+- For the next agent: the next stuck drain's `gateway.restart-drain.waiting` records (now retained for weeks) name each executing request's method, which should decide whether L-17 or L-18 is the fix that matters.

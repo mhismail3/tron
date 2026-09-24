@@ -101,6 +101,20 @@ describe("Gateway administrative restart", () => {
     expect(registry.size).toBe(0);
   });
 
+  it("admits a receipt-backed request as an rpc-mutation naming its method and session", async () => {
+    const registry = new GatewayWorkRegistry("epoch", 8);
+    let finishRename!: () => void;
+    const gateway = service({ workRegistry: registry, rename: () => new Promise<void>((resolve) => { finishRename = resolve; }) });
+    const pending = gateway.invoke(client, "session.rename", { commandId: "rename-command", sessionId: "session-1", name: "Renamed" });
+    await vi.waitFor(() => expect(finishRename).toBeTypeOf("function"));
+    expect(registry.facts()).toEqual([
+      expect.objectContaining({ kind: "rpc-mutation", method: "session.rename", sessionId: "session-1" }),
+    ]);
+    finishRename();
+    await pending;
+    expect(registry.size).toBe(0);
+  });
+
   it("refuses process replacement while a terminal PTY is alive", async () => {
     vi.stubEnv("TRON_GATEWAY_SUPERVISED", "1");
     const gateway = service({ activeTerminals: ["terminal-1"] });

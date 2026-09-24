@@ -264,11 +264,13 @@ enum AdministrativeDrainBlockerCategory: String, Codable, Hashable, Sendable, Ca
     case compactionExport = "compaction-export"
     case detachedExtensionRun = "detached-extension-run"
     case terminalReceiptPersistence = "terminal-receipt-persistence"
+    case rpcMutation = "rpc-mutation"
     case extensionCommandPromptUI = "extension-command-prompt-ui"
     case administrativeProviderPackageOperation = "administrative-provider-package-operation"
     case providerLogin = "provider-login"
     case automationDispatch = "automation-dispatch"
     case automationTerminalPersistence = "automation-terminal-persistence"
+    case knowledgeObservation = "knowledge-observation"
     case mcpToolCall = "mcp-tool-call"
 }
 

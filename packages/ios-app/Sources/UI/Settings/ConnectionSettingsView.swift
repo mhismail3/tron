@@ -374,11 +374,13 @@ enum AdministrativeDrainPresentation {
         case .compactionExport: singular = "compaction or export"
         case .detachedExtensionRun: singular = "detached run"
         case .terminalReceiptPersistence: singular = "completion receipt"
+        case .rpcMutation: singular = "running request"
         case .extensionCommandPromptUI: singular = "extension interaction"
         case .administrativeProviderPackageOperation: singular = "provider or package update"
         case .providerLogin: singular = "provider login"
         case .automationDispatch: singular = "automation dispatch"
         case .automationTerminalPersistence: singular = "automation completion"
+        case .knowledgeObservation: singular = "knowledge observation"
         case .mcpToolCall: singular = "MCP tool call"
         }
         return "\(count) \(singular)\(count == 1 ? "" : "s")"

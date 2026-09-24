@@ -9,6 +9,7 @@ export const gatewayWorkKinds = [
   "queued-mutation",
   "compaction-export",
   "terminal-receipt-persistence",
+  "rpc-mutation",
   "extension-command-prompt-ui",
   "administrative-provider-package-operation",
   "provider-login",
@@ -24,6 +25,8 @@ export interface GatewayWorkFact {
   token: string;
   kind: GatewayWorkKind;
   sessionId?: string;
+  /** The RPC method an `rpc-mutation` entry executes; diagnostics only. */
+  method?: string;
   hostEpoch: string;
   admittedAt: string;
   admittedMonotonicMs: number;
@@ -43,6 +46,7 @@ interface GatewayWorkEntry extends GatewayWorkFact {
 export interface GatewayWorkAdmission {
   kind: GatewayWorkKind;
   sessionId?: string;
+  method?: string;
   hostEpoch: string;
   cancellation?: () => Promise<void> | void;
 }
@@ -127,6 +131,7 @@ export class GatewayWorkRegistry {
       kind: admission.kind,
       pool: derived ? "derived" : "normal",
       ...(admission.sessionId ? { sessionId: admission.sessionId } : {}),
+      ...(admission.method ? { method: admission.method } : {}),
       hostEpoch: admission.hostEpoch,
       admittedAt: wall,
       admittedMonotonicMs: monotonic,

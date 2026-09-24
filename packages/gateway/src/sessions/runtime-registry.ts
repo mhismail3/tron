@@ -3387,6 +3387,7 @@ export class RuntimeRegistry {
     const facts: Array<{
       key: string;
       sessionId?: string;
+      method?: string;
       category: AdministrativeDrainBlockerCategory;
       state: AdministrativeDrainBlockerSummary["state"];
       admittedAt?: string;
@@ -3404,6 +3405,7 @@ export class RuntimeRegistry {
       facts.push({
         key: `work:${work.token}`,
         ...(work.sessionId ? { sessionId: work.sessionId } : {}),
+        ...(work.method ? { method: work.method } : {}),
         category: work.kind,
         state: foregroundIsSuspect
           ? "suspect"
@@ -3433,6 +3435,7 @@ export class RuntimeRegistry {
         id: `blocker-${createHash("sha256").update(`${this.drainId}\0${fact.key}`).digest("hex").slice(0, 20)}`,
         category: fact.category,
         ...(fact.sessionId ? { sessionId: fact.sessionId } : {}),
+        ...(fact.method ? { method: fact.method } : {}),
         state: fact.state,
         ...(fact.admittedAt && Number.isFinite(admittedMilliseconds) ? {
           admittedAt: fact.admittedAt,

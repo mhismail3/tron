@@ -201,6 +201,9 @@ struct GatewayUpdateControlPlaneTests {
         let login = try JSONDecoder.gateway.decode(AdministrativeDrainSnapshot.self, from: Data(
             #"{"drainId":"d","revision":1,"phase":"waiting","blockerCount":1,"blockerCounts":{"provider-login":1},"omittedCount":0,"suspectProjectionCount":0}"#.utf8))
         #expect(AdministrativeDrainPresentation.summary(login) == "Waiting for 1 accepted operation: 1 provider login.")
+        let requests = try JSONDecoder.gateway.decode(AdministrativeDrainSnapshot.self, from: Data(
+            #"{"drainId":"d","revision":1,"phase":"waiting","blockerCount":3,"blockerCounts":{"rpc-mutation":2,"knowledge-observation":1},"omittedCount":0,"suspectProjectionCount":0}"#.utf8))
+        #expect(AdministrativeDrainPresentation.summary(requests) == "Waiting for 3 accepted operations: 2 running requests, 1 knowledge observation.")
 
         let restart = try JSONDecoder.gateway.decode(
             GatewayRestartResponse.self,

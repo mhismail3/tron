@@ -29,6 +29,7 @@ export type AdministrativeDrainBlockerCategory =
   | "compaction-export"
   | "detached-extension-run"
   | "terminal-receipt-persistence"
+  | "rpc-mutation"
   | "extension-command-prompt-ui"
   | "administrative-provider-package-operation"
   | "provider-login"
@@ -42,6 +43,8 @@ export interface AdministrativeDrainBlockerSummary {
   id: string;
   category: AdministrativeDrainBlockerCategory;
   sessionId?: string;
+  /** For `rpc-mutation`, the receipt-backed RPC still executing. */
+  method?: string;
   state: "active" | "settling" | "suspect";
   admittedAt?: string;
   ageMs?: number;

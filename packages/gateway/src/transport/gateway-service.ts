@@ -1930,16 +1930,19 @@ export class GatewayService {
     settlementDuringDrain = false,
   ): Promise<JsonValue> {
     const commandId = string(params.commandId, "commandId", { min: 8, max: 160 });
+    // The entry spans the whole receipt-backed operation (a compaction or a
+    // branch summary can take minutes), so the drain names it as a request
+    // with its method rather than as receipt persistence.
+    const admission = {
+      kind: "rpc-mutation" as const,
+      method,
+      ...(typeof params.sessionId === "string" ? { sessionId: params.sessionId } : {}),
+      hostEpoch: this.workRegistry?.runtimeEpoch ?? "",
+    };
     const work = this.workRegistry
       ? (settlementDuringDrain && !this.workRegistry.isAdmissionOpen
-          ? this.workRegistry.beginDerived({
-              kind: "terminal-receipt-persistence",
-              hostEpoch: this.workRegistry.runtimeEpoch,
-            })
-          : this.workRegistry.begin({
-              kind: "terminal-receipt-persistence",
-              hostEpoch: this.workRegistry.runtimeEpoch,
-            }))
+          ? this.workRegistry.beginDerived(admission)
+          : this.workRegistry.begin(admission))
       : undefined;
     try {
       const knowledgeMutation = method.startsWith("knowledge.");

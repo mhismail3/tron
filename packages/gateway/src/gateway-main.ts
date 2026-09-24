@@ -418,8 +418,8 @@ function requestRestart(restartNow = false): void {
 }
 
 function logDrainBlockers(snapshot: ReturnType<typeof sessions.administrativeDrainSnapshot>): void {
-  const blockers = snapshot.blockers.map(({ sessionId, category, state, ageMs }) => ({
-    ...(sessionId ? { sessionId } : {}), category, state, ageMs: ageMs ?? null,
+  const blockers = snapshot.blockers.map(({ sessionId, category, method, state, ageMs }) => ({
+    ...(sessionId ? { sessionId } : {}), category, ...(method ? { method } : {}), state, ageMs: ageMs ?? null,
   }));
   logger.log("info", `Gateway restart waiting on ${snapshot.blockerCount} operation(s): ${JSON.stringify(blockers)}`, {
     event: "gateway.restart-drain.waiting", source: "lifecycle",
