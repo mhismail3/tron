@@ -97,7 +97,7 @@ import {
 import type { ForkBoundaryAnchor } from "./fork-boundary.js";
 import { RunMarkerCompletionConflictError, type RunMarkerEvidence, type RunMarkerStore } from "./run-markers.js";
 import { attributeExtensions, attributedCommandOwner, attributedToolOwner, currentExtensionOwner, currentInvocationContext, trustedExtensionOriginKind, withInvocationContext } from "../extensions/owner-attribution.js";
-import { EXTENSION_LIFECYCLE_ARTIFACT_VERSION, MAX_EXTENSION_LIFECYCLE_HEADER_BYTES, admitExtensionRunActivity, boundExtensionActivities, extensionActivityId, extensionActivityStatusFromTool, extensionLifecycleState, extensionRunAsyncDir, extensionRunChildProducerId, hasExtensionLifecycleProjectionProperty, hasForegroundSubagentRunActivity, hasObservedPausedProcessTerminal, hasStructuredExtensionRunActivity, recoveredReplacementClaim, inspectExtensionLifecycleProjection, inspectExtensionLifecycleArtifact, lifecycleProjectionArtifact, normalizeExtensionArtifact, parseExtensionLifecycleProjectionHeader, projectExtensionRunActivity, terminalLifecycleStates, usesForegroundSubagentChildIdentity, type ExtensionArtifactRejectionReason, type ExtensionRunChildIdentityStrategy } from "./extension-run-projection.js";
+import { EXTENSION_LIFECYCLE_ARTIFACT_VERSION, MAX_EXTENSION_ARTIFACT_BYTES, MAX_EXTENSION_LIFECYCLE_HEADER_BYTES, admitExtensionRunActivity, boundExtensionActivities, extensionActivityId, extensionActivityStatusFromTool, extensionLifecycleState, extensionRunAsyncDir, extensionRunChildProducerId, hasExtensionLifecycleProjectionProperty, hasForegroundSubagentRunActivity, hasObservedPausedProcessTerminal, hasStructuredExtensionRunActivity, recoveredReplacementClaim, inspectExtensionLifecycleProjection, inspectExtensionLifecycleArtifact, lifecycleProjectionArtifact, normalizeExtensionArtifact, parseExtensionLifecycleProjectionHeader, projectExtensionRunActivity, terminalLifecycleStates, usesForegroundSubagentChildIdentity, type ExtensionArtifactRejectionReason, type ExtensionRunChildIdentityStrategy } from "./extension-run-projection.js";
 import { EXTENSION_ACTIVITY_RECEIPT_TYPE, extensionActivityHistoryRevision, extensionActivityReceipts, extensionReceiptActivity, listExtensionActivityHistory, makeExtensionActivityReceipt } from "./extension-activity-history.js";
 import { CONTEXT_DELIVERY_RECEIPT_TYPE, makeContextDeliveryReceipt } from "./context-delivery-receipts.js";
 import { INVOCATION_RECEIPT_TYPE, invocationProjection, invocationReceipts, makeInvocationReceipt, receiptJSON, type InvocationProjection } from "./invocation-receipts.js";
@@ -249,7 +249,6 @@ const MAX_PRESENTATION_IDENTITY_BINDINGS = 512;
 const MAX_COMPLETION_DISPOSITIONS = 16;
 const MAX_VALIDATED_CHILD_SESSION_PATHS = 2_048;
 const RECOVERY_SESSION_OWNER = Symbol("recovery-session-owner");
-const MAX_EXTENSION_ARTIFACT_BYTES = 256 * 1_024;
 
 class OversizedExtensionArtifactError extends Error {
   constructor() {
@@ -317,7 +316,7 @@ export interface AutomationOperationTerminal {
   assistantCompletionId?: string;
 }
 
-export interface RuntimeSlotHooks {
+interface RuntimeSlotHooks {
   broadcast: SessionBroadcast;
   summaryChanged: (summary: SessionSummaryUpdate) => void;
   changed: (sessionId: string) => void;
@@ -341,7 +340,7 @@ export interface RuntimeSlotHooks {
   closed?: (sessionId: string, slot: RuntimeSlot) => void;
 }
 
-export interface PromptOwnership {
+interface PromptOwnership {
   operationId: string;
   /** Exact scheduler admission cancellation, fenced again at SDK preflight. */
   signal?: AbortSignal;
@@ -394,18 +393,13 @@ type CompletionOwnershipItem = {
   fallbackWork?: GatewayWorkHandle;
 };
 
-export interface RuntimeDrainBlockerFact {
+interface RuntimeDrainBlockerFact {
   key: string;
   category: AdministrativeDrainBlockerCategory;
   state: "active" | "settling" | "suspect";
   admittedAt?: string;
 }
 
-/**
- * Owns one live Pi runtime and the reconnect-safe mobile projection for its
- * canonical JSONL session. Every mutation runs through `lane`; distinct slots
- * remain concurrent.
- */
 /** Derive a stable scope from the canonical active branch. A leaf hash is
  * intentionally avoided: continuing a branch must not create a new privacy
  * scope, while sibling choices in one JSONL file must remain isolated. The
@@ -438,6 +432,11 @@ export function observationBranchIdFor(
   return `branch-${createHash("sha256").update(lineage.join("\n")).digest("hex").slice(0, 48)}`;
 }
 
+/**
+ * Owns one live Pi runtime and the reconnect-safe mobile projection for its
+ * canonical JSONL session. Every mutation runs through `lane`; distinct slots
+ * remain concurrent.
+ */
 export class RuntimeSlot {
   private readonly contextPolicies = new WeakMap<AgentSession, SessionContextWindowPolicy>();
   private readonly compactionPolicies = new WeakMap<AgentSession, CompactionOperationPolicy>();

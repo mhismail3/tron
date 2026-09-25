@@ -36,7 +36,6 @@ import { contextDeliveryMetadataByEntry } from "./context-delivery-receipts.js";
 import { INVOCATION_RECEIPT_TYPE, invocationProjection, invocationReceipts, parseInvocationReceipt, type InvocationProjection } from "./invocation-receipts.js";
 import { EXTENSION_NOTIFICATION_RECEIPT_TYPE, parseExtensionNotificationReceipt } from "./extension-notification-receipts.js";
 import { projectSkillInvocation, RESOURCE_NAME_MAX_BYTES } from "./resource-invocation.js";
-export { projectSkillInvocation } from "./resource-invocation.js";
 
 const MAX_TEXT = 64_000;
 const MAX_JSON_STRING = 100_000;
@@ -1530,7 +1529,7 @@ export const COMMAND_CATALOG_STRING_BYTES = 8_192;
 export const COMMAND_CATALOG_BYTES = 700_000;
 export const COMMAND_DETAIL_CONTENT_BYTES = 96 * 1_024;
 
-export interface BoundedCommandContent {
+interface BoundedCommandContent {
   content: string;
   contentBytes: number;
   contentTruncated: boolean;

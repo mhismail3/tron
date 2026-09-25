@@ -52,6 +52,7 @@ import {
 import { ExtensionActivityRecency } from "./extension-activity-recency.js";
 import { ProcessActivityRecency } from "./process-activity-recency.js";
 import {
+  MAX_EXTENSION_ARTIFACT_BYTES,
   MAX_EXTENSION_LIFECYCLE_HEADER_BYTES,
   admitExtensionLifecycleArtifact,
   hasExtensionLifecycleProjectionProperty,
@@ -97,7 +98,6 @@ import {
   type DelegatedSessionTopology,
 } from "./catalog-discovery.js";
 
-const MAX_EXTENSION_ARTIFACT_BYTES = 256 * 1_024;
 /** A read-only child observer may page only canonical sessions that fit this
  * explicit parse budget. The parser needs the selected branch graph, so it
  * reads one bounded file rather than maintaining an incremental mirror. */
@@ -242,7 +242,7 @@ interface CatalogAcquisitionAdmission extends CatalogAcquisitionResolution {
   invalidationGeneration: number;
 }
 
-export interface ReadOnlySubagentAdmission {
+interface ReadOnlySubagentAdmission {
   path: string;
   fileIdentity: string;
 }

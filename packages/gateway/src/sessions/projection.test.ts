@@ -7,6 +7,7 @@ import { BlobStore } from "./blob-store.js";
 import { EXTENSION_ACTIVITY_RECEIPT_TYPE } from "./extension-activity-history.js";
 import { CONTEXT_DELIVERY_RECEIPT_TYPE, makeContextDeliveryReceipt } from "./context-delivery-receipts.js";
 import { makeInvocationReceipt, INVOCATION_RECEIPT_TYPE } from "./invocation-receipts.js";
+import { projectSkillInvocation } from "./resource-invocation.js";
 import { EXTENSION_NOTIFICATION_RECEIPT_TYPE, makeExtensionNotificationReceipt } from "./extension-notification-receipts.js";
 import type { SessionSnapshot, TranscriptItem } from "../protocol/types.js";
 import {
@@ -23,7 +24,6 @@ import {
   STREAMING_PROGRESS_BYTES,
   projectJson,
   projectMessage,
-  projectSkillInvocation,
   mergeLiveToolOutput,
   MINIMUM_TRANSCRIPT_CONTINUITY_MESSAGES,
   projectToolOutput,

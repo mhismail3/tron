@@ -18,6 +18,8 @@ const MAX_TEXT_BYTES = 2_048;
 export const MAX_EXTENSION_ACTIVITY_COUNT = 32;
 export const MAX_EXTENSION_ACTIVITY_BYTES = 256 * 1_024;
 export const MAX_EXTENSION_LIFECYCLE_HEADER_BYTES = 32 * 1_024;
+/** Shared bound for runtime-slot and registry extension artifact reads. */
+export const MAX_EXTENSION_ARTIFACT_BYTES = 256 * 1_024;
 
 export interface ExtensionLifecycleProjection {
   version: 1;
