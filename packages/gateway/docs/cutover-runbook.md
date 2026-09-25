@@ -1,7 +1,7 @@
 # Tron integrations cutover runbook (operator-owned)
 
-This is the one ordered operator runbook for the machine-internal, delegated,
-Mac wizard-state, and integration-state cutovers. Owner docs linked below
+This is the one ordered operator runbook for the delegated provider-root
+cutover. Owner docs linked below
 define schemas and invariants; they do not provide alternate operator
 sequences.
 Agents may prepare source/build artifacts and synthetic fixtures only. A user or
@@ -34,8 +34,6 @@ The migration helpers are:
 
 - delegated provider tree and references: this runbook and
   `scripts/tron delegated-migrate` (marker schema 3);
-- Mac wizard state: the [Mac wizard-state cutover](../../mac-app/docs/wizard-state-cutover.md)
-  and `scripts/tron wizard-migrate`.
 
 ## 1. Read-only preflight and writer inventory
 
@@ -237,16 +235,6 @@ preflight. Run the exact focused owner regression before an operator cutover:
    before completing or refusing the operation. Re-running `recover` after a
    verified publication is a no-op; it does not trust the journal as proof of
    bytes.
-Stage/verify/publish the Mac wizard-state record with the exact commands in
-[Mac wizard-state cutover](../../mac-app/docs/wizard-state-cutover.md). Use an
-explicit Stable/Debug profile and home; the helper reads only
-`tron.mac.wizardStep` through `/usr/bin/defaults`, refuses malformed/newer
-data, conflicts, unsafe paths and links, and retains private rollback
-evidence. `.onboarded` remains completion authority and is never changed. If
-publication is interrupted, `verify` must refuse the ambiguous destination; use
-the owner’s explicit `recover --staging <staging>` only after its digest/source
-proof passes.
-
 For every step, compare source and destination bytes/digests, permissions,
 owners, identity, revision, receipts/request hashes, and journal phase. A
 publication interruption must use that helper’s `recover` operation and marker;

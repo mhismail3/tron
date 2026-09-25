@@ -14,9 +14,6 @@ Commands:
                                     Own the immutable Debug Gateway on port 9848
                                     status/preflight are read-only; users initiate
                                     every mutating Gateway lifecycle transition
-  wizard-migrate <stage|verify|publish|recover|cleanup> ...
-                                    Manually stage the legacy Mac wizard key
-                                    into internal/mac/wizard-state.json
   chat [--session <id>] [--cwd <path>] [--host <host>] [--port <port>]
                                     Attach terminal chat to the Gateway-owned runtime
   ci [check|test|all]               Validate the gateway and repository policy
@@ -51,9 +48,6 @@ case "$cmd" in
     ;;
   __dev-supervise|dev)
     exec "$ROOT/scripts/tron-dev" "$@"
-    ;;
-  wizard-migrate)
-    exec python3 "$ROOT/scripts/tron_wizard_migration.py" "$@"
     ;;
   chat)
     (cd "$GATEWAY" && npm run build >/dev/null)
