@@ -89,7 +89,8 @@ export interface GatewayUpdateStatus {
 export type GatewayUpdateCallback = (request: GatewayUpdateRequest | (GatewayRollbackRequest & { operation?: "rollback" })) => Promise<JsonValue>;
 type RuntimeIdentityFallback = GatewayUpdateIdentity & { buildFingerprint?: string };
 
-/** Convert the launcher's health-era buildFingerprint into update identity form. */
+/** Convert the supervised launcher's `buildFingerprint` into update identity
+ * form: that variable carries the selected payload's own fingerprint. */
 export function normalizeRuntimeIdentity(value: RuntimeIdentityFallback | undefined): GatewayUpdateIdentity | null {
   if (!value) return null;
   const { buildFingerprint, payloadFingerprint, ...rest } = value;
