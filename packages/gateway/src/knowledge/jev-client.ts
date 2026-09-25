@@ -6,9 +6,9 @@ export const JEV_DEFAULT_MODEL = "jev-1.13.0";
 export const JEV_MAX_STATE_BYTES = 24_000;
 export const JEV_MAX_BODY_BYTES = 60_000;
 export const JEV_MAX_STATE_QUESTION_BYTES = 28_000;
-export const JEV_MAX_RESPONSE_BYTES = 512_000;
-export const JEV_MAX_QUESTIONS = 16;
-export const JEV_MAX_JSON_DEPTH = 8;
+const JEV_MAX_RESPONSE_BYTES = 512_000;
+const JEV_MAX_QUESTIONS = 16;
+const JEV_MAX_JSON_DEPTH = 8;
 // Published direct price for this exact supported version: $0.042/M input,
 // output free. New versions require explicit contract/pricing qualification.
 function inputCostCents(tokens: number): number { return tokens * 42 / 10_000_000; }

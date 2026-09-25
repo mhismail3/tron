@@ -2,11 +2,9 @@ import { createHash } from "node:crypto";
 import type { ConnectorCredentialStore } from "./connector-credentials.js";
 import type { SourceAssessment } from "./knowledge-contract.js";
 import type { SourceAssessmentModel, SourceAssessmentModelInput, SourceAssessmentDispatchContext } from "./source-capture.js";
-import { JevDecisionClient, JEV_DEFAULT_MODEL, JEV_ENDPOINT, JEV_MAX_BODY_BYTES, JEV_MAX_STATE_BYTES, JEV_MAX_STATE_QUESTION_BYTES, type JevHTTP, type JevChoiceAnswer, type JevScoreAnswer, type JevQuestion } from "./jev-client.js";
+import { JevDecisionClient, JEV_DEFAULT_MODEL, JEV_MAX_BODY_BYTES, JEV_MAX_STATE_BYTES, JEV_MAX_STATE_QUESTION_BYTES, type JevHTTP, type JevChoiceAnswer, type JevScoreAnswer, type JevQuestion } from "./jev-client.js";
 
-export { JEV_ENDPOINT, JEV_MAX_STATE_BYTES };
-export const JEV_MODEL = JEV_DEFAULT_MODEL;
-export const JEV_PROFILE_VERSION = "tron-source-profile-v2";
+const JEV_PROFILE_VERSION = "tron-source-profile-v2";
 export const JEV_RUBRIC_VERSION = "tron-source-rubric-v3";
 const PRICING = "typesafe-jev-1.13.0-input-0.042-usd-per-million-output-free" as const;
 
@@ -28,7 +26,7 @@ function stateFor(input: SourceAssessmentModelInput, interests: string[], text: 
   return { title: bounded(input.title, 512), text, source: input.source, interests, evidenceCoverage: { mode: coverage, originalTextCharacters, evaluatedTextCharacters: Array.from(text).length } };
 }
 function fits(state: Record<string, unknown>, rubric: Record<string, unknown>): boolean {
-  if (bytes(state) > JEV_MAX_STATE_BYTES || bytes({ model: JEV_MODEL, state, questions: rubric }) > JEV_MAX_BODY_BYTES) return false;
+  if (bytes(state) > JEV_MAX_STATE_BYTES || bytes({ model: JEV_DEFAULT_MODEL, state, questions: rubric }) > JEV_MAX_BODY_BYTES) return false;
   return Object.values(rubric).every(question => bytes(state) + bytes(question) <= JEV_MAX_STATE_QUESTION_BYTES);
 }
 function excerpt(points: readonly string[], maximumCharacters: number): string {
@@ -69,7 +67,7 @@ export class JevSourceAssessmentModel implements SourceAssessmentModel {
     if (signal.aborted) throw new Error("Jev assessment cancelled");
     const interests = input.interests.slice(0, 50).map(value => bounded(value, 500));
     const prepared = prepareJevAssessmentInput(input, interests);
-    const result = await this.client.evaluate({ model: JEV_MODEL, state: prepared.state, questions: prepared.questions }, signal, ...(context?.beforeDispatch ? [{ beforeDispatch: context.beforeDispatch }] : []));
+    const result = await this.client.evaluate({ model: JEV_DEFAULT_MODEL, state: prepared.state, questions: prepared.questions }, signal, ...(context?.beforeDispatch ? [{ beforeDispatch: context.beforeDispatch }] : []));
     const admission = result.answers.admission as JevChoiceAnswer; const topic = result.answers.topic as JevChoiceAnswer; const usefulness = result.answers.score as JevScoreAnswer;
     // A sampled excerpt cannot support a destructive archive decision. It is
     // still useful for classification, but uncertainty favors retention.

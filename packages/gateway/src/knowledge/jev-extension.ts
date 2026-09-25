@@ -8,7 +8,7 @@ const parameters = Type.Object({
   model: Type.Optional(Type.String({ minLength: 1, maxLength: 64 })),
   maxChargeCents: Type.Number({ exclusiveMinimum: 0, maximum: 100, description: "Caller-authorized per-call estimated ceiling, checked before dispatch. This does not grant workflow or disclosure authority." }),
 }, { additionalProperties: false });
-export type JevToolParameters = Static<typeof parameters>;
+type JevToolParameters = Static<typeof parameters>;
 
 /** First-party explicit Jev evaluation tool. It owns no workflow state or budget ledger. */
 export function createJevExtension(client: JevDecisionClient): ExtensionFactory {

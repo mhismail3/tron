@@ -1,9 +1,10 @@
 import { describe, expect, it } from "vitest";
 import { InMemoryConnectorCredentialStore } from "../../test-support/connector-credentials.js";
-import { JevSourceAssessmentModel, JEV_ENDPOINT, JEV_MODEL, JEV_RUBRIC_VERSION, jevProfileVersion, prepareJevAssessmentInput } from "./jev-assessment.js";
+import { JEV_DEFAULT_MODEL, JEV_ENDPOINT } from "./jev-client.js";
+import { JevSourceAssessmentModel, JEV_RUBRIC_VERSION, jevProfileVersion, prepareJevAssessmentInput } from "./jev-assessment.js";
 
 const answer = {
-  model: JEV_MODEL,
+  model: JEV_DEFAULT_MODEL,
   answers: {
     admission: { type: "choice", choice: "retain", probabilities: { retain: 0.9, archive: 0.05, pending: 0.05 }, confidence: 0.9 },
     topic: { type: "choice", choice: "research", probabilities: { technical: 0.05, product: 0.05, research: 0.8, workflow: 0.05, other: 0.05 }, confidence: 0.9 },
@@ -18,9 +19,9 @@ const input = { title: "Synthetic source", text: "bounded evidence", interests: 
 describe("Jev source assessment adapter", () => {
   it("uses the documented typed response schema and bounded evidence", async () => {
     const fixture = model(); const result = await fixture.model.assess(input, new AbortController().signal);
-    expect(result).toMatchObject({ model: JEV_MODEL, recommendation: "retained", profileVersion: jevProfileVersion(input.interests), rubricVersion: JEV_RUBRIC_VERSION, classification: "research", usage: { inputTokens: 352, outputTokens: 20, estimatedCostCents: 352 * 42 / 10_000_000, pricing: "typesafe-jev-1.13.0-input-0.042-usd-per-million-output-free" } });
+    expect(result).toMatchObject({ model: JEV_DEFAULT_MODEL, recommendation: "retained", profileVersion: jevProfileVersion(input.interests), rubricVersion: JEV_RUBRIC_VERSION, classification: "research", usage: { inputTokens: 352, outputTokens: 20, estimatedCostCents: 352 * 42 / 10_000_000, pricing: "typesafe-jev-1.13.0-input-0.042-usd-per-million-output-free" } });
     expect(fixture.calls).toHaveLength(1); expect(fixture.calls[0]?.url).toBe(JEV_ENDPOINT); expect(fixture.calls[0]?.init.headers.authorization).toBe("Bearer synthetic-jev-key");
-    const body = JSON.parse(fixture.calls[0]!.init.body); expect(body.model).toBe(JEV_MODEL); expect(body.questions.admission.type).toBe("choice"); expect(body.questions.topic.type).toBe("choice"); expect(body.questions.score.type).toBe("score"); expect(body.questions.novelty).toBeUndefined(); expect(body.state.text).toBe("bounded evidence");
+    const body = JSON.parse(fixture.calls[0]!.init.body); expect(body.model).toBe(JEV_DEFAULT_MODEL); expect(body.questions.admission.type).toBe("choice"); expect(body.questions.topic.type).toBe("choice"); expect(body.questions.score.type).toBe("score"); expect(body.questions.novelty).toBeUndefined(); expect(body.state.text).toBe("bounded evidence");
   });
   it("fails closed on malformed or wrong-model results", async () => {
     await expect(model({ ...answer, model: "jev-latest" }).model.assess({ ...input, interests: [] }, new AbortController().signal)).rejects.toThrow(/Jev request or response is invalid/);
