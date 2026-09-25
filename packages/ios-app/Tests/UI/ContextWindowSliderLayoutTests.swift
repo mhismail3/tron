@@ -9,9 +9,12 @@ final class ContextWindowSliderLayoutTests: XCTestCase {
     func testExpandedGlassLayouts() async throws {
         for (name, scheme, typeSize, width) in [("phone", ColorScheme.light, DynamicTypeSize.large, CGFloat(440)),
                                                ("light", .light, .large, 320), ("dark", .dark, .large, 320),
-                                               ("large-text", .light, .accessibility3, 320)] {
+                                               ("large-text", .light, .accessibility3, 320),
+                                               // A default at the maximum must keep its label on the endpoint row.
+                                               ("default-at-max", .dark, .large, 393)] {
             let image = try await capture(
-                SliderFixture()
+                SliderFixture(defaultValue: name == "default-at-max" ? 1_000_000 : 272_000,
+                              maximum: name == "default-at-max" ? 1_000_000 : 1_050_000)
                     .tronPresentation()
                     .environment(\.colorScheme, scheme)
                     .environment(\.dynamicTypeSize, typeSize),
@@ -169,6 +172,8 @@ final class ContextWindowSliderLayoutTests: XCTestCase {
 private struct SliderFixture: View {
     @State private var presentation = ConfigurationSliderPresentation()
     @State private var owner = UUID()
+    var defaultValue = 272_000
+    var maximum = 1_050_000
 
     var body: some View {
         NavigationStack {
@@ -187,9 +192,9 @@ private struct SliderFixture: View {
                                     session: session, anchor: anchor, sourceVerticalInset: 8, accent: .tronPurple,
                                     editor: .contextWindow(ContextWindowSliderRequest(
                                         scale: ContextWindowSliderScale(
-                                            limits: ContextWindowLimits(minimum: 37_408, maximum: 1_050_000, default: 272_000, longContextThreshold: nil),
-                                            defaultValue: 272_000
-                                        ), value: 272_000, selection: nil, title: "272,000",
+                                            limits: ContextWindowLimits(minimum: 37_408, maximum: maximum, default: defaultValue, longContextThreshold: nil),
+                                            defaultValue: defaultValue
+                                        ), value: defaultValue, selection: nil, title: defaultValue.formatted(),
                                         resetLabel: "Use configured default", detail: "Supported model bounds.", finish: { _ in }
                                     ))
                                 )

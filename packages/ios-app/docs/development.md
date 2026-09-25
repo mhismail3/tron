@@ -658,7 +658,8 @@ short and weekly windows with the value first and the window label in parenthese
 provider's exact snapshot and lists every window, reset, balance, stale, and safe error state. Balance rows
 share the window row treatment: label left, currency-formatted amount right, and an emerald share bar with a
 `% of <primary label>` caption for each balance after the primary; a negative balance shows `Deficit` instead.
-Detail rows, including reset and updated lines, use the standard settings secondary sub-text size and color
+The sheet's usage header stacks the summary over its `Updated` sub-text (2pt, matching the provider row's
+line spacing) and centers the refresh control against that unit. Detail rows, including reset lines, use the standard settings secondary sub-text size and color
 rather than the smaller caption scale. The provider catalog's `usageSupported` flag marks the rows that will answer, so
 a supported configured row reserves its usage line with an animated skeleton and crossfades to the resolved
 summary instead of growing mid-load; a failed read retires that skeleton rather than leaving it pending, and

@@ -197,15 +197,31 @@ struct ContextWindowSliderLabelsLayout: Layout {
             subview.sizeThatFits(ProposedViewSize(width: index == 1 ? width : 2 * (inset + 12), height: nil))
         }
         guard sizes.count == 3 else { return (sizes, [], 0) }
-        let x = [inset, inset + CGFloat(min(1, max(0, defaultProgress))) * max(0, width - 2 * inset), width - inset]
+        let placement = Self.placement(sizes: sizes, width: width, defaultProgress: defaultProgress)
+        return (sizes, placement.centers, placement.height)
+    }
+
+    /// Places minimum, Default, and maximum label centers. Default follows its
+    /// track stop but slides just inside a colliding endpoint label, so a
+    /// default at (or near) a bound stays on the endpoint row instead of
+    /// dropping to a low-contrast line against the container's bottom edge.
+    /// Only when the row genuinely lacks room does Default wrap below, still
+    /// clamped fully inside the bounds.
+    static func placement(sizes: [CGSize], width: CGFloat, defaultProgress: Double) -> (centers: [CGPoint], height: CGFloat) {
+        let inset = trackInset, gap: CGFloat = 8
         let rowHeight = sizes.map(\.height).max() ?? 0
-        let collides = x[1] - sizes[1].width / 2 < x[0] + sizes[0].width / 2 + 6
-            || x[1] + sizes[1].width / 2 > x[2] - sizes[2].width / 2 - 6
-        let defaultY = collides ? rowHeight + 6 + sizes[1].height / 2 : rowHeight / 2
-        return (
-            sizes,
-            [CGPoint(x: x[0], y: rowHeight / 2), CGPoint(x: x[1], y: defaultY), CGPoint(x: x[2], y: rowHeight / 2)],
-            collides ? rowHeight + 6 + sizes[1].height : rowHeight
-        )
+        let x0 = inset, x2 = width - inset
+        let track = inset + CGFloat(min(1, max(0, defaultProgress))) * max(0, width - 2 * inset)
+        let half = sizes[1].width / 2
+        let lower = x0 + sizes[0].width / 2 + gap + half
+        let upper = x2 - sizes[2].width / 2 - gap - half
+        let endpoints = [CGPoint(x: x0, y: rowHeight / 2), CGPoint(x: x2, y: rowHeight / 2)]
+        if lower <= upper {
+            let x = min(upper, max(lower, track))
+            return ([endpoints[0], CGPoint(x: x, y: rowHeight / 2), endpoints[1]], rowHeight)
+        }
+        let x = min(max(half, width - half), max(half, track))
+        return ([endpoints[0], CGPoint(x: x, y: rowHeight + 6 + sizes[1].height / 2), endpoints[1]],
+                rowHeight + 6 + sizes[1].height)
     }
 }

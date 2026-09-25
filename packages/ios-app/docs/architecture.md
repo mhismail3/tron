@@ -1723,8 +1723,9 @@ owner reinstalls it after size/strength changes rather than masking an ancestor/
 fading composited SwiftUI material. No private filter, screenshot, or sheet-wide blur is used. The larger header title/value
 share a center-aligned row (stacking only when accessibility text cannot fit). Minimum/maximum
 labels center beneath the track endpoints; the
-non-button Default label centers beneath its actual detent. If labels would collide, Default
-uses a second line without moving its horizontal anchor. The continuous thumb gently gravitates toward point-sized detent wells;
+non-button Default label centers beneath its actual detent. If it would collide with an endpoint
+label (for example, a default at the maximum), Default slides just inside that label on the same
+row; only when the row lacks room does it wrap to a second line, clamped inside the bounds. The continuous thumb gently gravitates toward point-sized detent wells;
 release settles only near a detent. Bounds remain exact, the configured default is a detent,
 and rounded quarters avoid crowding it (million-token windows use familiar 500k/750k stops).
 Context values retain whole-token precision; accessibility exposes token units, source,

@@ -75,7 +75,8 @@ struct ProviderUsagePresentationTests {
             ProviderUsageSnapshot(providerId: "available", status: .available,
                 windows: [UsageWindow(id: "quota", label: "Quota", usedPercent: 0)])
         ))
-        #expect(ProviderUsagePresentation.hasDetailContent(
+        // The updated line lives in the summary header, not the detail stack.
+        #expect(!ProviderUsagePresentation.hasDetailContent(
             ProviderUsageSnapshot(providerId: "updated", status: .available,
                 updatedAt: "2026-01-02T03:04:05.123Z")
         ))

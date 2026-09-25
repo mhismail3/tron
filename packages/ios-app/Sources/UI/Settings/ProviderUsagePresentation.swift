@@ -22,10 +22,10 @@ enum ProviderUsagePresentation {
     }
 
     /// Keep summary-only states from reserving an empty detail row and its gap.
+    /// The updated line belongs to the summary header, so it is not detail.
     static func hasDetailContent(_ snapshot: ProviderUsageSnapshot) -> Bool {
         guard snapshot.status == .available || snapshot.status == .rateLimited else { return false }
-        return !snapshot.windows.isEmpty || !snapshot.balances.isEmpty
-            || updatedCopy(snapshot) != nil || retryCopy(snapshot) != nil
+        return !snapshot.windows.isEmpty || !snapshot.balances.isEmpty || retryCopy(snapshot) != nil
     }
 
     static func summary(_ snapshot: ProviderUsageSnapshot) -> String {
@@ -215,10 +215,7 @@ struct ProviderUsageSummaryView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
             if includeSummary {
-                Text(ProviderUsagePresentation.summary(snapshot))
-                    .font(TronTypography.sans(size: TronTypography.sizeBody, weight: .semibold))
-                    .foregroundStyle(Color.tronTextPrimary)
-                    .accessibilityLabel("Account usage: \(ProviderUsagePresentation.summary(snapshot))")
+                ProviderUsageSummaryHeader(snapshot: snapshot)
             }
             if detail && ProviderUsagePresentation.hasDetailContent(snapshot) {
                 ForEach(snapshot.windows) { window in
@@ -274,11 +271,6 @@ struct ProviderUsageSummaryView: View {
                         }
                     }
                 }
-                if let updated = ProviderUsagePresentation.updatedCopy(snapshot) {
-                    Text(updated)
-                        .font(detailFont)
-                        .foregroundStyle(Color.tronTextSecondary)
-                }
                 if let retry = ProviderUsagePresentation.retryCopy(snapshot) {
                     Text(retry)
                         .font(detailFont)
@@ -290,6 +282,31 @@ struct ProviderUsageSummaryView: View {
             }
         }
         .fixedSize(horizontal: false, vertical: true)
+    }
+}
+
+/// Usage headline with its "Updated" sub-text. The 2pt gap matches the
+/// provider row's line spacing so the header reads as one unit, which the
+/// detail sheet centers its refresh control against.
+struct ProviderUsageSummaryHeader: View {
+    let snapshot: ProviderUsageSnapshot
+    @Environment(\.tronSettingsSecondaryTextSizeAdjustment) private var secondaryTextSizeAdjustment
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 2) {
+            Text(ProviderUsagePresentation.summary(snapshot))
+                .font(TronTypography.sans(size: TronTypography.sizeBody, weight: .semibold))
+                .foregroundStyle(Color.tronTextPrimary)
+                .lineLimit(2)
+                .fixedSize(horizontal: false, vertical: true)
+                .accessibilityLabel("Account usage: \(ProviderUsagePresentation.summary(snapshot))")
+            if let updated = ProviderUsagePresentation.updatedCopy(snapshot) {
+                Text(updated)
+                    .font(TronTypography.sans(size: TronTypography.sizeSecondary + secondaryTextSizeAdjustment))
+                    .foregroundStyle(Color.tronTextSecondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
     }
 }
 

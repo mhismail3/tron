@@ -455,12 +455,7 @@ struct ProviderConfigurationSheet: View {
             } else if let usage = usageController.snapshots[provider.id] {
                 VStack(alignment: .leading, spacing: 10) {
                     HStack(alignment: .center, spacing: 8) {
-                        Text(ProviderUsagePresentation.summary(usage))
-                            .font(TronTypography.sans(size: TronTypography.sizeBody, weight: .semibold))
-                            .foregroundStyle(Color.tronTextPrimary)
-                            .lineLimit(2)
-                            .fixedSize(horizontal: false, vertical: true)
-                            .accessibilityLabel("Account usage: \(ProviderUsagePresentation.summary(usage))")
+                        ProviderUsageSummaryHeader(snapshot: usage)
                         Spacer(minLength: 4)
                         Button { usageController.begin() } label: {
                             Image(systemName: usageController.isLoading ? "arrow.triangle.2.circlepath" : "arrow.clockwise")
