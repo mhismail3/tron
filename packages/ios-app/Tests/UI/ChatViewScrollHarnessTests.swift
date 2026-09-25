@@ -764,6 +764,11 @@ struct ChatViewScrollHarnessTests {
                 #expect(canonical.physicalID == outgoing.physicalID)
                 #expect(canonical.instance == outgoing.instance)
                 #expect(abs(canonical.frame.maxY - outgoing.frame.maxY) <= 2)
+                // An ordinary prompt lifecycle row renders the same canonical
+                // bubble, so it replaces atomically: one physical host, one
+                // appearance, and no geometry step across the swap.
+                #expect(ack.observation.physicalRowAppearanceCounts[outgoing.physicalID] == 1)
+                #expect(ack.observation.physicalRowDisappearanceCounts[outgoing.physicalID, default: 0] == 0)
                 let lifecycleHeight = outgoing.frame.height
                 let lifecycleOrigin = outgoing.frame.minY
                 let transitionEnd = ack.frameIndex + 16
@@ -783,7 +788,7 @@ struct ChatViewScrollHarnessTests {
                     max(abs(new.frame.minY - old.frame.minY), abs(new.frame.height - old.frame.height))
                 }
                 #expect(frameSteps.allSatisfy { $0 <= 1 })
-                print("Lifecycle→canonical frame evidence: lifecycleHeight=\(lifecycleHeight), canonicalHeight=\(canonical.frame.height), maxRectStep=\(frameSteps.max() ?? 0), tailError=\(try harness.nativeTranscriptSignedTailError())")
+                print("Lifecycle→canonical atomic swap evidence: lifecycleHeight=\(lifecycleHeight), canonicalHeight=\(canonical.frame.height), maxRectStep=\(frameSteps.max() ?? 0), tailError=\(try harness.nativeTranscriptSignedTailError())")
                 #expect(try harness.nativeTranscriptDistanceFromTail() <= 2)
 
                 var response = acknowledged

@@ -279,15 +279,15 @@ enum ChatPhysicalTranscriptReplacementPolicy {
            !new.showsProgress {
             return .notification
         }
-        guard previous.isPromptLifecycle,
+        guard previous.usesQueuedCardVisual,
               case .transcript(let item, _) = next.content,
               item.isCanonicalUserPrompt else { return .none }
         return .promptContent
     }
 }
 
-/// A prompt replacement interpolates the row height only for an ordinary card
-/// size change on a visible surface. Very large changes install atomically,
+/// A queued-card prompt replacement interpolates the row height only for a
+/// bounded change on a visible surface. Very large changes install atomically,
 /// like large streaming backlogs.
 enum ChatPromptReplacementHeightPolicy {
     /// Reduce Motion keeps the cross-fade but installs the height at once,
@@ -303,6 +303,20 @@ private extension ChatPhysicalTranscriptRow {
     var isPromptLifecycle: Bool {
         switch content {
         case .pending, .outgoing, .queued: true
+        case .transcript: false
+        }
+    }
+
+    /// True only while the row renders the taller `ChatPromptCard` visual, which
+    /// is the one lifecycle appearance that differs from the canonical user
+    /// row. An ordinary outgoing or pending row renders the same Liquid Glass
+    /// bubble as the canonical row, so it must replace atomically: cross-fading
+    /// two identical layers dims the prompt.
+    var usesQueuedCardVisual: Bool {
+        switch content {
+        case .pending(let pending): pending.usesQueuedCardVisual
+        case .outgoing(let outgoing, _): outgoing.usesQueuedCardVisual
+        case .queued: true
         case .transcript: false
         }
     }
@@ -439,8 +453,9 @@ private struct ChatPhysicalTranscriptReplacementHost<Content: View>: View {
     /// native size-change anchor keeps a pinned tail in place every frame.
     private func naturalHeightChanged(_ height: CGFloat) {
         guard height.isFinite, height >= 0 else { return }
-        // Only prompt lifecycle rows can start a replacement, so only they
-        // (and a replacement awaiting its measurement) record their height.
+        // Only a queued-card prompt lifecycle row can start an animated
+        // replacement, so only it (and a replacement awaiting its measurement)
+        // records its height.
         // Streaming and history rows perform no state write per layout.
         let awaiting = awaitingReplacementHeightRevision != nil
         guard awaiting || displayed.isPromptLifecycle else { return }
@@ -491,8 +506,9 @@ private struct ChatPhysicalTranscriptReplacementHost<Content: View>: View {
             transaction.admitsChatNotificationReplacementAnimation = true
             withTransaction(transaction) { displayed = next }
         case .promptContent:
-            // Keep the physical host, row geometry, and consumed entrance lease;
-            // only the old and new contents cross-fade inside that owner.
+            // Only a queued-card row looks different from the canonical row, so
+            // only it cross-fades. Keep the physical host, row geometry, and
+            // consumed entrance lease; the two contents fade inside that owner.
             onPromptContentReplacement(next.semanticID)
             replacedPromptSemanticID = next.semanticID
             promptReplacementRevision &+= 1
@@ -528,8 +544,10 @@ private struct ChatPhysicalTranscriptReplacementHost<Content: View>: View {
                 }
             }
         case .none:
-            // Other payloads remain atomic; stable physical identity prevents
-            // duplicate entrance and the scroll owner retains its geometry.
+            // Every other payload replaces atomically, including an ordinary
+            // prompt lifecycle row whose content matches the canonical row.
+            // Stable physical identity prevents a second entrance and the
+            // scroll owner retains its geometry.
             promptReplacementRevision &+= 1
             var transaction = Transaction()
             transaction.disablesAnimations = true

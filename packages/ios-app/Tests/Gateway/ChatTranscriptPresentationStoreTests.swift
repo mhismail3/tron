@@ -1616,6 +1616,94 @@ struct ChatTranscriptPresentationStoreTests {
         #expect(!ChatPromptReplacementHeightPolicy.animates(from: .infinity, to: 44, surfaceActive: true, reduceMotion: false))
     }
 
+    // A lifecycle row that renders the queued card looks different from the
+    // canonical user row, so that swap cross-fades. An ordinary outgoing or
+    // pending row renders the same Liquid Glass bubble as the canonical row, so
+    // it must replace atomically: fading two identical layers dims the settled
+    // prompt.
+    @Test("only queued-card prompt lifecycles cross-fade into the canonical user row")
+    func promptReplacementKindMatchesLifecycleVisual() throws {
+        let canonical = try decodeTranscriptFixture(TranscriptItem.self, from: Data("""
+        {"id":"canonical-prompt","parentId":null,"timestamp":"2026-01-01T00:00:00Z","kind":"message","role":"user","presentationId":"submitted","content":[{"id":"text","ordinal":0,"type":"text","text":"hello"}]}
+        """.utf8))
+        let physicalID = "outgoing-submission:submitted"
+        let canonicalRow = ChatPhysicalTranscriptRow(
+            id: physicalID,
+            semanticID: "canonical-prompt",
+            content: .transcript(.transcript(canonical), isCommitted: true)
+        )
+        let target = SessionPresentationIdentity(sessionID: "session", generation: 1)
+        func outgoing(_ behavior: String?) -> ChatPhysicalTranscriptRow {
+            ChatPhysicalTranscriptRow(
+                id: physicalID,
+                semanticID: physicalID,
+                content: .outgoing(
+                    ChatOutgoingSubmissionPresentation(
+                        snapshot: ComposerSubmissionSnapshot(
+                            target: target,
+                            textRevision: 1,
+                            outgoingText: "hello",
+                            attachmentIDs: [],
+                            behavior: behavior,
+                            localNonce: 1
+                        ),
+                        transportActive: true
+                    ),
+                    []
+                )
+            )
+        }
+        func pending(
+            _ behavior: SessionSnapshot.QueuedMessage.Behavior?,
+            isCompacting: Bool
+        ) -> ChatPhysicalTranscriptRow {
+            ChatPhysicalTranscriptRow(
+                id: physicalID,
+                semanticID: physicalID,
+                content: .pending(ChatPendingPromptPresentation(
+                    snapshot: .init(
+                        id: "submitted",
+                        createdAt: nil,
+                        behavior: behavior,
+                        text: "hello",
+                        attachmentCount: 0
+                    ),
+                    isCompacting: isCompacting
+                ))
+            )
+        }
+        func kind(_ row: ChatPhysicalTranscriptRow) -> ChatPhysicalTranscriptReplacementKind {
+            ChatPhysicalTranscriptReplacementPolicy.replacement(from: row, to: canonicalRow)
+        }
+
+        // Ordinary lifecycles already render the canonical bubble.
+        #expect(kind(outgoing(nil)) == .none)
+        #expect(kind(pending(nil, isCompacting: false)) == .none)
+
+        // Queued-card lifecycles differ from the canonical row.
+        #expect(kind(outgoing("steer")) == .promptContent)
+        #expect(kind(outgoing("followUp")) == .promptContent)
+        #expect(kind(pending(.steer, isCompacting: false)) == .promptContent)
+        #expect(kind(pending(.followUp, isCompacting: false)) == .promptContent)
+        // An ordinary prompt queued behind compaction uses the card visual too.
+        #expect(kind(pending(nil, isCompacting: true)) == .promptContent)
+        let queued = ChatPhysicalTranscriptRow(
+            id: physicalID,
+            semanticID: physicalID,
+            content: .queued(ChatQueuedMessageRenderEntry(
+                id: physicalID,
+                index: 0,
+                message: SessionSnapshot.QueuedMessage(
+                    id: "submitted",
+                    behavior: .steer,
+                    text: "hello",
+                    attachmentCount: 0
+                )
+            ))
+        )
+        #expect(kind(queued) == .promptContent)
+    }
+
     @Test("pending, canonical-overlap, and idle compaction installs retain one physical row")
     func compactionTransitionIdentity() async throws {
         try await withTestWatchdog { @MainActor in
