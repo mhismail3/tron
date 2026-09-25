@@ -24,10 +24,7 @@ enum TronPaths {
     }()
 
     static let tronHome: URL = {
-        tronHome(environment: ProcessInfo.processInfo.environment)
-    }()
-
-    static func tronHome(environment: [String: String]) -> URL {
+        let environment = ProcessInfo.processInfo.environment
         if let override = environment[tronDataDirEnv], !override.isEmpty {
             precondition(override.hasPrefix("/"), "\(tronDataDirEnv) must be an absolute path")
             return URL(fileURLWithPath: override, isDirectory: true)
@@ -37,22 +34,22 @@ enum TronPaths {
             return homeDirectory.appendingPathComponent(homeName, isDirectory: true)
         }
         return homeDirectory.appendingPathComponent(".tron", isDirectory: true)
-    }
+    }()
 
-    static func tronHome(profile: TronGatewayProfile, environment: [String: String] = ProcessInfo.processInfo.environment) -> URL {
+    static func tronHome(profile: TronGatewayProfile) -> URL {
         // Stable is the wrapper-owned profile and follows the same explicit
         // whole-home overrides as Gateway config. Debug remains an isolated
         // profile and is never redirected by Stable's environment.
-        if profile == .stable { return tronHome(environment: environment) }
+        if profile == .stable { return tronHome }
         return homeDirectory.appendingPathComponent(profile.homeName, isDirectory: true)
     }
 
-    static func agentHome(profile: TronGatewayProfile, environment: [String: String] = ProcessInfo.processInfo.environment) -> URL {
-        if profile == .stable, let explicit = environment[piCodingAgentDirEnv], !explicit.isEmpty {
+    static func agentHome(profile: TronGatewayProfile) -> URL {
+        if profile == .stable, let explicit = ProcessInfo.processInfo.environment[piCodingAgentDirEnv], !explicit.isEmpty {
             precondition(explicit.hasPrefix("/"), "\(piCodingAgentDirEnv) must be an absolute path")
             return URL(fileURLWithPath: explicit, isDirectory: true)
         }
-        return tronHome(profile: profile, environment: environment).appendingPathComponent(profile.agentDirectoryName, isDirectory: true)
+        return tronHome(profile: profile).appendingPathComponent(profile.agentDirectoryName, isDirectory: true)
     }
 
     static func bearerTokenPath(profile: TronGatewayProfile) -> URL {
@@ -133,45 +130,29 @@ enum TronPaths {
     static var launchAgentPlistPath: URL { launchAgentPlistPath(profile: activeProfile) }
 
     static var serverHelperBundleProgram: String {
-        serverHelperBundleProgram(environment: ProcessInfo.processInfo.environment)
+        serverHelperBundleProgram(profile: activeProfile)
     }
 
     static func serverHelperBundleProgram(profile: TronGatewayProfile) -> String {
         "Contents/Library/LoginItems/\(profile.agentBundleName).app/Contents/MacOS/tron"
     }
 
-    static func serverHelperBundleProgram(environment: [String: String]) -> String {
-        "Contents/Library/LoginItems/\(agentBundleName(environment: environment)).app/Contents/MacOS/tron"
-    }
-
-    static var launchAgentLabel: String {
-        launchAgentLabel(environment: ProcessInfo.processInfo.environment)
-    }
+    static var launchAgentLabel: String { activeProfile.launchAgentLabel }
 
     static func launchAgentLabel(profile: TronGatewayProfile) -> String { profile.launchAgentLabel }
 
-    static func launchAgentLabel(environment: [String: String]) -> String {
-        activeProfile(environment: environment).launchAgentLabel
-    }
-
-    static var defaultServerPort: Int {
-        defaultServerPort(environment: ProcessInfo.processInfo.environment)
-    }
+    static var defaultServerPort: Int { activeProfile.port }
 
     static func defaultServerPort(profile: TronGatewayProfile) -> Int { profile.port }
 
-    static func defaultServerPort(environment: [String: String]) -> Int {
-        activeProfile(environment: environment).port
-    }
-
     static var launchAgentEnvironmentVariables: [String: String] {
-        launchAgentEnvironmentVariables(environment: ProcessInfo.processInfo.environment)
+        launchAgentEnvironmentVariables(profile: activeProfile)
     }
 
-    static func launchAgentEnvironmentVariables(profile: TronGatewayProfile, environment: [String: String] = ProcessInfo.processInfo.environment) -> [String: String] {
+    static func launchAgentEnvironmentVariables(profile: TronGatewayProfile) -> [String: String] {
         var values = [gatewaySupervisionEnv: gatewaySupervisionValue, gatewayChannelEnv: profile.channel]
         if profile == .stable {
-            if let explicit = environment[piCodingAgentDirEnv], !explicit.isEmpty {
+            if let explicit = ProcessInfo.processInfo.environment[piCodingAgentDirEnv], !explicit.isEmpty {
                 precondition(explicit.hasPrefix("/"), "\(piCodingAgentDirEnv) must be an absolute path")
                 values[piCodingAgentDirEnv] = explicit
             }
@@ -181,33 +162,22 @@ enum TronPaths {
         return values
     }
 
-    static func launchAgentEnvironmentVariables(environment: [String: String]) -> [String: String] {
-        launchAgentEnvironmentVariables(profile: activeProfile(environment: environment), environment: environment)
-    }
-
     static var canManageLaunchAgent: Bool {
-        canManageLaunchAgent(environment: ProcessInfo.processInfo.environment)
+        canManageLaunchAgent(profile: activeProfile)
     }
 
-    static func canManageLaunchAgent(profile: TronGatewayProfile, environment: [String: String] = ProcessInfo.processInfo.environment) -> Bool {
+    static func canManageLaunchAgent(profile: TronGatewayProfile) -> Bool {
         guard profile == .stable,
               MacRuntimeVariant.detect().canManageLaunchAgent(profile: profile, isIsolatedInstallMode: false) else { return false }
+        let environment = ProcessInfo.processInfo.environment
         return environment[tronDataDirEnv] == nil
             && environment[tronHomeNameEnv] == nil
             && environment[retiredAgentDirNameEnv] == nil
             && (environment[piCodingAgentDirEnv]?.isEmpty != false || environment[piCodingAgentDirEnv]!.hasPrefix("/"))
     }
 
-    static func canManageLaunchAgent(environment: [String: String]) -> Bool {
-        canManageLaunchAgent(profile: activeProfile(environment: environment), environment: environment)
-    }
-    static var agentBundleName: String {
-        agentBundleName(environment: ProcessInfo.processInfo.environment)
-    }
+    static var agentBundleName: String { activeProfile.agentBundleName }
 
-    static func agentBundleName(environment: [String: String]) -> String {
-        activeProfile(environment: environment).agentBundleName
-    }
     /// Stable has exactly one wrapper parent. Debug lifecycle is CLI-owned and
     /// has no SMAppService parent.
     static var associatedWrapperBundleIDs: [String] {
@@ -218,12 +188,8 @@ enum TronPaths {
         profile == .stable ? [MacRuntimeVariant.releaseBundleIdentifier] : []
     }
 
-    static func activeProfile(environment: [String: String] = ProcessInfo.processInfo.environment) -> TronGatewayProfile {
-        .stable
-    }
-
-    static var activeProfile: TronGatewayProfile { activeProfile(environment: ProcessInfo.processInfo.environment) }
-
+    /// The wrapper owns exactly one profile; Debug lifecycle is CLI-owned.
+    static let activeProfile: TronGatewayProfile = .stable
 
     static func macWrapperLockFileName(bundleIdentifier: String?) -> String {
         let rawIdentifier = bundleIdentifier?.isEmpty == false ? bundleIdentifier! : "unknown"
