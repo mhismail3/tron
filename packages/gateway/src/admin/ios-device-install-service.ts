@@ -1,8 +1,8 @@
 import { spawn } from "node:child_process";
 import { lstatSync } from "node:fs";
-import { lstat, mkdir, mkdtemp, readFile, realpath, rm } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, realpath, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { dirname, isAbsolute, join, parse } from "node:path";
+import { dirname, isAbsolute, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
 import { execFile } from "node:child_process";
@@ -10,6 +10,14 @@ import { GatewayError } from "../errors.js";
 import { atomicWriteJson, removeIfExists } from "../util/json.js";
 import { readSecureJson } from "../util/secure-json.js";
 import { AsyncMutex } from "../util/async-mutex.js";
+import {
+  COMMAND_ID,
+  admitIsoTimestamp,
+  admitTrustedDirectory,
+  admittedFailure,
+  boundedFailureText,
+  type FailureLine,
+} from "./document-admission.js";
 
 export const IOS_DEVICE_INSTALL_CAPABILITY = "ios-device-install.v3";
 const CONFIG_KIND = "tron-ios-device-install-config";
@@ -19,12 +27,16 @@ const MAX_DOCUMENT_BYTES = 64 * 1_024;
 const MAX_DISCOVERY_BYTES = 2 * 1_024 * 1_024;
 const MAX_PATH_BYTES = 4_096;
 const MAX_TARGETS = 256;
-const MAX_ERROR_BYTES = 2_048;
+/** Every persisted iOS install failure projects as one bounded line. */
+const INSTALL_FAILURE: FailureLine = {
+  maximum: 2_048,
+  fallback: "The iOS install helper failed.",
+  rejection: "iOS device install failure is malformed",
+};
 const INSTALL_TIMEOUT_MS = 2 * 60 * 60_000;
 const ACTIVE_STALE_MS = INSTALL_TIMEOUT_MS + 5 * 60_000;
 const IDENTIFIER = /^[0-9A-F]{8}-[0-9A-F]{4}-[0-9A-F]{4}-[0-9A-F]{4}-[0-9A-F]{12}$/u;
 const DEVICE_ID = /^[A-Za-z0-9._:-]{1,100}$/u;
-const COMMAND_ID = /^[A-Za-z0-9._:-]{8,160}$/u;
 const execFileAsync = promisify(execFile);
 
 export type IosDeviceInstallChannel = "stable" | "dev";
@@ -111,11 +123,7 @@ function admitCommandId(value: unknown): string {
 }
 
 function admitTimestamp(value: unknown, name: string): string {
-  const result = boundedText(value, name, 64);
-  if (!/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,9})?Z$/u.test(result)) {
-    throw new GatewayError("conflict", `iOS device install ${name} is malformed`);
-  }
-  return result;
+  return admitIsoTimestamp(value, { rejection: `iOS device install ${name} is malformed` });
 }
 
 function record(value: unknown): Record<string, unknown> | undefined {
@@ -143,38 +151,22 @@ function targetDocument(value: unknown): IosPhysicalDeviceTarget {
   };
 }
 
-async function validateSourceRoot(value: unknown): Promise<string> {
-  if (typeof value !== "string" || !isAbsolute(value) || Buffer.byteLength(value) > MAX_PATH_BYTES
-    || /[\u0000-\u001f\u007f]/u.test(value)) {
-    throw new GatewayError("invalid_request", "iOS source repository must be an absolute path");
-  }
-  const root = parse(value).root;
-  let cursor = root;
-  for (const component of value.slice(root.length).split(/[\\/]+/u).filter(Boolean)) {
-    cursor = join(cursor, component);
-    const info = await lstat(cursor).catch(() => undefined);
-    if (!info) throw new GatewayError("conflict", "iOS source repository is unavailable");
-    if (info.isSymbolicLink()) throw new GatewayError("conflict", "iOS source repository contains a symlink");
-  }
-  const resolved = await realpath(value).catch(() => undefined);
-  if (!resolved) throw new GatewayError("conflict", "iOS source repository is unavailable");
-  const info = await lstat(resolved);
-  if (!info.isDirectory() || info.isSymbolicLink()) {
-    throw new GatewayError("conflict", "iOS source repository must be a regular directory");
-  }
-  for (const marker of [
-    "packages/ios-app/project.yml",
-    "config/ci-toolchain.env",
-    "scripts/tron-ios-device",
-    "scripts/validate-ios-artifact.py",
-    "scripts/verify-gateway-protocol-contract.py",
-  ]) {
-    const markerInfo = await lstat(join(resolved, marker)).catch(() => undefined);
-    if (!markerInfo?.isFile() || markerInfo.isSymbolicLink()) {
-      throw new GatewayError("conflict", "iOS source repository is not a complete Tron checkout");
-    }
-  }
-  return resolved;
+/** The markers that prove a checkout is a complete Tron repository able to build
+ * and install the iOS app. */
+const SOURCE_ROOT_MARKERS = [
+  "packages/ios-app/project.yml",
+  "config/ci-toolchain.env",
+  "scripts/tron-ios-device",
+  "scripts/validate-ios-artifact.py",
+  "scripts/verify-gateway-protocol-contract.py",
+];
+
+async function admitSourceRoot(value: unknown): Promise<string> {
+  return admitTrustedDirectory(value, {
+    subject: "iOS source repository",
+    markers: SOURCE_ROOT_MARKERS,
+    markerRejection: "iOS source repository is not a complete Tron checkout",
+  });
 }
 
 function configDocument(value: unknown): IosDeviceInstallConfig {
@@ -228,7 +220,7 @@ function statusDocument(value: unknown): IosDeviceInstallStatus {
     || !["requested", "running", "succeeded", "failed"].includes(String(raw.state))) {
     throw new GatewayError("conflict", "iOS device install status is malformed");
   }
-  const error = raw.error === undefined ? undefined : admittedFailure(raw.error);
+  const error = raw.error === undefined ? undefined : admittedFailure(raw.error, INSTALL_FAILURE);
   return {
     schema: 2,
     kind: STATUS_KIND,
@@ -343,18 +335,8 @@ async function defaultDiscoverTargets(): Promise<IosPhysicalDeviceTarget[]> {
   }
 }
 
-function failureText(error: unknown, maximum = MAX_ERROR_BYTES): string {
-  const raw = error instanceof Error ? error.message : String(error);
-  const cleaned = raw.replace(/[\u0000-\u001f\u007f]+/gu, " ").replace(/\s+/gu, " ").trim();
-  if (Buffer.byteLength(cleaned) <= maximum) return cleaned || "The iOS install helper failed.";
-  return Buffer.from(cleaned).subarray(0, maximum).toString("utf8").replace(/�+$/u, "");
-}
-
-function admittedFailure(value: unknown): string {
-  if (typeof value !== "string" || Buffer.byteLength(value) === 0) {
-    throw new GatewayError("conflict", "iOS device install failure is malformed");
-  }
-  return failureText(value);
+function failureText(error: unknown, maximum = INSTALL_FAILURE.maximum): string {
+  return boundedFailureText(error, { ...INSTALL_FAILURE, maximum });
 }
 
 function defaultLauncher(environment: NodeJS.ProcessEnv): IosDeviceInstallLauncher | undefined {
@@ -434,7 +416,7 @@ export class IosDeviceInstallService {
     if (value === undefined) return null;
     const config = configDocument(value);
     if (config.deviceId !== deviceId) throw new GatewayError("conflict", "iOS device install configuration owner is malformed");
-    if (config.sourceRoot !== undefined) await validateSourceRoot(config.sourceRoot);
+    if (config.sourceRoot !== undefined) await admitSourceRoot(config.sourceRoot);
     return config;
   }
 
@@ -444,7 +426,7 @@ export class IosDeviceInstallService {
   }): Promise<IosDeviceInstallConfig> {
     this.requireUsable();
     const deviceId = admitDeviceId(value.deviceId);
-    const sourceRoot = await validateSourceRoot(value.sourceRoot);
+    const sourceRoot = await admitSourceRoot(value.sourceRoot);
     return this.mutex.run(async () => {
       const previous = await this.configStatus(deviceId);
       const gatewayChannel = this.options.gatewayChannel ?? "stable";
@@ -693,7 +675,7 @@ export async function runIosDeviceInstallHelper(input: {
   if (configValue === undefined) throw new Error("iOS device install configuration is missing");
   const config = configDocument(configValue);
   if (!config.sourceRoot || !config.target) throw new Error("iOS device install configuration is incomplete");
-  const sourceRoot = await validateSourceRoot(config.sourceRoot);
+  const sourceRoot = await admitSourceRoot(config.sourceRoot);
   const currentValue = await readDocument(statusPath(tronHome, deviceId));
   const current = currentValue === undefined ? undefined : statusDocument(currentValue);
   if (!current || current.commandId !== commandId) throw new Error("iOS device install command ownership changed");

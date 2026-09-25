@@ -1,10 +1,18 @@
-import { lstat, readFile, realpath, mkdir, rename, rm, writeFile } from "node:fs/promises";
+import { lstat, readFile, mkdir, rename, rm, writeFile } from "node:fs/promises";
 import { lstatSync, realpathSync } from "node:fs";
 import { randomUUID } from "node:crypto";
 import { spawn } from "node:child_process";
 import { isAbsolute, join, parse } from "node:path";
 import { GatewayError } from "../errors.js";
 import type { JsonValue } from "../protocol/types.js";
+import {
+  COMMAND_ID,
+  admitIsoTimestamp,
+  admitTrustedDirectory,
+  admittedFailure,
+  boundedFailureText,
+  type FailureLine,
+} from "./document-admission.js";
 
 const MAX_DOCUMENT_BYTES = 64 * 1_024;
 const MAX_STRING_BYTES = 256;
@@ -14,6 +22,12 @@ const FINGERPRINT = /^[0-9a-f]{64}$/u;
 const UPDATE_CONFIG_SCHEMA = 1;
 const UPDATE_CONFIG_KIND = "tron-gateway-update-config";
 const COMPONENT = /^[A-Za-z0-9._-]+$/u;
+/** Every persisted Gateway update failure projects as one bounded line. */
+const UPDATE_FAILURE: FailureLine = {
+  maximum: 2_048,
+  fallback: "Gateway update failed.",
+  rejection: "Gateway update error is malformed",
+};
 
 export type GatewayUpdateChannel = "stable" | "dev";
 export type GatewayUpdateMode = "source" | "artifact" | "auto";
@@ -110,7 +124,7 @@ export function gatewayRollbackHelperArgs(request: GatewayRollbackRequest): stri
   if (request.channel !== "stable" && request.channel !== "dev") {
     throw new GatewayError("invalid_request", "Gateway update channel must be stable or dev");
   }
-  if (typeof request.commandId !== "string" || !/^[A-Za-z0-9._:-]{8,160}$/u.test(request.commandId)) {
+  if (typeof request.commandId !== "string" || !COMMAND_ID.test(request.commandId)) {
     throw new GatewayError("invalid_request", "Gateway update command ID is invalid");
   }
   return ["rollback", "--channel", request.channel, "--command-id", request.commandId];
@@ -123,7 +137,7 @@ export function gatewayUpdateHelperArgs(request: GatewayUpdateRequest): string[]
     ...(request.candidateFingerprint === undefined ? {} : { candidateFingerprint: request.candidateFingerprint }),
   });
   const commandId = request.commandId;
-  if (typeof commandId !== "string" || !/^[A-Za-z0-9._:-]{8,160}$/u.test(commandId)) {
+  if (typeof commandId !== "string" || !COMMAND_ID.test(commandId)) {
     throw new GatewayError("invalid_request", "Gateway update command ID is invalid");
   }
   return ["apply", "--channel", normalized.channel, "--mode", normalized.mode,
@@ -132,18 +146,10 @@ export function gatewayUpdateHelperArgs(request: GatewayUpdateRequest): string[]
     "--command-id", commandId];
 }
 
-function failureText(error: unknown, maximum = 2_048): string {
-  const raw = error instanceof Error ? error.message : String(error);
-  const cleaned = raw.replace(/[\u0000-\u001f\u007f]+/gu, " ").replace(/\s+/gu, " ").trim();
-  if (Buffer.byteLength(cleaned) <= maximum) return cleaned || "Gateway update failed.";
-  return Buffer.from(cleaned).subarray(0, maximum).toString("utf8").replace(/�+$/u, "");
-}
-
-function admittedFailure(value: unknown): string {
-  if (typeof value !== "string" || Buffer.byteLength(value) === 0) {
-    throw new GatewayError("conflict", "Gateway update error is malformed");
-  }
-  return failureText(value);
+/** Bound one Gateway update failure line. `maximum` narrows the bound for a
+ * failure embedded in a thrown message. */
+function failureText(error: unknown, maximum = UPDATE_FAILURE.maximum): string {
+  return boundedFailureText(error, { ...UPDATE_FAILURE, maximum });
 }
 
 export function updaterFailureMessage(error: unknown): string {
@@ -308,29 +314,12 @@ function stateIdentity(raw: Record<string, unknown>, name: string): GatewayUpdat
   }, name);
 }
 
-async function validateTrustedDirectory(path: unknown, name: string, markers: string[] = []): Promise<string> {
-  if (typeof path !== "string" || !isAbsolute(path) || Buffer.byteLength(path) > MAX_PATH_BYTES
-    || /[\u0000-\u001f\u007f]/u.test(path)) throw new GatewayError("invalid_request", `Gateway update ${name} must be an absolute path`);
-  const normalized = path;
-  const root = parse(normalized).root;
-  let cursor = root;
-  for (const component of normalized.slice(root.length).split(/[\\/]+/u).filter(Boolean)) {
-    cursor = join(cursor, component);
-    let info;
-    try { info = await lstat(cursor); } catch { throw new GatewayError("conflict", `Gateway update ${name} is unavailable`); }
-    if (info.isSymbolicLink()) throw new GatewayError("conflict", `Gateway update ${name} contains a symlink`);
-  }
-  let resolved: string;
-  try { resolved = await realpath(normalized); } catch { throw new GatewayError("conflict", `Gateway update ${name} is unavailable`); }
-  const info = await lstat(resolved);
-  if (!info.isDirectory() || info.isSymbolicLink()) throw new GatewayError("conflict", `Gateway update ${name} must be a regular directory`);
-  for (const marker of markers) {
-    const markerPath = join(resolved, marker);
-    const markerInfo = await lstat(markerPath).catch(() => undefined);
-    if (!markerInfo?.isFile() || markerInfo.isSymbolicLink()) throw new GatewayError("conflict", `Gateway update ${name} is not a Tron repository`);
-  }
-  return resolved;
-}
+/** Files that prove a checkout is a complete Tron repository able to build and
+ * deploy a Gateway payload. */
+const SOURCE_ROOT_MARKERS = [
+  "packages/gateway/package.json", "packages/gateway/package-lock.json",
+  "packages/gateway/scripts/ensure-node-pty-helper.mjs", "scripts/gateway-payload-deploy.mjs",
+];
 
 function configDocument(value: unknown): GatewayUpdateConfig {
   if (!value || typeof value !== "object" || Array.isArray(value)) throw new GatewayError("conflict", "Gateway update config is malformed");
@@ -339,14 +328,13 @@ function configDocument(value: unknown): GatewayUpdateConfig {
     || raw.schema !== UPDATE_CONFIG_SCHEMA || raw.kind !== UPDATE_CONFIG_KIND
     || typeof raw.sourceRoot !== "string" || !isAbsolute(raw.sourceRoot)
     || Buffer.byteLength(raw.sourceRoot) > MAX_PATH_BYTES || /[\u0000-\u001f\u007f]/u.test(raw.sourceRoot)
-    || raw.artifactRoot !== undefined && (typeof raw.artifactRoot !== "string" || !isAbsolute(raw.artifactRoot) || Buffer.byteLength(raw.artifactRoot) > MAX_PATH_BYTES || /[\u0000-\u001f\u007f]/u.test(raw.artifactRoot))
-    || typeof raw.updatedAt !== "string" || Buffer.byteLength(raw.updatedAt) > 64
-    || !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,9})?Z$/u.test(raw.updatedAt)) {
+    || raw.artifactRoot !== undefined && (typeof raw.artifactRoot !== "string" || !isAbsolute(raw.artifactRoot) || Buffer.byteLength(raw.artifactRoot) > MAX_PATH_BYTES || /[\u0000-\u001f\u007f]/u.test(raw.artifactRoot))) {
     throw new GatewayError("conflict", "Gateway update config is malformed");
   }
   return {
     schema: 1, kind: UPDATE_CONFIG_KIND, sourceRoot: raw.sourceRoot,
-    ...(raw.artifactRoot === undefined ? {} : { artifactRoot: raw.artifactRoot }), updatedAt: raw.updatedAt,
+    ...(raw.artifactRoot === undefined ? {} : { artifactRoot: raw.artifactRoot }),
+    updatedAt: admitIsoTimestamp(raw.updatedAt, { rejection: "Gateway update config is malformed" }),
   };
 }
 
@@ -380,22 +368,16 @@ export class GatewayUpdateService {
     const value = await readBounded(path);
     if (value === undefined) return null;
     const config = configDocument(value);
-    await validateTrustedDirectory(config.sourceRoot, "sourceRoot", [
-      "packages/gateway/package.json", "packages/gateway/package-lock.json",
-      "packages/gateway/scripts/ensure-node-pty-helper.mjs", "scripts/gateway-payload-deploy.mjs",
-    ]);
-    if (config.artifactRoot !== undefined) await validateTrustedDirectory(config.artifactRoot, "artifactRoot");
+    await admitTrustedDirectory(config.sourceRoot, { subject: "Gateway update sourceRoot", markers: SOURCE_ROOT_MARKERS });
+    if (config.artifactRoot !== undefined) await admitTrustedDirectory(config.artifactRoot, { subject: "Gateway update artifactRoot" });
     return config;
   }
 
   async configure(value: { sourceRoot: unknown; artifactRoot?: unknown }): Promise<GatewayUpdateConfig> {
-    const sourceRoot = await validateTrustedDirectory(value.sourceRoot, "sourceRoot", [
-      "packages/gateway/package.json", "packages/gateway/package-lock.json",
-      "packages/gateway/scripts/ensure-node-pty-helper.mjs", "scripts/gateway-payload-deploy.mjs",
-    ]);
+    const sourceRoot = await admitTrustedDirectory(value.sourceRoot, { subject: "Gateway update sourceRoot", markers: SOURCE_ROOT_MARKERS });
     let artifactRoot: string | undefined;
     if (value.artifactRoot !== undefined && value.artifactRoot !== null) {
-      artifactRoot = await validateTrustedDirectory(value.artifactRoot, "artifactRoot");
+      artifactRoot = await admitTrustedDirectory(value.artifactRoot, { subject: "Gateway update artifactRoot" });
     }
     const config: GatewayUpdateConfig = {
       schema: 1, kind: UPDATE_CONFIG_KIND, sourceRoot,
@@ -455,17 +437,17 @@ export class GatewayUpdateService {
         throw new GatewayError("conflict", "Gateway deployment state is malformed");
       }
       state = raw.state;
-      const stateUpdatedAt = boundedString(raw.updatedAt, "updatedAt", 64);
-      if (stateUpdatedAt === undefined || !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,9})?(?:Z|[+-]\d{2}:\d{2})$/u.test(stateUpdatedAt)) {
-        throw new GatewayError("conflict", "Gateway deployment state is malformed");
-      }
-      updatedAt = stateUpdatedAt;
+      updatedAt = admitIsoTimestamp(raw.updatedAt, {
+        rejection: "Gateway deployment state is malformed",
+        shapeRejection: "Gateway update updatedAt is malformed",
+        allowOffset: true,
+      });
       const stateCommandId = boundedString(raw.commandId, "commandId", 160);
-      if (stateCommandId !== undefined && !/^[A-Za-z0-9._:-]{8,160}$/u.test(stateCommandId)) {
+      if (stateCommandId !== undefined && !COMMAND_ID.test(stateCommandId)) {
         throw new GatewayError("conflict", "Gateway deployment command ID is malformed");
       }
       commandId = stateCommandId ?? null;
-      if (raw.error !== undefined) error = admittedFailure(raw.error);
+      if (raw.error !== undefined) error = admittedFailure(raw.error, UPDATE_FAILURE);
       if (raw.candidateOrigin !== undefined) {
         if (raw.candidateOrigin !== "debug") throw new GatewayError("conflict", "Gateway candidate origin is malformed");
         declaresDebugOrigin = true;
@@ -546,22 +528,23 @@ export class GatewayUpdateService {
         || typeof raw.state !== "string" || raw.state.length === 0 || raw.state.length > 64) {
         throw new GatewayError("conflict", "Gateway update progress is malformed");
       }
-      const progressUpdatedAt = boundedString(raw.updatedAt, "updatedAt", 64);
-      if (progressUpdatedAt === undefined || !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,9})?(?:Z|[+-]\d{2}:\d{2})$/u.test(progressUpdatedAt)) {
-        throw new GatewayError("conflict", "Gateway update progress is malformed");
-      }
+      const progressUpdatedAt = admitIsoTimestamp(raw.updatedAt, {
+        rejection: "Gateway update progress is malformed",
+        shapeRejection: "Gateway update updatedAt is malformed",
+        allowOffset: true,
+      });
       // A delayed helper write must not regress an authoritative terminal
       // deployment state. Timestamps are validated ISO-8601 strings, so their
       // epoch comparison is deterministic and bounded.
       const progressCommandId = boundedString(raw.commandId, "commandId", 160);
-      if (progressCommandId !== undefined && !/^[A-Za-z0-9._:-]{8,160}$/u.test(progressCommandId)) {
+      if (progressCommandId !== undefined && !COMMAND_ID.test(progressCommandId)) {
         throw new GatewayError("conflict", "Gateway update progress command ID is malformed");
       }
       if (updatedAt === null || Date.parse(progressUpdatedAt) >= Date.parse(updatedAt)) {
         state = raw.state;
         updatedAt = progressUpdatedAt;
         commandId = progressCommandId ?? null;
-        if (raw.error !== undefined) error = admittedFailure(raw.error);
+        if (raw.error !== undefined) error = admittedFailure(raw.error, UPDATE_FAILURE);
       }
     }
     if (!candidateAvailable) { candidateOrigin = null; candidateProvenance = null; }
