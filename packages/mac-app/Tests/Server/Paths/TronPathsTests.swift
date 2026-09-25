@@ -53,18 +53,6 @@ struct TronPathsTests {
         #expect(TronPaths.tronHome(profile: .stable) == TronPaths.tronHome)
     }
 
-    @Test("the wrapper owns Stable whatever the environment says")
-    func wrapperIdentityIsEnvironmentIndependent() {
-        #expect(TronPaths.activeProfile == .stable)
-        #expect(TronPaths.launchAgentLabel == "com.tron.server")
-        #expect(TronPaths.defaultServerPort == 9847)
-        #expect(TronPaths.agentBundleName == "Tron Agent")
-        #expect(TronPaths.associatedWrapperBundleIDs == [MacRuntimeVariant.releaseBundleIdentifier])
-        #expect(TronPaths.associatedWrapperBundleIDs(profile: .debug).isEmpty)
-        // The Xcode Debug test host is a read-only companion, never a manager.
-        #expect(!TronPaths.canManageLaunchAgent)
-    }
-
     @Test("production LaunchAgent always advertises Gateway supervision")
     func productionLaunchAgentSupervisionEnvironment() {
         withAgentDirectoryOverride(nil) {

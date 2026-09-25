@@ -479,46 +479,6 @@ describe("AuthBroker", () => {
     broker.cancelOwner("tablet");
   });
 
-  it("shows the SDK abort race can release Gateway work before a provider login settles", async () => {
-    const root = await mkdtemp(join(tmpdir(), "tron-auth-abort-race-"));
-    const runtime = await ModelRuntime.create({ authPath: join(root, "auth.json"), modelsPath: null, refreshOnCreate: false });
-    let finishLogin!: (credential: { refresh: string; access: string; expires: number }) => void;
-    let providerSettled = false;
-    let markStarted!: () => void;
-    const started = new Promise<void>((resolve) => { markStarted = resolve; });
-    runtime.registerProvider("slow-oauth", {
-      name: "Slow OAuth fixture",
-      api: "openai-completions",
-      baseUrl: "https://example.invalid/v1",
-      models: [],
-      oauth: {
-        login: async () => {
-          markStarted();
-          try {
-            return await new Promise((resolve) => { finishLogin = resolve; });
-          } finally {
-            providerSettled = true;
-          }
-        },
-        async refreshToken(credentials) { return credentials; },
-        getApiKey(credentials) { return credentials.access; },
-      },
-    });
-    const registry = new GatewayWorkRegistry("epoch", 8);
-    const broker = new AuthBroker(runtime, () => {}, () => {}, { workRegistry: registry });
-    const operationId = broker.start("phone", "slow-oauth", "oauth").operationId;
-    await started;
-
-    expect(broker.cancel("phone", operationId)).toBe(true);
-    await registry.waitUntilSettled();
-    expect(providerSettled).toBe(false);
-
-    finishLogin({ refresh: "synthetic-refresh", access: "synthetic-access", expires: Date.now() + 60_000 });
-    await flushPromises();
-    expect(providerSettled).toBe(true);
-    expect(runtime.isUsingOAuth("slow-oauth")).toBe(false);
-  });
-
   it("settles a signal-ignoring manual-code provider through broker prompt retirement", async () => {
     // Mirrors the selected CortexKit Anthropic login shape: legacy onAuth/onPrompt
     // callbacks through Pi's real OAuth adapter, no signal use, and a code exchange
@@ -583,50 +543,6 @@ describe("AuthBroker", () => {
     await flushPromises();
     expect(settlements).toEqual(["rejected", "resolved"]);
     expect(runtime.isUsingOAuth("manual-code-oauth")).toBe(false);
-  });
-
-  it("observes callback-listener close before a successor reuses its port", async () => {
-    let port = 0;
-    let listeningCount = 0;
-    // Each adapter instance reports its own listen and close completion, so the
-    // test observes port reuse without sleeping on the clock.
-    const listenerClosures: Array<Promise<void>> = [];
-    const { notify, waitFor } = asyncSignal();
-    const runtime = runtimeWithLogin(async (interaction) => {
-      const server = createServer();
-      let closeCompleted!: () => void;
-      listenerClosures.push(new Promise<void>((resolve) => { closeCompleted = resolve; }));
-      await new Promise<void>((resolve, reject) => {
-        server.once("error", reject);
-        server.listen(port || 0, "127.0.0.1", () => {
-          const address = server.address();
-          if (!address || typeof address === "string") return reject(new Error("missing listener address"));
-          port = address.port;
-          listeningCount += 1;
-          notify();
-          resolve();
-        });
-      });
-      const close = () => server.close(() => closeCompleted());
-      interaction.signal.addEventListener("abort", close, { once: true });
-      await new Promise<void>((resolve, reject) => {
-        interaction.signal.addEventListener("abort", () => reject(new Error("cancelled")), { once: true });
-      });
-    });
-    const broker = new AuthBroker(runtime, () => {});
-    const first = broker.start("socket-1", "provider", "api_key", runtime, "device").operationId;
-    await waitFor(() => port !== 0);
-
-    expect(broker.cancel("device", first)).toBe(true);
-    await listenerClosures[0]!;
-
-    // This tests a cancellation-aware local adapter fixture, not the selected
-    // third-party provider whose source is not present in this checkout.
-    const second = broker.start("socket-2", "provider", "api_key", runtime, "device").operationId;
-    await waitFor(() => listeningCount === 2);
-    expect(broker.activeOperationCount).toBe(1);
-    broker.cancel("device", second);
-    await listenerClosures[1]!;
   });
 
   it("deduplicates auth.begin by stable owner and command ID", async () => {

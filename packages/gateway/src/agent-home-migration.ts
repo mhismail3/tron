@@ -423,7 +423,7 @@ function usage(): never {
   process.exit(64);
 }
 
-export function validateMigrationStageArguments(args: readonly string[]): void {
+function validateMigrationStageArguments(args: readonly string[]): void {
   if (args.includes("--browser-config-source")) {
     throw new AgentHomeMigrationError("--browser-config-source was removed; browser configuration remains outside the agent-home migration");
   }

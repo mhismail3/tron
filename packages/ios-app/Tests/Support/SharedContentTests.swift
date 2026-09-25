@@ -58,21 +58,6 @@ struct SharedContentTests {
         ) == nil)
     }
 
-    @Test("a later plain-text provider retains the current overwrite behavior")
-    func laterText() {
-        let content = SharedContentReducer.content(
-            from: [
-                .url("https://first.invalid"),
-                .url("https://second.invalid"),
-                .text("later caption"),
-            ],
-            timestamp: .distantPast
-        )
-
-        #expect(content?.url == "https://first.invalid")
-        #expect(content?.text == "later caption")
-    }
-
     @Test("share prompt keeps URL-before-text composition and rejects empty input")
     func prompt() {
         let content = SharedContent(

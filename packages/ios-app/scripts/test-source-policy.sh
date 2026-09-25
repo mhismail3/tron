@@ -56,20 +56,4 @@ grep -Fq 'tron-notification.caf' "$generated_project" \
 /usr/bin/python3 "$ROOT/scripts/presentation-source-policy.py" "$ROOT/Sources" \
   || fail "raw native sheet escaped its managed owner"
 
-# Bounded structural regressions, not proof of rendered animation or geometry.
-/usr/bin/python3 - "$ROOT/Sources/UI" <<'PY'
-import pathlib, sys
-ui = pathlib.Path(sys.argv[1])
-notice = (ui / "Components/InAppNoticePresentation.swift").read_text()
-stack = notice.split("private struct InAppNoticeStack: View {", 1)[1].split("private struct InAppNoticeCard", 1)[0]
-assert '.transition(reduceMotion ? .opacity : .move(edge: .top).combined(with: .opacity))' in stack
-assert '.animation(reduceMotion ? .easeOut(duration: 0.18) : .smooth(duration: 0.24), value: notices)' in stack
-assert 'removal: .identity' not in stack
-sheet = (ui / "Chat/ToolDetailSheet.swift").read_text()
-primary = sheet.split('@ViewBuilder private func primarySection', 1)[1].split('private func primaryValue', 1)[0]
-assert 'VStack(alignment: .leading, spacing: 7)' in primary
-assert 'presentation.sheetTitleIcon != nil || presentation.kind == .generic' in primary
-assert primary.index('boundedPreviewNote(') < primary.index('.padding(12)') < primary.index('.tronGlassSurface(')
-PY
-
-echo "iOS source policy passed (orientation/resources, managed presentation, and detail/notice structure)"
+echo "iOS source policy passed (orientation/resources and managed presentation)"

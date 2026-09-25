@@ -116,22 +116,6 @@ struct WorkspaceInspectorOwnerTests {
         #expect(owner.directory == nil)
     }
 
-    @Test("the default Files activation still overlaps inspection and the directory read")
-    func filesActivationKeepsBothReads() async {
-        let probe = WorkspaceMethodProbe()
-        let service = WorkspaceInspectionService { method, params in
-            try await probe.request(method: method, params: params)
-        }
-        let owner = WorkspaceInspectorOwner()
-
-        await owner.loadInitial(service: service, sessionID: "session")
-
-        let methods = Set(await probe.methods)
-        #expect(methods == ["session.workspace.inspect", "session.workspace.list"])
-        #expect(owner.inspection?.root == "/workspace")
-        #expect(owner.directory?.path == "")
-    }
-
     @Test("cancel retires visible loading state and late publication")
     func cancellation() async {
         let probe = WorkspaceInspectorProbe()

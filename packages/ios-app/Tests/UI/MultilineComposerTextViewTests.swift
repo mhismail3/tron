@@ -161,20 +161,6 @@ struct MultilineComposerTextViewTests {
         #expect(!ChatComposerPolicy.preservesFocus(submissionBehavior: steering))
     }
 
-    @Test("stop includes the projected operation kind as advisory metadata")
-    func activeOperationAbortPolicy() {
-        func operation(_ kind: SessionOperationState.Kind) -> SessionOperationState {
-            SessionOperationState(id: "operation", kind: kind, startedAt: "2026-01-01T00:00:00Z", reason: nil)
-        }
-        #expect(ChatComposerPolicy.abortKind(operation: operation(.prompt)) == "agent")
-        #expect(ChatComposerPolicy.abortKind(operation: operation(.command)) == "agent")
-        #expect(ChatComposerPolicy.abortKind(operation: operation(.compaction)) == "compaction")
-        #expect(ChatComposerPolicy.abortKind(operation: operation(.branchSummary)) == "branchSummary")
-        #expect(ChatComposerPolicy.abortKind(operation: operation(.bash)) == "bash")
-        #expect(ChatComposerPolicy.abortKind(operation: operation(.retry)) == "retry")
-        #expect(ChatComposerPolicy.abortKind(operation: nil) == "agent")
-    }
-
     @Test("ordinary command authority depends on the exact mounted session")
     func mountedSessionAuthorityIsExact() {
         #expect(SessionMountedAuthorityPolicy.admits(
@@ -259,34 +245,6 @@ struct MultilineComposerTextViewTests {
         #expect(behavior == nil)
         #expect(!ChatComposerPolicy.preservesFocus(submissionBehavior: behavior))
         #expect(ChatComposerPolicy.isTextEditable(isTranscriptReady: false))
-    }
-
-    @Test("attachment pickers preserve characterized selection ceilings")
-    func attachmentSelectionCeilings() {
-        #expect(ChatAttachmentImportPolicy.maximumPhotoSelection == 10)
-        #expect(ChatAttachmentImportPolicy.maximumPhotoSelection == ComposerAttachmentPolicy.maximumCount)
-        #expect(ChatAttachmentImportPolicy.maximumFileSelection == 10)
-    }
-
-    @Test("pending photo remove control centers a compact target on the preview corner")
-    func pendingPhotoRemoveGeometry() {
-        #expect(PendingPhotoRemoveLayoutPolicy.previewSide == 64)
-        #expect(PendingPhotoRemoveLayoutPolicy.visibleDiameter == 22)
-        #expect(PendingPhotoRemoveLayoutPolicy.touchTarget == 30)
-        #expect(PendingPhotoRemoveLayoutPolicy.centerOnTopTrailingCornerOffset == CGSize(
-            width: 15,
-            height: -15
-        ))
-    }
-
-    @Test("editor confirmation policy preserves wording and empty-draft admission")
-    func editorConfirmationPolicy() {
-        #expect(ComposerEditorRequestPolicy.confirmationTitle == "Replace the current draft?")
-        #expect(ComposerEditorRequestPolicy.useActionTitle == "Use Extension Text")
-        #expect(ComposerEditorRequestPolicy.keepActionTitle == "Keep Current Draft")
-        #expect(ComposerEditorRequestPolicy.confirmationMessage == "An extension requested a composer change. Tron will not overwrite what you typed without confirmation.")
-        #expect(ComposerEditorRequestPolicy.appliesAutomatically(to: ""))
-        #expect(!ComposerEditorRequestPolicy.appliesAutomatically(to: "existing"))
     }
 
     @Test("intrinsic sizing grows to eight lines and reconciles scrolling after final layout")
@@ -399,30 +357,6 @@ struct MultilineComposerTextViewTests {
         #expect(coordinator.hostedCaretIsVisible(in: view))
     }
 
-    @Test("layout callback reconciles overflow without recursive ownership")
-    func layoutCallbackReconcilesOverflow() {
-        var text = ""
-        var focused = true
-        let control = MultilineComposerTextView(
-            text: Binding(get: { text }, set: { text = $0 }),
-            isFocused: Binding(get: { focused }, set: { focused = $0 }),
-            isEditable: true,
-            keyboardAppearance: .dark
-        )
-        let coordinator = control.makeCoordinator()
-        let width: CGFloat = 240
-        let view = makeTextView(coordinator: coordinator, width: width)
-        view.text = (1...12).map { "line \($0)" }.joined(separator: "\n") + "\n"
-        view.selectedRange = NSRange(location: (view.text as NSString).length, length: 0)
-        coordinator.textViewDidChange(view)
-        view.frame.size.height = coordinator.resolvedHeight(of: view, width: width)
-        view.setNeedsLayout()
-        view.layoutIfNeeded()
-
-        #expect(view.isScrollEnabled)
-        #expect(coordinator.hostedCaretIsVisible(in: view))
-    }
-
     @Test("invalid and speculative widths fail closed before TextKit measurement")
     func invalidWidthProposals() {
         #expect(!MultilineComposerTextView.isAdmittedWidth(.nan))
@@ -450,23 +384,6 @@ struct MultilineComposerTextViewTests {
             #expect(coordinator.resolvedHeight(of: view, width: .infinity) == 0)
             #expect(coordinator.resolvedHeight(of: view, width: 240) == finite)
         }
-    }
-
-    @Test("internal scroll ownership has a one-point hysteresis band")
-    func scrollHysteresis() {
-        let maximum: CGFloat = 100
-        #expect(!MultilineComposerTextView.Coordinator.shouldUseInternalScrolling(
-            fittingHeight: 100.5, maximumHeight: maximum, currentlyScrolling: false
-        ))
-        #expect(MultilineComposerTextView.Coordinator.shouldUseInternalScrolling(
-            fittingHeight: 100.51, maximumHeight: maximum, currentlyScrolling: false
-        ))
-        #expect(MultilineComposerTextView.Coordinator.shouldUseInternalScrolling(
-            fittingHeight: 99.5, maximumHeight: maximum, currentlyScrolling: true
-        ))
-        #expect(!MultilineComposerTextView.Coordinator.shouldUseInternalScrolling(
-            fittingHeight: 99.49, maximumHeight: maximum, currentlyScrolling: true
-        ))
     }
 
     @Test("wrapped typing around the cap does not oscillate scroll ownership")

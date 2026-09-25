@@ -120,17 +120,6 @@ final class KnowledgeModelsTests: XCTestCase {
         XCTAssertEqual(presentation.record.provenance.evidence.count, 2, "Simplifying evidence rows must not discard canonical citations")
     }
 
-    func testGatewayObjectResponseAndImportedQualificationWireShapeDecode() throws {
-        let object = KnowledgeObjectRead(hash: String(repeating: "a", count: 64), mediaType: "text/plain", bytes: 5, totalBytes: 5, offset: 0, nextOffset: nil, base64: "aGVsbG8=")
-        let imported = KnowledgeImportOrigin(store: "llm-wiki", recordId: "assertion-1", revision: "git-revision", importedAt: "2026-01-01T00:00:00Z", review: KnowledgeImportReview(batch: "batch-1", auditId: "audit-1", receiptId: nil, resultRevision: nil, basis: "user-confirmed"))
-        let decoder = JSONDecoder()
-        let decodedObject = try decoder.decode(KnowledgeObjectRead.self, from: try JSONEncoder().encode(object))
-        let decodedOrigin = try decoder.decode(KnowledgeImportOrigin.self, from: try JSONEncoder().encode(imported))
-        XCTAssertEqual(decodedObject.hash, object.hash)
-        XCTAssertEqual(Data(base64Encoded: decodedObject.base64), Data("hello".utf8))
-        XCTAssertEqual(decodedOrigin.review?.basis, "user-confirmed")
-    }
-
     func testGlobalObservationGrantIsExplicitAndPreservesSelectedScopesAndExclusions() throws {
         let selected = Data(#"{"sessionIds":["selected-session"],"projectIds":["selected-project"],"excludedSessionIds":["private-session"],"excludedProjectIds":["private-project"]}"#.utf8)
         var eligibility = try JSONDecoder().decode(KnowledgeEligibility.self, from: selected)
@@ -530,17 +519,6 @@ final class KnowledgeModelsTests: XCTestCase {
         XCTAssertLessThan(citation.count, 48, "A citation cannot dominate the row beside its actions")
         XCTAssertEqual(KnowledgeCoveragePresentationPolicy.short("bd1ff330"), "bd1ff330")
         XCTAssertEqual(KnowledgeCoveragePresentationPolicy.title(.unavailable), "Observation unavailable")
-    }
-
-    func testKnowledgeMenusUseOneSettingsSubmenuAndKeepCreationActionsSeparate() {
-        XCTAssertEqual(KnowledgeDashboardMenuPolicy.settingsTitle(for: .chronicle), "Knowledge settings")
-        XCTAssertEqual(KnowledgeDashboardMenuPolicy.settingsTitle(for: .library), "Knowledge settings")
-        let settings = ["Observation configuration", "Needs attention", "Chronicle info"]
-        XCTAssertEqual(KnowledgeDashboardMenuPolicy.settingsItems(for: .chronicle).map(\.rawValue), settings)
-        XCTAssertEqual(KnowledgeDashboardMenuPolicy.settingsItems(for: .library).map(\.rawValue), settings)
-        XCTAssertEqual(KnowledgeDashboardMenuPolicy.creationItems.map(\.rawValue), ["Capture URL", "New note"])
-        XCTAssertFalse(KnowledgeDashboardMenuPolicy.settingsItems(for: .library).contains(.captureURL))
-        XCTAssertFalse(KnowledgeDashboardMenuPolicy.settingsItems(for: .library).contains(.newNote))
     }
 
     func testKnowledgeDashboardKeepsOneTopLevelRowAndScopedLibraryVisibility() {

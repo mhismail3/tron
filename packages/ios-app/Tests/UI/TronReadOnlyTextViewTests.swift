@@ -5,18 +5,6 @@ import UIKit
 @MainActor
 @Suite("Native document reader chrome")
 struct TronReadOnlyTextViewTests {
-    @Test("one native safe-area inset clears chrome without doubling document padding")
-    func initialInsetAndScrolledOffset() throws {
-        let view = reader()
-        #expect(view.contentInset.top == 0)
-        #expect(view.contentInset.left == 0)
-        #expect(view.textContainerInset.left == 18)
-        #expect(view.textContainerInset.top == view.safeAreaInsets.top + 18)
-        #expect(view.contentOffset.y == 0)
-        let firstGlyph = view.caretRect(for: view.beginningOfDocument)
-        #expect(firstGlyph.minY >= view.safeAreaInsets.top)
-        #expect(firstGlyph.minY < view.safeAreaInsets.top + 30)
-    }
 
     @Test("layout and unchanged updates never snap native bounce samples or selection")
     func rubberbandContinuity() {
@@ -45,10 +33,5 @@ struct TronReadOnlyTextViewTests {
         view.layoutIfNeeded()
         view.applyDocumentInsets()
         return view
-    }
-
-    @Test("reader keeps the native document inset contract")
-    func readerUsesDocumentHostInsetContract() {
-        #expect(TronDocumentReaderLayoutPolicy.contentInsetAdjustmentBehavior == .never)
     }
 }

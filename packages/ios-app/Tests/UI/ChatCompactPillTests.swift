@@ -5,65 +5,6 @@ import UIKit
 
 @Suite("Chat compact pill and prompt typography")
 struct ChatCompactPillTests {
-    @Test("prompt lines use logical leading alignment inside a right-anchored bound")
-    func promptAlignment() {
-        #expect(UserPromptTextLayoutPolicy.alignment(layoutDirection: .leftToRight) == .left)
-        #expect(UserPromptTextLayoutPolicy.alignment(layoutDirection: .rightToLeft) == .right)
-    }
-
-    @Test("prompt bound, response-matched type scale, and glass geometry are explicit")
-    func promptGeometry() {
-        #expect(UserPromptTextLayoutPolicy.maximumWidth == 364)
-        #expect(UserPromptTextLayoutPolicy.fontScale == 1)
-        #expect(ChatPromptContainerStyle.cornerRadius == 18)
-        #expect(ChatPromptContainerStyle.horizontalPadding == 12)
-        #expect(ChatPromptContainerStyle.topPadding == 8)
-        #expect(ChatPromptContainerStyle.userPromptBottomPadding == 8)
-        #expect(ChatPromptContainerStyle.queuedMessageBottomPadding == 12)
-        #expect(ChatPromptContainerStyle.tintOpacity == 0.16)
-    }
-
-    @Test("short prompts keep their intrinsic width while long prompts stop at the bound")
-    func promptFittedWidth() {
-        #expect(UserPromptTextLayoutPolicy.fittedWidth(measured: 96, proposed: 364) == 96)
-        #expect(UserPromptTextLayoutPolicy.fittedWidth(measured: 520, proposed: 364) == 364)
-    }
-
-    @Test("queued containers hug intrinsic content and remain bounded by proposal and cap")
-    func queuedContainerWidth() {
-        #expect(UserPromptTextLayoutPolicy.boundedContainerWidth(
-            intrinsic: 180, proposed: 364
-        ) == 180)
-        #expect(UserPromptTextLayoutPolicy.boundedContainerWidth(
-            intrinsic: 520, proposed: 364
-        ) == 364)
-        #expect(UserPromptTextLayoutPolicy.boundedContainerWidth(
-            intrinsic: 320, proposed: 240
-        ) == 240)
-        #expect(UserPromptTextLayoutPolicy.boundedContainerWidth(
-            intrinsic: .infinity, proposed: 300
-        ) == 300)
-    }
-
-    @Test("bottom blur follows keyboard focus without changing layout")
-    func bottomActivityBlurGeometry() {
-        #expect(ChatBottomActivityBlurLayout.height(keyboardVisible: false) == 68)
-        #expect(ChatBottomActivityBlurLayout.translation(keyboardVisible: false) == 44)
-        #expect(ChatBottomActivityBlurLayout.height(keyboardVisible: true) == 80)
-        #expect(ChatBottomActivityBlurLayout.translation(keyboardVisible: true) == 24)
-        #expect(
-            ChatBottomActivityBlurLayout.height(keyboardVisible: true)
-                - ChatBottomActivityBlurLayout.translation(keyboardVisible: true)
-                == 56
-        )
-    }
-
-    @Test("notification tone may change shape while mounted tool chips remain capsules")
-    func compactPillShapeOwnership() {
-        #expect(ChatCompactPillLayoutPolicy.cornerRadius(for: .error) == ChatCompactPillLayoutPolicy.errorCornerRadius)
-        #expect(ChatCompactPillLayoutPolicy.cornerRadius(for: .accent) == ChatCompactPillLayoutPolicy.capsuleCornerRadius)
-        #expect(ChatToolChipShapePolicy.cornerRadius == ChatCompactPillLayoutPolicy.capsuleCornerRadius)
-    }
 
     @Test("Manage Session compaction admission matches Gateway support")
     func sessionCompactionAdmission() {
@@ -96,36 +37,6 @@ struct ChatCompactPillTests {
         #expect(SessionContextPresentation(snapshot) != baseline)
     }
 
-    @Test("Manage Session distinguishes compacted and pending usage refresh states")
-    func sessionContextUsage() {
-        #expect(SessionContextUsagePresentation(nil) == .unavailable)
-        #expect(SessionContextUsagePresentation(.init(tokens: nil, contextWindow: 1_000, percent: nil)) == .unavailable)
-        #expect(SessionContextUsagePresentation(.init(tokens: 250, contextWindow: 1_000, percent: 25)) == .available(used: 250, window: 1_000, percent: 25))
-        #expect(SessionContextUsagePresentation(nil).accessibilityLabel.hasPrefix("Context usage:"))
-        #expect(SessionContextUsageRefreshPresentation(
-            lastTranscriptKind: .compaction,
-            assistantMessages: 3
-        ) == .compacted)
-        #expect(SessionContextUsageRefreshPresentation(
-            lastTranscriptKind: nil,
-            assistantMessages: 0
-        ) == .awaitingFirstResponse)
-        #expect(SessionContextUsageRefreshPresentation(
-            lastTranscriptKind: .message,
-            assistantMessages: 3
-        ) == .awaitingRefresh)
-    }
-
-    @Test("usage summary combines counts with bounded percentage without inventing estimates")
-    func combinedUsageSummary() {
-        let usage = SessionContextUsagePresentation(.init(tokens: 162_000, contextWindow: 272_000, percent: 59.56))
-        #expect(usage.usedSummary == "162K/272K • 60% used")
-        #expect(SessionContextUsagePresentation(.init(tokens: 0, contextWindow: 272_000, percent: 0)).usedSummary == "0/272K • 0% used")
-        #expect(SessionContextUsagePresentation(.init(tokens: 300_000, contextWindow: 272_000, percent: 110)).usedSummary == "300K/272K • 100% used")
-        #expect(SessionContextUsagePresentation(nil).usedSummary == nil)
-        #expect(SessionContextUsagePresentation(.init(tokens: nil, contextWindow: 272_000, percent: nil)).usedSummary == nil)
-    }
-
     @Test("model summary uses the exact selected provider and catalog name with a stable fallback")
     func modelSummaryName() throws {
         let first = ModelSummary(provider: "first", id: "same-id", name: "First Model", reasoning: true, input: ["text"], contextWindow: 272_000, maxTokens: 8_192, available: true)
@@ -139,38 +50,6 @@ struct ChatCompactPillTests {
         #expect(SessionModelSelectionPresentation.modelName(first.ref, catalog: catalog) == "First Model")
         #expect(SessionModelSelectionPresentation.modelName(first.ref, catalog: []) == first.ref.displayName)
         #expect(SessionModelSelectionPresentation.modelName(nil, catalog: catalog) == "Choose model")
-    }
-
-    @Test("Manage Session export rows keep stable identities and one progress owner")
-    func sessionExportPresentation() {
-        #expect(SessionExportPresentationPolicy.canStart(activeFormat: nil))
-        #expect(!SessionExportPresentationPolicy.canStart(activeFormat: "html"))
-        #expect(SessionExportPresentationPolicy.showsProgress(rowFormat: "html", activeFormat: "html"))
-        #expect(!SessionExportPresentationPolicy.showsProgress(rowFormat: "jsonl", activeFormat: "html"))
-        #expect(SessionExportPresentationPolicy.title(for: "html") == "Export as HTML")
-        #expect(SessionExportPresentationPolicy.title(for: "jsonl") == "Export as JSON")
-    }
-
-    @Test("Manage Session workspace row preserves branch, detached, and change evidence")
-    func sessionWorkspacePresentation() throws {
-        func inspection(_ repository: String) throws -> SessionWorkspaceInspection {
-            try JSONDecoder.gateway.decode(
-                SessionWorkspaceInspection.self,
-                from: Data(#"{"root":"/workspace","revision":"revision","repository":\#(repository)}"#.utf8)
-            )
-        }
-
-        let none = try JSONDecoder.gateway.decode(
-            SessionWorkspaceInspection.self,
-            from: Data(#"{"root":"/workspace","revision":"revision"}"#.utf8)
-        )
-        #expect(SessionWorkspaceRowPresentation.resolve(none) == .notRepository)
-        #expect(SessionWorkspaceRowPresentation.resolve(try inspection(
-            #"{"root":"/workspace","branch":"feature/tron","head":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","detached":false,"unborn":false,"dirty":true,"changes":[{"path":"README.md","originalPath":null,"staged":false,"unstaged":true,"untracked":false,"conflicted":false,"kind":"modified"}]}"#
-        )) == .loaded(branch: "feature/tron", dirty: true, changeCount: 1))
-        #expect(SessionWorkspaceRowPresentation.resolve(try inspection(
-            #"{"root":"/workspace","head":"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb","detached":true,"unborn":false,"dirty":false,"changes":[]}"#
-        )) == .loaded(branch: "Detached · bbbbbbbb", dirty: false, changeCount: 0))
     }
 
     @Test("workspace history graph preserves branch and merge lanes")
@@ -202,28 +81,6 @@ struct ChatCompactPillTests {
         #expect(rows[3].nodeLane == 0)
     }
 
-    @Test("commit details remove only the duplicated subject line")
-    func workspaceCommitMessageBody() throws {
-        #expect(WorkspaceCommitMessagePresentation.body(
-            subject: "Fix workspace",
-            message: "Fix workspace\n"
-        ) == nil)
-        #expect(WorkspaceCommitMessagePresentation.body(
-            subject: "Fix workspace",
-            message: "Fix workspace\n\nDetailed explanation.\nSecond line."
-        ) == "Detailed explanation.\nSecond line.")
-        #expect(WorkspaceCommitMessagePresentation.body(
-            subject: "Fix workspace",
-            message: "Independent message"
-        ) == "Independent message")
-        let body = try #require(WorkspaceCommitMessagePresentation.body(
-            subject: "commit: delete obsolete resource",
-            message: "commit: delete obsolete resource\n\nRemoves display smoke, a one-off image report and an\nunreferenced iOS log; keeps the plan history intact."
-        ))
-        #expect(body == "Removes display smoke, a one-off image report and an\nunreferenced iOS log; keeps the plan history intact.")
-        #expect(MarkdownPresentation.reflowProse(body) == "Removes display smoke, a one-off image report and an unreferenced iOS log; keeps the plan history intact.")
-    }
-
     @Test("commit prose reflows without joining list items, code, quotes or trailers")
     func structuredCommitMessageBody() throws {
         let structured = "- First change\n- Second change\n\n> Quoted line\n> Next line\n\n~~~text\nfirst code line\nsecond code line\n~~~\n\nSigned-off-by: Example <example@example.invalid>\nReviewed-by: Reviewer <reviewer@example.invalid>"
@@ -231,19 +88,6 @@ struct ChatCompactPillTests {
         let body = try #require(WorkspaceCommitMessagePresentation.body(subject: "Fix wrapping", message: source))
         #expect(MarkdownPresentation.reflowProse(body) == "A prose sentence continues here.\n\n" + structured)
         #expect(body.contains("A prose sentence\ncontinues here."))
-    }
-
-    @Test("Project Resources excludes instruction files owned by Agent Instructions")
-    func projectResourceCategories() {
-        #expect(ProjectResourceKind.allCases.map(\.key) == ["prompts", "skills", "tools", "extensions"])
-    }
-
-    @Test("Project resource descriptions normalize producer line breaks")
-    func projectResourceDescriptionsNormalizeWhitespace() {
-        #expect(
-            ProjectResourceTextPresentation.readableDescription("Parallel\nsubagents\treview\r\nresults.")
-                == "Parallel subagents review results."
-        )
     }
 
     @Test("Project prompts resolve content by exact loaded-template identity, not their display title or file path")
@@ -274,51 +118,6 @@ struct ChatCompactPillTests {
         ])).commandInfo == nil)
     }
 
-    @Test("Project resource details foreground kind-specific user guidance")
-    func projectResourceDetails() {
-        let extensionDetail = ProjectResourceDetailPresentation(kind: .extensions, value: .object([
-            "name": .string("index.ts"),
-            "scope": .string("user"),
-            "source": .string("npm:example@1.0.0"),
-            "path": .string("/extensions/index.ts"),
-            "tools": .array([.string("read"), .string("edit")]),
-            "commands": .array([.string("review")]),
-        ]))
-        #expect(extensionDetail.purpose.contains("loaded extension"))
-        #expect(extensionDetail.tools == ["read", "edit"])
-        #expect(extensionDetail.commands == ["review"])
-        #expect(extensionDetail.path == "/extensions/index.ts")
-
-        let prompt = ProjectResourceDetailPresentation(kind: .prompts, value: .object([
-            "name": .string("gather-context"),
-            "description": .string("Gather context before deciding."),
-            "argumentHint": .string("<topic>"),
-        ]))
-        #expect(prompt.purpose == "Gather context before deciding.")
-        #expect(prompt.invocation == "/gather-context <topic>")
-
-        let skill = ProjectResourceDetailPresentation(kind: .skills, value: .object([
-            "description": .string("Delegate single-agent work to focused subagents without wrapping the summary unnaturally."),
-            "disableModelInvocation": .bool(false),
-        ]))
-        #expect(skill.purpose.hasSuffix("unnaturally."))
-        #expect(skill.purpose.contains("single‑agent"))
-        #expect(!skill.purpose.contains("single-agent"))
-        #expect(skill.availability == "Available to the agent on demand")
-
-        let tool = ProjectResourceDetailPresentation(kind: .tools, value: .object([
-            "name": .string("write"),
-            "description": .string("Write a file."),
-            "parameters": .object([
-                "properties": .object(["path": .object([:]), "content": .object([:])]),
-                "required": .array([.string("path")]),
-            ]),
-            "promptGuidelines": .string("Use exact paths."),
-        ]))
-        #expect(tool.schemaSummary == "2 inputs · 1 required")
-        #expect(tool.guidance == "Use exact paths.")
-    }
-
     @Test("Session History fork points and continuation impact are explicit")
     func sessionHistoryPolicy() {
         let prompt = historyNode(id: "prompt", role: .user, current: true)
@@ -338,155 +137,6 @@ struct ChatCompactPillTests {
         #expect(SessionHistoryPolicy.navigationTitle(for: prompt) == "Edit From This Prompt")
         #expect(SessionHistoryPolicy.navigationTitle(for: response) == "Continue From Here")
         #expect(SessionHistoryPreview.plain("# **Hello**\n> [world](https://example.test)\n- ~~again~~\n```swift") == "Hello world again swift")
-    }
-
-    @Test("fork-before is offered only for user prompts accepted by the runtime")
-    func forkChoicePolicy() {
-        #expect(SessionForkChoicePolicy.initialPosition(for: .user) == .at)
-        #expect(SessionForkChoicePolicy.supportsBefore(.user))
-        for role: TranscriptItem.Role? in [.assistant, .toolResult, nil] {
-            #expect(SessionForkChoicePolicy.initialPosition(for: role) == .at)
-            #expect(!SessionForkChoicePolicy.supportsBefore(role))
-        }
-    }
-
-    @Test("compact transcript pills share metadata-level leading icon rhythm")
-    func compactPillGeometry() {
-        #expect(ChatCompactPillLayoutPolicy.horizontalPadding == 10)
-        #expect(ChatCompactPillLayoutPolicy.verticalPadding == 6)
-        #expect(ChatCompactPillLayoutPolicy.itemSpacing == 5)
-        #expect(ChatCompactPillLayoutPolicy.standardIconSize == 13)
-        #expect(ChatCompactPillLayoutPolicy.toolIconSize == 13)
-        #expect(ChatCompactPillLayoutPolicy.progressIconSize == 13)
-        #expect(ChatCompactPillLayoutPolicy.runningToolPulseOffsetX == -1)
-    }
-
-    @Test("tool chip visual state excludes timing and provenance payload churn")
-    func toolChipStructuralState() {
-        func run(
-            duration: Int,
-            origin: ExtensionToolOrigin?,
-            error: Bool = false,
-            completedAt: String? = nil
-        ) -> ChatToolRunPresentation {
-            ChatToolRunPresentation(tools: [ChatToolPresentation(
-                id: "call", title: "subagent", subtitle: "Running",
-                request: nil, response: nil, content: "", fallbackContent: nil,
-                error: error, startedAt: "2026-01-01T00:00:00Z", completedAt: completedAt,
-                durationMs: duration, lastProgressAt: nil, progressSequence: duration,
-                extensionOrigin: origin,
-                groupId: "stream:turn:tool-group:0", groupIndex: 0,
-                groupCount: 1, groupFinalized: true
-            )])
-        }
-        let first = ChatCompactPillVisualState.toolRun(run(duration: 10, origin: nil))
-        let updated = ChatCompactPillVisualState.toolRun(run(
-            duration: 900,
-            origin: ExtensionToolOrigin(source: "extension-source")
-        ))
-        #expect(first == updated)
-        #expect(first.tone == .warning)
-        let failed = ChatCompactPillVisualState.toolRun(run(
-            duration: 900,
-            origin: nil,
-            error: true,
-            completedAt: "2026-01-01T00:00:01Z"
-        ))
-        #expect(failed.tone == .error)
-        #expect(first.title == "subagent")
-        #expect(!first.title.contains("Extension activity"))
-    }
-
-    @Test("a completed single tool transitions in place to an aggregated running chip")
-    func completedToolExpandsIntoRunningRun() throws {
-        func tool(_ id: String, subtitle: String) -> ChatToolPresentation {
-            ChatToolPresentation(
-                id: id, title: "Edit file", toolName: "edit", subtitle: subtitle,
-                request: nil, response: nil, content: "", fallbackContent: nil,
-                error: false, startedAt: nil, completedAt: subtitle == "Completed" ? "done" : nil,
-                durationMs: 1, lastProgressAt: nil, progressSequence: 1,
-                toolSegmentId: "tool-segment:turn",
-                groupId: "group-\(id)", groupIndex: 0, groupCount: 1, groupFinalized: true
-            )
-        }
-        let completed = ChatToolRunPresentation(tools: [tool("one", subtitle: "Completed")])
-        let running = ChatToolRunPresentation(tools: [tool("two", subtitle: "Running")])
-        let fusion = try #require(ChatPhysicalToolRunFusion(canonical: completed, live: running))
-        let visual = ChatCompactPillVisualState.toolRun(fusion.run)
-
-        #expect(fusion.run.id == completed.id)
-        #expect(fusion.run.tools.map(\.id) == ["one", "two"])
-        #expect(visual.title == "2 tools")
-        #expect(visual.detail == "In progress")
-        #expect(visual.showsProgress)
-        #expect(visual.count == 2)
-    }
-
-    @Test("extension tool pills expose producer tool and status only")
-    func extensionToolPillSummary() {
-        let tool = ChatToolPresentation(
-            id: "call", title: "Update Goal", toolName: "update_goal", subtitle: "Completed",
-            request: .object(["status": .string("complete")]),
-            response: .object(["goal": .object(["objective": .string("Count to 20")])]),
-            content: "", fallbackContent: nil, error: false,
-            startedAt: nil, completedAt: nil, durationMs: 6,
-            lastProgressAt: nil, progressSequence: nil,
-            extensionOrigin: ExtensionToolOrigin(
-                source: "project",
-                owner: ExtensionOwner(id: "extension:goal", title: "Pi Goal", source: "project")
-            )
-        )
-        let visual = ChatCompactPillVisualState.toolRun(ChatToolRunPresentation(tools: [tool]))
-
-        #expect(visual.title == "Pi Goal · Update Goal")
-        #expect(visual.detail == "Completed")
-        #expect(visual.tone == .tool)
-        #expect(!visual.title.contains("Count to 20"))
-    }
-
-    @Test("tool chip transitions admit only the latest target token")
-    func toolChipLatestTarget() {
-        var transition = ChatToolChipTransitionState()
-        let first = ChatCompactPillVisualState(
-            id: "run", title: "2 tools", detail: "In progress",
-            icon: "square.stack.3d.up", tone: .warning, material: .glass,
-            showsProgress: true, count: 2
-        )
-        let final = ChatCompactPillVisualState(
-            id: "run", title: "2 tools", detail: "Completed",
-            icon: "square.stack.3d.up", tone: .accent, material: .glass,
-            showsProgress: false, count: 2
-        )
-        let staleToken = transition.retarget(first)
-        let finalToken = transition.retarget(final)
-        #expect(!transition.admits(staleToken))
-        #expect(transition.admits(finalToken))
-        #expect(transition.target == final)
-    }
-
-    @Test("command pills expose producer command and status but never arguments")
-    func commandPillSummary() {
-        let title = CommandLifecyclePresentationPolicy.title(origin: "Pi Goal", command: "goal")
-        #expect(title == "Pi Goal · /goal")
-        #expect(!title.contains("count to 20"))
-        #expect(CommandLifecyclePresentationPolicy.status("outcomeUnknown") == "Outcome Unknown")
-        #expect(CommandLifecyclePresentationPolicy.tone("completed") == .command)
-        #expect(CommandLifecyclePresentationPolicy.tone("failed") == .error)
-    }
-
-    @Test("semantic pill roles own a stable cross-extension palette")
-    func semanticPillPalette() {
-        #expect(ChatSemanticPillRole.command.tone == .command)
-        #expect(ChatSemanticPillRole.prompt.tone == .purple)
-        #expect(ChatSemanticPillRole.context.tone == .purple)
-        #expect(ChatSemanticPillRole.tool.tone == .tool)
-        #expect(ChatSemanticPillRole.notification.tone == .information)
-        #expect(Set([
-            ChatSemanticPillRole.command.tone,
-            ChatSemanticPillRole.context.tone,
-            ChatSemanticPillRole.tool.tone,
-            ChatSemanticPillRole.notification.tone,
-        ]).count == 4)
     }
 
     @Test("small semantic text keeps accessible contrast")
@@ -509,49 +159,6 @@ struct ChatCompactPillTests {
                 ) >= 4.5)
             }
         }
-    }
-
-    @Test("native title measurement promotes only clipped error notices")
-    func titleMeasurementPolicy() {
-        #expect(!ChatCompactPillTitleMeasurement(renderedWidth: 180, intrinsicWidth: 180).isTruncated)
-        #expect(!ChatCompactPillTitleMeasurement(renderedWidth: 180, intrinsicWidth: 180.4).isTruncated)
-        #expect(ChatCompactPillTitleMeasurement(renderedWidth: 180, intrinsicWidth: 181).isTruncated)
-    }
-
-    @Test("truncated errors retain exact detail content before native promotion")
-    func truncatedErrorDetailPolicy() {
-        let raw = "You have hit your provider usage limit. Try again in ~1 hour."
-        let error = ChatNotificationPresentation(
-            id: "error", semanticID: nil, icon: "exclamationmark.triangle.fill",
-            title: "You have hit your provider usage limit…", detail: nil,
-            body: raw, tone: .error, material: .flat, expandsOnTruncation: true
-        )
-        #expect(error.body == raw)
-        #expect(error.expandsOnTruncation)
-        #expect(!error.hasDetailSheet)
-
-    }
-
-    @Test("notification material exposes details only through glass buttons")
-    func notificationDetailPolicy() {
-        let flat = ChatNotificationPresentation(
-            id: "flat", semanticID: nil, icon: "info.circle", title: "Status",
-            detail: nil, body: nil, tone: .information, material: .flat
-        )
-        let glass = ChatNotificationPresentation(
-            id: "glass", semanticID: "entry", icon: "arrow.triangle.branch",
-            title: "Branch summary", detail: nil, body: "Summary",
-            tone: .accent, material: .glass
-        )
-        let emptyGlass = ChatNotificationPresentation(
-            id: "empty", semanticID: nil, icon: "info.circle", title: "Empty",
-            detail: nil, body: nil, tone: .accent, material: .glass
-        )
-
-        #expect(!flat.hasDetailSheet)
-        #expect(glass.hasDetailSheet)
-        #expect(!emptyGlass.hasDetailSheet)
-        #expect(glass.detailUsesGlassSurface)
     }
 
     private func historyNode(

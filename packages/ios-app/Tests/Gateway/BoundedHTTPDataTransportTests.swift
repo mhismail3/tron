@@ -286,24 +286,6 @@ struct BoundedHTTPDataTransportTests {
         }
     }
 
-    @Test("file upload transport propagates cancellation to its active operation")
-    func gatewayFileUploadCancellation() async throws {
-        try await withTestWatchdog {
-            let cancellation = UploadCancellationRecorder()
-            let transport = BoundedHTTPUploadTransport { _, _, _ in
-                try await cancellation.suspend()
-            }
-            let request = URLRequest(url: URL(string: "https://gateway.test/v1/uploads")!)
-            let operation = Task {
-                try await transport.data(for: request, fileURL: URL(fileURLWithPath: "/tmp/file"), maximumBytes: 64)
-            }
-            await cancellation.waitUntilStarted()
-            operation.cancel()
-            await #expect(throws: CancellationError.self) { try await operation.value }
-            #expect(await cancellation.wasCancelled)
-        }
-    }
-
     @Test("export blob reads remain file-backed and epoch-bound")
     func gatewayBlobFileBoundary() async throws {
         try await withTestWatchdog {
@@ -489,40 +471,6 @@ private actor BoundedUploadTransportRecorder {
 
     func record(request: URLRequest, fileURL: URL, maximumBytes: Int) {
         value = Value(request: request, fileURL: fileURL, maximumBytes: maximumBytes)
-    }
-}
-
-private actor UploadCancellationRecorder {
-    private var started = false
-    private var startWaiters: [CheckedContinuation<Void, Never>] = []
-    private var continuation: CheckedContinuation<(Data, HTTPURLResponse), Error>?
-    private(set) var wasCancelled = false
-
-    func suspend() async throws -> (Data, HTTPURLResponse) {
-        started = true
-        let waiters = startWaiters
-        startWaiters.removeAll()
-        waiters.forEach { $0.resume() }
-        return try await withTaskCancellationHandler {
-            try await withCheckedThrowingContinuation { continuation in
-                self.continuation = continuation
-            }
-        } onCancel: {
-            Task { await self.cancel() }
-        }
-    }
-
-    func waitUntilStarted() async {
-        if started { return }
-        await withCheckedContinuation { continuation in
-            startWaiters.append(continuation)
-        }
-    }
-
-    private func cancel() {
-        wasCancelled = true
-        continuation?.resume(throwing: CancellationError())
-        continuation = nil
     }
 }
 

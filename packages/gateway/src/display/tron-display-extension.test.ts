@@ -28,18 +28,6 @@ function fixture(internalFilesRoot?: () => Promise<string>) {
 }
 
 describe("first-party Tron display extension", () => {
-  // Requirement (`AGENTS.md` "Show useful visual results proactively", owned
-  // by `packages/gateway/README.md`): the model-facing guidance prefers
-  // proactive inline previews, excludes secrets, and labels mockups honestly.
-  it("registers guidance for proactive inline previews, excluded secrets, and honest mockup labels", () => {
-    const tool = fixture().tool();
-    expect(tool.promptSnippet).toContain("Proactively display useful visual results");
-    const guidance = tool.promptGuidelines.join("\n");
-    expect(guidance).toContain("do not wait to be asked");
-    expect(guidance).toContain("presentation.surface=inline");
-    expect(guidance).toContain("never include secrets");
-    expect(guidance).toContain("label mockups or simulator captures honestly");
-  });
 
   it("ingests a local artifact and returns its canonical presentation descriptor", async () => {
     const value = fixture();

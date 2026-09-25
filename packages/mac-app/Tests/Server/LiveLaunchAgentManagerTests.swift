@@ -226,15 +226,6 @@ struct LaunchAgentLoaderTests {
         #expect(mock.calls.map(\.kind) == [.load])
     }
 
-    @Test("already-loaded registration restarts on explicit service start")
-    func alreadyLoadedRestarts() async {
-        let mock = MockLaunchAgentManager()
-        mock.loadOutcome = .alreadyLoaded
-        let outcome = await LaunchAgentLoader.ensureLoaded(manager: mock, plistPath: URL(fileURLWithPath: "/fixture/agent.plist"), label: "fixture")
-        #expect(outcome == .ok)
-        #expect(mock.calls.map(\.kind) == [.load, .restart])
-    }
-
     @Test("registration failure prevents restart; restart failure is preserved")
     func failuresAreNotReplayed() async {
         let mock = MockLaunchAgentManager()

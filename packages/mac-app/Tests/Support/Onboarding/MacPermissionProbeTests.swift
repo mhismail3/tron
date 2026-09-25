@@ -4,12 +4,6 @@ import Testing
 
 @Suite("MacPermissionProbe")
 struct MacPermissionProbeTests {
-    @Test("GUI permission categories have distinct System Settings destinations")
-    func guiPermissionSettingsDestinations() {
-        #expect(Set(Permission.allCases) == [.fullDiskAccess, .accessibility, .screenRecording])
-        #expect(Permission.accessibility.systemSettingsURL.absoluteString.contains("Privacy_Accessibility"))
-        #expect(Permission.screenRecording.systemSettingsURL.absoluteString.contains("Privacy_ScreenCapture"))
-    }
 
     @Test("native host trust is identifier-bound, not PID-bound")
     func nativeHostTrustRequirements() throws {

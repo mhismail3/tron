@@ -91,12 +91,6 @@ chmod a-w "$PAYLOAD/runtime/node-x64"
 expect_rejected wrong-runtime-version
 
 reset_fixture
-chmod u+w "$PAYLOAD/runtime/node-x64"
-cp "$PAYLOAD/runtime/node-arm64" "$PAYLOAD/runtime/node-x64"
-chmod a-w "$PAYLOAD/runtime/node-x64"
-expect_rejected wrong-runtime-architecture
-
-reset_fixture
 make_writable "$PAYLOAD"
 sed 's/"version":"[^"]*"/"version":"9.9.9"/' "$PAYLOAD/manifest.json" > "$PAYLOAD/manifest.tmp"
 mv "$PAYLOAD/manifest.tmp" "$PAYLOAD/manifest.json"

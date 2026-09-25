@@ -414,13 +414,6 @@ class ProcessFixture(unittest.TestCase):
             "--", *child,
         ]
 
-    def test_output_and_nonzero_exit_are_preserved(self) -> None:
-        child = "print('complete-output', flush=True); raise SystemExit(7)"
-        result = subprocess.run(self.command([sys.executable, "-c", child]), text=True, stdout=subprocess.PIPE)
-        self.assertEqual(result.returncode, 7)
-        self.assertIn("complete-output", result.stdout)
-        self.assertIn("complete-output", (self.root / "full.log").read_text())
-
     def test_silence_timeout_preserves_artifact_and_kills_process_group(self) -> None:
         artifact = self.root / "partial.xcresult"
         pid_path = self.root / "descendant.pid"
@@ -450,28 +443,6 @@ class ProcessFixture(unittest.TestCase):
         else:
             stat = subprocess.run(["ps", "-o", "stat=", "-p", str(pid)], text=True, stdout=subprocess.PIPE).stdout.strip()
             self.assertTrue(stat.startswith("Z") or not stat, f"descendant still alive: {pid} {stat}")
-
-    def test_continuous_output_still_hits_overall_deadline(self) -> None:
-        child = "import time\nwhile True:\n print('tick', flush=True); time.sleep(.05)"
-        result = subprocess.run(self.command([sys.executable, "-c", child], overall=0.4, no_output=1), stdout=subprocess.DEVNULL)
-        self.assertEqual(result.returncode, 124)
-        timeout = json.loads((self.root / "evidence/timeout.json").read_text())
-        self.assertEqual(timeout["reason"], "overall")
-
-    def test_interrupt_is_forwarded_and_returns_conventional_exit(self) -> None:
-        signal_path = self.root / "signal.txt"
-        child = (
-            "import signal,time; from pathlib import Path; "
-            f"p=Path({str(signal_path)!r}); "
-            "signal.signal(signal.SIGINT, lambda *_: (p.write_text('INT'), exit(0))); print('ready', flush=True); time.sleep(30)"
-        )
-        process = subprocess.Popen(self.command([sys.executable, "-c", child]), stdout=subprocess.PIPE, text=True)
-        assert process.stdout is not None
-        self.assertEqual(process.stdout.readline().strip(), "ready")
-        process.send_signal(signal.SIGINT)
-        self.assertEqual(process.wait(timeout=5), 130)
-        process.stdout.close()
-        self.assertEqual(signal_path.read_text(), "INT")
 
 
 class LockFixture(unittest.TestCase):

@@ -623,22 +623,6 @@ struct BrowserLiveMountedViewingTests {
         }
     }
 
-    @Test("a throwing mounted fixture drains held opens, leases, and presentation registrations")
-    func failingFixtureDrains() async throws {
-        let probe = BrowserLiveTransportProbe(holdOpen: true)
-        var retiredCoordinator: PresentationActivityCoordinator?
-        await #expect(throws: BrowserLiveMountedError.expectedFailure) {
-            try await Self.withMountedHost(probe: probe, profile: Self.profile("mounted-failure")) { _, _, coordinator, _ in
-                retiredCoordinator = coordinator
-                try await Self.waitForRequests(1, probe: probe)
-                throw BrowserLiveMountedError.expectedFailure
-            }
-        }
-        #expect(await probe.drained)
-        #expect(await probe.requests.map(\.request.httpMethod) == ["POST", "DELETE"])
-        #expect(retiredCoordinator?.mountedSurfaceCount == 0)
-    }
-
     @Test("profile and same-identity generation changes preserve exact lease ownership", arguments: [DisplayKind.browserLive, .nativeLive])
     func sourceAndProfileReplacementRebindsDescriptor(kind: DisplayKind) async throws {
         let firstSocket = ScriptedGatewaySocket(), secondSocket = ScriptedGatewaySocket()
@@ -847,23 +831,6 @@ struct BrowserLiveMountedViewingTests {
             try await Task.sleep(for: .milliseconds(350))
             #expect(replacement.convert(replacement.bounds, to: host.window) == frame)
             #expect(state.floatingRoute?.display.liveView?.viewId == "view-b")
-        }
-    }
-
-    @Test("unavailable browser text sits directly at the floating window center")
-    func centeredFloatingFallback() async throws {
-        let probe = BrowserLiveTransportProbe(echoDescriptor: true, frames: [Data("invalid JPEG".utf8)])
-        try await Self.withMountedHost(probe: probe, profile: Self.profile("floating-unavailable"), floating: true) { _, _, _, host in
-            try await Self.waitForRequests(1, probe: probe) { $0.request.httpMethod == "DELETE" }
-            for _ in 0..<120 where host.marker("floating-unavailable") == nil {
-                try await DisplayFrameScheduler.displayLink.nextFrame()
-            }
-            let text = try #require(host.marker("floating-unavailable"))
-            let panel = try #require(host.floatingPanel)
-            let frame = text.convert(text.bounds, to: panel)
-            #expect(abs(frame.midX - panel.bounds.midX) <= 2)
-            #expect(abs(frame.midY - panel.bounds.midY) <= 2)
-            #expect(frame.width <= panel.bounds.width - 39)
         }
     }
 

@@ -226,18 +226,6 @@ struct InAppNoticeCenterTests {
 @Suite("In-app notice presentation contract")
 struct InAppNoticePresentationPolicyTests {
 
-    @Test("horizontal dismissal accepts easy swipes in both directions")
-    func horizontalDismissalPolicy() {
-        #expect(InAppNoticeSwipePolicy.shouldDismiss(
-            translation: CGSize(width: 40, height: 4),
-            predicted: CGSize(width: 48, height: 5)
-        ))
-        #expect(InAppNoticeSwipePolicy.shouldDismiss(
-            translation: CGSize(width: -40, height: 4),
-            predicted: CGSize(width: -52, height: 6)
-        ))
-    }
-
     @Test("upward dismissal accepts a deliberate drag or short flick")
     func upwardDismissalPolicy() {
         #expect(InAppNoticeSwipePolicy.shouldDismiss(
@@ -260,14 +248,6 @@ struct InAppNoticePresentationPolicyTests {
             translation: CGSize(width: 4, height: -20),
             predicted: CGSize(width: 5, height: -24)
         ))
-    }
-
-    @Test("notice top edge is stable for taller content and clears the safe area")
-    func topEdgePolicy() {
-        #expect(InAppNoticeLayout.topEdge(safeAreaTop: 59, toolbarCenterY: 81) == 67)
-        #expect(InAppNoticeLayout.topEdge(safeAreaTop: 59, toolbarCenterY: 300) == 278)
-        #expect(InAppNoticeLayout.topEdge(safeAreaTop: 59, toolbarCenterY: nil) == 67)
-        #expect(InAppNoticeLayout.topEdge(safeAreaTop: 59, toolbarCenterY: 81, accessibilitySize: true) == 111)
     }
 
 }

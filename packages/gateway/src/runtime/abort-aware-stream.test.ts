@@ -86,10 +86,4 @@ describe("abortAwareStream", () => {
     source.end(message);
     expect(await stream.result()).toEqual({ ...message, stopReason: stopReason === "error" ? "aborted" : "stop" });
   });
-
-  it("does not wrap requests without a cancellation signal", () => {
-    const source = new AssistantMessageEventStream();
-    expect(abortAwareStream(() => source)(model, context)).toBe(source);
-    source.end(fauxAssistantMessage("done"));
-  });
 });

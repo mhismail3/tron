@@ -110,15 +110,6 @@ struct GatewayProtocolContractTests {
         }
     }
 
-    @Test("model capabilities and context policy are optional for rolling gateways")
-    func optionalContextWindowFieldsDecode() throws {
-        let model = try JSONDecoder.gateway.decode(ModelSummary.self, from: Data(#"{"provider":"openai-codex","id":"gpt-6-astra","name":"GPT-6 Astra","reasoning":true,"input":["text"],"contextWindow":272000,"maxTokens":128000,"available":true,"contextWindowLimits":{"minimum":37408,"maximum":1050000,"default":272000,"longContextThreshold":272000}}"#.utf8))
-        #expect(model.contextWindow == 272_000)
-        #expect(model.contextWindowLimits?.maximum == 1_050_000)
-        let old = try JSONDecoder.gateway.decode(ModelSummary.self, from: Data(#"{"provider":"p","id":"m","name":"M","reasoning":false,"input":["text"],"contextWindow":1000,"maxTokens":100,"available":true}"#.utf8))
-        #expect(old.contextWindowLimits == nil)
-    }
-
     @Test("message presentation identity and content ordinals are required")
     func transcriptIdentityIsRequired() throws {
         let valid: [String: Any] = [
@@ -379,28 +370,6 @@ struct GatewayProtocolContractTests {
         #expect(!ExtensionPresentationPolicy.admit(try policy(#"{"id":"lease","connectionId":"connection","surfaceId":"surface","surfaceRevision":1,"acquiredAt":"not-a-time"}"#)))
     }
 
-    @Test("dashboard summary update carries a monotonic revision")
-    func summaryUpdateDecodes() throws {
-        let data = Data(#"{"sessionId":"session-1","summaryRevision":7,"phase":"running","waitingForUser":true,"updatedAt":"2026-01-01T00:00:01Z","activeSince":"2026-01-01T00:00:00Z","messageCount":2,"firstMessage":"hello","completionRevision":3,"attentionRevision":4,"isUnread":true}"#.utf8)
-        let update = try JSONDecoder.gateway.decode(SessionSummaryUpdate.self, from: data)
-        #expect(update.summaryRevision == 7)
-        #expect(update.phase == .running)
-        #expect(update.activeSince == "2026-01-01T00:00:00Z")
-        #expect(update.waitingForUser)
-        #expect(update.completionRevision == 3)
-        #expect(update.attentionRevision == 4)
-        #expect(update.isUnread)
-
-        let rolling = try JSONDecoder.gateway.decode(
-            SessionSummaryUpdate.self,
-            from: Data(#"{"sessionId":"session-1","summaryRevision":6,"phase":"idle","updatedAt":"2026-01-01T00:00:00Z","messageCount":1,"firstMessage":"hello"}"#.utf8)
-        )
-        #expect(rolling.activeSince == nil)
-        #expect(!rolling.waitingForUser)
-        #expect(rolling.completionRevision == 0)
-        #expect(!rolling.isUnread)
-    }
-
     @Test("dashboard attention revisions reject negative wire values")
     func negativeAttentionRevisionsReject() throws {
         let summaryBase = #"{"id":"session-1","cwd":"/workspace","createdAt":"2026-01-01T00:00:00Z","updatedAt":"2026-01-01T00:00:01Z","messageCount":2,"firstMessage":"hello","phase":"idle""#
@@ -413,15 +382,6 @@ struct GatewayProtocolContractTests {
                 try JSONDecoder.gateway.decode(SessionSummaryUpdate.self, from: Data((updateBase + suffix).utf8))
             }
         }
-    }
-
-    @Test("flat session-tree projection decodes")
-    func treeDecodes() throws {
-        let data = Data(#"[{"id":"entry","parentId":null,"timestamp":"2026-01-01T00:00:00Z","kind":"message","preview":"hello","role":"user","depth":0,"childCount":1,"isCurrentPath":true}]"#.utf8)
-        let nodes = try JSONDecoder.gateway.decode([SessionTreeNode].self, from: data)
-        #expect(nodes.first?.role == .user)
-        #expect(nodes.first?.isCurrentPath == true)
-        #expect(nodes.first?.depth == 0)
     }
 
     @Test("terminal events prepare typed payloads from original frame bytes")
@@ -465,76 +425,6 @@ struct GatewayProtocolContractTests {
     func malformedTerminalEventPreparation() throws {
         let event = try JSONDecoder.gateway.decode(GatewayEvent.self, from: Data(#"{"type":"event","topic":"terminal.output","sessionId":null,"payload":{"terminalId":"terminal-1","sequence":"bad"}}"#.utf8))
         #expect(event.preparation == .none)
-    }
-
-    @Test("synthetic terminal events use the same typed preparation")
-    func syntheticTerminalEventPreparation() {
-        let event = GatewayEvent(
-            type: "event",
-            topic: "terminal.exit",
-            sessionId: nil,
-            payload: .object([
-                "terminalId": .string("terminal-2"),
-                "sequence": .number(9),
-                "exitCode": .number(1),
-            ])
-        )
-        #expect(event.preparation == .terminalEvent(.exit(PreparedTerminalExitEvent(
-            terminalId: "terminal-2",
-            sequence: 9,
-            exitCode: 1
-        ))))
-    }
-
-    @Test("stored gateway profiles migrate when device identity was absent")
-    func profileMigration() throws {
-        let data = Data(#"{"id":"machine","label":"Mac","host":"100.64.0.1","port":9847,"machineId":"machine"}"#.utf8)
-        let profile = try JSONDecoder().decode(GatewayProfile.self, from: data)
-        #expect(profile.deviceId == nil)
-    }
-
-    @Test("authorized device projection decodes")
-    func pairedDeviceDecodes() throws {
-        let data = Data(#"{"id":"device","name":"Phone","createdAt":"2026-01-01T00:00:00Z"}"#.utf8)
-        #expect(try JSONDecoder().decode(PairedDevice.self, from: data).name == "Phone")
-    }
-
-    @Test("provider-qualified model identity does not collide")
-    func modelIdentity() {
-        #expect(ModelRef(provider: "one", id: "shared") != ModelRef(provider: "two", id: "shared"))
-    }
-
-    @Test("model pages decode with an optional continuation cursor")
-    func modelPageDecodes() throws {
-        struct Page: Decodable { let models: [ModelSummary]; let nextCursor: String? }
-        let data = Data(#"{"models":[{"provider":"extension","id":"model","name":"Model","reasoning":false,"input":["text"],"contextWindow":4096,"maxTokens":1024,"available":true}],"nextCursor":"500"}"#.utf8)
-        let page = try JSONDecoder.gateway.decode(Page.self, from: data)
-        #expect(page.models.first?.ref == ModelRef(provider: "extension", id: "model"))
-        #expect(page.nextCursor == "500")
-    }
-
-    @Test("resource, workspace, and terminal DTOs preserve their wire shapes")
-    func resourceWorkspaceAndTerminalDTOsDecode() throws {
-        let inventory = try JSONDecoder.gateway.decode(
-            PackageInventory.self,
-            from: Data(#"{"packages":[{"source":"pkg","scope":"project","filtered":false,"installedPath":"/workspace/pkg"}],"resources":{"commands":2}}"#.utf8)
-        )
-        #expect(inventory.packages.first?.id == "project:pkg")
-        #expect(inventory.resources.objectValue?["commands"] == .number(2))
-
-        let workspace = try JSONDecoder.gateway.decode(
-            WorkspaceListing.self,
-            from: Data(#"{"path":"/workspace","parent":"/","entries":[{"name":"src","path":"/workspace/src","kind":"directory","hidden":false}]}"#.utf8)
-        )
-        #expect(workspace.entries.first?.id == "/workspace/src")
-        #expect(workspace.entries.first?.kind == .directory)
-
-        let terminal = try JSONDecoder.gateway.decode(
-            TerminalSummary.self,
-            from: Data(#"{"id":"terminal","sessionId":"session","cwd":"/workspace","createdAt":"2026-01-01T00:00:00Z","exitedAt":null,"exitCode":null,"sequence":9}"#.utf8)
-        )
-        #expect(terminal.sessionId == "session")
-        #expect(terminal.sequence == 9)
     }
 
     @Test("extension presentation collections reject limit plus one during decoding")
@@ -736,11 +626,5 @@ struct GatewayProtocolContractTests {
         #expect(!AppModel.supportsSafeGatewayRestart(capabilities: ["sessions.v1"]))
         #expect(!AppModel.supportsSafeGatewayRestart(capabilities: ["sessions.v1", "restart-drain.v1"]))
         #expect(AppModel.supportsSafeGatewayRestart(capabilities: ["sessions.v1", "restart-drain.v1", "restart-supervised.v1"]))
-    }
-
-    @Test("gateway failure is a localized error")
-    func failure() {
-        let value = GatewayFailure(code: "busy", message: "Session busy", retryable: true, details: nil)
-        #expect(value.localizedDescription == "Session busy")
     }
 }

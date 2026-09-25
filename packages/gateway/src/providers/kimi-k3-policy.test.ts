@@ -73,24 +73,4 @@ describe("Kimi K3 request policy", () => {
     expect(response.status).toBe(429);
     await response.text();
   });
-
-  it("allows concurrent K3 requests when the account permits them", async () => {
-    let active = 0;
-    let maximumActive = 0;
-    const fetch = vi.fn<typeof globalThis.fetch>(async () => {
-      active += 1;
-      maximumActive = Math.max(maximumActive, active);
-      await new Promise((resolve) => setTimeout(resolve, 0));
-      active -= 1;
-      return new Response("ok", { status: 200 });
-    });
-    const wrapped = wrapKimiK3Fetch(fetch);
-    const [first, second] = await Promise.all([
-      wrapped("https://api.moonshot.ai/v1/chat/completions"),
-      wrapped("https://api.moonshot.ai/v1/chat/completions"),
-    ]);
-    await Promise.all([first.text(), second.text()]);
-    expect(maximumActive).toBe(2);
-    expect(fetch).toHaveBeenCalledTimes(2);
-  });
 });

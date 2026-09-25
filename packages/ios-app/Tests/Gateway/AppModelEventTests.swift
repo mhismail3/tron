@@ -603,59 +603,6 @@ struct AppModelEventTests {
         }
     }
 
-    @Test("explicit subscription ownership wins when the gateway sends it")
-    func currentSessionOpenToken() throws {
-        let snapshot = try loadSnapshot()
-        let open = try JSONValue.object([
-            "session": try JSONValue.encode(snapshot),
-            "syncToken": .string("sync-token"),
-            "subscriptionToken": .string("subscription-token"),
-        ]).decode(AppModel.SessionOpenResponse.self)
-
-        #expect(open.syncToken == "sync-token")
-        #expect(open.subscriptionToken == "subscription-token")
-    }
-
-    @Test("fresh presentation replaces expanded history while reconnect preserves it")
-    func snapshotInstallModes() throws {
-        let baseline = try loadSnapshot()
-        var expanded = baseline
-        expanded.transcriptStart = 10
-        expanded.transcriptTotal = 10 + expanded.transcript.count
-        var authoritative = baseline
-        authoritative.eventSequence += 1
-        authoritative.transcript = Array(baseline.transcript.suffix(3))
-        authoritative.transcriptStart = 15
-        authoritative.transcriptTotal = 18
-
-        let fresh = SessionPresentationStore.installingSnapshot(
-            current: expanded,
-            authoritative: authoritative,
-            mode: .freshPresentation
-        )
-        #expect(fresh.transcript.map(\.id) == authoritative.transcript.map(\.id))
-        #expect(fresh.transcriptStart == 15)
-
-        let reconnected = SessionPresentationStore.installingSnapshot(
-            current: expanded,
-            authoritative: authoritative,
-            mode: .reconnect
-        )
-        #expect(reconnected.transcript.count >= authoritative.transcript.count)
-        #expect(reconnected.eventSequence == authoritative.eventSequence)
-
-        var stale = authoritative
-        stale.eventSequence = expanded.eventSequence - 1
-        stale.runtimeGeneration = expanded.runtimeGeneration
-        let rejectedStale = SessionPresentationStore.installingSnapshot(
-            current: expanded,
-            authoritative: stale,
-            mode: .reconnect
-        )
-        #expect(rejectedStale.eventSequence == expanded.eventSequence)
-        #expect(rejectedStale.transcript.map(\.id) == expanded.transcript.map(\.id))
-    }
-
     @Test("global summaries update dashboard activity without opening that chat")
     func dashboardSummaryUpdates() async {
         let model = AppModel()
@@ -785,33 +732,6 @@ struct AppModelEventTests {
         #expect(model.sessionContextRevision(for: snapshot.sessionId) == 2)
     }
 
-    @Test("terminal events without an attached presentation are ignored")
-    func detachedTerminalEventsAreIgnored() async {
-        let model = AppModel()
-        await model.handle(GatewayEvent(
-            type: "event",
-            topic: "terminal.output",
-            sessionId: nil,
-            payload: .object([
-                "terminalId": .string("terminal"),
-                "sequence": .number(1),
-                "data": .string("unowned"),
-            ])
-        ))
-        await model.handle(GatewayEvent(
-            type: "event",
-            topic: "terminal.exit",
-            sessionId: nil,
-            payload: .object([
-                "terminalId": .string("terminal"),
-                "sequence": .number(2),
-                "exitCode": .number(0),
-            ])
-        ))
-        #expect(model.terminalReplay(for: "terminal") == .empty)
-        #expect(!model.terminalHasExited("terminal"))
-    }
-
     @Test("unrendered sequenced events still advance the authoritative cursor without creating app notices")
     func unrenderedEventsAdvanceCursor() async throws {
         let snapshot = try loadSnapshot()
@@ -861,12 +781,6 @@ struct AppModelEventTests {
         #expect(model.visibleNotices.isEmpty)
     }
 
-    @Test("receipt replay admission rejects cancellation after confirmed missing")
-    func receiptReplayCancellationAdmission() {
-        #expect(ConfirmedMutationExecutor.admitsReplay(taskIsCancelled: false))
-        #expect(!ConfirmedMutationExecutor.admitsReplay(taskIsCancelled: true))
-    }
-
     @Test("foreground transport interruption reconnects without a user error alert")
     func foregroundTransportErrorPresentation() {
         #expect(!AppModel.shouldSurface(GatewayFailure(
@@ -904,19 +818,6 @@ struct AppModelEventTests {
             retryable: false,
             details: nil
         )))
-    }
-
-    @Test("cached active dashboard rows retain phase but present as resuming")
-    func cachedActivityIsResuming() {
-        let summary = SessionSummary(
-            id: "cached", name: nil, cwd: "/workspace", parentSessionId: nil,
-            createdAt: "2026-01-01T00:00:00Z", updatedAt: "2026-01-01T00:00:01Z",
-            messageCount: 1, firstMessage: "Cached", phase: .running
-        )
-        var catalog = SessionCatalogCoordinator()
-        catalog.installCached([summary])
-        #expect(catalog.sessions.first?.phase == .running)
-        #expect(catalog.activity(for: "cached") == .resuming)
     }
 
     @Test("changing sessions clears secondary projections before their authoritative reload")

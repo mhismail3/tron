@@ -62,17 +62,6 @@ describe("DeviceStore", () => {
     expect((await store.listDevices())[0]).toMatchObject({ id: paired.deviceId, name: "iPhone" });
   });
 
-  it("retains observed metadata across persisted reads", async () => {
-    const { root, store } = await fixture();
-    const enrollment = await store.ensureEnrollment();
-    const paired = await store.pair(enrollment.code, "iPhone");
-    const path = join(root, "gateway", "devices.json");
-    const document = JSON.parse(await readFile(path, "utf8"));
-    document.devices[0].observedName = "Personal iPhone";
-    await writeFile(path, `${JSON.stringify(document)}\n`);
-    expect(await store.listDevices()).toEqual([expect.objectContaining({ id: paired.deviceId, name: "Personal iPhone" })]);
-  });
-
   it("rejects pairing beyond capacity without consuming the invitation", async () => {
     const root = await mkdtemp(join(tmpdir(), "tron-gateway-device-bound-"));
     const store = new DeviceStore(root, "machine-id", { maximumDevices: 1 });

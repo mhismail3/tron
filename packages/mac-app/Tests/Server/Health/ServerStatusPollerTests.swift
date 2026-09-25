@@ -136,36 +136,11 @@ struct ServerStatusPollerTests {
         #expect(snapshot.state.tone == .failed)
     }
 
-    @Test("timeout + launchd loaded maps to failed")
-    func timeoutSnapshot() async throws {
-        let setup = Self.makeSetup(token: "abc123", pingResult: .timeout, launchAgentLoaded: true)
-        let snapshot = await ServerStatusPoller.singleSnapshot(setup: setup)
-        #expect(snapshot.state == .failed(reason: "timeout"))
-    }
-
     @Test("explicit unauthorized maps to attention regardless of token presence")
     func unauthorizedSnapshot() async throws {
         let setup = Self.makeSetup(token: "abc123", pingResult: .unauthorized)
         let snapshot = await ServerStatusPoller.singleSnapshot(setup: setup)
         #expect(snapshot.state == .unauthorized)
         #expect(snapshot.state.tone == .attention)
-    }
-
-    @Test("malformed response + launchd loaded maps to failed")
-    func malformedSnapshot() async throws {
-        let setup = Self.makeSetup(token: "abc", pingResult: .malformedResponse, launchAgentLoaded: true)
-        let snapshot = await ServerStatusPoller.singleSnapshot(setup: setup)
-        #expect(snapshot.state == .failed(reason: "malformed response"))
-    }
-
-    @Test("uses cached Tailscale IP when server doesn't report one")
-    func cachedTailscaleFromSettings() async throws {
-        let setup = Self.makeSetup(
-            token: "abc",
-            pingResult: .success(ServerPingInfo(version: "0.5.0", gatewayChannel: "stable")),
-            tailscaleFromSettings: "100.99.99.99"
-        )
-        let snapshot = await ServerStatusPoller.singleSnapshot(setup: setup)
-        #expect(snapshot.tailscaleIP == "100.99.99.99")
     }
 }

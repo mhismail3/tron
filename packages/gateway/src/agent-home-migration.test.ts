@@ -6,7 +6,6 @@ import {
   createAgentHomeManifest,
   cleanupStagedAgentHome,
   stageAgentHome,
-  validateMigrationStageArguments,
   verifyStagedAgentHome,
 } from "./agent-home-migration.js";
 
@@ -64,23 +63,6 @@ describe("agent home migration staging", () => {
     expect((await lstat(join(staging, "target"))).mode & 0o777).toBe(0o600);
     expect((await lstat(join(source, "target"))).mode & 0o777).toBe(0o600);
     await expect(verifyStagedAgentHome(staging)).resolves.toMatchObject({ changesMade: false });
-  });
-
-  it("leaves an external browser config untouched while staging the agent home", async () => {
-    const root = await fixture("tron-agent-migration-browser-external-");
-    const source = join(root, "source");
-    const browserConfig = join(root, "browser", "config.json");
-    await mkdir(source);
-    await mkdir(join(root, "browser"));
-    const browserContents = JSON.stringify({ browser: { defaultProfile: { name: "default" } } }) + "\n";
-    await writeFile(browserConfig, browserContents, { mode: 0o600 });
-    const staged = await stageAgentHome({ source, destination: join(root, "destination"), staging: join(root, "staging"), acknowledgeQuiescence: true, acknowledgeBackup: true });
-    expect(await readFile(browserConfig, "utf8")).toBe(browserContents);
-    expect(staged.stagedManifest.entries.some(entry => entry.path.includes("browser"))).toBe(false);
-  });
-
-  it("rejects the removed browser-config-source migration option", () => {
-    expect(() => validateMigrationStageArguments(["--browser-config-source", "/tmp/browser.json"])).toThrow(/was removed/);
   });
 
   it("refuses staging without both operator acknowledgements and never creates roots", async () => {

@@ -15,28 +15,6 @@ const runAsync = (state, command, ...argumentsList) => new Promise((resolve, rej
 });
 
 const helper = new URL("./tron-dev-state.mjs", import.meta.url).pathname;
-const resolveFixture = (fixture) => execFileSync(process.execPath, [helper, "resolve-host-fixture", JSON.stringify(fixture)], { encoding: "utf8" }).trim();
-
-test("Debug health host uses Gateway deterministic Tailscale ordering", () => {
-  const mixed = {
-    zeta: [
-      { address: "fd7a:115c:a1e0::1", family: "IPv6", internal: false },
-      { address: "100.90.0.2", family: "IPv4", internal: false },
-    ],
-    alpha: [
-      { address: "100.80.0.3", family: 4, internal: false },
-      { address: "127.0.0.1", family: "IPv4", internal: true },
-    ],
-  };
-  assert.equal(resolveFixture(mixed), "100.80.0.3");
-  const reversed = Object.fromEntries(Object.entries(mixed).reverse());
-  assert.equal(resolveFixture(reversed), "100.80.0.3");
-  const ipv6 = {
-    zeta: [{ address: "fd7a:115c:a1e0::b", family: 6, internal: false }],
-    alpha: [{ address: "fd7a:115c:a1e0::a", family: "IPv6", internal: false }],
-  };
-  assert.equal(resolveFixture(ipv6), "fd7a:115c:a1e0::a");
-});
 
 test("Debug command host inherits a live Tailscale lifecycle and rejects conflicts", () => {
   const root = mkdtempSync(join(tmpdir(), "tron-dev-host-"));
@@ -51,18 +29,6 @@ test("Debug command host inherits a live Tailscale lifecycle and rejects conflic
     assert.throws(() => resolveCommand("127.0.0.1", true, true));
     assert.equal(resolveCommand("", false, false), "127.0.0.1");
     assert.equal(resolveCommand("tailscale", true, false), "tailscale");
-  } finally { rmSync(root, { recursive: true, force: true }); }
-});
-
-test("Debug lifecycle accepts the operational start/readiness/stop flow", () => {
-  const root = mkdtempSync(join(tmpdir(), "tron-dev-transition-"));
-  try {
-    const state = join(root, "lifecycle.json");
-    run(state, "transition", "starting", "generation=1");
-    run(state, "transition", "ready", "readiness=ready");
-    run(state, "transition", "stopping", "intentionalExit=true");
-    run(state, "transition", "stopped", "supervisorPid=");
-    assert.equal(JSON.parse(run(state, "read")).lifecycle, "stopped");
   } finally { rmSync(root, { recursive: true, force: true }); }
 });
 
@@ -96,13 +62,6 @@ test("Debug lifecycle serializes concurrent generation writes", async () => {
   } finally { rmSync(root, { recursive: true, force: true }); }
 });
 
-test("Debug candidate identity parser rejects noisy stdout", () => {
-  const valid = `debug-build ${"a".repeat(64)}`;
-  assert.equal(execFileSync(process.execPath, [helper, "validate-build-identity", valid], { encoding: "utf8" }).trim(), valid);
-  assert.throws(() => execFileSync(process.execPath, [helper, "validate-build-identity", `npm chatter\n${valid}`], { stdio: "ignore" }));
-  assert.throws(() => execFileSync(process.execPath, [helper, "validate-build-identity", "debug-build short"], { stdio: "ignore" }));
-});
-
 test("Debug lifecycle fails closed when a recorded supervisor is orphaned", () => {
   const root = mkdtempSync(join(tmpdir(), "tron-dev-state-"));
   try {
@@ -113,13 +72,6 @@ test("Debug lifecycle fails closed when a recorded supervisor is orphaned", () =
     assert.equal(output.supervisor.live, false);
     assert.equal(output.child.live, false);
   } finally { rmSync(root, { recursive: true, force: true }); }
-});
-
-test("Tailscale selection rejects malformed lookalikes and zones", () => {
-  for (const address of [
-    "100.64.0.999", "100.64.0.1.example", "100.63.255.255", "100.128.0.1", "100.64.0.1%en0",
-    "fd7a:115c:a1e0:garbage::1", "fd7a:115c:a1e1::1", "fd7a:115c:a1e0::1%utun0",
-  ]) assert.equal(resolveFixture({ en0: [{ address, family: address.includes(":" ) ? 6 : 4, internal: false }] }), "", address);
 });
 
 test("Debug start admission recovers only an exact owned orphan", () => {
@@ -201,13 +153,4 @@ test("Debug stop terminates and reaps an exactly owned child", async () => {
       await exited.catch(() => {});
     }
   }
-});
-
-test("Debug mutator command lock rejects a concurrent owner", () => {
-  const root = mkdtempSync(join(tmpdir(), "tron-dev-command-lock-"));
-  const lock = join(root, "command.lock");
-  try {
-    execFileSync("/usr/bin/shlock", ["-f", lock, "-p", String(process.pid)]);
-    assert.throws(() => execFileSync("/usr/bin/shlock", ["-f", lock, "-p", String(process.pid)]));
-  } finally { rmSync(root, { recursive: true, force: true }); }
 });

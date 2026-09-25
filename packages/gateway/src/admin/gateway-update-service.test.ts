@@ -135,26 +135,6 @@ describe("Gateway update control plane", () => {
     } finally { await rm(value.root, { recursive: true, force: true }); }
   });
 
-  it("returns a bounded projection and reports unavailable candidates explicitly", async () => {
-    const value = await fixture();
-    try {
-      const status = await new GatewayUpdateService({ tronHome: value.root }).status();
-      expect(status).toEqual({
-        state: "unknown",
-        channel: "stable",
-        currentIdentity: null,
-        candidateIdentity: null,
-        candidateAvailable: false,
-        error: null,
-        updatedAt: null,
-        commandId: null,
-        rollbackAvailable: false,
-        candidateOrigin: null,
-        candidateProvenance: null,
-      });
-    } finally { await rm(value.root, { recursive: true, force: true }); }
-  });
-
   it("projects Debug provenance only when every field matches the verified candidate", async () => {
     const value = await fixture();
     try {
@@ -217,14 +197,6 @@ describe("Gateway update control plane", () => {
   it("fails truthfully without the LaunchAgent-owned updater", async () => {
     await expect(new GatewayUpdateService({ tronHome: "/tmp", environment: {} }).update({ channel: "stable", mode: "auto" }))
       .rejects.toMatchObject({ code: "unsupported" });
-  });
-
-  it("bounds asynchronous helper failures into update progress", () => {
-    const error = new Error("x".repeat(4_096));
-    expect(updaterFailureProgress("stable", "command-1", error, "2026-01-01T00:00:00.000Z")).toEqual({
-      schema: 1, kind: "tron-gateway-update-progress", channel: "stable", state: "failure",
-      commandId: "command-1", error: "x".repeat(2_048), updatedAt: "2026-01-01T00:00:00.000Z",
-    });
   });
 
   it("validates the LaunchAgent helper path and constructs bounded arguments", async () => {

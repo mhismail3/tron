@@ -856,58 +856,6 @@ struct AppModelReconnectTests {
         defaults.removePersistentDomain(forName: suiteName)
     }
 
-    @Test("background retirement serializes one fresh foreground connection")
-    func backgroundRetirementOwnsForegroundReconnect() async throws {
-        let suiteName = "GatewayLifecycleBackgroundTests.\(UUID().uuidString)"
-        let defaults = UserDefaults(suiteName: suiteName)!
-        defaults.removePersistentDomain(forName: suiteName)
-        defer { defaults.removePersistentDomain(forName: suiteName) }
-        let profile = GatewayProfile(
-            id: "gateway", label: "Mac", host: "gateway.test", port: 9_847,
-            machineId: "machine", deviceId: "device"
-        )
-        defaults.set(try JSONEncoder.gateway.encode([profile]), forKey: "gatewayProfiles.v1")
-        defaults.set(profile.id, forKey: "selectedGateway.v1")
-        let oldSocket = ScriptedGatewaySocket()
-        let replacementSocket = ScriptedGatewaySocket()
-        let factory = ScriptedGatewaySocketFactory(sockets: [oldSocket, replacementSocket])
-        let client = GatewayClient(socketFactory: factory.factory)
-        let coordinator = GatewayLifecycleCoordinator(
-            client: client,
-            profiles: GatewayProfileStore(defaults: defaults),
-            clock: .continuous,
-            reconnectDelayPolicy: .standard,
-            uuidSource: .random,
-            pairer: GatewayPairer(),
-            pairingCommit: { _, _ in },
-            profileTokenLookup: { _ in "token" }
-        )
-        let projection = NoopGatewayLifecycleProjection()
-        coordinator.delegate = projection
-
-        let initial = Task { try await coordinator.connectHosted(profile: profile, token: "token") }
-        try await oldSocket.waitUntilSent(count: 1)
-        await oldSocket.enqueue(helloFrame())
-        try await initial.value
-
-        coordinator.enteredBackground()
-        for _ in 0..<20 where !(await oldSocket.closed()) { await Task.yield() }
-        #expect(await oldSocket.closed())
-        #expect(coordinator.connectionState == .connected)
-
-        let foreground = coordinator.becameActive()
-        await replacementSocket.enqueue(helloFrame())
-        for _ in 0..<20 where coordinator.connectionState != .connected { await Task.yield() }
-        await foreground?.value
-        #expect(factory.requests.count == 2)
-        await projection.waitForAggregateCompletion(count: 1)
-        #expect(projection.aggregateCompletions == [true])
-        #expect(coordinator.connectionState == .connected)
-
-        await coordinator.teardown()
-        await client.close()
-    }
-
     @Test("terminal mutation response survives immediate lifecycle retirement")
     func terminalMutationResponseOwnsCompletion() async throws {
         try await withTestWatchdog { @MainActor in

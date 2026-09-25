@@ -226,29 +226,6 @@ struct SessionPresentationStoreTests {
         }
     }
 
-    @Test("bounded historical search window stays separate from the live tail")
-    func historicalSearchWindowUsesExactOwnerIdentity() throws {
-        let store = SessionPresentationStore(client: GatewayClient(), performanceSignposts: SystemPerformanceSignposts.shared)
-        var snapshot = try SessionScenarioBuilder(seed: 812).openingTail(targetEncodedBytes: 4_096)
-        snapshot.transcriptStart = 100
-        snapshot.transcriptTotal = 101
-        store.installHostedAuthoritativeSnapshot(snapshot)
-        let generation = try #require(store.presentationGeneration(for: snapshot.sessionId))
-        let target = try #require(snapshot.transcript.last)
-        let anchor = SessionSearchAnchorResponse(
-            sessionId: snapshot.sessionId, entryId: target.id, start: 42,
-            end: 43, total: try #require(snapshot.transcriptTotal),
-            items: [target], runtimeGeneration: snapshot.runtimeGeneration,
-            leafEntryId: snapshot.leafEntryId, targetOrdinal: 42,
-            hasEarlier: true, hasLater: true
-        )
-        #expect(store.installHistoricalSearchWindow(anchor, sessionID: snapshot.sessionId, presentationGeneration: generation))
-        #expect(store.isShowingHistoricalTranscript)
-        #expect(store.visibleTranscript.last?.id == target.id)
-        #expect(store.returnToLatestTranscript(sessionID: snapshot.sessionId, presentationGeneration: generation))
-        #expect(!store.isShowingHistoricalTranscript)
-    }
-
     @Test("historical owner admits delayed older and newer pages without losing projected bounds")
     func delayedHistoricalPagesPreserveBounds() async throws {
         let socket = ScriptedGatewaySocket()
@@ -394,21 +371,6 @@ struct SessionPresentationStoreTests {
         #expect(Set(probe.retiredScopes) == Set([
             .session(id: "remove", generation: 5), .session(id: "remove", generation: 6)
         ]))
-    }
-
-    @Test("AppModel authoritative snapshot façade remains observable")
-    func observationForwarding() throws {
-        let model = AppModel()
-        let changed = Mutex(false)
-        withObservationTracking {
-            _ = model.authoritativeSnapshot(for: "session")
-        } onChange: {
-            changed.withLock { $0 = true }
-        }
-        let snapshot = try SessionScenarioBuilder(seed: 81).openingTail(targetEncodedBytes: 4_096)
-        model.installHostedAuthoritativeSnapshot(snapshot)
-        #expect(changed.withLock { $0 })
-        #expect(model.authoritativeSnapshot(for: snapshot.sessionId) == snapshot)
     }
 
     @Test("compaction settings read only the requested authoritative session snapshot")
@@ -693,32 +655,6 @@ struct SessionPresentationStoreTests {
 
         #expect(store.authoritativeSnapshot(for: tail.sessionId) == replacement)
         #expect(store.visibleTranscript.map(\.id) == replacement.transcript.map(\.id))
-        #expect(store.mountedTranscriptCoverage == nil)
-    }
-
-    @Test("tail-only exact-next snapshot installs without prefix reconciliation")
-    func tailOnlyExactNextSnapshotInstalls() async throws {
-        var tail = try SessionScenarioBuilder(seed: 8_812)
-            .openingTail(targetEncodedBytes: 4_096)
-        let store = SessionPresentationStore(
-            client: GatewayClient(),
-            performanceSignposts: SystemPerformanceSignposts.shared
-        )
-        store.installHostedSubscription(snapshot: tail, token: "token")
-        #expect(store.mountedTranscriptCoverage == nil)
-
-        tail.eventSequence += 1
-        tail.revision += 1
-        tail.phase = .running
-        await store.admit(GatewayEvent(
-            type: "event",
-            topic: "session.snapshot",
-            sessionId: tail.sessionId,
-            payload: try JSONValue.encode(tail)
-        ))
-
-        #expect(store.authoritativeSnapshot(for: tail.sessionId) == tail)
-        #expect(store.visibleTranscript.map(\.id) == tail.transcript.map(\.id))
         #expect(store.mountedTranscriptCoverage == nil)
     }
 
@@ -1195,40 +1131,6 @@ struct SessionPresentationStoreTests {
         #expect(!ExtensionPresentationPolicy.admit(snapshot.extensionPresentation))
     }
 
-    @Test("multiline editor, paste, and interaction projections remain admitted")
-    func multilineExtensionPresentationValues() throws {
-        var snapshot = try SessionScenarioBuilder(seed: 8_811).openingTail(targetEncodedBytes: 4_096)
-        snapshot.extensionPresentation.revision = 1
-        snapshot.extensionPresentation.semanticState.editorText = "first line\nsecond line"
-        snapshot.extensionPresentation.pendingInteractions = [
-            ExtensionInteraction(
-                id: "editor",
-                hostEpoch: snapshot.extensionPresentation.hostEpoch,
-                presentationRevision: 1,
-                method: .editor,
-                title: "Edit",
-                message: "line one\nline two",
-                options: nil,
-                placeholder: nil,
-                prefill: "prefill one\nprefill two",
-                expiresAt: nil
-            )
-        ]
-        let model = AppModel()
-        model.installHostedAuthoritativeSnapshot(snapshot)
-        #expect(model.authoritativeSnapshot(for: snapshot.sessionId)?.extensionPresentation.semanticState.editorText == "first line\nsecond line")
-        #expect(model.authoritativeSnapshot(for: snapshot.sessionId)?.extensionPresentation.pendingInteractions.first?.prefill == "prefill one\nprefill two")
-    }
-
-    @Test("cold cached snapshots never acquire live authority")
-    func coldSnapshotIsNotAuthoritative() throws {
-        let model = AppModel()
-        let snapshot = try SessionScenarioBuilder(seed: 82).openingTail(targetEncodedBytes: 4_096)
-        model.installHostedSnapshotWithoutPresentation(snapshot)
-        #expect(model.authoritativeSnapshot(for: snapshot.sessionId) == nil)
-        #expect(model.mountedPresentationTarget == nil)
-    }
-
     @Test("disconnect retires lease authority while profile reset clears the projection")
     func disconnectAndProfileReset() throws {
         let snapshot = try SessionScenarioBuilder(seed: 83).openingTail(targetEncodedBytes: 4_096)
@@ -1482,29 +1384,6 @@ struct SessionPresentationStoreTests {
             #expect(store.authoritativeSnapshot(for: newerSnapshot.sessionId) == newerSnapshot)
             await client.close()
         }
-    }
-
-    @Test("queue projection changes only through sequenced Gateway authority")
-    func confirmedQueueClear() throws {
-        var snapshot = try SessionScenarioBuilder(seed: 84).openingTail(targetEncodedBytes: 4_096)
-        snapshot.queueRevision = 7
-        snapshot.queuedItems = [
-            .init(id: "first", behavior: .steer, text: "duplicate", attachmentCount: 0),
-            .init(id: "second", behavior: .steer, text: "duplicate", attachmentCount: 1),
-            .init(id: "third", behavior: .followUp, text: "later", attachmentCount: 0),
-        ]
-        let store = SessionPresentationStore(
-            client: GatewayClient(),
-            performanceSignposts: SystemPerformanceSignposts.shared
-        )
-        store.installHostedAuthoritativeSnapshot(snapshot)
-        let generation = store.chatTimelineGeneration
-
-        // A command response is not a queue commit. Until the sequenced
-        // Gateway snapshot/event arrives, every projection remains unchanged.
-        #expect(store.chatTimelineGeneration == generation)
-        #expect(store.snapshot?.queuedItems == snapshot.queuedItems)
-        #expect(store.snapshot?.displayedQueuedMessages == snapshot.displayedQueuedMessages)
     }
 
     @Test("revocation rejects every sequenced event before cursor reduction")
@@ -1764,25 +1643,6 @@ struct SessionPresentationStoreTests {
         #expect(store.snapshot?.extensionPresentation.inputLease?.surfaceRevision == 6)
         #expect(store.snapshot?.extensionPresentation.projection == nil)
         #expect(store.snapshot?.eventSequence == 41)
-    }
-
-    @Test("authoritative snapshots replace the complete presentation epoch")
-    func extensionPresentationEpochReplacement() throws {
-        var first = try SessionScenarioBuilder(seed: 8_504).openingTail(targetEncodedBytes: 4_096)
-        first.extensionPresentation.hostEpoch = "old-host"
-        first.extensionPresentation.revision = 7
-        first.extensionPresentation.semanticState.statuses = ["old": "stale"]
-        let store = SessionPresentationStore(client: GatewayClient(), performanceSignposts: SystemPerformanceSignposts.shared)
-        store.installHostedSubscription(snapshot: first, token: "token")
-        var replacement = first
-        replacement.eventSequence += 1
-        replacement.revision += 1
-        replacement.extensionPresentation.hostEpoch = "new-host"
-        replacement.extensionPresentation.revision = 0
-        replacement.extensionPresentation.semanticState.statuses = [:]
-        store.installHostedSubscription(snapshot: replacement, token: "replacement")
-        #expect(store.snapshot?.extensionPresentation.hostEpoch == "new-host")
-        #expect(store.snapshot?.extensionPresentation.semanticState.statuses.isEmpty == true)
     }
 
     @Test("runtime replacement clears secondary projections and advances their reload owners")

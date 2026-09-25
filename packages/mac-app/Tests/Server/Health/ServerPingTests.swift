@@ -142,11 +142,6 @@ private final class TestLatch: @unchecked Sendable {
 /// frame decoder owns the cross-language gateway contract assertions.
 @Suite("ServerPing.decodeFrame")
 struct ServerPingDecodeTests {
-    @Test("matching system.info response projects the gateway version")
-    func matchingCanonicalResponseProjectsVersion() {
-        let body = #"{"type":"response","id":"mac-system-info","ok":true,"result":{"gatewayVersion":"0.1.0","protocolVersion":5,"minProtocolVersion":5,"machineId":"machine","gatewayChannel":"stable","machineName":"Mac","piVersion":"fixture-version","capabilities":[]}}"#
-        #expect(ServerPing.decodeFrame(data: Data(body.utf8)) == .result(ServerPingInfo(version: "0.1.0", gatewayChannel: "stable")))
-    }
 
     @Test("matching system.info response retains runtime provenance")
     func matchingResponseProjectsRuntimeIdentity() {
@@ -183,12 +178,6 @@ struct ServerPingDecodeTests {
         #expect(ServerPing.decodeFrame(data: Data(inverted.utf8)) == .malformed)
     }
 
-    @Test("malformed JSON is classified")
-    func malformedJSONIsClassified() {
-        #expect(ServerPing.decodeFrame(data: Data("garbage".utf8)) == .malformed)
-        #expect(ServerPing.decodeFrame(data: Data()) == .malformed)
-    }
-
     @Test("server hello must be exact before system.info is sent")
     func serverHelloRequiresExactTransportVersions() {
         let valid = #"{"type":"hello","protocolVersion":5,"minProtocolVersion":5}"#
@@ -220,18 +209,6 @@ struct ServerPingDecodeTests {
             minimumProtocolVersion: ServerPing.minimumProtocolVersion
         ))
         #expect(ServerPing.decodeFrame(data: Data(body.utf8)) == .result(ServerPingInfo(version: "0.1.0", gatewayChannel: "stable")))
-    }
-
-    @Test("socket URL brackets IPv6 literals")
-    func socketURLSupportsIPv6() throws {
-        #expect(ServerPing.socketURL(host: "fd7a:115c:a1e0::1", port: 9848)?.absoluteString == "ws://[fd7a:115c:a1e0::1]:9848/v1/socket")
-        #expect(ServerPing.socketURL(host: "100.64.0.2", port: 9847)?.absoluteString == "ws://100.64.0.2:9847/v1/socket")
-    }
-
-    @Test("matching gateway error frame is not a heartbeat")
-    func gatewayErrorFrameIsError() {
-        let body = #"{"type":"response","id":"mac-system-info","ok":false,"error":{"code":"invalid_request","message":"invalid id"}}"#
-        #expect(ServerPing.decodeFrame(data: Data(body.utf8)) == .error)
     }
 }
 

@@ -429,19 +429,6 @@ struct DisplayPresentationTests {
         #expect(state.inlineOpacity == 1)
     }
 
-    @Test("inline display viewport stays bounded without forcing short content tall")
-    func adaptiveInlineViewport() {
-        #expect(DisplayInlineLayoutPolicy.maximumViewportHeight == 320)
-        #expect(DisplayInlineLayoutPolicy.cornerRadius == 22)
-        #expect(DisplayInlineLayoutPolicy.controlDiameter == 34)
-        #expect(DisplayInlineLayoutPolicy.controlTouchTarget >= 44)
-        #expect(DisplayInlineLayoutPolicy.contentTopPadding == 4)
-        #expect(DisplayInlineLayoutPolicy.openingViewportHeight(for: .markdown) == 180)
-        #expect(DisplayInlineLayoutPolicy.openingViewportHeight(for: .image) == 220)
-        #expect(DisplayInlineLayoutPolicy.imageChipScale == 1.7)
-        #expect(DisplayInlineLayoutPolicy.imageChipSide == 108.8)
-    }
-
     @Test("large media suppresses automatic embedding but admits explicit floating activation")
     func largeMediaDowngrade() {
         let large = DisplayPresentationPolicy.maximumEmbeddedMediaBytes + 1

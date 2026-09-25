@@ -48,42 +48,6 @@ struct ChatCommittedLedgerTests {
         }
     }
 
-    @Test("canonical append and prepend advance the ledger exactly once")
-    func canonicalMutationsAdvanceRevision() throws {
-        let first = ChatTranscriptRenderItem.transcript(try message(id: "one", text: "one"))
-        let second = ChatTranscriptRenderItem.transcript(try message(id: "two", text: "two"))
-        let earlier = ChatTranscriptRenderItem.transcript(try message(id: "zero", text: "zero"))
-
-        let initial = ChatCommittedLedger.reconcile(items: [first], previous: nil)
-        let unchanged = ChatCommittedLedger.reconcile(items: [first], previous: initial)
-        let appended = ChatCommittedLedger.reconcile(items: [first, second], previous: unchanged)
-        let prepended = ChatCommittedLedger.reconcile(
-            items: [earlier, first, second],
-            previous: appended
-        )
-
-        #expect(initial.revision == 1)
-        #expect(unchanged.revision == initial.revision)
-        #expect(appended.revision == initial.revision + 1)
-        #expect(prepended.revision == appended.revision + 1)
-    }
-
-    @Test("hidden thinking labels are scoped to thinking row preparation")
-    func hiddenThinkingLabelIsRowScoped() throws {
-        let content = ChatTranscriptRenderItem.transcript(try message(id: "content", text: "hello"))
-        let thinkingItem = try decodeTranscriptFixture(
-            TranscriptItem.self,
-            from: Data("""
-            {"id":"thinking","parentId":null,"timestamp":"2026-01-01T00:00:00Z","kind":"message","role":"assistant","content":[{"id":"thinking:0","ordinal":0,"type":"thinking","text":"work"}]}
-            """.utf8)
-        )
-        let thinking = ChatTranscriptRenderItem.transcript(thinkingItem)
-        let prepared = ChatTextPreparationSnapshot.empty.withHiddenThinkingLabel("Reasoning")
-
-        #expect(prepared.slice(for: content).hiddenThinkingLabel == nil)
-        #expect(prepared.slice(for: thinking).hiddenThinkingLabel == "Reasoning")
-    }
-
     @Test("foreground replacement reuses history while cold reopen rebuilds deterministically")
     func foregroundAndColdReopen() async throws {
         try await withTestWatchdog { @MainActor in

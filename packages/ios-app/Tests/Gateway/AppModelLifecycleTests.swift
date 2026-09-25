@@ -271,32 +271,6 @@ struct AppModelLifecycleTests {
         defaults.removePersistentDomain(forName: suiteName)
     }
 
-    @Test("the AppModel lifecycle façade remains observable")
-    func lifecycleFacadeObservation() async {
-        let suiteName = "AppModelLifecycleObservationTests.\(UUID().uuidString)"
-        let defaults = UserDefaults(suiteName: suiteName)!
-        defaults.removePersistentDomain(forName: suiteName)
-        let model = AppModel(
-            client: GatewayClient(),
-            profiles: GatewayProfileStore(defaults: defaults),
-            cache: SnapshotCache(
-                root: FileManager.default.temporaryDirectory.appending(path: suiteName)
-            )
-        )
-        let changed = Mutex(false)
-        withObservationTracking {
-            _ = model.hasResolvedLaunchState
-        } onChange: {
-            changed.withLock { $0 = true }
-        }
-
-        await model.start()
-        #expect(changed.withLock { $0 })
-        #expect(model.hasResolvedLaunchState)
-        await model.teardown()
-        defaults.removePersistentDomain(forName: suiteName)
-    }
-
     @Test("forget awaits transport close and prevents the retired connect from restarting")
     func forgetOwnsConnectionShutdown() async throws {
         try await withFixture(socketCount: 1) { fixture in
@@ -430,14 +404,6 @@ struct AppModelLifecycleTests {
             #expect(fixture.socketFactory.requests.count == 1)
             #expect(fixture.model.settingsInvalidationGeneration == settingsGeneration)
             await start.value
-        }
-    }
-
-    @Test("settings restart surfaces current actionable failures")
-    func settingsRestartSurfacesFailure() async throws {
-        try await withFixture(socketCount: 1) { fixture in
-            await fixture.model.requestGatewayRestart()
-            #expect(fixture.model.visibleNotices.last?.title == "This Gateway is not supervised for remote restart. Install or relaunch the managed Tron Mac app, then retry; direct foreground Gateway processes must be restarted from their supervisor.")
         }
     }
 

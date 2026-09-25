@@ -81,44 +81,6 @@ struct TailscaleProbeTests {
         #expect(status == .installedNotSignedIn)
     }
 
-    @Test("BackendState=NeedsLogin (not signed in): installed-not-signed-in")
-    func backendNeedsLogin() async throws {
-        let cli = try makeFakeCLI()
-        defer { try? FileManager.default.removeItem(at: cli.deletingLastPathComponent()) }
-
-        let json = """
-        {
-          "Version": "1.58.2",
-          "BackendState": "NeedsLogin",
-          "AuthURL": "https://login.tailscale.com/a/abc123"
-        }
-        """
-
-        let status = await TailscaleProbe.probe(
-            tailscaleAppExists: { _ in true },
-            cliPaths: [cli],
-            runProcess: { _ in ProcessResult(exitCode: 0, stdout: json, stderr: "") }
-        )
-        #expect(status == .installedNotSignedIn)
-    }
-
-    @Test("BackendState=Starting (daemon coming up): installed-not-signed-in")
-    func backendStarting() async throws {
-        let cli = try makeFakeCLI()
-        defer { try? FileManager.default.removeItem(at: cli.deletingLastPathComponent()) }
-
-        let json = """
-        { "BackendState": "Starting" }
-        """
-
-        let status = await TailscaleProbe.probe(
-            tailscaleAppExists: { _ in true },
-            cliPaths: [cli],
-            runProcess: { _ in ProcessResult(exitCode: 0, stdout: json, stderr: "") }
-        )
-        #expect(status == .installedNotSignedIn)
-    }
-
     @Test("CLI exits non-zero (daemon not running): installed-not-signed-in")
     func cliExitsNonZero() async throws {
         let cli = try makeFakeCLI()

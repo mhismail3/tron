@@ -182,36 +182,6 @@ describe("session transcript paging", () => {
     }
   });
 
-  it("rejects an unsupported method without removing canonical JSONL import", async () => {
-    const importFromJsonl = vi.fn(async () => ({ id: "canonical-session" }));
-    const release = vi.fn(async () => {});
-    const service = new GatewayService({
-      config: {
-        machineId: "machine",
-        machineGroupID: "group",
-        machineName: "Mac",
-        tronHome: "/tmp/tron-legacy-retirement",
-      },
-      receipts: {
-        execute: async (_identity: string, _method: string, _commandID: string, operation: () => Promise<unknown>) => operation(),
-      },
-      uploads: {
-        prepareSessionImport: async () => ({ path: "/tmp/session.jsonl", release }),
-        remove: vi.fn(async () => {}),
-      },
-      sessions: { importFromJsonl },
-    } as unknown as GatewayServiceDependencies);
-
-    await expect(service.invoke(client, "legacy.inspect", {})).rejects.toMatchObject({ code: "not_found" });
-    await expect(service.invoke(client, "session.import", {
-      commandId: "command-2",
-      uploadId: "upload-1",
-      cwd: "/tmp/project",
-    })).resolves.toEqual({ sessionId: "canonical-session" });
-    expect(importFromJsonl).toHaveBeenCalledWith("/tmp/session.jsonl", "/tmp/project");
-    expect(release).toHaveBeenCalledOnce();
-  });
-
   it("advertises independent process and scalable upload-status capabilities", () => {
     const service = new GatewayService({
       config: {
@@ -235,39 +205,6 @@ describe("session transcript paging", () => {
       "browser-live-view.v1",
     ]));
     expect(capabilities).not.toContain("uploads-status.v1");
-  });
-
-  it("routes bounded unified process history through an established parent session", async () => {
-    const processHistory = vi.fn(() => ({ activities: [], historyRevision: "revision" }));
-    const processDetail = vi.fn(() => ({
-      version: 1,
-      processId: "process:command:test",
-      kind: "command",
-      executionMode: "foreground",
-      source: "mainAssistant",
-      lifecycle: { version: 1, state: "completed", attention: "none", sequence: 0, observedAt: "2026-01-01T00:00:00.000Z", terminalAt: "2026-01-01T00:00:00.000Z" },
-      visibility: "historical",
-      title: "Command",
-      outputTruncated: false,
-    }));
-    const acquire = vi.fn(async () => ({ processHistory, processDetail }));
-    const service = new GatewayService({
-      sessions: { isSubscribed: () => true, acquire },
-    } as unknown as GatewayServiceDependencies);
-
-    await expect(service.invoke(client, "session.processHistory.list", {
-      sessionId: "session",
-      limit: 25,
-      kind: "command",
-    })).resolves.toEqual({ activities: [], historyRevision: "revision" });
-    expect(processHistory).toHaveBeenCalledWith(undefined, 25, { kind: "command" });
-
-    await expect(service.invoke(client, "session.processHistory.get", {
-      sessionId: "session",
-      processId: "process:command:test",
-      historyRevision: "revision",
-    })).resolves.toEqual({ activity: expect.objectContaining({ kind: "command" }) });
-    expect(processDetail).toHaveBeenCalledWith("process:command:test", "revision");
   });
 
   it("routes subagent stop only through the exact connection-owned transcript lease", async () => {
@@ -684,33 +621,5 @@ describe("session transcript paging", () => {
     release();
     await expect(open).resolves.toMatchObject({ completionRevision: 7 });
     expect(snapshot).toHaveBeenCalledTimes(1);
-  });
-
-  it("applies absolute attention reads and receipt-backed attention mutations", async () => {
-    const setAttention = vi.fn(async (_sessionId: string, unread: boolean, through?: number) => ({
-      completionRevision: 4, attentionRevision: 8, isUnread: unread || (through ?? 0) < 4,
-    }));
-    const execute = vi.fn(async (
-      _identity: string,
-      _method: string,
-      _commandId: string,
-      operation: () => Promise<unknown>,
-    ) => operation());
-    const service = new GatewayService({
-      sessions: { setAttention },
-      receipts: { execute },
-    } as unknown as GatewayServiceDependencies);
-
-    await expect(service.invoke(client, "session.attention.read", {
-      sessionId: "session", throughCompletionRevision: 3,
-    })).resolves.toMatchObject({ isUnread: true });
-    await expect(service.invoke(client, "session.attention.set", {
-      sessionId: "session", unread: false, throughCompletionRevision: 4, commandId: "command-read",
-    })).resolves.toMatchObject({ isUnread: false });
-    await expect(service.invoke(client, "session.attention.set", {
-      sessionId: "session", unread: true, throughCompletionRevision: 4, commandId: "command-unread",
-    })).resolves.toMatchObject({ isUnread: true });
-    expect(execute).toHaveBeenCalledTimes(2);
-    expect(setAttention).toHaveBeenNthCalledWith(1, "session", false, 3);
   });
 });

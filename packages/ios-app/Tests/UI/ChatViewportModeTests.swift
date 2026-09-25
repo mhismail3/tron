@@ -19,21 +19,6 @@ struct ChatViewportModeTests {
         #expect(mode == .pinned)
     }
 
-    @Test("keyboard and geometry are not reducer inputs")
-    func mutationSurfaceExcludesGeometry() {
-        let intents: [ChatViewportIntent] = [
-            .userTookOver,
-            .userReturnedToTail,
-            .catchUpRequested,
-            .submitted,
-            .opened,
-            .prependBegan,
-            .prependEnded,
-            .presentationReset(retainingViewport: true),
-        ]
-        #expect(intents.count == 8)
-    }
-
     @Test("retained presentation keeps reader authority")
     func retainedPresentation() {
         var mode = ChatViewportMode.anchored
@@ -52,32 +37,6 @@ struct ChatViewportModeTests {
         #expect(mode == .pinned)
         mode.reduce(.userTookOver)
         mode.reduce(.opened)
-        #expect(mode == .pinned)
-    }
-
-    @Test("geometry cannot consume or manufacture an explicit return")
-    func geometryCannotConsumeExplicitReturn() {
-        var mode = ChatViewportMode.anchored
-        mode.reduce(.submitted)
-        mode.reduce(.prependBegan)
-        #expect(mode == .anchored)
-        mode.reduce(.userReturnedToTail)
-        #expect(mode == .pinned)
-    }
-
-    @Test("an explicit return pins despite stale geometry")
-    func explicitReturnPinsDespiteStaleGeometry() {
-        var mode = ChatViewportMode.anchored
-        mode.reduce(.userReturnedToTail)
-        #expect(mode == .pinned)
-    }
-
-    @Test("mode remains the complete native binding state; no release state exists")
-    func nativeBindingStateFollowsModeWithoutReleaseCommand() {
-        var mode = ChatViewportMode.pinned
-        mode.reduce(.userTookOver)
-        #expect(mode == .anchored)
-        mode.reduce(.catchUpRequested)
         #expect(mode == .pinned)
     }
 

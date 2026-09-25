@@ -217,12 +217,6 @@ describe("Tron-owned ask_user extension", () => {
     expect(Object.getPrototypeOf(answers)).toBeNull();
   });
 
-  it("registers compact call and result renderers", () => {
-    const tool = registeredTool();
-    expect(tool.renderCall).toBeTypeOf("function");
-    expect(tool.renderResult).toBeTypeOf("function");
-  });
-
   it("has an exact inline owner identity", () => {
     const firstParty = {
       path: TRON_ASK_USER_INLINE_PATH,

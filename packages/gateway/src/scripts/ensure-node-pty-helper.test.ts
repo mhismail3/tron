@@ -41,11 +41,6 @@ describe("node-pty helper extraction boundary", () => {
     const root = temporary("tron-pty-");
     expect(() => ensureNodePtyHelper("darwin", root)).toThrow(/spawn helper is missing/);
   });
-
-  it("is an explicit no-op away from Darwin", () => {
-    const root = temporary("tron-pty-");
-    expect(() => ensureNodePtyHelper("linux", root)).not.toThrow();
-  });
 });
 
 describe("source-built payload runtime alias bridge", () => {

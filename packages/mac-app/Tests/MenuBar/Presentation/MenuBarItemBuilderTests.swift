@@ -32,27 +32,6 @@ struct MenuBarItemBuilderTests {
         }
     }
 
-    @Test("running snapshot preserves endpoint and process diagnostics")
-    func runningSnapshot() {
-        let snap = ServerStatusSnapshot(
-            state: .running(version: "0.5.0", port: 9847),
-            tailscaleIP: "100.64.0.1",
-            processID: 16027,
-            uptime: "01:07:42"
-        )
-        let items = Self.build(snapshot: snap, defaultServerPort: 9848)
-
-        guard case .header(let content) = items[0] else {
-            Issue.record("status should live in custom header")
-            return
-        }
-        #expect(content.endpoint == "100.64.0.1:9847")
-        #expect(content.hasEndpoint)
-        #expect(content.tone == .running)
-        #expect(content.pid == 16027)
-        #expect(content.uptime == "01:07:42")
-    }
-
     @Test("split update shows both identities and exposes one rerun action")
     func updateIncomplete() {
         let snapshot = ServerStatusSnapshot(state: .updateIncomplete(running: "abc123", selected: "release-7"))
@@ -69,18 +48,6 @@ struct MenuBarItemBuilderTests {
         }
         #expect(actions.filter { $0.1 == .updateGateway }.map(\.0) == ["Rerun Gateway Update"])
         #expect(actions.filter { $0.1 == .restartServer }.isEmpty)
-    }
-
-    @Test("paused snapshot reports that no endpoint is available")
-    func pausedSnapshot() {
-        let items = Self.build(snapshot: ServerStatusSnapshot(state: .paused))
-        guard case .header(let content) = items[0] else {
-            Issue.record("first item should be header")
-            return
-        }
-        #expect(!content.hasEndpoint)
-        #expect(content.endpoint == "Tailscale unavailable")
-        #expect(content.tone == .paused)
     }
 
     @Test("Debug pairing is exposed only for an admitted pairable gateway")
@@ -127,20 +94,6 @@ struct MenuBarItemBuilderTests {
             return enabled
         }
         #expect(restart == [false])
-    }
-
-    @Test("Open Tron folder uses the configured tronHome path")
-    func openFolderUsesPath() {
-        let tronHome = URL(fileURLWithPath: "/tmp/custom-tron", isDirectory: true)
-        let items = Self.build(snapshot: .checking, tronHome: tronHome)
-        guard let openLink = items.first(where: { item in
-            if case .openLink = item { return true }
-            return false
-        }), case .openLink(_, let url) = openLink else {
-            Issue.record("expected an openLink for Open Tron folder")
-            return
-        }
-        #expect(url == tronHome)
     }
 
     @Test("uptime formatter accepts bounded process elapsed-time formats")

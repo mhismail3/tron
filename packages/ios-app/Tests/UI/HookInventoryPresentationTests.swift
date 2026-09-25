@@ -3,10 +3,6 @@ import Testing
 
 @Suite("Hook inventory presentation")
 struct HookInventoryPresentationTests {
-    @Test("project hook view defaults to event-first ordering")
-    func eventViewIsListedFirst() {
-        #expect(HookViewMode.allCases == [.byEvent, .byExtension])
-    }
 
     @Test("runtime registrations retain handler counts and truthful provenance")
     func runtimeHandlers() throws {

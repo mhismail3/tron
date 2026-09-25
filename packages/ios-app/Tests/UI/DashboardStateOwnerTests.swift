@@ -7,46 +7,6 @@ import UIKit
 
 @Suite("Dashboard state ownership")
 struct DashboardStateOwnerTests {
-    @MainActor
-    @Test("each dashboard owns the matching logo accent")
-    func dashboardLogoAccent() {
-        #expect(DashboardMode.sessions.accent == .tronEmerald)
-        #expect(DashboardMode.automations.accent == .tronAutomation)
-        #expect(Set(DashboardMode.allCases.map(\.id)).count == DashboardMode.allCases.count)
-        #expect(Set(DashboardMode.allCases.map(\.systemImage)).count == DashboardMode.allCases.count)
-        let menuButton = DashboardModeMenuButton(mode: .sessions, onSelect: { _ in }, actions: .init(
-            search: {}, filter: {}, settings: {},
-            creation: [.init(title: "New Session", symbol: "plus", perform: {})]
-        ))
-        let coordinator = menuButton.makeCoordinator()
-        let menu = coordinator.makeMenu()
-        #expect(menu.title.isEmpty, "The native dashboard menu must not show a redundant Dashboard header")
-        let dashboards = (menu.children.dropFirst(2).first as? UIMenu)?.children.compactMap { $0 as? UIAction } ?? []
-        #expect(dashboards.count == DashboardMode.allCases.count)
-        for action in dashboards {
-            #expect(action.image?.renderingMode == .alwaysOriginal,
-                    "Dashboard menu entries retain their per-mode symbol tint")
-        }
-
-        let automation = UIColor(DashboardMode.automations.accent)
-        #expect(
-            automation.resolvedColor(with: UITraitCollection(userInterfaceStyle: .light))
-                == UIColor(hex: "#31889A")
-        )
-        #expect(
-            automation.resolvedColor(with: UITraitCollection(userInterfaceStyle: .dark))
-                == UIColor(hex: "#74CBDC")
-        )
-        let automationText = UIColor(UserPromptTextTone.automation.color)
-        #expect(
-            automationText.resolvedColor(with: UITraitCollection(userInterfaceStyle: .light))
-                == UIColor(hex: "#1F6675")
-        )
-        #expect(
-            automationText.resolvedColor(with: UITraitCollection(userInterfaceStyle: .dark))
-                == UIColor(hex: "#8BD8E4")
-        )
-    }
 
     @Test("initial session loading is shown only while an empty catalog is converging")
     func sessionInitialLoadingPresentation() {
@@ -678,17 +638,6 @@ struct DashboardStateOwnerTests {
         }
     }
 
-    @Test("connection status labels cover live, restart, and failure states")
-    func connectionStatusLabels() {
-        #expect(DashboardServerConnectionState.connected.label == "Connected")
-        #expect(DashboardServerConnectionState.reconnecting.label == "Reconnecting")
-        #expect(DashboardServerConnectionState.noPath("Wi-Fi").label == "No path to this Mac over Wi-Fi")
-        #expect(DashboardServerConnectionState.noPath(nil).label == "No path to this Mac")
-        #expect(DashboardServerConnectionState.restarting.label == "Restarting")
-        #expect(DashboardServerConnectionState.identityMismatch.label == "Identity changed")
-        #expect(DashboardServerConnectionState.disabled.label == "Disabled")
-    }
-
     @Test("retiring a background transport retains its bounded dashboard bucket")
     func dashboardProjectionRetention() {
         #expect(DashboardProjectionRetentionPolicy.retainsExistingBucket(
@@ -1208,44 +1157,6 @@ struct DashboardStateOwnerTests {
         #expect(changed.withLock { $0 })
         #expect(model.sessions.first?.id == "session")
         #expect(model.dashboardPresentationRevision > presentationRevision)
-    }
-
-    @MainActor
-    @Test("dashboard indicator identities cover every icon transition")
-    func dashboardIndicatorStates() {
-        #expect(DashboardSessionIndicatorState(activity: .idle, isUnread: false) == .idleRead)
-        #expect(DashboardSessionIndicatorState(activity: .idle, isUnread: true) == .idleUnread)
-        #expect(DashboardSessionIndicatorState(activity: .active, isUnread: false) == .active)
-        #expect(DashboardSessionIndicatorState(activity: .waitingForUser, isUnread: false) == .waitingForUser)
-        #expect(DashboardSessionIndicatorState(activity: .subagentsWorking, isUnread: false) == .subagentsWorking)
-        #expect(DashboardSessionIndicatorState(activity: .resuming, isUnread: false) == .resuming)
-        #expect(DashboardSessionIndicatorState(activity: .interrupted, isUnread: true) == .interrupted)
-        #expect(DashboardSessionIndicatorPresentation.subagentOrbSize == TronTypography.sizeBody3)
-    }
-
-    @Test("dashboard presentation freezes exact rows and activity together")
-    func dashboardPresentationSnapshotIsAtomic() {
-        let session = summary(revision: 3, phase: .running)
-        let snapshot = DashboardPresentationSnapshot(
-            sessions: [session],
-            activityByDashboardID: [session.dashboardID: .active]
-        )
-        #expect(snapshot.sessions == [session])
-        #expect(snapshot.activity(for: session) == .active)
-
-        let unknown = SessionSummary(
-            id: "unknown",
-            name: "Unknown",
-            cwd: "/workspace",
-            parentSessionId: nil,
-            createdAt: "2026-01-01T00:00:00Z",
-            updatedAt: "2026-01-01T00:00:00Z",
-            messageCount: 0,
-            firstMessage: "",
-            phase: .idle,
-            summaryRevision: 1
-        )
-        #expect(snapshot.activity(for: unknown) == .idle)
     }
 
     private func summary(

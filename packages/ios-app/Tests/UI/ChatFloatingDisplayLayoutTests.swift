@@ -25,31 +25,6 @@ struct ChatFloatingDisplayLayoutTests {
         }
     }
 
-    @Test("bottom placement follows native viewport contraction and multiline composer growth")
-    func composerAndViewportAvoidance() async throws {
-        try await withHarness { harness in
-            let initial = try await layout(harness)
-            initial.marker.move?(.bottomTrailing)
-            try await settle()
-            harness.resize(height: 520)
-            try harness.setComposerDraftText(String(repeating: "A multiline composer grows without hiding the browser. ", count: 12))
-            try await settle()
-            let contracted = try #require(harness.floatingLayout(), "Resizing must not remove a usable floating panel")
-            print("Floating contracted: \(contracted.frame), toolbar bottom: \(contracted.toolbarBottom), composer: \(contracted.composer)")
-            #expect(contracted.marker === initial.marker)
-            #expect(contracted.frame.minY >= contracted.toolbarBottom + 7)
-            #expect(abs(contracted.composer.minY - contracted.frame.maxY - 8) <= 2)
-            #expect(contracted.frame.height < initial.frame.height)
-            try harness.setComposerDraftText("")
-            harness.resize(height: 844)
-            try await settle()
-            let restored = try #require(harness.floatingLayout())
-            #expect(restored.marker === initial.marker)
-            #expect(abs(restored.composer.minY - restored.frame.maxY - 8) <= 2)
-            #expect(abs(restored.frame.size.height - initial.frame.size.height) <= 2)
-        }
-    }
-
     @Test("keyboard, skill and photo chips share the same animated placement boundary")
     func keyboardAndAccessories() async throws {
         try await withHarness { harness in

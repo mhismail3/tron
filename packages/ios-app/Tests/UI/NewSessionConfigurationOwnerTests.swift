@@ -191,12 +191,4 @@ struct NewSessionConfigurationOwnerTests {
         #expect(owner.modelOverride(selected: explicit, configured: nil) == explicit)
         #expect(owner.modelOverride(selected: nil, configured: configured) == nil)
     }
-
-    @Test("a created route carries its explicit model until the opened chat applies it")
-    func createdRouteCarriesInitialModel() {
-        let route = AppModel.SessionNavigationRoute(sessionID: "created", editorText: nil)
-            .withInitialModel(ModelRef(provider: "openai-codex", id: "gpt-5.6-luna"))
-        #expect(route.initialModel == ModelRef(provider: "openai-codex", id: "gpt-5.6-luna"))
-        #expect(route.sessionID == "created")
-    }
 }

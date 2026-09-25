@@ -310,27 +310,6 @@ struct PushNotificationCoordinatorTests {
         try? FileManager.default.removeItem(at: cacheRoot)
     }
 
-    @Test("push navigation always targets the Sessions dashboard")
-    func pushNavigationTargetsSessionsDashboard() {
-        #expect(PushNavigationPresentationPolicy.destinationDashboard == .sessions)
-    }
-
-    @Test("same-route notification navigation retains the mounted presentation")
-    func sameRouteRetainsPresentation() {
-        #expect(PushNavigationPresentationPolicy.retainsCurrent(
-            presentedRouteID: "profile:session",
-            targetRouteID: "profile:session"
-        ))
-        #expect(!PushNavigationPresentationPolicy.retainsCurrent(
-            presentedRouteID: "profile:other",
-            targetRouteID: "profile:session"
-        ))
-        #expect(!PushNavigationPresentationPolicy.retainsCurrent(
-            presentedRouteID: nil,
-            targetRouteID: "profile:session"
-        ))
-    }
-
     @Test("canceled route work retains the current notification request")
     func canceledRouteWorkRetainsRequest() async {
         let barrier = PushNavigationCancellationBarrier()
@@ -939,22 +918,6 @@ struct PushNotificationCoordinatorTests {
         #expect(await retries.values.isEmpty)
         #expect(await script.submittedModes == ["assertion"])
         #expect(store.value?.appAttestKeyID == appAttestKey("key"))
-    }
-
-    @Test("diagnostics are fixed privacy-safe stage text")
-    func diagnosticPrivacy() {
-        let values = [
-            PushRegistrationDiagnostic.idle, .waitingForToken, .requestingChallenge,
-            .generatingKey, .generatingAttestation, .generatingAssertion, .submittingProof,
-            .retryBackoff, .transferringGrant, .complete, .stoppedRejected,
-            .stoppedInvalidKey, .stoppedInvalidResponse, .stoppedPersistence,
-            .stoppedExhausted, .stoppedUnavailable,
-        ].map(\.rawValue)
-        let forbidden = ["https://", "profile-1", "challenge-1", "key_1", "0123456789abcdef", "certificate", "bindingHash"]
-        #expect(values.allSatisfy { value in
-            forbidden.allSatisfy { !value.localizedCaseInsensitiveContains($0) }
-        })
-        #expect(values.allSatisfy { $0.utf8.count <= 32 })
     }
 
     @MainActor

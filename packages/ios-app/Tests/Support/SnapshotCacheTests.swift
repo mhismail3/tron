@@ -4,12 +4,6 @@ import Testing
 
 @Suite("Summary-only cache")
 struct SnapshotCacheTests {
-    @Test("summary cache retains bounded file policy")
-    func ratchets() {
-        #expect(SnapshotCachePolicy.maximumEncodedBytes == 8_388_608)
-        #expect(SnapshotCachePolicy.maximumSessionCount == 250)
-        #expect(SnapshotCachePolicy.maximumEncodedSessionBytes == 131_072)
-    }
 
     @Test("ignores legacy snapshot state while retaining summaries")
     func ignoresLegacySnapshotValues() async throws {

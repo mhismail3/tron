@@ -75,22 +75,6 @@ test("accepts only one exact Pi release", () => {
   for (const value of ["^1.2.3", "~1.2.3", "latest", "1.2", ""]) assert.equal(exactVersion(value), false);
 });
 
-test("plans native lifecycle install with engine enforcement and signature audit", () => {
-  assert.deepEqual(updateCommand("1.2.3"), [
-    "install", "--save-exact", "--engine-strict", "--registry=https://registry.npmjs.org/", ...DIRECT_PI_PACKAGES.map((name) => `${name}@1.2.3`),
-  ]);
-  assert.deepEqual(auditCommand(), ["audit", "signatures", "--registry=https://registry.npmjs.org/"]);
-  assert.throws(() => updateCommand("^1.2.3"), /exact semver/);
-});
-
-test("plans one metadata request per complete seven-package family", () => {
-  assert.deepEqual(metadataCommand(PI_PACKAGES[0], "1.2.3"), [
-    "view", "@earendil-works/pi-agent-core@1.2.3", "version", "gitHead", "dist.integrity", "engines", "--json", "--prefer-online", "--offline=false", "--registry=https://registry.npmjs.org/",
-  ]);
-  assert.equal(validSha512Integrity(integrity), true);
-  assert.throws(() => metadataCommand("other", "1.2.3"), /unknown Pi package/);
-});
-
 test("refuses dirty manifest state before any metadata request", async () => {
   const root = await makeRepo();
   try {
@@ -164,15 +148,5 @@ test("runs metadata, native install, coherence, and signature audit in order", a
     assert.match(commands[PI_PACKAGES.length], /^install /);
     assert.match(commands[PI_PACKAGES.length + 1], /^audit signatures /);
     assert.equal(result.metadata.length, PI_PACKAGES.length);
-  } finally { await cleanup(root); }
-});
-
-test("parses deterministic fake metadata without network", async () => {
-  const root = await makeRepo();
-  try {
-    const { script } = await fakeNpm(root);
-    const records = readMetadata(version, root, script);
-    assert.equal(records.length, PI_PACKAGES.length);
-    assert.equal(new Set(records.map((record) => record.gitHead)).size, 1);
   } finally { await cleanup(root); }
 });

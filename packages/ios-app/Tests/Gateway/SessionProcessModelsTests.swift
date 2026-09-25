@@ -4,10 +4,6 @@ import Testing
 
 @Suite("Session process models")
 struct SessionProcessModelsTests {
-    @Test("read-only viewer requires the negotiated v2 transcript capability")
-    func transcriptCapabilityIsV2() {
-        #expect(SessionProcessAdmissionPolicy.transcriptCapability == "process-transcript.v2")
-    }
 
     @Test("legacy command shapes validate but only subagents enter presentation")
     func wireShapes() throws {
@@ -31,22 +27,6 @@ struct SessionProcessModelsTests {
         #expect(SessionProcessAdmissionPolicy.admits(subagent))
         #expect(subagent.childSessionRef == "child-session-id")
         #expect(SessionProcessProjection.sections([command, subagent]).recent.map(\.processId) == [subagent.processId])
-    }
-
-    @Test("subagent metadata decodes and validates")
-    func subagentMetadata() throws {
-        let data = Data(#"""
-        {
-          "version":1,"processId":"process:subagent:metadata","kind":"subagent","executionMode":"asynchronous","source":"delegatedAgent",
-          "lifecycle":{"version":1,"state":"completed","attention":"none","sequence":4,"observedAt":"2026-01-01T00:00:02Z","terminalAt":"2026-01-01T00:00:01Z","recentUntil":"2026-01-01T00:05:01Z"},
-          "visibility":"recent","title":"worker","model":"openai-codex/gpt-5.6-luna","thinking":"high",
-          "outputTruncated":false
-        }
-        """#.utf8)
-        let process = try JSONDecoder.gateway.decode(SessionProcessActivity.self, from: data)
-        #expect(SessionProcessAdmissionPolicy.admits(process))
-        #expect(process.model == "openai-codex/gpt-5.6-luna")
-        #expect(process.thinking == "high")
     }
 
     @Test("canonical history uses the Gateway activities key")
@@ -94,22 +74,6 @@ struct SessionProcessModelsTests {
         let projected = SessionProcessHistoryProjection.appending([], rows, limit: 400)
         #expect(projected.count == 50)
         #expect(Set(projected.map(\.processId)).count == 50)
-    }
-
-    @Test("orb rows show the producer start in local time, not a progress timestamp")
-    func friendlyStartedTimestamp() throws {
-        let now = try #require(GatewayTimestamp.parse("2026-01-01T14:00:00Z"))
-        let locale = Locale(identifier: "en_US_POSIX")
-        let zone = try #require(TimeZone(secondsFromGMT: 0))
-        let process = makeProcess(startedAt: "2026-01-01T13:45:00Z")
-        let text = try #require(SessionProcessRowPresentation.startedText(for: process, relativeTo: now, locale: locale, timeZone: zone))
-        #expect(text.hasPrefix("Started 1:45"))
-        #expect(text.contains("PM"))
-        let older = SessionProcessRowPresentation.startedText(for: makeProcess(startedAt: "2025-12-31T13:45:00Z"), relativeTo: now, locale: locale, timeZone: zone)
-        #expect(older?.contains("Dec 31") == true)
-        for start: String? in [nil, "malformed"] {
-            #expect(SessionProcessRowPresentation.startedText(for: makeProcess(startedAt: start), relativeTo: now) == nil)
-        }
     }
 
     @Test("history timestamps use terminal time only, never start or observation time")
@@ -192,35 +156,6 @@ struct SessionProcessModelsTests {
         )) == "bash")
         #expect(SessionProcessRowPresentation.countLabel(1, singular: "tool") == "1 tool")
         #expect(SessionProcessRowPresentation.countLabel(2, singular: "turn") == "2 turns")
-    }
-
-    @Test("paused subagents are not presented as live execution")
-    func pausedPresentation() {
-        #expect(SessionProcessRowPresentation.activityLabel(for: .queued) == "QUEUED")
-        #expect(SessionProcessRowPresentation.activityLabel(for: .running) == "LIVE ACTIVITY")
-        #expect(SessionProcessRowPresentation.activityLabel(for: .paused) == "PAUSED")
-        #expect(SessionProcessRowPresentation.activityLabel(for: .completed) == "RECENT ACTIVITY")
-        #expect(SessionProcessRowPresentation.activityLabel(for: .failed) == "RECENT ACTIVITY")
-    }
-
-    @Test("subagent row tone gives lifecycle colors one standard meaning")
-    func rowTone() {
-        for state in [
-            SessionProcessLifecycleState.queued,
-            .running,
-            .paused,
-        ] {
-            #expect(SessionProcessRowPresentation.tone(for: state) == .inProgress)
-        }
-        #expect(SessionProcessRowPresentation.tone(for: .completed) == .succeeded)
-        for state in [
-            SessionProcessLifecycleState.failed,
-            .stopped,
-            .rejected,
-            .interrupted,
-        ] {
-            #expect(SessionProcessRowPresentation.tone(for: state) == .unsuccessful)
-        }
     }
 
     @Test("active and recent process rows are strictly admitted")

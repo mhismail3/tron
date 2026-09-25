@@ -119,25 +119,6 @@ struct ChatTranscriptPresentationTests {
         ) == 0)
     }
 
-    @Test("unknown context omits a producer without inventing one")
-    func unknownContextTitle() {
-        #expect(InboundProducerPresentationPolicy.title(for: nil) == "Unknown source")
-        #expect(InboundProducerPresentationPolicy.compactTitle(for: nil) == "Context")
-        #expect(InboundProducerPresentationPolicy.messageType("subagent_supervisor_request")
-            == "Subagent Supervisor Request")
-        #expect(InboundProducerPresentationPolicy.title(
-            for: ChatOrigin(kind: .extension, title: "Trusted Adapter", confidence: .receipt)
-        ) == "Trusted Adapter")
-    }
-
-    @Test("inbound delivery metadata remains truthful in technical details")
-    func inboundDeliveryLabels() {
-        #expect(InboundProducerPresentationPolicy.deliveryLabel(for: .stored) == "Stored for model context")
-        #expect(InboundProducerPresentationPolicy.deliveryLabel(for: .triggeredTurn) == "Triggered an agent turn")
-        #expect(InboundProducerPresentationPolicy.deliveryLabel(for: .followUp) == "Queued as a follow-up")
-        #expect(InboundProducerPresentationPolicy.deliveryLabel(for: nil) == "Unknown")
-    }
-
     @Test("prompt behavior normalizes wire values before first rendering")
     func promptBehaviorNormalization() {
         #expect(ChatPromptBehavior(rawValue: nil) == .ordinary)
@@ -148,39 +129,6 @@ struct ChatTranscriptPresentationTests {
         #expect(!ChatPromptBehavior(rawValue: nil).isQueuedKind)
     }
 
-    @Test("handoff behavior selects the first-frame component kind")
-    func handoffBehaviorSelectsFirstFrameKind() {
-        let target = SessionPresentationIdentity(sessionID: "session", generation: 1)
-        func behavior(_ raw: String?) -> ChatPromptBehavior {
-            ChatTranscriptHandoffCommit.outgoing(
-                presentation: ChatOutgoingSubmissionPresentation(
-                    snapshot: ComposerSubmissionSnapshot(
-                        target: target, textRevision: 1, outgoingText: "prompt",
-                        attachmentIDs: [], behavior: raw, localNonce: 1
-                    ),
-                    transportActive: true
-                ),
-                attachments: []
-            ).promptBehavior
-        }
-        #expect(behavior(nil) == .ordinary)
-        #expect(behavior("steer") == .steer)
-        #expect(behavior("followUp") == .followUp)
-        #expect(behavior("unrecognized") == .unknown)
-        let preflight = ChatOutgoingSubmissionPresentation(
-            snapshot: ComposerSubmissionSnapshot(
-                target: target, textRevision: 1, outgoingText: "prompt",
-                attachmentIDs: [], behavior: nil, localNonce: 2
-            ),
-            transportActive: true,
-            preflightCompacting: true
-        )
-        #expect(preflight.promptBehavior == .ordinary)
-        #expect(preflight.usesQueuedCardVisual)
-        #expect(preflight.cardBehavior == .steer)
-        #expect(preflight.cardTitle == "Message")
-        #expect(preflight.cardDetail == "After compaction")
-    }
     @Test("pending direct prompts consume canonical entrance entitlement exactly once")
     func pendingCanonicalReplacementSuppressesSecondEntrance() throws {
         let pending = SessionSnapshot.PendingPrompt(
@@ -207,25 +155,6 @@ struct ChatTranscriptPresentationTests {
             entranceSuppressed: false,
             hasIdentityAlias: true
         ))
-    }
-
-    @Test("pending resource presentation preserves exact invocation identity")
-    func pendingResourcePresentationPreservesInvocation() {
-        let resource = ComposerResourceInvocation(
-            source: .skill, name: "review", arguments: "Inspect this"
-        )
-        let pending = SessionSnapshot.PendingPrompt(
-            id: "operation-resource",
-            createdAt: "2026-01-01T00:00:01Z",
-            behavior: nil,
-            text: "Inspect this",
-            attachmentCount: 0,
-            resourceInvocation: resource
-        )
-        let presentation = ChatPendingPromptPresentation(
-            snapshot: pending, isCompacting: false
-        )
-        #expect(presentation.resourceInvocation == resource)
     }
 
     @Test("pending canonical replacement prefers exact operation identity over repeated text")
@@ -296,80 +225,6 @@ struct ChatTranscriptPresentationTests {
             for: unrelatedReceipt,
             in: [unrelated, exact]
         ) == nil)
-    }
-
-    @Test("previous installed pending handoff suppresses replacement when new snapshot omits pending")
-    func previousPendingHandoffSuppressesReplacement() throws {
-        let pending = ChatPendingPromptPresentation(
-            snapshot: .init(
-                id: "operation-2",
-                createdAt: "2026-01-01T00:00:01Z",
-                behavior: .steer,
-                text: "steer now",
-                attachmentCount: 0
-            ),
-            isCompacting: false
-        )
-        let data = Data(#"{"id":"canonical-2","parentId":null,"timestamp":"2026-01-01T00:00:02Z","kind":"message","role":"user","content":[{"id":"text","type":"text","text":"steer now"}]}"#.utf8)
-        let canonical = try decodeTranscriptFixture(TranscriptItem.self, from: data)
-        // This models the next authoritative snapshot: pendingPrompt is gone,
-        // but the canonical row is now present. The prior installed handoff is
-        // the only owner that can identify the replacement.
-        #expect(ChatPendingCanonicalSuppressionPolicy.canonicalIDs(
-            for: pending,
-            in: [canonical]
-        ) == ["canonical-2"])
-        // Same-text compatibility suppression avoids a duplicate entrance but
-        // cannot transfer physical identity without exact operation causality.
-        #expect(ChatPendingCanonicalSuppressionPolicy.exactCanonicalID(
-            for: pending,
-            in: [canonical]
-        ) == nil)
-        #expect(!ChatPromptLifecycleTransitionPolicy.shouldAnimateQueueEntrance(
-            isReady: true,
-            entranceSuppressed: false,
-            hasIdentityAlias: true
-        ))
-        #expect(ChatContentTransitionPolicy.revealAnimation(
-            for: .userPrompt,
-            reduceMotion: false
-        ) != ChatContentTransitionPolicy.revealAnimation(
-            for: .userPrompt,
-            reduceMotion: true
-        ))
-    }
-
-    @Test("queued replacement suppresses only the exact pending operation identity")
-    func previousPendingQueueReplacementUsesOperationID() {
-        let pending = ChatPendingPromptPresentation(
-            snapshot: .init(
-                id: "operation-3",
-                createdAt: "2026-01-01T00:00:01Z",
-                behavior: .followUp,
-                text: "follow up",
-                attachmentCount: 0
-            ),
-            isCompacting: false
-        )
-        let queue = SessionSnapshot.QueuedMessage(
-            id: "operation-3",
-            behavior: .followUp,
-            text: "follow up",
-            attachmentCount: 0
-        )
-        let unrelated = SessionSnapshot.QueuedMessage(
-            id: "operation-other",
-            behavior: .followUp,
-            text: "follow up",
-            attachmentCount: 0
-        )
-        #expect(queue.id == pending.id)
-        #expect(unrelated.id != pending.id)
-        #expect(ChatPromptLifecycleTransitionPolicy.shouldAnimateQueueEntrance(
-            isReady: true,
-            entranceSuppressed: false,
-            hasIdentityAlias: true
-        ) == false)
     }
 
     @Test("queue-to-canonical replacement requires one exact mixed-attachment candidate")
@@ -986,14 +841,6 @@ struct ChatTranscriptPresentationTests {
         #expect(ChatExtensionInteractionPolicy.shouldClearSuppression(scope, from: []))
     }
 
-    @Test("failed interaction responses do not create suppression scope")
-    func failedInteractionResponseLeavesScopeAvailable() {
-        let interaction = ExtensionInteraction(id: "failed", hostEpoch: "epoch", presentationRevision: 2, method: .confirm, title: "Continue?")
-        #expect(ChatExtensionInteractionPolicy.presentedInteraction(
-            [interaction], requested: nil, suppressing: nil
-        ) == interaction)
-    }
-
     @Test("queued compaction is explicit until canonical compaction starts")
     func queuedCompactionPresentation() throws {
         var snapshot = try fixture(transcript: "[]")
@@ -1038,81 +885,6 @@ struct ChatTranscriptPresentationTests {
         #expect(ChatNotificationPresentation.runtime(in: snapshot).map(\.id) == [
             "runtime-compaction-queued", "runtime-working",
         ])
-    }
-
-    @Test("pending prompts retain their requested delivery label across reconstruction")
-    func pendingPromptPresentation() {
-        let steer = ChatPendingPromptPresentation(snapshot: .init(
-            id: "pending-steer",
-            createdAt: "2026-01-01T00:00:00Z",
-            behavior: .steer,
-            text: "wait for compaction",
-            attachmentCount: 0
-        ), isCompacting: true)
-        #expect(steer.statusTitle == "Steering after compaction")
-        #expect(steer.text == "wait for compaction")
-
-        let ordinary = ChatPendingPromptPresentation(snapshot: .init(
-            id: "pending-prompt",
-            createdAt: "2026-01-01T00:00:00Z",
-            behavior: nil,
-            text: "send after compaction",
-            attachmentCount: 1
-        ), isCompacting: false)
-        #expect(ordinary.statusTitle == "Sending")
-        #expect(ordinary.promptBehavior == .ordinary)
-        #expect(ordinary.attachmentCount == 1)
-
-        let preflightCompacting = ChatPendingPromptPresentation(snapshot: .init(
-            id: "pending-preflight",
-            createdAt: "2026-01-01T00:00:00Z",
-            behavior: nil,
-            text: "next after compaction",
-            attachmentCount: 0
-        ), isCompacting: true)
-        #expect(preflightCompacting.promptBehavior == .ordinary)
-        #expect(preflightCompacting.usesQueuedCardVisual)
-        #expect(preflightCompacting.cardBehavior == .steer)
-        #expect(preflightCompacting.cardTitle == "Message")
-        #expect(preflightCompacting.cardDetail == "After compaction")
-        #expect(preflightCompacting.statusTitle == "Sending after compaction")
-    }
-
-    @Test("optimistic submissions preserve steering identity before Gateway reconstruction")
-    func outgoingSubmissionPresentation() {
-        let target = SessionPresentationIdentity(sessionID: "session", generation: 3)
-        let steer = ChatOutgoingSubmissionPresentation(
-            snapshot: ComposerSubmissionSnapshot(
-                target: target,
-                textRevision: 4,
-                outgoingText: String(repeating: "large prompt ", count: 100),
-                attachmentIDs: ["photo"],
-                behavior: "steer",
-                localNonce: 4
-            ),
-            transportActive: true
-        )
-        #expect(steer.statusTitle == "Steering next")
-        #expect(steer.attachmentIDs == ["photo"])
-        #expect(steer.transportActive)
-    }
-
-    @Test("ordinary running state uses canonical phase activity without extension chrome")
-    func ordinaryRunningUsesAmbientActivity() throws {
-        var snapshot = try fixture(transcript: "[]")
-        snapshot.phase = .running
-        snapshot.retry = nil
-        snapshot.extensionPresentation.semanticState.working = .init(
-            message: "Retired extension status",
-            visible: false
-        )
-
-        let presentation = try #require(ChatRuntimeWorkingPresentation(
-            phase: snapshot.phase
-        ))
-        #expect(presentation.message == "Tron is working")
-        #expect(presentation.usesAmbientBottomIndicator)
-        #expect(ChatNotificationPresentation.runtime(in: snapshot).isEmpty)
     }
 
     @Test("runtime working presentation follows canonical phase only")
@@ -1192,14 +964,6 @@ struct ChatTranscriptPresentationTests {
         )
         #expect(!roundedTail.isAtExactBottom)
         #expect(roundedTail.isAtCatchUpBoundary)
-    }
-
-    @Test("chat toolbar title remains bounded during interactive navigation")
-    func toolbarTitleWidth() {
-        #expect(ChatToolbarTitleLayout.width(containerWidth: 0) == 80)
-        #expect(ChatToolbarTitleLayout.width(containerWidth: 402) == 250)
-        #expect(ChatToolbarTitleLayout.width(containerWidth: 440) == 288)
-        #expect(ChatToolbarTitleLayout.width(containerWidth: 1_024) == 360)
     }
 
     @Test("composer sends text, attachments, or a selected resource without empty prompt chrome")
@@ -1563,15 +1327,6 @@ struct ChatTranscriptPresentationTests {
         ))
     }
 
-    @Test("tool run identity follows authoritative order rather than opaque ID sorting")
-    func toolRunIdentityUsesAuthoritativeOrder() {
-        let ordered = ChatToolRunPresentation(tools: [
-            toolPresentation("opaque-z-first"),
-            toolPresentation("opaque-a-second"),
-        ])
-        #expect(ordered.id == "tool-run-opaque-z-first")
-    }
-
     @Test("tool detail rows use invocation time, not completion or progress time")
     func reverseChronologicalToolDetails() {
         let run = ChatToolRunPresentation(tools: [
@@ -1615,37 +1370,6 @@ struct ChatTranscriptPresentationTests {
         ) == "Invoked 9:05 AM")
         #expect(ToolInvocationTimestamp.text(for: nil, relativeTo: reference) == nil)
         #expect(ToolInvocationTimestamp.text(for: "not-a-timestamp", relativeTo: reference) == nil)
-    }
-
-    @Test("compaction token counts use compact K shorthand")
-    func compactCompactionTokenCounts() {
-        #expect(ChatTokenCountPresentation.beforeCompaction(0) == "0 tokens before compaction")
-        #expect(ChatTokenCountPresentation.beforeCompaction(1) == "1 token before compaction")
-        #expect(ChatTokenCountPresentation.beforeCompaction(999) == "999 tokens before compaction")
-        #expect(ChatTokenCountPresentation.beforeCompaction(1_000) == "1K tokens before compaction")
-        #expect(ChatTokenCountPresentation.beforeCompaction(12_300) == "12.3K tokens before compaction")
-        #expect(ChatTokenCountPresentation.beforeCompaction(322_486) == "322K tokens before compaction")
-    }
-
-    @Test("notification policy separates flat status from detail-bearing summaries")
-    func notificationMaterialPolicy() throws {
-        let snapshot = try fixture(transcript: """
-        [
-          {"id":"compact","parentId":null,"timestamp":"2026-01-01T00:00:00Z","kind":"compaction","summary":"Condensed context","tokensBefore":1200},
-          {"id":"model","parentId":"compact","timestamp":"2026-01-01T00:00:01Z","kind":"modelChange","modelRef":{"provider":"openai-codex","id":"gpt-5.6-sol"}}
-        ]
-        """)
-        let compact = try #require(ChatNotificationPresentation.canonical(snapshot.transcript[0], globalOrdinal: 8))
-        let model = try #require(ChatNotificationPresentation.canonical(snapshot.transcript[1], globalOrdinal: 9))
-
-        #expect(compact.id == "notification-compaction-slot-8")
-        #expect(compact.material == .glass)
-        #expect(compact.hasDetailSheet)
-        #expect(!compact.detailUsesGlassSurface)
-        #expect(compact.tone == .accent)
-        #expect(model.material == .flat)
-        #expect(!model.hasDetailSheet)
-        #expect(model.detail == "OpenAI Codex / GPT 5.6 Sol")
     }
 
     @Test("whitespace-only summaries stay flat and noninteractive")
@@ -2140,27 +1864,6 @@ struct ChatTranscriptPresentationTests {
         snapshot.toolExecutions = []
         let settled = ChatTranscriptPresentation.timeline(in: snapshot)
         #expect(settled.ids == ["user", "assistant-tools", "tool-run-call-1", "assistant-final"])
-    }
-
-    @Test("streaming and canonical assistant rows share projected identity")
-    func streamingSettlementKeepsVisualIdentity() throws {
-        var liveSnapshot = try fixture(transcript: "[]")
-        liveSnapshot.phase = .running
-        liveSnapshot.streaming = try message("""
-        {"id":"stream-live","parentId":"user","presentationId":"stream:turn","timestamp":"2026-01-01T00:00:01Z","kind":"message","role":"assistant","content":[{"id":"answer","ordinal":0,"type":"text","text":"hello"}]}
-        """)
-        var settledSnapshot = liveSnapshot
-        settledSnapshot.phase = .idle
-        settledSnapshot.revision += 1
-        settledSnapshot.eventSequence += 1
-        settledSnapshot.transcript = [try message("""
-        {"id":"assistant-final","parentId":"user","presentationId":"stream:turn","timestamp":"2026-01-01T00:00:01Z","kind":"message","role":"assistant","content":[{"id":"answer","ordinal":0,"type":"text","text":"hello"}]}
-        """)]
-        settledSnapshot.streaming = nil
-        let live = ChatTranscriptPresentation.timeline(in: liveSnapshot)
-        let settled = ChatTranscriptPresentation.timeline(in: settledSnapshot)
-        #expect(live.ids == ["stream:turn"])
-        #expect(settled.ids == ["stream:turn"])
     }
 
     @Test("model attribution waits for message settlement across live and canonical projection")

@@ -4,13 +4,6 @@ import Testing
 
 @Suite("Notification inbox")
 struct NotificationInboxCoordinatorTests {
-    @Test("Automatic terminal alerts do not imply successful completion")
-    func terminalCategoryPresentation() throws {
-        let kind = try JSONDecoder().decode(NotificationInboxKind.self, from: Data(#""agent_finished""#.utf8))
-        #expect(kind.label == "Agent finished")
-        #expect(kind.icon == "stop.circle.fill")
-        #expect(NotificationInboxKind.ask.label == "Input needed")
-    }
 
     @Test("Gateway pages strictly admit bounded notification rows")
     func pageAdmission() throws {
@@ -120,25 +113,6 @@ struct NotificationInboxCoordinatorTests {
         #expect(coordinator.buckets[profile.id]?.notifications.map(\.id) == ["notification-a", "notification-b"])
         #expect(coordinator.buckets[profile.id]?.nextCursor == nil)
         #expect(coordinator.unreadCount == 2)
-    }
-
-    @Test("primary inbox projects exactly fifteen rows before full history")
-    func recentProjection() {
-        let notifications = (0..<16).map { index in
-            NotificationInboxItem(
-                profileID: "profile-a",
-                profileLabel: "Studio",
-                machineID: "machine-a",
-                notification: item(
-                    id: "notification-\(String(format: "%02d", index))",
-                    createdAt: "2026-01-01T00:00:\(String(format: "%02d", index))Z"
-                )
-            )
-        }
-        #expect(NotificationInboxPresentationPolicy.recentLimit == 15)
-        #expect(NotificationInboxPresentationPolicy.recent(notifications).map(\.id) == notifications.prefix(15).map(\.id))
-        #expect(NotificationInboxPresentationPolicy.hasHistory(after: notifications))
-        #expect(!NotificationInboxPresentationPolicy.hasHistory(after: Array(notifications.prefix(15))))
     }
 
     @MainActor

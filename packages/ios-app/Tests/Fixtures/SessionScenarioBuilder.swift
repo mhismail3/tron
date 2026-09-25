@@ -25,13 +25,6 @@ struct SessionScenarioBuilder: Sendable {
         let elapsed: Duration
     }
 
-    struct SyntheticAttachment: Hashable, Sendable {
-        let pixelWidth: Int
-        let pixelHeight: Int
-        let encodedData: Data
-        let content: ContentPart
-    }
-
     struct GeneratedImageFixture: Hashable, Sendable {
         enum Format: String, CaseIterable, Sendable { case jpeg, png }
         enum Orientation: UInt32, Sendable { case up = 1, right = 6 }
@@ -215,30 +208,6 @@ struct SessionScenarioBuilder: Sendable {
                 redacted: nil,
                 mimeType: mimeType,
                 blobId: "generated-image-blob-\(seed)-\(format.rawValue)",
-                toolCallId: nil,
-                name: nil,
-                arguments: nil
-            )
-        )
-    }
-
-    func highResolutionAttachment(pixelWidth: Int, pixelHeight: Int, encodedBytes: Int) -> SyntheticAttachment {
-        precondition(pixelWidth > 0 && pixelHeight > 0 && encodedBytes >= 0)
-        let name = "synthetic-\(seed).jpg"
-        return SyntheticAttachment(
-            pixelWidth: pixelWidth,
-            pixelHeight: pixelHeight,
-            encodedData: Data(repeating: UInt8(truncatingIfNeeded: seed), count: encodedBytes),
-            content: ContentPart(
-                id: "attachment-\(seed)",
-                ordinal: 0,
-                thinkingRunOrdinal: nil,
-                type: .image,
-                text: nil,
-                attachment: .init(name: name, mimeType: "image/jpeg", size: encodedBytes),
-                redacted: nil,
-                mimeType: "image/jpeg",
-                blobId: "synthetic-blob-\(seed)",
                 toolCallId: nil,
                 name: nil,
                 arguments: nil

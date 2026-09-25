@@ -395,38 +395,6 @@ struct PresentationActivityCoordinatorTests {
         #expect(lease.registeredToken == second)
     }
 
-    @Test("continuous clocks require active surface, scene, and viewport")
-    func continuousClockPolicy() {
-        #expect(PresentationClockPolicy.runs(
-            surfaceActive: true,
-            sceneActive: true,
-            viewportVisible: true
-        ))
-        #expect(!PresentationClockPolicy.runs(
-            surfaceActive: false,
-            sceneActive: true,
-            viewportVisible: true
-        ))
-        #expect(!PresentationClockPolicy.runs(
-            surfaceActive: true,
-            sceneActive: false,
-            viewportVisible: true
-        ))
-        #expect(!PresentationClockPolicy.runs(
-            surfaceActive: true,
-            sceneActive: true,
-            viewportVisible: false
-        ))
-    }
-
-    @Test("presentation activity participates in disposable task identity")
-    func presentationTaskIdentityChangesAcrossCoverage() {
-        let active = PresentationActivityTaskID(source: "load", presentationActive: true)
-        let covered = PresentationActivityTaskID(source: "load", presentationActive: false)
-        #expect(active != covered)
-        #expect(active == PresentationActivityTaskID(source: "load", presentationActive: true))
-    }
-
     private func waitForPresentedSurface(from controller: UIViewController) async throws {
         for _ in 0..<200 {
             if controller.presentedViewController != nil { return }

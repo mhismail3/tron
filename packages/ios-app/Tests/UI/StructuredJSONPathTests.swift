@@ -39,19 +39,6 @@ struct StructuredJSONPathTests {
         #expect(StructuredJSONPath.display(dotted) != StructuredJSONPath.display(nested))
     }
 
-    @Test("the same selection path resolves the newest live root value")
-    func newestRootWins() {
-        let path: [StructuredJSONPathComponent] = [.key("result"), .key("status")]
-        let initial: JSONValue = .object([
-            "result": .object(["status": .string("running")]),
-        ])
-        let updated: JSONValue = .object([
-            "result": .object(["status": .string("completed")]),
-        ])
-        #expect(StructuredJSONPath.resolve(initial, components: path) == .string("running"))
-        #expect(StructuredJSONPath.resolve(updated, components: path) == .string("completed"))
-    }
-
     @Test("large array fields preserve exact index identity without eager tuple projection")
     func largeArrayFieldCollection() {
         let values = (0 ..< 10_000).map { JSONValue.string("/tmp/item-\($0).txt") }

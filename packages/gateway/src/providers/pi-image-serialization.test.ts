@@ -1,9 +1,5 @@
-import { mkdtemp, rm } from "node:fs/promises";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
-import { InMemoryCredentialStore, type ImageContent } from "@earendil-works/pi-ai";
+import { type ImageContent } from "@earendil-works/pi-ai";
 import { openAIResponsesApi } from "@earendil-works/pi-ai/api/openai-responses.lazy";
-import { createAgentSession, DefaultResourceLoader, ModelRuntime, SessionManager, SettingsManager, type InlineExtension } from "@earendil-works/pi-coding-agent";
 import { describe, expect, it } from "vitest";
 import {
   COMPUTER_USE_FIXTURE_MODEL,
@@ -13,7 +9,6 @@ import {
   SYNTHETIC_UNRELATED_IMAGE,
   pngDimensions,
   syntheticComputerUseContext,
-  targetSyntheticNativeObservation,
 } from "../../test-fixtures/pi-sdk/computer-use-image.js";
 
 interface PayloadRecord {
@@ -92,49 +87,6 @@ async function captureRealProviderPayload() {
   return { payload: asPayload(serializedPayload), fetchCalls };
 }
 
-async function applyPublicBeforeProviderHook(payload: PayloadRecord) {
-  const root = await mkdtemp(join(tmpdir(), "tron-image-g0-"));
-  let dispose: (() => Promise<void>) | undefined;
-  try {
-    const settings = SettingsManager.inMemory();
-    const extensionFactories: InlineExtension[] = [{
-      name: "synthetic-computer-use-image-hook",
-      factory: (pi) => {
-        pi.on("before_provider_request", async (event) => targetSyntheticNativeObservation(event.payload));
-      },
-    }];
-    const loader = new DefaultResourceLoader({
-      cwd: root,
-      agentDir: root,
-      settingsManager: settings,
-      noExtensions: true,
-      noSkills: true,
-      noPromptTemplates: true,
-      noThemes: true,
-      noContextFiles: true,
-      extensionFactories,
-    });
-    await loader.reload();
-    const modelRuntime = await ModelRuntime.create({ modelsPath: null, credentials: new InMemoryCredentialStore(), refreshOnCreate: false, allowModelNetwork: false });
-    const { session } = await createAgentSession({
-      cwd: root,
-      agentDir: root,
-      modelRuntime,
-      settingsManager: settings,
-      resourceLoader: loader,
-      sessionManager: SessionManager.inMemory(),
-      model: COMPUTER_USE_FIXTURE_MODEL,
-      noTools: "all",
-    });
-    dispose = async () => { await session.dispose(); };
-    await session.bindExtensions({ mode: "rpc" });
-    return asPayload(await session.extensionRunner.emitBeforeProviderRequest(payload));
-  } finally {
-    try { await dispose?.(); }
-    finally { await rm(root, { recursive: true, force: true }); }
-  }
-}
-
 describe("pinned Pi computer-use image serialization", () => {
   it("retains synthetic bytes, dimensions, order and call identity in the real Responses payload", async () => {
     const { payload, fetchCalls } = await captureRealProviderPayload();
@@ -159,23 +111,5 @@ describe("pinned Pi computer-use image serialization", () => {
     expect(unrelatedImage.data).toBe(SYNTHETIC_UNRELATED_IMAGE.data);
     expect(pngDimensions(unrelatedImage)).toEqual({ width: 2, height: 3 });
     expect(unrelatedOutput[1]).toMatchObject({ type: "input_image", detail: "auto" });
-  });
-
-  it("uses the public before_provider_request hook only for the synthetic native call", async () => {
-    const { payload } = await captureRealProviderPayload();
-    const original = JSON.parse(JSON.stringify(payload)) as PayloadRecord;
-    const transformed = await applyPublicBeforeProviderHook(payload);
-
-    expect(resultOutput(transformed, SYNTHETIC_NATIVE_CALL_ID)[1]).toMatchObject({ detail: "original" });
-    expect(resultOutput(transformed, SYNTHETIC_UNRELATED_CALL_ID)[1]).toMatchObject({ detail: "auto" });
-    const userImage = transformed.input.find((item) => item.role === "user")?.content?.find((item) => item.type === "input_image");
-    expect(userImage).toMatchObject({ detail: "auto" });
-    expect(resultOutput(payload, SYNTHETIC_NATIVE_CALL_ID)[1]).toMatchObject({ detail: "auto" });
-    expect(payload).toEqual(original);
-
-    // The hook's fixture-only change preserves the provider's ordering, bytes,
-    // dimensions and exact call correlation while leaving unrelated history alone.
-    expect(transformed.input.map((item) => [item.type, item.call_id])).toEqual(payload.input.map((item) => [item.type, item.call_id]));
-    expect(pngDimensions(imageFromPart(resultOutput(transformed, SYNTHETIC_NATIVE_CALL_ID)[1]!))).toEqual({ width: 3, height: 2 });
   });
 });

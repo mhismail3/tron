@@ -26,18 +26,6 @@ struct ComposerAttachmentPreviewTests {
         #expect(height > width)
     }
 
-    @Test("plain text renders a bounded first-page preview only with file metadata")
-    func textPreview() throws {
-        let data = Data("First line\nSecond line\nThird line".utf8)
-        let preview = try #require(ComposerAttachmentPreviewPolicy.prepareSynchronously(
-            data,
-            mimeType: "text/plain",
-            name: "notes.txt"
-        ))
-        #expect(preview.count <= ComposerAttachmentPreviewPolicy.maximumEncodedBytes)
-        #expect(CGImageSourceCreateWithData(preview as CFData, nil) != nil)
-    }
-
     @Test("unknown binary data does not become a preview")
     func invalidInput() {
         #expect(ComposerAttachmentPreviewPolicy.prepareSynchronously(Data("not an image".utf8)) == nil)

@@ -170,14 +170,6 @@ describe("scripts/tron diagnose", () => {
     expect(bundle).toContain("self: 100.64.0.10");
   });
 
-  it("calls /usr/bin/log explicitly and records launchd's com.tron.server records", async () => {
-    const fixture = await harness();
-    const bundle = await run(fixture);
-    expect(bundle).toContain(`$ /usr/bin/log show --style compact --last 2h --predicate process == "launchd" AND eventMessage CONTAINS "com.tron.server"`);
-    expect(bundle).toContain("service inactive: com.tron.server");
-    expect(fixture.commands.filter((command) => command.startsWith("/usr/bin/log")).length).toBe(2);
-  });
-
   it("refuses to overwrite an existing output", async () => {
     const fixture = await harness();
     await writeFile(fixture.out, "existing\n");

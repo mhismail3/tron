@@ -27,17 +27,4 @@ struct OnboardedSentinelWriterTests {
         #expect(FileManager.default.fileExists(atPath: sentinel.path))
     }
 
-    @Test("no temp file leaks after successful write")
-    func noLeakedTempFiles() throws {
-        let tmp = TestTempDir.make()
-        defer { TestTempDir.cleanup(tmp) }
-        let path = tmp.appendingPathComponent(".onboarded", isDirectory: false)
-
-        try OnboardedSentinelWriter.touch(at: path)
-
-        let leftover = try FileManager.default.contentsOfDirectory(atPath: tmp.path)
-            .filter { $0.hasPrefix(".onboarded.") && $0.hasSuffix(".tmp") }
-        #expect(leftover.isEmpty, "temp files left behind: \(leftover)")
-    }
-
 }

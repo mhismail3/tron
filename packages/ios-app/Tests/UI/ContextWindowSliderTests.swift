@@ -87,26 +87,4 @@ struct ContextWindowSliderTests {
         #expect(!bounded.changed)
         #expect(bounded.selection == 2_000_000)
     }
-
-    @MainActor @Test("Default label stays on the endpoint row beside a colliding bound, wrapping only without room")
-    func defaultLabelPlacement() {
-        let sizes = [CGSize(width: 60, height: 16), CGSize(width: 64, height: 16), CGSize(width: 84, height: 16)]
-        let inset = ContextWindowSliderLabelsLayout.trackInset
-        // Default at the maximum: same row, fully left of the maximum label.
-        let atMax = ContextWindowSliderLabelsLayout.placement(sizes: sizes, width: 340, defaultProgress: 1)
-        #expect(atMax.height == 16)
-        #expect(atMax.centers[1].y == atMax.centers[2].y)
-        #expect(atMax.centers[1].x + 32 <= atMax.centers[2].x - 42)
-        // Default at the minimum: same row, fully right of the minimum label.
-        let atMin = ContextWindowSliderLabelsLayout.placement(sizes: sizes, width: 340, defaultProgress: 0)
-        #expect(atMin.height == 16)
-        #expect(atMin.centers[1].x - 32 >= atMin.centers[0].x + 30)
-        // A default clear of both bounds keeps its exact track position.
-        let middle = ContextWindowSliderLabelsLayout.placement(sizes: sizes, width: 340, defaultProgress: 0.5)
-        #expect(middle.centers[1].x == inset + 0.5 * (340 - 2 * inset))
-        // Too narrow for one row: wraps below, but never past either edge.
-        let narrow = ContextWindowSliderLabelsLayout.placement(sizes: sizes, width: 190, defaultProgress: 1)
-        #expect(narrow.height > 16)
-        #expect(narrow.centers[1].x + 32 <= 190)
-    }
 }

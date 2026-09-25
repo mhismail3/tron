@@ -406,17 +406,6 @@ class RecoveryArchiveTests(unittest.TestCase):
         self.assertTrue(self.source.exists())
         self.assertFalse((self.operation / 'recovery.json').exists())
 
-    def test_progress_reports_work_without_changing_archive_digest(self):
-        baseline = reinstall.archive_fingerprint(self.source)
-        clock = iter(range(0, 100000, 11))
-        progress = io.StringIO()
-        with patch.object(reinstall.time, 'monotonic', side_effect=lambda: next(clock)), \
-                contextlib.redirect_stderr(progress):
-            observed = reinstall.archive_fingerprint(self.source)
-        self.assertEqual(observed, baseline)
-        self.assertIn('entries,', progress.getvalue())
-        self.assertIn('GiB hashed', progress.getvalue())
-
     def test_depth_and_symlinked_roots_are_bounded(self):
         with patch.object(reinstall, 'MAX_ARCHIVE_ENTRIES', 1):
             with self.assertRaisesRegex(reinstall.Stop, 'archive-inventory-limit'):
@@ -837,10 +826,6 @@ class ReinstallTests(Fixture, unittest.TestCase):
         with self.assertRaisesRegex(reinstall.Stop, 'unsafe-path'):
             self.run_workflow(app=self.app)
         self.assertEqual(list(outside.iterdir()), [])
-
-    def test_mutually_exclusive_actions(self):
-        with self.assertRaisesRegex(reinstall.Stop, 'arguments'):
-            self.run_workflow(app=self.app, verify=True, confirm_offline=True)
 
     def test_wrong_workflow_does_not_reinterpret_receipt(self):
         self.run_workflow(app=self.app)

@@ -54,17 +54,6 @@ struct ChatScrollCoordinatorTests {
         }
     }
 
-    @Test("opening failure evidence names missing physical proof without weakening readiness")
-    func openingFailureReasonsRemainActionable() {
-        let coordinator = ChatScrollCoordinator()
-        defer { coordinator.cancel() }
-        coordinator.requestOpeningTail(targetRenderedID: "transcript-bottom")
-        let reasons = coordinator.openingFailureReasons()
-        #expect(reasons.contains(.viewport))
-        #expect(reasons.contains(.markerEpoch))
-        #expect(reasons.contains(.physicalAlignment))
-    }
-
     @Test("physical tail uses the short content edge until it fills the container", arguments: [80.0, 240.0, 622.0, 647.0, 1_200.0])
     func shortContentTailBoundary(contentHeight: Double) throws {
         let coordinator = ChatScrollCoordinator()
@@ -199,25 +188,6 @@ struct ChatScrollCoordinatorTests {
     }
 
     // MARK: Group B replacements — deleted command-arbitration mechanisms
-
-    @Test("size-change anchoring is intent-based for short and overflowing pinned content")
-    func sizeChangeAnchorRole() {
-        let coordinator = ChatScrollCoordinator()
-        let underflow = ChatTranscriptGeometry(
-            offsetY: 0, contentHeight: 240, containerHeight: 400
-        )
-        coordinator.geometryChanged(previous: .zero, current: underflow)
-        #expect(coordinator.usesPinnedSizeChangeAnchor)
-
-        coordinator.geometryChanged(previous: underflow, current: bottom)
-        #expect(coordinator.usesPinnedSizeChangeAnchor)
-
-        coordinator.scrollPositionChanged(isPositionedByUser: true)
-        #expect(coordinator.usesPinnedSizeChangeAnchor)
-
-        coordinator.geometryChanged(previous: bottom, current: away)
-        #expect(!coordinator.usesPinnedSizeChangeAnchor)
-    }
 
     @Test("detached and catch-up ownership defer automatic live projection intake")
     func detachedProjectionDeferral() {
@@ -504,27 +474,6 @@ struct ChatScrollCoordinatorTests {
         #expect(coordinator.command == nil)
     }
 
-    @Test("sticky pinned mode stays physically eligible while anchored mode remains inert")
-    func stickyModeHasNoOffsetCommandDestination() {
-        let coordinator = ChatScrollCoordinator()
-        coordinator.submitted()
-        coordinator.geometryChanged(
-            previous: bottom,
-            current: ChatTranscriptGeometry(
-                offsetY: 600, contentHeight: 1_120, containerHeight: 320, bottomInset: 80
-            )
-        )
-        #expect(coordinator.viewportMode == .pinned)
-        #expect(coordinator.command == nil)
-        #expect(coordinator.canInstallPersistentBottomPosition)
-
-        coordinator.scrollPositionChanged(isPositionedByUser: true)
-        coordinator.submitted()
-        #expect(coordinator.viewportMode == .anchored)
-        #expect(coordinator.command == nil)
-        #expect(!coordinator.canInstallPersistentBottomPosition)
-    }
-
     @Test("submission and composer contraction use persistent pinning and leave readers inert")
     func composerMutationsDoNotOwnScrollCommands() {
         let coordinator = ChatScrollCoordinator()
@@ -548,11 +497,6 @@ struct ChatScrollCoordinatorTests {
     }
 
     // MARK: Group A — preserved user-visible outcomes
-
-    @Test("detached projection topology change preserves a fresh surviving semantic anchor")
-    func detachedProjectionMutationPreservesAnchor() throws {
-        try anchoredRestoreRequiresFreshEvidence()
-    }
 
     @Test("pinned and detached shrink geometry emits no automatic write")
     func shrinkIsInert() {
@@ -584,22 +528,6 @@ struct ChatScrollCoordinatorTests {
         detached.geometryChanged(previous: away, current: overshoot)
         #expect(detached.viewportMode == .anchored)
         #expect(detached.command == nil)
-    }
-
-    @Test("phase-only overshoot and direct bottom rubber-band remain pinned without app writes")
-    func phaseOnlyOvershootRespectsOwnership() {
-        let overshoot = ChatTranscriptGeometry(
-            offsetY: 580, contentHeight: 900, containerHeight: 400
-        )
-        let automatic = ChatScrollCoordinator()
-        automatic.scrollPhaseChanged(from: .animating, to: .idle, finalGeometry: overshoot)
-        #expect(automatic.command == nil)
-        let direct = ChatScrollCoordinator()
-        direct.geometryChanged(previous: .zero, current: bottom)
-        direct.scrollPhaseChanged(from: .interacting, to: .decelerating, finalGeometry: overshoot)
-        #expect(direct.viewportMode == .pinned)
-        #expect(!direct.shouldShowCatchUpButton)
-        #expect(direct.command == nil)
     }
 
     @Test("bottom rubber-band callback ordering never exposes catch-up")
@@ -672,20 +600,6 @@ struct ChatScrollCoordinatorTests {
         #expect(coordinator.command == nil)
     }
 
-    @Test("detached composer transitions preserve reader ownership and issue no tail command")
-    func detachedComposerStructuralTransition() {
-        let coordinator = detachedCoordinator(at: away)
-        coordinator.submitted()
-        coordinator.viewportChanged(
-            previous: away,
-            current: ChatTranscriptGeometry(
-                offsetY: 300, contentHeight: 1_000, containerHeight: 320, bottomInset: 80
-            )
-        )
-        #expect(coordinator.viewportMode == .anchored)
-        #expect(coordinator.command == nil)
-    }
-
     @Test("upward interaction publishes catch-up immediately")
     func upwardInteractionPublishesCatchUpImmediately() {
         let coordinator = ChatScrollCoordinator()
@@ -707,13 +621,6 @@ struct ChatScrollCoordinatorTests {
         #expect(geometryFirst.command == ownershipFirst.command)
     }
 
-    @Test("geometry-first manual return to tail immediately clears catch-up state")
-    func geometryFirstManualReturnClearsCatchUp() {
-        assertManualTailReturn(after: { coordinator in
-            coordinator.geometryChanged(previous: self.away, current: self.bottom)
-        })
-    }
-
     @Test("manual return to tail remains pinned through keyboard viewport contraction")
     func manualReturnThenKeyboardFollowsTail() {
         let coordinator = detachedCoordinator(at: away)
@@ -727,13 +634,6 @@ struct ChatScrollCoordinatorTests {
         #expect(coordinator.viewportMode == .pinned)
         #expect(!coordinator.hasUnreadContent)
         #expect(coordinator.command == nil)
-    }
-
-    @Test("direct mixed viewport geometry return to tail clears catch-up")
-    func mixedViewportManualReturnClearsCatchUp() {
-        assertManualTailReturn(after: { coordinator in
-            coordinator.viewportChanged(previous: self.away, current: self.bottom)
-        })
     }
 
     @Test("active keyboard viewport settlement without content motion preserves detachment")
@@ -772,16 +672,6 @@ struct ChatScrollCoordinatorTests {
         coordinator.geometryChanged(previous: expanded, current: expanded)
         #expect(coordinator.viewportMode == .anchored)
         #expect(coordinator.command == nil)
-    }
-
-    @Test("native ownership end and accessibility phase preserve one-shot direct tail return")
-    func directTailReturnAdmission() {
-        let coordinator = detachedCoordinator(at: away)
-        coordinator.scrollPhaseChanged(from: .interacting, to: .idle, finalGeometry: bottom)
-        let generation = coordinator.tailSettlementGeneration
-        coordinator.scrollPhaseChanged(from: .idle, to: .idle, finalGeometry: bottom)
-        #expect(coordinator.viewportMode == .pinned)
-        #expect(coordinator.tailSettlementGeneration == generation)
     }
 
     @Test("long catch-up stages and finishes on separate display frames")
@@ -1733,13 +1623,6 @@ struct ChatScrollCoordinatorTests {
             #expect(coordinator.canRequestHistoryPage)
             #expect(coordinator.command == nil)
         }
-    }
-
-    @Test("opening tail opaque fallback defaults to 750 milliseconds")
-    func openingTailDefaultTimeout() {
-        #expect(ChatScrollCoordinator.defaultOpeningTailTimeout == .milliseconds(750))
-        #expect(ChatScrollCoordinator.defaultOpeningPostRevealTimeout == .seconds(2))
-        #expect(ChatScrollCoordinator.maximumOpeningTailCommandAttempts == 3)
     }
 
     @Test("opening acknowledgement deadline repairs rather than revealing displaced evidence")
@@ -3209,15 +3092,6 @@ struct ChatScrollCoordinatorTests {
         }
     }
 
-    @Test("semantic anchor correction preserves viewport offset without total-height input")
-    func semanticAnchorCorrection() {
-        #expect(ChatScrollCoordinator.prependCorrectionOffset(
-            currentOffsetY: 420,
-            capturedViewportOffsetY: 20,
-            installedFrameMinY: 92
-        ) == 492)
-    }
-
     @Test("gesture interruption synchronously suppresses pending prepend commands")
     func gestureInterruptsPrepend() async throws {
         let (coordinator, recorder) = try await beginCorrectingPrepend()
@@ -3225,53 +3099,6 @@ struct ChatScrollCoordinatorTests {
         #expect(coordinator.command == nil)
         #expect(!coordinator.isPrependingHistory)
         #expect(recorder.values == [.discarded])
-    }
-
-    @Test("pinned streamed growth stays on the persistent position without a command")
-    func streamedGrowthIsSmooth() {
-        let coordinator = ChatScrollCoordinator()
-        coordinator.geometryChanged(
-            previous: bottom,
-            current: ChatTranscriptGeometry(offsetY: 600, contentHeight: 1_160, containerHeight: 400)
-        )
-        #expect(coordinator.viewportMode == .pinned)
-        #expect(coordinator.canInstallPersistentBottomPosition)
-        #expect(coordinator.command == nil)
-        #expect(ChatScrollCoordinator.liveGrowthAnimationDuration == 0.16)
-    }
-
-    @Test("new agent row remains on the persistent pinned position without a command")
-    func insertedRowIsSmooth() {
-        let coordinator = ChatScrollCoordinator()
-        coordinator.geometryChanged(
-            previous: bottom,
-            current: ChatTranscriptGeometry(offsetY: 600, contentHeight: 1_100, containerHeight: 400)
-        )
-        #expect(coordinator.viewportMode == .pinned)
-        #expect(coordinator.command == nil)
-        #expect(coordinator.canInstallPersistentBottomPosition)
-    }
-
-    @Test("physical overshoot is clamped by native pinning without an animated app command")
-    func overshootCorrectionIsDisabled() {
-        let coordinator = ChatScrollCoordinator()
-        let overshoot = ChatTranscriptGeometry(
-            offsetY: 900, contentHeight: 900, containerHeight: 400
-        )
-        coordinator.geometryChanged(previous: bottom, current: overshoot)
-        #expect(coordinator.viewportMode == .pinned)
-        #expect(coordinator.command == nil)
-    }
-
-    @Test("detached reader receives no growth write")
-    func detachedGrowthIsInert() {
-        let coordinator = detachedCoordinator(at: away)
-        coordinator.geometryChanged(
-            previous: away,
-            current: ChatTranscriptGeometry(offsetY: 300, contentHeight: 1_120, containerHeight: 400)
-        )
-        #expect(coordinator.viewportMode == .anchored)
-        #expect(coordinator.command == nil)
     }
 
     // MARK: Helpers
@@ -3287,17 +3114,6 @@ struct ChatScrollCoordinatorTests {
         coordinator.scrollPhaseChanged(from: .interacting, to: .idle, finalGeometry: geometry)
         if withUnread { coordinator.semanticResponseArrived() }
         return coordinator
-    }
-
-    private func assertManualTailReturn(
-        after geometryUpdate: (ChatScrollCoordinator) -> Void
-    ) {
-        let coordinator = detachedCoordinator(at: away)
-        geometryUpdate(coordinator)
-        coordinator.scrollPhaseChanged(from: .interacting, to: .idle, finalGeometry: bottom)
-        #expect(coordinator.viewportMode == .pinned)
-        #expect(!coordinator.hasUnreadContent)
-        #expect(coordinator.command == nil)
     }
 
     private func prependReadyCoordinator(clock: ManualClock? = nil) -> ChatScrollCoordinator {

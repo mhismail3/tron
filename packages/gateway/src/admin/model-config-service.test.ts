@@ -65,10 +65,4 @@ describe("ModelConfigService", () => {
     await expect(service.put(expanded)).rejects.toMatchObject({ code: "conflict" });
     expect(await readFile(path, "utf8")).toBe(canonicalText);
   });
-
-  it("admits the native empty configuration", async () => {
-    const root = await mkdtemp(join(tmpdir(), "tron-model-config-"));
-    const service = new ModelConfigService(root);
-    await expect(service.validate({ providers: {} })).resolves.toEqual({ valid: true, providerCount: 0 });
-  });
 });

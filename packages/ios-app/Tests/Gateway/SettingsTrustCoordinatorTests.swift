@@ -268,17 +268,6 @@ struct SettingsTrustCoordinatorTests {
         }
     }
 
-    @Test("trust events advance trust and settings invalidations exactly once")
-    func trustEventSemantics() {
-        let owner = makeDisconnectedOwner()
-        owner.noteSettingsChanged()
-        #expect(owner.settingsInvalidationGeneration == 1)
-        #expect(owner.trustRevision == 0)
-        owner.noteTrustChanged()
-        #expect(owner.settingsInvalidationGeneration == 2)
-        #expect(owner.trustRevision == 1)
-    }
-
     @Test("facade consumers observe invalidations owned by the nested coordinator")
     func nestedObservationReachesFacadeConsumers() async {
         let model = AppModel()
@@ -423,31 +412,6 @@ struct SettingsTrustCoordinatorTests {
         await socket.enqueue(helloFrame())
         try await lifecycle.connectHosted(profile: profile, token: "token")
         return Harness(socket: socket, client: client, owner: owner)
-    }
-
-    private func makeDisconnectedOwner() -> SettingsTrustCoordinator {
-        let client = GatewayClient()
-        let defaults = UserDefaults(suiteName: UUID().uuidString)!
-        let lifecycle = GatewayLifecycleCoordinator(
-            client: client,
-            profiles: GatewayProfileStore(defaults: defaults),
-            clock: .continuous,
-            reconnectDelayPolicy: .standard,
-            uuidSource: .random,
-            pairer: GatewayPairer(),
-            pairingCommit: { _, _ in },
-            profileTokenLookup: { _ in nil }
-        )
-        return SettingsTrustCoordinator(
-            client: client,
-            mutationExecutor: ConfirmedMutationExecutor(
-                client: client,
-                lifecycle: lifecycle,
-                clock: .continuous,
-                performanceSignposts: RecordingPerformanceSignposts()
-            ),
-            uuidSource: .random
-        )
     }
 
     private func request(_ data: Data) throws -> Request {

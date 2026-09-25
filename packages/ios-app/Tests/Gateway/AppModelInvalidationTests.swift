@@ -15,33 +15,6 @@ struct AppModelInvalidationTests {
         }
     }
 
-    @Test("typed settings targets cannot encode project scope without a path")
-    func settingsTargetRequiresProjectPath() {
-        #expect(SettingsTarget(scope: .global, projectCWD: "/ignored") == .global)
-        #expect(SettingsTarget(scope: .project, projectCWD: nil) == nil)
-        #expect(SettingsTarget(scope: .project, projectCWD: "") == nil)
-        #expect(SettingsTarget(scope: .project, projectCWD: "/workspace/project") == .project(cwd: "/workspace/project"))
-        #expect(SettingsTarget.global.cwd == nil)
-        #expect(SettingsTarget.project(cwd: "/workspace/project").scope == .project)
-
-        let initial = SettingsLoadID(target: .global, invalidationGeneration: 0, foregroundGeneration: 0)
-        #expect(initial != SettingsLoadID(target: .project(cwd: "/workspace/project"), invalidationGeneration: 0, foregroundGeneration: 0))
-        #expect(initial != SettingsLoadID(target: .global, invalidationGeneration: 1, foregroundGeneration: 0))
-        #expect(initial != SettingsLoadID(target: .global, invalidationGeneration: 0, foregroundGeneration: 1))
-        #expect(CustomModelLoadID(target: .global, invalidationGeneration: 0, foregroundGeneration: 0)
-            != CustomModelLoadID(target: .global, invalidationGeneration: 0, foregroundGeneration: 1))
-        #expect(TrustLoadID(target: nil, invalidationGeneration: 0, foregroundGeneration: 0)
-            != TrustLoadID(target: nil, invalidationGeneration: 0, foregroundGeneration: 1))
-    }
-
-    @Test("package targets map only nonempty workspace paths")
-    func packageTargets() {
-        #expect(PackageConfigurationTarget(cwd: nil) == .global)
-        #expect(PackageConfigurationTarget(cwd: "") == .global)
-        #expect(PackageConfigurationTarget(cwd: "/workspace/project") == .workspace(cwd: "/workspace/project"))
-        #expect(PackageConfigurationTarget.global.cwd == nil)
-    }
-
     @Test("trust targets require an explicit nonempty project path")
     func trustTargets() {
         #expect(TrustTarget(cwd: "") == nil)
@@ -67,16 +40,6 @@ struct AppModelInvalidationTests {
         try await withTestWatchdog {
             try await valueOfOwnedTask(scenario)
         }
-    }
-
-    @Test("custom-model draft edits reject automatic publication until saved")
-    func customModelDraftAdmission() {
-        var owner = CustomModelDraftOwner()
-        #expect(owner.admitsPublication)
-        owner.markEdited()
-        #expect(!owner.admitsPublication)
-        owner.markInstalled()
-        #expect(owner.admitsPublication)
     }
 
     @Test("out-of-order settings responses respect target and request ownership")

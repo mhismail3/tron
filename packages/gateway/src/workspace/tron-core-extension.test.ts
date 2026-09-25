@@ -26,12 +26,6 @@ describe("Tron operating context", () => {
     expect(tronContext({ ...descriptor, available: false }, "/project", [])).toContain("Do not recreate");
   });
 
-  it("adds context without replacing the SDK/project prompt or appending session messages", async () => {
-    const result = await fixture().get("before_agent_start")!({ systemPrompt: "SDK + project rules" }, { cwd: "/project" });
-    expect(result.systemPrompt).toMatch(/^SDK \+ project rules\n\n## Tron operating context/);
-    expect(Object.keys(result)).toEqual(["systemPrompt"]);
-  });
-
   it.each([
     { agent: "worker", task: "Read only", context: "fresh" },
     { agent: "worker", task: "Read only", context: "fork" },

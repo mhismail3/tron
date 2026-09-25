@@ -23,64 +23,6 @@ struct PackageConfigurationCoordinatorTests {
         #expect(sameRowUpdate != sameRowRemove)
     }
 
-    @Test("resolved resource overview extracts bounded user-facing categories")
-    func resourceSummary() throws {
-        let resources = JSONValue.object([
-            "extensions": .array([
-                .object([
-                    "path": .string("/packages/sample/extensions/browser.ts"),
-                    "enabled": .bool(true),
-                    "metadata": .object([
-                        "source": .string("npm:sample"),
-                        "scope": .string("user"),
-                        "origin": .string("package"),
-                    ]),
-                ]),
-            ]),
-            "skills": .array([
-                .object([
-                    "path": .string("/packages/sample/skills/review/SKILL.md"),
-                    "enabled": .bool(false),
-                    "metadata": .object([
-                        "source": .string("npm:sample"),
-                        "scope": .string("project"),
-                        "origin": .string("package"),
-                    ]),
-                ]),
-            ]),
-            "prompts": .array([]),
-            "futureCategory": .array([.string("preserved only in technical JSON")]),
-        ])
-        let presentation = PackageResolvedResourcesPresentation(resources: resources)
-        #expect(presentation.categories.map(\.kind) == [.skills, .prompts, .themes])
-        #expect(presentation.categories.flatMap(\.items).count == 1)
-        #expect(presentation.categories[0].disabledCount == 1)
-        let skill = try #require(presentation.categories.first(where: { $0.kind == .skills })?.items.first)
-        #expect(skill.displayName == "Review")
-        #expect(skill.id == "/packages/sample/skills/review/SKILL.md")
-        #expect(skill.sourceDescription == "From npm:sample")
-        #expect(presentation.categories[0].caption == "From npm:sample · Available in the current project.")
-        #expect(PackageResolvedResourcesPresentation(resources: .object([:])).categories.allSatisfy { $0.items.isEmpty })
-        #expect(PackageResolvedResourcesPresentation(resources: .string("opaque")).categories.allSatisfy { $0.items.isEmpty })
-        #expect(skill.statusDescription == "Turned off")
-    }
-
-    @Test("friendly resource names preserve raw identity and group shared provenance once")
-    func friendlyResourceNames() {
-        let paths = ["/skills/tron-code-health/SKILL.md", "/skills/tron-ios/SKILL.md", "/prompts/parallel-review.md", "/themes/ios-theme.json"]
-        let expected = ["Tron Code Health", "Tron iOS", "Parallel Review", "iOS Theme"]
-        let items = paths.map { PackageResolvedResourceItem(path: $0, enabled: true, source: "auto", scope: "user", origin: "discovered") }
-        #expect(items.map(\.displayName) == expected)
-        #expect(items.map(\.id) == paths)
-        let category = PackageResolvedResourceCategory(kind: .skills, items: items)
-        #expect(category.hasSharedSource)
-        #expect(category.caption == "Discovered automatically · Available in every project.")
-        #expect(items.allSatisfy { $0.sourceDescription?.contains("Every project") != true })
-        let mixed = PackageResolvedResourceCategory(kind: .skills, items: items + [.init(path: "/other/SKILL.md", enabled: true, source: "npm:other", scope: "project", origin: "package")])
-        #expect(!mixed.hasSharedSource)
-        #expect(mixed.caption == "Source and scope details are available in Technical Details.")
-    }
-
     @Test("a fresh read clears offline state and a delayed older failure cannot restore it")
     func foregroundReadReplacesOfflineError() async throws {
         try await runScenario {
@@ -106,14 +48,6 @@ struct PackageConfigurationCoordinatorTests {
             #expect(try await harness.socket.sentFrames().dropFirst().map { try request($0).method } == ["packages.list", "packages.list", "packages.list"])
             await harness.client.close()
         }
-    }
-
-    @Test("resource categories retain Manage Session accents")
-    func resourceCategoryAccents() {
-        #expect(PackageResourceKind.extensions.accent == .tronPurple)
-        #expect(PackageResourceKind.skills.accent == .tronCyan)
-        #expect(PackageResourceKind.prompts.accent == ChatSemanticPillRole.prompt.accent)
-        #expect(PackageResourceKind.themes.accent == .tronTeal)
     }
 
     @Test("target-keyed inventories admit independently and newest same-target load wins")

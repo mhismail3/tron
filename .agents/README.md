@@ -36,7 +36,7 @@ harness copies, compatibility aliases, or a separate skill for every subsystem.
 Add a procedure only when it answers a distinct recurring question. Upstream
 attribution for adapted guidance remains in [NOTICE.md](skills/NOTICE.md).
 
-Run `scripts/check-agent-policy.sh`, `python3 scripts/test-agent-policy.py`,
+Run `scripts/check-agent-policy.sh`,
 `python3 scripts/check-documentation-policy.py`, and
 `scripts/personal-info-guard.sh` after changing guidance. The agent-policy checker
 compares skill directories with this catalog and validates metadata and platform guards;

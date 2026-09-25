@@ -145,33 +145,6 @@ struct GatewayProfileStoreTests {
         #expect(tokens.values[replacement.id] == "replacement-token")
     }
 
-    @Test("getters read one sanitized cache without write-on-read")
-    func gettersDoNotReloadOrPersist() {
-        let first = profile(id: "first", label: "First")
-        let metadata = RecordingProfileMetadata(document: .init(profiles: [first], selectedProfileID: first.id))
-        let store = GatewayProfileStore(metadata: metadata, tokens: RecordingTokenStore())
-        _ = store.profiles
-        _ = store.selected
-        _ = store.profiles
-        #expect(metadata.loadCount == 1)
-        #expect(metadata.saveCount == 0)
-    }
-
-    @Test("successful replacement commits one selected document and token")
-    func successfulReplacement() throws {
-        let first = profile(id: "first", label: "First")
-        let second = profile(id: "second", label: "Second")
-        let metadata = RecordingProfileMetadata(document: .init(profiles: [first], selectedProfileID: first.id))
-        let tokens = RecordingTokenStore(values: [first.id: "first-token"])
-        let store = GatewayProfileStore(metadata: metadata, tokens: tokens)
-
-        try store.save(second, token: "second-token")
-        #expect(store.profiles == [first, second])
-        #expect(store.selected == second)
-        #expect(store.token(for: second) == "second-token")
-        #expect(metadata.saveCount == 1)
-    }
-
     @Test("an added profile can commit without changing the focused server")
     func nonSelectingSavePreservesSelection() throws {
         let first = profile(id: "first", label: "First")

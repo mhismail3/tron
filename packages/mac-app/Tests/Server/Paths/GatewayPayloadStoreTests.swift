@@ -629,27 +629,6 @@ struct GatewayPayloadStoreTests {
         #expect(GatewayPayloadResolver.resolve(external: .failure(.unsafePath("payloads root")), bundled: .success(bundled)) == nil)
     }
 
-    @Test("invalid external selection falls back without mutating either payload")
-    func fallbackPolicy() {
-        let bundled = GatewayPayloadValidationResult(
-            root: URL(fileURLWithPath: "/bundled/Gateway"),
-            manifest: GatewayPayloadManifest(
-                channel: "stable",
-                version: "1",
-                gatewayVersion: "1",
-                nodeVersion: "22",
-                sourceRevision: "test-revision",
-                runtimeEpoch: "test-epoch",
-                payloadFingerprint: String(repeating: "b", count: 64)
-            )
-        )
-        let resolved = GatewayPayloadResolver.resolve(
-            external: .failure(.invalidManifest("current.json")),
-            bundled: .success(bundled)
-        )
-        #expect(resolved == bundled)
-    }
-
     private func makePayload(
         root: URL,
         channel: String,

@@ -167,7 +167,7 @@ function usage(): never {
   process.exit(64);
 }
 
-export function operationNeedsSettlement(
+function operationNeedsSettlement(
   operationId: string,
   reconciledSettledOperation: string | undefined,
 ): boolean {

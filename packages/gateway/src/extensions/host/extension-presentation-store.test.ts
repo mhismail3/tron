@@ -130,15 +130,4 @@ describe("ExtensionPresentationStore", () => {
     expect(store.state().diagnostics).toHaveLength(2);
     expect(events).toHaveLength(2);
   });
-
-  it("projects input lease and generic lifecycle activity", () => {
-    const store = new ExtensionPresentationStore(() => {});
-    store.transact((draft) => {
-      draft.surfaces.push(surface("focused"));
-      draft.inputLease = { id: "lease", connectionId: "connection", surfaceId: "focused", surfaceRevision: 1, acquiredAt: new Date(0).toISOString() };
-    });
-    store.setPendingComponentFactories(1);
-    store.setScheduledRenders(1);
-    expect(store).toMatchObject({ hasMountedPresentation: true, hasInputLease: true, hasPendingComponentFactory: true, hasScheduledRender: true });
-  });
 });

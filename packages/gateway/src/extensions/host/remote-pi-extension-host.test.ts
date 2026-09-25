@@ -28,11 +28,6 @@ function fixture() {
 }
 
 describe("RemotePiExtensionHost retained component foundation", () => {
-  it("forwards native tools-expanded changes and schedules a rerender", async () => {
-    const { host, context } = fixture();
-    host.context().setToolsExpanded(true);
-    expect(context.setToolsExpanded).toHaveBeenCalledWith(true);
-  });
 
   it("lazily starts, mounts sync factories, captures one render, and publishes bounded frames", async () => {
     const { host, presentation, events } = fixture();

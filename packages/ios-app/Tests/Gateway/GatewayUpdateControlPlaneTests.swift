@@ -43,38 +43,6 @@ struct GatewayUpdateControlPlaneTests {
         }
     }
 
-    @Test("server info presents gateway facts and opaque identities as shared metadata tables")
-    func serverDetailPresentation() throws {
-        let info = GatewayInfo(
-            gatewayVersion: "1", piVersion: "2", protocolVersion: 5, minProtocolVersion: 5,
-            machineId: "machine", machineName: "Mac", capabilities: ["gateway-update.v1"],
-            sourceRevision: "source-revision", runtimeEpoch: "runtime-epoch"
-        )
-        let status = GatewayUpdateStatus(
-            state: "ready", channel: "stable",
-            currentIdentity: GatewayUpdateIdentity(
-                version: "candidate", gatewayVersion: "1", sourceRevision: "fallback-revision",
-                runtimeEpoch: "fallback-epoch", payloadFingerprint: "payload-identity"
-            ),
-            candidateIdentity: nil, candidateAvailable: false, error: nil, updatedAt: nil
-        )
-        let metadata = GatewayConnectionDetailPresentation.metadata(info: info)
-        #expect(metadata.map(\.title) == ["Machine", "Gateway", "Agent runtime", "Protocol", "Restart supervision"])
-        #expect(metadata.map(\.value) == ["Mac", "1", "2", "5", "Unavailable"])
-        #expect(metadata.allSatisfy { !$0.icon.isEmpty }, "Every fact row carries its own icon")
-        #expect(GatewayConnectionDetailPresentation.metadata(info: nil).isEmpty)
-        let details = GatewayConnectionDetailPresentation.technicalDetails(info: info, updateStatus: status)
-        #expect(details.map(\.title) == ["Source revision", "Runtime epoch", "Payload identity"])
-        #expect(details.map(\.value) == ["source-revision", "runtime-epoch", "payload-identity"])
-        #expect(GatewayConnectionDetailPresentation.sourceRepositoryDetail(nil) == "Not configured")
-
-        let config = try GatewayUpdateConfig(
-            sourceRoot: "/Users/name/Workspace/tron",
-            updatedAt: "2026-01-01T00:00:00Z"
-        )
-        #expect(GatewayConnectionDetailPresentation.sourceRepositoryDetail(config) == "…/name/Workspace/tron")
-    }
-
     @Test("status presentation is bounded and candidate availability is explicit")
     func statusPresentation() throws {
         let available = GatewayUpdateStatus(
@@ -182,39 +150,6 @@ struct GatewayUpdateControlPlaneTests {
                 _ = try JSONDecoder.gateway.decode(GatewayUpdateStatus.self, from: Data(value.utf8))
             }
         }
-    }
-
-    @Test("drain wire models stay additive and presentation is bounded and private")
-    func administrativeDrainWireAndPresentation() throws {
-        let blockers = #"{"id":"opaque-private-id","category":"foreground-agent-operation","state":"active","admittedAt":"2026-01-01T00:00:00Z","ageMs":10}"#
-        let snapshotJSON = #"{"drainId":"private-drain-id","revision":7,"phase":"waiting","startedAt":"2026-01-01T00:00:00Z","lastProgressAt":"2026-01-01T00:00:01Z","blockerCount":9,"blockerCounts":{"foreground-agent-operation":4,"queued-mutation":2,"detached-extension-run":1,"terminal-receipt-persistence":1,"administrative-provider-package-operation":1},"oldestAdmissionAt":"2026-01-01T00:00:00Z","oldestAdmissionAgeMs":1000,"blockers":[\#(blockers)],"omittedCount":5,"suspectProjectionCount":2}"#
-        let snapshot = try JSONDecoder.gateway.decode(AdministrativeDrainSnapshot.self, from: Data(snapshotJSON.utf8))
-        let summary = AdministrativeDrainPresentation.summary(snapshot)
-        #expect(summary.contains("Waiting for 9 accepted operations"))
-        #expect(summary.contains("2 other accepted operations"))
-        #expect(summary.contains("5 blocker details omitted"))
-        #expect(!summary.contains("opaque-private-id"))
-        #expect(!summary.contains("private-drain-id"))
-        #expect(!summary.contains("2026-01-01"))
-        #expect(AdministrativeDrainPresentation.suspectSummary(snapshot) == "2 nonblocking diagnostic projections")
-
-        let login = try JSONDecoder.gateway.decode(AdministrativeDrainSnapshot.self, from: Data(
-            #"{"drainId":"d","revision":1,"phase":"waiting","blockerCount":1,"blockerCounts":{"provider-login":1},"omittedCount":0,"suspectProjectionCount":0}"#.utf8))
-        #expect(AdministrativeDrainPresentation.summary(login) == "Waiting for 1 accepted operation: 1 provider login.")
-        let requests = try JSONDecoder.gateway.decode(AdministrativeDrainSnapshot.self, from: Data(
-            #"{"drainId":"d","revision":1,"phase":"waiting","blockerCount":3,"blockerCounts":{"rpc-mutation":2,"knowledge-observation":1},"omittedCount":0,"suspectProjectionCount":0}"#.utf8))
-        #expect(AdministrativeDrainPresentation.summary(requests) == "Waiting for 3 accepted operations: 2 running requests, 1 knowledge observation.")
-
-        let restart = try JSONDecoder.gateway.decode(
-            GatewayRestartResponse.self,
-            from: Data(#"{"restarting":false,"scheduled":true,"activeSessionIds":["session-private"],"drainId":"private-drain-id","drainRevision":7,"drain":\#(snapshotJSON),"futureField":true}"#.utf8)
-        )
-        #expect(restart.drain?.revision == 7)
-        let legacy = try JSONDecoder.gateway.decode(
-            GatewayRestartResponse.self,
-            from: Data(#"{"restarting":true,"scheduled":false,"activeSessionIds":[]}"#.utf8)
-        )
-        #expect(legacy.drain == nil)
     }
 
     @Test("drain polling policy requires exact local ownership and active presentation")

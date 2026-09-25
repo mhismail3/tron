@@ -4,10 +4,6 @@ import Testing
 
 @Suite("Gateway diagnostics boundary")
 struct GatewayDiagnosticsServiceTests {
-    @Test("logs automatic refresh uses a quiet fifteen-second cadence")
-    func logsAutomaticRefreshCadence() {
-        #expect(GatewayLogsLoadPolicy.refreshInterval == 15)
-    }
 
     @Test("logs refresh callers join one local and remote read")
     @MainActor
@@ -226,16 +222,6 @@ struct GatewayDiagnosticsServiceTests {
         #expect(try JSONEncoder.gateway.encode(result).count <= IOSClientDiagnosticStore.maximumBytes)
     }
 
-    @Test("profile-qualified logs keep identical records distinct")
-    func profileQualifiedLogs() {
-        let record = GatewayLogRecord(timestamp: "2026-08-16T00:00:00Z", level: "info", message: "ready")
-        let first = GatewayProfileLogRecord(profileID: "server-a", profileLabel: "Server A", record: record)
-        let second = GatewayProfileLogRecord(profileID: "server-b", profileLabel: "Server B", record: record)
-
-        #expect(first.id != second.id)
-        #expect(first.record == second.record)
-    }
-
     @Test("log row identities remain unique for same-profile collisions")
     func logRowIdentityCollisions() {
         let first = GatewayProfileLogRecord(
@@ -398,28 +384,6 @@ struct GatewayDiagnosticsServiceTests {
         #expect(record.record.message.contains("trigger=automatic-retry"))
         #expect(record.record.message.contains("requestGeneration="))
         #expect(record.record.message.contains("durationMs=123"))
-        #expect(!record.record.message.contains("session text"))
-        #expect(!record.record.message.contains("/private/"))
-    }
-
-    @Test("RPC diagnostics preserve request correlation without sensitive values")
-    func rpcDiagnosticsAreCorrelatedAndRedacted() {
-        let record = IOSClientDiagnosticBuffer.logRecord(GatewayRPCDiagnostic(
-            method: "session.list",
-            requestID: "request-42",
-            outcome: .timeout,
-            code: "possibly_sent",
-            durationMilliseconds: 10_001,
-            timestamp: "2026-08-16T01:00:00Z",
-            profileID: "stable",
-            profileLabel: "Stable",
-            incidentID: "rpc:request-42"
-        ))
-        #expect(record.record.event == "gateway.rpc")
-        #expect(record.record.message.contains("method=session.list"))
-        #expect(record.record.message.contains("requestID=request-42"))
-        #expect(record.record.message.contains("outcome=timeout"))
-        #expect(record.incidentID == "rpc:request-42")
         #expect(!record.record.message.contains("session text"))
         #expect(!record.record.message.contains("/private/"))
     }
@@ -732,30 +696,6 @@ struct GatewayDiagnosticsServiceTests {
             await model.teardown()
             await client.close()
         }
-    }
-
-    @Test("incident retention is bounded and requires an injected owner")
-    func incidentRetentionIsBounded() async throws {
-        let suite = "GatewayDiagnosticsStore.\(UUID().uuidString)"
-        let defaults = try #require(UserDefaults(suiteName: suite))
-        let store = IOSClientDiagnosticStore(defaults: defaults)
-        defer { UserDefaults(suiteName: suite)?.removePersistentDomain(forName: suite) }
-        let records = (0..<IOSClientDiagnosticStore.maximumRecords + 8).map { index in
-            GatewayProfileLogRecord(
-                profileID: "stable:ios-client",
-                profileLabel: "Stable · iOS client",
-                record: GatewayLogRecord(
-                    timestamp: Date.now.formatted(.iso8601),
-                    level: "warning",
-                    message: "bounded incident \(index)",
-                    event: "gateway.connection",
-                    source: "ios-client"
-                )
-            )
-        }
-        await store.save(records)
-        let loaded = await store.load()
-        #expect(loaded.count == IOSClientDiagnosticStore.maximumRecords)
     }
 
     @Test("persisted invalid-response incidents use typed-safe fields")

@@ -224,15 +224,6 @@ describe("SemanticUIBroker", () => {
     await expect(result).resolves.toBe(true);
   });
 
-  it("survives client churn until a response arrives", async () => {
-    const broker = brokerWith(() => {});
-    const result = broker.context().select("Choose", ["one", "two"]);
-    const interaction = broker.interactions()[0];
-    expect(interaction?.method).toBe("select");
-    broker.respond(interaction!.id, interaction!.hostEpoch, interaction!.presentationRevision, "two", false);
-    await expect(result).resolves.toBe("two");
-  });
-
   it("rejects stale interaction scopes and retired epoch callbacks", async () => {
     const broker = brokerWith(() => {});
     const context = broker.context();

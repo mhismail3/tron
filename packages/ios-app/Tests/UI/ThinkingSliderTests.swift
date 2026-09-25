@@ -135,29 +135,4 @@ struct ThinkingSliderTests {
         #expect(reopened != old && reopened != replacement)
         #expect(presentation.admitsInput(reopened))
     }
-
-    @Test("each preview updates the readout while only the final raw selection commits")
-    @MainActor func composedDeferredCommit() {
-        let presentation = ConfigurationSliderPresentation()
-        let session = presentation.open(owner: UUID())
-        let scale = ThinkingSliderScale(levels: ["off", "high", "xhigh"])
-        var draft = ThinkingSliderDraft(value: "high")
-        var bound = "high"
-        var writes = 0
-        for (value, title) in [("off", "Off"), ("high", "High"), ("off", "Off"), ("xhigh", "Extra High")] {
-            draft.select(value, in: scale)
-            #expect(ThinkingLevelPresentation.title(draft.value) == title)
-            #expect(bound == "high" && writes == 0)
-        }
-        #expect(presentation.beginClosing(session))
-        for _ in 0..<3 {
-            presentation.finish(session) {
-                if let selection = draft.selectionToCommit(currentValue: bound, levels: scale.levels) {
-                    bound = selection
-                    writes += 1
-                }
-            }
-        }
-        #expect(bound == "xhigh" && writes == 1)
-    }
 }

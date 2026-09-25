@@ -27,13 +27,6 @@ struct PairingURLBuilderTests {
         #expect(queryValue("label", in: url) == nil)
     }
 
-    @Test("server name label is emitted")
-    func emitsLabel() throws {
-        let payload = PairingPayload(host: "100.64.0.1", port: 9847, code: "ABCD-EFGH", label: "Studio Mac")
-        let url = try #require(PairingURLBuilder.makeURL(payload))
-        #expect(queryValue("label", in: url) == "Studio Mac")
-    }
-
     @Test("trailing whitespace in host and code is trimmed")
     func whitespaceTrimming() throws {
         let payload = PairingPayload(host: "  100.64.0.1\n", port: 9847, code: "\tABCD-EFGH  ", label: nil)

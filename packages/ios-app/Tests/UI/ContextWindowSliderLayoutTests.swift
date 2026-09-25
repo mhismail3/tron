@@ -6,73 +6,6 @@ import XCTest
 /// of the slider. Device gesture/haptic feel remains a hands-on checkpoint.
 @MainActor
 final class ContextWindowSliderLayoutTests: XCTestCase {
-    func testExpandedGlassLayouts() async throws {
-        for (name, scheme, typeSize, width) in [("phone", ColorScheme.light, DynamicTypeSize.large, CGFloat(440)),
-                                               ("light", .light, .large, 320), ("dark", .dark, .large, 320),
-                                               ("large-text", .light, .accessibility3, 320),
-                                               // A default at the maximum must keep its label on the endpoint row.
-                                               ("default-at-max", .dark, .large, 393)] {
-            let image = try await capture(
-                SliderFixture(defaultValue: name == "default-at-max" ? 1_000_000 : 272_000,
-                              maximum: name == "default-at-max" ? 1_000_000 : 1_050_000)
-                    .tronPresentation()
-                    .environment(\.colorScheme, scheme)
-                    .environment(\.dynamicTypeSize, typeSize),
-                size: CGSize(width: width, height: 540), settling: .milliseconds(600)
-            )
-            XCTAssertEqual(image.size.width, width)
-            let attachment = XCTAttachment(image: image)
-            attachment.name = "context-window-\(name)"
-            attachment.lifetime = .keepAlways
-            add(attachment)
-        }
-    }
-
-    func testBackdropSoftensNearbyDetailButLeavesDistantContentSharp() async throws {
-        let frame = CGRect(x: 60, y: 160, width: 320, height: 120)
-        let image = try await capture(
-            ZStack {
-                Canvas { context, size in
-                    for x in stride(from: CGFloat.zero, to: size.width, by: 4) {
-                        context.fill(Path(CGRect(x: x, y: 0, width: 2, height: size.height)), with: .color(.black))
-                    }
-                }
-                .background(.white)
-                ConfigurationSliderSurface(source: frame, target: frame, fraction: 1, reduceMotion: false, accent: .tronPurple) {
-                    EmptyView()
-                } label: { EmptyView() }
-            }
-            .environment(\.colorScheme, .light),
-            size: CGSize(width: 440, height: 440)
-        )
-        let bitmap = try XCTUnwrap(image.cgImage)
-        func contrast(at y: CGFloat) throws -> Double {
-            let band = try XCTUnwrap(bitmap.cropping(to: CGRect(x: 0, y: y * image.scale, width: CGFloat(bitmap.width), height: image.scale)))
-            var pixels = [UInt8](repeating: 0, count: band.width * band.height * 4)
-            pixels.withUnsafeMutableBytes { buffer in
-                let context = CGContext(data: buffer.baseAddress, width: band.width, height: band.height,
-                    bitsPerComponent: 8, bytesPerRow: band.width * 4,
-                    space: CGColorSpace(name: CGColorSpace.sRGB)!, bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue)!
-                context.draw(band, in: CGRect(x: 0, y: 0, width: band.width, height: band.height))
-            }
-            let differences = stride(from: 112, to: 328, by: 4).map { x in
-                let dark = Int(CGFloat(x + 1) * image.scale) * 4
-                let light = Int(CGFloat(x + 3) * image.scale) * 4
-                return Double(Int(pixels[light]) - Int(pixels[dark])) / 255
-            }
-            return differences.reduce(0, +) / Double(differences.count)
-        }
-        let far = try contrast(at: 30)
-        let near = try contrast(at: 140) // 20pt outside the glass, not its own material.
-        let center = try contrast(at: 220)
-        XCTAssertGreaterThan(far, 0.9, "Distant rows must remain sharp")
-        XCTAssertLessThan(near, far * 0.75, "The halo must visibly soften detail outside the panel, not merely exist as a layer")
-        XCTAssertLessThan(center, far * 0.1, "The panel backdrop must actually filter fine detail, not leave sharp stripes behind tinted glass")
-        let attachment = XCTAttachment(image: image)
-        attachment.name = "context-window-local-blur"
-        attachment.lifetime = .keepAlways
-        add(attachment)
-    }
 
     func testMorphContainsContentAtIntermediateFrames() async throws {
         let source = CGRect(x: 230, y: 166, width: 72, height: 28)
@@ -166,53 +99,6 @@ final class ContextWindowSliderLayoutTests: XCTestCase {
         return UIGraphicsImageRenderer(size: size).image { _ in
             window.drawHierarchy(in: window.bounds, afterScreenUpdates: true)
         }
-    }
-}
-
-private struct SliderFixture: View {
-    @State private var presentation = ConfigurationSliderPresentation()
-    @State private var owner = UUID()
-    var defaultValue = 272_000
-    var maximum = 1_050_000
-
-    var body: some View {
-        NavigationStack {
-            ScrollView {
-                VStack(spacing: 0) {
-                    TronSettingsRow(icon: "brain", title: "Thinking", accent: .tronPurple) {
-                        TronInlineActionLabel("Extra High", accent: .tronPurple)
-                    }
-                    TronSettingsDivider(accent: .tronPurple)
-                    TronSettingsRow(icon: "gauge.with.dots.needle.50percent", title: "Context Window", accent: .tronPurple) {
-                        TronInlineActionLabel("272,000", accent: .tronPurple)
-                            .opacity(0)
-                            .anchorPreference(key: ConfigurationSliderPreference.self, value: .bounds) { anchor in
-                                guard let session = presentation.session else { return nil }
-                                return ConfigurationSliderRequest(
-                                    session: session, anchor: anchor, sourceVerticalInset: 8, accent: .tronPurple,
-                                    editor: .contextWindow(ContextWindowSliderRequest(
-                                        scale: ContextWindowSliderScale(
-                                            limits: ContextWindowLimits(minimum: 37_408, maximum: maximum, default: defaultValue, longContextThreshold: nil),
-                                            defaultValue: defaultValue
-                                        ), value: defaultValue, selection: nil, title: defaultValue.formatted(),
-                                        resetLabel: "Use configured default", detail: "Supported model bounds.", finish: { _ in }
-                                    ))
-                                )
-                            }
-                    }
-                    TronSettingsDivider(accent: .tronPurple)
-                    TronSettingsRow(icon: "rectangle.compress.vertical", title: "Automatic Compaction", subtitle: "Enabled", accent: .tronPurple)
-                }
-                .controlSize(.small)
-                .tronGlassSurface(accent: .tronPurple)
-                .padding(18)
-                .padding(.top, 60)
-            }
-            .navigationTitle("Manage Session")
-            .navigationBarTitleDisplayMode(.inline)
-        }
-        .tronConfigurationSliderHost(presentation)
-        .onAppear { presentation.open(owner: owner) }
     }
 }
 

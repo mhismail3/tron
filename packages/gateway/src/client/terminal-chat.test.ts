@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import type { GatewayProtocolClient } from "./gateway-client.js";
 import { GatewayClientError } from "./gateway-client.js";
-import { connectResilient, listSessions, operationNeedsSettlement, synchronizeTerminalSession } from "./terminal-chat.js";
+import { connectResilient, listSessions, synchronizeTerminalSession } from "./terminal-chat.js";
 
 function session(id: string, extra: Record<string, unknown> = {}) {
   return { id, cwd: "/workspace", firstMessage: id, ...extra };
@@ -61,14 +61,6 @@ describe("terminal chat synchronization", () => {
     await vi.waitFor(() => expect(attentionAttempts).toBe(2));
     expect(request.mock.calls.filter(([method]) => method === "session.attention.read"))
       .toEqual(Array(2).fill(["session.attention.read", { sessionId: "session", throughCompletionRevision: 19 }, 8_000]));
-  });
-});
-
-describe("terminal chat operation settlement", () => {
-  it("does not reinstall a waiter after reconnect already observed settlement", () => {
-    expect(operationNeedsSettlement("operation-one", "operation-one")).toBe(false);
-    expect(operationNeedsSettlement("operation-two", "operation-one")).toBe(true);
-    expect(operationNeedsSettlement("operation-one", undefined)).toBe(true);
   });
 });
 

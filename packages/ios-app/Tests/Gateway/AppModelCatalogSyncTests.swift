@@ -101,27 +101,6 @@ struct AppModelCatalogSyncTests {
         }
     }
 
-    @Test("shared catalog loader rejects a page larger than its row bound")
-    func loaderRejectsOversizedPage() async throws {
-        try await withHarness { harness in
-            let oversizedPage = (0..<(SessionCatalogLoadBounds.pageSize + 1)).map {
-                summary(id: "oversized-\($0)", revision: 1)
-            }
-            let loading = Task { try await SessionCatalogLoader.load(client: harness.client) { true } }
-            let request = try await request(harness.socket, index: 1)
-            await harness.socket.enqueue(response(id: request.id, sessions: oversizedPage, listRevision: 9))
-            switch try await loading.value {
-            case let .invalid(code, reason, pageCount, revision):
-                #expect(code == "invalid_response")
-                #expect(reason == "session-list-page")
-                #expect(pageCount == 1)
-                #expect(revision == 9)
-            default:
-                Issue.record("Oversized catalog page was not rejected.")
-            }
-        }
-    }
-
     @Test("shared catalog loader enforces the bounded page budget")
     func loaderEnforcesPageBudget() async throws {
         try await withHarness { harness in

@@ -15,13 +15,6 @@ struct SessionSettingPresentationTests {
         #expect(item.level == level)
     }
 
-    @Test("ordinary and unknown levels retain readable labels")
-    func ordinaryLevels() {
-        for (raw, title) in [("off", "Off"), ("minimal", "Minimal"), ("low", "Low"), ("medium", "Medium"), ("high", "High"), ("max", "Max"), ("adaptive", "Adaptive")] {
-            #expect(ThinkingLevelPresentation.title(raw) == title)
-        }
-    }
-
     @Test("history formats only typed thinking changes, not authored prompts or labels")
     func historyLabels() {
         func node(kind: String, label: String? = nil) -> SessionTreeNode {

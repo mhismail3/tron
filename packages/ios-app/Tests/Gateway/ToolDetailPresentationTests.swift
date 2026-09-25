@@ -34,14 +34,6 @@ struct ToolDetailPresentationTests {
         #expect(sanitized == [CGRect(x: 0, y: 0, width: 240, height: 1)])
     }
 
-    @Test("technical payload overview uses bounded top-level summaries")
-    func technicalPayloadSummary() {
-        #expect(ToolTechnicalPayloadSummary.summary(for: .object(["path": .string("a")])) == "1 top-level field")
-        #expect(ToolTechnicalPayloadSummary.summary(for: .object(["path": .string("a"), "line": .number(2)])) == "2 top-level fields")
-        #expect(ToolTechnicalPayloadSummary.summary(for: .array([.bool(true)])) == "1 top-level item")
-        #expect(ToolTechnicalPayloadSummary.summary(for: .string("value")) == "Scalar protocol value")
-    }
-
     @Test("bounded arguments are labeled without inventing request values", arguments: ["write", "edit", "bash", "ls", "grep", "find", "custom"])
     func boundedArguments(name: String) {
         for request: JSONValue in [
@@ -169,60 +161,6 @@ struct ToolDetailPresentationTests {
         ).text == "Running · 46.2s")
     }
 
-    @Test("file paths separate restrained directories from accented basenames")
-    func filePathPresentation() throws {
-        let presentation = ToolDetailPresentation(tool: tool(
-            "edit",
-            request: .object(["path": .string("packages/ios-app/Sources/App.swift"), "edits": .array([])])
-        ))
-        let path = try #require(presentation.primaryPath)
-        #expect(path.directory == "packages/ios-app/Sources/")
-        #expect(path.basename == "App.swift")
-
-        let basenameOnly = ToolPathPresentation.make(ToolTextPreview.make("README.md"))
-        #expect(basenameOnly.directory == nil)
-        #expect(basenameOnly.basename == "README.md")
-    }
-
-    @Test("file aliases and built-in metadata remain concise")
-    func metadata() {
-        let read = ToolDetailPresentation(tool: tool(
-            "read",
-            request: .object(["filePath": .string("README.md"), "offset": .number(41), "limit": .number(20)])
-        ))
-        #expect(read.primaryValue == "README.md")
-        #expect(read.metadata.map(\.label) == ["Starts at line", "Maximum lines"])
-
-        let write = ToolDetailPresentation(tool: tool(
-            "write",
-            request: .object(["path": .string("note.txt"), "content": .string("one\ntwo")])
-        ))
-        #expect(write.metadata.contains { $0.label == "Lines" && $0.value == "2" })
-        #expect(write.metadata.contains { $0.label == "Size" })
-
-        let search = ToolDetailPresentation(tool: tool(
-            "grep",
-            request: .object([
-                "pattern": .string("needle"), "path": .string("Sources"), "glob": .string("*.swift"),
-                "ignoreCase": .bool(true), "literal": .bool(false), "context": .number(2), "limit": .number(50),
-            ])
-        ))
-        #expect(search.metadata.map(\.label) == [
-            "Location", "File filter", "Ignore case", "Context lines", "Result limit",
-        ])
-        #expect(search.metadata.map(\.chipText) == [
-            "Sources", "*.swift", "Ignore case", "2 context lines", "Up to 50 results",
-        ])
-
-        let edit = ToolDetailPresentation(tool: tool(
-            "edit",
-            request: .object(["path": .string("one.swift"), "edits": .array([
-                .object(["oldText": .string("old"), "newText": .string("new")]),
-            ])])
-        ))
-        #expect(edit.metadata.first?.chipText == "1 change")
-    }
-
     @Test("command is complete and output state never falls back to its request")
     func commandAndExplicitEmptyOutput() {
         let command = "set -e\nprintf 'complete command'"
@@ -303,18 +241,6 @@ struct ToolDetailPresentationTests {
         #expect(diff.lines.contains { $0.kind == .removal && $0.text == "old" })
         #expect(diff.lines.contains { $0.kind == .addition && $0.text == "settled" })
         #expect(!diff.lines.contains { $0.kind == .addition && $0.text == "new" })
-    }
-
-    @Test("generic unified patches reuse the bounded diff presentation")
-    func genericUnifiedPatch() throws {
-        let diff = try #require(ToolDiffPresentation.make(
-            unifiedPatch: "--- a/file.swift\n+++ b/file.swift\n@@ -1 +1 @@\n-old\n+new",
-            sourceLabel: "Git diff"
-        ))
-        #expect(diff.sourceLabel == "Git diff")
-        #expect(diff.requestedChangeCount == nil)
-        #expect(diff.lines.contains { $0.kind == .removal && $0.text == "old" })
-        #expect(diff.lines.contains { $0.kind == .addition && $0.text == "new" })
     }
 
     @Test("diff counts exclude file metadata and unchanged lines", arguments: ["\n", "\r\n"])
@@ -480,22 +406,6 @@ struct ToolDetailPresentationTests {
         #expect(glance.contains { $0.kind == .removal && $0.text == "old" })
         #expect(expanded == diff.lines)
         #expect(expanded.count > glance.count)
-    }
-
-    @Test("in-progress edits render faithful removed and added blocks")
-    func requestedEditBlocks() throws {
-        let request: JSONValue = .object([
-            "path": .string("file.swift"),
-            "edits": .array([
-                .object(["oldText": .string("one\ntwo"), "newText": .string("one\nthree")]),
-                .object(["oldText": .string("four"), "newText": .string("five")]),
-            ]),
-        ])
-        let diff = try #require(ToolDiffPresentation.make(request: request, response: nil))
-        #expect(diff.sourceLabel == "Requested changes")
-        #expect(diff.lines.filter { $0.kind == .hunk }.count == 2)
-        #expect(diff.lines.contains { $0.kind == .removal && $0.text == "two" })
-        #expect(diff.lines.contains { $0.kind == .addition && $0.text == "three" })
     }
 
     @Test("pure insertion and deletion omit fabricated blank diff rows")
@@ -678,31 +588,6 @@ struct ToolDetailPresentationTests {
         #expect(presentation.displayTitle == "Read")
         #expect(presentation.icon == "wrench.and.screwdriver")
         #expect(presentation.primaryLabel == "File")
-    }
-
-    @Test("generic tools foreground one exact high-signal string and otherwise omit request chrome")
-    func genericPrimary() {
-        let subagent = ToolDetailPresentation(tool: tool(
-            "subagent",
-            request: .object(["task": .string("Review paging correctness"), "id": .string("child")])
-        ))
-        #expect(subagent.kind == .generic)
-        #expect(subagent.primaryLabel == "Task")
-        #expect(subagent.primaryValue == "Review paging correctness")
-
-        let web = ToolDetailPresentation(tool: tool(
-            "web_search",
-            request: .object(["query": .string("SwiftUI live sheet state"), "url": .string("https://example.com")])
-        ))
-        #expect(web.primaryLabel == "Query")
-        #expect(web.primaryValue == "SwiftUI live sheet state")
-
-        let unknown = ToolDetailPresentation(tool: tool(
-            "project_echo",
-            request: .object(["payload": .object(["nested": .bool(true)])])
-        ))
-        #expect(unknown.primaryLabel == nil)
-        #expect(unknown.primaryValue == nil)
     }
 
     @Test("pathological command and output previews are bounded while normal text remains complete")
@@ -891,30 +776,6 @@ struct ToolDetailPresentationTests {
         #expect(ToolOutputTailPreview.make("\n\n") == nil)
     }
 
-    @Test("aggregate preview fades disclose omitted content only")
-    func aggregatePreviewFadePolicy() {
-        #expect(!ToolRowPreviewFadePolicy.showsFade(
-            sourceIsBounded: false,
-            fullHeight: 40,
-            visibleHeight: 40
-        ))
-        #expect(ToolRowPreviewFadePolicy.showsFade(
-            sourceIsBounded: true,
-            fullHeight: 40,
-            visibleHeight: 40
-        ))
-        #expect(ToolRowPreviewFadePolicy.showsFade(
-            sourceIsBounded: false,
-            fullHeight: 61,
-            visibleHeight: 40
-        ))
-        #expect(!ToolRowPreviewFadePolicy.showsFade(
-            sourceIsBounded: false,
-            fullHeight: .infinity,
-            visibleHeight: 40
-        ))
-    }
-
     @Test("empty SDK envelopes wait for real output instead of rendering transport fields")
     func emptyRuntimeEnvelope() {
         for response: JSONValue in [.null, .object(["content": .array([]), "details": .null])] {
@@ -949,21 +810,6 @@ struct ToolDetailPresentationTests {
         }
         let payload: JSONValue = .object(["content": .array([]), "details": .null, "status": .string("queued")])
         #expect(ToolDetailPresentation(tool: tool("custom", response: payload)).structuredResult == payload)
-    }
-
-    @Test("unknown tools remain generic and surface structured results")
-    func genericFallback() {
-        let response: JSONValue = .object(["items": .array([.string("one"), .string("two")])])
-        let presentation = ToolDetailPresentation(tool: tool(
-            "project_echo",
-            request: .object(["value": .string("hello")]),
-            response: response
-        ))
-        #expect(presentation.kind == .generic)
-        #expect(presentation.displayTitle == "project_echo")
-        #expect(presentation.primaryValue == nil)
-        #expect(presentation.readableResult == nil)
-        #expect(presentation.structuredResult == response)
     }
 
     @Test("generic extension tools promote JSON text into the structured result table")

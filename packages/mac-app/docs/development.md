@@ -286,16 +286,6 @@ The Stable plist now requires Boolean `KeepAlive=true`. Delivering that plist re
 following **Reinstall a local Release build** below and refreshing registration with
 Pause/Resume; payload promotion alone does not replace the registered plist.
 
-An isolated opt-in launchd fixture verifies handled-exit relaunch and selection reread
-without using Tron's label, ports, or data directories:
-
-```bash
-TRON_RUN_LAUNCHD_FIXTURE=1 packages/mac-app/scripts/test-launchd-relaunch-fixture.sh
-```
-
-The fixture registers a temporary `com.example.*` label and cleans it up on exit. It is
-never part of ordinary automated tests because it intentionally invokes `launchctl`.
-
 ## Permission identity and stale listings
 
 For normal Stable use, keep `Tron.app` (`com.tron.mac`) at `/Applications/Tron.app`

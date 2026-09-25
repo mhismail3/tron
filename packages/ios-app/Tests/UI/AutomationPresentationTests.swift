@@ -51,21 +51,6 @@ struct AutomationPresentationTests {
         #expect(presentation.accessibilityLabel.contains("2 consecutive failures"))
     }
 
-    @Test func detailTablesPreserveOtherFactsWithoutSummaryDuplicatesOrActions() throws {
-        let record = try AutomationPresentationFixture.record(current: true)
-        let sections = AutomationDetailMetadata.sections(record: record, targetLabel: "Review session")
-        #expect(sections.map(\.title) == ["Action", "Schedule", "Target", "Current run", "About"])
-        let rows = sections.flatMap(\.rows)
-        #expect(rows.allSatisfy { $0.type == nil && $0.icon == nil })
-        let titles = Set(rows.map(\.title))
-        #expect(titles.isDisjoint(with: ["Status", "Runs", "Cadence", "Last run", "Updated", "Server", "Gateway", "Started"]))
-        #expect(titles.isSuperset(of: ["Prompt", "Series", "Timezone", "After downtime", "While running", "Deadline", "Next", "Session", "Scheduled", "Created", "Created by", "Revision"]))
-        #expect(rows.first { $0.title == "Prompt" }?.value == record.action.content)
-        #expect(rows.first { $0.title == "Created by" }?.value == "Mac")
-        #expect(rows.first { $0.title == "Session" }?.value == "Review session")
-        #expect(rows.first { $0.title == "Revision" }?.value == "2")
-    }
-
     @Test func descriptionAndPromptTemplateHaveDistinctStableRows() throws {
         let original = try AutomationPresentationFixture.record()
         var fields = try JSONValue.encode(original).objectValue!
@@ -83,15 +68,5 @@ struct AutomationPresentationTests {
         #expect(rows.map(\.title) == ["Prompt", "Prompt template"])
         #expect(Set(rows.map(\.id)).count == rows.count)
         #expect(rows.last?.value == "daily-review")
-    }
-
-    @Test func workspaceAndNotificationDetailsKeepTheirOwnValues() throws {
-        let workspace = try AutomationPresentationFixture.record(last: false, workspace: true)
-        let rows = AutomationDetailMetadata.sections(record: workspace, targetLabel: "New session per run · project").flatMap(\.rows)
-        #expect(rows.first { $0.title == "Workspace" }?.value == "/workspace/project")
-        let notification = try AutomationPresentationFixture.record(last: false, notification: true)
-        let action = AutomationDetailMetadata.sections(record: notification, targetLabel: "Review session").first
-        #expect(action?.rows.first?.title == "Message")
-        #expect(action?.rows.first?.value == "Review the weekly report.")
     }
 }

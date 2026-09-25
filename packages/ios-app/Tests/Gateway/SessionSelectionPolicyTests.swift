@@ -27,14 +27,4 @@ struct SessionSelectionPolicyTests {
             locallyCreatedUnindexedIDs: []
         ) == nil)
     }
-
-    @Test("indexed selection remains stable")
-    func retainsIndexedSelection() {
-        let selected = SessionSelectionPolicy.reconcile(
-            selected: "selected",
-            visibleIDs: ["first", "selected"],
-            locallyCreatedUnindexedIDs: []
-        )
-        #expect(selected == "selected")
-    }
 }

@@ -4,12 +4,6 @@ import Testing
 
 @Suite("Automation protocol")
 struct AutomationProtocolTests {
-    @Test("unset workspace delegates default resolution to Gateway without an empty path")
-    func workspaceBrowserInitialPath() {
-        #expect(AutomationWorkspacePathPolicy.initialPath(selectedPath: "") == nil)
-        #expect(AutomationWorkspacePathPolicy.initialPath(selectedPath: "/workspace/selected") == "/workspace/selected")
-        #expect(AutomationWorkspacePathPolicy.initialPath(selectedPath: "/workspace/trailing ") == "/workspace/trailing ")
-    }
 
     @Test("automation controls require the selected ready owner and settle safely")
     func mutationReadiness() {

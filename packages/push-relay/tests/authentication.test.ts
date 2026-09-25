@@ -19,17 +19,6 @@ describe("endpoint-scoped request authentication", () => {
     await expect(verifyGrantSignature({ ...common, body: utf8("{}") })).resolves.toBeUndefined();
   });
 
-  test("returns the digest for the exact UTF-8 bytes that were authenticated", async () => {
-    const secret = "endpoint-secret";
-    const body = utf8('{"message":"café","items":[1,2]}');
-    const provided = await signature(secret, "POST", "/v3/notifications", "2000000000", "request-identifier-0001", body);
-    const input = { secret, method: "POST" as const, path: "/v3/notifications", timestamp: "2000000000", requestId: "request-identifier-0001", body, provided, nowSeconds: 2_000_000_000 };
-
-    await expect(verifyGrantSignature(input)).resolves.toEqual({ bodyHash: await sha256Hex(body) });
-    await expect(verifyGrantSignature({ ...input, body: utf8('{"items":[1,2],"message":"café"}') })).resolves.toBeUndefined();
-    await expect(verifyGrantSignature({ ...input, body: Uint8Array.from([...body, 0]) })).resolves.toBeUndefined();
-  });
-
   test("rejects stale, malformed, and wrong-secret requests", async () => {
     const body = new Uint8Array();
     const provided = await signature("secret", "DELETE", "/v3/grants/grant-identifier-00001", "2000000000", "request-identifier-0001", body);

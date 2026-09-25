@@ -6,15 +6,6 @@ import UIKit
 @Suite("Chat layout transaction")
 @MainActor
 struct ChatLayoutTransactionTests {
-    @Test("overlapping mutations join one generation")
-    func joinsActiveGeneration() {
-        let transaction = ChatLayoutTransaction()
-        let submission = transaction.join(.submission)
-        let keyboard = transaction.join(.keyboard)
-
-        #expect(submission == keyboard)
-        #expect(transaction.generation?.joined == [.submission, .keyboard])
-    }
 
     @Test("the clock resolves once")
     func resolvesClockOnce() {
@@ -68,21 +59,6 @@ struct ChatLayoutTransactionTests {
             duration: ChatContentTransitionPolicy.transcriptEntranceDuration,
             curve: .smooth
         ))
-    }
-
-    @Test("submission generation exposes only its one frozen structural clock")
-    func submissionClockProjection() {
-        let transaction = ChatLayoutTransaction()
-        #expect(transaction.activeSubmissionGenerationID == nil)
-        #expect(transaction.resolvedAnimation == nil)
-        let generation = transaction.join(.submission)
-        #expect(transaction.activeSubmissionGenerationID == generation)
-        #expect(transaction.resolvedAnimation == nil)
-        _ = transaction.animation
-        #expect(transaction.resolvedAnimation != nil)
-        transaction.settle(generation, source: .submission)
-        #expect(transaction.activeSubmissionGenerationID == nil)
-        #expect(transaction.resolvedAnimation == nil)
     }
 
     @Test("a repeated settled participant reopens in the active generation")
@@ -153,18 +129,6 @@ struct ChatLayoutTransactionTests {
         #expect(transaction.abandonedGenerationID == generation)
         #expect(transaction.settledGenerationID == nil)
         #expect(transaction.consumeTerminalEvents() == [.abandoned(generation)])
-    }
-
-    @Test("successful settlement is distinct from abandonment")
-    func settlementPublishesOnlyCompletedGeneration() {
-        let transaction = ChatLayoutTransaction()
-        let generation = transaction.join(.submission)
-        transaction.settle(generation, source: .submission)
-
-        #expect(transaction.generation == nil)
-        #expect(transaction.settledGenerationID == generation)
-        #expect(transaction.abandonedGenerationID == nil)
-        #expect(transaction.consumeTerminalEvents() == [.settled(generation)])
     }
 
     @Test("settlement events retain consecutive generations")

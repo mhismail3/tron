@@ -104,63 +104,6 @@ struct GatewayClientTransportTests {
         }
     }
 
-    @Test("hello and request frames use injected IDs without changing their byte protocol")
-    func deterministicHelloAndRequestIDs() async throws {
-        try await withTestWatchdog {
-            let socket = ScriptedGatewaySocket()
-            let factory = ScriptedGatewaySocketFactory(socket: socket)
-            let ids = SequenceUUIDSource([
-                UUID(uuidString: "00000000-0000-0000-0000-000000000001")!,
-                UUID(uuidString: "00000000-0000-0000-0000-000000000002")!,
-            ])
-            let signposts = RecordingPerformanceSignposts()
-            let client = GatewayClient(
-                socketFactory: factory.factory,
-                uuidSource: ids.source,
-                performanceSignposts: signposts
-            )
-            await socket.enqueue(helloFrame())
-
-            let info = try await client.connect(profile: profile, token: "token")
-            #expect(info.machineId == "machine")
-            #expect(factory.requests.count == 1)
-            #expect(factory.requests[0].url == profile.socketURL)
-            #expect(factory.requests[0].timeoutInterval == GatewayConnectionPolicy.requestInactivityTimeout)
-            #expect(factory.requests[0].value(forHTTPHeaderField: "Authorization") == "Bearer token")
-
-            let sentHello = try await decodedValue(in: socket, index: 0)
-            #expect(sentHello == .object([
-                "type": .string("hello"),
-                "protocolVersion": .number(Double(TronGatewayProtocolContract.protocolVersion)),
-                "clientId": .string("00000000-0000-0000-0000-000000000001"),
-                "clientRole": .string("mobile"),
-            ]))
-
-            let request = Task {
-                try await client.requestValue("test.echo", EmptyParams(), timeout: .seconds(30))
-            }
-            defer { request.cancel() }
-            try await socket.waitUntilSent(count: 2)
-            let sentRequest = try await decodedValue(in: socket, index: 1)
-            #expect(sentRequest == .object([
-                "type": .string("request"),
-                "id": .string("00000000-0000-0000-0000-000000000002"),
-                "method": .string("test.echo"),
-                "params": .object([:]),
-            ]))
-            await socket.enqueue(responseFrame(
-                id: "00000000-0000-0000-0000-000000000002",
-                result: .object(["answer": .string("ok")])
-            ))
-            #expect(try await valueOfOwnedTask(request).objectValue?["answer"]?.stringValue == "ok")
-            #expect(signposts.events() == [
-                .begin(.gatewayConnect),
-                .end(.gatewayConnect, .success, .none),
-            ])
-            await client.close()
-        }
-    }
-
     @Test("always-on AppLog records repeated RPC completions at debug level")
     func appLogRecordsRPCs() async throws {
         let socket = ScriptedGatewaySocket()
@@ -264,29 +207,6 @@ struct GatewayClientTransportTests {
         #expect(GatewayClient.mediaPath(id: "upload:../../private") == nil)
     }
 
-    @Test("initial and reconnect URL loading timeouts stay above application liveness")
-    func websocketRequestTimeouts() async throws {
-        try await withTestWatchdog {
-            let initial = ScriptedGatewaySocket()
-            let replacement = ScriptedGatewaySocket()
-            let factory = ScriptedGatewaySocketFactory(sockets: [initial, replacement])
-            let client = GatewayClient(socketFactory: factory.factory)
-            await initial.enqueue(helloFrame())
-            _ = try await client.connect(profile: profile, token: "token")
-            await replacement.enqueue(helloFrame())
-            _ = try await client.reconnect()
-
-            #expect(factory.requests.map(\.timeoutInterval) == [
-                GatewayConnectionPolicy.requestInactivityTimeout,
-                GatewayConnectionPolicy.requestInactivityTimeout,
-            ])
-            #expect(GatewayConnectionPolicy.requestInactivityTimeout > 18)
-            #expect(GatewayConnectionPolicy.gracefulCloseLimit == .seconds(1))
-            #expect(GatewayConnectionPolicy.gracefulCloseLimit < .seconds(60))
-            await client.close()
-        }
-    }
-
     @Test("event activation is idempotent for one connection epoch")
     func eventActivationIsIdempotent() async throws {
         try await withTestWatchdog {
@@ -304,35 +224,6 @@ struct GatewayClientTransportTests {
 
             #expect(await socket.pendingReceiverCount() == 1)
             #expect(clock.activeSleeperCount() == 1)
-            await client.close()
-        }
-    }
-
-    @Test("response and event bytes are admitted by GatewayClient")
-    func responseAndEventAdmission() async throws {
-        try await withTestWatchdog {
-            let socket = ScriptedGatewaySocket()
-            let client = GatewayClient(
-                socketFactory: ScriptedGatewaySocketFactory(socket: socket).factory,
-                uuidSource: SequenceUUIDSource([
-                    UUID(uuidString: "00000000-0000-0000-0000-000000000011")!,
-                    UUID(uuidString: "00000000-0000-0000-0000-000000000012")!,
-                ]).source
-            )
-            await socket.enqueue(helloFrame())
-            _ = try await client.connect(profile: profile, token: "token")
-
-            let request = Task { try await client.requestValue("test.value", EmptyParams()) }
-            defer { request.cancel() }
-            try await socket.waitUntilSent(count: 2)
-            await socket.enqueue(responseFrame(id: "00000000-0000-0000-0000-000000000012", result: .number(7)))
-            #expect(try await valueOfOwnedTask(request).intValue == 7)
-
-            var iterator = client.events.makeAsyncIterator()
-            await socket.enqueue(eventFrame(topic: "test.changed", payload: .object(["revision": .number(3)])))
-            let event = await iterator.next()
-            #expect(event?.event.topic == "test.changed")
-            #expect(event?.event.payload.objectValue?["revision"]?.intValue == 3)
             await client.close()
         }
     }
@@ -577,13 +468,6 @@ struct GatewayClientTransportTests {
             #expect(await client.diagnostics().contains { $0.reason == .canceled })
             await client.close()
         }
-    }
-
-    @Test("transmission state distinguishes definitely queued from possibly sent")
-    func transmissionOutcomePolicy() {
-        #expect(!GatewayRequestTransmissionState.queued.mayHaveBeenSent)
-        #expect(GatewayRequestTransmissionState.sending.mayHaveBeenSent)
-        #expect(GatewayRequestTransmissionState.sent.mayHaveBeenSent)
     }
 
     @Test("ping completion remembers cancellation before install and ignores late callbacks")
@@ -872,69 +756,6 @@ struct GatewayClientTransportTests {
             #expect(weakClient.value == nil)
             await socket.releaseSend()
             #expect(await socket.sentFrames().count == 1)
-        }
-    }
-
-    @Test("request timeout advances on the injected monotonic clock")
-    func virtualRequestTimeout() async throws {
-        try await withTestWatchdog {
-            let clock = ManualClock()
-            let socket = ScriptedGatewaySocket()
-            let client = GatewayClient(
-                socketFactory: ScriptedGatewaySocketFactory(socket: socket).factory,
-                clock: clock.clock,
-                uuidSource: SequenceUUIDSource([
-                    UUID(uuidString: "00000000-0000-0000-0000-000000000021")!,
-                    UUID(uuidString: "00000000-0000-0000-0000-000000000022")!,
-                ]).source
-            )
-            await socket.enqueue(helloFrame())
-            _ = try await client.connect(profile: profile, token: "token")
-
-            let request = Task { try await client.requestValue("test.timeout", EmptyParams(), timeout: .seconds(5)) }
-            defer { request.cancel() }
-            try await socket.waitUntilSent(count: 2)
-            try await clock.waitUntilSleeping(count: 2) // liveness plus request deadline
-            clock.advance(by: .seconds(5))
-
-            do {
-                _ = try await valueOfOwnedTask(request)
-                Issue.record("request unexpectedly succeeded")
-            } catch let failure as GatewayPossiblySentError {
-                #expect(failure.failure.code == "possibly_sent")
-            }
-            await client.close()
-        }
-    }
-
-    @Test("request timeout diagnostics retain local send-state failure code")
-    func requestTimeoutDiagnosticCode() async throws {
-        try await withTestWatchdog {
-            let clock = ManualClock()
-            let socket = ScriptedGatewaySocket()
-            let client = GatewayClient(
-                socketFactory: ScriptedGatewaySocketFactory(socket: socket).factory,
-                clock: clock.clock,
-                uuidSource: SequenceUUIDSource([
-                    UUID(uuidString: "00000000-0000-0000-0000-000000000023")!,
-                    UUID(uuidString: "00000000-0000-0000-0000-000000000024")!,
-                ]).source
-            )
-            await socket.enqueue(helloFrame())
-            _ = try await client.connect(profile: profile, token: "token")
-
-            let request = Task { try await client.requestValue("session.list", EmptyParams(), timeout: .seconds(5)) }
-            defer { request.cancel() }
-            try await socket.waitUntilSent(count: 2)
-            try await clock.waitUntilSleeping(count: 2)
-            clock.advance(by: .seconds(5))
-            do {
-                _ = try await valueOfOwnedTask(request)
-                Issue.record("request unexpectedly succeeded")
-            } catch is GatewayPossiblySentError {}
-            await Task.yield()
-
-            await client.close()
         }
     }
 
@@ -1393,25 +1214,6 @@ struct GatewayClientTransportTests {
         }
     }
 
-    @Test("actual upgrade status distinguishes authentication, permission and capacity", arguments: [401, 403, 503])
-    func upgradeStatusClassification(status: Int) async throws {
-        try await withTestWatchdog {
-            let socket = ScriptedGatewaySocket(metadata: .init(closeCode: nil, httpStatusCode: status))
-            await socket.failNextSend(URLError(.badServerResponse))
-            let client = GatewayClient(socketFactory: ScriptedGatewaySocketFactory(socket: socket).factory)
-            do {
-                _ = try await client.connect(profile: profile, token: "fixture")
-                Issue.record("rejected upgrade unexpectedly connected")
-            } catch let failure as GatewayFailure {
-                #expect(failure.code == [401: "unauthenticated", 403: "forbidden", 503: "busy"][status])
-                #expect(failure.retryable == (status == 503))
-            }
-            let diagnostics = await client.diagnostics()
-            #expect(diagnostics.first(where: { $0.httpStatusCode == status })?.platformCode == URLError.badServerResponse.rawValue)
-            await client.close()
-        }
-    }
-
     @Test("late receive failure from a replaced receiver cannot disconnect the replacement")
     func staleDisconnectIsDiscarded() async throws {
         try await withTestWatchdog {
@@ -1437,31 +1239,6 @@ struct GatewayClientTransportTests {
             ))
             #expect(await client.info?.machineId == "machine")
             await client.close()
-        }
-    }
-
-    @Test("scripted waiters and close barriers observe cancellation")
-    func supportWaitCancellation() async throws {
-        try await withTestWatchdog {
-            let socket = ScriptedGatewaySocket(suspendsClose: true)
-            let sentWait = Task { try await socket.waitUntilSent(count: 1) }
-            defer { sentWait.cancel() }
-            sentWait.cancel()
-            await #expect(throws: CancellationError.self) { try await valueOfOwnedTask(sentWait) }
-
-            let clock = ManualClock()
-            let sleepWait = Task { try await clock.waitUntilSleeping(count: 1) }
-            defer { sleepWait.cancel() }
-            sleepWait.cancel()
-            await #expect(throws: CancellationError.self) { try await valueOfOwnedTask(sleepWait) }
-
-            let close = Task { await socket.close() }
-            defer { close.cancel() }
-            try await socket.waitUntilCloseInvoked()
-            close.cancel()
-            _ = try await valueOfOwnedTask(close)
-            #expect(await socket.closeInvocationCount() == 1)
-            #expect(await socket.closeTransitionCount() == 1)
         }
     }
 

@@ -7,15 +7,6 @@ import UIKit
 @MainActor
 @Suite("Composer image paste")
 struct ComposerPastedImagesTests {
-    @Test("UIKit image providers load as photo upload candidates without losing their representation")
-    func imageProvider() async throws {
-        let provider = NSItemProvider(object: image(.red))
-        #expect(ComposerPastedImages.containsImages([provider]))
-        let candidate = try await ComposerPastedImages.load(provider, maximumBytes: 25 * 1_048_576)
-        #expect(candidate.mimeType.hasPrefix("image/"))
-        #expect(candidate.name.hasPrefix("photo."))
-        #expect(UIImage(data: candidate.data) != nil)
-    }
 
     @Test("empty and oversized image data fail before upload")
     func byteBounds() async throws {

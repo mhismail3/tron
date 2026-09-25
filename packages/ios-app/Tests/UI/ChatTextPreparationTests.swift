@@ -4,16 +4,6 @@ import Testing
 
 @Suite("Bounded chat text preparation")
 struct ChatTextPreparationTests {
-    @Test("ratchets match the approved shared Phase 6 budget")
-    func ratchets() {
-        #expect(ChatTextPreparationPolicy.maximumAccountedBytes == 4_194_304)
-        #expect(ChatTextPreparationPolicy.maximumMarkdownRevisions == 512)
-        #expect(ChatTextPreparationPolicy.maximumThinkingSegments == 4_096)
-        #expect(ChatTextPreparationPolicy.maximumSourceBytes == 320_000)
-        #expect(ChatTextPreparationPolicy.maximumConcurrentPreparations == 2)
-        #expect(ChatTextPreparationPolicy.maximumNewMarkdownPreparationsPerProjection == 32)
-        #expect(ChatTextPreparationPolicy.maximumNewThinkingPreparationsPerProjection == 128)
-    }
 
     @Test("retired preparation epochs preserve the successor boundary")
     func retiredEpochPreservesSuccessorBoundary() async {
@@ -214,31 +204,6 @@ struct ChatTextPreparationTests {
         #expect(sources.count == ChatTranscriptPageRequest.maximumItemCount)
         #expect(sources.first?.identity.value == "assistant-88:content:0")
         #expect(sources.last?.identity.value == "assistant-599:content:0")
-    }
-
-    @Test("row revision changes when lower-revision membership is evicted")
-    func rowRevisionTracksMembership() throws {
-        let row = try message(id: "row", role: "assistant", parts: [
-            #"{"id":"row:0","type":"text","text":"one"}"#,
-            #"{"id":"row:1","type":"text","text":"two"}"#,
-        ])
-        let complete = ChatTextPreparationSnapshot(
-            markdown: [
-                "row:content:0": .init(source: "one", document: .init(source: "one"), revision: 4),
-                "row:content:1": .init(source: "two", document: .init(source: "two"), revision: 9),
-            ],
-            thinking: [:]
-        ).slice(for: .transcript(row))
-        let evicted = ChatTextPreparationSnapshot(
-            markdown: [
-                "row:content:1": .init(source: "two", document: .init(source: "two"), revision: 9),
-            ],
-            thinking: [:]
-        ).slice(for: .transcript(row))
-
-        #expect(complete.revision == [4, 9])
-        #expect(evicted.revision == [9])
-        #expect(complete.revision != evicted.revision)
     }
 
     @Test("a row slice contains only that row's immutable prepared values")

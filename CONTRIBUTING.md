@@ -22,7 +22,8 @@ agent execution, session state, inbox, badge, or reminder policy.
 
 ## Change requirements
 
-1. Ship implementation, focused tests, and owning documentation together.
+1. Ship implementation, owning documentation, and the tests required by the
+   [testing policy](AGENTS.md#testing-policy) together.
 2. Fix root causes and preserve canonical runtime ownership; do not create a
    second model/session/settings schema unless the mobile protocol requires a
    bounded projection.

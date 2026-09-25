@@ -2,7 +2,6 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { ModelRuntime } from "@earendil-works/pi-coding-agent";
 import { CommandReceiptStore } from "./command-receipts.js";
 import { GatewayService, type ClientContext, type GatewayServiceDependencies } from "./gateway-service.js";
 
@@ -51,17 +50,6 @@ describe("context window transport", () => {
     await expect(service.invoke(client, "model.list", {})).resolves.toMatchObject({ models: [{
       contextWindow: 272_000, maxTokens: 128_000, contextWindowLimits: { minimum: 37_408, maximum: 1_050_000, default: 272_000 },
     }] });
-  });
-
-  it("publishes the SDK's Opus 5.5 capacity through model.list", async () => {
-    const runtime = await ModelRuntime.create({ modelsPath: null, refreshOnCreate: false });
-    const service = new GatewayService({
-      modelRuntime: runtime,
-      globalProviderResources: { withStableSnapshot: async operation => operation() },
-    } as unknown as GatewayServiceDependencies);
-    const result = await service.invoke(client, "model.list", {}) as { models: Array<Record<string, unknown>> };
-    expect(result.models.find(model => model.provider === "anthropic" && model.id === "claude-opus-5-5"))
-      .toMatchObject({ contextWindow: 1_000_000, maxTokens: 128_000 });
   });
 
   it("admits project catalog validation only for a subscribed session in the requested cwd", async () => {

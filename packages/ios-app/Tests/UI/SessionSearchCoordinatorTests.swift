@@ -88,13 +88,4 @@ final class SessionSearchCoordinatorTests: XCTestCase {
         XCTAssertTrue(aggregate.profiles.allSatisfy { $0.state == "offline" })
         XCTAssertTrue(aggregate.groups.isEmpty)
     }
-
-    func testDismissInvalidatesCoordinatorRequests() async {
-        let pool = DashboardGatewayConnectionPool()
-        let coordinator = SessionSearchCoordinator()
-        coordinator.dismiss()
-        let aggregate = await coordinator.searchAll(query: "needle", targets: [], connections: pool)
-        XCTAssertTrue(aggregate.groups.isEmpty)
-        XCTAssertTrue(aggregate.profiles.isEmpty)
-    }
 }

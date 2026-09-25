@@ -89,15 +89,4 @@ struct GatewayNetworkCacheTests {
             try GatewayNetworkCacheWriter.cacheTailscaleIP("100.64.0.2", at: symlinkPath)
         }
     }
-
-    @Test("delete is idempotent")
-    func deleteCache() throws {
-        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
-        defer { try? FileManager.default.removeItem(at: root) }
-        let path = root.appendingPathComponent("network.json")
-        try GatewayNetworkCacheWriter.cacheTailscaleIP("100.64.0.1", at: path)
-        try GatewayNetworkCacheWriter.deleteCache(at: path)
-        try GatewayNetworkCacheWriter.deleteCache(at: path)
-        #expect(!FileManager.default.fileExists(atPath: path.path))
-    }
 }

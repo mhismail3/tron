@@ -206,24 +206,6 @@ struct ExtensionFormTests {
         #expect(navigation.icon == nil)
     }
 
-    @Test func completedTronAskUserResultPreservesTitleAndAllowOther() throws {
-        let response = try JSONDecoder.gateway.decode(JSONValue.self, from: Data(#"""
-        {"title":"Choose a database","questions":[{"question":"Which database?","options":[{"label":"Postgres"},{"label":"SQLite"}],"multiSelect":false,"allowOther":false}],"answers":{"Which database?":{"selected":["SQLite"],"other":null}},"cancelled":false}
-        """#.utf8))
-        let owner = ExtensionOwner(id: "tron-ask-user", title: "Ask User", source: AskUserToolPresentation.tronSource)
-        let tool = ChatToolPresentation(
-            id: "call", title: "Ask User", toolName: "ask_user", subtitle: "Completed",
-            request: nil, response: response, content: "", fallbackContent: nil,
-            error: false, startedAt: nil, completedAt: nil, durationMs: nil,
-            lastProgressAt: nil, progressSequence: nil,
-            extensionOrigin: ExtensionToolOrigin(source: AskUserToolPresentation.tronSource, owner: owner)
-        )
-        let presentation = try #require(AskUserToolPresentation.completed(tool: tool))
-        #expect(presentation.form.title == "Choose a database")
-        #expect(presentation.form.questions[0].allowOther == false)
-        #expect(presentation.answer?.answers[0].optionIds == ["question-0-option-1"])
-    }
-
     @Test func pendingToolMatchingUsesOperationAndAuditedOwnerInsteadOfToolCallID() throws {
         let owner = ExtensionOwner(
             id: "ask-user",
@@ -294,16 +276,5 @@ struct ExtensionFormTests {
                 valid.answers[1],
             ]), descriptor: form
         ) != nil)
-    }
-
-    @Test func expiryClockOnlyTicksTowardAnUnexpiredDeadline() {
-        let now = Date(timeIntervalSince1970: 1_800_000_000)
-        // No deadline and a reached deadline need no timer at all; the visible
-        // countdown text is self-updating independently of this clock.
-        #expect(!ExtensionFormExpiryClockPolicy.ticks(deadline: nil, now: now))
-        #expect(!ExtensionFormExpiryClockPolicy.ticks(deadline: now, now: now))
-        #expect(!ExtensionFormExpiryClockPolicy.ticks(deadline: now.addingTimeInterval(-1), now: now))
-        #expect(ExtensionFormExpiryClockPolicy.ticks(deadline: now.addingTimeInterval(1), now: now))
-        #expect(ExtensionFormExpiryClockPolicy.ticks(deadline: now.addingTimeInterval(3_600), now: now))
     }
 }

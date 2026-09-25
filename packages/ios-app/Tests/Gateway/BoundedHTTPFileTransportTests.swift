@@ -69,30 +69,6 @@ struct BoundedHTTPFileTransportTests {
         #expect(!FileManager.default.fileExists(atPath: stale.path))
         staging.discard(replacement)
     }
-
-    @Test("injected downloads preserve file-backed results without reading data")
-    func injectedDownload() async throws {
-        let source = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString)
-        try Data("file-backed".utf8).write(to: source)
-        defer { try? FileManager.default.removeItem(at: source) }
-        let response = try #require(HTTPURLResponse(
-            url: URL(string: "https://gateway.invalid/v1/blobs/id")!,
-            statusCode: 200,
-            httpVersion: nil,
-            headerFields: nil
-        ))
-        let transport = BoundedHTTPFileTransport { request, maximumBytes in
-            #expect(request.url?.path == "/v1/blobs/id")
-            #expect(maximumBytes == 32)
-            return BoundedHTTPDownloadedFile(url: source, response: response, byteCount: 11)
-        }
-        let result = try await transport.download(
-            for: URLRequest(url: response.url!),
-            maximumBytes: 32
-        )
-        #expect(result.url == source)
-        #expect(result.byteCount == 11)
-    }
 }
 
 private final class BoundedFileURLProtocol: URLProtocol {

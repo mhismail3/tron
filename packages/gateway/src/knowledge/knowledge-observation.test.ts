@@ -557,16 +557,6 @@ describe("KnowledgeObservationService", () => {
     recoveryObserver.dispose();
   });
 
-  it("records failed model inference as a non-success coverage disposition", async () => {
-    vi.useFakeTimers();
-    const { store, observer } = await fixture({ infer: async () => { throw new Error("synthetic provider failure"); } });
-    observer.admit({ sessionId: "session-1", entries, outcome: "failed" });
-    await waitFor(async () => (await store.status()).coverageCount === 1);
-    expect((await store.list({ kind: "observation" })).records).toHaveLength(0);
-    observer.dispose();
-    await vi.advanceTimersByTimeAsync(25);
-  });
-
   it("does not publish a late result after configuration revision changes", async () => {
     vi.useFakeTimers();
     let release!: () => void;

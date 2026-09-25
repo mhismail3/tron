@@ -40,22 +40,6 @@ struct IOSMetricKitDiagnosticsTests {
         #expect(manager.removed.count == 1)
     }
 
-    @Test("MetricKit callbacks are ignored after retirement")
-    func callbacksAfterStopDoNotEnterTheStore() async throws {
-        let manager = FakeManager()
-        let suite = "TronMetricKit.\(UUID())"
-        let defaults = try #require(UserDefaults(suiteName: suite))
-        let store = IOSClientDiagnosticStore(defaults: defaults)
-        let collector = IOSMetricKitDiagnostics(store: store, manager: manager)
-        collector.didReceive([] as [MXMetricPayload])
-        collector.didReceive([] as [MXDiagnosticPayload])
-        collector.stop()
-        collector.didReceive([] as [MXMetricPayload])
-        collector.didReceive([] as [MXDiagnosticPayload])
-        await store.flush()
-        #expect(await store.load().isEmpty)
-    }
-
     @Test("typed MetricKit conversion preserves units, histogram buckets, and bounds")
     func typedConversionBoundary() {
         let seconds = Measurement(value: 1.25, unit: UnitDuration.seconds)

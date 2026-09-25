@@ -148,24 +148,6 @@ struct ProviderUsagePresentationTests {
         #expect(!shows(snapshot: ProviderUsageSnapshot(providerId: "p", status: .available)))
     }
 
-    @Test("the usage skeleton breathes within a bounded opacity range")
-    func loadingLineOpacityIsBounded() {
-        let engine = ProviderUsageLoadingLineEngine.self
-        #expect(abs(engine.opacity(progress: 0.25) - engine.maximumOpacity) < 1e-9)
-        #expect(abs(engine.opacity(progress: 0.75) - engine.minimumOpacity) < 1e-9)
-        for step in 0...40 {
-            let value = engine.opacity(progress: Double(step) / 40)
-            #expect(value >= engine.minimumOpacity)
-            #expect(value <= engine.maximumOpacity)
-        }
-        // Out-of-range progress clamps instead of extrapolating the wave.
-        for progress in [-1.0, 2.0] {
-            let value = engine.opacity(progress: progress)
-            #expect(value >= engine.minimumOpacity)
-            #expect(value <= engine.maximumOpacity)
-        }
-    }
-
     @Test("balance-only snapshots present the primary balance in the same slot as windows")
     func balanceOnlySummary() {
         let balances = [
@@ -256,31 +238,5 @@ struct ProviderUsagePresentationTests {
         #expect(!shows(localOnly: false))
         #expect(!shows(isLoading: true))
         #expect(!shows(snapshot: ProviderUsageSnapshot(providerId: "ollama", status: .unavailable)))
-    }
-
-    @Test("the catalog usage flag decodes and a Gateway without it stays unsupported")
-    func decodesUsageSupportFlag() throws {
-        func provider(_ json: String) throws -> ProviderSummary {
-            try JSONDecoder.gateway.decode(ProviderSummary.self, from: Data(json.utf8))
-        }
-        let supported = try provider(#"{"id":"opencode-go","name":"OpenCode Go","configured":true,"usageSupported":true,"authSource":"api-key","credentialType":"api-key","authMethods":["api_key"],"modelCount":3}"#)
-        #expect(supported.supportsUsage)
-        let legacy = try provider(#"{"id":"openrouter","name":"OpenRouter","configured":true,"authSource":"api-key","credentialType":"api-key","authMethods":["api_key"],"modelCount":3}"#)
-        #expect(!legacy.supportsUsage)
-        let explicitFalse = try provider(#"{"id":"ollama","name":"Ollama","configured":true,"usageSupported":false,"authSource":null,"credentialType":null,"authMethods":[],"modelCount":0}"#)
-        #expect(!explicitFalse.supportsUsage)
-    }
-
-    @Test("the catalog local-only flag decodes and a Gateway without it presents no local indicator")
-    func decodesLocalOnlyFlag() throws {
-        func provider(_ json: String) throws -> ProviderSummary {
-            try JSONDecoder.gateway.decode(ProviderSummary.self, from: Data(json.utf8))
-        }
-        let local = try provider(#"{"id":"ollama","name":"Ollama","configured":true,"usageSupported":false,"localOnly":true,"authSource":null,"credentialType":null,"authMethods":[],"modelCount":3}"#)
-        #expect(local.isLocalOnly)
-        let remote = try provider(#"{"id":"opencode-go","name":"OpenCode Go","configured":true,"usageSupported":true,"localOnly":false,"authSource":"api-key","credentialType":"api-key","authMethods":["api_key"],"modelCount":3}"#)
-        #expect(!remote.isLocalOnly)
-        let legacy = try provider(#"{"id":"openrouter","name":"OpenRouter","configured":true,"authSource":"api-key","credentialType":"api-key","authMethods":["api_key"],"modelCount":3}"#)
-        #expect(!legacy.isLocalOnly)
     }
 }

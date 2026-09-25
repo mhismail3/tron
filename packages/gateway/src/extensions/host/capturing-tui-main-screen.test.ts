@@ -19,62 +19,6 @@ afterEach(() => {
 });
 
 describe("public TuiMainScreen feasibility harness", () => {
-  it("coalesces requests and resize-driven rendering through the in-memory terminal", async () => {
-    vi.useFakeTimers();
-    const terminal = new InMemoryTerminal(40, 12);
-    const tui = new CapturingTuiMainScreen(terminal);
-    const original = component(["content"]);
-    const recording = new RecordingComponent(original);
-    tui.addChild(recording);
-    tui.start();
-    await vi.runAllTimersAsync();
-    const initialRenders = recording.renderCount;
-
-    tui.requestRender();
-    tui.requestRender();
-    tui.requestRender();
-    await vi.runAllTimersAsync();
-    expect(recording.renderCount).toBe(initialRenders + 1);
-
-    terminal.resize(60, 20);
-    await vi.runAllTimersAsync();
-    expect(recording.renderCount).toBe(initialRenders + 2);
-    expect(recording.capture?.width).toBe(60);
-    tui.stop({ preserveScreen: true });
-  });
-
-  it("preserves input-listener order, focus, and overlay routing", () => {
-    const terminal = new InMemoryTerminal(40, 12);
-    const tui = new CapturingTuiMainScreen(terminal);
-    const baseInput = vi.fn();
-    const overlayInput = vi.fn();
-    const base = component(["base"], baseInput);
-    const overlay = component(["overlay"], overlayInput);
-    const recordedBase = new RecordingComponent(base);
-    const recordedOverlay = new RecordingComponent(overlay);
-    tui.addChild(recordedBase);
-    tui.setFocus(recordedBase);
-    const seen: string[] = [];
-    tui.addInputListener((data) => { seen.push(data); return { data: data.toUpperCase() }; });
-    tui.start();
-
-    expect(terminal.injectInput("a")).toBe(true);
-    expect(seen).toEqual(["a"]);
-    expect(baseInput).toHaveBeenCalledWith("A");
-    expect(base.focused).toBe(true);
-
-    const handle = tui.showOverlay(recordedOverlay, { width: 10 });
-    expect(overlay.focused).toBe(true);
-    expect(base.focused).toBe(false);
-    tui.renderNow();
-    expect(base.render).toHaveBeenCalledTimes(1);
-    expect(overlay.render).toHaveBeenCalledTimes(1);
-    terminal.injectInput("b");
-    expect(overlayInput).toHaveBeenCalledWith("B");
-    handle.hide();
-    expect(base.focused).toBe(true);
-    tui.stop({ preserveScreen: true });
-  });
 
   it("bounds raw render output before compositor work and emits nothing after stop", () => {
     const terminal = new InMemoryTerminal(40, 12);

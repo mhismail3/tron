@@ -363,14 +363,6 @@ describe("KnowledgeStore", () => {
     await expect(store.setCoverage({ commandId: command("terminal-fake"), expectedConfigRevision: configured.revision, expectedRevision: published.coverage.revisionId, coverage: { id: "terminal", range: published.coverage.range, disposition: "empty", groupRevisionIds: [] } })).rejects.toThrow("Terminal");
   });
 
-  it("accepts canonical absolute workspace project identities for observation scope", async () => {
-    const { store } = await fixture();
-    const config = await store.config();
-    const configured = await store.configure(command("project-path-config"), { ...config, eligibility: { ...config.eligibility, projectIds: ["/Users/example/Workspace/project"] } });
-    expect(configured.eligibility.projectIds).toEqual(["/Users/example/Workspace/project"]);
-    await expect(store.setCoverage({ commandId: command("project-path-coverage"), expectedConfigRevision: configured.revision, coverage: { id: "project-path-coverage", range: { sessionId: "session-1", projectId: "/Users/example/Workspace/project", fromEntryId: "entry-1", toEntryId: "entry-1", entryIds: ["entry-1"], entryDigest: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" }, disposition: "excluded", groupRevisionIds: [] } })).resolves.toBeDefined();
-  });
-
   it("keeps observation disabled until an explicit model is configured", async () => {
     const { store } = await fixture();
     expect((await store.status()).config).toEqual(DEFAULT_KNOWLEDGE_CONFIG);

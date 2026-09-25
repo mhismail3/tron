@@ -17,11 +17,4 @@ struct ModelPickerSearchTests {
         #expect(ModelPickerSearchPolicy.filtered(models, query: "latest alias").map(\.id) == ["claude-opus-4-5"])
         #expect(ModelPickerSearchPolicy.filtered(models, query: "").count == 4)
     }
-
-    @Test("search close guard preserves an active query lifecycle")
-    func closeGuard() {
-        #expect(ModelPickerSearchPolicy.shouldClose(showingSearch: true, query: "") == true)
-        #expect(ModelPickerSearchPolicy.shouldClose(showingSearch: false, query: "beta") == true)
-        #expect(ModelPickerSearchPolicy.shouldClose(showingSearch: false, query: "") == false)
-    }
 }

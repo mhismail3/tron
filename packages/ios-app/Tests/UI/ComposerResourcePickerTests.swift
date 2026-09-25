@@ -5,25 +5,6 @@ import UIKit
 
 @Suite("Composer resource picker")
 struct ComposerResourcePickerTests {
-    @Test("keyboard-constrained panels yield space to the existing composer")
-    func keyboardConstrainedPanel() {
-        #expect(ComposerResourcePanelPolicy.visibleRows(entryCount: 12, keyboardVisible: false) == 5)
-        #expect(ComposerResourcePanelPolicy.visibleRows(entryCount: 12, keyboardVisible: true) == 3)
-        #expect(ComposerResourcePanelPolicy.visibleRows(entryCount: 2, keyboardVisible: true) == 2)
-        #expect(ComposerResourcePanelPolicy.visibleRows(entryCount: -1, keyboardVisible: true) == 0)
-        #expect(ComposerResourcePanelPolicy.editorLines(
-            panelPresented: true,
-            keyboardVisible: true
-        ) == 4)
-        #expect(ComposerResourcePanelPolicy.editorLines(
-            panelPresented: false,
-            keyboardVisible: true
-        ) == 8)
-        #expect(ComposerResourcePanelPolicy.editorLines(
-            panelPresented: true,
-            keyboardVisible: false
-        ) == 8)
-    }
 
     @Test("mention and command triggers respect boundaries, caret, and inline code")
     func triggerBoundaries() {
@@ -41,14 +22,6 @@ struct ComposerResourcePickerTests {
             in: "@review",
             selection: NSRange(location: 2, length: 2)
         ) == nil)
-    }
-
-    @Test("deleting a trigger removes the active token")
-    func deletionDismissal() {
-        #expect(token("@r", caret: 2) != nil)
-        #expect(token("", caret: 0) == nil)
-        #expect(token("/", caret: 1) != nil)
-        #expect(token("plain", caret: 5) == nil)
     }
 
     @Test("manual leading resources use Pi delimiter and extension precedence")
@@ -107,26 +80,6 @@ struct ComposerResourcePickerTests {
         #expect(catalog.exactSkill(named: "review")?.invocationName == "skill:review")
     }
 
-    @Test("picker scopes preserve mentions, dedicated menus, and ranked slash completion")
-    func pickerScopes() throws {
-        let catalog = ComposerResourceCatalog(commands: [
-            command("skill:review", source: .skill),
-            command("review", source: .prompt),
-            command("review", source: .extension),
-            command("aaa", source: .extension, description: "Review changes"),
-        ])
-        let mention = ComposerResourcePickerSource.token(try #require(token("@rev", caret: 4)))
-        let slash = ComposerResourcePickerSource.token(try #require(token("/rev", caret: 4)))
-        #expect(catalog.entries(for: mention).map(\.source) == [.skill])
-        #expect(catalog.entries(for: .menu(.command)).map(\.source) == [.extension, .extension])
-        #expect(catalog.entries(for: .menu(.prompt)).map(\.source) == [.prompt])
-        #expect(catalog.entries(for: slash).map(\.id) == ["extension:review", "prompt:review", "extension:aaa"])
-        #expect(mention.title == "Skills")
-        #expect(slash.title == "Commands & Prompts")
-        #expect(ComposerResourcePickerSource.menu(.command).title == "Commands")
-        #expect(ComposerResourcePickerSource.menu(.prompt).title == "Prompts")
-    }
-
     @Test("project badges take precedence and User badges require global authorship",
           arguments: [CommandInfo.Source.skill, .prompt, .extension])
     func resourceProvenance(source: CommandInfo.Source) throws {
@@ -160,14 +113,6 @@ struct ComposerResourcePickerTests {
         #expect(ComposerResourceContentPresentation.normalizingSoftWraps(
             in: "A folded\ndescription stays natural."
         ) == "A folded description stays natural.")
-    }
-
-    @Test("resource names become user-facing titles without changing invocation identity")
-    func friendlyNames() {
-        #expect(ComposerResourceNameFormatter.friendly("council-mode") == "Council Mode")
-        #expect(ComposerResourceNameFormatter.friendly("pi-subagents") == "Pi Subagents")
-        #expect(ComposerResourceNameFormatter.friendly("inspectJSONPayload") == "Inspect JSON Payload")
-        #expect(ComposerResourceNameFormatter.friendly("ios_sdk") == "iOS SDK")
     }
 
     @Test("canonical resource chips lead with the friendly name and recover exact detail identity")

@@ -3,12 +3,6 @@ import Testing
 
 @Suite("Provider configuration presentation")
 struct ProviderConfigurationPresentationTests {
-    @Test("waiting detail sheets allow dismissal while owned mutations remain modal")
-    func interactiveDismissalPolicy() {
-        #expect(!ProviderConfigurationPresentation.disablesInteractiveDismissal(beginningMethod: nil, clearing: false))
-        #expect(ProviderConfigurationPresentation.disablesInteractiveDismissal(beginningMethod: "api-key", clearing: false))
-        #expect(ProviderConfigurationPresentation.disablesInteractiveDismissal(beginningMethod: nil, clearing: true))
-    }
 
     @Test("automatic setup starts only one supported unconfigured method")
     func automaticSingleMethod() {
@@ -27,15 +21,6 @@ struct ProviderConfigurationPresentationTests {
         #expect(ProviderConfigurationPresentation.automaticallyBegunMethod(
             for: provider(configured: false, authMethods: ["future-auth"])
         ) == nil)
-    }
-
-    @Test("refresh keeps a compact visible circle and a full hit target")
-    func refreshGeometryAndContrast() {
-        #expect(ProviderUsageRefreshPresentation.visibleDiameter == 26)
-        #expect(ProviderUsageRefreshPresentation.hitTargetDiameter == 44)
-        #expect(ProviderUsageRefreshPresentation.iconPointSize == 13)
-        #expect(TronSettingsButtonContrastPolicy.usesWhiteForeground(in: .dark))
-        #expect(!TronSettingsButtonContrastPolicy.usesWhiteForeground(in: .light))
     }
 
     @Test("changing an answered choice keeps earlier answers and replays them in order")

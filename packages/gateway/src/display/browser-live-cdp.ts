@@ -10,7 +10,7 @@ const FRAME_INTERVAL_MS = 200;
 const MAXIMUM_TARGETS = 8;
 
 /** Frame credit pacing must use the same monotonic clock as lifetime fences. */
-export function browserFrameDelay(now: number, lastCreditAt: number): number {
+function browserFrameDelay(now: number, lastCreditAt: number): number {
   return Math.max(0, FRAME_INTERVAL_MS - (now - lastCreditAt));
 }
 

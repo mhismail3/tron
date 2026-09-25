@@ -14,8 +14,6 @@ import {
   admitCommandCatalog,
   boundCommandContent,
   boundStreamingProgressItem,
-  canonicalToolResultCallIDs,
-  canonicalToolResultCallIDsFromBranch,
   COMMAND_CATALOG_BYTES,
   COMMAND_CATALOG_ITEMS,
   COMMAND_CATALOG_STRING_BYTES,
@@ -170,80 +168,7 @@ describe("aggregate transcript structure", () => {
   });
 });
 
-describe("canonical branch acquisition", () => {
-  it.each(["full", "page"])("uses one SDK ancestry walk for %s projection and preserves filtered rows", (kind) => {
-    const manager = SessionManager.inMemory("/tmp/tron-projection-cut");
-    const userID = manager.appendMessage({ role: "user", content: [{ type: "text", text: "Input" }], timestamp: 1 });
-    manager.appendCustomEntry("fixture-hidden", { value: 1 });
-    const resultID = manager.appendMessage({ role: "toolResult", toolCallId: "call", toolName: "read",
-      content: [{ type: "text", text: "Result" }], isError: false, timestamp: 2 });
-    const original = JSON.stringify(manager.getBranch());
-    let branchReads = 0;
-    const reader = { getBranch: () => { branchReads++; return manager.getBranch(); }, getSessionId: () => manager.getSessionId() };
-    const blobs = new BlobStore();
-    const projection = kind === "full" ? projectTranscript(reader, blobs) : projectTranscriptPage(reader, blobs);
-    const items = Array.isArray(projection) ? projection : projection.items;
-    expect(items.map(item => item.id)).toEqual([userID, resultID]);
-    expect(items.map(item => item.kind === "message" ? item.content : undefined)).toEqual([
-      [{ id: `${userID}:0`, ordinal: 0, type: "text", text: "Input" }],
-      [{ id: `${resultID}:0`, ordinal: 0, type: "text", text: "Result" }],
-    ]);
-    if (!Array.isArray(projection)) {
-      expect(projection).toMatchObject({ start: 0, end: 2, total: 2 });
-      const branchCut = manager.getBranch();
-      const suppliedCut = projectTranscriptPage(
-        { getBranch: () => { throw new Error("unexpected second branch walk"); } },
-        blobs,
-        undefined,
-        undefined,
-        undefined,
-        undefined,
-        undefined,
-        undefined,
-        undefined,
-        undefined,
-        branchCut,
-      );
-      expect(suppliedCut.items.map(item => item.id)).toEqual(items.map(item => item.id));
-    }
-    expect(JSON.stringify(manager.getBranch())).toBe(original);
-    // Count the real SDK boundary, not an internal projection counter. Both
-    // row filtering and invocation binding must consume the same branch cut.
-    expect(branchReads).toBe(1);
-  });
-});
-
-describe("canonical tool ownership", () => {
-  it("recognizes exact tool-result call IDs from a supplied branch cut", () => {
-    const branch = [
-      { type: "message", message: { role: "toolResult", toolCallId: "call-cut" } },
-    ] as any;
-    expect([...canonicalToolResultCallIDsFromBranch(branch)]).toEqual(["call-cut"]);
-  });
-
-  it("recognizes exact tool-result call IDs across the full branch", () => {
-    const manager = {
-      getBranch: () => [
-        { type: "message", message: { role: "toolResult", toolCallId: "call-old" } },
-        { type: "message", message: { role: "toolResult", toolCallId: "call-error" } },
-        { type: "message", message: { role: "assistant", content: [] } },
-      ] as any,
-    };
-    expect([...canonicalToolResultCallIDs(manager)]).toEqual(["call-old", "call-error"]);
-    expect(canonicalToolResultCallIDs(manager).has("call-old")).toBe(true);
-    expect(canonicalToolResultCallIDs(manager).has("call-missing")).toBe(false);
-  });
-});
-
 describe("catalog projection admission", () => {
-  it("admits command catalogs atomically without changing their order", () => {
-    const commands = [
-      { name: "zeta", source: "prompt" as const, argumentHint: "[value]" },
-      { name: "alpha", source: "extension" as const, description: "Alpha" },
-    ];
-    expect(admitCommandCatalog(commands)).toBe(commands);
-    expect(admitCommandCatalog(commands).map((command) => command.name)).toEqual(["zeta", "alpha"]);
-  });
 
   it("bounds selected command content without splitting UTF-8 scalars", () => {
     const exact = "Council guidance";
@@ -288,30 +213,6 @@ describe("catalog projection admission", () => {
 });
 
 describe("transcript projection", () => {
-  it("retains optional extension provenance only in the disposable tool projection", () => {
-    const message: AgentMessage = {
-      role: "toolResult",
-      toolCallId: "call-extension",
-      toolName: "example-tool",
-      content: [{ type: "text", text: "done" }],
-      isError: false,
-      timestamp: 1,
-    };
-    const projected = projectMessage(
-      "result",
-      null,
-      "2026-01-01T00:00:00Z",
-      message,
-      new BlobStore(),
-      {
-        startedAt: "2026-01-01T00:00:00Z",
-        lastProgressAt: "2026-01-01T00:00:01Z",
-        progressSequence: 1,
-        extensionOrigin: { source: "public-source" },
-      },
-    );
-    expect(projected).toMatchObject({ extensionOrigin: { source: "public-source" } });
-  });
 
   it("promotes only an exact reserved display result into the typed transcript field", () => {
     const details = {

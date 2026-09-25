@@ -29,25 +29,6 @@ struct SessionSummaryPresentationTests {
         )
     }
 
-    @Test("dashboard activity timestamp is relative")
-    func relativeTimestamp() {
-        let now = Date(timeIntervalSince1970: 10_000)
-        let updated = ISO8601DateFormatter().string(from: now.addingTimeInterval(-2 * 60 * 60))
-        let session = SessionSummary(
-            id: "session",
-            name: "Session",
-            cwd: "/tmp/project",
-            parentSessionId: nil,
-            createdAt: updated,
-            updatedAt: updated,
-            messageCount: 1,
-            firstMessage: "hello",
-            phase: .idle
-        )
-
-        #expect(session.relativeActivityDescription(relativeTo: now).contains("2"))
-    }
-
     @Test("recency ordering compares parsed instants instead of ISO text precision")
     func parsedRecencyOrdering() {
         let wholeSecond = session("whole", updatedAt: "2026-01-01T00:00:00Z")
@@ -97,16 +78,6 @@ struct SessionSummaryPresentationTests {
         #expect(SessionSummary.orderedForDashboard([advanced, earlier]).map(\.id) == ["a-active", "z-active"])
     }
 
-    @Test("relative activity changes as the dashboard clock advances")
-    func relativeTimestampAges() {
-        let value = session("aging", updatedAt: "2026-01-01T00:00:00Z")
-        let oneMinute = GatewayTimestamp.parse("2026-01-01T00:01:00Z")!
-        let twoHours = GatewayTimestamp.parse("2026-01-01T02:00:00Z")!
-
-        #expect(value.relativeActivityDescription(relativeTo: oneMinute)
-            != value.relativeActivityDescription(relativeTo: twoHours))
-    }
-
     @Test("settled rows age in seconds without events or changes to their stable order")
     func settledRowsAgeWithoutReordering() {
         let first = session("a", updatedAt: "2026-01-01T00:00:00Z")
@@ -122,19 +93,6 @@ struct SessionSummaryPresentationTests {
             #expect(SessionSummary.orderedForDashboard(rows).map(\.id) == ["a", "b"])
         }
         #expect(first.updatedAt == "2026-01-01T00:00:00Z")
-    }
-
-    @Test("missing kind decodes as a user session")
-    func legacyKindCompatibility() throws {
-        let json = """
-        {"id":"legacy","name":null,"cwd":"/tmp/project","parentSessionId":null,"createdAt":"2026-01-01T00:00:00Z","updatedAt":"2026-01-01T00:00:00Z","messageCount":1,"firstMessage":"hello","phase":"idle","summaryRevision":0}
-        """
-        let decoded = try JSONDecoder().decode(SessionSummary.self, from: Data(json.utf8))
-        #expect(decoded.kind == .user)
-        #expect(decoded.foregroundPhase == nil)
-        #expect(!decoded.hasActiveSubagents)
-        #expect(!decoded.hasOnlyActiveSubagents)
-        #expect(SessionSummary.dashboardSessions([decoded]).map(\.id) == ["legacy"])
     }
 
     @Test("Automation creation origin is strict and survives gateway qualification")

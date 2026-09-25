@@ -145,11 +145,6 @@ describe("extension owner attribution", () => {
     expect(extensionOwnerFor(titledExtension(`${root}/.pi/extensions/index.ts`, { baseDir: `${root}/.pi` })).title).toBe("Extension");
   });
 
-  it("names an inline capability by its own generated name", async () => {
-    expect(extensionOwnerFor(titledExtension("<inline:tron-ask-user>", { source: "tron:ask-user.v1" })).title).toBe("Tron Ask User");
-    expect(extensionOwnerFor(titledExtension("<inline:tron-notify>", { source: "tron:notify.v1" })).title).toBe("Tron Notify");
-  });
-
   it("keeps installed package titles and disambiguates generic entry directories", async () => {
     // A specific entry directory still wins, so installed labels do not change.
     expect(extensionOwnerFor(titledExtension(

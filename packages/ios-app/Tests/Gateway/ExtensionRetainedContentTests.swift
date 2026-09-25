@@ -42,18 +42,6 @@ struct ExtensionRetainedContentTests {
         )
     }
 
-    @Test("unified activity button gives active subagents highest priority")
-    func unifiedActivityButtonPrecedence() {
-        #expect(UnifiedActivityButtonKind.select(hasActiveSubagents: true, hasExtensionContent: true, hasRecentSubagents: true) == .activeSubagents)
-        #expect(UnifiedActivityButtonKind.select(hasActiveSubagents: true, hasExtensionContent: true, hasRecentSubagents: false) == .activeSubagents)
-        #expect(UnifiedActivityButtonKind.select(hasActiveSubagents: true, hasExtensionContent: false, hasRecentSubagents: true) == .activeSubagents)
-        #expect(UnifiedActivityButtonKind.select(hasActiveSubagents: true, hasExtensionContent: false, hasRecentSubagents: false) == .activeSubagents)
-        #expect(UnifiedActivityButtonKind.select(hasActiveSubagents: false, hasExtensionContent: true, hasRecentSubagents: false) == .extensionContent)
-        #expect(UnifiedActivityButtonKind.select(hasActiveSubagents: false, hasExtensionContent: true, hasRecentSubagents: true) == .extensionContent)
-        #expect(UnifiedActivityButtonKind.select(hasActiveSubagents: false, hasExtensionContent: false, hasRecentSubagents: true) == .recentSubagents)
-        #expect(UnifiedActivityButtonKind.select(hasActiveSubagents: false, hasExtensionContent: false, hasRecentSubagents: false) == nil)
-    }
-
     @Test("no retained content means no sheet entry point")
     func emptyContentIsNotPresentable() {
         #expect(ExtensionRetainedContentPolicy.content(widgets: nil, surfaces: nil).isEmpty)
@@ -169,32 +157,5 @@ struct ExtensionRetainedContentTests {
         #expect(content.producers == [ExtensionRetainedContent.unknownProducer])
         // A status is not subject to the widget detail-hint filter.
         #expect(ExtensionRetainedContentPolicy.presentableStatusText("Press x to inspect ↓") == "Press x to inspect ↓")
-    }
-
-    @Test("statuses render after widgets and frames for the same producer")
-    func statusOrdering() {
-        let content = ExtensionRetainedContentPolicy.content(
-            widgets: [widget(key: "goal", lines: ["active"], owner: .init(id: "owner-goal", title: "Goal", source: "npm:pkg"))],
-            surfaces: nil,
-            statuses: ["pi-goal": "Pursuing goal"],
-            statusOwners: ["pi-goal": .init(id: "owner-goal", title: "Goal", source: "npm:pkg")]
-        )
-        #expect(content.producers == ["Goal"])
-        #expect(content.entries.map(\.id) == ["widget:goal", "status:pi-goal"])
-    }
-
-    @Test("surface producers never invent a friendlier identity than provenance")
-    func surfaceProducerTitle() {
-        #expect(ExtensionRetainedContentPolicy.surfaceProvenanceTitle("npm:@example/extension") == "npm:@example/extension")
-        #expect(ExtensionRetainedContentPolicy.surfaceProvenanceTitle("  inline  ") == "inline")
-        #expect(ExtensionRetainedContentPolicy.surfaceProvenanceTitle(nil) == ExtensionRetainedContent.unknownProducer)
-        #expect(ExtensionRetainedContentPolicy.surfaceProvenanceTitle("") == ExtensionRetainedContent.unknownProducer)
-        #expect(ExtensionRetainedContentPolicy.surfaceProvenanceTitle("   ") == ExtensionRetainedContent.unknownProducer)
-        // A long resolver string is bounded rather than allowed to overflow a
-        // section header.
-        let long = String(repeating: "a", count: 200)
-        let bounded = ExtensionRetainedContentPolicy.surfaceProvenanceTitle(long)
-        #expect(bounded.count == ExtensionRetainedContentPolicy.maximumProvenanceTitleLength + 1)
-        #expect(bounded.hasSuffix("…"))
     }
 }

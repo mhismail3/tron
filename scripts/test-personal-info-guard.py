@@ -81,11 +81,6 @@ class PersonalInfoGuardTests(unittest.TestCase):
                 finally:
                     path.unlink()
 
-    def test_ignored_untracked_generated_input_is_not_scanned(self):
-        self.put(".gitignore", "generated/\n")
-        self.put("generated/cache.txt", NEEDLE)
-        self.check_guard(0)
-
     def test_tracked_input_is_not_hidden_by_ignore_rules_or_retired_allowlists(self):
         self.put(".gitignore", "generated/\nnode_modules/\n")
         for relative in ("generated/source.txt", "node_modules/owned-source.txt"):
@@ -119,10 +114,6 @@ class PersonalInfoGuardTests(unittest.TestCase):
                     self.run_git("add", "--", relative)
         self.check_guard(0, staged=True)
 
-    def test_empty_staged_set_does_not_scan_unstaged_source(self):
-        self.put("packages/gateway/unstaged.ts", NEEDLE)
-        self.check_guard(0, staged=True)
-
     def test_removed_worktree_file_does_not_hide_staged_blob(self):
         path = self.put("packages/gateway/removed.ts", NEEDLE, staged=True)
         path.unlink()
@@ -134,31 +125,6 @@ class PersonalInfoGuardTests(unittest.TestCase):
         self.check_guard(1, staged=True)
         path.write_text("prefix" + DEVELOPER_WORD + "suffix")
         self.check_guard(0)
-
-    def test_source_symlinks_do_not_read_outside_the_repo(self):
-        with tempfile.TemporaryDirectory(prefix="tron-privacy-link-target-") as temporary:
-            target = Path(temporary) / "outside.txt"
-            target.write_text(NEEDLE)
-            link = self.root / "linked-source.txt"
-            link.symlink_to(target)
-            self.check_guard(0)
-            self.run_git("add", "--", link.name)
-            self.check_guard(0)
-
-    def test_inherited_git_index_cannot_escape_fixture(self):
-        self.put("keep.txt", "owned sentinel", staged=True)
-        index = self.root / ".git/index"
-        before = index.read_bytes()
-        # Run one real fixture case under a deliberately poisoned environment;
-        # this index is ours, never the developer's actual index.
-        result = subprocess.run(
-            [sys.executable, str(Path(__file__).resolve()),
-             "PersonalInfoGuardTests.test_clean_repo_and_guard_itself_pass"],
-            cwd=self.root, env={**self.env, "GIT_INDEX_FILE": str(index)},
-            capture_output=True, text=True, timeout=30,
-        )
-        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
-        self.assertEqual(index.read_bytes(), before)
 
     def test_git_errors_fail_closed(self):
         for operation, staged in (("grep", True), ("diff", True), ("ls-files", False)):

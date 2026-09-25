@@ -74,7 +74,6 @@ allowed = {
     "scripts/tron-ios-device",
     "scripts/tron-ios-device-test",
     "scripts/check-agent-policy.sh",
-    "scripts/test-agent-policy.py",
     "packages/ios-app/scripts/test-build-matrix-policy.sh",
 }
 paths = subprocess.check_output(

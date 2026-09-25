@@ -6,22 +6,6 @@ describe("shutdownStep", () => {
   // that clock instead of the production code taking an injected one.
   afterEach(() => { vi.useRealTimers(); });
 
-  it("records the awaited operation duration", async () => {
-    vi.useFakeTimers({ toFake: ["performance"] });
-    const records: Array<{ step: string; durationMs: number }> = [];
-    const result = await shutdownStep("transport-close", async () => {
-      vi.advanceTimersByTime(16);
-      return "closed";
-    }, (step, durationMs) => records.push({ step, durationMs }));
-    expect(result).toBe("closed");
-    expect(records).toEqual([{ step: "transport-close", durationMs: 16 }]);
-
-    // Negative control: a synchronous operation has zero elapsed time, not the awaited duration.
-    const control: number[] = [];
-    await shutdownStep("dispose", async () => undefined, (_step, durationMs) => control.push(durationMs));
-    expect(control).toEqual([0]);
-  });
-
   it("records elapsed time when a shutdown operation rejects", async () => {
     vi.useFakeTimers({ toFake: ["performance"] });
     const records: Array<{ step: string; durationMs: number }> = [];

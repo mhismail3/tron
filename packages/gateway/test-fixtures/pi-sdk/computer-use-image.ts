@@ -105,29 +105,3 @@ export function pngDimensions(image: ImageContent): PngDimensions {
   }
   return { width: bytes.readUInt32BE(16), height: bytes.readUInt32BE(20) };
 }
-
-/**
- * Fixture-only equivalent of a narrowly scoped public
- * `before_provider_request` extension. Production code must not choose a
- * detail value until a live-provider fidelity gate supplies evidence.
- */
-export function targetSyntheticNativeObservation(payload: unknown): unknown {
-  if (!isRecord(payload) || !Array.isArray(payload.input)) return payload;
-  let changed = false;
-  const input = payload.input.map((item) => {
-    if (!isRecord(item) || item.type !== "function_call_output" || item.call_id !== SYNTHETIC_NATIVE_CALL_ID || !Array.isArray(item.output)) {
-      return item;
-    }
-    const output = item.output.map((part) => {
-      if (!isRecord(part) || part.type !== "input_image") return part;
-      changed = true;
-      return { ...part, detail: "original" };
-    });
-    return { ...item, output };
-  });
-  return changed ? { ...payload, input } : payload;
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null;
-}

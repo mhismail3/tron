@@ -43,25 +43,6 @@ private final class DeferredTimelineRequest {
 @Suite("Automation catalog ownership")
 @MainActor
 struct AutomationCoordinatorTests {
-    @Test("timeline admission changes only for endpoint, connection, capability, or revision facts")
-    func timelineAdmissionKey() {
-        let base = AutomationTimelineAdmissionKey.Endpoint(
-            profileID: "profile", connectionID: 7, state: .connected,
-            capabilities: [AutomationAdmissionPolicy.capability, AutomationAdmissionPolicy.timelineCapability],
-            catalogRevision: 3
-        )
-        let same = AutomationTimelineAdmissionKey(endpoints: [base])
-        #expect(same == AutomationTimelineAdmissionKey(endpoints: [base]))
-        #expect(same != AutomationTimelineAdmissionKey(endpoints: [
-            .init(profileID: "profile", connectionID: 8, state: .connected, capabilities: base.capabilities, catalogRevision: 3)
-        ]))
-        #expect(same != AutomationTimelineAdmissionKey(endpoints: [
-            .init(profileID: "profile", connectionID: 7, state: .connected, capabilities: base.capabilities, catalogRevision: 4)
-        ]))
-        #expect(same != AutomationTimelineAdmissionKey(endpoints: [
-            .init(profileID: "profile", connectionID: 7, state: .connected, capabilities: [AutomationAdmissionPolicy.capability], catalogRevision: 3)
-        ]))
-    }
 
     @Test("only connected compatible Gateways enter Automation projections")
     func endpointAdmission() {
@@ -83,66 +64,6 @@ struct AutomationCoordinatorTests {
         #expect(!AutomationEndpointAdmissionPolicy.admits(disconnected))
         #expect(!AutomationEndpointAdmissionPolicy.admits(outdated))
         #expect(!AutomationEndpointAdmissionPolicy.admitsTimeline(outdated))
-    }
-
-    @Test("timeline loading retains stable content and delays compact refresh activity")
-    func timelineLoadingPresentation() {
-        #expect(AutomationTimelinePresentationPolicy.showsInitialLoading(
-            mode: .all,
-            catalogHasLoaded: false,
-            timelineAvailable: false,
-            timelineIsLoading: false,
-            visibleDayCount: 0
-        ))
-        #expect(!AutomationTimelinePresentationPolicy.showsInitialLoading(
-            mode: .all,
-            catalogHasLoaded: true,
-            timelineAvailable: false,
-            timelineIsLoading: false,
-            visibleDayCount: 0
-        ))
-        #expect(AutomationTimelinePresentationPolicy.showsInitialLoading(
-            mode: .upcoming,
-            catalogHasLoaded: true,
-            timelineAvailable: true,
-            timelineIsLoading: true,
-            visibleDayCount: 0
-        ))
-        #expect(!AutomationTimelinePresentationPolicy.showsInitialLoading(
-            mode: .upcoming,
-            catalogHasLoaded: true,
-            timelineAvailable: true,
-            timelineIsLoading: true,
-            visibleDayCount: 1
-        ))
-        #expect(AutomationTimelinePresentationPolicy.showsEmptyState(visibleDayCount: 0))
-        #expect(!AutomationTimelinePresentationPolicy.showsEmptyState(visibleDayCount: 1))
-        #expect(AutomationTimelinePresentationPolicy.emptyStateHeight(
-            viewportHeight: 800,
-            hasAttentionBanner: false
-        ) == 696)
-        #expect(AutomationTimelinePresentationPolicy.emptyStateHeight(
-            viewportHeight: 800,
-            hasAttentionBanner: true
-        ) == 280)
-        #expect(AutomationTimelinePresentationPolicy.emptyStateHeight(
-            viewportHeight: 300,
-            hasAttentionBanner: false
-        ) == 280)
-        #expect(!AutomationTimelinePresentationPolicy.showsRefreshIndicator(
-            isLoading: true,
-            delayElapsed: false
-        ))
-        #expect(AutomationTimelinePresentationPolicy.showsRefreshIndicator(
-            isLoading: true,
-            delayElapsed: true
-        ))
-        #expect(!AutomationTimelinePresentationPolicy.showsRefreshIndicator(
-            isLoading: false,
-            delayElapsed: true
-        ))
-        #expect(!AutomationTimelinePresentationPolicy.showsInventoryFilters(mode: .upcoming))
-        #expect(AutomationTimelinePresentationPolicy.showsInventoryFilters(mode: .all))
     }
 
     @Test("no eligible Gateway produces a neutral empty projection")
@@ -227,35 +148,6 @@ struct AutomationCoordinatorTests {
         try await eventually { coordinator.hasLoaded && !coordinator.isLoading }
         #expect(coordinator.summaries.isEmpty)
         #expect(coordinator.buckets.first?.failure?.contains("duplicate") == true)
-    }
-
-    @Test("timeline coordinator admits a dense series and groups it by presentation day")
-    func timelineSeries() async throws {
-        let start = Date.now.addingTimeInterval(3_600)
-        let first = GatewayTimestamp.string(from: start)
-        let last = GatewayTimestamp.string(from: start.addingTimeInterval(3_300))
-        let day = Calendar.current.startOfDay(for: start)
-        let dayStart = GatewayTimestamp.string(from: day)
-        let script = AutomationRequestScript { method, _ in
-            guard method == "automation.timeline.list" else {
-                throw GatewayFailure(code: "unexpected", message: method, retryable: false, details: nil)
-            }
-            return .object([
-                "catalogRevision": .number(4),
-                "items": .array([.object([
-                    "kind": .string("series"), "automationId": .string("automation-one"),
-                    "automationRevision": .number(2), "dayStart": .string(dayStart),
-                    "firstAt": .string(first), "lastAt": .string(last), "count": .number(60),
-                ])]),
-            ])
-        }
-        let endpoint = AutomationGatewayEndpoint(profile: profile(), client: AutomationRPCClient(request: script.request))
-        let coordinator = AutomationTimelineCoordinator(endpoints: { [endpoint] })
-        coordinator.load(start: start)
-        try await eventually { !coordinator.isLoading }
-        #expect(coordinator.days.count == 1)
-        #expect(coordinator.days.first?.items.first?.occurrence.kind == .series)
-        #expect(coordinator.days.first?.items.first?.occurrence.count == 60)
     }
 
     @Test("revised timeline admission rejects a delayed predecessor and keeps one request per refresh")

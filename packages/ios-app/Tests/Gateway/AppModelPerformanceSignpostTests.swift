@@ -198,80 +198,6 @@ struct AppModelPerformanceSignpostTests {
         }
     }
 
-    @Test("mounted live snapshots require exact runtime and next cursor")
-    func mountedLiveSnapshotAdmission() async throws {
-        try await withTestWatchdog {
-            let harness = try await makeHarness()
-            let snapshot = try SessionScenarioBuilder(seed: 46).openingTail(targetEncodedBytes: 8_192)
-            let responder = Task {
-                let progress = try await respondToSessionSynchronization(
-                    socket: harness.socket,
-                    firstFrameIndex: 1,
-                    snapshot: snapshot
-                )
-                try await respondToPresentationRefreshes(
-                    socket: harness.socket,
-                    firstFrameIndex: progress.nextFrameIndex,
-                    excluding: progress.handledRefreshes
-                )
-            }
-            defer { responder.cancel() }
-
-            let presentationGeneration = try await harness.model.openSessionPresentation(snapshot.sessionId)
-            try await valueOfOwnedTask(responder)
-
-            var duplicate = snapshot
-            duplicate.phase = .running
-            duplicate.name = "same-cursor replacement"
-            await harness.model.handle(GatewayEvent(
-                type: "event",
-                topic: "session.snapshot",
-                sessionId: snapshot.sessionId,
-                payload: try JSONValue.encode(duplicate)
-            ))
-            let afterDuplicate = await MainActor.run {
-                harness.model.authoritativeSnapshot(for: snapshot.sessionId)
-            }
-            #expect(afterDuplicate == snapshot)
-
-            var next = snapshot
-            next.eventSequence += 1
-            next.phase = .running
-            await harness.model.handle(GatewayEvent(
-                type: "event",
-                topic: "session.snapshot",
-                sessionId: snapshot.sessionId,
-                payload: try JSONValue.encode(next)
-            ))
-            let afterNext = await MainActor.run {
-                harness.model.authoritativeSnapshot(for: snapshot.sessionId)
-            }
-            #expect(afterNext?.eventSequence == next.eventSequence)
-            #expect(afterNext?.phase == .running)
-
-            let target = AppModel.SessionPresentationTarget(
-                sessionID: snapshot.sessionId,
-                generation: presentationGeneration
-            )
-            await MainActor.run { harness.model.revokePresentationIntake(target) }
-            var afterRevocation = next
-            afterRevocation.eventSequence += 1
-            afterRevocation.name = "revoked presentation"
-            await harness.model.handle(GatewayEvent(
-                type: "event",
-                topic: "session.snapshot",
-                sessionId: snapshot.sessionId,
-                payload: try JSONValue.encode(afterRevocation)
-            ))
-            let rejectedAfterRevocation = await MainActor.run {
-                harness.model.selectedSnapshot
-            }
-            #expect(rejectedAfterRevocation?.eventSequence == next.eventSequence)
-            #expect(rejectedAfterRevocation?.name != "revoked presentation")
-            await harness.close()
-        }
-    }
-
     @Test("reconnect restoration opens only the still-mounted presentation")
     func reconnectRestoresMountedPresentation() async throws {
         try await withTestWatchdog {
@@ -485,35 +411,6 @@ struct AppModelPerformanceSignpostTests {
                 Issue.record("wire possibly-sent error unexpectedly succeeded")
             } catch let failure as GatewayFailure {
                 #expect(failure.code == "possibly_sent")
-            }
-            #expect(await harness.socket.sentFrames().count == 2)
-            #expect(harness.signposts.events().isEmpty)
-            await harness.close()
-        }
-    }
-
-    @Test("definitive retryable application errors do not enter receipt polling")
-    func retryableApplicationErrorIsDefinitive() async throws {
-        try await withTestWatchdog {
-            let harness = try await makeHarness()
-            let mutation = Task {
-                try await harness.model.setModel(
-                    ModelRef(provider: "test", id: "model"),
-                    sessionID: "mounted-route"
-                )
-            }
-            defer { mutation.cancel() }
-            let request = try await request(in: harness.socket, frameIndex: 1)
-            await harness.socket.enqueue(errorResponse(
-                id: request.id,
-                code: "busy",
-                retryable: true
-            ))
-            do {
-                try await valueOfOwnedTask(mutation)
-                Issue.record("retryable application rejection unexpectedly succeeded")
-            } catch let failure as GatewayFailure {
-                #expect(failure.code == "busy")
             }
             #expect(await harness.socket.sentFrames().count == 2)
             #expect(harness.signposts.events().isEmpty)

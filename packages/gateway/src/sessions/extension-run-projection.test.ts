@@ -458,17 +458,6 @@ describe("projectExtensionRunActivity", () => {
     expect(artifactTime.lifecycle?.producerUpdatedAt).toBe("2026-01-01T00:00:03.000Z");
   });
 
-  it("keeps a generic extension activity when details are not structured", () => {
-    const activity = projectExtensionRunActivity(undefined, base);
-    expect(activity).toMatchObject({
-      id: "tool-call",
-      toolCallId: "tool-call",
-      source: { source: "pi-subagents" },
-      status: "running",
-      children: [],
-    });
-  });
-
   it("retains the last structured values when a terminal result omits progress", () => {
     const running = projectExtensionRunActivity({
       details: {

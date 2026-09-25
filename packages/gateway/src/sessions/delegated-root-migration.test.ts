@@ -1,7 +1,5 @@
 import { chmod, lstat, mkdir, mkdtemp, readFile, rename, rm, symlink, truncate, writeFile } from "node:fs/promises";
-import { existsSync } from "node:fs";
-import { execFileSync } from "node:child_process";
-import { homedir, tmpdir } from "node:os";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import {
@@ -140,19 +138,6 @@ describe("delegated provider root cutover", () => {
     expect(JSON.parse(await readFile(join(value.destinationRoot, "refs.json"), "utf8"))).toEqual({ same: value.destinationRoot, child: value.destinationRoot + "/a", other: source + "-other/a" });
   });
 
-  it("uses the pinned provider root contract in an isolated child process", () => {
-    const provider = join(homedir(), ".tron", "agent", "npm", "node_modules", "pi-subagents");
-    if (!existsSync(join(provider, "src", "shared", "types.ts"))) return;
-    const root = join(tmpdir(), `tron-provider-fixture-${process.pid}`);
-    const output = execFileSync(process.execPath, ["--input-type=module", "--eval", [
-      "import { createJiti } from 'jiti';",
-      "const dirs = await createJiti(process.cwd() + '/fixture.mjs').import('./src/shared/types.ts');",
-      "console.log(JSON.stringify(dirs.DIRS));",
-    ].join(" ")], { cwd: provider, env: { ...process.env, PI_SUBAGENTS_TEMP_ROOT: root }, encoding: "utf8" });
-    const dirs = JSON.parse(output.trim()) as { async: string; results: string };
-    expect(dirs.async).toBe(join(root, "async-subagent-runs"));
-    expect(dirs.results).toBe(join(root, "async-subagent-results"));
-  });
   it("inventories and migrates retained terminal artifacts while rewriting only provider-root references", async () => {
     const root = await fixture("tron-delegated-cutover-");
     const value = options(root);

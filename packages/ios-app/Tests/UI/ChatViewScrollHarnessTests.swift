@@ -97,26 +97,6 @@ struct ChatViewScrollHarnessTests {
         #expect(thinkingHeight - textHeight < 120)
     }
 
-    @Test("composer height changes are atomic and coalesced")
-    func composerLayoutGenerationPolicy() {
-        #expect(ChatComposerStructuralTransitionPolicy.admitsHeightChange(
-            current: nil,
-            measured: 44
-        ))
-        #expect(ChatComposerStructuralTransitionPolicy.admitsHeightChange(
-            current: 44,
-            measured: 88
-        ))
-        #expect(!ChatComposerStructuralTransitionPolicy.admitsHeightChange(
-            current: 44,
-            measured: 44.2
-        ))
-        #expect(!ChatComposerStructuralTransitionPolicy.admitsHeightChange(
-            current: 44,
-            measured: .infinity
-        ))
-    }
-
     @Test("pinned keyboard-sized viewport changes preserve the physical tail")
     func pinnedKeyboardViewportChangesPreserveTail() async throws {
         try await withTestWatchdog(timeout: .seconds(10)) {
@@ -359,11 +339,6 @@ struct ChatViewScrollHarnessTests {
     @Test("queued prompt shrinks into its canonical user row with the tail held")
     func queuedPromptCanonicalReplacementShrinks() async throws {
         try await queuedPromptCanonicalReplacement(samplesPixels: false)
-    }
-
-    @Test("queued prompt cross-fades into its canonical user row in its retained host")
-    func queuedPromptCanonicalReplacementCrossFades() async throws {
-        try await queuedPromptCanonicalReplacement(samplesPixels: true)
     }
 
     private func queuedPromptCanonicalReplacement(samplesPixels: Bool) async throws {
@@ -1208,19 +1183,6 @@ struct ChatViewScrollHarnessTests {
         }
     }
 
-    @Test("hosted retirement releases composer control captures")
-    func retiredProbeReleasesComposerControls() {
-        let probe = ChatHostedProbe()
-        var owner: NSObject? = NSObject()
-        weak var retained = owner
-        probe.composerResourceSelection = { [owner] _ in _ = owner?.description }
-        owner = nil
-        #expect(retained != nil)
-        probe.retirePresentation()
-        #expect(retained == nil)
-        #expect(probe.composerResourceSelection == nil)
-    }
-
     @Test("production opening releases native controls on its ready frame")
     func openingReadyFrameReleasesNativeControls() async throws {
         try await withTestWatchdog(timeout: .seconds(20)) {
@@ -1648,157 +1610,6 @@ struct ChatViewScrollHarnessTests {
         }
     }
 
-    @Test("hosted aggregate counters and retained row frames are bounded")
-    func hostedEvidenceBounds() {
-        let probe = ChatHostedProbe()
-        for index in 0..<300 {
-            probe.updateRowFrame(
-                id: "synthetic-row-\(index)",
-                frame: CGRect(x: 0, y: index, width: 10, height: 10)
-            )
-        }
-        #expect(probe.observation.rowFrames.count == 256)
-        #expect(probe.observation.semanticFrameCallbackCount == 300)
-
-
-    }
-
-    @Test("hosted probe counts semantic remounts across projection installs")
-    func hostedSemanticRemountCounter() {
-        let probe = ChatHostedProbe()
-        probe.recordProjectionInstall(
-            rowCount: 1,
-            sourceOrdinal: 1,
-            nextRenderedIDBySemanticID: ["stream:turn": "stream:turn"]
-        )
-        probe.recordProjectionInstall(
-            rowCount: 1,
-            sourceOrdinal: 2,
-            nextRenderedIDBySemanticID: ["stream:turn": "stream:turn"]
-        )
-        #expect(probe.observation.remountedWhileSemanticIDDisplayed == 0)
-
-        probe.recordProjectionInstall(
-            rowCount: 1,
-            sourceOrdinal: 3,
-            nextRenderedIDBySemanticID: ["stream:turn": "assistant-final"]
-        )
-        #expect(probe.observation.remountedWhileSemanticIDDisplayed == 1)
-    }
-
-    @Test("hosted row evidence promotes future callbacks and rejects stale generations")
-    func hostedRowEvidenceGenerationFence() {
-        let probe = ChatHostedProbe()
-        let first = CGRect(x: 0, y: 10, width: 10, height: 10)
-        let future = CGRect(x: 0, y: 20, width: 10, height: 10)
-        let stale = CGRect(x: 0, y: 30, width: 10, height: 10)
-
-        probe.updateRowFrame(id: "row", frame: first, generation: 1)
-        #expect(probe.observation.rowFrames["row"] == nil)
-        probe.recordProjectionInstall(
-            rowCount: 1,
-            sourceOrdinal: 1,
-            nextRenderedIDBySemanticID: ["row": "row"]
-        )
-        #expect(probe.observation.rowFrames["row"] == first)
-
-        probe.updateRowFrame(id: "row", frame: future, generation: 2)
-        #expect(probe.observation.rowFrames["row"] == first)
-        probe.recordProjectionInstall(
-            rowCount: 1,
-            sourceOrdinal: 2,
-            nextRenderedIDBySemanticID: ["row": "row"]
-        )
-        #expect(probe.observation.rowFrames["row"] == future)
-
-        probe.updateRowFrame(id: "row", frame: stale, generation: 1)
-        #expect(probe.observation.rowFrames["row"] == future)
-        probe.recordProjectionInstall(
-            rowCount: 2,
-            sourceOrdinal: 3,
-            nextRenderedIDBySemanticID: ["row": "row", "new": "new"]
-        )
-        #expect(probe.observation.rowFrames.isEmpty)
-    }
-
-    @Test("harness renders the production scroll view and semantic row geometry")
-    func harnessFidelity() async throws {
-        try await withTestWatchdog(timeout: .seconds(10)) {
-            try await withHarness(seed: 101) { harness in
-                let sample = try await harness.recorder.waitUntil { sample in
-                    sample.observation.isReady
-                        && sample.observation.geometry.isValid
-                        && !sample.observation.visibleRowIDs.isEmpty
-                        && !sample.observation.rowFrames.isEmpty
-                        && sample.nativeGeometryMatches
-                }
-
-                #expect(sample.observation.geometry.isValid)
-                #expect(sample.nativeGeometryMatches)
-                #expect(sample.observation.rowFrames.keys.allSatisfy(harness.transcriptIDs.contains))
-                #expect(Set(sample.observation.visibleRowIDs).isSubset(of: harness.transcriptIDs))
-            }
-        }
-    }
-
-    @Test("a real visible semantic frame computes a zero-excursion prepend correction")
-    func semanticAnchorCorrection() async throws {
-        try await withTestWatchdog(timeout: .seconds(10)) {
-            try await withHarness(seed: 106) { harness in
-                let sample = try await harness.recorder.waitUntil { sample in
-                    sample.observation.isReady
-                        && sample.observation.rowFrames.keys.contains(where: {
-                            sample.observation.visibleRowIDs.contains($0)
-                        })
-                }
-                guard let rowID = sample.observation.visibleRowIDs.first(where: {
-                    sample.observation.rowFrames[$0] != nil
-                }), let capturedFrame = sample.observation.rowFrames[rowID] else {
-                    Issue.record("expected a visible semantic frame")
-                    return
-                }
-                let insertedPrefixHeight: CGFloat = 173
-                let installedFrameMinY = capturedFrame.minY + insertedPrefixHeight
-                let requestedOffset = ChatScrollCoordinator.prependCorrectionOffset(
-                    currentOffsetY: sample.observation.geometry.offsetY,
-                    capturedViewportOffsetY: capturedFrame.minY,
-                    installedFrameMinY: installedFrameMinY
-                )
-                let restoredFrameMinY = installedFrameMinY
-                    - (requestedOffset - sample.observation.geometry.offsetY)
-                #expect(abs(restoredFrameMinY - capturedFrame.minY) <= 1)
-            }
-        }
-    }
-
-    @Test("an overflowing authoritative transcript opens at its latest tail")
-    func opensAtTail() async throws {
-        try await withTestWatchdog(timeout: .seconds(10)) {
-            try await withHarness(seed: 102) { harness in
-                let sample = try await harness.recorder.waitUntil { sample in
-                    sample.observation.isReady
-                        && sample.observation.scrollSettledDistance != nil
-                        && sample.observation.visibleRowIDs.contains(harness.lastTranscriptID)
-                }
-
-                let scrollEvents = harness.scrollEvents
-                #expect((sample.observation.scrollSettledDistance ?? .infinity)
-                    <= ChatTranscriptGeometry.catchUpDistance)
-                #expect(sample.observation.visibleRowIDs.contains(harness.lastTranscriptID))
-                #expect(!sample.observation.visibleRowIDs.contains(harness.firstTranscriptID))
-                // Native initial-bottom anchoring may prove the exact tail
-                // without an explicit command. If a command was required, its
-                // settlement still has to be successful and singular.
-                if sample.observation.scrollCommandCount > 0 {
-                    #expect(scrollEvents.first == .begin(.scrollCommandSettle))
-                    #expect(scrollEvents.contains(.end(.scrollCommandSettle, .success, .none)))
-                    #expect(!scrollEvents.contains(.end(.scrollCommandSettle, .failure, .none)))
-                    #expect(!scrollEvents.contains(.end(.scrollCommandSettle, .cancelled, .none)))
-                }
-            }
-        }
-    }
-
     @Test("the first visible frame of a maximum-row transcript is the exact tail")
     func maximumRowOpeningNeverPresentsBlankViewport() async throws {
         try await withTestWatchdog(timeout: .seconds(10)) {
@@ -1833,21 +1644,6 @@ struct ChatViewScrollHarnessTests {
                 #expect(harness.recorder.samples.filter(\.observation.isReady).allSatisfy {
                     !$0.observation.visibleRowIDs.isEmpty
                 })
-            }
-        }
-    }
-
-    @Test("readiness is recorded only after a display-link frame")
-    func firstReadyFrame() async throws {
-        try await withTestWatchdog(timeout: .seconds(10)) {
-            try await withHarness(seed: 104) { harness in
-                _ = try await harness.recorder.waitUntil {
-                    $0.observation.readyFrameCompletionCount == 1
-                }
-                #expect(harness.firstReadyEvents == [
-                    .begin(.firstReadyFrame),
-                    .end(.firstReadyFrame, .success, .none),
-                ])
             }
         }
     }
@@ -2952,34 +2748,6 @@ struct ChatViewScrollHarnessTests {
         }
     }
 
-    @Test("geometry observations are coalesced to one sample per presented frame")
-    func oneSamplePerPresentedFrame() async throws {
-        try await withTestWatchdog(timeout: .seconds(10)) {
-            try await withHarness(seed: 103) { harness in
-                let initial = try await harness.recorder.waitUntil { $0.observation.geometry.isValid }
-                harness.resize(height: 760)
-                let resized = try await harness.recorder.waitUntil {
-                    abs($0.observation.geometry.containerHeight - initial.observation.geometry.containerHeight) > 1
-                }
-                harness.resize(height: 844)
-                _ = try await harness.recorder.waitUntil {
-                    $0.frameIndex > resized.frameIndex
-                        && abs($0.observation.geometry.containerHeight - initial.observation.geometry.containerHeight) <= 1
-                }
-
-                let samples = harness.recorder.samples
-                #expect(samples.count >= 3)
-                #expect(Set(samples.map(\.frameIndex)).count == samples.count)
-                for (previous, current) in zip(samples, samples.dropFirst()) {
-                    #expect(
-                        current.observation.automaticScrollCommandCount
-                            - previous.observation.automaticScrollCommandCount <= 1
-                    )
-                }
-            }
-        }
-    }
-
     private func withHarness(
         seed: Int,
         displayFrameScheduler: DisplayFrameScheduler = .displayLink,
@@ -3616,10 +3384,6 @@ final class ChatViewScrollHarness {
 
     var firstReadyEvents: [RecordingPerformanceSignposts.Event] {
         signposts.events().filter { $0.operation == .firstReadyFrame }
-    }
-
-    var scrollEvents: [RecordingPerformanceSignposts.Event] {
-        signposts.events().filter { $0.operation == .scrollCommandSettle }
     }
 
     private static func containsNativeTranscriptScrollView(

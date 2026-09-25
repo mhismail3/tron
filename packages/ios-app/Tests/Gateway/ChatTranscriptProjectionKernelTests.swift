@@ -619,34 +619,6 @@ struct ChatTranscriptProjectionKernelTests {
         #expect(!duplicate.isValid)
     }
 
-    @Test("cold work reports exact aggregate-only counts")
-    func aggregateWorkReport() throws {
-        let snapshot = try fixture(transcript: """
-        [{"id":"user","parentId":null,"timestamp":"2026-01-01T00:00:00Z","kind":"message","role":"user","content":[{"id":"text","type":"text","text":"private prompt"}]}]
-        """)
-        let recorder = ProjectionWorkRecorder()
-        let candidate = ChatTranscriptProjectionKernel.cold(
-            snapshot: snapshot,
-            workRecorder: recorder.record
-        )
-
-        #expect(candidate.workReport == ChatTranscriptProjectionWorkReport(
-            mode: .cold,
-            sourceEntriesExamined: 1,
-            fragmentsReused: 0,
-            fragmentsRebuilt: 1,
-            toolsInspected: 0,
-            toolsPatched: 0,
-            atomsAssembled: 2,
-            renderedItemCount: 1
-        ))
-        #expect(recorder.reports == [candidate.workReport])
-        #expect(Set(Mirror(reflecting: candidate.workReport).children.compactMap(\.label)) == [
-            "mode", "sourceEntriesExamined", "fragmentsReused", "fragmentsRebuilt",
-            "toolsInspected", "toolsPatched", "atomsAssembled", "renderedItemCount",
-        ])
-    }
-
     @Test("100 and 256 legacy unanchored tools fail closed to distinct deterministic rows", arguments: [100, 256])
     func largeToolBursts(count: Int) throws {
         let builder = SessionScenarioBuilder(seed: 1_301 + count)

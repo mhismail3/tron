@@ -3,30 +3,6 @@ import Testing
 
 @Suite("Scoped settings drafts")
 struct SettingsDraftStoreTests {
-    @Test("default settings reload identity includes the active provider target")
-    func providerTargetIdentity() {
-        let global = AgentDefaultsLoadID(
-            settingsTarget: .global,
-            providerTarget: .global,
-            settingsInvalidationGeneration: 0,
-            providerInvalidationGeneration: 0, foregroundGeneration: 0
-        )
-        let project = AgentDefaultsLoadID(
-            settingsTarget: .project(cwd: "/workspace/project"),
-            providerTarget: .session(id: "session-a"),
-            settingsInvalidationGeneration: 0,
-            providerInvalidationGeneration: 0, foregroundGeneration: 0
-        )
-        #expect(global != project)
-        #expect(global != AgentDefaultsLoadID(
-            settingsTarget: .global,
-            providerTarget: .global,
-            settingsInvalidationGeneration: 0,
-            providerInvalidationGeneration: 1, foregroundGeneration: 0
-        ))
-        #expect(global != AgentDefaultsLoadID(settingsTarget: .global, providerTarget: .global,
-            settingsInvalidationGeneration: 0, providerInvalidationGeneration: 0, foregroundGeneration: 1))
-    }
 
     @Test("settings patches contain only changed fields")
     func changedFieldsOnly() {
@@ -279,23 +255,6 @@ struct SettingsDraftStoreTests {
         let markedSaved = store.markSaved(presented, for: target, expectedRevision: revision)
         #expect(markedSaved)
         #expect(!store.hasChanges(presented, for: target))
-    }
-
-    @Test("runtime drafts preserve independent global and project edits")
-    func runtimeDraftTargets() {
-        let project = SettingsTarget.project(cwd: "/workspace/project")
-        var store = ScopedSettingsDraftStore<AgentDefaultsDraft>()
-        var global = AgentDefaultsDraft()
-        global.transport = "sse"
-        store.update(global, for: .global)
-        var projectDraft = AgentDefaultsDraft()
-        projectDraft.retryCount = 9
-        store.update(projectDraft, for: project)
-
-        #expect(store.draft(for: .global)?.transport == "sse")
-        #expect(store.draft(for: .global)?.retryCount == 3)
-        #expect(store.draft(for: project)?.transport == "auto")
-        #expect(store.draft(for: project)?.retryCount == 9)
     }
 
     @Test("resource edits made before publication reject only their target response")

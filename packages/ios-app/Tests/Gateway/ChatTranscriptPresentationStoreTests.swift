@@ -1023,27 +1023,6 @@ struct ChatTranscriptPresentationStoreTests {
         }
     }
 
-    @Test("paging bounds distinguish projections without revision advancement")
-    func pagingTagDistinction() throws {
-        var snapshot = try SessionScenarioBuilder(seed: 1_204)
-            .openingTail(targetEncodedBytes: 8_000)
-        snapshot.transcriptStart = 10
-        snapshot.transcriptTotal = snapshot.transcript.count + 10
-        let original = ChatTranscriptProjectionTag(snapshot: snapshot, presentationGeneration: 10)
-
-        snapshot.transcript.insert(
-            contentsOf: SessionScenarioBuilder(seed: 1_205)
-                .historyPage(count: 2, longRowBytes: 16),
-            at: 0
-        )
-        snapshot.transcriptStart = 8
-        let paged = ChatTranscriptProjectionTag(snapshot: snapshot, presentationGeneration: 10)
-
-        #expect(original.canonicalGeneration == paged.canonicalGeneration)
-        #expect(original.timelineGeneration == paged.timelineGeneration)
-        #expect(original != paged)
-    }
-
     @Test("warm canonical cache rejects changed paging bounds and edge identity")
     func warmCachePagingParity() async throws {
         try await withTestWatchdog { @MainActor in
@@ -1601,19 +1580,6 @@ struct ChatTranscriptPresentationStoreTests {
             ))
             #expect(store.entranceState(for: rowID) == .none)
         }
-    }
-
-    // A prompt replacement animates its height only for an ordinary change on
-    // an active surface without Reduce Motion; otherwise it installs at once.
-    @Test("prompt replacement height animates only for bounded changes on an active surface")
-    func promptReplacementHeightPolicy() {
-        #expect(ChatPromptReplacementHeightPolicy.animates(from: 80, to: 44, surfaceActive: true, reduceMotion: false))
-        #expect(ChatPromptReplacementHeightPolicy.animates(from: 44, to: 80, surfaceActive: true, reduceMotion: false))
-        #expect(!ChatPromptReplacementHeightPolicy.animates(from: 44, to: 44.4, surfaceActive: true, reduceMotion: false))
-        #expect(!ChatPromptReplacementHeightPolicy.animates(from: 80, to: 44, surfaceActive: true, reduceMotion: true))
-        #expect(!ChatPromptReplacementHeightPolicy.animates(from: 80, to: 44, surfaceActive: false, reduceMotion: false))
-        #expect(!ChatPromptReplacementHeightPolicy.animates(from: 4_000, to: 44, surfaceActive: true, reduceMotion: false))
-        #expect(!ChatPromptReplacementHeightPolicy.animates(from: .infinity, to: 44, surfaceActive: true, reduceMotion: false))
     }
 
     // A lifecycle row that renders the queued card looks different from the
@@ -2655,52 +2621,6 @@ struct ChatTranscriptPresentationStoreTests {
         #expect(window.start == nil)
         #expect(!window.hasExactBounds)
         #expect(window.ids.count == ChatTranscriptPageRequest.maximumItemCount)
-    }
-
-    @Test("maximum canonical page prepares off-main and installs one complete timeline")
-    func maximumPageProjection() async throws {
-        try await withTestWatchdog(timeout: .seconds(10)) { @MainActor in
-            let builder = SessionScenarioBuilder(seed: 1_208)
-            var snapshot = try builder.openingTail(targetEncodedBytes: 8_000)
-            let totalEntries = 10_000
-            snapshot.transcript = builder.pagedMixedSession(totalEntries: totalEntries).page(
-                before: totalEntries,
-                count: totalEntries
-            )
-            snapshot.transcriptStart = 0
-            snapshot.transcriptTotal = totalEntries
-            let tag = ChatTranscriptProjectionTag(snapshot: snapshot, presentationGeneration: 13)
-            let store = ChatTranscriptPresentationStore()
-
-            store.submit(snapshot: snapshot, tag: tag)
-            var mainActorMutation = 0
-            mainActorMutation += 1
-            #expect(mainActorMutation == 1)
-            let installed = try await store.waitForInstall(of: tag)
-            #expect(installed.timeline.isInternallyConsistent)
-            #expect(!installed.timeline.items.isEmpty)
-        }
-    }
-
-    @Test("blocked detached projection never blocks MainActor responsiveness")
-    func mainActorRemainsResponsive() async throws {
-        try await withTestWatchdog { @MainActor in
-            let snapshot = try SessionScenarioBuilder(seed: 1_207)
-                .openingTail(targetEncodedBytes: 8_000)
-            let tag = ChatTranscriptProjectionTag(snapshot: snapshot, presentationGeneration: 12)
-            let barrier = TranscriptProjectionBarrier()
-            let store = ChatTranscriptPresentationStore(workGate: barrier.block)
-
-            store.submit(snapshot: snapshot, tag: tag)
-            await barrier.waitForBuildCount(1)
-            var mainActorMutation = 0
-            mainActorMutation += 1
-            #expect(mainActorMutation == 1)
-            #expect(store.installed == nil)
-
-            barrier.releaseBuild(at: 0)
-            _ = try await store.waitForInstall(of: tag)
-        }
     }
 }
 

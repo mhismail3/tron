@@ -22,18 +22,6 @@ struct GatewayTimestampTests {
         #expect(offset != canonical)
     }
 
-    @Test("relative labels preserve the established formatter semantics")
-    func relative() throws {
-        let reference = try #require(GatewayTimestamp.parse("2026-01-02T04:04:05Z"))
-        let formatter = RelativeDateTimeFormatter()
-        formatter.unitsStyle = .abbreviated
-        let date = try #require(GatewayTimestamp.parse("2026-01-02T03:04:05Z"))
-        #expect(
-            GatewayTimestamp.relativeDescription("2026-01-02T03:04:05Z", relativeTo: reference)
-                == formatter.localizedString(for: date, relativeTo: reference)
-        )
-    }
-
     @Test("shared formatter access remains deterministic under concurrency")
     func concurrency() async {
         await withTaskGroup(of: String.self) { group in

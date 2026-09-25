@@ -4,31 +4,6 @@ import Testing
 @MainActor
 @Suite("Chat session presentation ownership")
 struct ChatSessionPresentationTests {
-    @Test("cold reopen creates clean disposable state and no replay ledger")
-    func coldReopen() {
-        let retired = ChatSessionPresentation(sessionID: "session-a")
-        retired.showContext = true
-        retired.showSettings = true
-        retired.showActivity = true
-        retired.modelPresentationGeneration = 7
-        retired.canonicalSubmissionHandoffs.formUnion(["prompt-a"])
-        retired.queueMutationCommandIsPending = true
-        retired.locallyMutatedQueueOperationIDs = ["operation-a"]
-
-        let reopened = ChatSessionPresentation(sessionID: "session-a")
-
-        #expect(reopened.open.phase == .opening)
-        #expect(reopened.modelPresentationGeneration == nil)
-        #expect(reopened.canonicalSubmissionHandoffs.ids.isEmpty)
-        #expect(!reopened.queueMutationCommandIsPending)
-        #expect(reopened.locallyMutatedQueueOperationIDs.isEmpty)
-        #expect(!reopened.showContext)
-        #expect(!reopened.showSettings)
-        #expect(!reopened.showActivity)
-        #expect(!reopened.permitsExtensionInteractionPresentation)
-        #expect(reopened.requestedInteractionScope == nil)
-        #expect(reopened.suppressedInteractionScope == nil)
-    }
 
     @Test("pending interaction has one stable presentation owner and explicit reopen intent")
     func interactionPresentationOwnership() {
@@ -122,44 +97,6 @@ struct ChatSessionPresentationTests {
         #expect(owner.finishOpeningTask(replacementGeneration))
     }
 
-    @Test("opening attempts fail closed only while unsettled")
-    func openingAttemptSettlementPolicy() {
-        #expect(ChatOpeningAttemptPolicy.deadline == .seconds(30))
-        #expect(ChatOpeningAttemptPolicy.isUnsettled(.opening))
-        #expect(ChatOpeningAttemptPolicy.isUnsettled(.positioning))
-        #expect(ChatOpeningAttemptPolicy.isUnsettled(.revealing))
-        #expect(ChatOpeningAttemptPolicy.isUnsettled(.presenting))
-        #expect(ChatOpeningAttemptPolicy.isUnsettled(.presented))
-        #expect(!ChatOpeningAttemptPolicy.isUnsettled(.ready))
-        #expect(!ChatOpeningAttemptPolicy.isUnsettled(.failed("retry")))
-        #expect(ChatOpeningAttemptPolicy.isFailed(.failed("retry")))
-        #expect(!ChatOpeningAttemptPolicy.isFailed(.ready))
-        #expect(ChatOpeningAttemptPolicy.shouldFailUnsettledAttempt(
-            completedOwnedTask: true,
-            taskCancelled: false,
-            sceneActive: true,
-            presentationActive: true,
-            modelAdmitsOpen: true,
-            phase: .positioning
-        ))
-        for admission in [
-            (true, true, true, true, true),
-            (false, false, true, true, true),
-            (true, false, false, true, true),
-            (true, false, true, false, true),
-            (true, false, true, true, false),
-        ] {
-            #expect(!ChatOpeningAttemptPolicy.shouldFailUnsettledAttempt(
-                completedOwnedTask: admission.0,
-                taskCancelled: admission.1,
-                sceneActive: admission.2,
-                presentationActive: admission.3,
-                modelAdmitsOpen: admission.4,
-                phase: .opening
-            ))
-        }
-    }
-
     @Test("foreground resumes an interrupted opening but not a passive ready session")
     func foregroundResumePolicy() {
         let inProgress = ChatSessionPresentation(sessionID: "session-a")
@@ -210,91 +147,6 @@ struct ChatSessionPresentationTests {
             surfaceActive: true,
             openingTaskRevision: presentation.openingTaskRevision
         ) != ChatOpeningSurfaceTaskID(surfaceActive: true, openingTaskRevision: before))
-    }
-
-    @Test("opening cover stays opaque through settlement and leaves visibility to one reveal")
-    func openingSurfaceProjectionPolicy() {
-        for phase in [ChatOpenPresentationPhase.opening, .positioning, .revealing, .presenting] {
-            #expect(ChatOpeningSurfacePolicy.showsOpaqueCover(phase: phase))
-        }
-        for phase in [ChatOpenPresentationPhase.presented, .ready, .failed("failed")] {
-            #expect(!ChatOpeningSurfacePolicy.showsOpaqueCover(phase: phase))
-        }
-    }
-
-    @Test("uncover waits for a covered opening and then retries only when still needed")
-    func coveredOpeningResumePolicy() {
-        #expect(ChatOpeningSurfacePolicy.action(
-            surfaceActive: false,
-            hasOpeningTask: true,
-            needsOpeningResume: false
-        ) == .none)
-        #expect(ChatOpeningSurfacePolicy.action(
-            surfaceActive: true,
-            hasOpeningTask: true,
-            needsOpeningResume: false
-        ) == .waitForCurrentThenBeginIfNeeded)
-        #expect(ChatOpeningSurfacePolicy.action(
-            surfaceActive: true,
-            hasOpeningTask: false,
-            needsOpeningResume: true
-        ) == .begin)
-        #expect(ChatOpeningSurfacePolicy.action(
-            surfaceActive: true,
-            hasOpeningTask: false,
-            needsOpeningResume: false
-        ) == .none)
-    }
-
-    @Test("fork navigation advances once through every nested dismissal owner")
-    func forkNavigationOwnership() throws {
-        var confirmation = ChatForkNavigationOwner()
-        var historySelection = ChatForkNavigationOwner()
-        var historySheet = ChatForkNavigationOwner()
-        var contextSheet = ChatForkNavigationOwner()
-        let route = AppModel.SessionNavigationRoute(sessionID: "fork", editorText: "draft")
-
-        confirmation.stage(route)
-        #expect(!contextSheet.hasPendingRoute)
-        let afterConfirmation = confirmation.consume()
-        historySelection.stage(try #require(afterConfirmation))
-        #expect(confirmation.consume() == nil)
-        let afterSelection = historySelection.consume()
-        historySheet.stage(try #require(afterSelection))
-        #expect(!contextSheet.hasPendingRoute)
-        let afterHistory = historySheet.consume()
-        contextSheet.stage(try #require(afterHistory))
-        #expect(contextSheet.consume() == route)
-        #expect(contextSheet.consume() == nil)
-    }
-
-    @Test("session visibility follows synchronized foreground lineage, not ready-frame timing")
-    func sessionVisibilityPolicy() {
-        #expect(ChatSessionVisibilityPolicy.isVisible(
-            sceneActive: true,
-            surfaceActive: true,
-            hasMountedAuthority: true
-        ))
-        #expect(ChatSessionVisibilityPolicy.isVisible(
-            sceneActive: true,
-            surfaceActive: PresentationSurfaceActivity.presentingDescendant.allowsDataPublication,
-            hasMountedAuthority: true
-        ))
-        #expect(!ChatSessionVisibilityPolicy.isVisible(
-            sceneActive: false,
-            surfaceActive: true,
-            hasMountedAuthority: true
-        ))
-        #expect(!ChatSessionVisibilityPolicy.isVisible(
-            sceneActive: true,
-            surfaceActive: false,
-            hasMountedAuthority: true
-        ))
-        #expect(!ChatSessionVisibilityPolicy.isVisible(
-            sceneActive: true,
-            surfaceActive: true,
-            hasMountedAuthority: false
-        ))
     }
 
     @Test("canonical alias ledger is causal one-to-one and bounded")

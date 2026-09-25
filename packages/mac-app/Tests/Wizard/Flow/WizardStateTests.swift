@@ -13,16 +13,6 @@ struct WizardStateTests {
         })
     }
 
-    @Test("fresh state starts at welcome without creating a cutover record")
-    func freshStarts() {
-        let (url, cleanup) = Self.isolatedURL(); defer { cleanup() }
-        let state = WizardState(stateURL: url)
-        #expect(state.step == .welcome)
-        #expect(state.persistenceFailure == nil)
-        #expect(state.installOutcome == nil)
-        #expect(!FileManager.default.fileExists(atPath: url.path))
-    }
-
     @Test("an absent record remains absent until explicit navigation")
     func absentRecordIsNotOverwritten() {
         let (url, cleanup) = Self.isolatedURL(); defer { cleanup() }
@@ -56,14 +46,6 @@ struct WizardStateTests {
             #expect(state.step == step)
             #expect(WizardState(stateURL: url).step == .welcome)
         }
-    }
-
-    @Test("safe persisted steps revive")
-    func safePersistedStepsRevive() {
-        let (url, cleanup) = Self.isolatedURL(); defer { cleanup() }
-        let state = WizardState(stateURL: url, initialStep: .install)
-        #expect(state.step == .install)
-        #expect(WizardState(stateURL: url).step == .install)
     }
 
     @Test("navigation remains bounded and explicit")

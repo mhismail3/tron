@@ -3,7 +3,8 @@
 ## Rules
 
 1. **Code, tests, and docs ship together.** Update the owning documentation and
-   focused tests in the same change.
+   the tests required by the [testing policy](#testing-policy) in the same
+   change.
 2. **Tron is the user-facing agent.** Pi is the pinned backing SDK and may be
    named in technical source/dependency documentation, not as a second product
    users operate.
@@ -110,13 +111,29 @@
 - Never erase iOS application or Keychain data to recover from a build/signing
   mismatch, and do not install on a device another session currently owns.
 
+## Testing policy
+
+- **Never write unit tests after you write code.** A test written to match code
+  that already exists reasserts the implementation instead of catching a bug.
+- **Highly prefer E2E tests as the sole testing mechanism.** Use them to verify
+  complex features work. At the end of an E2E test, produce a verifiable and
+  repeatable artifact (for example a retained result bundle, log, transcript,
+  screenshot, or JSON report at a stable path) that someone else can inspect and
+  regenerate with the same command.
+- **If you must test a system in isolation, first write down all the ways it
+  could fail, then write the code.** Each isolated test must target one of those
+  written failure modes, and must catch a real bug the E2E tests miss.
+
+Do not add tests that only reassert mocks, constants, literals, source text, or
+presentation details; delete them when you find them.
+
 ## Validation
 
-Prefer focused checks while iterating. Do not repeatedly run full or multi-minute
-end-to-end suites during diagnosis. Start with the owning unit, contract, fixture,
-or state test; use the narrowest integration case that can reproduce the boundary.
-Reserve full end-to-end suites for final cross-module/release checkpoints or an
-explicit maintainer request.
+Prefer the narrowest check that exercises the changed behavior while iterating.
+Do not repeatedly run full or multi-minute end-to-end suites during diagnosis;
+run the single E2E or integration case that reproduces the boundary. Reserve full
+end-to-end suites for final cross-module/release checkpoints or an explicit
+maintainer request.
 
 When closing an incident, name the signal that would have diagnosed it in one
 step. If that signal was missing, add it at the right level, with its test and

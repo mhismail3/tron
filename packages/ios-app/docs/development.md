@@ -52,11 +52,9 @@ configuration, Needs attention, and Chronicle info, with Capture URL and New not
 visible in the root menu's final creation section rather than in settings. Search on Automations
 explicitly selects All through its persistent preference owner before focusing the
 existing inventory search. Keyboard overlays cover the unchanged floating button,
-which is not interactive or accessible while searching. `DashboardChromeTests` mounts
-all three dashboards and checks menu/scroll identity, inset/offset stability, animated
-scroll return, stationary native controls, accents, and search/sheet ownership.
-Programmatic animation starts from a settled legal offset, not a synthetic overscroll
-without a drag lifecycle. `TronAccessibilityUITests` performs a real pull/release and
+which is not interactive or accessible while searching. Programmatic animation starts from a
+settled legal offset, not a synthetic overscroll without a drag lifecycle. `TronAccessibilityUITests`
+performs a real pull/release and
 observes actual heading frames at normal/accessibility sizes, popup placement/order,
 and the original destinations through native taps.
 
@@ -112,8 +110,7 @@ components for revisions, ranges, digests, attribution, certainty, model, and co
 are comma-separated and wrap naturally rather than allocating one line per ID.
 Reflection remains available in the actions menu rather than a redundant Observed items section.
 Session navigation and editable drafts are handed off only after the record sheet dismisses, with the
-originating Gateway identity rechecked. `KnowledgeModelsTests` and the focused observation case in
-`SessionSheetPresentationTests` cover retained evidence/source dates and real medium/large sheets.
+originating Gateway identity rechecked. `KnowledgeModelsTests` covers retained evidence/source dates.
 Coverage is an informational overview above the catalogue: a section label with the settled count, then the
 observed/empty/excluded breakdown and one button naming the cuts that need attention. The overview carries
 no list and no action of its own, so a healthy corpus costs two short rows; a Gateway that cannot filter
@@ -134,9 +131,7 @@ the Gateway identity captured when the sheet opened; `Clear` is only offered on 
 and confirms in the sheet, which owns that presented surface while the dashboard keeps the mutation and
 reload ownership. Coverage read and mutation failures stay visible in the sheet. `KnowledgeCoveragePresentationPolicy` owns the attention copy, the
 requested dispositions, and the
-bounded citation; `KnowledgeDashboardLayoutTests` mounts the real row, overview, and sheet to pin the dense
-row height, the statement cap, the overview cost, the tighter catalogue row gap, the sheet's separate cut
-actions, and the update-guidance state for a Gateway without the filter.
+bounded citation.
 Coverage retains its rows through sheet dismissal and same-Gateway refresh. An unchanged canonical
 revision reuses the loaded page/cursor; a changed revision replaces it after arrival, without a loading
 placeholder. Initial/new-Gateway reads still show loading. Dashboard catalogue rows likewise remain visible
@@ -223,10 +218,9 @@ The Gateway still checks each command's expected revision. Save uses an accessib
 control, and deadline steppers share the compact pill height. Existing-session target selection uses a large, scoped picker with dashboard
 project grouping. An unset workspace omits the browse path so the Gateway resolves its own default;
 explicit selections retain their exact path. Validate changes with
-`AutomationProtocolTests`, `AutomationCoordinatorTests`, and `AutomationPresentationTests`; hosted
-`SessionSheetPresentationTests` cover summary geometry and `StructuredJSONTableLayoutTests` protects
-shared row sizing. The native Automation UI regression covers all inventory facts, a newer detail
-record replacing stale catalog metadata, non-tappable table rows, controls-before-history ordering,
+`AutomationProtocolTests`, `AutomationCoordinatorTests`, and `AutomationPresentationTests`. The native
+Automation UI regression covers all inventory facts, a newer detail record replacing stale catalog
+metadata, non-tappable table rows, controls-before-history ordering,
 and the retained run-detail route. Its read-only `HOSTED_TEST` transport accepts no mutations. Workspace targets are selected through the existing focused-Gateway WorkspaceBrowser and trust
 flow, and their paths remain transient form state. Every workspace run creates and retains a new
 ordinary session; Run Details offers Open Session only through the owning profile/session route.
@@ -242,8 +236,8 @@ controls; subagent retention inherits this settings theme rather than the activi
 both the initial project row count and Show more batch size; Show less returns to that baseline.
 The two actions stay leading-aligned with a 24-point gap, rather than placing Show less beneath the
 bottom-right dashboard menu. Accessibility sizes stack the actions; either sole action remains leading.
-Hosted sizing and the native `testSessionPaginationKeepsShowLessBesideShowMoreAndClearOfLogo` regression
-cover single/paired controls, the scroll-end logo boundary, and both action callbacks.
+The native `testSessionPaginationKeepsShowLessBesideShowMoreAndClearOfLogo` regression covers
+single/paired controls, the scroll-end logo boundary, and both action callbacks.
 Changes apply when the dashboard becomes visible, without resetting project disclosure or changing
 Recent Activity ordering or Gateway catalog reads. Pagination retires pending animations while
 retaining generation counters so old completions cannot affect the new setting.
@@ -679,7 +673,7 @@ route; read replacement cancels safely, while attach/open replacement waits for 
 the pending route. Focused cases also require completed stale-open compensation, prevent confirmed-missing
 open replay after revocation, and keep terminate/write/resize failures visible while the renderer remains installed.
 The style guard pins that boundary so renderer code cannot regain Gateway/AppModel work.
-`SessionPresentationStoreTests` own observation forwarding, cold-cache non-authority,
+`SessionPresentationStoreTests` own cold-cache non-authority,
 disconnect/profile-reset semantics, all-topic revocation, old-close/new-open arbitration for both
 `closed:true` and already-retired `closed:false` responses, stale and
 revoked secondary-response rejection, exact subscription-token admission, and suspended paging
@@ -896,11 +890,10 @@ seeded pixel function at test time with explicit dimensions and orientation; no
 opaque image binary or personal file is stored. The separate arbitrary-byte
 high-resolution attachment remains an encoded-admission stress input, not a
 decodable image. Record the seed and requested byte/count/rate/dimension inputs
-with performance results. Validate the fixture contracts with:
+with performance results. Validate the remaining Markdown and transcript fixtures with:
 
 ```bash
 scripts/tron-ios-test run \
-  --only-testing TronMobileTests/SessionScenarioBuilderTests \
   --only-testing TronMobileTests/MarkdownPresentationTests \
   --only-testing TronMobileTests/ChatTextPreparationTests \
   --only-testing TronMobileTests/ChatMediaLoaderTests \
@@ -964,10 +957,9 @@ both pending and admitted geometry-owned entrances across more than 512 accumula
 suffix work across thirty updates of a 10,000-entry text stream. `ChatCommittedLedgerTests` require
 streaming and compatible foreground replacement to retain both the committed revision and every
 committed row's equatable render identity; the hosted streaming-burst journey also requires the aggregate
-committed-history body-evaluation counter to remain unchanged. Canonical append/prepend advance once, while a fresh store
+committed-history body-evaluation counter to remain unchanged. A fresh store
 rebuilds identical canonical rows deterministically at revision one. The same suite checks that
-foreground entrance suppression remains empty on both retained and cold owners and that hidden thinking
-labels appear only on thinking-row preparation slices. This is the active/passive resume contract: both
+foreground entrance suppression remains empty on both retained and cold owners. This is the active/passive resume contract: both
 modes install one complete authoritative commit, live-region replacement never mutates history lineage,
 and relaunch has no local entrance receipt to replay. The
 gate can delay work but cannot manufacture output or disable production projection semantics.
@@ -1010,11 +1002,10 @@ session-owned and cancels on suspension. Hosted controls drive the production co
 callback, command, frame, and maximum-excursion evidence.
 Hosted streaming bursts must install only their newest exact source while detached composer/viewport work
 remains writable and creates no projection work. Separate hosted journeys exercise catch-up settlement and
-a retained detached authoritative generation replacement before admitting that newest source. Canonical/live tool handoff tests also assert that adjacent equal nonempty producer segments compose into one display-only row with the first physical ID, canonical payload precedence, incremented membership, and any-member-running state; barriers or missing/conflicting segments remain separate. `ChatCompactPillTests` own intrinsic-width trailing placement for short prompts, the 364-point
-long-prompt bound, intrinsic-width glass selection, equal user-prompt vertical padding, logical-leading
-line alignment, agent-matched Dynamic Type body sizing, shared prompt/queue Liquid Glass geometry, and
-flat/detail material policy. Manual UI validation owns role classification, trailing composer-edge
-prompt/queue motion, aligned activity motion, and the identity transform required by Reduce Motion.
+a retained detached authoritative generation replacement before admitting that newest source. Canonical/live tool handoff tests also assert that adjacent equal nonempty producer segments compose into one display-only row with the first physical ID, canonical payload precedence, incremented membership, and any-member-running state; barriers or missing/conflicting segments remain separate. `ChatCompactPillTests` own the 364-point long-prompt bound, agent-matched Dynamic Type body
+sizing, and flat/detail material policy. Manual UI validation owns role classification, trailing
+composer-edge prompt/queue motion, aligned activity motion, and the identity transform required by
+Reduce Motion.
 Hosted scroll tests remain the authority that these visual transforms do not grant detached readers
 automatic writes or replay same-ID entrances. Lifecycle entrance receipts live in the projection owner rather than lazy row state, survive memory-pressure text eviction, and are pruned with their installed outgoing/pending/queue identities.
 `GatewayProtocolContractTests`, `SharedProtocolFixtureTests`, and
@@ -1062,39 +1053,6 @@ transcript text, protocol identity, path, filename, or model/provider value. Ord
 streaming-token projection updates are not logged, so tracing does not create a new
 per-token publication or layout workload.
 
-### Viewport test migration matrix
-
-The pre-pinning coordinator suite contained 81 cases. The 50 observable Group A cases keep
-their original function names and now assert outcomes against native pinning: detached semantic
-restore (12); shrink/overshoot ownership (23–25); detached composer and direct-return behavior
-(32–34, 36, 38–40, 42–44); catch-up (46–49); opening (50–63); Reduce Motion and prepend
-(64–77); and growth/row motion (78–81). The 31 deleted command-arbitration mechanism cases
-have these explicit observable replacements:
-
-| Retired tests | Observable replacement |
-|---|---|
-| `pinnedGrowthCoalesces` through `pinnedProjectionShorteningCorrectsPhysicalTail` (1–7), `appliedAutomaticTailDoesNotBlockShrinkCorrection` through `lifecycleGraftPreservesAuthoritativeMutation` (9–11) | `pinnedNativeEdgeEliminatesFollowCommandStream`, `stickyModeHasNoOffsetCommandDestination` — native bottom size-change anchoring owns continuous and discrete pinned growth with no app offset write. |
-| `projectionShorteningDefersToDirectTakeover` (8) | `directTakeoverCancelsPendingSemanticRestore` — direct authority leaves anchored mode and no command. |
-| `layoutCorrectionGeometryFirstSettlement` (13) | `anchoredRestoreRequiresFreshEvidence` — one semantic correction appears only after both newer semantic and geometry evidence. |
-| `interactionCancelsProjectionMutation` through `catchUpCancelsAppliedLayoutBinding` (14–17) | `directTakeoverCancelsPendingSemanticRestore`, `stickyModeHasNoOffsetCommandDestination`, `nativeEdgeStateFollowsModeWithoutOffsetCommand` — takeover/catch-up replace mode; no release-binding command exists. |
-| `installedRemovalPreservesContinuousFollow` (18), `continuousGrowthWhileSettling` through `noWriteInsideTolerance` (20–22) | `pinnedNativeBindingEliminatesFollowCommandStream` — native edge retention removes pending-follow arbitration and all ordinary writes. |
-| `detachedDiscreteInsertionIsInert` (19) | `stickyModeHasNoOffsetCommandDestination`, `detachedGrowthIsInert` — anchored insertion remains anchored with zero writes. |
-| `composerPreservesFreshNativeAuthority` through `geometryFirstComposerTransitionPreservesLocus` (26–31) | `composerMutationsDoNotOwnScrollCommands` — submission/composer/keyboard geometry preserves explicit mode and emits no command. |
-| `geometryFirstDetachmentConsumesDirectReturn` (35) | `geometryCannotConsumeExplicitReturn` — only the explicit return intent pins. |
-| `nativeVisibleEdgeAdmitsManualTail` (37) | `explicitReturnPinsDespiteStaleGeometry` — return intent wins independently of stale inset arithmetic. |
-| `nativePositioningRetainsExplicitEdgeAuthority` (41) | `nativeEdgeStateFollowsModeWithoutOffsetCommand` — mode directly selects native edge authority without an offset command. |
-| `interactionCancelsPendingFollow` (45) | `directTakeoverCancelsPendingAutomaticWork` plus the coordinator opening/catch-up/restore interruption cases — direct takeover wins synchronously and leaves no write. |
-
-```bash
-scripts/tron-ios-test run \
-  --only-testing TronMobileTests/ChatScrollCoordinatorTests \
-  --only-testing TronMobileTests/ChatTranscriptPresentationStoreTests \
-  --only-testing TronMobileTests/ChatTranscriptPresentationTests \
-  --only-testing TronMobileTests/ChatCompactPillTests \
-  --only-testing TronMobileTests/ChatViewScrollHarnessTests \
-  --only-testing TronMobileTests/ChatPerformanceTrackerTests
-```
-
 `ChatPerformanceBaselineTests` is diagnostic-only and opt-in. The default
 checkpoint discovers and skips its three entry points, so they contribute no
 correctness evidence. An explicit baseline run records five post-warm-up timing,
@@ -1125,10 +1083,9 @@ geometry behavioral oracles. `SessionSheetPresentationTests` retains
 checks the inherited session accent). `ChatViewScrollHarnessTests` retains
 `briefRecoveryPreservesRenderedChat`,
 `openingReadinessFollowsInstalledTerminalRow`, `semanticAnchorCorrection`,
-`opensAtTail`, `maximumRowOpeningNeverPresentsBlankViewport`, `firstReadyFrame`,
 and the rendered-pixel `hostedOpeningRevealIsMonotonic`. `ChatFloatingDisplayLayoutTests` retains
-`fullChatReachability`; `DashboardChromeTests` retains the reversible
-scroll/header policy checks and `testRealDashboardHeaderScrollAndExistingDestinations`.
+`fullChatReachability`; `DashboardChromeTests.testHeaderMotionIsSmallBoundedReversibleAndRespectsReduceMotion`
+retains the dashboard header-motion check.
 The browser suites retain `originalLeaseOwnsCleanup`,
 `sameProfileReconnectKeepsLease`, `retiredPreparationDoesNotOverlap`,
 `frameAdmissionAndDecode`, `nativeRetirementDoesNotSelectReplacement`, and
@@ -1303,10 +1260,9 @@ or a delayed interactive tail. Clear glass's light neutral fill must soften its 
 retaining translucent depth rather than solid lavender. Nearby background softening must be visible outside the panel and feather away,
 leaving distant rows and toolbar readable. The native blur view keeps alpha 1; only its
 UIView mask changes strength and is reinstalled after resizing, as required by UIKit.
-`ContextWindowSliderLayoutTests` renders intermediate native surface
-fractions with a contrasting-content containment oracle (including destination-sized Reduce
-Motion), checks nearby versus distant stripe contrast for the real backdrop effect, and retains
-narrow light/dark and large-text previews. `ThinkingSliderTests` covers discrete bounds, raw
+`ContextWindowSliderLayoutTests` renders intermediate native surface fractions with a
+contrasting-content containment oracle (including destination-sized Reduce Motion).
+`ThinkingSliderTests` covers discrete bounds, raw
 values, missing/single/duplicate choices, live draft readout, final-only commits and exact editor
 replacement/once-only completion. `ThinkingSliderLayoutTests` verifies the compact native
 viewport and that the header/rail fit without lower labels, exercises native close completion
@@ -1350,13 +1306,8 @@ admission behavior. Slim action/value capsules retain full touch height. Every s
 metadata face is half a point larger only within this sheet. The model picker must
 inherit purple across title, search, icons, and cards while keeping its ordinary type scale.
 Its title reads Models both from Manage Session and from Settings → Agent Defaults → Model Defaults.
-`SessionSummaryLayoutTests` measures the actual native cards/actions, retains light/dark and
-long-name/accessibility captures, and excludes screen safe areas from card-size assertions.
-Compact action rows must match equivalent ordinary Session row heights without adding row
-padding around an already 44-point action target; the regression compares rendered rows
-with and without actions instead of relying only on a loose total-card height bound.
-`ChatCompactPillTests` pins combined usage copy, missing estimates, exact provider/model
-catalog labels, and existing compaction admission; `SessionPresentationStoreTests` protects
+`ChatCompactPillTests` pins exact provider/model
+catalog labels and existing compaction admission; `SessionPresentationStoreTests` protects
 pending model selection and narrow authoritative projection. `SessionSettingPresentationTests`
 covers immediate pending choices, reset semantics, exact-request rollback, scope replacement,
 and shared Extra High labels without rewriting authored content. Project Resources must omit Context Files
@@ -1366,8 +1317,7 @@ custom top blur, icon-only Done, and no opaque bottom bar. Project Resources, Se
 Subagent History titles and toolbar actions must use the inherited teal accent. Resource
 categories are ordered Prompts, Skills, Tools, then Extensions. Resource detail sheets show only the description and bounded body content; their toolbar info action opens the complete metadata and technical JSON without a second content read. Titles, Done actions, icons, and cards explicitly use the chat resource theme for prompts and skills rather than inheriting the overview tint: prompts are purple and skills cyan; extension and tool categories retain their existing colors. Project Resources and chat share the body renderer and info sheet. Completed empty reads show an empty-content message; unavailable session reads settle with a retry instead of an indefinite loading state. Tools and extensions without supported body reads retain their metadata behind Info. Skill chips use the same cyan as their picker, not the general information-blue palette. Subagent pills use their card accent for icons and text, with compact vertical padding. Started timestamps and terminal timestamps (history, immediately before elapsed duration with a small middle-dot separator on the same line) share monospace styling; missing terminal times stay absent. Session History toolbar and older/newer paging actions explicitly use the sheet teal for icons and text in both appearances. Session History entry details have no end-of-content or metadata footer; navigation controls appear only for multipart content. Verify package/inline extension names
 instead of index filenames, friendly skill/prompt/tool titles, and unchanged raw invocations.
-`ProjectResourceTitlePresentationTests` pins those naming boundaries. `ManageSessionThemeTests` pins the
-adaptive light/dark teal values, contrast, and destination theme routing. `SessionSheetPresentationTests`
+`ProjectResourceTitlePresentationTests` pins those naming boundaries. `SessionSheetPresentationTests`
 presents actual native sheets, verifies large document detents, the custom blur and hidden
 bottom toolbar, markdown instructions, full selectable plain documents, and medium-first subagent lists on repeated
 presentations. Instructions use the shared block markdown renderer. Plain document readers are rendered in light and dark mode:
@@ -1629,7 +1579,7 @@ scripts/tron-ios-test run \
   --only-testing TronMobileTests/ChatSessionPresentationTests
 ```
 
-On a physical device verify solving-to-thinking-to-hidden expiry, simultaneous synchronous and asynchronous rows, and live-to-terminal updates. A no-edit worker used only as a visual lifecycle fixture must declare `agentContract: { version: 1 }` and an explicit reason-bearing `acceptance: { level: "none", reason: "visual lifecycle probe" }`; otherwise the legacy implementation completion guard can pause the worker after its command and final output have finished, which is canonical resumable state rather than a running process. The composer subagent orb must enter and leave with the same scoped spring as the catch-up arrow; Subagents, a tapped child transcript, and Subagent History open at medium and can expand to large. Row taps present a bottom sheet instead of a rightward push. Activity and History cards share the aggregate tool cards' scroll-optimized surface, 12-point corners, 12/11-point horizontal/vertical padding, and 8-point section spacing. The title leads; plain colored lifecycle text sits at the top-right immediately left of elapsed time on the same baseline, separated by a middle dot, with no status pill or icon. Accessibility text sizes place the status/timing line below the title instead of squeezing the heading. A DETAILS block renders model/thinking/Started and counts/execution mode in the tool FILE/COMMAND field's 12-point medium code font, natural line spacing, and a 4-point caption gap. Metadata wraps rather than dropping counts. The LIVE OUTPUT (or terminal RESULT/ERROR) block uses the tool result's 11-point medium code font and shared bounded-tail fade, retaining three newest nonempty logical lines without clipping away the newest line when they wrap. Queued and paused previews say LATEST OUTPUT. The existing authoritative process projection updates the open sheet's output and lifecycle without a separate poller or transcript read; VoiceOver includes this bounded latest result. Activity uses one lazy row collection across running/completed headers and retained extension content, so an exact process keeps one identity rather than handing a stale live cell between separate collections. Orb-sheet rows retain the friendly local **Started** timestamp. Verify running counters advance each second without incoming progress, continue across scroll/remount and child-sheet round trips, and settle to the authoritative final duration; queued and paused rows stay fixed. Backgrounded or covered sheets stop refreshing, then catch up from the same receipt-local clock when visible. The lifecycle text and active-sheet container color identify status: amber while in progress, success green after completion, and red after failure, stop, rejection, or interruption. History also uses amber for in-progress rows; terminal history cards and child-session chrome use `tronSubagent` seafoam (`#03C3A8`, darkened in light mode for contrast), as do subagent context/update/fork pills. The History title and Done action retain their originating Manage Session theme. `ManageSessionThemeTests` covers the palette and lifecycle scope; focused `SessionSheetPresentationTests` inspect rendered toolbar colors and capture light/dark rows under an unrelated inherited theme. Confirm queued and paused producer states say `QUEUED` and `PAUSED` rather than `LIVE ACTIVITY`; a paused completion guard is resumable canonical state, not a still-running child process. Both subagent lists use the same scroll-optimized card treatment; history retains its bounded 400-row projection incrementally through a standard Load More pill. `TronAccessibilityUITests.testActivityValuesUpdateInTheSamePresentedSheet` verifies successive canonical output samples and terminal results replace the accessible preview. The native `Button` owns its label/value/hint directly: adding a second accessibility grouping creates a non-button proxy and duplicate actionable child. `SessionSheetPresentationTests.testSubagentResultsUpdateInOpenActivitySheet` waits for rendered input and a display frame before verifying native scroll identity, offset, and sheet detent. Active rows remain tappable before child-session binding, show a waiting state, and open the canonical tail once that binding appears. Short/empty child transcripts stay top-aligned while long newest pages open at the tail. Verify content is already visible without dragging on first open and after medium/large resizing, including long prepared Markdown; scrolling away must disable tail-following during subsequent resizing. Closing a child must reveal the same loaded history and cursor without an extra request, automatic Load More, or a spurious History changed card. An active child sheet shows the leading stop icon only when `process-transcript-abort.v1` is advertised; it stays muted gray while the lease loads, transitions to enabled red only after abort authority arrives, and tapping it disables the control and stops only that exact lease-bound execution through the synchronous parent abort or asynchronous trusted-controller path. Terminal sheets omit it, and earlier-page loading uses the same compact transcript pill as the main chat. Child transcript checks must verify the main transcript's zero-spacing stack, shared 16-point horizontal inset, 12-point top/tail affordances, eight-point row spacing, prepared Markdown in thinking and assistant text, one reconciled run chip per exact invocation/result identity during both live refresh and history paging, preserved orphan results, and no second process-summary tool/output card; explicit earlier paging, append-aware transcript refresh, VoiceOver, large Dynamic Type, and Reduce Motion remain correct. Assistant bash—including `nohup x &`—remains ordinary transcript/tool activity and never appears in Subagents.
+On a physical device verify solving-to-thinking-to-hidden expiry, simultaneous synchronous and asynchronous rows, and live-to-terminal updates. A no-edit worker used only as a visual lifecycle fixture must declare `agentContract: { version: 1 }` and an explicit reason-bearing `acceptance: { level: "none", reason: "visual lifecycle probe" }`; otherwise the legacy implementation completion guard can pause the worker after its command and final output have finished, which is canonical resumable state rather than a running process. The composer subagent orb must enter and leave with the same scoped spring as the catch-up arrow; Subagents, a tapped child transcript, and Subagent History open at medium and can expand to large. Row taps present a bottom sheet instead of a rightward push. Activity and History cards share the aggregate tool cards' scroll-optimized surface, 12-point corners, 12/11-point horizontal/vertical padding, and 8-point section spacing. The title leads; plain colored lifecycle text sits at the top-right immediately left of elapsed time on the same baseline, separated by a middle dot, with no status pill or icon. Accessibility text sizes place the status/timing line below the title instead of squeezing the heading. A DETAILS block renders model/thinking/Started and counts/execution mode in the tool FILE/COMMAND field's 12-point medium code font, natural line spacing, and a 4-point caption gap. Metadata wraps rather than dropping counts. The LIVE OUTPUT (or terminal RESULT/ERROR) block uses the tool result's 11-point medium code font and shared bounded-tail fade, retaining three newest nonempty logical lines without clipping away the newest line when they wrap. Queued and paused previews say LATEST OUTPUT. The existing authoritative process projection updates the open sheet's output and lifecycle without a separate poller or transcript read; VoiceOver includes this bounded latest result. Activity uses one lazy row collection across running/completed headers and retained extension content, so an exact process keeps one identity rather than handing a stale live cell between separate collections. Orb-sheet rows retain the friendly local **Started** timestamp. Verify running counters advance each second without incoming progress, continue across scroll/remount and child-sheet round trips, and settle to the authoritative final duration; queued and paused rows stay fixed. Backgrounded or covered sheets stop refreshing, then catch up from the same receipt-local clock when visible. The lifecycle text and active-sheet container color identify status: amber while in progress, success green after completion, and red after failure, stop, rejection, or interruption. History also uses amber for in-progress rows; terminal history cards and child-session chrome use `tronSubagent` seafoam (`#03C3A8`, darkened in light mode for contrast), as do subagent context/update/fork pills. The History title and Done action retain their originating Manage Session theme. Focused `SessionSheetPresentationTests` inspect rendered toolbar colors and capture light/dark rows under an unrelated inherited theme. Confirm queued and paused producer states say `QUEUED` and `PAUSED` rather than `LIVE ACTIVITY`; a paused completion guard is resumable canonical state, not a still-running child process. Both subagent lists use the same scroll-optimized card treatment; history retains its bounded 400-row projection incrementally through a standard Load More pill. `TronAccessibilityUITests.testActivityValuesUpdateInTheSamePresentedSheet` verifies successive canonical output samples and terminal results replace the accessible preview. The native `Button` owns its label/value/hint directly: adding a second accessibility grouping creates a non-button proxy and duplicate actionable child. `SessionSheetPresentationTests.testSubagentResultsUpdateInOpenActivitySheet` waits for rendered input and a display frame before verifying native scroll identity, offset, and sheet detent. Active rows remain tappable before child-session binding, show a waiting state, and open the canonical tail once that binding appears. Short/empty child transcripts stay top-aligned while long newest pages open at the tail. Verify content is already visible without dragging on first open and after medium/large resizing, including long prepared Markdown; scrolling away must disable tail-following during subsequent resizing. Closing a child must reveal the same loaded history and cursor without an extra request, automatic Load More, or a spurious History changed card. An active child sheet shows the leading stop icon only when `process-transcript-abort.v1` is advertised; it stays muted gray while the lease loads, transitions to enabled red only after abort authority arrives, and tapping it disables the control and stops only that exact lease-bound execution through the synchronous parent abort or asynchronous trusted-controller path. Terminal sheets omit it, and earlier-page loading uses the same compact transcript pill as the main chat. Child transcript checks must verify the main transcript's zero-spacing stack, shared 16-point horizontal inset, 12-point top/tail affordances, eight-point row spacing, prepared Markdown in thinking and assistant text, one reconciled run chip per exact invocation/result identity during both live refresh and history paging, preserved orphan results, and no second process-summary tool/output card; explicit earlier paging, append-aware transcript refresh, VoiceOver, large Dynamic Type, and Reduce Motion remain correct. Assistant bash—including `nohup x &`—remains ordinary transcript/tool activity and never appears in Subagents.
 
 ## Manual iOS release validation and delivery
 

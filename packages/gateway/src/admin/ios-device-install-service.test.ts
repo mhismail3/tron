@@ -6,7 +6,6 @@ import {
   IosDeviceInstallService,
   admitDevicectlTargets,
   iosDeviceInstallHelperEnvironment,
-  iosDeviceInstallInvocation,
   projectIosDeviceInstallConfig,
   recordIosDeviceInstallHelperFailure,
   type IosPhysicalDeviceTarget,
@@ -102,16 +101,6 @@ describe("IosDeviceInstallService", () => {
     });
     expect(parsed).toEqual([target]);
     expect(JSON.stringify(parsed)).not.toContain("never-project");
-  });
-
-  it("fixes the repository helper to the ordinary LocalDevice install operation", () => {
-    expect(iosDeviceInstallInvocation("/trusted/tron", target.identifier, "optimized")).toEqual({
-      executable: "/bin/bash",
-      args: ["/trusted/tron/scripts/tron-ios-device", "install", "--device-id", target.identifier],
-      cwd: "/trusted/tron",
-    });
-    expect(iosDeviceInstallInvocation("/trusted/tron", target.identifier, "fast-debug").args)
-      .toEqual(["/trusted/tron/scripts/tron-ios-device", "install", "--device-id", target.identifier, "--fast-debug"]);
   });
 
   it("keeps CoreDevice identity owner-only while requiring an explicit Mac-local binding", async () => {

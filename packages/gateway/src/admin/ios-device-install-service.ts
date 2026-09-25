@@ -632,7 +632,7 @@ function appendTail(current: string, chunk: Buffer): string {
 /** The fixed repository helper invocation: no RPC-supplied command or scheme
  * can reach it. The install itself runs detached, so its argv is the only
  * in-process witness of what is launched. */
-export function iosDeviceInstallInvocation(
+function iosDeviceInstallInvocation(
   sourceRoot: string,
   targetIdentifier: string,
   buildMode: IosDeviceInstallBuildMode,

@@ -112,24 +112,6 @@ struct JSONValueBoundaryTests {
         }
     }
 
-    @Test("gateway coders are fresh and safe for concurrent protocol decoding")
-    func concurrentCoders() async throws {
-        try await withThrowingTaskGroup(of: JSONValue.self) { group in
-            for index in 0..<100 {
-                group.addTask {
-                    let data = Data(#"{"index":\#(index),"value":"ok"}"#.utf8)
-                    return try JSONDecoder.gateway.decode(JSONValue.self, from: data)
-                }
-            }
-            var count = 0
-            for try await value in group {
-                #expect(value.objectValue?["value"] == .string("ok"))
-                count += 1
-            }
-            #expect(count == 100)
-        }
-    }
-
     private func decode(
         _ source: String,
         limits: JSONValueDecodingLimits

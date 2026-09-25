@@ -305,7 +305,7 @@ These apply on top of `AGENTS.md`, which wins on any conflict.
 
 - Result: `withTestWatchdog` races the operation (now an unstructured task) against its deadline instead of running both in a task group, so the deadline always ends the test. On expiry it cancels the operation and joins it for a bounded `cancellationGrace` (default 1 s); `TestWatchdogExpired` now carries the timeout and whether the operation exited, and its description says when the operation ignored cancellation and was abandoned. Outer cancellation still cancels and joins the operation.
 - Evidence: `TestWatchdogTests` 3/3 in 0.13 s, including a new test with an operation blocked on a non-cancellable continuation (fails with `joined == false` in about 0.1 s) and one that a finishing operation's value and error win. Negative control: the new test against the old task-group watchdog stalled until `scripts/tron-ios-test` killed the run after 176 s. Full unit run (`scripts/tron-ios-test run`) with the new watchdog: 1871 Swift Testing tests in 138 suites plus 140 XCTest tests, 226 s wall, one failure in `hostedOpeningRevealIsMonotonic`, which is pre-existing flakiness (4 of 6 isolated failures with the old watchdog on unchanged `main`, 1 of 6 with the new one), recorded as T-IOS-FLAKY-OPENING-1.
-- Changes: this commit (`Tests/Support/TestWatchdog.swift`, `Tests/Support/TestWatchdogTests.swift`).
+- Changes: this commit (`Tests/Support/TestWatchdog.swift`, Tests/Support/TestWatchdogTests.swift (since deleted by the low-signal test prune)).
 - Tasks added: T-IOS-FLAKY-OPENING-1.
 - Kept on purpose: an operation that ignores cancellation is abandoned (it runs until the test process exits) rather than blocking the run; the failure message names that case.
 
@@ -327,7 +327,7 @@ These apply on top of `AGENTS.md`, which wins on any conflict.
 | --- | --- | --- | --- |
 | Gateway, full | `nice -n 19 npx vitest run --maxWorkers=2` in `packages/gateway` | 179 files, 1,941 tests | 80 s |
 | Scripts, Node | `node --test scripts/*.test.mjs` (Node 22.22.0) | 67 tests | 133 s |
-| Scripts, shell | `scripts/tron-dev-toolchain.test.sh`, `scripts/verify-ci-toolchain.test.sh` | pass | about 1 s |
+| Scripts, shell | scripts/tron-dev-toolchain.test.sh, scripts/verify-ci-toolchain.test.sh (since deleted by the low-signal test prune) | pass | about 1 s |
 | Mac reinstall tools | `python3 scripts/test-mac-reinstall.py` | 93 tests, 3 skipped | 2 s |
 | Launcher | `packages/mac-app/scripts/test-tron-gateway-launcher.sh` | pass | 271 s |
 | Mac payload scripts | `test-update-payload-fingerprint.sh`, `test-push-product-config.sh` | pass | under 1 s |
@@ -335,7 +335,7 @@ These apply on top of `AGENTS.md`, which wins on any conflict.
 | iOS, full | `scripts/tron-ios-test run` after `build` | 1,889 Swift Testing tests in 139 suites plus XCTest | build 132 s, run 236 s |
 | Mac, full | `xcodebuild build-for-testing` then `test-without-building` (TronMac) | 316 tests in 48 suites | build 227 s, run 134 s |
 
-- Not run: `test-launchd-relaunch-fixture.sh` (opt-in, needs `TRON_RUN_LAUNCHD_FIXTURE=1`), and the payload verifier, npm and signed-payload smoke scripts, which need a staged Mac payload.
+- Not run: test-launchd-relaunch-fixture.sh (since deleted by the low-signal test prune) (opt-in, needs `TRON_RUN_LAUNCHD_FIXTURE=1`), and the payload verifier, npm and signed-payload smoke scripts, which need a staged Mac payload.
 - Changes: this commit (plan only).
 - For the next agent: the launcher shell test needs Node 22.22.0 on `PATH`, or it exits 2 immediately. `hostedOpeningRevealIsMonotonic` passed in this run; it remains T-IOS-FLAKY-OPENING-1.
 
@@ -426,7 +426,7 @@ These apply on top of `AGENTS.md`, which wins on any conflict.
 
 - C-GW-KNOW-3 (done): `isCredentialQueryKey` and `normalizeKnowledgeSourceUrl` in `knowledge-contract.ts` replace four and two copies. The lane first adopted `xPostIdentity`'s substring rule for everyone, which would have refused ordinary keys such as `author` or `session_id` at capture, import and persisted-record validation; the supervisor restored the exact list the three admission sites used, and `xPostIdentity` keeps its broader rule inline. A table test pins both refused and ordinary keys.
 - C-GW-KNOW-4 (done): `InMemoryConnectorCredentialStore` now lives in `packages/gateway/test-support/connector-credentials.ts`, outside `src`, and `dist` no longer contains it (verified by a build).
-- C-COMMENTS-REFCHECK-1 (done): `check-documentation-policy.py` now checks backticked repository paths in source comments (TS/JS, Swift, Python, shell, C), about 0.1 s slower. Negative control: re-adding the old Mac palette reference fails the check. The supervisor added `scripts/test-documentation-policy.py` to CI, which the lane had left unwired. The check found no other stale paths.
+- C-COMMENTS-REFCHECK-1 (done): `check-documentation-policy.py` now checks backticked repository paths in source comments (TS/JS, Swift, Python, shell, C), about 0.1 s slower. Negative control: re-adding the old Mac palette reference fails the check. The supervisor added scripts/test-documentation-policy.py (since deleted by the low-signal test prune) to CI, which the lane had left unwired. The check found no other stale paths.
 - C-MAC-REDACT-1 (blocked): the corpus test showed `DiagnosticsRedactor` leaves bare `api-key=…` values that `TronLog.redact` masks, so merging would weaken log redaction. Nothing changed; C-MAC-REDACT-2 asks the user whether to widen the exporter first.
 - Evidence (verified): full Gateway suite on combined `main` 179 files, 1,968 tests, 81 s; `tsc --noEmit` passes; documentation policy tests pass.
 

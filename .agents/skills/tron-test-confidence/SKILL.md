@@ -17,8 +17,10 @@ recorders, helper return values, and internal counters remained unchanged.
 
 Prefer an independently observable outcome: durable bytes, admitted/rejected
 operations, cancellation of the exact lease, or the actual presented interface.
-Keep focused state tests when they prove a real contract; do not replace every
-unit test with an expensive end-to-end test. Mark gaps between those boundaries.
+Follow the [testing policy](../../../AGENTS.md#testing-policy): prefer E2E
+coverage, and keep an isolated test only when it targets a written-down failure
+mode that catches a real bug the E2E tests miss. Mark gaps between those
+boundaries.
 For chat layout, use the owning native geometry/identity harness and regressions;
 command consumption, projection installation, cached geometry, and lazy estimated
 offsets do not prove a rendered frame. Observe settlement after ownership changes.

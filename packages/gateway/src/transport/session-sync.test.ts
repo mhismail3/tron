@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from "vitest";
+import { describe, expect, it } from "vitest";
 import type { SessionSnapshot } from "../protocol/types.js";
 import { MAX_BUFFERED_SYNC_BYTES, MAX_BUFFERED_SYNC_EVENTS, SessionSyncBarrier } from "./session-sync.js";
 
@@ -55,31 +55,6 @@ describe("atomic session synchronization barrier", () => {
     barrier.offer(event(11));
     barrier.establish(snapshot(10));
     expect(barrier.commit("request")).toEqual({ events: [event(11)], overflowed: false });
-  });
-
-  it("reuses a prepared immutable encoding without reserializing the quarantine event", () => {
-    const barrier = new SessionSyncBarrier();
-    const value = event(11);
-    const encoded = JSON.stringify(value);
-    const frame = {
-      encoded,
-      bytes: Buffer.byteLength(encoded, "utf8"),
-      output: encoded,
-      outputBytes: Buffer.byteLength(encoded, "utf8"),
-      fallback: false,
-    };
-    const stringify = vi.spyOn(JSON, "stringify");
-    try {
-      barrier.begin("request");
-      barrier.establish(snapshot(10));
-      barrier.offer(value, frame);
-      const completed = barrier.commit("request");
-      expect(completed.events).toEqual([value]);
-      expect(barrier.takeEncoding(value)).toBe(frame);
-      expect(stringify).not.toHaveBeenCalled();
-    } finally {
-      stringify.mockRestore();
-    }
   });
 
   it("quarantines events until after the baseline and removes covered events", () => {

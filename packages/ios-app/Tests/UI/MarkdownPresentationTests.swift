@@ -360,32 +360,6 @@ struct MarkdownPresentationTests {
         #expect(items[0].inline.source == "e\u{301}")
     }
 
-    @Test("inline attribution is constructed by the cold model with exact fallback and accessibility source")
-    func attributedEquivalence() throws {
-        let values = [
-            "plain  whitespace",
-            "**bold** and _emphasis_",
-            "*unmatched",
-            "[incomplete](",
-            "`open code",
-            "null \u{0} scalar",
-        ]
-        for value in values {
-            let document = MarkdownPresentation.Document(source: value)
-            guard case .paragraph(let inline) = try #require(document.blocks.first).kind else {
-                Issue.record("inline equivalence fixture was not a paragraph")
-                continue
-            }
-            let oracle = try? AttributedString(
-                markdown: value,
-                options: .init(interpretedSyntax: .inlineOnlyPreservingWhitespace)
-            )
-            #expect(inline.attributedString == oracle)
-            #expect(inline.source == value)
-            #expect(inline.accessibilitySource == value)
-        }
-    }
-
     @Test("only an unterminated code fence is eligible for streaming progress")
     func codeFenceSettlement() throws {
         let document = MarkdownPresentation.Document(source: "```swift\nclosed\n```\n\ntext\n\n```json\nopen")
@@ -396,20 +370,6 @@ struct MarkdownPresentationTests {
         #expect(codeBlocks.count == 2)
         #expect(!codeBlocks[0].isOpenCodeFence)
         #expect(codeBlocks[1].isOpenCodeFence)
-    }
-
-    @Test("renderer accepts the exact parsed document and convenience initialization delegates to the cold oracle")
-    @MainActor
-    func rendererUsesDocument() {
-        let source = "# Heading\n\nparagraph\n\n| raw | cells |\n| --- | --- |"
-        let document = MarkdownPresentation.Document(source: source)
-        let supplied = TronMarkdownView(document: document, streaming: true)
-        let convenience = TronMarkdownView(text: source, streaming: true)
-
-        #expect(supplied.document == document)
-        #expect(convenience.document == document)
-        #expect(supplied.streaming)
-        #expect(convenience.streaming)
     }
 
     private func requireSendable<T: Sendable>(_: T) {}

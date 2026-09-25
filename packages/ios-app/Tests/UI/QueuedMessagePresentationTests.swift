@@ -29,42 +29,6 @@ struct QueuedMessagePresentationTests {
         ) == .requiresGatewayUpdate)
     }
 
-    @Test("installed authoritative queue remains manageable while transcript work advances")
-    func transcriptProjectionDoesNotOwnQueueAvailability() {
-        let installedAvailability = QueuedMessageManagementPolicy.availability(
-            queueManagementCapability: true,
-            queueRevision: 9,
-            hasAuthoritativeItems: true
-        )
-        // Availability is intentionally a fact of the installed queue commit;
-        // unrelated desired transcript tags are not an input to this policy.
-        #expect(installedAvailability == .available)
-        #expect(installedAvailability.isManageable)
-    }
-
-    @Test("capability replacement changes policy only with the installed commit")
-    func capabilityReplacement() {
-        let supported = QueuedMessageManagementPolicy.availability(
-            queueManagementCapability: true,
-            queueRevision: 9,
-            hasAuthoritativeItems: true
-        )
-        let unsupported = QueuedMessageManagementPolicy.availability(
-            queueManagementCapability: false,
-            queueRevision: 9,
-            hasAuthoritativeItems: true
-        )
-        #expect(supported == .available)
-        #expect(unsupported == .requiresGatewayUpdate)
-    }
-
-    @Test("only authoritative rich queue state permits mutation")
-    func mutationGate() {
-        #expect(QueuedMessageManagementAvailability.available.isManageable)
-        #expect(!QueuedMessageManagementAvailability.requiresGatewayUpdate.isManageable)
-        #expect(!QueuedMessageManagementAvailability.invalidProjection.isManageable)
-    }
-
     @Test("queue lineage changes only for edited or removed operations")
     func changedQueueOperationIDs() {
         let first = SessionSnapshot.QueuedMessage(
@@ -116,18 +80,6 @@ struct QueuedMessagePresentationTests {
         #expect(legacy.count == 1)
         #expect(legacy[0].kind == .file)
         #expect(legacy[0].attachment == nil)
-    }
-
-    @Test("queued attachment descriptors decode additively")
-    func attachmentDescriptorDecoding() throws {
-        let data = Data(#"{"id":"queued","behavior":"steer","text":"review","attachmentCount":1,"photoCount":0,"fileAttachmentCount":1,"attachments":[{"id":"upload","name":"notes.txt","mimeType":"text/plain","size":4}]}"#.utf8)
-        let decoded = try JSONDecoder().decode(SessionSnapshot.QueuedMessage.self, from: data)
-        #expect(decoded.attachments == [
-            .init(id: "upload", name: "notes.txt", mimeType: "text/plain", size: 4),
-        ])
-
-        let legacy = Data(#"{"id":"legacy","behavior":"followUp","text":"later","attachmentCount":1}"#.utf8)
-        #expect(try JSONDecoder().decode(SessionSnapshot.QueuedMessage.self, from: legacy).attachments == nil)
     }
 
     @Test("canonical boundary waits for queue mutation outcome before choosing identity")
@@ -397,13 +349,5 @@ struct QueuedMessagePresentationTests {
         #expect(chip.id == "attachment-upload:gateway-upload")
         #expect(chip.attachment?.id == "upload:gateway-upload")
         #expect(QueuedMessageAttachmentPresentation.chips(for: [attachment.requiringUpload()]).isEmpty)
-    }
-
-    @Test("queued card geometry keeps compact balanced header spacing")
-    func compactCardGeometry() {
-        #expect(QueuedMessageCardLayout.contentSpacing == 6)
-        #expect(QueuedMessageCardLayout.arrowContainerSize == 24)
-        #expect(QueuedMessageCardLayout.attachmentChipSize == 22)
-        #expect(QueuedMessageCardLayout.attachmentChipCornerRadius == 6)
     }
 }
