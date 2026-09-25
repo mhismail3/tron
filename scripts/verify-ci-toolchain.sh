@@ -55,9 +55,6 @@ for tool in "$@"; do
       [[ -f "$presets/base.yml" && -f "$presets/Platforms/iOS.yml" && -f "$presets/Platforms/macOS.yml" ]] \
         || { echo "xcodegen setting presets are incomplete" >&2; exit 1; }
       ;;
-    asc)
-      asc version 2>&1 | grep -F "$TRON_CI_ASC_VERSION" >/dev/null
-      ;;
     *) echo "unsupported tool verification: $tool" >&2; exit 64 ;;
   esac
 done

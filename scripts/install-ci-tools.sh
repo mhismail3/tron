@@ -30,15 +30,6 @@ for tool in "$@"; do
       ln -sfn "$executable" "$BIN/xcodegen"
       ln -sfn "$(dirname "$presets")" "$SHARE/xcodegen"
       ;;
-    asc)
-      case "$(uname -m)" in
-        arm64) url="$TRON_CI_ASC_MACOS_ARM64_URL"; sha="$TRON_CI_ASC_MACOS_ARM64_SHA256" ;;
-        x86_64) url="$TRON_CI_ASC_MACOS_AMD64_URL"; sha="$TRON_CI_ASC_MACOS_AMD64_SHA256" ;;
-        *) echo "unsupported architecture" >&2; exit 1 ;;
-      esac
-      executable="$CACHE/asc-$TRON_CI_ASC_VERSION-$(uname -m)"
-      fetch "$url" "$sha" "$executable"; chmod 0755 "$executable"; ln -sfn "$executable" "$BIN/asc"
-      ;;
     *) echo "unsupported CI tool: $tool" >&2; exit 64 ;;
   esac
 done
