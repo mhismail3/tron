@@ -45,7 +45,7 @@ import { SessionSearchIndex } from "./sessions/session-search-index.js";
 import { SessionSearchAllowanceLedger } from "./sessions/session-search-allowance.js";
 import { SessionSearchService } from "./sessions/session-search-service.js";
 import { admitSearchEmbeddingHelper, NaturalLanguageEmbeddingClient } from "./sessions/session-search-embedding.js";
-import { createKnowledgeConnectorExtension } from "./knowledge/connectors.js";
+import { KnowledgeConnectorExtension } from "./knowledge/connectors.js";
 import { createKnowledgeImporter } from "./knowledge/legacy-import.js";
 import { ConnectionOwner } from "./integrations/connection-owner.js";
 import { McpAdapter } from "./integrations/mcp-adapter.js";
@@ -258,7 +258,7 @@ const knowledgeStore = new KnowledgeStore(
   () => transport?.broadcast("knowledge.changed", {}),
   async (connectionId) => connections.resolveInstance(connectionId).catch(() => undefined),
 );
-const knowledgeConnector = createKnowledgeConnectorExtension(knowledgeStore, {
+const knowledgeConnector = new KnowledgeConnectorExtension(knowledgeStore, {
   credentials: knowledgeCredentials,
   assessment: new JevSourceAssessmentModel(knowledgeCredentials),
   ...(xPricing ? { xPricing } : {}),

@@ -123,6 +123,16 @@ class ConnectorShapeError extends Error { constructor() { super("Connector retur
 function initial(connector: Connector): KnowledgeConnectorState {
   return { connector, enabled: false, allowWrites: false, paidAccessApproved: false, paidBudgetCents: 0, recurringApproved: false, pending: [], capturedIds: [], health: "unconfigured", remaining: 0 };
 }
+/** Connector policy values for a configuration write: the request wins, then the
+ * stored state on a merge, then the reset default an identity change starts from. */
+function policyDefaults(request: KnowledgeConnectorConfigurationRequest, fallback?: KnowledgeConnectorState): Pick<KnowledgeConnectorState, "allowWrites" | "paidAccessApproved" | "paidBudgetCents" | "recurringApproved"> {
+  return {
+    allowWrites: request.allowWrites ?? fallback?.allowWrites ?? false,
+    paidAccessApproved: request.paidAccessApproved ?? fallback?.paidAccessApproved ?? false,
+    paidBudgetCents: request.paidBudgetCents ?? fallback?.paidBudgetCents ?? 0,
+    recurringApproved: request.recurringApproved ?? fallback?.recurringApproved ?? false,
+  };
+}
 function stateStatus(state: KnowledgeConnectorState | undefined, connector: Connector, authority?: ConnectionInstance): KnowledgeConnectorStatus {
   const value = state ?? initial(connector);
   // ConnectionOwner is the sole authority for account admission. Knowledge
@@ -279,14 +289,7 @@ export class KnowledgeConnectorExtension {
     const signal = externalSignal ? AbortSignal.any([controller.signal, externalSignal]) : controller.signal;
     const deadline = setTimeout(() => controller.abort(new Error("Raindrop read deadline exceeded")), RUN_DEADLINE_MS);
     deadline.unref?.();
-    const sleep = async (milliseconds: number) => {
-      await new Promise<void>((resolve, reject) => {
-        const timer = setTimeout(() => { signal.removeEventListener("abort", abort); resolve(); }, milliseconds);
-        const abort = () => { clearTimeout(timer); signal.removeEventListener("abort", abort); reject(signal.reason instanceof Error ? signal.reason : new Error("Raindrop read cancelled")); };
-        if (signal.aborted) abort(); else signal.addEventListener("abort", abort, { once: true });
-      });
-      if (signal.aborted) throw signal.reason instanceof Error ? signal.reason : new Error("Raindrop read cancelled");
-    };
+    const sleep = (milliseconds: number) => this.cancellableSleep(signal, milliseconds);
     const requestEndpoint = async (endpoint: string): Promise<{ value: any; headers: Headers }> => requestJson(this.http, endpoint, token, { sleep, signal });
     const safeID = (value: string, label: string): string => {
       if (!/^[A-Za-z0-9_-]{1,128}$/.test(value)) throw bad(`${label} is invalid`);
@@ -315,7 +318,6 @@ export class KnowledgeConnectorExtension {
       }
       const live = await this.store.connectorState("raindrop");
       if (!live?.enabled || live.accountId !== state.accountId || live.credentialRef !== state.credentialRef) throw new GatewayError("conflict", "Raindrop configuration changed during read");
-      if ((read.operation === "bookmarks" || read.operation === "highlights") && (!Number.isSafeInteger(read.page ?? 0) || (read.page ?? 0) < 0 || (read.page ?? 0) > 1_000_000 || !Number.isSafeInteger(read.perpage ?? 50) || (read.perpage ?? 50) < 1 || (read.perpage ?? 50) > 50)) throw bad("Raindrop page must be 0..1000000 and perpage must be 1..50");
       if (read.operation === "collections") {
         const root = await requestEndpoint("https://api.raindrop.io/rest/v1/collections");
         headers = root.headers; value = root.value;
@@ -330,8 +332,6 @@ export class KnowledgeConnectorExtension {
           const collection = read.collectionId ?? state.scope ?? "0";
           if (!/^-?\d{1,18}$/.test(collection)) throw bad("Collection ID is invalid");
           const params = new URLSearchParams({ page: String(read.page ?? 0), perpage: String(read.perpage ?? 50) });
-          if (read.search !== undefined && (typeof read.search !== "string" || read.search.length > 512)) throw bad("Raindrop search exceeds its limit");
-          if (read.sort !== undefined && (typeof read.sort !== "string" || read.sort.length > 64)) throw bad("Raindrop sort exceeds its limit");
           if (read.search) params.set("search", read.search);
           if (read.sort) params.set("sort", read.sort);
           if (read.nested !== undefined) params.set("nested", String(read.nested));
@@ -341,7 +341,6 @@ export class KnowledgeConnectorExtension {
         } else if (read.operation === "highlights") {
           const params = new URLSearchParams({ page: String(read.page ?? 0), perpage: String(read.perpage ?? 50) });
           if (read.collectionId) {
-            if (!/^-?\d{1,18}$/.test(read.collectionId)) throw bad("Collection ID is invalid");
             endpoint = `https://api.raindrop.io/rest/v1/highlights/${encodeURIComponent(read.collectionId)}?${params}`;
           } else endpoint = `https://api.raindrop.io/rest/v1/highlights?${params}`;
         } else throw bad("Unsupported Raindrop read operation");
@@ -398,10 +397,9 @@ export class KnowledgeConnectorExtension {
       ...(nextScope ? { scope: nextScope } : {}),
       ...(nextCredentialRef ? { credentialRef: nextCredentialRef } : {}),
       ...(nextDestination ? { destination: nextDestination } : {}),
-      allowWrites: request.allowWrites ?? false, paidAccessApproved: request.paidAccessApproved ?? false,
-      paidBudgetCents: request.paidBudgetCents ?? 0, recurringApproved: request.recurringApproved ?? false,
+      ...policyDefaults(request),
       health: request.enabled && Boolean(nextCredentialRef && nextAccountId && nextScope) ? "ready" : "unconfigured",
-    } : { ...base, enabled: request.enabled, ...(request.accountId !== undefined ? { accountId: request.accountId } : {}), ...(request.scope !== undefined ? { scope: request.scope } : {}), ...(request.destination !== undefined ? { destination: request.destination } : {}), ...(request.credentialRef !== undefined ? { credentialRef: request.credentialRef } : {}), allowWrites: request.allowWrites ?? current?.allowWrites ?? false, paidAccessApproved: request.paidAccessApproved ?? current?.paidAccessApproved ?? false, paidBudgetCents: request.paidBudgetCents ?? current?.paidBudgetCents ?? 0, recurringApproved: request.recurringApproved ?? current?.recurringApproved ?? false, health: request.enabled && (request.credentialRef ?? current?.credentialRef) && (request.accountId ?? current?.accountId) && (request.scope ?? current?.scope) ? "ready" : "unconfigured" };
+    } : { ...base, enabled: request.enabled, ...(request.accountId !== undefined ? { accountId: request.accountId } : {}), ...(request.scope !== undefined ? { scope: request.scope } : {}), ...(request.destination !== undefined ? { destination: request.destination } : {}), ...(request.credentialRef !== undefined ? { credentialRef: request.credentialRef } : {}), ...policyDefaults(request, current), health: request.enabled && (request.credentialRef ?? current?.credentialRef) && (request.accountId ?? current?.accountId) && (request.scope ?? current?.scope) ? "ready" : "unconfigured" };
     delete next.lastError;
     let currentAuthority = authority;
     if (this.options.connections) {
@@ -889,8 +887,4 @@ export class KnowledgeConnectorExtension {
       return { status: "moved" };
     } catch { return { status: "conflict" }; }
   }
-}
-
-export function createKnowledgeConnectorExtension(store: KnowledgeStore, options: KnowledgeConnectorOptions): KnowledgeConnectorExtension {
-  return new KnowledgeConnectorExtension(store, options);
 }
