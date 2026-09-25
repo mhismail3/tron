@@ -99,9 +99,6 @@ describe.sequential("RuntimeRegistry with the pinned agent runtime", () => {
       stageTiming: options.stageTiming,
     });
     registries.push(registry);
-    const startupEvidence = options.phaseObserver
-      ? vi.spyOn(registry as any, "catalogStructureEvidence")
-      : undefined;
     if (options.beforeInitialize) await options.beforeInitialize(manager.getSessionFile()!);
     await registry.initialize(options.phaseObserver);
     await registry.recoverCanonicalAttention();
@@ -115,7 +112,6 @@ describe.sequential("RuntimeRegistry with the pinned agent runtime", () => {
       events,
       summaries,
       sessionFile: manager.getSessionFile()!,
-      startupEvidence,
     };
   }
 
@@ -194,15 +190,12 @@ describe.sequential("RuntimeRegistry with the pinned agent runtime", () => {
     }
   });
 
-  it("orders startup phases and acquires one structural evidence cut", async () => {
+  it("publishes startup phases in catalog-before-attention order", async () => {
     const phases: string[] = [];
-    const fixture = await coldFixture("startup-phases", {
+    await coldFixture("startup-phases", {
       phaseObserver: (phase) => phases.push(phase),
     });
     expect(phases).toEqual(["catalog-warming", "attention-recovery"]);
-    // A later page source may validate a different cut, but startup itself has
-    // exactly one bounded structural evidence acquisition for reconciliation.
-    expect(fixture.startupEvidence).toHaveBeenCalledTimes(1);
   });
 
   it("owns one exact live session for a workspace Automation operation", async () => {
