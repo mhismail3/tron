@@ -1,21 +1,8 @@
 import type { SessionProcessActivity } from "../protocol/types.js";
+import { RecencyDeadlines, systemRecencyClock, type RecencyClock } from "./recency-deadlines.js";
 
 export const PROCESS_ACTIVITY_RECENT_MS = 5 * 60 * 1_000;
 const MAX_PROCESS_TIMESTAMP_FUTURE_SKEW_MS = 60_000;
-
-export interface ProcessActivityClock {
-  wallNow(): number;
-  monotonicNow(): number;
-  setTimeout(callback: () => void, delayMs: number): unknown;
-  clearTimeout(handle: unknown): void;
-}
-
-const systemProcessActivityClock: ProcessActivityClock = {
-  wallNow: () => Date.now(),
-  monotonicNow: () => typeof performance !== "undefined" ? performance.now() : Date.now(),
-  setTimeout: (callback, delayMs) => setTimeout(callback, delayMs),
-  clearTimeout: (handle) => clearTimeout(handle as ReturnType<typeof setTimeout>),
-};
 
 export interface ProcessActivityExpiryFrame {
   revision: number;
@@ -24,7 +11,7 @@ export interface ProcessActivityExpiryFrame {
   expiredProcessIds: string[];
 }
 
-type ProcessActivityExpiryCallback = (frame: ProcessActivityExpiryFrame) => void;
+export type ProcessActivityExpiryCallback = (frame: ProcessActivityExpiryFrame) => void;
 
 const terminalStates = new Set(["completed", "failed", "stopped", "rejected", "interrupted"]);
 const MAX_TERMINAL_TOMBSTONES = 2_048;
@@ -33,15 +20,16 @@ const MAX_TERMINAL_TOMBSTONES = 2_048;
  * Canonical history is read independently and is never removed here. */
 export class ProcessActivityRecency {
   private readonly activities = new Map<string, SessionProcessActivity>();
-  private readonly monotonicDeadlines = new Map<string, number>();
+  private readonly deadlines: RecencyDeadlines;
   /** Bounded non-presentational terminal latches prevent a late artifact from
    * resurrecting work after its five-minute row has expired. */
   private readonly terminalTombstones = new Set<string>();
   private readonly callbacks = new Set<ProcessActivityExpiryCallback>();
-  private expiryTimer: unknown;
   private revision = 0;
 
-  constructor(private readonly clock: ProcessActivityClock = systemProcessActivityClock) {}
+  constructor(private readonly clock: RecencyClock = systemRecencyClock) {
+    this.deadlines = new RecencyDeadlines(clock);
+  }
 
   registerExpiryCallback(callback: ProcessActivityExpiryCallback): () => void {
     this.callbacks.add(callback);
@@ -68,15 +56,7 @@ export class ProcessActivityRecency {
     const normalized = this.normalized(activity);
     this.activities.set(activity.processId, normalized);
     const recentUntil = normalized.lifecycle.recentUntil;
-    const expiry = recentUntil === undefined ? Number.NaN : Date.parse(recentUntil);
-    if (Number.isFinite(expiry)) {
-      this.monotonicDeadlines.set(
-        activity.processId,
-        this.clock.monotonicNow() + Math.max(0, expiry - this.clock.wallNow()),
-      );
-    } else {
-      this.monotonicDeadlines.delete(activity.processId);
-    }
+    this.deadlines.admit(activity.processId, recentUntil === undefined ? undefined : Date.parse(recentUntil));
     this.revision += 1;
     this.expireDue(false); // Also installs the nearest remaining expiry timer.
     return { activity: this.wire(normalized), accepted: true };
@@ -84,7 +64,7 @@ export class ProcessActivityRecency {
 
   remove(processId: string): void {
     if (!this.activities.delete(processId)) return;
-    this.monotonicDeadlines.delete(processId);
+    this.deadlines.delete(processId);
     this.revision += 1;
     this.schedule();
   }
@@ -97,8 +77,8 @@ export class ProcessActivityRecency {
     if (!terminalStates.has(activity.lifecycle.state)) {
       return activity.lifecycle.state === "unknown" ? "unknown" : "active";
     }
-    const deadline = this.monotonicDeadlines.get(activity.processId);
-    if (deadline !== undefined) return deadline > this.clock.monotonicNow() ? "recent" : "historical";
+    const remainingMs = this.deadlines.remaining(activity.processId);
+    if (remainingMs !== undefined) return remainingMs > 0 ? "recent" : "historical";
     const expiry = Date.parse(activity.lifecycle.recentUntil ?? "");
     return Number.isFinite(expiry) && expiry > this.clock.wallNow() ? "recent" : "historical";
   }
@@ -135,7 +115,7 @@ export class ProcessActivityRecency {
     for (const [processId, activity] of this.activities) {
       if (this.visibility(activity) !== "historical") continue;
       this.activities.delete(processId);
-      this.monotonicDeadlines.delete(processId);
+      this.deadlines.delete(processId);
       if (terminalStates.has(activity.lifecycle.state)) this.latchTerminal(processId);
       expiredProcessIds.push(processId);
     }
@@ -171,20 +151,12 @@ export class ProcessActivityRecency {
   }
 
   private schedule(): void {
-    if (this.expiryTimer !== undefined) this.clock.clearTimeout(this.expiryTimer);
     let nearest: number | undefined;
     for (const [processId, activity] of this.activities) {
       if (!terminalStates.has(activity.lifecycle.state)) continue;
-      const deadline = this.monotonicDeadlines.get(processId);
+      const deadline = this.deadlines.deadline(processId);
       if (deadline !== undefined && (nearest === undefined || deadline < nearest)) nearest = deadline;
     }
-    if (nearest === undefined) {
-      this.expiryTimer = undefined;
-      return;
-    }
-    this.expiryTimer = this.clock.setTimeout(() => {
-      this.expiryTimer = undefined;
-      this.expireDue();
-    }, Math.max(0, nearest - this.clock.monotonicNow()));
+    this.deadlines.schedule(nearest, () => this.expireDue());
   }
 }

@@ -1,12 +1,13 @@
 import { describe, expect, it } from "vitest";
 import type { ExtensionRunActivity } from "../protocol/types.js";
-import { ExtensionActivityRecency, type ExtensionActivityClock } from "./extension-activity-recency.js";
+import { ExtensionActivityRecency } from "./extension-activity-recency.js";
+import type { RecencyClock } from "./recency-deadlines.js";
 
 function clock(start = Date.parse("2026-01-01T00:00:00.000Z")) {
   let wall = start;
   let mono = 0;
   const timers: Array<{ at: number; callback: () => void }> = [];
-  const value: ExtensionActivityClock = {
+  const value: RecencyClock = {
     wallNow: () => wall,
     monotonicNow: () => mono,
     setTimeout: (callback, delayMs) => { timers.push({ at: mono + delayMs, callback }); return callback; },

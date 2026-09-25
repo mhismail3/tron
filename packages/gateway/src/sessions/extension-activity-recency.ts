@@ -1,21 +1,6 @@
 import type { ExtensionRunActivity, ExtensionRunVisibility } from "../protocol/types.js";
+import { RecencyDeadlines, systemRecencyClock, type RecencyClock } from "./recency-deadlines.js";
 
-export interface ExtensionActivityClock {
-  wallNow(): number;
-  /** Retained for clock fakes and callers that already provide a monotonic clock.
-   * Recency admission deliberately uses wall-clock lifecycle facts so restart
-   * remaining time is reconstructed from `recentUntil - wallNow`. */
-  monotonicNow(): number;
-  setTimeout(callback: () => void, delayMs: number): unknown;
-  clearTimeout(handle: unknown): void;
-}
-
-const systemExtensionActivityClock: ExtensionActivityClock = {
-  wallNow: () => Date.now(),
-  monotonicNow: () => typeof performance !== "undefined" ? performance.now() : Date.now(),
-  setTimeout: (callback, delayMs) => setTimeout(callback, delayMs),
-  clearTimeout: (handle) => clearTimeout(handle as ReturnType<typeof setTimeout>),
-};
 
 export interface ActivityVisibility {
   visibility: ExtensionRunVisibility;
@@ -33,7 +18,7 @@ export interface ActivityExpiryFrame {
   expiredActivityIds: string[];
 }
 
-type ExtensionActivityExpiryCallback = (frame: ActivityExpiryFrame) => void;
+export type ExtensionActivityExpiryCallback = (frame: ActivityExpiryFrame) => void;
 
 /** Gateway-owned current/recent partition. Recency is a bounded scheduling
  * projection; canonical history is never removed here. */
@@ -41,13 +26,13 @@ export class ExtensionActivityRecency {
   private readonly activities = new Map<string, ExtensionRunActivity>();
   /** In-memory monotonic deadlines are reconstructed from persisted
    * recentUntil-wallNow on admission, including after restart. */
-  private readonly monotonicDeadlines = new Map<string, number>();
+  private readonly deadlines: RecencyDeadlines;
   private readonly expiryCallbacks = new Set<ExtensionActivityExpiryCallback>();
-  private expiryTimer: unknown;
-  private timerDeadline: number | undefined;
   private revision = 0;
 
-  constructor(private readonly clock: ExtensionActivityClock = systemExtensionActivityClock) {}
+  constructor(private readonly clock: RecencyClock = systemRecencyClock) {
+    this.deadlines = new RecencyDeadlines(clock);
+  }
 
   get liveRevision(): number { return this.revision; }
 
@@ -72,12 +57,7 @@ export class ExtensionActivityRecency {
     }
     this.activities.set(key, activity);
     const recentUntil = activity.lifecycle?.recentUntil;
-    const recentUntilMs = recentUntil === undefined ? Number.NaN : Date.parse(recentUntil);
-    if (Number.isFinite(recentUntilMs)) {
-      this.monotonicDeadlines.set(key, this.clock.monotonicNow() + Math.max(0, recentUntilMs - this.clock.wallNow()));
-    } else {
-      this.monotonicDeadlines.delete(key);
-    }
+    this.deadlines.admit(key, recentUntil === undefined ? undefined : Date.parse(recentUntil));
     this.revision += 1;
     this.expireDue(false); // Also installs the nearest remaining expiry timer.
     return { ...this.visibility(activity), accepted: true };
@@ -85,7 +65,7 @@ export class ExtensionActivityRecency {
 
   remove(activityId: string): void {
     if (!this.activities.delete(activityId)) return;
-    this.monotonicDeadlines.delete(activityId);
+    this.deadlines.delete(activityId);
     this.revision += 1;
     this.scheduleNearestExpiry();
   }
@@ -124,7 +104,7 @@ export class ExtensionActivityRecency {
       const visibility = this.scheduledVisibility(key, activity, now);
       if (visibility.visibility !== "historical") continue;
       this.activities.delete(key);
-      this.monotonicDeadlines.delete(key);
+      this.deadlines.delete(key);
       expiredActivityIds.push(key);
     }
     if (expiredActivityIds.length > 0) this.revision += 1;
@@ -151,39 +131,23 @@ export class ExtensionActivityRecency {
   }
 
   private scheduleNearestExpiry(): void {
-    if (this.expiryTimer !== undefined) this.clock.clearTimeout(this.expiryTimer);
     let nearest: number | undefined;
     const now = this.clock.wallNow();
     for (const [key, activity] of this.activities) {
       const visibility = this.scheduledVisibility(key, activity, now);
       if (visibility.visibility !== "recent") continue;
-      const deadline = this.monotonicDeadlines.get(key);
+      const deadline = this.deadlines.deadline(key);
       if (deadline !== undefined && (nearest === undefined || deadline < nearest)) nearest = deadline;
     }
-    if (nearest === undefined) {
-      this.expiryTimer = undefined;
-      this.timerDeadline = undefined;
-      return;
-    }
-    // Persisted deadlines are wall-clock facts. Once admitted (including after
-    // restart), convert the remaining wall time to a monotonic deadline so a
-    // later wall-clock jump cannot move an already scheduled expiry.
-    const remainingMs = Math.max(0, nearest - this.clock.monotonicNow());
-    this.timerDeadline = nearest;
-    this.expiryTimer = this.clock.setTimeout(() => {
-      this.expiryTimer = undefined;
-      this.timerDeadline = undefined;
-      this.expireDue();
-    }, remainingMs);
+    this.deadlines.schedule(nearest, () => this.expireDue());
   }
 
   private scheduledVisibility(key: string, activity: ExtensionRunActivity, wallNow: number): ActivityVisibility {
-    const deadline = this.monotonicDeadlines.get(key);
-    if (deadline === undefined) return this.visibility(activity, wallNow);
+    const remainingMs = this.deadlines.remaining(key);
+    if (remainingMs === undefined) return this.visibility(activity, wallNow);
     const lifecycle = activity.lifecycle;
     const terminalAt = lifecycle?.terminalAt;
     const recentUntil = lifecycle?.recentUntil;
-    const remainingMs = Math.max(0, deadline - this.clock.monotonicNow());
     return {
       visibility: remainingMs > 0 ? "recent" : "historical",
       remainingMs,

@@ -1,8 +1,9 @@
 import { describe, expect, it, vi } from "vitest";
 import type { SessionProcessActivity } from "../protocol/types.js";
-import { PROCESS_ACTIVITY_RECENT_MS, ProcessActivityRecency, type ProcessActivityClock } from "./process-activity-recency.js";
+import { PROCESS_ACTIVITY_RECENT_MS, ProcessActivityRecency } from "./process-activity-recency.js";
+import type { RecencyClock } from "./recency-deadlines.js";
 
-class Clock implements ProcessActivityClock {
+class Clock implements RecencyClock {
   wall = Date.parse("2026-01-01T00:00:00.000Z");
   mono = 1_000;
   callback: (() => void) | undefined;
