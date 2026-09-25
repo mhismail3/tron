@@ -42,33 +42,24 @@ describe("GatewayLogger", () => {
     expect(new GatewayLogger(path).recent(1)[0]).toMatchObject({ runtimeEpoch: "epoch-1", commandId: "command_1" });
   });
 
-  it("does not mirror persisted records to process streams when supervised", () => {
-    vi.stubEnv("TRON_GATEWAY_SUPERVISED", "1");
+  it.each([["1", false], ["0", true]])("mirrors persisted records to process streams only when TRON_GATEWAY_SUPERVISED is %s", (supervised, mirrors) => {
+    vi.stubEnv("TRON_GATEWAY_SUPERVISED", supervised);
     const path = logPath();
     const logger = new GatewayLogger(path);
 
-    logger.log("info", "supervised lifecycle", { event: "gateway.started" });
-    logger.log("error", "supervised fault", { event: "gateway.fault" });
+    logger.log("info", "lifecycle", { event: "gateway.started" });
+    logger.log("error", "fault", { event: "gateway.fault" });
 
     expect(lines(path).map((record) => record.event)).toEqual(["gateway.started", "gateway.fault"]);
     const mirrored = [process.stdout, process.stderr]
       .map((stream) => vi.mocked(stream.write).mock.calls.map(([chunk]) => String(chunk)).join(""))
       .join("");
-    expect(mirrored).toBe("");
-  });
-
-  it("mirrors persisted records to process streams when not supervised", () => {
-    vi.stubEnv("TRON_GATEWAY_SUPERVISED", "0");
-    const logger = new GatewayLogger(logPath());
-
-    logger.log("info", "foreground lifecycle", { event: "gateway.started" });
-    logger.log("error", "foreground fault", { event: "gateway.fault" });
-
-    const mirrored = [process.stdout, process.stderr]
-      .map((stream) => vi.mocked(stream.write).mock.calls.map(([chunk]) => String(chunk)).join(""))
-      .join("");
-    expect(mirrored).toContain("foreground lifecycle");
-    expect(mirrored).toContain("foreground fault");
+    if (mirrors) {
+      expect(mirrored).toContain("lifecycle");
+      expect(mirrored).toContain("fault");
+    } else {
+      expect(mirrored).toBe("");
+    }
   });
 
   it("sanitizes and bounds client-supplied correlation IDs", () => {

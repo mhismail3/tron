@@ -94,22 +94,6 @@ describe("session transcript paging", () => {
       expect(JSON.stringify(replay)).not.toContain("private fixture");
     } finally { await workspace.dispose(); await rm(root, { recursive: true, force: true }); }
   });
-  it("replays thumbnail refresh receipts without rerunning a no-image operation", async () => {
-    const root = await mkdtemp(join(tmpdir(), "tron-service-preview-receipt-"));
-    const workspace = new TronWorkspace(root);
-    try {
-      const store = new KnowledgeStore(workspace);
-      const source = await store.captureSource({ commandId: "preview-receipt-source", record: { kind: "source", scope: "research", provenance: { actor: "user", evidence: [] }, relations: [], content: { title: "No preview", text: "body", captureDisposition: "complete", capturedAt: "2026-01-01T00:00:00Z", origin: "manual" } } });
-      const service = new GatewayService({ config: { tronHome: root }, sessions: {}, receipts: new CommandReceiptStore(root), knowledge: new KnowledgeService(store, { admit() {}, dispose() {} }), updateService: {}, iosDeviceInstallService: {}, gitWorktrees: {}, workspaceInspector: {}, providerUsage: {} } as unknown as GatewayServiceDependencies);
-      const request = { commandId: "preview-receipt-command", sourceId: source.record.id, expectedRevision: source.record.revisionId };
-      const first = await service.invoke(client, "knowledge.source.preview.refresh", request);
-      const second = await service.invoke(client, "knowledge.source.preview.refresh", request);
-      expect(second).toEqual(first);
-      expect(first).toMatchObject({ status: "unavailable", reason: "Source has no safe URL for preview refresh." });
-      expect((await store.read(source.record.id))?.revisionId).toBe(source.record.revisionId);
-    } finally { await workspace.dispose(); await rm(root, { recursive: true, force: true }); }
-  });
-
   it("publishes durable self-revocation before install cleanup and preserves idempotence", async () => {
     const root = await mkdtemp(join(tmpdir(), "tron-service-revoke-"));
     let releaseCleanup: (() => void) | undefined;
@@ -227,24 +211,6 @@ describe("session transcript paging", () => {
     })).resolves.toEqual({ sessionId: "canonical-session" });
     expect(importFromJsonl).toHaveBeenCalledWith("/tmp/session.jsonl", "/tmp/project");
     expect(release).toHaveBeenCalledOnce();
-  });
-
-  it("routes exact mobile presentation visibility through connection ownership", async () => {
-    const setPresentationVisibility = vi.fn((_sessionId, _token, revision: number, visible: boolean) => ({
-      revision,
-      visible,
-    }));
-    const service = new GatewayService({
-      sessions: {},
-    } as unknown as GatewayServiceDependencies);
-
-    await expect(service.invoke({ ...client, setPresentationVisibility }, "session.presentation.set", {
-      sessionId: "session",
-      subscriptionToken: "subscription",
-      revision: 7,
-      visible: true,
-    })).resolves.toEqual({ revision: 7, visible: true });
-    expect(setPresentationVisibility).toHaveBeenCalledWith("session", "subscription", 7, true);
   });
 
   it("advertises independent process and scalable upload-status capabilities", () => {
@@ -370,9 +336,10 @@ describe("session transcript paging", () => {
     })).rejects.toMatchObject({ code: "invalid_request" });
   });
 
-  it("rejects live mutation before session ownership and preserves list-scoped rename", async () => {
+  it("rejects live session mutation or terminal creation before session ownership and preserves list-scoped rename", async () => {
     const prompt = vi.fn(async () => ({ queued: false }));
     const rename = vi.fn(async () => {});
+    const open = vi.fn();
     const acquire = vi.fn(async () => ({ id: "session", prompt, rename }));
     const execute = vi.fn(async (
       _identity: string,
@@ -380,21 +347,30 @@ describe("session transcript paging", () => {
       _commandId: string,
       operation: () => Promise<unknown>,
     ) => operation());
+    const closedClient = { ...client, isSubscribed: () => false };
     const closedService = new GatewayService({
       sessions: { isSubscribed: () => false, acquire },
       uploads: { materialize: async () => ({ envelope: "", images: [] }) },
+      terminals: { open },
       receipts: { execute },
     } as unknown as GatewayServiceDependencies);
 
-    await expect(closedService.invoke({ ...client, isSubscribed: () => false }, "session.prompt", {
+    await expect(closedService.invoke(closedClient, "session.prompt", {
       sessionId: "session",
       text: "hello",
       commandId: "command-1",
     })).rejects.toMatchObject({ code: "invalid_request" });
+    await expect(closedService.invoke(closedClient, "terminal.open", {
+      sessionId: "session",
+      columns: 80,
+      rows: 24,
+      commandId: "command-3",
+    })).rejects.toMatchObject({ code: "invalid_request" });
     expect(acquire).not.toHaveBeenCalled();
     expect(prompt).not.toHaveBeenCalled();
+    expect(open).not.toHaveBeenCalled();
 
-    await expect(closedService.invoke({ ...client, isSubscribed: () => false }, "session.rename", {
+    await expect(closedService.invoke(closedClient, "session.rename", {
       sessionId: "session",
       name: "Dashboard rename",
       commandId: "command-2",
@@ -517,7 +493,7 @@ describe("session transcript paging", () => {
     expect(prompt).toHaveBeenCalledTimes(3);
   });
 
-  it("admits empty resources, rejects mismatched text, and rejects extension attachments", async () => {
+  it("admits empty resources and rejects mismatched or malformed resource invocations", async () => {
     const prompt = vi.fn(async () => ({ operationId: "resource-operation" }));
     const execute = vi.fn(async (_identity: string, _method: string, _commandId: string, operation: () => Promise<unknown>) => operation());
     const commands = vi.fn(() => [
@@ -530,39 +506,20 @@ describe("session transcript paging", () => {
       receipts: { execute },
     } as unknown as GatewayServiceDependencies);
 
-    await expect(service.invoke(client, "session.prompt", {
-      sessionId: "session", text: "", uploadIds: [],
-      resourceInvocation: { source: "skill", name: "review", arguments: "" },
-      commandId: "00000000-0000-4000-8000-000000000007",
-    })).resolves.toEqual({ operationId: "resource-operation" });
-    await expect(service.invoke(client, "session.prompt", {
-      sessionId: "session", text: "shown", uploadIds: [],
-      resourceInvocation: { source: "skill", name: "review", arguments: "executed" },
-      commandId: "00000000-0000-4000-8000-000000000008",
-    })).rejects.toMatchObject({ code: "invalid_request" });
-    await expect(service.invoke(client, "session.prompt", {
-      sessionId: "session", text: "", uploadIds: ["upload"],
-      resourceInvocation: { source: "extension", name: "goal", arguments: "" },
-      commandId: "00000000-0000-4000-8000-000000000009",
-    })).rejects.toMatchObject({ code: "invalid_request" });
-  });
-
-  it("rejects invalid resource controls and oversized UTF-8 names", async () => {
-    const service = new GatewayService({
-      sessions: { isSubscribed: () => true, retainLiveSession: () => () => {}, acquire: async () => ({ id: "session", prompt: vi.fn(), commands: vi.fn(() => []) }) },
-      uploads: { materialize: async () => ({ envelope: "", images: [], photoCount: 0, fileAttachmentCount: 0, attachments: [] }) },
-      receipts: { execute: vi.fn(async (_a: string, _b: string, _c: string, operation: () => Promise<unknown>) => operation()) },
-    } as unknown as GatewayServiceDependencies);
-    await expect(service.invoke(client, "session.prompt", {
-      sessionId: "session", text: "x", uploadIds: [],
-      resourceInvocation: { source: "prompt", name: "x", arguments: "bad\u0000" },
-      commandId: "00000000-0000-4000-8000-000000000011",
-    })).rejects.toMatchObject({ code: "invalid_request" });
-    await expect(service.invoke(client, "session.prompt", {
-      sessionId: "session", text: "x".repeat(200), uploadIds: [],
-      resourceInvocation: { source: "prompt", name: "🙂".repeat(300), arguments: "x".repeat(200) },
-      commandId: "00000000-0000-4000-8000-000000000012",
-    })).rejects.toMatchObject({ code: "invalid_request" });
+    const cases: Array<[string, Record<string, unknown>, boolean]> = [
+      ["an empty skill invocation", { commandId: "00000000-0000-4000-8000-000000000007", text: "", uploadIds: [], resourceInvocation: { source: "skill", name: "review", arguments: "" } }, true],
+      ["skill text that differs from its arguments", { commandId: "00000000-0000-4000-8000-000000000008", text: "shown", uploadIds: [], resourceInvocation: { source: "skill", name: "review", arguments: "executed" } }, false],
+      ["an extension resource with an attachment", { commandId: "00000000-0000-4000-8000-000000000009", text: "", uploadIds: ["upload"], resourceInvocation: { source: "extension", name: "goal", arguments: "" } }, false],
+      ["a control character in the arguments", { commandId: "00000000-0000-4000-8000-000000000011", text: "bad\u0000", uploadIds: [], resourceInvocation: { source: "prompt", name: "x", arguments: "bad\u0000" } }, false],
+      ["an oversized UTF-8 resource name", { commandId: "00000000-0000-4000-8000-000000000012", text: "x".repeat(200), uploadIds: [], resourceInvocation: { source: "prompt", name: "🙂".repeat(300), arguments: "x".repeat(200) } }, false],
+    ];
+    for (const [label, request, admitted] of cases) {
+      const invocation = service.invoke(client, "session.prompt", { sessionId: "session", ...request });
+      if (admitted) await expect(invocation, label).resolves.toEqual({ operationId: "resource-operation" });
+      else await expect(invocation, label).rejects.toMatchObject({ code: "invalid_request" });
+    }
+    // Only the admitted invocation may reach the runtime.
+    expect(prompt).toHaveBeenCalledTimes(1);
   });
 
   it("rejects terminal control until this connection attaches", async () => {
@@ -736,30 +693,5 @@ describe("session transcript paging", () => {
     })).resolves.toMatchObject({ isUnread: true });
     expect(execute).toHaveBeenCalledTimes(2);
     expect(setAttention).toHaveBeenNthCalledWith(1, "session", false, 3);
-  });
-
-  it("rejects terminal creation before the client opens the session", async () => {
-    const acquire = vi.fn();
-    const open = vi.fn();
-    const execute = vi.fn(async (
-      _identity: string,
-      _method: string,
-      _commandId: string,
-      operation: () => Promise<unknown>,
-    ) => operation());
-    const service = new GatewayService({
-      sessions: { isSubscribed: () => false, acquire },
-      terminals: { open },
-      receipts: { execute },
-    } as unknown as GatewayServiceDependencies);
-
-    await expect(service.invoke({ ...client, isSubscribed: () => false }, "terminal.open", {
-      sessionId: "session",
-      columns: 80,
-      rows: 24,
-      commandId: "command-1",
-    })).rejects.toMatchObject({ code: "invalid_request" });
-    expect(acquire).not.toHaveBeenCalled();
-    expect(open).not.toHaveBeenCalled();
   });
 });

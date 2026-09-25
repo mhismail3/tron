@@ -200,18 +200,6 @@ export function existingSessionOpenOwner(
     ?? synchronizations.get(sessionId)?.requestId;
 }
 
-export function releaseOwnedSubscription(
-  tokens: Map<string, string>,
-  sessionId: string,
-  token: string,
-  release: () => void,
-): boolean {
-  if (tokens.get(sessionId) !== token) return false;
-  tokens.delete(sessionId);
-  release();
-  return true;
-}
-
 export function releaseSessionTerminals(
   terminals: Set<string>,
   sessionId: string,

@@ -413,7 +413,7 @@ describe("ProcessTranscriptLeaseStore", () => {
     )).resolves.toMatchObject({ leaseId: "viewer-1" });
   });
 
-  it("reserves capacity while concurrent child viewers are opening", async () => {
+  it("enforces the per-parent viewer bound across in-flight and settled leases", async () => {
     const root = await mkdtemp(join(tmpdir(), "tron-process-opening-capacity-"));
     roots.push(root);
     const path = join(root, "child.jsonl");
@@ -435,8 +435,12 @@ describe("ProcessTranscriptLeaseStore", () => {
       "client-1", "parent-1", "process-3", "child-3", "run-1", undefined, vi.fn(),
     )).rejects.toMatchObject({ code: "busy", retryable: true });
     releaseAdmissions?.();
-    await Promise.all([first, second]);
+    const [firstLease] = await Promise.all([first, second]);
+    await expect(openLease(store,
+      "client-1", "parent-1", "process-3", "child-3", "run-1", undefined, vi.fn(),
+    )).rejects.toMatchObject({ code: "busy", retryable: true });
     store.releaseClient("client-1");
+    await expect(store.page("client-1", firstLease.leaseId)).rejects.toMatchObject({ code: "not_found" });
   });
 
   it("reserves the total client capacity across concurrent parent opens", async () => {
@@ -464,23 +468,5 @@ describe("ProcessTranscriptLeaseStore", () => {
     releaseAdmissions?.();
     await Promise.all(openings);
     store.releaseClient("client-1");
-  });
-
-  it("enforces a bounded lease count for each client and parent session", async () => {
-    const root = await mkdtemp(join(tmpdir(), "tron-process-capacity-"));
-    roots.push(root);
-    const path = join(root, "child.jsonl");
-    await writeFile(path, "{}\n");
-    const sessions = {
-      resolveReadOnlySubagentPath: vi.fn(async () => admission(path)),
-      readOnlySubagentTranscriptPage: vi.fn(async () => page("revision-1")),
-    } as unknown as RuntimeRegistry;
-    const store = new ProcessTranscriptLeaseStore(sessions);
-    const first = await openLease(store, "client-1", "parent-1", "process-1", "child-1", "run-1", undefined, vi.fn());
-    await openLease(store, "client-1", "parent-1", "process-2", "child-2", "run-1", undefined, vi.fn());
-    await expect(openLease(store, "client-1", "parent-1", "process-3", "child-3", "run-1", undefined, vi.fn()))
-      .rejects.toMatchObject({ code: "busy", retryable: true });
-    store.releaseClient("client-1");
-    await expect(store.page("client-1", first.leaseId)).rejects.toMatchObject({ code: "not_found" });
   });
 });

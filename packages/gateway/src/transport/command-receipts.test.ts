@@ -55,18 +55,19 @@ describe("CommandReceiptStore", () => {
     await executions;
   });
 
-  it("serializes concurrent duplicates of the same command", async () => {
+  it("serializes duplicates of the same command and returns the recorded response", async () => {
     const root = await temporaryRoot("tron-receipts-");
     const store = new CommandReceiptStore(root);
-    const operation = vi.fn(async () => {
-      await new Promise((resolve) => setTimeout(resolve, 25));
-      return { accepted: true };
-    });
+    const operation = vi.fn(async () => ({ accepted: true }));
     const [first, second] = await Promise.all([
       store.execute("device", "session.prompt", "same-command", operation),
       store.execute("device", "session.prompt", "same-command", operation),
     ]);
     expect(first).toEqual(second);
+    expect(operation).toHaveBeenCalledTimes(1);
+
+    // A later sequential duplicate reads the same completed receipt.
+    await expect(store.execute("device", "session.prompt", "same-command", operation)).resolves.toEqual(first);
     expect(operation).toHaveBeenCalledTimes(1);
   });
 
@@ -161,12 +162,12 @@ describe("CommandReceiptStore", () => {
     expect(await store.status("device", "packages.update", "partial-owner-error")).toEqual({ status: "pending" });
   });
 
-  it("rejects new mutations before execution when entry capacity is full", async () => {
-    const root = await temporaryRoot("tron-receipts-entry-capacity-");
-    const store = new CommandReceiptStore(root, atomicWriteJson, {
-      maximumEntries: 1,
-      maximumAggregateBytes: 2 * 1_048_576,
-    });
+  it.each<[string, { maximumEntries: number; maximumAggregateBytes: number }]>([
+    ["entry count", { maximumEntries: 1, maximumAggregateBytes: 2 * 1_048_576 }],
+    ["aggregate bytes", { maximumEntries: 10, maximumAggregateBytes: 1_048_576 + 4 * 1_024 + 1 }],
+  ])("rejects new mutations before execution when %s capacity is full", async (_label, limits) => {
+    const root = await temporaryRoot("tron-receipts-capacity-");
+    const store = new CommandReceiptStore(root, atomicWriteJson, limits);
     await store.execute("device", "session.prompt", "first-command", async () => ({ accepted: true }));
     const rejected = vi.fn(async () => ({ accepted: true }));
 
@@ -215,20 +216,6 @@ describe("CommandReceiptStore", () => {
     expect(await receiptFiles(root)).toHaveLength(2);
     await expect(store.status("device", "session.prompt", "prompt-command-one"))
       .resolves.toMatchObject({ status: "completed" });
-  });
-
-  it("reserves aggregate completion capacity before executing a mutation", async () => {
-    const root = await temporaryRoot("tron-receipts-byte-capacity-");
-    const store = new CommandReceiptStore(root, atomicWriteJson, {
-      maximumEntries: 10,
-      maximumAggregateBytes: 1_048_576 + 4 * 1_024 + 1,
-    });
-    await store.execute("device", "session.prompt", "first-command", async () => ({ accepted: true }));
-    const rejected = vi.fn(async () => ({ accepted: true }));
-
-    await expect(store.execute("device", "session.prompt", "second-command", rejected))
-      .rejects.toMatchObject({ code: "busy" });
-    expect(rejected).not.toHaveBeenCalled();
   });
 
   it("retains pending state when successful completion cannot be persisted", async () => {
@@ -355,16 +342,6 @@ describe("CommandReceiptStore", () => {
       code: "conflict",
       details: { outcomeUnknown: true },
     });
-    expect(operation).toHaveBeenCalledTimes(1);
-  });
-
-  it("returns the recorded response without repeating a mutation", async () => {
-    const root = await temporaryRoot("tron-receipts-");
-    const store = new CommandReceiptStore(root);
-    const operation = vi.fn(async () => ({ accepted: true }));
-    const first = await store.execute("device", "session.prompt", "command-123", operation);
-    const second = await store.execute("device", "session.prompt", "command-123", operation);
-    expect(first).toEqual(second);
     expect(operation).toHaveBeenCalledTimes(1);
   });
 });

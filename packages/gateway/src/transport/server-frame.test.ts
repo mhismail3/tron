@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { canAttachTerminal, clearRequestSynchronizations, encodeOutboundFrame, existingSessionOpenOwner, heartbeatTimerDelay, HttpTransportAdmission, releaseOwnedSubscription, releaseSessionTerminals, shouldTerminateHeartbeat } from "./server.js";
+import { canAttachTerminal, clearRequestSynchronizations, encodeOutboundFrame, existingSessionOpenOwner, heartbeatTimerDelay, HttpTransportAdmission, releaseSessionTerminals, shouldTerminateHeartbeat } from "./server.js";
 import { SessionSyncBarrier } from "./session-sync.js";
 
 describe("bounded outbound gateway frames", () => {
@@ -157,17 +157,6 @@ describe("bounded outbound gateway frames", () => {
       clearTimeout(timeout);
       clearTimeout(current);
     }
-  });
-
-  it("ignores stale subscription closes and accepts the current owner", () => {
-    const tokens = new Map([["session", "current"]]);
-    let releases = 0;
-    expect(releaseOwnedSubscription(tokens, "session", "stale", () => { releases += 1; })).toBe(false);
-    expect(tokens.get("session")).toBe("current");
-    expect(releases).toBe(0);
-    expect(releaseOwnedSubscription(tokens, "session", "current", () => { releases += 1; })).toBe(true);
-    expect(tokens.has("session")).toBe(false);
-    expect(releases).toBe(1);
   });
 
   it("closing one session revokes only its terminal attachments", () => {
