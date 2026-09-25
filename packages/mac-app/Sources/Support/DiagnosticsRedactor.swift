@@ -4,9 +4,13 @@ import Foundation
 /// retaining surrounding diagnostics. This is not a general secret detector.
 struct DiagnosticsRedactor {
     func redactMessage(_ input: String) -> String {
+        // URL userinfo is a credential in the same position a key/value pair
+        // would occupy, so it is masked before the credential and path passes
+        // could consume part of the URL instead.
+        let urls = Self.redactURLUserinfo(input)
         // Mask complete quoted values first, before a nested Bearer run could
         // replace part of their value and change the reported source length.
-        let credentials = Self.redactQuotedCredentials(input)
+        let credentials = Self.redactQuotedCredentials(urls)
         let bearers = Self.redactBearerRuns(credentials)
         let fields = Self.redactUnquotedCredentials(bearers)
         let ns = fields as NSString
@@ -15,6 +19,14 @@ struct DiagnosticsRedactor {
             withTemplate: "[redacted:path]"
         )
     }
+
+    // RFC 3986 userinfo: everything between the scheme's `//` and the host's
+    // separator `@`. The class stops at `/` so a plain text address with no
+    // scheme cannot be read as userinfo and the host, port, path and query are
+    // left to the other passes.
+    private static let urlUserinfoRegex = try! NSRegularExpression(
+        pattern: #"\b([A-Za-z][A-Za-z0-9+.\-]*)://([^\s/@]+)@"#
+    )
 
     // A missing token at line end must not consume the next diagnostic line.
     private static let bearerRegex = try! NSRegularExpression(
@@ -39,6 +51,17 @@ struct DiagnosticsRedactor {
     private static let localPathRegex = try! NSRegularExpression(
         pattern: #"(?:file://)?(?:/Users|/home|/private/var|/var|/tmp|/Volumes|/Applications|~/)[^\s"'<>),;]*"#
     )
+
+    private static func redactURLUserinfo(_ input: String) -> String {
+        let ns = input as NSString
+        let matches = urlUserinfoRegex.matches(in: input, range: NSRange(location: 0, length: ns.length))
+        var out = input
+        for match in matches.reversed() {
+            guard let range = Range(match.range(at: 2), in: out) else { continue }
+            out.replaceSubrange(range, with: "[redacted:userinfo]")
+        }
+        return out
+    }
 
     private static func redactBearerRuns(_ input: String) -> String {
         let ns = input as NSString

@@ -127,4 +127,36 @@ struct DiagnosticsRedactorTests {
         #expect(occurrences == 2)
     }
 
+    @Test("masks URL userinfo and keeps scheme, host, port, path and query", arguments: [
+        (input: "https://alice:s3cret@example.test/callback?state=ok",
+         expected: "https://[redacted:userinfo]@example.test/callback?state=ok"),
+        (input: "https://alice@example.test/callback",
+         expected: "https://[redacted:userinfo]@example.test/callback"),
+        (input: "https://alice:p%40ss%2Fword@example.test/inbox",
+         expected: "https://[redacted:userinfo]@example.test/inbox"),
+        (input: "https://alice:s3cret@[fd7a:115c:a1e0::1]:9847/v1/socket?limit=10",
+         expected: "https://[redacted:userinfo]@[fd7a:115c:a1e0::1]:9847/v1/socket?limit=10"),
+    ])
+    func masksURLUserinfo(input: String, expected: String) {
+        #expect(DiagnosticsRedactor().redactMessage(input) == expected)
+    }
+
+    @Test("leaves addresses without userinfo unchanged", arguments: [
+        "https://example.test/callback?state=ok",
+        "https://[fd7a:115c:a1e0::1]:9847/v1/socket",
+        "contact=alice@example.test",
+        "mailto:alice@example.test",
+    ])
+    func preservesAddressesWithoutUserinfo(input: String) {
+        #expect(DiagnosticsRedactor().redactMessage(input) == input)
+    }
+
+    @Test("a URL path is still masked without damaging the userinfo placeholder")
+    func userinfoPlaceholderSurvivesThePathPass() {
+        #expect(
+            DiagnosticsRedactor().redactMessage("https://alice:s3cret@example.test/tmp/state.json")
+                == "https://[redacted:userinfo]@example.test[redacted:path]"
+        )
+    }
+
 }

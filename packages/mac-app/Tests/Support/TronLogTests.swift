@@ -32,13 +32,15 @@ struct TronLogTests {
         #expect(redactor.redactMessage("retry count=3 notBearer hello") == "retry count=3 notBearer hello")
         #expect(TronLog.redact("retry count=3 notBearer hello") == "retry count=3 notBearer hello")
 
-        for unchanged in [
-            "url=https://alice:password@example.test/private",
-            "contact=alice@example.test",
-        ] {
-            #expect(redactor.redactMessage(unchanged) == unchanged)
-            #expect(TronLog.redact(unchanged) == unchanged)
-        }
+        // A URL's userinfo is a credential, so the log writer masks it too.
+        let userinfoURL = "url=https://alice:password@example.test/private"
+        #expect(redactor.redactMessage(userinfoURL) == "url=https://[redacted:userinfo]@example.test/private")
+        #expect(TronLog.redact(userinfoURL) == "url=https://[redacted:userinfo]@example.test/private")
+
+        // A plain address has no scheme, so it is not userinfo.
+        let email = "contact=alice@example.test"
+        #expect(redactor.redactMessage(email) == email)
+        #expect(TronLog.redact(email) == email)
     }
     @Test("debug memory stays bounded and redacted files rotate within their segment cap")
     func debugMemoryAndPersistedRotation() async throws {

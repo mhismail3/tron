@@ -338,12 +338,13 @@ the other.
 The menu feedback action exports the same environment/status context and recent
 log text through a prefilled GitHub issue, or its existing 7,000-character URL
 limit/clipboard fallback. `FeedbackIssueComposer` masks known quoted credential
-fields, Bearer runs and local paths in both logs and server failure details
-before either export route. `DiagnosticsRedactor` treats escaped quotes and
-backslashes as value content, masks short credentials, and stops truncated values
-at their own line boundary so the next diagnostic survives. Empty credentials
-and non-sensitive fields remain useful. This is a targeted export safeguard,
-not a general secret detector or a change to the private log viewer.
+fields, Bearer runs, URL userinfo and local paths in both logs and server
+failure details before either export route. `DiagnosticsRedactor` treats
+escaped quotes and backslashes as value content, masks short credentials, and
+stops truncated values at their own line boundary so the next diagnostic
+survives. Empty credentials and non-sensitive fields remain useful. This is a
+targeted export safeguard, not a general secret detector or a change to the
+private log viewer.
 
 `DiagnosticsRedactorTests` protects the string boundaries; `FeedbackComposerTests`
 checks the decoded issue body and the exact body used by the clipboard branch.
