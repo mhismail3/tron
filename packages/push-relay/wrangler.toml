@@ -6,8 +6,7 @@ compatibility_date = "2026-07-24"
 name = "PUSH_REGISTRY"
 class_name = "PushRegistry"
 
-# Production is a fresh service. The retired RelayLedger namespace is not part
-# of this migration history and must never be recreated.
+# Production is a fresh service.
 [[migrations]]
 tag = "v1"
 new_sqlite_classes = ["PushRegistry"]

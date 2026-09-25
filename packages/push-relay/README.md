@@ -4,11 +4,11 @@
 an agent runtime, notification inbox, mobile API gateway, or general push
 provider. Production deployment is a manual maintainer action.
 
-The package ports the final pre-Gateway relay's proven APNs provider-token
-cache, strict routing, stable provider request IDs, bounded response parsing,
-outcome classification, and SQLite Durable Object idempotency. It deliberately
-does not restore Engine workers, `/v1`, badges, reminders, background refresh,
-or arbitrary APNs payloads.
+The package provides one bounded HTTP surface: App Attest challenge and
+installation registration, HMAC grant capabilities, per-grant and
+per-installation quota, a durable SQLite request ledger, and one fixed APNs
+alert. APNs provider responses are read under a byte cap before their reason is
+parsed, so an oversized or unreadable response falls back to the HTTP status.
 
 ## Ownership and trust boundary
 
