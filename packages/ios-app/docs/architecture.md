@@ -626,7 +626,7 @@ The provider catalog's `usageSupported` flag marks rows that will answer, so a s
 reserves its usage line with an animated skeleton and crossfades to the resolved summary instead of
 growing mid-load; a failed read retires the skeleton, and a Gateway without the flag reserves nothing.
 A balance-only provider (one that reports balances but no windows) keeps the same row treatment: the
-line shows the primary balance label and its currency-formatted amount, and the detail sheet lists every
+line shows the primary balance's currency-formatted amount followed by its label (`$0.03 Available`), and the detail sheet lists every
 reported balance as a window-shaped row whose secondary balances carry an emerald share bar and a
 percentage-of-primary caption, or `Deficit` when the amount is negative. A negative amount formats as a
 negative currency value. The catalog's `localOnly` flag marks a provider whose models all resolve to a

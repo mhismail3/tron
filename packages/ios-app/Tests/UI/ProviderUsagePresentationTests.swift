@@ -172,16 +172,16 @@ struct ProviderUsagePresentationTests {
             UsageBalance(id: "voucher", label: "Voucher", amount: 12.5, currency: "USD")
         ]
         let snapshot = ProviderUsageSnapshot(providerId: "moonshotai", status: .available, balances: balances)
-        #expect(ProviderUsagePresentation.summary(snapshot) == "Available $49.59")
+        #expect(ProviderUsagePresentation.summary(snapshot) == "$49.59 Available")
         #expect(ProviderUsagePresentation.hasDetailContent(snapshot))
         #expect(ProviderUsagePresentation.summary(ProviderUsageSnapshot(
             providerId: "moonshotai", status: .available,
             balances: [UsageBalance(id: "available", label: "Available", amount: -1.2, currency: "USD")]
-        )) == "Available -$1.20")
+        )) == "-$1.20 Available")
         #expect(ProviderUsagePresentation.summary(ProviderUsageSnapshot(
             providerId: "moonshotai-cn", status: .available,
             balances: [UsageBalance(id: "available", label: "Available", amount: 12.5, currency: "CNY")]
-        )) == "Available CN¥12.50")
+        )) == "CN¥12.50 Available")
         // Windows stay authoritative when a provider reports both, and stale or
         // rate-limited decoration keeps applying to a balance-only row.
         #expect(ProviderUsagePresentation.summary(ProviderUsageSnapshot(
@@ -190,7 +190,7 @@ struct ProviderUsagePresentationTests {
         )) == "12% used")
         #expect(ProviderUsagePresentation.summary(ProviderUsageSnapshot(
             providerId: "moonshotai", status: .rateLimited, stale: true, balances: balances
-        )) == "Usage temporarily rate limited · Available $49.59 · Stale")
+        )) == "Usage temporarily rate limited · $49.59 Available · Stale")
     }
 
     @Test("balance currency copy follows the reported ISO code and falls back on anything else")

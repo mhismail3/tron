@@ -688,7 +688,7 @@ final class SettingsLayoutStyleTests: XCTestCase {
                 UsageBalance(id: "cash", label: "Cash", amount: 3.00001, currency: "USD")
             ]
         )
-        XCTAssertEqual(ProviderUsagePresentation.summary(balance), "Available $49.59")
+        XCTAssertEqual(ProviderUsagePresentation.summary(balance), "$49.59 Available")
         XCTAssertTrue(ProviderUsagePresentation.showsLocalUnlimited(configured: true, localOnly: true, snapshot: nil, isLoading: false))
         try await withHost(
             VStack(alignment: .leading, spacing: TronSpacing.section) {

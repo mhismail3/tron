@@ -43,8 +43,8 @@ enum ProviderUsagePresentation {
         }
         if parts.isEmpty, let balance = snapshot.balances.first {
             // A balance-only provider still presents like its window peers: the
-            // primary balance label followed by the localized amount.
-            parts.append("\(balance.label) \(currency(balance.amount, code: balance.currency))")
+            // localized primary amount followed by its label, e.g. "$0.03 Available".
+            parts.append("\(currency(balance.amount, code: balance.currency)) \(balance.label)")
         }
         guard !parts.isEmpty else {
             return snapshot.stale ? "Usage unavailable · Last known data is stale" : statusCopy(snapshot.status)
