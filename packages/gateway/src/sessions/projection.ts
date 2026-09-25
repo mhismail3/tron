@@ -28,6 +28,7 @@ import { jsonNodeCount } from "../protocol/json-budget.js";
 import { admitToolDisplayProjection } from "../display/display-contract.js";
 import { trustedExtensionOriginKind } from "../extensions/owner-attribution.js";
 import { isGatewayTimestamp } from "../util/timestamp.js";
+import { boundedUtf8Prefix, boundedUtf8Suffix, TRUNCATION_MARKER } from "../util/bounded-text.js";
 import type { BlobStore } from "./blob-store.js";
 import { EXTENSION_ACTIVITY_RECEIPT_TYPE } from "./extension-activity-history.js";
 import { projectForkBoundary, type ForkBoundaryAnchor } from "./fork-boundary.js";
@@ -211,15 +212,15 @@ export function safeJson(value: unknown, depth = 0, seen = new WeakSet<object>()
       if (!Object.prototype.hasOwnProperty.call(value, key)) continue;
       if (entries >= 1_000) break;
       const keyLimit = MAX_JSON_STRING;
-      const keyMarker = "…";
+      const keyMarker = TRUNCATION_MARKER;
       const baseKey = Buffer.byteLength(key) <= keyLimit
         ? key
-        : `${utf8Prefix(key, keyLimit - Buffer.byteLength(keyMarker))}${keyMarker}`;
+        : `${boundedUtf8Prefix(key, keyLimit - Buffer.byteLength(keyMarker))}${keyMarker}`;
       let boundedKey = baseKey;
       let collision = 2;
       while (usedKeys.has(boundedKey)) {
         const suffix = `${keyMarker}${collision}`;
-        boundedKey = `${utf8Prefix(baseKey, keyLimit - Buffer.byteLength(suffix))}${suffix}`;
+        boundedKey = `${boundedUtf8Prefix(baseKey, keyLimit - Buffer.byteLength(suffix))}${suffix}`;
         collision += 1;
       }
       usedKeys.add(boundedKey);
@@ -237,46 +238,8 @@ export function safeJson(value: unknown, depth = 0, seen = new WeakSet<object>()
   return null;
 }
 
-function utf8CodePointBytes(codePoint: number): number {
-  return codePoint <= 0x7f ? 1 : codePoint <= 0x7ff ? 2 : codePoint <= 0xffff ? 3 : 4;
-}
-
-function utf8Prefix(value: string, maximumBytes: number): string {
-  if (maximumBytes <= 0) return "";
-  let bytes = 0;
-  let index = 0;
-  while (index < value.length) {
-    const codePoint = value.codePointAt(index)!;
-    const width = utf8CodePointBytes(codePoint);
-    if (bytes + width > maximumBytes) break;
-    bytes += width;
-    index += codePoint > 0xffff ? 2 : 1;
-  }
-  return index === value.length ? value : value.slice(0, index);
-}
-
-function utf8Suffix(value: string, maximumBytes: number): string {
-  if (maximumBytes <= 0) return "";
-  let bytes = 0;
-  let index = value.length;
-  while (index > 0) {
-    let start = index - 1;
-    const unit = value.charCodeAt(start);
-    if (unit >= 0xdc00 && unit <= 0xdfff && start > 0) {
-      const lead = value.charCodeAt(start - 1);
-      if (lead >= 0xd800 && lead <= 0xdbff) start -= 1;
-    }
-    const codePoint = value.codePointAt(start)!;
-    const width = utf8CodePointBytes(codePoint);
-    if (bytes + width > maximumBytes) break;
-    bytes += width;
-    index = start;
-  }
-  return index === 0 ? value : value.slice(index);
-}
-
 function boundedUtf8Tail(value: string, maximumBytes: number): { value: string; truncated: boolean } {
-  const bounded = utf8Suffix(value, maximumBytes);
+  const bounded = boundedUtf8Suffix(value, maximumBytes);
   return { value: bounded, truncated: bounded.length !== value.length };
 }
 
@@ -300,7 +263,7 @@ export function projectToolOutput(value: unknown, maximumBytes = MAX_LIVE_TOOL_O
     if (!text) return false; // filter(Boolean) in the original collector
     const textBytes = Buffer.byteLength(text);
     if (retainedNewestFirst.length === 0) {
-      const kept = textBytes <= maximumBytes ? text : utf8Suffix(text, maximumBytes);
+      const kept = textBytes <= maximumBytes ? text : boundedUtf8Suffix(text, maximumBytes);
       retainedNewestFirst.unshift(kept);
       retainedBytes = Buffer.byteLength(kept);
       if (textBytes > maximumBytes) truncated = true;
@@ -312,7 +275,7 @@ export function projectToolOutput(value: unknown, maximumBytes = MAX_LIVE_TOOL_O
       return true;
     }
     if (textBytes > capacity) {
-      retainedNewestFirst.unshift(utf8Suffix(text, capacity));
+      retainedNewestFirst.unshift(boundedUtf8Suffix(text, capacity));
       retainedBytes = maximumBytes;
       truncated = true;
       return true;
@@ -350,10 +313,10 @@ export function projectToolOutput(value: unknown, maximumBytes = MAX_LIVE_TOOL_O
   // Keep the newest tail instead; every returned frame remains within its
   // caller-owned byte budget (for all feasible JSON/text budgets).
   if (maximumBytes <= markerBytes) {
-    return { output: utf8Suffix(output, maximumBytes), outputTruncated: true };
+    return { output: boundedUtf8Suffix(output, maximumBytes), outputTruncated: true };
   }
   return {
-    output: marker + utf8Suffix(output, maximumBytes - markerBytes),
+    output: marker + boundedUtf8Suffix(output, maximumBytes - markerBytes),
     outputTruncated: true,
   };
 }
@@ -450,7 +413,7 @@ function boundedJsonNode(
     return { value: projected, bytes: jsonBytes(projected), truncated: false };
   }
   if (typeof value === "string") {
-    const clipped = value.length <= MAX_JSON_STRING ? value : `${utf8Prefix(value, MAX_JSON_STRING - Buffer.byteLength("…"))}…`;
+    const clipped = value.length <= MAX_JSON_STRING ? value : `${boundedUtf8Prefix(value, MAX_JSON_STRING - Buffer.byteLength(TRUNCATION_MARKER))}${TRUNCATION_MARKER}`;
     const clippedBytes = jsonBytes(clipped);
     if (clippedBytes <= maximumBytes) {
       return { value: clipped, bytes: clippedBytes, truncated: clipped !== value };
@@ -458,7 +421,7 @@ function boundedJsonNode(
     // Do not allocate or encode the source string merely to discover that it
     // cannot fit. A bounded scalar prefix is enough for the outer truncation
     // preview, and the returned JSON remains valid.
-    const prefix = utf8Prefix(clipped, Math.max(0, maximumBytes - 2));
+    const prefix = boundedUtf8Prefix(clipped, Math.max(0, maximumBytes - 2));
     const projected = prefix;
     return { value: projected, bytes: jsonBytes(projected), truncated: true };
   }
@@ -508,12 +471,12 @@ function boundedJsonNode(
       if (entries >= 1_000) { truncated = true; break; }
       const boundedKeyBase = Buffer.byteLength(key) <= MAX_JSON_STRING
         ? key
-        : `${utf8Prefix(key, MAX_JSON_STRING - Buffer.byteLength("…"))}…`;
+        : `${boundedUtf8Prefix(key, MAX_JSON_STRING - Buffer.byteLength(TRUNCATION_MARKER))}${TRUNCATION_MARKER}`;
       let boundedKey = boundedKeyBase;
       let collision = 2;
       while (usedKeys.has(boundedKey)) {
         const suffix = `…${collision}`;
-        boundedKey = `${utf8Prefix(boundedKeyBase, MAX_JSON_STRING - Buffer.byteLength(suffix))}${suffix}`;
+        boundedKey = `${boundedUtf8Prefix(boundedKeyBase, MAX_JSON_STRING - Buffer.byteLength(suffix))}${suffix}`;
         collision += 1;
       }
       usedKeys.add(boundedKey);
@@ -538,7 +501,7 @@ function boundedJsonNode(
 }
 
 function boundedProjectionEnvelope(preview: string, maximumBytes: number): JsonValue {
-  const marker = "…";
+  const marker = TRUNCATION_MARKER;
   const envelopeBytes = (candidate: string): number => jsonBytes({ truncated: true, preview: candidate });
   if (envelopeBytes("") <= maximumBytes) {
     let lower = 0;
@@ -572,7 +535,7 @@ export function projectJson(value: unknown, maximumBytes = MAX_PROJECTED_JSON_BY
   if (!bounded.truncated && bounded.bytes <= maximumBytes) return bounded.value;
   // Keep previews useful without allowing the diagnostic envelope to become a
   // second copy of a large projected graph.
-  const preview = utf8Prefix(JSON.stringify(bounded.value), 24_000);
+  const preview = boundedUtf8Prefix(JSON.stringify(bounded.value), 24_000);
   return boundedProjectionEnvelope(preview, maximumBytes);
 }
 
@@ -612,9 +575,9 @@ export function boundStreamingProgressItem(
         // Reuse the existing truncated/preview JSON contract. A source byte can
         // expand to at most six escaped bytes; reserve the preview envelope so
         // quotes/control characters cannot overrun the argument allocation.
-        const prefixBytes = Math.floor((argumentBudget - frameBytes({ truncated: true, preview: "…" })) / 6);
+        const prefixBytes = Math.floor((argumentBudget - frameBytes({ truncated: true, preview: TRUNCATION_MARKER })) / 6);
         const argumentsPreview = prefixBytes > 0
-          ? { truncated: true, preview: `${utf8Prefix(encoded, prefixBytes)}…` }
+          ? { truncated: true, preview: `${boundedUtf8Prefix(encoded, prefixBytes)}${TRUNCATION_MARKER}` }
           : omitted;
         return { ...part, arguments: argumentsPreview };
       }),
@@ -633,13 +596,13 @@ export function boundStreamingProgressItem(
       continue;
     }
     if (part.type === "text" || part.type === "thinking") {
-      const marker = "…";
+      const marker = TRUNCATION_MARKER;
       let lower = 0;
       let upper = Math.max(0, Math.min(Buffer.byteLength(part.text), maximumBytes - bytes));
       let best: ContentPart | undefined;
       while (lower <= upper) {
         const candidateBytes = Math.floor((lower + upper) / 2);
-        const candidate = { ...part, text: `${marker}${utf8Suffix(part.text, candidateBytes)}` };
+        const candidate = { ...part, text: `${marker}${boundedUtf8Suffix(part.text, candidateBytes)}` };
         const projected = { ...item, content: [candidate, ...kept] };
         if (frameBytes(projected) <= maximumBytes) {
           best = candidate;
@@ -923,7 +886,7 @@ export function fitSessionSnapshot(
     const liveOutput = tool.output === undefined
       ? {}
       : {
-          output: utf8Suffix(tool.output, 8 * 1_024),
+          output: boundedUtf8Suffix(tool.output, 8 * 1_024),
           ...(Buffer.byteLength(tool.output) > 8 * 1_024 || tool.outputTruncated ? { outputTruncated: true } : {}),
         };
     return { ...metadata, ...liveOutput, arguments: { truncated: true } };
@@ -2167,13 +2130,13 @@ function compactTranscriptPageItem(item: TranscriptItem, byteBudget: number, nod
       ...base,
       content: item.content.map((part) => {
         if (part.type !== "text" && part.type !== "thinking") return part;
-        return { ...part, text: utf8Prefix(part.text, Math.max(64, Math.floor(byteBudget / 3))) };
+        return { ...part, text: boundedUtf8Prefix(part.text, Math.max(64, Math.floor(byteBudget / 3))) };
       }),
       ...(item.details === undefined ? {} : { details: { truncated: true, preview: "Oversized detail omitted from mobile page." } }),
       ...(item.usage === undefined ? {} : { usage: projectJson(item.usage, 256) }),
     };
   } else if (item.kind === "bash") {
-    compacted = { ...item, command: utf8Prefix(item.command, 256), output: utf8Suffix(item.output, Math.max(64, byteBudget - 1_024)), truncated: true };
+    compacted = { ...item, command: boundedUtf8Prefix(item.command, 256), output: boundedUtf8Suffix(item.output, Math.max(64, byteBudget - 1_024)), truncated: true };
   } else if (item.kind === "customMessage") {
     compacted = { ...item, content: [], details: { truncated: true, preview: "Oversized custom message omitted from mobile page." } };
   } else if (item.kind === "customEntry") {
@@ -2182,7 +2145,7 @@ function compactTranscriptPageItem(item: TranscriptItem, byteBudget: number, nod
       ? {
           ...item,
           data: {
-            message: utf8Prefix(notification.message, Math.max(64, byteBudget - 2_048)),
+            message: boundedUtf8Prefix(notification.message, Math.max(64, byteBudget - 2_048)),
             tone: typeof notification.tone === "string" ? notification.tone : "info",
             truncated: true,
           },
@@ -2190,7 +2153,7 @@ function compactTranscriptPageItem(item: TranscriptItem, byteBudget: number, nod
       : { ...item, data: { truncated: true, preview: "Oversized custom entry omitted from mobile page." } };
   } else if (item.kind === "compaction" || item.kind === "branchSummary") {
     const { details: _details, usage: _usage, ...base } = item;
-    compacted = { ...base, summary: utf8Prefix(item.summary, Math.max(64, byteBudget - 1_024)) };
+    compacted = { ...base, summary: boundedUtf8Prefix(item.summary, Math.max(64, byteBudget - 1_024)) };
   }
   if (jsonNodeCount(compacted, nodeBudget, true) <= nodeBudget
     && Buffer.byteLength(JSON.stringify(compacted)) <= byteBudget) return compacted;
