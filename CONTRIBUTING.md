@@ -83,8 +83,8 @@ reject duplicated version mirrors. Install native project generation with
 `scripts/tron mac generate` reject a mismatched XcodeGen. Xcode version literals
 remain intentional Apple-toolchain pins. Run
 `python3 scripts/check-documentation-policy.py` after changing documentation
-navigation, commands, or repository paths. Run `scripts/check-agent-policy.sh`
-after changing agent guidance. The [agent guidance index](.agents/README.md)
+navigation, commands, repository paths, or backticked paths in source
+comments. Run `scripts/check-agent-policy.sh` after changing agent guidance. The [agent guidance index](.agents/README.md)
 owns skill routing and the policy-fixture validation commands.
 
 ### Gateway

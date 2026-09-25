@@ -12,9 +12,15 @@ EXCLUDED_PARTS = {"build", "dist", "node_modules", "DerivedData", ".build"}
 MARKDOWN_LINK = re.compile(r"\[[^\]]*\]\(([^)]+)\)")
 BACKTICK = re.compile(r"`([^`]+)`")
 FENCED_PATH = re.compile(
-    r"(?<![\w.])((?:scripts|packages|config|\.agents|\.github)/[A-Za-z0-9_./-]+)"
+    r"(?<![\w.])((?:scripts|packages|docs|config|\.agents|\.github)/[A-Za-z0-9_./-]+)"
 )
-REPOSITORY_PREFIXES = ("scripts/", "packages/", "config/", ".agents/", ".github/")
+REPOSITORY_PREFIXES = (
+    "packages/", "scripts/", "docs/", "config/", ".agents/", ".github/",
+)
+SOURCE_SUFFIXES = {
+    ".ts", ".tsx", ".mts", ".cts", ".js", ".jsx", ".mjs", ".cjs",
+    ".c", ".h", ".swift", ".py", ".sh",
+}
 
 
 def fail(message: str) -> None:
@@ -38,6 +44,62 @@ def markdown_paths(files: set[str]) -> list[Path]:
     ]
 
 
+def source_comments(source: str, suffix: str) -> list[tuple[int, str]]:
+    """Return comment text without treating quoted path examples as comments."""
+    hash_comments = suffix in {".py", ".sh"}
+    comments: list[tuple[int, str]] = []
+    block = False
+    multiline_quote = ""
+    for line_number, line in enumerate(source.splitlines(), 1):
+        pieces: list[str] = []
+        quote = multiline_quote
+        escaped = False
+        index = 0
+        while index < len(line):
+            pair = line[index:index + 2]
+            char = line[index]
+            if block:
+                if pair == "*/":
+                    block = False
+                    index += 2
+                else:
+                    pieces.append(char)
+                    index += 1
+            elif quote:
+                if len(quote) == 3 and line.startswith(quote, index):
+                    quote = ""
+                    index += 3
+                elif len(quote) == 1 and escaped:
+                    escaped = False
+                    index += 1
+                elif len(quote) == 1 and char == "\\":
+                    escaped = True
+                    index += 1
+                elif len(quote) == 1 and char == quote:
+                    quote = ""
+                    index += 1
+                else:
+                    index += 1
+            elif char in {'"', "'", "`"}:
+                quote = char * 3 if line.startswith(char * 3, index) else char
+                index += len(quote)
+            elif pair == "/*" and not hash_comments:
+                block = True
+                index += 2
+            elif pair == "//" and not hash_comments:
+                pieces.append(line[index + 2:])
+                break
+            elif char == "#" and hash_comments:
+                pieces.append(line[index + 1:])
+                break
+            else:
+                index += 1
+        multiline_quote = quote if len(quote) == 3 else ""
+        if pieces:
+            comments.append((line_number, "".join(pieces)))
+    return comments
+
+
 def heading_anchors(source: str) -> set[str]:
     anchors: set[str] = set()
     counts: dict[str, int] = {}
@@ -55,12 +117,15 @@ def heading_anchors(source: str) -> set[str]:
 
 
 def validate_repository_literal(
-    candidate: str, *, source: Path, line_number: int, files: set[str]
+    candidate: str, *, source: Path, line_number: int, files: set[str],
+    check_directories: bool = False,
 ) -> None:
     candidate = candidate.split()[0].rstrip(".,;:)")
     if not candidate.startswith(REPOSITORY_PREFIXES):
         return
     if any(marker in candidate for marker in ("<", ">", "*", "[", "]", "{", "}", "=")):
+        return
+    if EXCLUDED_PARTS.intersection(Path(candidate).parts):
         return
     if candidate.endswith("/"):
         return
@@ -68,7 +133,17 @@ def validate_repository_literal(
     # roots are valid documentation subjects but absent in clean checkouts.
     # Validate command paths and file-like literals against source inventory.
     if not (candidate.startswith("scripts/") or Path(candidate).suffix):
-        return
+        if not check_directories:
+            return
+        if any(relative.startswith(f"{candidate.rstrip('/')}/") for relative in files):
+            return
+    # Markdown links often repeat a docs/ path relative to their owning doc.
+    if source.suffix in {".md", ".mdx"} and candidate.startswith("docs/"):
+        package_index = source.relative_to(ROOT).parts[:1] == ("packages",)
+        if (source.parent / candidate).exists():
+            return
+        if package_index and (ROOT / Path(*source.relative_to(ROOT).parts[:2]) / candidate).exists():
+            return
     if candidate not in files:
         relative_source = source.relative_to(ROOT)
         fail(f"{relative_source}:{line_number}: missing repository path: {candidate}")
@@ -117,6 +192,28 @@ def main() -> None:
                     validate_repository_literal(
                         candidate, source=path, line_number=line_number, files=files
                     )
+
+    tracked = subprocess.check_output(
+        ["git", "-C", str(ROOT), "ls-files"], text=True
+    ).splitlines()
+    for relative in sorted(tracked):
+        source_path = Path(relative)
+        if source_path.suffix not in SOURCE_SUFFIXES:
+            continue
+        if EXCLUDED_PARTS.intersection(source_path.parts):
+            continue
+        path = ROOT / source_path
+        if not path.is_file():
+            continue
+        source_text = path.read_text()
+        if not any(f"`{prefix}" in source_text for prefix in REPOSITORY_PREFIXES):
+            continue
+        for line_number, comment in source_comments(source_text, source_path.suffix):
+            for literal in BACKTICK.findall(comment):
+                validate_repository_literal(
+                    literal, source=path, line_number=line_number, files=files,
+                    check_directories=True,
+                )
 
     print(f"documentation policy passed ({len(paths)} authored files)")
 
