@@ -2,7 +2,7 @@
 
 - **Started:** 2026-09-23
 - **Status:** Active
-- **Last updated:** 2026-09-24, S-BUILD-1
+- **Last updated:** 2026-09-25, S-GW-SESS-1, S-GW-KNOW-1, S-MAC-1
 - **Goal:** Every file, module, abstraction, dependency, comment and test in Tron has a specific, visible reason to exist, with no change to what users see or do.
 
 Follow the [plan protocol](README.md#protocol) to claim tasks and hand off.
@@ -221,11 +221,21 @@ These apply on top of `AGENTS.md`, which wins on any conflict.
 | C-BUILD-4 | Claimed | Give the documented TronMac build and test commands an explicit `-derivedDataPath` inside the package build folder, so they stop filling the global Xcode DerivedData (11 TronMac folders, 5.7 GB) | S-BUILD-1 | simplification session, 2026-09-24 |
 | C-STRUCT-RULES-1 | Ready | Make the structure self-maintaining with the least mechanism: (1) a short `AGENTS.md` rule that whoever adds, moves or removes a file updates its references, owning doc and ownership notes in the same change and commits no temporary files; (2) a two-line "owns / does not own" note in each package's existing README or doc where missing; (3) only if S-STRUCT-1 finds recurring leftovers, one fast CI check for the patterns actually found | S-STRUCT-1 | |
 | S-GW-ROOT-1 | Ready | For each migration tool and cutover doc, determine whether it is complete on every supported install. Removal needs the user's approval; record the evidence and the question | V-0 | |
-| S-GW-SESS-1 | Claimed | Split GW-SESS into sub-units (runtime slot, registry, projection, catalog, search, blobs, process activity, extensions projection); add one S-GW-SESS row per sub-unit with its file list | V-0 | simplification session, 2026-09-24 |
+| S-GW-SESS-1 | Done | Split GW-SESS into sub-units (runtime slot, registry, projection, catalog, search, blobs, process activity, extensions projection); add one S-GW-SESS row per sub-unit with its file list | V-0 | simplification session, 2026-09-24 |
+| S-GW-SESS-SLOT-1 | Ready | Scope `runtime-slot.ts` in three passes by line range: core (1–2905: types, lane, binding, ownership, durable-write retry, attention), events (2906–5003: `onEvent`, streaming identity, completion ownership, artifact reads) and API (5004–end: progress, queue, snapshot, pages, prompt/abort, compaction, export, dispose) | S-GW-SESS-1 | |
+| S-GW-SESS-REGISTRY-1 | Ready | Scope `runtime-registry.ts`, `session-attention-store.ts`, `session-presentation-presence.ts`, `session-branch.ts` | S-GW-SESS-1 | |
+| S-GW-SESS-PARTS-1 | Ready | Scope the smaller GW-SESS sub-units in one pass: projection (`projection.ts`), catalog (`catalog-*`, `history.ts`, `summary-text.ts`), search (`session-search-*`, distinct from the performance row S-GW-SESS-SEARCH-1), blobs and export, process activity, extension activity (`extension-*`, `semantic-ui-broker.ts`, `hook-projection.ts`), receipts (`invocation-receipts.ts`, `resource-invocation.ts`, `context-delivery-receipts.ts`) and ownership (`run-markers.ts`, `delegated-provider.ts`, `gateway-work-registry.ts`, `fork-boundary.ts`, `restart-drain.ts`, `agent-runtime-lock.ts`). `delegated-root-migration.ts` stays with S-GW-ROOT-1 | S-GW-SESS-1 | |
+| C-GW-SESS-1 | Claimed | Small verified GW-SESS cleanups in one change: one receipt validator (`invocation-receipts.ts:29-38,99-133` and `extension-notification-receipts.ts:7-49` duplicate `MAX_ID_BYTES`, the origin sets and `validText`/`validTimestamp`/`validOrigin`); one `MAX_EXTENSION_ARTIFACT_BYTES` (declared in both `runtime-slot.ts` and `runtime-registry.ts`); move the `RuntimeSlot` class doc from `observationBranchIdFor` to the class; delete the test-only `projectSkillInvocation` re-export in `projection.ts` and import it from `resource-invocation.ts` in the test; drop `export` from declarations used only in their own file | S-GW-SESS-1 | simplification session, 2026-09-25 |
 | S-GW-SESS-SEARCH-1 | Needs scoping | Moved from observability L-8c: session-search warm-up peaks at 743.9 MiB post-GC heap (1.3 GB RSS) on a 207-session catalog because the canonical read and parse path (`RuntimeRegistry.readSearchCut`) materializes whole sessions up to its 64 MiB cap. First record why 62 of 207 catalog sessions were not indexed and correlate GC samples with read sizes; then bound or stream the parse while keeping full graph and branch validation. Acceptance: peak post-GC heap under 150 MB on a cloned corpus, identical indexed counts and ranked results, warm-up no more than 10% slower | none | |
-| T-GW-SESS-1 | Ready | Test audit of `runtime-registry.integration.test.ts` (10,560 lines): map each test to the requirement it protects; propose deletions, merges and rewrites | V-0 | |
+| T-GW-SESS-1 | Claimed | Test audit of `runtime-registry.integration.test.ts` (10,560 lines): map each test to the requirement it protects; propose deletions, merges and rewrites | V-0 | simplification session, 2026-09-25 |
 | S-GW-TRANS-1 | Ready | Scope GW-TRANS (server, gateway service, receipts, transcript leases, logger, diagnostic export); keep `packages/gateway/docs/observability.md` accurate | V-0 | |
-| S-GW-KNOW-1 | Claimed | Scope GW-KNOW | V-0 | simplification session, 2026-09-24 |
+| S-GW-KNOW-1 | Done | Scope GW-KNOW | V-0 | simplification session, 2026-09-24 |
+| C-GW-KNOW-1 | Claimed | Delete the test-only `knowledge/semantic-notes.ts` (its only importer is `source-capture.test.ts`; production calls the store directly) and rewrite those test calls against the store APIs | S-GW-KNOW-1 | simplification session, 2026-09-25 |
+| C-GW-KNOW-2 | Claimed | Remove dead knowledge code: the unreachable store-sniffing branch in `legacy-import.ts` `resolveSource` (a named root always sets the store) with its "or path" comment and error wording, the unused `awaitAbortable` in `model-await.ts`, unneeded exports (`SOURCE_CAPTURE_USER_AGENT`, `redactSourceUrl`, the `JEV_REQUEST_MODEL` alias) and the single-implementation `KnowledgeTable` interface | S-GW-KNOW-1 | simplification session, 2026-09-25 |
+| C-GW-KNOW-3 | Ready | One credential-query-key predicate for the four copies (`x-public-post.ts`, `source-capture.ts`, `legacy-import.ts`, `knowledge-contract.ts`; source capture keeps its X-embed exception) and one normalized-URL helper for `source-capture.ts` and `knowledge-store.ts` | S-GW-KNOW-1 | |
+| C-GW-KNOW-4 | Ready | Move the test-only `InMemoryConnectorCredentialStore` out of `connector-credentials.ts` into test support (7 test files across knowledge, sessions and integrations) | S-GW-KNOW-1 | |
+| T-GW-KNOW-1 | Ready | Test audit of the GW-KNOW tests (3,708 lines): replace the real-time waits in `knowledge-observation.test.ts`, `connectors.test.ts` and `source-capture.test.ts` with an injected clock, and delete tests that assert internals; keep the two scale tests | C-GW-KNOW-1 to C-GW-KNOW-4 | |
+| S-GW-KNOW-2 | Ready | Scope the knowledge provider sub-unit (`connectors.ts`, the Jev client, assessment and extension, `fixed-host-transport.ts`) and pass redaction and bounds overlaps to S-XMOD-1 | S-GW-KNOW-1 | |
 | S-GW-MACH-1 | Ready | Scope GW-MACH | V-0 | |
 | S-GW-AUTO-1 | Ready | Scope GW-AUTO | V-0 | |
 | S-GW-EXT-1 | Ready | Scope GW-EXT | V-0 | |
@@ -237,7 +247,16 @@ These apply on top of `AGENTS.md`, which wins on any conflict.
 | S-IOS-SET-1 | Ready | Scope IOS-SET | V-0, V-0-UX | |
 | S-IOS-UI-OTHER-1 | Ready | Scope IOS-UI-OTHER | V-0, V-0-UX | |
 | S-IOS-CORE-1 | Ready | Scope IOS-CORE, including AppLog and log export; keep `packages/gateway/docs/observability.md` accurate | V-0, V-0-UX | |
-| S-MAC-1 | Claimed | Scope MAC | V-0, V-0-UX | simplification session, 2026-09-24 |
+| S-MAC-1 | Done | Scope MAC | V-0, V-0-UX | simplification session, 2026-09-24 |
+| C-MAC-DEAD-1 | Claimed | Delete verified dead Mac code: 8 unused `TronPaths` members, `GatewayPayloadStore+Wrapper.swift` (no production caller; the launcher reads the channel) and its 4 expectations, `MacRuntimeVariant.isReadOnlyDebug`/`isManagedRelease`, `DebugGatewayMenuState.admissionIsPairable`, two unused typography tokens, `LocalComputerName.currentPairingName`, the uncalled `LaunchAgentManaging.isRegistered` and its three implementations, the test-only and uncalled hello checks in `ServerPing.swift` and `GatewayRestartClient.swift`, the unread `Response.scheduled`, and the history narration in `TronMacApp.swift` and `WizardButtonStyle.swift` | S-MAC-1 | simplification session, 2026-09-25 |
+| T-MAC-1 | Ready | Test audit of Mac Tests/Server and Tests/Support, then collapse the seams no remaining test needs, including the test-only `environment:` overloads in `TronPaths` (`activeProfile(environment:)` ignores its argument, so its test asserts a tautology). At least two changes, each under 800 lines | S-MAC-1 | |
+| T-MAC-2 | Ready | Test audit of Mac Tests/Wizard, Tests/MenuBar, Tests/App and the shared fakes | S-MAC-1 | |
+| C-MAC-RPC-1 | Ready | One decoder for the `{type,id,ok,result,error}` envelope shared by `MenuBarLogReader.swift`, `ServerPing.swift` and `GatewayRestartClient.swift`; each client keeps its own errors and bounds | T-MAC-1 | |
+| C-MAC-SMALL-1 | Ready | Use `TailscaleProbe.isIPv6` instead of the 59-line IPv6 validator in `PairingURLBuilder.swift`, pinning the accepted hosts with a negative case; and one private atomic JSON writer for `WizardState.swift`, `OnboardedSentinelWriter.swift` and `MacAppStartupMaintenance.swift`, keeping bytes and modes | S-MAC-1 | |
+| C-MAC-PAYLOAD-1 | Needs approval | Delete the second, injectable payload validation in `ExistingInstallDetector.swift:116-207` in favor of `GatewayPayloadValidator`; the lane says the extra package checks are already covered by the manifest fingerprint. Touches payload validation, so the user sets the equivalence bar | S-MAC-1 | |
+| C-MAC-REDACT-1 | Needs approval | Make `TronLog.redact` call `DiagnosticsRedactor` behind an equivalence corpus. Touches redaction, so the user decides | S-MAC-1 | |
+| S-MAC-2 | Ready | Scope `Sources/NativeHost` and `Sources/Search` together with MAC-NATIVE | S-MAC-1 | |
+| S-MAC-3 | Ready | Scope the payload and launcher contract across `GatewayPayloadStore.swift`, `tron-gateway-launcher.c` and `hash-gateway-payload.sh`, so the fail-closed policy is stated once | S-MAC-1 | |
 | S-MAC-NATIVE-1 | Ready | Scope MAC-NATIVE, including the C launcher | V-0 | |
 | S-RELAY-1 | Ready | Scope RELAY | V-0 | |
 | S-SCRIPTS-1 | Ready | Scope SCRIPTS: which scripts a maintainer or CI actually runs; the Python reinstall tools and their tests; the deploy helper excluding progress reporting | V-0 | |
@@ -336,3 +355,15 @@ These apply on top of `AGENTS.md`, which wins on any conflict.
 - Changes: this commit (plan only).
 - Tasks added: C-BUILD-1 to C-BUILD-4. A small release script was proposed and not added, because the skill step is enough unless the user wants it automated.
 - For the next agent: several merged worktrees under `/private/tmp` and `tron-bounded-restart` still hold about 1.1 GB each. Releasing them is housekeeping (C-BUILD-3's step) and needs their owner's agreement where they are dirty.
+
+### S-GW-SESS-1, S-GW-KNOW-1, S-MAC-1 · Done · 2026-09-25 · simplification session (DeepSeek lanes, checked by the supervisor)
+
+- Result: all three units are mostly load-bearing; the findings are small deletions and deduplication, with no wire, persisted-format or UI change.
+  - GW-SESS splits into slot, registry and a set of smaller parts (new S- rows). Only the registry's tests exceed 3,000 lines, so T-GW-SESS-1 stays the one test-audit row.
+  - GW-KNOW: the legacy importer is live (iOS dashboard → `knowledge.import*` RPC → importer) and the catalog storage upgrade runs every start and short-circuits on its manifest, so neither is removable now; the upgrade's removal is S-GW-ROOT-1's question.
+  - MAC: the 12 Mac events match the `observability.md` catalog exactly.
+- Evidence (verified by the supervisor with reference searches): the duplicate receipt validators and the duplicate 256 KiB artifact bound; `projectSkillInvocation`'s re-export used only by `projection.test.ts`; `semantic-notes.ts` imported only by `source-capture.test.ts`; `awaitAbortable` defined and never called; the unreachable store sniffing in `resolveSource`; the 12 unused Mac members, the test-only `GatewayPayloadStore.channel(environment:)`, and `isRegistered` with implementations but no caller. Other rows' counts and line ranges are the lanes' (inspected).
+- Kept on purpose (from the lanes' keep lists): the per-session mutation lane, the durable-write retry, the read-only child 64 MiB bound, the frozen real producer fixtures, the runtime lock, presentation presence for idle eviction, knowledge SSRF pinning, observation redaction and bounds, the payload validator, the launchd registration plan, bounded subprocesses and the owner-only credential reader.
+- Changes: this commit (plan only).
+- Tasks added: S-GW-SESS-SLOT-1, S-GW-SESS-REGISTRY-1, S-GW-SESS-PARTS-1, C-GW-SESS-1, C-GW-KNOW-1 to C-GW-KNOW-4, T-GW-KNOW-1, S-GW-KNOW-2, C-MAC-DEAD-1, T-MAC-1, T-MAC-2, C-MAC-RPC-1, C-MAC-SMALL-1, C-MAC-PAYLOAD-1 and C-MAC-REDACT-1 (both need approval), S-MAC-2, S-MAC-3. The lane's Wizard and menu bar UI scoping waits on V-0-UX and is not a row yet.
+- For the next agent: the user reaffirmed that the program should remove all over-engineering and all unnecessary tests; the test bar and finding types above are how that is judged.
