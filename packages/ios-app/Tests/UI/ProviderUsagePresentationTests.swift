@@ -43,7 +43,7 @@ struct ProviderUsagePresentationTests {
     @Test("ordering is configured first then stable friendly name and ID")
     func configuredFirstOrdering() {
         let provider: (String, String, Bool) -> ProviderSummary = { id, name, configured in
-            ProviderSummary(id: id, name: name, configured: configured, usageSupported: nil, authSource: nil,
+            ProviderSummary(id: id, name: name, configured: configured, usageSupported: nil, localOnly: nil, authSource: nil,
                             credentialType: nil, authMethods: [], modelCount: 0)
         }
         let result = ProviderUsageOrdering.sorted([
@@ -165,6 +165,93 @@ struct ProviderUsagePresentationTests {
         }
     }
 
+    @Test("balance-only snapshots present the primary balance in the same slot as windows")
+    func balanceOnlySummary() {
+        let balances = [
+            UsageBalance(id: "available", label: "Available", amount: 49.59, currency: "USD"),
+            UsageBalance(id: "voucher", label: "Voucher", amount: 12.5, currency: "USD")
+        ]
+        let snapshot = ProviderUsageSnapshot(providerId: "moonshotai", status: .available, balances: balances)
+        #expect(ProviderUsagePresentation.summary(snapshot) == "Available $49.59")
+        #expect(ProviderUsagePresentation.hasDetailContent(snapshot))
+        #expect(ProviderUsagePresentation.summary(ProviderUsageSnapshot(
+            providerId: "moonshotai", status: .available,
+            balances: [UsageBalance(id: "available", label: "Available", amount: -1.2, currency: "USD")]
+        )) == "Available -$1.20")
+        #expect(ProviderUsagePresentation.summary(ProviderUsageSnapshot(
+            providerId: "moonshotai-cn", status: .available,
+            balances: [UsageBalance(id: "available", label: "Available", amount: 12.5, currency: "CNY")]
+        )) == "Available CN¥12.50")
+        // Windows stay authoritative when a provider reports both, and stale or
+        // rate-limited decoration keeps applying to a balance-only row.
+        #expect(ProviderUsagePresentation.summary(ProviderUsageSnapshot(
+            providerId: "moonshotai", status: .available,
+            windows: [UsageWindow(id: "quota", label: "Quota", usedPercent: 12)], balances: balances
+        )) == "12% used")
+        #expect(ProviderUsagePresentation.summary(ProviderUsageSnapshot(
+            providerId: "moonshotai", status: .rateLimited, stale: true, balances: balances
+        )) == "Usage temporarily rate limited · Available $49.59 · Stale")
+    }
+
+    @Test("balance currency copy follows the reported ISO code and falls back on anything else")
+    func currencyFormatting() {
+        #expect(ProviderUsagePresentation.currency(49.59, code: "USD") == "$49.59")
+        #expect(ProviderUsagePresentation.currency(-1.2, code: "USD") == "-$1.20")
+        #expect(ProviderUsagePresentation.currency(12.5, code: "CNY") == "CN¥12.50")
+        #expect(ProviderUsagePresentation.currency(12.5, code: "usd") == "$12.50")
+        #expect(ProviderUsagePresentation.currency(3.456, code: "USD") == "$3.46")
+        for code in ["DOLLARS", "US", "", "US1"] {
+            #expect(ProviderUsagePresentation.currency(12.5, code: code) == "12.5 \(code)")
+        }
+    }
+
+    @Test("secondary balances present their share of the primary balance")
+    func balanceShares() {
+        let primary = UsageBalance(id: "available", label: "Available", amount: 20, currency: "USD")
+        func share(_ amount: Double, currency: String = "USD") -> Double? {
+            ProviderUsagePresentation.balanceShare(
+                UsageBalance(id: "secondary", label: "Voucher", amount: amount, currency: currency),
+                of: primary
+            )
+        }
+        #expect(share(10) == 50)
+        #expect(share(0) == 0)
+        // An inconsistent snapshot clamps instead of overflowing the bar.
+        #expect(share(40) == 100)
+        #expect(share(10, currency: "usd") == 50)
+        #expect(share(10, currency: "CNY") == nil)
+        #expect(share(-1) == nil)
+        // A zero or negative primary supports no share, so a deficit stays a
+        // deficit rather than an inverted percentage.
+        for primaryAmount in [0.0, -5.0] {
+            #expect(ProviderUsagePresentation.balanceShare(
+                UsageBalance(id: "voucher", label: "Voucher", amount: 10, currency: "USD"),
+                of: UsageBalance(id: "available", label: "Available", amount: primaryAmount, currency: "USD")
+            ) == nil)
+        }
+        #expect(ProviderUsagePresentation.balanceShareCaption(50, of: primary) == "50% of available")
+        #expect(ProviderUsagePresentation.balanceDeficitCopy == "Deficit")
+    }
+
+    @Test("only a configured local-only row without a snapshot or pending read shows unlimited")
+    func localUnlimitedDecision() {
+        func shows(
+            configured: Bool = true,
+            localOnly: Bool = true,
+            snapshot: ProviderUsageSnapshot? = nil,
+            isLoading: Bool = false
+        ) -> Bool {
+            ProviderUsagePresentation.showsLocalUnlimited(
+                configured: configured, localOnly: localOnly, snapshot: snapshot, isLoading: isLoading
+            )
+        }
+        #expect(shows())
+        #expect(!shows(configured: false))
+        #expect(!shows(localOnly: false))
+        #expect(!shows(isLoading: true))
+        #expect(!shows(snapshot: ProviderUsageSnapshot(providerId: "ollama", status: .unavailable)))
+    }
+
     @Test("the catalog usage flag decodes and a Gateway without it stays unsupported")
     func decodesUsageSupportFlag() throws {
         func provider(_ json: String) throws -> ProviderSummary {
@@ -176,5 +263,18 @@ struct ProviderUsagePresentationTests {
         #expect(!legacy.supportsUsage)
         let explicitFalse = try provider(#"{"id":"ollama","name":"Ollama","configured":true,"usageSupported":false,"authSource":null,"credentialType":null,"authMethods":[],"modelCount":0}"#)
         #expect(!explicitFalse.supportsUsage)
+    }
+
+    @Test("the catalog local-only flag decodes and a Gateway without it presents no local indicator")
+    func decodesLocalOnlyFlag() throws {
+        func provider(_ json: String) throws -> ProviderSummary {
+            try JSONDecoder.gateway.decode(ProviderSummary.self, from: Data(json.utf8))
+        }
+        let local = try provider(#"{"id":"ollama","name":"Ollama","configured":true,"usageSupported":false,"localOnly":true,"authSource":null,"credentialType":null,"authMethods":[],"modelCount":3}"#)
+        #expect(local.isLocalOnly)
+        let remote = try provider(#"{"id":"opencode-go","name":"OpenCode Go","configured":true,"usageSupported":true,"localOnly":false,"authSource":"api-key","credentialType":"api-key","authMethods":["api_key"],"modelCount":3}"#)
+        #expect(!remote.isLocalOnly)
+        let legacy = try provider(#"{"id":"openrouter","name":"OpenRouter","configured":true,"authSource":"api-key","credentialType":"api-key","authMethods":["api_key"],"modelCount":3}"#)
+        #expect(!legacy.isLocalOnly)
     }
 }

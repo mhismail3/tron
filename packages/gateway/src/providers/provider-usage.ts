@@ -111,6 +111,16 @@ const adapters: Record<string, Adapter> = {
     endpoint: "https://open.bigmodel.cn/api/monitor/usage/quota/limit", source: "zai-coding-cn.monitor", scope: "account",
     headers: rawHeaders, parse: parseZai,
   },
+  moonshotai: {
+    id: "moonshotai", shapes: [{ api: "openai-completions", baseUrl: "https://api.moonshot.ai/v1" }],
+    endpoint: "https://api.moonshot.ai/v1/users/me/balance", source: "moonshotai.balance", scope: "account",
+    headers: bearerHeaders, parse: parseMoonshotBalance("USD"),
+  },
+  "moonshotai-cn": {
+    id: "moonshotai-cn", shapes: [{ api: "openai-completions", baseUrl: "https://api.moonshot.cn/v1" }],
+    endpoint: "https://api.moonshot.cn/v1/users/me/balance", source: "moonshotai-cn.balance", scope: "account",
+    headers: bearerHeaders, parse: parseMoonshotBalance("CNY"),
+  },
   "opencode-go": {
     // Go models resolve across three wire APIs under two base URLs; the plan's
     // account usage is the one endpoint both the console and the CLI report.
@@ -376,6 +386,30 @@ function parseOpenCodeGo(body: unknown) {
   }
   return { windows: capWindows(windows), balances: [] };
 }
+/**
+ * Moonshot Open Platform reports prepaid balances only; the currency is fixed by
+ * the regional host that answered, so no response field can select it.
+ */
+function parseMoonshotBalance(currency: string) {
+  return (body: unknown): { windows: UsageWindow[]; balances: UsageBalance[] } => {
+    const root = object(body); if (!root) throw new Error("usage body is not an object");
+    if (root.status === false) throw new Error("usage body reports failure");
+    if (root.code !== undefined && number(root.code) !== 0) throw new Error("usage body reports a failure code");
+    const data = object(root.data); if (!data) throw new Error("usage body has no balance object");
+    const available = number(data.available_balance);
+    if (available === null) throw new Error("invalid Moonshot available balance");
+    const balances: UsageBalance[] = [{ id: "available", label: "Available", amount: available, currency }];
+    // Voucher and cash detail are optional; a reported amount may be a deficit.
+    for (const [id, label] of [["voucher", "Voucher"], ["cash", "Cash"]] as const) {
+      const reported = data[`${id}_balance`];
+      if (reported === undefined || reported === null) continue;
+      const amount = number(reported); if (amount === null) throw new Error("invalid Moonshot balance");
+      balances.push({ id, label, amount, currency });
+    }
+    // Moonshot reports no quota windows, so only balances are projected.
+    return { windows: [], balances: capBalances(balances) };
+  };
+}
 function parseBalances(value: unknown): UsageBalance[] {
   const row = object(value); if (!row) return [];
   const amount = number(row.balance) ?? number(row.amount) ?? number(row.remaining); const currency = text(row.currency) ?? "USD";
@@ -386,6 +420,31 @@ function parseBalances(value: unknown): UsageBalance[] {
 export function providerUsageSupported(runtime: ModelRuntime, providerId: string): boolean {
   const adapter = adapterFor(runtime, providerId);
   return adapter !== undefined && (!adapter.oauthOnly || !runtime.hasConfiguredAuth(providerId) || runtime.isUsingOAuth(providerId));
+}
+function loopbackHost(hostname: string): boolean {
+  // URL hostnames bracket IPv6 literals, so compare the unbracketed form.
+  const host = hostname.toLowerCase().replace(/^\[|\]$/gu, "");
+  // Anything but a literal 127.0.0.0/8 address may resolve elsewhere.
+  return host === "localhost" || host === "::1" || /^127\.\d{1,3}\.\d{1,3}\.\d{1,3}$/u.test(host);
+}
+
+/**
+ * True when the provider resolves only to a local runtime, which is unmetered:
+ * clients show an unlimited indicator instead of reading account usage.
+ */
+export function providerLocalOnly(runtime: ModelRuntime, providerId: string): boolean {
+  const models = runtime.getModels(providerId);
+  if (models.length === 0) return false;
+  const providerBaseUrl = runtime.getProvider(providerId)?.baseUrl;
+  const baseUrls: string[] = models.map((item) => item.baseUrl);
+  if (providerBaseUrl) baseUrls.push(providerBaseUrl);
+  for (const baseUrl of baseUrls) {
+    let parsed: URL;
+    // A malformed or absent host cannot be proven local, so it stays metered.
+    try { parsed = new URL(baseUrl); } catch { return false; }
+    if (!loopbackHost(parsed.hostname)) return false;
+  }
+  return true;
 }
 
 function providerBinding(runtime: ModelRuntime, id: string): ProviderBinding {

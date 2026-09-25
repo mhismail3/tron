@@ -59,7 +59,7 @@ import { AUTOMATIONS_CAPABILITY, AUTOMATIONS_TIMELINE_CAPABILITY } from "../auto
 import { AutomationPaginationStore } from "../automations/automation-pagination.js";
 import { admitsAutomationTrigger } from "../automations/automation-contract.js";
 import { validateTimelineWindow } from "../automations/automation-timeline.js";
-import { ProviderUsageOwner, providerUsageSupported, PROVIDER_USAGE_CAPABILITY } from "../providers/provider-usage.js";
+import { ProviderUsageOwner, providerUsageSupported, providerLocalOnly, PROVIDER_USAGE_CAPABILITY } from "../providers/provider-usage.js";
 import type { KnowledgeService } from "../knowledge/knowledge-service.js";
 import { KnowledgeStoreError } from "../knowledge/knowledge-store.js";
 import type { KnowledgeAction } from "../knowledge/knowledge-contract.js";
@@ -1988,6 +1988,7 @@ export class GatewayService {
         name: provider.name,
         configured: auth !== undefined,
         usageSupported: providerUsageSupported(modelRuntime, provider.id),
+        localOnly: providerLocalOnly(modelRuntime, provider.id),
         authSource: auth?.source ?? null,
         credentialType: credentials.get(provider.id) ?? null,
         authMethods: [provider.auth.apiKey?.login ? "api_key" : null, provider.auth.oauth ? "oauth" : null]
@@ -2022,6 +2023,7 @@ export function validateProviderCatalog(providers: Array<{
   id: string;
   name: string;
   usageSupported: boolean;
+  localOnly: boolean;
   authSource: string | null;
   credentialType: string | null;
   authMethods: string[];
@@ -2037,6 +2039,9 @@ export function validateProviderCatalog(providers: Array<{
     }
     if (typeof provider.usageSupported !== "boolean") {
       throw new GatewayError("conflict", "Provider catalog contains an invalid usage flag");
+    }
+    if (typeof provider.localOnly !== "boolean") {
+      throw new GatewayError("conflict", "Provider catalog contains an invalid local-only flag");
     }
     identities.add(provider.id);
     const values = [provider.id, provider.name, ...provider.authMethods];

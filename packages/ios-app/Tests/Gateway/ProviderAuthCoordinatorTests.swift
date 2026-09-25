@@ -1651,7 +1651,7 @@ struct ProviderAuthCoordinatorTests {
             id: id,
             name: name ?? id,
             configured: false,
-            usageSupported: nil,
+            usageSupported: nil, localOnly: nil,
             authSource: nil,
             credentialType: nil,
             authMethods: [],

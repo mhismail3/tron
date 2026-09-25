@@ -449,7 +449,7 @@ final class SettingsLayoutStyleTests: XCTestCase {
     }
     func testProviderRowsKeepLightweightIndividualSurfaces() async throws {
         let provider = ProviderSummary(
-            id: "openai-codex", name: "OpenAI Codex", configured: true, usageSupported: true,
+            id: "openai-codex", name: "OpenAI Codex", configured: true, usageSupported: true, localOnly: nil,
             authSource: "oauth", credentialType: "oauth", authMethods: ["oauth"], modelCount: 2
         )
         try await withHost(
@@ -469,11 +469,11 @@ final class SettingsLayoutStyleTests: XCTestCase {
 
     func testProviderGroupsCoverUsageActionsAndAccessibilitySizing() async throws {
         let configuredWithoutUsage = ProviderSummary(
-            id: "configured-without-usage", name: "Configured Provider Without Usage", configured: true, usageSupported: false,
+            id: "configured-without-usage", name: "Configured Provider Without Usage", configured: true, usageSupported: false, localOnly: nil,
             authSource: "api-key", credentialType: "api-key", authMethods: ["api-key"], modelCount: 1
         )
         let available = ProviderSummary(
-            id: "available-provider", name: "Available Provider With A Longer Display Name", configured: false, usageSupported: nil,
+            id: "available-provider", name: "Available Provider With A Longer Display Name", configured: false, usageSupported: nil, localOnly: nil,
             authSource: nil, credentialType: nil, authMethods: ["api-key"], modelCount: 1
         )
         let usage = ProviderUsageSnapshot(
@@ -485,7 +485,7 @@ final class SettingsLayoutStyleTests: XCTestCase {
             ]
         )
         let configuredWithUsage = ProviderSummary(
-            id: "configured-with-usage", name: "Configured Provider", configured: true, usageSupported: true,
+            id: "configured-with-usage", name: "Configured Provider", configured: true, usageSupported: true, localOnly: nil,
             authSource: "oauth", credentialType: "oauth", authMethods: ["oauth"], modelCount: 1
         )
         for width in [320, 375, 393] {
@@ -511,7 +511,7 @@ final class SettingsLayoutStyleTests: XCTestCase {
                         ProviderSetupRow(surfaceStyle: .grouped, provider: available)
                         TronSettingsDivider(accent: .tronPurple)
                         ProviderSetupRow(surfaceStyle: .grouped, provider: ProviderSummary(
-                            id: "available-second", name: "Another Available Provider", configured: false, usageSupported: nil,
+                            id: "available-second", name: "Another Available Provider", configured: false, usageSupported: nil, localOnly: nil,
                             authSource: nil, credentialType: nil, authMethods: ["api-key"], modelCount: 1
                         ))
                     }
@@ -529,7 +529,7 @@ final class SettingsLayoutStyleTests: XCTestCase {
 
     func testProviderUsagePlaceholderReservesTheResolvedUsageLineHeight() async throws {
         let provider = ProviderSummary(
-            id: "opencode-go", name: "Opencode Go", configured: true, usageSupported: true,
+            id: "opencode-go", name: "Opencode Go", configured: true, usageSupported: true, localOnly: nil,
             authSource: "api-key", credentialType: "api-key", authMethods: ["api-key"], modelCount: 3
         )
         let usage = ProviderUsageSnapshot(
@@ -582,7 +582,7 @@ final class SettingsLayoutStyleTests: XCTestCase {
 
     func testConfiguredProviderRowAndDetailSheetRenderLightDarkAndLargeText() async throws {
         let provider = ProviderSummary(
-            id: "openai-codex", name: "OpenAI Codex", configured: true, usageSupported: true,
+            id: "openai-codex", name: "OpenAI Codex", configured: true, usageSupported: true, localOnly: nil,
             authSource: "oauth", credentialType: "oauth", authMethods: ["oauth"], modelCount: 2
         )
         let snapshot = ProviderUsageSnapshot(
@@ -668,6 +668,49 @@ final class SettingsLayoutStyleTests: XCTestCase {
     }
     private func reply(_ id: String, _ result: JSONValue) throws -> Data {
         try JSONEncoder.gateway.encode(JSONValue.object(["type": .string("response"), "id": .string(id), "ok": .bool(true), "result": result]))
+    }
+
+    func testBalanceAndLocalProviderUsageRenderRowAndDetailFixtures() async throws {
+        let moonshot = ProviderSummary(
+            id: "moonshotai", name: "Moonshot AI", configured: true, usageSupported: true, localOnly: false,
+            authSource: "stored", credentialType: "api_key", authMethods: ["api_key"], modelCount: 4
+        )
+        let ollama = ProviderSummary(
+            id: "ollama", name: "Ollama", configured: true, usageSupported: false, localOnly: true,
+            authSource: "models_json_key", credentialType: nil, authMethods: [], modelCount: 2
+        )
+        let balance = ProviderUsageSnapshot(
+            providerId: "moonshotai", status: .available, source: "moonshotai.balance", scope: .account,
+            updatedAt: "2026-01-02T03:04:05Z",
+            balances: [
+                UsageBalance(id: "available", label: "Available", amount: 49.58894, currency: "USD"),
+                UsageBalance(id: "voucher", label: "Voucher", amount: 46.58893, currency: "USD"),
+                UsageBalance(id: "cash", label: "Cash", amount: 3.00001, currency: "USD")
+            ]
+        )
+        XCTAssertEqual(ProviderUsagePresentation.summary(balance), "Available $49.59")
+        XCTAssertTrue(ProviderUsagePresentation.showsLocalUnlimited(configured: true, localOnly: true, snapshot: nil, isLoading: false))
+        try await withHost(
+            VStack(alignment: .leading, spacing: TronSpacing.section) {
+                TronSettingsGroup("Configured", accent: .tronPurple, surfaceStyle: .glass) {
+                    ProviderSetupRow(surfaceStyle: .grouped, provider: moonshot, usageSnapshot: balance)
+                    TronSettingsDivider(accent: .tronPurple)
+                    ProviderSetupRow(surfaceStyle: .grouped, provider: ollama)
+                }
+                TronSettingsGroup("Account Usage", accent: .tronEmerald) {
+                    VStack(alignment: .leading, spacing: 10) {
+                        ProviderUsageSummaryView(snapshot: balance, detail: true)
+                    }
+                    .padding(.top, 8).padding(.horizontal, 14).padding(.bottom, 14)
+                }
+            }
+            .padding(16)
+            .tronPresentation().tronSettingsLayout()
+            .tronSettingsVisualTheme(accent: .tronPurple),
+            size: CGSize(width: 393, height: 760), scheme: .dark
+        ) { host in
+            attach(image(host), name: "provider-balance-and-local-dark")
+        }
     }
 
     func testProviderUsageSummaryAndDetailRenderLightAndDarkFixtures() async throws {

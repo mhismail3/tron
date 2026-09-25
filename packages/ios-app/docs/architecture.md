@@ -625,6 +625,14 @@ Supported, unsupported, stale, rate-limited, and authentication-required statuse
 The provider catalog's `usageSupported` flag marks rows that will answer, so a supported configured row
 reserves its usage line with an animated skeleton and crossfades to the resolved summary instead of
 growing mid-load; a failed read retires the skeleton, and a Gateway without the flag reserves nothing.
+A balance-only provider (one that reports balances but no windows) keeps the same row treatment: the
+line shows the primary balance label and its currency-formatted amount, and the detail sheet lists every
+reported balance as a window-shaped row whose secondary balances carry an emerald share bar and a
+percentage-of-primary caption, or `Deficit` when the amount is negative. A negative amount formats as a
+negative currency value. The catalog's `localOnly` flag marks a provider whose models all resolve to a
+loopback base URL; its list row shows an emerald infinity glyph in the usage slot and its detail sheet
+shows an `Unlimited` local-models row instead of any snapshot, loading, or failure copy, without a
+Gateway usage capability or a `provider.usage` read.
 
 Compaction Settings owns automatic compaction and advanced reserve/recent controls. The existing scoped draft
 store/coordinator owns edits, target switching and confirmed writes. `compaction-policy.v1`

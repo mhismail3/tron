@@ -42,7 +42,9 @@ enum ProviderUsagePresentation {
             parts.append(shouldLabel ? "\(summaryLabel(window.label, windowSeconds: window.windowSeconds)) \(value)" : value)
         }
         if parts.isEmpty, let balance = snapshot.balances.first {
-            parts.append("\(balance.label): \(amount(balance.amount)) \(balance.currency)")
+            // A balance-only provider still presents like its window peers: the
+            // primary balance label followed by the localized amount.
+            parts.append("\(balance.label) \(currency(balance.amount, code: balance.currency))")
         }
         guard !parts.isEmpty else {
             return snapshot.stale ? "Usage unavailable · Last known data is stale" : statusCopy(snapshot.status)
@@ -126,6 +128,53 @@ enum ProviderUsagePresentation {
         return "Retry after \(date.formatted(date: .abbreviated, time: .shortened))"
     }
 
+    /// The share of the primary balance a secondary balance represents on the
+    /// 0-100 progress scale. Only a positive primary and a non-negative,
+    /// same-currency balance can be expressed as a share; a cash deficit is
+    /// presented as such instead. The ratio is clamped so an inconsistent
+    /// snapshot cannot overflow the bar.
+    static func balanceShare(_ balance: UsageBalance, of primary: UsageBalance) -> Double? {
+        guard primary.amount > 0, balance.amount >= 0,
+              balance.currency.caseInsensitiveCompare(primary.currency) == .orderedSame else { return nil }
+        return min(100, max(0, balance.amount / primary.amount * 100))
+    }
+
+    static func balanceShareCaption(_ share: Double, of primary: UsageBalance) -> String {
+        "\(number(share))% of \(primary.label.lowercased())"
+    }
+
+    /// Secondary balance copy when a share cannot be expressed. A negative
+    /// balance is a deficit (the provider withheld or owes funds) rather than a
+    /// 0% share of the primary.
+    static let balanceDeficitCopy = "Deficit"
+
+    static func showsLocalUnlimited(
+        configured: Bool,
+        localOnly: Bool,
+        snapshot: ProviderUsageSnapshot?,
+        isLoading: Bool
+    ) -> Bool {
+        guard snapshot == nil, configured, localOnly else { return false }
+        return !isLoading
+    }
+
+    /// Currency copy for balance amounts. ICU's currency style supplies the
+    /// locale's exact presentation for a reported ISO code ($49.59, CN¥12.50);
+    /// anything outside that shape keeps its raw code so an unexpected value is
+    /// visible instead of silently re-labeled.
+    static func currency(_ amount: Double, code: String) -> String {
+        guard code.count == 3, code.allSatisfy({ $0.isASCII && $0.isLetter }) else {
+            return "\(Self.amount(amount)) \(code)"
+        }
+        let formatter = NumberFormatter()
+        formatter.locale = Locale(identifier: "en_US")
+        formatter.numberStyle = .currency
+        formatter.currencyCode = code
+        formatter.minimumFractionDigits = 2
+        formatter.maximumFractionDigits = 2
+        return formatter.string(from: NSNumber(value: amount)) ?? "\(Self.amount(amount)) \(code)"
+    }
+
     static func number(_ value: Double) -> String {
         let formatter = NumberFormatter()
         formatter.locale = Locale(identifier: "en_US_POSIX")
@@ -190,15 +239,33 @@ struct ProviderUsageSummaryView: View {
                         }
                     }
                 }
-                ForEach(snapshot.balances) { balance in
-                    HStack {
-                        Text(balance.label)
-                        Spacer()
-                        Text("\(ProviderUsagePresentation.amount(balance.amount)) \(balance.currency)")
-                            .monospacedDigit()
+                let primaryBalance = snapshot.balances.first
+                ForEach(Array(snapshot.balances.enumerated()), id: \.element.id) { index, balance in
+                    VStack(alignment: .leading, spacing: 4) {
+                        HStack {
+                            Text(balance.label)
+                            Spacer()
+                            Text(ProviderUsagePresentation.currency(balance.amount, code: balance.currency))
+                                .monospacedDigit()
+                        }
+                        .font(detailFont)
+                        .foregroundStyle(Color.tronTextSecondary)
+                        // The primary balance is the headline; every later
+                        // balance is presented as its share so the group reads
+                        // like the window rows above it.
+                        if index > 0, let primaryBalance {
+                            if let share = ProviderUsagePresentation.balanceShare(balance, of: primaryBalance) {
+                                ProviderUsageProgress(percent: share, accent: .tronEmerald)
+                                Text(ProviderUsagePresentation.balanceShareCaption(share, of: primaryBalance))
+                                    .font(detailFont)
+                                    .foregroundStyle(Color.tronTextSecondary)
+                            } else if balance.amount < 0 {
+                                Text(ProviderUsagePresentation.balanceDeficitCopy)
+                                    .font(detailFont)
+                                    .foregroundStyle(Color.tronTextSecondary)
+                            }
+                        }
                     }
-                    .font(detailFont)
-                    .foregroundStyle(Color.tronTextSecondary)
                 }
                 if let updated = ProviderUsagePresentation.updatedCopy(snapshot) {
                     Text(updated)

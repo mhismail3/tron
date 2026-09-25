@@ -42,14 +42,17 @@ describe("provider.list usage support", () => {
   const anthropicModels = [
     { provider: "anthropic", id: "claude-opus-5-5", api: "cortexkit-anthropic-messages", baseUrl: "https://api.anthropic.com" },
   ];
+  const ollamaModels = [
+    { provider: "ollama", id: "llama3", api: "openai-completions", baseUrl: "http://127.0.0.1:11434/v1" },
+  ];
   let anthropicOAuth = true;
   const runtime = {
     getProviders: () => [
       { id: "opencode-go", name: "OpenCode Go", auth: { apiKey: {} }, baseUrl: undefined, getModels: () => goModels },
       { id: "anthropic", name: "Anthropic (CortexKit)", auth: { apiKey: {}, oauth: {} }, baseUrl: undefined, getModels: () => anthropicModels },
-      { id: "ollama", name: "Ollama", auth: { apiKey: {} }, baseUrl: undefined, getModels: () => [] },
+      { id: "ollama", name: "Ollama", auth: { apiKey: {} }, baseUrl: undefined, getModels: () => ollamaModels },
     ],
-    getModels: (id: string) => id === "opencode-go" ? goModels : id === "anthropic" ? anthropicModels : [],
+    getModels: (id: string) => id === "opencode-go" ? goModels : id === "anthropic" ? anthropicModels : id === "ollama" ? ollamaModels : [],
     getProvider: (id: string) => ({ id, baseUrl: undefined, auth: { apiKey: {}, oauth: id === "anthropic" ? {} : undefined } }),
     isUsingOAuth: (id: string) => id === "anthropic" && anthropicOAuth,
     hasConfiguredAuth: () => true,
@@ -62,11 +65,12 @@ describe("provider.list usage support", () => {
       modelRuntime: runtime,
       globalProviderResources: { withStableSnapshot: (read: () => Promise<unknown>) => read() },
     } as unknown as GatewayServiceDependencies);
-    const result = await service.invoke(client, "provider.list", {}) as { providers: Array<{ id: string; usageSupported: boolean }> };
+    const result = await service.invoke(client, "provider.list", {}) as { providers: Array<{ id: string; usageSupported: boolean; localOnly: boolean }> };
     expect(result.providers).toEqual([
-      expect.objectContaining({ id: "opencode-go", usageSupported: true }),
-      expect.objectContaining({ id: "anthropic", usageSupported: true, credentialType: "oauth" }),
-      expect.objectContaining({ id: "ollama", usageSupported: false }),
+      expect.objectContaining({ id: "opencode-go", usageSupported: true, localOnly: false }),
+      expect.objectContaining({ id: "anthropic", usageSupported: true, localOnly: false, credentialType: "oauth" }),
+      // Loopback-only models are unmetered, so the row is local rather than usage-backed.
+      expect.objectContaining({ id: "ollama", usageSupported: false, localOnly: true }),
     ]);
     anthropicOAuth = false;
     const apiKeyResult = await service.invoke(client, "provider.list", {}) as { providers: Array<{ id: string; usageSupported: boolean }> };

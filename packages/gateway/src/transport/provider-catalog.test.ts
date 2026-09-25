@@ -6,6 +6,7 @@ function provider(id: string, name = id) {
     id,
     name,
     usageSupported: false,
+    localOnly: false,
     authSource: null,
     credentialType: null,
     authMethods: [] as string[],
@@ -25,6 +26,8 @@ describe("provider catalog bounds", () => {
       .toThrow(/duplicate IDs/);
     expect(() => validateProviderCatalog([{ ...provider("p"), usageSupported: "yes" as unknown as boolean }]))
       .toThrow(/invalid usage flag/);
+    expect(() => validateProviderCatalog([{ ...provider("p"), localOnly: "yes" as unknown as boolean }]))
+      .toThrow(/invalid local-only flag/);
     expect(() => validateProviderCatalog([provider("large", "x".repeat(100_001))]))
       .toThrow(/string limit/);
   });

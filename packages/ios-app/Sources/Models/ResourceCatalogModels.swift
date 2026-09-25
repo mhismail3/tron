@@ -266,12 +266,18 @@ struct ProviderSummary: Codable, Hashable, Identifiable, Sendable {
     /// Gateway-reported first-party usage support. Optional so a Gateway that
     /// predates the field simply reserves no usage placeholder.
     let usageSupported: Bool?
+    /// Gateway-reported local-model provider: every advertised model (and the
+    /// provider default) resolves to a loopback base URL, so account usage
+    /// never applies. Optional so a Gateway that predates the field simply
+    /// presents no local indicator.
+    let localOnly: Bool?
     let authSource: String?
     let credentialType: String?
     let authMethods: [String]
     let modelCount: Int
 
     var supportsUsage: Bool { usageSupported == true }
+    var isLocalOnly: Bool { localOnly == true }
 }
 
 struct ContextWindowLimits: Codable, Hashable, Sendable {

@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { ProviderUsageOwner, providerUsageSupported } from "./provider-usage.js";
+import { ProviderUsageOwner, providerLocalOnly, providerUsageSupported } from "./provider-usage.js";
 
 const model = (provider: string, baseUrl: string, api = "openai-completions") => ({ provider, id: "fixture", api, baseUrl });
 function runtime(provider: string, baseUrl: string, auth: unknown = { auth: { apiKey: "fixture-secret" } }, api = "openai-completions", oauth = false) {
@@ -18,6 +18,7 @@ const openCodeGoShapes = [
   { api: "openai-completions", baseUrl: "https://opencode.ai/zen/go/v1" },
   { api: "openai-responses", baseUrl: "https://opencode.ai/zen/go/v1" },
 ];
+const moonshotBalanceBody = { code: 0, data: { available_balance: 49.58894, voucher_balance: 46.58893, cash_balance: 3.00001 }, scode: "0x0", status: true };
 function response(body: unknown, status = 200, headers: Record<string, string> = {}) {
   return new Response(typeof body === "string" ? body : JSON.stringify(body), { status, headers });
 }
@@ -257,6 +258,80 @@ describe("provider usage owner", () => {
     const owner = new ProviderUsageOwner({ fetch, now: () => 1_700_000_000_000 });
     const result = await owner.read(runtime("openrouter", "https://openrouter.ai/api/v1"), "openrouter");
     expect(result.providers[0]).toMatchObject({ status: "unavailable", message: "Provider usage response was malformed", retryAt: expect.any(String) });
+  });
+
+  it("projects Moonshot Open Platform balances for both regional hosts without quota windows", async () => {
+    const fixtures = [
+      { id: "moonshotai", base: "https://api.moonshot.ai/v1", endpoint: "https://api.moonshot.ai/v1/users/me/balance", source: "moonshotai.balance", currency: "USD" },
+      { id: "moonshotai-cn", base: "https://api.moonshot.cn/v1", endpoint: "https://api.moonshot.cn/v1/users/me/balance", source: "moonshotai-cn.balance", currency: "CNY" },
+    ] as const;
+    for (const fixture of fixtures) {
+      const fetch = vi.fn(async (url: string, init?: RequestInit) => {
+        expect(url).toBe(fixture.endpoint);
+        expect(init).toMatchObject({ method: "GET", redirect: "error" });
+        expect((init?.headers as Record<string, string>).Authorization).toBe("Bearer fixture-secret");
+        return response(moonshotBalanceBody);
+      });
+      const result = await new ProviderUsageOwner({ fetch }).read(runtime(fixture.id, fixture.base), fixture.id);
+      expect(result.providers[0]).toMatchObject({ providerId: fixture.id, status: "available", source: fixture.source, scope: "account", windows: [] });
+      expect(result.providers[0]!.balances).toEqual([
+        { id: "available", label: "Available", amount: 49.58894, currency: fixture.currency },
+        { id: "voucher", label: "Voucher", amount: 46.58893, currency: fixture.currency },
+        { id: "cash", label: "Cash", amount: 3.00001, currency: fixture.currency },
+      ]);
+      expect(fetch).toHaveBeenCalledTimes(1);
+    }
+  });
+
+  it("keeps a Moonshot cash deficit and omits unreported balance lines", async () => {
+    const fetch = vi.fn(async () => response({ code: 0, status: true, data: { available_balance: "2.5", cash_balance: -1.25 } }));
+    const result = await new ProviderUsageOwner({ fetch }).read(runtime("moonshotai", "https://api.moonshot.ai/v1"), "moonshotai");
+    expect(result.providers[0]!.balances).toEqual([
+      { id: "available", label: "Available", amount: 2.5, currency: "USD" },
+      { id: "cash", label: "Cash", amount: -1.25, currency: "USD" },
+    ]);
+  });
+
+  it("reports Moonshot failure codes, missing data and non-numeric balances as malformed", async () => {
+    const bodies = [
+      { code: 20, status: true, data: { available_balance: 1 } },
+      { code: 0, status: false, data: { available_balance: 1 } },
+      { code: 0, status: true },
+      { code: 0, status: true, data: { available_balance: "unknown" } },
+      { code: 0, status: true, data: { available_balance: 1, cash_balance: "unknown" } },
+    ];
+    for (const body of bodies) {
+      const fetch = vi.fn(async () => response(body));
+      const result = await new ProviderUsageOwner({ fetch }).read(runtime("moonshotai", "https://api.moonshot.ai/v1"), "moonshotai");
+      expect(result.providers[0]).toMatchObject({ status: "unavailable", message: "Provider usage response was malformed", windows: [], balances: [] });
+    }
+  });
+
+  it("reports a rejected Moonshot key as authentication_required and never queries an overridden host", async () => {
+    const rejected = vi.fn(async () => response({ error: { message: "Invalid Authentication" } }, 401));
+    const rejectedResult = await new ProviderUsageOwner({ fetch: rejected }).read(runtime("moonshotai", "https://api.moonshot.ai/v1"), "moonshotai");
+    expect(rejectedResult.providers[0]).toMatchObject({ status: "authentication_required", windows: [], balances: [] });
+
+    const fetch = vi.fn(async () => response(moonshotBalanceBody));
+    const proxy = await new ProviderUsageOwner({ fetch }).read(runtime("moonshotai", "https://proxy.example/v1"), "moonshotai");
+    expect(proxy.providers[0]).toMatchObject({ status: "unsupported", source: "moonshotai.balance", windows: [], balances: [] });
+    expect(fetch).not.toHaveBeenCalled();
+  });
+
+  it("reports local-only providers that resolve exclusively to loopback hosts", () => {
+    const models = (baseUrls: string[], providerBaseUrl?: string) => ({
+      getModels: () => baseUrls.map((baseUrl, index) => ({ ...model("ollama", baseUrl), id: `fixture-${index}` })),
+      getProvider: () => ({ baseUrl: providerBaseUrl, auth: {} }),
+    } as any);
+    expect(providerLocalOnly(models(["http://127.0.0.1:11434/v1"]), "ollama")).toBe(true);
+    expect(providerLocalOnly(models(["http://localhost:11434/v1"]), "ollama")).toBe(true);
+    expect(providerLocalOnly(models(["http://[::1]:11434/v1"]), "ollama")).toBe(true);
+    expect(providerLocalOnly(models(["http://127.0.0.1:11434/v1"], "http://127.0.0.1:11434/v1"), "ollama")).toBe(true);
+    expect(providerLocalOnly(models(["http://127.0.0.1:11434/v1", "https://api.openai.com/v1"]), "ollama")).toBe(false);
+    expect(providerLocalOnly(models(["http://127.0.0.1:11434/v1"], "https://proxy.example/v1"), "ollama")).toBe(false);
+    expect(providerLocalOnly(models([]), "ollama")).toBe(false);
+    expect(providerLocalOnly(models(["https://openrouter.ai/api/v1"]), "openrouter")).toBe(false);
+    expect(providerLocalOnly(models(["not-a-url"]), "ollama")).toBe(false);
   });
 
   it("coalesces reads without letting one cancelled waiter abort the shared request", async () => {

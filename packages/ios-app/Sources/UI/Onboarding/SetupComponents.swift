@@ -217,16 +217,34 @@ struct ProviderSetupRow: View {
                 .fixedSize(horizontal: false, vertical: true)
                 .accessibilityLabel("Account usage: \(ProviderUsagePresentation.summary(usageSnapshot))")
                 .transition(.opacity)
+        } else if showsLocalUnlimitedIndicator {
+            // Local models have no account to report usage for, so the slot
+            // states that instead of staying empty.
+            Image(systemName: "infinity")
+                .font(TronTypography.sans(size: TronTypography.sizeSecondary + secondaryTextSizeAdjustment, weight: .semibold))
+                .foregroundStyle(Color.tronEmerald)
+                .transition(.opacity)
+                .accessibilityLabel("Local models, no usage limits")
         } else if isUsageLoading {
             ProviderUsageLoadingLine()
                 .transition(.opacity)
         }
     }
 
+    private var showsLocalUnlimitedIndicator: Bool {
+        ProviderUsagePresentation.showsLocalUnlimited(
+            configured: provider.configured,
+            localOnly: provider.isLocalOnly,
+            snapshot: usageSnapshot,
+            isLoading: isUsageLoading
+        )
+    }
+
     private var usageLineIdentity: String {
         if let usageSnapshot {
             return "usage:\(usageSnapshot.providerId):\(usageSnapshot.updatedAt ?? "")"
         }
+        if showsLocalUnlimitedIndicator { return "local" }
         return isUsageLoading ? "loading" : "none"
     }
 
@@ -234,6 +252,7 @@ struct ProviderSetupRow: View {
         if let usageSnapshot {
             return "Account usage: \(ProviderUsagePresentation.summary(usageSnapshot))"
         }
+        if showsLocalUnlimitedIndicator { return "Local models, no usage limits" }
         return isUsageLoading ? "Account usage is loading" : "Account usage unavailable"
     }
 }
@@ -250,6 +269,7 @@ struct ProviderConfigurationSheet: View {
     @Environment(\.scenePhase) private var scenePhase
     @Environment(\.tronSettingsVisualTheme) private var settingsTheme
     @Environment(\.tronPresentationActivity) private var presentationActivity
+    @Environment(\.tronSettingsSecondaryTextSizeAdjustment) private var secondaryTextSizeAdjustment
     let provider: ProviderSummary
     let target: ProviderCatalogTarget
     @State private var activeOperationID: String?
@@ -406,7 +426,31 @@ struct ProviderConfigurationSheet: View {
 
     @ViewBuilder private var usageSection: some View {
         TronSettingsGroup("Account Usage", accent: .tronEmerald) {
-            if model.gatewayInfo?.capabilities.contains(ProviderUsageCapability.name) != true {
+            if provider.isLocalOnly {
+                // Local models have no account, so this status is authoritative
+                // without a Gateway usage capability or a provider.usage read.
+                HStack(alignment: .top, spacing: 8) {
+                    Image(systemName: "infinity")
+                        .font(TronTypography.sans(size: TronTypography.sizeBody, weight: .semibold))
+                        .foregroundStyle(Color.tronEmerald)
+                        .accessibilityHidden(true)
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text("Unlimited")
+                            .font(TronTypography.sans(size: TronTypography.sizeBody, weight: .semibold))
+                            .foregroundStyle(Color.tronTextPrimary)
+                        Text("Local models run on this Mac with no account usage limits.")
+                            .font(TronTypography.sans(size: TronTypography.sizeSecondary + secondaryTextSizeAdjustment))
+                            .foregroundStyle(Color.tronTextSecondary)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.top, 8)
+                .padding(.horizontal, 14)
+                .padding(.bottom, 14)
+                .accessibilityElement(children: .combine)
+                .accessibilityLabel("Unlimited. Local models run on this Mac with no account usage limits.")
+            } else if model.gatewayInfo?.capabilities.contains(ProviderUsageCapability.name) != true {
                 TronSettingsCaption("Account usage is unavailable on this Gateway. Connection details remain available.")
             } else if let usage = usageController.snapshots[provider.id] {
                 VStack(alignment: .leading, spacing: 10) {
@@ -463,7 +507,8 @@ struct ProviderConfigurationSheet: View {
     }
 
     private func loadUsage() async {
-        guard model.gatewayInfo?.capabilities.contains(ProviderUsageCapability.name) == true,
+        guard !provider.isLocalOnly,
+              model.gatewayInfo?.capabilities.contains(ProviderUsageCapability.name) == true,
               presentationActivity.allowsPresentationPublication,
               !Task.isCancelled else { return }
         let identity = ProviderUsageReadIdentity(

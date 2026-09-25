@@ -655,12 +655,16 @@ search, persistence, and mutation while labels use product casing such as “Ope
 Provider rows are configured-first and deterministic within each Configured / Available group. When the
 Gateway advertises `provider-usage.v1`, a provider list performs one bounded account-usage read; rows show
 short and weekly windows with explicit labels, while the existing configuration sheet fetches the selected
-provider's exact snapshot and lists every window, reset, balance, stale, and safe error state. Detail rows,
-including reset and updated lines, use the standard settings secondary sub-text size and color rather than
-the smaller caption scale. The provider catalog's `usageSupported` flag marks the rows that will answer, so
+provider's exact snapshot and lists every window, reset, balance, stale, and safe error state. Balance rows
+share the window row treatment: label left, currency-formatted amount right, and an emerald share bar with a
+`% of <primary label>` caption for each balance after the primary; a negative balance shows `Deficit` instead.
+Detail rows, including reset and updated lines, use the standard settings secondary sub-text size and color
+rather than the smaller caption scale. The provider catalog's `usageSupported` flag marks the rows that will answer, so
 a supported configured row reserves its usage line with an animated skeleton and crossfades to the resolved
 summary instead of growing mid-load; a failed read retires that skeleton rather than leaving it pending, and
-a Gateway without the flag reserves nothing. Configured rows are
+a Gateway without the flag reserves nothing. The catalog's `localOnly` flag marks a provider whose models all
+resolve to a loopback base URL; that row shows an emerald infinity glyph in the usage slot and its sheet shows
+an `Unlimited` local-models row instead of usage content, with no `provider.usage` read. Configured rows are
 whole-row Details links; unconfigured rows retain their Connect action and automatic single-method setup. Both actions
 use the shared compact settings-pill treatment, and usage appears beneath the connection subtitle in the leading provider text stack when present. The Providers sheet starts with Model Catalog (available-model count and explicit forced Refresh) above its rounded Configured and Available containers. The catalog row uses the Providers accent and the exact global/session provider target, with presentation/identity/request fences for refresh results; Agent Defaults keeps model defaults but no separate catalog action. Provider containers use standard dividers between rows; standalone onboarding rows retain their own surface.
 Usage is an account projection only: it never represents session context or local token totals, and a missing capability
