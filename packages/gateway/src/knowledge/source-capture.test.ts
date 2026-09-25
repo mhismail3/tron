@@ -6,7 +6,6 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { TronWorkspace } from "../workspace/tron-workspace.js";
 import { KnowledgeStore } from "./knowledge-store.js";
 import { captureSource, isPrivateAddress, refreshSourcePreview } from "./source-capture.js";
-import { createSemanticNote, correctSemanticNote, readCitedSourceObject, supersedeSemanticNote, updateSemanticNote } from "./semantic-notes.js";
 
 const homes: string[] = [];
 const command = (value: string) => `source-test-${value}`;
@@ -428,11 +427,15 @@ describe("semantic notes", () => {
     const { store } = await fixture();
     const source = await captureSource(store, { commandId: command("note-source"), url: "https://example.com/note", scope: "research" }, { fetcher: async () => new Response("evidence", { headers: { "content-type": "text/plain" } }), resolveHost: publicResolver });
     const citation = { recordId: source.record.id, revisionId: source.record.revisionId, objectHash: source.record.content.object!.hash };
-    const note = await createSemanticNote(store, { commandId: command("note-create"), scope: "personal", title: "Preference", role: "preference", confirmed: true, fields: [{ field: "theme", value: "dark", evidence: [citation], certainty: "confirmed" }], evidence: [citation] });
-    const updated = await updateSemanticNote(store, { commandId: command("note-update"), recordId: note.record.id, expectedRevision: note.record.revisionId, scope: "personal", title: "Preference", role: "preference", confirmed: true, freshness: "current", contraryEvidence: [citation], fields: [{ field: "theme", value: "light", evidence: [citation], certainty: "confirmed" }] });
-    const corrected = await correctSemanticNote(store, { commandId: command("note-correct"), recordId: updated.record.id, expectedRevision: updated.record.revisionId, scope: "personal", title: "Corrected", role: "preference", confirmed: true, fields: [{ field: "theme", value: "system", evidence: [citation], certainty: "confirmed" }] });
-    const replacement = await supersedeSemanticNote(store, { commandId: command("note-supersede"), supersedesRecordId: corrected.record.id, supersedesRevisionId: corrected.record.revisionId, scope: "personal", title: "Current preference", role: "preference", confirmed: false });
+    const note = await store.createNote({ commandId: command("note-create"), record: { kind: "note", scope: "personal", provenance: { actor: "agent", evidence: [citation] }, relations: [], content: { title: "Preference", role: "preference", confirmed: true, fields: [{ field: "theme", value: "dark", evidence: [citation], certainty: "confirmed" }] } } });
+    const updated = await store.updateNote({ commandId: command("note-update"), recordId: note.record.id, expectedRevision: note.record.revisionId, record: { kind: "note", scope: "personal", provenance: { actor: "agent", evidence: [citation] }, relations: [], content: { title: "Preference", role: "preference", confirmed: true, freshness: "current", contraryEvidence: [citation], fields: [{ field: "theme", value: "light", evidence: [citation], certainty: "confirmed" }] } } });
+    const corrected = await store.correct(command("note-correct"), updated.record.id, updated.record.revisionId, { kind: "note", scope: "personal", provenance: { actor: "agent", evidence: [citation] }, relations: [], content: { title: "Corrected", role: "preference", confirmed: true, fields: [{ field: "theme", value: "system", evidence: [citation], certainty: "confirmed" }] } }, { type: "corrects", recordId: updated.record.id, revisionId: updated.record.revisionId });
+    const replacement = await store.createNote({ commandId: command("note-supersede"), record: { kind: "note", scope: "personal", provenance: { actor: "agent", evidence: [] }, relations: [{ type: "supersedes", recordId: corrected.record.id, revisionId: corrected.record.revisionId }], content: { title: "Current preference", role: "preference", confirmed: false } } });
+    expect(updated.record.content).toMatchObject({ contraryEvidence: [citation], fields: [{ value: "light" }] });
+    expect(corrected.record.relations).toContainEqual({ type: "corrects", recordId: updated.record.id, revisionId: updated.record.revisionId });
     expect(replacement.record.relations).toContainEqual({ type: "supersedes", recordId: corrected.record.id, revisionId: corrected.record.revisionId });
-    expect((await readCitedSourceObject(store, citation))?.byteLength).toBeGreaterThan(0);
+    const sourceRecord = await store.read(citation.recordId, citation.revisionId);
+    expect(sourceRecord?.kind).toBe("source");
+    expect((await store.readObject(sourceRecord!.content.object!, { recordId: citation.recordId, revisionId: citation.revisionId }))?.byteLength).toBeGreaterThan(0);
   });
 });
