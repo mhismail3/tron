@@ -225,19 +225,6 @@ rather than orphaning private bytes. Cancelled assessments cannot enter a new
 derivative transaction after asynchronous revalidation. Connector calls fail as unsupported until their named extension seam is installed;
 legacy import is installed only when explicitly named checkout roots are configured.
 
-## Explicit connector authority migration
-
-A legacy catalog with provider-keyed connector rows is not upgraded by startup.
-Its operator sequence, backup/quiescence requirements, command placeholders,
-lockstep activation, and rollback/GO gates are in the single [integrations
-cutover runbook](cutover-runbook.md). The owner contract below remains the
-schema authority; `scripts/tron connection-migrate` is only the explicitly
-invoked offline helper.
-`knowledge-observation.test.ts` covers global admission, exclusion-before-inference,
-and narrowing scope during inference. `runtime-knowledge-observation.integration.test.ts`
-drives real canonical runtime turns through the observation owner and checks
-persisted, cited recall under both selected and global scope without backfill.
-
 ## Sources and maintained notes
 
 `SourceContent` keeps the original immutable object (`object`) separate from its

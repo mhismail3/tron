@@ -35,9 +35,7 @@ The migration helpers are:
 - delegated provider tree and references: this runbook and
   `scripts/tron delegated-migrate` (marker schema 3);
 - Mac wizard state: the [Mac wizard-state cutover](../../mac-app/docs/wizard-state-cutover.md)
-  and `scripts/tron wizard-migrate`;
-- Knowledge/ConnectionOwner catalog: [`connections.md`](connections.md) and
-  `scripts/tron connection-migrate`.
+  and `scripts/tron wizard-migrate`.
 
 ## 1. Read-only preflight and writer inventory
 
@@ -60,7 +58,6 @@ user-approved home. Include:
 
 ```bash
 scripts/tron delegated-migrate preflight --destination-root <tronHome>/internal/subagents --legacy-root <tmp-provider-root>
-scripts/tron connection-migrate preflight --tron-home <tronHome>
 ```
 
 The delegated inventory must account for every provider directory/file,
@@ -161,9 +158,7 @@ publication and then resume migrations. Do the following in this exact order:
    then stage, verify, and publish the migrations below while all writers remain
    stopped. Use private same-filesystem staging directories and preserve each
    helper’s journal. Commands are exact; replace angle-bracket values only with
-   paths from preflight. There is no connection-migration `verify` subcommand:
-   its `stage` rechecks the source and its `publish` rechecks the journal,
-   source digests, owner authority, and catalog revision.
+   paths from preflight.
 4. After **all** migration publications and their exact post-publication checks
    succeed, the maintainer selects the approved bundled payload while still
    offline, before the reinstall snapshot:
@@ -251,34 +246,6 @@ evidence. `.onboarded` remains completion authority and is never changed. If
 publication is interrupted, `verify` must refuse the ambiguous destination; use
 the owner’s explicit `recover --staging <staging>` only after its digest/source
 proof passes.
-
-Prepare/stage/publish the Knowledge catalog and ConnectionOwner authority through
-the production `TronWorkspace` and catalog-control paths. Preserve records,
-source counts, checkpoints, pending identities, cohorts, usage, receipts,
-pending remote effects, opaque refs, and account/scope policy. Current status
-must be read from the ConnectionOwner revision/observations; Knowledge progress
-is not a second admission authority. The exact commands are:
-
-```bash
-scripts/tron connection-migrate preflight --tron-home <stable-tron-home>
-scripts/tron connection-migrate prepare --tron-home <stable-tron-home>
-scripts/tron connection-migrate stage \
-  --tron-home <stable-tron-home> --staging <private-connection-staging>
-scripts/tron connection-migrate publish \
-  --tron-home <stable-tron-home> --staging <private-connection-staging> \
-  --confirm-offline
-```
-
-`connection-migrate --confirm-offline` is only the migration helper’s explicit
-operator-approval flag; it is not the Mac reinstall checkpoint above. Run the
-focused readiness regression before an operator cutover:
-
-   ```bash
-   cd packages/gateway
-   PATH=/opt/homebrew/bin:$PATH npx vitest run src/knowledge/multi-account-connectors.test.ts
-   ```
-
-   Do not publish a provider JSON sidecar or edit canonical evidence.
 
 For every step, compare source and destination bytes/digests, permissions,
 owners, identity, revision, receipts/request hashes, and journal phase. A

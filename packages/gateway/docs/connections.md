@@ -41,38 +41,15 @@ labels individual tools read-only. Knowledge credential/account observations and
 MCP handshake/discovery readiness remain adapter-owned evidence. Availability is
 not a claim that tools are loaded into every existing conversation.
 
-## Prepared state migration
+## Account envelope ownership
 
-The operator sequence is the single [integrations cutover runbook](cutover-runbook.md);
-this section is the owner contract only. `connection-migration.ts` contains an explicit, write-free plan builder for
-the production Knowledge `state.json` plus catalog-control shape (including
-catalog receipts). It extracts account/ref/policy into the connection owner
-while preserving provider state (checkpoints, pending identities, cohorts,
-usage, and `pendingRemote`) and the global receipt/request-hash map. It rejects
-newer, incomplete, malformed, duplicate account/scope, and conflicting state
-before a plan is accepted. CLI preflight/prepare inspect the existing workspace
-through its read-only descriptor; they do not create directories or acquire the
-running workspace owner's lock. Missing workspace state refuses instead of
-initializing a replacement. Hashing sorts object keys recursively, so a nested
-provider-state mutation is rejected by `verifyMigrationPlan`.
-
-Publication is an operator-only offline action with separate owner and provider
-authority destinations plus a resumable publication marker. It stages the
-marker, publishes the owner, records `owner-published`, then publishes the
-Knowledge control-shaped provider state and marks the publication complete.
-`recoverConnectionMigration` inspects an interrupted publication; it never
-runs at Gateway startup, and preparation failure leaves the old Knowledge
-authority untouched.
-
-After the owner is active, Knowledge connector actions carry the exact
-`connectionId`; configuration rejects account/scope/credential fields and
-updates policy through `ConnectionOwner`. The provider state is keyed by that
-instance ID, while its persisted adapter document omits the generic envelope;
-`KnowledgeStore` resolves the private envelope only at the owning adapter
-boundary. Missing owner admission fails closed rather than falling back to a
-provider-keyed account.
+Knowledge connector actions carry the exact `connectionId`; configuration rejects
+account/scope/credential fields and updates policy through `ConnectionOwner`. The
+provider state is keyed by that instance ID, while its persisted adapter document
+omits the generic envelope; `KnowledgeStore` resolves the private envelope only
+at the owning adapter boundary. Missing owner admission fails closed rather than
+falling back to a provider-keyed account.
 
 Provider-specific Knowledge behavior remains with `KnowledgeStore` and its
-connector adapter through the explicit migration and corresponding RPC/native
-consumer transition. Public X capture remains a credential-free source
-capability, not a connection instance.
+connector adapter. Public X capture remains a credential-free source capability,
+not a connection instance.

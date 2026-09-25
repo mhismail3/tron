@@ -48,17 +48,13 @@ receipts. Setup, policy, and disconnect use exact owner-typed commands and
 bounded receipts. Runtime bindings are session/generation-scoped admission
 projections, not persisted child authority. See [Connection management](docs/connections.md).
 
-### Knowledge connector migration
+### Knowledge connector authority
 
-A pre-refactor provider-keyed Knowledge catalog is migrated only through the
-single ordered [integrations cutover runbook](docs/cutover-runbook.md), using
-the explicit offline `scripts/tron connection-migrate` helper. Gateway startup
-never invokes it. The resolver obtains the Knowledge workspace from
-`TronWorkspace` and the ConnectionOwner path from `connectionStatePath`; it
-never derives one from the other. Owner schema, preserved catalog state, and
-journal invariants are documented in [Connection management](docs/connections.md).
-The user/maintainer must quiesce writers, verify a backup, and manually run the
-operator action; no agent may run it against live state.
+A legacy catalog with provider-keyed connector rows is not upgraded by startup.
+The resolver obtains the Knowledge workspace from `TronWorkspace` and the
+ConnectionOwner path from `connectionStatePath`; it never derives one from the
+other. Owner schema and preserved catalog state are documented in
+[Connection management](docs/connections.md).
 
 ## Knowledge boundaries
 
