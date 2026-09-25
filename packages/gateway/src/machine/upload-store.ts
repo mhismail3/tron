@@ -7,7 +7,8 @@ import {
 import { basename, dirname, extname, join } from "node:path";
 import type { ImageContent } from "@earendil-works/pi-ai";
 import { GatewayError } from "../errors.js";
-import { atomicWriteJson, readJson } from "../util/json.js";
+import { durableAtomicWriteJson } from "../util/durable-json.js";
+import { readJson } from "../util/json.js";
 import { abortableRead } from "../util/abortable-read.js";
 import { isGatewayTimestamp } from "../util/timestamp.js";
 import type { PromptAttachmentState } from "../protocol/types.js";
@@ -401,7 +402,7 @@ export class UploadStore {
           digest,
           createdAt: new Date(this.now()).toISOString(),
         };
-        await this.durableWriteMetadata(join(folder, "metadata.json"), metadata);
+        await durableAtomicWriteJson(join(folder, "metadata.json"), metadata);
         await this.syncPath(uploadDirectory);
         await this.syncPath(dirname(uploadDirectory));
         this.installIndexedMetadata(metadata);
@@ -478,12 +479,6 @@ export class UploadStore {
     const handle = await open(path, "r");
     try { await handle.sync(); }
     finally { await handle.close(); }
-  }
-
-  private async durableWriteMetadata(path: string, value: UploadMetadataV2): Promise<void> {
-    await atomicWriteJson(path, value);
-    await this.syncPath(path);
-    await this.syncPath(dirname(path));
   }
 
   private async adoptStagedObject(stagedPath: string, digest: string, size: number): Promise<string> {
@@ -888,7 +883,7 @@ export class UploadStore {
       }
       const claimedMetadata = metadata.map((value) => ({ ...value, sessionId }));
       for (const [index, value] of claimedMetadata.entries()) {
-        await this.durableWriteMetadata(
+        await durableAtomicWriteJson(
           join(owned[index]!.ownedDirectory, "metadata.json"),
           value,
         );
@@ -968,7 +963,7 @@ export class UploadStore {
     this.unavailableObjectDigests.delete(digest);
     if (metadata.version === 2) return metadata;
     const migrated: UploadMetadataV2 = { ...metadata, version: 2, digest };
-    await this.durableWriteMetadata(join(owned.ownedDirectory, "metadata.json"), migrated);
+    await durableAtomicWriteJson(join(owned.ownedDirectory, "metadata.json"), migrated);
     return migrated;
   }
 

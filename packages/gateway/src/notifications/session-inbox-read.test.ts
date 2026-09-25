@@ -2,7 +2,7 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import * as json from "../util/json.js";
+import * as durableJson from "../util/durable-json.js";
 import { NotificationGrantStore, notificationHash, type NotificationInboxEntry } from "./grant-store.js";
 import { NotificationService } from "./notification-service.js";
 import type { PushRelayClient } from "./relay-client.js";
@@ -72,7 +72,7 @@ describe("session notification read cuts", () => {
 
   it("does not rewrite credentials or invalidate the inbox for an empty or already-read cut", async () => {
     const { service, changed } = await fixture([entry(1)]);
-    const write = vi.spyOn(json, "atomicWriteJson");
+    const write = vi.spyOn(durableJson, "durableAtomicWriteJson");
     await service.markSessionInboxRead("session-other");
     expect(write).not.toHaveBeenCalled();
     expect(changed).not.toHaveBeenCalled();
@@ -89,7 +89,7 @@ describe("session notification read cuts", () => {
 
   it("retries failed writes while the relay is offline without consuming newer same-session alerts", async () => {
     const { service, store, changed } = await fixture([entry(1), entry(2, "session-b")]);
-    vi.spyOn(json, "atomicWriteJson").mockRejectedValueOnce(new Error("planned persistence failure"));
+    vi.spyOn(durableJson, "durableAtomicWriteJson").mockRejectedValueOnce(new Error("planned persistence failure"));
     await expect(service.markSessionInboxRead("session-a")).rejects.toThrow("planned persistence failure");
     expect(changed).not.toHaveBeenCalled();
     expect((await store.snapshot()).inbox!.every((row) => row.readAt === undefined)).toBe(true);

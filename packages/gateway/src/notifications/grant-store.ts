@@ -2,7 +2,7 @@ import { createHash } from "node:crypto";
 import { lstat, mkdir } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { AsyncMutex } from "../util/async-mutex.js";
-import { atomicWriteJson } from "../util/json.js";
+import { durableAtomicWriteJson } from "../util/durable-json.js";
 import { readSecureJson, SecureJsonFileError } from "../util/secure-json.js";
 import { isGatewayTimestamp } from "../util/timestamp.js";
 import { GatewayError } from "../errors.js";
@@ -221,7 +221,7 @@ export class NotificationGrantStore {
       await this.ensureSecureParent();
       const current = await this.read();
       if (!current.present) {
-        await atomicWriteJson(this.path, empty());
+        await durableAtomicWriteJson(this.path, empty());
         await this.ensureSecureParent();
         return;
       }
@@ -244,7 +244,7 @@ export class NotificationGrantStore {
       const encoded = Buffer.byteLength(JSON.stringify(next));
       if (encoded > MAXIMUM_DOCUMENT_BYTES) throw new GatewayError("busy", "Notification state exceeds its bounded capacity", true);
       await this.ensureSecureParent();
-      await atomicWriteJson(this.path, next);
+      await durableAtomicWriteJson(this.path, next);
       await this.ensureSecureParent();
       return structuredClone(next);
     });

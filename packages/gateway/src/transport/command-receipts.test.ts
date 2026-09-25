@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { GatewayError, asUncertainOutcome } from "../errors.js";
-import { atomicWriteJson } from "../util/json.js";
+import { durableAtomicWriteJson } from "../util/durable-json.js";
 import { CommandReceiptStore } from "./command-receipts.js";
 
 // Every case owns one temporary tron home; release them all so a long-lived
@@ -73,7 +73,7 @@ describe("CommandReceiptStore", () => {
 
   it("does not prune a completed receipt while its duplicate lane is active", async () => {
     const root = await temporaryRoot("tron-receipts-active-lane-");
-    const store = new CommandReceiptStore(root, atomicWriteJson, { maximumAgeMs: 0 });
+    const store = new CommandReceiptStore(root, durableAtomicWriteJson, { maximumAgeMs: 0 });
     let releaseOperation: (() => void) | undefined;
     let signalStarted: (() => void) | undefined;
     const started = new Promise<void>((resolve) => { signalStarted = resolve; });
@@ -167,7 +167,7 @@ describe("CommandReceiptStore", () => {
     ["aggregate bytes", { maximumEntries: 10, maximumAggregateBytes: 1_048_576 + 4 * 1_024 + 1 }],
   ])("rejects new mutations before execution when %s capacity is full", async (_label, limits) => {
     const root = await temporaryRoot("tron-receipts-capacity-");
-    const store = new CommandReceiptStore(root, atomicWriteJson, limits);
+    const store = new CommandReceiptStore(root, durableAtomicWriteJson, limits);
     await store.execute("device", "session.prompt", "first-command", async () => ({ accepted: true }));
     const rejected = vi.fn(async () => ({ accepted: true }));
 
@@ -182,7 +182,7 @@ describe("CommandReceiptStore", () => {
     const directory = join(root, "gateway", "command-receipts");
     await mkdir(directory, { recursive: true });
     await writeFile(join(directory, `${"a".repeat(43)}.json.123.123456789abc.tmp`), "interrupted write");
-    const store = new CommandReceiptStore(root, atomicWriteJson, {
+    const store = new CommandReceiptStore(root, durableAtomicWriteJson, {
       maximumEntries: 1,
       maximumAggregateBytes: 2 * 1_048_576,
     });
@@ -194,7 +194,7 @@ describe("CommandReceiptStore", () => {
 
   it("expires completed editor updates quickly without shortening other receipt retention", async () => {
     const root = await temporaryRoot("tron-receipts-editor-expiry-");
-    const store = new CommandReceiptStore(root, atomicWriteJson, {
+    const store = new CommandReceiptStore(root, durableAtomicWriteJson, {
       maximumEntries: 2,
       maximumAggregateBytes: 2 * 1_048_576,
     });
@@ -224,7 +224,7 @@ describe("CommandReceiptStore", () => {
     const store = new CommandReceiptStore(root, async (path, value, mode) => {
       writes += 1;
       if (writes === 2) throw new Error("synthetic completion write failure");
-      await atomicWriteJson(path, value, mode);
+      await durableAtomicWriteJson(path, value, mode);
     });
     const operation = vi.fn(async () => ({ accepted: true }));
 

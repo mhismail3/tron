@@ -2,7 +2,7 @@ import { mkdir, mkdtemp, readFile, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it, vi } from "vitest";
-import { atomicWriteJson } from "../util/json.js";
+import { durableAtomicWriteJson } from "../util/durable-json.js";
 import { SessionAttentionStore } from "./session-attention-store.js";
 import { completionOwnedByMarker, successfulAssistantCompletion } from "./runtime-slot.js";
 
@@ -91,7 +91,7 @@ describe("SessionAttentionStore", () => {
 
   it("does not write, create records, or advance revisions for no-op reads", async () => {
     const home = await mkdtemp(join(tmpdir(), "tron-attention-noop-"));
-    const write = vi.fn(atomicWriteJson);
+    const write = vi.fn(durableAtomicWriteJson);
     const store = new SessionAttentionStore(home, { write });
     await store.initialize();
     expect((await store.set("empty", false, 0)).changed).toBe(false);
@@ -116,7 +116,7 @@ describe("SessionAttentionStore", () => {
           rejectNext = false;
           throw new Error("injected attention write failure");
         }
-        await atomicWriteJson(path, value);
+        await durableAtomicWriteJson(path, value);
       },
     });
     await store.initialize();

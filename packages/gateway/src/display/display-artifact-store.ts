@@ -7,7 +7,8 @@ import { basename, dirname, extname, isAbsolute, join, relative, resolve, sep } 
 import { Transform } from "node:stream";
 import { pipeline } from "node:stream/promises";
 import { GatewayError } from "../errors.js";
-import { atomicWriteJson, readJson } from "../util/json.js";
+import { durableAtomicWriteJson } from "../util/durable-json.js";
+import { readJson } from "../util/json.js";
 import type { BlobByteRange, BlobLease } from "../sessions/blob-store.js";
 
 const METADATA_MAX_BYTES = 64 * 1_024;
@@ -432,7 +433,7 @@ export class DisplayArtifactStore {
           owners: [input.sessionID],
           createdAt: new Date().toISOString(),
         };
-        await this.writeMetadata(join(folder, "metadata.json"), metadata);
+        await durableAtomicWriteJson(join(folder, "metadata.json"), metadata);
         this.index.set(id, metadata);
         this.verifiedDigests.add(metadata.digest);
         this.logicalBytes += metadata.size;
@@ -458,7 +459,7 @@ export class DisplayArtifactStore {
       if (metadata.owners.includes(sessionID)) return;
       if (metadata.owners.length >= 512) throw new GatewayError("busy", "Display artifact ownership reached its bounded capacity", true);
       const next = { ...metadata, owners: [...metadata.owners, sessionID].sort() };
-      await this.writeMetadata(join(this.artifactDirectory, id, "metadata.json"), next);
+      await durableAtomicWriteJson(join(this.artifactDirectory, id, "metadata.json"), next);
       this.index.set(id, next);
     });
   }
@@ -567,7 +568,7 @@ export class DisplayArtifactStore {
     // Revocation removes future authority durably, even while a reader owns
     // the bytes. Empty ownership survives a crash only as startup cleanup.
     const next = { ...metadata, owners };
-    await this.writeMetadata(join(this.artifactDirectory, id, "metadata.json"), next);
+    await durableAtomicWriteJson(join(this.artifactDirectory, id, "metadata.json"), next);
     this.index.set(id, next);
     await this.removeUnowned(id);
   }
@@ -595,7 +596,7 @@ export class DisplayArtifactStore {
           && (liveSessionIDs === undefined || liveSessionIDs.has(owner)));
         if (owners.length !== metadata.owners.length) {
           const next = { ...metadata, owners };
-          await this.writeMetadata(join(this.artifactDirectory, id, "metadata.json"), next);
+          await durableAtomicWriteJson(join(this.artifactDirectory, id, "metadata.json"), next);
           this.index.set(id, next);
         }
         await this.removeUnowned(id);
@@ -629,13 +630,6 @@ export class DisplayArtifactStore {
     this.verificationFlights.set(digest, operation);
     try { await operation; }
     finally { this.verificationFlights.delete(digest); }
-  }
-
-  private async writeMetadata(path: string, metadata: DisplayArtifactMetadata): Promise<void> {
-    await atomicWriteJson(path, metadata);
-    const handle = await open(path, "r");
-    try { await handle.sync(); }
-    finally { await handle.close(); }
   }
 
   private async removeObjectIfUnreferenced(digest: string): Promise<void> {

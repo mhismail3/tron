@@ -1,8 +1,10 @@
-import { chmod, mkdtemp, mkdir, readFile, readdir, rm, symlink, writeFile } from "node:fs/promises";
+import { chmod, mkdtemp, mkdir, open, readFile, readdir, rename, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it, vi } from "vitest";
 import { DisplayArtifactStore } from "./display-artifact-store.js";
+import * as durableJson from "../util/durable-json.js";
+import type { DurableJsonFileSystem } from "../util/durable-json.js";
 
 async function collect(stream: NodeJS.ReadableStream): Promise<Buffer> {
   const chunks: Buffer[] = [];
@@ -333,5 +335,33 @@ describe("DisplayArtifactStore", () => {
     await restarted.initialize();
     expect(await readdir(artifacts)).toEqual([]);
     await expect(restarted.acquire(artifact.id, "session-a")).rejects.toMatchObject({ code: "not_found" });
+  });
+
+  it("does not acknowledge an artifact whose metadata directory sync failed", async () => {
+    const value = await fixture();
+    await writeFile(join(value.workspace, "note.txt"), "durable display");
+    const artifactRoot = join(value.home, "gateway", "display-artifacts", "artifacts");
+    const failure = Object.assign(new Error("directory sync failed"), { code: "ENOSPC" });
+    const realWrite = durableJson.durableAtomicWriteJson;
+    const faultedFileSystem: DurableJsonFileSystem = {
+      mkdir,
+      rename,
+      rm,
+      open: (async (path: string, ...args: unknown[]) => {
+        const handle = await open(path, ...(args as [never]));
+        if (args[0] === "r" && path.startsWith(artifactRoot)) {
+          Object.defineProperty(handle, "sync", { value: async () => { throw failure; } });
+        }
+        return handle;
+      }) as DurableJsonFileSystem["open"],
+    };
+    vi.spyOn(durableJson, "durableAtomicWriteJson").mockImplementationOnce((path, entry, mode) =>
+      realWrite(path, entry, mode, faultedFileSystem));
+    try {
+      await expect(value.store.ingest(value.workspace, "note.txt", "session-a")).rejects.toMatchObject({ code: "ENOSPC" });
+      expect(await readdir(artifactRoot)).toEqual([]);
+    } finally {
+      vi.restoreAllMocks();
+    }
   });
 });

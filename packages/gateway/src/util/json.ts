@@ -1,7 +1,7 @@
-import { randomBytes } from "node:crypto";
-import { mkdir, open, readFile, rename, rm, writeFile } from "node:fs/promises";
+import { mkdir, open, readFile, rm } from "node:fs/promises";
 import { dirname } from "node:path";
 import lockfile from "proper-lockfile";
+import { durableAtomicWriteJson } from "./durable-json.js";
 
 const MAX_BOUNDED_JSON_BYTES = 64 * 1_048_576;
 
@@ -37,13 +37,6 @@ export async function readJson<T>(path: string, fallback: T, maximumBytes?: numb
   }
 }
 
-export async function atomicWriteJson(path: string, value: unknown, mode = 0o600): Promise<void> {
-  await mkdir(dirname(path), { recursive: true, mode: 0o700 });
-  const temporary = `${path}.${process.pid}.${randomBytes(6).toString("hex")}.tmp`;
-  await writeFile(temporary, `${JSON.stringify(value, null, 2)}\n`, { mode });
-  await rename(temporary, path);
-}
-
 export async function updateJsonLocked<T>(
   path: string,
   fallback: T,
@@ -64,7 +57,7 @@ export async function updateJsonLocked<T>(
   try {
     const current = await readJson(path, fallback, maximumBytes);
     const next = update(current);
-    await atomicWriteJson(path, next);
+    await durableAtomicWriteJson(path, next);
     return next;
   } finally {
     await release();

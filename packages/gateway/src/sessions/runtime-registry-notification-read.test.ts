@@ -6,7 +6,7 @@ import { TrustService } from "../admin/trust-service.js";
 import { NotificationGrantStore, notificationHash } from "../notifications/grant-store.js";
 import { NotificationService } from "../notifications/notification-service.js";
 import type { PushRelayClient } from "../notifications/relay-client.js";
-import * as json from "../util/json.js";
+import * as durableJson from "../util/durable-json.js";
 import { RuntimeRegistry } from "./runtime-registry.js";
 
 const roots: string[] = [];
@@ -87,7 +87,7 @@ describe("visible session notification read admission", () => {
     const { store, notifications, reads, registry, append, present } = await fixture();
     await append("notification-original");
     registry.subscribe("phone", "session-a");
-    vi.spyOn(json, "atomicWriteJson").mockRejectedValueOnce(new Error("planned persistence failure"));
+    vi.spyOn(durableJson, "durableAtomicWriteJson").mockRejectedValueOnce(new Error("planned persistence failure"));
     expect(present(1)).toEqual({ visible: true, revision: 1 });
     await expect(reads.mock.results[0]!.value).rejects.toThrow("planned persistence failure");
     registry.unsubscribeClient("phone");

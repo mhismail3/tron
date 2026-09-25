@@ -7,7 +7,8 @@ import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
 import { execFile } from "node:child_process";
 import { GatewayError } from "../errors.js";
-import { atomicWriteJson, removeIfExists } from "../util/json.js";
+import { durableAtomicWriteJson } from "../util/durable-json.js";
+import { removeIfExists } from "../util/json.js";
 import { readSecureJson } from "../util/secure-json.js";
 import { AsyncMutex } from "../util/async-mutex.js";
 import {
@@ -388,7 +389,7 @@ export async function recordIosDeviceInstallHelperFailure(
   const startedAt = current === undefined ? new Date().toISOString() : statusDocument(current).startedAt;
   const targetName = current === undefined ? "iOS device" : statusDocument(current).targetName;
   const buildMode = current === undefined ? "optimized" : statusDocument(current).buildMode;
-  await atomicWriteJson(statusPath(tronHome, deviceId), {
+  await durableAtomicWriteJson(statusPath(tronHome, deviceId), {
     schema: 2,
     kind: STATUS_KIND,
     deviceId,
@@ -461,7 +462,7 @@ export class IosDeviceInstallService {
         updatedAt: new Date().toISOString(),
       };
       await mkdir(join(installRoot(this.options.tronHome), "configs"), { recursive: true, mode: 0o700 });
-      await atomicWriteJson(configPath(this.options.tronHome, deviceId), config);
+      await durableAtomicWriteJson(configPath(this.options.tronHome, deviceId), config);
       return config;
     });
   }
@@ -514,7 +515,7 @@ export class IosDeviceInstallService {
         target,
         updatedAt: new Date().toISOString(),
       };
-      await atomicWriteJson(configPath(this.options.tronHome, deviceId), replacement);
+      await durableAtomicWriteJson(configPath(this.options.tronHome, deviceId), replacement);
       return replacement;
     });
   }
@@ -584,8 +585,8 @@ export class IosDeviceInstallService {
         updatedAt: startedAt,
       };
       await mkdir(join(installRoot(this.options.tronHome), "status"), { recursive: true, mode: 0o700 });
-      await atomicWriteJson(statusPath(this.options.tronHome, deviceId), status);
-      await atomicWriteJson(activePath(this.options.tronHome), {
+      await durableAtomicWriteJson(statusPath(this.options.tronHome, deviceId), status);
+      await durableAtomicWriteJson(activePath(this.options.tronHome), {
         schema: 2, kind: ACTIVE_KIND, deviceId, commandId, buildMode, startedAt,
       } satisfies ActiveInstall);
       try {
@@ -708,7 +709,7 @@ export async function runIosDeviceInstallHelper(input: {
     state: "running",
     updatedAt: new Date().toISOString(),
   };
-  await atomicWriteJson(statusPath(tronHome, deviceId), running);
+  await durableAtomicWriteJson(statusPath(tronHome, deviceId), running);
 
   let tail = "";
   let timedOut = false;
@@ -739,7 +740,7 @@ export async function runIosDeviceInstallHelper(input: {
       ? "The iOS build/install exceeded its two-hour deadline."
       : outcome.error ?? (tail.trim().split("\n").slice(-12).join("\n") || `The iOS build/install exited with status ${outcome.code ?? "unknown"}.`),
   ).replaceAll(config.target.identifier, "[physical device]");
-  await atomicWriteJson(statusPath(tronHome, deviceId), {
+  await durableAtomicWriteJson(statusPath(tronHome, deviceId), {
     ...running,
     state: succeeded ? "succeeded" : "failed",
     updatedAt: new Date().toISOString(),
