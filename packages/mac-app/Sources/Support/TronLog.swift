@@ -149,17 +149,7 @@ final class TronLog: @unchecked Sendable {
     }
 
     static func redact(_ value: String) -> String {
-        var result = value
-        for (pattern, replacement) in [
-            (#"\bBearer\s+[^\s,;]+"#, "Bearer [REDACTED]"),
-            (#"((?:authorization|api[-_ ]?key|access[-_ ]?token|refresh[-_ ]?token|password|secret)\s*[:=]\s*)[^\s,;]+"#, "$1[REDACTED]"),
-            (#"/Users/[^\s'\"]+"#, "[USER_PATH]"),
-            (#"/private/var/[^\s'\"]+"#, "[PRIVATE_PATH]")
-        ] {
-            guard let regex = try? NSRegularExpression(pattern: pattern, options: [.caseInsensitive]) else { continue }
-            result = regex.stringByReplacingMatches(in: result, range: NSRange(result.startIndex..., in: result), withTemplate: replacement)
-        }
-        return result
+        DiagnosticsRedactor().redactMessage(value)
     }
 
     private static let timestampStyle = Date.ISO8601FormatStyle(includingFractionalSeconds: true)

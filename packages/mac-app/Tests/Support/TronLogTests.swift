@@ -60,8 +60,8 @@ struct TronLogTests {
         let debugRecords = await logger.debugBuffer()
         #expect(!debugRecords.isEmpty)
         #expect(debugRecords.count < 1_000)
-        #expect(debugRecords.last?.message.contains("Bearer [REDACTED]") == true)
-        #expect(debugRecords.last?.message.contains("[USER_PATH]") == true)
+        #expect(debugRecords.last?.message.contains("Bearer [redacted:len=6]") == true)
+        #expect(debugRecords.last?.message.contains("[redacted:path]") == true)
 
         let active = directory.appendingPathComponent("mac.jsonl")
         let rotated = directory.appendingPathComponent("mac.jsonl.1")
@@ -69,16 +69,14 @@ struct TronLogTests {
         let activeSize = try FileManager.default.attributesOfItem(atPath: active.path)[.size] as? NSNumber
         #expect((activeSize?.intValue ?? Int.max) <= 1_048_576)
         let persisted = try String(contentsOf: active, encoding: .utf8)
-        #expect(persisted.contains("Bearer [REDACTED]"))
-        #expect(persisted.contains("authorization: [REDACTED]"))
-        #expect(persisted.contains("api-key=[REDACTED]"))
-        #expect(persisted.contains("access_token=[REDACTED]"))
-        #expect(persisted.contains("refresh-token=[REDACTED]"))
-        #expect(persisted.contains("password=[REDACTED]"))
-        #expect(persisted.contains("secret=[REDACTED]"))
-        #expect(persisted.contains("[USER_PATH]"))
-        #expect(persisted.contains("[PRIVATE_PATH]"))
-        #expect(persisted.contains("/Users/alice") == false)
-        #expect(persisted.contains("Bearer abc123") == false)
+        #expect(persisted.contains("Bearer [redacted:len=6]"))
+        for secret in [
+            "Bearer abc123", "authorization: secret", "api-key=abc", "access_token=def",
+            "refresh-token=ghi", "password=jkl", "secret=mno", "/Users/alice/private",
+            "/private/var/tmp/secret",
+        ] {
+            #expect(!persisted.contains(secret), "persisted diagnostics leaked \\(secret)")
+        }
+        #expect(persisted.contains("[redacted:path]"))
     }
 }
