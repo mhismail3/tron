@@ -470,7 +470,12 @@ always use diagnostics `Never` plus `-collect-test-diagnostics never`. Use
 `diagnose --only-testing …` only when verbose collection is explicitly needed;
 it has a larger finite bound and never runs as an automatic retry. Every attempt
 retains a full log, metadata, process evidence, and a unique xcresult under
-`packages/ios-app/build/test-runs`, with `latest` outside the bundle. Exit 65 is
+`$HOME/Library/Developer/Tron/ios/test-runs`, with `latest` outside the bundle.
+The shared per-user iOS build root is `$HOME/Library/Developer/Tron/ios`:
+test products and runs use its `test-derived-data` and `test-runs` folders. The
+test runner's existing lease serializes access to those shared test products;
+simulator-app and device builds remain worktree-local because their helpers do
+not acquire that lease. Exit 65 is
 a product-test failure, 66 a destination failure, 70 a build failure, 73 a busy
 lease, 74 a runner failure, and 75 a process timeout.
 

@@ -13,8 +13,9 @@ STATE_ROOT="${TRON_IOS_TEST_STATE_DIR:-$HOME/.tron/internal/ios-test}"
 MARKER="$STATE_ROOT/simulator.json"
 LOCK="$STATE_ROOT/lease.lock"
 DEVELOPMENT_STATE="${TRON_IOS_SIMULATOR_STATE_DIR:-$HOME/.tron/internal/run}/ios-simulator-udid"
-DERIVED_DATA="${TRON_IOS_TEST_DERIVED_DATA:-$IOS/build/test-derived-data}"
-RESULTS_ROOT="${TRON_IOS_TEST_RESULTS_DIR:-$IOS/build/test-runs}"
+IOS_BUILD_ROOT="$HOME/Library/Developer/Tron/ios"
+DERIVED_DATA="${TRON_IOS_TEST_DERIVED_DATA:-$IOS_BUILD_ROOT/test-derived-data}"
+RESULTS_ROOT="${TRON_IOS_TEST_RESULTS_DIR:-$IOS_BUILD_ROOT/test-runs}"
 DEVICE_NAME="${TRON_IOS_TEST_DEVICE_NAME:-Tron iOS Tests}"
 EPHEMERAL="${TRON_IOS_TEST_EPHEMERAL:-0}"
 PROCESS="$ROOT/scripts/ios-test-process.py"
@@ -48,7 +49,7 @@ Stable exits: 65 test failure, 66 destination, 70 build failure, 73 busy,
 74 runner failure, 75 process timeout. Signals retain their conventional exits.
 Routine runs are serial, use an exact owned simulator UDID, disable verbose test
 diagnostics, and preserve unique complete logs plus xcresults under
-packages/ios-app/build/test-runs by default. diagnose never runs automatically.
+$HOME/Library/Developer/Tron/ios/test-runs by default. diagnose never runs automatically.
 USAGE
 }
 
