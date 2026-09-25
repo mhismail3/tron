@@ -56,12 +56,8 @@ export interface AdministrativeDrainSnapshot {
   drainId: string;
   revision: number;
   phase: AdministrativeDrainPhase;
-  startedAt?: string;
-  lastProgressAt?: string;
   blockerCount: number;
   blockerCounts: Partial<Record<AdministrativeDrainBlockerCategory, number>>;
-  oldestAdmissionAt?: string;
-  oldestAdmissionAgeMs?: number;
   blockers: AdministrativeDrainBlockerSummary[];
   omittedCount: number;
   suspectProjectionCount: number;

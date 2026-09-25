@@ -369,8 +369,6 @@ export class RuntimeRegistry {
   private drainId: string;
   private drainRevision = 0;
   private drainPhase: AdministrativeDrainPhase = "idle";
-  private drainStartedAt: string | undefined;
-  private drainLastProgressAt: string | undefined;
   private drainFingerprint = "";
   private shutdownState: "active" | "shuttingDown" | "disposed" = "active";
   private disposalPromise: Promise<void> | undefined;
@@ -3367,8 +3365,6 @@ export class RuntimeRegistry {
       for (const slot of this.slots.values()) slot.beginAdministrativeDrainCutoff();
       this.drainId = randomUUID();
       this.drainPhase = "preparing";
-      this.drainStartedAt = new Date().toISOString();
-      this.drainLastProgressAt = this.drainStartedAt;
       this.drainFingerprint = "";
       this.drainRevision += 1;
     }
@@ -3379,7 +3375,6 @@ export class RuntimeRegistry {
     if (this.drainPhase === phase) return;
     this.drainPhase = phase;
     this.drainRevision += 1;
-    this.drainLastProgressAt = new Date().toISOString();
     this.drainFingerprint = "";
   }
 
@@ -3424,12 +3419,6 @@ export class RuntimeRegistry {
       || left.category.localeCompare(right.category) || left.key.localeCompare(right.key));
     const counts: Partial<Record<AdministrativeDrainBlockerCategory, number>> = {};
     for (const fact of facts) counts[fact.category] = (counts[fact.category] ?? 0) + 1;
-    const admitted = facts.flatMap((fact) => {
-      if (!fact.admittedAt) return [];
-      const milliseconds = Date.parse(fact.admittedAt);
-      return Number.isFinite(milliseconds) ? [{ timestamp: fact.admittedAt, milliseconds }] : [];
-    }).sort((left, right) => left.milliseconds - right.milliseconds);
-    const oldest = admitted[0];
     const summaries = facts.slice(0, 64).map((fact) => {
       const admittedMilliseconds = fact.admittedAt ? Date.parse(fact.admittedAt) : Number.NaN;
       return {
@@ -3452,20 +3441,13 @@ export class RuntimeRegistry {
     if (fingerprint !== this.drainFingerprint) {
       this.drainFingerprint = fingerprint;
       this.drainRevision += 1;
-      if (this.administrativeDrainStarted) this.drainLastProgressAt = new Date(now).toISOString();
     }
     return {
       drainId: this.drainId,
       revision: this.drainRevision,
       phase: this.drainPhase,
-      ...(this.drainStartedAt ? { startedAt: this.drainStartedAt } : {}),
-      ...(this.drainLastProgressAt ? { lastProgressAt: this.drainLastProgressAt } : {}),
       blockerCount: facts.length,
       blockerCounts: counts,
-      ...(oldest ? {
-        oldestAdmissionAt: oldest.timestamp,
-        oldestAdmissionAgeMs: Math.max(0, now - oldest.milliseconds),
-      } : {}),
       blockers: summaries,
       omittedCount: Math.max(0, facts.length - summaries.length),
       suspectProjectionCount: facts.filter((fact) => fact.state === "suspect").length,
