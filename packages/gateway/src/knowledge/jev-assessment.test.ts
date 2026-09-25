@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { InMemoryConnectorCredentialStore } from "./connector-credentials.js";
+import { InMemoryConnectorCredentialStore } from "../../test-support/connector-credentials.js";
 import { JevSourceAssessmentModel, JEV_ENDPOINT, JEV_MODEL, JEV_RUBRIC_VERSION, jevProfileVersion, prepareJevAssessmentInput } from "./jev-assessment.js";
 
 const answer = {

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { InMemoryConnectorCredentialStore } from "./connector-credentials.js";
+import { InMemoryConnectorCredentialStore } from "../../test-support/connector-credentials.js";
 import { JevDecisionClient, JEV_DEFAULT_MODEL, type JevDecisionRequest } from "./jev-client.js";
 
 const credentials = () => new InMemoryConnectorCredentialStore(new Map([["connector:jev:personal", "synthetic-key"]]));

@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { GatewayError } from "../errors.js";
-import { InMemoryConnectorCredentialStore } from "../knowledge/connector-credentials.js";
+import { InMemoryConnectorCredentialStore } from "../../test-support/connector-credentials.js";
 import { JevDecisionClient, JevEvaluationError } from "../knowledge/jev-client.js";
 import { SessionSearchService, type SessionSearchEmbeddingClient } from "./session-search-service.js";
 import { SessionSearchIndex } from "./session-search-index.js";

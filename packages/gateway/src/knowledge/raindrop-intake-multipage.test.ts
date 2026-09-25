@@ -4,7 +4,7 @@ import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { TronWorkspace } from "../workspace/tron-workspace.js";
 import { KnowledgeStore } from "./knowledge-store.js";
-import { InMemoryConnectorCredentialStore } from "./connector-credentials.js";
+import { InMemoryConnectorCredentialStore } from "../../test-support/connector-credentials.js";
 import { KnowledgeConnectorExtension, type ConnectorHTTPResponse, type KnowledgeConnectorOptions } from "./connectors.js";
 import type { SourceAssessmentModel } from "./source-capture.js";
 import { jevInputDigest, jevProfileVersion } from "./jev-assessment.js";

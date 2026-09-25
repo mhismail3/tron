@@ -5,7 +5,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import { TronWorkspace } from "../workspace/tron-workspace.js";
 import { KnowledgeStore } from "./knowledge-store.js";
 import { KnowledgeConnectorExtension, type ConnectorHTTPResponse } from "./connectors.js";
-import { InMemoryConnectorCredentialStore } from "./connector-credentials.js";
+import { InMemoryConnectorCredentialStore } from "../../test-support/connector-credentials.js";
 import { jevProfileVersion } from "./jev-assessment.js";
 
 const roots: string[] = [];

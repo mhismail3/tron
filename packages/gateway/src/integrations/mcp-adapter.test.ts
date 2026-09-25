@@ -5,7 +5,7 @@ import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { ConnectionOwner } from "./connection-owner.js";
 import { McpAdapter } from "./mcp-adapter.js";
-import { InMemoryConnectorCredentialStore } from "../knowledge/connector-credentials.js";
+import { InMemoryConnectorCredentialStore } from "../../test-support/connector-credentials.js";
 import { GatewayWorkRegistry } from "../sessions/gateway-work-registry.js";
 
 const cleanup: Array<() => Promise<void>> = [];

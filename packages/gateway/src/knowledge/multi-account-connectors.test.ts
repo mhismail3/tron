@@ -6,7 +6,7 @@ import { ConnectionOwner } from "../integrations/connection-owner.js";
 import { TronWorkspace } from "../workspace/tron-workspace.js";
 import { KnowledgeStore } from "./knowledge-store.js";
 import { KnowledgeConnectorExtension, type ConnectorHTTPResponse } from "./connectors.js";
-import { InMemoryConnectorCredentialStore } from "./connector-credentials.js";
+import { InMemoryConnectorCredentialStore } from "../../test-support/connector-credentials.js";
 
 const roots: string[] = [];
 afterEach(async () => { await Promise.all(roots.splice(0).map(root => rm(root, { recursive: true, force: true }))); });

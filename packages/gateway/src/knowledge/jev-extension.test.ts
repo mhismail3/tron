@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { InMemoryConnectorCredentialStore } from "./connector-credentials.js";
+import { InMemoryConnectorCredentialStore } from "../../test-support/connector-credentials.js";
 import { JevDecisionClient } from "./jev-client.js";
 import { createJevExtension } from "./jev-extension.js";
 
