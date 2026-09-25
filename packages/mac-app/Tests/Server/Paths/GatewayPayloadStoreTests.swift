@@ -440,40 +440,149 @@ struct GatewayPayloadStoreTests {
         }
     }
 
-    @Test("canonical validation rejects an incomplete payload with a real manifest fingerprint")
-    func canonicalValidationRejectsIncompleteInstallPayload() throws {
+    @Test("canonical validation rejects each payload tamper rejected by install detection")
+    func canonicalValidationRejectsInstallPayloadTampering() throws {
         let temporary = try TemporaryPayloadDirectory()
-        let root = temporary.root.appendingPathComponent("install-payload", isDirectory: true)
+        let fileManager = FileManager.default
         defer {
-            if let items = FileManager.default.enumerator(at: root, includingPropertiesForKeys: [.isDirectoryKey]) {
-                for case let item as URL in items {
-                    let isDirectory = (try? item.resourceValues(forKeys: [.isDirectoryKey]).isDirectory) == true
-                    try? FileManager.default.setAttributes([.posixPermissions: isDirectory ? 0o755 : 0o644], ofItemAtPath: item.path)
-                }
+            for root in (try? fileManager.contentsOfDirectory(at: temporary.root, includingPropertiesForKeys: nil)) ?? [] {
+                try? makePayloadWritable(root)
             }
-            try? FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: root.path)
             temporary.cleanup()
         }
-        try makePayload(root: root, channel: "stable", version: "install", fingerprint: String(repeating: "a", count: 64))
-
-        let entrypoint = root.appendingPathComponent("app/dist/index.js")
-        for case let item as URL in FileManager.default.enumerator(at: root, includingPropertiesForKeys: [.isDirectoryKey])! {
-            let isDirectory = (try? item.resourceValues(forKeys: [.isDirectoryKey]).isDirectory) == true
-            try FileManager.default.setAttributes([.posixPermissions: isDirectory ? 0o755 : 0o644], ofItemAtPath: item.path)
+        let extraDependencies: [(String, Data)] = [
+            ("app/node_modules/@earendil-works/pi-agent-core/package.json", Data("{}".utf8)),
+            ("app/node_modules/@earendil-works/pi-ai/package.json", Data("{}".utf8)),
+            ("app/node_modules/@earendil-works/pi-tui/package.json", Data("{}".utf8)),
+            ("app/node_modules/node-pty/package.json", Data("{}".utf8)),
+            ("app/node_modules/proper-lockfile/package.json", Data("{}".utf8)),
+            ("app/node_modules/ws/package.json", Data("{}".utf8)),
+        ]
+        typealias Mutation = (URL) throws -> Void
+        var rejections: [(String, Mutation)] = [
+            ("invalid manifest JSON", { root in
+                try Data("{ invalid json".utf8).write(to: root.appendingPathComponent("manifest.json"))
+            }),
+            ("entrypoint below 1,024 bytes", { root in
+                try Data(repeating: 0x2f, count: 1_023).write(to: root.appendingPathComponent("app/dist/index.js"))
+            }),
+            ("missing app/package.json", { root in
+                try fileManager.removeItem(at: root.appendingPathComponent("app/package.json"))
+            }),
+            ("missing app/package-lock.json", { root in
+                try fileManager.removeItem(at: root.appendingPathComponent("app/package-lock.json"))
+            }),
+            ("missing app/node_modules", { root in
+                try fileManager.removeItem(at: root.appendingPathComponent("app/node_modules", isDirectory: true))
+            }),
+        ]
+        for relativePath in [
+            "app/node_modules/@earendil-works/pi-agent-core/package.json",
+            "app/node_modules/@earendil-works/pi-ai/package.json",
+            "app/node_modules/@earendil-works/pi-coding-agent/package.json",
+            "app/node_modules/@earendil-works/pi-tui/package.json",
+            "app/node_modules/node-pty/package.json",
+            "app/node_modules/proper-lockfile/package.json",
+            "app/node_modules/ws/package.json",
+            "app/scripts/ensure-node-pty-helper.mjs",
+            "app/scripts/gateway-payload-deploy.mjs",
+        ] {
+            rejections.append(("missing \(relativePath)", { root in
+                try fileManager.removeItem(at: root.appendingPathComponent(relativePath))
+            }))
         }
-        try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: root.path)
-        try FileManager.default.removeItem(at: entrypoint)
-        for case let item as URL in FileManager.default.enumerator(at: root, includingPropertiesForKeys: [.isDirectoryKey])! {
-            let isDirectory = (try? item.resourceValues(forKeys: [.isDirectoryKey]).isDirectory) == true
-            let mode: NSNumber = isDirectory || item.path.contains("/runtime/") ? 0o555 : 0o444
-            try FileManager.default.setAttributes([.posixPermissions: mode], ofItemAtPath: item.path)
+        for architecture in ["arm64", "x64"] {
+            rejections.append(("runtime/node-\(architecture) below 1 MiB", { root in
+                try Data(repeating: 0x7f, count: Int(GatewayPayloadValidator.minimumRuntimeBytes) - 1)
+                    .write(to: root.appendingPathComponent("runtime/node-\(architecture)"))
+            }))
+            rejections.append(("runtime/node-\(architecture) is non-executable", { root in
+                try fileManager.setAttributes(
+                    [.posixPermissions: 0o444],
+                    ofItemAtPath: root.appendingPathComponent("runtime/node-\(architecture)").path
+                )
+            }))
         }
-        try FileManager.default.setAttributes([.posixPermissions: 0o555], ofItemAtPath: root.path)
 
-        guard case .failure = GatewayPayloadValidator.validate(payloadRoot: root, expectedChannel: "stable") else {
-            Issue.record("canonical validation must reject the incomplete install payload")
+        let positiveRoot = temporary.root.appendingPathComponent("positive-control", isDirectory: true)
+        try makePayload(
+            root: positiveRoot,
+            channel: "stable",
+            version: "install-positive",
+            fingerprint: String(repeating: "a", count: 64),
+            additionalFiles: extraDependencies
+        )
+        guard case .success(let valid) = GatewayPayloadValidator.validate(
+            payloadRoot: positiveRoot,
+            expectedChannel: "stable"
+        ) else {
+            Issue.record("the complete makePayload fixture must pass the production fingerprint validator")
             return
         }
+        #expect(valid.manifest.payloadFingerprint == (try independentPayloadFingerprint(positiveRoot)))
+        #expect(valid.manifest.payloadFingerprint != String(repeating: "a", count: 64))
+
+        for (index, rejection) in rejections.enumerated() {
+            let root = temporary.root.appendingPathComponent("tamper-\(index)", isDirectory: true)
+            try makePayload(
+                root: root,
+                channel: "stable",
+                version: "install-\(index)",
+                fingerprint: String(repeating: "a", count: 64),
+                additionalFiles: extraDependencies
+            )
+            let manifestURL = root.appendingPathComponent("manifest.json")
+            let manifestBeforeTampering = try Data(contentsOf: manifestURL)
+            guard case .success = GatewayPayloadValidator.validate(payloadRoot: root, expectedChannel: "stable") else {
+                Issue.record("fresh fixture must validate before tampering: \(rejection.0)")
+                continue
+            }
+
+            try makePayloadWritable(root)
+            try rejection.1(root)
+            try makePayloadImmutable(root)
+            if rejection.0 != "invalid manifest JSON" {
+                #expect(try Data(contentsOf: manifestURL) == manifestBeforeTampering)
+            }
+            guard case .failure = GatewayPayloadValidator.validate(payloadRoot: root, expectedChannel: "stable") else {
+                Issue.record("canonical validation admitted \(rejection.0)")
+                continue
+            }
+        }
+    }
+
+    private func makePayloadWritable(_ root: URL) throws {
+        var info = stat()
+        guard chmod(root.path, 0o755) == 0,
+              let enumerator = FileManager.default.enumerator(at: root, includingPropertiesForKeys: nil) else {
+            throw CocoaError(.fileReadUnknown)
+        }
+        for case let item as URL in enumerator {
+            guard lstat(item.path, &info) == 0 else { throw CocoaError(.fileReadUnknown) }
+            if (info.st_mode & S_IFMT) == S_IFDIR {
+                guard chmod(item.path, 0o755) == 0 else { throw CocoaError(.fileWriteUnknown) }
+            } else if (info.st_mode & S_IFMT) == S_IFREG {
+                guard chmod(item.path, 0o644) == 0 else { throw CocoaError(.fileWriteUnknown) }
+            }
+        }
+    }
+
+    private func makePayloadImmutable(_ root: URL) throws {
+        var info = stat()
+        guard let enumerator = FileManager.default.enumerator(at: root, includingPropertiesForKeys: nil) else {
+            throw CocoaError(.fileReadUnknown)
+        }
+        let items = enumerator.compactMap { $0 as? URL }.reversed()
+        for item in items {
+            guard lstat(item.path, &info) == 0 else { throw CocoaError(.fileReadUnknown) }
+            if (info.st_mode & S_IFMT) == S_IFDIR {
+                guard chmod(item.path, 0o555) == 0 else { throw CocoaError(.fileWriteUnknown) }
+            } else if (info.st_mode & S_IFMT) == S_IFREG {
+                let mode: mode_t = item.path.contains("/runtime/") && (info.st_mode & 0o111) != 0 ? 0o555 : 0o444
+                guard chmod(item.path, mode) == 0 else { throw CocoaError(.fileWriteUnknown) }
+            }
+        }
+        guard chmod(root.path, 0o555) == 0 else { throw CocoaError(.fileWriteUnknown) }
     }
 
     @Test("writable payload entries are ordinary incomplete external payloads")
