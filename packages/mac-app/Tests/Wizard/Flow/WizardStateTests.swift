@@ -44,6 +44,7 @@ struct WizardStateTests {
         #expect(object["version"] as? Int == 1)
         #expect(object["step"] as? String == WizardStep.install.rawValue)
         #expect(((try FileManager.default.attributesOfItem(atPath: url.path)[.posixPermissions] as? NSNumber)?.intValue ?? 0) & 0o777 == 0o600)
+        #expect(((try FileManager.default.attributesOfItem(atPath: url.deletingLastPathComponent().path)[.posixPermissions] as? NSNumber)?.intValue ?? 0) & 0o777 == 0o700)
         #expect(WizardState(stateURL: url).step == .install)
     }
 

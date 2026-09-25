@@ -100,6 +100,8 @@ struct MacAppStartupMaintenanceTests {
         try MacAppVersionMarkerStore.write(version, at: marker)
 
         #expect(MacAppVersionMarkerStore.read(at: marker) == version)
+        #expect(((try FileManager.default.attributesOfItem(atPath: marker.path)[.posixPermissions] as? NSNumber)?.intValue ?? 0) & 0o777 == 0o600)
+        #expect(((try FileManager.default.attributesOfItem(atPath: marker.deletingLastPathComponent().path)[.posixPermissions] as? NSNumber)?.intValue ?? 0) & 0o777 == 0o700)
     }
 
     @Test("existing onboarded launch restarts once when version marker is missing")

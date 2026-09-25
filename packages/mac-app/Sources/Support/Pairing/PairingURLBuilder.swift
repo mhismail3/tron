@@ -51,7 +51,9 @@ private enum PairingHostValidator {
         }
 
         if trimmed.contains(":") {
-            guard isValidIPv6(trimmed) else { return nil }
+            // Preserve the old host grammar: inet_pton also accepts embedded
+            // IPv4 and scoped addresses, though the pairing contract did not.
+            guard !trimmed.contains("."), !trimmed.contains("%"), TailscaleProbe.isIPv6(trimmed) else { return nil }
             return trimmed.lowercased()
         }
 
@@ -85,64 +87,14 @@ private enum PairingHostValidator {
         }
     }
 
-    private static func isValidIPv6(_ host: String) -> Bool {
-        guard host.unicodeScalars.allSatisfy({ isASCIIHex($0) || $0.value == 58 }) else {
-            return false
-        }
-        guard host.contains(":"),
-              !host.contains(":::"),
-              occurrenceCount(of: "::", in: host) <= 1 else {
-            return false
-        }
-
-        if host.contains("::") {
-            let parts = host.components(separatedBy: "::")
-            guard parts.count == 2 else { return false }
-            let left = ipv6Segments(parts[0])
-            let right = ipv6Segments(parts[1])
-            guard left.valid, right.valid else { return false }
-            return left.count + right.count < 8
-        }
-
-        let segments = host.split(separator: ":", omittingEmptySubsequences: false)
-        guard segments.count == 8 else { return false }
-        return segments.allSatisfy(isValidIPv6Segment)
-    }
-
-    private static func ipv6Segments(_ side: String) -> (valid: Bool, count: Int) {
-        guard !side.isEmpty else { return (true, 0) }
-        let segments = side.split(separator: ":", omittingEmptySubsequences: false)
-        guard segments.allSatisfy(isValidIPv6Segment) else { return (false, segments.count) }
-        return (true, segments.count)
-    }
-
-    private static func isValidIPv6Segment(_ segment: Substring) -> Bool {
-        (1...4).contains(segment.count) && segment.unicodeScalars.allSatisfy(isASCIIHex)
-    }
-
     private static func isASCIIAlphanumeric(_ scalar: Unicode.Scalar) -> Bool {
         (48...57).contains(scalar.value)
             || (65...90).contains(scalar.value)
             || (97...122).contains(scalar.value)
     }
 
-    private static func isASCIIHex(_ scalar: Unicode.Scalar) -> Bool {
-        (48...57).contains(scalar.value)
-            || (65...70).contains(scalar.value)
-            || (97...102).contains(scalar.value)
-    }
-
     private static func isDigits(_ value: String) -> Bool {
         !value.isEmpty && value.unicodeScalars.allSatisfy { (48...57).contains($0.value) }
     }
 
-    private static func occurrenceCount(of needle: String, in haystack: String) -> Int {
-        var count = 0
-        var searchStart = haystack.startIndex
-        while let range = haystack.range(of: needle, range: searchStart..<haystack.endIndex) {
-            count += 1
-            searchStart = range.upperBound
-        }
-        return count
-    }
 }

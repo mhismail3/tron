@@ -12,6 +12,8 @@ struct OnboardedSentinelWriterTests {
 
         try OnboardedSentinelWriter.touch(at: path)
         #expect(FileManager.default.fileExists(atPath: path.path))
+        #expect(((try FileManager.default.attributesOfItem(atPath: path.path)[.posixPermissions] as? NSNumber)?.intValue ?? 0) & 0o777 == 0o600)
+        #expect(((try FileManager.default.attributesOfItem(atPath: tmp.path)[.posixPermissions] as? NSNumber)?.intValue ?? 0) & 0o777 == 0o700)
     }
 
     @Test("touch creates parent directory if missing")

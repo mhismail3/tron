@@ -76,6 +76,18 @@ struct PairingURLBuilderTests {
         #expect(queryValue("host", in: url) == "my-mac.tail-scale.ts.net")
     }
 
+    @Test("IPv6 host rejects embedded IPv4 and scoped addresses")
+    func unsupportedIPv6FormsRejected() {
+        let mappedTailscaleAddress = "fd7a:115c:a1e0::192.0.2.1"
+        #expect(TailscaleProbe.isTailscaleAddress(mappedTailscaleAddress))
+        for host in [mappedTailscaleAddress, "::ffff:192.0.2.1", "fe80::1%en0"] {
+            #expect(
+                PairingURLBuilder.makeURL(PairingPayload(host: host, port: 9847, code: "ABCD-EFGH", label: nil)) == nil,
+                "expected the old IPv6 validator to reject \\(host)"
+            )
+        }
+    }
+
     @Test("IPv6 host is emitted unbracketed")
     func ipv6HostAccepted() throws {
         let payload = PairingPayload(host: "FD7A:115C:A1E0::1", port: 9847, code: "ABCD-EFGH", label: nil)

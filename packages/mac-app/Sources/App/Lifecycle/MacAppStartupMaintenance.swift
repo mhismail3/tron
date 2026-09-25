@@ -40,19 +40,8 @@ enum MacAppVersionMarkerStore {
     }
 
     static func write(_ version: MacAppVersionIdentity, at path: URL) throws {
-        try FileManager.default.createDirectory(
-            at: path.deletingLastPathComponent(),
-            withIntermediateDirectories: true
-        )
         let data = try JSONEncoder().encode(version)
-        let tmp = path.deletingLastPathComponent()
-            .appendingPathComponent(".\(path.lastPathComponent).\(UUID().uuidString).tmp", isDirectory: false)
-        try data.write(to: tmp, options: [.atomic])
-        if FileManager.default.fileExists(atPath: path.path) {
-            _ = try FileManager.default.replaceItemAt(path, withItemAt: tmp)
-        } else {
-            try FileManager.default.moveItem(at: tmp, to: path)
-        }
+        try AtomicFileWriter.write(data, to: path)
     }
 }
 

@@ -9,12 +9,6 @@ enum OnboardedSentinelWriter {
     }
 
     static func touch(at path: URL) throws {
-        let parent = path.deletingLastPathComponent()
-        if !FileManager.default.fileExists(atPath: parent.path) {
-            try FileManager.default.createDirectory(at: parent, withIntermediateDirectories: true)
-        }
-
-        let tmp = parent.appendingPathComponent(".onboarded.\(UUID().uuidString).tmp", isDirectory: false)
         // Include fractional seconds so repeated touches within the same
         // second produce distinct bodies.
         let formatter = ISO8601DateFormatter()
@@ -24,17 +18,8 @@ enum OnboardedSentinelWriter {
             throw Failure.writeFailed("UTF-8 encoding failure")
         }
         do {
-            try data.write(to: tmp, options: [.atomic])
+            try AtomicFileWriter.write(data, to: path)
         } catch {
-            throw Failure.writeFailed(error.localizedDescription)
-        }
-        do {
-            // Use replaceItemAt for true atomic rename even when the
-            // destination already exists.
-            _ = try FileManager.default.replaceItemAt(path, withItemAt: tmp)
-        } catch {
-            // Cleanup the tempfile on failure.
-            try? FileManager.default.removeItem(at: tmp)
             throw Failure.writeFailed(error.localizedDescription)
         }
     }

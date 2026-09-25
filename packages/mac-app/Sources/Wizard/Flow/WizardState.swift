@@ -124,26 +124,9 @@ final class WizardState {
     }
 
     private static func write(step: WizardStep, to url: URL) throws {
-        let parent = url.deletingLastPathComponent()
-        try FileManager.default.createDirectory(at: parent, withIntermediateDirectories: true,
-                                                 attributes: [.posixPermissions: 0o700])
-        try FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: parent.path)
         let object: [String: Any] = ["version": stateFileVersion, "step": step.rawValue]
         let data = try JSONSerialization.data(withJSONObject: object, options: [.sortedKeys])
-        let temporary = parent.appendingPathComponent(".wizard-state.\(UUID().uuidString).tmp", isDirectory: false)
-        do {
-            try data.write(to: temporary, options: [.atomic])
-            try FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: temporary.path)
-            if FileManager.default.fileExists(atPath: url.path) {
-                _ = try FileManager.default.replaceItemAt(url, withItemAt: temporary)
-            } else {
-                try FileManager.default.moveItem(at: temporary, to: url)
-            }
-            try FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: url.path)
-        } catch {
-            try? FileManager.default.removeItem(at: temporary)
-            throw error
-        }
+        try AtomicFileWriter.write(data, to: url)
     }
 
     private static func isSafeToResume(_ step: WizardStep) -> Bool {
