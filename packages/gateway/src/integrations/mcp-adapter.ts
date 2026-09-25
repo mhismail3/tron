@@ -286,11 +286,6 @@ export class McpAdapter {
       await client.connect(transport as any, { timeout: CALL_TIMEOUT_MS });
       const version = transport instanceof StreamableHTTPClientTransport ? transport.protocolVersion : undefined;
       if (version && version !== MCP_SUPPORTED_PROTOCOL_VERSION) throw unavailable(`MCP protocol version ${version} is unsupported; expected ${MCP_SUPPORTED_PROTOCOL_VERSION}`);
-      const capabilities = client.getServerCapabilities() ?? {};
-      if (capabilities.resources || capabilities.prompts || capabilities.completions || capabilities.logging || capabilities.tasks) {
-        // These are tolerated server declarations, but intentionally not
-        // advertised by this client. Tool discovery remains the only route.
-      }
       return { client, close: async () => { await client.close().catch(() => undefined); await transport.close().catch(() => undefined); } };
     } catch (error) {
       await transport.close().catch(() => undefined);
