@@ -76,11 +76,27 @@ enum GatewayLogExport {
         )
         // The chat interaction trace is the incident evidence for chat
         // scroll/geometry bugs. Its producer bounds it to
-        // `ChatInteractionTrace.maximumRecords`, and the export always carries
-        // every retained record whatever else the payload weighs.
+        // `ChatInteractionTrace.maximumRecords`, and the export spends its byte
+        // and line budgets on the identifying header plus every retained trace
+        // row before any other record can claim space. Trace rows are usually
+        // older than the newest phone rows, so a payload selected by line count
+        // alone could still lose the trace to the byte envelope that
+        // `uploadText` applies; the trace's 256-record bound keeps this
+        // reservation far inside `maximumUploadBytes`.
         let chatTrace = newestFirst.filter { $0.profileID == ChatInteractionTrace.diagnosticProfileID }
             .prefix(ChatInteractionTrace.maximumRecords)
-        // The newest remaining records win the leftover slots. `AppLog` is
+        let encoder = JSONEncoder()
+        // `bytes` counts the line's newline, so summing a selection bounds the
+        // emitted payload exactly.
+        func encoded(_ record: AppLogRecord) -> (record: AppLogRecord, text: String, bytes: Int)? {
+            guard let data = try? encoder.encode(record) else { return nil }
+            return (record, String(decoding: data, as: UTF8.self), data.count + 1)
+        }
+        let header = encoded(appStarted)
+        let trace = chatTrace.map(gatewayRecord).compactMap(encoded)
+        var byteBudget = maximumUploadBytes - (header?.bytes ?? 0) - trace.reduce(0) { $0 + $1.bytes }
+        var lineBudget = maximumExportLines - (header == nil ? 0 : 1) - trace.count
+        // The newest remaining records win the leftover budget. `AppLog` is
         // oldest-first, so it reverses into a newest-first candidate list; the
         // rows already projected from it are skipped instead of written twice.
         var candidates = appRecords.reversed().map(localRecord)
@@ -88,13 +104,22 @@ enum GatewayLogExport {
             .filter { $0.profileID != appLogProfileID && $0.profileID != ChatInteractionTrace.diagnosticProfileID }
             .map(gatewayRecord))
         let newest = candidates.sorted { GatewayTimestamp.isNewer($0.timestamp, than: $1.timestamp) }
-        let retained = Array(newest.prefix(max(0, maximumExportLines - 1 - chatTrace.count)))
-            + chatTrace.map(gatewayRecord)
+        // Taking the newest prefix is what drops the oldest non-trace records,
+        // so the retained window stays contiguous and the byte bound holds.
+        var retained: [(record: AppLogRecord, text: String, bytes: Int)] = []
+        for record in newest {
+            guard lineBudget > 0, let value = encoded(record), value.bytes <= byteBudget else { break }
+            byteBudget -= value.bytes
+            lineBudget -= 1
+            retained.append(value)
+        }
         // `isNewer` is a total order, so its inverse lists the retained evidence
         // oldest to newest behind the header.
-        let encoder = JSONEncoder()
-        let lines = ([appStarted] + retained.sorted { GatewayTimestamp.isNewer($1.timestamp, than: $0.timestamp) })
-            .compactMap { try? encoder.encode($0) }.map { String(decoding: $0, as: UTF8.self) }
+        var lines: [String] = []
+        if let header { lines.append(header.text) }
+        lines.append(contentsOf: (trace + retained).sorted {
+            GatewayTimestamp.isNewer($1.record.timestamp, than: $0.record.timestamp)
+        }.map { $0.text })
         return lines.joined(separator: "\n") + (lines.isEmpty ? "" : "\n")
     }
 

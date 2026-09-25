@@ -121,6 +121,49 @@ struct GatewayLogExportTests {
         #expect(decoded.dropFirst().map(\.timestamp) == decoded.dropFirst().map(\.timestamp).sorted())
     }
 
+    // The line bound alone cannot protect the chat trace: `uploadText` keeps the
+    // newest lines, and the trace is older than the newest phone rows. The byte
+    // envelope must itself reserve the header and the whole trace.
+    @Test("the byte envelope keeps every chat-trace row and stays inside the upload bound")
+    func byteEnvelopeReservesTheChatTrace() throws {
+        let base = Date(timeIntervalSince1970: 1_767_225_600)
+        let appRecords = (0..<1_100).map { index in
+            AppLogRecord(
+                timestamp: GatewayTimestamp.preciseString(from: base.addingTimeInterval(Double(index))),
+                level: "info", event: "fixture.large.\(index)", source: "app",
+                message: String(repeating: "x", count: 1_024), process: "ios", requestID: nil,
+                durationMs: nil, outcome: nil, code: nil, profileID: nil, connectionID: nil,
+                lifecycleGeneration: nil
+            )
+        }
+        // Roughly 800-byte rows, as a real geometry sample is, and older than
+        // every phone record, so only the reserved byte budget can carry them.
+        let trace = (0..<ChatInteractionTrace.maximumRecords).map { index in
+            GatewayProfileLogRecord(
+                profileID: ChatInteractionTrace.diagnosticProfileID,
+                profileLabel: "iOS client · Chat trace",
+                record: GatewayLogRecord(
+                    timestamp: GatewayTimestamp.preciseString(from: base.addingTimeInterval(-3_600 + Double(index))),
+                    level: "info",
+                    message: "context=1 sequence=\(index) " + String(repeating: "viewportActive=1 ", count: 50),
+                    event: "chat.geometry.sample", source: "ios-client"
+                )
+            )
+        }
+        let text = GatewayLogExport.jsonLines(records: trace, metadata: .empty, appRecords: appRecords)
+        let decoded = try text.split(separator: "\n").map { try JSONDecoder().decode(AppLogRecord.self, from: Data($0.utf8)) }
+        #expect(text.utf8.count <= GatewayLogExport.maximumUploadBytes)
+        #expect(decoded.first?.event == "diagnostics.exported")
+        #expect(decoded.filter { $0.event == "chat.geometry.sample" }.map(\.message) == trace.map(\.record.message))
+        #expect(decoded.contains { $0.event == "fixture.large.1099" })
+        #expect(!decoded.contains { $0.event == "fixture.large.0" })
+        #expect(decoded.dropFirst().map(\.timestamp) == decoded.dropFirst().map(\.timestamp).sorted())
+        // The selection already satisfies the upload envelope, so the defensive
+        // truncation never fires and writes no marker.
+        #expect(GatewayLogExport.uploadText(text) == text)
+        #expect(!text.contains("diagnostics.truncated"))
+    }
+
     @Test("export bounds describe exactly the copied subset and redact every rendered row")
     func visibleRangeAndPrivacy() {
         let shown = Date(timeIntervalSince1970: 1_700_000_000.875)
