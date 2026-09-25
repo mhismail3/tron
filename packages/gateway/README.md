@@ -1325,7 +1325,16 @@ its own marker independently, even if newer prompts defer the handoff; compactio
 successor's marker. Every successful or failed
 `compaction_end` publishes one immediate fitted authoritative snapshot with the current canonical
 tail/leaf and restored prompt/automatic-idle state; manual work remains compacting until its durable
-marker retires. Manual admission keeps its operation ID and start time through the SDK's
+marker retires. Each terminal compaction is logged as `session.compaction.completed` with the exact
+session, available operation ID, trigger reason and success/failure/cancellation outcome. Automatic
+failures emit `session.operationFailed` while that compaction still owns the slot, so iOS shows a
+sequenced failure notice without allowing late cleanup to report against a successor. Exhausted
+overflow recovery can end without a new start; it is logged and surfaced without inventing an
+operation ID or changing the current operation. Cancellation is not
+reported as failure, and diagnostics contain only bounded, redacted provider error text—not prompts,
+transcripts or credentials. The focused failure, cancellation and successful-compaction regressions
+live in `runtime-compaction.integration.test.ts`. Manual admission keeps its operation ID and start
+time through the SDK's
 `compaction_start`. A hook-launched successor gets its own visible Stop identity at `agent_start`;
 older cleanup retains its captured compaction owner across SDK and marker awaits and cannot erase
 the successor's abort intent, phase, or marker. The

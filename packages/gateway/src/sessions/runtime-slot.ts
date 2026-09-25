@@ -105,6 +105,7 @@ import { EXTENSION_NOTIFICATION_RECEIPT_TYPE, extensionNotificationJSON, makeExt
 import { admitPromptText, admitResourceInvocation, canonicalResourceName, parsePiLiteralCommand, userFacingPromptPreview } from "./resource-invocation.js";
 import { ExtensionActivityRecency, type ActivityExpiryFrame, type ActivityVisibility } from "./extension-activity-recency.js";
 import { ProcessActivityRecency, type ProcessActivityExpiryFrame } from "./process-activity-recency.js";
+import { redactProcessText } from "./process-activity.js";
 import {
   boundProcessActivities,
   listProcessHistory,
@@ -379,6 +380,7 @@ export interface RuntimeSlotDependencies {
    * never settles must not strand the canonical session behind idle eviction. */
   runtimeDisposalTimedOut?: (graceMs: number) => void;
   persistenceDiagnostic?: (sessionId: string, code: string) => void;
+  compactionDiagnostic?: (diagnostic: { sessionId: string; operationId?: string; reason: "manual" | "threshold" | "overflow"; outcome: "success" | "failure" | "cancelled"; errorMessage?: string }) => void;
   /** Resolves inherited history once at canonical bind/rebind, never per snapshot. */
   resolveForkBoundary?: (manager: SessionManager) => Promise<ForkBoundaryAnchor | undefined>;
 }
@@ -3209,6 +3211,19 @@ export class RuntimeSlot {
       case "compaction_end": {
         const completedOperation = this.compactionOperation;
         const ownerStillCurrent = completedOperation !== undefined && this.operationMatches(completedOperation);
+        const outcome = event.aborted ? "cancelled" : event.result ? "success" : "failure";
+        const errorMessage = event.errorMessage
+          ? redactProcessText(event.errorMessage).slice(0, 512)
+          : undefined;
+        // Exhausted overflow recovery emits an end without a new start. Keep
+        // that failure observable without inventing a compaction operation ID.
+        this.dependencies.compactionDiagnostic?.({
+          sessionId: this.id,
+          ...(completedOperation?.id ? { operationId: completedOperation.id } : {}),
+          reason: event.reason,
+          outcome,
+          ...(errorMessage ? { errorMessage } : {}),
+        });
         if (ownerStillCurrent) this.retry = undefined;
         if (completedOperation?.kind === "compaction" && completedOperation.id) {
           const canonicalCompaction = [...this.sessionManager.getBranch()]
@@ -3224,6 +3239,15 @@ export class RuntimeSlot {
         // safe when a successor replaced `operation`, because its identity is
         // fenced by the captured compaction owner.
         if (completedOperation?.id) this.abortedOperations.delete(completedOperation.id);
+        if (outcome === "failure" && event.reason !== "manual"
+          && (ownerStillCurrent || completedOperation === undefined)) {
+          this.emit("session.operationFailed", {
+            ...(completedOperation?.id ? { operationId: completedOperation.id } : {}),
+            message: errorMessage
+              ? `Automatic compaction failed: ${errorMessage}`
+              : "Automatic compaction failed. Check Gateway logs for details.",
+          });
+        }
         // A successor may have started from a compaction hook before this event;
         // never rebuild its phase or operation from the completed compaction.
         if (!ownerStillCurrent) {

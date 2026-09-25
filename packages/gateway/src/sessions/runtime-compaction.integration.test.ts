@@ -34,6 +34,8 @@ describe.sequential("compaction cancellation with the pinned runtime", () => {
     } }));
     const faux = fauxProvider({ provider: "tron-compaction-stop", models: [{ id: "faux-reasoning", reasoning: true }], tokensPerSecond: 1_000_000, tokenSize: { min: 100_000, max: 100_000 } });
     const summarySignals: AbortSignal[] = [];
+    const compactionDiagnostics: Array<Record<string, unknown>> = [];
+    const sessionEvents: string[] = [];
     const providerRequests: Array<{ context: string; options: { reasoning?: string } | undefined }> = [];
     const ordinaryRequests: typeof providerRequests = [];
     const releaseSummaries = new Set<() => void>();
@@ -70,7 +72,8 @@ describe.sequential("compaction cancellation with the pinned runtime", () => {
     const registry = new RuntimeRegistry({
       agentDir, tronHome: join(root, "tron"), idleRuntimeMs: 60_000,
       modelRuntimeFactory: async () => runtime, trust: new TrustService(agentDir),
-      broadcast: () => {}, sessionSummaryChanged: () => {}, sessionListChanged: () => {},
+      broadcast: (_id, topic) => { sessionEvents.push(topic); }, sessionSummaryChanged: () => {}, sessionListChanged: () => {},
+      compactionDiagnostic: diagnostic => compactionDiagnostics.push(diagnostic),
     });
     let session: AgentSession | undefined;
     let stopping: Promise<void> | undefined;
@@ -99,6 +102,8 @@ describe.sequential("compaction cancellation with the pinned runtime", () => {
       await stopping;
       await waitUntil(() => !slot.isBusy);
       expect(summarySignals.every((signal) => signal.aborted)).toBe(true);
+      expect(compactionDiagnostics).toContainEqual(expect.objectContaining({ reason: "threshold", outcome: "cancelled" }));
+      expect(sessionEvents).not.toContain("session.operationFailed");
       expect(faux.state.callCount).toBe(callsAtStop);
       expect(session.isIdle).toBe(true);
       expect(slot.snapshot()).toMatchObject({ phase: "idle", compactionQueued: false });
@@ -139,7 +144,7 @@ describe.sequential("compaction cancellation with the pinned runtime", () => {
 const disposals: Array<() => Promise<void>> = [];
 afterEach(async () => { for (const dispose of disposals.splice(0).reverse()) await dispose(); });
 
-async function boundaryFixture(historyRepeats = 8_000, extension?: (root: string) => string) {
+async function boundaryFixture(historyRepeats = 8_000, extension?: (root: string) => string, compactionDiagnostics: Array<Record<string, unknown>> = []) {
   const root = await mkdtemp(join(tmpdir(), "tron-compaction-boundary-"));
   const agentDir = join(root, "agent");
   const cwd = join(root, "project");
@@ -155,17 +160,20 @@ async function boundaryFixture(historyRepeats = 8_000, extension?: (root: string
   const runtime = await ModelRuntime.create({ authPath: join(root, "auth.json"), modelsPath: null, refreshOnCreate: false });
   runtime.registerNativeProvider(faux.provider);
   const snapshots: SessionSnapshot[] = [];
+  const sessionEvents: Array<{ topic: string; payload: unknown }> = [];
   let onSnapshot: ((snapshot: SessionSnapshot) => void) | undefined;
   const registry = new RuntimeRegistry({
     agentDir, tronHome: join(root, "tron"), idleRuntimeMs: 60_000,
     modelRuntimeFactory: async () => runtime, trust: new TrustService(agentDir),
     broadcast: (_id, event, value) => {
+      sessionEvents.push({ topic: event, payload: value });
       if (event === "session.snapshot") {
         const snapshot = value as unknown as SessionSnapshot;
         snapshots.push(snapshot);
         onSnapshot?.(snapshot);
       }
     }, sessionSummaryChanged: () => {}, sessionListChanged: () => {},
+    compactionDiagnostic: diagnostic => compactionDiagnostics.push(diagnostic),
   });
   const settings = new SettingsService(agentDir, runtime);
   disposals.push(async () => { await registry.dispose(); await rm(root, { recursive: true, force: true }); });
@@ -180,7 +188,7 @@ async function boundaryFixture(historyRepeats = 8_000, extension?: (root: string
     await settings.update({ compaction }, { cwd, scope: "global", projectTrusted: false });
     registry.refreshCompactionPolicies("global", cwd);
   };
-  return { root, slot, session, faux, snapshots, registry, update,
+  return { root, slot, session, faux, snapshots, sessionEvents, compactionDiagnostics, registry, update,
     observe: (callback: typeof onSnapshot) => { onSnapshot = callback; },
     entries: async () => (await readFile(slot.sessionFile!, "utf8")).trim().split("\n").map(line => JSON.parse(line)),
   };
@@ -209,6 +217,43 @@ async function expectSettled(item: Awaited<ReturnType<typeof boundaryFixture>>) 
 }
 
 describe.sequential("compaction operation admission and authoritative reconciliation", () => {
+  it("reports repeated automatic compaction failures without attributing a later success to them", async () => {
+    const diagnostics: Array<Record<string, unknown>> = [];
+    const item = await boundaryFixture(8_000, undefined, diagnostics);
+    await item.update({ enabled: true });
+    const summaryFailure = async () => { throw new Error(`summary provider failed API_KEY=top-secret ${"x".repeat(2_000)}`); };
+    item.faux.setResponses([
+      summaryFailure, fauxAssistantMessage("The agent continued after the first compaction failure."),
+      summaryFailure, fauxAssistantMessage("The agent continued after the second compaction failure."),
+      summaryFailure, fauxAssistantMessage("The agent continued after the third compaction failure."),
+    ]);
+
+    await item.slot.prompt("Trigger automatic compaction once.");
+    await waitUntil(() => !item.slot.isBusy);
+    await item.slot.prompt("Trigger automatic compaction again.");
+    await waitUntil(() => !item.slot.isBusy);
+
+    const failures = diagnostics.filter(entry => entry.outcome === "failure");
+    expect(failures.length).toBeGreaterThanOrEqual(2);
+    expect(failures.every(entry => entry.sessionId === item.slot.id
+      && typeof entry.operationId === "string"
+      && entry.reason === "threshold"
+      && typeof entry.errorMessage === "string"
+      && (entry.errorMessage as string).length <= 512)).toBe(true);
+    expect(JSON.stringify(failures)).not.toContain("top-secret");
+    expect(failures.every(entry => (entry.errorMessage as string).includes("API_KEY=[REDACTED]"))).toBe(true);
+    const succeededIDs = new Set(diagnostics.filter(entry => entry.outcome === "success").map(entry => entry.operationId));
+    expect(succeededIDs.size).toBeGreaterThan(0);
+    expect(failures.every(entry => !succeededIDs.has(entry.operationId))).toBe(true);
+    const notices = item.sessionEvents.filter(entry => entry.topic === "session.operationFailed");
+    expect(notices.length).toBe(failures.length);
+    expect(notices.every(entry => JSON.stringify(entry.payload).includes("Automatic compaction failed"))).toBe(true);
+    expect(notices.every(entry => JSON.stringify(entry.payload).includes("API_KEY=[REDACTED]"))).toBe(true);
+    expect(JSON.stringify(notices)).not.toContain("top-secret");
+    expect((await item.entries()).some(entry => entry.type === "compaction")).toBe(true);
+    expect(item.slot.snapshot().phase).toBe("idle");
+  });
+
   it.each(["start", "provider"] as const)("one Stop at preflight %s prevents the waiting prompt from reaching the provider", async timing => {
     const item = await boundaryFixture();
     await item.update({ enabled: true });
@@ -366,6 +411,43 @@ describe.sequential("compaction operation admission and authoritative reconcilia
     expect(compacting).toBeGreaterThanOrEqual(0);
     expect(finalIdle).toBeGreaterThan(compacting);
     expect(states.slice(finalIdle).every(snapshot => snapshot.phase === "idle")).toBe(true);
+  });
+
+  it("reports exhausted overflow recovery even when the SDK emits no new compaction start", async () => {
+    const item = await boundaryFixture();
+    await item.update({ enabled: true, reserveTokens: 4_096, keepRecentTokens: 0 });
+    const starts: string[] = [];
+    const ends: string[] = [];
+    item.session.subscribe(event => {
+      if (event.type === "compaction_start") starts.push(event.reason);
+      if (event.type === "compaction_end") ends.push(event.reason);
+    });
+    let ordinary = 0;
+    const respond = () => {
+      if (item.slot.snapshot().compactionPolicy?.active) {
+        return fauxAssistantMessage("The API contract remains authoritative. Continue the latest request.");
+      }
+      ordinary += 1;
+      return fauxAssistantMessage("", { stopReason: "error", errorMessage: "context_length_exceeded" });
+    };
+    item.faux.setResponses(Array.from({ length: 6 }, () => respond));
+    await item.slot.prompt("Recover a request whose retry also overflows");
+    await expectSettled(item);
+    expect(ordinary).toBe(2);
+    expect(starts).toEqual(["overflow"]);
+    expect(ends).toEqual(["overflow", "overflow"]);
+    expect(item.compactionDiagnostics).toHaveLength(2);
+    expect(item.compactionDiagnostics[0]).toMatchObject({ outcome: "success", operationId: expect.any(String) });
+    expect(item.compactionDiagnostics[1]).toMatchObject({
+      sessionId: item.slot.id, reason: "overflow", outcome: "failure",
+      errorMessage: expect.stringContaining("Context overflow recovery failed after one compact-and-retry attempt"),
+    });
+    expect(item.compactionDiagnostics[1]).not.toHaveProperty("operationId");
+    const notices = item.sessionEvents.filter(entry => entry.topic === "session.operationFailed");
+    expect(notices).toHaveLength(1);
+    expect(notices[0].payload).toMatchObject({ data: { message: expect.stringContaining("Context overflow recovery failed") } });
+    expect(notices[0].payload).not.toHaveProperty("data.operationId");
+    expect((await item.entries()).filter(entry => entry.type === "compaction")).toHaveLength(1);
   });
 
   it("recovers a provider request-size rejection by compacting and retrying once", async () => {

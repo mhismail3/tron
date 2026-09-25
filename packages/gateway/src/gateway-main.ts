@@ -205,6 +205,11 @@ const sessions = new RuntimeRegistry({
   persistenceDiagnostic: (sessionId, code) => logger.log("warning", "Session persistence diagnostic", {
     event: code, source: "session", sessionId,
   }),
+  compactionDiagnostic: (diagnostic) => logger.log(
+    diagnostic.outcome === "failure" ? "error" : "info",
+    `Session compaction ${diagnostic.outcome}`,
+    { event: "session.compaction.completed", source: "session", ...diagnostic },
+  ),
   machineId: config.machineId,
   notifications,
   browserLiveViews,

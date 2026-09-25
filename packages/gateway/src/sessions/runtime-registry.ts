@@ -47,6 +47,7 @@ import {
   type CanonicalAssistantCompletion,
   type SessionAttentionRebindDisposition,
   type SessionBroadcast,
+  type RuntimeSlotDependencies,
 } from "./runtime-slot.js";
 import { ExtensionActivityRecency } from "./extension-activity-recency.js";
 import { ProcessActivityRecency } from "./process-activity-recency.js";
@@ -399,6 +400,7 @@ export class RuntimeRegistry {
       beforeSessionDelete?: (sessionId: string) => Promise<void>;
       sessionClosed?: (sessionId: string) => void;
       persistenceDiagnostic?: (sessionId: string, code: string) => void;
+      compactionDiagnostic?: RuntimeSlotDependencies["compactionDiagnostic"];
       catalogDiscoveryLimits?: Partial<typeof DEFAULT_CATALOG_DISCOVERY_LIMITS>;
       stageTiming?: (
         stage: string,
@@ -983,6 +985,7 @@ export class RuntimeRegistry {
       processActivityRecency: this.processActivityRecency,
       workRegistry: this.workRegistry,
       ...(this.options.persistenceDiagnostic ? { persistenceDiagnostic: this.options.persistenceDiagnostic } : {}),
+      ...(this.options.compactionDiagnostic ? { compactionDiagnostic: this.options.compactionDiagnostic } : {}),
       isSessionPresented: (sessionId: string) => this.isSessionPresented(sessionId),
       ...(this.options.machineId ? { machineId: this.options.machineId } : {}),
       ...(this.options.notifications ? { notifications: this.options.notifications } : {}),
