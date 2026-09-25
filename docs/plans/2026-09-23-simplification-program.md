@@ -450,7 +450,7 @@ These apply on top of `AGENTS.md`, which wins on any conflict.
 
 ### C-DOCS-GW-1, C-DOCS-OWNER-1 · Done · 2026-09-25 · simplification session (DeepSeek lane, reviewed by the supervisor)
 
-- Result: `packages/gateway/docs/session-search.md` and `packages/gateway/docs/knowledge.md` own session search and knowledge bounds; the Gateway README links to them. CONTRIBUTING's repository map owns the retired-architecture list, `packages/ios-app/docs/development.md#build-matrix` the iOS configurations, `packages/mac-app/docs/development.md#efficient-focused-tests` the TronMac commands, and AGENTS.md the documentation-ownership list. Every fact that existed only in a removed copy was moved to its owner; the supervisor restored "event journals" to the retired list. README is 182 lines. The documentation policy check passes.
+- Result: `packages/gateway/docs/session-search.md` and `packages/gateway/docs/knowledge.md` own session search and knowledge bounds; the Gateway README links to them. CONTRIBUTING's repository map owns the retired-architecture list, the iOS development doc's Build matrix section the iOS configurations, the Mac development doc's Efficient focused tests section the TronMac commands, and AGENTS.md the documentation-ownership list. Every fact that existed only in a removed copy was moved to its owner; the supervisor restored "event journals" to the retired list. README is 182 lines. The documentation policy check passes.
 
 ### T-GW-TRANS-1, S-GW-MACH-1, S-GW-ADMIN-1, S-GW-DISP-1, S-GW-SMALL-1 · Done · 2026-09-25 · simplification session (DeepSeek lanes, checked by the supervisor)
 
