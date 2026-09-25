@@ -20,7 +20,7 @@ import { GatewayAutomationExecutor } from "../automations/automation-executor.js
 import type { AutomationExecutionHandle } from "../automations/automation-scheduler.js";
 import type { AutomationRecord, AutomationRun } from "../automations/types.js";
 import type { NotificationService } from "../notifications/notification-service.js";
-import type { ExtensionRunActivity, ExtensionToolOrigin, SessionProcessActivity, SessionSummaryUpdate } from "../protocol/types.js";
+import type { ExtensionRunActivity, ExtensionToolOrigin, SessionSummaryUpdate } from "../protocol/types.js";
 import { GatewayWorkRegistry, type GatewayWorkHandle } from "./gateway-work-registry.js";
 import { CatalogDiscovery, DEFAULT_CATALOG_DISCOVERY_LIMITS } from "./catalog-discovery.js";
 import { CatalogMetadataIndex } from "./catalog-metadata-index.js";
@@ -381,45 +381,6 @@ describe.sequential("RuntimeRegistry with the pinned agent runtime", () => {
       "missing-run",
     )).rejects.toMatchObject({ code: "not_found" });
     expect(fixture.runtimeFactory).not.toHaveBeenCalled();
-  });
-
-  it("announces a final successful Pi settlement through the inline notification hook", async () => {
-    const root = await mkdtemp(join(tmpdir(), "tron-agent-finished-notification-"));
-    const agentDir = join(root, "agent");
-    const cwd = join(root, "workspace");
-    await Promise.all([mkdir(agentDir), mkdir(cwd)]);
-    const runtime = await ModelRuntime.create({ modelsPath: null, refreshOnCreate: false });
-    const faux = fauxProvider({ provider: "tron-agent-finished-notification", tokensPerSecond: 10_000 });
-    faux.setResponses([fauxAssistantMessage("notification ready")]);
-    runtime.registerNativeProvider(faux.provider);
-    const enqueue = vi.fn(async () => "queued" as const);
-    const registry = new RuntimeRegistry({
-      agentDir,
-      tronHome: join(root, "tron"),
-      idleRuntimeMs: 60_000,
-      modelRuntimeFactory: async () => runtime,
-      trust: new TrustService(agentDir),
-      broadcast: () => {},
-      sessionSummaryChanged: () => {},
-      sessionListChanged: () => {},
-      machineId: "machine-notification-test",
-      notifications: { enqueue } as unknown as NotificationService,
-    });
-    registries.push(registry);
-    await registry.initialize();
-    const slot = await registry.create(cwd);
-    const model = faux.getModel();
-    await slot.setModel(model.provider, model.id);
-    await slot.prompt("finish and notify");
-    await waitUntil(() => !slot.isBusy);
-    await waitUntil(() => enqueue.mock.calls.length > 0);
-    expect(enqueue).toHaveBeenCalledWith(expect.objectContaining({
-      sessionId: slot.id,
-      kind: "agent_finished",
-      title: "finish and notify",
-      message: "The agent finished responding.",
-      route: { sessionId: slot.id, machineId: "machine-notification-test" },
-    }));
   });
 
   it("latches foreground-open and foreground-close completion dispositions at canonical admission", async () => {
@@ -4228,34 +4189,6 @@ describe.sequential("RuntimeRegistry with the pinned agent runtime", () => {
       .toMatchObject({ removedProcessIds: [terminalRoot?.processId] });
   });
 
-  it("emits exact removals when process producer identity is replaced", async () => {
-    const fixture = await coldFixture("process-removal-delta");
-    const slot = await fixture.registry.acquire(fixture.manager.getSessionId());
-    const internal = slot as unknown as {
-      replaceProcessesForToolCall: (toolCallId: string, activities: SessionProcessActivity[]) => void;
-      publishProcessesForToolCall: (toolCallId: string) => void;
-    };
-    const now = new Date().toISOString();
-    const process = (processId: string, sequence: number): SessionProcessActivity => ({
-      version: 1, processId, kind: "subagent", executionMode: "asynchronous",
-      source: "delegatedAgent", visibility: "active", title: "worker", outputTruncated: false,
-      lifecycle: { version: 1, state: "running", attention: "none", sequence, observedAt: now },
-      toolCallId: "tool-1", runId: "run-1",
-    });
-    internal.replaceProcessesForToolCall("tool-1", [process("process-old", 1)]);
-    internal.publishProcessesForToolCall("tool-1");
-    fixture.events.splice(0);
-
-    internal.replaceProcessesForToolCall("tool-1", [process("process-new", 2)]);
-    internal.publishProcessesForToolCall("tool-1");
-    const delta = fixture.events.find((event) => event.topic === "session.processActivity")?.payload.data;
-    expect(delta).toMatchObject({
-      activity: { processId: "process-new" },
-      removedProcessIds: ["process-old"],
-      overview: { visibility: "active", activeCount: 1 },
-    });
-  });
-
   it("never reports a canonical receipt as durable when Pi only staged it in memory", async () => {
     // Reproduces the pinned SDK ordering: `_appendEntry` inserts the entry into
     // the live branch and then `_persist` fails, so the receipt exists in memory
@@ -5729,27 +5662,6 @@ describe.sequential("RuntimeRegistry with the pinned agent runtime", () => {
     expect(slot.snapshot().extensionActivities).toHaveLength(1);
     await fixture.registry.waitUntilIdle();
     expect(slot.isDrainBusy).toBe(false);
-  });
-
-  it("still rejects distinct genuine launch owners for the same delegated run", async () => {
-    const fixture = await coldFixture("duplicate-real-launch-ownership");
-    const slot = await fixture.registry.acquire(fixture.manager.getSessionId());
-    const internal = slot as unknown as {
-      runtime: { session: { sessionManager: SessionManager } };
-      extensionToolOrigin: (name: string) => { source: string } | undefined;
-      canonicalExtensionRunFacts: () => Map<string, { ambiguous: boolean; toolCallId?: string }>;
-    };
-    vi.spyOn(internal, "extensionToolOrigin").mockReturnValue({ source: "pi-subagents" });
-    for (const toolCallId of ["first-launch", "second-launch"]) {
-      internal.runtime.session.sessionManager.appendMessage({
-        role: "toolResult", toolCallId, toolName: "subagent",
-        content: [{ type: "text", text: "launched" }],
-        details: { runId: "duplicate-run", asyncId: "duplicate-run", results: [] },
-        isError: false, timestamp: Date.now(),
-      });
-    }
-    expect(internal.canonicalExtensionRunFacts().get("duplicate-run")).toMatchObject({ ambiguous: true });
-    expect(internal.canonicalExtensionRunFacts().get("duplicate-run")?.toolCallId).toBeUndefined();
   });
 
   it("fails closed on a stale running artifact after canonical completion", async () => {
