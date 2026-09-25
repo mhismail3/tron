@@ -457,10 +457,8 @@ by `com.tron.server`/`com.tron.mac` on 9847. `scripts/tron dev` uses
 
 ### Resumable local reinstall preparation
 
-For a coordinated state migration, use the [cutover runbook](../../gateway/docs/cutover-runbook.md).
-Its pre-migration backup is separate from this helper's post-migration snapshot.
-After migrations and their validation, while the old wrapper and every writer
-remain stopped, run `scripts/tron mac reinstall --select-bundled-offline`.
+While the old wrapper and every writer remain stopped, run
+`scripts/tron mac reinstall --select-bundled-offline`.
 This explicit maintainer operation validates both recorded app identities and
 retires the complete `~/.tron/gateway/payloads/stable` directory by same-filesystem
 exclusive rename into `~/.tron-maintenance/<operation>/retired-stable-payloads`.
@@ -558,7 +556,8 @@ data or capability continuity: also open a historical conversation, run a fresh
 delegated worker and its extensions, exercise browser operation and a live Ask
 User form, and check historical answers, pairing, settings, trust, models and
 packages. Do not repeatedly restart after failure. Preserve post-update writes
-and use the coherent manual rollback procedure in the cutover runbook.
+and use the coherent manual rollback procedure: restore the protected backup only
+when no accepted new work would be lost.
 
 Focused regression: `python3 scripts/test-mac-reinstall.py` (CI runs it in the Mac
 job).
@@ -572,7 +571,7 @@ reinstall helper owns `<operation-id>/receipt.json`, source manifests,
 `recovery.json` and `<operation-id>/pre-cutover/`. Do not move these independently,
 rewrite completed receipts, or use symlinks to conceal relocated stores.
 
-For a coordinated migration, prepare the app checkpoint first to obtain the
+For a recorded pre-cutover checkpoint, prepare the app checkpoint first to obtain the
 operation ID. Before publishing migrations, the maintainer prepares the separately
 verified **pre-write** backup, isolated restore evidence and journals in a private
 `~/.tron-maintenance/pre-cutover-<operation-id>/` staging root, with the checkpoint
@@ -597,15 +596,14 @@ Pre-migration owner maps verify original UID/GID; the older post-migration
 manifests lack owner maps, so registration records current ownership for later
 integrity checks without claiming historical UID/GID proof. Original source
 manifest digests stay exact; copied data admits only the existing Darwin
-copy-provenance exception. It does not inspect live homes, stop writers or
-publish migrations. The historical
-cutover `verify-publications.py` is not an operational verifier and must not be
-executed against current state. Use the owning migration tool's
-required same-filesystem staging location; do not relocate live staging or
-journals merely to satisfy the archival layout.
+copy-provenance exception. It does not inspect live homes or stop writers. The
+historical `verify-publications.py` is not an operational verifier and must not be
+executed against current state. Register the checkpoint from its recorded
+same-filesystem staging location; do not relocate live staging or journals
+merely to satisfy the archival layout.
 
-Keep one accepted, coherent recovery set, including both checkpoints when a
-migration requires them, until its replacement has passed restore and continuity
+Keep one accepted, coherent recovery set, including both checkpoints when an
+operation kept them, until its replacement has passed restore and continuity
 checks. Retention is explicit and manual, never age-based automatic deletion.
 Review older sets for unique history or unmerged source before removing them.
 Historical source archives and concise incident evidence may live in the same
