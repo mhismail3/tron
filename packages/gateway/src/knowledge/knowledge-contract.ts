@@ -3,8 +3,12 @@ import { isGatewayTimestamp } from "../util/timestamp.js";
 
 export const KNOWLEDGE_SCHEMA_VERSION = 1 as const;
 
+/** Exact credential query-parameter names refused wherever a source URL is
+ * admitted or persisted. Exact matching keeps ordinary keys such as `author`
+ * valid, including in already-stored records; X post URLs apply a broader
+ * substring rule in `xPostIdentity`. */
 export function isCredentialQueryKey(key: string): boolean {
-  return /token|secret|password|passwd|auth|signature|credential|session|api.?key|^key$|^sig$/i.test(key);
+  return /^(?:token|api[_-]?key|key|secret|password|passwd|auth|signature|sig|access[_-]?token|credential|session)$/i.test(key);
 }
 
 export function normalizeKnowledgeSourceUrl(value: string): string {

@@ -96,7 +96,7 @@ export function xPostIdentity(input: string): { id: string; url: string } {
   if (typeof input !== "string" || input.length > X_PUBLIC_LINK_MAX_LENGTH) throw new Error("Public X URL exceeds its bound");
   const url = new URL(input);
   if (url.protocol !== "https:" || url.username || url.password || url.port || !["x.com", "www.x.com", "twitter.com", "www.twitter.com", "mobile.twitter.com"].includes(url.hostname.toLowerCase())) throw new Error("Public X reads require an https X post URL without credentials");
-  for (const key of url.searchParams.keys()) if (isCredentialQueryKey(key)) throw new Error("Public X URL contains a credential parameter");
+  for (const key of url.searchParams.keys()) if (/token|secret|password|passwd|auth|signature|credential|session|api.?key|^key$|^sig$/i.test(key)) throw new Error("Public X URL contains a credential parameter");
   const match = url.pathname.match(/^\/(?:[A-Za-z0-9_]{1,50}\/status|i\/web\/status)\/([1-9][0-9]{0,19})(?:\/(?:photo|video)\/[1-4])?\/?$/);
   if (!match) throw new Error("Public X reads require a numeric post permalink, not a profile or bookmark page");
   return { id: match[1]!, url: `https://x.com/i/web/status/${match[1]}` };
