@@ -357,6 +357,30 @@ export class SessionSearchService {
     }).finally(() => { this.semanticTask = undefined; });
   }
 
+  /** Admits one embedded entry under the semantic byte bound. Returns false
+   * when the scan must stop: the vector no longer matches the current
+   * generation, or the exact byte budget is full (coverage becomes partial). */
+  private admitSemanticVector(
+    sessionId: string,
+    document: SearchDocument,
+    entry: SearchTextEntry,
+    vector: { vector: number[]; dimension: number; language: string; modelRevision: string },
+  ): boolean {
+    if (!this.semanticModel || !this.isEmbedding(vector) || !sameSemanticGeneration(vector, this.semanticModel)) return false;
+    const bytes = vector.vector.length * Float64Array.BYTES_PER_ELEMENT;
+    if (this.semanticBytes + bytes > MAX_SEMANTIC_BYTES) { this.semanticCoverage = "partial"; return false; }
+    this.semanticBytes += bytes;
+    this.semanticVectors.set(`${sessionId}\u0000${entry.id}`, {
+      vector: vector.vector,
+      textDigest: digest(entry.text),
+      branchDigest: document.branchDigest,
+      fileIdentity: document.fileIdentity,
+      generation: this.semanticModel,
+    });
+    this.semanticTotal = this.semanticVectors.size;
+    return true;
+  }
+
   private async indexSemanticCorpus(): Promise<void> {
     if (!this.semanticClient) return;
     const generation = this.semanticGeneration;
@@ -383,12 +407,8 @@ export class SessionSearchService {
         this.semanticWork += 1;
         try {
           const vector = await this.semanticClient.embed(entry.text, this.semanticModel?.language, this.semanticAbort.signal);
-          if (generation !== this.semanticGeneration || !this.semanticModel || !this.isEmbedding(vector) || !sameSemanticGeneration(vector, this.semanticModel)) return;
-          const bytes = vector.vector.length * Float64Array.BYTES_PER_ELEMENT;
-          if (this.semanticBytes + bytes > MAX_SEMANTIC_BYTES) { this.semanticCoverage = "partial"; return; }
-          this.semanticBytes += bytes;
-          this.semanticVectors.set(`${document.sessionId}\u0000${entry.id}`, { vector: vector.vector, textDigest: digest(entry.text), branchDigest: document.branchDigest, fileIdentity: document.fileIdentity, generation: this.semanticModel });
-          this.semanticTotal = this.semanticVectors.size;
+          if (generation !== this.semanticGeneration) return;
+          if (!this.admitSemanticVector(document.sessionId, document, entry, vector)) return;
         } catch (error) { if (this.semanticAbort.signal.aborted) return; this.semanticCoverage = "partial"; }
       }
     }
@@ -456,12 +476,8 @@ export class SessionSearchService {
         this.semanticWork += 1;
         try {
           const vector = await this.semanticClient.embed(entry.text, this.semanticModel.language, this.semanticAbort.signal);
-          if (generation !== this.semanticGeneration || !this.semanticModel || !this.isEmbedding(vector) || !sameSemanticGeneration(vector, this.semanticModel)) return;
-          const bytes = vector.vector.length * Float64Array.BYTES_PER_ELEMENT;
-          if (this.semanticBytes + bytes > MAX_SEMANTIC_BYTES) { this.semanticCoverage = "partial"; return; }
-          this.semanticBytes += bytes;
-          this.semanticVectors.set(`${item.id}\u0000${entry.id}`, { vector: vector.vector, textDigest: digest(entry.text), branchDigest: document.branchDigest, fileIdentity: document.fileIdentity, generation: this.semanticModel });
-          this.semanticTotal = this.semanticVectors.size;
+          if (generation !== this.semanticGeneration) return;
+          if (!this.admitSemanticVector(item.id, document, entry, vector)) return;
         } catch {
           if (this.semanticAbort.signal.aborted) return;
           this.semanticCoverage = "partial";

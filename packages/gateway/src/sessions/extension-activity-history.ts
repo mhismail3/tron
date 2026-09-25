@@ -1,5 +1,9 @@
 import { createHash } from "node:crypto";
 import type { ExtensionOwner, ExtensionRunActivity, ExtensionRunAttention, ExtensionRunChild, ExtensionRunLifecycleState, ExtensionToolOrigin } from "../protocol/types.js";
+/** This module must stay free of runtime imports: extension-activity-history.test.ts
+ * loads it in a worker thread under `node --experimental-strip-types`, which does
+ * not resolve the `.js` specifiers the rest of the Gateway uses. The bounded page
+ * assembler shared with process history therefore lives here. */
 
 /** Reserved Pi custom-entry type. Custom entries are canonical JSONL facts but
  * are intentionally not transcript messages or model context. */
@@ -286,48 +290,22 @@ export function listExtensionActivityHistory(entries: readonly unknown[], sessio
   });
   // Receipt identity changes still invalidate cursors even when duplicate
   // activity IDs are collapsed from the returned page.
-  const boundedLimit = Math.min(MAX_EXTENSION_HISTORY_PAGE, Math.max(1, Math.floor(limit)));
-  const query = extensionActivityCursorQuery(filter);
-  let offset = 0;
-  if (cursor) {
-    // An unrecognized cursor shape is a conflict rather than a client error: a
-    // cursor from another paging scope or an older Gateway must restart paging.
-    const parts = cursor.split(":");
-    if (parts.length !== 3) throw new Error("extension activity history cursor conflict");
-    const [cursorRevision, cursorQuery, encodedOffset] = parts;
-    if (cursorRevision !== historyRevision || cursorQuery !== query) throw new Error("extension activity history cursor conflict");
-    if (!/^\d+$/u.test(encodedOffset ?? "")) throw new Error("extension activity history cursor invalid");
-    offset = Number(encodedOffset);
-    if (!Number.isSafeInteger(offset) || offset < 0 || offset > all.length) throw new Error("extension activity history cursor invalid");
-  }
-  const activities: ExtensionRunActivity[] = [];
-  let bytes = 2;
-  let omittedBytes = 0;
-  let omittedCount = 0;
-  const maximumEnd = Math.min(all.length, offset + boundedLimit);
-  let nextOffset = offset;
-  for (let index = offset; index < maximumEnd; index += 1) {
-    const summary = extensionReceiptActivity(all[index]!.receipt);
-    const size = Buffer.byteLength(JSON.stringify(summary)) + 1;
-    if (bytes + size > MAX_EXTENSION_HISTORY_BYTES) {
-      // Exhausting this page does not omit canonical history. Leave the row at
-      // the next cursor; only an oversized row on an empty page is consumed.
-      if (activities.length > 0 || omittedCount > 0) break;
-      omittedBytes += size;
-      omittedCount += 1;
-      nextOffset = index + 1;
-      continue;
-    }
-    activities.push(summary);
-    bytes += size;
-    nextOffset = index + 1;
-  }
-  const next = nextOffset < all.length ? `${historyRevision}:${query}:${nextOffset}` : undefined;
+  const page = boundedHistoryPage({
+    rowCount: all.length,
+    project: (index) => extensionReceiptActivity(all[index]!.receipt),
+    cursor,
+    revision: historyRevision,
+    query: extensionActivityCursorQuery(filter),
+    limit,
+    maximumPage: MAX_EXTENSION_HISTORY_PAGE,
+    maximumBytes: MAX_EXTENSION_HISTORY_BYTES,
+    label: "extension activity history",
+  });
   return {
-    activities,
+    activities: page.activities,
     historyRevision,
-    ...(next ? { nextCursor: next } : {}),
-    ...(omittedCount > 0 ? { omissions: { count: omittedCount, bytes: omittedBytes, reason: "bytes" as const } } : {}),
+    ...(page.nextCursor === undefined ? {} : { nextCursor: page.nextCursor }),
+    ...(page.omissions === undefined ? {} : { omissions: page.omissions }),
   };
 }
 
@@ -380,5 +358,72 @@ export function extensionReceiptActivity(receipt: ExtensionActivityReceipt): Ext
     ...(receipt.summary?.turnCount === undefined ? {} : { turnCount: receipt.summary.turnCount }),
     children,
     lifecycle: { version: 1, state: receipt.state, attention: "none", sequence: 0, observedAt: receipt.observedAt, terminalAt: receipt.terminalAt, recentUntil: new Date(Date.parse(receipt.terminalAt) + 900_000).toISOString(), visibility: "historical" },
+  };
+}
+
+/** One bounded cursor page over an already-filtered history list. Process and
+ * extension activity history share the cursor shape (`revision:query:offset`),
+ * the JSON byte budget, and the omission rule: a row that only exhausts this
+ * page's remainder belongs at the next cursor, while a row too large for an
+ * otherwise empty page is consumed and counted as omitted. */
+export interface BoundedHistoryPage<Row> {
+  activities: Row[];
+  nextCursor?: string;
+  omissions?: { count: number; bytes: number; reason: "bytes" | "countAndBytes" };
+}
+
+export function boundedHistoryPage<Row>(options: {
+  /** Rows the caller already filtered, sorted and deduplicated. */
+  rowCount: number;
+  /** Projects one row for the page; called only for rows in page range. */
+  project: (index: number) => Row;
+  /** Cursor from this page's own scope; undefined starts at the first row. */
+  cursor: string | undefined;
+  revision: string;
+  /** Binds the cursor to the caller's exact filter scope. */
+  query: string;
+  limit: number;
+  maximumPage: number;
+  maximumBytes: number;
+  /** Names the page in cursor failures, for example "process history". */
+  label: string;
+}): BoundedHistoryPage<Row> {
+  let offset = 0;
+  if (options.cursor) {
+    // An unrecognized cursor shape is a conflict rather than a client error: a
+    // cursor from another paging scope or an older Gateway must restart paging.
+    const parts = options.cursor.split(":");
+    if (parts.length !== 3) throw new Error(`${options.label} cursor conflict`);
+    const [cursorRevision, cursorQuery, encodedOffset] = parts;
+    if (cursorRevision !== options.revision || cursorQuery !== options.query) throw new Error(`${options.label} cursor conflict`);
+    if (!/^\d+$/u.test(encodedOffset ?? "")) throw new Error(`${options.label} cursor invalid`);
+    offset = Number(encodedOffset);
+    if (!Number.isSafeInteger(offset) || offset < 0 || offset > options.rowCount) throw new Error(`${options.label} cursor invalid`);
+  }
+  const boundedLimit = Math.min(options.maximumPage, Math.max(1, Math.floor(options.limit)));
+  const maximumEnd = Math.min(options.rowCount, offset + boundedLimit);
+  const activities: Row[] = [];
+  let bytes = 2;
+  let omittedBytes = 0;
+  let omittedCount = 0;
+  let nextOffset = offset;
+  for (let index = offset; index < maximumEnd; index += 1) {
+    const row = options.project(index);
+    const size = Buffer.byteLength(JSON.stringify(row)) + 1;
+    if (bytes + size > options.maximumBytes) {
+      if (activities.length > 0 || omittedCount > 0) break;
+      omittedBytes += size;
+      omittedCount += 1;
+      nextOffset = index + 1;
+      continue;
+    }
+    activities.push(row);
+    bytes += size;
+    nextOffset = index + 1;
+  }
+  return {
+    activities,
+    ...(nextOffset < options.rowCount ? { nextCursor: `${options.revision}:${options.query}:${nextOffset}` } : {}),
+    ...(omittedCount > 0 ? { omissions: { count: omittedCount, bytes: omittedBytes, reason: "bytes" as const } } : {}),
   };
 }

@@ -5,13 +5,14 @@ import type { SessionManager } from "@earendil-works/pi-coding-agent";
 type ReadonlySessionManager = Pick<SessionManager, "getBranch" | "getSessionId" | "getLeafId">;
 import type {
   ExtensionRunActivity,
+  ExtensionRunAttention,
   ExtensionRunChild,
   SessionProcessActivity,
   SessionProcessHistoryPage,
   SessionProcessOverview,
   SessionProcessState,
 } from "../protocol/types.js";
-import { extensionActivityReceipts, extensionReceiptActivity } from "./extension-activity-history.js";
+import { boundedHistoryPage, extensionActivityReceipts, extensionReceiptActivity } from "./extension-activity-history.js";
 import { PROCESS_ACTIVITY_RECENT_MS } from "./process-activity-recency.js";
 
 export const PROCESS_ACTIVITY_CAPABILITY = "process-activity.v1";
@@ -189,16 +190,7 @@ function childRows(
       executionMode: subagentMode(activity.mode),
       source: "delegatedAgent",
       ...(parentProcessId ? { parentProcessId } : {}),
-      lifecycle: {
-        version: 1,
-        state,
-        attention: child.attention ?? "none",
-        sequence: Math.max(0, activity.lifecycle?.sequence ?? 0),
-        observedAt: activity.lifecycle?.observedAt ?? activity.updatedAt,
-        ...(activity.lifecycle?.producerUpdatedAt ? { producerUpdatedAt: activity.lifecycle.producerUpdatedAt } : {}),
-        ...(terminalAt ? { terminalAt, recentUntil: new Date(Date.parse(terminalAt) + PROCESS_ACTIVITY_RECENT_MS).toISOString() } : {}),
-      },
-      visibility: terminalAt ? "recent" : state === "unknown" ? "unknown" : "active",
+      ...subagentRowLifecycle(activity, state, terminalAt, child.attention),
       startedAt: child.startedAt ?? activity.startedAt,
       ...(durationMs === undefined ? {} : { durationMs }),
       title: utf8Prefix(child.label, 512).value,
@@ -223,6 +215,30 @@ function childRows(
     ));
   }
   return rows;
+}
+
+/** One subagent lifecycle projection for both the delegated child rows and
+ * the aggregated extension process. A terminal row always carries the
+ * Gateway-authored five-minute recency deadline the process recency owner
+ * schedules from, and never borrows a producer's terminal timestamp. */
+function subagentRowLifecycle(
+  activity: ExtensionRunActivity,
+  state: SessionProcessState,
+  terminalAt: string | undefined,
+  attention: ExtensionRunAttention | undefined,
+): Pick<SessionProcessActivity, "lifecycle" | "visibility"> {
+  return {
+    lifecycle: {
+      version: 1,
+      state,
+      attention: attention ?? "none",
+      sequence: Math.max(0, activity.lifecycle?.sequence ?? 0),
+      observedAt: activity.lifecycle?.observedAt ?? activity.updatedAt,
+      ...(activity.lifecycle?.producerUpdatedAt ? { producerUpdatedAt: activity.lifecycle.producerUpdatedAt } : {}),
+      ...(terminalAt ? { terminalAt, recentUntil: new Date(Date.parse(terminalAt) + PROCESS_ACTIVITY_RECENT_MS).toISOString() } : {}),
+    },
+    visibility: terminalAt ? "recent" : state === "unknown" ? "unknown" : "active",
+  };
 }
 
 function aggregateSubagentProcess(
@@ -250,16 +266,7 @@ function aggregateSubagentProcess(
     kind: "subagent",
     executionMode: mode,
     source: "admittedExtension",
-    lifecycle: {
-      version: 1,
-      state,
-      attention: activity.lifecycle?.attention ?? "none",
-      sequence: Math.max(0, activity.lifecycle?.sequence ?? 0),
-      observedAt: activity.lifecycle?.observedAt ?? activity.updatedAt,
-      ...(activity.lifecycle?.producerUpdatedAt ? { producerUpdatedAt: activity.lifecycle.producerUpdatedAt } : {}),
-      ...(terminalAt ? { terminalAt, recentUntil: new Date(Date.parse(terminalAt) + PROCESS_ACTIVITY_RECENT_MS).toISOString() } : {}),
-    },
-    visibility: terminalAt ? "recent" : state === "unknown" ? "unknown" : "active",
+    ...subagentRowLifecycle(activity, state, terminalAt, activity.lifecycle?.attention),
     startedAt: activity.startedAt,
     ...(durationMs === undefined ? {} : { durationMs }),
     title: utf8Prefix(activity.title === "Pi Subagents" ? "Subagent" : activity.title, 512).value,
@@ -410,47 +417,22 @@ export function listProcessHistory(
   const revision = processHistoryRevisionFor(manager, history);
   const all = history.filter((activity) =>
     (!filter?.kind || activity.kind === filter.kind) && (!filter?.state || activity.lifecycle.state === filter.state));
-  const query = processHistoryCursorQuery(filter);
-  let offset = 0;
-  if (cursor) {
-    // An unrecognized cursor shape is a conflict rather than a client error: a
-    // cursor from another paging scope or an older Gateway must restart paging.
-    const parts = cursor.split(":");
-    if (parts.length !== 3) throw new Error("process history cursor conflict");
-    const [cursorRevision, cursorQuery, encodedOffset] = parts;
-    if (cursorRevision !== revision || cursorQuery !== query) throw new Error("process history cursor conflict");
-    if (!/^\d+$/u.test(encodedOffset ?? "")) throw new Error("process history cursor invalid");
-    offset = Number(encodedOffset);
-    if (!Number.isSafeInteger(offset) || offset < 0 || offset > all.length) throw new Error("process history cursor invalid");
-  }
-  const boundedLimit = Math.min(MAX_PROCESS_HISTORY_PAGE, Math.max(1, Math.floor(limit)));
-  const maximumEnd = Math.min(all.length, offset + boundedLimit);
-  const activities: SessionProcessActivity[] = [];
-  let bytes = 2;
-  let omittedBytes = 0;
-  let omittedCount = 0;
-  let nextOffset = offset;
-  for (let index = offset; index < maximumEnd; index += 1) {
-    const activity = all[index]!;
-    const size = Buffer.byteLength(JSON.stringify(activity)) + 1;
-    if (bytes + size > MAX_PROCESS_HISTORY_BYTES) {
-      // A row that only exhausts this page's remainder belongs at the next
-      // cursor. Only a row too large for an otherwise empty page is omitted.
-      if (activities.length > 0 || omittedCount > 0) break;
-      omittedBytes += size;
-      omittedCount += 1;
-      nextOffset = index + 1;
-      continue;
-    }
-    activities.push(activity);
-    bytes += size;
-    nextOffset = index + 1;
-  }
+  const page = boundedHistoryPage({
+    rowCount: all.length,
+    project: (index) => all[index]!,
+    cursor,
+    revision,
+    query: processHistoryCursorQuery(filter),
+    limit,
+    maximumPage: MAX_PROCESS_HISTORY_PAGE,
+    maximumBytes: MAX_PROCESS_HISTORY_BYTES,
+    label: "process history",
+  });
   return {
-    activities,
+    activities: page.activities,
     historyRevision: revision,
-    ...(nextOffset < all.length ? { nextCursor: `${revision}:${query}:${nextOffset}` } : {}),
-    ...(omittedCount > 0 ? { omissions: { count: omittedCount, bytes: omittedBytes, reason: "bytes" as const } } : {}),
+    ...(page.nextCursor === undefined ? {} : { nextCursor: page.nextCursor }),
+    ...(page.omissions === undefined ? {} : { omissions: page.omissions }),
   };
 }
 
