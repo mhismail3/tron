@@ -173,6 +173,18 @@ export function updaterFailureProgress(
   };
 }
 
+/** Write one compact JSON document through a temp file in its own directory, so
+ * a reader observes either the previous document or the complete new one. `wx`
+ * refuses a pre-created temp path, and 0600 keeps update state owner-only. */
+async function writeJsonAtomic(path: string, value: unknown): Promise<void> {
+  const temporary = `${path}.tmp-${process.pid}-${randomUUID()}`;
+  await writeFile(temporary, `${JSON.stringify(value)}\n`, { mode: 0o600, flag: "wx" });
+  try { await rename(temporary, path); } catch (error) {
+    await rm(temporary, { force: true });
+    throw error;
+  }
+}
+
 async function recordUpdaterFailure(tronHome: string, channel: GatewayUpdateChannel, commandId: string, error: unknown): Promise<void> {
   if (!isAbsolute(tronHome)) return;
   const directory = join(tronHome, "gateway", "payloads", channel);
@@ -192,13 +204,7 @@ async function recordUpdaterFailure(tronHome: string, channel: GatewayUpdateChan
     const uid = process.getuid?.();
     if (!info?.isDirectory() || info.isSymbolicLink() || uid !== undefined && info.uid !== uid) return;
   }
-  const path = join(directory, "update-progress.json");
-  const temporary = `${path}.tmp-${process.pid}-${randomUUID()}`;
-  await writeFile(temporary, `${JSON.stringify(updaterFailureProgress(channel, commandId, error))}\n`, { mode: 0o600, flag: "wx" });
-  try { await rename(temporary, path); } catch (renameError) {
-    await rm(temporary, { force: true });
-    throw renameError;
-  }
+  await writeJsonAtomic(join(directory, "update-progress.json"), updaterFailureProgress(channel, commandId, error));
 }
 
 function launchAgentUpdater(environment: NodeJS.ProcessEnv = process.env, tronHome = environment.TRON_DATA_DIR ?? ""): GatewayUpdateCallback | undefined {
@@ -383,11 +389,8 @@ export class GatewayUpdateService {
       schema: 1, kind: UPDATE_CONFIG_KIND, sourceRoot,
       ...(artifactRoot === undefined ? {} : { artifactRoot }), updatedAt: new Date().toISOString(),
     };
-    const path = this.configPath();
     await mkdir(join(this.options.tronHome, "gateway"), { recursive: true, mode: 0o700 });
-    const temporary = `${path}.tmp-${process.pid}-${randomUUID()}`;
-    await writeFile(temporary, `${JSON.stringify(config)}\n`, { mode: 0o600, flag: "wx" });
-    try { await rename(temporary, path); } catch (error) { await rm(temporary, { force: true }); throw error; }
+    await writeJsonAtomic(this.configPath(), config);
     return config;
   }
 
