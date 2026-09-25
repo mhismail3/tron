@@ -19,7 +19,7 @@ const DEFAULT_MAXIMUM_ITEMS = 16_384;
 const DEFAULT_MINIMUM_FREE_BYTES = 1 * 1_024 * 1_024 * 1_024;
 // Display reads reserve their allowance before verification/open and an ingest
 // copies up to 2 GiB into staging, so these caps are fixed bounds rather than
-// tuning knobs (`docs/connection-resilience.md`).
+// tuning knobs (`packages/gateway/docs/connection-resilience.md`).
 const MAXIMUM_ACTIVE_READERS = 4;
 const MAXIMUM_ACTIVE_INGESTS = 2;
 
@@ -222,7 +222,7 @@ export class DisplayArtifactStore {
           }
           // Revocation can commit empty ownership and crash before the lane
           // removes the folder: empty-owner metadata is startup cleanup only,
-          // never restored authority (`docs/connection-resilience.md`).
+          // never restored authority (`packages/gateway/docs/connection-resilience.md`).
           if (metadata.owners.length === 0) {
             await rm(folder, { recursive: true, force: true });
             continue;
