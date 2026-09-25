@@ -231,106 +231,16 @@ not projected, and `settings.update` ignores them; values already in `settings.j
 untouched. `telemetry.install` remains because the SDK uses it to gate provider
 attribution headers.
 
-### Agent-home migration preflight
+### Agent home
 
-`scripts/tron agent-home-preflight --source <absolute-path> --destination
-<absolute-path>` is a read-only preparation check for the future Stable agent-home
-move. The intended contract is one Stable agent authority at `~/.tron/agent`, a
-separately isolated Debug agent authority at `~/.tron-dev/agent`, and an explicit
-absolute `PI_CODING_AGENT_DIR` override for an intentionally custom Gateway
-invocation. The managed Debug supervisor strips that override to preserve its
-profile. The source default resolves beneath the
-selected Tron home; the retired `TRON_AGENT_DIR_NAME` is rejected rather than
-silently reinterpreted. This worktree carries that default so it can be validated
-before a user-approved cutover; the command does not enact the cutover. It
-never creates a directory, acquires a lock, initializes a store, writes a
-manifest, or opens a Pi `SessionManager`. Source, destination, and traversal
-limits are validated completely before any root inspection; invalid requests are
-blocked with zero source traversal or settings reads. The source must be a real directory and
-the destination must be absent. The bounded traversal reports collisions,
-overlap, special files, root symlinks, and escaping symlinks without following
-any link. Relative links that remain inside the source are counted as safe
-internal package links; absolute or escaping links remain unresolved.
-
-The preflight parses only bounded supported metadata: global `settings.json`,
-package-manifest agent directories, discovered `agents/**/*.md` definitions,
-and the `extensions/subagent/config.json` path fields needed to identify
-executable session, package, extension, skill, prompt, theme, and child-launch
-references. It follows the pinned Pi SDK's resource conventions: top-level resource
-patterns are relative to the agent home, package-object resource patterns are
-relative to that package source, and agent-definition relative extension and
-skill paths are relative to the definition file. `!`, `+`, `-`, `*`, and `?`
-prefixes are classified without expanding or executing them. Relative paths may
-remain portable when contained by the old home; absolute and home-expanded paths
-are always marked relocation-sensitive, even when they physically point inside
-the old home, because their bytes would retain the old root after a move.
-Portable executable references must resolve in the source home. Unsupported
-bases, malformed arrays/metadata, and uncertain paths are reported without
-exposing values or repairing settings. The complete classification and explicit
-coverage exclusions are in [`docs/agent-home-reference-inventory.md`](docs/agent-home-reference-inventory.md).
-Registry/VCS package specs (`npm:`, `git:`, `github:`, HTTPS, and SSH) are
-portable package provenance: their installed trees move with the agent home and
-do not create an external filesystem decision. Absolute, local, session, and
-resource paths remain owner decisions. External references require an owner
-decision and diagnostics contain neither settings values, credential values, nor
-session bodies. Quiescence is always
-reported as unproven: the absence of a lock is not evidence that migration is
-safe. This command is an assessment, not an activation authority, and never
-returns a migration-ready or approval verdict. Mandatory operator prerequisites
-remain unverified here: owner/private-mode and access checks, free space and
-filesystem-boundary checks, active-writer/lock quiescence, trust/auth/model
-metadata continuity, complete package/resource inventory, and extension/provider
-store ownership. Offline backup, staging, publication, rollback, and manual
-Gateway/Mac activation remain future operator-run steps. Project `.pi`/`.agents`,
-Keychain stores, and Gateway state are not relocated by this preflight.
-The inspected pinned extension seams are concrete: `pi-goal` stores state as Pi session custom entries and its install marker under the resolved agentDir; `pi-web-access` uses `PI_CODING_AGENT_DIR/web-search.json`, so Gateway and inherited children keep that config/cache under the resolved agentDir (it falls back to `$XDG_CONFIG_HOME/pi/web-search.json` or `~/.pi/web-search.json` only when run outside Gateway); and `pi-subagents` keeps its config under the resolved agentDir extension namespace and its ephemeral run roots under OS temp/project-owned roots. `pi-agent-browser-native` remains on its upstream global configuration path (`~/.pi/config/pi-agent-browser-native/config.json` by default), with project configuration and explicit `PI_AGENT_BROWSER_CONFIG` semantics unchanged. Browser configuration relocation is deferred until upstream provides a supported global-path contract; this migration neither copies nor rewrites it. Browser profiles, cookies, and Keychain credentials remain OS/browser-owned. The durable repository classification and explicit sweep exclusions are recorded in [`docs/agent-home-reference-inventory.md`](docs/agent-home-reference-inventory.md).
-### Agent-home staging and manual cutover
-
-`agent-home-migrate stage` is an explicit operator command, not part of Gateway
-startup. It requires both
-`--acknowledge-quiescence` and `--acknowledge-backup`, reruns the read-only
-preflight, refuses every decision or
-collision, and copies only a synthetic or explicitly chosen source into a new
-staging root. It preserves regular-file bytes, modes, and relative internal
-symlinks. On macOS it restores symlink permissions with `lchmod`, independently
-of the operator's umask and without changing link-target permissions; the focused
-migration tests cover differing source/creation modes. Special files, absolute/dangling/escaping links, source changes during
-the copy, extra staged entries, malformed markers, and bounded traversal failures
-abort without deleting the partial staging tree. The sibling marker is `0600`
-and contains only bounded paths, an operation ID, phase, count, and manifest
-hashes; manifests contain metadata and SHA-256 digests, never file contents,
-credentials, or session text.
-
-Use the companion operations only after the source owner has independently
-protected a backup and quiesced every writer:
-
-```bash
-(cd packages/gateway && npm run build)
-scripts/tron agent-home-migrate stage \
-  --source "$HOME/.pi/agent" --destination "$HOME/.tron/agent" \
-  --staging "$HOME/.tron/.agent.migrate-<id>" \
-  --acknowledge-quiescence --acknowledge-backup
-scripts/tron agent-home-migrate verify --staging "$HOME/.tron/.agent.migrate-<id>"
-```
-
-The low-level staging tool does not implement publication. The separate, one-time
-operator command `scripts/tron agent-home-cutover` owns verified backups and
-journaled no-clobber same-filesystem publication; regular `scripts/tron mac reinstall`
-never migrates agent homes. Neither command replaces or activates the Mac app.
-The complete operator
-sequence, including the legacy Ask User staged-settings transform, app/helper drain,
-backup, activation, diagnostics, and rollback is in [`packages/mac-app/docs/agent-home-cutover.md`](../mac-app/docs/agent-home-cutover.md).
-The user/maintainer must explicitly confirm successful helper retirement and
-writer quiescence before running the cutover command. Cross-filesystem or custom
-layouts require a separate reviewed procedure, not a fallback copy. The user then
-updates the Mac app/profile together and manually activates one Gateway authority. Never run old and
-new agent directories concurrently, use a symlink/fallback, merge a non-empty
-destination, or recursively delete anything except a marked staging root with:
-`scripts/tron agent-home-migrate cleanup --staging <exact-marked-root>`. If
-verification or activation fails, stop the new owner, quarantine it without
-merging post-cutover writes, restore the unchanged protected backup and old
-profile, and activate it manually. Post-cutover writes require an explicit
-recovery decision; they are not silently merged into rollback.
+Pi's canonical agent home is `<tronHome>/agent`: Stable uses `~/.tron/agent` and
+the isolated Debug supervisor uses `~/.tron-dev/agent`. An absolute
+`PI_CODING_AGENT_DIR` is the only override for an intentionally custom Gateway
+invocation, and the managed Debug supervisor strips it to preserve its profile;
+the retired `TRON_AGENT_DIR_NAME` is rejected rather than silently
+reinterpreted. Canonical JSONL, settings, credentials, installed
+packages/resources, retries, and compaction stay in that home. The retired
+`~/.pi/agent` home is never read, migrated, or deleted.
 
 ### Provider account usage
 

@@ -449,7 +449,6 @@ class MacPlatform:
             if re.search(r'Tron\.app/Contents/MacOS|Tron Native Host\.app|Tron Agent\.app|'
                          r'Gateway/app/dist/index\.js|gateway/dist/index\.js|tron-dev.*__|'
                          r'gateway-payload-deploy\.mjs|async-runner\.(?:ts|js)|'
-                         r'agent-home-(?:preflight|migration)\.js|'
                          r'pi-coding-agent/.*/(cli|index)\.js|(?:^|/)(?:pi|npm|pnpm|yarn)(?: |$)', text):
                 raise Stop('writer-present: stop standalone clients, workers and package operations before retry')
 

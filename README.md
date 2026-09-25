@@ -163,7 +163,7 @@ are owned by the embedded runtime under `~/.tron/agent` for Stable and
 `~/.tron-dev/agent` for separately isolated Debug. An explicit absolute
 `PI_CODING_AGENT_DIR` is supported for an intentionally custom Gateway
 invocation; the managed Debug supervisor strips it to preserve profile isolation.
-The pinned `pi-agent-browser-native` package keeps its global configuration at its existing owner-managed path (`~/.pi/config/pi-agent-browser-native/config.json` by default). Project configuration and the explicit `PI_AGENT_BROWSER_CONFIG` override retain their existing precedence. Browser profiles, cookies, and Keychain credentials remain OS/browser-owned and are not relocated by agent-home migration; browser configuration relocation is deferred until upstream supports an owned global-path contract. Use the Settings Import action for supported JSON/JSONL session exports. Retained documents in `workspace/files` can be presented in chat through
+The pinned `pi-agent-browser-native` package keeps its global configuration at its existing owner-managed path (`~/.pi/config/pi-agent-browser-native/config.json` by default). Project configuration and the explicit `PI_AGENT_BROWSER_CONFIG` override retain their existing precedence. Browser profiles, cookies, and Keychain credentials remain OS/browser-owned and are not relocated by Tron; browser configuration relocation is deferred until upstream supports an owned global-path contract. Use the Settings Import action for supported JSON/JSONL session exports. Retained documents in `workspace/files` can be presented in chat through
 `display` without changing the session directory. See the
 [workspace ownership and recovery contract](packages/gateway/docs/internal-workspace.md).
 
