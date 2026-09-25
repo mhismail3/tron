@@ -1,10 +1,8 @@
 import { createHash } from "node:crypto";
-import type { SessionSummary, JsonValue } from "../protocol/types.js";
+import type { JsonValue } from "../protocol/types.js";
 
-export const SESSION_SEARCH_CAPABILITY = "session-search.v1" as const;
 export const SESSION_SEARCH_MAX_QUERY_BYTES = 2_048;
 export const SESSION_SEARCH_MAX_RESULTS = 50;
-export const SESSION_SEARCH_MAX_PASSAGES_PER_SESSION = 5;
 export const SESSION_SEARCH_MAX_SNIPPET_BYTES = 1_024;
 export const SESSION_SEARCH_MAX_ENTRY_BYTES = 128 * 1_024;
 export const SESSION_SEARCH_MAX_INDEX_BYTES = 512 * 1_024 * 1_024;
@@ -153,11 +151,4 @@ export function stableSearchResultOrder(left: SessionSearchResult, right: Sessio
   if (right.lexicalScore !== left.lexicalScore) return right.lexicalScore - left.lexicalScore;
   const updated = right.updatedAt.localeCompare(left.updatedAt);
   return updated || left.sessionId.localeCompare(right.sessionId) || left.entryId.localeCompare(right.entryId);
-}
-
-export function titleForSummary(summary: Pick<SessionSummary, "name" | "firstMessage">): string {
-  const named = summary.name?.trim();
-  if (named) return named;
-  const first = summary.firstMessage.trim();
-  return first ? first.slice(0, 80) : "New session";
 }

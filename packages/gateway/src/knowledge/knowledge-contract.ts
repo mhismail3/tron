@@ -447,12 +447,6 @@ export interface KnowledgeRecallResponse {
   incomplete?: boolean;
 }
 
-export interface KnowledgeSourceRecordCaptureRequest {
-  commandId: string;
-  expectedRevision?: string;
-  record: KnowledgeRecordDraft & { kind: "source" };
-}
-
 /** URL capture is fetched by the Gateway source owner; callers never submit
  * fetched text as if it were canonical evidence. */
 export interface KnowledgeSourceURLCaptureRequest {

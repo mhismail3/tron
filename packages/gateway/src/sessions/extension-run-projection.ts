@@ -8,7 +8,6 @@ import type {
   ExtensionRunLifecycle,
   ExtensionRunLifecycleState,
   ExtensionToolOrigin,
-  JsonValue,
 } from "../protocol/types.js";
 
 const MAX_CHILDREN = 32;
@@ -1011,8 +1010,4 @@ export function projectExtensionRunActivity(
 export function extensionRunAsyncDir(value: unknown): string | undefined {
   const details = detailsFrom(value);
   return text(details?.asyncDir, 2_048);
-}
-
-export function extensionRunActivityJSON(activity: ExtensionRunActivity): JsonValue {
-  return activity as unknown as JsonValue;
 }

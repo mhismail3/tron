@@ -36,10 +36,6 @@ export type AutomationRunState =
   | "skipped"
   | "outcomeUnknown";
 
-export const terminalAutomationRunStates = new Set<AutomationRunState>([
-  "succeeded", "failed", "cancelled", "skipped", "outcomeUnknown",
-]);
-
 export interface AutomationRunResolution {
   outcome: "succeeded" | "failed" | "cancelled";
   resolvedAt: string;
@@ -146,8 +142,4 @@ export interface AutomationUpdateInput {
   overlapPolicy: AutomationOverlapPolicy;
   executionDeadlineSeconds: number;
   action: AutomationAction;
-}
-
-export function isTerminalAutomationRun(run: AutomationRun | undefined): boolean {
-  return run !== undefined && terminalAutomationRunStates.has(run.state);
 }

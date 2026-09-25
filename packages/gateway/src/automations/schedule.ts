@@ -145,13 +145,6 @@ export function automationLocalDayStart(instantMs: number, timezone: string): st
   return new Date(automationLocalDayBounds(instantMs, timezone).start).toISOString();
 }
 
-/** Returns the local calendar day key for deterministic grouping and tests. */
-export function automationLocalDayKey(instantMs: number, timezone: string): string {
-  if (!Number.isFinite(instantMs)) throw new Error("Schedule boundary is invalid");
-  const local = localParts(instantMs, timezone);
-  return `${String(local.year).padStart(4, "0")}-${String(local.month).padStart(2, "0")}-${String(local.day).padStart(2, "0")}`;
-}
-
 export function nextAutomationOccurrence(trigger: AutomationTrigger, afterMs: number): string | undefined {
   if (!Number.isFinite(afterMs)) throw new Error("Schedule boundary is invalid");
   if (trigger.kind === "once") {

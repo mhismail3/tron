@@ -393,10 +393,6 @@ function processHistoryRevisionFor(
     .digest("hex").slice(0, 32);
 }
 
-export function processHistoryRevision(manager: ReadonlySessionManager): string {
-  return processHistoryRevisionFor(manager, canonicalProcessHistory(manager));
-}
-
 /** Bounded fingerprint of the exact filter that produced a page offset.
  * The content revision alone cannot identify a position: the same revision
  * with a different filter is a different array. */

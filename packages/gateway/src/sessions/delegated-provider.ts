@@ -39,8 +39,6 @@ export const DELEGATED_ARTIFACT_FILES = [
   "process-terminal.json",
 ] as const;
 
-export type DelegatedArtifactFileName = (typeof DELEGATED_ARTIFACT_FILES)[number];
-
 /** One Gateway-admitted provider root per resolved Tron home. */
 /** pi-subagents 0.59.0 reads this before deriving async/results/chain roots. */
 export const DELEGATED_PROVIDER_ROOT_ENV = "PI_SUBAGENTS_TEMP_ROOT";

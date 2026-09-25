@@ -10,7 +10,6 @@ import type { ConnectionInstance, ConnectionOwnerState, ConnectionPolicy } from 
 import { CONNECTION_STATE_SCHEMA_VERSION, validateConnectionState } from "./connection-contract.js";
 import { connectionStatePath } from "./connection-owner.js";
 
-export const LEGACY_CONNECTOR_STATE_SCHEMA_VERSION = 1 as const;
 export const CONNECTION_MIGRATION_PLAN_VERSION = 3 as const;
 export const CONNECTION_MIGRATION_JOURNAL_VERSION = 1 as const;
 

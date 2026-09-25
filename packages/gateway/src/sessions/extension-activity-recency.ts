@@ -1,7 +1,5 @@
 import type { ExtensionRunActivity, ExtensionRunVisibility } from "../protocol/types.js";
 
-export const EXTENSION_ACTIVITY_RECENT_MS = 15 * 60 * 1_000;
-
 export interface ExtensionActivityClock {
   wallNow(): number;
   /** Retained for clock fakes and callers that already provide a monotonic clock.
