@@ -218,7 +218,7 @@ actor NativeCaptureSession {
                 guard !catalogued, !usedStream else { return .error(.stale) }
                 catalogued = true
                 let values = try await operations.catalog { [fence] in fence.admits() }
-                guard await admitted(request), values.count <= 32 else { return .error(.stale) }
+                guard await admitted(request), values.count <= NativeCaptureCatalog.maximumSources else { return .error(.stale) }
                 var entries: [[String: Any]] = []
                 for value in values {
                     let handle = UUID(); targets[handle] = value

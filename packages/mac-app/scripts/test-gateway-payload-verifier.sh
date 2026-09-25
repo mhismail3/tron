@@ -77,6 +77,16 @@ chmod a-w "$PAYLOAD/app/dist/index.js"
 expect_rejected tampered-app-file
 
 reset_fixture
+# The early publication-mode check owns any write bit, including owner-only, so
+# an owner-writable payload fails there instead of after the compiled verifier.
+chmod u+w "$PAYLOAD/app/package.json"
+expect_rejected owner-writable-payload
+grep -q 'published payload tree is writable' "$TMP/owner-writable-payload.err" || {
+    echo "owner-writable payload was not rejected by the early mode check" >&2
+    exit 1
+}
+
+reset_fixture
 # Preserve a valid universal Mach-O container while changing its bytes; the
 # verifier must reject this forged helper by canonical byte identity.
 chmod u+w "$APP/Contents/MacOS" "$HELPER"

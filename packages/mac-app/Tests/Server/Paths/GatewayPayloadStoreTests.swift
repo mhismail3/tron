@@ -193,33 +193,29 @@ struct GatewayPayloadStoreTests {
         }
     }
 
-    @Test("manifest fields admit launcher maxima and reject over-limit or unsupported values")
+    @Test("manifest identity admits exactly the launcher's maxima and rejects every other shape")
     func manifestBoundsAndChannels() throws {
         let temporary = try TemporaryPayloadDirectory()
         defer { temporary.cleanup() }
         let store = GatewayPayloadStore(home: temporary.root, channel: "dev")
         let version = "2025.01"
         let fingerprint = String(repeating: "a", count: 64)
-        let maxGatewayVersion = String(repeating: "é", count: 63) + "a"
-        let maxNodeVersion = String(repeating: "é", count: 63) + "a"
-        let maxSourceRevision = String(repeating: "é", count: 127) + "a"
-        let maxRuntimeEpoch = String(repeating: "e", count: GatewayPayloadStore.runtimeEpochComponentLimit)
         let root = store.versionRoot(version)
         try makePayload(
             root: root,
             channel: "dev",
             version: version,
             fingerprint: fingerprint,
-            gatewayVersion: maxGatewayVersion,
-            nodeVersion: maxNodeVersion,
-            sourceRevision: maxSourceRevision,
-            runtimeEpoch: maxRuntimeEpoch
+            gatewayVersion: String(repeating: "a", count: GatewayPayloadStore.gatewayVersionComponentLimit),
+            nodeVersion: String(repeating: "a", count: GatewayPayloadStore.nodeVersionComponentLimit),
+            sourceRevision: String(repeating: "f", count: 40),
+            runtimeEpoch: "01234567-89ab-cdef-0123-456789abcdef"
         )
         let manifestURL = root.appendingPathComponent("manifest.json")
         let manifest = try JSONDecoder().decode(GatewayPayloadManifest.self, from: Data(contentsOf: manifestURL))
         try write(GatewayPayloadSelection(channel: "dev", version: version, payloadFingerprint: manifest.payloadFingerprint), to: store.currentManifestURL)
         guard case .success = GatewayPayloadValidator.validateSelection(store: store) else {
-            Issue.record("launcher maximum UTF-8 field lengths should validate")
+            Issue.record("the launcher's maximum component lengths, 40-hex revision and UUID epoch should validate")
             return
         }
 
@@ -261,21 +257,71 @@ struct GatewayPayloadStoreTests {
             return
         }
 
-        let overLimitValues = [
+        // One rejected row per rule the launcher enforces: the identity bounds
+        // are the launcher's, not wider field lengths of our own.
+        let rejectedValues = [
+            ("gatewayVersion", String(repeating: "a", count: GatewayPayloadStore.gatewayVersionComponentLimit + 1)),
+            ("gatewayVersion", "1.0 beta"),
             ("gatewayVersion", String(repeating: "é", count: 64)),
-            ("nodeVersion", String(repeating: "é", count: 64)),
-            ("sourceRevision", String(repeating: "é", count: 128)),
-            ("runtimeEpoch", String(repeating: "e", count: GatewayPayloadStore.runtimeEpochComponentLimit + 1)),
+            ("nodeVersion", String(repeating: "a", count: GatewayPayloadStore.nodeVersionComponentLimit + 1)),
+            ("nodeVersion", "22/23"),
+            ("sourceRevision", String(repeating: "f", count: 39)),
+            ("sourceRevision", String(repeating: "f", count: 41)),
+            ("sourceRevision", String(repeating: "F", count: 40)),
+            ("sourceRevision", "test-revision"),
+            ("runtimeEpoch", String(repeating: "e", count: 35)),
+            ("runtimeEpoch", String(repeating: "e", count: 36)),
+            ("runtimeEpoch", "01234567-89AB-CDEF-0123-456789ABCDEF"),
             ("protocolVersion", "3"),
             ("minProtocolVersion", "3"),
             ("channel", "preview"),
         ]
-        for (field, value) in overLimitValues {
+        for (field, value) in rejectedValues {
             try rewriteManifest(replacement(field, value), at: manifestURL)
             guard case .failure(.invalidManifest) = GatewayPayloadValidator.validateSelection(store: store) else {
-                Issue.record("over-limit or unsupported manifest field was admitted: \(field)")
+                Issue.record("rejected manifest identity value was admitted: \(field)=\(value)")
                 return
             }
+        }
+    }
+
+    @Test("unknown and repeated manifest or selection keys are rejected like the launcher's parser")
+    func rejectsUnknownOrRepeatedKeys() throws {
+        let temporary = try TemporaryPayloadDirectory()
+        defer { temporary.cleanup() }
+        let store = GatewayPayloadStore(home: temporary.root, channel: "dev")
+        let version = "2025.01"
+        let root = store.versionRoot(version)
+        try makePayload(root: root, channel: "dev", version: version, fingerprint: String(repeating: "a", count: 64))
+        let manifestURL = root.appendingPathComponent("manifest.json")
+        let manifest = try JSONDecoder().decode(GatewayPayloadManifest.self, from: Data(contentsOf: manifestURL))
+        try write(GatewayPayloadSelection(channel: "dev", version: version, payloadFingerprint: manifest.payloadFingerprint), to: store.currentManifestURL)
+        guard case .success = GatewayPayloadValidator.validateSelection(store: store) else {
+            Issue.record("the generated fixture must validate before the key controls run")
+            return
+        }
+
+        // The launcher admits exactly the twelve manifest keys once; an unknown
+        // or repeated key is a tampering signal that Codable would otherwise hide.
+        let pristine = try String(contentsOf: manifestURL, encoding: .utf8)
+        let manifestControls = [
+            ("unknown", "\"unexpected\":\"x\""),
+            ("repeated", "\"version\":\"\(version)\""),
+        ]
+        for (label, pair) in manifestControls {
+            try rewriteRaw(String(pristine.dropLast()) + ",\(pair)}", at: manifestURL)
+            guard case .failure(.invalidManifest("manifest keys")) = GatewayPayloadValidator.validate(payloadRoot: root, expectedChannel: "dev") else {
+                Issue.record("a \(label) manifest key was admitted")
+                return
+            }
+        }
+        try rewriteRaw(pristine, at: manifestURL)
+
+        let selectionText = try String(contentsOf: store.currentManifestURL, encoding: .utf8)
+        try rewriteRaw(String(selectionText.dropLast()) + ",\"unexpected\":\"x\"}", at: store.currentManifestURL)
+        guard case .failure(.invalidManifest("selection keys")) = GatewayPayloadValidator.validateSelection(store: store) else {
+            Issue.record("an unknown selection key was admitted")
+            return
         }
     }
 
@@ -636,8 +682,8 @@ struct GatewayPayloadStoreTests {
         fingerprint: String,
         gatewayVersion: String = "1",
         nodeVersion: String = "22",
-        sourceRevision: String = "test-revision",
-        runtimeEpoch: String = "test-epoch",
+        sourceRevision: String = "0123456789abcdef0123456789abcdef01234567",
+        runtimeEpoch: String = "01234567-89ab-cdef-0123-456789abcdef",
         pushConfiguration: String? = nil,
         additionalFiles: [(String, Data)] = [],
         additionalSymlinks: [(String, String)] = []
@@ -815,10 +861,22 @@ struct GatewayPayloadStoreTests {
         try write(manifest, to: url)
     }
 
+    private func rewriteRaw(_ text: String, at url: URL) throws {
+        let fm = FileManager.default
+        try fm.setAttributes([.posixPermissions: 0o644], ofItemAtPath: url.path)
+        defer { try? fm.setAttributes([.posixPermissions: 0o444], ofItemAtPath: url.path) }
+        try Data(text.utf8).write(to: url)
+    }
+
     private func write<T: Encodable>(_ value: T, to url: URL) throws {
         let fm = FileManager.default
+        let encoder = JSONEncoder()
+        // The manifest is written by bundle-gateway.sh and gateway-payload-deploy.mjs,
+        // neither of which escapes a solidus, and the launcher's bounded parser
+        // rejects every escape sequence. The fixture must model those bytes.
+        encoder.outputFormatting = [.withoutEscapingSlashes]
         try fm.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
-        try JSONEncoder().encode(value).write(to: url)
+        try encoder.encode(value).write(to: url)
     }
 }
 

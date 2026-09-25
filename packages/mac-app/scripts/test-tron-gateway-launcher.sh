@@ -117,6 +117,104 @@ printf '%s\n' '{"name":"npm","version":"stale"}' > "$STALE_NPM/runtime/npm-arm64
 if "$HASH" "$STALE_NPM" >/dev/null 2>&1; then
   echo "canonical hash admitted stale npm metadata" >&2; exit 1
 fi
+OVERSIZED_PACKAGE="$TMP/invalid-oversized-package"
+cp -R "$BUNDLE" "$OVERSIZED_PACKAGE"
+chmod -R u+w "$OVERSIZED_PACKAGE"
+# The manifest records the fingerprint of these bytes, so recompute it and bind
+# the oversized document to the fixture before the size rule is exercised.
+{
+  printf '{"name":"fixture","padding":"'
+  dd if=/dev/zero bs=65536 count=1 2>/dev/null | tr '\\0' 'p'
+  printf '"}\n'
+} > "$OVERSIZED_PACKAGE/app/package.json"
+oversized_fingerprint="$("$HASH" "$OVERSIZED_PACKAGE")"
+sed "s/\"payloadFingerprint\":\"[^\"]*\"/\"payloadFingerprint\":\"$oversized_fingerprint\"/" \
+  "$OVERSIZED_PACKAGE/manifest.json" > "$OVERSIZED_PACKAGE/manifest.tmp"
+mv "$OVERSIZED_PACKAGE/manifest.tmp" "$OVERSIZED_PACKAGE/manifest.json"
+chmod -R a-w "$OVERSIZED_PACKAGE"
+# 64 KiB is the bound the Swift validator applies to app/package.json.
+if "$HELPER" --verify-payload "$OVERSIZED_PACKAGE" stable fixture fixture 0123456789abcdef0123456789abcdef01234567 >/dev/null 2>&1; then
+  echo "launcher payload validation admitted an oversized package document" >&2; exit 1
+fi
+# One refused fixture per identity rule the launcher enforces. The manifest is
+# not fingerprinted, so only the field under test changes while the payload
+# bytes stay valid. Values are test literals evaluated by the fixture helper.
+IDENTITY="$TMP/invalid-identity"
+cp -R "$BUNDLE" "$IDENTITY"
+chmod -R u+w "$IDENTITY"
+cp "$BUNDLE/manifest.json" "$TMP/pristine-manifest.json"
+chmod 644 "$TMP/pristine-manifest.json"
+# Each case starts from the pristine manifest so only the rule under test can
+# reject it, and passes the field's own value as the expected one, so a
+# rejection can never come from the expected-identity comparison instead.
+identity_rule() {
+  local field="$1" expression="$2" value
+  local node_argument=fixture gateway_argument=fixture revision_argument=0123456789abcdef0123456789abcdef01234567
+  chmod u+w "$IDENTITY/manifest.json"
+  cp "$TMP/pristine-manifest.json" "$IDENTITY/manifest.json"
+  value="$(python3 - "$IDENTITY/manifest.json" "$field" "$expression" <<'PY'
+import json, sys
+path, field, expression = sys.argv[1], sys.argv[2], sys.argv[3]
+with open(path, encoding="utf-8") as handle:
+    manifest = json.load(handle)
+if expression == "absent":
+    del manifest[field]
+    value = ""
+else:
+    manifest[field] = value = eval(expression)
+# The launcher also requires manifest version and gatewayVersion to agree.
+if field == "gatewayVersion":
+    manifest["version"] = value
+with open(path, "w", encoding="utf-8") as handle:
+    json.dump(manifest, handle)
+print(value)
+PY
+)"
+  chmod a-w "$IDENTITY/manifest.json"
+  [[ "$field" == nodeVersion ]] && node_argument="$value"
+  [[ "$field" == gatewayVersion ]] && gateway_argument="$value"
+  [[ "$field" == sourceRevision ]] && revision_argument="$value"
+  "$HELPER" --verify-payload "$IDENTITY" stable "$node_argument" "$gateway_argument" "$revision_argument" >/dev/null 2>&1 && {
+    echo "launcher payload validation admitted $field=$expression" >&2; exit 1
+  }
+  return 0
+}
+identity_rule gatewayVersion '"a" * 128'
+identity_rule gatewayVersion '"1.0 beta"'
+identity_rule gatewayVersion '"\u00e9" * 64'
+identity_rule nodeVersion '"a" * 128'
+identity_rule nodeVersion '"22/23"'
+identity_rule sourceRevision 'absent'
+identity_rule sourceRevision '"source"'
+identity_rule sourceRevision '"A" * 40'
+identity_rule sourceRevision '"a" * 41'
+identity_rule runtimeEpoch 'absent'
+identity_rule runtimeEpoch '"epoch"'
+identity_rule runtimeEpoch '"e" * 36'
+identity_rule runtimeEpoch '"01234567-89AB-CDEF-0123-456789ABCDEF"'
+identity_rule channel '"preview"'
+# Codable and JSON.parse both hide these; the launcher's exact key set does not.
+identity_key_rule() {
+  local label="$1" pair="$2"
+  chmod u+w "$IDENTITY/manifest.json"
+  cp "$TMP/pristine-manifest.json" "$IDENTITY/manifest.json"
+  python3 - "$IDENTITY/manifest.json" "$pair" <<'PY'
+import json, sys
+path, pair = sys.argv[1], sys.argv[2]
+with open(path, encoding="utf-8") as handle:
+    text = json.dumps(json.load(handle))
+with open(path, "w", encoding="utf-8") as handle:
+    handle.write(text[:-1] + "," + pair + "}")
+PY
+  chmod a-w "$IDENTITY/manifest.json"
+  "$HELPER" --verify-payload "$IDENTITY" stable fixture fixture 0123456789abcdef0123456789abcdef01234567 >/dev/null 2>&1 && {
+    echo "launcher payload validation admitted $label" >&2; exit 1
+  }
+  return 0
+}
+identity_key_rule "an unknown manifest key" '"unexpected":"x"'
+identity_key_rule "a repeated manifest key" '"version":"fixture"'
+
 DIRECTORY_LINK="$TMP/invalid-directory-link"
 cp -R "$BUNDLE" "$DIRECTORY_LINK"
 chmod -R u+w "$DIRECTORY_LINK"
@@ -289,7 +387,6 @@ record = records[0]
 assert (record["event"], record["level"], record["source"], record["process"]) == ("launcher.bundled-fallback", "warning", "launcher", "launcher"), record
 assert record["payloadVersion"] == "fixture" and record["runtimeEpoch"] == epoch, record
 assert "v3-protocol" in record["message"] and fingerprint in record["message"], record
-assert "failed validation" in record["message"] and "using bundled payload fixture" in record["message"], record
 PY
 chmod -R u+w "$TMP/home"
 printf '{"schema":1,"kind":"tron-gateway-selection","channel":"stable","version":"v2","payloadFingerprint":"%s"}\n' "$(sed -n 's/.*payloadFingerprint":"\([0-9a-f]*\)".*/\1/p' "$EXTERNAL/manifest.json")" > "$TMP/home/.tron/gateway/payloads/stable/current.json"

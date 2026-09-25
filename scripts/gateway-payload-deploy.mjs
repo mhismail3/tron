@@ -53,6 +53,11 @@ const SCHEMA = 1;
 const KIND = "tron-gateway-payload";
 const SELECTION_KIND = "tron-gateway-selection";
 const PAYLOAD_FINGERPRINT_COVERAGE = "app/** and runtime/** regular files";
+// The launcher requires exactly these keys once, in this order-agnostic set.
+const MANIFEST_KEYS = [
+  "schema", "kind", "gatewayVersion", "protocolVersion", "minProtocolVersion", "nodeVersion",
+  "sourceRevision", "runtimeEpoch", "channel", "version", "payloadFingerprint", "dependencyTreeCoverage",
+];
 const PAYLOAD_PI_CLI = "app/node_modules/.bin/pi";
 const PAYLOAD_PI_ALIAS_TARGET = "../../app/node_modules/.bin/pi";
 const PROTOCOL_VERSION = 5;
@@ -310,6 +315,14 @@ async function completePayload(root) {
       throw new Error(`runtime is not executable: ${path}`);
     }
   }
+  for (const [path, maximum] of [
+    ["app/package.json", MAX_PACKAGE_JSON_BYTES],
+    ["app/package-lock.json", MAX_PACKAGE_LOCK_BYTES],
+  ]) {
+    // The Swift validator and the C launcher bound these two documents; an
+    // oversized one is a tampering signal even when the fingerprint matches it.
+    if ((await stat(join(resolved, path))).size > maximum) throw new Error(`payload document exceeds ${maximum} byte limit: ${path}`);
+  }
   await validateRuntimeNodeAlias(resolved, "arm64");
   await validateRuntimeNodeAlias(resolved, "x64");
   await validateRuntimeNpmAlias(resolved, "arm64");
@@ -374,12 +387,63 @@ async function payloadSubtreeFingerprint(root, prefix) {
   return createHash("sha256").update(lines.join("")).digest("hex");
 }
 
-async function json(path, maximum = MAX_MANIFEST_BYTES) {
+async function jsonDocument(path, maximum = MAX_MANIFEST_BYTES) {
   const info = await lstat(path);
   if (!info.isFile() || info.isSymbolicLink()) throw new Error(`${path} is not a regular file`);
   const data = await readFile(path);
   if (data.length === 0 || data.length > maximum) throw new Error(`${path} is missing, empty, or oversized`);
-  try { return JSON.parse(data); } catch { throw new Error(`${path} is not valid JSON`); }
+  try { return { text: data.toString("utf8"), value: JSON.parse(data) }; } catch { throw new Error(`${path} is not valid JSON`); }
+}
+
+async function json(path, maximum = MAX_MANIFEST_BYTES) {
+  return (await jsonDocument(path, maximum)).value;
+}
+
+/**
+ * The C launcher parses both payload documents with a bounded flat parser and
+ * admits no escapes, so it requires their exact key sets once each. JSON.parse
+ * would instead ignore an unknown key and keep the last of a repeated one,
+ * which is exactly the tampering signal this rejects.
+ */
+function keysAreExact(text, keys) {
+  let index = 0;
+  const skipSpace = () => { while (index < text.length && " \t\r\n".includes(text[index])) index += 1; };
+  const take = (character) => { if (text[index] !== character) return false; index += 1; return true; };
+  const readString = () => {
+    if (!take('"')) return undefined;
+    const start = index;
+    while (index < text.length && text[index] !== '"') {
+      const code = text.charCodeAt(index);
+      if (text[index] === "\\" || code < 0x20 || code === 0x7f) return undefined;
+      index += 1;
+    }
+    if (!take('"')) return undefined;
+    return text.slice(start, index - 1);
+  };
+  const seen = new Set();
+  skipSpace();
+  if (!take("{")) return false;
+  for (;;) {
+    skipSpace();
+    if (take("}")) {
+      skipSpace();
+      return index === text.length && seen.size === keys.length;
+    }
+    const key = readString();
+    if (key === undefined || !keys.includes(key) || seen.has(key)) return false;
+    seen.add(key);
+    skipSpace();
+    if (!take(":")) return false;
+    skipSpace();
+    if (key === "schema") {
+      if (!take("1")) return false;
+    } else if (readString() === undefined) {
+      return false;
+    }
+    skipSpace();
+    if (take(",")) continue;
+    if (text[index] !== "}") return false;
+  }
 }
 
 function gatewayTimestamp(value) {
@@ -435,16 +499,19 @@ export async function readLocalCredential(path) {
 }
 
 function payloadManifest(value, expected = {}) {
-  const safeIdentity = (item, maximum = 256) => typeof item === "string" && item.length > 0
-    && Buffer.byteLength(item) <= maximum && !/[\u0000-\u001f\u007f]/u.test(item);
+  // One identity policy across the Swift validator, this helper and the C
+  // launcher: component charset and byte limits, a 40-hex revision, a UUID
+  // epoch, and the two production channels.
   if (!value || typeof value !== "object" || Array.isArray(value)
     || value.schema !== SCHEMA || value.kind !== KIND
-    || !validComponent(value.channel, 64) || !validComponent(value.version, 128)
-    || !safeIdentity(value.gatewayVersion)
+    || (value.channel !== "stable" && value.channel !== "dev") || !validComponent(value.version, 128)
+    || !validComponent(value.gatewayVersion, 127)
     || value.protocolVersion !== String(PROTOCOL_VERSION)
     || value.minProtocolVersion !== String(MIN_PROTOCOL_VERSION)
-    || !safeIdentity(value.nodeVersion)
-    || !safeIdentity(value.sourceRevision) || !validComponent(value.runtimeEpoch, 128) || !fingerprint(value.payloadFingerprint)
+    || !validComponent(value.nodeVersion, 127)
+    || !/^[0-9a-f]{40}$/u.test(value.sourceRevision ?? "")
+    || !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/u.test(value.runtimeEpoch ?? "")
+    || !fingerprint(value.payloadFingerprint)
     || value.dependencyTreeCoverage !== PAYLOAD_FINGERPRINT_COVERAGE) {
     throw new Error("payload manifest identity is invalid");
   }
@@ -523,7 +590,9 @@ async function assertCompiledImportsShipped(root) {
 export async function validatePayload(root, expected = {}, checkFingerprint = true) {
   await completePayload(root);
   await assertCompiledImportsShipped(root);
-  const manifest = payloadManifest(await json(join(root, "manifest.json")), expected);
+  const document = await jsonDocument(join(root, "manifest.json"));
+  if (!keysAreExact(document.text, MANIFEST_KEYS)) throw new Error("payload manifest keys are not the canonical set");
+  const manifest = payloadManifest(document.value, expected);
   await validatePayloadPushConfiguration(root, manifest.channel);
   if (checkFingerprint) {
     const actual = await payloadFingerprint(root);
@@ -1157,11 +1226,18 @@ function args() {
 }
 
 async function gitRevision(cwd) {
+  let revision = "";
   try {
     const { execFile } = await import("node:child_process");
     const { promisify } = await import("node:util");
-    return (await promisify(execFile)("git", ["rev-parse", "HEAD"], { cwd, encoding: "utf8" })).stdout.trim() || "unknown";
-  } catch { return "unknown"; }
+    revision = (await promisify(execFile)("git", ["rev-parse", "HEAD"], { cwd, encoding: "utf8" })).stdout.trim();
+  } catch { revision = ""; }
+  // A manifest must carry the commit identity the launcher requires; a
+  // placeholder would produce a payload that can never be selected.
+  if (!/^[0-9a-f]{40}$/u.test(revision)) {
+    throw new Error("source revision is unavailable: a payload manifest requires the 40-hex commit identity");
+  }
+  return revision;
 }
 
 async function copyTrustedSourceScripts(sourceRoot, candidateRoot) {

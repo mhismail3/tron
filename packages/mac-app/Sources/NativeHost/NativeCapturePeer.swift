@@ -62,7 +62,7 @@ public struct NativeCaptureContext: Sendable {
     let teamRequirement: String
     var helper: URL { outerBundle.appendingPathComponent("Contents/Library/LoginItems/Tron Agent.app/Contents/MacOS/tron") }
     var store: GatewayPayloadStore {
-        GatewayPayloadStore(home: FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(".tron"), channel: "stable")
+        GatewayPayloadStore(home: FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(TronGatewayProfile.stable.homeName), channel: TronGatewayProfile.stable.channel)
     }
     func payload() throws -> GatewayPayloadValidationResult {
         guard let result = GatewayPayloadResolver.resolve(

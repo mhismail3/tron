@@ -11,8 +11,6 @@ EXPECTED_CHANNEL="${3:-stable}"
 NODE_VERSION_FILE="$REPO_ROOT/.node-version"
 # shellcheck disable=SC1091
 source "$REPO_ROOT/config/ci-toolchain.env"
-NODE_ARM64_SHA256="913b144fdb40638b1acef7974ab3c33fbd527cc0974cb5da467ab1e6ac51b4d4"
-NODE_X64_SHA256="bf0e0ff20d4e5a16436d1ec372e47161e52be8e487db8070ae3f06b01efbba0c"
 
 [[ $# -ge 2 && $# -le 3 && ( "$EXPECTED_CHANNEL" == stable || "$EXPECTED_CHANNEL" == dev ) ]] || {
     echo "usage: verify-gateway-payload.sh PAYLOAD_ROOT STAGED_HELPER [stable|dev]" >&2; exit 64;
@@ -50,9 +48,9 @@ NODE_VERSION_LINES="$(awk 'END { print NR }' "$NODE_VERSION_FILE")"
 
 # Check the publication mode before invoking any verifier. The C verifier also
 # checks this recursively, including the manifest, while this explicit check
-# keeps the policy visible and rejects writable special paths before Xcode.
-if find "$PAYLOAD_DIR" -type f -perm -022 -print -quit | grep -q . ||
-   find "$PAYLOAD_DIR" -type d -perm -022 -print -quit | grep -q .; then
+# keeps the policy visible and rejects any write bit (S_IWUSR|S_IWGRP|S_IWOTH,
+# as `immutable_tree` does) before Xcode runs.
+if find "$PAYLOAD_DIR" \( -type f -o -type d \) \( -perm +200 -o -perm +020 -o -perm +002 \) -print -quit | grep -q .; then
     fail "published payload tree is writable"
 fi
 
@@ -86,16 +84,17 @@ done
 validate_runtime() {
     local arch="$1" expected_sha="$2" expected_arch="arm64" path="$PAYLOAD_DIR/runtime/node-$1"
     [[ "$arch" == x64 ]] && expected_arch="x86_64"
-    local actual_sha file_description lipo_arches
+    local actual_sha file_description
     actual_sha="$(shasum -a 256 "$path" | awk '{print $1}')" || fail "cannot hash Node $arch runtime"
     [[ "$actual_sha" == "$expected_sha" ]] || fail "Node $arch runtime checksum mismatch"
     file_description="$(file "$path" 2>/dev/null)" || fail "cannot inspect Node $arch runtime"
     [[ "$file_description" == *Mach-O* ]] || fail "Node $arch runtime is not Mach-O"
-    lipo_arches="$(lipo -archs "$path" 2>/dev/null)" || fail "cannot inspect Node $arch architecture"
-    [[ "$lipo_arches" == "$expected_arch" ]] || fail "Node $arch runtime architecture mismatch"
+    # One architecture-set owner shared with the bundle and DMG scripts.
+    "$SCRIPT_DIR/verify-macho-architectures.sh" "$path" "$expected_arch" >/dev/null ||
+        fail "Node $arch runtime architecture mismatch"
 }
-validate_runtime arm64 "$NODE_ARM64_SHA256"
-validate_runtime x64 "$NODE_X64_SHA256"
+validate_runtime arm64 "$TRON_NODE_ARM64_RUNTIME_SHA256"
+validate_runtime x64 "$TRON_NODE_X64_RUNTIME_SHA256"
 xcodegen_presets_hash() {
     local root="$1"
     (
@@ -114,9 +113,8 @@ XCODEGEN_PRESETS="$PAYLOAD_DIR/runtime/xcodegen/share/xcodegen"
     || fail "XcodeGen presets checksum mismatch"
 [[ "$("$XCODEGEN" --version 2>/dev/null)" == "Version: $TRON_CI_XCODEGEN_VERSION" ]] \
     || fail "XcodeGen version is not canonical"
-XCODEGEN_ARCHES="$(lipo -archs "$XCODEGEN" 2>/dev/null || true)"
-[[ " $XCODEGEN_ARCHES " == *" arm64 "* && " $XCODEGEN_ARCHES " == *" x86_64 "* ]] \
-    || fail "XcodeGen executable is not universal arm64/x86_64"
+"$SCRIPT_DIR/verify-macho-architectures.sh" "$XCODEGEN" arm64 x86_64 >/dev/null 2>&1 ||
+    fail "XcodeGen executable is not universal arm64/x86_64"
 if find "$PAYLOAD_DIR/runtime/xcodegen" -type l -print -quit | grep -q .; then
     fail "XcodeGen toolchain contains a symlink"
 fi
@@ -168,16 +166,7 @@ HELPER_CONTENTS="$(cd "$(dirname "$HELPER")/.." && pwd -P)"
 [[ -d "$HELPER_CONTENTS/MacOS" && -d "$HELPER_CONTENTS/Resources" ]] || fail "helper app directories are incomplete"
 helper_file="$(file "$HELPER" 2>/dev/null)" || fail "cannot inspect staged helper"
 [[ "$helper_file" == *Mach-O* ]] || fail "staged helper is not Mach-O"
-helper_arches="$(lipo -archs "$HELPER" 2>/dev/null)" || fail "cannot inspect staged helper architectures"
-helper_has_arm64=0
-helper_has_x86_64=0
-helper_arch_count=0
-for helper_arch in $helper_arches; do
-    ((helper_arch_count += 1))
-    [[ "$helper_arch" == arm64 ]] && helper_has_arm64=1
-    [[ "$helper_arch" == x86_64 ]] && helper_has_x86_64=1
-done
-[[ "$helper_arch_count" == 2 && "$helper_has_arm64" == 1 && "$helper_has_x86_64" == 1 ]] ||
+"$SCRIPT_DIR/verify-macho-architectures.sh" "$HELPER" arm64 x86_64 >/dev/null 2>&1 ||
     fail "staged helper is not the expected universal executable"
 TRUSTED_TEMP="$(mktemp -d "${TMPDIR:-/tmp}/tron-gateway-verifier.XXXXXX")"
 trap 'rm -rf "$TRUSTED_TEMP"' EXIT

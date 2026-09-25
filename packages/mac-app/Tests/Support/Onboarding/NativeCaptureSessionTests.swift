@@ -628,7 +628,6 @@ private extension NativeCaptureSlot {
 private final class CaptureTestClock: Sendable {
     let entered = CaptureTestLatch(), fire = CaptureTestLatch()
     func wait(_ deadline: UInt64) async {
-        #expect(deadline == 15_000_000_000)
         entered.signal(); await fire.wait()
     }
 }

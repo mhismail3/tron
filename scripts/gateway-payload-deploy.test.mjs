@@ -2,6 +2,8 @@ import { strict as assert } from "node:assert";
 import { watch } from "node:fs";
 import { chmod, cp, lstat, mkdir, mkdtemp, readFile, readlink, readdir, realpath, rename, rm, stat, symlink, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
+import { execFile } from "node:child_process";
+import { promisify } from "node:util";
 import { tmpdir } from "node:os";
 import { test } from "node:test";
 
@@ -302,6 +304,8 @@ test("restored selection clears a mismatched candidate attempt marker", async ()
       current: Buffer.from(`${JSON.stringify(current)}\n`),
       previous: Buffer.from(`${JSON.stringify(previous)}\n`),
     }).then(() => { restored = true; });
+    // Durability requirement: restore must take the same shared lock as
+    // promotion, so it stays pending while another writer holds it.
     await new Promise((resolve) => setTimeout(resolve, 50));
     assert.equal(restored, false);
     assert.deepEqual(JSON.parse(await readFile(store.current, "utf8")), candidate);
@@ -334,6 +338,8 @@ test("automatic rollback switches selection and clears its attempt under the sha
     await mkdir(lock);
     let rolledBack = false;
     const rollingBack = rollbackSelectionAndClearAttempt(store).then(() => { rolledBack = true; });
+    // Durability requirement: rollback must wait for the same shared lock as
+    // promotion instead of switching selection under a foreign writer.
     await new Promise((resolve) => setTimeout(resolve, 50));
     assert.equal(rolledBack, false);
     await rm(lock, { recursive: true });
@@ -462,7 +468,7 @@ test("payload fingerprints include safe internal node_modules symlinks", async (
     const sourceFingerprint = await payloadFingerprint(versionRoot);
     await writeFile(join(versionRoot, "manifest.json"), `${JSON.stringify({
       schema: 1, kind: "tron-gateway-payload", channel: "dev", version: "source",
-      gatewayVersion: "1", protocolVersion: "5", minProtocolVersion: "5", nodeVersion: "22", sourceRevision: "source", runtimeEpoch: "source-epoch",
+      gatewayVersion: "1", protocolVersion: "5", minProtocolVersion: "5", nodeVersion: "22", sourceRevision: "0123456789abcdef0123456789abcdef01234567", runtimeEpoch: "01234567-89ab-cdef-0123-456789abcdef",
       payloadFingerprint: sourceFingerprint, dependencyTreeCoverage: "app/** and runtime/** regular files",
     })}\n`);
 
@@ -524,7 +530,7 @@ test("source build failure leaves active selection and deployment state unchange
     await chmod(join(versionRoot, "runtime", "node-x64"), 0o755);
     await addRuntimeNodeAliases(versionRoot);
     const fingerprint = await payloadFingerprint(versionRoot);
-    const manifest = { schema: 1, kind: "tron-gateway-payload", channel: "stable", version: "active", gatewayVersion: "1", protocolVersion: "5", minProtocolVersion: "5", nodeVersion: "22", sourceRevision: "source", runtimeEpoch: "epoch", payloadFingerprint: fingerprint, dependencyTreeCoverage: "app/** and runtime/** regular files" };
+    const manifest = { schema: 1, kind: "tron-gateway-payload", channel: "stable", version: "active", gatewayVersion: "1", protocolVersion: "5", minProtocolVersion: "5", nodeVersion: "22", sourceRevision: "0123456789abcdef0123456789abcdef01234567", runtimeEpoch: "01234567-89ab-cdef-0123-456789abcdef", payloadFingerprint: fingerprint, dependencyTreeCoverage: "app/** and runtime/** regular files" };
     await writeFile(join(versionRoot, "manifest.json"), `${JSON.stringify(manifest)}\n`);
     await mkdir(store.channelRoot, { recursive: true });
     await writeFile(store.current, `${JSON.stringify(selection("active", fingerprint))}\n`);
@@ -617,6 +623,8 @@ test("source runtime base copy rejects a projection changed after admission", as
   } finally { await rm(root, { recursive: true, force: true }); }
 });
 
+const execFileAsync = promisify(execFile);
+
 async function makeSourceBuildFixture(root) {
   const store = await paths(root);
   const sourceRoot = join(root, "source");
@@ -636,6 +644,11 @@ async function makeSourceBuildFixture(root) {
   for (const [path, content] of Object.entries(sourceFiles)) {
     await writeFile(join(gatewayRoot, path), content);
   }
+  // The source revision is read from the checkout's git metadata and the
+  // manifest must carry a 40-hex commit, so the fixture is a real repository.
+  await execFileAsync("git", ["init", "-q"], { cwd: sourceRoot });
+  await execFileAsync("git", ["-c", "user.email=fixture@example.test", "-c", "user.name=Fixture",
+    "commit", "-q", "--allow-empty", "-m", "fixture source"], { cwd: sourceRoot });
   const versionRoot = join(store.versionsRoot, "active");
   await mkdir(join(versionRoot, "app", "dist"), { recursive: true });
   await mkdir(join(versionRoot, "app", "scripts"), { recursive: true });
@@ -660,7 +673,7 @@ async function makeSourceBuildFixture(root) {
   await chmod(join(versionRoot, "runtime", "node-x64"), 0o755);
   await addRuntimeNodeAliases(versionRoot);
   const fingerprint = await payloadFingerprint(versionRoot);
-  const activeManifest = { schema: 1, kind: "tron-gateway-payload", channel: "stable", version: "active", gatewayVersion: "1", protocolVersion: "5", minProtocolVersion: "5", nodeVersion: "22", sourceRevision: "source", runtimeEpoch: "epoch", payloadFingerprint: fingerprint, dependencyTreeCoverage: "app/** and runtime/** regular files" };
+  const activeManifest = { schema: 1, kind: "tron-gateway-payload", channel: "stable", version: "active", gatewayVersion: "1", protocolVersion: "5", minProtocolVersion: "5", nodeVersion: "22", sourceRevision: "0123456789abcdef0123456789abcdef01234567", runtimeEpoch: "01234567-89ab-cdef-0123-456789abcdef", payloadFingerprint: fingerprint, dependencyTreeCoverage: "app/** and runtime/** regular files" };
   await writeFile(join(versionRoot, "manifest.json"), `${JSON.stringify(activeManifest)}\n`);
   await mkdir(store.channelRoot, { recursive: true });
   await writeFile(store.current, `${JSON.stringify(selection("active", fingerprint))}\n`);
@@ -811,7 +824,8 @@ async function makePreflightFixture(root) {
   const fingerprint = await payloadFingerprint(payload);
   await writeFile(join(payload, "manifest.json"), JSON.stringify({
     schema: 1, kind: "tron-gateway-payload", channel: "stable", version: "preflight",
-    gatewayVersion: "1", protocolVersion: "5", minProtocolVersion: "5", nodeVersion: "22", sourceRevision: "source", runtimeEpoch: "epoch",
+    gatewayVersion: "1", protocolVersion: "5", minProtocolVersion: "5", nodeVersion: "22",
+    sourceRevision: "0123456789abcdef0123456789abcdef01234567", runtimeEpoch: "01234567-89ab-cdef-0123-456789abcdef",
     payloadFingerprint: fingerprint, dependencyTreeCoverage: "app/** and runtime/** regular files",
   }));
   return payload;
@@ -962,7 +976,52 @@ test("runtime Node and Pi aliases are exact required command links", async () =>
     const manifest = JSON.parse(await readFile(manifestPath, "utf8"));
     delete manifest.dependencyTreeCoverage;
     await writeFile(manifestPath, JSON.stringify(manifest));
-    await assert.rejects(validatePayload(missingCoverage, { channel: "stable" }, true), /manifest identity/);
+    await assert.rejects(validatePayload(missingCoverage, { channel: "stable" }, true), /manifest keys/);
+  } finally { await rm(root, { recursive: true, force: true }); }
+});
+
+test("payload manifest identity and key set match the launcher's exact parser", async () => {
+  const root = await mkdtemp(join(tmpdir(), "tron-payload-identity-"));
+  try {
+    const payload = await makePreflightFixture(join(root, "fixture"));
+    const manifestPath = join(payload, "manifest.json");
+    const pristine = await readFile(manifestPath, "utf8");
+    const identity = JSON.parse(pristine);
+    const rewrite = (manifest) => writeFile(manifestPath, JSON.stringify(manifest));
+    await validatePayload(payload, {}, false);
+
+    // One rejected row per identity rule the launcher enforces; JSON.parse alone
+    // would admit every one of these.
+    for (const [field, value] of [
+      ["gatewayVersion", "a".repeat(128)],
+      ["gatewayVersion", "1.0 beta"],
+      ["gatewayVersion", "é".repeat(64)],
+      ["nodeVersion", "a".repeat(128)],
+      ["nodeVersion", "22/23"],
+      ["sourceRevision", "source"],
+      ["sourceRevision", "A".repeat(40)],
+      ["sourceRevision", "a".repeat(41)],
+      ["runtimeEpoch", "epoch"],
+      ["runtimeEpoch", "e".repeat(36)],
+      ["runtimeEpoch", "01234567-89AB-CDEF-0123-456789ABCDEF"],
+      ["channel", "preview"],
+    ]) {
+      await rewrite({ ...identity, [field]: value });
+      await assert.rejects(validatePayload(payload, {}, false), /manifest identity/, `${field}=${value}`);
+    }
+    await rewrite({ ...identity, gatewayVersion: "a".repeat(127), nodeVersion: "a".repeat(127) });
+    await validatePayload(payload, {}, false);
+
+    // Codable and JSON.parse both hide these; the launcher's exact key set does not.
+    await writeFile(manifestPath, `${pristine.slice(0, -1)},"unexpected":"x"}`);
+    await assert.rejects(validatePayload(payload, {}, false), /manifest keys/);
+    await writeFile(manifestPath, `${pristine.slice(0, -1)},"version":"preflight"}`);
+    await assert.rejects(validatePayload(payload, {}, false), /manifest keys/);
+    await writeFile(manifestPath, pristine);
+
+    // The two package documents carry the Swift validator's upper limits.
+    await writeFile(join(payload, "app", "package.json"), `{"padding":"${"p".repeat(65_536)}"}`);
+    await assert.rejects(validatePayload(payload, {}, false), /byte limit/);
   } finally { await rm(root, { recursive: true, force: true }); }
 });
 
@@ -1485,7 +1544,7 @@ test("Debug handoff copies exact bytes only after post-proof and leaves Stable i
     const stableHome = join(root, "stable-home");
     const stagedDev = await stagePayload({
       home: devHome, channel: "dev", source: bundledStable,
-      version: "tested-debug", sourceRevision: "tested-revision",
+      version: "tested-debug", sourceRevision: "0123456789abcdef0123456789abcdef01234567",
     });
     const devChannel = join(devHome, "gateway", "payloads", "dev");
     await writeFile(join(devChannel, "current.json"), `${JSON.stringify({

@@ -6,8 +6,6 @@ set -euo pipefail
 REPO_ROOT="$(cd "$(dirname "$0")/../../.." && pwd -P)"
 # shellcheck disable=SC1091
 source "$REPO_ROOT/config/ci-toolchain.env"
-NODE_ARM64_SHA256="913b144fdb40638b1acef7974ab3c33fbd527cc0974cb5da467ab1e6ac51b4d4"
-NODE_X64_SHA256="bf0e0ff20d4e5a16436d1ec372e47161e52be8e487db8070ae3f06b01efbba0c"
 
 usage() {
     echo "Usage: package-dmg.sh --app PATH --output PATH --volume-name NAME --layout structural|release"
@@ -151,7 +149,7 @@ verify_app_bundle() {
             runtime_arch=x64
         fi
         [ -x "$runtime" ] || die "Node $expected_arch runtime is not executable"
-        if [[ "$expected_arch" == arm64 ]]; then expected_sha="$NODE_ARM64_SHA256"; else expected_sha="$NODE_X64_SHA256"; fi
+        if [[ "$expected_arch" == arm64 ]]; then expected_sha="$TRON_NODE_ARM64_RUNTIME_SHA256"; else expected_sha="$TRON_NODE_X64_RUNTIME_SHA256"; fi
         [[ "$(shasum -a 256 "$runtime" | awk '{print $1}')" == "$expected_sha" ]] \
             || die "Node $expected_arch runtime checksum is not canonical"
         codesign --verify --strict "$runtime" >/dev/null 2>&1 \

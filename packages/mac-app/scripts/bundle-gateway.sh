@@ -39,8 +39,6 @@ MIN_PROTOCOL_VERSION="$(python3 -c 'import json,sys; print(json.load(open(sys.ar
 }
 # Pinned binary integrity metadata. The canonical version remains .node-version;
 # these hashes only authorize the exact runtime artifacts staged below.
-NODE_ARM64_SHA256="913b144fdb40638b1acef7974ab3c33fbd527cc0974cb5da467ab1e6ac51b4d4"
-NODE_X64_SHA256="bf0e0ff20d4e5a16436d1ec372e47161e52be8e487db8070ae3f06b01efbba0c"
 if [[ -n "${NVM_DIR:-}" && "$NVM_DIR" != /* ]]; then
     echo "relative NVM_DIR is not allowed" >&2
     exit 127
@@ -339,36 +337,25 @@ validate_node_runtime() {
         exit 3
     }
 
-    local file_tool lipo_tool file_description lipo_arches
+    local file_tool file_description
     file_tool="$(command -v file 2>/dev/null || true)"
-    lipo_tool="$(command -v lipo 2>/dev/null || true)"
-    [[ -n "$file_tool" || -n "$lipo_tool" ]] || {
-        echo "unable to verify Mach-O architecture: neither file nor lipo is available" >&2
+    [[ -n "$file_tool" ]] || {
+        echo "unable to verify Mach-O type: file is unavailable" >&2
         exit 3
     }
-    if [[ -n "$file_tool" ]]; then
-        file_description="$("$file_tool" "$destination")" || {
-            echo "unable to inspect staged Node $arch runtime" >&2
-            exit 3
-        }
-        [[ "$file_description" == *"Mach-O"* ]] || {
-            echo "Node $arch runtime is not a Mach-O binary" >&2
-            exit 3
-        }
-    fi
-    if [[ -n "$lipo_tool" ]]; then
-        lipo_arches="$("$lipo_tool" -archs "$destination" 2>/dev/null)" || {
-            echo "unable to inspect staged Node $arch architecture" >&2
-            exit 3
-        }
-        [[ "$lipo_arches" == "$expected_arch" ]] || {
-            echo "Node $arch architecture mismatch (expected $expected_arch, got $lipo_arches)" >&2
-            exit 3
-        }
-    elif [[ "$file_description" != *"$expected_arch"* ]]; then
+    file_description="$("$file_tool" "$destination")" || {
+        echo "unable to inspect staged Node $arch runtime" >&2
+        exit 3
+    }
+    [[ "$file_description" == *"Mach-O"* ]] || {
+        echo "Node $arch runtime is not a Mach-O binary" >&2
+        exit 3
+    }
+    # One architecture-set owner for every Mach-O check in the payload scripts.
+    "$SCRIPT_DIR/verify-macho-architectures.sh" "$destination" "$expected_arch" || {
         echo "Node $arch architecture mismatch (expected $expected_arch)" >&2
         exit 3
-    fi
+    }
 }
 
 validate_npm_runtime() {
@@ -488,10 +475,15 @@ cp "$REPO_ROOT/scripts/gateway-payload-deploy.mjs" "$APP_DIR/scripts/"
 # npm prune in the source tree would damage developer dependencies. Install an
 # independent production tree directly into the generated app payload.
 (cd "$APP_DIR" && "$NPM_BIN" ci --omit=dev --ignore-scripts=false)
+# node-pty loads only prebuilds/${process.platform}-${process.arch}, so the
+# Windows prebuilds npm ci installs can never load from this signed payload.
+for windows_prebuild in win32-arm64 win32-x64; do
+    safe_remove_tree "$APP_DIR/node_modules/node-pty/prebuilds/$windows_prebuild"
+done
 "$NODE_BIN" "$GATEWAY_DIR/scripts/check-pi-sdk.mjs" --runtime-tree "$APP_DIR"
 
-stage_node arm64 "$NODE_ARM64_SHA256"
-stage_node x64 "$NODE_X64_SHA256"
+stage_node arm64 "$TRON_NODE_ARM64_RUNTIME_SHA256"
+stage_node x64 "$TRON_NODE_X64_RUNTIME_SHA256"
 stage_xcodegen
 
 # Provide an immutable architecture-specific command named `node` for hosted
@@ -557,7 +549,14 @@ done
 cp "$RESOURCES_DIR/AppIcon.icns" "$HELPER_DIR/Resources/AppIcon.icns"
 
 GATEWAY_VERSION="$("$NODE_BIN" -p "require('$GATEWAY_DIR/package.json').version")"
-SOURCE_REVISION="$(git -C "$REPO_ROOT" rev-parse HEAD 2>/dev/null || printf 'unknown')"
+# The manifest cannot carry a placeholder revision: the launcher requires 40
+# lowercase hex characters, so a tree without git metadata fails here instead of
+# being built read-only and discarded.
+SOURCE_REVISION="$(git -C "$REPO_ROOT" rev-parse HEAD 2>/dev/null || true)"
+[[ "$SOURCE_REVISION" =~ ^[0-9a-f]{40}$ ]] || {
+    echo "source revision is unavailable: ${SOURCE_REVISION:-none} (expected 40 lowercase hex characters)" >&2
+    exit 3
+}
 RUNTIME_EPOCH="$(uuidgen | tr '[:upper:]' '[:lower:]')"
 # Hash the complete staged dependency tree, not merely the compiled entrypoint.
 # The helper is standalone so release validation can exercise the same coverage.

@@ -15,10 +15,15 @@ struct GatewayPayloadStore {
     static let maxPushConfigurationBytes = 4 * 1024
     static let channelComponentLimit = 64
     static let versionComponentLimit = 128
-    static let gatewayVersionByteLimit = 127
-    static let nodeVersionByteLimit = 127
-    static let sourceRevisionByteLimit = 255
-    static let runtimeEpochComponentLimit = 127
+    static let gatewayVersionComponentLimit = 127
+    static let nodeVersionComponentLimit = 127
+    /// The launcher's `json_manifest_exact` requires this exact flat key set,
+    /// each key once, and the selection pointer's five keys the same way.
+    static let manifestKeys = [
+        "schema", "kind", "gatewayVersion", "protocolVersion", "minProtocolVersion", "nodeVersion",
+        "sourceRevision", "runtimeEpoch", "channel", "version", "payloadFingerprint", "dependencyTreeCoverage",
+    ]
+    static let selectionKeys = ["schema", "kind", "channel", "version", "payloadFingerprint"]
     static let fingerprintCoverage = "app/** and runtime/** regular files"
     static let piCLIRelativePath = "app/node_modules/.bin/pi"
     static let piAliasTarget = "../../app/node_modules/.bin/pi"
@@ -61,6 +66,82 @@ struct GatewayPayloadStore {
         return value.utf8.allSatisfy {
             ($0 >= 0x41 && $0 <= 0x5a) || ($0 >= 0x61 && $0 <= 0x7a)
                 || ($0 >= 0x30 && $0 <= 0x39) || $0 == 0x2e || $0 == 0x2d || $0 == 0x5f
+        }
+    }
+
+    /// The launcher's `valid_revision`: exactly 40 lowercase hex characters.
+    static func validSourceRevision(_ value: String) -> Bool {
+        value.utf8.count == 40 && value.utf8.allSatisfy {
+            ($0 >= 0x30 && $0 <= 0x39) || ($0 >= 0x61 && $0 <= 0x66)
+        }
+    }
+
+    /// The launcher's `valid_uuid`: exactly 36 lowercase hex characters with
+    /// dashes at the four canonical positions.
+    static func validRuntimeEpoch(_ value: String) -> Bool {
+        let bytes = Array(value.utf8)
+        guard bytes.count == 36 else { return false }
+        for (index, byte) in bytes.enumerated() {
+            if index == 8 || index == 13 || index == 18 || index == 23 {
+                guard byte == 0x2d else { return false }
+                continue
+            }
+            guard (0x30...0x39).contains(byte) || (0x61...0x66).contains(byte) else { return false }
+        }
+        return true
+    }
+
+    /// The launcher parses these documents with a bounded flat parser and
+    /// admits no escapes, so a key set is exact and every value is either the
+    /// schema digit or an unescaped string. `Codable` would ignore an unknown
+    /// key and keep the last of a repeated one, which is exactly the tampering
+    /// signal this rejects.
+    static func keysAreExact(_ data: Data, keys: [String]) -> Bool {
+        let bytes = Array(data)
+        var index = 0
+        func skipSpace() {
+            while index < bytes.count,
+                  bytes[index] == 0x20 || bytes[index] == 0x09 || bytes[index] == 0x0a || bytes[index] == 0x0d {
+                index += 1
+            }
+        }
+        func take(_ byte: UInt8) -> Bool {
+            guard index < bytes.count, bytes[index] == byte else { return false }
+            index += 1
+            return true
+        }
+        func string() -> String? {
+            guard take(0x22) else { return nil }
+            var value: [UInt8] = []
+            while index < bytes.count, bytes[index] != 0x22 {
+                guard bytes[index] != 0x5c, bytes[index] >= 0x20, bytes[index] != 0x7f else { return nil }
+                value.append(bytes[index])
+                index += 1
+            }
+            guard take(0x22) else { return nil }
+            return String(decoding: value, as: UTF8.self)
+        }
+        var seen: Set<String> = []
+        skipSpace()
+        guard take(0x7b) else { return false }
+        while true {
+            skipSpace()
+            if take(0x7d) {
+                skipSpace()
+                return index == bytes.count && seen.count == keys.count
+            }
+            guard let key = string(), keys.contains(key), seen.insert(key).inserted else { return false }
+            skipSpace()
+            guard take(0x3a) else { return false }
+            skipSpace()
+            if key == "schema" {
+                guard take(0x31) else { return false }
+            } else {
+                guard string() != nil else { return false }
+            }
+            skipSpace()
+            if take(0x2c) { continue }
+            guard index < bytes.count, bytes[index] == 0x7d else { return false }
         }
     }
 }
@@ -205,6 +286,9 @@ enum GatewayPayloadValidator {
               let data = boundedData(at: manifestURL, fileManager: fileManager) else {
             return .failure(.missing("manifest.json"))
         }
+        guard GatewayPayloadStore.keysAreExact(data, keys: GatewayPayloadStore.manifestKeys) else {
+            return .failure(.invalidManifest("manifest keys"))
+        }
         let manifest: GatewayPayloadManifest
         do {
             manifest = try JSONDecoder().decode(GatewayPayloadManifest.self, from: data)
@@ -215,14 +299,12 @@ enum GatewayPayloadValidator {
               manifest.kind == GatewayPayloadManifest.payloadKind,
               GatewayPayloadStore.validChannel(manifest.channel),
               GatewayPayloadStore.validComponent(manifest.version, maximumLength: GatewayPayloadStore.versionComponentLimit),
-              !manifest.gatewayVersion.isEmpty,
-              manifest.gatewayVersion.utf8.count <= GatewayPayloadStore.gatewayVersionByteLimit,
+              GatewayPayloadStore.validComponent(manifest.gatewayVersion, maximumLength: GatewayPayloadStore.gatewayVersionComponentLimit),
               manifest.protocolVersion == String(TronGatewayProtocolContract.protocolVersion),
               manifest.minProtocolVersion == String(TronGatewayProtocolContract.minimumProtocolVersion),
-              !manifest.nodeVersion.isEmpty,
-              manifest.nodeVersion.utf8.count <= GatewayPayloadStore.nodeVersionByteLimit,
-              manifest.sourceRevision.map({ !$0.isEmpty && $0.utf8.count <= GatewayPayloadStore.sourceRevisionByteLimit }) == true,
-              manifest.runtimeEpoch.map({ GatewayPayloadStore.validComponent($0, maximumLength: GatewayPayloadStore.runtimeEpochComponentLimit) }) == true,
+              GatewayPayloadStore.validComponent(manifest.nodeVersion, maximumLength: GatewayPayloadStore.nodeVersionComponentLimit),
+              manifest.sourceRevision.map(GatewayPayloadStore.validSourceRevision) == true,
+              manifest.runtimeEpoch.map(GatewayPayloadStore.validRuntimeEpoch) == true,
               manifest.dependencyTreeCoverage == GatewayPayloadStore.fingerprintCoverage,
               isFingerprint(manifest.payloadFingerprint) else {
             return .failure(.invalidManifest("manifest identity"))
@@ -349,6 +431,9 @@ enum GatewayPayloadValidator {
         }
         guard let data = boundedData(at: currentManifest, fileManager: fileManager) else {
             return .failure(.missing("current.json"))
+        }
+        guard GatewayPayloadStore.keysAreExact(data, keys: GatewayPayloadStore.selectionKeys) else {
+            return .failure(.invalidManifest("selection keys"))
         }
         let selection: GatewayPayloadSelection
         do {

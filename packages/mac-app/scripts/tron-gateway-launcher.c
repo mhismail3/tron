@@ -13,6 +13,8 @@
 #include <CommonCrypto/CommonDigest.h>
 
 #define MAX_MANIFEST_BYTES (64 * 1024)
+#define MAX_PACKAGE_JSON_BYTES (64 * 1024)
+#define MAX_PACKAGE_LOCK_BYTES (16 * 1024 * 1024)
 #define MAX_PUSH_CONFIG_BYTES (4 * 1024)
 #define MAX_COMPONENT_BYTES 128
 #define TRON_GATEWAY_PROTOCOL_VERSION "5"
@@ -172,6 +174,10 @@ static int valid_component(const char *value, size_t maxLength) {
     return 1;
 }
 
+static int valid_channel(const char *value) {
+    return strcmp(value, "stable") == 0 || strcmp(value, "dev") == 0;
+}
+
 static int valid_revision(const char *value) {
     if (strlen(value) != 40) return 0;
     for (size_t index = 0; index < 40; ++index) {
@@ -245,6 +251,17 @@ static int immutable_tree(const char *path, const char *root) {
     }
     closedir(directory);
     return result;
+}
+
+/* The Swift validator and the deployment helper bound the two package
+ * documents; an oversized one is a tampering signal even when its bytes match
+ * the fingerprint, so this launcher applies the same upper limits. */
+static int required_document(const char *root, const char *relative, off_t maximumBytes) {
+    char path[PATH_MAX];
+    struct stat info;
+    if (snprintf(path, sizeof(path), "%s/%s", root, relative) >= (int)sizeof(path) ||
+        lstat(path, &info) != 0 || !S_ISREG(info.st_mode) || info.st_size > maximumBytes) return -1;
+    return 0;
 }
 
 static int required_path(const char *root, const char *relative, char *resolved, size_t capacity,
@@ -487,7 +504,7 @@ static int read_payload_manifest(const char *root, PayloadIdentity *identity) {
         json_string(json, "channel", identity->channel, sizeof(identity->channel)) != 0 ||
         json_string(json, "version", identity->version, sizeof(identity->version)) != 0 ||
         json_string(json, "payloadFingerprint", identity->fingerprint, sizeof(identity->fingerprint)) != 0 ||
-        !valid_component(identity->channel, 64) || !valid_component(identity->version, 128) ||
+        !valid_channel(identity->channel) || !valid_component(identity->version, 128) ||
         !valid_fingerprint(identity->fingerprint)) return -1;
     return 0;
 }
@@ -577,6 +594,8 @@ static int validate_payload(const char *payload, const char *expectedChannel, co
     if (required_path(root, "app/dist/index.js", entrypoint, PATH_MAX, 0, 1024, 0) != 0 ||
         required_path(root, "app/package.json", node, PATH_MAX, 0, 1, 0) != 0 ||
         required_path(root, "app/package-lock.json", node, PATH_MAX, 0, 1, 0) != 0 ||
+        required_document(root, "app/package.json", MAX_PACKAGE_JSON_BYTES) != 0 ||
+        required_document(root, "app/package-lock.json", MAX_PACKAGE_LOCK_BYTES) != 0 ||
         required_path(root, "app/PushService.xcconfig", node, PATH_MAX, 0, 1, 0) != 0 ||
         validate_push_config(root, identity.channel) != 0 ||
         required_path(root, "app/scripts/ensure-node-pty-helper.mjs", node, PATH_MAX, 0, 1, 0) != 0 ||

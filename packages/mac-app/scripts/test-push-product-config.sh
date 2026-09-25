@@ -43,12 +43,12 @@ fi
 origin="$(sed -nE 's/^[[:space:]]*TRON_PUSH_SERVICE_ORIGIN[[:space:]]*=[[:space:]]*(.*)[[:space:]]*$/\1/p' "$REPO_ROOT/config/PushService.xcconfig")"
 if [[ -z "$origin" ]]; then
   set +e
-  output="$($SCRIPT_DIR/bundle-gateway.sh --skip-install --skip-download 2>&1)"
+  "$SCRIPT_DIR/bundle-gateway.sh" --skip-install --skip-download >/dev/null 2>&1
   status=$?
   set -e
-  [[ $status -eq 3 && "$output" == *"official builds require"* ]] || {
-    echo "unconfigured official payload did not fail closed" >&2
-    printf '%s\n' "$output" >&2
+  # Fail-closed exit status is the contract; the message wording is not.
+  [[ $status -eq 3 ]] || {
+    echo "unconfigured official payload did not fail closed: status $status" >&2
     exit 1
   }
 fi

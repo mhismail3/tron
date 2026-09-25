@@ -438,7 +438,42 @@ fingerprint before exporting identity; it bounds manifest reads, rejects
 escaping/dangling/special links and writable payload entries, resolves every
 executable/resource path with `realpath`, and exports provenance before `exec`. Invalid or absent external
 selection falls back to the bundled payload only after validating its
-authoritative manifest. The LaunchAgent exports the selected payload's validated
+authoritative manifest.
+
+### Payload identity rules
+
+One fail-closed policy decides whether a payload manifest is admissible, and
+three independent implementations enforce it: the signed C launcher during
+selection, `GatewayPayloadStore.swift` in the wrapper, and
+`gateway-payload-deploy.mjs` during staging and promotion. No implementation is
+allowed to be wider than the launcher. The table states each rule and what
+each side enforced before this policy was stated once.
+
+| rule | `bundle-gateway.sh` (writer) | C launcher | `GatewayPayloadStore.swift` | `gateway-payload-deploy.mjs` |
+| --- | --- | --- | --- | --- |
+| manifest keys | writes the twelve keys once | exactly these twelve, each once | ignored unknown and repeated keys, now exact | ignored unknown and repeated keys, now exact |
+| `schema` | integer `1` | literal `1` | `1` | `1` |
+| `kind` | `tron-gateway-payload` | exact | exact | exact |
+| `channel` | operation channel | any component ≤64 bytes, now `stable` or `dev` | `stable` or `dev` | any component ≤64 bytes, now `stable` or `dev` |
+| `version` | Gateway package version | component ≤128 | component ≤128 | component ≤128 |
+| `gatewayVersion` | Gateway package version | component ≤127 | non-empty ≤127 bytes, now component ≤127 | non-empty ≤256 bytes, now component ≤127 |
+| `nodeVersion` | canonical `.node-version` | component ≤127 | non-empty ≤127 bytes, now component ≤127 | non-empty ≤256 bytes, now component ≤127 |
+| `sourceRevision` | `git rev-parse HEAD`, refused unless 40 lowercase hex | exactly 40 lowercase hex | non-empty ≤255 bytes, now 40 lowercase hex | non-empty ≤256 bytes, now 40 lowercase hex |
+| `runtimeEpoch` | lowercase `uuidgen` | 36-character lowercase UUID | component ≤127, now a UUID | component ≤128, now a UUID |
+| `payloadFingerprint` | the launcher's `--fingerprint` | 64 lowercase hex | 64 lowercase hex | 64 lowercase hex |
+| `dependencyTreeCoverage` | exact coverage string | exact | exact | exact |
+| `protocolVersion`, `minProtocolVersion` | `config/GatewayProtocol.json` | compiled lockstep values | compiled lockstep values | compiled lockstep values |
+| `app/package.json`, `app/package-lock.json` | staged immutable | ≤64 KiB, ≤16 MiB | ≤64 KiB, ≤16 MiB | ≤64 KiB, ≤16 MiB |
+| selection pointer keys | writes the five keys once | exactly the five keys once | now exactly the five keys once | reads the five fields and compares them to the expected channel, version and fingerprint |
+
+The launcher parses both documents with a bounded flat parser that admits no
+escapes, which is why the key set and every value shape are checked before
+decoding; a decoder would silently keep the last of a repeated key. Payload
+admission also requires the immutable tree, the alias targets, the required
+files and the recomputed fingerprint described above. Each rule has a refused
+fixture: one per rule in `packages/mac-app/scripts/test-tron-gateway-launcher.sh`,
+the same table in `GatewayPayloadStoreTests`, and the identity and key cases in
+`scripts/gateway-payload-deploy.test.mjs`. The LaunchAgent exports the selected payload's validated
 `app/scripts/gateway-payload-deploy.mjs` as the only update helper; verified
 artifact promotion is wired, and source builds read only the validated
 `gateway/update-config.json` projection. Source mode compiles with the repository's
@@ -481,7 +516,10 @@ Source-built Gateway candidates inherit it byte-for-byte from the selected
 validated payload or, when a newer contract invalidates that predecessor, one
 explicit fully validated migration base: configured artifact, launcher-exported
 bundle, or prepared source-checkout bundle. The copied snapshot must still match
-its admitted manifest before mutation. The detached iOS installer receives its
+its admitted manifest before mutation. `node-pty` resolves only
+`prebuilds/<platform>-<arch>`, so bundle assembly deletes its `win32-arm64` and
+`win32-x64` prebuilds before the dependency tree is fingerprinted and sealed;
+the bytes were unreachable from the signed macOS payload. The detached iOS installer receives its
 absolute path through `TRON_XCODEGEN`, so launchd's sanitized `PATH` and
 machine-local package managers cannot alter project generation.
 
