@@ -1,7 +1,7 @@
 /**
  * A bounded caller wait paired with the underlying operation's settlement.
- * Abort only rejects `wait`; `settled` remains owned by the adapter boundary so
- * callers can retire lifecycle tokens after the provider really finishes.
+ * Abort rejects `wait`, not the provider; `settled` lets owners retain lifecycle
+ * state until the underlying operation really finishes.
  */
 export interface AbortableOperation<T> {
   wait: Promise<T>;
@@ -22,13 +22,4 @@ export function awaitAbortableWithSettlement<T>(promise: Promise<T>, signal: Abo
     );
   });
   return { wait, settled };
-}
-
-/**
- * Bounds the caller's wait without claiming that an uncooperative model has
- * stopped. Use `awaitAbortableWithSettlement` when the caller owns lifecycle
- * state that must remain active until the adapter promise settles.
- */
-export function awaitAbortable<T>(promise: Promise<T>, signal: AbortSignal, failure: () => Error): Promise<T> {
-  return awaitAbortableWithSettlement(promise, signal, failure).wait;
 }

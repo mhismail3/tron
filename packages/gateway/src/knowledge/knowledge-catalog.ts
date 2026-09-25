@@ -1,15 +1,5 @@
 import { DatabaseSync, type SQLInputValue } from "node:sqlite";
 
-export interface KnowledgeTable<T> {
-  readonly size: number;
-  get(key: string): T | undefined;
-  set(key: string, value: T): void;
-  delete(key: string): void;
-  entries(): IterableIterator<[string, T]>;
-  values(): IterableIterator<T>;
-  keys(): IterableIterator<string>;
-}
-
 export type CatalogCollection = "records" | "coverage" | "suppressions" | "scopeExclusions" | "receipts" | "imports" | "cleanup" | "recordCleanup" | "sourceIdentities";
 
 // Validate rows at their read/write boundary, without materializing the corpus.
@@ -63,7 +53,7 @@ function catalogValue<T>(collection: CatalogCollection, raw: unknown): T {
 
 // Escape keys as JSON strings: receipt keys contain NUL separators, and the
 // SQLite text-column binding must never truncate their command identity.
-class CatalogTable<T> implements KnowledgeTable<T> {
+class CatalogTable<T> {
   constructor(private readonly database: DatabaseSync, private readonly collection: CatalogCollection) {}
   get size(): number { return Number(this.database.prepare("SELECT count(*) AS count FROM entries WHERE collection = ?").get(this.collection)!.count); }
   get(key: string): T | undefined {
@@ -86,6 +76,8 @@ class CatalogTable<T> implements KnowledgeTable<T> {
     for (const row of this.database.prepare("SELECT key FROM entries WHERE collection = ? ORDER BY key").iterate(this.collection)) yield JSON.parse(String(row.key)) as string;
   }
 }
+
+export type KnowledgeTable<T> = Pick<CatalogTable<T>, keyof CatalogTable<T>>;
 
 /** Canonical catalog, not a mirror/cache. Immutable bodies remain in records/.
  * The store's workspace mutex owns every connection/transaction through close,

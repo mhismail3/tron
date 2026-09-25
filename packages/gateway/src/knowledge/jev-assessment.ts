@@ -6,7 +6,6 @@ import { JevDecisionClient, JEV_DEFAULT_MODEL, JEV_ENDPOINT, JEV_MAX_BODY_BYTES,
 
 export { JEV_ENDPOINT, JEV_MAX_STATE_BYTES };
 export const JEV_MODEL = JEV_DEFAULT_MODEL;
-export const JEV_REQUEST_MODEL = JEV_DEFAULT_MODEL;
 export const JEV_PROFILE_VERSION = "tron-source-profile-v2";
 export const JEV_RUBRIC_VERSION = "tron-source-rubric-v3";
 const PRICING = "typesafe-jev-1.13.0-input-0.042-usd-per-million-output-free" as const;

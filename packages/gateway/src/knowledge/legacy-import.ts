@@ -41,7 +41,7 @@ interface AssertionPlan { kind: "assertion"; legacy: LegacyAssertion; id: string
 type PlanItem = SourcePlan | EntityPlan | AssertionPlan;
 
 export interface LegacyImporterOptions {
-  /** Named roots are convenient for a UI; an explicit absolute path is also accepted. */
+  /** Configured checkout roots selected by their stable names. */
   roots?: Partial<Record<LegacyStoreName, string>>;
   now?: () => string;
 }
@@ -217,18 +217,14 @@ export class LegacyKnowledgeImporter {
   constructor(private readonly store: KnowledgeStore, private readonly options: LegacyImporterOptions = {}) {}
 
   private async resolveSource(source: string): Promise<{ root: string; store: LegacyStoreName }> {
-    if (typeof source !== "string" || source.length === 0 || source.length > 4_096) throw new Error("Import source must be an explicit named root or path");
+    if (typeof source !== "string" || source.length === 0 || source.length > 4_096) throw new Error("Import source must be a named root");
     let store: LegacyStoreName | undefined;
     let root: string | undefined;
     if (source === "personal-os" || source === "llm-wiki") { store = source; root = this.options.roots?.[source]; }
-    if (!root || !isAbsolute(root)) throw new Error("Import source is not configured; install an explicitly named checkout root");
+    if (!root || !store || !isAbsolute(root)) throw new Error("Import source is not configured; install an explicitly named checkout root");
     root = await resolve(root);
     const stat = await lstat(root);
     if (!stat.isDirectory() || stat.isSymbolicLink()) throw new Error("Import source must be a real directory");
-    if (!store) {
-      const [personal, wiki] = await Promise.all([lstat(join(root, "sources", "records")).then(() => true, () => false), lstat(join(root, "graph", "assertions.jsonl")).then(() => true, () => false)]);
-      store = personal && !wiki ? "personal-os" : "llm-wiki";
-    }
     return { root, store };
   }
 

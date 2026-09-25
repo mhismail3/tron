@@ -12,7 +12,7 @@ import { KnowledgeStore, type KnowledgeMutationResult } from "./knowledge-store.
 import { awaitAbortableWithSettlement } from "./model-await.js";
 import { isPublicXEmbedUrl, lookupPublicXPost, normalizePublicLinkedUrl, xPostIdentity, type XPublicCoverage, type XPublicLookupOptions, type XPublicPost } from "./x-public-post.js";
 
-export const SOURCE_CAPTURE_USER_AGENT = "Tron/0.1 (public-source-capture)";
+const SOURCE_CAPTURE_USER_AGENT = "Tron/0.1 (public-source-capture)";
 
 /** Canonical derivative binding: only title and readable evidence determine freshness. */
 export function sourceEvidenceDigest(title: string, text: string): string {
@@ -130,7 +130,7 @@ function assertSafeUrl(value: string): URL {
 }
 
 /** URL diagnostics never include query strings or credentials. */
-export function redactSourceUrl(value: string): string {
+function redactSourceUrl(value: string): string {
   try { const url = new URL(value); return `${url.protocol}//${url.host}${url.pathname}`; } catch { return "[invalid-url]"; }
 }
 
