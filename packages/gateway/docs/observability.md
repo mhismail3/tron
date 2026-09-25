@@ -31,13 +31,13 @@ it lives in a bounded in-memory buffer that exports include.
   reason, next to the emitting code. A slow success is warning only past it.
 - A caller's mistake (invalid request, unauthorized) is warning. An expected
   transient state (warming up, busy) is info or warning, never error.
-- Debug never reaches disk on any stream. It exists so a diagnostic export can
+- Debug never reaches disk on any Tron-owned stream. It exists so a diagnostic export can
   carry the detail of the minutes before a failure.
 
 ## Streams
 
-One writer per file, and no two processes rotate the same file. Everything on
-the Mac is under `~/.tron/logs/`; the phone writes inside its own container.
+One writer per file, and no two processes rotate the same file. Tron-owned logs on
+the Mac are under `~/.tron/logs/`; the phone writes inside its own container.
 `gateway.jsonl` is the canonical Gateway record stream; every other stream is a
 bounded projection or a separate writer's own timeline. A supervised Gateway
 (`TRON_GATEWAY_SUPERVISED=1`) does not mirror persisted records to stdout or
@@ -56,6 +56,31 @@ stderr, because the launcher has already redirected stderr to
 
 The phone's performance signposts are `OSSignposter` (`com.tron.mobile`) and are
 not a log stream. No stream is shipped off the machine.
+
+## External provider diagnostics
+
+Installed provider extensions retain their own diagnostic owners; these are not
+Gateway streams and are not automatically included in `system.logs.export`.
+CortexKit Pi `1.23.1-tron.7` provides the following scalar-only signals in its existing
+`pi-cache` logger channel. They require adoption of that extension and its matching
+core package; a Gateway source change alone does not install them. This integration
+defaults to one-hour explicit caching without setup commands and preserves an
+explicit off choice. Already-open project runtimes retain loaded extension code
+until their normal resource reload; package adoption does not restart the Gateway.
+
+| Event | Level | Owner | Fields and purpose |
+| --- | --- | --- | --- |
+| `request cache coverage` | debug normally; warning for a non-empty conversation without a cache marker | CortexKit Pi `src/stream.ts` / `src/convert.ts` | Model, bounded response request ID, status, cache mode, extended-TTL flag, wire bytes, breakpoint counts and conversation coverage; a missing conversation marker identifies uncached-history replay without a prompt dump |
+| `response cache usage` | info, once per metered stream, including partial errors and compaction calls | CortexKit Pi `src/stream.ts` | Uncached input, output, cache-read/write counts, returned five-minute/one-hour writes and `response-ttl` versus `catalog-estimate` pricing basis; estimates are not subscription quota |
+
+CortexKit's core logger controls filtering and best-effort rotation (5 MiB plus
+three rotated generations), defaulting to the OS temporary directory's
+`opencode-anthropic-auth.log`; `OPENCODE_ANTHROPIC_AUTH_LOG_FILE` overrides it.
+Its debug/disk policy is independent of Tron's, and its default file can be shared
+by external clients. Do not treat it as a canonical usage journal or enable full
+request dumping to diagnose caching. Its focused regressions are the CortexKit
+Pi `src/tests/cache.test.ts`; configuration races are covered in core
+`src/tests/config-transactions.test.ts`.
 
 ## Retention budgets and measured volume
 
