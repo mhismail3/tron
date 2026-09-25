@@ -142,9 +142,26 @@ owner coordination is still required.
 
 For ordinary, unmanaged, released worktrees:
 
-1. Remove the approved linked worktree with `git worktree remove -- "$path"`.
+1. Run that worktree's documented build cleaners, if any; do not clean output
+   owned outside it.
+2. `packages/mac-app/scripts/bundle-gateway.sh` makes its generated Gateway
+   payload read-only. Before removal, make only that payload writable, refusing
+   links and paths outside the worktree:
+
+   ```bash
+   worktree_real=$(cd "$path" && pwd -P)
+   payload="$path/packages/mac-app/Sources/Resources/Gateway"
+   if [[ -L "$payload" ]]; then echo "refusing symlink: $payload" >&2; exit 1; fi
+   if [[ -e "$payload" ]]; then
+     payload_real=$(cd "$payload" && pwd -P)
+     [[ "$payload_real" == "$worktree_real"/* ]] || { echo "refusing path outside worktree: $payload" >&2; exit 1; }
+     chmod -R u+w "$payload"
+   fi
+   ```
+
+3. Remove the approved linked worktree with plain `git worktree remove -- "$path"`.
    Never use `--force` or `rm -rf`. Refusal is a blocker to investigate, not bypass.
-2. Recheck that the branch is no longer checked out anywhere. Delete the exact
+4. Recheck that the branch is no longer checked out anywhere. Delete the exact
    local branch with `git branch -d -- "$branch"` only after independent merge
    proof. Git's `-d` can consult an upstream other than the integration target.
 3. If `-d` refuses a reviewed squash/rebase merge, explain why and obtain explicit
