@@ -25,7 +25,7 @@ struct ProviderUsagePresentationTests {
         #expect(snapshot.windows[0].usedPercent == 0)
         #expect(snapshot.windows[1].usedPercent == 124)
         #expect(snapshot.balances.first?.amount == 12.5)
-        #expect(ProviderUsagePresentation.summary(snapshot) == "5h 0% used · Weekly 124% used")
+        #expect(ProviderUsagePresentation.summary(snapshot) == "0% used (5h) · 124% used (Weekly)")
     }
 
     @Test("malformed and duplicate bounded usage data is rejected")

@@ -654,7 +654,7 @@ and resource previews; `ConfigurationAutosaveTests` covers removed/reordered pro
 search, persistence, and mutation while labels use product casing such as “OpenAI Codex / GPT 5.6 Luna”.
 Provider rows are configured-first and deterministic within each Configured / Available group. When the
 Gateway advertises `provider-usage.v1`, a provider list performs one bounded account-usage read; rows show
-short and weekly windows with explicit labels, while the existing configuration sheet fetches the selected
+short and weekly windows with the value first and the window label in parentheses (`3% used (5h)`), while the existing configuration sheet fetches the selected
 provider's exact snapshot and lists every window, reset, balance, stale, and safe error state. Balance rows
 share the window row treatment: label left, currency-formatted amount right, and an emerald share bar with a
 `% of <primary label>` caption for each balance after the primary; a negative balance shows `Deficit` instead.

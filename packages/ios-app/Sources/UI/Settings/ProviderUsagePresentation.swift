@@ -5,7 +5,7 @@ enum ProviderUsagePresentation {
     /// Skeleton copy shown while a supported row waits for its first snapshot.
     /// It shares the usage line's font and stays single-line at ordinary widths
     /// so the resolved text does not change the row height.
-    static let loadingPlaceholder = "5h 00% used · Weekly 00% used"
+    static let loadingPlaceholder = "00% used (5h) · 00% used (Weekly)"
 
     /// A supported configured row reserves its usage line while the bounded read
     /// is pending. Once the read settles, the snapshot (or its absence) owns the
@@ -39,7 +39,8 @@ enum ProviderUsagePresentation {
             // A provider can expose both a short window and a weekly quota. Keep
             // both labels so the primary row never hides the meaningful limit.
             let shouldLabel = windows.count > 1 || index > 0
-            parts.append(shouldLabel ? "\(summaryLabel(window.label, windowSeconds: window.windowSeconds)) \(value)" : value)
+            // The value leads and the window label trails in parentheses: "3% used (5h)".
+            parts.append(shouldLabel ? "\(value) (\(summaryLabel(window.label, windowSeconds: window.windowSeconds)))" : value)
         }
         if parts.isEmpty, let balance = snapshot.balances.first {
             // A balance-only provider still presents like its window peers: the
