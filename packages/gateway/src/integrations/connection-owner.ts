@@ -80,10 +80,12 @@ function copy<T>(value: T): T { return structuredClone(value); }
 
 /** The presentation projection omits credential references, so an unadmitted
  * prerequisite names the Keychain service that owns the item instead of the
- * exact account; the agent-facing connector error carries the account. */
+ * exact account; the agent-facing connector error carries the account.
+ * `unavailable` is recorded both for a missing item and for a token the
+ * provider rejected, so the text covers both. */
 function prerequisiteDetail(instance: ConnectionInstanceProjection): string {
   return instance.credentialAvailability === "unavailable"
-    ? `Credential missing from the Mac Keychain (service '${CONNECTOR_CREDENTIAL_SERVICE}'). Ask the agent to check this connection for the exact account.`
+    ? `Credential missing or rejected. Check the Mac Keychain item (service '${CONNECTOR_CREDENTIAL_SERVICE}'); ask the agent for the exact account.`
     : "Connection prerequisites are not admitted";
 }
 

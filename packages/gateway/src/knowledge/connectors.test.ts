@@ -79,7 +79,7 @@ describe("knowledge connectors", () => {
     // The capability row iOS renders carries no credential reference, so it
     // names the Keychain service and sends the user to the agent for the account.
     const capability = (await owner.snapshot()).capabilities.find(item => item.connectionId === "personal" && item.id === "read");
-    expect(capability).toMatchObject({ availability: "unavailable", detail: "Credential missing from the Mac Keychain (service 'Tron Connector Credentials'). Ask the agent to check this connection for the exact account." });
+    expect(capability).toMatchObject({ availability: "unavailable", detail: "Credential missing or rejected. Check the Mac Keychain item (service 'Tron Connector Credentials'); ask the agent for the exact account." });
   });
 
   it("does not debit or contact X when its credential is unavailable", async () => {

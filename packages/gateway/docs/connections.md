@@ -40,7 +40,7 @@ and a positive budget, and MCP tools require write approval even when the server
 labels individual tools read-only. Knowledge credential/account observations and
 MCP handshake/discovery readiness remain adapter-owned evidence. An unadmitted
 capability whose credential observation is `unavailable` reports the Mac Keychain
-service that owns the missing item and directs the user to the agent for the exact
+service that owns the missing or provider-rejected item and directs the user to the agent for the exact
 account, because the presentation projection never carries a credential reference.
 Availability is
 not a claim that tools are loaded into every existing conversation.
