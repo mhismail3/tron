@@ -37,11 +37,14 @@ enum MarkdownPresentation: Sendable {
 
         var accessibilitySource: String { source }
 
-        init(source: String) {
+        init(source: String, reflowSoftLineBreaks: Bool = true) {
+            let markdownSource = reflowSoftLineBreaks
+                ? MarkdownPresentation.reflowSoftLineBreaks(source)
+                : source
             self.init(
                 source: source,
                 attributedString: try? AttributedString(
-                    markdown: source,
+                    markdown: markdownSource,
                     options: .init(interpretedSyntax: .inlineOnlyPreservingWhitespace)
                 )
             )
@@ -111,6 +114,54 @@ enum MarkdownPresentation: Sendable {
         }
     }
 
+    /// Markdown soft source wraps become ordinary spaces only in presentation.
+    /// Explicit hard breaks and blank paragraph separators remain line breaks.
+    static func reflowSoftLineBreaks(_ source: String) -> String {
+        let lines = source.components(separatedBy: "\n").map { $0.hasSuffix("\r") ? String($0.dropLast()) : $0 }
+        guard lines.count > 1 else { return lines[0] }
+        var result = lines[0]
+        for index in 1..<lines.count {
+            let previous = lines[index - 1]
+            let current = lines[index]
+            let trailingSlashes = previous.reversed().prefix(while: { $0 == "\\" }).count
+            let preservesBreak = previous.trimmingCharacters(in: .whitespaces).isEmpty
+                || current.trimmingCharacters(in: .whitespaces).isEmpty
+                || previous.hasSuffix("  ") || trailingSlashes % 2 == 1
+            if preservesBreak {
+                result.append("\n")
+                result.append(contentsOf: current)
+            } else {
+                while result.last == " " || result.last == "\t" { result.removeLast() }
+                result.append(" ")
+                result.append(contentsOf: current.drop(while: { $0 == " " || $0 == "\t" }))
+            }
+        }
+        return result
+    }
+
+    /// Plain prose surfaces (such as commit bodies) share block boundaries, not
+    /// Markdown styling. Preserve structured text and Git trailers verbatim.
+    static func reflowProse(_ source: String) -> String {
+        let bytes = Array(source.utf8)
+        var result = ""
+        var offset = 0
+        for block in ColdParser.parse(source) {
+            result += String(decoding: bytes[offset..<block.sourceRange.lowerBound], as: UTF8.self)
+            if case .paragraph = block.kind {
+                let lines = block.id.content.components(separatedBy: "\n")
+                let trailers = lines.allSatisfy {
+                    $0.range(of: #"^[A-Za-z0-9-]+:[ \t]+\S"#, options: .regularExpression) != nil
+                }
+                result += trailers ? block.id.content : reflowSoftLineBreaks(block.id.content)
+            } else {
+                result += block.id.content
+            }
+            offset = block.sourceRange.upperBound
+        }
+        result += String(decoding: bytes[offset...], as: UTF8.self)
+        return result
+    }
+
     private struct SourceLine {
         let text: String
         let range: SourceRange
@@ -124,18 +175,47 @@ enum MarkdownPresentation: Sendable {
 
             while index < lines.count {
                 let line = lines[index].text
-                let trimmed = line.trimmingCharacters(in: .whitespaces)
+                let trimmed = line.trimmingCharacters(in: .whitespacesAndNewlines)
                 if trimmed.isEmpty {
                     index += 1
                     continue
                 }
-                if trimmed.hasPrefix("```") {
+                if line.hasPrefix("    ") || line.hasPrefix("\t") {
                     let start = index
-                    let language = String(trimmed.dropFirst(3)).trimmingCharacters(in: .whitespaces)
+                    var code: [String] = []
+                    while index < lines.count {
+                        let value = lines[index].text
+                        if value.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                            code.append("")
+                            index += 1
+                        } else if value.hasPrefix("    ") {
+                            code.append(String(value.dropFirst(4)))
+                            index += 1
+                        } else if value.hasPrefix("\t") {
+                            code.append(String(value.dropFirst()))
+                            index += 1
+                        } else {
+                            break
+                        }
+                    }
+                    while code.last == "" { code.removeLast() }
+                    append(
+                        .code(language: nil, code: code.joined(separator: "\n")),
+                        lines: lines,
+                        start: start,
+                        end: index,
+                        source: source,
+                        to: &result
+                    )
+                    continue
+                }
+                if let fence = codeFence(trimmed) {
+                    let start = index
+                    let language = String(trimmed.dropFirst(fence.count)).trimmingCharacters(in: .whitespacesAndNewlines)
                     index += 1
                     var code: [String] = []
                     while index < lines.count,
-                          !lines[index].text.trimmingCharacters(in: .whitespaces).hasPrefix("```") {
+                          !closesFence(lines[index].text, marker: fence.marker, count: fence.count) {
                         code.append(lines[index].text)
                         index += 1
                     }
@@ -174,10 +254,9 @@ enum MarkdownPresentation: Sendable {
                     var values: [String] = []
                     while index < lines.count,
                           lines[index].text.trimmingCharacters(in: .whitespaces).hasPrefix(">") {
-                        values.append(
-                            String(lines[index].text.trimmingCharacters(in: .whitespaces).dropFirst())
-                                .trimmingCharacters(in: .whitespaces)
-                        )
+                        var content = lines[index].text.drop(while: { $0 == " " || $0 == "\t" }).dropFirst()
+                        if content.first == " " { content = content.dropFirst() }
+                        values.append(String(content))
                         index += 1
                     }
                     append(
@@ -190,13 +269,29 @@ enum MarkdownPresentation: Sendable {
                     )
                     continue
                 }
-                if let first = listItem(lines[index], source: source) {
+                if listItemComponents(lines[index].text) != nil {
                     let start = index
-                    var items = [first]
-                    index += 1
-                    while index < lines.count, let item = listItem(lines[index], source: source) {
-                        items.append(item)
+                    var items: [ListItem] = []
+                    while index < lines.count, let item = listItemComponents(lines[index].text) {
+                        let itemStart = index
+                        let contentIndent = lines[index].text.count - item.text.count
+                        var content = [item.text]
                         index += 1
+                        while index < lines.count {
+                            let continuation = lines[index].text
+                            let indentation = continuation.prefix(while: { $0 == " " || $0 == "\t" }).count
+                            guard !continuation.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+                                  indentation < contentIndent + 4,
+                                  !isIndependentBlock(continuation) else { break }
+                            content.append(String(continuation.dropFirst(indentation)))
+                            index += 1
+                        }
+                        let range = SourceRange(lowerBound: lines[itemStart].range.lowerBound, upperBound: lines[index - 1].range.upperBound)
+                        items.append(ListItem(
+                            id: identity(range: range, source: source), sourceRange: range,
+                            depth: item.depth, marker: item.marker,
+                            inline: Inline(source: content.joined(separator: "\n"))
+                        ))
                     }
                     append(
                         .list(items),
@@ -234,8 +329,8 @@ enum MarkdownPresentation: Sendable {
                 index += 1
                 while index < lines.count {
                     let next = lines[index].text
-                    let value = next.trimmingCharacters(in: .whitespaces)
-                    if value.isEmpty || value.hasPrefix("```") || heading(value) != nil
+                    let value = next.trimmingCharacters(in: .whitespacesAndNewlines)
+                    if value.isEmpty || codeFence(value) != nil || heading(value) != nil
                         || value.hasPrefix(">") || listItemComponents(next) != nil
                         || isRule(value) {
                         break
@@ -293,6 +388,12 @@ enum MarkdownPresentation: Sendable {
             return SourceIdentity(sourceRange: range, content: String(decoding: utf8[lower..<upper], as: UTF8.self))
         }
 
+        private static func isIndependentBlock(_ line: String) -> Bool {
+            let value = line.trimmingCharacters(in: .whitespaces)
+            return heading(value) != nil || value.hasPrefix(">") || listItemComponents(line) != nil || isRule(value)
+                || codeFence(value) != nil
+        }
+
         private static func heading(_ line: String) -> (Int, String)? {
             let count = line.prefix(while: { $0 == "#" }).count
             guard (1...6).contains(count), line.dropFirst(count).first == " " else { return nil }
@@ -304,15 +405,16 @@ enum MarkdownPresentation: Sendable {
             return value.count >= 3 && Set(value).count == 1 && "-*_".contains(value.first!)
         }
 
-        private static func listItem(_ line: SourceLine, source: String) -> ListItem? {
-            guard let value = listItemComponents(line.text) else { return nil }
-            return ListItem(
-                id: identity(range: line.range, source: source),
-                sourceRange: line.range,
-                depth: value.depth,
-                marker: value.marker,
-                inline: Inline(source: value.text)
-            )
+        private static func codeFence(_ line: String) -> (marker: Character, count: Int)? {
+            guard let marker = line.first, marker == "`" || marker == "~" else { return nil }
+            let count = line.prefix(while: { $0 == marker }).count
+            return count >= 3 ? (marker, count) : nil
+        }
+
+        private static func closesFence(_ line: String, marker: Character, count: Int) -> Bool {
+            let trimmed = line.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard let fence = codeFence(trimmed), fence.marker == marker, fence.count >= count else { return false }
+            return trimmed.dropFirst(fence.count).isEmpty
         }
 
         private static func listItemComponents(_ line: String) -> (depth: Int, marker: String, text: String)? {

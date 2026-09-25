@@ -623,7 +623,7 @@ private struct ThinkingBlock: View {
         // Explicitly paged history can exceed the asynchronously warmed tail.
         // Lazily realized older thinking rows still receive the same exact
         // Markdown semantics through the bounded cold-parser fallback.
-        return MarkdownPresentation.Inline(source: source)
+        return MarkdownPresentation.Inline(source: source, reflowSoftLineBreaks: false)
     }
 
     private func measurementText(inline: MarkdownPresentation.Inline) -> some View {

@@ -828,8 +828,16 @@ constructs each inline `AttributedString` once with the established plain-`Text`
 the exact immutable document to `TronMarkdownView`. Table header and body cells use that same prepared
 inline representation, preserving bold, italic, combined emphasis, strikethrough, inline code, links,
 and escaped literals instead of displaying Markdown delimiters. Their attributed storage participates
-in the existing document byte accounting; rendering does not reparse cell strings. Table sizing,
-horizontal scrolling, ragged-row padding, and block identities remain unchanged.
+in the existing document byte accounting; rendering does not reparse cell strings. Markdown soft
+source wraps reflow to spaces only in attributed presentation; blank paragraph boundaries and explicit
+Markdown hard breaks remain breaks (including inside quotes), while backtick/tilde fences and indented
+code retain literal lines. List continuations prepare one inline value per item, not per source line.
+The exact source continues to own block identity, accessibility text, and source-backed copy actions;
+native text-selection copy follows the rendered text, including its reflowed spaces. Commit bodies
+use the same block boundaries to reflow prose only, leaving lists, quotes, code, and Git trailers
+verbatim without adding Markdown styling. Thinking traces opt out because their line boundaries
+carry their own meaning. Table sizing, horizontal scrolling, ragged-row padding, and block identities
+remain unchanged.
 Block and list identities combine exact content with UTF-8 source ranges, so equal duplicates remain
 distinct. Code-header progress is eligible only for the one unterminated fence while its owning response
 is still streaming; closed fences settle immediately and every fence is terminal when the response settles.

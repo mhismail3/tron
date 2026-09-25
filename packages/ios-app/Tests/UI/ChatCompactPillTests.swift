@@ -203,7 +203,7 @@ struct ChatCompactPillTests {
     }
 
     @Test("commit details remove only the duplicated subject line")
-    func workspaceCommitMessageBody() {
+    func workspaceCommitMessageBody() throws {
         #expect(WorkspaceCommitMessagePresentation.body(
             subject: "Fix workspace",
             message: "Fix workspace\n"
@@ -216,6 +216,21 @@ struct ChatCompactPillTests {
             subject: "Fix workspace",
             message: "Independent message"
         ) == "Independent message")
+        let body = try #require(WorkspaceCommitMessagePresentation.body(
+            subject: "commit: delete obsolete resource",
+            message: "commit: delete obsolete resource\n\nRemoves display smoke, a one-off image report and an\nunreferenced iOS log; keeps the plan history intact."
+        ))
+        #expect(body == "Removes display smoke, a one-off image report and an\nunreferenced iOS log; keeps the plan history intact.")
+        #expect(MarkdownPresentation.reflowProse(body) == "Removes display smoke, a one-off image report and an unreferenced iOS log; keeps the plan history intact.")
+    }
+
+    @Test("commit prose reflows without joining list items, code, quotes or trailers")
+    func structuredCommitMessageBody() throws {
+        let structured = "- First change\n- Second change\n\n> Quoted line\n> Next line\n\n~~~text\nfirst code line\nsecond code line\n~~~\n\nSigned-off-by: Example <example@example.invalid>\nReviewed-by: Reviewer <reviewer@example.invalid>"
+        let source = "Fix wrapping\n\nA prose sentence\ncontinues here.\n\n" + structured
+        let body = try #require(WorkspaceCommitMessagePresentation.body(subject: "Fix wrapping", message: source))
+        #expect(MarkdownPresentation.reflowProse(body) == "A prose sentence continues here.\n\n" + structured)
+        #expect(body.contains("A prose sentence\ncontinues here."))
     }
 
     @Test("Project Resources excludes instruction files owned by Agent Instructions")

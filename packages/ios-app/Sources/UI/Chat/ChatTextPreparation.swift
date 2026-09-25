@@ -412,7 +412,7 @@ actor ChatTextPreparationCache {
                 accountedBytes: document.accountedByteCount
             )
         case .thinking:
-            let inline = MarkdownPresentation.Inline(source: source.source)
+            let inline = MarkdownPresentation.Inline(source: source.source, reflowSoftLineBreaks: false)
             return Prepared(
                 source: source,
                 value: .thinking(inline),

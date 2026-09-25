@@ -18,7 +18,7 @@ final class ThinkingTraceSheetTests: XCTestCase {
             ("streaming-long", true, Self.longTrace),
         ] {
             let sheet = ThinkingTraceDetailSheet(
-                inline: MarkdownPresentation.Inline(source: source),
+                inline: MarkdownPresentation.Inline(source: source, reflowSoftLineBreaks: false),
                 identity: "thinking-trace-test",
                 streaming: streaming
             )

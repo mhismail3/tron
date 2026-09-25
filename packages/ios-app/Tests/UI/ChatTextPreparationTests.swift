@@ -66,7 +66,7 @@ struct ChatTextPreparationTests {
         #expect(snapshot.thinkingInline(
             identity: "thinking",
             source: thinkingSource
-        ) == MarkdownPresentation.Inline(source: thinkingSource))
+        ) == MarkdownPresentation.Inline(source: thinkingSource, reflowSoftLineBreaks: false))
     }
 
     @Test("Markdown revision count is bounded by deterministic LRU eviction")

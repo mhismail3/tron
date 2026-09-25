@@ -829,7 +829,7 @@ private struct WorkspaceCommitDetailSheet: View {
                             .font(TronTypography.headline)
                             .foregroundStyle(Color.tronTextPrimary)
                         if let messageBody {
-                            Text(messageBody)
+                            Text(MarkdownPresentation.reflowProse(messageBody))
                                 .font(TronTypography.bodySM)
                                 .foregroundStyle(Color.tronTextSecondary)
                                 .textSelection(.enabled)

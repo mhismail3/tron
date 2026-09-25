@@ -39,7 +39,7 @@ struct MarkdownPresentationTests {
             return
         }
         #expect(heading.source == "Heading")
-        #expect(quote.source == "quote\nnext")
+        #expect(quote.source == "quote \nnext")
         #expect(items.map(\.sourceRange) == [
             .init(lowerBound: 32, upperBound: 37),
             .init(lowerBound: 38, upperBound: 46),
@@ -51,6 +51,148 @@ struct MarkdownPresentationTests {
         #expect(code == " code  ")
         #expect(!document.blocks[3].isOpenCodeFence)
         #expect(rows.map { $0.map(\.source) } == [["a", "b"], ["c", "d"]])
+    }
+
+    @Test("reflows Markdown soft wraps only in presentation and preserves exact source")
+    func markdownSoftWrapsReflowWithoutLosingExplicitBreaks() throws {
+        let lines = [
+            "A README paragraph is hard-wrapped",
+            "for source readability and contains `inline code`.",
+            "",
+            "A second paragraph",
+            "continues naturally.",
+            "Explicit hard break  ",
+            "remains a break.",
+            "Backslash break\\",
+            "after the escape.",
+        ]
+        let source = lines.joined(separator: "\n")
+        let document = MarkdownPresentation.Document(source: source)
+        #expect(document.source == source)
+        #expect(document.blocks.first?.id.content == "A README paragraph is hard-wrapped\nfor source readability and contains `inline code`.")
+        guard case .paragraph(let prose) = document.blocks.first?.kind else {
+            Issue.record("Expected a reflowed paragraph")
+            return
+        }
+        let attributed = try #require(prose.attributedString)
+        #expect(prose.source == "A README paragraph is hard-wrapped\nfor source readability and contains `inline code`.")
+        #expect(String(attributed.characters) == "A README paragraph is hard-wrapped for source readability and contains inline code.")
+        #expect(prose.accessibilitySource == prose.source)
+
+        let hardBreaks = ["ordinary wrap", "continues", "", "new paragraph", "line  ", "hard break", "slash\\", "next"].joined(separator: "\n")
+        #expect(MarkdownPresentation.reflowSoftLineBreaks(hardBreaks) == "ordinary wrap continues\n\nnew paragraph line  \nhard break slash\\\nnext")
+        // Known-bad control: the old inlineOnlyPreservingWhitespace request source
+        // retains the hard-wrap newline that previously rendered as a premature line break.
+        let oldBehavior = try AttributedString(markdown: lines.prefix(2).joined(separator: "\n"), options: .init(interpretedSyntax: .inlineOnlyPreservingWhitespace))
+        #expect(String(oldBehavior.characters).contains("hard-wrapped\nfor source"))
+        #expect(!String(attributed.characters).contains("hard-wrapped\nfor source"))
+    }
+
+    @Test("soft wraps reflow across quotes and list continuations while code remains literal")
+    func wrapsAcrossMarkdownBlocks() throws {
+        let source = [
+            "> This quoted sentence is hard-wrapped", "> and must read continuously.", "",
+            "- A list item has", "  a source continuation.", "",
+            "```text", "keep", "these", "code lines", "```",
+        ].joined(separator: "\n")
+        let document = MarkdownPresentation.Document(source: source)
+        guard case .quote(let quote) = document.blocks[0].kind,
+              case .list(let items) = document.blocks[1].kind,
+              case .code(language: "text", code: let code) = document.blocks[2].kind else {
+            Issue.record("Expected quote, list, and fenced code blocks")
+            return
+        }
+        #expect(String(try #require(quote.attributedString).characters) == "This quoted sentence is hard-wrapped and must read continuously.")
+        #expect(items.map(\.inline.source) == ["A list item has\na source continuation."])
+        #expect(code == "keep\nthese\ncode lines")
+        #expect(document.source == source)
+    }
+
+    @Test("explicit quoted breaks survive while ordinary quote wraps reflow")
+    func quotedHardBreaks() throws {
+        let document = MarkdownPresentation.Document(source: "> first  \n> second\\\n> third\n> continued")
+        guard case .quote(let quote) = try #require(document.blocks.first).kind else {
+            Issue.record("Expected a quote")
+            return
+        }
+        let text = String(try #require(quote.attributedString).characters)
+        #expect(text.contains("first"))
+        #expect(text.contains("\nsecond"))
+        #expect(text.contains("\nthird continued"))
+    }
+
+    @Test("tilde and longer backtick fences preserve literal lines and exact closing markers")
+    func matchingCodeFences() throws {
+        for marker in ["~~~~", "````"] {
+            let open = marker + "text\nfirst\n" + String(marker.dropLast()) + "\nsecond"
+            let unfinished = try #require(MarkdownPresentation.Document(source: open).blocks.first)
+            #expect(unfinished.isOpenCodeFence)
+            guard case .code(language: "text", code: let code) = unfinished.kind else {
+                Issue.record("Expected literal fenced code")
+                continue
+            }
+            #expect(code == "first\n" + String(marker.dropLast()) + "\nsecond")
+            let closed = MarkdownPresentation.Document(source: open + "\n" + marker + "\n\nAfter\ncode.")
+            #expect(!closed.blocks[0].isOpenCodeFence)
+            #expect(closed.blocks[0].id.content == open + "\n" + marker)
+            guard case .paragraph(let paragraph) = closed.blocks[1].kind else {
+                Issue.record("Expected prose after closing fence")
+                continue
+            }
+            #expect(String(try #require(paragraph.attributedString).characters) == "After code.")
+        }
+    }
+
+    @Test("whitespace-only paragraph boundaries, CRLF and escaped backslashes reflow correctly")
+    func whitespaceAndEscapes() throws {
+        #expect(MarkdownPresentation.reflowSoftLineBreaks("first \n  continued") == "first continued")
+        #expect(MarkdownPresentation.reflowSoftLineBreaks("first\r") == "first")
+        #expect(MarkdownPresentation.reflowSoftLineBreaks("first\r\nsecond  \r\nthird") == "first second  \nthird")
+        #expect(MarkdownPresentation.reflowSoftLineBreaks("first\n \t\nsecond") == "first\n \t\nsecond")
+        #expect(MarkdownPresentation.reflowSoftLineBreaks("first\\\\\nsecond") == "first\\\\ second")
+        let document = MarkdownPresentation.Document(source: "first\r\ncontinued\r\n\r\nsecond")
+        #expect(document.blocks.count == 2)
+        #expect(document.source == "first\r\ncontinued\r\n\r\nsecond")
+    }
+
+    @Test("nested list continuations keep their item and explicit hard breaks")
+    func nestedListContinuation() throws {
+        let source = "- Parent\n  - Nested  \n    intentional break\n    continues here"
+        guard case .list(let items) = try #require(MarkdownPresentation.Document(source: source).blocks.first).kind else {
+            Issue.record("Expected nested list")
+            return
+        }
+        #expect(items.count == 2)
+        #expect(items.map(\.depth) == [0, 1])
+        let text = String(try #require(items[1].inline.attributedString).characters)
+        #expect(text.contains("\nintentional break continues here"))
+    }
+
+    @Test("a long wrapped list constructs one item without changing its source identity")
+    func longListContinuation() throws {
+        let lines = ["- First"] + Array(repeating: "  continuation", count: 500)
+        let source = lines.joined(separator: "\n")
+        let document = MarkdownPresentation.Document(source: source)
+        guard case .list(let items) = try #require(document.blocks.first).kind else {
+            Issue.record("Expected one continued list")
+            return
+        }
+        #expect(items.count == 1)
+        #expect(items[0].id.content == source)
+        let text = String(try #require(items[0].inline.attributedString).characters)
+        #expect(text == (["First"] + Array(repeating: "continuation", count: 500)).joined(separator: " "))
+    }
+
+    @Test("indented code retains literal source line breaks rather than reflowing prose")
+    func indentedCodeRemainsLiteral() throws {
+        let source = ["    first code line", "    second code line"].joined(separator: "\n")
+        let document = MarkdownPresentation.Document(source: source)
+        guard case .code(language: nil, code: let code) = try #require(document.blocks.first?.kind) else {
+            Issue.record("Expected an indented code block")
+            return
+        }
+        #expect(code == "first code line\nsecond code line")
+        #expect(document.source == source)
     }
 
     @Test("equal duplicate blocks and list items remain distinct by exact source range")
@@ -134,7 +276,7 @@ struct MarkdownPresentationTests {
         #expect(paragraph.source == "####### nope\n1.no")
         #expect(items.map(\.marker) == ["01."])
         #expect(items.map(\.inline.source) == ["yes"])
-        #expect(quote.source == "x")
+        #expect(quote.source == "  x  ")
         #expect(document.blocks[3].isOpenCodeFence)
 
         let incompleteInline = MarkdownPresentation.Document(source: "*open [link]( and `code")
