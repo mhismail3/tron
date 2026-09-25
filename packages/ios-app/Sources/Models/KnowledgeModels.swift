@@ -385,10 +385,6 @@ struct KnowledgeConnectorStatus: Codable, Hashable, Sendable {
     var detail: String? { lastError ?? (available ? nil : "Provider admission is not established.") }
 }
 struct KnowledgeConnectorRunResult: Codable, Hashable, Sendable { let dryRun: Bool; let connector: String; let discovered: Int; let captured: Int?; let pending: Int; let remaining: Int?; let health: String; let partial: Int?; let error: String? }
-struct KnowledgeImportPlan: Codable, Hashable, Sendable { let operation: String; let source: String; let planHash: String; let planned: Int; let selected: Int; let imported: Int; let resumed: Int; let skipped: Int; let failed: Int; let completed: Bool; let progress: KnowledgeImportProgress; let mappings: [KnowledgeImportMapping]; let warnings: [String] }
-struct KnowledgeImportProgress: Codable, Hashable, Sendable { let completed: Int; let remaining: Int; let total: Int }
-struct KnowledgeImportMapping: Codable, Hashable, Sendable { let legacyId: String; let kind: String; let newId: String }
-struct KnowledgeImportResult: Codable, Hashable, Sendable { let operation: String; let source: String; let planHash: String; let planned: Int; let selected: Int; let imported: Int; let resumed: Int; let skipped: Int; let failed: Int; let completed: Bool; let progress: KnowledgeImportProgress; let mappings: [KnowledgeImportMapping]; let warnings: [String] }
 struct KnowledgeTriageResult: Codable, Hashable, Sendable { let source: KnowledgeRecord; let assessment: KnowledgeSourceAssessment }
 
 struct KnowledgeListRequest: Encodable, Sendable {

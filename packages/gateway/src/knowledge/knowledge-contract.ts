@@ -676,15 +676,6 @@ export interface KnowledgeConnectorStatus {
   assessmentPilot?: { id: string; maxItems: number; budgetCents: number; usedItems: number; reservedCents: number; accountId: string; sourceCollection: string; profileVersion: string; itemIds: string[] };
   assessmentApprovals?: Array<{ id: string; maxItems: number; budgetCents: number; reservedCents: number; usedItems: number; accountId: string; sourceCollection: string; profileVersion: string; itemIds: string[] }>;
 }
-export interface KnowledgeImportScope {
-  /** Explicitly limits which legacy record families may be admitted. */
-  kinds?: Array<"sources" | "entities" | "assertions">;
-  /** Optional exact legacy IDs; an empty list selects nothing. */
-  ids?: string[];
-}
-export interface KnowledgeImportDryRunRequest { commandId: string; source: string; scope?: KnowledgeImportScope; limit?: number; offset?: number; }
-export interface KnowledgeImportRunRequest { commandId: string; source: string; scope?: KnowledgeImportScope; expectedPlanHash: string; limit?: number; offset?: number; }
-
 /** Object bytes are authorized by the exact committed record revision that
  * supplied the object or representation reference. Hashes alone are never a
  * readable authority. */
@@ -725,9 +716,7 @@ export type KnowledgeAction =
   | { operation: "knowledge.connector.status"; request: KnowledgeConnectorStatusRequest }
   | { operation: "knowledge.connector.run"; request: KnowledgeConnectorRunRequest }
   | { operation: "knowledge.raindrop.intake"; request: KnowledgeRaindropIntakeRequest }
-  | { operation: "knowledge.raindrop.read"; request: KnowledgeRaindropRequest }
-  | { operation: "knowledge.import.dry-run"; request: KnowledgeImportDryRunRequest }
-  | { operation: "knowledge.import.run"; request: KnowledgeImportRunRequest };
+  | { operation: "knowledge.raindrop.read"; request: KnowledgeRaindropRequest };
 
 const ID = /^[A-Za-z0-9._:-]{1,200}$/;
 const REVISION = /^[0-9a-f-]{16,80}$/;

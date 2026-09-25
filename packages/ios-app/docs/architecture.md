@@ -1392,9 +1392,8 @@ the managed history sheet rather than issuing a parallel history read: `SessionH
 subscription. Knowledge status projects settled and remaining coverage dispositions without mirroring coverage
 records. Reflected observations publish the generated unconfirmed note as an explicit editable handoff, while
 source corrections retain the captured text/object and append a user-authored correction with new provenance.
-Knowledge detail, linked-record, and import-plan presentations fence activity, Gateway identity, and latest
-request generation before and after every await; import execution carries the exact inspected offset, limit,
-and plan hash.
+Knowledge detail and linked-record presentations fence activity, Gateway identity, and latest
+request generation before and after every await.
 
 In-app notification projection is disposable and bounded to eight entries, 4 KiB per message, and 16 KiB total.
 `InAppNoticeCenter` is the single AppModel-owned, monotonic-clock-driven center. It presents one readable
@@ -2156,7 +2155,7 @@ Account technical details expose credential availability and account verificatio
 
 `KnowledgeRPCClient` is the typed iOS consumer of the Gateway Knowledge contract. It
 uses the existing confirmed-mutation receipt owner for every change and bounds
-search, pages, connector runs, and imports before exposing them to SwiftUI.
+search, pages, and connector runs before exposing them to SwiftUI.
 `KnowledgeDashboardView` presents All Knowledge (including All Links), filters by
 record kind and Personal/Research scope, and loads detail evidence on demand. The catalogue is dense by
 design—statement rows use one type step below the detail sheet with a bounded statement preview, and
@@ -2180,9 +2179,7 @@ in the typed DTO and are labeled in the same bounded object reader; corrections
 copy those references rather than dropping canonical evidence. The originating-session action keeps
 its exact history-entry citation through sheet dismissal; the existing session/history owner then
 reads and presents that entry with bounded continuation, including when it is absent from the first
-history page. Import requests carry an explicit offset and exact dry-run plan hash;
-a completed batch reports corpus progress and never claims whole-corpus completion
-until the final selected batch. Detail renders structured field values,
+history page. Detail renders structured field values,
 subjects, validity, qualifications, contrary evidence, and nested record/session
 citations for source/note records; observation technical details retain the full protocol evidence.
 Handoffs carry record/revision and Gateway identity metadata with explicit
@@ -2201,9 +2198,7 @@ the grant and restores the retained individual selections; empty selection never
 grants global access. The switch and RPC admission require
 `knowledge-global-observation.v1` so an unsupported Gateway cannot silently
 ignore the setting. Exclusions always override either scope and remain
-Gateway-authoritative. Editable current interests are persisted in the Gateway configuration and do not enable observation; source triage is an explicit `knowledge.source.triage` mutation that resolves those interests server-side. Connector status reports
-unconfigured or writes-disabled integrations honestly, while legacy import is a
-Gateway-owned dry-run followed by explicit plan-hash confirmation. Starting a
+Gateway-authoritative. Editable current interests are persisted in the Gateway configuration and do not enable observation; source triage is an explicit `knowledge.source.triage` mutation that resolves those interests server-side. Starting a
 session from an entry pins the originating Gateway and opens the existing New Session sheet for workspace/model/trust choices, then seeds only an unsent draft;
 no prompt is replayed or automatically sent.
 

@@ -1,6 +1,6 @@
 import { DatabaseSync, type SQLInputValue } from "node:sqlite";
 
-export type CatalogCollection = "records" | "coverage" | "suppressions" | "scopeExclusions" | "receipts" | "imports" | "cleanup" | "recordCleanup" | "sourceIdentities";
+export type CatalogCollection = "records" | "coverage" | "suppressions" | "scopeExclusions" | "receipts" | "cleanup" | "recordCleanup" | "sourceIdentities";
 
 // Validate rows at their read/write boundary, without materializing the corpus.
 function catalogValue<T>(collection: CatalogCollection, raw: unknown): T {
@@ -36,10 +36,6 @@ function catalogValue<T>(collection: CatalogCollection, raw: unknown): T {
     case "receipts":
       if (typeof value.operation !== "string" || typeof value.requestHash !== "string" || !strings(value.recordIds)
         || !value.result || typeof value.result !== "object" || (value.invalidated !== undefined && typeof value.invalidated !== "boolean")) throw new Error("Invalid Knowledge receipt");
-      break;
-    case "imports":
-      if (typeof value.planHash !== "string" || !strings(value.plannedRecordIds) || !strings(value.completedRecordIds)
-        || !value.completedRecordIds.every(id => (value.plannedRecordIds as string[]).includes(id))) throw new Error("Invalid Knowledge import checkpoint");
       break;
     case "recordCleanup":
       if (typeof value.recordId !== "string" || typeof value.revisionId !== "string") throw new Error("Invalid Knowledge record cleanup row");

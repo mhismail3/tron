@@ -141,22 +141,6 @@ enum KnowledgeDashboardLayout {
     static let recordSpacing: CGFloat = 8
 }
 
-enum KnowledgeImportPresentationPolicy {
-    static func corpusProgress(planned: Int, selected: Int, offset: Int) -> String {
-        "\(min(max(0, planned), max(0, offset) + max(0, selected))) of \(max(0, planned))"
-    }
-
-    static func completionMessage(plan: KnowledgeImportPlan, result: KnowledgeImportResult, offset: Int) -> String {
-        let processed = result.imported + result.resumed + result.skipped
-        let expected = max(plan.planned, plan.selected)
-        guard result.failed == 0, processed == result.selected else {
-            return "Import incomplete (\(processed) of \(result.selected) admitted; \(result.failed) failed); retry this operation to continue."
-        }
-        if result.completed && result.progress.remaining == 0 { return "Import complete (\(result.imported) imported)." }
-        return "Batch complete (\(result.progress.completed) of \(expected)); continuing with \(result.progress.remaining) remaining."
-    }
-}
-
 /// Bounded Gateway projection for observations, links, and notes. iOS never
 /// mirrors the canonical Knowledge corpus.
 struct KnowledgeDashboardView: View {

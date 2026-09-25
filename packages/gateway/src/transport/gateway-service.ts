@@ -418,9 +418,7 @@ export class GatewayService {
       case "knowledge.connector.configure":
       case "knowledge.connector.assessment.approve":
       case "knowledge.connector.run":
-      case "knowledge.raindrop.intake":
-      case "knowledge.import.dry-run":
-      case "knowledge.import.run": {
+      case "knowledge.raindrop.intake": {
         const knowledge = this.requireKnowledge();
         return this.mutation(client, method, params, async () => safeJson(await knowledge.invoke({ operation: method, request: params } as KnowledgeAction)));
       }

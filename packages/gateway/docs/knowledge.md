@@ -20,7 +20,7 @@ reports unavailable/lost state rather than creating an empty corpus.
 
 `KnowledgeCatalog` uses Node's built-in SQLite, not a new dependency or a session
 mirror. Catalog rows own record heads, exact revision ownership, normalized
-lexical search fields, coverage, exclusions, receipts, import checkpoints, and
+lexical search fields, coverage, exclusions, receipts, and
 cleanup intentions. Immutable record/object bytes remain in their existing
 files. There is no four-MiB whole-corpus document or ten-thousand-record scan
 cutoff. Dates are indexed in the catalog rather than inferred from filesystem
@@ -60,7 +60,7 @@ reader admits up to 64 MiB, including legacy state that already outgrew the old
 four-MiB ceiling; larger or invalid state is left intact and unavailable, never
 silently reset. It validates
 every committed legacy revision and captured object, preserves IDs, timestamps,
-coverage, configuration, exclusions, receipts, and checkpoints, and prepares a
+coverage, configuration, exclusions, and receipts, and prepares a
 new durable catalog. Only then does an atomic replacement of the small manifest
 publish storage v2. Before that boundary the original v1 manifest remains
 canonical. Definite preparation failure removes its own staging catalog; an
@@ -169,7 +169,7 @@ store errors. Registered recall text includes bounded dated, attributed,
 qualified evidence and a pinned `knowledge.read` continuation (`id`,
 `revisionId`, and `offset`) whenever the evidence section is incomplete; the
 complete record is never available only through tool details. Observation
-defaults to disabled and the store never chooses a provider or model silently. Connector/import DTOs are operation shapes implemented by the installed connector
+defaults to disabled and the store never chooses a provider or model silently. Connector DTOs are operation shapes implemented by the installed connector
 extension. Connection setup owns the selected account/scope and opaque `credentialRef`
 (`connector:<provider>:<account>`); only the Mac Keychain adapter resolves it.
 Once `ConnectionOwner` is active, connector actions require an exact
@@ -222,8 +222,7 @@ ownership covers admission reads through publication and all late provider
 settlements. Store cancellation is checked at serialized mutation admission;
 once record bodies begin writing, their catalog and receipt commit must finish
 rather than orphaning private bytes. Cancelled assessments cannot enter a new
-derivative transaction after asynchronous revalidation. Connector calls fail as unsupported until their named extension seam is installed;
-legacy import is installed only when explicitly named checkout roots are configured.
+derivative transaction after asynchronous revalidation. Connector calls fail as unsupported until their named extension seam is installed.
 
 ## Sources and maintained notes
 
@@ -574,28 +573,3 @@ rejected locally before credential lookup or provider HTTP; provider failures
 remain sanitized.
 The operation is manual only; no recurring approval, scheduler, X integration,
 or collection creation is implied.
-
-## Legacy import
-
-`LegacyKnowledgeImporter` is installed through the `KnowledgeExtensionSeam.importer`
-registration. Hosts configure the named `personal-os` and `llm-wiki` roots with
-`TRON_PERSONAL_OS_ROOT` and `TRON_LLM_WIKI_ROOT`; the iOS surface only offers those
-names and never sends arbitrary filesystem paths. It accepts only an explicitly named, configured `personal-os` or
-`llm-wiki` checkout and a bounded `KnowledgeImportScope` (record families and/or
-exact legacy IDs); it never scans an arbitrary path or invokes legacy wrappers.
-Dry-run returns a deterministic plan hash over selected payloads, evidence hashes,
-and stable mappings. Run requires that hash and records exact selected batch membership
-and completed IDs in the knowledge store, so a crash can resume without creating a
-second record. Structured assertion evidence qualifications and list-valued supersession
-are preserved as attributed historical material.
-
-Legacy source, entity, and assertion IDs are retained in `importOrigin` together
-with the pinned Git revision and import time. Source capture disposition is
-independent of evidence availability: Personal OS metadata-only sources remain
-metadata-only, while Wiki extracts are read from a regular retained file or a
-verified Git blob when available. Git reads disable lazy fetch, prompts, optional
-locks, and helpers; no checkout or remote side effect occurs. Original dates,
-structured assertion values, field evidence, negation, validity, supersession,
-review lineage, sensitivity, and usage constraints remain explicit in typed
-source/note payloads. Missing or over-limit evidence is reported and never
-reconstructed from a hash.

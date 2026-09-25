@@ -51,7 +51,7 @@ async function legacyFixture() {
     records: { [old.id]: { latestRevisionId: corrected.revisionId, revisionIds: [old.revisionId, corrected.revisionId] }, [excluded.id]: { latestRevisionId: excluded.revisionId, revisionIds: [excluded.revisionId] } },
     coverage: { [coverage.id]: coverage }, suppressions: { [excluded.id]: { excluded: true, forgotten: false, updatedAt: excluded.updatedAt } },
     scopeExclusions: { "session:excluded-session": { sessionId: "excluded-session", excluded: true, updatedAt: old.updatedAt } },
-    cleanup: [], recordCleanup: [], imports: {}, receipts: {},
+    cleanup: [], recordCleanup: [], receipts: {},
     config: { ...structuredClone(DEFAULT_KNOWLEDGE_CONFIG), revision: 3, eligibility: { ...DEFAULT_KNOWLEDGE_CONFIG.eligibility, allSessions: true as const }, observation: { ...DEFAULT_KNOWLEDGE_CONFIG.observation, enabled: true, model: "fixture/model" } }, connectors: {} };
   await writeFile(join(result.root, "state.json"), JSON.stringify(state), { mode: 0o600 });
   return { ...result, old, corrected, excluded, coverage, state };

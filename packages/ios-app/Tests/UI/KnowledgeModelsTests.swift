@@ -585,21 +585,6 @@ final class KnowledgeModelsTests: XCTestCase {
         XCTAssertNil(KnowledgeDraftHandoffPolicy.text(for: record, identity: KnowledgePresentationIdentity(profileID: nil, lifecycleGeneration: nil, connectionID: nil)))
     }
 
-    func testImportPresentationDoesNotClaimWholeCorpusAfterOneBatch() {
-        XCTAssertEqual(KnowledgeImportPresentationPolicy.corpusProgress(planned: 120, selected: 50, offset: 0), "50 of 120")
-        let plan = KnowledgeImportPlan(operation: "dry-run", source: "synthetic", planHash: "plan", planned: 120, selected: 50, imported: 0, resumed: 0, skipped: 0, failed: 0, completed: false, progress: KnowledgeImportProgress(completed: 0, remaining: 50, total: 50), mappings: [], warnings: [])
-        let result = KnowledgeImportResult(operation: "run", source: "synthetic", planHash: "plan", planned: 120, selected: 50, imported: 50, resumed: 0, skipped: 0, failed: 0, completed: false, progress: KnowledgeImportProgress(completed: 50, remaining: 70, total: 120), mappings: [], warnings: [])
-        XCTAssertEqual(KnowledgeImportPresentationPolicy.completionMessage(plan: plan, result: result, offset: 0), "Batch complete (50 of 120); continuing with 70 remaining.")
-        let failed = KnowledgeImportResult(operation: "run", source: "synthetic", planHash: "plan", planned: 120, selected: 50, imported: 49, resumed: 0, skipped: 0, failed: 1, completed: false, progress: KnowledgeImportProgress(completed: 49, remaining: 1, total: 50), mappings: [], warnings: [])
-        XCTAssertTrue(KnowledgeImportPresentationPolicy.completionMessage(plan: plan, result: failed, offset: 0).contains("incomplete"))
-
-        let widePlan = KnowledgeImportPlan(operation: "dry-run", source: "personal-os", planHash: "wide-plan", planned: 53, selected: 50, imported: 0, resumed: 0, skipped: 0, failed: 0, completed: true, progress: KnowledgeImportProgress(completed: 0, remaining: 53, total: 53), mappings: [], warnings: [])
-        let partial = KnowledgeImportResult(operation: "run", source: "personal-os", planHash: "wide-plan", planned: 53, selected: 53, imported: 49, resumed: 0, skipped: 0, failed: 1, completed: false, progress: KnowledgeImportProgress(completed: 49, remaining: 4, total: 53), mappings: [], warnings: [])
-        XCTAssertTrue(KnowledgeImportPresentationPolicy.completionMessage(plan: widePlan, result: partial, offset: 0).contains("retry"))
-        let resumed = KnowledgeImportResult(operation: "run", source: "personal-os", planHash: "wide-plan", planned: 53, selected: 53, imported: 4, resumed: 49, skipped: 0, failed: 0, completed: true, progress: KnowledgeImportProgress(completed: 53, remaining: 0, total: 53), mappings: [], warnings: [])
-        XCTAssertEqual(KnowledgeImportPresentationPolicy.completionMessage(plan: widePlan, result: resumed, offset: 0), "Import complete (4 imported).")
-    }
-
     func testSourcePresentationSeparatesSafeLinksCoverageAndAdmission() throws {
         XCTAssertEqual(KnowledgeSourcePresentationPolicy.domain("https://Example.com/path"), "example.com")
         XCTAssertNil(KnowledgeSourcePresentationPolicy.safeURL("file:///private/fixture"))

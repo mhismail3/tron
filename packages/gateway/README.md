@@ -91,10 +91,7 @@ Clients re-read authoritative pages rather than treating the event as a data mir
 the store rechecks current privacy/exclusion fences after byte I/O and never
 uses a hash-only corpus scan. Excluded/forgotten records cannot authorize
 object reads.
-Legacy imports support explicit `offset` continuation with one checkpoint
-covering the complete admitted plan; page completion is distinct from whole-plan
-completion. They compute excluded-source/dependent assertion closure before
-page slicing. Connector X runs require a host-qualified account price, explicit paid
+Connector X runs require a host-qualified account price, explicit paid
 access, and a one-attempt allowance reservation/debit; unknown pricing or a
 positive budget alone never permits an API call. The read-only `knowledge.raindrop.read` surface verifies the configured numeric
 Raindrop user ID against `/user` on every request, then returns bounded raw
@@ -106,12 +103,8 @@ metadata fails closed rather than truncating. The agent-facing `raindrop` skill
 covers secure manual Keychain setup, the numeric account-ID prerequisite, and
 metadata-versus-article-content limits. Remote Raindrop moves
 re-read the exact current source revision and connector account/write policy
-after preflight before persisting or applying the effect. Legacy exclusions are withheld rather than copied; if a re-import changes an
-already-readable canonical record to excluded, the run fails closed and asks
-for the existing exclusion/forget control rather than mutating that record.
-Native import exposes bounded offset continuation, and an admitted run owns its
-per-record checkpoint through the operation deadline instead of transport
-cancellation. Native note/correction mutations carry an explicit confirmation
+after preflight before persisting or applying the effect. Native note/correction
+mutations carry an explicit confirmation
 bit; agent-tool notes remain agent-authored and unconfirmed. `knowledge.status`
 returns typed coverage counts (`observedCount`, `emptyCount`, `excludedCount`,
 `pendingCount`, `failedCount`, `unavailableCount`, and `remainingCount`), while

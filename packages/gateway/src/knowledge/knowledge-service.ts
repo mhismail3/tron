@@ -153,7 +153,6 @@ function synthesisEvidencePack(record: import("./knowledge-contract.js").Knowled
 
 export interface KnowledgeExtensionSeam {
   connector?: (action: KnowledgeAction, signal?: AbortSignal) => Promise<unknown>;
-  importer?: (action: KnowledgeAction, signal?: AbortSignal) => Promise<unknown>;
 }
 
 export interface KnowledgeGenerationModel extends SourceAssessmentModel {
@@ -201,8 +200,8 @@ export class ModelRuntimeKnowledgeModel implements KnowledgeGenerationModel {
   }
 }
 
-/** Gateway owner for the typed knowledge surface. Source connectors/importers
- * are intentionally extension seams: until an owner is installed they fail
+/** Gateway owner for the typed knowledge surface. Source connectors are
+ * intentionally extension seams: until an owner is installed they fail
  * explicitly instead of reporting a fabricated successful capture. */
 export class KnowledgeService {
   readonly observer: KnowledgeObservationService;
@@ -401,14 +400,6 @@ export class KnowledgeService {
       case "knowledge.raindrop.intake":
         if (!this.extensions.connector) throw new GatewayError("unsupported", "Knowledge connector support is not configured");
         return this.runOwned(action.operation === "knowledge.raindrop.intake" ? "Raindrop intake" : "knowledge connector run", (ownedSignal) => this.extensions.connector!(action, ownedSignal), signal);
-      case "knowledge.import.dry-run":
-      case "knowledge.import.run":
-        if (!this.extensions.importer) throw new GatewayError("unsupported", "Knowledge importer support is not configured");
-        // A confirmed import owns its bounded operation after admission; a
-        // transport disconnect must not cancel the next checkpoint. Dry-run
-        // reads remain presentation-cancellable.
-        const parentSignal = action.operation === "knowledge.import.run" ? undefined : signal;
-        return this.runOwned("legacy import", ownedSignal => this.extensions.importer!(action, ownedSignal), parentSignal);
     }
   }
 

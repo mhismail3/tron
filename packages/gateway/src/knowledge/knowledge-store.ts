@@ -18,7 +18,6 @@ import {
   type KnowledgeConnectorState, type ObservationCoverage, type ObservationCoverageDisposition, type ObservationRange, type KnowledgeCoveragePage, type KnowledgeCoverageSummary, validateKnowledgeConfig,
   validateKnowledgeRecord, validateObjectRef, assertKnowledgeId, assertKnowledgeProjectId,
 } from "./knowledge-contract.js";
-import { isGatewayTimestamp } from "../util/timestamp.js";
 import { KnowledgeCatalog, type KnowledgeTable } from "./knowledge-catalog.js";
 import type { SQLInputValue } from "node:sqlite";
 import { jsonNodeCount } from "../protocol/json-budget.js";
@@ -59,12 +58,6 @@ type ScopeExclusion = { sessionId?: string; branchId?: string; projectId?: strin
 type PendingRecordCleanup = { recordId: string; revisionId: string };
 type SourceRecordWriteRequest = { commandId: string; expectedRevision?: string; canonicalUri?: string; record: KnowledgeRecordDraft & { kind: "source" }; signal?: AbortSignal };
 type SourcePreviewWriteRequest = { commandId: string; recordId: string; expectedRevision: string; preview: KnowledgeObjectRef; signal?: AbortSignal };
-export interface KnowledgeImportCheckpoint {
-  planHash: string;
-  plannedRecordIds: string[];
-  completedRecordIds: string[];
-  updatedAt: string;
-}
 type StoredReceipt = { operation: string; requestHash: string; createdAt: string; result: ReceiptResult; recordIds: string[]; invalidated?: boolean };
 type ReceiptResult =
   | { kind: "record"; recordId: string; revisionId: string; stateRevision: number }
@@ -80,8 +73,6 @@ interface LegacyKnowledgeState {
   cleanup: string[];
   /** Forgotten immutable revisions awaiting post-commit removal. */
   recordCleanup?: PendingRecordCleanup[];
-  /** Exact import batch membership and resumable progress, owned by the store. */
-  imports?: Record<string, KnowledgeImportCheckpoint>;
   receipts: Record<string, StoredReceipt>;
   config: KnowledgeConfig;
   /** Connector checkpoints and pending IDs are canonical operational state; secrets are never stored here. */
@@ -100,7 +91,6 @@ interface KnowledgeState {
   cleanup: KnowledgeTable<true>;
   recordCleanup: KnowledgeTable<PendingRecordCleanup>;
   sourceIdentities: KnowledgeTable<string>;
-  imports: KnowledgeTable<KnowledgeImportCheckpoint>;
   receipts: KnowledgeTable<StoredReceipt>;
   config: KnowledgeConfig;
   connectors?: Record<string, KnowledgeConnectorState>;
@@ -161,7 +151,7 @@ async function safeDirectory(path: string, create: boolean): Promise<void> {
 }
 
 function emptyState(): LegacyKnowledgeState {
-  return { schemaVersion: KNOWLEDGE_SCHEMA_VERSION, stateRevision: 0, records: {}, coverage: {}, suppressions: {}, scopeExclusions: {}, cleanup: [], recordCleanup: [], imports: {}, receipts: {}, config: structuredClone(DEFAULT_KNOWLEDGE_CONFIG), connectors: {} };
+  return { schemaVersion: KNOWLEDGE_SCHEMA_VERSION, stateRevision: 0, records: {}, coverage: {}, suppressions: {}, scopeExclusions: {}, cleanup: [], recordCleanup: [], receipts: {}, config: structuredClone(DEFAULT_KNOWLEDGE_CONFIG), connectors: {} };
 }
 function catalogState(control: CatalogControl, catalog?: KnowledgeCatalog): KnowledgeState {
   return { ...control, ...(catalog ? { catalog } : {}),
@@ -170,7 +160,6 @@ function catalogState(control: CatalogControl, catalog?: KnowledgeCatalog): Know
     suppressions: catalog?.table<Suppression>("suppressions") ?? new Map(),
     scopeExclusions: catalog?.table<ScopeExclusion>("scopeExclusions") ?? new Map(),
     receipts: catalog?.table<StoredReceipt>("receipts") ?? new Map(),
-    imports: catalog?.table<KnowledgeImportCheckpoint>("imports") ?? new Map(),
     cleanup: catalog?.table<true>("cleanup") ?? new Map(),
     recordCleanup: catalog?.table<PendingRecordCleanup>("recordCleanup") ?? new Map(),
     sourceIdentities: catalog?.table<string>("sourceIdentities") ?? new Map(),
@@ -284,16 +273,6 @@ function validateState(value: unknown): LegacyKnowledgeState {
   if (!state.scopeExclusions || typeof state.scopeExclusions !== "object" || Array.isArray(state.scopeExclusions)) throw new KnowledgeStoreError("invalid", "Invalid scope exclusions");
   if (!Array.isArray(state.cleanup) || state.cleanup.some(hash => typeof hash !== "string" || !OBJECT_HASH.test(hash))) throw new KnowledgeStoreError("invalid", "Invalid knowledge cleanup list");
   if (state.recordCleanup !== undefined && (!Array.isArray(state.recordCleanup) || state.recordCleanup.some(item => !item || typeof item !== "object" || typeof item.recordId !== "string" || typeof item.revisionId !== "string"))) throw new KnowledgeStoreError("invalid", "Invalid record cleanup list");
-  if (state.imports !== undefined) {
-    if (!state.imports || typeof state.imports !== "object" || Array.isArray(state.imports)) throw new KnowledgeStoreError("invalid", "Invalid knowledge import checkpoints");
-    for (const [planHash, checkpoint] of Object.entries(state.imports as Record<string, unknown>)) {
-      if (!OBJECT_HASH.test(planHash) || !checkpoint || typeof checkpoint !== "object" || Array.isArray(checkpoint)) throw new KnowledgeStoreError("invalid", "Invalid knowledge import checkpoint");
-      const item = checkpoint as Record<string, unknown>;
-      const planned = item.plannedRecordIds; const completed = item.completedRecordIds;
-      if (item.planHash !== planHash || !Array.isArray(planned) || !Array.isArray(completed) || planned.length > 20_000 || completed.length > planned.length || !completed.every(id => typeof id === "string" && planned.includes(id)) || typeof item.updatedAt !== "string" || !isGatewayTimestamp(item.updatedAt)) throw new KnowledgeStoreError("invalid", "Invalid knowledge import checkpoint");
-      (planned as unknown[]).forEach(id => assertKnowledgeId(id, "import record id"));
-    }
-  }
   if (!state.receipts || typeof state.receipts !== "object" || Array.isArray(state.receipts)) throw new KnowledgeStoreError("invalid", "Invalid knowledge receipts");
   for (const receipt of Object.values(state.receipts as Record<string, unknown>)) {
     const item = receipt as Record<string, unknown>;
@@ -547,7 +526,6 @@ export class KnowledgeStore {
       for (const [id, value] of Object.entries(legacy.suppressions)) state.suppressions.set(id, value);
       for (const [id, value] of Object.entries(legacy.scopeExclusions)) state.scopeExclusions.set(id, value);
       for (const [id, value] of Object.entries(legacy.receipts)) state.receipts.set(id, value);
-      for (const [id, value] of Object.entries(legacy.imports ?? {})) state.imports.set(id, value);
       for (const hash of legacy.cleanup) state.cleanup.set(hash, true);
       for (const item of legacy.recordCleanup ?? []) state.recordCleanup.set(cleanupKey(item), item);
       catalog.setControl(this.control(state));
@@ -1206,29 +1184,6 @@ export class KnowledgeStore {
       if (changed) state.stateRevision += 1;
     });
   }
-  async importCheckpoint(planHash: string): Promise<KnowledgeImportCheckpoint | null> {
-    if (!OBJECT_HASH.test(planHash)) throw invalid("Invalid import plan hash");
-    return this.inspect(async state => state.imports.get(planHash) ?? null);
-  }
-  async beginImport(commandId: string, planHash: string, plannedRecordIds: string[]): Promise<KnowledgeImportCheckpoint> {
-    if (!OBJECT_HASH.test(planHash) || plannedRecordIds.length > 20_000 || plannedRecordIds.some(id => { try { assertKnowledgeId(id, "import record id"); return false; } catch { return true; } })) throw invalid("Invalid import batch");
-    const unique = [...new Set(plannedRecordIds)]; if (unique.length !== plannedRecordIds.length) throw invalid("Import batch contains duplicate record IDs");
-    return this.mutate("knowledge.import.begin", commandId, { planHash, plannedRecordIds: unique }, async state => {
-      const existing = state.imports.get(planHash);
-      if (existing && (existing.plannedRecordIds.length !== unique.length || existing.plannedRecordIds.some((id, index) => id !== unique[index]))) throw conflict("Import plan membership changed");
-      const checkpoint = existing ?? { planHash, plannedRecordIds: unique, completedRecordIds: [], updatedAt: now() };
-      state.imports.set(planHash, checkpoint); return structuredClone(checkpoint);
-    });
-  }
-  async markImportRecord(commandId: string, planHash: string, recordId: string): Promise<KnowledgeImportCheckpoint> {
-    if (!OBJECT_HASH.test(planHash)) throw invalid("Invalid import plan hash"); assertKnowledgeId(recordId, "import record id");
-    return this.mutate("knowledge.import.progress", commandId, { planHash, recordId }, async state => {
-      const checkpoint = state.imports.get(planHash); if (!checkpoint || !checkpoint.plannedRecordIds.includes(recordId)) throw conflict("Import record is outside the planned batch");
-      if (!checkpoint.completedRecordIds.includes(recordId)) checkpoint.completedRecordIds.push(recordId);
-      checkpoint.updatedAt = now(); state.imports.set(planHash, checkpoint); return structuredClone(checkpoint);
-    });
-  }
-
   async putObject(bytes: Uint8Array, mediaType: string): Promise<KnowledgeObjectRef> {
     if (bytes.byteLength > OBJECT_MAX_BYTES || !mediaType || mediaType.length > 160) throw invalid("Content object is too large or has an invalid media type"); const hash = createHash("sha256").update(bytes).digest("hex");
     return this.mutex.run(async () => {

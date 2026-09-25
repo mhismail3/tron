@@ -159,20 +159,6 @@ final class KnowledgeRPCClient {
         struct Params: Encodable { let connector: String; let connectionId: String; let dryRun: Bool; let limit: Int }
         return try await mutate("knowledge.connector.run", parameters: Params(connector: connector, connectionId: connectionID, dryRun: dryRun, limit: min(100, max(1, limit))))
     }
-    func importDryRun(source: String, limit: Int = 50, offset: Int = 0) async throws -> KnowledgeImportPlan {
-        struct Params: Encodable { let source: String; let limit: Int; let offset: Int }
-        return try await mutate("knowledge.import.dry-run", parameters: Params(source: String(source.prefix(4_096)), limit: min(100, max(1, limit)), offset: max(0, offset)))
-    }
-    func importRun(source: String, planHash: String, limit: Int = 50, offset: Int = 0) async throws -> KnowledgeImportResult {
-        struct Params: Encodable { let source: String; let expectedPlanHash: String; let limit: Int; let offset: Int }
-        let requestedLimit = min(100, max(1, limit))
-        let result: KnowledgeImportResult = try await mutate("knowledge.import.run", parameters: Params(source: String(source.prefix(4_096)), expectedPlanHash: planHash, limit: requestedLimit, offset: max(0, offset)))
-        guard result.source == String(source.prefix(4_096)), result.planHash == planHash,
-              result.selected >= 0, result.selected <= requestedLimit,
-              result.imported >= 0, result.resumed >= 0, result.skipped >= 0, result.failed >= 0,
-              result.imported + result.resumed + result.skipped + result.failed <= result.selected else { throw invalidResponse() }
-        return result
-    }
 
     private func needsSelectedGateway() -> GatewayFailure { GatewayFailure(code: "needs_server", message: "Select this Gateway before changing Knowledge.", retryable: false, details: nil) }
     private func invalidResponse() -> GatewayFailure { GatewayFailure(code: "invalid_response", message: "The Knowledge response is invalid.", retryable: false, details: nil) }

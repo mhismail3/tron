@@ -383,11 +383,10 @@ describe("KnowledgeService integration", () => {
     expect((settledOnly as { coverage: unknown[] }).coverage).toEqual([]);
   });
 
-  it("rejects connector and importer calls without an installed extension", async () => {
+  it("rejects connector calls without an installed extension", async () => {
     const root = await mkdtemp(join(tmpdir(), "tron-knowledge-service-")); roots.push(root);
     const store = new KnowledgeStore(new TronWorkspace(root));
     const service = new KnowledgeService(store, new KnowledgeObservationService(store, undefined));
     await expect(service.invoke({ operation: "knowledge.connector.status", request: { connector: "raindrop" } })).rejects.toMatchObject({ code: "unsupported" });
-    await expect(service.invoke({ operation: "knowledge.import.dry-run", request: { commandId: "service-import", source: "synthetic", limit: 1 } })).rejects.toMatchObject({ code: "unsupported" });
   });
 });

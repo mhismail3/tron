@@ -46,7 +46,6 @@ import { SessionSearchAllowanceLedger } from "./sessions/session-search-allowanc
 import { SessionSearchService } from "./sessions/session-search-service.js";
 import { admitSearchEmbeddingHelper, NaturalLanguageEmbeddingClient } from "./sessions/session-search-embedding.js";
 import { KnowledgeConnectorExtension } from "./knowledge/connectors.js";
-import { createKnowledgeImporter } from "./knowledge/legacy-import.js";
 import { ConnectionOwner } from "./integrations/connection-owner.js";
 import { McpAdapter } from "./integrations/mcp-adapter.js";
 import { delegatedArtifactRoot, delegatedProviderEnvironment, ensureDelegatedArtifactRoot } from "./sessions/delegated-provider.js";
@@ -281,10 +280,6 @@ const knowledge = new KnowledgeService(
   ),
   {
     connector: (action, signal) => knowledgeConnector.invoke(action, signal),
-    importer: createKnowledgeImporter(knowledgeStore, { roots: {
-      ...(process.env.TRON_PERSONAL_OS_ROOT ? { "personal-os": process.env.TRON_PERSONAL_OS_ROOT } : {}),
-      ...(process.env.TRON_LLM_WIKI_ROOT ? { "llm-wiki": process.env.TRON_LLM_WIKI_ROOT } : {}),
-    } }),
   },
   (knowledgeConfig) => {
     const model = modelForConfig(modelRuntime, knowledgeConfig.observation.model);
