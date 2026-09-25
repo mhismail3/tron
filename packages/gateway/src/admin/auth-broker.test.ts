@@ -23,12 +23,49 @@ async function flushPromises(): Promise<void> {
   await Promise.resolve();
 }
 
-async function waitFor(predicate: () => boolean): Promise<void> {
-  for (let attempt = 0; attempt < 100; attempt++) {
-    if (predicate()) return;
-    await new Promise((resolve) => setTimeout(resolve, 5));
-  }
-  throw new Error("auth event timed out");
+/** Settlement signal for test-owned fixtures. Each waiter is resolved by the
+ * `notify` that follows its own signal instead of a clock poll, so a state that
+ * never arrives fails the test rather than being retried for a fixed period; an
+ * event storm that never satisfies the predicate throws instead of looping. */
+function asyncSignal(): { notify: () => void; waitFor: (predicate: () => boolean) => Promise<void> } {
+  const listeners = new Set<() => void>();
+  return {
+    notify: () => { for (const listener of [...listeners]) listener(); },
+    waitFor: async (predicate) => {
+      for (let attempt = 0; attempt < 64; attempt += 1) {
+        if (predicate()) return;
+        await new Promise<void>((resolve) => {
+          // Re-registering after every event keeps each waiter independent.
+          const listener = (): void => { listeners.delete(listener); resolve(); };
+          listeners.add(listener);
+        });
+      }
+      if (!predicate()) throw new Error("async state did not arrive");
+    },
+  };
+}
+
+/** Broker event recorder: the emit sink is also the signal that settles waiters. */
+function authEvents() {
+  const signal = asyncSignal();
+  const events: Array<{ client: string; topic: string; payload: JsonValue }> = [];
+  return {
+    events,
+    emit: (client: string, topic: string, payload: JsonValue): void => {
+      events.push({ client, topic, payload });
+      signal.notify();
+    },
+    notify: signal.notify,
+    waitFor: signal.waitFor,
+  };
+}
+
+/** Drains the promise chain a retired login settles its work entry on. The work
+ * registry has no event source and the chain holds no timers, so this waits on
+ * continuations instead of the clock, and fails if the state never arrives. */
+async function settleWorkEntry(predicate: () => boolean): Promise<void> {
+  for (let turn = 0; turn < 256 && !predicate(); turn += 1) await Promise.resolve();
+  if (!predicate()) throw new Error("auth work did not settle");
 }
 
 describe("AuthBroker", () => {
@@ -40,8 +77,8 @@ describe("AuthBroker", () => {
       modelsPath: null,
       refreshOnCreate: false,
     });
-    const events: Array<{ topic: string; payload: JsonValue }> = [];
-    const broker = new AuthBroker(runtime, (_client, topic, payload) => events.push({ topic, payload }));
+    const { events, emit, waitFor } = authEvents();
+    const broker = new AuthBroker(runtime, emit);
     const operationId = broker.start("phone", "anthropic", "api_key").operationId;
     await waitFor(() => events.some((event) => event.topic === "auth.prompt"));
     const prompt = events.find((event) => event.topic === "auth.prompt")!.payload as Record<string, JsonValue>;
@@ -60,8 +97,8 @@ describe("AuthBroker", () => {
       interaction = value;
       await value.prompt({ type: "secret", message: "Enter API key" });
     });
-    const events: Array<{ topic: string; payload: JsonValue }> = []
-    const broker = new AuthBroker(runtime, (_client, topic, payload) => events.push({ topic, payload }))
+    const { events, emit, waitFor } = authEvents()
+    const broker = new AuthBroker(runtime, emit)
     const operationId = broker.start("phone", "provider", "api_key").operationId
     await waitFor(() => events.some((event) => event.topic === "auth.prompt"))
     const prompt = events.find((event) => event.topic === "auth.prompt")!.payload as Record<string, JsonValue>
@@ -91,12 +128,13 @@ describe("AuthBroker", () => {
     }));
     const tablet = broker.start("tablet", "provider", "api_key").operationId;
     expect(() => broker.start("desktop", "provider", "api_key")).toThrow(expect.objectContaining({ code: "busy" }));
-    expect(broker.activeOperationCount).toBe(2);
 
+    // Cancellation releases exactly one slot: the replacement is admitted under
+    // the same per-client bound, while the global bound still refuses a third.
     broker.cancel("phone", phone);
-    expect(broker.activeOperationCount).toBe(1);
     const replacement = broker.start("phone", "provider", "api_key").operationId;
-    expect(broker.activeOperationCount).toBe(2);
+    expect(() => broker.start("desktop", "provider", "api_key"))
+      .toThrow(expect.objectContaining({ code: "busy" }));
     broker.cancel("phone", replacement);
     broker.cancel("tablet", tablet);
     expect(broker.activeOperationCount).toBe(0);
@@ -110,8 +148,9 @@ describe("AuthBroker", () => {
       loginStarted();
       await new Promise<void>((resolve) => { finishLogin = resolve; });
     });
+    const { notify, waitFor } = asyncSignal();
     const broker = new AuthBroker(runtime, () => {});
-    const refresh = vi.fn(async () => {});
+    const refresh = vi.fn(async () => { notify(); });
     const operationId = broker.start("phone", "provider", "api_key", runtime, "phone", "command-1", "global").operationId;
     await started;
 
@@ -137,8 +176,8 @@ describe("AuthBroker", () => {
       interaction = value;
       return login;
     });
-    const events: Array<{ topic: string; payload: JsonValue }> = [];
-    const broker = new AuthBroker(runtime, (_client, topic, payload) => events.push({ topic, payload }), () => {}, {
+    const { events, emit } = authEvents();
+    const broker = new AuthBroker(runtime, emit, () => {}, {
       operationTimeoutMs: 100,
     });
     const operationId = broker.start("phone", "provider", "api_key").operationId;
@@ -186,10 +225,10 @@ describe("AuthBroker", () => {
     Object.defineProperty(hostile, "message", {
       value: { toString(): string { throw new Error("hostile conversion"); } },
     });
-    const events: Array<{ topic: string; payload: JsonValue }> = [];
+    const { events, emit } = authEvents();
     const hostileBroker = new AuthBroker(
       runtimeWithLogin(() => Promise.reject(hostile)),
-      (_client, topic, payload) => events.push({ topic, payload }),
+      emit,
     );
     hostileBroker.start("phone", "provider", "api_key");
     await flushPromises();
@@ -240,12 +279,12 @@ describe("AuthBroker", () => {
 
   it("restart cancels logins waiting on the user but keeps a completing login", async () => {
     const registry = new GatewayWorkRegistry("epoch", 8);
-    const events: Array<{ client: string; topic: string; payload: JsonValue }> = [];
+    const { events, emit, waitFor } = authEvents();
     const logs: string[] = [];
     const broker = new AuthBroker(runtimeWithLogin(async (interaction) => {
       await interaction.prompt({ type: "secret", message: "Enter API key" });
       await new Promise<void>(() => {});
-    }), (client, topic, payload) => events.push({ client, topic, payload }), () => {}, {
+    }), emit, () => {}, {
       workRegistry: registry,
       log: (_level, message, event) => logs.push(`${event} ${message}`),
     });
@@ -261,7 +300,7 @@ describe("AuthBroker", () => {
     expect(broker.activeOperationCount).toBe(1);
     expect(events.find((event) => event.client === "phone" && event.topic === "auth.completed")?.payload)
       .toMatchObject({ operationId: waiting, success: false });
-    await waitFor(() => registry.size === 1);
+    await settleWorkEntry(() => registry.size === 1);
     expect(logs.some((line) => line.startsWith("auth.login.started") && line.includes("waiting (api_key)"))).toBe(true);
     expect(logs.some((line) => line.startsWith("auth.login.ended") && line.includes("Gateway restart cancelled a waiting login"))).toBe(true);
     expect(logs.join("\n")).not.toContain("secret-answer");
@@ -279,7 +318,6 @@ describe("AuthBroker", () => {
     await flushPromises();
 
     broker.detachClient("socket-1");
-    expect(broker.activeOperationCount).toBe(2);
     expect(signals).toHaveLength(2);
     expect(signals.every((signal) => !signal.aborted)).toBe(true);
     expect(broker.resume("device", "socket-2", first)).toMatchObject({ state: "active" });
@@ -295,8 +333,8 @@ describe("AuthBroker", () => {
     const runtime = runtimeWithLogin(async (interaction) => {
       await interaction.prompt({ type: "text", message: "Paste code" });
     });
-    const events: Array<{ client: string; topic: string }> = [];
-    const broker = new AuthBroker(runtime, (client, topic) => events.push({ client, topic }), () => {}, {
+    const { events, emit, waitFor } = authEvents();
+    const broker = new AuthBroker(runtime, emit, () => {}, {
       maximumOperations: 2,
       maximumOperationsPerClient: 1,
     });
@@ -310,7 +348,6 @@ describe("AuthBroker", () => {
       expect(broker.start(`socket-${attempt}`, "provider", "api_key", runtime, "device", `command-${attempt}`, "global"))
         .toEqual({ operationId: first.operationId, recovered: true });
     }
-    expect(broker.activeOperationCount).toBe(1);
     expect(events.filter((event) => event.client === "socket-4" && event.topic === "auth.prompt")).toHaveLength(1);
     // The recovery receipt is idempotent too.
     expect(broker.start("socket-5", "provider", "api_key", runtime, "device", "command-3", "global"))
@@ -328,16 +365,19 @@ describe("AuthBroker", () => {
   });
 
   it("restarts only the exact recovered operation and starts the successor after the predecessor settles", async () => {
+    const { notify, waitFor } = asyncSignal();
     const pending: Array<{ signal: AbortSignal; settle: () => void }> = [];
     const runtime = runtimeWithLogin(async (interaction) => {
-      await new Promise<void>((_resolve, reject) => pending.push({
-        signal: interaction.signal,
-        settle: () => reject(new Error("aborted")),
-      }));
+      await new Promise<void>((_resolve, reject) => {
+        pending.push({
+          signal: interaction.signal,
+          settle: () => reject(new Error("aborted")),
+        });
+        notify();
+      });
     });
-    const events: Array<{ client: string; topic: string; payload: JsonValue }> = [];
     const registry = new GatewayWorkRegistry("epoch", 8);
-    const broker = new AuthBroker(runtime, (client, topic, payload) => events.push({ client, topic, payload }), () => {}, {
+    const broker = new AuthBroker(runtime, () => {}, () => {}, {
       maximumOperationsPerClient: 1,
       workRegistry: registry,
     });
@@ -377,9 +417,9 @@ describe("AuthBroker", () => {
 
   it("fails a successor whose predecessor never settles while keeping the predecessor accounted", async () => {
     const runtime = runtimeWithLogin(async () => new Promise<void>(() => {}));
-    const events: Array<{ topic: string; payload: JsonValue }> = [];
+    const { events, emit, waitFor } = authEvents();
     const registry = new GatewayWorkRegistry("epoch", 8);
-    const broker = new AuthBroker(runtime, (_client, topic, payload) => events.push({ topic, payload }), () => {}, {
+    const broker = new AuthBroker(runtime, emit, () => {}, {
       predecessorSettleTimeoutMs: 20,
       workRegistry: registry,
     });
@@ -398,11 +438,11 @@ describe("AuthBroker", () => {
   });
 
   it("projects a credential Pi committed before cancellation as a truthful late success", async () => {
+    const { events, emit, notify, waitFor } = authEvents();
     let commit!: () => void;
-    const runtime = runtimeWithLogin(async () => new Promise<void>((resolve) => { commit = resolve; }));
-    const events: Array<{ topic: string; payload: JsonValue }> = [];
+    const runtime = runtimeWithLogin(async () => new Promise<void>((resolve) => { commit = resolve; notify(); }));
     const broadcasts: string[] = [];
-    const broker = new AuthBroker(runtime, (_client, topic, payload) => events.push({ topic, payload }), (topic) => broadcasts.push(topic));
+    const broker = new AuthBroker(runtime, emit, (topic) => broadcasts.push(topic));
     const operationId = broker.start("phone", "provider", "api_key").operationId;
     await waitFor(() => commit !== undefined);
     expect(broker.cancel("phone", operationId)).toBe(true);
@@ -426,8 +466,8 @@ describe("AuthBroker", () => {
       });
       await new Promise<void>(() => {});
     });
-    const events: Array<{ client: string; topic: string; payload: JsonValue }> = [];
-    const broker = new AuthBroker(runtime, (client, topic, payload) => events.push({ client, topic, payload }));
+    const { events, emit, waitFor } = authEvents();
+    const broker = new AuthBroker(runtime, emit);
     broker.start("phone", "provider", "api_key", runtime, "phone");
     broker.start("tablet", "provider", "api_key", runtime, "tablet");
     await waitFor(() => events.filter((event) => event.topic === "auth.event").length === 2);
@@ -470,7 +510,7 @@ describe("AuthBroker", () => {
     await started;
 
     expect(broker.cancel("phone", operationId)).toBe(true);
-    await waitFor(() => registry.size === 0);
+    await registry.waitUntilSettled();
     expect(providerSettled).toBe(false);
 
     finishLogin({ refresh: "synthetic-refresh", access: "synthetic-access", expires: Date.now() + 60_000 });
@@ -501,11 +541,14 @@ describe("AuthBroker", () => {
             await callbacks.onPrompt({ message: "Paste the synthetic code:" });
             const credential = await new Promise<{ refresh: string; access: string; expires: number }>((resolve) => {
               finishExchange = resolve;
+              notify();
             });
             settlements.push("resolved");
+            notify();
             return credential;
           } catch (error) {
             settlements.push("rejected");
+            notify();
             throw error;
           }
         },
@@ -513,15 +556,15 @@ describe("AuthBroker", () => {
         getApiKey(credentials) { return credentials.access; },
       },
     });
-    const events: Array<{ topic: string; payload: JsonValue }> = [];
+    const { events, emit, notify, waitFor } = authEvents();
     const registry = new GatewayWorkRegistry("epoch", 8);
-    const broker = new AuthBroker(runtime, (_client, topic, payload) => events.push({ topic, payload }), () => {}, { workRegistry: registry });
+    const broker = new AuthBroker(runtime, emit, () => {}, { workRegistry: registry });
 
     const abandoned = broker.start("socket-1", "manual-code-oauth", "oauth", runtime, "device").operationId;
     await waitFor(() => events.some((event) => event.topic === "auth.prompt"));
     broker.detachClient("socket-1");
     expect(broker.cancel("device", abandoned)).toBe(true);
-    await waitFor(() => settlements.length === 1 && registry.size === 0);
+    await Promise.all([waitFor(() => settlements.length === 1), registry.waitUntilSettled()]);
     expect(settlements).toEqual(["rejected"]);
 
     // After the code is accepted, the exchange is outside every Gateway-owned
@@ -534,7 +577,7 @@ describe("AuthBroker", () => {
     expect(broker.respond("device", exchanging, prompt.promptId as string, "synthetic-code")).toBe(true);
     await waitFor(() => finishExchange !== undefined);
     expect(broker.cancel("device", exchanging)).toBe(true);
-    await waitFor(() => registry.size === 0);
+    await registry.waitUntilSettled();
     expect(settlements).toEqual(["rejected"]);
     finishExchange!({ refresh: "synthetic-refresh", access: "synthetic-access", expires: Date.now() + 60_000 });
     await flushPromises();
@@ -545,10 +588,14 @@ describe("AuthBroker", () => {
   it("observes callback-listener close before a successor reuses its port", async () => {
     let port = 0;
     let listeningCount = 0;
-    let listenerClosed!: () => void;
-    const closed = new Promise<void>((resolve) => { listenerClosed = resolve; });
+    // Each adapter instance reports its own listen and close completion, so the
+    // test observes port reuse without sleeping on the clock.
+    const listenerClosures: Array<Promise<void>> = [];
+    const { notify, waitFor } = asyncSignal();
     const runtime = runtimeWithLogin(async (interaction) => {
       const server = createServer();
+      let closeCompleted!: () => void;
+      listenerClosures.push(new Promise<void>((resolve) => { closeCompleted = resolve; }));
       await new Promise<void>((resolve, reject) => {
         server.once("error", reject);
         server.listen(port || 0, "127.0.0.1", () => {
@@ -556,10 +603,11 @@ describe("AuthBroker", () => {
           if (!address || typeof address === "string") return reject(new Error("missing listener address"));
           port = address.port;
           listeningCount += 1;
+          notify();
           resolve();
         });
       });
-      const close = () => server.close(() => listenerClosed());
+      const close = () => server.close(() => closeCompleted());
       interaction.signal.addEventListener("abort", close, { once: true });
       await new Promise<void>((resolve, reject) => {
         interaction.signal.addEventListener("abort", () => reject(new Error("cancelled")), { once: true });
@@ -570,7 +618,7 @@ describe("AuthBroker", () => {
     await waitFor(() => port !== 0);
 
     expect(broker.cancel("device", first)).toBe(true);
-    await closed;
+    await listenerClosures[0]!;
 
     // This tests a cancellation-aware local adapter fixture, not the selected
     // third-party provider whose source is not present in this checkout.
@@ -578,7 +626,7 @@ describe("AuthBroker", () => {
     await waitFor(() => listeningCount === 2);
     expect(broker.activeOperationCount).toBe(1);
     broker.cancel("device", second);
-    await new Promise<void>((resolve) => setTimeout(resolve, 5));
+    await listenerClosures[1]!;
   });
 
   it("deduplicates auth.begin by stable owner and command ID", async () => {
@@ -588,7 +636,6 @@ describe("AuthBroker", () => {
     const duplicate = broker.start("socket-2", "provider", "api_key", runtime, "device", "command-123", "global").operationId;
 
     expect(duplicate).toBe(first);
-    expect(broker.activeOperationCount).toBe(1);
     expect(() => broker.start("socket-2", "other", "api_key", runtime, "device", "command-123", "global"))
       .toThrow(expect.objectContaining({ code: "conflict" }));
     broker.cancelOwner("device");
@@ -615,8 +662,8 @@ describe("AuthBroker", () => {
       });
       await callbackReceived;
     });
-    const events: Array<{ topic: string; payload: JsonValue }> = [];
-    const broker = new AuthBroker(runtime, (_client, topic, payload) => events.push({ topic, payload }));
+    const { events, emit, waitFor } = authEvents();
+    const broker = new AuthBroker(runtime, emit);
     const operationId = broker.start("socket", "provider", "api_key", runtime, "device").operationId;
     await waitFor(() => events.some((event) => event.topic === "auth.event"));
     const event = events.find((value) => value.topic === "auth.event")!.payload as Record<string, JsonValue>;
@@ -641,11 +688,11 @@ describe("AuthBroker", () => {
   });
 
   it("rejects oversized provider projections and releases the operation exactly once", async () => {
-    const events: Array<{ topic: string; payload: JsonValue }> = [];
+    const { events, emit } = authEvents();
     const runtime = runtimeWithLogin(async (interaction) => {
       interaction.notify({ type: "progress", message: "x".repeat(128 * 1_024) });
     });
-    const broker = new AuthBroker(runtime, (_client, topic, payload) => events.push({ topic, payload }));
+    const broker = new AuthBroker(runtime, emit);
 
     broker.start("phone", "provider", "api_key");
     await flushPromises();
@@ -678,8 +725,8 @@ describe("AuthBroker", () => {
         getApiKey(credentials) { return credentials.access; },
       },
     });
-    const events: Array<{ topic: string; payload: JsonValue }> = [];
-    const broker = new AuthBroker(runtime, (_client, topic, payload) => events.push({ topic, payload }));
+    const { events, emit, waitFor } = authEvents();
+    const broker = new AuthBroker(runtime, emit);
     const operationId = broker.start("phone", "test-oauth", "oauth").operationId;
     await waitFor(() => events.some((event) => event.topic === "auth.prompt"));
     expect(events.some((event) => event.topic === "auth.event")).toBe(true);

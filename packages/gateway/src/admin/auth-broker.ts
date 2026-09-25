@@ -214,6 +214,9 @@ export class AuthBroker {
     }
   }
 
+  /** Admitted operations, currently or awaiting their provider. The bound and
+   * its release are asserted through this count: capacity alone is observable
+   * only as a later `busy` refusal, which a leaked slot also produces. */
   get activeOperationCount(): number { return this.operations.size; }
 
   /** Coalesce user-resource changes and apply them between global auth operations. */

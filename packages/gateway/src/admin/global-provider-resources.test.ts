@@ -32,7 +32,25 @@ async function fixture() {
     refreshOnCreate: false,
   });
   const events: Array<{ topic: string; payload: JsonValue }> = [];
-  const broker = new AuthBroker(runtime, (_client, topic, payload) => events.push({ topic, payload }));
+  // Authentication events are this fixture's only asynchronous signal, so
+  // waiters settle from the sink instead of polling the clock.
+  const listeners = new Set<() => void>();
+  const broker = new AuthBroker(runtime, (_client, topic, payload) => {
+    events.push({ topic, payload });
+    for (const listener of [...listeners]) listener();
+  });
+  /** Resolves once the recorded events satisfy the predicate; an event storm
+   * that never satisfies it throws instead of looping. */
+  const waitForAuthEvent = async (predicate: () => boolean): Promise<void> => {
+    for (let attempt = 0; attempt < 64; attempt += 1) {
+      if (predicate()) return;
+      await new Promise<void>((resolve) => {
+        const listener = (): void => { listeners.delete(listener); resolve(); };
+        listeners.add(listener);
+      });
+    }
+    if (!predicate()) throw new Error("global provider auth event did not arrive");
+  };
   const log = vi.fn();
   const broadcast = vi.fn();
   const createResources = () => GlobalProviderResources.create({
@@ -43,7 +61,7 @@ async function fixture() {
     log,
     broadcast,
   });
-  return { root, agentDir, extensionPath, runtime, events, broker, log, broadcast, createResources };
+  return { root, agentDir, extensionPath, runtime, events, broker, log, broadcast, createResources, waitForAuthEvent };
 }
 
 function providerExtension(providerId: string, waitForPrompt = false, probeRuntime = false): string {
@@ -69,12 +87,15 @@ async function configure(agentDir: string, extensions: string[]): Promise<void> 
   await writeFile(join(agentDir, "settings.json"), JSON.stringify({ extensions }, null, 2));
 }
 
-async function waitFor(predicate: () => boolean): Promise<void> {
-  for (let attempt = 0; attempt < 100; attempt += 1) {
-    if (predicate()) return;
-    await new Promise((resolve) => setTimeout(resolve, 10));
+/** Event-loop turns are what settle a queued catalog read: every pending
+ * continuation and I/O callback runs before each `setImmediate` callback, and no
+ * wall-clock wait is involved. A read that is not fenced on the refresh mutex
+ * resolves inside these turns, which is what the assertions below detect. */
+async function settleScheduledWork(): Promise<void> {
+  for (let turn = 0; turn < 32; turn += 1) {
+    await Promise.resolve();
+    await new Promise<void>((resolve) => setImmediate(resolve));
   }
-  throw new Error("Timed out waiting for global provider resource refresh");
 }
 
 describe("global provider resources", () => {
@@ -97,7 +118,7 @@ describe("global provider resources", () => {
       providers: expect.arrayContaining([expect.objectContaining({ id: "global-fixture", modelCount: 1 })]),
     });
     const operationId = f.broker.start("dashboard", "global-fixture", "oauth", f.runtime, "dashboard-device", "login-1", "global").operationId;
-    await waitFor(() => f.events.some((event) => event.topic === "auth.completed"));
+    await f.waitForAuthEvent(() => f.events.some((event) => event.topic === "auth.completed"));
     expect(f.runtime.isUsingOAuth("global-fixture")).toBe(true);
     expect(f.events).toContainEqual(expect.objectContaining({
       topic: "auth.completed",
@@ -290,7 +311,7 @@ describe("global provider resources", () => {
       modelsResolved = true;
       return result as { models: Array<{ provider: string }> };
     });
-    await new Promise((resolve) => setTimeout(resolve, 10));
+    await settleScheduledWork();
     expect(refreshCalls).toBeGreaterThan(0);
     expect(catalogResolved).toBe(false);
     expect(modelsResolved).toBe(false);
@@ -315,7 +336,7 @@ describe("global provider resources", () => {
     const resources = await f.createResources();
     f.broadcast.mockClear();
     const operationId = f.broker.start("dashboard", "global-fixture", "oauth", f.runtime, "dashboard-device", "login-1", "global").operationId;
-    await waitFor(() => f.events.some((event) => event.topic === "auth.prompt"));
+    await f.waitForAuthEvent(() => f.events.some((event) => event.topic === "auth.prompt"));
     const refreshed = new Promise<void>((resolve) => f.broadcast.mockImplementationOnce(resolve));
     await writeFile(join(f.agentDir, "settings.json"), JSON.stringify({ extensions: [] }));
     resources.requestReload();
@@ -323,7 +344,7 @@ describe("global provider resources", () => {
     expect(f.runtime.getProvider("global-fixture")).toBeDefined();
     const prompt = f.events.find((event) => event.topic === "auth.prompt")!.payload as Record<string, JsonValue>;
     f.broker.respond("dashboard-device", operationId, prompt.promptId as string, "fixture-code");
-    await waitFor(() => f.events.some((event) => event.topic === "auth.completed"));
+    await f.waitForAuthEvent(() => f.events.some((event) => event.topic === "auth.completed"));
     await refreshed;
     expect(f.events).toContainEqual(expect.objectContaining({ topic: "auth.completed", payload: expect.objectContaining({ operationId, success: true }) }));
     expect(f.runtime.getProvider("global-fixture")).toBeUndefined();

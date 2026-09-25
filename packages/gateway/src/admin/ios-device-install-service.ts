@@ -276,6 +276,9 @@ function activePath(tronHome: string): string {
   return join(installRoot(tronHome), "active.json");
 }
 
+/** Admit only bounded physical-iOS fields from `devicectl list devices`:
+ * serials, UDIDs and other raw properties are dropped. The real discovery runs
+ * `xcrun`, so this admission is the only in-process witness of the field set. */
 export function admitDevicectlTargets(value: unknown): IosPhysicalDeviceTarget[] {
   const devices = record(record(value)?.result)?.devices;
   if (!Array.isArray(devices) || devices.length > MAX_TARGETS) {
@@ -610,6 +613,9 @@ function appendTail(current: string, chunk: Buffer): string {
   return Buffer.from(next).subarray(-maximum).toString("utf8").replace(/^�+/u, "");
 }
 
+/** The fixed repository helper invocation: no RPC-supplied command or scheme
+ * can reach it. The install itself runs detached, so its argv is the only
+ * in-process witness of what is launched. */
 export function iosDeviceInstallInvocation(
   sourceRoot: string,
   targetIdentifier: string,
@@ -635,6 +641,9 @@ function bundledXcodegen(runtimeExecutable: string): string | undefined {
   } catch { return undefined; }
 }
 
+/** The allow-listed helper environment, including the payload's own XcodeGen.
+ * The install runs detached, so this environment is the only in-process witness
+ * of what a PATH-injected tool could otherwise reach. */
 export function iosDeviceInstallHelperEnvironment(
   config: IosDeviceInstallConfig,
   inherited: NodeJS.ProcessEnv = process.env,

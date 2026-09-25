@@ -10,8 +10,6 @@ import {
   gatewayRollbackHelperArgs,
   gatewayUpdateHelperArgs,
   gatewayUpdateHelperPath,
-  normalizeRuntimeIdentity,
-  updaterFailureMessage,
   updaterFailureProgress,
   validateGatewayUpdateRequest,
 } from "./gateway-update-service.js";
@@ -223,7 +221,6 @@ describe("Gateway update control plane", () => {
 
   it("bounds asynchronous helper failures into update progress", () => {
     const error = new Error("x".repeat(4_096));
-    expect(updaterFailureMessage(error)).toHaveLength(2_048);
     expect(updaterFailureProgress("stable", "command-1", error, "2026-01-01T00:00:00.000Z")).toEqual({
       schema: 1, kind: "tron-gateway-update-progress", channel: "stable", state: "failure",
       commandId: "command-1", error: "x".repeat(2_048), updatedAt: "2026-01-01T00:00:00.000Z",

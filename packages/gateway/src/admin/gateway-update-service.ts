@@ -91,7 +91,7 @@ type RuntimeIdentityFallback = GatewayUpdateIdentity & { buildFingerprint?: stri
 
 /** Convert the supervised launcher's `buildFingerprint` into update identity
  * form: that variable carries the selected payload's own fingerprint. */
-export function normalizeRuntimeIdentity(value: RuntimeIdentityFallback | undefined): GatewayUpdateIdentity | null {
+function normalizeRuntimeIdentity(value: RuntimeIdentityFallback | undefined): GatewayUpdateIdentity | null {
   if (!value) return null;
   const { buildFingerprint, payloadFingerprint, ...rest } = value;
   const fingerprint = payloadFingerprint ?? buildFingerprint;
@@ -101,7 +101,9 @@ export function normalizeRuntimeIdentity(value: RuntimeIdentityFallback | undefi
   };
 }
 
-/** The helper is trusted only when LaunchAgent exported an absolute, non-link file. */
+/** The helper is trusted only when LaunchAgent exported an absolute, non-link
+ * file inside the payload root. The spawn that consumes the result runs
+ * detached, so this admission is the only in-process witness of it. */
 export function gatewayUpdateHelperPath(environment: NodeJS.ProcessEnv = process.env): string | undefined {
   const value = environment.TRON_GATEWAY_UPDATE_HELPER;
   const payloadRoot = environment.TRON_GATEWAY_PAYLOAD_ROOT;
@@ -122,6 +124,8 @@ export function gatewayUpdateHelperPath(environment: NodeJS.ProcessEnv = process
 }
 
 export function gatewayRollbackHelperArgs(request: GatewayRollbackRequest): string[] {
+  // The rollback helper runs detached with its stdio ignored, so this exact
+  // argument list is the only in-process witness of what is launched.
   if (request.channel !== "stable" && request.channel !== "dev") {
     throw new GatewayError("invalid_request", "Gateway update channel must be stable or dev");
   }
@@ -132,6 +136,8 @@ export function gatewayRollbackHelperArgs(request: GatewayRollbackRequest): stri
 }
 
 export function gatewayUpdateHelperArgs(request: GatewayUpdateRequest): string[] {
+  // Only an admitted channel/mode/candidate triple and a bounded command ID
+  // reach the detached helper, so its argv is the only in-process witness.
   const normalized = validateGatewayUpdateRequest({
     channel: request.channel, mode: request.mode,
     ...(request.candidateVersion === undefined ? {} : { candidateVersion: request.candidateVersion }),
@@ -153,10 +159,13 @@ function failureText(error: unknown, maximum = UPDATE_FAILURE.maximum): string {
   return boundedFailureText(error, { ...UPDATE_FAILURE, maximum });
 }
 
-export function updaterFailureMessage(error: unknown): string {
+function updaterFailureMessage(error: unknown): string {
   return failureText(error);
 }
 
+/** The update-progress document a failed helper leaves behind: the persisted
+ * shape is the contract, and the detached helper's write path has no in-process
+ * seam to observe it through. */
 export function updaterFailureProgress(
   channel: GatewayUpdateChannel,
   commandId: string,
