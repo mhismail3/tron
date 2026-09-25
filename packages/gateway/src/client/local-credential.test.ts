@@ -1,8 +1,9 @@
-import { chmod, mkdir, mkdtemp, symlink, writeFile } from "node:fs/promises";
+import { chmod, mkdir, mkdtemp, readFile, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { readLocalCredential } from "./local-credential.js";
+import { DeviceStore } from "../security/device-store.js";
 
 async function credentialPath(): Promise<{ root: string; path: string }> {
   const root = await mkdtemp(join(tmpdir(), "tron-local-credential-"));
@@ -30,6 +31,14 @@ describe("bounded local wrapper credential", () => {
     await expect(readLocalCredential(root)).resolves.toBe("t".repeat(32));
   });
 
+  it("reads the credential document its owning store publishes", async () => {
+    const { root, path } = await credentialPath();
+    await new DeviceStore(root, "machine-id").initialize();
+    const published = JSON.parse(await readFile(path, "utf8")) as { bearerToken: string };
+
+    await expect(readLocalCredential(root)).resolves.toBe(published.bearerToken);
+  });
+
   it.each([
     ["missing", undefined],
     ["malformed", "{not-json"],
@@ -37,6 +46,7 @@ describe("bounded local wrapper credential", () => {
     ["wrong purpose", JSON.stringify({ ...document(), purpose: "device" })],
     ["unknown field", JSON.stringify({ ...document(), extra: true })],
     ["short token", JSON.stringify(document("short"))],
+    ["invalid timestamp", JSON.stringify({ ...document(), lastUpdated: "2026-02-30T00:00:00.000Z" })],
     ["empty", ""],
   ])("rejects %s credentials consistently", async (_label, content) => {
     const { root, path } = await credentialPath();

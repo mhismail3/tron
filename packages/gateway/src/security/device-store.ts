@@ -8,7 +8,9 @@ import { readSecureJson, SecureJsonFileError } from "../util/secure-json.js";
 import { isGatewayTimestamp } from "../util/timestamp.js";
 import { GatewayError } from "../errors.js";
 
-interface LocalAuthDocument {
+/** The wrapper credential document written by the credential store and read by
+ * the terminal client. One shape rule decides which of these documents is valid. */
+export interface LocalAuthDocument {
   version: 2;
   bearerToken: string;
   purpose: "local-wrapper-health";
@@ -117,7 +119,7 @@ function requireSynchronousResult<T>(value: T): T {
   return value;
 }
 
-function isLocalAuthDocument(value: unknown): value is LocalAuthDocument {
+export function isLocalAuthDocument(value: unknown): value is LocalAuthDocument {
   if (!value || typeof value !== "object" || Array.isArray(value)) return false;
   const document = value as Record<string, unknown>;
   if (!hasOnlyKeys(document, ["version", "bearerToken", "purpose", "lastUpdated"])) return false;
