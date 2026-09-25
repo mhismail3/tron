@@ -160,65 +160,6 @@ struct ExistingInstallDetectorTests {
         }
     }
 
-    @Test("Gateway payload validation requires embedded runtime and production dependencies")
-    func gatewayPayloadValidation() throws {
-        let tmp = TestTempDir.make()
-        defer { TestTempDir.cleanup(tmp) }
-        let payload = tmp.appendingPathComponent("Gateway", isDirectory: true)
-        let entrypoint = payload.appendingPathComponent("app/dist/index.js", isDirectory: false)
-        let packageManifest = payload.appendingPathComponent("app/package.json", isDirectory: false)
-        let packageLock = payload.appendingPathComponent("app/package-lock.json", isDirectory: false)
-        let dependencies = payload.appendingPathComponent("app/node_modules", isDirectory: true)
-        let runtime = payload.appendingPathComponent("runtime", isDirectory: true)
-        try FileManager.default.createDirectory(at: entrypoint.deletingLastPathComponent(), withIntermediateDirectories: true)
-        try Data(repeating: 0x2f, count: 1_024).write(to: entrypoint)
-        #expect(ExistingInstallDetector.validateGatewayPayload(payloadRoot: payload) != nil)
-
-        try Data("{}".utf8).write(to: packageManifest)
-        try Data("{}".utf8).write(to: packageLock)
-        try FileManager.default.createDirectory(at: dependencies, withIntermediateDirectories: true)
-        for relativePath in [
-            "@earendil-works/pi-agent-core/package.json",
-            "@earendil-works/pi-ai/package.json",
-            "@earendil-works/pi-coding-agent/package.json",
-            "@earendil-works/pi-tui/package.json",
-            "node-pty/package.json",
-            "proper-lockfile/package.json",
-            "ws/package.json",
-        ] {
-            let dependency = dependencies.appendingPathComponent(relativePath, isDirectory: false)
-            try FileManager.default.createDirectory(at: dependency.deletingLastPathComponent(), withIntermediateDirectories: true)
-            try Data("{}".utf8).write(to: dependency)
-        }
-        let helper = payload.appendingPathComponent("app/scripts/ensure-node-pty-helper.mjs", isDirectory: false)
-        let updateHelper = payload.appendingPathComponent("app/scripts/gateway-payload-deploy.mjs", isDirectory: false)
-        try FileManager.default.createDirectory(at: helper.deletingLastPathComponent(), withIntermediateDirectories: true)
-        try Data("// test".utf8).write(to: helper)
-        try Data("// update test".utf8).write(to: updateHelper)
-        try FileManager.default.createDirectory(at: runtime, withIntermediateDirectories: true)
-        for architecture in ["arm64", "x64"] {
-            try Data(repeating: 0, count: 1_048_576).write(to: runtime.appendingPathComponent("node-\(architecture)"))
-        }
-
-        try JSONEncoder().encode(
-            GatewayPayloadManifest(
-                channel: "stable",
-                version: "1",
-                gatewayVersion: "1",
-                nodeVersion: "22",
-                sourceRevision: "test-revision",
-                runtimeEpoch: "test-epoch",
-                payloadFingerprint: String(repeating: "a", count: 64)
-            )
-        ).write(to: payload.appendingPathComponent("manifest.json"))
-        #expect(
-            ExistingInstallDetector.validateGatewayPayload(
-                payloadRoot: payload,
-                isExecutable: { _ in true }
-            ) == nil
-        )
-    }
-
     @Test("LaunchAgent plist requires current BundleProgram and associated wrapper IDs")
     func launchAgentPlistIsCurrent() {
         let plist = trackedLaunchAgentPlist(named: "com.tron.server.plist")

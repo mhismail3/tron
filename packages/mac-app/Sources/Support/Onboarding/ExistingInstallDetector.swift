@@ -113,96 +113,9 @@ enum ExistingInstallDetector {
         return await bundleSignatureProblem(of: helperBundle, expectedBundleIdentifier: profile.launchAgentLabel)
     }
 
-    static func validateGatewayPayload(
-        payloadRoot: URL = TronPaths.gatewayPayloadRoot,
-        fileExists: (String) -> Bool = { FileManager.default.fileExists(atPath: $0) },
-        isExecutable: (String) -> Bool = { FileManager.default.isExecutableFile(atPath: $0) },
-        fileSize: (String) -> Int64? = {
-            (try? FileManager.default.attributesOfItem(atPath: $0)[.size] as? NSNumber)?.int64Value
-        },
-        readData: (String) -> Data? = { try? Data(contentsOf: URL(fileURLWithPath: $0)) }
-    ) -> String? {
-        // The canonical validator owns complete bundled payload verification,
-        // including the deterministic fingerprint and symlink boundary. Keep
-        // the injectable checks below support focused validator fixtures.
-        if case .failure(let error) = GatewayPayloadValidator.validate(payloadRoot: payloadRoot),
-           payloadRoot.standardizedFileURL.path == TronPaths.gatewayPayloadRoot.standardizedFileURL.path {
+    static func validateGatewayPayload() -> String? {
+        if case .failure(let error) = GatewayPayloadValidator.validate(payloadRoot: TronPaths.gatewayPayloadRoot) {
             return "The bundled Gateway payload failed canonical validation: \(error)"
-        }
-        func usableFile(_ url: URL, minimumBytes: Int64 = 1) -> Bool {
-            fileExists(url.path) && (fileSize(url.path) ?? 0) >= minimumBytes
-        }
-
-        let payloadManifest = payloadRoot.appendingPathComponent("manifest.json", isDirectory: false)
-        guard usableFile(payloadManifest),
-              (fileSize(payloadManifest.path) ?? Int64.max) <= Int64(GatewayPayloadStore.maxManifestBytes),
-              let payloadManifestData = readData(payloadManifest.path),
-              let identity = try? JSONDecoder().decode(GatewayPayloadManifest.self, from: payloadManifestData),
-              identity.schema == GatewayPayloadStore.schema,
-              identity.kind == GatewayPayloadManifest.payloadKind,
-              GatewayPayloadStore.validComponent(identity.channel, maximumLength: GatewayPayloadStore.channelComponentLimit),
-              GatewayPayloadStore.validComponent(identity.version, maximumLength: GatewayPayloadStore.versionComponentLimit),
-              identity.payloadFingerprint.count == 64,
-              identity.payloadFingerprint.unicodeScalars.allSatisfy({ "0123456789abcdef".unicodeScalars.contains($0) }),
-              identity.sourceRevision?.isEmpty == false,
-              identity.runtimeEpoch.map({ GatewayPayloadStore.validComponent($0, maximumLength: GatewayPayloadStore.versionComponentLimit) }) == true else {
-            return "The bundled Gateway payload manifest is missing or invalid. Rebuild or reinstall Tron."
-        }
-
-        let entrypoint = payloadRoot.appendingPathComponent("app/dist/index.js", isDirectory: false)
-        guard usableFile(entrypoint, minimumBytes: 1_024) else {
-            return "The bundled Gateway entrypoint is missing or incomplete. Rebuild or reinstall Tron."
-        }
-
-        let packageManifest = payloadRoot.appendingPathComponent("app/package.json", isDirectory: false)
-        let packageLock = payloadRoot.appendingPathComponent("app/package-lock.json", isDirectory: false)
-        guard usableFile(packageManifest), usableFile(packageLock),
-              let manifestData = readData(packageManifest.path),
-              let lockData = readData(packageLock.path),
-              (try? JSONSerialization.jsonObject(with: manifestData)) is [String: Any],
-              (try? JSONSerialization.jsonObject(with: lockData)) is [String: Any] else {
-            return "The bundled Gateway package manifest is missing or invalid. Rebuild or reinstall Tron."
-        }
-
-        let dependencies = payloadRoot.appendingPathComponent("app/node_modules", isDirectory: true)
-        guard fileExists(dependencies.path) else {
-            return "The bundled Gateway dependencies are missing. Rebuild or reinstall Tron."
-        }
-
-        let requiredDependencyFiles = [
-            "@earendil-works/pi-agent-core/package.json",
-            "@earendil-works/pi-ai/package.json",
-            "@earendil-works/pi-coding-agent/package.json",
-            "@earendil-works/pi-tui/package.json",
-            "node-pty/package.json",
-            "proper-lockfile/package.json",
-            "ws/package.json",
-        ]
-        for relativePath in requiredDependencyFiles {
-            let dependency = dependencies.appendingPathComponent(relativePath, isDirectory: false)
-            guard usableFile(dependency) else {
-                return "The bundled Gateway dependency tree is incomplete. Rebuild or reinstall Tron."
-            }
-        }
-
-        let nodePtyHelper = payloadRoot
-            .appendingPathComponent("app/scripts/ensure-node-pty-helper.mjs", isDirectory: false)
-        let updateHelper = payloadRoot
-            .appendingPathComponent("app/scripts/gateway-payload-deploy.mjs", isDirectory: false)
-        guard usableFile(nodePtyHelper), usableFile(updateHelper) else {
-            return "The bundled Gateway helper scripts are missing. Rebuild or reinstall Tron."
-        }
-
-        for architecture in ["arm64", "x64"] {
-            let runtime = payloadRoot
-                .appendingPathComponent("runtime", isDirectory: true)
-                .appendingPathComponent("node-\(architecture)", isDirectory: false)
-            guard usableFile(runtime, minimumBytes: 1_048_576) else {
-                return "The bundled Node \(architecture) runtime is missing or incomplete. Rebuild or reinstall Tron."
-            }
-            guard isExecutable(runtime.path) else {
-                return "The bundled Node \(architecture) runtime is not executable. Rebuild or reinstall Tron."
-            }
         }
         return nil
     }

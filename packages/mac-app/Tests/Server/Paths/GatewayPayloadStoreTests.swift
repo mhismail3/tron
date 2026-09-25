@@ -440,6 +440,42 @@ struct GatewayPayloadStoreTests {
         }
     }
 
+    @Test("canonical validation rejects an incomplete payload with a real manifest fingerprint")
+    func canonicalValidationRejectsIncompleteInstallPayload() throws {
+        let temporary = try TemporaryPayloadDirectory()
+        let root = temporary.root.appendingPathComponent("install-payload", isDirectory: true)
+        defer {
+            if let items = FileManager.default.enumerator(at: root, includingPropertiesForKeys: [.isDirectoryKey]) {
+                for case let item as URL in items {
+                    let isDirectory = (try? item.resourceValues(forKeys: [.isDirectoryKey]).isDirectory) == true
+                    try? FileManager.default.setAttributes([.posixPermissions: isDirectory ? 0o755 : 0o644], ofItemAtPath: item.path)
+                }
+            }
+            try? FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: root.path)
+            temporary.cleanup()
+        }
+        try makePayload(root: root, channel: "stable", version: "install", fingerprint: String(repeating: "a", count: 64))
+
+        let entrypoint = root.appendingPathComponent("app/dist/index.js")
+        for case let item as URL in FileManager.default.enumerator(at: root, includingPropertiesForKeys: [.isDirectoryKey])! {
+            let isDirectory = (try? item.resourceValues(forKeys: [.isDirectoryKey]).isDirectory) == true
+            try FileManager.default.setAttributes([.posixPermissions: isDirectory ? 0o755 : 0o644], ofItemAtPath: item.path)
+        }
+        try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: root.path)
+        try FileManager.default.removeItem(at: entrypoint)
+        for case let item as URL in FileManager.default.enumerator(at: root, includingPropertiesForKeys: [.isDirectoryKey])! {
+            let isDirectory = (try? item.resourceValues(forKeys: [.isDirectoryKey]).isDirectory) == true
+            let mode: NSNumber = isDirectory || item.path.contains("/runtime/") ? 0o555 : 0o444
+            try FileManager.default.setAttributes([.posixPermissions: mode], ofItemAtPath: item.path)
+        }
+        try FileManager.default.setAttributes([.posixPermissions: 0o555], ofItemAtPath: root.path)
+
+        guard case .failure = GatewayPayloadValidator.validate(payloadRoot: root, expectedChannel: "stable") else {
+            Issue.record("canonical validation must reject the incomplete install payload")
+            return
+        }
+    }
+
     @Test("writable payload entries are ordinary incomplete external payloads")
     func writablePayloadFallsBack() throws {
         let temporary = try TemporaryPayloadDirectory()
