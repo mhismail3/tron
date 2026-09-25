@@ -8,7 +8,7 @@ import {
   REGISTRY_NAME,
   type Env,
 } from "./contracts";
-import { ownedBuffer } from "./crypto";
+import { ownedBuffer, readBoundedStream } from "./crypto";
 import { json } from "./response";
 
 export { PushRegistry } from "./registry";
@@ -29,9 +29,8 @@ export default {
     }
     if (!env.PUSH_REGISTRY) return json({ error: "service_not_configured" }, 503);
 
-    const read = await readBoundedBody(request, MAX_BODY_BYTES);
-    if (!read.ok) return json({ error: "invalid_body_size" }, 413);
-    const body: Uint8Array<ArrayBufferLike> = read.body;
+    const body = await readBoundedBody(request, MAX_BODY_BYTES);
+    if (body === undefined) return json({ error: "invalid_body_size" }, 413);
     const expectsBody = request.method === "POST" && url.pathname !== CHALLENGE_PATH;
     if (expectsBody && request.headers.get("content-type")?.split(";", 1)[0].trim().toLowerCase() !== "application/json") {
       return json({ error: "unsupported_media_type" }, 415);
@@ -65,31 +64,11 @@ export default {
   },
 };
 
-async function readBoundedBody(request: Request, maximum: number): Promise<
-  { ok: true; body: Uint8Array } | { ok: false }
-> {
+async function readBoundedBody(request: Request, maximum: number): Promise<Uint8Array | undefined> {
   const declared = request.headers.get("content-length");
-  if (declared !== null) {
-    if (!/^\d+$/.test(declared) || Number(declared) > maximum) return { ok: false };
-  }
-  const reader = request.body?.getReader();
-  if (!reader) return { ok: true, body: new Uint8Array() };
-  const chunks: Uint8Array[] = [];
-  let size = 0;
-  while (true) {
-    const { done, value } = await reader.read();
-    if (done) break;
-    size += value.byteLength;
-    if (size > maximum) {
-      await reader.cancel();
-      return { ok: false };
-    }
-    chunks.push(value);
-  }
-  const body = new Uint8Array(size);
-  let offset = 0;
-  for (const chunk of chunks) { body.set(chunk, offset); offset += chunk.byteLength; }
-  return { ok: true, body };
+  if (declared !== null && (!/^\d+$/.test(declared) || Number(declared) > maximum)) return undefined;
+  const read = await readBoundedStream(request.body, maximum);
+  return read.ok ? read.bytes : undefined;
 }
 
 function exactGrantPath(path: string): boolean {

@@ -19,6 +19,31 @@ export function ownedBuffer(value: Uint8Array): ArrayBuffer {
   return Uint8Array.from(value).buffer;
 }
 
+/**
+ * Bounded stream read for the request body gate and the APNs response parse.
+ * An absent stream reads as empty bytes; callers own what an empty body means.
+ */
+export async function readBoundedStream(
+  stream: ReadableStream<Uint8Array> | null | undefined,
+  maximumBytes: number,
+): Promise<{ ok: true; bytes: Uint8Array } | { ok: false }> {
+  const reader = stream?.getReader();
+  if (!reader) return { ok: true, bytes: new Uint8Array() };
+  const chunks: Uint8Array[] = [];
+  let size = 0;
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    size += value.byteLength;
+    if (size > maximumBytes) {
+      await reader.cancel();
+      return { ok: false };
+    }
+    chunks.push(value);
+  }
+  return { ok: true, bytes: concatBytes(...chunks) };
+}
+
 export async function sha256(value: Uint8Array): Promise<Uint8Array> {
   return new Uint8Array(await crypto.subtle.digest("SHA-256", ownedBuffer(value)));
 }
@@ -27,7 +52,7 @@ export async function sha256Hex(value: Uint8Array): Promise<string> {
   return bytesToHex(await sha256(value));
 }
 
-export function bytesToHex(value: Uint8Array): string {
+function bytesToHex(value: Uint8Array): string {
   return [...value].map((byte) => byte.toString(16).padStart(2, "0")).join("");
 }
 

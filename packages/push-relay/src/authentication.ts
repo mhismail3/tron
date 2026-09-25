@@ -2,7 +2,7 @@ import { constantTimeEqual, hexBytes, hmacHex, sha256Hex } from "./crypto";
 
 const CLOCK_SKEW_SECONDS = 300;
 
-export interface VerifiedGrantSignature {
+interface VerifiedGrantSignature {
   bodyHash: string;
 }
 

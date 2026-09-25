@@ -61,6 +61,17 @@ describe("closed APNs payload", () => {
     });
   });
 
+  test("bounds an oversize APNs provider response before parsing its reason", async () => {
+    // The reason sits past the 2048-byte response cap, so an unbounded reader
+    // would classify this as invalid_token instead of the status fallback.
+    const body = `{"padding":"${"x".repeat(4096)}","reason":"Unregistered"}`;
+    vi.stubGlobal("fetch", vi.fn(async () => new Response(body, { status: 410 })));
+    expect(await sendToApns(env as unknown as Env, notification, target)).toEqual({
+      status: "permanent_failure",
+      reason: "http_410",
+    });
+  });
+
   test("provider-token cache identity includes private-key contents", async () => {
     const providerFetch = vi.fn(async () => new Response(null, { status: 200 }));
     vi.stubGlobal("fetch", providerFetch);

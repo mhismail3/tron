@@ -1,5 +1,5 @@
 import type { ApnsEnvironment, Env, NotificationRequest, RelayResult } from "./contracts";
-import { base64Url, ownedBuffer, pemBytes, sha256, stableProviderId, utf8 } from "./crypto";
+import { base64Url, ownedBuffer, pemBytes, readBoundedStream, sha256, stableProviderId, utf8 } from "./crypto";
 
 const MAX_APNS_PAYLOAD_BYTES = 4096;
 const MAX_APNS_RESPONSE_BYTES = 2048;
@@ -112,25 +112,10 @@ async function providerToken(env: Env): Promise<string> {
 }
 
 async function sanitizedApnsReason(response: Response): Promise<string> {
-  const reader = response.body?.getReader();
-  if (!reader) return `http_${response.status}`;
-  const chunks: Uint8Array[] = [];
-  let size = 0;
   try {
-    while (true) {
-      const { done, value } = await reader.read();
-      if (done) break;
-      size += value.byteLength;
-      if (size > MAX_APNS_RESPONSE_BYTES) {
-        await reader.cancel();
-        return `http_${response.status}`;
-      }
-      chunks.push(value);
-    }
-    const bytes = new Uint8Array(size);
-    let offset = 0;
-    for (const chunk of chunks) { bytes.set(chunk, offset); offset += chunk.byteLength; }
-    const value = JSON.parse(new TextDecoder().decode(bytes)) as { reason?: unknown };
+    const read = await readBoundedStream(response.body, MAX_APNS_RESPONSE_BYTES);
+    if (!read.ok) return `http_${response.status}`;
+    const value = JSON.parse(new TextDecoder().decode(read.bytes)) as { reason?: unknown };
     return typeof value.reason === "string" ? sanitizeReason(value.reason) : `http_${response.status}`;
   } catch {
     return `http_${response.status}`;

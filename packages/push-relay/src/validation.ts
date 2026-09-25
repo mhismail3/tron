@@ -81,10 +81,10 @@ function isMachineRouteId(value: unknown): value is string {
     && !/[\u0000-\u001f\u007f]/.test(value);
 }
 
-export function isPushRoute(value: unknown): value is PushRoute {
+function isPushRoute(value: unknown): value is PushRoute {
   return typeof value === "string" && Object.hasOwn(ROUTES, value);
 }
 
-export function isRecord(value: unknown): value is Record<string, unknown> {
+function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }

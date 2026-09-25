@@ -2,7 +2,10 @@ import { sendToApns } from "./apns";
 import { verifyAssertion, verifyAttestation } from "./app-attest";
 import { verifyGrantSignature } from "./authentication";
 import {
+  CHALLENGE_PATH,
   GRANT_PATH_PREFIX,
+  INSTALLATIONS_PATH,
+  NOTIFICATIONS_PATH,
   ROUTES,
   type Env,
   type InstallationRegistration,
@@ -119,9 +122,9 @@ export class PushRegistry {
 
   async fetch(request: Request): Promise<Response> {
     const url = new URL(request.url);
-    if (request.method === "POST" && url.pathname === "/v3/attestation/challenge") return this.createChallenge();
-    if (request.method === "POST" && url.pathname === "/v3/installations") return this.registerInstallation(request);
-    if (request.method === "POST" && url.pathname === "/v3/notifications") return this.dispatch(request);
+    if (request.method === "POST" && url.pathname === CHALLENGE_PATH) return this.createChallenge();
+    if (request.method === "POST" && url.pathname === INSTALLATIONS_PATH) return this.registerInstallation(request);
+    if (request.method === "POST" && url.pathname === NOTIFICATIONS_PATH) return this.dispatch(request);
     if (request.method === "DELETE" && url.pathname.startsWith(GRANT_PATH_PREFIX)) return this.revoke(request, url.pathname);
     return json({ error: "not_found" }, 404);
   }
@@ -303,7 +306,7 @@ export class PushRegistry {
     const grant = this.grant(grantId);
     const authentication = grant && grant.enabled === 1
       ? await verifyGrantSignature({
-        secret: grant.secret, method: "POST", path: "/v3/notifications", timestamp, requestId, body, provided: signature,
+        secret: grant.secret, method: "POST", path: NOTIFICATIONS_PATH, timestamp, requestId, body, provided: signature,
       })
       : undefined;
     if (!grant || grant.enabled !== 1 || !authentication) return json({ error: "invalid_signature" }, 401);

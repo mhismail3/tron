@@ -1,16 +1,11 @@
-export interface Env {
-  APNS_KEY_P8: string;
-  APNS_KEY_ID: string;
-  APNS_TEAM_ID: string;
-  APPLE_TEAM_ID: string;
-  PUSH_REGISTRY: DurableObjectNamespace;
-}
+/** Worker bindings are declared once in worker-configuration.d.ts. */
+export type Env = Cloudflare.Env;
 
 export type PushRoute = "beta" | "production-sandbox" | "production";
 export type ApnsEnvironment = "sandbox" | "production";
 export type AttestationEnvironment = "development" | "production";
 
-export interface RouteDefinition {
+interface RouteDefinition {
   bundleId: string;
   topic: string;
   apnsEnvironment: ApnsEnvironment;
@@ -38,7 +33,7 @@ export const ROUTES: Readonly<Record<PushRoute, RouteDefinition>> = {
   },
 };
 
-export interface RegistrationFields {
+interface RegistrationFields {
   version: 1;
   challengeId: string;
   challenge: string;
@@ -48,12 +43,12 @@ export interface RegistrationFields {
   bindingHash: string;
 }
 
-export interface AttestationRegistration extends RegistrationFields {
+interface AttestationRegistration extends RegistrationFields {
   proof: "attestation";
   attestationObject: string;
 }
 
-export interface AssertionRegistration extends RegistrationFields {
+interface AssertionRegistration extends RegistrationFields {
   proof: "assertion";
   assertionObject: string;
 }
@@ -71,7 +66,7 @@ export interface NotificationRequest {
   expiresAt: string;
 }
 
-export type RelayStatus =
+type RelayStatus =
   | "accepted_by_apns"
   | "retryable"
   | "permanent_failure"

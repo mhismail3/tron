@@ -3,6 +3,7 @@ import { BasicConstraintsExtension, KeyUsageFlags, KeyUsagesExtension, X509Certi
 import { APPLE_APP_ATTESTATION_ROOT_PEM } from "./apple-app-attestation-root";
 import type { AttestationEnvironment } from "./contracts";
 import {
+  base64Url,
   concatBytes,
   constantTimeEqual,
   decodeBase64Url,
@@ -120,7 +121,7 @@ export async function verifyAttestationAgainstTrustedRoot(
   }
 
   return {
-    publicKeySpki: toBase64Url(new Uint8Array(leaf.publicKey.rawData)),
+    publicKeySpki: base64Url(new Uint8Array(leaf.publicKey.rawData)),
     counter: 0,
   };
 }
@@ -250,10 +251,4 @@ function bytes(value: unknown): Uint8Array {
   if (value instanceof Uint8Array) return value;
   if (value instanceof ArrayBuffer) return new Uint8Array(value);
   throw new Error("invalid_cbor_bytes");
-}
-
-function toBase64Url(value: Uint8Array): string {
-  let binary = "";
-  for (const byte of value) binary += String.fromCharCode(byte);
-  return btoa(binary).replace(/=/g, "").replace(/\+/g, "-").replace(/\//g, "_");
 }
