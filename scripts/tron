@@ -20,9 +20,6 @@ Commands:
                                     Offline Knowledge catalog/ConnectionOwner migration
   delegated-migrate <preflight|stage|verify|publish|recover|cleanup> ...
                                     Explicit retained pi-subagents root cutover
-  agent-home-cutover --app <Release.app> [--confirm-offline|--verify|--status]
-                                    One-time offline cutover; manual app activation
-                                    See --help for reviewed pre-helper bootstrap
   wizard-migrate <stage|verify|publish|recover|cleanup> ...
                                     Manually stage the legacy Mac wizard key
                                     into internal/mac/wizard-state.json
@@ -84,9 +81,6 @@ case "$cmd" in
       exit 66
     fi
     exec node "$GATEWAY/dist/sessions/delegated-root-migration.js" "$@"
-    ;;
-  agent-home-cutover)
-    exec python3 "$ROOT/scripts/tron_agent_home_cutover.py" "$@"
     ;;
   wizard-migrate)
     exec python3 "$ROOT/scripts/tron_wizard_migration.py" "$@"

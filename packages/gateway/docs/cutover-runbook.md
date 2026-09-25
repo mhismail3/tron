@@ -3,9 +3,7 @@
 This is the one ordered operator runbook for the machine-internal, delegated,
 Mac wizard-state, and integration-state cutovers. Owner docs linked below
 define schemas and invariants; they do not provide alternate operator
-sequences. General Mac agent-home recovery is separate and is not part of this
-refactor cutover; see the [agent-home runbook](../../mac-app/docs/agent-home-cutover.md)
-only when that independently approved recovery is required.
+sequences.
 Agents may prepare source/build artifacts and synthetic fixtures only. A user or
 maintainer must perform quiescence, backup, publication, Gateway activation,
 app replacement, and cleanup.
@@ -274,7 +272,7 @@ data, conflicts, unsafe paths and links, and retains private rollback
 evidence. `.onboarded` remains completion authority and is never changed. If
 publication is interrupted, `verify` must refuse the ambiguous destination; use
 the owner’s explicit `recover --staging <staging>` only after its digest/source
-proof passes. General agent-home migration is not a step in this cutover.
+proof passes.
 
 Prepare/stage/publish the Knowledge catalog and ConnectionOwner authority through
 the production `TronWorkspace` and catalog-control paths. Preserve records,

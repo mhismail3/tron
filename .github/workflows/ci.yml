@@ -56,7 +56,6 @@ jobs:
             scripts/check-documentation-policy.py \
             scripts/test-personal-info-guard.py \
             scripts/tron_mac_reinstall.py \
-            scripts/tron_agent_home_cutover.py \
             scripts/test-mac-reinstall.py \
             scripts/validate-ios-artifact.py \
             scripts/ios-test-lock.py \
@@ -284,8 +283,6 @@ jobs:
             -derivedDataPath build/ci-derived-data
       - name: Smoke test signed staged Pi payload
         run: packages/mac-app/scripts/test-signed-pi-payload-smoke.sh packages/mac-app/build/ci-derived-data/Build/Products/Debug/TronMac.app
-      - name: Exercise offline cutover with bundled migration tools
-        run: TRON_TEST_APP="$GITHUB_WORKSPACE/packages/mac-app/build/ci-derived-data/Build/Products/Debug/TronMac.app" python3 scripts/test-mac-reinstall.py
       - name: Run Mac tests without rebuilding
         working-directory: packages/mac-app
         run: |

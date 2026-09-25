@@ -374,10 +374,6 @@ helper. Do not weaken the pins, force unregister/kill surviving work, or assume
 Restart Helper repairs that mismatch. If an older installed build lacks the
 pre-update control, stop for an explicitly reviewed maintainer bootstrap based on
 that build's actual capabilities; the capture-owning sequence cannot be skipped.
-The separate one-time cutover runbook documents a narrowly admitted
-[pre-helper bootstrap](agent-home-cutover.md#reviewed-pre-helper-bootstrap) for
-the reviewed build that predates native capture entirely. It is not a general
-missing-helper fallback and is not part of routine reinstall behavior.
 Likewise, a `.notFound`/unknown native-service status refuses drain without XPC,
 registration or Gateway/file changes. Some never-registered optional helpers can
 report `.notFound`; successful uninstall/refresh for that first-install case is
@@ -496,8 +492,7 @@ scripts/tron mac reinstall --finish
 ```
 
 The regular command requires an existing private `~/.tron/agent`. It does not
-inspect, migrate or delete an old agent home. For a machine still using
-`~/.pi/agent`, use the separate [one-time cutover](agent-home-cutover.md) instead.
+inspect, migrate or delete an old agent home.
 Neither command replaces an app, changes LaunchAgents, starts/stops a Gateway,
 or approves macOS permissions. Repository agents may test them on isolated
 fixtures, but must not execute a live cutover or confirm the operator's offline
@@ -565,9 +560,8 @@ User form, and check historical answers, pairing, settings, trust, models and
 packages. Do not repeatedly restart after failure. Preserve post-update writes
 and use the coherent manual rollback procedure in the cutover runbook.
 
-Focused regressions: `python3 scripts/test-mac-reinstall.py`; set `TRON_TEST_APP`
-to a built app to include real bundled preflight/staging/verification against
-temporary homes. CI runs both filesystem tests and the bundled-tool integration.
+Focused regression: `python3 scripts/test-mac-reinstall.py` (CI runs it in the Mac
+job).
 
 ### Local recovery location and retention
 
@@ -628,16 +622,6 @@ These are local recovery checkpoints, not scheduled ongoing backups and not
 protection against disk loss. Off-device backup requires a separately configured
 protected destination. Restoration and any app/Gateway transition remain
 maintainer actions.
-
-### Agent-home cutover (operator-owned)
-
-Follow the canonical [agent-home cutover runbook](agent-home-cutover.md) for the
-full dependency gate, exact commands, stop conditions, diagnostics, and rollback.
-`scripts/tron agent-home-cutover` is a separate, explicitly invoked one-time
-operator command. It reuses the reinstall backup/receipt owner and the bundled
-canonical migration tools, then journals two no-clobber same-filesystem renames.
-There is no startup migration or compatibility path in the regular reinstall
-command. App replacement and activation remain manual in both workflows.
 
 ### Gateway payload operations
 
