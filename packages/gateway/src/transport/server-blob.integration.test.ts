@@ -276,7 +276,7 @@ describe("Gateway blob HTTP leases", () => {
     await mkdir(workspace);
     await writeFile(join(workspace, "note.txt"), "contents");
     const store = new DisplayArtifactStore(home, { minimumFreeBytes: 0 });
-    await store.initialize(new Set(["session-1"]));
+    await store.initialize();
     const artifact = await store.ingest(workspace, "note.txt", "session-1");
     const gateway = makeServer(async () => { throw new GatewayError("not_found", "missing"); });
     let streamClosed: Promise<{ closed: true } | { error: unknown }> | undefined;

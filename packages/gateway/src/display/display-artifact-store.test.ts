@@ -30,7 +30,7 @@ async function fixture() {
     minimumFreeBytes: 0,
     uuid: () => ids[index++]!,
   });
-  await store.initialize(new Set(["session-a", "session-b"]));
+  await store.initialize();
   return { home, workspace, store };
 }
 
@@ -111,7 +111,7 @@ describe("DisplayArtifactStore", () => {
       expect(await readdir(join(value.home, "gateway/display-artifacts/artifacts"))).toEqual([]);
       // Capacity and durable authorization do not survive the last reader.
       const restarted = new DisplayArtifactStore(value.home, { minimumFreeBytes: 0 });
-      await restarted.initialize(new Set(["session-a"]));
+      await restarted.initialize();
       expect(restarted.hasOwner(artifact.id, "session-a")).toBe(false);
     } finally {
       resume();
@@ -171,7 +171,7 @@ describe("DisplayArtifactStore", () => {
       .rejects.toMatchObject({ code: "invalid_request" });
   });
 
-  it("rejects a NUL beyond the signature prefix and never publishes undecodable text", async () => {
+  it("rejects a NUL anywhere in text artifacts and never publishes undecodable text", async () => {
     const home = await mkdtemp(join(tmpdir(), "tron-display-text-"));
     const workspace = join(home, "workspace");
     await mkdir(workspace, { recursive: true });
@@ -185,6 +185,9 @@ describe("DisplayArtifactStore", () => {
     await store.initialize();
     const published = join(home, "gateway", "display-artifacts", "artifacts");
     try {
+      await writeFile(join(workspace, "early-nul.txt"), Buffer.from("ab\u0000cd"));
+      await expect(store.ingest(workspace, "early-nul.txt", "session-a"))
+        .rejects.toMatchObject({ code: "invalid_request" });
       await writeFile(join(workspace, "late-nul.txt"), Buffer.concat([Buffer.alloc(5_000, 0x61), Buffer.from([0])]));
       await expect(store.ingest(workspace, "late-nul.txt", "session-a"))
         .rejects.toMatchObject({ code: "invalid_request" });
@@ -227,7 +230,7 @@ describe("DisplayArtifactStore", () => {
       maximumItems: 8,
       minimumFreeBytes: 0,
     });
-    await restarted.initialize(new Set(["session-a"]));
+    await restarted.initialize();
     await expect(restarted.acquire(artifact.id, "session-a")).rejects.toMatchObject({ code: "conflict" });
   });
 
@@ -246,14 +249,14 @@ describe("DisplayArtifactStore", () => {
     await chmod(operationalFolder, 0);
     try {
       const restarted = new DisplayArtifactStore(value.home, { maximumItemBytes: 1_024, maximumLogicalBytes: 4_096, maximumItems: 8, minimumFreeBytes: 0 });
-      await restarted.initialize(new Set(["session-a"]));
+      await restarted.initialize();
       expect(await readdir(artifactRoot)).toContain(operational.id);
       await expect(restarted.acquire(operational.id, "session-a")).rejects.toMatchObject({ code: "conflict" });
       expect(await readFile(objectPath, "utf8")).toBe("operational");
 
       await writeFile(join(corruptFolder, "metadata.json"), "not-json");
       const cleaned = new DisplayArtifactStore(value.home, { maximumItemBytes: 1_024, maximumLogicalBytes: 4_096, maximumItems: 8, minimumFreeBytes: 0 });
-      await cleaned.initialize(new Set(["session-a"]));
+      await cleaned.initialize();
       expect(await readdir(artifactRoot)).not.toContain(corrupt.id);
     } finally {
       await chmod(operationalFolder, 0o700).catch(() => {});
@@ -279,7 +282,7 @@ describe("DisplayArtifactStore", () => {
         maximumItems: 8,
         minimumFreeBytes: 0,
       });
-      await restarted.initialize(new Set(["session-a", "session-b"]));
+      await restarted.initialize();
       await expect(restarted.reconcileSession("session-a", new Set())).rejects.toMatchObject({ code: "conflict" });
       await writeFile(join(value.workspace, "new.txt"), "new bytes");
       await expect(restarted.ingest(value.workspace, "new.txt", "session-a")).rejects.toMatchObject({ code: "conflict" });
@@ -289,7 +292,7 @@ describe("DisplayArtifactStore", () => {
       expect(await readFile(objectPath, "utf8")).toBe("shared bytes");
 
       const revalidated = new DisplayArtifactStore(value.home, { minimumFreeBytes: 0 });
-      await revalidated.initialize(new Set(["session-a"]));
+      await revalidated.initialize();
       expect(revalidated.hasOwner(artifactA.id, "session-a")).toBe(true);
       const lease = await revalidated.acquire(artifactA.id, "session-a");
       expect(await collect(lease.stream)).toEqual(Buffer.from("shared bytes"));
@@ -312,9 +315,25 @@ describe("DisplayArtifactStore", () => {
       maximumItems: 8,
       minimumFreeBytes: 0,
     });
-    await restarted.initialize(new Set(["session-a"]));
+    await restarted.initialize();
     expect(restarted.hasOwner(artifact.id, "session-a")).toBe(true);
     await restarted.maintain(async () => new Set());
+    await expect(restarted.acquire(artifact.id, "session-a")).rejects.toMatchObject({ code: "not_found" });
+  });
+
+  it("treats empty-owner metadata as startup cleanup instead of restored authority", async () => {
+    const value = await fixture();
+    await writeFile(join(value.workspace, "note.txt"), "durable display");
+    const artifact = await value.store.ingest(value.workspace, "note.txt", "session-a");
+    const artifacts = join(value.home, "gateway/display-artifacts/artifacts");
+    const folder = join(artifacts, artifact.id);
+    // Revocation commits empty ownership before the lane removes the folder, so
+    // a crash in between leaves startup as the only cleanup owner.
+    const metadata = JSON.parse(await readFile(join(folder, "metadata.json"), "utf8")) as { owners: string[] };
+    await writeFile(join(folder, "metadata.json"), JSON.stringify({ ...metadata, owners: [] }));
+    const restarted = new DisplayArtifactStore(value.home, { minimumFreeBytes: 0 });
+    await restarted.initialize();
+    expect(await readdir(artifacts)).toEqual([]);
     await expect(restarted.acquire(artifact.id, "session-a")).rejects.toMatchObject({ code: "not_found" });
   });
 });

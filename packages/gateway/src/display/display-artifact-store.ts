@@ -17,6 +17,11 @@ export const DISPLAY_MAXIMUM_ARTIFACT_BYTES = 2 * 1_024 * 1_024 * 1_024;
 const DEFAULT_MAXIMUM_LOGICAL_BYTES = 32 * 1_024 * 1_024 * 1_024;
 const DEFAULT_MAXIMUM_ITEMS = 16_384;
 const DEFAULT_MINIMUM_FREE_BYTES = 1 * 1_024 * 1_024 * 1_024;
+// Display reads reserve their allowance before verification/open and an ingest
+// copies up to 2 GiB into staging, so these caps are fixed bounds rather than
+// tuning knobs (`docs/connection-resilience.md`).
+const MAXIMUM_ACTIVE_READERS = 4;
+const MAXIMUM_ACTIVE_INGESTS = 2;
 
 export type DisplayArtifactKind =
   | "image" | "markdown" | "text" | "code" | "pdf" | "html"
@@ -42,9 +47,6 @@ interface DisplayArtifactStoreOptions {
   maximumLogicalBytes?: number;
   maximumItems?: number;
   minimumFreeBytes?: number;
-  maximumReaders?: number;
-  maximumIngests?: number;
-  now?: () => number;
   uuid?: () => string;
 }
 
@@ -136,12 +138,9 @@ function signatureMatches(prefix: Buffer, classification: { mimeType: string; ki
     case "audio/mp4": return prefix.length >= 12 && prefix.subarray(4, 8).toString("ascii") === "ftyp";
     case "audio/mpeg": return ascii.startsWith("ID3") || (prefix[0] === 0xff && (prefix[1] ?? 0) >= 0xe0);
     case "audio/wav": return ascii.startsWith("RIFF") && ascii.slice(8, 12) === "WAVE";
-    default:
-      if (classification.kind === "text" || classification.kind === "markdown"
-        || classification.kind === "code" || classification.kind === "html") {
-        return !prefix.includes(0);
-      }
-      return true;
+    // Text-like kinds have no container signature; ingest validates the whole
+    // staged file as UTF-8 without NUL bytes.
+    default: return true;
   }
 }
 
@@ -154,9 +153,6 @@ export class DisplayArtifactStore {
   private readonly maximumLogicalBytes: number;
   private readonly maximumItems: number;
   private readonly minimumFreeBytes: number;
-  private readonly maximumReaders: number;
-  private readonly maximumIngests: number;
-  private readonly now: () => number;
   private readonly uuid: () => string;
   private readonly index = new Map<string, DisplayArtifactMetadata>();
   private readonly activeReaderCounts = new Map<string, number>();
@@ -182,18 +178,16 @@ export class DisplayArtifactStore {
     this.maximumLogicalBytes = options.maximumLogicalBytes ?? DEFAULT_MAXIMUM_LOGICAL_BYTES;
     this.maximumItems = options.maximumItems ?? DEFAULT_MAXIMUM_ITEMS;
     this.minimumFreeBytes = options.minimumFreeBytes ?? DEFAULT_MINIMUM_FREE_BYTES;
-    this.maximumReaders = options.maximumReaders ?? 4;
-    this.maximumIngests = options.maximumIngests ?? 2;
-    this.now = options.now ?? Date.now;
     this.uuid = options.uuid ?? randomUUID;
-    if (![this.maximumItemBytes, this.maximumLogicalBytes, this.maximumItems, this.minimumFreeBytes,
-      this.maximumReaders, this.maximumIngests].every(Number.isSafeInteger)
+    if (![this.maximumItemBytes, this.maximumLogicalBytes, this.maximumItems, this.minimumFreeBytes]
+      .every(Number.isSafeInteger)
       || this.maximumItemBytes < 1 || this.maximumLogicalBytes < this.maximumItemBytes
-      || this.maximumItems < 1 || this.minimumFreeBytes < 0 || this.maximumReaders < 1
-      || this.maximumIngests < 1) throw new Error("Display artifact store bounds are invalid");
+      || this.maximumItems < 1 || this.minimumFreeBytes < 0) {
+      throw new Error("Display artifact store bounds are invalid");
+    }
   }
 
-  async initialize(liveSessionIDs?: ReadonlySet<string>): Promise<void> {
+  async initialize(): Promise<void> {
     await this.serialize(async () => {
       await this.ensureDirectories();
       await rm(this.stagingDirectory, { recursive: true, force: true });
@@ -218,8 +212,10 @@ export class DisplayArtifactStore {
           if (!isMetadata(metadata, entry.name, this.maximumItemBytes)) {
             throw new GatewayError("conflict", "Display artifact metadata is invalid");
           }
-          const owners = liveSessionIDs ? metadata.owners.filter((id) => liveSessionIDs.has(id)) : metadata.owners;
-          if (owners.length === 0) {
+          // Revocation can commit empty ownership and crash before the lane
+          // removes the folder: empty-owner metadata is startup cleanup only,
+          // never restored authority (`docs/connection-resilience.md`).
+          if (metadata.owners.length === 0) {
             await rm(folder, { recursive: true, force: true });
             continue;
           }
@@ -236,10 +232,8 @@ export class DisplayArtifactStore {
             throw new GatewayError("conflict", "Display artifact object is invalid");
           }
           await chmod(object, 0o400);
-          const admitted = owners.length === metadata.owners.length ? metadata : { ...metadata, owners };
-          if (admitted !== metadata) await this.writeMetadata(join(folder, "metadata.json"), admitted);
-          this.index.set(admitted.id, admitted);
-          this.logicalBytes += admitted.size;
+          this.index.set(metadata.id, metadata);
+          this.logicalBytes += metadata.size;
         } catch (error) {
           if (isConfirmedArtifactCorruption(error)) {
             await rm(folder, { recursive: true, force: true });
@@ -258,7 +252,7 @@ export class DisplayArtifactStore {
 
   async ingest(workspace: string, requestedPath: string, sessionID: string): Promise<DisplayArtifactDescriptor> {
     this.assertInitialized();
-    if (this.activeIngests >= this.maximumIngests) {
+    if (this.activeIngests >= MAXIMUM_ACTIVE_INGESTS) {
       throw new GatewayError("busy", "Concurrent display artifact ingestion reached its bounded capacity", true);
     }
     this.activeIngests += 1;
@@ -418,7 +412,7 @@ export class DisplayArtifactStore {
           kind: input.classification.kind,
           digest: input.digest,
           owners: [input.sessionID],
-          createdAt: new Date(this.now()).toISOString(),
+          createdAt: new Date().toISOString(),
         };
         await this.writeMetadata(join(folder, "metadata.json"), metadata);
         this.index.set(id, metadata);
@@ -464,7 +458,7 @@ export class DisplayArtifactStore {
     if (!metadata || !metadata.owners.includes(sessionID)) {
       throw new GatewayError("not_found", "Display artifact is unavailable");
     }
-    if (this.activeReaders >= this.maximumReaders) {
+    if (this.activeReaders >= MAXIMUM_ACTIVE_READERS) {
       throw new GatewayError("busy", "Concurrent display artifact reads reached their bounded capacity", true);
     }
     const start = requestedRange?.start ?? 0;
