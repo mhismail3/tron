@@ -689,6 +689,91 @@ struct ChatViewScrollHarnessTests {
         }
     }
 
+    // Stage 3 diagnostic fixture for the 2026-09-25 LazyVStack estimate
+    // blow-up. That export resumed 177 canonical rows with a 17,371 pt content
+    // estimate and an ~80,870 pt settled content, then jumped to 185,852 pt
+    // about 3 ms after the send's changed physical spine installed, and
+    // collapsed in multi-thousand-point steps under a pinned offset until the
+    // reader saw a blank viewport.
+    //
+    // This fixture keeps the two structural ingredients that make such an
+    // estimate possible: a realized tail of one-line rows, and unmeasured rows
+    // near the end that render many screens tall. It then runs an ordinary send
+    // across a keyboard-sized viewport transition, which is the one display
+    // window that dismisses the keyboard, collapses the composer, applies the
+    // tail-materialization `scrollTo(id:anchor:.bottom)`, and installs the
+    // changed spine together.
+    //
+    // Measured here, SwiftUI re-derives the LazyVStack estimate from the rows it
+    // has mounted when the container/inset changes, and not from the spine
+    // install or the materialization target: this history reports ~9,000-10,000
+    // pt while pinned at the full-height viewport, ~27,900 pt after the keyboard
+    // contraction, and the identical send with no container change leaves the
+    // estimate alone. The incident's 2.3x overshoot under a held offset did not
+    // reproduce in the hosted harness, so this fixture protects the product
+    // invariant instead: the pinned transcript still settles on its native tail.
+    @Test("an ordinary send over a mixed-height lazy history settles on its native tail")
+    func mixedHeightLazyHistorySendSettlesOnNativeTail() async throws {
+        try await withTestWatchdog(timeout: .seconds(30)) {
+            var snapshot = try SessionScenarioBuilder(seed: 1_266)
+                .openingTail(targetEncodedBytes: 10_000)
+            snapshot.acceptsQueuedPrompts = false
+            snapshot.transcript = try (0..<172).map { index in
+                try harnessRichAssistantMessage(
+                    id: "tall-history-\(index)",
+                    presentationID: "tall-history-turn-\(index)",
+                    thinkingLines: [],
+                    text: harnessTallTailHistoryRowText(index)
+                )
+            }
+            snapshot.transcriptStart = 0
+            snapshot.transcriptTotal = snapshot.transcript.count
+            try await withHarness(snapshot: snapshot, enablesComposerSubmission: true) { harness in
+                let ready = try await harness.recorder.waitUntil {
+                    $0.observation.isReady && $0.nativeRows.contains {
+                        $0.semanticID == "tall-history-turn-171" && $0.isVisible
+                    }
+                }
+                let openedEstimate = ready.observation.geometry.contentHeight
+                let commandBaseline = ready.observation.tailMaterializationCommandCount
+                // Keyboard-sized contraction, as while the reader is typing.
+                harness.resize(height: 620)
+                _ = try await harness.recorder.waitUntil {
+                    $0.observation.geometry.containerHeight
+                        < ready.observation.geometry.containerHeight - 100
+                }
+                let contractedEstimate = harness.probeObservation.geometry.contentHeight
+                try harness.setComposerDraftText(
+                    Array(repeating: "A tall-tail resumed prompt paragraph.", count: 48)
+                        .joined(separator: " ")
+                )
+                harness.submitPrompt()
+                // The send dismisses the keyboard and collapses the composer in
+                // the same display window that applies the materialization.
+                harness.resize(height: 844)
+                for _ in 0..<120 { try await harness.driveFrameBoundary() }
+
+                let estimates = harness.recorder.samples
+                    .filter { $0.frameIndex >= ready.frameIndex }
+                    .map { $0.observation.geometry.contentHeight }
+                let settledEstimate = try #require(estimates.last)
+                print("""
+                Mixed-height lazy history send: opened=\(openedEstimate) \
+                contracted=\(contractedEstimate) settled=\(settledEstimate) \
+                band=\(estimates.min() ?? 0)...\(estimates.max() ?? 0) \
+                commands=\(harness.probeObservation.tailMaterializationCommandCount - commandBaseline) \
+                tail=\(try harness.nativeTranscriptDistanceFromTail())
+                """)
+                #expect(
+                    harness.probeObservation.tailMaterializationCommandCount
+                        == commandBaseline + 1
+                )
+                #expect(!harness.probeObservation.geometry.isPastBottomEdge)
+                #expect(try harness.nativeTranscriptDistanceFromTail() <= 2)
+            }
+        }
+    }
+
     enum SendHistory: CaseIterable, Sendable { case short, shortToOverflow, long }
 
     @Test("short and long history preserve the mounted prompt through acknowledgement and successor", arguments: SendHistory.allCases, [false, true])
@@ -2896,6 +2981,19 @@ struct ChatViewScrollHarnessTests {
         }
         await harness.close()
     }
+}
+
+/// Mixed-height lazy history for the tall-tailed send fixture: a realized tail
+/// of one-line rows, with six rows near the end rendering many screens tall so
+/// an estimate derived from the mounted rows can be wrong in both directions.
+private func harnessTallTailHistoryRowText(_ index: Int) -> String {
+    if (150...155).contains(index) {
+        return Array(
+            repeating: "Tall history row \(index) renders a body long enough to stand many screens above its neighbours.",
+            count: 48
+        ).joined(separator: "\n\n")
+    }
+    return "Short history row \(index) stays one line."
 }
 
 private func harnessInlineMarkdownDisplaySnapshot() throws -> SessionSnapshot {
