@@ -1,9 +1,10 @@
+import { randomUUID } from "node:crypto";
 import { mkdirSync, writeFileSync } from "node:fs";
 import { chmod, mkdir, mkdtemp, readFile, readdir, realpath, rename, rm, stat, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterEach, describe, expect, it, vi } from "vitest";
-import { MAXIMUM_ATTACHMENT_READERS, UploadStore } from "./upload-store.js";
+import { afterEach, describe, expect, it } from "vitest";
+import { UploadStore } from "./upload-store.js";
 
 it("captures orphan membership after queued attachment claims and fails closed on unavailable membership", async () => {
   const directory = await root();
@@ -12,19 +13,22 @@ it("captures orphan membership after queued attachment claims and fails closed o
   let release!: () => void;
   const barrier = new Promise<void>(resolve => { release = resolve; });
   const live = new Set<string>();
-  const earlier = (store as any).serialize(async () => { await barrier; live.add("new-session"); });
+  // A maintenance pass still holding the storage lane while the claim and the
+  // next pass queue up: membership must be read from inside the lane, after the
+  // accepted claim, or the pass deletes an attachment a live session owns.
+  const earlier = store.maintain(async () => { await barrier; live.add("new-session"); return new Set(live); });
   const claim = store.materialize([upload.id], "new-session");
   const maintained = store.maintain(async () => new Set(live));
+  release();
+  const [, , status] = await Promise.all([earlier, claim, maintained]);
+  expect(status).toMatchObject({ claimedCount: 1, unclaimedCount: 0 });
+  await expect(store.maintain(async () => { throw new Error("membership unavailable"); })).rejects.toThrow("membership unavailable");
+  const lease = await store.acquire(upload.id);
   try {
-    release(); await Promise.all([earlier, claim, maintained]);
-    await expect(store.maintain(async () => { throw new Error("membership unavailable"); })).rejects.toThrow("membership unavailable");
-    const lease = await store.acquire(upload.id);
-    try {
-      const chunks = [];
-      for await (const chunk of lease.stream) chunks.push(Buffer.from(chunk));
-      expect(Buffer.concat(chunks).toString()).toBe("durable");
-    } finally { await lease.release(); }
-  } finally { release(); await Promise.allSettled([earlier, claim, maintained]); }
+    const chunks = [];
+    for await (const chunk of lease.stream) chunks.push(Buffer.from(chunk));
+    expect(Buffer.concat(chunks).toString()).toBe("durable");
+  } finally { await lease.release(); }
 });
 
 it("bounds attachment metadata acquisition before I/O and releases every reader", async () => {
@@ -32,29 +36,18 @@ it("bounds attachment metadata acquisition before I/O and releases every reader"
   const store = new UploadStore(directory, 1_024);
   const upload = await store.save("fixture.txt", "text/plain", Buffer.from("fixture"));
   await store.materialize([upload.id], "fixture-session");
-  const io = store as unknown as { metadata(id: string): Promise<unknown> };
-  const original = io.metadata.bind(store);
-  let release!: () => void;
-  const gate = new Promise<void>(resolve => { release = resolve; });
-  const metadata = vi.spyOn(io, "metadata").mockImplementation(async id => { await gate; return original(id); });
-  const requests = Array.from({ length: MAXIMUM_ATTACHMENT_READERS + 1 }, () => store.acquire(upload.id));
-  for (const request of requests) void request.catch(() => {});
-  try {
-    expect(metadata).toHaveBeenCalledTimes(MAXIMUM_ATTACHMENT_READERS);
-    release();
-    const results = await Promise.allSettled(requests);
-    expect(results.filter(result => result.status === "fulfilled")).toHaveLength(MAXIMUM_ATTACHMENT_READERS);
-    expect(results.at(-1)).toMatchObject({ status: "rejected", reason: { code: "busy" } });
-    for (const result of results) if (result.status === "fulfilled") await result.value.release();
-    const next = await store.acquire(upload.id);
-    expect(next.size).toBe(7);
-    await next.release();
-  } finally {
-    release();
-    const results = await Promise.allSettled(requests);
-    for (const result of results) if (result.status === "fulfilled") await result.value.release();
-    metadata.mockRestore();
-  }
+  // 32 readers may hold a lease at once; the next acquisition is refused retryably.
+  const requests = Array.from({ length: 33 }, () => store.acquire(upload.id));
+  const results = await Promise.allSettled(requests);
+  expect(results.filter(result => result.status === "fulfilled")).toHaveLength(32);
+  expect(results.at(-1)).toMatchObject({ status: "rejected", reason: { code: "busy", retryable: true } });
+  // Admission precedes metadata I/O: a saturated reader pool refuses an unknown
+  // attachment as capacity, so it cannot read metadata for unbounded callers.
+  await expect(store.acquire(randomUUID())).rejects.toMatchObject({ code: "busy", retryable: true });
+  for (const result of results) if (result.status === "fulfilled") await result.value.release();
+  const next = await store.acquire(upload.id);
+  expect(next.size).toBe(7);
+  await next.release();
 });
 
 const roots: string[] = [];

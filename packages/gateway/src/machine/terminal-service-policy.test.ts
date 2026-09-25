@@ -30,17 +30,19 @@ vi.mock("node-pty", () => ({
   }),
 }));
 
-import {
-  MAX_ACTIVE_TERMINALS,
-  MAX_RETAINED_TERMINALS,
-  MAX_TERMINAL_OUTPUT_CHUNK_BYTES,
-  TerminalService,
-} from "./terminal-service.js";
+import { TerminalService } from "./terminal-service.js";
+
+// Documented terminal policy (README "terminal catalog"): one Gateway keeps at
+// most 128 retained records and 16 active PTYs, and splits output at 64 KiB.
+// The literals keep the service, not this test, the owner of each bound.
+const RETAINED_TERMINAL_LIMIT = 128;
+const ACTIVE_TERMINAL_LIMIT = 16;
+const OUTPUT_CHUNK_LIMIT = 64 * 1_024;
 
 describe("TerminalService hardening policy", () => {
   it("fails retryably at the global active PTY ceiling", () => {
     const service = new TerminalService(64_000, () => {});
-    for (let index = 0; index < MAX_ACTIVE_TERMINALS; index += 1) {
+    for (let index = 0; index < ACTIVE_TERMINAL_LIMIT; index += 1) {
       service.open(`session-${index}`, "/tmp");
     }
 
@@ -51,7 +53,7 @@ describe("TerminalService hardening policy", () => {
       expect(error).toBeInstanceOf(GatewayError);
       expect(error).toMatchObject({ code: "busy", retryable: true });
     }
-    expect(service.activeTerminalIds()).toHaveLength(MAX_ACTIVE_TERMINALS);
+    expect(service.activeTerminalIds()).toHaveLength(ACTIVE_TERMINAL_LIMIT);
     service.dispose();
   });
 
@@ -59,7 +61,7 @@ describe("TerminalService hardening policy", () => {
     const service = new TerminalService(64_000, () => {});
     const ids: string[] = [];
     ids.push(service.open("session", "/tmp").id);
-    for (let index = 1; index < MAX_RETAINED_TERMINALS; index += 1) {
+    for (let index = 1; index < RETAINED_TERMINAL_LIMIT; index += 1) {
       ids.push(service.open("session", "/tmp").id);
       ptys.at(-1)!.emitExit();
     }
@@ -76,7 +78,7 @@ describe("TerminalService hardening policy", () => {
 
   it("preserves retained history when PTY spawn fails", () => {
     const service = new TerminalService(64_000, () => {});
-    for (let index = 0; index < MAX_RETAINED_TERMINALS; index += 1) {
+    for (let index = 0; index < RETAINED_TERMINAL_LIMIT; index += 1) {
       service.open("session", "/tmp");
       if (index > 0) ptys.at(-1)!.emitExit();
     }
@@ -140,12 +142,12 @@ describe("TerminalService hardening policy", () => {
       if (topic === "terminal.output") events.push(payload as unknown as { sequence: number; data: string });
     });
     const terminal = service.open("session", "/tmp");
-    const output = `${"a".repeat(MAX_TERMINAL_OUTPUT_CHUNK_BYTES - 1)}😀${"b".repeat(70_000)}`;
+    const output = `${"a".repeat(OUTPUT_CHUNK_LIMIT - 1)}😀${"b".repeat(70_000)}`;
     ptys.at(-1)!.emitData(output);
 
     expect(events.length).toBeGreaterThan(1);
     expect(events.map(({ sequence }) => sequence)).toEqual(events.map((_, index) => index + 1));
-    expect(events.every(({ data }) => Buffer.byteLength(data) <= MAX_TERMINAL_OUTPUT_CHUNK_BYTES)).toBe(true);
+    expect(events.every(({ data }) => Buffer.byteLength(data) <= OUTPUT_CHUNK_LIMIT)).toBe(true);
     expect(events.map(({ data }) => data).join("")).toBe(output);
     const replay = service.attach(terminal.id, 0);
     expect(replay.reset).toBe(false);

@@ -3,7 +3,7 @@ import { access, mkdir, mkdtemp, realpath, rm, symlink, writeFile } from "node:f
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it, vi } from "vitest";
-import { CuaComputerClient, parseCuaOutput } from "./cua-client.js";
+import { CuaComputerClient } from "./cua-client.js";
 
 const binding = () => ({ canonicalSessionID: "fixture-session", runtimeLoadID: randomUUID() });
 const snapshot = { pid: 123, window_id: 456, snapshot_id: "s00000001", elements: [{ element_token: "s00000001:1" }] };
@@ -175,7 +175,9 @@ describe("Cua session/load adapter", () => {
   it.each([
     ['{"code":"background_unavailable"}', "refused"], ['{"refusal":{"code":"stale_element_token"},"status":"refused"}', "refused"],
     ['{"effect":"unverifiable"}', "outcomeUnknown"], ['{"effect":"partial"}', "outcomeUnknown"], ['{"effect":"confirmed"}', "completed"],
-  ])("does not confuse exit-zero payload %s with verified success", (wire, status) => {
-    expect(parseCuaOutput(wire, "generation").status).toBe(status);
+  ])("does not confuse exit-zero payload %s with verified success", async (wire, status) => {
+    const f = fixture();
+    f.run.mockResolvedValue({ stdout: wire, stderr: "" });
+    expect((await f.client.invoke("get_window_state", { pid: 123, include_screenshot: false })).status).toBe(status);
   });
 });

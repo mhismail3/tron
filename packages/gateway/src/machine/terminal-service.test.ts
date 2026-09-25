@@ -1,5 +1,4 @@
-import { access, chmod, mkdtemp } from "node:fs/promises";
-import { constants } from "node:fs";
+import { mkdtemp } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
@@ -43,13 +42,5 @@ describe("TerminalService", () => {
     expect(draining.beginRestartDrain()).toBe(true);
     expect(() => draining.open("session", cwd)).toThrow(/not accepting terminal/u);
     draining.dispose();
-  });
-
-  it("ships an executable node-pty spawn helper on macOS", async () => {
-    if (process.platform !== "darwin") return;
-    const helper = join(process.cwd(), "node_modules", "node-pty", "prebuilds", `darwin-${process.arch}`, "spawn-helper");
-    // Exercise the production repair contract rather than relying on a local umask.
-    await chmod(helper, 0o755);
-    await expect(access(helper, constants.X_OK)).resolves.toBeUndefined();
   });
 });

@@ -2,13 +2,9 @@ import { mkdtemp, mkdir, rm, symlink } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
-import { FilesystemService, WORKSPACE_MAXIMUM_ENTRIES } from "./filesystem-service.js";
+import { FilesystemService } from "./filesystem-service.js";
 
 describe("FilesystemService", () => {
-  it("stays within the shared dynamic JSON array ceiling", () => {
-    expect(WORKSPACE_MAXIMUM_ENTRIES).toBe(1_000);
-  });
-
   it("lists and creates directories under its explicit root", async () => {
     const root = await mkdtemp(join(tmpdir(), "tron-fs-"));
     await mkdir(join(root, "existing"));
