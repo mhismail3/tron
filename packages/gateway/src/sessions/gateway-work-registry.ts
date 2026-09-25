@@ -95,8 +95,10 @@ export class GatewayWorkRegistry {
 
   get size(): number { return this.entries.size; }
   get isAdmissionOpen(): boolean { return this.admissionsOpen; }
-  hasSessionWork(sessionId: string): boolean {
-    return [...this.entries.values()].some((entry) => entry.sessionId === sessionId);
+  /** Exclusion is for one enclosing RPC's own domain admission check only;
+   * administrative drain and eviction use the unfiltered query. */
+  hasSessionWork(sessionId: string, exceptToken?: string): boolean {
+    return [...this.entries.values()].some((entry) => entry.sessionId === sessionId && entry.token !== exceptToken);
   }
 
   begin(admission: GatewayWorkAdmission): GatewayWorkHandle {

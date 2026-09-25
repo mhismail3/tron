@@ -1437,7 +1437,14 @@ No direct JSONL writer or separate preference journal bypasses the SDK. If nativ
 append stages an entry but disk persistence fails, the RPC reports an uncertain
 outcome and publishes the actual live projection rather than fabricating rollback
 or blindly replaying the command. An explicitly issued new command always records
-its desired value, even when it matches a previously staged in-memory value.
+its desired value, even when it matches a previously staged in-memory value. Parent
+`session.setModel` is serialized against active foreground runs and pending prompts,
+but its own scoped RPC-accounting token is excluded from the idle check. Detached
+child/subagent work belongs to its own session and does not block a safe parent-model
+change; it still blocks parent deletion and remains visible to administrative drain
+and idle-eviction accounting. `session.delete` similarly excludes only its initiating
+RPC token and continues rejecting live child work. `session_operation_busy` on
+`rpc.error` identifies true foreground/delete blockers.
 
 Forked transcript projections carry an optional, disposable `forkBoundary` annotation. At runtime bind/rebind and tree navigation, Gateway validates the selected child's contiguous inherited identity/ancestry against the catalog-admitted immediate parent's complete canonical tree. It retains only one inherited-entry anchor, not a transcript mirror; snapshots map that anchor onto the current branch without parent I/O, including after the first child append. Read-only subagent pages derive the anchor from their admitted parent runtime and include the projected annotation in their revision. Regenerated labels are normalized out of ancestry; sanitized/pruned payloads with preserved identities remain inherited. Missing, ambiguous, cyclic, replaced or oversized parents omit the annotation without blocking chat. A header-only relationship or a fork with no retained context cannot establish a marker. Parent reads are inode-fenced and capped at 64 MiB; derived graph scans are linear and capped at 100,000 entries. The annotation carries the stable inherited anchor ID plus its gap ordinal (0...total) in the canonical projected sequence, so inherited-only and hidden-only branches still have a boundary and later child appends cannot move it. It does not change canonical IDs, counts, or paging anchors. iOS owns the gap insertion before visibility folding, including the true canonical tail before streaming, and flushes tool grouping; page ownership is one-sided so adjacent pages cannot duplicate it. `fork-boundary.test.ts`, focused runtime-registry fork regressions, process-transcript lease tests, and `ChatTranscriptProjectionKernelTests` cover ancestry, the actual SDK fork behavior, reopen, wire propagation, paging, hidden tails, and rendering.
 

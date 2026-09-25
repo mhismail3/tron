@@ -8,6 +8,7 @@ import { GatewayService, type ClientContext, type GatewayServiceDependencies } f
 import { TronWorkspace } from "../workspace/tron-workspace.js";
 import { KnowledgeStore } from "../knowledge/knowledge-store.js";
 import { KnowledgeService } from "../knowledge/knowledge-service.js";
+import { GatewayWorkRegistry } from "../sessions/gateway-work-registry.js";
 
 const client: ClientContext = {
   id: "phone",
@@ -25,6 +26,57 @@ const client: ClientContext = {
 };
 
 describe("session transcript paging", () => {
+  it("passes the exact deleting RPC work token through to RuntimeRegistry", async () => {
+    const root = await mkdtemp(join(tmpdir(), "tron-service-delete-owner-"));
+    const workRegistry = new GatewayWorkRegistry();
+    const deleteSession = vi.fn(async (sessionId: string, workToken?: string) => {
+      expect(sessionId).toBe("error-session");
+      expect(workRegistry.facts()).toContainEqual(expect.objectContaining({
+        token: workToken, kind: "rpc-mutation", method: "session.delete", sessionId,
+      }));
+    });
+    const service = new GatewayService({
+      config: { tronHome: root },
+      sessions: { delete: deleteSession, removeDisplayArtifacts: async () => {} },
+      uploads: { removeSession: async () => {} },
+      sessionDeleted: () => {},
+      receipts: new CommandReceiptStore(root), workRegistry,
+    } as unknown as GatewayServiceDependencies);
+    try {
+      await expect(service.invoke(client, "session.delete", {
+        commandId: "delete-error-session", sessionId: "error-session",
+      })).resolves.toEqual({ deleted: true });
+      expect(deleteSession).toHaveBeenCalledOnce();
+      expect(workRegistry.facts()).toEqual([]);
+    } finally { await rm(root, { recursive: true, force: true }); }
+  });
+
+  it("passes the exact scoped RPC work token into a fresh-session model mutation", async () => {
+    const root = await mkdtemp(join(tmpdir(), "tron-service-model-owner-"));
+    const workRegistry = new GatewayWorkRegistry();
+    const mutateModel = vi.fn(async (provider: string, modelId: string, workToken?: string) => {
+      expect(provider).toBe("anthropic");
+      expect(modelId).toBe("claude-opus-4-5-20251101");
+      expect(workRegistry.facts()).toContainEqual(expect.objectContaining({
+        token: workToken, kind: "rpc-mutation", method: "session.setModel", sessionId: "fresh-session",
+      }));
+    });
+    const service = new GatewayService({
+      config: { tronHome: root },
+      sessions: { acquire: async () => ({ setModel: mutateModel }) },
+      receipts: new CommandReceiptStore(root), workRegistry,
+    } as unknown as GatewayServiceDependencies);
+    try {
+      await expect(service.invoke(client, "session.setModel", {
+        commandId: "fresh-session-model-change", sessionId: "fresh-session",
+        provider: "anthropic", modelId: "claude-opus-4-5-20251101",
+      })).resolves.toEqual({ updated: true });
+      expect(mutateModel).toHaveBeenCalledOnce();
+      expect(workRegistry.facts()).toEqual([]);
+    } finally { await rm(root, { recursive: true, force: true }); }
+  });
+
+
   it("resolves knowledge receipt references after supporting evidence is forgotten", async () => {
     const root = await mkdtemp(join(tmpdir(), "tron-service-knowledge-erasure-"));
     const workspace = new TronWorkspace(root);

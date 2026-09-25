@@ -2957,7 +2957,7 @@ export class RuntimeRegistry {
     });
   }
 
-  async delete(sessionId: string): Promise<void> {
+  async delete(sessionId: string, initiatingWorkToken?: string): Promise<void> {
     await this.attentionLane.run(async () => {
       await this.flushPendingAttentionRemovals();
       if (this.deletingSessionIds.has(sessionId)) throw new GatewayError("busy", "Session deletion is already in progress", true);
@@ -2988,11 +2988,13 @@ export class RuntimeRegistry {
         if (await this.projectTrustReloading(cwd)) {
           throw new GatewayError("busy", "Project trust is being reconfigured", true);
         }
-        if (slot?.isBusy) throw new GatewayError("busy", "Stop the active session before deleting it");
+        if (slot && slot.isBusyExceptWorkToken(initiatingWorkToken)) {
+          throw new GatewayError("busy", "Stop the active session before deleting it", false, undefined, "session_operation_busy");
+        }
         this.searchInvalidator?.(sessionId);
         await this.options.beforeSessionDelete?.(sessionId);
         this.cancelIdleEviction(sessionId, slot);
-        if (slot) await slot.dispose();
+        if (slot) await slot.dispose(initiatingWorkToken);
         this.slots.delete(sessionId);
         this.subscribers.delete(sessionId);
         this.presentationPresence.removeSession(sessionId);

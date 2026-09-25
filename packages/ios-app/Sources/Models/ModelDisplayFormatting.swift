@@ -77,6 +77,21 @@ enum ModelDisplayFormatting {
         "\(Self.provider(provider)) / \(Self.model(model))"
     }
 
+    static func pickerIdentity(for model: ModelSummary) -> String {
+        let identifier = "\(model.provider)/\(model.id)"
+        if ["claude-haiku-4-5", "claude-opus-4-5", "claude-sonnet-4-5"].contains(model.id) {
+            return "Latest alias · \(identifier)"
+        }
+        if let match = model.id.range(of: #"-(\d{8})$"#, options: .regularExpression) {
+            let date = String(model.id[match].dropFirst())
+            let year = date.prefix(4)
+            let month = date.dropFirst(4).prefix(2)
+            let day = date.suffix(2)
+            return "Pinned release · \(year)-\(month)-\(day) · \(identifier)"
+        }
+        return "Model ID · \(identifier)"
+    }
+
     private static func normalizeKey(_ value: String) -> String {
         value
             .lowercased()
@@ -119,6 +134,7 @@ extension ProviderSummary {
 }
 
 extension ModelSummary {
+    var pickerIdentity: String { ModelDisplayFormatting.pickerIdentity(for: self) }
     var displayProviderName: String { ModelDisplayFormatting.provider(provider) }
     var displayName: String {
         ModelDisplayFormatting.model(name.isEmpty ? id : name)

@@ -13,7 +13,7 @@ export type GatewayErrorCode =
 export type GatewayDiagnosticReason =
   | "viewer_capacity" | "viewer_retired" | "viewer_identity_in_use"
   | "catalog_capacity" | "catalog_headers_unavailable" | "catalog_changed"
-  | "catalog_identity_ambiguous";
+  | "catalog_identity_ambiguous" | "session_operation_busy";
 
 export class GatewayError extends Error {
   constructor(

@@ -1176,11 +1176,11 @@ export class GatewayService {
         return { closed };
       }
       case "session.delete":
-        return this.mutation(client, method, params, async () => {
+        return this.mutation(client, method, params, async (workToken) => {
           const sessionId = string(params.sessionId, "sessionId", { max: 200 });
           client.unsubscribe(sessionId);
           this.processTranscriptLeases.releaseSession(sessionId);
-          await this.dependencies.sessions.delete(sessionId);
+          await this.dependencies.sessions.delete(sessionId, workToken);
           this.dependencies.sessionDeleted(sessionId);
           const cleanup = await Promise.allSettled([
             this.dependencies.uploads.removeSession(sessionId),
@@ -1318,8 +1318,8 @@ export class GatewayService {
           params.excludeFromContext === undefined ? false : boolean(params.excludeFromContext, "excludeFromContext"),
         ));
       case "session.setModel":
-        return this.mutation(client, method, params, async () => {
-          await (await this.openedSlot(client, params)).setModel(string(params.provider, "provider", { max: 120 }), string(params.modelId, "modelId", { max: 300 }));
+        return this.mutation(client, method, params, async (workToken) => {
+          await (await this.openedSlot(client, params)).setModel(string(params.provider, "provider", { max: 120 }), string(params.modelId, "modelId", { max: 300 }), workToken);
           return { updated: true };
         });
       case "session.setContextWindow":
@@ -1936,7 +1936,7 @@ export class GatewayService {
     client: ClientContext,
     method: string,
     params: Record<string, unknown>,
-    operation: () => Promise<JsonValue>,
+    operation: (workToken?: string) => Promise<JsonValue>,
     settlementDuringDrain = false,
   ): Promise<JsonValue> {
     const commandId = string(params.commandId, "commandId", { min: 8, max: 160 });
@@ -1966,7 +1966,7 @@ export class GatewayService {
         commandId,
         knowledgeMutation
           ? async () => this.knowledgeReceiptSafe(await operation())
-          : operation,
+          : () => operation(work?.token),
       );
       return knowledgeMutation ? this.knowledgeReceiptResult(result) : result;
     } finally {

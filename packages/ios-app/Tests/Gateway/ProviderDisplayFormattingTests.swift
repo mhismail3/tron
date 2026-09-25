@@ -37,6 +37,17 @@ struct ProviderDisplayFormattingTests {
             "Claude Mythos 5.1",
         ])
         #expect(models.map(\.id).first == "claude-haiku-4-5")
+        #expect(models.map(\.pickerIdentity) == [
+            "Latest alias · anthropic/claude-haiku-4-5",
+            "Pinned release · 2025-10-01 · anthropic/claude-haiku-4-5-20251001",
+            "Latest alias · anthropic/claude-opus-4-5",
+            "Pinned release · 2025-11-01 · anthropic/claude-opus-4-5-20251101",
+            "Latest alias · anthropic/claude-sonnet-4-5",
+            "Pinned release · 2025-09-29 · anthropic/claude-sonnet-4-5-20250929",
+            "Model ID · anthropic/claude-mythos-5-1",
+        ])
+        #expect(Set(models.map(\.pickerIdentity)).count == models.count)
+        #expect(models.map(\.ref).count == models.count)
         // Negative control: when a catalog name is available it wins over the ID-only fallback.
         #expect(summary(id: "claude-haiku-4-5", name: "Claude Haiku 4.5").displayName == "Claude Haiku 4.5")
         #expect(ModelDisplayFormatting.model("unknown-model") == "Unknown Model")

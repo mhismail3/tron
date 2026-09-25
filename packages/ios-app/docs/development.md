@@ -262,7 +262,10 @@ Every shared model picker starts with an icon-only search action in the top-lead
 not a persistent bottom control. Tapping reveals the shared bottom search field and focuses it;
 close/focus loss retains the existing keyboard-settlement and sheet-dismissal guards. Native
 `SessionSheetPresentationTests` verifies the leading toolbar paint in light/dark appearances
-and absence of an initially mounted field; `ModelPickerSearchTests` covers filtering.
+and absence of an initially mounted field; `ModelPickerSearchTests` covers filtering. Every picker
+row also exposes its canonical `provider/id`: the known Anthropic 4.5 aliases are labeled “Latest alias”
+(within that model family, not the newest generation), while date-suffixed IDs are labeled “Pinned
+release” with their date. These labels never merge or rewrite distinct model choices.
 
 ## UI motion and loading surfaces
 

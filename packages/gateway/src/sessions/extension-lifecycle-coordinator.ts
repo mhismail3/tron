@@ -36,9 +36,13 @@ export class ExtensionLifecycleCoordinator {
   get isDraining(): boolean { return this.drainRequested; }
   /** Work that makes trust/resource mutation unsafe. Decorative state is excluded. */
   get preventsOperationalQuiescence(): boolean {
+    return this.preventsNonRuntimeQuiescence || this.hasRuntimeWork();
+  }
+  /** Parent-only settings may ignore detached child work, but never pending
+   * commands, prompts, or UI interactions owned by this session. */
+  get preventsNonRuntimeQuiescence(): boolean {
     return this.pendingCommands > 0 || this.pendingPrompts > 0 || this.hasPendingUI
-      || this.activity.hasInputLease || this.activity.hasScheduledRender || this.activity.hasBlockingPresentation
-      || this.hasRuntimeWork();
+      || this.activity.hasInputLease || this.activity.hasScheduledRender || this.activity.hasBlockingPresentation;
   }
   /** Automatic eviction also retains reconnect-visible presentation. */
   get preventsEviction(): boolean {

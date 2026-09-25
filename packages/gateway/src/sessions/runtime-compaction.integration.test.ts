@@ -6,7 +6,9 @@ import { fauxAssistantMessage, fauxProvider, fauxToolCall, getCurrentSystemPromp
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { TrustService } from "../admin/trust-service.js";
 import { SettingsService } from "../admin/settings-service.js";
-import type { SessionSnapshot } from "../protocol/types.js";
+import type { SessionSnapshot, ExtensionRunActivity } from "../protocol/types.js";
+import { GatewayService, type ClientContext, type GatewayServiceDependencies } from "../transport/gateway-service.js";
+import { CommandReceiptStore } from "../transport/command-receipts.js";
 import { INVOCATION_RECEIPT_TYPE } from "./invocation-receipts.js";
 import { RuntimeRegistry } from "./runtime-registry.js";
 import type { RunMarkerStore } from "./run-markers.js";
@@ -156,7 +158,7 @@ async function boundaryFixture(historyRepeats = 8_000, extension?: (root: string
     await mkdir(join(agentDir, "extensions"));
     await writeFile(join(agentDir, "extensions", "continuation.ts"), extension(root));
   }
-  const faux = fauxProvider({ provider: "tron-compaction-boundary", models: [{ id: "fixture", reasoning: true }], tokensPerSecond: 1_000_000, tokenSize: { min: 100_000, max: 100_000 } });
+  const faux = fauxProvider({ provider: "tron-compaction-boundary", models: [{ id: "fixture", reasoning: true }, { id: "alternate", reasoning: true }], tokensPerSecond: 1_000_000, tokenSize: { min: 100_000, max: 100_000 } });
   const runtime = await ModelRuntime.create({ authPath: join(root, "auth.json"), modelsPath: null, refreshOnCreate: false });
   runtime.registerNativeProvider(faux.provider);
   const snapshots: SessionSnapshot[] = [];
@@ -252,6 +254,104 @@ describe.sequential("compaction operation admission and authoritative reconcilia
     expect(JSON.stringify(notices)).not.toContain("top-secret");
     expect((await item.entries()).some(entry => entry.type === "compaction")).toBe(true);
     expect(item.slot.snapshot().phase).toBe("idle");
+  });
+
+  it("switches a fresh and failed session through real RPC admission while retaining detached-child deletion safety", async () => {
+    const item = await boundaryFixture();
+    const fresh = await item.registry.create(item.slot.cwd);
+    const registry = item.registry.administrativeWorkRegistry;
+    const service = new GatewayService({
+      config: { tronHome: join(item.root, "tron") }, sessions: item.registry,
+      uploads: { removeSession: async () => {} }, sessionDeleted: () => {},
+      receipts: new CommandReceiptStore(join(item.root, "tron")), workRegistry: registry,
+    } as unknown as GatewayServiceDependencies);
+    const client: ClientContext = {
+      id: "phone", identity: "device:test", isLocal: false,
+      beginSynchronization: () => "sync", establishSynchronization: () => {}, completeSynchronization: () => {},
+      setPresentationVisibility: (_id, _token, revision, visible) => ({ revision, visible }),
+      unsubscribe: () => true, attachTerminal: () => {}, detachTerminal: () => {}, ownsTerminal: () => false,
+      isSubscribed: () => true, isRevoked: () => false, revokeDevice: () => {},
+    };
+    let command = 0;
+    const switchModel = (modelId: string) => service.invoke(client, "session.setModel", {
+      sessionId: fresh.id, provider: item.faux.getModel().provider, modelId, commandId: `model-change-${++command}`,
+    });
+    // Negative control: losing the initiating token recreates the original
+    // self-block through the real service and session admission boundary.
+    const setModel = fresh.setModel.bind(fresh);
+    const droppedToken = vi.spyOn(fresh, "setModel").mockImplementation((provider, modelId) => setModel(provider, modelId));
+    await expect(switchModel("fixture")).rejects.toMatchObject({ code: "busy" });
+    droppedToken.mockRestore();
+    await expect(switchModel("fixture")).resolves.toEqual({ updated: true });
+    item.faux.setResponses([fauxAssistantMessage("", { stopReason: "error", errorMessage: "Synthetic provider authorization failure" })]);
+    await fresh.prompt("A failed turn must not strand the new session");
+    await waitUntil(() => !fresh.isBusy);
+    await expect(switchModel("alternate")).resolves.toEqual({ updated: true });
+    expect(fresh.snapshot().model?.id).toBe("alternate");
+    const activities = (fresh as unknown as { extensionActivities: Map<string, ExtensionRunActivity> }).extensionActivities;
+    const now = new Date().toISOString();
+    const child: ExtensionRunActivity = {
+      id: "async-tool", activityId: "async-activity", runId: "async-run", toolCallId: "async-tool",
+      source: { source: "pi-subagents" }, title: "Subagent", mode: "asynchronous", status: "running",
+      startedAt: now, updatedAt: now, children: [],
+      lifecycle: { version: 1, state: "running", attention: "none", sequence: 1, observedAt: now },
+    };
+    activities.set(child.toolCallId, child);
+    try {
+      expect(fresh.isDrainBusy).toBe(true);
+      await expect(switchModel("fixture")).resolves.toEqual({ updated: true });
+      expect(fresh.snapshot().model?.id).toBe("fixture");
+      expect(activities.get(child.toolCallId)).toBe(child);
+      const otherRPC = registry.begin({ kind: "rpc-mutation", method: "session.setModel", sessionId: fresh.id, hostEpoch: registry.runtimeEpoch });
+      try {
+        await expect(switchModel("alternate")).rejects.toMatchObject({ code: "busy" });
+      } finally { otherRPC.settle(); }
+      await expect(service.invoke(client, "session.delete", {
+        sessionId: fresh.id, commandId: "delete-with-live-child",
+      })).rejects.toMatchObject({ code: "busy" });
+    } finally { activities.delete(child.toolCallId); }
+    await expect(service.invoke(client, "session.delete", {
+      sessionId: fresh.id, commandId: "delete-after-child-settled",
+    })).resolves.toEqual({ deleted: true });
+    expect(registry.hasSessionWork(fresh.id)).toBe(false);
+  });
+
+  it("retires failed provider-turn ownership so the exact follow-up model mutation can proceed", async () => {
+    const item = await boundaryFixture();
+    item.faux.setResponses([fauxAssistantMessage("", {
+      stopReason: "error", errorMessage: "Codex error: temporary subscription authorization failure",
+    })]);
+    await item.slot.prompt("This request will fail before producing a response");
+    await waitUntil(() => !item.slot.isBusy);
+    expect(item.slot.snapshot()).toMatchObject({ phase: "idle" });
+    const workRegistry = item.registry.administrativeWorkRegistry;
+    const work = workRegistry.begin({
+      kind: "rpc-mutation", method: "session.setModel", sessionId: item.slot.id, hostEpoch: workRegistry.runtimeEpoch,
+    });
+    try {
+      await expect(item.slot.setModel(item.faux.getModel().provider, item.faux.getModel().id, work.token)).resolves.toBeUndefined();
+    } finally { work.settle(); }
+    const terminal = (await item.entries()).filter(entry => entry.customType === INVOCATION_RECEIPT_TYPE && entry.data.receiptKind === "terminal");
+    expect(terminal.at(-1)?.data).toMatchObject({ lifecycle: "failed", errorCode: "agent-error" });
+  });
+
+  it("preserves all other parent work fences when changing the model", async () => {
+    const item = await boundaryFixture();
+    const registry = item.registry.administrativeWorkRegistry;
+    const model = item.faux.getModel();
+    const selfMutation = registry.begin({
+      kind: "rpc-mutation", method: "session.setModel", sessionId: item.slot.id, hostEpoch: registry.runtimeEpoch,
+    });
+    try {
+      await item.slot.setModel(model.provider, model.id, selfMutation.token);
+      expect(item.session.model).toMatchObject({ provider: model.provider, id: model.id });
+      for (const kind of ["foreground-agent-operation", "mcp-tool-call", "compaction-export", "terminal-receipt-persistence"] as const) {
+        const parentWork = registry.begin({ kind, sessionId: item.slot.id, hostEpoch: registry.runtimeEpoch });
+        try {
+          await expect(item.slot.setModel(model.provider, model.id, selfMutation.token)).rejects.toMatchObject({ code: "busy", diagnosticReason: "session_operation_busy" });
+        } finally { parentWork.settle(); }
+      }
+    } finally { selfMutation.settle(); }
   });
 
   it.each(["start", "provider"] as const)("one Stop at preflight %s prevents the waiting prompt from reaching the provider", async timing => {

@@ -915,8 +915,12 @@ export class RuntimeSlot {
 
   /** Actionable work only; decorative presentation must not block trust/delete. */
   get isBusy(): boolean {
+    return this.isBusyExceptWorkToken();
+  }
+  isBusyExceptWorkToken(exceptWorkToken?: string): boolean {
     return this.hasBlockedOwnershipWrite
-      || this.lifecycle.preventsOperationalQuiescence
+      || this.lifecycle.preventsNonRuntimeQuiescence
+      || this.hasRuntimeWork(exceptWorkToken)
       || this.pendingAssistantCompletion !== undefined
       || this.activeExports > 0
       || this.retainedLeaseCount > 0;
@@ -1105,8 +1109,8 @@ export class RuntimeSlot {
     }
   }
 
-  private hasRuntimeWork(): boolean {
-    return this.dependencies.workRegistry.hasSessionWork(this.id)
+  private hasRuntimeWork(exceptWorkToken?: string): boolean {
+    return this.dependencies.workRegistry.hasSessionWork(this.id, exceptWorkToken)
       // Detached nonterminal extension work remains the explicit compatibility
       // authority until the extension host offers direct registration tokens.
       || this.hasDetachedDashboardWork();
@@ -6920,9 +6924,9 @@ export class RuntimeSlot {
     });
   }
 
-  async setModel(provider: string, modelId: string): Promise<void> {
+  async setModel(provider: string, modelId: string, initiatingWorkToken?: string): Promise<void> {
     await this.lane.run(async () => {
-      this.assertIdle();
+      this.assertModelChangeIdle(initiatingWorkToken);
       const model = this.runtime.session.modelRuntime.getModel(provider, modelId);
       if (!model) throw new GatewayError("not_found", "Model is not registered in Tron");
       await this.runtime.session.setModel(model as Model<never>);
@@ -7649,12 +7653,12 @@ export class RuntimeSlot {
     }
   }
 
-  async dispose(): Promise<void> {
+  async dispose(exceptWorkToken?: string): Promise<void> {
     if (this.disposed) return;
     this.assertOwnershipPersistence();
-    if ((this.isBusy && this.pendingReceiptWrites.size === 0) || this.trustReloadPending) throw new GatewayError("busy", "Cannot dispose a busy session runtime");
+    if ((this.isBusyExceptWorkToken(exceptWorkToken) && this.pendingReceiptWrites.size === 0) || this.trustReloadPending) throw new GatewayError("busy", "Cannot dispose a busy session runtime");
     await this.waitForReceiptWrites();
-    await this.disposeIf(() => true);
+    await this.disposeIf(() => true, exceptWorkToken);
   }
 
   /**
@@ -7662,7 +7666,7 @@ export class RuntimeSlot {
    * after any preceding lane work settles. This is the handoff point that lets
    * a newly acquired or subscribed session cancel idle eviction safely.
    */
-  async disposeIf(shouldDispose: () => boolean): Promise<boolean> {
+  async disposeIf(shouldDispose: () => boolean, exceptWorkToken?: string): Promise<boolean> {
     if (this.disposed) return false;
     return this.lane.run(async () => {
       if (this.disposed) return false;
@@ -7671,7 +7675,7 @@ export class RuntimeSlot {
       // Receipt work protects the existing slot; a later idle pass may retry
       // only after that authority settles. Explicit shutdown/delete continues
       // to join receipt writes through dispose()/performShutdown().
-      if (this.isBusy || this.pendingReceiptWrites.size > 0 || this.trustReloadPending) {
+      if (this.isBusyExceptWorkToken(exceptWorkToken) || this.pendingReceiptWrites.size > 0 || this.trustReloadPending) {
         throw new GatewayError("busy", "Cannot dispose a busy session runtime");
       }
       if (!shouldDispose()) return false;
@@ -7885,6 +7889,20 @@ export class RuntimeSlot {
       || this.effectivePhase === "retrying"
       || this.runtime.session.isBashRunning) {
       throw new GatewayError("busy", "Session must be idle for this operation");
+    }
+  }
+
+  private assertModelChangeIdle(initiatingWorkToken?: string): void {
+    this.assertUsable();
+    // Detached child activities affect the aggregate dashboard/drain, not the
+    // parent's model. Keep every actual parent-owned work token fenced.
+    const activePhase = this.phase === "running" || this.phase === "compacting" || this.phase === "retrying";
+    if (this.runtime.session.isStreaming || activePhase || this.activeOperationId !== undefined
+      || this.pendingPrompt !== undefined || this.pendingQueueAdmission !== undefined
+      || this.pendingExtensionCommand !== undefined || this.pendingAssistantCompletion !== undefined
+      || this.queuedMessages.length > 0 || this.lifecycle.preventsNonRuntimeQuiescence
+      || this.dependencies.workRegistry.hasSessionWork(this.id, initiatingWorkToken)) {
+      throw new GatewayError("busy", "Session must be idle for this operation", false, undefined, "session_operation_busy");
     }
   }
 

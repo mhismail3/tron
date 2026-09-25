@@ -648,6 +648,22 @@ describe.sequential("RuntimeRegistry with the pinned agent runtime", () => {
     expect(catalog).not.toHaveBeenCalled();
   });
 
+  it("excludes only the deleting RPC owner while preserving live child-work deletion safety", async () => {
+    const fixture = await coldFixture("delete-own-rpc-work", { workRegistry: new GatewayWorkRegistry() });
+    const session = await fixture.registry.create(fixture.cwd);
+    const works = fixture.registry.administrativeWorkRegistry;
+    const deleteRPC = works.begin({
+      kind: "rpc-mutation", method: "session.delete", sessionId: session.id, hostEpoch: works.runtimeEpoch,
+    });
+    const child = works.begin({ kind: "mcp-tool-call", sessionId: session.id, hostEpoch: works.runtimeEpoch });
+    try {
+      await expect(fixture.registry.delete(session.id, deleteRPC.token)).rejects.toMatchObject({ code: "busy", diagnosticReason: "session_operation_busy" });
+    } finally { child.settle(); }
+    await expect(fixture.registry.delete(session.id, deleteRPC.token)).resolves.toBeUndefined();
+    deleteRPC.settle();
+    expect((await fixture.registry.catalog("user")).sessions.some(entry => entry.id === session.id)).toBe(false);
+  });
+
   it("acknowledges attention for a live persisted session without walking catalog headers", async () => {
     const fixture = await coldFixture("attention-live-owner");
     const sessionId = fixture.manager.getSessionId();

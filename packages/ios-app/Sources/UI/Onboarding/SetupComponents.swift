@@ -658,7 +658,7 @@ enum ModelPickerSearchPolicy {
     static func filtered(_ models: [ModelSummary], query: String) -> [ModelSummary] {
         query.isEmpty
             ? models
-            : models.filter { "\($0.provider) \($0.id) \($0.name)".localizedCaseInsensitiveContains(query) }
+            : models.filter { "\($0.provider) \($0.id) \($0.name) \($0.pickerIdentity)".localizedCaseInsensitiveContains(query) }
     }
 
     static func shouldClose(showingSearch: Bool, query: String) -> Bool {
@@ -690,7 +690,7 @@ struct ModelPicker: View {
                                 Text(model.displayName)
                                     .font(TronTypography.sans(size: TronTypography.sizeBody, weight: .semibold))
                                     .foregroundStyle(Color.tronTextPrimary)
-                                Text(model.displayDescription)
+                                Text(model.pickerIdentity)
                                     .font(TronTypography.secondaryDescription)
                                     .foregroundStyle(Color.tronTextPrimary)
                             }
@@ -707,7 +707,7 @@ struct ModelPicker: View {
                         cornerRadius: 14,
                         tintOpacity: selection == model.ref ? 0.18 : 0.08
                     )
-                    .accessibilityLabel(model.displayName)
+                    .accessibilityLabel("\(model.displayName), \(model.pickerIdentity)")
                     .accessibilityValue(selection == model.ref ? "Selected" : "")
                 }
             }
