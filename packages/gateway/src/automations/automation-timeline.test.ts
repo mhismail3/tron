@@ -4,7 +4,6 @@ import { automationOccurrenceId } from "./schedule.js";
 import {
   AutomationTimelinePaginationStore,
   buildAutomationTimeline,
-  MAXIMUM_TIMELINE_RAW_OCCURRENCES,
 } from "./automation-timeline.js";
 import type { AutomationSummary } from "./types.js";
 
@@ -93,7 +92,6 @@ describe("Automation timeline projection", () => {
     );
     expect(result.items).toHaveLength(77);
     expect(result.items.every((item) => item.kind === "series" && item.count === 1_440)).toBe(true);
-    expect(MAXIMUM_TIMELINE_RAW_OCCURRENCES).toBeGreaterThan(0);
   });
 });
 

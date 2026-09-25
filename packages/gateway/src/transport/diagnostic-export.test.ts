@@ -2,7 +2,7 @@ import { chmod, mkdir, mkdtemp, readFile, readdir, rm, stat, symlink } from "nod
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import { diagnosticExportPolicy, exportDiagnosticSnapshot } from "./diagnostic-export.js";
+import { exportDiagnosticSnapshot } from "./diagnostic-export.js";
 
 const roots: string[] = [];
 afterEach(async () => {
@@ -47,11 +47,13 @@ describe("diagnostic export", () => {
     expect(text.indexOf("debug-0")).toBeLessThan(text.indexOf("debug-2"));
   });
 
-  it("rejects content over the byte bound without creating a file", async () => {
+  it("enforces the 512 KiB byte limit without creating an oversized file", async () => {
     const directory = await root();
-    await expect(exportDiagnosticSnapshot("x".repeat(diagnosticExportPolicy.maxBytes + 1), [], new Date(), directory, "device-id"))
+    const maximumBytes = 512 * 1_024;
+    await exportDiagnosticSnapshot("x".repeat(maximumBytes), [], new Date(), directory, "device-id");
+    await expect(exportDiagnosticSnapshot("x".repeat(maximumBytes + 1), [], new Date(), directory, "device-id"))
       .rejects.toThrow("exceeds the size limit");
-    expect((await readdir(directory)).filter((name) => name.endsWith(".jsonl"))).toEqual([]);
+    expect((await readdir(directory)).filter((name) => name.endsWith(".jsonl"))).toHaveLength(1);
   });
 
   it("fails closed when the destination is not private", async () => {
@@ -72,13 +74,13 @@ describe("diagnostic export", () => {
     expect((await readdir(target))).toEqual([]);
   });
 
-  it("retains only the bounded newest exports", async () => {
+  it("retains only the ten newest exports", async () => {
     const directory = await root();
-    for (let index = 0; index < diagnosticExportPolicy.maxRetained + 2; index += 1) {
+    for (let index = 0; index < 12; index += 1) {
       await exportDiagnosticSnapshot(`export-${index}`, [], new Date(1_700_000_000_000 + index * 1_000), directory, "device-id");
     }
     const files = (await readdir(directory)).filter((name) => name.endsWith(".jsonl"));
-    expect(files).toHaveLength(diagnosticExportPolicy.maxRetained);
+    expect(files).toHaveLength(10);
     const contents = await Promise.all(files.map((file) => readFile(join(directory, file), "utf8")));
     expect(contents).toContain("export-11");
     expect(contents).toContain("export-10");

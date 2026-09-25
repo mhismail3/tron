@@ -2,7 +2,7 @@ import { createHash } from "node:crypto";
 import { Type, type Static } from "typebox";
 import type { Api, AssistantMessage, Context, Model } from "@earendil-works/pi-ai";
 import type { ModelRuntime } from "@earendil-works/pi-coding-agent";
-import type { KnowledgeAction, KnowledgeConfig, KnowledgeListRequest, KnowledgeRecallRequest, KnowledgeSearchRequest, KnowledgeRaindropReadRequest, ObservationCoverageDisposition, SourceAssessment } from "./knowledge-contract.js";
+import type { KnowledgeAction, KnowledgeConfig, KnowledgeListRequest, KnowledgeRecallRequest, KnowledgeRaindropReadRequest, ObservationCoverageDisposition, SourceAssessment } from "./knowledge-contract.js";
 import type { KnowledgeStore } from "./knowledge-store.js";
 import { KnowledgeObservationService, type ObservationSettlement } from "./knowledge-observation.js";
 import { awaitAbortableWithSettlement } from "./model-await.js";

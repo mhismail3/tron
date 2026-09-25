@@ -105,8 +105,3 @@ async function pruneDiagnosticSnapshots(newPath: string, directory: string): Pro
     .slice(MAX_RETAINED_EXPORTS);
   await Promise.all(stale.filter((file) => file.path !== newPath).map((file) => rm(file.path, { force: true })));
 }
-
-export const diagnosticExportPolicy = {
-  maxBytes: MAX_EXPORT_BYTES,
-  maxRetained: MAX_RETAINED_EXPORTS,
-};

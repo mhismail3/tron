@@ -31,7 +31,6 @@ const RECORD_MAX_BYTES = 2 * 1_048_576;
 const OBJECT_MAX_BYTES = 8_000_000;
 const RECEIPT_LIMIT = 256;
 const OBJECT_HASH = /^[a-f0-9]{64}$/;
-const OBJECT_SCHEMA_VERSION = 1 as const;
 export const CATALOG_STORAGE_VERSION = 2 as const;
 const CATALOG_PAGE_BYTES = 750_000;
 const CATALOG_PAGE_NODES = 24_000;

@@ -2,7 +2,6 @@ import { DatabaseSync } from "node:sqlite";
 import { chmod, mkdir, rm } from "node:fs/promises";
 import { chmodSync, rmSync, statSync } from "node:fs";
 import { dirname } from "node:path";
-import { createHash } from "node:crypto";
 import {
   SESSION_SEARCH_MAX_INDEX_BYTES,
   SESSION_SEARCH_MAX_INDEX_PASSAGES,

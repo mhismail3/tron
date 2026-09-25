@@ -1,6 +1,6 @@
 import { createHash, randomUUID } from "node:crypto";
 import { realpathSync } from "node:fs";
-import { lstat, open, opendir, readFile, readdir, realpath, rename, rm, stat } from "node:fs/promises";
+import { lstat, open, opendir, readFile, realpath, rename, rm, stat } from "node:fs/promises";
 import { basename, dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { tmpdir } from "node:os";
 import { performance } from "node:perf_hooks";
@@ -111,10 +111,6 @@ const MAX_EXTENSION_TEMP_ENTRIES = 1_024;
 // reconciliation above is intentionally outside this ambient budget.
 const MAX_EXTENSION_ROOT_ENTRIES = 4_096;
 const SUBAGENT_RUN_DIRECTORY = /^run-\d+$/u;
-
-function isMissingFilesystemError(error: unknown): boolean {
-  return (error as NodeJS.ErrnoException | undefined)?.code === "ENOENT";
-}
 
 function assertProcessSessionRef(value: string): void {
   if (!value || Buffer.byteLength(value) > 256 || /[\\/\0]/u.test(value)) {

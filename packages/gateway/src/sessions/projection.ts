@@ -157,19 +157,6 @@ function semanticForStatus(sequence = 0): ChatSemanticMetadata {
   };
 }
 
-function semanticForState(sequence = 0): ChatSemanticMetadata {
-  return {
-    version: 1,
-    direction: "hiddenInternal",
-    contextEffect: "none",
-    delivery: "stored",
-    visibility: "hidden",
-    kind: "state",
-    origin: { kind: "extension", confidence: "unknown" },
-    sequence,
-  };
-}
-
 function projectedSkillText(value: string): string {
   const invocation = projectSkillInvocation(value);
   if (invocation) return invocation.text;
