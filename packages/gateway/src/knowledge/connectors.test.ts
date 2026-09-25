@@ -3,6 +3,8 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { TronWorkspace } from "../workspace/tron-workspace.js";
+import { ConnectionOwner } from "../integrations/connection-owner.js";
+import { GatewayError } from "../errors.js";
 import { KnowledgeStore } from "./knowledge-store.js";
 import { InMemoryConnectorCredentialStore } from "../../test-support/connector-credentials.js";
 import { KnowledgeConnectorExtension, type ConnectorHTTPResponse } from "./connectors.js";
@@ -56,6 +58,28 @@ describe("knowledge connectors", () => {
     const extension = new KnowledgeConnectorExtension(store, { credentials: { read: async () => "must-not-read" }, http: async () => { throw new Error("must-not-request"); } });
     await expect(extension.invoke({ operation: "knowledge.connector.configure", request: { commandId: command(`namespace-${connector}`), connector, enabled: true, accountId: "42", scope: "7", credentialRef } })).rejects.toMatchObject({ code: "invalid_request" });
     expect(await store.connectorState(connector)).toBeUndefined();
+  });
+
+  it("names the exact Keychain item to add when a connection credential is missing", async () => {
+    const root = await mkdtemp(join(tmpdir(), "tron-missing-connection-credential-")); roots.push(root);
+    const owner = new ConnectionOwner(root);
+    const setup = await owner.execute({ kind: "setup.begin", commandId: command("missing-credential-begin"), instanceId: "personal", definitionId: "knowledge.raindrop", method: "token" }) as { operationId: string };
+    await owner.execute({ kind: "setup.complete", commandId: command("missing-credential-complete"), operationId: setup.operationId, instanceId: "personal", providerAccountId: "42", scope: "0", credentialRef: "connector:raindrop:personal", policy: { enabled: true, allowWrites: false, paidAccessApproved: false, paidBudgetCents: 0, recurringApproved: false } });
+    let httpCalls = 0;
+    const store = new KnowledgeStore(new TronWorkspace(root));
+    const extension = new KnowledgeConnectorExtension(store, { connections: owner, credentials: { read: async () => undefined }, http: async () => { httpCalls += 1; return response({ items: [] }); }, sleep: async () => {} });
+    await extension.invoke({ operation: "knowledge.connector.configure", request: { commandId: command("missing-credential-config"), connector: "raindrop", connectionId: "personal", enabled: true } });
+    // The agent reads this failure text, so it has to name the service and the
+    // exact account to add while never carrying a token.
+    const failure = await extension.invoke({ operation: "knowledge.connector.run", request: { commandId: command("missing-credential-run"), connector: "raindrop", connectionId: "personal", dryRun: false, limit: 1 } }).catch((error: unknown) => error as GatewayError);
+    expect(failure).toMatchObject({ code: "unsupported" });
+    expect(failure.message).toContain("service 'Tron Connector Credentials'");
+    expect(failure.message).toContain("account 'connector:raindrop:personal'");
+    expect(httpCalls).toBe(0);
+    // The capability row iOS renders carries no credential reference, so it
+    // names the Keychain service and sends the user to the agent for the account.
+    const capability = (await owner.snapshot()).capabilities.find(item => item.connectionId === "personal" && item.id === "read");
+    expect(capability).toMatchObject({ availability: "unavailable", detail: "Credential missing from the Mac Keychain (service 'Tron Connector Credentials'). Ask the agent to check this connection for the exact account." });
   });
 
   it("does not debit or contact X when its credential is unavailable", async () => {

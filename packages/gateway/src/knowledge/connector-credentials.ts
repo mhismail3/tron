@@ -3,6 +3,9 @@ import { promisify } from "node:util";
 
 const execFileAsync = promisify(execFile);
 
+/** The Keychain service the Gateway credential adapter reads. */
+export const CONNECTOR_CREDENTIAL_SERVICE = "Tron Connector Credentials";
+
 /** Connector credentials are addressed by opaque references, never copied into
  * knowledge state or DTOs. The Mac implementation reads the dedicated Tron
  * Keychain service without placing a secret in argv or logs. */
@@ -19,7 +22,7 @@ export function isConnectorCredentialReference(reference: string, connector: "ra
 }
 
 export class MacKeychainConnectorCredentialStore implements ConnectorCredentialStore {
-  constructor(private readonly service = "Tron Connector Credentials") {}
+  constructor(private readonly service = CONNECTOR_CREDENTIAL_SERVICE) {}
 
   async read(reference: string): Promise<string | undefined> {
     if (!/^connector:[a-z][a-z0-9-]{0,31}:[A-Za-z0-9._:-]{1,160}$/.test(reference)) return undefined;

@@ -409,7 +409,9 @@ bounded page is durably retained, and incomplete/partial captures remain pending
 retry. Successful provider envelopes with a missing or non-array item collection
 are shape failures, never empty pages. Credential references are admitted only in
 the exact `connector:<provider>:...` namespace; a legacy mismatch requires
-explicit reconfiguration and is never read as a different provider token.
+explicit reconfiguration and is never read as a different provider token. When the
+Keychain item for a connection's credential is missing, the connector failure names
+the Mac Keychain service and the exact account to add, never a token.
 Paid budgets are rejected until a provider operation has an explicit maintained
 price; approval flags never imply unknown spend. X is not contacted unless both explicit paid-access approval and a positive
 bounded budget are present. Paid qualification is host-owned and requires

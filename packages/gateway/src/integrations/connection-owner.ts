@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import { lstat, mkdir } from "node:fs/promises";
 import { join } from "node:path";
 import { AsyncMutex } from "../util/async-mutex.js";
+import { CONNECTOR_CREDENTIAL_SERVICE } from "../knowledge/connector-credentials.js";
 import { durableAtomicWriteJson } from "../util/durable-json.js";
 import { readSecureJson, SecureJsonFileError } from "../util/secure-json.js";
 import { GatewayError } from "../errors.js";
@@ -77,6 +78,15 @@ function initialState(): ConnectionOwnerState { return { schemaVersion: CONNECTI
 function statePath(tronHome: string): string { return join(tronHome, ...CONNECTION_STATE_RELATIVE_PATH); }
 function copy<T>(value: T): T { return structuredClone(value); }
 
+/** The presentation projection omits credential references, so an unadmitted
+ * prerequisite names the Keychain service that owns the item instead of the
+ * exact account; the agent-facing connector error carries the account. */
+function prerequisiteDetail(instance: ConnectionInstanceProjection): string {
+  return instance.credentialAvailability === "unavailable"
+    ? `Credential missing from the Mac Keychain (service '${CONNECTOR_CREDENTIAL_SERVICE}'). Ask the agent to check this connection for the exact account.`
+    : "Connection prerequisites are not admitted";
+}
+
 function capabilityAvailability(
   capability: IntegrationDefinition["capabilities"][number],
   instance: ConnectionInstanceProjection
@@ -88,7 +98,7 @@ function capabilityAvailability(
     ? true
     : instance.credentialAvailability === "available" && instance.providerIdentity === "admitted";
   if (instance.health !== "ready" || !providerPrerequisitesAdmitted) {
-    return { availability: "unavailable", detail: instance.lastError ?? "Connection prerequisites are not admitted" };
+    return { availability: "unavailable", detail: instance.lastError ?? prerequisiteDetail(instance) };
   }
   if (capability.effects.includes("write") && !instance.policy.allowWrites) {
     return { availability: "unavailable", detail: "Write approval is required for this capability" };

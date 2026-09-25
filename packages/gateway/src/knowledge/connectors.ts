@@ -6,7 +6,7 @@ import { triageSource } from "./source-triage.js";
 import { GatewayError } from "../errors.js";
 import { AsyncMutex } from "../util/async-mutex.js";
 import type { KnowledgeStore } from "./knowledge-store.js";
-import { isConnectorCredentialReference, type ConnectorCredentialStore } from "./connector-credentials.js";
+import { CONNECTOR_CREDENTIAL_SERVICE, isConnectorCredentialReference, type ConnectorCredentialStore } from "./connector-credentials.js";
 import { currentInvocationContext } from "../extensions/owner-attribution.js";
 import { jevInputDigest, jevProfileVersion } from "./jev-assessment.js";
 import { JEV_DEFAULT_MODEL } from "./jev-client.js";
@@ -48,6 +48,12 @@ interface RaindropItemDTO { _id?: unknown; title?: unknown; link?: unknown; exce
 interface XBookmarkDTO { id?: unknown; text?: unknown; created_at?: unknown; author_id?: unknown; entities?: unknown; }
 
 function bad(message: string): GatewayError { return new GatewayError("invalid_request", message); }
+/** A missing Keychain item is the one connector failure a person can fix, so the
+ * failure names the exact service and account to add. The credential reference
+ * is an opaque Keychain account name, and no token ever appears here. */
+function missingCredential(connector: Connector, credentialRef: string): GatewayError {
+  return new GatewayError("unsupported", `${connector === "raindrop" ? "Raindrop" : "X"} credential is unavailable. Add it to the Mac Keychain: service '${CONNECTOR_CREDENTIAL_SERVICE}', account '${credentialRef}'.`);
+}
 function command(base: string, suffix: string): string {
   const normalizedBase = base.replace(/[^A-Za-z0-9._:-]/g, "_"); const normalizedSuffix = suffix.replace(/[^A-Za-z0-9._:-]/g, "_");
   const digest = createHash("sha256").update(`${base}\u0000${suffix}`).digest("hex").slice(0, 16);
@@ -284,7 +290,7 @@ export class KnowledgeConnectorExtension {
     const token = await this.options.credentials.read(state.credentialRef);
     if (!token) {
       await observe({ credentialAvailability: "unavailable", providerIdentity: "unknown" });
-      throw new GatewayError("unsupported", "Raindrop credential is unavailable");
+      throw missingCredential("raindrop", state.credentialRef);
     }
     const controller = new AbortController();
     const signal = externalSignal ? AbortSignal.any([controller.signal, externalSignal]) : controller.signal;
@@ -505,7 +511,7 @@ export class KnowledgeConnectorExtension {
     if (request.sourceCollection !== undefined && !/^-?\d{1,18}$/.test(request.sourceCollection)) throw bad("Raindrop intake source collection is invalid");
     const limit = request.limit ?? 10;
     const token = await this.options.credentials.read(state.credentialRef);
-    if (!token) throw new GatewayError("unsupported", "Raindrop credential is unavailable");
+    if (!token) throw missingCredential("raindrop", state.credentialRef);
     const controller = new AbortController(); const signal = externalSignal ? AbortSignal.any([controller.signal, externalSignal]) : controller.signal;
     const deadline = setTimeout(() => controller.abort(new Error("Raindrop intake deadline exceeded")), RUN_DEADLINE_MS); deadline.unref?.();
     try {
@@ -658,7 +664,7 @@ export class KnowledgeConnectorExtension {
       if (reconciled?.pendingRemote) throw new GatewayError("conflict", "Connector has an unresolved remote effect");
     }
     const token = await this.options.credentials.read(current.credentialRef);
-    if (!token) { await this.recordAdmission(current, "unavailable", "unknown", request.commandId, expectedSetupRevision); await this.store.updateConnectorState(command(request.commandId, "auth"), connector, state => ({ ...(state ?? current), health: "auth-error", lastError: "Credential reference is unavailable", lastRunAt: this.now() })); throw new GatewayError("unsupported", "Connector credential is unavailable"); }
+    if (!token) { await this.recordAdmission(current, "unavailable", "unknown", request.commandId, expectedSetupRevision); await this.store.updateConnectorState(command(request.commandId, "auth"), connector, state => ({ ...(state ?? current), health: "auth-error", lastError: "Credential reference is unavailable", lastRunAt: this.now() })); throw missingCredential(connector, current.credentialRef); }
     const assertCurrentAuthority = async (): Promise<void> => {
       const live = await this.store.connectorState(connector);
       if (!live?.enabled || live.accountId !== current.accountId || live.scope !== current.scope || live.credentialRef !== current.credentialRef) throw new GatewayError("conflict", "Connector configuration changed during provider discovery");
@@ -672,7 +678,7 @@ export class KnowledgeConnectorExtension {
       const live = await this.store.connectorState(connector);
       if (!live?.credentialRef || live.credentialRef !== current.credentialRef) throw new GatewayError("conflict", "Connector credential changed during provider discovery");
       const fresh = await this.options.credentials.read(live.credentialRef);
-      if (!fresh) { credentialUnavailable = true; throw new GatewayError("unsupported", "Connector credential is unavailable"); }
+      if (!fresh) { credentialUnavailable = true; throw missingCredential(connector, live.credentialRef); }
       return fresh;
     };
     const limit = Math.min(request.limit ?? MAX_ITEMS, MAX_ITEMS); if (!Number.isSafeInteger(limit) || limit < 1) throw bad("Connector limit is invalid");
