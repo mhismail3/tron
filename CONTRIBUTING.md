@@ -163,9 +163,11 @@ packages/mac-app/scripts/bundle-gateway.sh
 scripts/tron mac generate
 cd packages/mac-app
 xcodebuild build-for-testing -project TronMac.xcodeproj -scheme TronMac \
-  -configuration Debug -destination 'platform=macOS,arch=arm64'
+  -configuration Debug -destination 'platform=macOS,arch=arm64' \
+  -derivedDataPath build/DerivedData
 xcodebuild test-without-building -project TronMac.xcodeproj -scheme TronMac \
   -configuration Debug -destination 'platform=macOS,arch=arm64' \
+  -derivedDataPath build/DerivedData \
   -only-testing:TronMacTests/<OwningSuite>
 ```
 

@@ -169,7 +169,8 @@ packages/mac-app/scripts/test-update-payload-fingerprint.sh
 scripts/tron mac generate
 cd packages/mac-app
 xcodebuild build -project TronMac.xcodeproj -scheme TronMac \
-  -configuration Debug -destination 'platform=macOS,arch=arm64'
+  -configuration Debug -destination 'platform=macOS,arch=arm64' \
+  -derivedDataPath build/DerivedData
 ```
 
 The build fails closed if staging cannot complete (for example, if the
@@ -703,10 +704,12 @@ copying into `/Applications`, release deployment, or launchd registration.
 
 ```bash
 xcodebuild build-for-testing -project TronMac.xcodeproj -scheme TronMac \
-  -configuration Debug -destination 'platform=macOS,arch=arm64'
+  -configuration Debug -destination 'platform=macOS,arch=arm64' \
+  -derivedDataPath build/DerivedData
 
 xcodebuild test-without-building -project TronMac.xcodeproj -scheme TronMac \
   -configuration Debug -destination 'platform=macOS,arch=arm64' \
+  -derivedDataPath build/DerivedData \
   -only-testing:TronMacTests/PairingURLBuilderTests \
   -only-testing:TronMacTests/EnrollmentCodeReaderTests \
   -only-testing:TronMacTests/SingleInstanceLockTests
