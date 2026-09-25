@@ -14,8 +14,6 @@ Commands:
                                     Own the immutable Debug Gateway on port 9848
                                     status/preflight are read-only; users initiate
                                     every mutating Gateway lifecycle transition
-  delegated-migrate <preflight|stage|verify|publish|recover|cleanup> ...
-                                    Explicit retained pi-subagents root cutover
   wizard-migrate <stage|verify|publish|recover|cleanup> ...
                                     Manually stage the legacy Mac wizard key
                                     into internal/mac/wizard-state.json
@@ -53,14 +51,6 @@ case "$cmd" in
     ;;
   __dev-supervise|dev)
     exec "$ROOT/scripts/tron-dev" "$@"
-    ;;
-  delegated-migrate)
-    if [[ ! -f "$GATEWAY/dist/sessions/delegated-root-migration.js" ]]; then
-      echo "missing prepared migration artifact: $GATEWAY/dist/sessions/delegated-root-migration.js" >&2
-      echo "prepare it explicitly with: (cd packages/gateway && npm run build)" >&2
-      exit 66
-    fi
-    exec node "$GATEWAY/dist/sessions/delegated-root-migration.js" "$@"
     ;;
   wizard-migrate)
     exec python3 "$ROOT/scripts/tron_wizard_migration.py" "$@"
