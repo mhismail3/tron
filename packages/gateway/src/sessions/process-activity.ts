@@ -18,10 +18,10 @@ export const PROCESS_ACTIVITY_CAPABILITY = "process-activity.v1";
 export const PROCESS_ACTIVITY_HISTORY_CAPABILITY = "process-history.v1";
 export const PROCESS_TRANSCRIPT_CAPABILITY = "process-transcript.v2";
 export const PROCESS_TRANSCRIPT_ABORT_CAPABILITY = "process-transcript-abort.v1";
-export const MAX_PROCESS_ACTIVITY_COUNT = 32;
-export const MAX_PROCESS_ACTIVITY_BYTES = 256 * 1_024;
-export const MAX_PROCESS_HISTORY_PAGE = 50;
-export const MAX_PROCESS_HISTORY_BYTES = 256 * 1_024;
+const MAX_PROCESS_ACTIVITY_COUNT = 32;
+const MAX_PROCESS_ACTIVITY_BYTES = 256 * 1_024;
+const MAX_PROCESS_HISTORY_PAGE = 50;
+const MAX_PROCESS_HISTORY_BYTES = 256 * 1_024;
 
 const terminalStates = new Set<SessionProcessState>([
   "completed", "failed", "stopped", "rejected", "interrupted",
@@ -84,7 +84,7 @@ export function redactProcessText(value: string): string {
   return redacted;
 }
 
-export function subagentProcessId(sessionId: string, toolCallId: string, childId: string): string {
+function subagentProcessId(sessionId: string, toolCallId: string, childId: string): string {
   return processHash("subagent", sessionId, toolCallId, childId);
 }
 
@@ -118,7 +118,7 @@ function subagentMode(mode: string | undefined): SessionProcessActivity["executi
   return "unknown";
 }
 
-export type SubagentAbortRoute =
+type SubagentAbortRoute =
   | { kind: "foreground"; expectedOperationId: string }
   | { kind: "controller"; runId: string; childId: string };
 

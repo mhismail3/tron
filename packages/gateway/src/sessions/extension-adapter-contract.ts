@@ -17,7 +17,7 @@ import type { ExtensionFormAnswer, ExtensionFormDescriptor } from "../protocol/t
  */
 export const TRON_FORM_CAPABILITY = "tron.form.v1";
 
-export interface FormRequestInput {
+interface FormRequestInput {
   form: ExtensionFormDescriptor;
   signal?: AbortSignal;
 }

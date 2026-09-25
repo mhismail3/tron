@@ -44,12 +44,12 @@ export interface BlobByteRange {
   end?: number;
 }
 
-export const BLOB_MAX_ITEM_BYTES = 25 * 1_048_576;
-export const BLOB_MAX_ITEMS = 128;
-export const BLOB_MAX_TOTAL_BYTES = 200 * 1_048_576;
-export const BLOB_MAX_MIME_TYPE_BYTES = 1_024;
+const BLOB_MAX_ITEM_BYTES = 25 * 1_048_576;
+const BLOB_MAX_ITEMS = 128;
+const BLOB_MAX_TOTAL_BYTES = 200 * 1_048_576;
+const BLOB_MAX_MIME_TYPE_BYTES = 1_024;
 
-export interface BlobStoreLimits {
+interface BlobStoreLimits {
   maximumItemBytes: number;
   maximumItems: number;
   maximumTotalBytes: number;

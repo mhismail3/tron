@@ -1072,7 +1072,7 @@ function projectUserText(text: string, ownerId: string, nextIndex: () => number)
   return projected;
 }
 
-export function toolGroupId(presentationId: string, firstOrdinal: number): string {
+function toolGroupId(presentationId: string, firstOrdinal: number): string {
   return `tool-group:${JSON.stringify([presentationId, firstOrdinal])}`;
 }
 
@@ -1363,7 +1363,7 @@ export function projectMessage(
   }
 }
 
-export function projectEntry(
+function projectEntry(
   entry: SessionEntry,
   blobs: BlobStore,
   toolMetadata?: ReadonlyMap<string, ToolProjectionMetadata>,
@@ -1578,9 +1578,9 @@ export function admitCommandCatalog(commands: CommandInfo[]): CommandInfo[] {
 // safeJson intentionally bounds arrays to 1,000 values. Keep the tree page
 // within that generic transport bound so selected nodes are never discarded
 // after projectTree has chosen the newest useful history.
-export const MAX_TREE_NODES = 1_000;
+const MAX_TREE_NODES = 1_000;
 export const TREE_PROJECTION_BYTES = 700_000;
-export const TREE_PROJECTION_STRING_BYTES = 8_192;
+const TREE_PROJECTION_STRING_BYTES = 8_192;
 
 function validTreeString(value: unknown, optional = false): boolean {
   return optional && value === undefined

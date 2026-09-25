@@ -29,10 +29,10 @@ export const DELEGATED_PROVIDER_TOOL_NAME = "subagent";
 export const DELEGATED_SUPERVISOR_TOOL_NAME = "subagent_supervisor";
 
 /** Fallback source label used when no installed owner can be resolved. */
-export const DELEGATED_PROVIDER_SOURCE = "pi-subagents";
+const DELEGATED_PROVIDER_SOURCE = "pi-subagents";
 
 /** Lifecycle files the provider may publish inside one run directory. */
-export const DELEGATED_ARTIFACT_FILES = [
+const DELEGATED_ARTIFACT_FILES = [
   "status.json",
   "events.jsonl",
   "recovery-descriptor.json",

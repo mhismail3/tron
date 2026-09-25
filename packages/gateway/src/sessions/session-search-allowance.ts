@@ -4,7 +4,7 @@ import { existsSync } from "node:fs";
 import { dirname } from "node:path";
 import type { SessionSearchPolicy } from "./session-search-contract.js";
 
-export interface JevReservation { requestID: string; day: string; reservedMicroCents: number; }
+interface JevReservation { requestID: string; day: string; reservedMicroCents: number; }
 
 /** Durable spending authority. This file is intentionally separate from the
  * disposable lexical index: corruption fails closed rather than rebuilding a

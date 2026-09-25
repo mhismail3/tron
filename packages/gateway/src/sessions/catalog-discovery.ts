@@ -53,13 +53,13 @@ export async function visitConcurrently<T>(
 }
 
 /** Stable hash and materialization order despite concurrent filesystem visits. */
-export function sortCatalogPaths(paths: Iterable<string>): string[] {
+function sortCatalogPaths(paths: Iterable<string>): string[] {
   return [...paths].sort();
 }
 
 /** pi-subagents reserves only the immediate workspace diagnostics directory;
  * deeper project directories with the same basename remain canonical. */
-export function isIgnoredCatalogDirectory(directory: string, canonicalRoot: string): boolean {
+function isIgnoredCatalogDirectory(directory: string, canonicalRoot: string): boolean {
   const fromRoot = relative(canonicalRoot, resolve(directory));
   if (fromRoot === ".." || fromRoot.startsWith(`..${sep}`) || isAbsolute(fromRoot)) return true;
   const parts = fromRoot.split(sep);
@@ -159,7 +159,7 @@ export async function buildCatalogSessionInfo(filePath: string): Promise<Catalog
   }
 }
 
-export async function buildCatalogSessionInfos(
+async function buildCatalogSessionInfos(
   files: readonly string[],
   concurrency = DEFAULT_CATALOG_DISCOVERY_LIMITS.metadataReadConcurrency,
 ): Promise<CatalogSessionInfo[]> {

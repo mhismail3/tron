@@ -1,18 +1,18 @@
 import { createHash } from "node:crypto";
 import type { JsonValue } from "../protocol/types.js";
 
-export const SESSION_SEARCH_MAX_QUERY_BYTES = 2_048;
-export const SESSION_SEARCH_MAX_RESULTS = 50;
+const SESSION_SEARCH_MAX_QUERY_BYTES = 2_048;
+const SESSION_SEARCH_MAX_RESULTS = 50;
 export const SESSION_SEARCH_MAX_SNIPPET_BYTES = 1_024;
 export const SESSION_SEARCH_MAX_ENTRY_BYTES = 128 * 1_024;
 export const SESSION_SEARCH_MAX_INDEX_BYTES = 512 * 1_024 * 1_024;
 export const SESSION_SEARCH_MAX_INDEX_SESSIONS = 25_000;
 export const SESSION_SEARCH_MAX_INDEX_PASSAGES = 1_000_000;
 
-export type SessionSearchScope = "user";
-export type SessionSearchCoverageState = "complete" | "indexing" | "partial" | "unavailable";
-export type SessionSearchSemanticState = "ready" | "partial" | "indexing" | "unavailable" | "unsupportedLanguage" | "disabled";
-export type SessionSearchRankingState = "lexical" | "localSemantic" | "jev" | "jevUnavailable" | "budgetLimited";
+type SessionSearchScope = "user";
+type SessionSearchCoverageState = "complete" | "indexing" | "partial" | "unavailable";
+type SessionSearchSemanticState = "ready" | "partial" | "indexing" | "unavailable" | "unsupportedLanguage" | "disabled";
+type SessionSearchRankingState = "lexical" | "localSemantic" | "jev" | "jevUnavailable" | "budgetLimited";
 
 export interface SessionSearchAnchorRevision {
   indexRevision: string;
@@ -46,7 +46,7 @@ export interface SessionSearchResult {
   anchorRevision: SessionSearchAnchorRevision;
 }
 
-export interface SessionSearchCoverage {
+interface SessionSearchCoverage {
   state: SessionSearchCoverageState;
   sessionsIndexed: number;
   sessionsTotal: number;
@@ -55,7 +55,7 @@ export interface SessionSearchCoverage {
   reason?: string;
 }
 
-export interface SessionSearchSemanticStatus {
+interface SessionSearchSemanticStatus {
   state: SessionSearchSemanticState;
   modelRevision?: string;
   language?: string;

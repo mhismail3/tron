@@ -21,7 +21,7 @@ export async function admitSearchEmbeddingHelper(path: string, expectedTeam = "M
   } catch { return false; }
 }
 
-export interface SearchEmbedding { vector: number[]; dimension: number; language: string; modelRevision: string; }
+interface SearchEmbedding { vector: number[]; dimension: number; language: string; modelRevision: string; }
 
 /** One-shot helper calls keep the signed process boundary simple and ensure a
  * crashed helper cannot strand a Gateway worker or retain transcript text. */

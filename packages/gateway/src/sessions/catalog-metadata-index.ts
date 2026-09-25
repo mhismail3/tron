@@ -10,7 +10,7 @@ import { boundedSummaryText, MAX_SUMMARY_TEXT_BYTES } from "./summary-text.js";
 
 export const CATALOG_METADATA_INDEX_VERSION = 3 as const;
 export const CATALOG_METADATA_INDEX_MAX_BYTES = 8 * 1_024 * 1_024;
-export const CATALOG_METADATA_INDEX_MAX_ENTRIES = 25_000;
+const CATALOG_METADATA_INDEX_MAX_ENTRIES = 25_000;
 const TAIL_BOUNDARY_BYTES = 4_096;
 const RECONCILE_CONCURRENCY = 16;
 
@@ -99,7 +99,7 @@ export interface CatalogMetadataIndexSummary {
   messageCount: number;
 }
 
-export interface CatalogMetadataIndexDiagnostics {
+interface CatalogMetadataIndexDiagnostics {
   (stage: "load" | "discard" | "rebuild" | "append" | "save", durationMs: number, outcome: "success" | "failure"): void;
 }
 

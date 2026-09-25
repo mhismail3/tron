@@ -24,7 +24,7 @@ export interface InvocationProjection {
 
 /** Canonical, non-context receipt family for Gateway invocation causality. */
 export const INVOCATION_RECEIPT_TYPE = "tron.chat-invocation.v1";
-export const INVOCATION_RECEIPT_WRITER = "gateway";
+const INVOCATION_RECEIPT_WRITER = "gateway";
 export const MAX_RECEIPT_BYTES = 400 * 1_024;
 export const MAX_ID_BYTES = 256;
 const MAX_NAME_BYTES = 512;
@@ -52,7 +52,7 @@ interface InvocationReceiptCommon {
   createdAt: string;
 }
 
-export interface InvocationStartReceipt extends InvocationReceiptCommon {
+interface InvocationStartReceipt extends InvocationReceiptCommon {
   receiptKind: "start";
   name?: string;
   arguments?: string;
@@ -61,12 +61,12 @@ export interface InvocationStartReceipt extends InvocationReceiptCommon {
   origin: ChatOrigin;
 }
 
-export interface InvocationTransitionReceipt extends InvocationReceiptCommon {
+interface InvocationTransitionReceipt extends InvocationReceiptCommon {
   receiptKind: "transition";
   lifecycle: Exclude<InvocationLifecycle, "staged" | "completed" | "failed" | "interrupted" | "outcomeUnknown">;
 }
 
-export interface InvocationTerminalReceipt extends InvocationReceiptCommon {
+interface InvocationTerminalReceipt extends InvocationReceiptCommon {
   receiptKind: "terminal";
   lifecycle: "completed" | "failed" | "interrupted" | "outcomeUnknown";
   name?: string;
@@ -76,13 +76,13 @@ export interface InvocationTerminalReceipt extends InvocationReceiptCommon {
   errorCode?: string;
 }
 
-export interface InvocationBindingReceipt extends InvocationReceiptCommon {
+interface InvocationBindingReceipt extends InvocationReceiptCommon {
   receiptKind: "binding";
   canonicalEntryId: string;
   parentEntryId?: string;
 }
 
-export type InvocationReceiptData =
+type InvocationReceiptData =
   | (InvocationStartReceipt & { writer: typeof INVOCATION_RECEIPT_WRITER })
   | (InvocationTransitionReceipt & { writer: typeof INVOCATION_RECEIPT_WRITER })
   | (InvocationTerminalReceipt & { writer: typeof INVOCATION_RECEIPT_WRITER })

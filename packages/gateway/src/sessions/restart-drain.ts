@@ -1,6 +1,6 @@
 import type { AdministrativeDrainBlockerSummary, AdministrativeDrainSnapshot } from "../protocol/types.js";
 
-export type RestartDrainDecision =
+type RestartDrainDecision =
   | { outcome: "completed" }
   | { outcome: "waiting" }
   | { outcome: "unresolved-owners"; owners: AdministrativeDrainBlockerSummary[] }

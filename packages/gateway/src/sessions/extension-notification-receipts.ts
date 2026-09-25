@@ -8,11 +8,11 @@ import {
 
 /** Canonical, non-context extension notification persisted in Pi JSONL. */
 export const EXTENSION_NOTIFICATION_RECEIPT_TYPE = "tron.extension-notification.v1";
-export const EXTENSION_NOTIFICATION_WRITER = "gateway";
+const EXTENSION_NOTIFICATION_WRITER = "gateway";
 const MAX_RECEIPT_BYTES = 40 * 1_024;
 const MAX_MESSAGE_BYTES = 32 * 1_024;
 
-export interface ExtensionNotificationReceipt {
+interface ExtensionNotificationReceipt {
   writer: typeof EXTENSION_NOTIFICATION_WRITER;
   version: 1;
   receiptId: string;
@@ -26,7 +26,7 @@ export interface ExtensionNotificationReceipt {
   createdAt: string;
 }
 
-export type ExtensionNotificationReceiptInput = Omit<ExtensionNotificationReceipt, "writer"> & { writer?: never };
+type ExtensionNotificationReceiptInput = Omit<ExtensionNotificationReceipt, "writer"> & { writer?: never };
 
 export function makeExtensionNotificationReceipt(input: ExtensionNotificationReceiptInput): ExtensionNotificationReceipt {
   return { ...input, writer: EXTENSION_NOTIFICATION_WRITER };

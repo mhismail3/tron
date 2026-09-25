@@ -10,17 +10,17 @@ export interface HookProjectionExtension {
   handlers: ReadonlyMap<string, readonly unknown[]>;
 }
 
-export interface HookProjectionLoadError {
+interface HookProjectionLoadError {
   path: string;
   error: string;
 }
 
-export const MAX_HOOK_HANDLER_EVENTS_PER_EXTENSION = 512;
-export const MAX_HOOK_STRING_CHARACTERS = 16 * 1_024;
+const MAX_HOOK_HANDLER_EVENTS_PER_EXTENSION = 512;
+const MAX_HOOK_STRING_CHARACTERS = 16 * 1_024;
 export const MAX_HOOK_PROJECTION_BYTES = 256 * 1_024;
-export const GENERIC_RESOURCE_ARRAY_LIMIT = 1_000;
+const GENERIC_RESOURCE_ARRAY_LIMIT = 1_000;
 
-export interface HookRegistrationProjection {
+interface HookRegistrationProjection {
   extensions: Array<Record<string, unknown>>;
   extensionLoadErrors: Array<{ path: string; error: string }>;
   hookInventory: {

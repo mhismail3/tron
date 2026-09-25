@@ -2,7 +2,7 @@ import { randomUUID } from "node:crypto";
 import { performance } from "node:perf_hooks";
 import { GatewayError } from "../errors.js";
 
-export const gatewayWorkKinds = [
+const gatewayWorkKinds = [
   "slot-admission",
   "prompt-preflight",
   "foreground-agent-operation",
@@ -21,7 +21,7 @@ export const gatewayWorkKinds = [
 
 export type GatewayWorkKind = typeof gatewayWorkKinds[number];
 
-export interface GatewayWorkFact {
+interface GatewayWorkFact {
   token: string;
   kind: GatewayWorkKind;
   sessionId?: string;
@@ -44,7 +44,7 @@ interface GatewayWorkEntry extends GatewayWorkFact {
   cancellationStarted?: Promise<void>;
 }
 
-export interface GatewayWorkAdmission {
+interface GatewayWorkAdmission {
   kind: GatewayWorkKind;
   sessionId?: string;
   method?: string;

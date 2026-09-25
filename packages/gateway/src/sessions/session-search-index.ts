@@ -24,7 +24,7 @@ export interface SearchIndexDocument {
   entries: SearchTextEntry[];
 }
 
-export interface SearchIndexCandidate {
+interface SearchIndexCandidate {
   rowID: string;
   sessionId: string;
   title: string;
@@ -38,12 +38,10 @@ export interface SearchIndexCandidate {
   lexicalScore: number;
 }
 
-export interface SearchIndexStats {
+interface SearchIndexStats {
   indexRevision: string;
   sessionsIndexed: number;
   passagesIndexed: number;
-  vectorsIndexed: number;
-  vectorsTotal: number;
   bytes: number;
   state: "complete" | "indexing" | "partial" | "unavailable";
   reason?: string;
@@ -234,7 +232,7 @@ export class SessionSearchIndex {
     const passages = Number((this.database.prepare("SELECT count(*) AS n FROM passages").get() as { n: number }).n);
     const bytes = this.storageBytes();
     const state = sessions > SESSION_SEARCH_MAX_INDEX_SESSIONS || passages > SESSION_SEARCH_MAX_INDEX_PASSAGES || bytes > this.maxStorageBytes ? "partial" : "complete";
-    return { indexRevision: this.indexRevision, sessionsIndexed: sessions, passagesIndexed: passages, vectorsIndexed: 0, vectorsTotal: 0, bytes, state };
+    return { indexRevision: this.indexRevision, sessionsIndexed: sessions, passagesIndexed: passages, bytes, state };
   }
 
   close(): void { if (!this.closed) { this.closed = true; this.database.close(); } }

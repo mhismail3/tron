@@ -15,7 +15,7 @@ export interface SearchTextEntry {
   ordinal: number;
 }
 
-export interface ValidatedSearchBranch {
+interface ValidatedSearchBranch {
   header: FileEntry & { type: "session" };
   entries: SessionEntry[];
   leafEntryId?: string;

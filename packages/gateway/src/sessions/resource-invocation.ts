@@ -9,7 +9,7 @@ export const RESOURCE_ARGUMENTS_MAX_BYTES = 5_000;
 const MAX_SKILL_INVOCATION_BYTES = 4 * 1_048_576;
 const MAX_SKILL_PATH_BYTES = 8_192;
 
-export interface ProjectedSkillInvocation {
+interface ProjectedSkillInvocation {
   resourceName: string;
   text: string;
 }
@@ -85,7 +85,7 @@ function admittedText(value: unknown, field: string, maximumBytes: number, allow
   return value;
 }
 
-export function admitResourceName(value: unknown, field = "resourceInvocation.name"): string {
+function admitResourceName(value: unknown, field = "resourceInvocation.name"): string {
   const name = admittedText(value, field, RESOURCE_NAME_MAX_BYTES, false);
   // Pi command tokens cannot contain whitespace. Reject catalog entries that
   // could be displayed but never invoked through their declared identity.

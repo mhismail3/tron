@@ -10,7 +10,7 @@ export interface ExtensionActivityClock {
   clearTimeout(handle: unknown): void;
 }
 
-export const systemExtensionActivityClock: ExtensionActivityClock = {
+const systemExtensionActivityClock: ExtensionActivityClock = {
   wallNow: () => Date.now(),
   monotonicNow: () => typeof performance !== "undefined" ? performance.now() : Date.now(),
   setTimeout: (callback, delayMs) => setTimeout(callback, delayMs),
@@ -33,7 +33,7 @@ export interface ActivityExpiryFrame {
   expiredActivityIds: string[];
 }
 
-export type ExtensionActivityExpiryCallback = (frame: ActivityExpiryFrame) => void;
+type ExtensionActivityExpiryCallback = (frame: ActivityExpiryFrame) => void;
 
 /** Gateway-owned current/recent partition. Recency is a bounded scheduling
  * projection; canonical history is never removed here. */

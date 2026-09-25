@@ -396,8 +396,6 @@ export class SessionSearchService {
     if (this.semanticCoverage === "indexing") this.semanticCoverage = "complete";
   }
 
-  private semanticHitsState(hits: readonly unknown[]): "lexical" | "localSemantic" { return hits.length > 0 ? "localSemantic" : "lexical"; }
-
   private enqueueSemantic(operation: () => Promise<void>): Promise<void> {
     const run = this.semanticTail.then(operation, operation);
     this.semanticTail = run.then(() => undefined, () => undefined);

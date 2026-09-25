@@ -14,13 +14,13 @@ const MAX_CHILDREN = 32;
 const MAX_CHILDREN_TOTAL = 64;
 const MAX_DEPTH = 3;
 const MAX_TEXT_BYTES = 2_048;
-export const MAX_EXTENSION_ACTIVITY_COUNT = 32;
-export const MAX_EXTENSION_ACTIVITY_BYTES = 256 * 1_024;
+const MAX_EXTENSION_ACTIVITY_COUNT = 32;
+const MAX_EXTENSION_ACTIVITY_BYTES = 256 * 1_024;
 export const MAX_EXTENSION_LIFECYCLE_HEADER_BYTES = 32 * 1_024;
 /** Shared bound for runtime-slot and registry extension artifact reads. */
 export const MAX_EXTENSION_ARTIFACT_BYTES = 256 * 1_024;
 
-export interface ExtensionLifecycleProjection {
+interface ExtensionLifecycleProjection {
   version: 1;
   runId: string;
   toolCallId?: string;
@@ -382,7 +382,7 @@ export type ExtensionArtifactRejectionReason =
   | "oversized-artifact"
   | "artifact-replacement-in-progress";
 
-export type ExtensionArtifactAdmission =
+type ExtensionArtifactAdmission =
   | { accepted: true; artifact: Record<string, unknown> }
   | { accepted: false; reason: "invalid-timestamp" | "missing-terminal-time" | "malformed-artifact" };
 
@@ -534,7 +534,7 @@ export function extensionLifecycleState(value: unknown, fallback: ExtensionRunLi
   return fallback;
 }
 
-export interface NormalizedExtensionArtifact {
+interface NormalizedExtensionArtifact {
   lifecycleState: ExtensionRunLifecycleState;
   status: "running" | "completed" | "failed";
   terminal: boolean;

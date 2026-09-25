@@ -2,7 +2,7 @@ import type { SessionEntry, SessionManager } from "@earendil-works/pi-coding-age
 import { GatewayError } from "../errors.js";
 import type { JsonValue, SessionTreeNode } from "../protocol/types.js";
 
-export const HISTORY_PAGE_SIZE = 100;
+const HISTORY_PAGE_SIZE = 100;
 export const HISTORY_TEXT_CHARS = 24_000;
 export interface HistoryCursor { ordinal: number; entryId: string; direction: "older" | "newer" }
 export interface HistoryPage {

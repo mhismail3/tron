@@ -4,7 +4,7 @@ import type { ContextDeliveryMetadata, ExtensionToolOrigin } from "../protocol/t
 export const CONTEXT_DELIVERY_RECEIPT_TYPE = "tron.context-delivery.v4";
 const HISTORICAL_CONTEXT_DELIVERY_RECEIPT_TYPE = "tron.session-input.v1";
 
-export interface ContextDeliveryReceiptData {
+interface ContextDeliveryReceiptData {
   writer: "gateway";
   version: 4;
   targetEntryId: string;

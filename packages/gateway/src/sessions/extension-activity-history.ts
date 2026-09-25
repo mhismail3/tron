@@ -5,7 +5,7 @@ import type { ExtensionOwner, ExtensionRunActivity, ExtensionRunAttention, Exten
  * are intentionally not transcript messages or model context. */
 export const EXTENSION_ACTIVITY_RECEIPT_TYPE = "tron.extension-activity.v1";
 export const EXTENSION_ACTIVITY_HISTORY_CAPABILITY = "extension-activity-history.v1";
-export const MAX_EXTENSION_HISTORY_PAGE = 50;
+const MAX_EXTENSION_HISTORY_PAGE = 50;
 export const MAX_EXTENSION_HISTORY_BYTES = 256 * 1_024;
 
 export interface ExtensionActivityReceipt {

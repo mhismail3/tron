@@ -1,7 +1,7 @@
 import type { SessionProcessActivity } from "../protocol/types.js";
 
 export const PROCESS_ACTIVITY_RECENT_MS = 5 * 60 * 1_000;
-export const MAX_PROCESS_TIMESTAMP_FUTURE_SKEW_MS = 60_000;
+const MAX_PROCESS_TIMESTAMP_FUTURE_SKEW_MS = 60_000;
 
 export interface ProcessActivityClock {
   wallNow(): number;
@@ -10,7 +10,7 @@ export interface ProcessActivityClock {
   clearTimeout(handle: unknown): void;
 }
 
-export const systemProcessActivityClock: ProcessActivityClock = {
+const systemProcessActivityClock: ProcessActivityClock = {
   wallNow: () => Date.now(),
   monotonicNow: () => typeof performance !== "undefined" ? performance.now() : Date.now(),
   setTimeout: (callback, delayMs) => setTimeout(callback, delayMs),
@@ -24,7 +24,7 @@ export interface ProcessActivityExpiryFrame {
   expiredProcessIds: string[];
 }
 
-export type ProcessActivityExpiryCallback = (frame: ProcessActivityExpiryFrame) => void;
+type ProcessActivityExpiryCallback = (frame: ProcessActivityExpiryFrame) => void;
 
 const terminalStates = new Set(["completed", "failed", "stopped", "rejected", "interrupted"]);
 const MAX_TERMINAL_TOMBSTONES = 2_048;
