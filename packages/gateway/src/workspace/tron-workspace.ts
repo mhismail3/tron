@@ -128,7 +128,7 @@ export class TronWorkspace {
     const read = await readSecureJson<unknown>(marker, 256);
     if (!read.present) return false;
     if (!read.value || typeof read.value !== "object" || Array.isArray(read.value)) return false;
-    return (read.value as Record<string, unknown>)["knowledgeInitialized"] === true;
+    return (read.value as Record<string, unknown>)[`${feature}Initialized`] === true;
   }
 
   async markFeatureInitialized(feature: "knowledge"): Promise<void> {
