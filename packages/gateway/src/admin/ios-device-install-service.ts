@@ -559,10 +559,27 @@ export class IosDeviceInstallService {
       // A missing binding is not permission to choose another connected phone.
       const targets = await this.discoverTargets(config.target.identifier);
       const currentTarget = targets.find((candidate) => candidate.identifier === config.target?.identifier);
-      if (!currentTarget || !currentTarget.developerModeEnabled || currentTarget.connectionState !== "connected") {
+      // Each refusal names the stored binding and the one failed check
+      // (discovery, connection, Developer Mode) instead of one combined cause,
+      // short enough for the iOS toast's three-line title.
+      if (!currentTarget) {
         throw new GatewayError(
           "not_found",
-          "Connect and unlock the bound iOS device and enable Developer Mode; changing phones requires an explicit Mac-side binding",
+          `${config.target.name} isn't visible to this Mac. Pair it in Xcode.`,
+          true,
+        );
+      }
+      if (currentTarget.connectionState !== "connected") {
+        throw new GatewayError(
+          "not_found",
+          `${config.target.name} isn't reachable. Plug it in or join the Mac's Wi-Fi.`,
+          true,
+        );
+      }
+      if (!currentTarget.developerModeEnabled) {
+        throw new GatewayError(
+          "not_found",
+          `Turn on Developer Mode on ${config.target.name}.`,
           true,
         );
       }

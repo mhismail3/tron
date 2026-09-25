@@ -184,18 +184,31 @@ describe("IosDeviceInstallService", () => {
   });
 
   it.each([
-    { connectionState: "disconnected", developerModeEnabled: true },
-    { connectionState: "connected", developerModeEnabled: false },
-  ])("rejects unavailable bound targets without launching: %j", async (state) => {
+    {
+      cause: "not visible to this Mac",
+      discovered: [] as IosPhysicalDeviceTarget[],
+      message: "Development iPhone isn't visible to this Mac. Pair it in Xcode.",
+    },
+    {
+      cause: "unreachable",
+      discovered: [{ ...target, connectionState: "disconnected" }],
+      message: "Development iPhone isn't reachable. Plug it in or join the Mac's Wi-Fi.",
+    },
+    {
+      cause: "Developer Mode off",
+      discovered: [{ ...target, developerModeEnabled: false }],
+      message: "Turn on Developer Mode on Development iPhone.",
+    },
+  ])("rejects unavailable bound targets without launching: $cause", async ({ discovered, message }) => {
     const { source, tronHome, service } = await fixture();
     await service.configure({ deviceId: "device-alpha", sourceRoot: source });
     await service.bindTarget("device-alpha", target.identifier);
     const launched = vi.fn(async () => {});
     const unavailable = new IosDeviceInstallService({
-      tronHome, discoverer: async () => [{ ...target, ...state }], launcher: launched,
+      tronHome, discoverer: async () => discovered, launcher: launched,
     });
     await expect(unavailable.install("device-alpha", "command-install-1", "optimized"))
-      .rejects.toMatchObject({ code: "not_found" });
+      .rejects.toMatchObject({ code: "not_found", retryable: true, message });
     expect(launched).not.toHaveBeenCalled();
     expect((await unavailable.configStatus("device-alpha"))?.target?.identifier).toBe(target.identifier);
   });
