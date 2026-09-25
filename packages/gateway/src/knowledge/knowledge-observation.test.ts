@@ -14,6 +14,7 @@ import { GatewayWorkRegistry } from "../sessions/gateway-work-registry.js";
 const roots: string[] = [];
 const workspaces: TronWorkspace[] = [];
 afterEach(async () => {
+  vi.useRealTimers();
   await Promise.all(workspaces.splice(0).map(workspace => workspace.dispose()));
   await Promise.all(roots.splice(0).map(root => rm(root, { recursive: true, force: true })));
 });
@@ -38,6 +39,9 @@ const entries = [
 
 const output = JSON.stringify({ observations: [{ text: "The release is planned for Friday.", attribution: "user", certainty: "qualified", observedAt: "2026-01-01T00:00:01Z" }] });
 
+/** Waits for an observable condition. `waitFor` polls on real timers, so store
+ * I/O still progresses between its polls while a test's fake clock stays under
+ * the test's control; tests that would otherwise sleep advance it explicitly. */
 async function waitFor(predicate: () => boolean | Promise<boolean>): Promise<void> {
   await vi.waitFor(async () => expect(await predicate()).toBe(true), { timeout: 3_000, interval: 10 });
 }
@@ -74,6 +78,7 @@ describe("KnowledgeObservationService", () => {
   });
 
   it("does not merge distinct terminal envelopes while an older inference is busy", async () => {
+    vi.useFakeTimers();
     let release!: (value: string) => void;
     const blocked = new Promise<string>(resolve => { release = resolve; });
     const infer = vi.fn(async (input) => input.range.invocationIds?.includes("invocation-a") ? blocked : output.replace("planned for Friday", "failed turn"));
@@ -83,7 +88,7 @@ describe("KnowledgeObservationService", () => {
     observer.admit({ sessionId: "session-1", entries: [first], outcome: "completed", invocationId: "invocation-a" });
     await waitFor(() => infer.mock.calls.length === 1);
     observer.admit({ sessionId: "session-1", entries: [second], outcome: "failed", invocationId: "invocation-c" });
-    await new Promise(resolve => setTimeout(resolve, 25));
+    await vi.advanceTimersByTimeAsync(25);
     expect(infer).toHaveBeenCalledTimes(1);
     release(output);
     await waitFor(() => infer.mock.calls.length === 2);
@@ -91,7 +96,7 @@ describe("KnowledgeObservationService", () => {
     expect(infer.mock.calls[1]?.[0].range.invocationIds).toEqual(["invocation-c"]);
     await waitFor(async () => (await store.status()).coverageCount === 2);
     observer.dispose();
-    await new Promise(resolve => setTimeout(resolve, 1_000));
+    await vi.advanceTimersByTimeAsync(1_000);
   });
 
   it("rejects a model result that arrives after the configured attempt deadline", async () => {
@@ -351,6 +356,7 @@ describe("KnowledgeObservationService", () => {
   });
 
   it("coalesces and durably deduplicates canonical no-tool turns without forwarding thinking", async () => {
+    vi.useFakeTimers();
     const infer = vi.fn(async (input) => {
       expect(input.sourceText).not.toContain("private reasoning omitted");
       return output;
@@ -364,7 +370,7 @@ describe("KnowledgeObservationService", () => {
     expect(tool.text).toContain("release");
     expect(JSON.stringify(tool.details).length).toBeLessThan(8_000);
     observer.admit({ sessionId: "session-1", entries, outcome: "completed" });
-    await new Promise(resolve => setTimeout(resolve, 50));
+    await vi.advanceTimersByTimeAsync(50);
     expect(infer).toHaveBeenCalledTimes(1);
     const nextEntries = [...entries, { type: "message", id: "entry-3", timestamp: "2026-01-01T00:00:03Z", message: { role: "user", content: "The date is still Friday." } }];
     observer.admit({ sessionId: "session-1", entries: nextEntries, outcome: "completed" });
@@ -373,10 +379,11 @@ describe("KnowledgeObservationService", () => {
     expect(infer.mock.calls[1]?.[0].sourceText).toContain("The date is still Friday");
     expect(infer.mock.calls[1]?.[0].sourceText).not.toContain("release is Friday");
     observer.dispose();
-    await new Promise(resolve => setTimeout(resolve, 25));
+    await vi.advanceTimersByTimeAsync(25);
   });
 
   it("does not replay a committed second chunk when a later snapshot includes all chunks", async () => {
+    vi.useFakeTimers();
     const infer = vi.fn(async (input) => output.replace("planned for Friday", input.sourceText.includes("entry-3") ? "the date is still Friday" : "planned for Friday"));
     const { store, observer } = await fixture({ infer });
     observer.admit({ sessionId: "session-1", entries: [entries[0], entries[1]], outcome: "completed" });
@@ -385,14 +392,20 @@ describe("KnowledgeObservationService", () => {
     observer.admit({ sessionId: "session-1", entries: [entries[0], entries[1], third], outcome: "completed" });
     await waitFor(() => infer.mock.calls.length === 2);
     observer.admit({ sessionId: "session-1", entries: [entries[0], entries[1], third], outcome: "completed" });
-    await new Promise(resolve => setTimeout(resolve, 100));
-    expect(infer).toHaveBeenCalledTimes(2);
-    expect(infer.mock.calls[1]?.[0].sourceText).toContain("The date is still Friday");
+    // The already-covered snapshot adds no inference. The next snapshot proves
+    // that positively: its cut must hold only the new entry, so a replay of the
+    // committed chunks would land in this call instead of entry-4 alone.
+    const fourth = { type: "message", id: "entry-4", timestamp: "2026-01-01T00:00:04Z", message: { role: "user", content: "The date moved to Monday." } };
+    observer.admit({ sessionId: "session-1", entries: [entries[0], entries[1], third, fourth], outcome: "completed" });
+    await waitFor(() => infer.mock.calls.length === 3);
+    expect(infer.mock.calls[2]?.[0].sourceText).toContain("The date moved to Monday");
+    expect(infer.mock.calls[2]?.[0].sourceText).not.toContain("The date is still Friday");
     observer.dispose();
-    await new Promise(resolve => setTimeout(resolve, 25));
+    await vi.advanceTimersByTimeAsync(25);
   });
 
   it("treats empty allowlists as an excluded, incomplete scope", async () => {
+    vi.useFakeTimers();
     const root = await mkdtemp(join(tmpdir(), "tron-observer-scope-")); roots.push(root);
     const workspace = new TronWorkspace(join(root, "home")); workspaces.push(workspace);
     const store = new KnowledgeStore(workspace);
@@ -404,7 +417,7 @@ describe("KnowledgeObservationService", () => {
     expect(infer).not.toHaveBeenCalled();
     expect((await store.list({ kind: "observation" })).records).toHaveLength(0);
     observer.dispose();
-    await new Promise(resolve => setTimeout(resolve, 25));
+    await vi.advanceTimersByTimeAsync(25);
   });
 
   it("observes new sessions across projects only with an explicit global grant", async () => {
@@ -545,15 +558,17 @@ describe("KnowledgeObservationService", () => {
   });
 
   it("records failed model inference as a non-success coverage disposition", async () => {
+    vi.useFakeTimers();
     const { store, observer } = await fixture({ infer: async () => { throw new Error("synthetic provider failure"); } });
     observer.admit({ sessionId: "session-1", entries, outcome: "failed" });
     await waitFor(async () => (await store.status()).coverageCount === 1);
     expect((await store.list({ kind: "observation" })).records).toHaveLength(0);
     observer.dispose();
-    await new Promise(resolve => setTimeout(resolve, 25));
+    await vi.advanceTimersByTimeAsync(25);
   });
 
   it("does not publish a late result after configuration revision changes", async () => {
+    vi.useFakeTimers();
     let release!: () => void;
     const blocked = new Promise<string>(resolve => { release = () => resolve(output); });
     const infer = vi.fn(async () => blocked);
@@ -566,6 +581,6 @@ describe("KnowledgeObservationService", () => {
     await waitFor(async () => (await store.status()).coverageCount === 1);
     expect((await store.list({ kind: "observation" })).records).toHaveLength(0);
     observer.dispose();
-    await new Promise(resolve => setTimeout(resolve, 25));
+    await vi.advanceTimersByTimeAsync(25);
   });
 });

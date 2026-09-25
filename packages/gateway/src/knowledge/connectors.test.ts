@@ -14,7 +14,7 @@ const command = (name: string) => `connector-test-${name}`;
 const headers = () => new Headers();
 const publicResolver = async () => ["93.184.216.34"];
 
-afterEach(async () => { await Promise.all(roots.splice(0).map(root => rm(root, { recursive: true, force: true }))); });
+afterEach(async () => { vi.useRealTimers(); await Promise.all(roots.splice(0).map(root => rm(root, { recursive: true, force: true }))); });
 
 function response(value: unknown, status = 200): ConnectorHTTPResponse { return { status, headers: headers(), body: JSON.stringify(value) }; }
 async function fixture(http: (url: string, init: { headers: Record<string, string>; signal: AbortSignal; method?: "GET" | "PUT" | "POST" | "DELETE" }) => Promise<ConnectorHTTPResponse>, xPricing?: { accountId: string; costCentsPerAttempt: number; maxAttempts: number }, options: { assessment?: SourceAssessmentModel; sourceFetch?: (url: string, excerpt: string | undefined, signal: AbortSignal) => Promise<Response> } = {}) {
@@ -267,6 +267,7 @@ describe("knowledge connectors", () => {
   });
 
   it("serializes connector configuration behind an admitted discovery request", async () => {
+    vi.useFakeTimers();
     let release!: () => void;
     let entered!: () => void;
     let requests = 0;
@@ -279,7 +280,7 @@ describe("knowledge connectors", () => {
     await started;
     const reconfigure = extension.invoke({ operation: "knowledge.connector.configure", request: { commandId: command("lane-reconfigure"), connector: "raindrop", enabled: true, accountId: "account-2", scope: "456", credentialRef: "connector:raindrop:test-account" } });
     let settled = false; void reconfigure.then(() => { settled = true; });
-    await new Promise(resolve => setTimeout(resolve, 20));
+    await vi.advanceTimersByTimeAsync(20);
     expect(requests).toBe(1);
     expect(settled).toBe(false);
     release();

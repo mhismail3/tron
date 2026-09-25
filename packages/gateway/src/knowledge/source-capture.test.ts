@@ -13,7 +13,7 @@ async function fixture(): Promise<{ store: KnowledgeStore; home: string }> {
   const home = await mkdtemp(join(tmpdir(), "tron-source-")); homes.push(home);
   return { home, store: new KnowledgeStore(new TronWorkspace(home)) };
 }
-afterEach(async () => { await Promise.all(homes.splice(0).map(home => rm(home, { recursive: true, force: true }))); });
+afterEach(async () => { vi.useRealTimers(); await Promise.all(homes.splice(0).map(home => rm(home, { recursive: true, force: true }))); });
 
 const publicResolver = async () => ["93.184.216.34"];
 
@@ -219,15 +219,20 @@ describe("safe source capture", () => {
 
   it("serializes concurrent redirect aliases at the source publication owner", async () => {
     const { store } = await fixture();
+    // The fetcher pauses on the fake clock, so both alias reads are provably in
+    // flight together. `waitFor` advances that clock while it polls, so the race
+    // is real but costs no wall time.
+    vi.useFakeTimers();
     const fetcher = async (url: URL) => {
       await new Promise(resolve => setTimeout(resolve, 10));
       if (["https://example.com/alias-a", "https://example.com/alias-b"].includes(url.toString())) return new Response(null, { status: 302, headers: { location: "https://example.com/canonical" } });
       return new Response("concurrent canonical", { headers: { "content-type": "text/plain" } });
     };
-    const [first, second] = await Promise.all([
+    const captures = Promise.all([
       captureSource(store, { commandId: command("concurrent-a"), url: "https://example.com/alias-a", scope: "research" }, { fetcher, resolveHost: publicResolver }),
       captureSource(store, { commandId: command("concurrent-b"), url: "https://example.com/alias-b", scope: "research" }, { fetcher, resolveHost: publicResolver }),
     ]);
+    const [first, second] = await vi.waitFor(() => captures, { interval: 10, timeout: 3_000 });
     expect(first.record.id).toBe(second.record.id);
     expect((await store.list({ kind: "source", includeArchived: true, includePending: true })).records).toHaveLength(1);
   });
