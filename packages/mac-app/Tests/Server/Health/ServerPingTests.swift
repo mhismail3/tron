@@ -18,7 +18,7 @@ struct GatewayWebSocketTransportTests {
                 deadline: GatewayWebSocketTransport.Deadline(timeout: 2)
             )
         }
-        try await Task.sleep(nanoseconds: 20_000_000)
+        await task.receiveEntered.wait()
         pending.cancel()
         do {
             _ = try await pending.value
@@ -80,6 +80,9 @@ private final class TestWebSocketTask: GatewayWebSocketTransport.WebSocketTask, 
     private var cancelled = false
     private(set) var cancelCount = 0
     private let nextMessage: URLSessionWebSocketTask.Message?
+    /// Signalled when `receive()` is entered, so cancellation targets a live
+    /// socket observation without a real-time sleep.
+    let receiveEntered = TestLatch()
 
     init(message: URLSessionWebSocketTask.Message? = nil) {
         nextMessage = message
@@ -102,6 +105,7 @@ private final class TestWebSocketTask: GatewayWebSocketTransport.WebSocketTask, 
 
     func receive() async throws -> URLSessionWebSocketTask.Message {
         if let nextMessage { return nextMessage }
+        receiveEntered.signal()
         return try await withCheckedThrowingContinuation { continuation in
             lock.lock()
             if cancelled {
@@ -111,6 +115,25 @@ private final class TestWebSocketTask: GatewayWebSocketTransport.WebSocketTask, 
                 self.continuation = continuation
                 lock.unlock()
             }
+        }
+    }
+}
+
+/// One-shot signal for a test task that must not poll or sleep.
+private final class TestLatch: @unchecked Sendable {
+    private let lock = NSLock()
+    private var ready = false
+    private var waiters: [CheckedContinuation<Void, Never>] = []
+
+    func signal() {
+        let waiters = lock.withLock { ready = true; defer { self.waiters.removeAll() }; return self.waiters }
+        for waiter in waiters { waiter.resume() }
+    }
+
+    func wait() async {
+        await withCheckedContinuation { continuation in
+            let immediate = lock.withLock { if ready { return true }; waiters.append(continuation); return false }
+            if immediate { continuation.resume() }
         }
     }
 }

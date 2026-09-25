@@ -34,10 +34,17 @@ struct EnrollmentCodeReaderTests {
         try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
         defer { try? FileManager.default.removeItem(at: root) }
         let file = root.appendingPathComponent("enrollment.json")
-        try #"{"version":1,"code":"ABCD-EFGH","expiresAt":"2020-01-01T00:00:00Z","machineId":"machine"}"#.write(to: file, atomically: true, encoding: .utf8)
-        try FileManager.default.setAttributes([.posixPermissions: 0o644], ofItemAtPath: file.path)
+        let now = Date(timeIntervalSince1970: 1_700_000_000)
 
-        #expect(EnrollmentCodeReader.read(at: file) == nil)
+        // Owner-only but expired: only the expiry check can reject this.
+        try #"{"version":1,"code":"ABCD-EFGH","expiresAt":"2020-01-01T00:00:00Z","machineId":"machine"}"#.write(to: file, atomically: true, encoding: .utf8)
+        try FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: file.path)
+        #expect(EnrollmentCodeReader.read(at: file, now: now) == nil)
+
+        // Unexpired but group-readable: only the owner-only read guard can reject this.
+        try #"{"version":1,"code":"ABCD-EFGH","expiresAt":"2030-01-01T00:00:00Z","machineId":"machine"}"#.write(to: file, atomically: true, encoding: .utf8)
+        try FileManager.default.setAttributes([.posixPermissions: 0o644], ofItemAtPath: file.path)
+        #expect(EnrollmentCodeReader.read(at: file, now: now) == nil)
     }
 
     @Test("rejects symlinks, directories, oversized files, and unknown keys")

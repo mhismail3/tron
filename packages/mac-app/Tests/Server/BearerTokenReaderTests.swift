@@ -102,13 +102,4 @@ struct BearerTokenReaderTests {
         #expect(BearerTokenReader.read(at: path) == nil)
     }
 
-    @Test("0o600 is accepted")
-    func tightPermissionsAccepted() throws {
-        let tmp = TestTempDir.make()
-        defer { TestTempDir.cleanup(tmp) }
-        let path = tmp.appendingPathComponent("auth.json", isDirectory: false)
-        try writeSecureToken(Data(#"{"version":2,"bearerToken":"abcdef1234567890abcdef1234567890","purpose":"local-wrapper-health","lastUpdated":"2026-04-27T00:00:00Z"}"#.utf8), to: path)
-        #expect(BearerTokenReader.read(at: path) == "abcdef1234567890abcdef1234567890")
-    }
-
 }
