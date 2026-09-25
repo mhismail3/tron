@@ -381,8 +381,11 @@ describe("synchronization catch-up overflow recovery", () => {
     releaseRecovery?.();
     await liveSync;
     const deadline = Date.now() + 5_000;
-    while (!frames.some((frame) => frame.topic === "session.rebaseline")) {
-      if (Date.now() >= deadline) throw new Error("recovery snapshot timed out");
+    // The recovered live event is written after the rebaseline frame; wait for
+    // both so the ordering assertions below never race the socket.
+    while (!frames.some((frame) => frame.topic === "session.rebaseline")
+      || !frames.some((frame) => frame.topic === "session.progress" && frame.payload?.eventSequence === 100)) {
+      if (Date.now() >= deadline) throw new Error("recovery snapshot or recovered event timed out");
       await new Promise((resolve) => setTimeout(resolve, 1));
     }
     const recovery = frames.find((frame) => frame.topic === "session.rebaseline");
