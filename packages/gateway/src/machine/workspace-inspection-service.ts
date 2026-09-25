@@ -4,19 +4,21 @@ import { lstat, open, opendir, realpath, stat } from "node:fs/promises";
 import { basename, extname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { spawn } from "node:child_process";
 import { GatewayError } from "../errors.js";
+import { containedWithin } from "./path-containment.js";
+import { WORKSPACE_MAXIMUM_ENTRIES, WORKSPACE_MAXIMUM_PROJECTED_BYTES, projectBoundedEntries } from "./workspace-bounds.js";
 
 const GIT = process.env.TRON_GIT_PATH ?? "/usr/bin/git";
 const GIT_TIMEOUT_MS = 5_000;
 const HISTORY_TIMEOUT_MS = 10_000;
 const GIT_MAX_OUTPUT_BYTES = 768 * 1_024;
 const DIFF_MAX_OUTPUT_BYTES = 480 * 1_024;
-const WORKSPACE_MAXIMUM_ENTRIES = 1_000;
-const WORKSPACE_MAXIMUM_PROJECTED_BYTES = 768 * 1_024;
 const WORKSPACE_FILE_MAXIMUM_BYTES = 25 * 1_048_576;
 const WORKSPACE_MAXIMUM_CHANGES = 5_000;
 const WORKSPACE_METADATA_CONCURRENCY = 16;
 const HISTORY_MAXIMUM_LIMIT = 100;
 const HISTORY_CURSOR_MAXIMUM_AGE_MS = 5 * 60_000;
+const LISTING_ENTRY_OVERFLOW = { message: "This folder contains too many entries to browse safely", retryable: true };
+const LISTING_METADATA_OVERFLOW = { message: "This folder contains too much metadata to browse safely", retryable: true };
 
 type WorkspaceEntryKind = "directory" | "file" | "symlink";
 type WorkspaceChangeKind = "added" | "modified" | "deleted" | "renamed" | "copied" | "untracked" | "conflicted" | "typeChanged";
@@ -71,11 +73,6 @@ interface HistoryCursor {
   issuedAt: number;
 }
 
-function inside(root: string, candidate: string): boolean {
-  const delta = relative(root, candidate);
-  return delta === "" || (!delta.startsWith(`..${sep}`) && delta !== ".." && !isAbsolute(delta));
-}
-
 function invalidRelativePath(): never {
   throw new GatewayError("invalid_request", "Workspace path must be a relative path inside the session workspace");
 }
@@ -111,7 +108,7 @@ async function containedPathFromRoot(root: string, relativePath: string, finalKi
       throw new GatewayError("invalid_request", "Workspace symbolic links cannot be followed");
     }
   }
-  if (!inside(root, candidate)) return invalidRelativePath();
+  if (!containedWithin(root, candidate)) return invalidRelativePath();
   const metadata = await lstat(candidate);
   if (finalKind === "directory" && !metadata.isDirectory()) {
     throw new GatewayError("invalid_request", "Workspace path is not a directory");
@@ -259,7 +256,7 @@ function changeKind(code: string, untracked: boolean, conflicted: boolean): Work
 
 function workspaceRelativePath(repositoryRoot: string, workspaceRoot: string, repositoryPath: string): string | undefined {
   const absolute = resolve(repositoryRoot, repositoryPath);
-  if (!inside(workspaceRoot, absolute)) return undefined;
+  if (!containedWithin(workspaceRoot, absolute)) return undefined;
   const value = relative(workspaceRoot, absolute);
   if (!value || isAbsolute(value) || value === ".." || value.startsWith(`..${sep}`)) return undefined;
   return value.split(sep).join("/");
@@ -504,7 +501,7 @@ export class WorkspaceInspectionService {
     const directoryPath = await containedPathFromRoot(root, relativePath, "directory");
     const beforeDirectory = await lstat(directoryPath);
     const openedDirectoryPath = await realpath(directoryPath);
-    if (!inside(root, openedDirectoryPath) || beforeDirectory.isSymbolicLink() || !beforeDirectory.isDirectory()) {
+    if (!containedWithin(root, openedDirectoryPath) || beforeDirectory.isSymbolicLink() || !beforeDirectory.isDirectory()) {
       return invalidRelativePath();
     }
     const directory = await opendir(directoryPath);
@@ -513,7 +510,7 @@ export class WorkspaceInspectionService {
       for await (const entry of directory) {
         names.push(entry.name);
         if (names.length > WORKSPACE_MAXIMUM_ENTRIES) {
-          throw new GatewayError("conflict", "This folder contains too many entries to browse safely", true);
+          throw new GatewayError("conflict", LISTING_ENTRY_OVERFLOW.message, LISTING_ENTRY_OVERFLOW.retryable);
         }
       }
     } finally {
@@ -537,20 +534,14 @@ export class WorkspaceInspectionService {
         modifiedAt: metadata.mtime.toISOString(),
       };
     });
-    const entries: Array<{ name: string; path: string; kind: WorkspaceEntryKind; hidden: boolean; size?: number; modifiedAt?: string }> = [];
-    let bytes = 2;
-    for (const candidate of projected) {
-      if (!candidate) continue;
-      const candidateBytes = Buffer.byteLength(JSON.stringify(candidate)) + 1;
-      if (candidateBytes > WORKSPACE_MAXIMUM_PROJECTED_BYTES - bytes) {
-        throw new GatewayError("conflict", "This folder contains too much metadata to browse safely", true);
-      }
-      entries.push(candidate);
-      bytes += candidateBytes;
-    }
+    const entries = await projectBoundedEntries(
+      projected.filter((candidate) => candidate !== undefined),
+      WORKSPACE_MAXIMUM_PROJECTED_BYTES,
+      LISTING_METADATA_OVERFLOW,
+    );
     const afterDirectory = await lstat(directoryPath);
     const currentDirectoryPath = await realpath(directoryPath);
-    if (!inside(root, currentDirectoryPath) || afterDirectory.isSymbolicLink() || !afterDirectory.isDirectory()
+    if (!containedWithin(root, currentDirectoryPath) || afterDirectory.isSymbolicLink() || !afterDirectory.isDirectory()
       || beforeDirectory.dev !== afterDirectory.dev || beforeDirectory.ino !== afterDirectory.ino
       || beforeDirectory.mtimeMs !== afterDirectory.mtimeMs || beforeDirectory.size !== afterDirectory.size) {
       throw new GatewayError("conflict", "Workspace directory changed while it was listed", true);
@@ -591,7 +582,7 @@ export class WorkspaceInspectionService {
     try {
       const before = await handle.stat();
       const openedRealPath = await realpath(source);
-      if (!inside(root, openedRealPath)) return invalidRelativePath();
+      if (!containedWithin(root, openedRealPath)) return invalidRelativePath();
       if (!before.isFile() || before.size > WORKSPACE_FILE_MAXIMUM_BYTES) {
         throw new GatewayError("conflict", "Workspace file exceeds the 25 MiB preview limit");
       }
@@ -599,7 +590,7 @@ export class WorkspaceInspectionService {
       const after = await handle.stat();
       const current = await lstat(source);
       const currentRealPath = await realpath(source);
-      if (!inside(root, currentRealPath) || !after.isFile() || current.isSymbolicLink() || !current.isFile()
+      if (!containedWithin(root, currentRealPath) || !after.isFile() || current.isSymbolicLink() || !current.isFile()
         || before.dev !== after.dev || before.ino !== after.ino || before.size !== after.size
         || before.mtimeMs !== after.mtimeMs || current.dev !== before.dev || current.ino !== before.ino
         || data.length !== before.size) {
@@ -630,7 +621,7 @@ export class WorkspaceInspectionService {
     if (!context) throw new GatewayError("invalid_request", "The session workspace is not a Git repository");
     const relativePath = validateRelativePath(requestedPath, false).split(sep).join("/");
     const absolute = resolve(context.workspaceRoot, relativePath);
-    if (!inside(context.workspaceRoot, absolute)) return invalidRelativePath();
+    if (!containedWithin(context.workspaceRoot, absolute)) return invalidRelativePath();
     const repositoryPath = relative(context.repositoryRoot, absolute).split(sep).join("/");
     const common = ["--no-ext-diff", "--no-textconv", "--no-color", "--unified=3"];
     let results: GitResult[];
@@ -652,7 +643,7 @@ export class WorkspaceInspectionService {
       if (tracked.exitCode !== 0) {
         await containedPathFromRoot(context.workspaceRoot, relativePath, "file");
         const untrackedRealPath = await realpath(absolute);
-        if (!inside(context.workspaceRoot, untrackedRealPath)) return invalidRelativePath();
+        if (!containedWithin(context.workspaceRoot, untrackedRealPath)) return invalidRelativePath();
         results = [await runGit(context.repositoryRoot, ["diff", "--no-index", ...common, "--", "/dev/null", absolute], {
           maximumBytes: DIFF_MAX_OUTPUT_BYTES,
           allowedExitCodes: [0, 1],
@@ -760,7 +751,7 @@ export class WorkspaceInspectionService {
     await this.assertVisibleCommit(context.repositoryRoot, context.workspaceRoot, oid);
     const relativePath = validateRelativePath(requestedPath, false).split(sep).join("/");
     const absolute = resolve(context.workspaceRoot, relativePath);
-    if (!inside(context.workspaceRoot, absolute)) return invalidRelativePath();
+    if (!containedWithin(context.workspaceRoot, absolute)) return invalidRelativePath();
     const repositoryPath = relative(context.repositoryRoot, absolute).split(sep).join("/");
     const result = await runGit(context.repositoryRoot, [
       "diff-tree", "--root", "--no-commit-id", "-p", "-r", "-M", "--first-parent",

@@ -402,8 +402,8 @@ export class UploadStore {
           createdAt: new Date(this.now()).toISOString(),
         };
         await this.durableWriteMetadata(join(folder, "metadata.json"), metadata);
-        await this.syncDirectory(uploadDirectory);
-        await this.syncDirectory(dirname(uploadDirectory));
+        await this.syncPath(uploadDirectory);
+        await this.syncPath(dirname(uploadDirectory));
         this.installIndexedMetadata(metadata);
         this.verifiedObjectDigests.add(digest);
         this.inventoryInitialized = true;
@@ -473,13 +473,8 @@ export class UploadStore {
     return { digest: hash.digest("hex"), size };
   }
 
+  /** fsync one owned path, file or directory, after a publication boundary. */
   private async syncPath(path: string): Promise<void> {
-    const handle = await open(path, "r");
-    try { await handle.sync(); }
-    finally { await handle.close(); }
-  }
-
-  private async syncDirectory(path: string): Promise<void> {
     const handle = await open(path, "r");
     try { await handle.sync(); }
     finally { await handle.close(); }
@@ -488,7 +483,7 @@ export class UploadStore {
   private async durableWriteMetadata(path: string, value: UploadMetadataV2): Promise<void> {
     await atomicWriteJson(path, value);
     await this.syncPath(path);
-    await this.syncDirectory(dirname(path));
+    await this.syncPath(dirname(path));
   }
 
   private async adoptStagedObject(stagedPath: string, digest: string, size: number): Promise<string> {
@@ -509,9 +504,9 @@ export class UploadStore {
     }
     await chmod(target, 0o400);
     await this.syncPath(target);
-    await this.syncDirectory(dirname(target));
-    await this.syncDirectory(dirname(dirname(target)));
-    await this.syncDirectory(dirname(dirname(dirname(target))));
+    await this.syncPath(dirname(target));
+    await this.syncPath(dirname(dirname(target)));
+    await this.syncPath(dirname(dirname(dirname(target))));
     return realpath(target);
   }
 
@@ -965,10 +960,10 @@ export class UploadStore {
     }
     await chmod(objectPath, 0o400);
     await this.syncPath(objectPath);
-    await this.syncDirectory(dirname(objectPath));
-    await this.syncDirectory(dirname(dirname(objectPath)));
-    await this.syncDirectory(dirname(dirname(dirname(objectPath))));
-    await this.syncDirectory(owned.ownedDirectory);
+    await this.syncPath(dirname(objectPath));
+    await this.syncPath(dirname(dirname(objectPath)));
+    await this.syncPath(dirname(dirname(dirname(objectPath))));
+    await this.syncPath(owned.ownedDirectory);
     this.verifiedObjectDigests.add(digest);
     this.unavailableObjectDigests.delete(digest);
     if (metadata.version === 2) return metadata;

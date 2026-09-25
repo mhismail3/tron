@@ -1,8 +1,10 @@
 import { realpathSync } from "node:fs";
-import { lstat, mkdir, opendir, realpath, stat } from "node:fs/promises";
+import { lstat, mkdir, opendir, realpath } from "node:fs/promises";
 import { homedir } from "node:os";
-import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
+import { dirname, join, resolve } from "node:path";
 import { GatewayError } from "../errors.js";
+import { containedWithin } from "./path-containment.js";
+import { WORKSPACE_MAXIMUM_ENTRIES, WORKSPACE_MAXIMUM_PROJECTED_BYTES, projectBoundedEntries } from "./workspace-bounds.js";
 import { inspectGitPath } from "./workspace-inspection-service.js";
 
 interface WorkspaceEntry {
@@ -12,13 +14,10 @@ interface WorkspaceEntry {
   hidden: boolean;
 }
 
-function inside(root: string, candidate: string): boolean {
-  const delta = relative(root, candidate);
-  return delta === "" || (!delta.startsWith(`..${sep}`) && delta !== ".." && !isAbsolute(delta));
-}
-
-const WORKSPACE_MAXIMUM_ENTRIES = 1_000;
-const WORKSPACE_MAXIMUM_PROJECTED_BYTES = 768 * 1_024;
+const FOLDER_LISTING_OVERFLOW = {
+  message: "This folder contains too many entries to browse safely. Choose a more specific folder on the Mac.",
+  retryable: false,
+};
 
 interface FilesystemServiceOptions {
   maximumEntries?: number;
@@ -42,7 +41,7 @@ export class FilesystemService {
 
   private async canonical(path: string): Promise<string> {
     const target = await realpath(resolve(path));
-    if (!inside(this.root, target)) throw new GatewayError("invalid_request", "Path is outside the allowed workspace root");
+    if (!containedWithin(this.root, target)) throw new GatewayError("invalid_request", "Path is outside the allowed workspace root");
     return target;
   }
 
@@ -52,41 +51,34 @@ export class FilesystemService {
     if (!validated.isDirectory() || validated.isSymbolicLink()) {
       throw new GatewayError("invalid_request", "Path is not a directory");
     }
-    const projected: WorkspaceEntry[] = [];
-    let projectedBytes = 2;
-    let examinedEntries = 0;
+    const maximumEntries = this.maximumEntries;
     const directory = await opendir(canonical);
+    // Candidates stream out of the open handle, so both ceilings are enforced
+    // while the folder is read rather than after buffering it.
+    const candidates = async function* (): AsyncGenerator<WorkspaceEntry> {
+      let examinedEntries = 0;
+      for await (const entry of directory) {
+        examinedEntries += 1;
+        if (examinedEntries > maximumEntries) {
+          throw new GatewayError("conflict", FOLDER_LISTING_OVERFLOW.message, FOLDER_LISTING_OVERFLOW.retryable);
+        }
+        if (!entry.isDirectory() && !entry.isFile()) continue;
+        yield {
+          name: entry.name,
+          path: join(canonical, entry.name),
+          kind: entry.isDirectory() ? "directory" : "file",
+          hidden: entry.name.startsWith("."),
+        };
+      }
+    };
+    let projected: WorkspaceEntry[];
     try {
       const opened = await lstat(canonical);
       if (!opened.isDirectory() || opened.isSymbolicLink()
         || opened.dev !== validated.dev || opened.ino !== validated.ino) {
         throw new GatewayError("conflict", "The workspace folder changed while it was being opened", true);
       }
-      for await (const entry of directory) {
-        examinedEntries += 1;
-        if (examinedEntries > this.maximumEntries) {
-          throw new GatewayError(
-            "conflict",
-            "This folder contains too many entries to browse safely. Choose a more specific folder on the Mac.",
-          );
-        }
-        if (!entry.isDirectory() && !entry.isFile()) continue;
-        const candidate: WorkspaceEntry = {
-          name: entry.name,
-          path: join(canonical, entry.name),
-          kind: entry.isDirectory() ? "directory" : "file",
-          hidden: entry.name.startsWith("."),
-        };
-        const candidateBytes = Buffer.byteLength(JSON.stringify(candidate)) + 1;
-        if (candidateBytes > this.maximumProjectedBytes - projectedBytes) {
-          throw new GatewayError(
-            "conflict",
-            "This folder contains too many entries to browse safely. Choose a more specific folder on the Mac.",
-          );
-        }
-        projected.push(candidate);
-        projectedBytes += candidateBytes;
-      }
+      projected = await projectBoundedEntries<WorkspaceEntry>(candidates(), this.maximumProjectedBytes, FOLDER_LISTING_OVERFLOW);
     } finally {
       await directory.close().catch((error: NodeJS.ErrnoException) => {
         if (error.code !== "ERR_DIR_CLOSED") throw error;
@@ -103,7 +95,7 @@ export class FilesystemService {
     }
     const canonicalParent = await this.canonical(parent);
     const target = join(canonicalParent, name);
-    if (!inside(this.root, target)) throw new GatewayError("invalid_request", "Folder is outside the allowed workspace root");
+    if (!containedWithin(this.root, target)) throw new GatewayError("invalid_request", "Folder is outside the allowed workspace root");
     await mkdir(target);
     return realpath(target);
   }

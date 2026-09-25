@@ -1,8 +1,9 @@
 import { randomUUID } from "node:crypto";
 import { spawn } from "node:child_process";
 import { lstat, mkdir, realpath } from "node:fs/promises";
-import { basename, dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
+import { basename, dirname, join, resolve } from "node:path";
 import { asUncertainOutcome, GatewayError, isUncertainOutcome } from "../errors.js";
+import { containedWithin } from "./path-containment.js";
 
 const GIT = process.env.TRON_GIT_PATH ?? "/usr/bin/git";
 const COMMAND_TIMEOUT_MS = 10_000;
@@ -21,11 +22,6 @@ interface PreparedSessionWorkspace {
 interface GitCommandResult {
   stdout: string;
   stderr: string;
-}
-
-function inside(root: string, candidate: string): boolean {
-  const delta = relative(root, candidate);
-  return delta === "" || (!delta.startsWith(`..${sep}`) && delta !== ".." && !isAbsolute(delta));
 }
 
 async function ensureDirectoryNoSymlink(path: string): Promise<void> {
@@ -267,11 +263,11 @@ export class GitWorktreeService {
     const canonicalRoot = await realpath(managedRoot);
     await ensureDirectoryNoSymlink(folder);
     const canonicalFolder = await realpath(folder);
-    if (!inside(canonicalRoot, canonicalFolder)) {
+    if (!containedWithin(canonicalRoot, canonicalFolder)) {
       throw new GatewayError("internal", "Git worktree path escaped its managed root", false);
     }
     const target = join(folder, `${branchName}-${randomUUID().slice(0, 8)}`);
-    if (!inside(canonicalRoot, canonicalFolder) || !inside(resolve(managedRoot), resolve(target))) {
+    if (!containedWithin(canonicalRoot, canonicalFolder) || !containedWithin(resolve(managedRoot), resolve(target))) {
       throw new GatewayError("internal", "Git worktree path escaped its managed root", false);
     }
     try {
@@ -284,7 +280,7 @@ export class GitWorktreeService {
       if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
     }
     const canonicalParent = await realpath(dirname(target));
-    if (!inside(canonicalRoot, canonicalParent)) {
+    if (!containedWithin(canonicalRoot, canonicalParent)) {
       throw new GatewayError("internal", "Git worktree path escaped its managed root", false);
     }
     return target;
