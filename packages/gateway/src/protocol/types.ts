@@ -67,69 +67,6 @@ export interface AdministrativeDrainSnapshot {
   suspectProjectionCount: number;
 }
 
-export interface SessionSearchAnchorRevision {
-  indexRevision: string;
-  fileIdentity: string;
-  branchDigest: string;
-  leafEntryId?: string;
-  entryOrdinal: number;
-  forkBoundary?: { kind: "sessionFork" | "subagentFork"; inheritedEntryId: string; gapOrdinal: number };
-}
-
-export interface SessionSearchResult {
-  sessionId: string;
-  gatewayProfileID?: string;
-  title: string;
-  cwd: string;
-  updatedAt: string;
-  entryId: string;
-  parentEntryId?: string;
-  ordinal: number;
-  passageKind: "user" | "assistant";
-  snippet: string;
-  lexicalScore: number;
-  semanticScore?: number;
-  jevScore?: number;
-  anchorRevision: SessionSearchAnchorRevision;
-}
-
-export interface SessionSearchResponse {
-  query: string;
-  queryRevision: string;
-  corpusRevision: string;
-  indexRevision: string;
-  coverage: {
-    state: "complete" | "indexing" | "partial" | "unavailable";
-    sessionsIndexed: number;
-    sessionsTotal: number;
-    passagesIndexed: number;
-    omittedSessions: number;
-    reason?: string;
-  };
-  semantic: {
-    state: "ready" | "partial" | "indexing" | "unavailable" | "unsupportedLanguage" | "disabled";
-    modelRevision?: string;
-    language?: string;
-    dimension?: number;
-    vectorsIndexed: number;
-    vectorsTotal: number;
-    reason?: string;
-  };
-  ranking: { state: "lexical" | "localSemantic" | "jev" | "jevUnavailable" | "budgetLimited"; jev?: "disabled" | "notConfigured" | "consentRequired" | "uncertain" };
-  results: SessionSearchResult[];
-}
-
-export interface SessionSearchAnchorResponse {
-  sessionId: string;
-  entryId: string;
-  start: number;
-  end: number;
-  total: number;
-  items: TranscriptItem[];
-  runtimeGeneration?: string;
-  leafEntryId?: string;
-}
-
 export interface SessionSummary {
   id: string;
   name?: string;
