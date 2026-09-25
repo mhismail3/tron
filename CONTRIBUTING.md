@@ -13,8 +13,8 @@ source contracts, but not as a second user-facing product.
 - `packages/push-relay` — closed product-operated App Attest/APNs transport
 - `scripts/tron` — contributor command entry point
 
-The custom Rust backend, Engine/Activity protocol, agent workers, event SQLite
-mirror, browser operator, and legacy notification delivery subsystem were
+The custom Rust backend, Engine/Activity protocol, agent workers, event
+journals and the SQLite session mirror, browser operator, and legacy notification delivery subsystem were
 retired. Do not reintroduce their terminology or architecture through
 compatibility wrappers. The current Cloudflare push relay is only a closed
 installation registry, idempotency boundary, and APNs transport; it owns no
