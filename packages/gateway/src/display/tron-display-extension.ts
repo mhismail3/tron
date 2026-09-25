@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { Type } from "typebox";
+import { Type } from "@earendil-works/pi-ai";
 import type { ExtensionFactory } from "@earendil-works/pi-coding-agent";
 import { DISPLAY_SCHEMA, boundedString, eligibleDisplaySurfaces, normalizePublicDisplayURL, type DisplayInlineTapAction, type DisplayKind, type DisplayProjection, type DisplaySurface } from "./display-contract.js";
 import type { DisplayArtifactStore } from "./display-artifact-store.js";

@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { Type, type Static } from "typebox";
+import { Type, type Static } from "@earendil-works/pi-ai";
 import type { Api, AssistantMessage, Context, Model } from "@earendil-works/pi-ai";
 import type { ModelRuntime } from "@earendil-works/pi-coding-agent";
 import type { KnowledgeAction, KnowledgeConfig, KnowledgeListRequest, KnowledgeRecallRequest, KnowledgeRaindropReadRequest, ObservationCoverageDisposition, SourceAssessment } from "./knowledge-contract.js";

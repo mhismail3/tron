@@ -1,4 +1,4 @@
-import { Type, type Static } from "typebox";
+import { Type, type Static } from "@earendil-works/pi-ai";
 import type { ExtensionFactory } from "@earendil-works/pi-coding-agent";
 import { JevDecisionClient, type JevDecisionRequest } from "./jev-client.js";
 

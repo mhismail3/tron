@@ -1,4 +1,4 @@
-import { Type } from "typebox";
+import { Type } from "@earendil-works/pi-ai";
 import type { ExtensionFactory } from "@earendil-works/pi-coding-agent";
 import type { TronWorkspace, TronWorkspaceDescriptor } from "./tron-workspace.js";
 import { KNOWLEDGE_TOOL_PARAMETERS, type KnowledgeService, type KnowledgeToolParameters } from "../knowledge/knowledge-service.js";

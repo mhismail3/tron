@@ -1,5 +1,5 @@
 import { Box, Text, TruncatedText, truncateToWidth } from "@earendil-works/pi-tui";
-import { Type } from "typebox";
+import { Type } from "@earendil-works/pi-ai";
 import type { ExtensionFactory, ToolDefinition } from "@earendil-works/pi-coding-agent";
 import type {
   ExtensionFormAnswer,

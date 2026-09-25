@@ -1,4 +1,4 @@
-import { Type } from "typebox";
+import { Type } from "@earendil-works/pi-ai";
 import type { ExtensionFactory } from "@earendil-works/pi-coding-agent";
 import type { BrowserLiveViewRegistry } from "./browser-live-view.js";
 

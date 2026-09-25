@@ -1,6 +1,6 @@
 import { StringEnum } from "@earendil-works/pi-ai";
 import type { ExtensionFactory } from "@earendil-works/pi-coding-agent";
-import { Type } from "typebox";
+import { Type } from "@earendil-works/pi-ai";
 import { currentInvocationContext } from "../extensions/owner-attribution.js";
 import type { JsonValue } from "../protocol/types.js";
 

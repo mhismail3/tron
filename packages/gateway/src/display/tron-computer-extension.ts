@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { Type } from "typebox";
+import { Type } from "@earendil-works/pi-ai";
 import type { ExtensionFactory } from "@earendil-works/pi-coding-agent";
 import { CuaComputerClient } from "../machine/cua-client.js";
 
