@@ -171,6 +171,37 @@ describe("DisplayArtifactStore", () => {
       .rejects.toMatchObject({ code: "invalid_request" });
   });
 
+  it("rejects a NUL beyond the signature prefix and never publishes undecodable text", async () => {
+    const home = await mkdtemp(join(tmpdir(), "tron-display-text-"));
+    const workspace = join(home, "workspace");
+    await mkdir(workspace, { recursive: true });
+    // The signature prefix covers only the first 4 KiB, so a late NUL isolates
+    // the staged-file UTF-8/NUL validation from content-type signature matching.
+    const store = new DisplayArtifactStore(home, {
+      maximumItemBytes: 8_192,
+      maximumLogicalBytes: 16_384,
+      minimumFreeBytes: 0,
+    });
+    await store.initialize();
+    const published = join(home, "gateway", "display-artifacts", "artifacts");
+    try {
+      await writeFile(join(workspace, "late-nul.txt"), Buffer.concat([Buffer.alloc(5_000, 0x61), Buffer.from([0])]));
+      await expect(store.ingest(workspace, "late-nul.txt", "session-a"))
+        .rejects.toMatchObject({ code: "invalid_request" });
+      // Undecodable bytes fail closed before publication. The decoder's own
+      // ERR_ENCODING_INVALID_ENCODED_DATA escapes rather than a Gateway error,
+      // so only the rejection and the empty store are contractual here.
+      await writeFile(join(workspace, "invalid-utf8.md"), Buffer.from([0x61, 0xff, 0x62]));
+      await expect(store.ingest(workspace, "invalid-utf8.md", "session-a")).rejects.toThrow();
+      expect(await readdir(published)).toEqual([]);
+      await writeFile(join(workspace, "utf8.txt"), "héllo ✓");
+      await expect(store.ingest(workspace, "utf8.txt", "session-a")).resolves.toMatchObject({ kind: "text" });
+      expect(await readdir(published)).toHaveLength(1);
+    } finally {
+      await rm(home, { recursive: true, force: true });
+    }
+  });
+
   it("rejects same-size tampering before reusing an existing content object", async () => {
     const value = await fixture();
     await writeFile(join(value.workspace, "note.txt"), "durable display");
