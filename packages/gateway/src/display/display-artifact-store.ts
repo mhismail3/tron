@@ -12,7 +12,7 @@ import type { BlobByteRange, BlobLease } from "../sessions/blob-store.js";
 
 const METADATA_MAX_BYTES = 64 * 1_024;
 const DIGEST_PATTERN = /^[0-9a-f]{64}$/;
-const ID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+export const DISPLAY_ARTIFACT_ID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 export const DISPLAY_MAXIMUM_ARTIFACT_BYTES = 2 * 1_024 * 1_024 * 1_024;
 const DEFAULT_MAXIMUM_LOGICAL_BYTES = 32 * 1_024 * 1_024 * 1_024;
 const DEFAULT_MAXIMUM_ITEMS = 16_384;
@@ -23,9 +23,17 @@ const DEFAULT_MINIMUM_FREE_BYTES = 1 * 1_024 * 1_024 * 1_024;
 const MAXIMUM_ACTIVE_READERS = 4;
 const MAXIMUM_ACTIVE_INGESTS = 2;
 
-export type DisplayArtifactKind =
-  | "image" | "markdown" | "text" | "code" | "pdf" | "html"
-  | "video" | "audio" | "document";
+const DISPLAY_ARTIFACT_KINDS = [
+  "image", "markdown", "text", "code", "pdf", "html",
+  "video", "audio", "document",
+] as const;
+
+export type DisplayArtifactKind = (typeof DISPLAY_ARTIFACT_KINDS)[number];
+
+/** Closed artifact-kind admission, shared with the `tron.display.v1` projection. */
+export function isDisplayArtifactKind(value: unknown): value is DisplayArtifactKind {
+  return (DISPLAY_ARTIFACT_KINDS as readonly string[]).includes(String(value));
+}
 
 export interface DisplayArtifactDescriptor {
   id: string;
@@ -79,12 +87,12 @@ function isMetadata(value: unknown, expectedID: string, maximumItemBytes: number
   return Object.keys(item).length === expectedKeys.length
     && Object.keys(item).every((key) => expectedKeys.includes(key))
     && item.version === 1
-    && item.id === expectedID && typeof item.id === "string" && ID_PATTERN.test(item.id)
+    && item.id === expectedID && typeof item.id === "string" && DISPLAY_ARTIFACT_ID_PATTERN.test(item.id)
     && typeof item.name === "string" && item.name === safeName(item.name)
     && typeof item.mimeType === "string" && item.mimeType.length > 0 && item.mimeType.length <= 200
     && !/[\u0000-\u001f\u007f]/.test(item.mimeType)
     && Number.isSafeInteger(item.size) && (item.size as number) > 0 && (item.size as number) <= maximumItemBytes
-    && ["image", "markdown", "text", "code", "pdf", "html", "video", "audio", "document"].includes(String(item.kind))
+    && isDisplayArtifactKind(item.kind)
     && typeof item.digest === "string" && DIGEST_PATTERN.test(item.digest)
     && Array.isArray(item.owners) && item.owners.length <= 512
     && new Set(item.owners).size === item.owners.length && item.owners.every(validIdentity)
@@ -199,7 +207,7 @@ export class DisplayArtifactStore {
       const entries = await readdir(this.artifactDirectory, { withFileTypes: true });
       for (const entry of entries) {
         const folder = join(this.artifactDirectory, entry.name);
-        if (!entry.isDirectory() || !ID_PATTERN.test(entry.name)) {
+        if (!entry.isDirectory() || !DISPLAY_ARTIFACT_ID_PATTERN.test(entry.name)) {
           await rm(folder, { recursive: true, force: true });
           continue;
         }
@@ -398,7 +406,7 @@ export class DisplayArtifactStore {
       }
       await rm(input.source, { force: true });
       const id = this.uuid();
-      if (!ID_PATTERN.test(id) || this.index.has(id)) throw new GatewayError("busy", "Could not allocate a display artifact identity", true);
+      if (!DISPLAY_ARTIFACT_ID_PATTERN.test(id) || this.index.has(id)) throw new GatewayError("busy", "Could not allocate a display artifact identity", true);
       const folder = join(this.artifactDirectory, id);
       await mkdir(folder, { recursive: false, mode: 0o700 });
       try {
@@ -528,7 +536,7 @@ export class DisplayArtifactStore {
       throw new GatewayError("invalid_request", "Display artifact reconciliation identity is invalid");
     }
     for (const id of canonicalArtifactIDs) {
-      if (!ID_PATTERN.test(id)) {
+      if (!DISPLAY_ARTIFACT_ID_PATTERN.test(id)) {
         throw new GatewayError("invalid_request", "Display artifact reconciliation identity is invalid");
       }
     }
@@ -668,7 +676,7 @@ export class DisplayArtifactStore {
   }
 
   private validateID(id: string): void {
-    if (!ID_PATTERN.test(id)) throw new GatewayError("not_found", "Display artifact is unavailable");
+    if (!DISPLAY_ARTIFACT_ID_PATTERN.test(id)) throw new GatewayError("not_found", "Display artifact is unavailable");
   }
 
   private assertInitialized(): void {

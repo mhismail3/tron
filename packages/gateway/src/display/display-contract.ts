@@ -1,11 +1,14 @@
 import { isIP } from "node:net";
 import { admitBrowserToolReference } from "./browser-tool-reference.js";
 import {
+  DISPLAY_ARTIFACT_ID_PATTERN,
   DISPLAY_MAXIMUM_ARTIFACT_BYTES,
+  isDisplayArtifactKind,
   type DisplayArtifactDescriptor,
   type DisplayArtifactKind,
 } from "./display-artifact-store.js";
-import type { LiveViewDescriptor } from "./browser-live-view.js";
+import { BROWSER_LIVE_VIEW_SCHEMA, type LiveViewDescriptor } from "./browser-live-view.js";
+import { NATIVE_LIVE_VIEW_SCHEMA } from "./native-live-view.js";
 export { NATIVE_LIVE_VIEW_CAPABILITY } from "./native-live-view.js";
 export { BROWSER_LIVE_VIEW_CAPABILITY as DISPLAY_LIVE_VIEW_CAPABILITY } from "./browser-live-view.js";
 
@@ -13,8 +16,6 @@ export const DISPLAY_SCHEMA = "tron.display.v1";
 export const DISPLAY_CAPABILITY = "display-artifacts.v1";
 export { DISPLAY_MAXIMUM_ARTIFACT_BYTES };
 export const DISPLAY_EMBEDDED_MEDIA_MAXIMUM_BYTES = 50 * 1_024 * 1_024;
-
-const DISPLAY_ARTIFACT_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
 export type DisplaySurface = "sheet" | "inline" | "floating";
 export type DisplayInlineTapAction = "sheet" | "none";
@@ -46,7 +47,7 @@ function hasOnlyKeys(value: Record<string, unknown>, allowed: readonly string[])
   return Object.keys(value).every((key) => admitted.has(key));
 }
 
-function boundedString(value: unknown, minimum: number, maximumBytes: number): value is string {
+export function boundedString(value: unknown, minimum: number, maximumBytes: number): value is string {
   return typeof value === "string" && Buffer.byteLength(value) >= minimum
     && Buffer.byteLength(value) <= maximumBytes
     && !/[\u0000-\u001f\u007f]/.test(value);
@@ -106,10 +107,6 @@ function surface(value: unknown): value is DisplaySurface {
 
 function displayKind(value: unknown): value is DisplayKind {
   return ["image", "markdown", "text", "code", "pdf", "html", "video", "audio", "document", "webpage", "hls", "browser_live", "native_live"].includes(String(value));
-}
-
-function artifactKind(value: unknown): value is DisplayArtifactKind {
-  return ["image", "markdown", "text", "code", "pdf", "html", "video", "audio", "document"].includes(String(value));
 }
 
 export function eligibleDisplaySurfaces(kind: DisplayKind, artifactSize?: number): DisplaySurface[] {
@@ -178,11 +175,11 @@ export function admitDisplayProjection(toolName: string | undefined, value: unkn
     if (!item.artifact || typeof item.artifact !== "object") return undefined;
     const source = item.artifact as Record<string, unknown>;
     if (!hasOnlyKeys(source, ["id", "name", "mimeType", "size", "kind"])
-      || !boundedString(source.id, 1, 200) || !DISPLAY_ARTIFACT_ID.test(source.id)
+      || !boundedString(source.id, 1, 200) || !DISPLAY_ARTIFACT_ID_PATTERN.test(source.id)
       || !boundedString(source.name, 1, 160) || /[\\/]/.test(source.name)
       || !boundedString(source.mimeType, 1, 200) || !Number.isSafeInteger(source.size)
       || (source.size as number) < 1 || (source.size as number) > DISPLAY_MAXIMUM_ARTIFACT_BYTES
-      || !artifactKind(source.kind) || source.kind !== item.kind) return undefined;
+      || !isDisplayArtifactKind(source.kind) || source.kind !== item.kind) return undefined;
     artifact = {
       id: source.id,
       name: source.name,
@@ -196,15 +193,16 @@ export function admitDisplayProjection(toolName: string | undefined, value: unkn
   if (item.liveView !== undefined) {
     if (!item.liveView || typeof item.liveView !== "object") return undefined;
     const source = item.liveView as Record<string, unknown>;
+    // The display kind pins the one admitted live-view schema.
+    const liveSchema = item.kind === "native_live" ? NATIVE_LIVE_VIEW_SCHEMA : BROWSER_LIVE_VIEW_SCHEMA;
     if (!hasOnlyKeys(source, ["schema", "viewId", "generation", "title", "fallbackText"])
-      || (source.schema !== "tron.browser-live-view.v1" && source.schema !== "tron.native-live-view.v1")
-      || source.schema !== (item.kind === "native_live" ? "tron.native-live-view.v1" : "tron.browser-live-view.v1")
+      || source.schema !== liveSchema
       || !boundedString(source.viewId, 1, 200)
       || !boundedString(source.generation, 1, 200)
       || !boundedString(source.title, 1, 256)
       || !boundedString(source.fallbackText, 1, 4_096)) return undefined;
     liveView = {
-      schema: source.schema,
+      schema: liveSchema,
       viewId: source.viewId,
       generation: source.generation,
       title: source.title,

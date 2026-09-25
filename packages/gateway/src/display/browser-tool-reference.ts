@@ -1,5 +1,5 @@
 import { createHmac, randomBytes, timingSafeEqual } from "node:crypto";
-import type { BrowserLiveViewDescriptor } from "./browser-live-view.js";
+import { BROWSER_LIVE_VIEW_SCHEMA, type BrowserLiveViewDescriptor } from "./browser-live-view.js";
 
 // A descriptor alone is not tool-result provenance. Bind the provider admission
 // to this canonical call/session without keeping a second per-call registry.
@@ -30,7 +30,7 @@ export function admitBrowserToolReference(
   if (!ref || ref.toolCallId !== toolCallId || typeof ref.sessionId !== "string" || ref.sessionId.length > 256
     || ref.sessionId !== sessionId || typeof ref.automatic !== "boolean" || typeof ref.seal !== "string" || !/^[a-f0-9]{64}$/.test(ref.seal)) return;
   const descriptor = ref.descriptor;
-  if (!descriptor || descriptor.schema !== "tron.browser-live-view.v1"
+  if (!descriptor || descriptor.schema !== BROWSER_LIVE_VIEW_SCHEMA
     || ![descriptor.viewId, descriptor.generation, descriptor.title, descriptor.fallbackText]
       .every(value => typeof value === "string" && value.length > 0 && value.length <= 2048)) return;
   return timingSafeEqual(Buffer.from(ref.seal, "hex"), signature(ref.sessionId, toolCallId, descriptor, ref.automatic))

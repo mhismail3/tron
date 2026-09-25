@@ -1,10 +1,11 @@
 import { randomUUID } from "node:crypto";
 import { Type } from "typebox";
 import type { ExtensionFactory } from "@earendil-works/pi-coding-agent";
-import { DISPLAY_SCHEMA, eligibleDisplaySurfaces, normalizePublicDisplayURL, type DisplayInlineTapAction, type DisplayKind, type DisplayProjection, type DisplaySurface } from "./display-contract.js";
+import { DISPLAY_SCHEMA, boundedString, eligibleDisplaySurfaces, normalizePublicDisplayURL, type DisplayInlineTapAction, type DisplayKind, type DisplayProjection, type DisplaySurface } from "./display-contract.js";
 import type { DisplayArtifactStore } from "./display-artifact-store.js";
 import { GatewayError } from "../errors.js";
-import type { BrowserLiveViewRegistry } from "./browser-live-view.js";
+import { BROWSER_LIVE_VIEW_SCHEMA, type BrowserLiveViewRegistry } from "./browser-live-view.js";
+import { NATIVE_LIVE_VIEW_SCHEMA } from "./native-live-view.js";
 
 const presentationSchema = Type.Object({
   surface: Type.Union([Type.Literal("sheet"), Type.Literal("inline"), Type.Literal("floating")]),
@@ -60,8 +61,7 @@ function publicURL(input: string): string {
 }
 
 function requireBoundedText(value: string, name: string, maximumBytes: number): void {
-  if (Buffer.byteLength(value) < 1 || Buffer.byteLength(value) > maximumBytes
-    || /[\u0000-\u001f\u007f]/.test(value)) {
+  if (!boundedString(value, 1, maximumBytes)) {
     throw new GatewayError("invalid_request", `${name} exceeds the bounded display text contract`);
   }
 }
@@ -123,7 +123,7 @@ export function createTronDisplayExtension(input: {
         } else if (params.source.kind === "browser_live" || params.source.kind === "native_live") {
           if (!input.liveViews) throw new GatewayError("conflict", "Live viewing is unavailable");
           liveView = input.liveViews.describe(sessionID, params.source.viewId, params.source.generation);
-          const schema = params.source.kind === "native_live" ? "tron.native-live-view.v1" : "tron.browser-live-view.v1";
+          const schema = params.source.kind === "native_live" ? NATIVE_LIVE_VIEW_SCHEMA : BROWSER_LIVE_VIEW_SCHEMA;
           if (liveView.schema !== schema) throw new GatewayError("invalid_request", "Live view producer kind differs from its reference");
           kind = params.source.kind;
         } else {
