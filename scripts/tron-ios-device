@@ -8,7 +8,7 @@ ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 source "$ROOT_DIR/config/ci-toolchain.env"
 IOS_DIR="$ROOT_DIR/packages/ios-app"
 PROJECT="TronMobile.xcodeproj"
-DERIVED_DATA="build/device-derived-data"
+DERIVED_DATA="build/DerivedData"
 BUILD_MODE="optimized"
 PHYSICAL_BUNDLE_ID="com.tron.mobile"
 SCHEME="${TRON_IOS_SCHEME:-Tron Device}"
@@ -340,9 +340,9 @@ build_install_launch() {
 
     set +e
     if [[ "$BUILD_MODE" == "fast-debug" ]]; then
-        DERIVED_DATA="build/device-derived-data-fast-debug"
+        DERIVED_DATA="build/DerivedData-fast-debug"
     else
-        DERIVED_DATA="build/device-derived-data"
+        DERIVED_DATA="build/DerivedData"
     fi
     prepare_xcodebuild_args "$DERIVED_DATA" "$xcresult" "$device_id" "$BUILD_MODE"
     xcodebuild "${XCODEBUILD_ARGS[@]}" \

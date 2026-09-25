@@ -164,7 +164,7 @@ For ordinary, unmanaged, released worktrees:
 4. Recheck that the branch is no longer checked out anywhere. Delete the exact
    local branch with `git branch -d -- "$branch"` only after independent merge
    proof. Git's `-d` can consult an upstream other than the integration target.
-3. If `-d` refuses a reviewed squash/rebase merge, explain why and obtain explicit
+5. If `-d` refuses a reviewed squash/rebase merge, explain why and obtain explicit
    approval for deleting that exact non-ancestor head. Prefer an expected-OID
    deletion (`git update-ref -d "refs/heads/$branch" "$head_oid"`) after rechecking
    attachments, rather than an unconditional `-D`. Never use this to bypass a lock

@@ -8,7 +8,7 @@ IOS_DIR="$ROOT_DIR/packages/ios-app"
 STATE_DIR="${TRON_IOS_SIMULATOR_STATE_DIR:-$HOME/.tron/internal/run}"
 STATE_FILE="$STATE_DIR/ios-simulator-udid"
 SIMULATOR_ID="${TRON_IOS_SIMULATOR_ID:-}"
-DERIVED_DATA="${TRON_IOS_SIMULATOR_DERIVED_DATA:-$IOS_DIR/build/simulator-derived-data}"
+DERIVED_DATA="${TRON_IOS_SIMULATOR_DERIVED_DATA:-$HOME/Library/Developer/Tron/ios/simulator-derived-data}"
 BUNDLE_ID="com.tron.mobile.beta"
 
 usage() {
