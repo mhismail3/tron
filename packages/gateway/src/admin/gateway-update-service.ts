@@ -469,16 +469,6 @@ export class GatewayUpdateService {
       let candidateReference: GatewayUpdateIdentity | null = null;
       if (raw.candidateIdentity !== undefined) {
         candidateReference = stateIdentity(raw.candidateIdentity as Record<string, unknown>, "candidate");
-      } else if (raw.candidate !== undefined) {
-        candidateReference = stateIdentity(raw.candidate as Record<string, unknown>, "candidate");
-      } else if (raw.candidateVersion !== undefined || raw.candidateFingerprint !== undefined) {
-        candidateReference = stateIdentity({
-          version: raw.candidateVersion,
-          payloadFingerprint: raw.candidateFingerprint,
-          sourceRevision: raw.candidateSourceRevision,
-          runtimeEpoch: raw.candidateRuntimeEpoch,
-          gatewayVersion: raw.candidateGatewayVersion,
-        }, "candidate");
       }
       if (candidateReference !== null) {
         try {
