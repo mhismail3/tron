@@ -68,6 +68,9 @@ struct GatewayLogExportTests {
         let gatewayRow = GatewayProfileLogRecord(profileID: "profile-1", profileLabel: "Mac",
             record: GatewayLogRecord(timestamp: "2026-01-01T00:00:02.000Z", level: "info", message: "gateway-row", event: "gateway.started", source: "lifecycle"))
         let retainedPhoneRow = record(message: "retained-phone-row")
+        let traceRow = GatewayProfileLogRecord(profileID: ChatInteractionTrace.diagnosticProfileID,
+            profileLabel: "iOS client · Chat trace",
+            record: GatewayLogRecord(timestamp: "2026-01-01T00:00:03.000Z", level: "info", message: "chat-trace-row", event: "chat.geometry.sample", source: "ios-client"))
         let projected = GatewayProfileLogRecord(profileID: GatewayLogExport.appLogProfileID, profileLabel: "This iPhone",
             record: GatewayLogRecord(timestamp: "2026-01-01T00:00:01.000Z", level: "info", message: "applog-row", event: "app.started", source: "app"))
         let local = AppLogRecord(
@@ -76,11 +79,14 @@ struct GatewayLogExportTests {
             durationMs: nil, outcome: nil, code: nil, profileID: nil, connectionID: nil,
             lifecycleGeneration: nil
         )
-        let text = GatewayLogExport.jsonLines(records: [gatewayRow, retainedPhoneRow, projected], metadata: .empty, appRecords: [local])
+        let text = GatewayLogExport.jsonLines(records: [gatewayRow, retainedPhoneRow, traceRow, projected], metadata: .empty, appRecords: [local])
         let decoded = try text.split(separator: "\n").map { try JSONDecoder().decode(AppLogRecord.self, from: Data($0.utf8)) }
         #expect(decoded.filter { $0.message == "applog-row" }.map(\.process) == ["ios"])
         #expect(decoded.first { $0.message == "gateway-row" }?.process == "gateway")
         #expect(decoded.first { $0.message.contains("retained-phone-row") }?.process == "ios")
+        // The trace is keyed `ios-client:chat-trace`, so the `:ios-client` suffix
+        // rule alone would label this phone record as a Gateway one.
+        #expect(decoded.first { $0.message == "chat-trace-row" }?.process == "ios")
     }
 
     // The export bound keeps the newest evidence and never drops the bounded

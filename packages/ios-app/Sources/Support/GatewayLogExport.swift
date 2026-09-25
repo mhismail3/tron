@@ -21,9 +21,12 @@ enum GatewayLogExport {
         // supplies.
         let newestFirst = records.sorted { gatewayLogRecordIsNewer($0, than: $1) }
         let loadedComposition = Array(newestFirst.prefix(maximumExportLines))
-        // Retained phone diagnostics are keyed `<profile>:ios-client`.
+        // Retained phone diagnostics are keyed `<profile>:ios-client`; the chat
+        // interaction trace is keyed `ios-client:chat-trace`. Both are phone
+        // records.
         func process(for profileID: String) -> String {
-            profileID.hasSuffix(":\(appLogProfileID)") ? "ios" : "gateway"
+            profileID == ChatInteractionTrace.diagnosticProfileID || profileID.hasSuffix(":\(appLogProfileID)")
+                ? "ios" : "gateway"
         }
         func gatewayRecord(_ item: GatewayProfileLogRecord) -> AppLogRecord {
             let value = item.record
