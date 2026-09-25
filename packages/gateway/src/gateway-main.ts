@@ -48,7 +48,7 @@ import { admitSearchEmbeddingHelper, NaturalLanguageEmbeddingClient } from "./se
 import { createKnowledgeConnectorExtension } from "./knowledge/connectors.js";
 import { createKnowledgeImporter } from "./knowledge/legacy-import.js";
 import { ConnectionOwner } from "./integrations/connection-owner.js";
-import { createMcpAdapter } from "./integrations/mcp-adapter.js";
+import { McpAdapter } from "./integrations/mcp-adapter.js";
 import { delegatedArtifactRoot, delegatedProviderEnvironment, ensureDelegatedArtifactRoot } from "./sessions/delegated-provider.js";
 import { assertDelegatedRootCutoverReady } from "./sessions/delegated-root-migration.js";
 import { runtimeIdentity } from "./transport/runtime-identity.js";
@@ -185,7 +185,7 @@ startupCheckpoint("global-provider-resources");
 const connections = new ConnectionOwner(config.tronHome);
 const knowledgeCredentials = new MacKeychainConnectorCredentialStore();
 const jevClient = new JevDecisionClient(knowledgeCredentials);
-const mcp = createMcpAdapter({ connections, credentials: knowledgeCredentials, workRegistry });
+const mcp = new McpAdapter({ connections, credentials: knowledgeCredentials, workRegistry });
 let automations!: AutomationService;
 let automationToolOperations!: GatewayScheduleToolOperations;
 const sessions = new RuntimeRegistry({

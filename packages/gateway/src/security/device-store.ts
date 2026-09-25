@@ -39,7 +39,7 @@ export interface DeviceListEntry {
   customLabel?: string;
 }
 
-export const MAXIMUM_PAIRED_DEVICES = 256;
+const MAXIMUM_PAIRED_DEVICES = 256;
 const MAXIMUM_DEVICE_DOCUMENT_BYTES = 1 * 1_024 * 1_024;
 const MAXIMUM_LOCAL_AUTH_DOCUMENT_BYTES = 4 * 1_024;
 const MAXIMUM_ENROLLMENT_DOCUMENT_BYTES = 16 * 1_024;

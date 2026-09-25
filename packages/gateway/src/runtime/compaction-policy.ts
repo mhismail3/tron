@@ -6,7 +6,7 @@ import type { CompactionConfiguration, CompactionPolicyProjection, ResolvedCompa
 
 export const COMPACTION_POLICY_INSTRUCTION_LIMIT = 4_000;
 export const COMPACTION_THINKING_LEVELS = ["inherit", "off", "minimal", "low", "medium", "high", "xhigh", "max"] as const;
-export type CompactionThinkingLevel = typeof COMPACTION_THINKING_LEVELS[number];
+type CompactionThinkingLevel = typeof COMPACTION_THINKING_LEVELS[number];
 const DEFAULTS = { enabled: true, reserveTokens: 16_384, keepRecentTokens: 20_000, thinkingLevel: "inherit", instructions: "" } as const;
 
 function document(value: unknown): Record<string, unknown> {
@@ -39,7 +39,7 @@ export function resolveCompactionPolicy(global: Record<string, unknown>, project
   return { ...result, source } as unknown as CompactionConfiguration;
 }
 
-export function settingsCompactionPolicy(settings: SettingsManager): CompactionConfiguration {
+function settingsCompactionPolicy(settings: SettingsManager): CompactionConfiguration {
   return resolveCompactionPolicy(settings.getGlobalSettings() as Record<string, unknown>, settings.getProjectSettings() as Record<string, unknown>, settings.isProjectTrusted());
 }
 

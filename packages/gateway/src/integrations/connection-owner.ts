@@ -37,7 +37,7 @@ const MAX_RECEIPTS = 256;
 const STATE_MAX_BYTES = 4 * 1_048_576;
 const CONNECTION_STATE_RELATIVE_PATH = ["state", "integrations", "connections.json"] as const;
 
-export const BUILTIN_INTEGRATION_DEFINITIONS: readonly IntegrationDefinition[] = [
+const BUILTIN_INTEGRATION_DEFINITIONS: readonly IntegrationDefinition[] = [
   {
     schemaVersion: 1,
     id: "knowledge.raindrop",

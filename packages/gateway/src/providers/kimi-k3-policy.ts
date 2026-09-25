@@ -10,7 +10,7 @@ export const KIMI_K3_MAX_COMPLETION_TOKENS = 32_768;
 const installedRuntimes = new WeakSet<ModelRuntime>();
 const KIMI_K3_MAX_CONCURRENCY_RETRY_DELAY_MS = 10_000;
 
-export function isKimiK3Model(model: Pick<Model<any>, "provider" | "id">): boolean {
+function isKimiK3Model(model: Pick<Model<any>, "provider" | "id">): boolean {
   return (model.provider === "moonshotai" || model.provider === "moonshotai-cn") && model.id === "kimi-k3";
 }
 

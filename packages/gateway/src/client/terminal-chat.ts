@@ -174,7 +174,7 @@ export function operationNeedsSettlement(
   return operationId !== reconciledSettledOperation;
 }
 
-export async function runTerminalChat(): Promise<void> {
+async function runTerminalChat(): Promise<void> {
   if (process.argv.includes("--help") || process.argv.includes("-h")) usage();
   const tronHome = resolveTronHome();
   const port = Number(argument("--port") ?? process.env.TRON_GATEWAY_PORT ?? (process.env.TRON_HOME_NAME === ".tron-dev" ? 9848 : 9847));

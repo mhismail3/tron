@@ -12,7 +12,7 @@ const REQUEST_MAX_BYTES = 2 * 1_024;
 const TIMEOUT_MS = 20_000;
 const PUBLIC_HOST_LABEL = /^(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/u;
 
-export function fixedPushOrigin(raw: string | undefined): URL | undefined {
+function fixedPushOrigin(raw: string | undefined): URL | undefined {
   if (raw === undefined || raw.trim() === "") return undefined;
   let value: URL;
   try { value = new URL(raw); } catch { throw new GatewayError("invalid_request", "Tron Push service origin is invalid"); }

@@ -15,7 +15,7 @@ import type { ConnectorCredentialStore } from "../knowledge/connector-credential
  * sampling/elicitation are not advertised or delegated. */
 /** The revision negotiated by the pinned SDK cohort. Older server revisions
  * are rejected rather than silently changing the feature contract. */
-export const MCP_SUPPORTED_PROTOCOL_VERSION = "2025-11-25" as const;
+const MCP_SUPPORTED_PROTOCOL_VERSION = "2025-11-25" as const;
 const MAX_TOOLS = 128;
 const MAX_SCHEMA_BYTES = 64 * 1024;
 const MAX_SCHEMA_DEPTH = 8;
@@ -298,5 +298,3 @@ export class McpAdapter {
     }
   }
 }
-
-export function createMcpAdapter(options: McpAdapterOptions): McpAdapter { return new McpAdapter(options); }

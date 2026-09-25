@@ -1017,10 +1017,3 @@ export interface CommandDetail extends CommandInfo {
   contentBytes?: number;
   contentTruncated?: boolean;
 }
-
-export interface ProtocolEvent {
-  type: "event";
-  topic: string;
-  sessionId?: string;
-  payload: JsonValue;
-}
