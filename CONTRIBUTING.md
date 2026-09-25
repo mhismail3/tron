@@ -69,7 +69,9 @@ and nonignored untracked file, so new packages, configuration and agent guidance
 need no parallel scan-root list. Ignored generated output is skipped only when
 untracked; tracked files remain in scope. Only the guard's own needle definitions
 are exempt. Pre-commit `--staged` checks changed index blobs, not later working-tree
-edits. Run `python3 scripts/test-personal-info-guard.py` for disposable-repository
+edits. Install that hook once per clone with `scripts/install-hooks.sh`; it runs
+`personal-info-guard.sh --staged` and the Gateway build for staged gateway
+TypeScript. Run `python3 scripts/test-personal-info-guard.py` for disposable-repository
 regressions covering those boundaries, literal filenames and fail-closed Git
 errors. Fixtures isolate Git's environment/configuration so an inherited
 alternate index cannot redirect their writes. CI runs them on Linux and macOS;
@@ -191,3 +193,8 @@ regenerated from `project.yml`; staged Mac gateway payloads and Node runtimes ar
 ignored. CI does not publish production artifacts. TestFlight/App Store delivery,
 Mac signing and notarization, and production deployment are deliberate manual
 maintainer actions. Release tags use `tron-v<version>`.
+
+`VERSION.env` is the only hand-edited product identity file; `scripts/tron version`
+owns its mirrors. `sync` rewrites every generated platform mirror from it, `bump
+beta|patch|minor` updates `VERSION.env`, syncs the mirrors, and prints the result,
+and CI runs `check` to reject drift read-only.
