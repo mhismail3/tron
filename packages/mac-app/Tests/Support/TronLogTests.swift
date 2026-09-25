@@ -7,27 +7,28 @@ struct TronLogTests {
     @Test("diagnostics redaction covers TronLog secrets and preserves plain text")
     func diagnosticsRedactionCoversTronLogCorpus() {
         let redactor = DiagnosticsRedactor()
-        let corpus: [(input: String, secrets: [String])] = [
-            ("Upgrade: Bearer bearer-secret-123", ["bearer-secret-123"]),
-            ("Authorization: Bearer punctuation:secret?123", ["punctuation:secret?123"]),
-            ("api-key=api-secret-123", ["api-secret-123"]),
-            ("authorization: auth-secret-123", ["auth-secret-123"]),
-            ("access_token=access-secret-123", ["access-secret-123"]),
-            ("refresh-token: refresh-secret-123", ["refresh-secret-123"]),
-            ("password=password-secret-123 secret=secret-value-123", ["password-secret-123", "secret-value-123"]),
-            (#"{"password":"json-password-123","secret":"json-secret-123","code":"pairing-code-123"}"#, ["json-password-123", "json-secret-123", "pairing-code-123"]),
-            ("home=/Users/alice/.tron/settings.json state=/private/var/tmp/state.json", ["/Users/alice/.tron/settings.json", "/private/var/tmp/state.json"]),
+        let corpus: [(input: String, logSecrets: [String], diagnosticsOnlySecrets: [String])] = [
+            ("Upgrade: Bearer bearer-secret-123", ["bearer-secret-123"], []),
+            ("Authorization: Bearer punctuation:secret?123", ["punctuation:secret?123"], []),
+            ("api-key=api-secret-123", ["api-secret-123"], []),
+            ("authorization: auth-secret-123", ["auth-secret-123"], []),
+            ("access_token=access-secret-123", ["access-secret-123"], []),
+            ("refresh-token: refresh-secret-123", ["refresh-secret-123"], []),
+            ("password=password-secret-123 secret=secret-value-123", ["password-secret-123", "secret-value-123"], []),
+            (#"{"password":"json-password-123","secret":"json-secret-123","code":"pairing-code-123"}"#, [], ["json-password-123", "json-secret-123", "pairing-code-123"]),
+            ("home=/Users/alice/.tron/settings.json state=/private/var/tmp/state.json", ["/Users/alice/.tron/settings.json", "/private/var/tmp/state.json"], []),
         ]
         for entry in corpus {
             let logOutput = TronLog.redact(entry.input)
             let diagnosticsOutput = redactor.redactMessage(entry.input)
-            for secret in entry.secrets {
-                if !logOutput.contains(secret) {
-                    #expect(!diagnosticsOutput.contains(secret), "DiagnosticsRedactor leaked \\(secret)")
-                }
+            for secret in entry.logSecrets {
+                #expect(!logOutput.contains(secret), "TronLog leaked \\(secret)")
+                #expect(!diagnosticsOutput.contains(secret), "DiagnosticsRedactor leaked \\(secret)")
+            }
+            for secret in entry.diagnosticsOnlySecrets {
+                #expect(!diagnosticsOutput.contains(secret), "DiagnosticsRedactor leaked \\(secret)")
             }
         }
-        #expect(!redactor.redactMessage(corpus[6].input).contains("pairing-code-123"))
         #expect(redactor.redactMessage("retry count=3 notBearer hello") == "retry count=3 notBearer hello")
         #expect(TronLog.redact("retry count=3 notBearer hello") == "retry count=3 notBearer hello")
 
