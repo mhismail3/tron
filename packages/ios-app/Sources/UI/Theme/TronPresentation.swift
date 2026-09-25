@@ -521,24 +521,6 @@ private struct TronInlineFieldModifier: ViewModifier {
             .tint(accent)
     }
 }
-
-private struct TronComposerFieldModifier: ViewModifier {
-    func body(content: Content) -> some View {
-        content
-            .textFieldStyle(.plain)
-            .font(TronTypography.input)
-            .foregroundStyle(Color.tronAccentText)
-            .tint(Color.tronEmerald)
-            .padding(.horizontal, TronSpacing.inputHorizontal)
-            .padding(.vertical, TronSpacing.inputVertical)
-            .frame(minHeight: 44)
-            .glassEffect(
-                .regular.tint(Color.tronEmerald.opacity(0.18)),
-                in: RoundedRectangle(cornerRadius: TronSpacing.cornerInput, style: .continuous)
-            )
-    }
-}
-
 private struct TronTextEditorSurfaceModifier: ViewModifier {
     let monospaced: Bool
     @Environment(\.tronSettingsVisualTheme) private var settingsTheme
@@ -573,10 +555,6 @@ extension View {
             surfaceTint: surfaceTint,
             border: border
         ))
-    }
-
-    func tronComposerField() -> some View {
-        modifier(TronComposerFieldModifier())
     }
 
     /// Text input whose material is owned by a surrounding historical glass
@@ -1784,47 +1762,6 @@ struct TronInlineActionLabel: View {
                 : 0
         )
         .contentShape(Rectangle())
-    }
-}
-
-struct TronSection<Content: View>: View {
-    let title: String
-    @ViewBuilder let content: Content
-
-    init(_ title: String, @ViewBuilder content: () -> Content) {
-        self.title = title
-        self.content = content()
-    }
-
-    var body: some View {
-        Section {
-            content
-                .listRowBackground(
-                    RoundedRectangle(cornerRadius: 12, style: .continuous)
-                        .fill(Color.clear)
-                        .glassEffect(
-                            .regular.tint(Color.tronEmerald.opacity(0.10)),
-                            in: RoundedRectangle(cornerRadius: 12, style: .continuous)
-                        )
-                )
-                .listRowSeparator(.hidden)
-        } header: {
-            TronSectionHeader(title)
-        }
-    }
-}
-
-struct TronSectionHeader: View {
-    let title: String
-
-    init(_ title: String) { self.title = title }
-
-    var body: some View {
-        Text(title)
-            .font(TronTypography.sans(size: TronTypography.sizeBody3, weight: .bold))
-            .foregroundStyle(Color.tronTextPrimary)
-            .textCase(nil)
-            .accessibilityAddTraits(.isHeader)
     }
 }
 

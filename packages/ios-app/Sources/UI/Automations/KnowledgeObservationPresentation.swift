@@ -178,66 +178,6 @@ enum KnowledgeCoveragePresentationPolicy {
     }
 }
 
-/// The dashboard's coverage overview: the settled breakdown and one button that
-/// opens the cuts needing attention. It carries no list and no action of its
-/// own, so a healthy corpus costs two short rows.
-struct KnowledgeCoverageOverview: View {
-    let coverage: KnowledgeCoverageSummary
-    /// The paired Gateway cannot list cuts by disposition, so the button would
-    /// have no list behind it. State that instead of offering a dead control.
-    let requiresGatewayUpdate: Bool
-    let onOpen: () -> Void
-
-    private var needsAttention: Bool { coverage.remainingCount > 0 }
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: TronSpacing.md) {
-            HStack(alignment: .firstTextBaseline) {
-                Text("Observation coverage")
-                    .font(TronTypography.sheetSectionHeader)
-                    .foregroundStyle(Color.tronKnowledge)
-                    .accessibilityAddTraits(.isHeader)
-                Spacer(minLength: TronSpacing.md)
-                Text(KnowledgeCoveragePresentationPolicy.settledLabel(coverage))
-                    .font(TronTypography.secondaryCodeDescription)
-                    .foregroundStyle(Color.tronTextMuted)
-            }
-            VStack(spacing: 0) {
-                TronSettingsRow(
-                    icon: "eye",
-                    title: KnowledgeCoveragePresentationPolicy.settledDetail(coverage),
-                    accent: .tronKnowledge,
-                    titleFont: TronTypography.secondaryDescription,
-                    titleColor: .tronTextSecondary
-                )
-                TronSettingsDivider(accent: .tronKnowledge)
-                if requiresGatewayUpdate {
-                    TronSettingsNotice(message: "Update this Gateway to list the cuts that need attention.", accent: .tronAmber)
-                        .padding(TronSpacing.md)
-                } else if needsAttention {
-                    Button { onOpen() } label: {
-                        TronSettingsRow(
-                            icon: "exclamationmark.triangle",
-                            title: KnowledgeCoveragePresentationPolicy.attentionTitle(coverage),
-                            subtitle: KnowledgeCoveragePresentationPolicy.attentionDetail(coverage),
-                            subtitleLineLimit: 2,
-                            accent: .tronAmber
-                        )
-                    }
-                    .buttonStyle(.plain)
-                    .accessibilityLabel(KnowledgeCoveragePresentationPolicy.attentionTitle(coverage))
-                    .accessibilityHint("Shows each cut needing attention")
-                } else {
-                    TronSettingsRow(icon: "checkmark.circle", title: KnowledgeCoveragePresentationPolicy.attentionTitle(coverage), accent: .tronKnowledge)
-                }
-            }
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .tronScrollSurface(accent: .tronKnowledge, tintOpacity: 0.10)
-        }
-        .controlSize(.small)
-    }
-}
-
 /// One cut needing attention: disposition, reason, bounded citation, and its own
 /// Open/Clear targets. Shared by the coverage detail sheet and its layout test so
 /// the two actions stay separate elements.

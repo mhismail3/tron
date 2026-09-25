@@ -888,10 +888,6 @@ final class DashboardGatewayConnectionPool {
         publish(profileID: profileID)
     }
 
-    private static func invalidDashboardCatalog(_ message: String) -> GatewayFailure {
-        GatewayFailure(code: "invalid_dashboard_catalog", message: message, retryable: true, details: nil)
-    }
-
     private func publish(profileID: String) {
         guard let entry = entries[profileID] else { return }
         delegate?.dashboardPoolDidUpdate(

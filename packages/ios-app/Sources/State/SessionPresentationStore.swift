@@ -412,11 +412,6 @@ final class SessionPresentationStore {
         return projection
     }
 
-    func snapshotForOwnedSession(_ sessionID: String) -> SessionSnapshot? {
-        guard ownsSession(sessionID) else { return nil }
-        return snapshot
-    }
-
     func presentationGeneration(for sessionID: String) -> Int? {
         guard target?.sessionID == sessionID else { return nil }
         return target?.generation
@@ -1550,11 +1545,6 @@ final class SessionPresentationStore {
         scheduleResynchronization(sessionID: target.sessionID)
         await eventProcessingTask?.value
         return mountedTarget == target && hasInstalledSubscription(for: target.sessionID)
-    }
-
-    func handleResyncRequired(sessionID: String?) async {
-        scheduleResynchronization(sessionID: sessionID)
-        await Task.yield()
     }
 
     @discardableResult
@@ -3198,12 +3188,6 @@ final class SessionPresentationStore {
             if !synchronization.markRetryRequired(sessionID: sessionID) { return sessionID }
         }
         return nil
-    }
-
-    private func ownsPendingSynchronization(sessionID: String) -> Bool {
-        synchronization.intent(sessionID: sessionID).map {
-            ownsSynchronizationIntent($0, sessionID: sessionID)
-        } ?? false
     }
 
     private func ownsLiveSnapshotEvent(sessionID: String) -> Bool {

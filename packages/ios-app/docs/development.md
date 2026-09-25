@@ -90,8 +90,8 @@ Automations cyan palette: use `Color.tronKnowledge` for deep violet in light app
 in dark appearance, with `tronKnowledgeText` only where readable text contrast requires it. Keep warning,
 success, and destructive states semantic. The dashboard uses the shared heading and floating logo menu,
 `TronSearchBar`, `TronDashboardFilterSheet`, `TronPlaceholderState`, loading pulse, and edge chrome. Coverage and records share one scroll owner with bottom-control
-clearance; closing search clears its query instead of hiding an active filter. Configuration, connector,
-import, capture, note, and correction forms compose `KnowledgeFormSheet` with the existing
+clearance; closing search clears its query instead of hiding an active filter. Configuration,
+capture, note, and correction forms compose `KnowledgeFormSheet` with the existing
 `TronSettingsGroup`, selection, toggle, inline-field, editor, caption, and notice controls—not native
 Form chrome. The shared wrapper only owns presentation; each form keeps its draft and command owner.
 Model selection opens the existing progressive picker rather than nesting a scrolling picker in a form. Type and scope selections remain
@@ -111,11 +111,8 @@ are comma-separated and wrap naturally rather than allocating one line per ID.
 Reflection remains available in the actions menu rather than a redundant Observed items section.
 Session navigation and editable drafts are handed off only after the record sheet dismisses, with the
 originating Gateway identity rechecked. `KnowledgeModelsTests` covers retained evidence/source dates.
-Coverage is an informational overview above the catalogue: a section label with the settled count, then the
-observed/empty/excluded breakdown and one button naming the cuts that need attention. The overview carries
-no list and no action of its own, so a healthy corpus costs two short rows; a Gateway that cannot filter
-coverage is told to update instead of being shown a button with no list behind it. That button opens
-`KnowledgeCoverageDetailSheet`, a standard medium/large managed sheet (violet title, Done control, edge
+Coverage is presented by `KnowledgeCoverageDetailSheet`, opened from the dashboard menu's **Needs attention**
+item: a standard medium/large managed sheet (violet title, Done control, edge
 chrome, hidden grabber) whose host owns the NavigationStack and medium initial detent from its first frame;
 loading, errors, and content therefore keep the same shell and user-selected large detent while the read settles. The page is filtered by disposition
 (`knowledge-coverage-filter.v1`, `pending`/`failed`/`unavailable`), so settled rows never enter the list,

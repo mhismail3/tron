@@ -131,11 +131,3 @@ struct IntegrationSetupConfiguration: Codable, Hashable, Sendable {
     let cwd: String?
     let env: [String: String]?
 }
-
-struct IntegrationSetupPolicy: Codable, Hashable, Sendable {
-    let enabled: Bool
-    let allowWrites: Bool
-    let paidAccessApproved: Bool
-    let paidBudgetCents: Int
-    let recurringApproved: Bool
-}

@@ -1721,11 +1721,6 @@ final class AppModel {
         return startCatalogRefresh(key: key)
     }
 
-    func retrySessionCatalog() async -> SessionCatalogRefreshOutcome {
-        guard let key = currentCatalogLoadKey() else { return .retained }
-        return await retryCatalog(ownedBy: key)
-    }
-
     private func retryCatalog(ownedBy key: SessionCatalogLoadKey) async -> SessionCatalogRefreshOutcome {
         guard !Task.isCancelled, currentCatalogLoadKey() == key else { return .retained }
         if let task = catalogRefreshTask, catalogRefreshKey == key { return await task.value.outcome }
@@ -2169,10 +2164,6 @@ final class AppModel {
         return await dashboardConnections.info(for: profileID)
     }
 
-    nonisolated static func supportsContextWindow(capabilities: [String]) -> Bool {
-        capabilities.contains("context-window.v1")
-    }
-
     nonisolated static func supportsGatewayUpdate(capabilities: [String]) -> Bool {
         capabilities.contains("gateway-update.v1")
     }
@@ -2499,10 +2490,6 @@ final class AppModel {
             sourceStatuses: sourceStatuses,
             appSourceRevision: IOSBuildIdentity.sourceRevision()
         )
-    }
-
-    func loadGatewayLogs(limit: Int = 1_000) async -> [GatewayProfileLogRecord] {
-        await loadGatewayLogsResult(limit: limit).records
     }
 
     /// Aggregate device read across every configured profile. Cancellation is

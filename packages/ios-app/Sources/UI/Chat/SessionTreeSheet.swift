@@ -2,7 +2,6 @@ import SwiftUI
 
 enum SessionForkPosition: String, Equatable, Sendable { case before, at }
 enum SessionForkChoicePolicy {
-    static func initialPosition(for _: TranscriptItem.Role?) -> SessionForkPosition { .at }
     static func supportsBefore(_ role: TranscriptItem.Role?) -> Bool { role == .user }
 }
 

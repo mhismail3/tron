@@ -406,8 +406,3 @@ struct GatewayHello: Decodable, Sendable {
 }
 
 struct EmptyParams: Codable, Sendable {}
-
-struct CommandParams: Codable, Sendable {
-    let commandId: String
-    init(commandId: String = UUID().uuidString) { self.commandId = commandId }
-}

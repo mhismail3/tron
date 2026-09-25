@@ -524,11 +524,6 @@ enum KnowledgeSourcePresentationPolicy {
         case .archived: return "Archived"
         }
     }
-
-    static func isIntakeOrArchive(_ record: KnowledgeRecord) -> Bool {
-        guard case .source(let source) = record.content else { return false }
-        return source.admission?.status == .pending || source.admission?.status == .archived
-    }
 }
 
 enum KnowledgeDraftHandoffPolicy {

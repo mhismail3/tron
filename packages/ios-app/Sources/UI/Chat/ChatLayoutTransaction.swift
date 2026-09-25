@@ -236,11 +236,6 @@ final class ChatLayoutTransaction {
         finish(id)
     }
 
-    func settleAll(_ id: Int) {
-        guard generation?.id == id else { return }
-        finish(id)
-    }
-
     func abandon() {
         watchdogTask?.cancel()
         watchdogTask = nil

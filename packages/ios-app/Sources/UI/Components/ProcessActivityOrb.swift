@@ -48,14 +48,6 @@ enum ProcessActivityOrbEngine {
         reduceMotion || !isVisible || !sceneActive || !surfaceActive
     }
 
-    /// Longer delegated runs animate more slowly without allowing very long
-    /// history items to become effectively static.
-    static func durationSpeedScale(durationMs: Int?) -> Double {
-        guard let durationMs, durationMs > 0 else { return 1 }
-        let durationMinutes = Double(durationMs) / 60_000
-        return max(0.45, 1 / (1 + durationMinutes * 0.08))
-    }
-
     private struct Move: Sendable {
         let axis: Int
         let lower: Double

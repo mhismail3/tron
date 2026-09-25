@@ -36,12 +36,6 @@ final class ChatPerformanceTracker {
         return prependGeneration
     }
 
-    func endPrepend(generation: Int, result: PerformanceResult) {
-        guard let prependInterval, prependInterval.generation == generation else { return }
-        self.prependInterval = nil
-        signposts.end(prependInterval.interval, result: result, metrics: .none)
-    }
-
     func cancelAll() {
         endScroll(result: .cancelled)
         if let prependInterval {

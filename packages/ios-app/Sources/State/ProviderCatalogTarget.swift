@@ -14,8 +14,3 @@ struct ProviderCatalog {
     let providers: [ProviderSummary]
     let models: [ModelSummary]
 }
-
-struct ProviderCatalogLoadID: Hashable {
-    let target: ProviderCatalogTarget
-    let invalidationGeneration: Int
-}

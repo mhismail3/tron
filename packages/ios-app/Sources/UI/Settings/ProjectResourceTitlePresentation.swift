@@ -25,11 +25,6 @@ enum ProjectResourceTitlePresentation {
         return "Unnamed \(kind.rawValue.dropLast())"
     }
 
-    static func packageTitle(source: String) -> String? {
-        guard let package = packageName(source) else { return nil }
-        return ComposerResourceNameFormatter.friendly(package.hasPrefix("pi-") ? String(package.dropFirst(3)) : package)
-    }
-
     /// Package resolution has paths, not authored titles. Use the same friendly
     /// fallback as session resources without inventing a new canonical name.
     static func resourcePathTitle(_ path: String) -> String {

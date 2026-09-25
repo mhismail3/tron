@@ -155,7 +155,6 @@ final class FontSettings {
         values[axis.rawValue] = value
         axisValues[family.rawValue] = values
     }
-    func currentAxisValue(for axis: FontAxis) -> Double { axisValue(for: selectedFamily, axis: axis) }
 }
 
 enum AppearanceMode: String, CaseIterable, Identifiable, Sendable {

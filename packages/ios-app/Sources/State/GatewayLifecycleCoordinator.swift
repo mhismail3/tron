@@ -463,13 +463,6 @@ final class GatewayLifecycleCoordinator {
         }
     }
 
-    func cancelRestarting() {
-        restartWatchdogTask?.cancel()
-        restartWatchdogTask = nil
-        restartRequested = false
-        if case .restarting = connectionState { connectionState = .connected }
-    }
-
     /// Path hints only gate replacement attempts. They never establish endpoint
     /// reachability or revoke a currently viable socket. A satisfied hint may
     /// revive a parked episode even when the missed callback left no task.

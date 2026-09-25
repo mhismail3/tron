@@ -24,18 +24,6 @@ enum AutomationStatusPresentation {
         switch activation { case .enabled: return "checkmark.circle.fill"; case .paused: return "pause.circle.fill"; case .draft: return "pencil.circle"; case .completed: return "checkmark.seal"; case .blocked: return "exclamationmark.triangle.fill" }
     }
 }
-
-struct AutomationStatusBadge: View {
-    let activation: AutomationActivation
-    var run: AutomationRunState? = nil
-    var body: some View {
-        Label(run?.label ?? activation.label, systemImage: AutomationStatusPresentation.icon(activation, run: run))
-            .font(TronTypography.secondaryCodeDescription)
-            .foregroundStyle(AutomationStatusPresentation.color(activation, run: run))
-            .lineLimit(1)
-    }
-}
-
 struct AutomationDateFormatting {
     static func date(_ value: String?, style: DateFormatter.Style = .medium) -> String {
         guard let value, let date = GatewayTimestamp.parse(value) else { return value ?? "—" }
