@@ -1,9 +1,9 @@
 import { setTimeout as delay } from "node:timers/promises";
 import { WebSocket } from "ws";
 
-export const MAXIMUM_FRAME_BYTES = 2 * 1_024 * 1_024;
-export const MAXIMUM_FRAME_EDGE = 2_560;
-export const MAXIMUM_FRAME_PIXELS = 4_000_000;
+const MAXIMUM_FRAME_BYTES = 2 * 1_024 * 1_024;
+const MAXIMUM_FRAME_EDGE = 2_560;
+const MAXIMUM_FRAME_PIXELS = 4_000_000;
 const MAXIMUM_PAYLOAD = Math.ceil(MAXIMUM_FRAME_BYTES * 4 / 3) + 65_536;
 const COMMAND_TIMEOUT_MS = 5_000;
 const FRAME_INTERVAL_MS = 200;

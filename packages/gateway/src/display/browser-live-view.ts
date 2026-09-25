@@ -21,12 +21,12 @@ export function browserCDPEndpoint(value: string): URL {
 
 export const BROWSER_LIVE_VIEW_SCHEMA = "tron.browser-live-view.v1" as const;
 export const BROWSER_LIVE_VIEW_CAPABILITY = "browser-live-view.v1" as const;
-export const BROWSER_LIVE_VIEW_MAXIMUM_VIEWERS = 4;
-export const BROWSER_LIVE_VIEW_MAXIMUM_TOTAL_VIEWERS = 16;
-export const BROWSER_LIVE_VIEW_MAXIMUM_REGISTRATIONS = 64;
-export const BROWSER_LIVE_VIEW_LEASE_IDLE_MS = 15_000;
+const BROWSER_LIVE_VIEW_MAXIMUM_VIEWERS = 4;
+const BROWSER_LIVE_VIEW_MAXIMUM_TOTAL_VIEWERS = 16;
+const BROWSER_LIVE_VIEW_MAXIMUM_REGISTRATIONS = 64;
+const BROWSER_LIVE_VIEW_LEASE_IDLE_MS = 15_000;
 
-export interface BrowserLiveViewFrame extends CapturedBrowserFrame { sequence: number }
+interface BrowserLiveViewFrame extends CapturedBrowserFrame { sequence: number }
 export interface BrowserLiveViewDescriptor {
   schema: typeof BROWSER_LIVE_VIEW_SCHEMA;
   viewId: string;
@@ -34,7 +34,7 @@ export interface BrowserLiveViewDescriptor {
   title: string;
   fallbackText: string;
 }
-export interface NativeLiveViewDescriptor extends Omit<BrowserLiveViewDescriptor, "schema"> {
+interface NativeLiveViewDescriptor extends Omit<BrowserLiveViewDescriptor, "schema"> {
   schema: typeof NATIVE_LIVE_VIEW_SCHEMA;
 }
 export type LiveViewDescriptor = BrowserLiveViewDescriptor | NativeLiveViewDescriptor;
@@ -50,7 +50,7 @@ interface NativeLiveViewRegistration extends Omit<BrowserLiveViewRegistration, "
   region: NativeCaptureRegion | undefined;
 }
 type Registration = BrowserLiveViewRegistration | NativeLiveViewRegistration;
-export interface BrowserLiveViewRegistration {
+interface BrowserLiveViewRegistration {
   sessionId: string;
   viewId: string;
   generation: string;
@@ -72,7 +72,7 @@ interface View {
   sequence: number;
   firstFrameDeadline?: number;
 }
-export type BrowserLiveViewFrameResult = BrowserLiveViewFrame | { status: "waiting" | "unchanged" };
+type BrowserLiveViewFrameResult = BrowserLiveViewFrame | { status: "waiting" | "unchanged" };
 type ViewIdentity = { sessionId: string; viewId: string; generation: string };
 function key(sessionId: string, viewId: string): string { return `${sessionId}\0${viewId}`; }
 const MAXIMUM_OBSERVED_GENERATIONS = 4_096;
