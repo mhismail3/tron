@@ -34,6 +34,26 @@ struct ChatScrollCoordinatorTests {
         )
     }
 
+    /// Releases `count` display boundaries in order, waiting for the next frame
+    /// request when the task under test is not parked on one yet. The past-end
+    /// net needs two: one `CADisplayLink` callback can still land inside the
+    /// frame a keyboard or inset transition is delivering.
+    private func releaseRepairFrames(
+        _ frames: ManualViewportFrameScheduler,
+        count: Int
+    ) async {
+        for _ in 0..<count {
+            var spins = 0
+            while !frames.hasPendingFrame, spins < 200 {
+                if Task.isCancelled { return }
+                await Task.yield()
+                spins += 1
+            }
+            frames.releaseNext()
+            await Task.yield()
+        }
+    }
+
     @Test("opening failure evidence names missing physical proof without weakening readiness")
     func openingFailureReasonsRemainActionable() {
         let coordinator = ChatScrollCoordinator()
@@ -2573,8 +2593,7 @@ struct ChatScrollCoordinatorTests {
             self.admitAlignedTail(coordinator)
 
             coordinator.geometryChanged(previous: self.bottom, current: self.pastEnd)
-            await frames.waitForRequest(count: 1)
-            frames.releaseNext()
+            await self.releaseRepairFrames(frames, count: 2)
             let repair = try await coordinator.hostedNextCommand()
             #expect(repair.origin == .pastEndRepair)
             #expect(repair.destination == .tail)
@@ -2582,8 +2601,7 @@ struct ChatScrollCoordinatorTests {
             #expect(coordinator.commandApplied(repair))
             // The correction needs no marker proof, so the lease is released
             // through the same bounded path every other tail command uses.
-            await frames.waitForRequest(count: 2)
-            frames.releaseNext()
+            await self.releaseRepairFrames(frames, count: 1)
             await Task.yield()
             #expect(coordinator.consumeTargetRelease())
             #expect(!coordinator.hasAppliedTargetLease)
@@ -2649,10 +2667,8 @@ struct ChatScrollCoordinatorTests {
             coordinator.layoutTransactionSettled(41)
             #expect(coordinator.ownsTailMaterializationTarget(renderedID: "outgoing"))
 
-            let beforePastEnd = frames.requestCount
             coordinator.geometryChanged(previous: self.bottom, current: self.pastEnd)
-            await frames.waitForRequest(count: beforePastEnd + 1)
-            frames.releaseNext()
+            await self.releaseRepairFrames(frames, count: 2)
             let repair = try await coordinator.hostedNextCommand()
             #expect(repair.origin == .pastEndRepair)
             #expect(!coordinator.ownsTailMaterializationTarget(renderedID: "outgoing"))
@@ -2675,15 +2691,74 @@ struct ChatScrollCoordinatorTests {
         #expect(frames.requestCount == 0)
         #expect(coordinator.command == nil)
 
-        // One frame of overshoot that resolves before the boundary is never
-        // corrected, however far past the legal bottom it reports.
+        // One frame of overshoot that resolves before the second display
+        // boundary is never corrected, however far past the legal bottom it
+        // reports.
         coordinator.geometryChanged(previous: plausibleRubberBand, current: pastEnd)
+        await releaseRepairFrames(frames, count: 1)
+        // One boundary has passed without publishing the correction.
+        #expect(coordinator.command == nil)
         coordinator.geometryChanged(previous: pastEnd, current: bottom)
         await Task.yield()
         for _ in 0..<4 { frames.releaseNext() }
         await Task.yield()
         #expect(coordinator.command == nil)
         coordinator.cancel()
+    }
+
+    @Test("a structural viewport change re-arms exactly one past-end correction")
+    func pastEndRepairReArmsOnStructuralViewportChange() async throws {
+        try await withTestWatchdog { @MainActor in
+            let frames = ManualViewportFrameScheduler()
+            let coordinator = ChatScrollCoordinator(frameScheduler: frames.scheduler)
+            self.admitAlignedTail(coordinator)
+
+            coordinator.geometryChanged(previous: self.bottom, current: self.pastEnd)
+            await self.releaseRepairFrames(frames, count: 2)
+            let first = try await coordinator.hostedNextCommand()
+            #expect(first.origin == .pastEndRepair)
+            #expect(coordinator.commandApplied(first))
+            await self.releaseRepairFrames(frames, count: 1)
+            await Task.yield()
+            #expect(coordinator.consumeTargetRelease())
+
+            // The same impossible viewport, and a content-only change that
+            // cannot move the lazy estimate, spend no second correction.
+            let commandsAfterFirst = coordinator.commandRevision
+            coordinator.geometryChanged(previous: self.pastEnd, current: self.pastEnd)
+            coordinator.geometryChanged(
+                previous: self.pastEnd,
+                current: ChatTranscriptGeometry(
+                    offsetY: 1_060, contentHeight: 940, containerHeight: 400
+                )
+            )
+            await Task.yield()
+            for _ in 0..<4 { frames.releaseNext() }
+            await Task.yield()
+            #expect(coordinator.command == nil)
+            #expect(coordinator.commandRevision == commandsAfterFirst)
+
+            // A keyboard-sized container change re-derives the estimate under
+            // the same installed epoch, so it arms one correction again — and
+            // only one, however often the same sample repeats afterwards.
+            let collapsed = ChatTranscriptGeometry(
+                offsetY: 1_120, contentHeight: 1_000, containerHeight: 320, bottomInset: 80
+            )
+            coordinator.geometryChanged(previous: self.pastEnd, current: collapsed)
+            await self.releaseRepairFrames(frames, count: 2)
+            let second = try await coordinator.hostedNextCommand()
+            #expect(second.origin == .pastEndRepair)
+            #expect(coordinator.commandApplied(second))
+            let commandsAfterSecond = coordinator.commandRevision
+            for _ in 0..<6 {
+                coordinator.geometryChanged(previous: collapsed, current: collapsed)
+                await Task.yield()
+            }
+            for _ in 0..<4 { frames.releaseNext() }
+            await Task.yield()
+            #expect(coordinator.commandRevision == commandsAfterSecond)
+            coordinator.cancel()
+        }
     }
 
     @Test("past-end recovery waits for pinned ownership and a quiet layout clock")
@@ -2730,8 +2805,7 @@ struct ChatScrollCoordinatorTests {
             #expect(gatedFrames.requestCount == 0)
             #expect(gated.command == nil)
             gated.layoutTransactionStateChanged(isActive: false)
-            await gatedFrames.waitForRequest(count: 1)
-            gatedFrames.releaseNext()
+            await self.releaseRepairFrames(gatedFrames, count: 2)
             #expect(try await gated.hostedNextCommand().origin == .pastEndRepair)
             gated.cancel()
 
@@ -2754,6 +2828,71 @@ struct ChatScrollCoordinatorTests {
             await Task.yield()
             #expect(prepending.command?.origin != .pastEndRepair)
             prepending.cancel()
+        }
+    }
+
+    @Test("past-end recovery waits for the opening presentation release")
+    func pastEndRepairWaitsForOpeningPresentationRelease() async throws {
+        try await withTestWatchdog { @MainActor in
+            let frames = ManualViewportFrameScheduler()
+            let coordinator = ChatScrollCoordinator(frameScheduler: frames.scheduler)
+            let positioning = Task {
+                await coordinator.positionOpeningTail(
+                    targetRenderedID: "transcript-bottom",
+                    physicalTargetID: "transcript-bottom"
+                )
+            }
+            await frames.waitForRequest(count: 1)
+            frames.releaseNext()
+            let opening = try await coordinator.hostedNextCommand()
+            #expect(opening.origin == .presentation)
+            #expect(coordinator.commandApplied(opening))
+            coordinator.physicalTerminalRowObserved(layoutEpoch: coordinator.layoutEpoch)
+            coordinator.geometryChanged(previous: .zero, current: self.bottom)
+            coordinator.semanticFrameChanged(
+                renderedID: "transcript-bottom",
+                layoutEpoch: coordinator.layoutEpoch,
+                frame: CGRect(x: 0, y: 388, width: 100, height: 12)
+            )
+            #expect(await positioning.value)
+            coordinator.openingRevealCompleted()
+            let settlement = Task { await coordinator.waitForOpeningTailSettlement() }
+            for _ in 0..<20 { await Task.yield() }
+            coordinator.completeVisibleOpeningReveal()
+
+            // Advance to the opening's own release boundary without consuming
+            // it: `consumeTargetRelease` is what retires the applied
+            // presentation target and resumes the settlement waiter.
+            var advanced = 0
+            while coordinator.targetReleaseGeneration == 0, advanced < 40 {
+                frames.releaseNext()
+                await Task.yield()
+                advanced += 1
+            }
+            #expect(coordinator.targetReleaseGeneration == 1)
+
+            // The applied opening target still owes the release callback that
+            // resumes the settlement waiter. Replacing it now would strand that
+            // waiter, so the past-end net refuses to act while it is pending.
+            let commandsWhilePending = coordinator.commandRevision
+            coordinator.geometryChanged(previous: self.bottom, current: self.pastEnd)
+            await Task.yield()
+            for _ in 0..<8 { frames.releaseNext() }
+            await Task.yield()
+            #expect(coordinator.command == nil)
+            #expect(coordinator.commandRevision == commandsWhilePending)
+
+            // The exact release still completes the opening and settles its
+            // waiter instead of being replaced by the correction.
+            #expect(coordinator.consumeTargetRelease())
+            #expect(await settlement.value == .settled)
+
+            // With the opening owner gone the same impossible viewport is
+            // admitted again, so the refusal withheld one command rather than
+            // discarding the net.
+            await self.releaseRepairFrames(frames, count: 2)
+            #expect(try await coordinator.hostedNextCommand().origin == .pastEndRepair)
+            coordinator.cancel()
         }
     }
 
@@ -3318,6 +3457,9 @@ private final class ManualViewportFrameScheduler {
     private var nextID = 0
     private var nextWaiterID = 0
     private(set) var requestCount = 0
+
+    /// True while a frame request is outstanding and can be released.
+    var hasPendingFrame: Bool { !continuations.isEmpty }
 
     lazy var scheduler = DisplayFrameScheduler { [weak self] in
         guard let self else { throw CancellationError() }

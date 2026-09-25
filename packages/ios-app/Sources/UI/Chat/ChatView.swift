@@ -2702,6 +2702,16 @@ struct ChatView: View {
                 var target = ScrollPosition(idType: String.self)
                 target.scrollTo(id: renderedID, anchor: .bottom)
                 transcriptScrollPosition = target
+            case .tail where command.origin == .pastEndRepair:
+                // A fresh value forces SwiftUI to apply the edge after a
+                // collapsed estimate stranded the old one, where re-scrolling a
+                // value SwiftUI already considers satisfied can be a no-op. The
+                // edge, not `installStableTailTarget`'s marker ID: this net is
+                // admitted exactly when marker evidence is unavailable, so it
+                // must not depend on a marker row to be reachable.
+                var target = ScrollPosition(idType: String.self)
+                target.scrollTo(edge: .bottom)
+                transcriptScrollPosition = target
             case .tail:
                 transcriptScrollPosition.scrollTo(edge: .bottom)
             case .offsetY(let offsetY):

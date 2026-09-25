@@ -13,8 +13,9 @@ struct ChatScrollCommand: Equatable, Sendable {
         case prepend
         case tailMaterialization
         case physicalTailRepair
-        /// The bounded past-end safety net. It is admitted only from sustained
-        /// geometry and never from marker evidence or a held target lease.
+        /// The bounded past-end safety net. It is admitted only from a
+        /// past-end condition that survives two display boundaries, never from
+        /// marker evidence or a held target lease.
         case pastEndRepair
     }
 
@@ -285,16 +286,17 @@ final class ChatScrollCoordinator {
     /// repair can inspect it; the lifted opening frame is not repair evidence.
     private var physicalTailRepairBlockedUntilEvidenceRevision: Int?
     @ObservationIgnored private var pastEndRepairTask: Task<Void, Never>?
-    /// One correction per installed layout epoch, and a fresh single-correction
-    /// budget only when a changed physical spine installs a new epoch — the one
-    /// structural event that can move a lazy content estimate. Re-reporting the
-    /// same impossible viewport inside an epoch can never issue a second
-    /// command, so the net cannot loop on one stale sample.
+    /// The installed layout epoch whose one correction is already spent. A fresh
+    /// budget comes only from a structural change that can move a lazy content
+    /// estimate: a changed physical spine installs a new epoch, and a container
+    /// or bottom-inset change re-arms this one in place. Each is a single event,
+    /// so re-reporting the same impossible viewport — or any non-structural
+    /// sample — can never issue a second command and the net cannot oscillate.
     private var pastEndRepairLayoutEpoch: Int?
     /// The mounted transcript's structural clock is mid-transaction. ChatView
-    /// owns that transaction; only its liveness is published here so a tail
-    /// correction can never interleave with a send, keyboard, or growth
-    /// choreography.
+    /// owns that transaction; only its liveness is published here so an open
+    /// submission generation — with any keyboard change that rides it — cannot
+    /// interleave a tail correction with that choreography.
     private var layoutTransactionInFlight = false
 
     @ObservationIgnored private var catchUpTask: Task<Void, Never>?
@@ -728,6 +730,16 @@ final class ChatScrollCoordinator {
         geometry = current
         let viewportStructureChanged = abs(current.containerHeight - previousGeometry.containerHeight) > 0.5
             || abs(current.bottomInset - previousGeometry.bottomInset) > 0.5
+        if viewportStructureChanged {
+            // A container or inset change re-derives the mounted LazyVStack's
+            // content estimate, which can strand this pinned viewport past the
+            // tail again inside the same installed epoch. Re-arm the one
+            // correction on exactly that structural boundary, never on a
+            // repeating sample, so a re-reported impossible viewport cannot
+            // oscillate the net.
+            cancelPastEndRepair()
+            pastEndRepairLayoutEpoch = nil
+        }
         let contentHeightChangedMaterially = abs(current.contentHeight - previousGeometry.contentHeight)
             > max(80, current.containerHeight * 0.25)
         let meaningfulTraceChange = viewportStructureChanged
@@ -907,6 +919,9 @@ final class ChatScrollCoordinator {
         clearTailMaterializationState()
         // Re-evaluate marker evidence captured under the opening lease.
         schedulePhysicalTailRepairIfNeeded()
+        // The opening owned the tail until this exact release; the past-end net
+        // may now own a viewport that is still impossible.
+        schedulePastEndRepairIfNeeded()
         return true
     }
 
@@ -1349,9 +1364,14 @@ final class ChatScrollCoordinator {
 
     /// The structural clock's liveness, published by the owner of the
     /// `ChatLayoutTransaction` (`ChatView`). It is that transaction's own state,
-    /// not a second machine: while any send, keyboard, or growth generation is
-    /// open, the past-end safety net stays dormant so its single command cannot
-    /// interleave with the choreography that owns the viewport.
+    /// not a second machine: a generation opens at submission and a keyboard
+    /// transition joins one already open, so this gate covers an in-flight send
+    /// (with any keyboard change that rides it) and keeps the past-end command
+    /// out of that choreography. A standalone keyboard show/hide, a composer or
+    /// attachment height change, streaming growth, a tool-chip entrance, and the
+    /// queued-card interpolation open no generation: they are protected only by
+    /// the past-end threshold and the frame persistence in
+    /// `schedulePastEndRepairIfNeeded`.
     func layoutTransactionStateChanged(isActive: Bool) {
         guard layoutTransactionInFlight != isActive else { return }
         layoutTransactionInFlight = isActive
@@ -2993,9 +3013,14 @@ final class ChatScrollCoordinator {
     /// materialization lease, and an exhausted marker-repair episode cannot
     /// describe an offset beyond the legal content bottom, so none of them
     /// gates this net: a confirmed past-end viewport is the whole condition.
-    /// Every other viewport owner still outranks it, so the correction can
-    /// never interleave with a send, keyboard, growth, opening, prepend,
-    /// restore, or catch-up transition, or with a reader holding the viewport.
+    /// Every other viewport owner still outranks it: a reader holding the
+    /// viewport, an opening/visible-reveal/prepend/restore/catch-up transition,
+    /// an applied opening presentation target and its pending release waiter,
+    /// and an open submission generation (`layoutTransactionInFlight`). That
+    /// last gate is the only one a keyboard change can trip, and only while a
+    /// send is already open; a standalone keyboard, composer, growth, or
+    /// tool-chip transition relies on the past-end threshold and the frame
+    /// persistence in `schedulePastEndRepairIfNeeded`.
     private var admitsPastEndRepair: Bool {
         geometry.isBeyondLegalContentBottom
             && viewportMode == .pinned
@@ -3009,12 +3034,21 @@ final class ChatScrollCoordinator {
             && catchUpPhase == .none
             && !openingTailPhase.isActive
             && !visibleOpeningRevealPending
+            // An applied `.presentation` target still owes the release callback
+            // that resumes `pendingOpeningReleaseWaiterToken`; taking the
+            // viewport now would replace that target and strand the waiter, so
+            // the opening keeps the tail until its exact release consumes it.
+            && appliedTargetOrigin != .presentation
+            && pendingOpeningReleaseWaiterToken == nil
     }
 
-    /// One correction per installed layout epoch, and only after the condition
-    /// survives one presented frame. Keyboard and inset transitions overshoot
-    /// for a single frame, so a sample that does not stay past the legal bottom
-    /// at the next boundary is never corrected.
+    /// One correction per installed layout epoch and structural re-arm, and only
+    /// after the condition survives two display boundaries. One `CADisplayLink`
+    /// callback can still land inside the frame whose geometry and SwiftUI
+    /// layout a keyboard or inset transition is delivering, so the second
+    /// boundary is what requires the admitted sample — or the newer sample that
+    /// replaced it — to remain past the legal bottom after a full frame of
+    /// layout. A transient that overshoots for one frame is never corrected.
     private func schedulePastEndRepairIfNeeded() {
         guard admitsPastEndRepair, pastEndRepairLayoutEpoch != layoutEpoch else {
             cancelPastEndRepair()
@@ -3024,8 +3058,12 @@ final class ChatScrollCoordinator {
         let admittedPresentation = presentation
         let admittedLayout = layoutEpoch
         pastEndRepairTask = Task { [weak self, frameScheduler] in
-            do { try await frameScheduler.nextFrame(); try Task.checkCancellation() }
-            catch { return }
+            do {
+                try await frameScheduler.nextFrame()
+                try Task.checkCancellation()
+                try await frameScheduler.nextFrame()
+                try Task.checkCancellation()
+            } catch { return }
             guard let self else { return }
             self.pastEndRepairTask = nil
             guard self.presentation == admittedPresentation,
@@ -3038,7 +3076,10 @@ final class ChatScrollCoordinator {
     /// Retires every lease that owns a row target through the existing lease
     /// APIs, then hands the tail back to native pinning with one disabled
     /// `.tail` command. Its own origin keeps the lease accounting and the
-    /// command trace naming exactly which owner moved the viewport.
+    /// command trace naming exactly which owner moved the viewport. Admission is
+    /// re-checked at this frame boundary by its only caller; that check is what
+    /// refuses to act while an opening presentation target or its release waiter
+    /// still owns the tail.
     private func publishPastEndRepair() {
         let pendingOrigin = command?.origin
         guard pendingOrigin == nil

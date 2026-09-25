@@ -127,6 +127,7 @@ struct ChatViewScrollHarnessTests {
                 }
                 let baselineTailError = try harness.nativeTranscriptSignedTailError()
                 let initialHeight = ready.observation.geometry.containerHeight
+                let pastEndBaseline = ready.observation.pastEndRepairCommandCount
 
                 harness.resize(height: 620)
                 _ = try await harness.recorder.waitUntil {
@@ -152,6 +153,10 @@ struct ChatViewScrollHarnessTests {
                 // same legal native tail instead of retaining the old viewport
                 // delta as a new past-bottom blank gap.
                 #expect(abs(expandedTailError - baselineTailError) <= 16)
+                #expect(
+                    harness.probeObservation.pastEndRepairCommandCount == pastEndBaseline,
+                    "keyboard contraction and expansion must never fire the past-end net"
+                )
             }
         }
     }
@@ -177,6 +182,7 @@ struct ChatViewScrollHarnessTests {
                 let trailingGap = try #require(leading.composerClearance)
                 #expect(trailingGap >= -2)
                 #expect(trailingGap <= 32)
+                let pastEndBaseline = ready.observation.pastEndRepairCommandCount
 
                 // The hosted window contraction is the keyboard-sized native
                 // viewport boundary. Do not also summon the simulator keyboard,
@@ -193,6 +199,10 @@ struct ChatViewScrollHarnessTests {
                 #expect(contracted.instance == leading.instance)
                 #expect(try #require(contracted.composerClearance) >= -2)
                 #expect(try #require(contracted.composerClearance) <= 32)
+                #expect(
+                    harness.probeObservation.pastEndRepairCommandCount == pastEndBaseline,
+                    "a short-transcript contraction must never fire the past-end net"
+                )
             }
         }
     }
@@ -390,6 +400,7 @@ struct ChatViewScrollHarnessTests {
                     $0.physicalID == "queued-message-queued-prompt-operation" && $0.isVisible
                 })
                 let region = queued.frame
+                let pastEndBaseline = queuedSample.observation.pastEndRepairCommandCount
                 var previousPixels = samplesPixels ? harness.renderedRowLuminance(in: region) : []
                 harness.replaceAuthoritativeSnapshot(canonicalTemplate)
                 var heights: [CGFloat] = []
@@ -418,6 +429,10 @@ struct ChatViewScrollHarnessTests {
                 // The fixture's queued card is taller than its canonical row.
                 #expect(totalChange > 8)
                 #expect(tailDistances.allSatisfy { $0 <= 2 }, "tail moved: \(tailDistances)")
+                #expect(
+                    harness.probeObservation.pastEndRepairCommandCount == pastEndBaseline,
+                    "the queued-card cross-fade must never fire the past-end net"
+                )
                 if samplesPixels {
                     #expect(pixelChangingFrames >= 3)
                 } else {
@@ -443,6 +458,7 @@ struct ChatViewScrollHarnessTests {
             let initial = snapshot
             try await withHarness(snapshot: initial) { harness in
                 _ = try await harness.recorder.waitUntil { $0.observation.isReady }
+                let pastEndBaseline = harness.probeObservation.pastEndRepairCommandCount
                 var next = initial
                 next.phase = .running
                 var crossedInsetBand = false
@@ -469,6 +485,10 @@ struct ChatViewScrollHarnessTests {
                 }
                 #expect(harness.probeObservation.geometry.hasScrollableOverflow)
                 #expect(crossedInsetBand)
+                #expect(
+                    harness.probeObservation.pastEndRepairCommandCount == pastEndBaseline,
+                    "streaming growth must never fire the past-end net"
+                )
             }
         }
     }
@@ -517,6 +537,7 @@ struct ChatViewScrollHarnessTests {
                 let commandBaseline = ready.observation.tailMaterializationCommandCount
                 let releaseBaseline = ready.observation.targetReleaseCount
                 let repairBaseline = ready.observation.physicalTailRepairCommandCount
+                let pastEndBaseline = ready.observation.pastEndRepairCommandCount
                 let composerHeight = ready.observation.composerHeight
                 let outgoingPrefix = "outgoing-submission:\(snapshot.sessionId):"
 
@@ -588,6 +609,10 @@ struct ChatViewScrollHarnessTests {
                 #expect(settled.observation.targetReleaseCount == releaseBaseline + 1)
                 #expect(settled.observation.tailMaterializationCommandCount == commandBaseline + 1)
                 #expect(settled.observation.physicalTailRepairCommandCount == repairBaseline)
+                #expect(
+                    settled.observation.pastEndRepairCommandCount == pastEndBaseline,
+                    "the send choreography must never fire the past-end net"
+                )
                 #expect(abs(settled.observation.composerHeight - composerHeight) <= 1)
                 #expect(settled.observation.physicalRowAppearanceCounts[outgoingID] == 1)
                 #expect(settled.observation.physicalRowDisappearanceCounts[outgoingID, default: 0] == 0)
@@ -618,6 +643,7 @@ struct ChatViewScrollHarnessTests {
                     }
                 }
                 let releaseBaseline = ready.observation.targetReleaseCount
+                let pastEndBaseline = ready.observation.pastEndRepairCommandCount
                 try harness.setComposerDraftText(String(repeating: "multiline resumed prompt ", count: 28))
                 harness.submitPrompt()
                 // Exercise both sides of the keyboard-sized viewport change
@@ -668,6 +694,10 @@ struct ChatViewScrollHarnessTests {
                 for _ in 0..<80 { try await harness.driveFrameBoundary() }
                 let settled = try #require(harness.recorder.samples.last)
                 #expect(settled.observation.targetReleaseCount >= releaseBaseline + 1)
+                #expect(
+                    settled.observation.pastEndRepairCommandCount == pastEndBaseline,
+                    "a resumed send across keyboard resize must never fire the past-end net"
+                )
                 #expect(successor.nativeRows.contains {
                     $0.physicalID == outgoing.physicalID && $0.instance == outgoing.instance && $0.isVisible
                 })
@@ -706,7 +736,7 @@ struct ChatViewScrollHarnessTests {
     //
     // Measured here, SwiftUI re-derives the LazyVStack estimate from the rows it
     // has mounted when the container/inset changes, and not from the spine
-    // install or the materialization target: this history reports ~9,000-10,000
+    // install or the materialization target: this history reports ~9,000-12,900
     // pt while pinned at the full-height viewport, ~27,900 pt after the keyboard
     // contraction, and the identical send with no container change leaves the
     // estimate alone. The incident's 2.3x overshoot under a held offset did not
@@ -734,15 +764,14 @@ struct ChatViewScrollHarnessTests {
                         $0.semanticID == "tall-history-turn-171" && $0.isVisible
                     }
                 }
-                let openedEstimate = ready.observation.geometry.contentHeight
                 let commandBaseline = ready.observation.tailMaterializationCommandCount
+                let repairBaseline = ready.observation.pastEndRepairCommandCount
                 // Keyboard-sized contraction, as while the reader is typing.
                 harness.resize(height: 620)
                 _ = try await harness.recorder.waitUntil {
                     $0.observation.geometry.containerHeight
                         < ready.observation.geometry.containerHeight - 100
                 }
-                let contractedEstimate = harness.probeObservation.geometry.contentHeight
                 try harness.setComposerDraftText(
                     Array(repeating: "A tall-tail resumed prompt paragraph.", count: 48)
                         .joined(separator: " ")
@@ -753,23 +782,19 @@ struct ChatViewScrollHarnessTests {
                 harness.resize(height: 844)
                 for _ in 0..<120 { try await harness.driveFrameBoundary() }
 
-                let estimates = harness.recorder.samples
-                    .filter { $0.frameIndex >= ready.frameIndex }
-                    .map { $0.observation.geometry.contentHeight }
-                let settledEstimate = try #require(estimates.last)
-                print("""
-                Mixed-height lazy history send: opened=\(openedEstimate) \
-                contracted=\(contractedEstimate) settled=\(settledEstimate) \
-                band=\(estimates.min() ?? 0)...\(estimates.max() ?? 0) \
-                commands=\(harness.probeObservation.tailMaterializationCommandCount - commandBaseline) \
-                tail=\(try harness.nativeTranscriptDistanceFromTail())
-                """)
+                // The opening and contracted estimates this fixture measures stay
+                // in the hosted recorder's bounded geometry trace; these are the
+                // invariants, not the number.
                 #expect(
                     harness.probeObservation.tailMaterializationCommandCount
                         == commandBaseline + 1
                 )
                 #expect(!harness.probeObservation.geometry.isPastBottomEdge)
                 #expect(try harness.nativeTranscriptDistanceFromTail() <= 2)
+                #expect(
+                    harness.probeObservation.pastEndRepairCommandCount == repairBaseline,
+                    "a healthy tall-history send must never fire the past-end net"
+                )
             }
         }
     }
@@ -804,6 +829,7 @@ struct ChatViewScrollHarnessTests {
                 #expect(ready.observation.geometry.hasScrollableOverflow == !isShort)
                 let commandBaseline = ready.observation.tailMaterializationCommandCount
                 let releaseBaseline = ready.observation.targetReleaseCount
+                let pastEndBaseline = ready.observation.pastEndRepairCommandCount
                 let maximumSendCommands = history == .shortToOverflow ? 2 : 1
                 let text = history == .shortToOverflow
                     ? String(repeating: "A large outgoing prompt must cross the viewport without a forced offset. ", count: 40)
@@ -906,6 +932,10 @@ struct ChatViewScrollHarnessTests {
                 #expect(abs(try harness.nativeTranscriptSignedTailError()) <= 2)
                 let successor = try #require(settled.nativeRows.first { $0.semanticID == "first-successor" })
                 #expect(try #require(successor.composerClearance) >= -2)
+                #expect(
+                    settled.observation.pastEndRepairCommandCount == pastEndBaseline,
+                    "an ordinary send over \(history) history must never fire the past-end net"
+                )
                 #expect(!harness.traceRecords.contains { $0.record.event == "chat.lease.bounded-fallback" })
             }
         }
@@ -2054,20 +2084,38 @@ struct ChatViewScrollHarnessTests {
                 _ = try await harness.recorder.waitUntil {
                     $0.observation.readyFrameCompletionCount == 1
                 }
-                let baseline = harness.probeObservation.automaticScrollCommandCount
-                let bottom = ChatTranscriptGeometry(
-                    offsetY: 600, contentHeight: 1_000, containerHeight: 400,
-                    visibleTopY: 600, visibleBottomY: 1_000
+                // Keep the mounted container and visible rect: a pinned
+                // overshoot is the legal offset of a larger estimate still held
+                // while the mounted rows report 100 pt less content. A synthetic
+                // 400 pt container would instead displace the real tail marker by
+                // the window's actual container height and let the marker-drift
+                // repair — not this journey — write.
+                let current = harness.probeObservation.geometry
+                #expect(current.hasScrollableOverflow)
+                let overshootOffset = max(
+                    0, current.contentHeight + current.bottomInset - current.containerHeight
                 )
                 let overshoot = ChatTranscriptGeometry(
-                    offsetY: 600, contentHeight: 900, containerHeight: 400,
-                    visibleTopY: 600, visibleBottomY: 1_000
+                    offsetY: overshootOffset,
+                    contentHeight: current.contentHeight - 100,
+                    containerHeight: current.containerHeight,
+                    bottomInset: current.bottomInset,
+                    visibleTopY: overshootOffset,
+                    visibleBottomY: overshootOffset + current.containerHeight
                 )
+                let baseline = harness.probeObservation.scrollCommandCount
+                let repairBaseline = harness.probeObservation.pastEndRepairCommandCount
                 #expect(overshoot.isPastBottomEdge)
-                harness.driveGeometry(previous: bottom, current: overshoot)
+                #expect(overshoot.isPlausibleBottomRubberBand)
+                #expect(!overshoot.isBeyondLegalContentBottom)
+                harness.driveGeometry(previous: current, current: overshoot)
                 try await harness.driveFrameBoundary()
                 try await Task.sleep(for: .milliseconds(100))
-                #expect(harness.probeObservation.automaticScrollCommandCount == baseline)
+                #expect(harness.probeObservation.scrollCommandCount == baseline)
+                #expect(
+                    harness.probeObservation.pastEndRepairCommandCount == repairBaseline,
+                    "an in-tolerance pinned overshoot must never fire the past-end net"
+                )
             }
         }
     }
