@@ -83,6 +83,44 @@ struct GatewayLogExportTests {
         #expect(decoded.first { $0.message.contains("retained-phone-row") }?.process == "ios")
     }
 
+    // The export bound keeps the newest evidence and never drops the bounded
+    // chat interaction trace, whatever the rest of the payload weighs.
+    @Test("diagnostic export keeps the newest phone records and always carries the chat interaction trace")
+    func newestEvidenceAndChatTraceSurviveOverflow() throws {
+        let base = Date(timeIntervalSince1970: 1_767_225_600)
+        let appRecords = (0..<1_500).map { index in
+            AppLogRecord(
+                timestamp: GatewayTimestamp.preciseString(from: base.addingTimeInterval(Double(index))),
+                level: "info", event: "fixture.app.\(index)", source: "app", message: "sequence=\(index)",
+                process: "ios", requestID: nil, durationMs: nil, outcome: nil, code: nil, profileID: nil,
+                connectionID: nil, lifecycleGeneration: nil
+            )
+        }
+        // This trace is older than every phone record, so only its own reserved
+        // share can carry it into the export.
+        let trace = (0..<ChatInteractionTrace.maximumRecords).map { index in
+            GatewayProfileLogRecord(
+                profileID: ChatInteractionTrace.diagnosticProfileID,
+                profileLabel: "iOS client · Chat trace",
+                record: GatewayLogRecord(
+                    timestamp: GatewayTimestamp.preciseString(from: base.addingTimeInterval(-3_600 + Double(index))),
+                    level: "info", message: "context=\(index) sequence=\(index)",
+                    event: "chat.geometry.sample", source: "ios-client"
+                )
+            )
+        }
+        let text = GatewayLogExport.jsonLines(records: trace, metadata: .empty, appRecords: appRecords)
+        let lines = text.split(separator: "\n")
+        let decoded = try lines.map { try JSONDecoder().decode(AppLogRecord.self, from: Data($0.utf8)) }
+        #expect(lines.count == GatewayLogExport.maximumExportLines)
+        #expect(decoded.first?.event == "diagnostics.exported")
+        #expect(decoded.dropFirst().allSatisfy { $0.event != "diagnostics.exported" })
+        #expect(decoded.contains { $0.event == "fixture.app.1499" })
+        #expect(!decoded.contains { $0.event == "fixture.app.0" })
+        #expect(decoded.filter { $0.event.hasPrefix("chat.") }.map(\.message) == trace.map(\.record.message))
+        #expect(decoded.dropFirst().map(\.timestamp) == decoded.dropFirst().map(\.timestamp).sorted())
+    }
+
     @Test("export bounds describe exactly the copied subset and redact every rendered row")
     func visibleRangeAndPrivacy() {
         let shown = Date(timeIntervalSince1970: 1_700_000_000.875)
@@ -273,20 +311,22 @@ struct GatewayLogExportTests {
         await store.discard(replacement)
     }
 
-    @Test("server uploads remain UTF-8 safe and bounded")
+    @Test("server uploads remain UTF-8 safe and keep the newest records within the byte bound")
     func uploadBounds() throws {
         let encoder = JSONEncoder()
         let head = AppLogRecord(timestamp: "2026-01-01T00:00:00Z", level: "info", event: "diagnostics.exported",
             source: "lifecycle", message: "header=true", process: "ios", requestID: nil, durationMs: nil,
             outcome: nil, code: nil, profileID: nil, connectionID: nil, lifecycleGeneration: nil)
-        let large = AppLogRecord(timestamp: "2026-01-01T00:00:00Z", level: "info", event: "fixture.large",
+        let large = { (index: Int) in AppLogRecord(timestamp: "2026-01-01T00:00:00Z", level: "info", event: "fixture.large.\(index)",
             source: "test", message: String(repeating: "é", count: 400), process: "ios", requestID: nil,
-            durationMs: nil, outcome: nil, code: nil, profileID: nil, connectionID: nil, lifecycleGeneration: nil)
-        let source = ([head] + Array(repeating: large, count: 1_000)).compactMap { try? encoder.encode($0) }
+            durationMs: nil, outcome: nil, code: nil, profileID: nil, connectionID: nil, lifecycleGeneration: nil) }
+        let source = ([head] + (0..<1_000).map(large)).compactMap { try? encoder.encode($0) }
             .map { String(decoding: $0, as: UTF8.self) }.joined(separator: "\n") + "\n"
         let upload = GatewayLogExport.uploadText(source)
         #expect(upload.utf8.count <= GatewayLogExport.maximumUploadBytes)
         #expect(upload.contains("diagnostics.truncated"))
+        #expect(upload.contains("\"event\":\"fixture.large.999\""))
+        #expect(!upload.contains("\"event\":\"fixture.large.0\""))
         #expect(String(decoding: upload.data(using: .utf8)!, as: UTF8.self) == upload)
         let lines = upload.split(separator: "\n")
         #expect(try JSONDecoder().decode(AppLogRecord.self, from: Data(try #require(lines.first).utf8)).event == "diagnostics.exported")

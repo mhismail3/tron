@@ -3,6 +3,9 @@ import Foundation
 /// Copy is a bounded diagnostic projection, never a transcript or credential
 /// export. Profile labels are user-entered text, so use per-copy opaque aliases.
 enum GatewayLogExport {
+    /// One export carries at most this many JSON lines, the identifying header
+    /// included.
+    static let maximumExportLines = 1_000
     static let maximumUploadBytes = 512 * 1024
 
     /// The Logs rows projected from `AppLog`. The export carries `AppLog`
@@ -13,24 +16,42 @@ enum GatewayLogExport {
         records: [GatewayProfileLogRecord], metadata: GatewayLogCaptureMetadata,
         appRecords: [AppLogRecord]
     ) -> String {
-        let gatewayRecords = records.filter { $0.profileID != appLogProfileID }.prefix(1_000).map { item in
+        // The Logs surface hands `records` newest-first. Re-derive that order so
+        // every bound below keeps the newest evidence whatever order a caller
+        // supplies.
+        let newestFirst = records.sorted { gatewayLogRecordIsNewer($0, than: $1) }
+        let loadedComposition = Array(newestFirst.prefix(maximumExportLines))
+        // Retained phone diagnostics are keyed `<profile>:ios-client`.
+        func process(for profileID: String) -> String {
+            profileID.hasSuffix(":\(appLogProfileID)") ? "ios" : "gateway"
+        }
+        func gatewayRecord(_ item: GatewayProfileLogRecord) -> AppLogRecord {
             let value = item.record
-            // Retained phone diagnostics are keyed `<profile>:ios-client`.
-            let process = item.profileID.hasSuffix(":\(appLogProfileID)") ? "ios" : "gateway"
             return AppLogRecord(
                 timestamp: IOSClientDiagnosticBuffer.redactedMessage(value.timestamp),
                 level: value.level, event: IOSClientDiagnosticBuffer.redactedMessage(value.event ?? "gateway.log"),
                 source: IOSClientDiagnosticBuffer.redactedMessage(value.source ?? "gateway"),
-                message: IOSClientDiagnosticBuffer.redactedMessage(value.message), process: process,
+                message: IOSClientDiagnosticBuffer.redactedMessage(value.message), process: process(for: item.profileID),
                 requestID: value.requestID, durationMs: value.durationMs, outcome: value.outcome,
                 code: value.code, profileID: nil, connectionID: nil, lifecycleGeneration: nil
             )
         }
-        let metadata = metadata.withBounds(records: Array(records.prefix(1_000)))
+        func localRecord(_ value: AppLogRecord) -> AppLogRecord {
+            AppLogRecord(
+                timestamp: IOSClientDiagnosticBuffer.redactedMessage(value.timestamp), level: value.level,
+                event: IOSClientDiagnosticBuffer.redactedMessage(value.event),
+                source: IOSClientDiagnosticBuffer.redactedMessage(value.source),
+                message: IOSClientDiagnosticBuffer.redactedMessage(value.message), process: "ios",
+                requestID: value.requestID, durationMs: value.durationMs, outcome: value.outcome,
+                code: value.code, profileID: value.profileID, connectionID: value.connectionID,
+                lifecycleGeneration: value.lifecycleGeneration
+            )
+        }
+        let metadata = metadata.withBounds(records: loadedComposition)
         func owner(_ id: String) -> String {
             id.hasSuffix(":ios-client") ? String(id.dropLast(":ios-client".count)) : id
         }
-        let owners = Set(records.prefix(1_000).map { owner($0.profileID) })
+        let owners = Set(loadedComposition.map { owner($0.profileID) })
             .union(metadata.sourceStatuses.keys).union(metadata.gatewayIdentities.keys).sorted()
         let metadataLines = owners.enumerated().map { index, id in
             let alias = "source-\(index + 1)"
@@ -53,19 +74,26 @@ enum GatewayLogExport {
             process: "ios", requestID: nil, durationMs: nil, outcome: nil, code: nil,
             profileID: nil, connectionID: nil, lifecycleGeneration: nil
         )
+        // The chat interaction trace is the incident evidence for chat
+        // scroll/geometry bugs. Its producer bounds it to
+        // `ChatInteractionTrace.maximumRecords`, and the export always carries
+        // every retained record whatever else the payload weighs.
+        let chatTrace = newestFirst.filter { $0.profileID == ChatInteractionTrace.diagnosticProfileID }
+            .prefix(ChatInteractionTrace.maximumRecords)
+        // The newest remaining records win the leftover slots. `AppLog` is
+        // oldest-first, so it reverses into a newest-first candidate list; the
+        // rows already projected from it are skipped instead of written twice.
+        var candidates = appRecords.reversed().map(localRecord)
+        candidates.append(contentsOf: newestFirst
+            .filter { $0.profileID != appLogProfileID && $0.profileID != ChatInteractionTrace.diagnosticProfileID }
+            .map(gatewayRecord))
+        let newest = candidates.sorted { GatewayTimestamp.isNewer($0.timestamp, than: $1.timestamp) }
+        let retained = Array(newest.prefix(max(0, maximumExportLines - 1 - chatTrace.count)))
+            + chatTrace.map(gatewayRecord)
+        // `isNewer` is a total order, so its inverse lists the retained evidence
+        // oldest to newest behind the header.
         let encoder = JSONEncoder()
-        let localRecords = appRecords.map { value in
-            AppLogRecord(
-                timestamp: IOSClientDiagnosticBuffer.redactedMessage(value.timestamp), level: value.level,
-                event: IOSClientDiagnosticBuffer.redactedMessage(value.event),
-                source: IOSClientDiagnosticBuffer.redactedMessage(value.source),
-                message: IOSClientDiagnosticBuffer.redactedMessage(value.message), process: "ios",
-                requestID: value.requestID, durationMs: value.durationMs, outcome: value.outcome,
-                code: value.code, profileID: value.profileID, connectionID: value.connectionID,
-                lifecycleGeneration: value.lifecycleGeneration
-            )
-        }
-        let lines = ([appStarted] + localRecords + gatewayRecords).prefix(1_000)
+        let lines = ([appStarted] + retained.sorted { GatewayTimestamp.isNewer($1.timestamp, than: $0.timestamp) })
             .compactMap { try? encoder.encode($0) }.map { String(decoding: $0, as: UTF8.self) }
         return lines.joined(separator: "\n") + (lines.isEmpty ? "" : "\n")
     }
@@ -117,7 +145,8 @@ enum GatewayLogExport {
     }
 
     /// Keeps the export contract byte-bounded without splitting UTF-8 or
-    /// removing its identifying header.
+    /// removing its identifying header. The newest lines are kept: the oldest
+    /// overflow is dropped ahead of the truncation marker.
     static func uploadText(_ text: String) -> String {
         guard text.utf8.count > maximumUploadBytes else { return text }
         let marker = AppLogRecord(
@@ -129,18 +158,21 @@ enum GatewayLogExport {
         )
         guard let markerData = try? JSONEncoder().encode(marker) else { return "" }
         let markerLine = markerData + Data([0x0A])
-        let prefixLimit = maximumUploadBytes - markerLine.count
-        var prefixLines: [String] = []
-        var prefixBytes = 0
-        for rawLine in text.split(separator: "\n") {
-            let line = String(rawLine)
-            guard let data = line.data(using: .utf8),
-                  (try? JSONDecoder().decode(AppLogRecord.self, from: data)) != nil else { break }
-            guard prefixBytes + data.count + 1 <= prefixLimit else { break }
-            prefixLines.append(line)
-            prefixBytes += data.count + 1
+        let lines = text.split(separator: "\n").map(String.init)
+        guard let header = lines.first, let headerData = header.data(using: .utf8),
+              (try? JSONDecoder().decode(AppLogRecord.self, from: headerData)) != nil else {
+            return String(decoding: markerLine, as: UTF8.self)
         }
-        let prefix = prefixLines.isEmpty ? "" : prefixLines.joined(separator: "\n") + "\n"
-        return prefix + String(decoding: markerLine, as: UTF8.self)
+        var budget = maximumUploadBytes - markerLine.count - headerData.count - 1
+        var body: [String] = []
+        for rawLine in lines.dropFirst().reversed() {
+            guard let data = rawLine.data(using: .utf8),
+                  (try? JSONDecoder().decode(AppLogRecord.self, from: data)) != nil else { break }
+            guard data.count + 1 <= budget else { break }
+            body.append(rawLine)
+            budget -= data.count + 1
+        }
+        let kept = ([header] + body.reversed()).joined(separator: "\n") + "\n"
+        return kept + String(decoding: markerLine, as: UTF8.self)
     }
 }

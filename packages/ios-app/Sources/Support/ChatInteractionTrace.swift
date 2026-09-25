@@ -8,6 +8,10 @@ import OSLog
 final class ChatInteractionTrace: @unchecked Sendable {
     static let maximumRecords = 256
 
+    /// Profile identity these records carry in the Logs surface, so the
+    /// diagnostic export can select exactly the trace it must always carry.
+    static let diagnosticProfileID = "ios-client:chat-trace"
+
     enum OpeningStage: String, Sendable {
         case attemptBegan = "attempt-began"
         case authorityOpened = "authority-opened"
@@ -480,7 +484,7 @@ final class ChatInteractionTrace: @unchecked Sendable {
         lock.unlock()
         return snapshot.map { value in
             GatewayProfileLogRecord(
-                profileID: "ios-client:chat-trace",
+                profileID: Self.diagnosticProfileID,
                 profileLabel: "iOS client · Chat trace",
                 record: GatewayLogRecord(
                     timestamp: value.timestamp,
