@@ -289,6 +289,7 @@ These apply on top of `AGENTS.md`, which wins on any conflict.
 | S-DOCS-1 | Done | Docs: one owner per fact per `AGENTS.md`; flag docs that describe finished cutovers or duplicate another doc | none | simplification session, 2026-09-24 |
 | S-XMOD-1 | Needs scoping | Cross-module duplication of the same capability across packages (redaction, bounds, JSON helpers, path validation, protocol constants), from candidates the area scopings report | all S-GW, S-IOS and S-MAC scoping rows | |
 | T-IOS-TEST-INFRA-1 | Needs scoping | Audit iOS test harness helpers after the iOS test audits, deleting helpers no remaining test uses | all iOS test-audit rows | |
+| C-IOS-INSTALL-MSG-1 | Ready | User-requested copy change (approved 2026-09-25 as an exception to the no-UX-change rule): `IosDeviceInstallService.install` (`packages/gateway/src/admin/ios-device-install-service.ts`) rejects every unusable bound target with one long message, which the iOS toast truncates and which does not say which check failed. Return one short message per cause, naming the device: not visible to the Mac, visible but not connected ("Moose's iPhone isn't reachable from the Mac: connect it by cable or join the Mac's Wi-Fi, then unlock it"), or Developer Mode off. Keep the `not_found` code and retryable flag, add a test per cause, and check that the iOS toast shows each message in full | C-GW-ADMIN-4 | |
 | V-FINAL | Needs scoping | Final check: full suites against V-0 times, V-0-UX flows re-checked, dead-code tools clean, every Done row has a handoff | all rows | |
 
 ## Handoff log
