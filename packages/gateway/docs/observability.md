@@ -305,6 +305,14 @@ merged into the existing Logs destination on demand and reserved first inside a
 `device-exports/` bundle. Its event prefix is `chat.`; the row below is the
 catalogued warning an operator reads when the app recovered a viewport itself.
 
+Ring pressure reclaims slots in this order: an unchanged `chat.composer.availability`
+repeat is never stored, then the oldest `chat.composer.availability` samples go
+before the `chat.geometry.*`, `chat.viewport.transition` and
+`chat.submission.checkpoint` samples, which go before any other info record;
+`chat.context.begin` outlives all of them and warnings and errors are evicted
+only as a last resort. A composer flag missing from an export was therefore a
+repeat, or was reclaimed ahead of geometry — not a control the app never sampled.
+
 | event | level | owner (file) | emitted when | key fields | added because |
 | --- | --- | --- | --- | --- | --- |
 | `chat.tail.past-end-repair` | warning | `packages/ios-app/Sources/UI/Chat/ChatScrollCoordinator.swift`; writer `packages/ios-app/Sources/Support/ChatInteractionTrace.swift` | one correction is admitted for a pinned viewport that is still past its legal content bottom at a display-frame boundary; emitted as the command is issued | `pastEndBy` (points past the legal bottom) plus the standard trace state — `offset`, `content`, `container`, `inset`, `pastBottom`, `mode`, `command` | A resumed session's lazy estimate collapse on 2026-09-25 left the viewport at offset 101,281.7 over 99,830 pt of content (`pastBottom=1`) and the reader saw a blank transcript until they dragged; marker evidence is absent in that state and the two-attempt marker-repair budget cannot fire, so the recovery needs its own signal |

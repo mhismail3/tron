@@ -171,6 +171,93 @@ struct ChatInteractionTraceTests {
         #expect(ready.message.contains("commandReady=1 attachmentsReady=1"))
     }
 
+    @Test("an unchanged composer availability repeat does not spend a ring slot")
+    func availabilityRepeatsAreDiscarded() {
+        let trace = ChatInteractionTrace()
+        trace.resetForTesting()
+        let context = trace.beginContext(retainedPresentation: false)
+        let waiting = Self.availabilitySample()
+        trace.availability(waiting, context: context)
+        trace.availability(waiting, context: context)
+        var ready = waiting
+        ready.transcriptReady = false
+        trace.availability(ready, context: context)
+        // A blocked admission is one discrete user action, not a repeat sample.
+        trace.availability(waiting, context: context, blockedAction: true)
+
+        let events = trace.diagnosticRecords(limit: 1_000).map(\.record.event)
+        #expect(events.filter { $0 == "chat.composer.availability" }.count == 2)
+        #expect(events.filter { $0 == "chat.composer.admission-blocked" }.count == 1)
+    }
+
+    @Test("geometry survives composer availability noise under ring pressure")
+    func geometrySurvivesAvailabilityNoise() {
+        let trace = ChatInteractionTrace()
+        trace.resetForTesting()
+        let context = trace.beginContext(retainedPresentation: false)
+        // Alternating values are real transitions, so every sample is retained
+        // and only eviction can reclaim its slot.
+        for index in 0..<(ChatInteractionTrace.maximumRecords - 2) {
+            var value = Self.availabilitySample()
+            value.sceneActive = index.isMultiple(of: 2)
+            trace.availability(value, context: context, state: .init(presentationEpoch: index))
+        }
+        for index in 0..<40 {
+            trace.geometry(.meaningfulChange, context: context, state: .init(layoutEpoch: index))
+        }
+
+        let records = trace.diagnosticRecords(limit: 1_000)
+        #expect(records.count == ChatInteractionTrace.maximumRecords)
+        #expect(records.filter { $0.record.event?.hasPrefix("chat.geometry.") == true }.count == 40)
+        // Every eviction came from the availability samples, oldest first.
+        #expect(records.filter { $0.record.event == "chat.composer.availability" }
+            .count == ChatInteractionTrace.maximumRecords - 2 - 39)
+        #expect(records.contains {
+            $0.record.event == "chat.composer.availability"
+                && $0.record.message.contains("presentation=39")
+        })
+        #expect(!records.contains {
+            $0.record.event == "chat.composer.availability"
+                && $0.record.message.contains("presentation=38")
+        })
+    }
+
+    @Test("protected edges outlive composer availability noise")
+    func protectedEdgesSurviveAvailabilityNoise() {
+        let trace = ChatInteractionTrace()
+        trace.resetForTesting()
+        let context = trace.beginContext(retainedPresentation: false)
+        trace.command(
+            .issued,
+            context: context,
+            command: ChatScrollCommand(
+                token: 7, presentation: 1, origin: .presentation,
+                destination: .tail, animation: .disabled
+            ),
+            state: .empty
+        )
+        trace.lease(
+            .boundedFallback, context: context, token: 7, reason: .attemptLimit, state: .empty
+        )
+        trace.anomaly(.submissionLostTail, context: context, state: .empty)
+        for index in 0..<(ChatInteractionTrace.maximumRecords + 40) {
+            var value = Self.availabilitySample()
+            value.sceneActive = index.isMultiple(of: 2)
+            trace.availability(value, context: context, state: .init(presentationEpoch: index))
+        }
+
+        let records = trace.diagnosticRecords(limit: 1_000)
+        #expect(records.count == ChatInteractionTrace.maximumRecords)
+        #expect(records.contains { $0.record.event == "chat.context.begin" })
+        #expect(records.contains { $0.record.event == "chat.command.issued" })
+        #expect(records.contains { $0.record.event == "chat.lease.bounded-fallback" })
+        #expect(records.contains { $0.record.event == "chat.anomaly.submission-lost-tail" })
+        // Only availability was reclaimed: the four protected edges still hold
+        // the rest of the ring.
+        #expect(records.filter { $0.record.event == "chat.composer.availability" }
+            .count == ChatInteractionTrace.maximumRecords - 4)
+    }
+
     @Test("compact and queued lease diagnostics expose ordering without exporting row IDs")
     @MainActor
     func compactLeaseDiagnostics() throws {
@@ -395,5 +482,15 @@ struct ChatInteractionTraceTests {
         #expect(record?.record.level == "error")
         #expect(record?.record.event == "chat.anomaly.opening-viewport-displaced")
         #expect(record?.record.message.contains("canonicalRows=42") == true)
+    }
+
+    private static func availabilitySample() -> ChatInteractionTrace.Availability {
+        ChatInteractionTrace.Availability(
+            connected: true, reconciling: false, mountedAuthority: true,
+            projectionAvailable: true, openingTask: false, transcriptReady: true,
+            scrollAllowsSubmission: true, scrollCommand: false, submissionPending: false,
+            uploading: false, sending: false, commandReady: true, attachmentsReady: true,
+            sceneActive: true, viewportActive: true, publicationActive: true
+        )
     }
 }

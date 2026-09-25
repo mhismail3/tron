@@ -208,12 +208,21 @@ final class ChatInteractionTrace: @unchecked Sendable {
         let message: String
     }
 
+    /// Composer availability is edge-triggered evidence, so an unchanged repeat
+    /// carries nothing a reader of the ring does not already have.
+    private struct AvailabilityRecordSignature: Equatable {
+        var context: Int
+        var event: String
+        var details: String
+    }
+
     private let lock = NSLock()
     private var nextSequence = 0
     private var nextContext = 0
     private var nextIdentity = 0
     private var identityTokens: [(id: String, token: Int)] = []
     private var lastRecordDate = Date.distantPast
+    private var lastAvailability: AvailabilityRecordSignature?
     private var records: [Record] = []
     private let timestampFormatter: ISO8601DateFormatter = {
         let formatter = ISO8601DateFormatter()
@@ -301,7 +310,10 @@ final class ChatInteractionTrace: @unchecked Sendable {
             context: context,
             level: "info",
             event: blockedAction ? "composer.admission-blocked" : "composer.availability",
-            details: values.joined(separator: " ")
+            details: values.joined(separator: " "),
+            // A blocked admission is one discrete user action; only the
+            // repeated availability sample is dropped when nothing changed.
+            deduplicatingAvailability: !blockedAction
         )
     }
 
@@ -522,13 +534,32 @@ final class ChatInteractionTrace: @unchecked Sendable {
         nextIdentity = 0
         identityTokens = []
         lastRecordDate = .distantPast
+        lastAvailability = nil
         records = []
         lock.unlock()
     }
     #endif
 
-    private func append(context: Int, level: String, event: String, details: String) {
+    private func append(
+        context: Int,
+        level: String,
+        event: String,
+        details: String,
+        deduplicatingAvailability: Bool = false
+    ) {
         lock.lock()
+        if deduplicatingAvailability {
+            let signature = AvailabilityRecordSignature(
+                context: context,
+                event: event,
+                details: details
+            )
+            guard signature != lastAvailability else {
+                lock.unlock()
+                return
+            }
+            lastAvailability = signature
+        }
         nextSequence &+= 1
         let sequence = nextSequence
         let message = details.isEmpty
@@ -547,10 +578,15 @@ final class ChatInteractionTrace: @unchecked Sendable {
         )
         records.append(record)
         while records.count > Self.maximumRecords {
-            // Evict repetitive samples before causal lifecycle edges. Keep
-            // context starts, commands, failures, and warnings long enough to
-            // interpret the bounded suffix without retaining private content.
+            // Evict repetitive samples before causal lifecycle edges, and spend
+            // the availability samples before the geometry samples: a lost
+            // composer flag is re-derived by the next edge, while geometry is
+            // the only record of a viewport that displaced itself. Keep context
+            // starts, commands, failures, and warnings long enough to interpret
+            // the bounded suffix without retaining private content.
             let evictionIndex = records.firstIndex {
+                $0.level == "info" && $0.event == "chat.composer.availability"
+            } ?? records.firstIndex {
                 $0.level == "info" && (
                     $0.event.hasPrefix("chat.geometry.")
                         || $0.event == "chat.viewport.transition"
