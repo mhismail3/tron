@@ -2,6 +2,16 @@ import type { JsonValue } from "../protocol/types.js";
 import { isGatewayTimestamp } from "../util/timestamp.js";
 
 export const KNOWLEDGE_SCHEMA_VERSION = 1 as const;
+
+export function isCredentialQueryKey(key: string): boolean {
+  return /token|secret|password|passwd|auth|signature|credential|session|api.?key|^key$|^sig$/i.test(key);
+}
+
+export function normalizeKnowledgeSourceUrl(value: string): string {
+  const url = new URL(value); url.hash = ""; url.hostname = url.hostname.toLowerCase();
+  if ((url.protocol === "https:" && url.port === "443") || (url.protocol === "http:" && url.port === "80")) url.port = "";
+  return url.toString();
+}
 export type KnowledgeScope = "personal" | "research";
 export type KnowledgeRecordKind = "source" | "observation" | "note";
 
@@ -889,7 +899,7 @@ function validateKindContent(kind: KnowledgeRecordKind, value: unknown): void {
         try {
           const url = new URL(value);
           if (!(url.protocol === "https:" || url.protocol === "http:") || url.username || url.password || url.port) throw new Error();
-          for (const key of url.searchParams.keys()) if (/^(?:token|api[_-]?key|key|secret|password|passwd|auth|signature|sig|access[_-]?token|credential|session)$/i.test(key)) throw new Error();
+          for (const key of url.searchParams.keys()) if (isCredentialQueryKey(key)) throw new Error();
         } catch { throw new Error("Linked source URL must be an http(s) URL without credentials"); }
       }
     }

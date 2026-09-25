@@ -3,11 +3,7 @@ import { request as httpRequest } from "node:http";
 import { request as httpsRequest } from "node:https";
 import { lookup } from "node:dns/promises";
 import { isIP } from "node:net";
-import type {
-  KnowledgeEvidenceRef, KnowledgeObjectRef, KnowledgeRecord, KnowledgeRecordDraft,
-  KnowledgeScope, SourceAssessment, SourceContent,
-  SourceIdentity, SourceOrigin, SourceOriginKind, KnowledgeSourcePreviewRefreshResult,
-} from "./knowledge-contract.js";
+import { isCredentialQueryKey, normalizeKnowledgeSourceUrl, type KnowledgeEvidenceRef, type KnowledgeObjectRef, type KnowledgeRecord, type KnowledgeRecordDraft, type KnowledgeScope, type SourceAssessment, type SourceContent, type SourceIdentity, type SourceOrigin, type SourceOriginKind, type KnowledgeSourcePreviewRefreshResult } from "./knowledge-contract.js";
 import { KnowledgeStore, type KnowledgeMutationResult } from "./knowledge-store.js";
 import { awaitAbortableWithSettlement } from "./model-await.js";
 import { isPublicXEmbedUrl, lookupPublicXPost, normalizePublicLinkedUrl, xPostIdentity, type XPublicCoverage, type XPublicLookupOptions, type XPublicPost } from "./x-public-post.js";
@@ -124,7 +120,7 @@ function assertSafeUrl(value: string): URL {
   // persisted, logged, fetched, or passed to an assessment model.
   for (const key of parsed.searchParams.keys()) {
     if (key === "token" && isPublicXEmbedUrl(parsed)) continue; // Public deterministic embed ID, never an account token.
-    if (/^(?:token|api[_-]?key|key|secret|password|passwd|auth|signature|sig|access[_-]?token|credential|session)$/i.test(key)) throw invalid("Source URL contains a credential-bearing query parameter");
+    if (isCredentialQueryKey(key)) throw invalid("Source URL contains a credential-bearing query parameter");
   }
   return parsed;
 }
@@ -395,15 +391,9 @@ async function allSourceRecords(store: KnowledgeStore): Promise<Array<KnowledgeR
   return result;
 }
 
-function normalizedUrl(value: string): string {
-  const url = new URL(value); url.hash = ""; url.hostname = url.hostname.toLowerCase();
-  if ((url.protocol === "https:" && url.port === "443") || (url.protocol === "http:" && url.port === "80")) url.port = "";
-  return url.toString();
-}
-
 function sourceMatches(record: KnowledgeRecord & { kind: "source" }, input: SourceCaptureInput, sourceUrl: string, normalized: string): boolean {
   if (input.identity && record.content.identity && JSON.stringify(record.content.identity) === JSON.stringify(input.identity)) return true;
-  if (record.content.uri && normalizedUrl(record.content.uri) === normalized) return true;
+  if (record.content.uri && normalizeKnowledgeSourceUrl(record.content.uri) === normalized) return true;
   if (input.publicPostLookup && record.content.uri) {
     try { return xPostIdentity(record.content.uri).id === xPostIdentity(sourceUrl).id; } catch { /* The record is not an X post alias. */ }
   }
@@ -414,7 +404,7 @@ function sourceMatches(record: KnowledgeRecord & { kind: "source" }, input: Sour
  * origins here: referral origins deliberately contain the referring post and
  * may not identify this linked target. */
 function finalUrlMatches(record: KnowledgeRecord & { kind: "source" }, scope: KnowledgeScope, finalUrl: string): boolean {
-  return record.scope === scope && record.content.uri !== undefined && normalizedUrl(record.content.uri) === normalizedUrl(finalUrl);
+  return record.scope === scope && record.content.uri !== undefined && normalizeKnowledgeSourceUrl(record.content.uri) === normalizeKnowledgeSourceUrl(finalUrl);
 }
 
 function finalTarget(records: Array<KnowledgeRecord & { kind: "source" }>, input: SourceCaptureInput, finalUrl: string): KnowledgeRecord & { kind: "source" } | undefined {
@@ -633,7 +623,7 @@ export async function captureSource(store: KnowledgeStore, input: SourceCaptureI
   if (options.signal?.aborted) throw invalid("Source capture was cancelled");
   let existing = await allSourceRecords(store);
   if (options.signal?.aborted) throw invalid("Source capture was cancelled");
-  const normalized = normalizedUrl(sourceUrl.toString());
+  const normalized = normalizeKnowledgeSourceUrl(sourceUrl.toString());
   const refreshRequested = input.publicPostLookup === true && input.publicPostCoverage !== undefined && input.publicPostCoverage !== "root";
   const requestedMatches = existing.filter(record => record.scope === input.scope && sourceMatches(record, input, sourceUrl.toString(), normalized));
   if (requestedMatches.length > 1) throw invalid("Multiple sources match the requested source identity");

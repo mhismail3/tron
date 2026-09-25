@@ -1,6 +1,7 @@
 /** Public X hydration. FxEmbed v2 is the only Fx provider contract; the
  * syndication response is an independent, root-only fallback. No credentials,
  * cookies, browser state, or provider-v1 parsing cross this boundary. */
+import { isCredentialQueryKey } from "./knowledge-contract.js";
 export type XPostProvider = "fxembed-v2" | "x-syndication";
 export type XPublicCoverage = "root" | "conversation" | "thread";
 export const X_PUBLIC_LINK_MAX_LENGTH = 4_096;
@@ -9,7 +10,6 @@ export const X_PUBLIC_MAX_ITEMS = 256;
 export const X_PUBLIC_MAX_BODY_BYTES = 2_000_000;
 const X_PUBLIC_MAX_ARTICLE_BLOCKS = 512;
 const X_PUBLIC_MAX_ARTICLE_TEXT = 1_000_000;
-const credentialQueryKey = /^(?:token|api[_-]?key|key|secret|password|passwd|auth|signature|sig|access[_-]?token|credential|session)$/i;
 
 export interface XPostAttempt {
   provider: XPostProvider;
@@ -96,7 +96,7 @@ export function xPostIdentity(input: string): { id: string; url: string } {
   if (typeof input !== "string" || input.length > X_PUBLIC_LINK_MAX_LENGTH) throw new Error("Public X URL exceeds its bound");
   const url = new URL(input);
   if (url.protocol !== "https:" || url.username || url.password || url.port || !["x.com", "www.x.com", "twitter.com", "www.twitter.com", "mobile.twitter.com"].includes(url.hostname.toLowerCase())) throw new Error("Public X reads require an https X post URL without credentials");
-  for (const key of url.searchParams.keys()) if (/token|secret|password|passwd|auth|signature|credential|session|api.?key|^key$|^sig$/i.test(key)) throw new Error("Public X URL contains a credential parameter");
+  for (const key of url.searchParams.keys()) if (isCredentialQueryKey(key)) throw new Error("Public X URL contains a credential parameter");
   const match = url.pathname.match(/^\/(?:[A-Za-z0-9_]{1,50}\/status|i\/web\/status)\/([1-9][0-9]{0,19})(?:\/(?:photo|video)\/[1-4])?\/?$/);
   if (!match) throw new Error("Public X reads require a numeric post permalink, not a profile or bookmark page");
   return { id: match[1]!, url: `https://x.com/i/web/status/${match[1]}` };
@@ -111,7 +111,7 @@ export function normalizePublicLinkedUrl(value: unknown): string | undefined {
   try {
     const url = new URL(value);
     if (!(url.protocol === "https:" || url.protocol === "http:") || url.username || url.password || url.port) return undefined;
-    for (const key of url.searchParams.keys()) if (credentialQueryKey.test(key)) return undefined;
+    for (const key of url.searchParams.keys()) if (isCredentialQueryKey(key)) return undefined;
     if (["x.com", "www.x.com", "twitter.com", "www.twitter.com", "mobile.twitter.com"].includes(url.hostname.toLowerCase()) && /\/(?:[^/]+\/)?status\/[1-9][0-9]{0,19}/i.test(url.pathname)) return undefined;
     url.hash = "";
     const normalized = url.toString();

@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import { lookupPublicXPost, xPostIdentity, xEmbedToken, type XPostResponse } from "./x-public-post.js";
 import { readPublicXPost } from "./source-capture.js";
+import { isCredentialQueryKey } from "./knowledge-contract.js";
 
 const url = "https://x.com/synthetic/status/123456789";
 const v2 = (extra: Record<string, unknown> = {}) => JSON.stringify({ code: 200, status: { id: "123456789", text: "Root publication", author: { id: "42", protected: false }, replying_to: null, raw_text: { facets: [] }, is_note_tweet: false, ...extra }, thread: [], replies: [], cursor: {} });
@@ -9,6 +10,10 @@ const article = (extra: Record<string, unknown> = {}) => ({ id: "987654321", tit
 const signal = () => new AbortController().signal;
 
 describe("public X v2 hydration", () => {
+  it.each(["token", "api_key", "api-key", "key", "secret", "password", "passwd", "auth", "signature", "sig", "access_token", "credential", "session", "x-token", "apikey", "mysecret", "signature_hint"]) (
+    "rejects credential query-key variant %s", key => expect(isCredentialQueryKey(key)).toBe(true),
+  );
+  it.each(["page", "language", "id"]) ("allows non-credential query key %s", key => expect(isCredentialQueryKey(key)).toBe(false));
   it.each(["https://x.com/i/bookmarks", "https://evil.test/synthetic/status/123", "https://x.com.evil.test/a/status/123", "https://user:pass@x.com/a/status/123", "http://x.com/a/status/123", "https://x.com:444/a/status/123", "https://x.com/a/status/123?auth_token=synthetic"]) ("rejects unsafe/non-post input %s before network", async input => {
     const get = vi.fn(); await expect(lookupPublicXPost(input, get, signal())).rejects.toThrow(); expect(get).not.toHaveBeenCalled();
   });

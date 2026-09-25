@@ -4,7 +4,7 @@ import { lstat, readFile, readdir } from "node:fs/promises";
 import { isAbsolute, join, relative, resolve } from "node:path";
 import { promisify } from "node:util";
 import type { JsonValue } from "../protocol/types.js";
-import type { KnowledgeAction, KnowledgeImportRunRequest, KnowledgeRecordDraft, KnowledgeImportScope } from "./knowledge-contract.js";
+import { isCredentialQueryKey, type KnowledgeAction, type KnowledgeImportRunRequest, type KnowledgeRecordDraft, type KnowledgeImportScope } from "./knowledge-contract.js";
 import { KnowledgeStore, type KnowledgeImportCheckpoint } from "./knowledge-store.js";
 
 const execFile = promisify(execFileCallback);
@@ -208,7 +208,7 @@ function sourceUri(source: LegacySource): string | undefined {
   try {
     const parsed = new URL(candidate);
     if (!["http:", "https:"].includes(parsed.protocol) || parsed.username || parsed.password) return undefined;
-    for (const key of parsed.searchParams.keys()) if (/^(?:token|api[_-]?key|key|secret|password|passwd|auth|signature|sig|access[_-]?token|credential|session)$/i.test(key)) return undefined;
+    for (const key of parsed.searchParams.keys()) if (isCredentialQueryKey(key)) return undefined;
     return parsed.toString();
   } catch { return undefined; }
 }

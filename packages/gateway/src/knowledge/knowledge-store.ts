@@ -9,7 +9,7 @@ import { AsyncMutex } from "../util/async-mutex.js";
 import { durableAtomicWriteJson, durableRemove } from "../util/durable-json.js";
 import { readSecureJson, SecureJsonFileError } from "../util/secure-json.js";
 import {
-  DEFAULT_KNOWLEDGE_CONFIG, KNOWLEDGE_SCHEMA_VERSION, OBSERVATION_ATTENTION_DISPOSITIONS, OBSERVATION_COVERAGE_DISPOSITIONS, knowledgeScopeEligible,
+  DEFAULT_KNOWLEDGE_CONFIG, KNOWLEDGE_SCHEMA_VERSION, OBSERVATION_ATTENTION_DISPOSITIONS, OBSERVATION_COVERAGE_DISPOSITIONS, knowledgeScopeEligible, normalizeKnowledgeSourceUrl,
   type KnowledgeConfig, type KnowledgeEvidenceRef, type KnowledgeListRequest,
   type KnowledgeListResponse, type KnowledgeObjectRef, type KnowledgeRecallRequest,
   type KnowledgeRecallResponse, type KnowledgeRecord, type KnowledgeRecordDraft,
@@ -133,11 +133,6 @@ export interface KnowledgeForgetResult { forgotten: true; recordId: string; stat
 export interface KnowledgeReconcileResult { removedObjects: string[]; pendingObjects: string[]; stateRevision: number; }
 
 function conflict(message: string): GatewayError { return new GatewayError("conflict", message); }
-function normalizedSourceUri(value: string): string {
-  const url = new URL(value); url.hash = ""; url.hostname = url.hostname.toLowerCase();
-  if ((url.protocol === "https:" && url.port === "443") || (url.protocol === "http:" && url.port === "80")) url.port = "";
-  return url.toString();
-}
 function mergeSourceAttribution(existing: KnowledgeRecord & { kind: "source" }, incoming: KnowledgeRecordDraft & { kind: "source" }): KnowledgeRecordDraft & { kind: "source" } {
   const origins = [...(existing.content.origins ?? [])];
   for (const origin of incoming.content.origins ?? []) if (!origins.some(previous => previous.kind === origin.kind && previous.uri === origin.uri && JSON.stringify(previous.identity) === JSON.stringify(origin.identity))) origins.push(origin);
@@ -936,11 +931,11 @@ export class KnowledgeStore {
     const { canonicalUri } = request;
     return this.mutate("knowledge.source.record-write", request.commandId, receiptRequest, async (state, paths) => {
       if (canonicalUri) {
-        const normalized = normalizedSourceUri(canonicalUri);
+        const normalized = normalizeKnowledgeSourceUrl(canonicalUri);
         const matches: Array<KnowledgeRecord & { kind: "source" }> = [];
         for (const id of state.records.keys()) {
           const current = await this.currentRecord(state, paths, id);
-          if (current?.kind === "source" && current.scope === request.record.scope && current.content.uri && normalizedSourceUri(current.content.uri) === normalized) matches.push(current);
+          if (current?.kind === "source" && current.scope === request.record.scope && current.content.uri && normalizeKnowledgeSourceUrl(current.content.uri) === normalized) matches.push(current);
         }
         if (matches.length > 1) throw conflict("Multiple sources match the validated redirect target");
         const existing = matches[0];
