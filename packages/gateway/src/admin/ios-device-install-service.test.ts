@@ -200,6 +200,23 @@ describe("IosDeviceInstallService", () => {
     expect((await unavailable.configStatus("device-alpha"))?.target?.identifier).toBe(target.identifier);
   });
 
+  it("reaches the bound phone before judging it, so an idle paired phone still installs", async () => {
+    // CoreDevice lists a paired phone as connected only while a tunnel is open,
+    // and opens that tunnel on demand: discovery must request the bound device.
+    const { source, tronHome, service } = await fixture();
+    await service.configure({ deviceId: "device-alpha", sourceRoot: source });
+    await service.bindTarget("device-alpha", target.identifier);
+    const launched = vi.fn(async () => {});
+    const idle = new IosDeviceInstallService({
+      tronHome,
+      discoverer: async (reach) => [{ ...target, connectionState: reach === target.identifier ? "connected" : "disconnected" }],
+      launcher: launched,
+    });
+    await expect(idle.install("device-alpha", "command-idle-phone", "optimized"))
+      .resolves.toMatchObject({ accepted: true });
+    expect(launched).toHaveBeenCalledTimes(1);
+  });
+
   it("round-trips each build mode through requested status and active ownership", async () => {
     for (const buildMode of ["fast-debug", "optimized"] as const) {
       const { source, service } = await fixture();

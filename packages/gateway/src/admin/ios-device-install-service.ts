@@ -95,7 +95,10 @@ interface ActiveInstall {
   startedAt: string;
 }
 
-export type IosDeviceTargetDiscovery = () => Promise<IosPhysicalDeviceTarget[]>;
+/** Lists physical targets. `reach` names one bound device whose CoreDevice
+ * tunnel discovery opens first: `devicectl` reports a paired phone as connected
+ * only while a tunnel is open, and nothing else opens one on demand. */
+export type IosDeviceTargetDiscovery = (reach?: string) => Promise<IosPhysicalDeviceTarget[]>;
 export type IosDeviceInstallLauncher = (request: {
   tronHome: string;
   deviceId: string;
@@ -336,7 +339,15 @@ export function admitDevicectlTargets(value: unknown): IosPhysicalDeviceTarget[]
   return targets.sort((lhs, rhs) => lhs.name.localeCompare(rhs.name) || lhs.identifier.localeCompare(rhs.identifier));
 }
 
-async function defaultDiscoverTargets(): Promise<IosPhysicalDeviceTarget[]> {
+async function defaultDiscoverTargets(reach?: string): Promise<IosPhysicalDeviceTarget[]> {
+  if (reach !== undefined && IDENTIFIER.test(reach)) {
+    // Opening the tunnel is best effort: an unreachable phone still lists as
+    // disconnected below and is refused with the ordinary retryable error.
+    await execFileAsync("/usr/bin/xcrun", ["devicectl", "device", "info", "details", "--device", reach], {
+      timeout: 20_000,
+      maxBuffer: 256 * 1_024,
+    }).catch(() => {});
+  }
   const directory = await mkdtemp(join(tmpdir(), "tron-ios-targets-"));
   const output = join(directory, "devices.json");
   try {
@@ -505,7 +516,7 @@ export class IosDeviceInstallService {
           throw new GatewayError("busy", `An iOS build/install is already running for ${activeStatus.targetName}`, true);
         }
       }
-      const targets = await this.discoverTargets();
+      const targets = await this.discoverTargets(targetIdentifier);
       const target = targets.find((candidate) => candidate.identifier === targetIdentifier);
       if (!target || !target.developerModeEnabled || target.connectionState !== "connected") {
         throw new GatewayError("not_found", "The requested iOS device is not connected with Developer Mode enabled", true);
@@ -546,7 +557,7 @@ export class IosDeviceInstallService {
         );
       }
       // A missing binding is not permission to choose another connected phone.
-      const targets = await this.discoverTargets();
+      const targets = await this.discoverTargets(config.target.identifier);
       const currentTarget = targets.find((candidate) => candidate.identifier === config.target?.identifier);
       if (!currentTarget || !currentTarget.developerModeEnabled || currentTarget.connectionState !== "connected") {
         throw new GatewayError(
@@ -608,9 +619,9 @@ export class IosDeviceInstallService {
     }
   }
 
-  private async discoverTargets(): Promise<IosPhysicalDeviceTarget[]> {
+  private async discoverTargets(reach?: string): Promise<IosPhysicalDeviceTarget[]> {
     this.requireUsable();
-    const targets = await this.discoverer();
+    const targets = await this.discoverer(reach);
     if (targets.length > MAX_TARGETS) throw new GatewayError("conflict", "Too many physical iOS devices were discovered");
     return targets.map(targetDocument);
   }
