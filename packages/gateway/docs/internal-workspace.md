@@ -15,9 +15,9 @@ inferred from pairing identity, browser preferences, or the current project.
   accessed through that owner, not arbitrary edits. Other namespaces have no
   generic state API. Use the capability's owning interface when one exists.
 - `internal/machine-group-id`: one shared Stable/Debug physical-machine
-  identity. The retired `~/.tron-machine-group-id` is never read on startup;
-  missing or conflicting legacy/canonical files require the explicit operator
-  migration command. The value is opaque identity bytes, not a credential.
+  identity. The retired `~/.tron-machine-group-id` is never read on startup and
+  is never a fallback: while it exists, startup refuses and asks the operator to
+  retire it. The value is opaque identity bytes, not a credential.
 - `internal/subagents/`: the installed delegated provider's existing
   `PI_SUBAGENTS_TEMP_ROOT` root; its `async-subagent-runs/` child is the only
   lifecycle subtree admitted by Gateway. Provider project/session artifacts,
@@ -34,7 +34,7 @@ hidden folders, and still supports folder creation. Session directory selection,
 recent directories, project trust, worktrees, and Automation cwd capture are
 unchanged. Merely using this root never changes a session cwd or grants trust.
 No workspace document is automatically collected or loaded as global instructions.
-Secrets belong in existing credential stores, not workspace documents. Internal-layout publications keep a resumable marker beside staging; recovery completes a source-retired rename only after validating the staged bytes and destination absence, and never recreates a missing authority.
+Secrets belong in existing credential stores, not workspace documents.
 
 ## Initialization, failure and recovery
 
@@ -133,20 +133,6 @@ not create real namespace state.
 
 These are requirements for future owning adapters, not guarantees supplied by an
 unimplemented namespace API or by arbitrary filesystem tools today.
-
-## Explicit internal-layout migration
-
-`src/internal-layout-migration.ts` is an operator-run, fail-closed fixture for
-retiring the machine-group source and other explicitly selected internal files.
-Run `scripts/tron internal-migrate preflight|stage|verify|publish|recover|cleanup`
-only against synthetic or a user-quiesced maintenance fixture. It requires
-absolute paths, owner-only regular files, exact bytes/permissions, protected
-backup and quiescence acknowledgements, and never merges an existing destination.
-Staging leaves a durable marker on interruption. Publication retires the old
-source before exposing the destination; recovery reports ambiguity rather than
-choosing an authority. Gateway startup never invokes this tool or silently
-regenerates identity. The command prepares state only; app replacement, Gateway
-activation and retirement of live paths remain manual operator actions.
 
 ## Explicit delegated-provider root cutover
 

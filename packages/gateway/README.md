@@ -519,9 +519,9 @@ rejected with bounded diagnostics and can never become an uncaught process exit.
 - Physical-machine group identity: a bounded random ID in the one shared path
   `~/.tron/internal/machine-group-id`, used only for connection grouping; Stable
   and Debug resolve this path independently of their selected homes. The retired
-  `~/.tron-machine-group-id` path is never a startup fallback: explicit operator
-  migration must preserve exact bytes, detect conflicts, and retire the old file
-  before startup. It is not a session, credential, or runtime-data store
+  `~/.tron-machine-group-id` path is never a startup fallback or startup read:
+  while it exists, startup refuses rather than minting a second identity. It is
+  not a session, credential, or runtime-data store
 - Gateway state: `<TRON_DATA_DIR|~/$TRON_HOME_NAME|~/.tron>/gateway/`; `gateway.json` is an exact-shape, 16 KiB maximum document with a 256-byte machine ID and 1 KiB machine name; unsafe/malformed/oversized existing files fail startup without rekeying. Secure bounded reads reject symlinks and non-owner-only files; publication uses the existing durable atomic JSON utility. The exact old version-1 shape with a valid `defaultWorkspace` is normalized under the config lock by removing only that unused field, preserving machine identity; unknown shapes/versions are never rewritten. Tron’s durable internal workspace is the sibling `<tronHome>/workspace`; it is separate from the session cwd and canonical Pi session store.
 - Local wrapper credential: `gateway/local-auth.json` (`0600`, owner-UID-only regular non-symlink file;
   an existing malformed, wrong-version, or wrong-purpose credential fails closed)

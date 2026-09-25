@@ -32,8 +32,6 @@ packages or use an artifact built from another commit.
 
 The migration helpers are:
 
-- machine identity/internal files: [`internal-workspace.md`](internal-workspace.md)
-  and `scripts/tron internal-migrate`;
 - delegated provider tree and references: this runbook and
   `scripts/tron delegated-migrate` (marker schema 3);
 - Mac wizard state: the [Mac wizard-state cutover](../../mac-app/docs/wizard-state-cutover.md)
@@ -61,7 +59,6 @@ Run every owner preflight in no-write mode against an isolated or explicitly
 user-approved home. Include:
 
 ```bash
-scripts/tron internal-migrate preflight --source <legacy-machine-id> --destination <shared-machine-id> --staging <private-machine-id-staging>
 scripts/tron delegated-migrate preflight --destination-root <tronHome>/internal/subagents --legacy-root <tmp-provider-root>
 scripts/tron connection-migrate preflight --tron-home <tronHome>
 ```
@@ -195,25 +192,6 @@ publication and then resume migrations. Do the following in this exact order:
    If it stops, preserve the maintenance operation and migration journals; do
    not rewrite a receipt or continue with an unproven order. Only then may the
    user replace/launch the app and choose Resume as described in Section 5.
-
-Stage/verify machine identity with quiescence and backup acknowledgements;
-check source/destination bytes, mode `0600`, owner, digest, and conflict marker.
-Publish only after verification. The exact commands are:
-
-```bash
-scripts/tron internal-migrate stage \
-  --source <legacy-machine-id> \
-  --destination <stable-tron-home>/internal/machine-group-id \
-  --staging <private-internal-staging> \
-  --acknowledge-quiescence --acknowledge-backup
-scripts/tron internal-migrate verify --staging <private-internal-staging>
-scripts/tron internal-migrate publish --staging <private-internal-staging>
-```
-
-The machine-group destination is the one canonical `<userHome>/.tron/internal/
-machine-group-id` shared by Stable and Debug; run this migration once, not once
-per profile. If preflight reports no migration required, do not manufacture a
-second identity.
 
 Stage/verify delegated roots with
 `--acknowledge-quiescence --acknowledge-backup`. The helper preserves provider

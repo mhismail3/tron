@@ -14,8 +14,6 @@ Commands:
                                     Own the immutable Debug Gateway on port 9848
                                     status/preflight are read-only; users initiate
                                     every mutating Gateway lifecycle transition
-  internal-migrate <preflight|stage|verify|publish|recover|cleanup> ...
-                                    Explicit machine-identity/internal-root migration
   connection-migrate <preflight|prepare|stage|publish|recover> ...
                                     Offline Knowledge catalog/ConnectionOwner migration
   delegated-migrate <preflight|stage|verify|publish|recover|cleanup> ...
@@ -57,14 +55,6 @@ case "$cmd" in
     ;;
   __dev-supervise|dev)
     exec "$ROOT/scripts/tron-dev" "$@"
-    ;;
-  internal-migrate)
-    if [[ ! -f "$GATEWAY/dist/internal-layout-migration.js" ]]; then
-      echo "missing prepared migration artifact: $GATEWAY/dist/internal-layout-migration.js" >&2
-      echo "prepare it explicitly with: (cd packages/gateway && npm run build)" >&2
-      exit 66
-    fi
-    exec node "$GATEWAY/dist/internal-layout-migration.js" "$@"
     ;;
   connection-migrate)
     if [[ ! -f "$GATEWAY/dist/integrations/connection-migration.js" ]]; then
