@@ -100,8 +100,10 @@ Sources, observations, and notes have stable IDs and immutable revision IDs.
 Every observation range includes ordered canonical entry IDs and an entry
  digest supplied by the session owner, plus optional branch/project identity.
 Coverage must repeat that exact range and digest and cannot be rebound to
-another input. Terminal `observed`, `empty`, and `excluded` dispositions are
-immutable; pending/failed work can recover, while `observed` cannot be
+another input; recovery compares exact canonical entry IDs and digest and marks
+missing or non-active coverage unavailable rather than replaying it. Terminal
+`observed`, `empty`, and `excluded` dispositions are immutable; pending/failed
+work can recover, while `observed` cannot be
 fabricated without committed observation revisions. Session-entry evidence is represented by a typed
 `sessionEntry` citation; record evidence names the exact record revision.
 
@@ -200,19 +202,22 @@ parser; the configured model is never expected to guess that contract. Admission
 occurs only after the runtime's terminal receipt and canonical attention barrier;
 bounded model chunks name only their exact entry
 IDs and digest, and any remaining suffix is admitted as a separate chunk.
+Model-bound text removes recognized machine paths and credential shapes without
+claiming complete secret scrubbing.
 Prospective source retention is bounded by 64 cuts, 100,000 entries, and a
-conservative 32 MiB budget including the currently processed cut. A bounded
-traversal measures input before retaining it; repeated snapshots merge by exact
+conservative 32 MiB retained-data budget including the currently processed cut.
+A bounded traversal measures input before retaining it; repeated snapshots merge by exact
 canonical entry ID, not repeated whole-payload JSON serialization. Excess new
 admissions are rejected and diagnosed, not used to evict prior accepted cuts or
 spawn an unbounded secondary gap-write queue. Only committed coverage is recovery
 authority: pre-coverage cuts can be lost on shutdown or crash, and rejected input
 is not advertised as recoverable coverage. Operational admission/read failures
-retain the same accepted cut for backoff retry. Durable pending/failed retries
-derive command IDs from the current coverage revision, so each legitimate
+retain the same accepted cut for a bounded-backoff retry. Durable pending/failed
+retries derive command IDs from the current coverage revision, so each legitimate
 transition has its own receipt.
 
-Cancellation bounds model caller waits but does not settle the provider. Work
+A model timeout bounds the caller wait, not the operation lifetime; cancellation
+bounds model caller waits but does not settle the provider. Work
 ownership covers admission reads through publication and all late provider
 settlements. Store cancellation is checked at serialized mutation admission;
 once record bodies begin writing, their catalog and receipt commit must finish

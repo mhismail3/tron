@@ -75,24 +75,10 @@ cut is branch-lineage-scoped (not the changing leaf), exact, redacted, and
 input-bounded. Distinct terminal envelopes retain their own invocation/outcome
 when queued. Cancellation or a
 configuration/privacy change leaves the cut retryable and cannot publish late.
-A failed durable admission retains its exact cut with bounded backoff; transition
-receipt IDs include the current coverage revision so failed/pending recovery does
-not conflict with an earlier command's request hash. Prospective admission is
-bounded by 64 cuts, 100,000 entries, and a conservative 32 MiB retained-data budget
-including the active cut. Excess new input is rejected with a diagnostic rather
-than evicting accepted cuts or starting unbounded gap-write tasks. Pre-coverage
-cuts remain process-local and may be lost on shutdown/restart; only a committed
-coverage row is recovery authority. Model-bound text removes recognized machine
-paths and credential shapes without claiming complete secret scrubbing.
-A model timeout bounds the caller wait, not the operation lifetime: the exact
-Gateway work token remains held until the task and all provider promises settle.
-Admission and derivative publication carry cancellation through serialized store
-entry; an already-admitted record-body/catalog transaction finishes its receipt
-rather than abandoning durable private bodies after a late cancellation.
+Admission, retention, redaction, cancellation and recovery bounds are stated
+once in [Knowledge storage](docs/knowledge.md).
 Branch scope uses append-order first-child continuation, so adding a sibling
-never changes the original branch identity; recovery compares exact canonical
-entry IDs and digest and marks missing/non-active coverage unavailable rather
-than replaying it. Registered synthesis accepts exact SOURCE, NOTE, and
+never changes the original branch identity. Registered synthesis accepts exact SOURCE, NOTE, and
 OBSERVATION revisions, preserves capture disposition, qualifications, contrary
 evidence, and privacy scope, and publishes only an unconfirmed agent-derived
 note after cancellation/configuration/source fences. Knowledge read pages
@@ -2172,22 +2158,7 @@ open a real PTY so packaging cannot silently ship a non-executable helper.
 
 ## Session search
 
-When advertised as `session-search.v1`, `session.search` performs bounded
-canonical-message lexical retrieval and `session.search.anchor` validates the
-entry/file/branch revision before returning an exact transcript page. Search
-uses a disposable Gateway-owned postings database; each process discards the
-previous index before rebuilding it from canonical JSONL, which remains the
-only transcript authority. Warm-up starts after session-registry recovery and
-before automation recovery; startup never integrity-checks an index it will
-discard. Open sessions are read through their existing RuntimeSlot, while cold
-files undergo complete graph validation before branch
-selection. The index excludes tool, thinking, hidden, delegated, and abandoned
-content and reports partial coverage for malformed or interrupted files. Local
-semantic ranking and Jev reranking are separate explicit readiness/consent
-states; neither is silently represented as lexical success. Jev policy and
-reservations use a separate durable ledger (`session-search-jev-allowance.sqlite`)
-with one-millionth-cent microCents, idempotent settlement, bounded history, and
-fail-closed corruption handling; the disposable postings index never owns spend.
+[Session search](docs/session-search.md) owns the `session-search.v1` capability.
 
 ## Development
 
