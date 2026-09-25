@@ -74,20 +74,6 @@ describe("DeviceStore", () => {
     expect(await store.listDevices()).toHaveLength(1);
   });
 
-  it("reads legacy lastSeenAt but normalizes it on the next owned write", async () => {
-    const { root, store } = await fixture();
-    const enrollment = await store.ensureEnrollment();
-    const paired = await store.pair(enrollment.code, "Phone");
-    const path = join(root, "gateway", "devices.json");
-    const document = JSON.parse(await readFile(path, "utf8"));
-    document.devices[0].lastSeenAt = "2026-01-01T00:00:00.000Z";
-    await writeFile(path, `${JSON.stringify(document)}\n`);
-    expect(await store.listDevices()).toEqual([expect.objectContaining({ id: paired.deviceId })]);
-    expect(await readFile(path, "utf8")).toContain("lastSeenAt");
-    await store.revoke(paired.deviceId, () => {});
-    expect(await readFile(path, "utf8")).not.toContain("lastSeenAt");
-  });
-
   it("rejects duplicate or oversized persisted device catalogs", async () => {
     const { root, store } = await fixture();
     const enrollment = await store.ensureEnrollment();

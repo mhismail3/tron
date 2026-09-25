@@ -85,8 +85,7 @@ export interface NotificationDocument {
   pending: PendingIntent[];
   receipts: NotificationReceipt[];
   revocations: RevocationTombstone[];
-  /** Added compatibly to version 1. Missing means a pre-inbox document. */
-  inbox?: NotificationInboxEntry[];
+  inbox: NotificationInboxEntry[];
 }
 
 export const MAXIMUM_PUSH_GRANTS = 64;
@@ -188,7 +187,7 @@ function isInboxEntry(value: unknown): value is NotificationInboxEntry {
 function validate(value: unknown): NotificationDocument {
   if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error("not object");
   const v = value as Record<string, unknown>;
-  if (!exact(v, ["version", "policy", "grants", "pending", "receipts", "revocations"], ["inbox"]) || v.version !== 1) throw new Error("shape");
+  if (!exact(v, ["version", "policy", "grants", "pending", "receipts", "revocations", "inbox"]) || v.version !== 1) throw new Error("shape");
   if (!v.policy || typeof v.policy !== "object" || Array.isArray(v.policy)
     || !exact(v.policy as Record<string, unknown>, ["notifyWhenAskPresented"])
     || typeof (v.policy as { notifyWhenAskPresented?: unknown }).notifyWhenAskPresented !== "boolean") throw new Error("policy");
@@ -196,11 +195,11 @@ function validate(value: unknown): NotificationDocument {
   if (!Array.isArray(v.pending) || v.pending.length > MAXIMUM_PENDING_INTENTS || !v.pending.every(isIntent)) throw new Error("pending");
   if (!Array.isArray(v.receipts) || v.receipts.length > MAXIMUM_NOTIFICATION_RECEIPTS || !v.receipts.every(isReceipt)) throw new Error("receipts");
   if (!Array.isArray(v.revocations) || v.revocations.length > MAXIMUM_REVOCATIONS || !v.revocations.every(isRevocation)) throw new Error("revocations");
-  if (v.inbox !== undefined && (!Array.isArray(v.inbox) || v.inbox.length > MAXIMUM_NOTIFICATION_INBOX_ENTRIES || !v.inbox.every(isInboxEntry))) throw new Error("inbox");
+  if (!Array.isArray(v.inbox) || v.inbox.length > MAXIMUM_NOTIFICATION_INBOX_ENTRIES || !v.inbox.every(isInboxEntry)) throw new Error("inbox");
   if ((v.grants as unknown[]).length + v.revocations.length > MAXIMUM_REVOCATIONS) throw new Error("revocation reserve");
   const grants = v.grants as PushGrant[];
   if (new Set(grants.map((grant) => grant.deviceId)).size !== grants.length || new Set(grants.map((grant) => grant.grantId)).size !== grants.length) throw new Error("duplicate grants");
-  const inbox = (v.inbox ?? []) as NotificationInboxEntry[];
+  const inbox = v.inbox as NotificationInboxEntry[];
   if (new Set(inbox.map((entry) => entry.id)).size !== inbox.length
     || new Set(inbox.flatMap((entry) => entry.requestIds)).size !== inbox.flatMap((entry) => entry.requestIds).length) throw new Error("duplicate inbox identity");
   return structuredClone(value) as NotificationDocument;

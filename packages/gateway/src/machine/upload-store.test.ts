@@ -399,28 +399,20 @@ describe("UploadStore", () => {
     });
   });
 
-  it("migrates legacy upload folders into resumable content-addressed objects", async () => {
+  it("repairs a lost content-addressed object from its logical file", async () => {
     const home = await root();
     const firstStore = new UploadStore(home, 16);
-    const upload = await firstStore.save("legacy.txt", "text/plain", Buffer.from("legacy"));
-    const metadataPath = join(home, "gateway", "uploads", upload.id, "metadata.json");
-    const current = JSON.parse(await readFile(metadataPath, "utf8"));
-    delete current.digest;
-    current.version = 1;
-    await writeFile(metadataPath, JSON.stringify(current));
+    const upload = await firstStore.save("retained.txt", "text/plain", Buffer.from("durable"));
     await rm(join(home, "gateway", "upload-objects"), { recursive: true, force: true });
-    await chmod(upload.path, 0o600);
 
-    const migratedStore = new UploadStore(home, 16);
-    await expect(migratedStore.maintain(async () => new Set())).resolves.toMatchObject({
+    const repairedStore = new UploadStore(home, 16);
+    await expect(repairedStore.maintain(async () => new Set())).resolves.toMatchObject({
       entryCount: 1,
       objectCount: 1,
-      objectBytes: 6,
+      objectBytes: 7,
     });
-    const migrated = JSON.parse(await readFile(metadataPath, "utf8"));
-    expect(migrated).toMatchObject({ version: 2, digest: expect.stringMatching(/^[0-9a-f]{64}$/) });
-    await expect(migratedStore.materialize([upload.id], "session")).resolves.toMatchObject({
-      envelope: expect.stringContaining("legacy.txt"),
+    await expect(repairedStore.materialize([upload.id], "session")).resolves.toMatchObject({
+      envelope: expect.stringContaining("retained.txt"),
     });
   });
 

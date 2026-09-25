@@ -338,21 +338,6 @@ describe("NotificationGrantStore and NotificationService", () => {
     expect(snapshot.revocations.map((item) => item.grantId)).toEqual([grant.grantId]);
   });
 
-  it("migrates a pre-inbox notification document without losing grant authority", async () => {
-    const root = await mkdtemp(join(tmpdir(), "tron-notifications-inbox-migration-"));
-    const store = new NotificationGrantStore(root);
-    await store.initialize();
-    const path = join(root, "gateway", "notifications.json");
-    const legacy = JSON.parse(await readFile(path, "utf8"));
-    delete legacy.inbox;
-    await writeFile(path, JSON.stringify(legacy), { mode: 0o600 });
-    const service = new NotificationService(new NotificationGrantStore(root), { available: false } as PushRelayClient);
-    await service.initialize();
-    service.dispose();
-    expect((await service.inbox()).notifications).toEqual([]);
-    expect((await new NotificationGrantStore(root).snapshot()).inbox).toEqual([]);
-  });
-
   it("enforces the durable per-session hourly quota", async () => {
     const { service } = await fixture(undefined, Date.now, {
       dailyIntents: 10,

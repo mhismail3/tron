@@ -89,7 +89,7 @@ function boundedRoute(route: { sessionId: string; machineId: string } | undefine
 function prune(document: NotificationDocument, now: number): NotificationDocument {
   const expired = new Set(document.pending.filter((intent) => Date.parse(intent.expiresAt) <= now).map((intent) => intent.dedupeKey));
   for (const receipt of document.receipts) if (expired.has(receipt.dedupeKey) && receipt.result === "queued") receipt.result = "expired";
-  for (const entry of document.inbox ?? []) {
+  for (const entry of document.inbox) {
     if (expired.has(entry.dedupeKey) && entry.outcome === "queued") {
       entry.outcome = "expired";
       entry.updatedAt = iso(now);
@@ -97,7 +97,7 @@ function prune(document: NotificationDocument, now: number): NotificationDocumen
   }
   document.receipts = document.receipts.filter((receipt) => Date.parse(receipt.expiresAt) > now).slice(-512);
   document.pending = document.pending.filter((intent) => Date.parse(intent.expiresAt) > now).slice(-MAXIMUM_PENDING_INTENTS);
-  document.inbox = (document.inbox ?? []).slice(-MAXIMUM_NOTIFICATION_INBOX_ENTRIES);
+  document.inbox = document.inbox.slice(-MAXIMUM_NOTIFICATION_INBOX_ENTRIES);
   // Revocation authority must be retained until the relay acknowledges it.
   document.revocations = document.revocations.slice(-MAXIMUM_REVOCATIONS);
   return document;
@@ -138,7 +138,7 @@ function retainRevocationAuthority(document: NotificationDocument, now: number):
     if (intent.targets.length === 0) {
       const receipt = document.receipts.find((candidate) => candidate.dedupeKey === intent.dedupeKey);
       if (receipt?.result === "queued") receipt.result = "failed";
-      const inbox = document.inbox?.find((entry) => entry.dedupeKey === intent.dedupeKey);
+      const inbox = document.inbox.find((entry) => entry.dedupeKey === intent.dedupeKey);
       if (inbox?.outcome === "queued") {
         inbox.outcome = "failed";
         inbox.updatedAt = iso(now);
@@ -258,7 +258,7 @@ export class NotificationService {
         if (intent.targets.length > 0) continue;
         const receipt = document.receipts.find((candidate) => candidate.dedupeKey === intent.dedupeKey);
         if (receipt?.result === "queued") receipt.result = "failed";
-        const inbox = document.inbox?.find((entry) => entry.dedupeKey === intent.dedupeKey);
+        const inbox = document.inbox.find((entry) => entry.dedupeKey === intent.dedupeKey);
         if (inbox?.outcome === "queued") {
           inbox.outcome = "failed";
           inbox.updatedAt = iso(now);
@@ -306,13 +306,13 @@ export class NotificationService {
     const now = this.now();
     let expiredChanged = false;
     const document = await this.store.update((current) => {
-      const before = (current.inbox ?? []).filter((entry) => entry.outcome === "queued").length;
+      const before = current.inbox.filter((entry) => entry.outcome === "queued").length;
       prune(current, now);
-      expiredChanged = (current.inbox ?? []).filter((entry) => entry.outcome === "queued").length !== before;
+      expiredChanged = current.inbox.filter((entry) => entry.outcome === "queued").length !== before;
       return current;
     });
     if (expiredChanged) this.publishInboxChanged();
-    const entries = [...(document.inbox ?? [])].sort((left, right) => {
+    const entries = [...document.inbox].sort((left, right) => {
       const delta = Date.parse(right.createdAt) - Date.parse(left.createdAt);
       return delta || left.id.localeCompare(right.id);
     });
@@ -350,7 +350,7 @@ export class NotificationService {
     let resolvedId: string | undefined;
     await this.store.update((document) => {
       prune(document, now);
-      const entry = (document.inbox ?? []).find((candidate) => input.id !== undefined
+      const entry = document.inbox.find((candidate) => input.id !== undefined
         ? candidate.id === input.id
         : candidate.requestIds.includes(input.requestId!));
       if (!entry) throw new GatewayError("not_found", "Notification was not found");
@@ -371,7 +371,7 @@ export class NotificationService {
     let changed = 0;
     await this.store.update((document) => {
       prune(document, now);
-      for (const entry of document.inbox ?? []) {
+      for (const entry of document.inbox) {
         if (entry.readAt !== undefined) continue;
         entry.readAt = iso(now);
         entry.updatedAt = iso(now);
@@ -406,7 +406,7 @@ export class NotificationService {
     const ids = new Set<string>();
     let changed = false;
     await this.store.update((document) => {
-      const unread = (document.inbox ?? []).filter((entry) => entry.readAt === undefined);
+      const unread = document.inbox.filter((entry) => entry.readAt === undefined);
       const retained = new Set(unread.map((entry) => entry.id));
       // Capture and mutation share the admission/settlement mutex. Only IDs
       // survive a failed write, bounded by the canonical inbox's 512 rows.
@@ -526,7 +526,6 @@ export class NotificationService {
         id: intentId, dedupeKey, sessionKey, kind: input.kind, createdAt: iso(now), expiresAt: iso(now + INTENT_TTL_MS), targets,
       });
       document.receipts.push(receiptFor({ dedupeKey, sessionKey, grantIds: grants.map((grant) => grant.grantId), now, result: "queued" }));
-      document.inbox ??= [];
       const inboxExposesModelText = input.kind !== "explicit" || grants.every((grant) => grant.previewsEnabled);
       document.inbox.push({
         id: intentId,
@@ -649,7 +648,7 @@ export class NotificationService {
         const finalOutcome: NotificationInboxOutcome = intent.targets.some((candidate) => candidate.outcome === "accepted_by_apns") ? "accepted_by_apns"
           : intent.targets.some((candidate) => candidate.outcome === "ambiguous") ? "ambiguous" : "failed";
         if (receipt) receipt.result = finalOutcome;
-        const inbox = document.inbox?.find((entry) => entry.dedupeKey === intent.dedupeKey);
+        const inbox = document.inbox.find((entry) => entry.dedupeKey === intent.dedupeKey);
         if (inbox && inbox.outcome !== finalOutcome) {
           inbox.outcome = finalOutcome;
           inbox.updatedAt = iso(now);

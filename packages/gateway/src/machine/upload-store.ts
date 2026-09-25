@@ -20,23 +20,17 @@ const DEFAULT_MAXIMUM_RETAINED_ENTRIES = 16_384;
 const DEFAULT_MINIMUM_FREE_BYTES = 1_024 * 1_048_576;
 const DIGEST_PATTERN = /^[0-9a-f]{64}$/;
 
-interface UploadMetadataV1 {
-  version: 1;
+interface UploadMetadata {
+  version: 2;
   id: string;
   name: string;
   mimeType: string;
   size: number;
   path: string;
+  digest: string;
   createdAt: string;
   sessionId?: string;
 }
-
-interface UploadMetadataV2 extends Omit<UploadMetadataV1, "version"> {
-  version: 2;
-  digest: string;
-}
-
-type UploadMetadata = UploadMetadataV1 | UploadMetadataV2;
 
 interface StagedUpload {
   id: string;
@@ -123,14 +117,12 @@ function isConfirmedUploadCorruption(error: unknown): boolean {
 function isUploadMetadata(value: unknown, expectedID: string, maximumBytes: number): value is UploadMetadata {
   if (typeof value !== "object" || value === null) return false;
   const metadata = value as Record<string, unknown>;
-  const version = metadata.version;
   const expectedKeys = [
-    "version", "id", "name", "mimeType", "size", "path", "createdAt",
-    ...(version === 2 ? ["digest"] : []),
+    "version", "id", "name", "mimeType", "size", "path", "digest", "createdAt",
     ...(metadata.sessionId === undefined ? [] : ["sessionId"]),
   ];
   const keys = Object.keys(metadata);
-  return (version === 1 || version === 2)
+  return metadata.version === 2
     && keys.length === expectedKeys.length && keys.every((key) => expectedKeys.includes(key))
     && metadata.id === expectedID
     && typeof metadata.name === "string" && metadata.name === safeName(metadata.name)
@@ -143,7 +135,7 @@ function isUploadMetadata(value: unknown, expectedID: string, maximumBytes: numb
     && (metadata.size as number) <= maximumBytes
     && (metadata.sessionId === undefined || (typeof metadata.sessionId === "string"
       && metadata.sessionId.length > 0 && metadata.sessionId.length <= 200))
-    && (version !== 2 || (typeof metadata.digest === "string" && DIGEST_PATTERN.test(metadata.digest)));
+    && typeof metadata.digest === "string" && DIGEST_PATTERN.test(metadata.digest);
 }
 
 export class UploadStore {
@@ -167,7 +159,7 @@ export class UploadStore {
   private activeDownloadReaders = 0;
   private readonly activeImportLeases = new Map<string, number>();
   /** Rebuildable physical attachment index; canonical session ownership remains JSONL/catalog authority. */
-  private readonly logicalIndex = new Map<string, UploadMetadataV2>();
+  private readonly logicalIndex = new Map<string, UploadMetadata>();
   private readonly unclaimedIndex = new Set<string>();
   private indexedUnclaimedBytes = 0;
   private indexedClaimedCount = 0;
@@ -392,7 +384,7 @@ export class UploadStore {
           || info.dev !== objectInfo.dev || info.ino !== objectInfo.ino) {
           throw new GatewayError("conflict", "Upload content escaped its owned object or changed size");
         }
-        const metadata: UploadMetadataV2 = {
+        const metadata: UploadMetadata = {
           version: 2,
           id: staged.id,
           name,
@@ -593,7 +585,7 @@ export class UploadStore {
     }
   }
 
-  private async auditNextObject(inventory: readonly UploadMetadataV2[]): Promise<void> {
+  private async auditNextObject(inventory: readonly UploadMetadata[]): Promise<void> {
     const objects = new Map<string, number>();
     for (const metadata of inventory) objects.set(metadata.digest, metadata.size);
     const values = [...objects];
@@ -771,7 +763,7 @@ export class UploadStore {
     return this.serialize(async () => this.capacityStatus(await this.currentInventory()));
   }
 
-  private async capacityStatus(inventory: readonly UploadMetadataV2[]): Promise<UploadCapacityStatus> {
+  private async capacityStatus(inventory: readonly UploadMetadata[]): Promise<UploadCapacityStatus> {
     const unclaimed = inventory.filter((item) => item.sessionId === undefined);
     const claimed = inventory.filter((item) => item.sessionId !== undefined);
     const logicalBytes = inventory.reduce((total, item) => total + item.size, 0);
@@ -904,30 +896,26 @@ export class UploadStore {
     });
   }
 
-  private async migrateMetadata(metadata: UploadMetadata): Promise<UploadMetadataV2> {
+  private async repairMetadata(metadata: UploadMetadata): Promise<UploadMetadata> {
     const owned = await this.ownedLogicalPath(metadata);
-    if (metadata.version === 2) {
-      const objectPath = await this.objectPath(metadata.digest);
-      try {
-        const [logicalInfo, objectInfo] = await Promise.all([stat(owned.actual), lstat(objectPath)]);
-        if (objectInfo.isFile() && !objectInfo.isSymbolicLink()
-          && objectInfo.size === metadata.size
-          && logicalInfo.dev === objectInfo.dev && logicalInfo.ino === objectInfo.ino) {
-          return metadata;
-        }
-      } catch (error) {
-        if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+    const objectPath = await this.objectPath(metadata.digest);
+    try {
+      const [logicalInfo, objectInfo] = await Promise.all([stat(owned.actual), lstat(objectPath)]);
+      if (objectInfo.isFile() && !objectInfo.isSymbolicLink()
+        && objectInfo.size === metadata.size
+        && logicalInfo.dev === objectInfo.dev && logicalInfo.ino === objectInfo.ino) {
+        return metadata;
       }
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
     }
 
-    // Legacy migration and crash repair are exceptional paths. Hash them once,
-    // then ordinary inventory validates only inode/size ownership.
+    // Crash repair is an exceptional path. Hash the logical file once, then
+    // ordinary inventory validates only inode/size ownership.
     const verified = await this.hashFile(owned.actual);
-    const digest = metadata.version === 2 ? metadata.digest : verified.digest;
-    if (verified.size !== metadata.size || verified.digest !== digest) {
+    if (verified.size !== metadata.size || verified.digest !== metadata.digest) {
       throw new GatewayError("conflict", "Attachment content failed integrity verification");
     }
-    const objectPath = await this.objectPath(digest);
     let objectExists = false;
     try {
       const objectInfo = await lstat(objectPath);
@@ -935,7 +923,7 @@ export class UploadStore {
         throw new GatewayError("conflict", "Attachment object is invalid");
       }
       const objectHash = await this.hashFile(objectPath);
-      if (objectHash.digest !== digest || objectHash.size !== metadata.size) {
+      if (objectHash.digest !== metadata.digest || objectHash.size !== metadata.size) {
         throw new GatewayError("conflict", "Attachment object failed integrity verification");
       }
       objectExists = true;
@@ -959,17 +947,14 @@ export class UploadStore {
     await this.syncPath(dirname(dirname(objectPath)));
     await this.syncPath(dirname(dirname(dirname(objectPath))));
     await this.syncPath(owned.ownedDirectory);
-    this.verifiedObjectDigests.add(digest);
-    this.unavailableObjectDigests.delete(digest);
-    if (metadata.version === 2) return metadata;
-    const migrated: UploadMetadataV2 = { ...metadata, version: 2, digest };
-    await durableAtomicWriteJson(join(owned.ownedDirectory, "metadata.json"), migrated);
-    return migrated;
+    this.verifiedObjectDigests.add(metadata.digest);
+    this.unavailableObjectDigests.delete(metadata.digest);
+    return metadata;
   }
 
   private async reconcileIndexedOwnership(
     liveSessionIds?: ReadonlySet<string>,
-  ): Promise<UploadMetadataV2[]> {
+  ): Promise<UploadMetadata[]> {
     await this.refreshIndexedExpiry();
     const failedRemovals = new Set<string>();
     for (const [id, metadata] of [...this.logicalIndex]) {
@@ -992,7 +977,7 @@ export class UploadStore {
     return [...this.logicalIndex.values()];
   }
 
-  private installIndexedMetadata(metadata: UploadMetadataV2): void {
+  private installIndexedMetadata(metadata: UploadMetadata): void {
     this.removeIndexedMetadata(metadata.id);
     this.logicalIndex.set(metadata.id, metadata);
     if (metadata.sessionId === undefined) {
@@ -1030,16 +1015,16 @@ export class UploadStore {
     }
   }
 
-  private async currentInventory(): Promise<UploadMetadataV2[]> {
+  private async currentInventory(): Promise<UploadMetadata[]> {
     await this.refreshIndexedExpiry();
     return [...this.logicalIndex.values()];
   }
 
-  private async rebuildInventory(liveSessionIds?: ReadonlySet<string>): Promise<UploadMetadataV2[]> {
+  private async rebuildInventory(liveSessionIds?: ReadonlySet<string>): Promise<UploadMetadata[]> {
     this.verifiedObjectDigests.clear();
     const uploadDirectory = await this.ensureUploadDirectory();
     const entries = await readdir(uploadDirectory, { withFileTypes: true });
-    const result: UploadMetadataV2[] = [];
+    const result: UploadMetadata[] = [];
     const pendingRemovals = new Set(this.pendingSessionRemovals);
     const failedRemovals = new Set<string>();
     const cutoff = this.now() - this.maximumUnclaimedAgeMs;
@@ -1064,12 +1049,12 @@ export class UploadStore {
             await rm(folder, { recursive: true, force: true });
           } catch {
             failedRemovals.add(metadata.sessionId);
-            const migrated = await this.migrateMetadata(metadata);
-            result.push(migrated);
+            const repaired = await this.repairMetadata(metadata);
+            result.push(repaired);
           }
         } else {
-          const migrated = await this.migrateMetadata(metadata);
-          result.push(migrated);
+          const repaired = await this.repairMetadata(metadata);
+          result.push(repaired);
         }
       } catch (error) {
         if (!isConfirmedUploadCorruption(error)) throw error;
@@ -1095,7 +1080,7 @@ export class UploadStore {
     return result;
   }
 
-  private async metadata(id: string): Promise<UploadMetadataV2> {
+  private async metadata(id: string): Promise<UploadMetadata> {
     this.validateID(id);
     const uploadDirectory = await this.ensureUploadDirectory();
     const folder = join(uploadDirectory, id);
@@ -1120,18 +1105,18 @@ export class UploadStore {
       throw new GatewayError("not_found", "Upload was not found");
     }
     try {
-      const migrated = await this.migrateMetadata(metadata);
-      await this.ownedPath(migrated);
-      this.installIndexedMetadata(migrated);
-      return migrated;
+      const repaired = await this.repairMetadata(metadata);
+      await this.ownedPath(repaired);
+      this.installIndexedMetadata(repaired);
+      return repaired;
     } catch (error) {
       if (!isConfirmedUploadCorruption(error)) throw error;
-      if (metadata.version === 2 && this.unavailableObjectDigests.has(metadata.digest)) {
+      if (this.unavailableObjectDigests.has(metadata.digest)) {
         throw new GatewayError("not_found", "Attachment content is unavailable after integrity failure");
       }
       await rm(join(uploadDirectory, id), { recursive: true, force: true });
       this.removeIndexedMetadata(id);
-      if (metadata.version === 2) await this.cleanupReleasedObject(metadata.digest, metadata.size);
+      await this.cleanupReleasedObject(metadata.digest, metadata.size);
       throw new GatewayError("not_found", "Upload content is missing or invalid");
     }
   }
@@ -1169,24 +1154,24 @@ export class UploadStore {
   }
 
   private async ownedPath(metadata: UploadMetadata): Promise<{ actual: string; ownedDirectory: string }> {
-    const migrated = await this.migrateMetadata(metadata);
-    const owned = await this.ownedLogicalPath(migrated);
-    const objectPath = await this.objectPath(migrated.digest);
+    const repaired = await this.repairMetadata(metadata);
+    const owned = await this.ownedLogicalPath(repaired);
+    const objectPath = await this.objectPath(repaired.digest);
     const [logicalInfo, objectInfo] = await Promise.all([stat(owned.actual), stat(objectPath)]);
-    if (!objectInfo.isFile() || objectInfo.size !== migrated.size
+    if (!objectInfo.isFile() || objectInfo.size !== repaired.size
       || logicalInfo.dev !== objectInfo.dev || logicalInfo.ino !== objectInfo.ino) {
       throw new GatewayError("conflict", "Attachment logical path is not backed by its owned object");
     }
-    if (this.unavailableObjectDigests.has(migrated.digest)) {
+    if (this.unavailableObjectDigests.has(repaired.digest)) {
       throw new GatewayError("conflict", "Attachment object is unavailable after integrity failure");
     }
-    if (!this.verifiedObjectDigests.has(migrated.digest)) {
+    if (!this.verifiedObjectDigests.has(repaired.digest)) {
       const verified = await this.hashFile(owned.actual);
-      if (verified.size !== migrated.size || verified.digest !== migrated.digest) {
-        this.unavailableObjectDigests.set(migrated.digest, migrated.size);
+      if (verified.size !== repaired.size || verified.digest !== repaired.digest) {
+        this.unavailableObjectDigests.set(repaired.digest, repaired.size);
         throw new GatewayError("conflict", "Attachment object failed read-time integrity verification");
       }
-      this.verifiedObjectDigests.add(migrated.digest);
+      this.verifiedObjectDigests.add(repaired.digest);
     }
     return owned;
   }

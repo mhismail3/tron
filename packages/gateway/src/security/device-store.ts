@@ -207,13 +207,11 @@ export class DeviceStore {
     const ids = new Set<string>();
     const hashes = new Set<string>();
     for (const device of document.devices) {
-      const legacy = device as DeviceRecord & { lastSeenAt?: unknown };
       if (!device || typeof device !== "object" || Array.isArray(device)
         || !hasOnlyKeys(device as unknown as Record<string, unknown>, [
           "id", "name", "tokenHash", "createdAt",
           ...(device.customLabel === undefined ? [] : ["customLabel"]),
           ...(device.observedName === undefined ? [] : ["observedName"]),
-          ...(legacy.lastSeenAt === undefined ? [] : ["lastSeenAt"]),
         ])
         || typeof device.id !== "string" || device.id.length === 0 || Buffer.byteLength(device.id) > 100
         || typeof device.name !== "string" || device.name.trim().length === 0 || Buffer.byteLength(device.name) > MAXIMUM_DEVICE_NAME_BYTES
@@ -222,15 +220,12 @@ export class DeviceStore {
         || (device.observedName !== undefined && !isObservedName(device.observedName))
         || typeof device.tokenHash !== "string" || canonicalTokenHash(device.tokenHash) === null
         || typeof device.createdAt !== "string" || !isGatewayTimestamp(device.createdAt)
-        || (legacy.lastSeenAt !== undefined && (typeof legacy.lastSeenAt !== "string" || !isGatewayTimestamp(legacy.lastSeenAt)))
         || ids.has(device.id) || hashes.has(device.tokenHash)) {
         throw new GatewayError("conflict", "Paired device storage is malformed or ambiguous");
       }
       ids.add(device.id);
       hashes.add(device.tokenHash);
     }
-    // Legacy lastSeenAt is accepted for migration, but is deliberately not part
-    // of the current in-memory or persisted projection.
     return {
       version: 1,
       devices: document.devices.map(({ id, name, tokenHash, createdAt, customLabel, observedName }) => ({
