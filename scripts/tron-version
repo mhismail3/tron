@@ -193,6 +193,22 @@ check_grep_count() {
     fi
 }
 
+# Every occurrence of a build setting must carry the canonical value. The Mac
+# project versions two bundles (Tron.app and TronNativeHost), and the sync step
+# rewrites every occurrence, so a count of exactly one would reject a correct file.
+check_every_setting() {
+    local label="$1"
+    local key="$2"
+    local expected="$3"
+    local file="$4"
+    local total matching
+    total=$(grep -Ec "^[[:space:]]*${key}:" "$file" || true)
+    matching=$(grep -Fc "${key}: \"${expected}\"" "$file" || true)
+    if [ "$total" -lt 1 ] || [ "$total" != "$matching" ]; then
+        note_failure "$label: $matching of $total occurrence(s) are '$expected'"
+    fi
+}
+
 check_versions() {
     failures=0
     derive_version_fields
@@ -207,8 +223,8 @@ check_versions() {
     check_equals "gateway lock version" "$gateway_lock_version" "$TRON_VERSION"
     check_grep_count "gateway source version" 1 "GATEWAY_VERSION = \"${TRON_VERSION}\"" "$PROJECT_DIR/packages/gateway/src/version.ts"
 
-    check_grep_count "Mac MARKETING_VERSION" 1 "MARKETING_VERSION: \"${TRON_APPLE_MARKETING_VERSION}\"" "$PROJECT_DIR/packages/mac-app/project.yml"
-    check_grep_count "Mac CURRENT_PROJECT_VERSION" 1 "CURRENT_PROJECT_VERSION: \"${TRON_APPLE_BUILD}\"" "$PROJECT_DIR/packages/mac-app/project.yml"
+    check_every_setting "Mac MARKETING_VERSION" MARKETING_VERSION "$TRON_APPLE_MARKETING_VERSION" "$PROJECT_DIR/packages/mac-app/project.yml"
+    check_every_setting "Mac CURRENT_PROJECT_VERSION" CURRENT_PROJECT_VERSION "$TRON_APPLE_BUILD" "$PROJECT_DIR/packages/mac-app/project.yml"
     check_grep_count "Mac TRON_CANONICAL_VERSION" 1 "TRON_CANONICAL_VERSION: \"${TRON_VERSION}\"" "$PROJECT_DIR/packages/mac-app/project.yml"
 
     check_grep_count "iOS MARKETING_VERSION" 1 "MARKETING_VERSION: \"${TRON_APPLE_MARKETING_VERSION}\"" "$PROJECT_DIR/packages/ios-app/project.yml"
