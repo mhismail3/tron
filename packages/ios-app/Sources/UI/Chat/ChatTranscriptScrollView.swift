@@ -300,13 +300,6 @@ enum ChatPromptReplacementHeightPolicy {
 }
 
 private extension ChatPhysicalTranscriptRow {
-    var isPromptLifecycle: Bool {
-        switch content {
-        case .pending, .outgoing, .queued: true
-        case .transcript: false
-        }
-    }
-
     /// True only while the row renders the taller `ChatPromptCard` visual, which
     /// is the one lifecycle appearance that differs from the canonical user
     /// row. An ordinary outgoing or pending row renders the same Liquid Glass
@@ -458,7 +451,7 @@ private struct ChatPhysicalTranscriptReplacementHost<Content: View>: View {
         // records its height.
         // Streaming and history rows perform no state write per layout.
         let awaiting = awaitingReplacementHeightRevision != nil
-        guard awaiting || displayed.isPromptLifecycle else { return }
+        guard awaiting || displayed.usesQueuedCardVisual else { return }
         if naturalHeight != height { naturalHeight = height }
         guard let revision = awaitingReplacementHeightRevision,
               revision == promptReplacementRevision,
