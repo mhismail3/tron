@@ -468,10 +468,6 @@ function prepareOutboundFrame(value: unknown, maximum: number): PreparedOutbound
     : undefined;
 }
 
-export function encodeOutboundFrame(value: unknown, maximum: number): string | undefined {
-  return prepareOutboundFrame(value, maximum)?.output;
-}
-
 async function* completeRequestBody(request: IncomingMessage): AsyncGenerator<Buffer> {
   for await (const value of request) {
     yield Buffer.isBuffer(value) ? value : Buffer.from(value);
@@ -1745,7 +1741,7 @@ export class GatewayServer {
           }
           connection.synchronizations.delete(completion.sessionId);
 
-          // `fallback` means encodeOutboundFrame already emitted the compact
+          // `fallback` means prepareOutboundFrame already produced the compact
           // resync replacement. Do not emit a duplicate or flush a suffix that
           // has no corresponding published baseline.
           const recoveryOutcome = this.sendOutcome(connection, {

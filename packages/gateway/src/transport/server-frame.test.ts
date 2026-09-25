@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { canAttachTerminal, clearRequestSynchronizations, encodeOutboundFrame, existingSessionOpenOwner, heartbeatTimerDelay, HttpTransportAdmission, releaseSessionTerminals, shouldTerminateHeartbeat } from "./server.js";
+import { canAttachTerminal, clearRequestSynchronizations, existingSessionOpenOwner, heartbeatTimerDelay, HttpTransportAdmission, releaseSessionTerminals, shouldTerminateHeartbeat } from "./server.js";
 import { SessionSyncBarrier } from "./session-sync.js";
 
 describe("bounded outbound gateway frames", () => {
@@ -59,58 +59,6 @@ describe("bounded outbound gateway frames", () => {
     expect(() => first.commit("token-1")).toThrow();
     expect(() => second.commit("wrong-token")).toThrow();
   });
-  it("delivers maximum admitted machine identity fields in the hello frame", () => {
-    const hello = {
-      type: "hello",
-      gatewayVersion: "1.0.0",
-      piVersion: "1.0.0",
-      protocolVersion: 5,
-      minProtocolVersion: 4,
-      machineId: "i".repeat(256),
-      machineName: "n".repeat(1_024),
-      capabilities: ["sessions.v1"],
-    };
-    const encoded = encodeOutboundFrame(hello, 1_048_576);
-
-    expect(encoded).toBeDefined();
-    expect(JSON.parse(encoded!)).toEqual(hello);
-  });
-
-  it("returns a correlated error instead of closing the socket for an oversized response", () => {
-    const encoded = encodeOutboundFrame({
-      type: "response",
-      id: "request-1",
-      ok: true,
-      result: { transcript: "x".repeat(2_000) },
-    }, 1_000);
-
-    expect(encoded).toBeDefined();
-    expect(JSON.parse(encoded!)).toMatchObject({
-      type: "response",
-      id: "request-1",
-      ok: false,
-      error: { code: "response_too_large" },
-    });
-  });
-
-  it("admits exactly the native node ceiling and returns a correlated error one node above it", () => {
-    const rows = Array.from({ length: 4 }, (_, index) => Array(index === 3 ? 8_189 : 8_190).fill(0));
-    const frame = { type: "response", id: "dense-request", ok: true, result: rows };
-    expect(JSON.parse(encodeOutboundFrame(frame, 1_048_576)!)).toEqual(frame);
-    rows[3]!.push(0);
-    expect(Buffer.byteLength(JSON.stringify(frame))).toBeLessThan(1_048_576);
-    expect(JSON.parse(encodeOutboundFrame(frame, 1_048_576)!)).toMatchObject({
-      type: "response", id: "dense-request", ok: false,
-      error: { code: "response_too_large", retryable: false,
-        details: { nodeCountAtLeast: 32_769, maximumNodes: 32_768 } },
-    });
-    const event = { type: "event", topic: "session.snapshot", sessionId: "session", payload: rows };
-    expect(JSON.parse(encodeOutboundFrame(event, 1_048_576)!)).toMatchObject({
-      type: "event", topic: "transport.resyncRequired", sessionId: "session",
-      payload: { nodeCountAtLeast: 32_769, maximumNodes: 32_768 },
-    });
-  });
-
   it("clears a failed open transaction so the same session can synchronize again immediately", () => {
     const firstTimeout = setTimeout(() => {}, 60_000);
     const otherTimeout = setTimeout(() => {}, 60_000);
@@ -178,22 +126,5 @@ describe("bounded outbound gateway frames", () => {
     expect(canAttachTerminal(subscriptions, "terminal", belongs)).toBe(false);
     subscriptions.set("replacement", "replacement-token");
     expect(canAttachTerminal(subscriptions, "terminal", belongs)).toBe(false);
-  });
-
-  it("turns an oversized snapshot event into a bounded resync hint", () => {
-    const encoded = encodeOutboundFrame({
-      type: "event",
-      topic: "session.snapshot",
-      sessionId: "session-1",
-      payload: { transcript: "x".repeat(2_000) },
-    }, 1_000);
-
-    expect(encoded).toBeDefined();
-    expect(JSON.parse(encoded!)).toMatchObject({
-      type: "event",
-      topic: "transport.resyncRequired",
-      sessionId: "session-1",
-      payload: { reason: "oversized projection" },
-    });
   });
 });

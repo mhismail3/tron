@@ -1,4 +1,4 @@
-import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it, vi } from "vitest";
@@ -182,7 +182,7 @@ describe("session transcript paging", () => {
     }
   });
 
-  it("removes retired legacy RPCs without removing canonical JSONL import", async () => {
+  it("rejects an unsupported method without removing canonical JSONL import", async () => {
     const importFromJsonl = vi.fn(async () => ({ id: "canonical-session" }));
     const release = vi.fn(async () => {});
     const service = new GatewayService({
@@ -203,7 +203,6 @@ describe("session transcript paging", () => {
     } as unknown as GatewayServiceDependencies);
 
     await expect(service.invoke(client, "legacy.inspect", {})).rejects.toMatchObject({ code: "not_found" });
-    await expect(service.invoke(client, "legacy.import", { commandId: "command-1" })).rejects.toMatchObject({ code: "not_found" });
     await expect(service.invoke(client, "session.import", {
       commandId: "command-2",
       uploadId: "upload-1",
@@ -272,32 +271,52 @@ describe("session transcript paging", () => {
   });
 
   it("routes subagent stop only through the exact connection-owned transcript lease", async () => {
-    const abortOwned = vi.fn(async () => undefined);
-    const execute = vi.fn(async (
-      _identity: string,
-      _method: string,
-      _commandId: string,
-      operation: () => Promise<unknown>,
-    ) => operation());
-    const service = new GatewayService({
-      sessions: {},
-      receipts: { execute },
-    } as unknown as GatewayServiceDependencies);
-    Object.assign(service as unknown as Record<string, unknown>, {
-      processTranscriptLeases: { abortOwned },
-    });
+    const root = await mkdtemp(join(tmpdir(), "tron-service-subagent-stop-"));
+    try {
+      const path = join(root, "child.jsonl");
+      await writeFile(path, "{}\n");
+      const abortSubagentProcess = vi.fn(async () => undefined);
+      const slot = {
+        id: "parent",
+        reconcileProcessChildSessionBinding: vi.fn(async () => {}),
+        processChildSessionBinding: () => ({ ref: "child", runId: "run-1" }),
+        processChildSessionPath: () => undefined,
+        processSubagentAbortAuthority: () => ({ expectedOperationId: "operation-1" }),
+        abortSubagentProcess,
+      };
+      const sessions = {
+        isSubscribed: () => true,
+        acquire: vi.fn(async () => slot),
+        resolveReadOnlySubagentPath: vi.fn(async () => ({ path, fileIdentity: "1:1" })),
+        readOnlySubagentTranscriptPage: vi.fn(async () => ({
+          items: [], start: 0, end: 0, total: 0, revision: "revision-1", fileIdentity: "1:1",
+        })),
+      };
+      const service = new GatewayService({
+        config: { tronHome: root },
+        sessions,
+        receipts: new CommandReceiptStore(root),
+      } as unknown as GatewayServiceDependencies);
+      const owner = { ...client, subscriptionToken: () => "subscription-1", sendEvent: vi.fn() };
+      const other = { ...client, id: "other-phone", identity: "device:other", subscriptionToken: () => "subscription-2", sendEvent: vi.fn() };
 
-    await expect(service.invoke(client, "session.processTranscript.abort", {
-      leaseId: "lease-1",
-      commandId: "command-subagent-stop",
-    })).resolves.toEqual({ aborted: true });
-    expect(abortOwned).toHaveBeenCalledWith("phone", "lease-1");
-    expect(execute).toHaveBeenCalledWith(
-      "device:test",
-      "session.processTranscript.abort",
-      "command-subagent-stop",
-      expect.any(Function),
-    );
+      await expect(service.invoke(owner, "session.processTranscript.open", {
+        sessionId: "parent", processId: "process", viewerId: "lease-1", subscriptionToken: "subscription-1",
+      })).resolves.toMatchObject({ leaseId: "lease-1", canAbort: true });
+
+      // Only the connection that owns the lease may stop it.
+      await expect(service.invoke(other, "session.processTranscript.abort", {
+        leaseId: "lease-1", commandId: "other-command",
+      })).rejects.toMatchObject({ code: "not_found" });
+
+      await expect(service.invoke(owner, "session.processTranscript.abort", {
+        leaseId: "lease-1", commandId: "command-subagent-stop",
+      })).resolves.toEqual({ aborted: true });
+      expect(abortSubagentProcess).toHaveBeenCalledWith("process", "run-1", "operation-1");
+      await expect(service.invoke(owner, "command.status", {
+        method: "session.processTranscript.abort", commandId: "command-subagent-stop",
+      })).resolves.toMatchObject({ status: "completed", result: { aborted: true } });
+    } finally { await rm(root, { recursive: true, force: true }); }
   });
 
   it("returns a bounded page only for an established subscription without creating ownership", async () => {
@@ -667,7 +686,7 @@ describe("session transcript paging", () => {
     expect(snapshot).toHaveBeenCalledTimes(1);
   });
 
-  it("serializes absolute attention mutations and stale-safe open acknowledgements", async () => {
+  it("applies absolute attention reads and receipt-backed attention mutations", async () => {
     const setAttention = vi.fn(async (_sessionId: string, unread: boolean, through?: number) => ({
       completionRevision: 4, attentionRevision: 8, isUnread: unread || (through ?? 0) < 4,
     }));

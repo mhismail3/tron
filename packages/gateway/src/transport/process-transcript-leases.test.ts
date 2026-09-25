@@ -378,8 +378,15 @@ describe("ProcessTranscriptLeaseStore", () => {
     const store = new ProcessTranscriptLeaseStore(sessions);
     const controller = new AbortController();
     controller.abort();
-    expect(() => store.reserveOpen("client-1", "parent-1", "viewer-1", "token-1", controller.signal))
-      .toThrowError(/retired/u);
+    // The aborted-signal fence is checked before the opening reservation, so
+    // retried retired viewers cannot consume any of the client's capacity.
+    for (let attempt = 0; attempt < 9; attempt += 1) {
+      expect(() => store.reserveOpen("client-1", "parent-1", `viewer-${attempt}`, "token-1", controller.signal))
+        .toThrowError(/retired/u);
+    }
+    const fresh = store.reserveOpen("client-1", "parent-1", "viewer-fresh", "token-1");
+    expect(fresh.signal.aborted).toBe(false);
+    fresh.release();
   });
 
   it("retires a canceled open before a late admission response can publish a lease", async () => {
