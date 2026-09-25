@@ -1,6 +1,6 @@
 import { env } from "cloudflare:test";
 import { afterEach, describe, expect, test, vi } from "vitest";
-import { buildApnsPayload, sendToApns, TRON_NOTIFICATION_SOUND } from "../src/apns";
+import { sendToApns } from "../src/apns";
 import type { Env } from "../src/contracts";
 import { notification } from "./fixtures";
 
@@ -9,27 +9,34 @@ afterEach(() => { vi.unstubAllGlobals(); vi.useRealTimers(); });
 const target = { deviceToken: "00", topic: "com.tron.mobile", environment: "sandbox" as const };
 
 describe("closed APNs payload", () => {
-  test("projects one fixed alert without badge, routing, or arbitrary data", () => {
-    const payload = JSON.parse(buildApnsPayload(notification));
-    expect(payload).toEqual({
+  test("projects one fixed alert without badge, routing, or arbitrary data", async () => {
+    const providerFetch = vi.fn(async (_url: string | URL | Request, _init?: RequestInit) => new Response(null, { status: 200 }));
+    vi.stubGlobal("fetch", providerFetch);
+    expect((await sendToApns(env as unknown as Env, notification, target)).status).toBe("accepted_by_apns");
+    const [url, init] = providerFetch.mock.calls[0]!;
+    expect(String(url)).toBe("https://api.sandbox.push.apple.com/3/device/00");
+    const body = String(init?.body);
+    expect(JSON.parse(body)).toEqual({
       aps: {
         alert: { title: "Tron", body: "Tron needs your input." },
-        sound: TRON_NOTIFICATION_SOUND,
-        category: "TRON_AGENT_NOTIFICATION",
+        sound: "tron-notification.caf",
       },
       tron: { kind: "agent_notification", requestId: "request-identifier-0001" },
     });
-    expect(new TextEncoder().encode(JSON.stringify(payload)).byteLength).toBeLessThanOrEqual(4096);
-    expect(JSON.stringify(payload)).not.toContain("deviceToken");
+    expect(new TextEncoder().encode(body).byteLength).toBeLessThanOrEqual(4096);
+    expect(body).not.toContain("deviceToken");
   });
 
-  test("projects the product title and exact chat route for an agent completion", () => {
-    const payload = JSON.parse(buildApnsPayload({
+  test("projects the product title and exact chat route for an agent completion", async () => {
+    const providerFetch = vi.fn(async (_url: string | URL | Request, _init?: RequestInit) => new Response(null, { status: 200 }));
+    vi.stubGlobal("fetch", providerFetch);
+    await sendToApns(env as unknown as Env, {
       ...notification,
       title: "Release audit",
       sessionId: "session-abcdefgh",
       machineId: "machine-abcdefgh",
-    }));
+    }, target);
+    const payload = JSON.parse(String(providerFetch.mock.calls[0]![1]?.body));
     expect(payload.aps.alert).toEqual({
       title: "Release audit",
       body: "Tron needs your input.",
@@ -38,6 +45,17 @@ describe("closed APNs payload", () => {
       sessionId: "session-abcdefgh",
       machineId: "machine-abcdefgh",
     });
+  });
+
+  test("rejects a payload past the provider byte ceiling without contacting APNs", async () => {
+    const providerFetch = vi.fn();
+    vi.stubGlobal("fetch", providerFetch);
+    expect(await sendToApns(
+      env as unknown as Env,
+      { ...notification, message: "x".repeat(5000) },
+      target,
+    )).toEqual({ status: "permanent_failure", reason: "payload_too_large" });
+    expect(providerFetch).not.toHaveBeenCalled();
   });
 
   test("bounds provider-token failures without contacting APNs", async () => {

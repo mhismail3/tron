@@ -4,7 +4,7 @@ import { base64Url, ownedBuffer, pemBytes, readBoundedStream, sha256, stableProv
 const MAX_APNS_PAYLOAD_BYTES = 4096;
 const MAX_APNS_RESPONSE_BYTES = 2048;
 const JWT_CACHE_SECONDS = 50 * 60;
-export const TRON_NOTIFICATION_SOUND = "tron-notification.caf";
+const TRON_NOTIFICATION_SOUND = "tron-notification.caf";
 
 let cachedProviderToken: { fingerprint: string; token: string; expiresAt: number } | undefined;
 
@@ -69,12 +69,11 @@ export async function sendToApns(
   return { status: "permanent_failure", reason };
 }
 
-export function buildApnsPayload(request: NotificationRequest): string {
+function buildApnsPayload(request: NotificationRequest): string {
   return JSON.stringify({
     aps: {
       alert: { title: request.title ?? "Tron", body: request.message },
       sound: TRON_NOTIFICATION_SOUND,
-      category: "TRON_AGENT_NOTIFICATION",
     },
     tron: { kind: "agent_notification", requestId: request.requestId },
     ...(request.sessionId && request.machineId
