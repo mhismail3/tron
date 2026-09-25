@@ -16,9 +16,11 @@ struct MenuBarControllerTests {
         let controller = MenuBarController(setup: .live, debugSetup: debug)
 
         let first = controller.refreshDebugGatewayState()
-        try? await Task.sleep(nanoseconds: 10_000_000)
+        await sequence.waitForFirstRequest()
         let second = controller.refreshDebugGatewayState()
+        await sequence.waitForSecondRequest()
         await second.value
+        await sequence.releaseFirstRequest()
         await first.value
 
         #expect(controller.debugGatewayAdmission?.processID == 42)
@@ -68,10 +70,16 @@ struct MenuBarControllerTests {
     }
 }
 
+/// Holds the first observation until the test has issued a newer refresh, so
+/// the fence is exercised without a real-time sleep.
 private actor DebugObservationSequence {
     let first: DebugGatewayObserver.Admission
     let second: DebugGatewayObserver.Admission
-    var calls = 0
+    private var calls = 0
+    private var firstEntered = false
+    private var secondEntered = false
+    private var firstRelease: CheckedContinuation<Void, Never>?
+    private var entryWaiters: [CheckedContinuation<Void, Never>] = []
 
     init(first: DebugGatewayObserver.Admission, second: DebugGatewayObserver.Admission) {
         self.first = first
@@ -81,9 +89,32 @@ private actor DebugObservationSequence {
     func next() async -> DebugGatewayObserver.Observation {
         calls += 1
         if calls == 1 {
-            try? await Task.sleep(nanoseconds: 150_000_000)
+            firstEntered = true
+            resumeEntryWaiters()
+            await withCheckedContinuation { firstRelease = $0 }
             return .admitted(first)
         }
+        secondEntered = true
+        resumeEntryWaiters()
         return .admitted(second)
+    }
+
+    func waitForFirstRequest() async { await waitForEntry { self.firstEntered } }
+
+    func waitForSecondRequest() async { await waitForEntry { self.secondEntered } }
+
+    func releaseFirstRequest() {
+        firstRelease?.resume()
+        firstRelease = nil
+    }
+
+    private func waitForEntry(_ hasEntered: () -> Bool) async {
+        if hasEntered() { return }
+        await withCheckedContinuation { entryWaiters.append($0) }
+    }
+
+    private func resumeEntryWaiters() {
+        for waiter in entryWaiters { waiter.resume() }
+        entryWaiters.removeAll()
     }
 }

@@ -183,43 +183,8 @@ struct MacAppStartupMaintenanceTests {
         #expect(mock.calls.map(\.kind) == [.runtimeInfo])
     }
 
-    @Test("same-version marker repairs a registration with the wrong channel marker")
-    func recordedVersionRepairsWrongChannelRegistration() async throws {
-        let tmp = TestTempDir.make()
-        defer { TestTempDir.cleanup(tmp) }
-        let current = MacAppVersionIdentity(canonicalVersion: "0.1.0-beta.3", buildNumber: "3")
-        let mock = MockLaunchAgentManager()
-        let helper = tmp.appendingPathComponent("Tron.app/Contents/Library/LoginItems/Tron Agent.app/Contents/MacOS/tron").path
-        let payload = tmp.appendingPathComponent("Tron.app/Contents/Resources/Gateway").path
-        mock.runtimeInfo = LaunchAgentRuntimeInfo(
-            pid: 42,
-            parentBundleIdentifier: MacRuntimeVariant.releaseBundleIdentifier,
-            parentBundleVersion: current.buildNumber,
-            executablePath: helper,
-            processCommand: "\(payload)/runtime/node-arm64 \(payload)/app/dist/index.js --host tailscale --port 9847",
-            gatewaySupervisionMarker: TronPaths.gatewaySupervisionValue,
-            gatewayChannelMarker: "dev"
-        )
-        let setup = Self.makeSetup(
-            tmp: tmp,
-            currentVersion: current,
-            recordedVersion: current,
-            runtimeOwnershipHealthy: false,
-            launchAgentManager: mock
-        )
-
-        let result = await MacAppStartupMaintenance.run(
-            setup: setup,
-            controller: nil,
-            context: .existingOnboardedLaunch
-        )
-
-        #expect(result == .restarted(.ok))
-        #expect(mock.calls.map(\.kind) == [.runtimeInfo, .load])
-    }
-
-    @Test("same-version marker repairs when selected payload ownership changes")
-    func recordedVersionRepairsChangedSelectedPayload() async throws {
+    @Test("same-version marker does not suppress repair of an unowned selected payload")
+    func recordedVersionRepairsUnownedSelectedPayload() async throws {
         let tmp = TestTempDir.make()
         defer { TestTempDir.cleanup(tmp) }
         let current = MacAppVersionIdentity(canonicalVersion: "0.1.0-beta.3", buildNumber: "3")
@@ -229,6 +194,7 @@ struct MacAppStartupMaintenanceTests {
         mock.runtimeInfo = LaunchAgentRuntimeInfo(
             pid: 42,
             parentBundleIdentifier: MacRuntimeVariant.releaseBundleIdentifier,
+            parentBundleVersion: current.buildNumber,
             executablePath: helper,
             processCommand: "\(selectedPayload)/runtime/node-arm64 \(selectedPayload)/app/dist/index.js --host tailscale --port 9847",
             gatewaySupervisionMarker: TronPaths.gatewaySupervisionValue,

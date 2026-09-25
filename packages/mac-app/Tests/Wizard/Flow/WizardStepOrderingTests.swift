@@ -2,11 +2,11 @@ import Foundation
 import Testing
 @testable import TronMac
 
-/// Pins the canonical step ordering so a silent reorder triggers a
-/// failing test instead of a confused user.
+/// Pins the canonical step ordering and the persisted raw values so a silent
+/// reorder or rename triggers a failing test instead of a confused user.
 @Suite("WizardStep ordering")
 struct WizardStepOrderingTests {
-    @Test("rawValues are stable strings (used as UserDefaults keys)")
+    @Test("rawValues are stable strings (they are the persisted wizard-state step)")
     func rawValuesStable() {
         #expect(WizardStep.welcome.rawValue == "welcome")
         #expect(WizardStep.tailscale.rawValue == "tailscale")

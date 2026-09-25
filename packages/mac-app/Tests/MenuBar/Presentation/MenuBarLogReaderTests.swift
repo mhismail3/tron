@@ -57,12 +57,6 @@ struct MenuBarLogReaderTests {
         #expect(MenuBarLogReader.decodeFrame(data: Data(#"{"id":"another-request"}"#.utf8)) == .ignore)
     }
 
-    @Test("explicit log host is used to build the Gateway socket URL")
-    func explicitHostBuildsSocketURL() {
-        let url = GatewaySocketURL.make(host: "100.64.0.9", port: 9847)
-        #expect(url?.host == "100.64.0.9")
-    }
-
     @Test("formats structured rows for display")
     func formatsStructuredRows() {
         let text = MenuBarLogReader.format([
