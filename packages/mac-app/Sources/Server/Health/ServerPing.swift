@@ -109,67 +109,53 @@ enum ServerPing {
         case malformed
     }
 
-    private struct PingResponseFrame: Decodable {
-        let type: String
-        let id: String
-        let ok: Bool
-        let result: ResultFrame?
-
-        struct ResultFrame: Decodable {
-            let gatewayVersion: String
-            let protocolVersion: Int
-            let minProtocolVersion: Int
-            let machineId: String
-            let gatewayChannel: String
-            let sourceRevision: String?
-            let buildFingerprint: String?
-            let runtimeEpoch: String?
-        }
+    private struct SystemInfoResult: Decodable {
+        let gatewayVersion: String
+        let protocolVersion: Int
+        let minProtocolVersion: Int
+        let machineId: String
+        let gatewayChannel: String
+        let sourceRevision: String?
+        let buildFingerprint: String?
+        let runtimeEpoch: String?
     }
 
     static func decodeFrame(
         data: Data,
         expectedID: String = requestID
     ) -> ResponseFrame {
-        guard let json = try? JSONSerialization.jsonObject(with: data, options: []) as? [String: Any] else {
-            return .malformed
-        }
-        guard responseID(json["id"], matches: expectedID) else {
+        let frame: GatewayResponseDecoder.Frame<SystemInfoResult> = GatewayResponseDecoder.decode(
+            data: data,
+            expectedID: expectedID
+        )
+        switch frame {
+        case .ignore:
             return .ignore
-        }
-        guard let frame = try? JSONDecoder().decode(PingResponseFrame.self, from: data),
-              frame.type == "response",
-              frame.id == expectedID else {
-            return .malformed
-        }
-        if json["error"] != nil || !frame.ok {
+        case .error:
+            // A failed system.info carries no version to report; the poller
+            // treats this exactly as an unreadable payload.
             return .error
-        }
-        guard let value = frame.result,
-              !value.gatewayVersion.isEmpty,
-              value.protocolVersion == supportedProtocolVersion,
-              value.minProtocolVersion == minimumProtocolVersion,
-              !value.machineId.isEmpty,
-              GatewayPayloadStore.validComponent(
-                value.gatewayChannel,
-                maximumLength: GatewayPayloadStore.channelComponentLimit
-              ) else {
+        case .malformed:
             return .malformed
+        case .result(let value):
+            guard !value.gatewayVersion.isEmpty,
+                  value.protocolVersion == supportedProtocolVersion,
+                  value.minProtocolVersion == minimumProtocolVersion,
+                  !value.machineId.isEmpty,
+                  GatewayPayloadStore.validComponent(
+                    value.gatewayChannel,
+                    maximumLength: GatewayPayloadStore.channelComponentLimit
+                  ) else {
+                return .malformed
+            }
+            return .result(ServerPingInfo(
+                version: value.gatewayVersion,
+                gatewayChannel: value.gatewayChannel,
+                sourceRevision: value.sourceRevision,
+                buildFingerprint: value.buildFingerprint,
+                runtimeEpoch: value.runtimeEpoch
+            ))
         }
-        return .result(ServerPingInfo(
-            version: value.gatewayVersion,
-            gatewayChannel: value.gatewayChannel,
-            sourceRevision: value.sourceRevision,
-            buildFingerprint: value.buildFingerprint,
-            runtimeEpoch: value.runtimeEpoch
-        ))
-    }
-
-    private static func responseID(_ value: Any?, matches expectedID: String) -> Bool {
-        if let string = value as? String {
-            return string == expectedID
-        }
-        return false
     }
 }
 

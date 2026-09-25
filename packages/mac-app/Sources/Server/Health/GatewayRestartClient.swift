@@ -150,19 +150,22 @@ enum GatewayRestartClient {
             ], deadline: deadline)
             for _ in 0..<8 {
                 guard let data = try await connection.receiveData(deadline: deadline) else { throw Failure.malformedResponse }
-                guard let frame = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-                      frame["id"] as? String == commandID else { continue }
-                guard frame["type"] as? String == "response", let ok = frame["ok"] as? Bool else { throw Failure.malformedResponse }
-                if !ok {
-                    guard let error = frame["error"] as? [String: Any], let code = error["code"] as? String,
-                          let message = error["message"] as? String else { throw Failure.malformedResponse }
-                    throw Failure.gateway(code: code, message: message, retryable: error["retryable"] as? Bool ?? false)
+                let frame: GatewayResponseDecoder.Frame<UpdateResponse> = GatewayResponseDecoder.decode(
+                    data: data,
+                    expectedID: commandID
+                )
+                switch frame {
+                case .result(let response):
+                    guard response.commandId == commandID else { throw Failure.malformedResponse }
+                    return response
+                case .ignore:
+                    continue
+                case .error(let error):
+                    guard let failure = gatewayFailure(error) else { throw Failure.malformedResponse }
+                    throw failure
+                case .malformed:
+                    throw Failure.malformedResponse
                 }
-                guard let result = frame["result"], JSONSerialization.isValidJSONObject(result),
-                      let resultData = try? JSONSerialization.data(withJSONObject: result),
-                      let response = try? JSONDecoder().decode(UpdateResponse.self, from: resultData),
-                      response.commandId == commandID else { throw Failure.malformedResponse }
-                return response
             }
             throw Failure.timeout
         } catch is CancellationError { throw CancellationError() }
@@ -197,15 +200,20 @@ enum GatewayRestartClient {
             ], deadline: deadline)
             for _ in 0..<8 {
                 guard let data = try await connection.receiveData(deadline: deadline) else { throw Failure.malformedResponse }
-                guard let frame = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-                      frame["id"] as? String == commandID else { continue }
-                guard frame["type"] as? String == "response", let result = frame["result"],
-                      JSONSerialization.isValidJSONObject(result),
-                      let bytes = try? JSONSerialization.data(withJSONObject: result),
-                      let response = try? JSONDecoder().decode(CommandStatusResponse.self, from: bytes) else {
+                let frame: GatewayResponseDecoder.Frame<CommandStatusResponse> = GatewayResponseDecoder.decode(
+                    data: data,
+                    expectedID: commandID
+                )
+                switch frame {
+                case .result(let response):
+                    return response
+                case .ignore:
+                    continue
+                case .error, .malformed:
+                    // A failed or unreadable command-status frame has always
+                    // been reported as an invalid protocol response here.
                     throw Failure.malformedResponse
                 }
-                return response
             }
             throw Failure.timeout
         } catch is CancellationError { throw CancellationError() }
@@ -238,27 +246,32 @@ enum GatewayRestartClient {
     }
 
     static func decodeFrame(data: Data, expectedID: String) -> Frame {
-        guard let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+        let frame: GatewayResponseDecoder.Frame<Response> = GatewayResponseDecoder.decode(
+            data: data,
+            expectedID: expectedID
+        )
+        switch frame {
+        case .ignore:
+            return .ignore
+        case .malformed:
             return .malformed
+        case .result(let response):
+            guard response.activeSessionIds.allSatisfy({ !$0.isEmpty }) else { return .malformed }
+            return .result(response)
+        case .error(let error):
+            guard let failure = gatewayFailure(error) else { return .malformed }
+            return .error(failure)
         }
-        guard json["id"] as? String == expectedID else { return .ignore }
-        guard json["type"] as? String == "response", let ok = json["ok"] as? Bool else {
-            return .malformed
+    }
+
+    /// The Gateway's own error object (`packages/gateway/src/errors.ts`) is this
+    /// client's failure taxonomy: a code and a message the user can read. The
+    /// Gateway never sends either empty, so an empty one is an unusable frame.
+    private static func gatewayFailure(_ error: GatewayResponseDecoder.ErrorFrame?) -> Failure? {
+        guard let code = error?.code, let message = error?.message, !code.isEmpty, !message.isEmpty else {
+            return nil
         }
-        if !ok {
-            guard let error = json["error"] as? [String: Any],
-                  let code = error["code"] as? String,
-                  let message = error["message"] as? String,
-                  !code.isEmpty, !message.isEmpty else { return .malformed }
-            return .error(.gateway(code: code, message: message, retryable: error["retryable"] as? Bool ?? false))
-        }
-        guard json["error"] == nil,
-              let resultObject = json["result"],
-              JSONSerialization.isValidJSONObject(resultObject),
-              let resultData = try? JSONSerialization.data(withJSONObject: resultObject),
-              let result = try? JSONDecoder().decode(Response.self, from: resultData),
-              result.activeSessionIds.allSatisfy({ !$0.isEmpty }) else { return .malformed }
-        return .result(result)
+        return .gateway(code: code, message: message, retryable: error?.retryable ?? false)
     }
 
 }

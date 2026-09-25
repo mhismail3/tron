@@ -56,7 +56,7 @@ profile starts.
 - `packages/mac-app/Sources/Wizard/` — location, installation, permissions, Tailscale, pairing, finish
 - `packages/mac-app/Sources/MenuBar/` — status poller, controls, pairing window, gateway logs
 - `packages/mac-app/Sources/Server/LaunchAgent/` — the retained internal name for SMAppService ownership
-- `packages/mac-app/Sources/Server/Health/` — authenticated `system.info` gateway probe
+- `packages/mac-app/Sources/Server/Health/` — authenticated `system.info` gateway probe and the shared Gateway response-envelope decoder
 - `packages/mac-app/Sources/Server/Paths/` — canonical wrapper identities and filesystem paths
 - `packages/mac-app/Sources/Support/Pairing/` — strict invitation URL and QR generation
 - `packages/mac-app/Sources/Resources/Library/` — tracked Gateway Login Item and LaunchAgent skeletons
@@ -284,13 +284,14 @@ by separate exact-key schema validation. Stable transport never probes loopback
 when Tailscale resolution is unavailable; Debug admits only the exact lifecycle
 host (`tailscale` or `127.0.0.1`), and loopback Debug is never pairable.
 ServerPing, GatewayRestartClient and MenuBarLogReader share the bounded WebSocket
-transport handshake and receive deadline while retaining their error taxonomies.
-After host resolution, log capture uses one five-second deadline across hello,
+transport handshake, the receive deadline and one response-envelope decoder,
+while each client keeps its own result type, error taxonomy and user-facing text.
+Matching responses must be JSON objects addressed to the request ID with
+`type=response` and a Boolean `ok`, and a response that mixes a result with an
+error is malformed. After host resolution, log capture uses one five-second deadline across hello,
 send and all receives; cancellation closes the pending socket rather than waiting
 for a response. Its 1-MiB frame capacity preserves ordinary 200-record log replies
-that exceed the health/restart probes' unchanged 256-KiB admission limit. Matching
-log responses require `type=response`, Boolean `ok` and non-conflicting result/error
-fields. No request is sent before hello acceptance, and unrelated frames do not
+that exceed the health/restart probes' unchanged 256-KiB admission limit. No request is sent before hello acceptance, and unrelated frames do not
 reset the deadline or extend the existing eight-frame limit.
 
 `Subprocess` requires explicit observation or accepted-operation authority. An

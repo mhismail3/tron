@@ -96,22 +96,20 @@ enum MenuBarLogReader {
     }
 
     static func decodeFrame(data: Data, expectedID: String = requestID) -> ResponseFrame {
-        guard let json = try? JSONSerialization.jsonObject(with: data, options: []) as? [String: Any] else {
-            return .malformed
-        }
-        guard (json["id"] as? String) == expectedID else {
+        let frame: GatewayResponseDecoder.Frame<RecentLogsResult> = GatewayResponseDecoder.decode(
+            data: data,
+            expectedID: expectedID
+        )
+        switch frame {
+        case .result(let result):
+            return .result(result)
+        case .ignore:
             return .ignore
-        }
-        guard let envelope = try? JSONDecoder().decode(GatewayResponseEnvelope<RecentLogsResult>.self, from: data),
-              envelope.type == "response" else {
+        case .error(let error):
+            return .error(error?.message ?? "Log request failed")
+        case .malformed:
             return .malformed
         }
-        if !envelope.ok {
-            guard envelope.result == nil else { return .malformed }
-            return .error(envelope.error?.message ?? "Log request failed")
-        }
-        guard envelope.error == nil, let result = envelope.result else { return .malformed }
-        return .result(result)
     }
 
     static func format(_ records: [RecentLogEntry]) -> String {
@@ -119,17 +117,6 @@ enum MenuBarLogReader {
             "[\(entry.timestamp)] \(entry.level.uppercased()) TRON: \(entry.message)"
         }
         .joined(separator: "\n")
-    }
-}
-
-private struct GatewayResponseEnvelope<Result: Decodable>: Decodable {
-    var type: String
-    var ok: Bool
-    var result: Result?
-    var error: ErrorFrame?
-
-    struct ErrorFrame: Decodable {
-        var message: String?
     }
 }
 

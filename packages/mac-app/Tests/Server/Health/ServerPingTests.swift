@@ -155,6 +155,12 @@ struct ServerPingDecodeTests {
         )))
     }
 
+    @Test("undeclared result fields are tolerated")
+    func undeclaredResultFieldsAreTolerated() {
+        let body = #"{"type":"response","id":"mac-system-info","ok":true,"result":{"gatewayVersion":"0.1.0","protocolVersion":5,"minProtocolVersion":5,"machineId":"machine","gatewayChannel":"stable","machineName":"Mac","piVersion":"fixture-version","capabilities":[]}}"#
+        #expect(ServerPing.decodeFrame(data: Data(body.utf8)) == .result(ServerPingInfo(version: "0.1.0", gatewayChannel: "stable")))
+    }
+
     @Test("gateway channel is bounded when present")
     func gatewayChannelIsBounded() {
         let oversized = String(repeating: "x", count: GatewayPayloadStore.channelComponentLimit + 1)
