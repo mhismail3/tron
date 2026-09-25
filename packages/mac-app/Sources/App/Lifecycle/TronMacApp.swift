@@ -149,12 +149,7 @@ struct RootView: View {
             case .wizard:
                 NSApp.setActivationPolicy(.regular)
                 NSApp.activate(ignoringOtherApps: true)
-                // Window chrome (transparency, hidden titlebar, rounded
-                // corners) is configured via `WindowConfigurator` in the
-                // SwiftUI body — it runs synchronously on the first
-                // layout pass, before the window is shown, avoiding a
-                // one-frame flash of opaque chrome that this `.task`
-                // path used to produce.
+                // WindowConfigurator applies window chrome before display.
                 NSApp.windows.first?.makeKeyAndOrderFront(nil)
             case .menuBarOnly:
                 NSApp.setActivationPolicy(.accessory)

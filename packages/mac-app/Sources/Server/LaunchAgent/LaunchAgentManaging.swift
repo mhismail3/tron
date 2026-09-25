@@ -50,10 +50,6 @@ protocol LaunchAgentManaging: Sendable {
     /// Nil means the observation failed; it is not proof that the job is absent.
     func isLoaded(label: String) async -> Bool?
 
-    /// True when ServiceManagement still has a registration, even if launchd
-    /// has not loaded the process yet.
-    func isRegistered(label: String) async -> Bool
-
     /// Best-effort process metadata from launchd/ps for diagnostics UI.
     /// Returns nil when launchd has no loaded service or does not expose a pid.
     func runtimeInfo(label: String) async -> LaunchAgentRuntimeInfo?

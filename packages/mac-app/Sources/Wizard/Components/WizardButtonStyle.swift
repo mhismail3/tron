@@ -6,8 +6,7 @@ import SwiftUI
 /// pressed, the bevels invert (top inset / bottom highlight), the
 /// outer shadows shrink, and a slight darkness wash overlays the fill —
 /// the classic "pushed into the surface" feel that flat buttons can't
-/// quite sell. Replaces the old capsule because the wizard wanted more
-/// physical depth than gradient-on-pill could provide.
+/// quite sell; the wizard needs more physical depth than gradient-on-pill.
 ///
 /// All animations are spring-driven so the press feels tactile rather
 /// than mechanical; hover lifts both the glow and the highlight a

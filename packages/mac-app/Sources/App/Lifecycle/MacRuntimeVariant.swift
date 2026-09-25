@@ -28,15 +28,6 @@ enum MacStartupMode: Equatable, Sendable {
         }
     }
 
-    var isReadOnlyDebug: Bool {
-        if case .debugReadOnly = self { return true }
-        return false
-    }
-
-    var isManagedRelease: Bool {
-        if case .onboarded = self { return true }
-        return false
-    }
 }
 
 /// The wrapper has three supported operating modes:

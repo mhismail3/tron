@@ -11,10 +11,6 @@ struct GatewayPayloadStoreTests {
 
         #expect(store.currentManifestURL.path == "/tmp/tron-home/gateway/payloads/dev/current.json")
         #expect(store.versionRoot("2025.01").path == "/tmp/tron-home/gateway/payloads/dev/versions/2025.01")
-        #expect(GatewayPayloadStore.channel(environment: [:]) == "stable")
-        #expect(GatewayPayloadStore.channel(environment: [TronPaths.gatewayChannelEnv: "dev"]) == "dev")
-        #expect(GatewayPayloadStore.channel(environment: [TronPaths.gatewayChannelEnv: "../escape"]) == "stable")
-        #expect(GatewayPayloadStore.channel(environment: [TronPaths.gatewayChannelEnv: "preview"]) == "stable")
     }
 
     @Test("selection and payload manifests must agree on identity")

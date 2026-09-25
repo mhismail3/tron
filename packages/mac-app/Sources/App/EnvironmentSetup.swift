@@ -400,7 +400,6 @@ private struct ReadOnlyDebugLaunchAgentManager: LaunchAgentManaging {
     func unload(label: String) async -> LaunchAgentOutcome { refused }
     func restart(label: String) async -> LaunchAgentOutcome { refused }
     func isLoaded(label: String) async -> Bool? { false }
-    func isRegistered(label: String) async -> Bool { false }
     func runtimeInfo(label: String) async -> LaunchAgentRuntimeInfo? { nil }
 }
 

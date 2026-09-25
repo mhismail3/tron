@@ -434,13 +434,6 @@ struct LiveLaunchAgentManager: LaunchAgentManaging {
             : .launchdRefused(message: result.stderr.isEmpty ? result.stdout : result.stderr)
     }
 
-    func isRegistered(label: String) async -> Bool {
-        switch ExistingInstallDetector.serviceStatus(label: label) {
-        case .enabled, .requiresApproval: return true
-        case .notRegistered, .notFound, .unknown: return false
-        }
-    }
-
     func isLoaded(label: String) async -> Bool? {
         let result = await Subprocess.run(
             executable: URL(fileURLWithPath: "/bin/launchctl"),

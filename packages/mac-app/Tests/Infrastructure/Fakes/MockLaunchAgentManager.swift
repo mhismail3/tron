@@ -75,10 +75,6 @@ final class MockLaunchAgentManager: LaunchAgentManaging, @unchecked Sendable {
         }
     }
 
-    func isRegistered(label: String) async -> Bool {
-        await isLoaded(label: label) == true
-    }
-
     func isLoaded(label: String) async -> Bool? {
         state.withLock {
             $0.calls.append(Call(kind: .isLoaded, label: label, plistPath: nil))

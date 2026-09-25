@@ -12,7 +12,6 @@ enum GatewayRestartClient {
 
     struct Response: Codable, Equatable, Sendable {
         let restarting: Bool
-        let scheduled: Bool
         let activeSessionIds: [String]
     }
 
@@ -236,14 +235,6 @@ enum GatewayRestartClient {
         let count = value.utf8.count
         return count >= minimumCommandIDLength && count <= maximumCommandIDLength
             && !value.unicodeScalars.contains(where: { $0.value < 0x20 || $0.value == 0x7f })
-    }
-
-    static func decodeHello(data: Data) -> Bool {
-        guard let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-              json["type"] as? String == "hello",
-              json["protocolVersion"] as? Int == protocolVersion,
-              json["minProtocolVersion"] as? Int == minimumProtocolVersion else { return false }
-        return true
     }
 
     static func decodeFrame(data: Data, expectedID: String) -> Frame {

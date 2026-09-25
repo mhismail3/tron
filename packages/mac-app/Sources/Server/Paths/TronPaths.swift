@@ -18,8 +18,6 @@ enum TronPaths {
     /// Selects the externally staged payload namespace under the selected Tron home.
     static let gatewayChannelEnv = "TRON_GATEWAY_CHANNEL"
     static let productionGatewayChannel = TronGatewayProfile.stable.channel
-    static let productionLaunchAgentLabel = TronGatewayProfile.stable.launchAgentLabel
-    static let productionServerPort = TronGatewayProfile.stable.port
 
     static let homeDirectory: URL = {
         FileManager.default.homeDirectoryForCurrentUser
@@ -76,7 +74,6 @@ enum TronPaths {
     static func runDir(profile: TronGatewayProfile) -> URL { internalDir(profile: profile).appendingPathComponent(HomeComponent.runDir, isDirectory: true) }
 
     static var internalDir: URL { tronHome.appendingPathComponent(HomeComponent.internalDir, isDirectory: true) }
-    static var runDir: URL { internalDir.appendingPathComponent(HomeComponent.runDir, isDirectory: true) }
 
     static let releaseApplicationURL = URL(fileURLWithPath: "/Applications/Tron.app", isDirectory: true)
 
@@ -109,21 +106,6 @@ enum TronPaths {
             .appendingPathComponent("Contents/Resources/Gateway", isDirectory: true)
     }
 
-    static var gatewayEntrypoint: URL {
-        gatewayPayloadRoot
-            .appendingPathComponent("app/dist/index.js", isDirectory: false)
-    }
-
-    static var gatewayProductionDependencies: URL {
-        gatewayPayloadRoot
-            .appendingPathComponent("app/node_modules", isDirectory: true)
-    }
-
-    static func gatewayNodeRuntime(architecture: String) -> URL {
-        gatewayPayloadRoot
-            .appendingPathComponent("runtime/node-\(architecture)", isDirectory: false)
-    }
-
     static var bearerTokenPath: URL { bearerTokenPath(profile: activeProfile) }
     static var enrollmentCodePath: URL { enrollmentCodePath(profile: activeProfile) }
 
@@ -136,10 +118,6 @@ enum TronPaths {
         runDir(profile: profile).appendingPathComponent("mac-app-version.json", isDirectory: false)
     }
     static var macAppVersionMarkerPath: URL { macAppVersionMarkerPath(profile: activeProfile) }
-
-    static var authLockPath: URL {
-        runDir.appendingPathComponent("auth.lock", isDirectory: false)
-    }
 
     static func macWrapperLockPath(profile: TronGatewayProfile) -> URL {
         runDir(profile: profile).appendingPathComponent(macWrapperLockFileName(bundleIdentifier: Bundle.main.bundleIdentifier), isDirectory: false)
@@ -175,8 +153,6 @@ enum TronPaths {
     static func launchAgentLabel(environment: [String: String]) -> String {
         activeProfile(environment: environment).launchAgentLabel
     }
-
-    static func profile(_ profile: TronGatewayProfile) -> TronGatewayProfile { profile }
 
     static var defaultServerPort: Int {
         defaultServerPort(environment: ProcessInfo.processInfo.environment)

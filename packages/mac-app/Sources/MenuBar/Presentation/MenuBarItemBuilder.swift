@@ -36,11 +36,6 @@ enum DebugGatewayMenuState: Equatable, Sendable {
         }
     }
 
-    var admissionIsPairable: Bool {
-        if case .admitted(let isPairable) = self { return isPairable }
-        return false
-    }
-
 }
 
 enum MenuBarItemBuilder {

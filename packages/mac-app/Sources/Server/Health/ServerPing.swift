@@ -127,16 +127,6 @@ enum ServerPing {
         }
     }
 
-    static func decodeHello(data: Data) -> Bool {
-        guard let json = try? JSONSerialization.jsonObject(with: data, options: []) as? [String: Any],
-              json["type"] as? String == "hello",
-              json["protocolVersion"] as? Int == supportedProtocolVersion,
-              json["minProtocolVersion"] as? Int == minimumProtocolVersion else {
-            return false
-        }
-        return true
-    }
-
     static func decodeFrame(
         data: Data,
         expectedID: String = requestID

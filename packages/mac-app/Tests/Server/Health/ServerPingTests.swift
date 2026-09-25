@@ -171,15 +171,31 @@ struct ServerPingDecodeTests {
         let valid = #"{"type":"hello","protocolVersion":5,"minProtocolVersion":5}"#
         let older = #"{"type":"hello","protocolVersion":3,"minProtocolVersion":3}"#
         let future = #"{"type":"hello","protocolVersion":5,"minProtocolVersion":4}"#
-        #expect(ServerPing.decodeHello(data: Data(valid.utf8)))
-        #expect(!ServerPing.decodeHello(data: Data(older.utf8)))
-        #expect(!ServerPing.decodeHello(data: Data(future.utf8)))
+        #expect(GatewayWebSocketTransport.validHello(
+            data: Data(valid.utf8),
+            protocolVersion: ServerPing.supportedProtocolVersion,
+            minimumProtocolVersion: ServerPing.minimumProtocolVersion
+        ))
+        #expect(!GatewayWebSocketTransport.validHello(
+            data: Data(older.utf8),
+            protocolVersion: ServerPing.supportedProtocolVersion,
+            minimumProtocolVersion: ServerPing.minimumProtocolVersion
+        ))
+        #expect(!GatewayWebSocketTransport.validHello(
+            data: Data(future.utf8),
+            protocolVersion: ServerPing.supportedProtocolVersion,
+            minimumProtocolVersion: ServerPing.minimumProtocolVersion
+        ))
     }
 
     @Test("system.info responses are not accepted as the server hello")
     func responseCannotSatisfyHelloGate() {
         let body = #"{"type":"response","id":"mac-system-info","ok":true,"result":{"gatewayVersion":"0.1.0","protocolVersion":5,"minProtocolVersion":5,"machineId":"machine","gatewayChannel":"stable"}}"#
-        #expect(!ServerPing.decodeHello(data: Data(body.utf8)))
+        #expect(!GatewayWebSocketTransport.validHello(
+            data: Data(body.utf8),
+            protocolVersion: ServerPing.supportedProtocolVersion,
+            minimumProtocolVersion: ServerPing.minimumProtocolVersion
+        ))
         #expect(ServerPing.decodeFrame(data: Data(body.utf8)) == .result(ServerPingInfo(version: "0.1.0", gatewayChannel: "stable")))
     }
 
