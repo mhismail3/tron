@@ -139,11 +139,7 @@ enum TronPaths {
 
     static var launchAgentLabel: String { activeProfile.launchAgentLabel }
 
-    static func launchAgentLabel(profile: TronGatewayProfile) -> String { profile.launchAgentLabel }
-
     static var defaultServerPort: Int { activeProfile.port }
-
-    static func defaultServerPort(profile: TronGatewayProfile) -> Int { profile.port }
 
     static var launchAgentEnvironmentVariables: [String: String] {
         launchAgentEnvironmentVariables(profile: activeProfile)

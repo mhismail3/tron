@@ -11,10 +11,6 @@ import Testing
 struct TronPathsTests {
     @Test("Stable and Debug profiles have independent canonical identities")
     func profilesAreIndependent() {
-        #expect(TronPaths.launchAgentLabel(profile: .stable) == "com.tron.server")
-        #expect(TronPaths.launchAgentLabel(profile: .debug) == "com.tron.server.dev")
-        #expect(TronPaths.defaultServerPort(profile: .stable) == 9847)
-        #expect(TronPaths.defaultServerPort(profile: .debug) == 9848)
         #expect(TronPaths.tronHome(profile: .debug).path.hasSuffix("/.tron-dev"))
         #expect(TronPaths.agentHome(profile: .debug).path.hasSuffix("/.tron-dev/agent"))
         #expect(TronPaths.bearerTokenPath(profile: .debug).path.hasSuffix("/.tron-dev/gateway/local-auth.json"))

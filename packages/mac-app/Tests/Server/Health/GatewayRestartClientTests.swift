@@ -35,7 +35,7 @@ struct GatewayRestartClientTests {
 
     @Test("matching restart response is decoded")
     func responseDecoding() {
-        let body = #"{"type":"response","id":"command-123","ok":true,"result":{"restarting":true,"scheduled":false,"activeSessionIds":[]}}"#
+        let body = #"{"type":"response","id":"command-123","ok":true,"result":{"restarting":true,"activeSessionIds":[]}}"#
         #expect(
             GatewayRestartClient.decodeFrame(data: Data(body.utf8), expectedID: "command-123")
                 == .result(.init(restarting: true, activeSessionIds: []))
