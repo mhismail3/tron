@@ -868,6 +868,34 @@ struct ChatTranscriptGeometry: Equatable {
         let tolerance = min(160, max(48, containerHeight * 0.25))
         return overscroll <= tolerance
     }
+
+    /// A pinned viewport past the legal content bottom that no finger can hold.
+    /// Lazy content estimates do collapse under an offset the larger estimate
+    /// put in range, and the result is an impossible viewport the reader sees as
+    /// blank. The 2 pt tolerance of `isPastBottomEdge` and the rubber-band
+    /// tolerance stay in force, so ordinary overscroll during a drag or an
+    /// inset change is never admitted; a viewport whose visible rect lies
+    /// entirely past the content edge is admitted regardless of tolerance,
+    /// because no rubber band produces it.
+    var isBeyondLegalContentBottom: Bool {
+        guard isPastBottomEdge else { return false }
+        if let visibleTopY, let visibleBottomY,
+           visibleTopY.isFinite, visibleBottomY.isFinite,
+           visibleTopY >= contentHeight + bottomInset {
+            return true
+        }
+        return !isPlausibleBottomRubberBand
+    }
+
+    /// Distance the viewport sits past the legal content bottom, in points. It
+    /// is the diagnostic scalar for one past-end correction, never a threshold.
+    var distanceBeyondLegalContentBottom: CGFloat {
+        guard isBeyondLegalContentBottom else { return 0 }
+        let legalBottom = max(0, contentHeight + bottomInset - containerHeight)
+        let offsetExcess = offsetY - legalBottom
+        guard let visibleBottomY, visibleBottomY.isFinite else { return max(0, offsetExcess) }
+        return max(0, max(offsetExcess, visibleBottomY - (contentHeight + bottomInset)))
+    }
 }
 
 enum ChatOpenPresentationPhase: Equatable {

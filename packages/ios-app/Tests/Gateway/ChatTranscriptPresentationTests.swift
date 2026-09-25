@@ -758,6 +758,38 @@ struct ChatTranscriptPresentationTests {
         #expect(undersizedOvershoot.isAtCatchUpBoundary)
     }
 
+    @Test("past-end detection keeps plausible rubber bands out and admits a wholly past-content viewport")
+    func pastEndDetectionBounds() {
+        let atBottom = ChatTranscriptGeometry(
+            offsetY: 600, contentHeight: 1_000, containerHeight: 400
+        )
+        // A finger can hold 80 pt of overscroll on this container.
+        let plausibleRubberBand = ChatTranscriptGeometry(
+            offsetY: 680, contentHeight: 1_000, containerHeight: 400
+        )
+        let collapsedEstimate = ChatTranscriptGeometry(
+            offsetY: 1_060, contentHeight: 1_000, containerHeight: 400
+        )
+        // A short container caps the tolerance below the viewport's own height,
+        // so this overscroll is nominally plausible while the whole viewport
+        // sits past the content edge.
+        let whollyBeyondContent = ChatTranscriptGeometry(
+            offsetY: 1_000, contentHeight: 1_000, containerHeight: 40,
+            visibleTopY: 1_000, visibleBottomY: 1_040
+        )
+
+        #expect(!atBottom.isBeyondLegalContentBottom)
+        #expect(atBottom.distanceBeyondLegalContentBottom == 0)
+        #expect(plausibleRubberBand.isPastBottomEdge)
+        #expect(plausibleRubberBand.isPlausibleBottomRubberBand)
+        #expect(!plausibleRubberBand.isBeyondLegalContentBottom)
+        #expect(collapsedEstimate.isBeyondLegalContentBottom)
+        #expect(collapsedEstimate.distanceBeyondLegalContentBottom == 460)
+        #expect(whollyBeyondContent.isPlausibleBottomRubberBand)
+        #expect(whollyBeyondContent.isBeyondLegalContentBottom)
+        #expect(whollyBeyondContent.distanceBeyondLegalContentBottom == 40)
+    }
+
     @Test("physical tail evidence uses signed marker displacement")
     func physicalTailEvidenceClassification() {
         let aligned = ChatPhysicalTailEvidence.make(

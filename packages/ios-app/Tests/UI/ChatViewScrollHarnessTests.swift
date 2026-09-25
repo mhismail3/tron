@@ -1987,6 +1987,71 @@ struct ChatViewScrollHarnessTests {
         }
     }
 
+    @Test("a sustained past-end pinned viewport returns to the tail through one disabled repair")
+    func pastEndRepairReturnsToTail() async throws {
+        try await withTestWatchdog(timeout: .seconds(15)) {
+            try await withHarness(seed: 1_195) { harness in
+                _ = try await harness.recorder.waitUntil {
+                    $0.observation.readyFrameCompletionCount == 1
+                }
+                let repairBaseline = harness.probeObservation.pastEndRepairCommandCount
+                let commandBaseline = harness.probeObservation.scrollCommandCount
+                // The harness cannot drag the real `UIScrollView` past its legal
+                // bottom (`displaceNativeTranscriptFromTail` clamps to it), so
+                // the collapse is injected as native geometry: the incident's
+                // 2,128 pt offset past the legal content bottom, still pinned and
+                // with no layout transaction in flight.
+                let current = harness.probeObservation.geometry
+                #expect(current.hasScrollableOverflow)
+                let legalBottom = max(
+                    0, current.contentHeight + current.bottomInset - current.containerHeight
+                )
+                let injectedOffset = legalBottom + 2_128
+                let pastEnd = ChatTranscriptGeometry(
+                    offsetY: injectedOffset,
+                    contentHeight: current.contentHeight,
+                    containerHeight: current.containerHeight,
+                    bottomInset: current.bottomInset,
+                    visibleTopY: injectedOffset,
+                    visibleBottomY: injectedOffset + current.containerHeight
+                )
+                #expect(pastEnd.isBeyondLegalContentBottom)
+                harness.driveGeometry(previous: current, current: pastEnd)
+
+                // The condition must survive a presented frame before the one
+                // correction is published and applied.
+                for _ in 0..<30 where harness.probeObservation.pastEndRepairCommandCount == repairBaseline {
+                    try await harness.driveFrameBoundary()
+                }
+                #expect(harness.probeObservation.pastEndRepairCommandCount == repairBaseline + 1)
+                #expect(harness.probeObservation.scrollCommandCount == commandBaseline + 1)
+                // The lease is released and native pinning owns the real tail.
+                for _ in 0..<20 where try harness.nativeTranscriptDistanceFromTail() > 2 {
+                    try await harness.driveFrameBoundary()
+                    await Task.yield()
+                }
+                #expect(try harness.nativeTranscriptSignedTailError() <= 2)
+                // One correction per installed layout epoch: a continuing
+                // collapse that re-reports the same impossible viewport in that
+                // epoch cannot issue a second command.
+                for step in 1...6 {
+                    let collapsed = ChatTranscriptGeometry(
+                        offsetY: injectedOffset - Double(step),
+                        contentHeight: pastEnd.contentHeight,
+                        containerHeight: pastEnd.containerHeight,
+                        bottomInset: pastEnd.bottomInset,
+                        visibleTopY: injectedOffset - Double(step),
+                        visibleBottomY: injectedOffset - Double(step) + pastEnd.containerHeight
+                    )
+                    harness.driveGeometry(previous: collapsed, current: collapsed)
+                    try await harness.driveFrameBoundary()
+                }
+                #expect(harness.probeObservation.pastEndRepairCommandCount == repairBaseline + 1)
+                #expect(harness.probeObservation.scrollCommandCount == commandBaseline + 1)
+            }
+        }
+    }
+
     @Test("agent response and compaction settlement retain mounted physical rows")
     // Installation can precede this generation's native visibility callbacks.
     // Assert the rendered row only after a nonempty viewport observation, not

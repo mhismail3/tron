@@ -13,6 +13,9 @@ struct ChatScrollCommand: Equatable, Sendable {
         case prepend
         case tailMaterialization
         case physicalTailRepair
+        /// The bounded past-end safety net. It is admitted only from sustained
+        /// geometry and never from marker evidence or a held target lease.
+        case pastEndRepair
     }
 
     enum Destination: Equatable, Sendable {
@@ -281,6 +284,18 @@ final class ChatScrollCoordinator {
     /// Reveal/layout transitions must publish a new marker frame before drift
     /// repair can inspect it; the lifted opening frame is not repair evidence.
     private var physicalTailRepairBlockedUntilEvidenceRevision: Int?
+    @ObservationIgnored private var pastEndRepairTask: Task<Void, Never>?
+    /// One correction per installed layout epoch, and a fresh single-correction
+    /// budget only when a changed physical spine installs a new epoch — the one
+    /// structural event that can move a lazy content estimate. Re-reporting the
+    /// same impossible viewport inside an epoch can never issue a second
+    /// command, so the net cannot loop on one stale sample.
+    private var pastEndRepairLayoutEpoch: Int?
+    /// The mounted transcript's structural clock is mid-transaction. ChatView
+    /// owns that transaction; only its liveness is published here so a tail
+    /// correction can never interleave with a send, keyboard, or growth
+    /// choreography.
+    private var layoutTransactionInFlight = false
 
     @ObservationIgnored private var catchUpTask: Task<Void, Never>?
     @ObservationIgnored private var layoutRestoreTimeoutTask: Task<Void, Never>?
@@ -533,6 +548,9 @@ final class ChatScrollCoordinator {
             pinAtTail()
         }
         directPositionOwnership = false
+        // A reader who releases the viewport without moving it off the tail
+        // leaves that pinned viewport eligible for the past-end net.
+        schedulePastEndRepairIfNeeded()
     }
 
     /// Tests and explicit opaque tree replacement use the unconditional epoch
@@ -733,6 +751,7 @@ final class ChatScrollCoordinator {
         evaluateLayoutRestoreIfReady()
         evaluatePrependIfReady()
         evaluateOpeningTailIfPossible(allowsUnrealizedTailCommand: false)
+        schedulePastEndRepairIfNeeded()
         guard !openingTailSettlementPending else { return }
         if (isUserInteracting || directPositionOwnership),
            viewportMode == .pinned,
@@ -970,6 +989,7 @@ final class ChatScrollCoordinator {
         guard visibleOpeningRevealPending else { return }
         visibleOpeningRevealPending = false
         schedulePhysicalTailRepairIfNeeded()
+        schedulePastEndRepairIfNeeded()
     }
 
     func requestCatchUp(reduceMotion: Bool) {
@@ -1146,7 +1166,11 @@ final class ChatScrollCoordinator {
     /// viewport. Canonical projection and pinned/anchored intent remain intact.
     func viewportObservationChanged(isActive: Bool) {
         viewportObservationActive = isActive
-        guard !isActive else { return }
+        guard !isActive else {
+            schedulePastEndRepairIfNeeded()
+            return
+        }
+        cancelPastEndRepair()
         if retainedViewportReconciliationState == .pendingTargetFreeRebase {
             retainedViewportReconciliationState = .idle
         }
@@ -1321,6 +1345,21 @@ final class ChatScrollCoordinator {
         if pendingTailMaterialization?.layoutTransactionID == id {
             pendingTailMaterialization?.layoutSettled = true
         }
+    }
+
+    /// The structural clock's liveness, published by the owner of the
+    /// `ChatLayoutTransaction` (`ChatView`). It is that transaction's own state,
+    /// not a second machine: while any send, keyboard, or growth generation is
+    /// open, the past-end safety net stays dormant so its single command cannot
+    /// interleave with the choreography that owns the viewport.
+    func layoutTransactionStateChanged(isActive: Bool) {
+        guard layoutTransactionInFlight != isActive else { return }
+        layoutTransactionInFlight = isActive
+        guard !isActive else {
+            cancelPastEndRepair()
+            return
+        }
+        schedulePastEndRepairIfNeeded()
     }
 
     /// Abandonment is a terminal cancellation, not successful layout evidence.
@@ -1595,6 +1634,13 @@ final class ChatScrollCoordinator {
                 layout: layoutEpoch,
                 issuedRevision: physicalTailRepairIssuedEvidenceRevision
             )
+        }
+        if applied.origin == .pastEndRepair {
+            // Application is the correction, and it needs no marker proof: the
+            // tail is legal as soon as the command lands. Release through the
+            // bounded lease path so native pinning owns the viewport again from
+            // the next frame instead of holding an edge target across a send.
+            requestTargetRelease(applied.token)
         }
 
         if case .positioning(var opening) = openingTailPhase,
@@ -2218,6 +2264,7 @@ final class ChatScrollCoordinator {
 
     private func beginDirectInteraction(allowsBottomRubberBand: Bool = true) {
         retainedViewportReconciliationState = .idle
+        cancelPastEndRepair()
         physicalTailRepairTask?.cancel()
         physicalTailRepairTask = nil
         physicalTailRepairEvidenceRevision = nil
@@ -2276,6 +2323,7 @@ final class ChatScrollCoordinator {
     private func cancelAllOwnedWork(result: PerformanceResult) {
         physicalTailRepairTask?.cancel()
         physicalTailRepairTask = nil
+        cancelPastEndRepair()
         physicalTailRepairEvidenceRevision = nil
         physicalTailRepairCommandToken = nil
         physicalTailRepairIssuedEvidenceRevision = nil
@@ -2683,6 +2731,11 @@ final class ChatScrollCoordinator {
 
     private func advanceLayoutEpoch() {
         layoutEpoch &+= 1
+        // A new installed epoch invalidates any pending past-end sample; the
+        // next admitted geometry sample in the new epoch re-arms the one
+        // correction that epoch is allowed.
+        cancelPastEndRepair()
+        pastEndRepairLayoutEpoch = nil
         // A pending materialization command can outlive a projection install.
         // Rebase its evidence before application so the command cannot be
         // permanently rejected as belonging to the prior layout epoch.
@@ -2818,6 +2871,10 @@ final class ChatScrollCoordinator {
               !awaitingOpeningBaseline,
               viewportObservationActive,
               !geometry.isNativeUnderflow,
+              // An offset past the legal content bottom is owned by the strict
+              // past-end net: it fires without marker evidence and is not blocked
+              // by a held lease or this episode's spent attempt budget.
+              !geometry.isBeyondLegalContentBottom,
               viewportMode == .pinned,
               !isUserInteracting, !directPositionOwnership,
               command == nil, appliedTargetCommandToken == nil,
@@ -2857,6 +2914,7 @@ final class ChatScrollCoordinator {
                   !self.awaitingOpeningBaseline,
                   self.viewportObservationActive,
                   !self.geometry.isNativeUnderflow,
+                  !self.geometry.isBeyondLegalContentBottom,
                   self.viewportMode == .pinned,
                   !self.isUserInteracting, !self.directPositionOwnership,
                   self.command == nil, self.appliedTargetCommandToken == nil,
@@ -2924,6 +2982,87 @@ final class ChatScrollCoordinator {
             self.physicalTailRepairAttempts &+= 1
             self.publish(.tail, animation: .disabled, origin: .physicalTailRepair)
         }
+    }
+
+    private func cancelPastEndRepair() {
+        pastEndRepairTask?.cancel()
+        pastEndRepairTask = nil
+    }
+
+    /// The one correction geometry alone admits. Marker evidence, a held
+    /// materialization lease, and an exhausted marker-repair episode cannot
+    /// describe an offset beyond the legal content bottom, so none of them
+    /// gates this net: a confirmed past-end viewport is the whole condition.
+    /// Every other viewport owner still outranks it, so the correction can
+    /// never interleave with a send, keyboard, growth, opening, prepend,
+    /// restore, or catch-up transition, or with a reader holding the viewport.
+    private var admitsPastEndRepair: Bool {
+        geometry.isBeyondLegalContentBottom
+            && viewportMode == .pinned
+            && !isUserInteracting
+            && !directPositionOwnership
+            && viewportObservationActive
+            && !layoutTransactionInFlight
+            && !awaitingOpeningBaseline
+            && prepend == nil
+            && layoutRestore == nil
+            && catchUpPhase == .none
+            && !openingTailPhase.isActive
+            && !visibleOpeningRevealPending
+    }
+
+    /// One correction per installed layout epoch, and only after the condition
+    /// survives one presented frame. Keyboard and inset transitions overshoot
+    /// for a single frame, so a sample that does not stay past the legal bottom
+    /// at the next boundary is never corrected.
+    private func schedulePastEndRepairIfNeeded() {
+        guard admitsPastEndRepair, pastEndRepairLayoutEpoch != layoutEpoch else {
+            cancelPastEndRepair()
+            return
+        }
+        guard pastEndRepairTask == nil else { return }
+        let admittedPresentation = presentation
+        let admittedLayout = layoutEpoch
+        pastEndRepairTask = Task { [weak self, frameScheduler] in
+            do { try await frameScheduler.nextFrame(); try Task.checkCancellation() }
+            catch { return }
+            guard let self else { return }
+            self.pastEndRepairTask = nil
+            guard self.presentation == admittedPresentation,
+                  self.layoutEpoch == admittedLayout,
+                  self.admitsPastEndRepair else { return }
+            self.publishPastEndRepair()
+        }
+    }
+
+    /// Retires every lease that owns a row target through the existing lease
+    /// APIs, then hands the tail back to native pinning with one disabled
+    /// `.tail` command. Its own origin keeps the lease accounting and the
+    /// command trace naming exactly which owner moved the viewport.
+    private func publishPastEndRepair() {
+        let pendingOrigin = command?.origin
+        guard pendingOrigin == nil
+                || pendingOrigin == .tailMaterialization
+                || pendingOrigin == .physicalTailRepair
+                || pendingOrigin == .pastEndRepair else { return }
+        if pendingOrigin != nil { clearCommand() }
+        if appliedTargetOrigin == .tailMaterialization
+            || appliedTargetOrigin == .physicalTailRepair
+            || appliedTargetOrigin == .pastEndRepair {
+            retireAppliedTargetWithoutCallback()
+        }
+        pastEndRepairLayoutEpoch = layoutEpoch
+        tracePastEndRepair()
+        publish(.tail, animation: .disabled, origin: .pastEndRepair)
+    }
+
+    private func tracePastEndRepair() {
+        guard let interactionTrace, let interactionTraceContext else { return }
+        interactionTrace.tailPastEndRepair(
+            context: interactionTraceContext,
+            distanceBeyondBottom: geometry.distanceBeyondLegalContentBottom,
+            state: traceState()
+        )
     }
 
     #if HOSTED_TEST

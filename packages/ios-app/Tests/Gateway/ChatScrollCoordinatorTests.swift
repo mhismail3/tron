@@ -14,6 +14,15 @@ struct ChatScrollCoordinatorTests {
     private let farAway = ChatTranscriptGeometry(
         offsetY: 0, contentHeight: 1_000, containerHeight: 400
     )
+    /// Past this container's legal bottom by 460 pt, far outside the 100 pt
+    /// plausible-rubber-band tolerance: the viewport a collapsing lazy
+    /// estimate leaves behind.
+    private let pastEnd = ChatTranscriptGeometry(
+        offsetY: 1_060, contentHeight: 1_000, containerHeight: 400
+    )
+    private let plausibleRubberBand = ChatTranscriptGeometry(
+        offsetY: 680, contentHeight: 1_000, containerHeight: 400
+    )
 
     private func admitAlignedTail(_ coordinator: ChatScrollCoordinator) {
         coordinator.physicalTerminalRowObserved(layoutEpoch: coordinator.layoutEpoch)
@@ -2550,6 +2559,202 @@ struct ChatScrollCoordinatorTests {
         coordinator.geometryChanged(previous: away, current: bottom)
         #expect(coordinator.command == nil)
         #expect(coordinator.viewportMode == .pinned)
+    }
+
+    @Test("a sustained past-end pinned viewport returns to the tail exactly once")
+    func pastEndRepairFiresOncePerLayoutEpoch() async throws {
+        try await withTestWatchdog { @MainActor in
+            let frames = ManualViewportFrameScheduler()
+            let coordinator = ChatScrollCoordinator(frameScheduler: frames.scheduler)
+            let trace = ChatInteractionTrace()
+            coordinator.configureInteractionTrace(
+                trace, context: trace.beginContext(retainedPresentation: true)
+            )
+            self.admitAlignedTail(coordinator)
+
+            coordinator.geometryChanged(previous: self.bottom, current: self.pastEnd)
+            await frames.waitForRequest(count: 1)
+            frames.releaseNext()
+            let repair = try await coordinator.hostedNextCommand()
+            #expect(repair.origin == .pastEndRepair)
+            #expect(repair.destination == .tail)
+            #expect(repair.animation == .disabled)
+            #expect(coordinator.commandApplied(repair))
+            // The correction needs no marker proof, so the lease is released
+            // through the same bounded path every other tail command uses.
+            await frames.waitForRequest(count: 2)
+            frames.releaseNext()
+            await Task.yield()
+            #expect(coordinator.consumeTargetRelease())
+            #expect(!coordinator.hasAppliedTargetLease)
+            #expect(trace.diagnosticRecords(limit: 64).filter {
+                $0.record.event == "chat.tail.past-end-repair"
+            }.count == 1)
+
+            // One correction per installed layout epoch: re-reporting the same
+            // impossible viewport cannot produce a second command.
+            let commandsAfterRepair = coordinator.commandRevision
+            for step in 0..<8 {
+                coordinator.geometryChanged(
+                    previous: self.pastEnd,
+                    current: ChatTranscriptGeometry(
+                        offsetY: 1_060 - Double(step),
+                        contentHeight: 1_000,
+                        containerHeight: 400
+                    )
+                )
+                await Task.yield()
+            }
+            #expect(coordinator.command == nil)
+            #expect(coordinator.commandRevision == commandsAfterRepair)
+            coordinator.cancel()
+        }
+    }
+
+    @Test("past-end recovery ignores a held materialization lease and exhausted marker repair")
+    func pastEndRepairIgnoresHeldTargetAndExhaustedRepairs() async throws {
+        try await withTestWatchdog { @MainActor in
+            let frames = ManualViewportFrameScheduler()
+            let coordinator = ChatScrollCoordinator(frameScheduler: frames.scheduler)
+            let trace = ChatInteractionTrace()
+            coordinator.configureInteractionTrace(
+                trace, context: trace.beginContext(retainedPresentation: true)
+            )
+            self.admitAlignedTail(coordinator)
+            // Spend the marker-repair budget the way a collapse does, leaving
+            // the coordinator in its exhausted target-free rebase state.
+            for attempt in 0..<2 {
+                let before = frames.requestCount
+                coordinator.semanticFrameChanged(
+                    renderedID: "transcript-bottom",
+                    layoutEpoch: coordinator.layoutEpoch,
+                    frame: CGRect(x: 0, y: 300 - attempt * 20, width: 100, height: 12)
+                )
+                await frames.waitForRequest(count: before + 1)
+                frames.releaseNext()
+                let markerRepair = try await coordinator.hostedNextCommand()
+                #expect(markerRepair.origin == .physicalTailRepair)
+                let beforeAcknowledgement = frames.requestCount
+                #expect(coordinator.commandApplied(markerRepair))
+                await frames.waitForRequest(count: beforeAcknowledgement + 1)
+                frames.releaseNext()
+                await Task.yield()
+            }
+            // A send whose layout clock has settled still holds its exact
+            // materialization lease when the estimate collapses under it.
+            #expect(coordinator.fullHeightTailInserted(renderedID: "outgoing", layoutTransactionID: 41))
+            let held = try #require(coordinator.command)
+            #expect(held.origin == .tailMaterialization)
+            #expect(coordinator.commandApplied(held))
+            coordinator.layoutTransactionSettled(41)
+            #expect(coordinator.ownsTailMaterializationTarget(renderedID: "outgoing"))
+
+            let beforePastEnd = frames.requestCount
+            coordinator.geometryChanged(previous: self.bottom, current: self.pastEnd)
+            await frames.waitForRequest(count: beforePastEnd + 1)
+            frames.releaseNext()
+            let repair = try await coordinator.hostedNextCommand()
+            #expect(repair.origin == .pastEndRepair)
+            #expect(!coordinator.ownsTailMaterializationTarget(renderedID: "outgoing"))
+            #expect(coordinator.commandApplied(repair))
+            #expect(trace.diagnosticRecords(limit: 64).filter {
+                $0.record.event == "chat.tail.past-end-repair"
+            }.count == 1)
+            coordinator.cancel()
+        }
+    }
+
+    @Test("past-end recovery needs the condition to survive a presented frame")
+    func pastEndRepairRequiresSustainedEvidence() async {
+        let frames = ManualViewportFrameScheduler()
+        let coordinator = ChatScrollCoordinator(frameScheduler: frames.scheduler)
+        // A plausible finger rubber band is not an impossible viewport.
+        coordinator.geometryChanged(previous: .zero, current: bottom)
+        coordinator.geometryChanged(previous: bottom, current: plausibleRubberBand)
+        await Task.yield()
+        #expect(frames.requestCount == 0)
+        #expect(coordinator.command == nil)
+
+        // One frame of overshoot that resolves before the boundary is never
+        // corrected, however far past the legal bottom it reports.
+        coordinator.geometryChanged(previous: plausibleRubberBand, current: pastEnd)
+        coordinator.geometryChanged(previous: pastEnd, current: bottom)
+        await Task.yield()
+        for _ in 0..<4 { frames.releaseNext() }
+        await Task.yield()
+        #expect(coordinator.command == nil)
+        coordinator.cancel()
+    }
+
+    @Test("past-end recovery waits for pinned ownership and a quiet layout clock")
+    func pastEndRepairExclusions() async throws {
+        try await withTestWatchdog { @MainActor in
+            // A reader owns the viewport while the gesture is live.
+            let interactionFrames = ManualViewportFrameScheduler()
+            let interacting = ChatScrollCoordinator(frameScheduler: interactionFrames.scheduler)
+            interacting.geometryChanged(previous: .zero, current: self.pastEnd)
+            interacting.scrollPhaseChanged(from: .idle, to: .interacting, finalGeometry: self.pastEnd)
+            await Task.yield()
+            for _ in 0..<4 { interactionFrames.releaseNext() }
+            await Task.yield()
+            #expect(interacting.command == nil)
+            interacting.cancel()
+
+            // A detached reader keeps its own cut until it returns to the tail.
+            let detachedFrames = ManualViewportFrameScheduler()
+            let detached = self.detachedCoordinator(at: self.away, frames: detachedFrames)
+            detached.geometryChanged(previous: self.away, current: self.pastEnd)
+            await Task.yield()
+            for _ in 0..<4 { detachedFrames.releaseNext() }
+            await Task.yield()
+            #expect(detached.command == nil)
+            detached.cancel()
+
+            // The mounted presentation's opaque baseline is not yet installed.
+            let openingFrames = ManualViewportFrameScheduler()
+            let opening = ChatScrollCoordinator(frameScheduler: openingFrames.scheduler)
+            opening.resetForPresentation()
+            opening.geometryChanged(previous: .zero, current: self.pastEnd)
+            await Task.yield()
+            #expect(openingFrames.requestCount == 0)
+            #expect(opening.command == nil)
+            opening.cancel()
+
+            // An open send, keyboard, or growth generation owns the viewport;
+            // the net is admitted only after its owner publishes settlement.
+            let gatedFrames = ManualViewportFrameScheduler()
+            let gated = ChatScrollCoordinator(frameScheduler: gatedFrames.scheduler)
+            gated.layoutTransactionStateChanged(isActive: true)
+            gated.geometryChanged(previous: .zero, current: self.pastEnd)
+            await Task.yield()
+            #expect(gatedFrames.requestCount == 0)
+            #expect(gated.command == nil)
+            gated.layoutTransactionStateChanged(isActive: false)
+            await gatedFrames.waitForRequest(count: 1)
+            gatedFrames.releaseNext()
+            #expect(try await gated.hostedNextCommand().origin == .pastEndRepair)
+            gated.cancel()
+
+            // Catch-up owns the tail until its own command settles.
+            let catchUpFrames = ManualViewportFrameScheduler()
+            let catchUp = self.detachedCoordinator(at: self.away, frames: catchUpFrames)
+            catchUp.requestCatchUp(reduceMotion: true)
+            let catchUpCommand = try #require(catchUp.command)
+            #expect(catchUp.commandApplied(catchUpCommand))
+            catchUp.geometryChanged(previous: self.away, current: self.pastEnd)
+            await Task.yield()
+            for _ in 0..<4 { catchUpFrames.releaseNext() }
+            await Task.yield()
+            #expect(catchUp.command?.origin != .pastEndRepair)
+            catchUp.cancel()
+
+            // A prepend correction owns the viewport until its anchor settles.
+            let (prepending, _) = try await self.beginCorrectingPrepend()
+            prepending.geometryChanged(previous: self.away, current: self.pastEnd)
+            await Task.yield()
+            #expect(prepending.command?.origin != .pastEndRepair)
+            prepending.cancel()
+        }
     }
 
     @Test("prepend growth cannot arm a later automatic tail follow")

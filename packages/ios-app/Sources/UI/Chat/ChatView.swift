@@ -314,6 +314,13 @@ struct ChatView: View {
             layoutTransaction.configure(keyboard: keyboardObserver.transition, reduceMotion: enabled)
         }
         .onChange(of: layoutTransaction.terminalEventRevision) { _, _ in consumeLayoutTerminalEvents() }
+        .onChange(of: layoutTransaction.generation?.id, initial: true) { _, generationID in
+            // The transaction is the structural clock for a send, keyboard, or
+            // transcript-growth mutation. Publishing only its liveness lets the
+            // viewport owner keep the past-end safety net out of that
+            // choreography without duplicating the transaction's own state.
+            scrollCoordinator.layoutTransactionStateChanged(isActive: generationID != nil)
+        }
         .onChange(of: scenePhase) { _, current in
             scenePhaseChanged(current)
         }

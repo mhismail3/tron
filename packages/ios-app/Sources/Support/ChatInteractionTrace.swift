@@ -477,6 +477,23 @@ final class ChatInteractionTrace: @unchecked Sendable {
         )
     }
 
+    /// The pinned past-end safety net. No marker evidence and no repair budget
+    /// are involved, so this record is the only evidence that an impossible
+    /// pinned viewport was returned to the tail.
+    func tailPastEndRepair(context: Int, distanceBeyondBottom: CGFloat?, state: State) {
+        var values: [String] = []
+        if let distanceBeyondBottom {
+            values.append("pastEndBy=\(Self.scalar(distanceBeyondBottom))")
+        }
+        appendState(state, to: &values)
+        append(
+            context: context,
+            level: "warning",
+            event: "tail.past-end-repair",
+            details: values.joined(separator: " ")
+        )
+    }
+
     func diagnosticRecords(limit: Int) -> [GatewayProfileLogRecord] {
         guard limit > 0 else { return [] }
         lock.lock()
@@ -656,6 +673,7 @@ final class ChatInteractionTrace: @unchecked Sendable {
         case .prepend: "prepend"
         case .tailMaterialization: "tail-materialization"
         case .physicalTailRepair: "physical-tail-repair"
+        case .pastEndRepair: "past-end-repair"
         }
     }
     private static func destination(_ destination: ChatScrollCommand.Destination) -> String {
