@@ -300,14 +300,6 @@ export class BlobStore {
     }
   }
 
-  /** Compatibility accessor for synchronous projected-image tests and callers. */
-  get(id: string): { data: Buffer; mimeType: string } {
-    const value = this.available(id);
-    if (value.kind !== "memory") throw new GatewayError("conflict", "File-backed blobs require a reader lease");
-    this.touch(value);
-    return { data: value.data, mimeType: value.mimeType };
-  }
-
   acquire(id: string, requestedRange?: BlobByteRange, signal?: AbortSignal): Promise<BlobLease> {
     return abortableRead(signal, () => this.acquireOwned(id, requestedRange), lease => lease.release());
   }

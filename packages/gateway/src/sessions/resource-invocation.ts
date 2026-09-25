@@ -85,12 +85,12 @@ function admittedText(value: unknown, field: string, maximumBytes: number, allow
   return value;
 }
 
-function admitResourceName(value: unknown, field = "resourceInvocation.name"): string {
-  const name = admittedText(value, field, RESOURCE_NAME_MAX_BYTES, false);
+function admitResourceName(value: unknown): string {
+  const name = admittedText(value, "resourceInvocation.name", RESOURCE_NAME_MAX_BYTES, false);
   // Pi command tokens cannot contain whitespace. Reject catalog entries that
   // could be displayed but never invoked through their declared identity.
   if (/\s/u.test(name)) {
-    throw new GatewayError("invalid_request", `${field} contains whitespace`);
+    throw new GatewayError("invalid_request", "resourceInvocation.name contains whitespace");
   }
   return name;
 }

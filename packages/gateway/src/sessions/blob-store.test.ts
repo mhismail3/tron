@@ -27,12 +27,12 @@ async function leaseData(lease: BlobLease): Promise<Buffer> {
 }
 
 describe("bounded blob store", () => {
-  it("deduplicates exact content without consuming another slot", () => {
+  it("deduplicates exact content without consuming another slot", async () => {
     const store = new BlobStore({ maximumItemBytes: 4, maximumItems: 1, maximumTotalBytes: 4 });
     const first = store.registerData(Buffer.from("same"), "text/plain");
     const second = store.registerData(Buffer.from("same"), "text/plain");
     expect(second).toBe(first);
-    expect(store.get(first).data.toString()).toBe("same");
+    expect((await leaseData(await store.acquire(first))).toString()).toBe("same");
   });
 
   it("bounds MIME metadata and rejects controls without changing valid content identities", () => {
@@ -53,14 +53,14 @@ describe("bounded blob store", () => {
     expect(() => store.register("A".repeat(9), "image/png")).toThrow(/item limit/);
   });
 
-  it("rejects one oversized item without evicting admitted data", () => {
+  it("rejects one oversized item without evicting admitted data", async () => {
     const store = new BlobStore({ maximumItemBytes: 4, maximumItems: 2, maximumTotalBytes: 8 });
     const retained = store.registerData(Buffer.from("keep"), "text/plain");
     expect(() => store.registerData(Buffer.from("large"), "text/plain")).toThrow(/item limit/);
-    expect(store.get(retained).data.toString()).toBe("keep");
+    expect((await leaseData(await store.acquire(retained))).toString()).toBe("keep");
   });
 
-  it("rejects capacity overflow without invalidating already projected IDs", () => {
+  it("rejects capacity overflow without invalidating already projected IDs", async () => {
     let now = 1;
     const store = new BlobStore(
       { maximumItemBytes: 4, maximumItems: 2, maximumTotalBytes: 6 },
@@ -70,12 +70,12 @@ describe("bounded blob store", () => {
     now += 1;
     const second = store.registerData(Buffer.from("bbb"), "text/plain");
     now += 1;
-    store.get(first);
+    await leaseData(await store.acquire(first));
     now += 1;
     expect(() => store.registerData(Buffer.from("ccc"), "text/plain")).toThrow(/temporarily full/);
 
-    expect(store.get(first).data.toString()).toBe("aaa");
-    expect(store.get(second).data.toString()).toBe("bbb");
+    expect((await leaseData(await store.acquire(first))).toString()).toBe("aaa");
+    expect((await leaseData(await store.acquire(second))).toString()).toBe("bbb");
   });
 
   it("reserves capacity before concurrent distinct file copies", async () => {
@@ -302,7 +302,7 @@ describe("bounded blob store", () => {
       .resolves.toBe("replacement");
   });
 
-  it("prunes expired values while retaining the exact age boundary", () => {
+  it("prunes expired values while retaining the exact age boundary", async () => {
     let now = 10;
     const store = new BlobStore(
       { maximumItemBytes: 4, maximumItems: 3, maximumTotalBytes: 12 },
@@ -314,7 +314,7 @@ describe("bounded blob store", () => {
     now = 21;
     store.prune(10);
 
-    expect(() => store.get(expired)).toThrow(/not available/);
-    expect(store.get(boundary).data.toString()).toBe("new");
+    await expect(store.acquire(expired)).rejects.toThrow(/not available/);
+    expect((await leaseData(await store.acquire(boundary))).toString()).toBe("new");
   });
 });

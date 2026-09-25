@@ -8,7 +8,7 @@ function broker(): SemanticUIBroker { return new SemanticUIBroker(new ExtensionP
 describe("ExtensionLifecycleCoordinator", () => {
   it("tracks command, presentation, and shutdown control state", async () => {
     const semantic = broker();
-    const lifecycle = new ExtensionLifecycleCoordinator(semantic.presentation);
+    const lifecycle = new ExtensionLifecycleCoordinator(semantic.presentation, () => false);
     let resolve!: () => void;
     const command = lifecycle.trackCommand(new Promise<void>((done) => { resolve = done; }), () => {});
     expect(lifecycle.hasPendingCommands).toBe(true);
@@ -25,7 +25,7 @@ describe("ExtensionLifecycleCoordinator", () => {
 
   it("counts generic component/focus/render activity and freezes starts after drain cutoff", () => {
     const semantic = broker();
-    const lifecycle = new ExtensionLifecycleCoordinator(semantic.presentation);
+    const lifecycle = new ExtensionLifecycleCoordinator(semantic.presentation, () => false);
     semantic.context().setStatus("ready", "Ready");
     expect(lifecycle.preventsOperationalQuiescence).toBe(false);
     expect(lifecycle.preventsEviction).toBe(true);
@@ -50,7 +50,7 @@ describe("ExtensionLifecycleCoordinator", () => {
   });
 
   it("does not grant a second permit when agent_start precedes the acceptance callback", () => {
-    const lifecycle = new ExtensionLifecycleCoordinator(broker().presentation);
+    const lifecycle = new ExtensionLifecycleCoordinator(broker().presentation, () => false);
     lifecycle.beginPreflight("owner");
     expect(lifecycle.admitAgentStartDuringDrain("owner")).toBe(true);
     lifecycle.resolvePreflight("owner", true);

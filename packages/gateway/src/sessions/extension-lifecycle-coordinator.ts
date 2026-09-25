@@ -16,7 +16,7 @@ export class ExtensionLifecycleCoordinator {
 
   constructor(
     private activity: ExtensionHostActivity,
-    private readonly hasRuntimeWork: () => boolean = () => false,
+    private readonly hasRuntimeWork: () => boolean,
   ) {}
 
   replaceActivity(activity: ExtensionHostActivity): void { this.activity = activity; }

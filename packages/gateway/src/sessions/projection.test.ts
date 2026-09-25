@@ -47,6 +47,19 @@ function wireNodes(value: unknown): number {
   return 1;
 }
 
+/** Reads a memory blob through its reader lease; the store exposes no other
+ * accessor, matching how the Gateway serves blob bytes. */
+async function leaseData(store: BlobStore, id: string): Promise<Buffer> {
+  const lease = await store.acquire(id);
+  const chunks: Buffer[] = [];
+  try {
+    for await (const chunk of lease.stream) chunks.push(Buffer.from(chunk));
+    return Buffer.concat(chunks);
+  } finally {
+    await lease.release();
+  }
+}
+
 describe("aggregate transcript structure", () => {
   it("pages forward from the exact projected boundary under byte and node budgets", () => {
     const manager = SessionManager.inMemory("/tmp/forward-page-fixture");
@@ -747,7 +760,7 @@ describe("transcript projection", () => {
     expect(transcript.some((item) => item.customType === CONTEXT_DELIVERY_RECEIPT_TYPE)).toBe(false);
   });
 
-  it("omits oversized or capacity-excess images without failing the snapshot", () => {
+  it("omits oversized or capacity-excess images without failing the snapshot", async () => {
     const manager = SessionManager.inMemory("/tmp/project");
     const entry = manager.appendMessage({
       role: "user",
@@ -769,7 +782,7 @@ describe("transcript projection", () => {
     const firstBlob = projected?.kind === "message" && projected.content[0]?.type === "image"
       ? projected.content[0].blobId
       : "";
-    expect(blobs.get(firstBlob).data.toString()).toBe("one");
+    expect((await leaseData(blobs, firstBlob)).toString()).toBe("one");
 
     const oversized = SessionManager.inMemory("/tmp/project");
     oversized.appendMessage({
@@ -936,7 +949,7 @@ describe("transcript projection", () => {
     expect(JSON.stringify(tree)).not.toContain('"children"');
   });
 
-  it("projects tree images lazily so omitted candidates do not consume blobs", () => {
+  it("projects tree images lazily so omitted candidates do not consume blobs", async () => {
     const manager = SessionManager.inMemory("/tmp/lazy-tree-images");
     for (let index = 0; index < 1_001; index += 1) {
       manager.appendMessage({
@@ -953,8 +966,8 @@ describe("transcript projection", () => {
     // The newest admitted candidate registers; the structurally omitted oldest
     // candidate never reaches BlobStore registration.
     const blobID = (index: number) => createHash("sha256").update("image/png").update("\0").update(`image-${index}`).digest("base64url");
-    expect(blobs.get(blobID(1_000)).data.toString()).toBe("image-1000");
-    expect(() => blobs.get(blobID(0))).toThrow();
+    expect((await leaseData(blobs, blobID(1_000))).toString()).toBe("image-1000");
+    await expect(blobs.acquire(blobID(0))).rejects.toThrow();
     expect(tree.at(-1)?.id).toBe(manager.getEntries().at(-1)?.id);
   });
 
