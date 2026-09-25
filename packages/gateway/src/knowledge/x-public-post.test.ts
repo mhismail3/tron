@@ -140,5 +140,5 @@ describe("public X v2 hydration", () => {
     expect(result.disposition).toBe("inaccessible"); expect(seen).toEqual(["https://api.fxtwitter.com/2/conversation/123456789"]);
   });
   it("accepts canonical web-status permalinks", () => expect(xPostIdentity("https://x.com/i/web/status/123456789").id).toBe("123456789"));
-  it("keeps response type usable in failure tests", async () => { const get = vi.fn(async (): Promise<XPostResponse> => { throw new Error("secret"); }); const result = await lookupPublicXPost(url, get, signal()); expect(result.disposition).toBe("inaccessible"); });
+  it("reports a thrown provider failure as an inaccessible lookup", async () => { const get = vi.fn(async (): Promise<XPostResponse> => { throw new Error("secret"); }); const result = await lookupPublicXPost(url, get, signal()); expect(result.disposition).toBe("inaccessible"); });
 });
