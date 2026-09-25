@@ -276,6 +276,24 @@ function activePath(tronHome: string): string {
   return join(installRoot(tronHome), "active.json");
 }
 
+/** `active.json` is the advisory pointer to one in-flight install, and its schema
+ * is bumped whenever the pointer shape changes (`7f23eba1a` bumped it to 2). A
+ * document that declares any other schema cannot be read by this Gateway, so it
+ * is leftover pointer state from an install this Gateway no longer owns: the
+ * owner clears it and reports no active install. A document that declares the
+ * current schema and still fails admission stays fatal. */
+async function readActiveInstall(tronHome: string): Promise<ActiveInstall | undefined> {
+  const path = activePath(tronHome);
+  const value = await readDocument(path);
+  if (value === undefined) return undefined;
+  const raw = record(value);
+  if (raw !== undefined && "schema" in raw && raw.schema !== 2) {
+    await removeIfExists(path).catch(() => {});
+    return undefined;
+  }
+  return activeDocument(value);
+}
+
 /** Admit only bounded physical-iOS fields from `devicectl list devices`:
  * serials, UDIDs and other raw properties are dropped. The real discovery runs
  * `xcrun`, so this admission is the only in-process witness of the field set. */
@@ -450,9 +468,8 @@ export class IosDeviceInstallService {
 
   async activeStatus(): Promise<IosDeviceInstallStatus | null> {
     if (!this.isUsable) return null;
-    const value = await readDocument(activePath(this.options.tronHome));
-    if (value === undefined) return null;
-    const active = activeDocument(value);
+    const active = await readActiveInstall(this.options.tronHome);
+    if (active === undefined) return null;
     const status = await this.status(active.deviceId);
     if (!status || status.commandId !== active.commandId || status.buildMode !== active.buildMode) {
       throw new GatewayError("conflict", "iOS device install activity has unresolved owner state");
@@ -480,9 +497,8 @@ export class IosDeviceInstallService {
     return this.mutex.run(async () => {
       const config = await this.configStatus(deviceId);
       if (!config) throw new GatewayError("not_found", "Configure the iOS source repository before binding a device", true);
-      const activeValue = await readDocument(activePath(this.options.tronHome));
-      if (activeValue !== undefined) {
-        const active = activeDocument(activeValue);
+      const active = await readActiveInstall(this.options.tronHome);
+      if (active !== undefined) {
         const activeStatus = await this.status(active.deviceId).catch(() => null);
         if (activeStatus?.state === "requested" || activeStatus?.state === "running") {
           throw new GatewayError("busy", `An iOS build/install is already running for ${activeStatus.targetName}`, true);
@@ -538,9 +554,8 @@ export class IosDeviceInstallService {
           true,
         );
       }
-      const activeValue = await readDocument(activePath(this.options.tronHome));
-      if (activeValue !== undefined) {
-        const active = activeDocument(activeValue);
+      const active = await readActiveInstall(this.options.tronHome);
+      if (active !== undefined) {
         const activeStatus = await this.status(active.deviceId).catch(() => null);
         const age = Date.now() - Date.parse(active.startedAt);
         if (age < ACTIVE_STALE_MS) {

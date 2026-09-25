@@ -1,4 +1,4 @@
-import { chmod, mkdtemp, mkdir, realpath, rm, symlink, writeFile } from "node:fs/promises";
+import { chmod, mkdtemp, mkdir, readFile, realpath, rm, symlink, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -51,6 +51,32 @@ async function fixture() {
 afterEach(async () => {
   await Promise.all(roots.splice(0).map((root) => rm(root, { recursive: true, force: true })));
 });
+
+const client: ClientContext = {
+  id: "phone", identity: "device-alpha", isLocal: false,
+  beginSynchronization: () => "sync", establishSynchronization: () => {}, completeSynchronization: () => {},
+  setPresentationVisibility: () => ({ visible: true, revision: 1 }), unsubscribe: () => true,
+  attachTerminal: () => {}, detachTerminal: () => {}, ownsTerminal: () => false,
+  isSubscribed: () => true, isRevoked: () => false, revokeDevice: () => {},
+};
+
+function gatewayRpc(service: IosDeviceInstallService, tronHome: string) {
+  const update = vi.fn(async () => ({ accepted: true }));
+  const gateway = new GatewayService({
+    config: { machineId: "machine", machineGroupID: "group", machineName: "Mac", tronHome },
+    updateService: new GatewayUpdateService({ tronHome, updater: update }),
+    iosDeviceInstallService: service,
+    devices: {
+      hasDevice: async (deviceId: string) => deviceId === "device-alpha",
+      updateObservedName: async () => undefined,
+    },
+    receipts: {
+      execute: async (_identity: string, _method: string, _commandId: string, operation: () => Promise<unknown>) => operation(),
+    },
+    broadcast: () => {},
+  } as unknown as GatewayServiceDependencies);
+  return { gateway, update };
+}
 
 describe("IosDeviceInstallService", () => {
   it("admits only bounded physical iOS discovery fields", () => {
@@ -277,27 +303,7 @@ describe("IosDeviceInstallService", () => {
 
   it("projects only opaque targets through paired-device receipt-backed RPC", async () => {
     const { source, service, tronHome } = await fixture();
-    const update = vi.fn(async () => ({ accepted: true }));
-    const gateway = new GatewayService({
-      config: { machineId: "machine", machineGroupID: "group", machineName: "Mac", tronHome },
-      updateService: new GatewayUpdateService({ tronHome, updater: update }),
-      iosDeviceInstallService: service,
-      devices: {
-        hasDevice: async (deviceId: string) => deviceId === "device-alpha",
-        updateObservedName: async () => undefined,
-      },
-      receipts: {
-        execute: async (_identity: string, _method: string, _commandId: string, operation: () => Promise<unknown>) => operation(),
-      },
-      broadcast: () => {},
-    } as unknown as GatewayServiceDependencies);
-    const client: ClientContext = {
-      id: "phone", identity: "device-alpha", isLocal: false,
-      beginSynchronization: () => "sync", establishSynchronization: () => {}, completeSynchronization: () => {},
-      setPresentationVisibility: () => ({ visible: true, revision: 1 }), unsubscribe: () => true,
-      attachTerminal: () => {}, detachTerminal: () => {}, ownsTerminal: () => false,
-      isSubscribed: () => true, isRevoked: () => false, revokeDevice: () => {},
-    };
+    const { gateway, update } = gatewayRpc(service, tronHome);
     expect((gateway.info() as Record<string, unknown>).capabilities).toContain("ios-device-install.v3");
     const configured = await gateway.invoke(client, "device.install.config", {
       commandId: "command-config-1", deviceId: "device-alpha", sourceRoot: source,
@@ -320,6 +326,64 @@ describe("IosDeviceInstallService", () => {
       commandId: "command-update-1", channel: "stable", mode: "source",
     })).rejects.toMatchObject({ code: "busy", retryable: true });
     expect(update).not.toHaveBeenCalled();
+  });
+
+  const activePointer = (tronHome: string) => join(tronHome, "gateway", "ios-device-installs", "active.json");
+
+  it("treats an older-schema active install pointer as stale and clears it", async () => {
+    const { source, service, tronHome, launched } = await fixture();
+    await service.configure({ deviceId: "device-alpha", sourceRoot: source });
+    await service.bindTarget("device-alpha", target.identifier);
+    const active = activePointer(tronHome);
+    // The exact `schema: 1` pointer a Gateway before 7f23eba1a left behind.
+    const writeOlderSchema = async () => {
+      await writeFile(active, `${JSON.stringify({
+        schema: 1, kind: "tron-ios-device-install-active", deviceId: "device-alpha",
+        commandId: "command-install-1", startedAt: "2026-09-01T00:00:00.000Z",
+      })}\n`, { mode: 0o600 });
+      await chmod(active, 0o600);
+    };
+    const { gateway, update } = gatewayRpc(service, tronHome);
+
+    // Each reader treats the unreadable pointer as stale: the mutation gate,
+    // the status projection and install admission all proceed.
+    await writeOlderSchema();
+    await expect(gateway.invoke(client, "gateway.update", {
+      commandId: "command-update-1", channel: "stable", mode: "source",
+    })).resolves.toMatchObject({ accepted: true });
+    expect(update).toHaveBeenCalledOnce();
+
+    await writeOlderSchema();
+    await expect(service.activeStatus()).resolves.toBeNull();
+    await expect(readFile(active, "utf8")).rejects.toMatchObject({ code: "ENOENT" });
+
+    await writeOlderSchema();
+    await expect(service.install("device-alpha", "command-install-2", "optimized"))
+      .resolves.toMatchObject({ accepted: true, commandId: "command-install-2", buildMode: "optimized" });
+    expect(launched).toEqual([expect.objectContaining({ commandId: "command-install-2" })]);
+  });
+
+  it("keeps failing closed for a corrupt current-schema active install pointer", async () => {
+    const { source, service, tronHome } = await fixture();
+    await service.configure({ deviceId: "device-alpha", sourceRoot: source });
+    await service.bindTarget("device-alpha", target.identifier);
+    const active = activePointer(tronHome);
+    await writeFile(active, `${JSON.stringify({
+      schema: 2, kind: "tron-ios-device-install-active", deviceId: "device-alpha", commandId: "command-install-1",
+    })}\n`, { mode: 0o600 });
+    await chmod(active, 0o600);
+    const { gateway } = gatewayRpc(service, tronHome);
+
+    await expect(service.activeStatus()).rejects.toMatchObject({ code: "conflict" });
+    await expect(service.install("device-alpha", "command-install-2", "optimized"))
+      .rejects.toMatchObject({ code: "conflict" });
+    await expect(service.bindTarget("device-alpha", target.identifier))
+      .rejects.toMatchObject({ code: "conflict" });
+    await expect(gateway.invoke(client, "gateway.update", {
+      commandId: "command-update-1", channel: "stable", mode: "source",
+    })).rejects.toMatchObject({ code: "conflict" });
+    // Corrupt current-schema state is not silently cleared.
+    await expect(readFile(active, "utf8")).resolves.toContain('"schema":2');
   });
 
   it("fails closed for incomplete, linked, and unsupervised configuration", async () => {
