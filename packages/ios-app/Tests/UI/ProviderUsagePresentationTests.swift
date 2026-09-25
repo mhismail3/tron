@@ -188,6 +188,11 @@ struct ProviderUsagePresentationTests {
             providerId: "moonshotai", status: .available,
             windows: [UsageWindow(id: "quota", label: "Quota", usedPercent: 12)], balances: balances
         )) == "12% used")
+        // A lone window with a known cadence still names it (Codex's weekly quota).
+        #expect(ProviderUsagePresentation.summary(ProviderUsageSnapshot(
+            providerId: "openai-codex", status: .available,
+            windows: [UsageWindow(id: "primary", label: "Primary", usedPercent: 26, windowSeconds: 604_800)]
+        )) == "26% used (Weekly)")
         #expect(ProviderUsagePresentation.summary(ProviderUsageSnapshot(
             providerId: "moonshotai", status: .rateLimited, stale: true, balances: balances
         )) == "Usage temporarily rate limited · $49.59 Available · Stale")

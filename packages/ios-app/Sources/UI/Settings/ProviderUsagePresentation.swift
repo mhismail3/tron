@@ -38,7 +38,9 @@ enum ProviderUsagePresentation {
             guard let value = windowSummary(window) else { continue }
             // A provider can expose both a short window and a weekly quota. Keep
             // both labels so the primary row never hides the meaningful limit.
-            let shouldLabel = windows.count > 1 || index > 0
+            // A lone window is labeled only when its duration names a cadence
+            // (Codex's single weekly window), not a generic "Primary"/"Usage".
+            let shouldLabel = windows.count > 1 || index > 0 || cadenceLabel(window.windowSeconds) != nil
             // The value leads and the window label trails in parentheses: "3% used (5h)".
             parts.append(shouldLabel ? "\(value) (\(summaryLabel(window.label, windowSeconds: window.windowSeconds)))" : value)
         }
@@ -104,15 +106,19 @@ enum ProviderUsagePresentation {
         }
     }
 
-    static func summaryLabel(_ label: String, windowSeconds: Int? = nil) -> String {
+    static func cadenceLabel(_ windowSeconds: Int?) -> String? {
         switch windowSeconds {
         case 3_600: return "Hourly"
         case 18_000: return "5h"
         case 86_400: return "Daily"
         case 604_800: return "Weekly"
         case 2_592_000: return "Monthly"
-        default: break
+        default: return nil
         }
+    }
+
+    static func summaryLabel(_ label: String, windowSeconds: Int? = nil) -> String {
+        if let cadence = cadenceLabel(windowSeconds) { return cadence }
         let normalized = label.trimmingCharacters(in: .whitespacesAndNewlines)
         return normalized.lowercased().contains("week") ? "Weekly" : normalized
     }
