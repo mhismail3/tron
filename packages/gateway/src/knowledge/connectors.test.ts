@@ -250,20 +250,34 @@ describe("knowledge connectors", () => {
   });
 
   it.each(["Retry-After", "X-RateLimit-Reset", "RateLimit-Reset"])("honors %s before a safe retry", async header => {
-    let calls = 0; let firstAt = 0; let retryAt = 0;
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "Date"] });
+    // A fixed clock makes the provider cooldown exact: one second from now.
+    vi.setSystemTime(new Date("2026-01-01T00:00:00.000Z"));
+    let calls = 0; let firstAt = 0; let retriedAt = 0;
+    let firstAttempt!: () => void;
+    const attempted = new Promise<void>(resolve => { firstAttempt = resolve; });
     const { extension } = await fixture(async () => {
       calls += 1;
       if (calls === 1) {
-        firstAt = Date.now(); retryAt = Math.ceil(firstAt / 1000) * 1000 + 1000;
-        return { status: 429, body: "{}", headers: new Headers({ [header]: header === "Retry-After" ? new Date(retryAt).toUTCString() : String(retryAt / 1000) }) };
+        firstAt = Date.now();
+        firstAttempt();
+        return { status: 429, body: "{}", headers: new Headers({ [header]: header === "Retry-After" ? new Date(firstAt + 1_000).toUTCString() : String((firstAt + 1_000) / 1_000) }) };
       }
-      expect(Date.now()).toBeGreaterThanOrEqual(retryAt - 5);
+      retriedAt = Date.now();
       return response({ user: { _id: 42 } });
     });
     await extension.invoke({ operation: "knowledge.connector.configure", request: { commandId: command("retry-config"), connector: "raindrop", enabled: true, accountId: "42", credentialRef: "connector:raindrop:test-account" } });
-    await extension.invoke({ operation: "knowledge.raindrop.read", request: { commandId: command("retry-read"), read: { operation: "user" } } });
+    const read = extension.invoke({ operation: "knowledge.raindrop.read", request: { commandId: command("retry-read"), read: { operation: "user" } } });
+    await attempted;
+    // Let the request park in the provider cooldown before moving the clock.
+    await new Promise(resolve => setImmediate(resolve));
+    // A provider cooldown is never shortened: one millisecond early is too early.
+    await vi.advanceTimersByTimeAsync(999);
+    expect(calls).toBe(1);
+    await vi.advanceTimersByTimeAsync(1_000);
+    await read;
     expect(calls).toBe(2);
-    expect(Date.now() - firstAt).toBeGreaterThanOrEqual(995);
+    expect(retriedAt - firstAt).toBeGreaterThanOrEqual(1_000);
   });
 
   it("serializes connector configuration behind an admitted discovery request", async () => {
