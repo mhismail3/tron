@@ -5,10 +5,9 @@ import { spawn, type IPty } from "node-pty";
 import { GatewayError } from "../errors.js";
 import type { JsonValue } from "../protocol/types.js";
 
-export const MAX_RETAINED_TERMINALS = 128;
-export const MAX_ACTIVE_TERMINALS = 16;
-export const MAX_TERMINAL_OUTPUT_CHUNK_BYTES = 64 * 1_024;
-export const MAX_TERMINAL_REPLAY_ENCODED_BYTES = 768 * 1_024;
+const MAX_RETAINED_TERMINALS = 128;
+const MAX_ACTIVE_TERMINALS = 16;
+const MAX_TERMINAL_OUTPUT_CHUNK_BYTES = 64 * 1_024;
 
 interface OutputChunk {
   sequence: number;
@@ -43,7 +42,7 @@ function terminatePtyProcessGroup(pty: IPty): void {
   process.kill(-pty.pid, "SIGKILL");
 }
 
-export interface TerminalSummary {
+interface TerminalSummary {
   id: string;
   sessionId: string;
   cwd: string;
@@ -65,7 +64,9 @@ export class TerminalService {
     private readonly broadcast: (terminalId: string, topic: string, payload: JsonValue) => void,
     private readonly terminateProcessGroup: (pty: IPty) => void = terminatePtyProcessGroup,
   ) {
-    this.replayBytes = Math.max(0, Math.min(replayBytes, MAX_TERMINAL_REPLAY_ENCODED_BYTES));
+    // `config.terminalReplayBytes` owns the replay cap; this service enforces
+    // exactly the admitted value instead of re-declaring a second ceiling.
+    this.replayBytes = Math.max(0, replayBytes);
   }
 
   /** Atomically refuse replacement when a PTY is live, otherwise close future

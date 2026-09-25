@@ -6,7 +6,7 @@ export interface NativeCaptureTransport {
   closeLocal(): Promise<void>;
 }
 
-export const NATIVE_CAPTURE_OPERATION_TIMEOUT_MS = 10_000;
+const NATIVE_CAPTURE_OPERATION_TIMEOUT_MS = 10_000;
 
 function boundedCallback<T>(
   operation: string,

@@ -5,17 +5,37 @@ import { join } from "node:path";
 import { describe, expect, it, vi } from "vitest";
 import { CuaComputerClient } from "./cua-client.js";
 
+// The endpoint and the driver CLI are the two native seams the client owns, so
+// the fixture replaces those modules instead of injecting constructor values.
+const native = vi.hoisted(() => {
+  const state = {
+    endpoint: { socket: "", generation: "" },
+    close: vi.fn(async () => {}),
+    open: vi.fn(),
+  };
+  state.open.mockImplementation(async () => ({ automationEndpoint: async () => state.endpoint, close: state.close }));
+  return state;
+});
+const cli = vi.hoisted(() => ({ run: vi.fn(), activate: vi.fn(), exec: vi.fn() }));
+vi.mock("./native-capture-client.js", () => ({ openNativeCaptureClient: native.open }));
+vi.mock("node:child_process", async (importOriginal) => {
+  const { promisify } = await import("node:util");
+  // cua-client promisifies execFile once; the custom hook makes every CLI call
+  // land on the same recorded mock as the production driver path.
+  return { ...(await importOriginal<typeof import("node:child_process")>()), execFile: Object.assign(cli.exec, { [promisify.custom]: cli.exec }) };
+});
+
 const binding = () => ({ canonicalSessionID: "fixture-session", runtimeLoadID: randomUUID() });
 const snapshot = { pid: 123, window_id: 456, snapshot_id: "s00000001", elements: [{ element_token: "s00000001:1" }] };
 function fixture() {
   const generation = randomUUID(), endpoint = { socket: `/tmp/tron-cua-${generation}/s`, generation };
-  const nativeClose = vi.fn(async () => {});
-  const open = vi.fn(async () => ({ automationEndpoint: async () => endpoint, close: nativeClose }));
-  const run = vi.fn(async (_path: string, args: string[], _options: unknown) => ({ stdout: JSON.stringify(args[1] === "end_session" ? { active: false } : snapshot), stderr: "" }));
-  const activate = vi.fn(async () => ({ stdout: '{"active":true,"revived":false}', stderr: "" }));
-  const transport = vi.fn(async (path: string, args: string[], options: unknown) => args[1] === "start_session" ? activate() : run(path, args, options));
-  const owner = binding(), client = new CuaComputerClient(owner, "/fixture/cua-driver", open as never, transport as never);
-  return { client, owner, endpoint, open, nativeClose, run, activate, transport };
+  native.endpoint = endpoint;
+  native.close.mockClear(); native.open.mockClear();
+  cli.run.mockReset().mockImplementation(async (_path: string, args: string[]) => ({ stdout: JSON.stringify(args[1] === "end_session" ? { active: false } : snapshot), stderr: "" }));
+  cli.activate.mockReset().mockImplementation(async () => ({ stdout: '{"active":true,"revived":false}', stderr: "" }));
+  cli.exec.mockReset().mockImplementation((path: string, args: string[], options: unknown) => args[1] === "start_session" ? cli.activate() : cli.run(path, args, options));
+  const owner = binding(), client = new CuaComputerClient(owner);
+  return { client, owner, endpoint, open: native.open, nativeClose: native.close, run: cli.run, activate: cli.activate, transport: cli.exec };
 }
 async function observe(f: ReturnType<typeof fixture>) {
   await f.client.invoke("get_window_state", { pid: 123, window_id: 456, include_screenshot: false });

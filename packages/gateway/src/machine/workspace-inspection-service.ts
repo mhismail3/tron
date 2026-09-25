@@ -18,12 +18,12 @@ const WORKSPACE_METADATA_CONCURRENCY = 16;
 const HISTORY_MAXIMUM_LIMIT = 100;
 const HISTORY_CURSOR_MAXIMUM_AGE_MS = 5 * 60_000;
 
-export type WorkspaceEntryKind = "directory" | "file" | "symlink";
-export type WorkspaceChangeKind = "added" | "modified" | "deleted" | "renamed" | "copied" | "untracked" | "conflicted" | "typeChanged";
+type WorkspaceEntryKind = "directory" | "file" | "symlink";
+type WorkspaceChangeKind = "added" | "modified" | "deleted" | "renamed" | "copied" | "untracked" | "conflicted" | "typeChanged";
 export type WorkspaceDiffScope = "current" | "staged" | "unstaged";
 export type WorkspaceHistoryScope = "currentBranch" | "allReferences";
 
-export interface WorkspaceChange {
+interface WorkspaceChange {
   path: string;
   originalPath?: string;
   staged: boolean;
@@ -33,7 +33,7 @@ export interface WorkspaceChange {
   kind: WorkspaceChangeKind;
 }
 
-export interface WorkspaceRepositoryInspection {
+interface WorkspaceRepositoryInspection {
   root: string;
   branch?: string;
   head?: string;
@@ -43,7 +43,7 @@ export interface WorkspaceRepositoryInspection {
   changes: WorkspaceChange[];
 }
 
-export interface WorkspaceInspection {
+interface WorkspaceInspection {
   root: string;
   revision: string;
   repository?: WorkspaceRepositoryInspection;

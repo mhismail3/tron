@@ -5,7 +5,7 @@ import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { GatewayError } from "../errors.js";
 import { inspectGitPath } from "./workspace-inspection-service.js";
 
-export interface WorkspaceEntry {
+interface WorkspaceEntry {
   name: string;
   path: string;
   kind: "directory" | "file";
@@ -17,8 +17,8 @@ function inside(root: string, candidate: string): boolean {
   return delta === "" || (!delta.startsWith(`..${sep}`) && delta !== ".." && !isAbsolute(delta));
 }
 
-export const WORKSPACE_MAXIMUM_ENTRIES = 1_000;
-export const WORKSPACE_MAXIMUM_PROJECTED_BYTES = 768 * 1_024;
+const WORKSPACE_MAXIMUM_ENTRIES = 1_000;
+const WORKSPACE_MAXIMUM_PROJECTED_BYTES = 768 * 1_024;
 
 interface FilesystemServiceOptions {
   maximumEntries?: number;

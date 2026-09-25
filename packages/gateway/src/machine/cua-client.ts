@@ -14,14 +14,14 @@ const OBSERVATIONS = new Set(["help", "list_apps", "list_windows", "get_window_s
 const IMAGES = new Set(["get_window_state", "get_desktop_state"]);
 const ACTIONS = new Set(["launch_app", "set_window_frame", "bring_to_front", "click", "double_click", "right_click", "type_text", "press_key", "hotkey", "scroll", "drag", "move_cursor", "set_value"]);
 const RESERVED = new Set(["session", "_session_id", "socket", "endpoint", "env", "screenshot_out_file"]);
-export type CuaComputerResult = Readonly<{
+type CuaComputerResult = Readonly<{
   status: "completed" | "refused" | "outcomeUnknown";
   output: unknown;
   endpointGeneration: string;
   image?: { type: "image"; data: string; mimeType: "image/png" };
 }>;
 
-export function parseCuaOutput(stdout: string, endpointGeneration: string, kind: "observation" | "action" = "observation"): CuaComputerResult {
+function parseCuaOutput(stdout: string, endpointGeneration: string, kind: "observation" | "action" = "observation"): CuaComputerResult {
   if (Buffer.byteLength(stdout) > OUTPUT_LIMIT) throw new Error("Cua output exceeds bounds");
   const output: unknown = JSON.parse(stdout);
   if (!output || typeof output !== "object" || Array.isArray(output)) throw new Error("Invalid Cua result");
@@ -50,12 +50,7 @@ export class CuaComputerClient {
   private refreshEndpoint = false;
   private windowReferences: { pid: number; window: number; tokens: Set<string> } | undefined;
 
-  constructor(
-    private readonly binding: NativeCaptureBinding,
-    private readonly driverPath = DRIVER,
-    private readonly openNative = openNativeCaptureClient,
-    private readonly run = execFileAsync,
-  ) {}
+  constructor(private readonly binding: NativeCaptureBinding) {}
 
   invalidateObservation(): void {
     this.observed = false; this.desktopObserved = false; this.pixelObserved = false; this.windowReferences = undefined;
@@ -108,14 +103,14 @@ export class CuaComputerClient {
         const name = arguments_.tool;
         if (name === undefined) return { status: "completed", output: { tools: [...OBSERVATIONS, ...ACTIONS] }, endpointGeneration: "metadata" };
         if (typeof name !== "string" || (!OBSERVATIONS.has(name) && !ACTIONS.has(name)) || name === "help") throw new Error("Unsupported computer help topic");
-        const { stdout } = await this.run(this.driverPath, ["describe", name], { env: this.environment(), maxBuffer: OUTPUT_LIMIT, encoding: "utf8", windowsHide: true });
+        const { stdout } = await execFileAsync(DRIVER, ["describe", name], { env: this.environment(), maxBuffer: OUTPUT_LIMIT, encoding: "utf8", windowsHide: true });
         signal?.throwIfAborted();
         if (this.closed) throw new Error("Computer session ended before help publication");
         return { status: "completed", output: { documentation: stdout }, endpointGeneration: "metadata" };
       }
       if (!this.endpoint || (observation && this.refreshEndpoint)) {
         if (!observation) throw new Error("Observe before establishing a computer endpoint");
-        const native = await this.openNative(this.binding);
+        const native = await openNativeCaptureClient(this.binding);
         let endpoint: NativeAutomationEndpoint;
         try { endpoint = await native.automationEndpoint(); }
         finally { await native.close(); }
@@ -127,7 +122,7 @@ export class CuaComputerClient {
       if (observation) {
         // Cua expires idle CLI sessions. Only a fresh observation may revive
         // this load's exact session; never revive or replay an input action.
-        const { stdout } = await this.run(this.driverPath, ["call", "start_session", JSON.stringify({ session: this.binding.runtimeLoadID }), "--socket", endpoint.socket],
+        const { stdout } = await execFileAsync(DRIVER, ["call", "start_session", JSON.stringify({ session: this.binding.runtimeLoadID }), "--socket", endpoint.socket],
           { env: this.environment(), maxBuffer: OUTPUT_LIMIT, encoding: "utf8", windowsHide: true });
         const activation = parseCuaOutput(stdout, endpoint.generation);
         const state = activation.output as Record<string, unknown>;
@@ -157,7 +152,7 @@ export class CuaComputerClient {
       if (this.closed) throw new Error("Computer session ended before dispatch");
       // No waiter signal/timeout: do not kill an accepted native invocation.
       // Overflow/transport failure is uncertainty; it never triggers replay.
-      const { stdout } = await this.run(this.driverPath, ["call", tool, JSON.stringify(args), "--socket", endpoint.socket], {
+      const { stdout } = await execFileAsync(DRIVER, ["call", tool, JSON.stringify(args), "--socket", endpoint.socket], {
         env: this.environment(), maxBuffer: OUTPUT_LIMIT, encoding: "utf8", windowsHide: true,
       });
       const result = parseCuaOutput(stdout, endpoint.generation, observation ? "observation" : "action");
@@ -222,7 +217,7 @@ export class CuaComputerClient {
       const endpoint = this.endpoint; this.endpoint = undefined;
       if (!endpoint) return;
       for (;;) {
-        const { stdout } = await this.run(this.driverPath, ["call", "end_session", JSON.stringify({ session: this.binding.runtimeLoadID }), "--socket", endpoint.socket],
+        const { stdout } = await execFileAsync(DRIVER, ["call", "end_session", JSON.stringify({ session: this.binding.runtimeLoadID }), "--socket", endpoint.socket],
           { env: this.environment(), maxBuffer: OUTPUT_LIMIT, encoding: "utf8", windowsHide: true });
         const result = JSON.parse(stdout) as Record<string, unknown>;
         if (result.code === "session_cleanup_pending") {

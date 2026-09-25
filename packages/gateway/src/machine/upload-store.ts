@@ -12,7 +12,7 @@ import { abortableRead } from "../util/abortable-read.js";
 import { isGatewayTimestamp } from "../util/timestamp.js";
 import type { PromptAttachmentState } from "../protocol/types.js";
 
-export const MAXIMUM_ATTACHMENT_READERS = 32;
+const MAXIMUM_ATTACHMENT_READERS = 32;
 const UPLOAD_METADATA_MAX_BYTES = 64 * 1_024;
 const DEFAULT_MAXIMUM_STAGING_ENTRIES = 1_024;
 const DEFAULT_MAXIMUM_RETAINED_ENTRIES = 16_384;
@@ -44,12 +44,12 @@ interface StagedUpload {
   reservedBytes: number;
 }
 
-export interface UploadImportLease {
+interface UploadImportLease {
   path: string;
   release(): Promise<void>;
 }
 
-export interface UploadLease {
+interface UploadLease {
   name: string;
   mimeType: string;
   size: number;
@@ -69,7 +69,7 @@ interface UploadStoreOptions {
   availableDiskBytes?: () => Promise<number>;
 }
 
-export interface UploadCapacityStatus {
+interface UploadCapacityStatus {
   entryCount: number;
   logicalBytes: number;
   stagingEntryCount: number;

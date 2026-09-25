@@ -8,17 +8,12 @@ const GIT = process.env.TRON_GIT_PATH ?? "/usr/bin/git";
 const COMMAND_TIMEOUT_MS = 10_000;
 const MAX_BRANCH_BYTES = 255;
 
-export type SessionSourceControlMode =
-  | "existingCheckout"
-  | "newBranchWorktree"
-  | "existingBranchWorktree";
-
 export type SessionSourceControlRequest =
   | { mode: "existingCheckout" }
   | { mode: "newBranchWorktree"; branch: string; base?: string }
   | { mode: "existingBranchWorktree"; branch: string };
 
-export interface PreparedSessionWorkspace {
+interface PreparedSessionWorkspace {
   cwd: string;
   cleanup: () => Promise<void>;
 }
