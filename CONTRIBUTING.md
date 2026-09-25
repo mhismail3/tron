@@ -149,9 +149,8 @@ logs/results on its exact repository-owned test simulator. A successful run must
 also contain an extracted XCTest summary proving at least one executed,
 non-skipped passing test; process failures and timeouts retain their original
 status. Run `scripts/tron-ios-test checkpoint` only after focused owners pass. See
-`packages/ios-app/docs/development.md` for status, cleanup, and diagnostics. Development is the simulator app,
-Test is the explicit `HOSTED_TEST` host, LocalDevice is the canonical physical
-device install, DevicePerformance is test-only, and Release is archive-only.
+`packages/ios-app/docs/development.md` for status, cleanup, diagnostics, and the
+[iOS build matrix](packages/ios-app/docs/development.md#build-matrix).
 Keep generated schemes and DerivedData out of the diff.
 
 ### Mac
@@ -161,15 +160,10 @@ Stage generated gateway payloads only when a build/archive needs them:
 ```bash
 packages/mac-app/scripts/bundle-gateway.sh
 scripts/tron mac generate
-cd packages/mac-app
-xcodebuild build-for-testing -project TronMac.xcodeproj -scheme TronMac \
-  -configuration Debug -destination 'platform=macOS,arch=arm64' \
-  -derivedDataPath build/DerivedData
-xcodebuild test-without-building -project TronMac.xcodeproj -scheme TronMac \
-  -configuration Debug -destination 'platform=macOS,arch=arm64' \
-  -derivedDataPath build/DerivedData \
-  -only-testing:TronMacTests/<OwningSuite>
 ```
+
+The TronMac build and test commands are in the
+[Mac development guide](packages/mac-app/docs/development.md#efficient-focused-tests).
 
 The Release app packages only `Tron Agent.app` under the stable
 `com.tron.server` label. Developer tooling reuses that installed signed launcher
@@ -183,13 +177,8 @@ guarantees are in the Gateway README's Diagnostic bundle section.
 
 ## Documentation ownership
 
-- Product shape, setup, and primary workflow: root `README.md`
-- Gateway protocol/security/session invariants: `packages/gateway/README.md`
-- iOS structure and state: `packages/ios-app/docs/architecture.md`
-- iOS test workflow: `packages/ios-app/docs/development.md`
-- Mac supervision and pairing: `packages/mac-app/docs/architecture.md`
-- Mac packaging and testing: `packages/mac-app/docs/development.md`
-- Multi-session work plans and completed-work history: [docs/plans](docs/plans/README.md)
+Owning docs by area are listed in
+[AGENTS.md](AGENTS.md#documentation-ownership).
 
 Update the nearest owner when behavior changes. Keep root README concise and link
 to implementation-level detail.

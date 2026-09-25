@@ -10,8 +10,9 @@
 3. **Canonical truth stays canonical.** Runtime JSONL, settings, credentials,
    packages, resources, compaction, and retries are authoritative. iOS caches
    and gateway snapshots are bounded projections, never mirrors.
-4. **Root-cause fixes only.** Do not recreate Engine, workers, event journals,
-   SQLite session mirrors, or compatibility branches for retired architecture.
+4. **Root-cause fixes only.** Do not recreate the retired architecture listed in
+   [CONTRIBUTING.md](CONTRIBUTING.md#repository-map) or compatibility branches
+   for it.
 5. **Personal data stays out of source; secrets stay in owned stores.** Run
    `scripts/personal-info-guard.sh`. Provider credentials remain in the Mac
    runtime store; mobile device tokens remain in Keychain; only hashes persist
@@ -102,9 +103,10 @@
   boilerplate; implementation details belong in their owning code and docs.
 - For iOS build, test, simulator, signing, archive, or physical-device work, load
   `.agents/skills/tron-ios/SKILL.md` and use its routing table.
-- Use repository device helpers rather than inventing scheme/configuration pairs.
-  Physical development uses `Tron Device` + `LocalDevice`; `Release` is
-  archive-only, and signed artifacts are the authority for Apple environments.
+- Use repository device helpers rather than inventing scheme/configuration pairs;
+  the [iOS build matrix](packages/ios-app/docs/development.md#build-matrix) owns
+  the configurations. Signed artifacts remain the authority for Apple
+  environments.
 - Never erase iOS application or Keychain data to recover from a build/signing
   mismatch, and do not install on a device another session currently owns.
 
@@ -144,7 +146,9 @@ xcodebuild test-without-building -project TronMac.xcodeproj -scheme TronMac \
 
 Run full gateway/native suites at cross-module checkpoints or after focused
 owners pass. Stage the Mac payload with `packages/mac-app/scripts/bundle-gateway.sh`
-only when packaging/build validation needs generated resources.
+only when packaging/build validation needs generated resources. The
+[Mac development guide](packages/mac-app/docs/development.md#efficient-focused-tests)
+owns the TronMac commands.
 
 ## Documentation ownership
 

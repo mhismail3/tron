@@ -73,10 +73,10 @@ packages/push-relay/ closed Cloudflare/APNs transport
 scripts/tron        contributor entry point
 ```
 
-The retired custom Rust backend, agent worker platform, browser operator,
-notification inbox/delivery subsystem, and Engine/Activity client domains remain
-absent. The current push relay is only a closed installation registry,
-idempotency boundary, and APNs adapter.
+The retired backend and subsystems are listed in
+[Contributing](CONTRIBUTING.md#repository-map) and stay absent. The current push
+relay is only a closed installation registry, idempotency boundary, and APNs
+adapter.
 
 ## Requirements
 
@@ -119,12 +119,8 @@ Install the Mac app first; source-built local replacements must follow the
 manual [local Release reinstall runbook](packages/mac-app/docs/development.md#reinstall-a-local-release-build).
 Gateway lifecycle transitions remain user-initiated.
 
-The iOS matrix has five configurations: Development for simulator work,
-Test for the isolated hosted test host, LocalDevice for ordinary development
-device installs, DevicePerformance for hosted performance tests, and Release
-for manual archives only. Use `scripts/tron-ios-device` for its safe
-Tron Device + LocalDevice default; signed artifact metadata and entitlements
-are the final push-route and signing authority.
+The [iOS build matrix](packages/ios-app/docs/development.md#build-matrix) lists
+the five configurations with their schemes, identities, and routes.
 
 ### Focused native tests
 
@@ -135,16 +131,10 @@ products for focused tests with bounded process and result evidence. See the
 ```bash
 scripts/tron-ios-test build
 scripts/tron-ios-test run --only-testing TronMobileTests/SnapshotCacheTests
-
-cd packages/mac-app
-xcodebuild build-for-testing -project TronMac.xcodeproj -scheme TronMac \
-  -configuration Debug -destination 'platform=macOS,arch=arm64' \
-  -derivedDataPath build/DerivedData
-xcodebuild test-without-building -project TronMac.xcodeproj -scheme TronMac \
-  -configuration Debug -destination 'platform=macOS,arch=arm64' \
-  -derivedDataPath build/DerivedData \
-  -only-testing:TronMacTests/PairingURLBuilderTests
 ```
+
+The TronMac build and test commands are in the
+[Mac development guide](packages/mac-app/docs/development.md#efficient-focused-tests).
 
 This avoids rebuilding or running unrelated suites for each edit. Run broader
 suites only after focused owners are green.
