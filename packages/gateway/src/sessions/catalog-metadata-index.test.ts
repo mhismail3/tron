@@ -1,6 +1,6 @@
 import { appendFile, mkdtemp, readFile, rename, truncate, writeFile } from "node:fs/promises";
 import { join } from "node:path";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it } from "vitest";
 import {
   CatalogMetadataIndex,
   applyCatalogMetadataEntry,
@@ -183,7 +183,7 @@ describe("CatalogMetadataIndex", () => {
     expect(rows?.find((row) => row.id === "session")?.messageCount).toBe(1);
   });
 
-  it("reconciles unchanged rows with bounded filesystem concurrency", async () => {
+  it("reads reconciled files in one bounded batch at a time", async () => {
     const f = await fixture();
     const index = new CatalogMetadataIndex(f.gateway);
     const files = [f.path];
@@ -196,26 +196,45 @@ describe("CatalogMetadataIndex", () => {
       ...summary(path), id: number === 0 ? "session" : `session-${number}`,
     })))).filter((row): row is NonNullable<typeof row> => row !== undefined);
     await index.save(f.catalog, rows);
-    let active = 0;
-    let maximumActive = 0;
-    const originalVerify = (index as any).verifyUnchanged.bind(index) as (row: unknown) => Promise<boolean>;
-    const verify = vi.spyOn(index as any, "verifyUnchanged").mockImplementation(async (row: unknown) => {
-      active += 1;
-      maximumActive = Math.max(maximumActive, active);
-      await new Promise((resolve) => setTimeout(resolve, 5));
-      active -= 1;
-      return originalVerify(row);
-    });
-    try {
-      const candidates = rows.map((row) => ({
-        path: row.path, id: row.id, cwd: row.cwd, fileIdentity: row.fileIdentity, size: row.size, mtimeMs: row.mtimeMs,
-      }));
-      await expect(index.reconcile(f.catalog, candidates, async () => undefined)).resolves.toHaveLength(rows.length);
-      expect(maximumActive).toBeGreaterThan(1);
-      expect(maximumActive).toBeLessThanOrEqual(16);
-    } finally {
-      verify.mockRestore();
+    expect(rows).toHaveLength(32);
+    // Rewrite every session in place with the same byte length. Each indexed
+    // row is then stale, so every candidate runs the real file verification and
+    // reaches the public rebuild callback, where this test can see how many
+    // rows one reconcile holds at a time.
+    for (const path of files) {
+      const header = JSON.parse((await readFile(path, "utf8")).trim()) as Record<string, string>;
+      await writeFile(path, `${JSON.stringify({ ...header, timestamp: "2027-02-02T02:02:02.000Z" })}\n`);
     }
+    const candidates = rows.map((row) => ({
+      path: row.path, id: row.id, cwd: row.cwd, fileIdentity: row.fileIdentity, size: row.size, mtimeMs: row.mtimeMs,
+    }));
+    let inFlight = 0;
+    let maximumInFlight = 0;
+    let entered = 0;
+    let releaseBatch!: () => void;
+    const batchGate = new Promise<void>((resolve) => { releaseBatch = resolve; });
+    const rebuilt = await index.reconcile(f.catalog, candidates, async (candidate) => {
+      inFlight += 1;
+      maximumInFlight = Math.max(maximumInFlight, inFlight);
+      entered += 1;
+      // 16 rows is RECONCILE_CONCURRENCY. Opening the gate on the sixteenth row
+      // is what makes a serialized read phase fail here instead of passing
+      // vacuously; the verifications for the batch's files already ran.
+      if (entered === 16) releaseBatch();
+      await batchGate;
+      inFlight -= 1;
+      return {
+        id: candidate.id,
+        path: candidate.path,
+        cwd: candidate.cwd,
+        firstMessage: "rewritten",
+        createdAt: "2026-01-01T00:00:00.000Z",
+        updatedAt: "2027-02-02T02:02:02.000Z",
+        messageCount: 0,
+      };
+    });
+    expect(rebuilt).toHaveLength(rows.length);
+    expect(maximumInFlight).toBe(16);
   });
 
   it("updates exact summary fields from newline-complete appended bytes", async () => {

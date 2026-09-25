@@ -272,7 +272,10 @@ describe("SessionSearchService backend seams", () => {
   });
 
   it("reports lexical partial coverage instead of failing when an index replacement overflows", async () => {
-    const index = { clear() {}, replace() { throw new Error("bounded overflow"); }, candidates() { return []; }, stats() { return { indexRevision: "x", sessionsIndexed: 0, passagesIndexed: 0, vectorsIndexed: 0, vectorsTotal: 0, bytes: 0, state: "partial" as const }; }, close() {} } as any;
+    // A real index whose storage bound is one byte rejects the fixture session
+    // at its own bound, so the service's recovery path is what this observes.
+    const root = await mkdtemp(join(tmpdir(), "tron-search-overflow-")); roots.push(root);
+    const index = await SessionSearchIndex.open(join(root, "index.sqlite"), { maxStorageBytes: 1 });
     const service = new SessionSearchService(sessionsFor(), index);
     const response = await service.search({ query: "needle", maxResults: 5 });
     expect(response.coverage.state).toBe("partial");
