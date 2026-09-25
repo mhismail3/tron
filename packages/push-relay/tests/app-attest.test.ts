@@ -4,7 +4,7 @@ import { describe, expect, test } from "vitest";
 import syntheticAttestation from "./app-attest-synthetic.json";
 import { verifyAssertion, verifyAttestationAgainstTrustedRoot } from "../src/app-attest";
 import { APPLE_APP_ATTESTATION_ROOT_PEM } from "../src/apple-app-attestation-root";
-import { base64Url, concatBytes, decodeBase64Url, ownedBuffer, sha256, utf8 } from "../src/crypto";
+import { base64Url, concatBytes, decodeBase64Url, ownedBuffer, sha256, sha256Hex, utf8 } from "../src/crypto";
 
 async function assertionFixture(appId: string, counter: number, clientDataHash: Uint8Array) {
   const keys = await crypto.subtle.generateKey({ name: "ECDSA", namedCurve: "P-256" }, true, ["sign", "verify"]);
@@ -40,12 +40,13 @@ function rawEcdsaToDer(raw: Uint8Array): Uint8Array {
 }
 
 describe("Apple App Attest verification", () => {
-  test("parses the pinned Apple trust root within its reviewed validity window", () => {
-    const root = new X509Certificate(APPLE_APP_ATTESTATION_ROOT_PEM);
-    const reviewedAt = new Date("2026-01-01T00:00:00.000Z");
-    expect(root.subject).toContain("Apple App Attestation Root CA");
-    expect(root.notBefore.getTime()).toBeLessThanOrEqual(reviewedAt.getTime());
-    expect(root.notAfter.getTime()).toBeGreaterThan(reviewedAt.getTime());
+  test("pins the reviewed Apple App Attestation Root CA bytes", async () => {
+    // README records the pinned PEM's source-file digest, which includes the
+    // file's trailing newline.
+    expect(await sha256Hex(utf8(`${APPLE_APP_ATTESTATION_ROOT_PEM}\n`))).toBe(
+      "c778d09ac341f7fd9f8f3b19e2b815af6aed4ad4490e1e92c05cb355212a5013",
+    );
+    expect(new X509Certificate(APPLE_APP_ATTESTATION_ROOT_PEM).subject).toContain("Apple App Attestation Root CA");
   });
 
   test("executes the complete pinned-chain, nonce, AAGUID, credential, and counter path", async () => {

@@ -277,24 +277,26 @@ describe("v3 Worker boundary", () => {
     const replacementToken = "cd".repeat(32);
     const registration = await assertionRegistration(replacementToken);
     await seedGrantForAssertion(registration);
-    const notification = await signedNotification();
+    const requestId = "token-capture-request-0001";
+    const notification = await signedNotification({ requestId });
     const entered = deferred();
     const release = deferred();
     const providerFetch = vi.fn(async (_url: string | URL | Request) => new Response(null, { status: 200 }));
     vi.stubGlobal("fetch", providerFetch);
     const digest = crypto.subtle.digest.bind(crypto.subtle);
-    let bodyHashes = 0;
+    let frozen = false;
     vi.spyOn(crypto.subtle, "digest").mockImplementation(async (algorithm, data) => {
       const result = await digest(algorithm, data);
-      // Freeze after authentication's single body hash, without bypassing
-      // the real admission boundary.
-      if (new TextDecoder().decode(data) === notification.body && ++bodyHashes === 1) {
+      // Freeze at the authentication body hash, without bypassing the real
+      // admission boundary.
+      if (!frozen && new TextDecoder().decode(data) === notification.body) {
+        frozen = true;
         entered.resolve();
         await release.promise;
       }
       return result;
     });
-    await runInDurableObject(stub(), async (instance: PushRegistry) => {
+    await runInDurableObject(stub(), async (instance: PushRegistry, state) => {
       const pending = instance.fetch(new Request("https://push.test/v3/notifications", notification));
       try {
         await Promise.race([entered.promise, pending.then(() => { throw new Error("Dispatch bypassed body-hash gate"); })]);
@@ -302,7 +304,11 @@ describe("v3 Worker boundary", () => {
         expect(registered.status).toBe(201);
         release.resolve();
         expect(await (await pending).json()).toMatchObject({ status: "accepted_by_apns" });
-        expect(bodyHashes).toBe(1);
+        // Admission persists the hash of the exact authenticated body, so the
+        // replacement token cannot be admitted under a stale body identity.
+        expect(state.storage.sql.exec<{ body_hash: string }>(
+          "SELECT body_hash FROM relay_requests WHERE request_id = ?", requestId,
+        ).one().body_hash).toBe(await sha256Hex(utf8(notification.body as string)));
         expect(providerFetch.mock.calls.map(([url]) => url)).toEqual([
           `https://api.sandbox.push.apple.com/3/device/${replacementToken}`,
         ]);
