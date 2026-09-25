@@ -63,6 +63,16 @@ function inside(root: string, candidate: string): boolean {
   return delta === "" || (!delta.startsWith(`..${sep}`) && delta !== ".." && !isAbsolute(delta));
 }
 
+// A fatal decoder throws on invalid UTF-8; the caller reports it as a request error.
+function isValidUtf8(bytes: Uint8Array): boolean {
+  try {
+    new TextDecoder("utf-8", { fatal: true }).decode(bytes);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 function safeName(input: string): string {
   const value = basename(input).replace(/[\u0000-\u001f\u007f]/g, "").slice(0, 160);
   return value || "artifact";
@@ -350,7 +360,7 @@ export class DisplayArtifactStore {
       if (classification.kind === "text" || classification.kind === "markdown"
         || classification.kind === "code" || classification.kind === "html") {
         const text = await readFile(staging);
-        if (text.includes(0) || !new TextDecoder("utf-8", { fatal: true }).decode(text)) {
+        if (text.includes(0) || !isValidUtf8(text)) {
           throw new GatewayError("invalid_request", "Display text artifacts must contain valid UTF-8 text without NUL bytes");
         }
       }

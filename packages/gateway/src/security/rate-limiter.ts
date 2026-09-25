@@ -13,6 +13,8 @@ export class RateLimiter {
     }
   }
 
+  /** Test witness for the retained-key bound: pruning is otherwise unobservable
+   * because `admit` re-filters stale timestamps itself. */
   get retainedKeyCount(): number {
     return this.attempts.size;
   }

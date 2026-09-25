@@ -45,7 +45,9 @@ describe("AsyncMutex ownership", () => {
         return result;
       });
       expect(await Promise.all(cancellations)).toEqual(Array(100).fill("AbortError"));
-      // Inspect the actual retaining collection, not a parallel usage counter.
+      // A cancelled queued read is otherwise invisible (it never runs and its
+      // rejection is already delivered), so the retaining set is the only
+      // witness that cancellation releases its memory.
       expect((mutex as unknown as { waiting: Set<unknown> }).waiting.size).toBe(0);
       controller.abort();
       await expect(read).rejects.toMatchObject({ name: "AbortError" });

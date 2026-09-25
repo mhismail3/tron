@@ -191,11 +191,9 @@ describe("DisplayArtifactStore", () => {
       await writeFile(join(workspace, "late-nul.txt"), Buffer.concat([Buffer.alloc(5_000, 0x61), Buffer.from([0])]));
       await expect(store.ingest(workspace, "late-nul.txt", "session-a"))
         .rejects.toMatchObject({ code: "invalid_request" });
-      // Undecodable bytes fail closed before publication. The decoder's own
-      // ERR_ENCODING_INVALID_ENCODED_DATA escapes rather than a Gateway error,
-      // so only the rejection and the empty store are contractual here.
       await writeFile(join(workspace, "invalid-utf8.md"), Buffer.from([0x61, 0xff, 0x62]));
-      await expect(store.ingest(workspace, "invalid-utf8.md", "session-a")).rejects.toThrow();
+      await expect(store.ingest(workspace, "invalid-utf8.md", "session-a"))
+        .rejects.toMatchObject({ code: "invalid_request" });
       expect(await readdir(published)).toEqual([]);
       await writeFile(join(workspace, "utf8.txt"), "héllo ✓");
       await expect(store.ingest(workspace, "utf8.txt", "session-a")).resolves.toMatchObject({ kind: "text" });
