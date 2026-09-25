@@ -42,21 +42,7 @@ final class KnowledgeModelsTests: XCTestCase {
     }
 
     @MainActor
-    func testConnectorStatusCarriesExactConnectionRoute() async throws {
-        var captured: (String, JSONValue)?
-        let client = KnowledgeRPCClient(request: { method, params in
-            captured = (method, params)
-            return .object(["connector": .string("raindrop"), "connectionId": .string("account-two"), "configured": .bool(true), "enabled": .bool(true), "health": .string("setup-required"), "credentialAvailability": .string("unknown"), "providerIdentity": .string("unknown"), "accountId": .string("202"), "scope": .string("0"), "remaining": .number(0), "pending": .number(0), "paidBudgetCents": .number(0), "allowWrites": .bool(false), "recurringApproved": .bool(false), "paidAccessApproved": .bool(false)])
-        })
-        _ = try await client.connectorStatus("raindrop", connectionID: "account-two")
-        XCTAssertEqual(captured?.0, "knowledge.connector.status")
-        XCTAssertEqual(captured?.1.objectValue?["connector"], .string("raindrop"))
-        XCTAssertEqual(captured?.1.objectValue?["connectionId"], .string("account-two"))
-        XCTAssertEqual(captured?.1.objectValue?.count, 2)
-    }
-
-    @MainActor
-    func testAcceptedConnectorMutationCarriesExactConnectionAndSettlesAfterOwnerResponse() async throws {
+    func testAcceptedKnowledgeMutationCarriesInjectedCommandAndSettlesAfterOwnerResponse() async throws {
         let socket = ScriptedGatewaySocket()
         let gateway = GatewayClient(socketFactory: ScriptedGatewaySocketFactory(socket: socket).factory, clock: .continuous)
         let defaults = try XCTUnwrap(UserDefaults(suiteName: UUID().uuidString))
@@ -71,12 +57,12 @@ final class KnowledgeModelsTests: XCTestCase {
         let client = KnowledgeRPCClient(request: { method, parameters in
             try await gateway.requestValue(method, parameters)
         }, mutationExecutor: executor, uuidSource: UUIDSource(next: { UUID(uuidString: "00000000-0000-4000-8000-000000000001")! }))
-        let task = Task { try await client.runConnector("raindrop", connectionID: "account-two", dryRun: true, limit: 10) }
+        let task = Task { try await client.forget(id: "record-one", reason: "fixture") }
         var request: JSONValue?
         var requestID: String?
         for _ in 0..<100 {
             for frame in await socket.sentFrames() {
-                if let value = try? JSONDecoder.gateway.decode(JSONValue.self, from: frame), value.objectValue?["method"]?.stringValue == "knowledge.connector.run" {
+                if let value = try? JSONDecoder.gateway.decode(JSONValue.self, from: frame), value.objectValue?["method"]?.stringValue == "knowledge.forget" {
                     request = value; requestID = value.objectValue?["id"]?.stringValue; break
                 }
             }
@@ -85,21 +71,12 @@ final class KnowledgeModelsTests: XCTestCase {
         }
         let admittedRequest = try XCTUnwrap(request)
         let id = try XCTUnwrap(requestID)
-        XCTAssertEqual(admittedRequest.objectValue?["params"]?.objectValue?["connectionId"], .string("account-two"))
-        XCTAssertEqual(admittedRequest.objectValue?["params"]?.objectValue?["connector"], .string("raindrop"))
+        XCTAssertEqual(admittedRequest.objectValue?["params"]?.objectValue?["recordId"], .string("record-one"))
         XCTAssertEqual(admittedRequest.objectValue?["params"]?.objectValue?["commandId"], .string("00000000-0000-4000-8000-000000000001"))
-        await socket.enqueue(try! JSONEncoder.gateway.encode(JSONValue.object(["type": .string("response"), "id": .string(id), "ok": .bool(true), "result": .object(["dryRun": .bool(true), "connector": .string("raindrop"), "discovered": .number(0), "captured": .number(0), "pending": .number(0), "remaining": .number(0), "health": .string("ready"), "partial": .number(0), "error": .null])])) )
+        await socket.enqueue(try! JSONEncoder.gateway.encode(JSONValue.object(["type": .string("response"), "id": .string(id), "ok": .bool(true), "result": .object(["forgotten": .bool(true), "recordId": .string("record-one"), "stateRevision": .number(2)])])) )
         let result = try await task.value
-        XCTAssertEqual(result.connector, "raindrop")
-        XCTAssertTrue(result.dryRun)
-    }
-
-    func testConnectorStatusKeepsConnectionIdentityAndDoesNotTreatSetupAsReady() throws {
-        let data = Data(#"{"connector":"raindrop","connectionId":"account-two","configured":true,"enabled":true,"health":"setup-required","credentialAvailability":"unknown","providerIdentity":"unknown","accountId":"202","scope":"0","lastRunAt":null,"lastError":null,"remaining":0,"pending":0,"paidBudgetCents":0,"allowWrites":false,"recurringApproved":false,"paidAccessApproved":false}"#.utf8)
-        let status = try JSONDecoder().decode(KnowledgeConnectorStatus.self, from: data)
-        XCTAssertEqual(status.connectionId, "account-two")
-        XCTAssertFalse(status.available)
-        XCTAssertEqual(status.detail, "Provider admission is not established.")
+        XCTAssertTrue(result.forgotten)
+        XCTAssertEqual(result.recordId, "record-one")
     }
 
     func testObservationPresentationSeparatesStatementDateAndTechnicalEvidence() throws {

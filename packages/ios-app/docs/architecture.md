@@ -2149,13 +2149,13 @@ retired sheets. Setup checks the exact Gateway identity between begin and comple
 is a separate command; a profile replacement leaves the original pending operation with its original owner.
 Account technical details expose credential availability and account verification, never credential references.
 
-`KnowledgeDashboardView` continues to use Knowledge's domain owner for provider evidence, checkpoints, and source operations. It enumerates the redacted connection-owner instances and sends the exact `connectionId` on every status, policy, and run request, so two accounts from one provider cannot cross routes. Account identity, credential references, and setup are handled only by `IntegrationsRPCClient`; the dashboard changes Knowledge policy and never sends provider-only setup fields to Knowledge. Status keeps configured intent separate from `credentialAvailability` and `providerIdentity`; unknown or non-admitted observations are not rendered as ready. Package/resource installation, trust, provider-model authentication, and Gateway pairing remain their existing owner routes rather than generic integration actions.
+Package/resource installation, trust, provider-model authentication, and Gateway pairing remain their existing owner routes rather than generic integration actions.
 
 ## Knowledge projection
 
 `KnowledgeRPCClient` is the typed iOS consumer of the Gateway Knowledge contract. It
 uses the existing confirmed-mutation receipt owner for every change and bounds
-search, pages, and connector runs before exposing them to SwiftUI.
+search and pages before exposing them to SwiftUI.
 `KnowledgeDashboardView` presents All Knowledge (including All Links), filters by
 record kind and Personal/Research scope, and loads detail evidence on demand. The catalogue is dense by
 design—statement rows use one type step below the detail sheet with a bounded statement preview, and
