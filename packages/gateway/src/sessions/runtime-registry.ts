@@ -438,6 +438,7 @@ export class RuntimeRegistry {
   private exportsDisposed = false;
   private workspaceDisposed = false;
   private catalogIndexDisposed = false;
+  private recentModelsDisposed = false;
 
   constructor(
     private readonly options: {
@@ -717,10 +718,19 @@ export class RuntimeRegistry {
       byID.set(identity.id, candidates);
     }
     const retainedSessionIds = new Set(byID.keys());
+    // Live ownership is membership too: a session that was opened or created
+    // after this cut, or one that has not reached disk yet, must keep its
+    // record. Recovery runs after the listener is already serving.
+    for (const sessionId of this.slots.keys()) retainedSessionIds.add(sessionId);
     await this.attention.prune(retainedSessionIds);
     // Archive state is a display projection of the same membership, so it
-    // recovers from the same complete cut or keeps its records untouched.
-    if (await this.archive.prune(retainedSessionIds)) this.archiveChanged();
+    // recovers from the same complete cut or keeps its records untouched. It
+    // serializes with delete and rebind, and each dropped record names its live
+    // slot so an open snapshot cannot keep a timestamp the store no longer has.
+    await this.attentionLane.run(async () => {
+      const pruned = await this.archive.prune(retainedSessionIds);
+      if (pruned.length > 0) this.archiveChanged(pruned);
+    });
     for (const [sessionId, markers] of markerEvidence) {
       const candidates = byID.get(sessionId);
       // Duplicate IDs are intentionally not recoverable: choosing one file
@@ -821,17 +831,24 @@ export class RuntimeRegistry {
         }
         const existing = this.slots.get(nextId);
         if (existing && existing !== slot) throw new GatewayError("conflict", "Replacement session is already active");
-        // Complete every fallible attention and archive write while the slot and
-        // registry still own previousId, then commit both in one synchronous turn.
-        if (disposition === "migrate") await this.attention.rekey(previousId, nextId);
-        if (disposition === "reset" || disposition === "discard") await this.attention.assertAbsent(nextId);
-        if (disposition === "discard") await this.attention.remove(previousId);
+        // Every fallible admission check runs before the first change, so a
+        // rejected rebind cannot leave attention and archive state out of step
+        // while the slot rolls back its identity.
+        if (disposition === "reset" || disposition === "discard") {
+          await this.attention.assertAbsent(nextId);
+          await this.archive.assertAbsent(nextId);
+        }
         // A reset identity (a new session or a fork) starts unarchived; a
         // migrated identity carries its archive state; a discarded identity
-        // takes it away.
-        if (disposition === "migrate") await this.archive.rekey(previousId, nextId);
-        if (disposition === "reset" || disposition === "discard") await this.archive.assertAbsent(nextId);
-        if (disposition === "discard") await this.archive.remove(previousId);
+        // takes it away. Complete these writes while the slot and registry still
+        // own previousId, then commit both in one synchronous turn.
+        if (disposition === "migrate") {
+          await this.attention.rekey(previousId, nextId);
+          await this.archive.rekey(previousId, nextId);
+        } else if (disposition === "discard") {
+          await this.attention.remove(previousId);
+          await this.archive.remove(previousId);
+        }
         // A rebind ends any pending visible override: the identity changed, so
         // the previous ID's run is no longer the owner of either record.
         this.pendingArchiveRestorations.delete(previousId);
@@ -905,7 +922,7 @@ export class RuntimeRegistry {
     }
     for (const sessionId of [...this.pendingArchiveRemovals]) {
       try {
-        if (await this.archive.remove(sessionId)) this.archiveChanged(sessionId);
+        if (await this.archive.remove(sessionId)) this.archiveChanged([sessionId]);
         this.pendingArchiveRemovals.delete(sessionId);
         this.pendingArchiveRestorations.delete(sessionId);
       } catch {
@@ -917,12 +934,12 @@ export class RuntimeRegistry {
 
   /** A committed archive change is a dashboard membership change, not a
    * transcript change, so it publishes a list revision instead of a summary.
-   * Archive state is also part of a live slot's snapshot, which therefore
-   * republishes in the same call; startup pruning has no slot to notify. */
-  private archiveChanged(sessionId?: string): void {
+   * Archive state is also part of a live slot's snapshot, so every named slot
+   * republishes in the same call. */
+  private archiveChanged(sessionIds: readonly string[] = []): void {
     this.revision += 1;
     this.options.sessionListChanged();
-    if (sessionId !== undefined) this.slots.get(sessionId)?.refreshArchiveProjection();
+    for (const sessionId of sessionIds) this.slots.get(sessionId)?.refreshArchiveProjection();
   }
 
   private archivePersistFailed(stage: "set" | "remove" | "auto-unarchive"): void {
@@ -931,11 +948,12 @@ export class RuntimeRegistry {
     this.options.archiveDiagnostic?.({ outcome: "failure", stage });
   }
 
-  /** Effective archive projection. A pending restoration is already visible:
-   * its durable record could not be removed yet, so the live outcome wins until
-   * the record is provably gone. */
+  /** Effective archive projection. A pending record change is already visible:
+   * a restoration's record could not be removed yet, and a removal's record
+   * outlives a session that no longer exists, so the live outcome wins until
+   * the store proves otherwise. */
   private archivedAt(sessionId: string): string | undefined {
-    if (this.pendingArchiveRestorations.has(sessionId)) return undefined;
+    if (this.pendingArchiveRestorations.has(sessionId) || this.pendingArchiveRemovals.has(sessionId)) return undefined;
     return this.archive.archivedAt(sessionId);
   }
 
@@ -960,7 +978,7 @@ export class RuntimeRegistry {
       }
       this.pendingArchiveRestorations.delete(sessionId);
       if (removed) {
-        this.archiveChanged(sessionId);
+        this.archiveChanged([sessionId]);
         this.options.archiveDiagnostic?.({ outcome: "auto-unarchived", trigger: "admission" });
       }
     });
@@ -980,15 +998,21 @@ export class RuntimeRegistry {
     // A failed durable clear keeps the override and republishes again on the
     // next active projection.
     if (!wasPending) {
+      // Visibility changes at this moment, so clients get the membership change
+      // now: waiting for the durable clear would leave the device that archived
+      // this session hiding a row that is already working.
+      this.revision += 1;
+      this.options.sessionListChanged();
       const slot = this.slots.get(sessionId);
       if (slot) queueMicrotask(() => slot.refreshArchiveProjection());
     }
     if (this.archiveRestorationAttempts.has(sessionId)) return;
-    const attempt = this.clearArchivedRecord(sessionId);
-    this.archiveRestorationAttempts.set(sessionId, attempt);
-    void attempt.finally(() => {
+    // The stored promise removes its own entry before it settles, so a disposal
+    // drain can await this map until it is empty.
+    const attempt = this.clearArchivedRecord(sessionId).finally(() => {
       if (this.archiveRestorationAttempts.get(sessionId) === attempt) this.archiveRestorationAttempts.delete(sessionId);
     });
+    this.archiveRestorationAttempts.set(sessionId, attempt);
   }
 
   private async clearArchivedRecord(sessionId: string): Promise<void> {
@@ -1009,21 +1033,41 @@ export class RuntimeRegistry {
     }
   }
 
-  /** An archived session must be idle. The dashboard projection is checked as
-   * well as the slot's own run ownership, so a user can never archive a row
-   * that still shows running, waiting for input, or working through detached
-   * subagents. */
-  private assertArchiveIdle(sessionId: string, slot: RuntimeSlot | undefined): void {
+  /** The row state a dashboard client sees for one session: the published
+   * summary first, then the live slot, so a cold session still reports its row
+   * state. Archive admission and archive restoration share it. */
+  private dashboardProjection(sessionId: string, slot: RuntimeSlot | undefined): {
+    phase: SessionSummary["phase"];
+    foregroundPhase: SessionSummary["foregroundPhase"];
+    waitingForUser: boolean;
+    hasActiveSubagents: boolean;
+  } {
     const latest = this.latestSummaries.get(sessionId);
-    const projection = {
+    return {
       phase: latest?.phase ?? (slot ? slot.catalogPhase : "idle"),
       foregroundPhase: latest?.foregroundPhase ?? slot?.catalogForegroundPhase,
       waitingForUser: latest?.waitingForUser ?? slot?.catalogWaitingForUser ?? false,
       hasActiveSubagents: latest?.hasActiveSubagents ?? slot?.catalogHasActiveSubagents ?? false,
     };
-    if (sessionShowsWork(projection)) {
+  }
+
+  /** An archived session must be idle. The dashboard projection is checked as
+   * well as the slot's own run ownership, so a user can never archive a row
+   * that still shows running, waiting for input, or working through detached
+   * subagents. */
+  private assertArchiveIdle(sessionId: string, slot: RuntimeSlot | undefined): void {
+    if (sessionShowsWork(this.dashboardProjection(sessionId, slot))) {
       throw new GatewayError("busy", "Stop the session before archiving it", false, undefined, "session_operation_busy");
     }
+  }
+
+  /** The durable record can land after a run Pi started on its own (an
+   * extension `triggerTurn`) escaped run admission, because the backstop
+   * published before the record existed and reads that same record. Visibility
+   * wins: the row is restored and the clear retries behind it. */
+  private restoreArchivedSessionIfWorking(sessionId: string, slot: RuntimeSlot | undefined): void {
+    if (!slot || !sessionShowsWork(this.dashboardProjection(sessionId, slot))) return;
+    this.restoreArchivedSession(sessionId);
   }
 
   private async publishAttentionSummary(
@@ -3274,18 +3318,22 @@ export class RuntimeRegistry {
             throw new GatewayError("busy", "Session archive state could not be persisted", true);
           }
           this.pendingArchiveRestorations.delete(sessionId);
-          if (removed) this.archiveChanged(sessionId);
+          if (removed) this.archiveChanged([sessionId]);
           return { archived: false };
         }
         let archivedAt: string;
         try {
+          // A pending restoration means the durable record is stale: its clear
+          // failed while the session was visibly working. Retire it first, or
+          // the new archive would resurrect the old row position.
+          if (this.pendingArchiveRestorations.has(sessionId)) await this.archive.remove(sessionId);
           archivedAt = await this.archive.archive(sessionId);
         } catch {
           this.archivePersistFailed("set");
           throw new GatewayError("busy", "Session archive state could not be persisted", true);
         }
         this.pendingArchiveRestorations.delete(sessionId);
-        this.archiveChanged(sessionId);
+        this.archiveChanged([sessionId]);
         return { archived: true, archivedAt };
       });
       // A live slot owns the lane that admits runs, so its idle admission and
@@ -3294,7 +3342,14 @@ export class RuntimeRegistry {
       // cold session has no lane to interleave with, and the recheck inside
       // `commit` rejects any slot published while the commit was in flight.
       if (archived && slot && !slot.isDisposed) {
-        return slot.commitArchiveWhileIdle(initiatingWorkToken, commit);
+        // A long lane holder (a branch summary, Bash before its phase lands, a
+        // reload) is invisible to the published projection and would otherwise
+        // hold this Gateway-wide mutex for its whole duration, so it is rejected
+        // here before the lane wait. The lane re-checks the same rule.
+        slot.assertArchivable(initiatingWorkToken);
+        const result = await slot.commitArchiveWhileIdle(initiatingWorkToken, commit);
+        this.restoreArchivedSessionIfWorking(sessionId, slot);
+        return result;
       }
       return commit();
     });
@@ -3376,10 +3431,13 @@ export class RuntimeRegistry {
             try {
               archiveRemoved = await this.archive.remove(sessionId);
             } catch {
+              // Report the first failure at the boundary that owned the attempt;
+              // the flush retries this exact removal silently.
+              this.archivePersistFailed("remove");
               this.pendingArchiveRemovals.add(sessionId);
             }
             this.pendingArchiveRestorations.delete(sessionId);
-            if (archiveRemoved) this.archiveChanged(sessionId);
+            if (archiveRemoved) this.archiveChanged([sessionId]);
           }
         } finally {
           this.deletingSessionIds.delete(sessionId);
@@ -3942,7 +4000,19 @@ export class RuntimeRegistry {
     if (!this.catalogIndexDisposed) {
       pending.push(this.catalogMetadataIndex.dispose().then(() => { this.catalogIndexDisposed = true; }));
     }
+    // Model recency is recorded fire-and-forget from an admitted run, so a
+    // preference write can equally outlive this owner.
+    if (!this.recentModelsDisposed) {
+      pending.push(this.recentModels.dispose().then(() => { this.recentModelsDisposed = true; }));
+    }
+    // The archive backstop clears records fire-and-forget while sessions
+    // publish, and a summary published during slot shutdown can start one more.
+    // Drain until no attempt remains, so none writes after disposal resolves.
+    for (const attempt of this.archiveRestorationAttempts.values()) pending.push(attempt);
     const results = await Promise.allSettled(pending);
+    while (this.archiveRestorationAttempts.size > 0) {
+      await Promise.allSettled([...this.archiveRestorationAttempts.values()]);
+    }
     const failure = results.find((result): result is PromiseRejectedResult => result.status === "rejected");
     if (failure) throw failure.reason;
   }
