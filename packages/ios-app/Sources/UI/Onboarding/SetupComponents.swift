@@ -776,17 +776,17 @@ enum ModelPickerSectioning {
                   alias.admittedReleaseDate == releaseDate else { return nil }
             return pinned.ref
         })
+        // Sort keys are resolved once per model, not once per comparison.
         return dated
             .filter { !collapsedPinnedRefs.contains($0.ref) }
+            .map { (model: $0, date: $0.admittedReleaseDate ?? "", name: $0.displayName) }
             .sorted { lhs, rhs in
-                let left = lhs.admittedReleaseDate ?? ""
-                let right = rhs.admittedReleaseDate ?? ""
-                if left != right { return left > right }
-                let nameOrder = lhs.displayName.localizedCaseInsensitiveCompare(rhs.displayName)
-                return nameOrder == .orderedSame ? lhs.id < rhs.id : nameOrder == .orderedAscending
+                if lhs.date != rhs.date { return lhs.date > rhs.date }
+                let nameOrder = lhs.name.localizedCaseInsensitiveCompare(rhs.name)
+                return nameOrder == .orderedSame ? lhs.model.id < rhs.model.id : nameOrder == .orderedAscending
             }
             .prefix(maximumLatestModels)
-            .map { $0 }
+            .map(\.model)
     }
 
     /// The selected model's provider leads so its section is reachable without
@@ -817,30 +817,61 @@ enum ModelPickerSectioning {
     }
 }
 
+/// Picker-local spacing, type, and motion. Section headers share one size so
+/// Recent, Latest, and provider sections read as one hierarchy.
+@MainActor
+enum ModelPickerLayout {
+    static let headerFont = TronTypography.sans(size: TronTypography.sizeTitle, weight: .semibold)
+    static let sectionGap: CGFloat = 10
+    /// Rows drop in from their header and fade out quickly on collapse, so a
+    /// leaving row is gone before the content below slides over it.
+    static let rowTransition = AnyTransition.asymmetric(
+        insertion: .opacity.combined(with: .offset(y: -10)),
+        removal: .opacity.animation(.easeOut(duration: 0.12))
+    )
+}
+
 struct ModelPicker: View {
     @Binding var selection: ModelRef?
     let models: [ModelSummary]
     @State private var search = ""
     @State private var showingSearch = false
     @State private var closingSearch = false
-    /// A toggle lands here first so the section repaints immediately; the store
-    /// keeps the choice for the next picker over this gateway profile.
-    @State private var providerExpansionOverrides: [String: Bool] = [:]
+    /// The one owner of section expansion: toggles write here inside the
+    /// disclosure animation, and the next picker over this profile reads it.
     @State private var providerExpansion = ModelProviderExpansionStore.shared
     @Environment(\.tronSettingsVisualTheme) private var settingsTheme
     @Environment(AppModel.self) private var model
 
     var body: some View {
+        // Sectioning sorts and groups the whole catalog; build it once per body
+        // evaluation rather than once per section read.
+        let sections = self.sections
         ScrollView(.vertical, showsIndicators: true) {
             LazyVStack(alignment: .leading, spacing: 8) {
                 if !sections.recent.isEmpty {
-                    cardRail(title: "Recent", models: sections.recent)
+                    sectionTitle("Recent")
+                    cardRail(sections.recent)
                 }
                 if !sections.latest.isEmpty {
-                    cardRail(title: "Latest", models: sections.latest)
+                    sectionTitle("Latest")
+                        .padding(.top, sections.recent.isEmpty ? 0 : ModelPickerLayout.sectionGap)
+                    cardRail(sections.latest)
                 }
-                ForEach(sections.providers) { section in
-                    providerSection(section)
+                // Header and rows are separate lazy children, so a long expanded
+                // provider builds only the rows on screen and its neighbours
+                // move with the same disclosure transaction.
+                ForEach(Array(sections.providers.enumerated()), id: \.element.id) { index, section in
+                    let isExpanded = isSectionExpanded(section.provider)
+                    providerHeader(section, isExpanded: isExpanded)
+                        .padding(.top, index == 0 && sections.recent.isEmpty && sections.latest.isEmpty
+                            ? 0 : ModelPickerLayout.sectionGap)
+                    if isExpanded {
+                        ForEach(section.models, id: \.ref) { model in
+                            row(model)
+                                .transition(ModelPickerLayout.rowTransition)
+                        }
+                    }
                 }
             }
             .padding(.horizontal, 16)
@@ -904,22 +935,29 @@ struct ModelPicker: View {
 
     private var accent: Color { settingsTheme?.accent ?? .tronEmerald }
 
-    private func cardRail(title: String, models: [ModelSummary]) -> some View {
+    private func sectionTitle(_ title: String) -> some View {
+        Text(title)
+            .font(ModelPickerLayout.headerFont)
+            .foregroundStyle(Color.tronTextSecondary)
+            .accessibilityAddTraits(.isHeader)
+    }
+
+    private func cardRail(_ models: [ModelSummary]) -> some View {
         TronCardRail(
-            title: title,
             items: models,
             identity: \.ref,
             accent: accent,
+            cornerRadius: 16,
+            // Same static surface as the rows below: tall live-glass cards in a
+            // scrolling sheet cost frames and refract the section titles.
+            surface: .scroll,
             isSelected: { $0.ref == selection },
-            accessibilityLabel: { "\($0.displayName), \($0.displayProviderName)" },
+            accessibilityLabel: ModelRailCard.accessibilityLabel,
             accessibilityValue: { $0.ref == selection ? "Selected" : "" },
             action: { select($0.ref) }
         ) { model in
-            TronRailCardLabel(
-                primary: model.displayName,
-                secondary: model.displayProviderName,
-                primaryLineLimit: 2,
-                minimumWidth: 132,
+            ModelRailCard(
+                model: model,
                 selectionAccent: model.ref == selection ? rowAccent(isSelected: true) : nil
             )
             #if HOSTED_TEST
@@ -931,44 +969,38 @@ struct ModelPicker: View {
         }
     }
 
-    @ViewBuilder
-    private func providerSection(_ section: ModelPickerSectioning.ProviderSection) -> some View {
-        let isExpanded = isSectionExpanded(section.provider)
-        VStack(alignment: .leading, spacing: 8) {
-            Button { toggleExpansion(section.provider) } label: {
-                HStack(spacing: 8) {
-                    Text(section.displayName)
-                        .font(TronTypography.sheetSectionHeader)
-                        .lineLimit(1)
-                    Text("\(section.models.count)")
-                        .font(TronTypography.secondaryDescription)
-                        .foregroundStyle(Color.tronTextSecondary)
-                    Spacer(minLength: 8)
-                    TronDisclosureChevron(isExpanded: isExpanded)
-                }
-                .foregroundStyle(accent)
-                .frame(minHeight: 32, alignment: .leading)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .contentShape(Rectangle())
-                .animation(TronDisclosureLayout.expansionAnimation, value: isExpanded)
+    private func providerHeader(_ section: ModelPickerSectioning.ProviderSection, isExpanded: Bool) -> some View {
+        Button { toggleExpansion(section.provider) } label: {
+            HStack(spacing: 8) {
+                Text(section.displayName)
+                    .font(ModelPickerLayout.headerFont)
+                    .lineLimit(1)
+                Text("\(section.models.count)")
+                    .font(TronTypography.sans(size: TronTypography.sizeBody3, weight: .medium))
+                    .foregroundStyle(Color.tronTextSecondary)
+                Spacer(minLength: 8)
+                TronDisclosureChevron(
+                    isExpanded: isExpanded,
+                    size: 13,
+                    animation: TronDisclosureLayout.contentAnimation
+                )
             }
-            .buttonStyle(.plain)
-            .accessibilityLabel(section.displayName)
-            .accessibilityValue(isExpanded ? "expanded" : "collapsed")
-            .accessibilityHint(isExpanded ? "Double tap to hide models" : "Double tap to show models")
-            #if HOSTED_TEST
-            .modifier(ModelPickerHostedActionModifier(
-                id: "picker.provider.\(section.provider)",
-                action: { toggleExpansion(section.provider) }
-            ))
-            #endif
-
-            if isExpanded {
-                ForEach(section.models, id: \.ref) { model in
-                    row(model)
-                }
-            }
+            .foregroundStyle(accent)
+            .frame(minHeight: 40, alignment: .leading)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .contentShape(Rectangle())
         }
+        .buttonStyle(.plain)
+        .accessibilityAddTraits(.isHeader)
+        .accessibilityLabel("\(section.displayName), \(section.models.count) models")
+        .accessibilityValue(isExpanded ? "expanded" : "collapsed")
+        .accessibilityHint(isExpanded ? "Double tap to hide models" : "Double tap to show models")
+        #if HOSTED_TEST
+        .modifier(ModelPickerHostedActionModifier(
+            id: "picker.provider.\(section.provider)",
+            action: { toggleExpansion(section.provider) }
+        ))
+        #endif
     }
 
     private func row(_ model: ModelSummary) -> some View {
@@ -1015,7 +1047,6 @@ struct ModelPicker: View {
     /// section. Clearing the query restores the remembered expansion.
     private func isSectionExpanded(_ provider: String) -> Bool {
         guard search.isEmpty else { return true }
-        if let override = providerExpansionOverrides[provider] { return override }
         return providerExpansion.isExpanded(
             profileID: model.profiles.selected?.id,
             provider: provider,
@@ -1033,14 +1064,13 @@ struct ModelPicker: View {
 
     private func toggleExpansion(_ provider: String) {
         let expanded = !isSectionExpanded(provider)
-        withAnimation(TronDisclosureLayout.expansionAnimation) {
-            providerExpansionOverrides[provider] = expanded
+        withAnimation(TronDisclosureLayout.contentAnimation) {
+            providerExpansion.setExpanded(
+                expanded,
+                profileID: model.profiles.selected?.id,
+                provider: provider
+            )
         }
-        providerExpansion.setExpanded(
-            expanded,
-            profileID: model.profiles.selected?.id,
-            provider: provider
-        )
     }
 
     private func rowAccent(isSelected: Bool) -> Color {

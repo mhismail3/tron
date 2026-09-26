@@ -18,11 +18,15 @@ final class ModelPickerPresentationTests: XCTestCase {
         summary("anthropic", "claude-opus-5", "Claude Opus 5", releaseDate: "2026-01-01"),
         summary("anthropic", "claude-opus-4-5", "Claude Opus 4.5 (latest)", releaseDate: "2025-11-01"),
         summary("anthropic", "claude-opus-4-5-20251101", "Claude Opus 4.5", releaseDate: "2025-11-01"),
-        summary("anthropic", "claude-haiku-4-6", "Claude Haiku 4.6"),
+        summary("anthropic", "claude-haiku-4-6", "Claude Haiku 4.6", cost: ModelTokenPrice(input: 0.8, output: 4)),
         summary("openai", "gpt-5", "GPT 5", releaseDate: "2025-10-01"),
-        summary("openai", "gpt-5-mini", "GPT 5 Mini"),
+        summary("openai", "gpt-5-mini", "GPT 5 Mini", cost: nil),
         summary("beta", "beta-hidden", "Beta Hidden", available: false, releaseDate: "2025-09-01"),
     ]
+
+    private static let undatedCatalog = catalog.map {
+        summary($0.provider, $0.id, $0.name, available: $0.available, cost: $0.cost)
+    }
 
     /// The Gateway's history, newest first. One entry has no release date, so
     /// only the Recent rail can account for its card.
@@ -54,17 +58,16 @@ final class ModelPickerPresentationTests: XCTestCase {
                 XCTAssertFalse(probe.contains("picker.card.anthropic/claude-opus-4-5-20251101"),
                                "the pinned release stays out of the Latest rail")
 
-                // One header per available provider; the selected provider's
-                // section is expanded and the others start collapsed.
+                // The selected provider leads, expanded, below the portrait
+                // rails. Rows below the fold are lazily unmounted, so section
+                // membership beyond the first screen is owned by the policy
+                // suite and the collapsed-section test below.
                 XCTAssertTrue(probe.contains("picker.provider.anthropic"))
-                XCTAssertTrue(probe.contains("picker.provider.openai"))
                 XCTAssertFalse(probe.contains("picker.provider.beta"),
                                "an unavailable model never creates a provider section")
                 XCTAssertTrue(probe.contains("picker.row.anthropic/claude-opus-5"))
                 XCTAssertTrue(probe.contains("picker.row.anthropic/claude-opus-4-5-20251101"),
                               "the pinned release is still selectable in the provider section")
-                XCTAssertTrue(probe.contains("picker.row.anthropic/claude-haiku-4-6"))
-                XCTAssertFalse(probe.contains("picker.row.openai/gpt-5"))
 
                 self.capture(controller, name: "model-picker-sections-\(scheme == .dark ? "dark" : "light")")
             }
@@ -76,7 +79,13 @@ final class ModelPickerPresentationTests: XCTestCase {
         defer { resetSharedExpansion() }
         let probe = ModelPickerHostedProbe()
         var selection: ModelRef? = ModelRef(provider: "anthropic", id: "claude-opus-5")
-        try await withPicker(selection: Binding(get: { selection }, set: { selection = $0 }), probe: probe) { controller in
+        // No rails, so both provider sections fit on the first screen.
+        try await withPicker(
+            selection: Binding(get: { selection }, set: { selection = $0 }),
+            probe: probe,
+            models: Self.undatedCatalog,
+            recents: []
+        ) { controller in
             XCTAssertTrue(probe.activate("picker.provider.openai"))
             try await self.waitForMount("picker.row.openai/gpt-5", probe: probe, in: controller)
             XCTAssertTrue(probe.activate("picker.provider.openai"))
@@ -85,17 +94,46 @@ final class ModelPickerPresentationTests: XCTestCase {
             // The selected provider's own section collapses too.
             XCTAssertTrue(probe.activate("picker.provider.anthropic"))
             try await self.waitForUnmount("picker.row.anthropic/claude-opus-4-5", probe: probe, in: controller)
+            // Capture the settled layout, not a frame of the 0.34 s disclosure.
+            try await Task.sleep(for: .milliseconds(450))
             self.capture(controller, name: "model-picker-anthropic-collapsed")
         }
 
         // A remembered collapse survives the next presentation of the picker.
         let next = ModelPickerHostedProbe()
         var nextSelection: ModelRef? = ModelRef(provider: "anthropic", id: "claude-opus-5")
-        try await withPicker(selection: Binding(get: { nextSelection }, set: { nextSelection = $0 }), probe: next) { controller in
+        try await withPicker(
+            selection: Binding(get: { nextSelection }, set: { nextSelection = $0 }),
+            probe: next,
+            models: Self.undatedCatalog,
+            recents: []
+        ) { controller in
             try await self.settle()
             XCTAssertFalse(next.contains("picker.row.anthropic/claude-opus-4-5"),
                            "a remembered collapse survives the next picker")
             XCTAssertFalse(next.contains("picker.row.openai/gpt-5"))
+        }
+    }
+
+    /// Performance guard: an expanded provider's rows are separate lazy
+    /// children, so a long section builds only what is on screen. Before the
+    /// rows were flattened, the whole section mounted as one child.
+    func testLongProviderSectionMountsOnlyVisibleRows() async throws {
+        resetSharedExpansion()
+        defer { resetSharedExpansion() }
+        let probe = ModelPickerHostedProbe()
+        let long = (0..<60).map { Self.summary("bulk", "bulk-\($0)", "Bulk Model \($0)", cost: nil) }
+        var selection: ModelRef? = ModelRef(provider: "bulk", id: "bulk-0")
+        try await withPicker(
+            selection: Binding(get: { selection }, set: { selection = $0 }),
+            probe: probe,
+            models: long,
+            recents: []
+        ) { _ in
+            try await self.settle()
+            XCTAssertTrue(probe.contains("picker.row.bulk/bulk-0"))
+            let mounted = long.filter { probe.contains("picker.row.\($0.provider)/\($0.id)") }.count
+            XCTAssertLessThan(mounted, 30, "only on-screen rows mount; \(mounted) of 60 mounted")
         }
     }
 
@@ -152,7 +190,8 @@ final class ModelPickerPresentationTests: XCTestCase {
         _ id: String,
         _ name: String,
         available: Bool = true,
-        releaseDate: String? = nil
+        releaseDate: String? = nil,
+        cost: ModelTokenPrice? = ModelTokenPrice(input: 5, output: 25)
     ) -> ModelSummary {
         ModelSummary(
             provider: provider,
@@ -163,7 +202,8 @@ final class ModelPickerPresentationTests: XCTestCase {
             contextWindow: 200_000,
             maxTokens: 32_000,
             available: available,
-            releaseDate: releaseDate
+            releaseDate: releaseDate,
+            cost: cost
         )
     }
 
@@ -178,6 +218,7 @@ final class ModelPickerPresentationTests: XCTestCase {
         probe: ModelPickerHostedProbe,
         scheme: ColorScheme = .light,
         models: [ModelSummary] = ModelPickerPresentationTests.catalog,
+        recents: [RecentModelRef] = ModelPickerPresentationTests.recents,
         inspect: (UIViewController) async throws -> Void
     ) async throws {
         let suiteName = "model-picker-presentation.\(UUID().uuidString)"
@@ -192,7 +233,7 @@ final class ModelPickerPresentationTests: XCTestCase {
             profiles: GatewayProfileStore(defaults: defaults),
             cache: SnapshotCache(root: cacheURL)
         )
-        model.installHostedRecentModels(Self.recents)
+        model.installHostedRecentModels(recents)
         XCTAssertNil(model.profiles.selected, "the fixture device is unpaired, so the preference key is the unpaired one")
         let content = NavigationStack {
             ModelPicker(selection: selection, models: models)

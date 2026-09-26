@@ -2039,6 +2039,9 @@ export class GatewayService {
         // Undated models simply omit the field; the picker's provider sections
         // list them without a release date.
         const releaseDate = modelReleaseDate(model.provider, model.id);
+        // USD per million tokens. An all-zero SDK price means "unset", not free,
+        // so it is omitted and the picker shows no price.
+        const priced = model.cost.input > 0 || model.cost.output > 0;
         return {
           provider: model.provider,
           id: model.id,
@@ -2050,6 +2053,7 @@ export class GatewayService {
           maxTokens: model.maxTokens,
           available: available.has(`${model.provider}\0${model.id}`),
           ...(releaseDate === undefined ? {} : { releaseDate }),
+          ...(priced ? { cost: { input: model.cost.input, output: model.cost.output } } : {}),
         };
       });
     });

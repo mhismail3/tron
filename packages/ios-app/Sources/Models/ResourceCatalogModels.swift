@@ -397,8 +397,16 @@ struct ModelSummary: Codable, Hashable, Identifiable, Sendable {
     /// Gateway canon release date (`YYYY-MM-DD`). Absent when the Gateway has no
     /// recorded release for the model, which keeps it out of the Latest rail.
     var releaseDate: String? = nil
+    /// USD per million tokens from the pinned SDK catalog. Absent when the
+    /// Gateway has no price, which is not the same as free.
+    var cost: ModelTokenPrice? = nil
 
     var ref: ModelRef { ModelRef(provider: provider, id: id) }
+}
+
+struct ModelTokenPrice: Codable, Hashable, Sendable {
+    let input: Double
+    let output: Double
 }
 
 /// One Gateway-recorded recently used model. The Gateway owns this history;

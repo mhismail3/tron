@@ -1754,7 +1754,8 @@ recent-model history, a Latest rail ordered by the Gateway's optional release da
 collapsible section per provider. The Gateway keeps the history, the release dates, and the
 availability that the rails filter on, and no picker-local usage list or date table exists. The
 collapsible provider sections reuse the dashboard's shared disclosure primitive, and both rails
-reuse the shared card rail, so section chrome has one owner. The model card scopes the same purple theme to
+reuse the shared card rail, so section chrome has one owner. Rail cards are portrait and show
+context window and the Gateway-projected input/output price; the picker owns no price table. The model card scopes the same purple theme to
 its inline controls and nested sheets. An in-flight choice appears immediately without replacing canonical authority.
 Context-window model/revision guards, Thinking's available-level list, and compaction
 queue/export/active-operation admission stay owned by the existing session mutations.

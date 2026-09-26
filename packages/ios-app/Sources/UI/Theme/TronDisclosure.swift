@@ -76,6 +76,10 @@ struct TronDisclosureState: Equatable {
 
 enum TronDisclosureLayout {
     static let expansionAnimation = Animation.smooth(duration: 0.18)
+    /// Scroll-view sections that insert and remove their own rows (the model
+    /// picker) use a longer settle so neighbouring content glides rather than
+    /// jumps. The dashboard's `List` keeps `expansionAnimation`.
+    static let contentAnimation = Animation.smooth(duration: 0.34)
 }
 
 /// The shared expanding/collapsing chevron: one symbol, size, and rotation
@@ -83,11 +87,13 @@ enum TronDisclosureLayout {
 struct TronDisclosureChevron: View {
     let isExpanded: Bool
     var size: CGFloat = 10
+    /// Matches the rotation to the owning section's row motion.
+    var animation: Animation = TronDisclosureLayout.expansionAnimation
 
     var body: some View {
         Image(systemName: "chevron.right")
             .font(TronTypography.sans(size: size, weight: .bold))
             .rotationEffect(.degrees(isExpanded ? 90 : 0))
-            .animation(TronDisclosureLayout.expansionAnimation, value: isExpanded)
+            .animation(animation, value: isExpanded)
     }
 }

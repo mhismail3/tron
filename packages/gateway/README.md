@@ -1949,6 +1949,11 @@ disposable preference: a malformed or oversized document is replaced with an
 empty one instead of failing Gateway startup, because no canonical evidence
 exists to rebuild it from.
 
+`model.list` items also carry an optional `cost` of `{input, output}` in USD per
+million tokens, copied from the pinned SDK catalog for the picker's rail cards.
+An all-zero SDK price means the price is unset, not that the model is free, so
+the field is omitted; cache rates and tiered pricing are not projected.
+
 `model.list` items carry an optional `releaseDate` (`YYYY-MM-DD`) that backs the
 picker's Latest rail; models with no known date omit the field and appear only
 in provider sections. The pinned Pi catalog drops the vendor's `release_date`,

@@ -167,3 +167,34 @@ extension ModelSummary {
         ModelDisplayFormatting.reference(provider: provider, model: name.isEmpty ? id : name)
     }
 }
+
+/// Compact facts for the model picker's rail cards.
+enum ModelCardFacts {
+    /// `$input / $output` per million tokens. Whole dollars drop decimals;
+    /// fractional prices keep cents so sub-dollar rates stay distinguishable.
+    static func priceLabel(_ price: ModelTokenPrice?) -> String? {
+        guard let price else { return nil }
+        return "\(dollars(price.input)) / \(dollars(price.output))"
+    }
+
+    /// Compact window size. Rounds down so a label never claims more context
+    /// than the model accepts (1,048,576 is "1M", not "1.1M").
+    static func contextLabel(_ tokens: Int) -> String? {
+        guard tokens > 0 else { return nil }
+        if tokens >= 1_000_000 {
+            let tenths = tokens / 100_000
+            return tenths % 10 == 0 ? "\(tenths / 10)M" : "\(tenths / 10).\(tenths % 10)M"
+        }
+        if tokens >= 1_000 { return "\(tokens / 1_000)K" }
+        return "\(tokens)"
+    }
+
+    private static func dollars(_ value: Double) -> String {
+        guard value.isFinite, value > 0 else { return "$0" }
+        if value < 0.01 { return "<$0.01" }
+        let cents = (value * 100).rounded()
+        return cents.truncatingRemainder(dividingBy: 100) == 0
+            ? "$\(Int(cents / 100))"
+            : String(format: "$%.2f", locale: Locale(identifier: "en_US_POSIX"), cents / 100)
+    }
+}

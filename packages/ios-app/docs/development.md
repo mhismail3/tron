@@ -253,15 +253,21 @@ Every shared model picker starts with an icon-only search action in the top-lead
 not a persistent bottom control. Tapping reveals the shared bottom search field and focuses it;
 close/focus loss retains the existing keyboard-settlement and sheet-dismissal guards. Native
 `ModelPickerPresentationTests` mounts the picker in both appearances and checks which elements it
-installs — every rail card, provider header, and provider row, including the ones that must be
-absent — while retaining light/dark captures; `ModelPickerSearchTests` covers filtering. Every picker
+installs — every on-screen rail card, provider header, and provider row, including the ones that
+must be absent — while retaining light/dark captures; `ModelPickerSearchTests` covers filtering. Every picker
 row also exposes its canonical `provider/id`: the known Anthropic 4.5 aliases are labeled “Latest alias”
 (within that model family, not the newest generation), while date-suffixed IDs are labeled “Pinned
 release” with their date. These labels never merge or rewrite distinct model choices.
 
 The picker, top to bottom, is a **Recent** card rail, a **Latest** card rail, then every provider
-as a collapsible section. Both rails are the shared `TronCardRail` (the same tinted Liquid Glass
-card the New Session quick selections use), so a rail and its cards have one styling owner.
+as a collapsible section. Both rails are the shared `TronCardRail`, so a rail and its cards have
+one styling owner. The picker's rails use its `.scroll` surface (the static `tronScrollSurface`
+the provider rows use) rather than the New Session chips' live `.glass`: tall live-glass cards in
+a scrolling sheet cost frames on device, and in captures they refracted the section titles into
+the cards. Each `ModelRailCard` is a 3:4 portrait card (a minimum height, so Dynamic Type grows it)
+showing provider, model name, context window, and input/output price per million tokens from
+the Gateway's optional `cost`; an absent fact is omitted, never shown as zero
+(`ModelCardFactsTests`). Recent, Latest, and provider headers share one 16-point header size.
 Recent order and membership belong to the Gateway's bounded recent-model history read through
 `model.recent` and refreshed by the `models.recentChanged` event; a ref that has left the
 available catalog is dropped rather than displayed. Latest orders the available catalog by the
@@ -269,7 +275,12 @@ Gateway's optional `releaseDate` (newest first, display-name ties) and keeps the
 its pinned release shares that date, while both stay selectable in the provider section; models
 without a (well-formed) date never enter the rail. Provider sections lead with the selected
 model's provider and are otherwise alphabetical by display name, each header carrying the
-provider name and its model count. Expansion is a device preference remembered per paired
+provider name and its model count. Header and rows are separate `LazyVStack` children, so a long
+expanded provider builds only on-screen rows (`testLongProviderSectionMountsOnlyVisibleRows`;
+nesting a section's rows in one child mounted all 60). The body builds `ModelPickerSectioning`
+once per evaluation. Rows enter with a short fade and drop from their header and leave with a
+faster fade, under `TronDisclosureLayout.contentAnimation` (0.34 s smooth); the dashboard's
+`List` keeps its 0.18 s `expansionAnimation`. Expansion is a device preference remembered per paired
 profile (`ModelProviderExpansionStore`); a provider with nothing remembered starts expanded only
 when it holds the current selection. A query replaces both rails with the matching provider
 sections, all expanded, and clearing it restores the remembered expansion. `ModelPickerSectioning`
