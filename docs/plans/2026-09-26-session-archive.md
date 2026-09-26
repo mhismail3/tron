@@ -92,7 +92,7 @@ Current state, inspected 2026-09-26:
 | G-1 | Done | Gateway archive store, `session.archive.set` RPC, list filtering and count, delete/rekey/prune ownership, `session-archive.v1` capability | none | archive worker, 2026-09-26 |
 | G-2 | Claimed | Every new run unarchives: an admission-time clear for Gateway-admitted runs, plus a backstop when an active phase is published | G-1 | tron-coordinator, 2026-09-26 |
 | G-3 | Claimed | Search results carry `archived`; `session-search.md` updated | G-1 | tron-coordinator, 2026-09-26 |
-| I-1 | Ready | iOS model, mutation service, AppModel and capability gating; catalog membership follows authoritative responses | G-1 | |
+| I-1 | Claimed | iOS model, mutation service, AppModel and capability gating; catalog membership follows authoritative responses | G-1 | tron-coordinator, 2026-09-26 |
 | I-2 | Ready | Dashboard full-swipe Archive, one collapsed "Archived (N)" container at the bottom, and archived-row actions | I-1 | |
 | I-3 | Ready | Search "Archived" label, automation picker exclusion, and display of an existing automation whose target is archived | I-1, G-3 | |
 | F-1 | Needs scoping | The `session.fork` RPC rejects with retryable `busy` because its own admitted work entry satisfies the slot's idle check; decide the fix and cover the real path | none | |
