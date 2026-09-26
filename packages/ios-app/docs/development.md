@@ -1207,8 +1207,12 @@ session to its workspace. The fixture supplies only session membership and a pro
 revision, so the journey exercises the container's production visibility, expansion,
 and confirmation control flow; paging, the zero-count
 collapse, and the pass retirement a reload performs are covered by the container's own
-focused tests. Its three retained screenshots are
-the visual evidence. Hosted fixtures that render real dashboard rows must declare an
+focused tests. `TronSmokeUITests.testSessionArchiveExpansionRevealsRowsInView` drives the
+fixture's reveal mode (`-tron-session-archive-reveal-fixture`): a screen of live rows puts
+the archived header at the bottom, its gated first page read makes the header's loading
+spinner observable, and the reveal must bring the rows into view with the header still
+visible. Its three retained screenshots are
+its visual evidence, as are the confirmation journey's. Hosted fixtures that render real dashboard rows must declare an
 inactive branch presentation activity (the archive fixture does), because the production
 one-second row clock keeps the run loop busy and XCUI can never observe app quiescence while
 it ticks.

@@ -861,27 +861,38 @@ struct SessionShellView: View {
         // `filteredSessions` re-filters the whole dashboard, and this list needs
         // it for both its rows and its animation key.
         let filtered = filteredSessions
-        return List {
-            sessionSections(filtered)
+        // The reader is what lets the archived container reveal the rows it
+        // expands into; the scroll modifier stays on the List itself, because it
+        // reads that scroll owner's geometry.
+        return ScrollViewReader { proxy in
+            List {
+                sessionSections(
+                    filtered,
+                    onRevealArchivedRows: { proxy.revealArchivedSection(reduceMotion: reduceMotion) }
+                )
+            }
+            .listStyle(.plain)
+            .environment(\.defaultMinListRowHeight, 38)
+            .contentMargins(.bottom, 92)
+            .tronCollectionSurface()
+            .tronScrollEdgeChrome()
+            .tronDashboardScroll(dashboardHeader, topMargin: 6)
+            .animation(
+                TronDashboardContentMotion.animation(reduceMotion: reduceMotion),
+                value: dashboardPresentation
+            )
+            .animation(
+                TronDashboardContentMotion.animation(reduceMotion: reduceMotion),
+                value: filtered.map(\.dashboardID)
+            )
         }
-        .listStyle(.plain)
-        .environment(\.defaultMinListRowHeight, 38)
-        .contentMargins(.bottom, 92)
-        .tronCollectionSurface()
-        .tronScrollEdgeChrome()
-        .tronDashboardScroll(dashboardHeader, topMargin: 6)
-        .animation(
-            TronDashboardContentMotion.animation(reduceMotion: reduceMotion),
-            value: dashboardPresentation
-        )
-        .animation(
-            TronDashboardContentMotion.animation(reduceMotion: reduceMotion),
-            value: filtered.map(\.dashboardID)
-        )
     }
 
     @ViewBuilder
-    private func sessionSections(_ filtered: [SessionSummary]) -> some View {
+    private func sessionSections(
+        _ filtered: [SessionSummary],
+        onRevealArchivedRows: @escaping () -> Void
+    ) -> some View {
         if serverFilter.sortMode == .recent {
             Section {
                 ForEach(filtered, id: \.dashboardID) { session in
@@ -965,12 +976,12 @@ struct SessionShellView: View {
             }
         }
         }
-        archivedContainerSection
+        archivedContainerSection(onRevealRows: onRevealArchivedRows)
     }
 
     /// One container row after every workspace group, owned by
     /// `ArchivedSessionsContainerSection`.
-    private var archivedContainerSection: some View {
+    private func archivedContainerSection(onRevealRows: @escaping () -> Void) -> some View {
         ArchivedSessionsContainerSection(
             count: model.archivedSessionCount,
             sources: archivedContainerSources,
@@ -985,6 +996,7 @@ struct SessionShellView: View {
                     presentationActive: { dashboardPresentationIsActive }
                 )
             },
+            onRevealRows: onRevealRows,
             onOpen: openArchivedSession,
             onUnarchive: { archiveConfirmation = SessionArchiveConfirmation(session: $0, archived: false) },
             onDelete: { sessionToDelete = $0 }

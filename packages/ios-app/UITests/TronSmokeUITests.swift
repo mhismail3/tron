@@ -388,6 +388,70 @@ final class TronSmokeUITests: XCTestCase {
         keepScreenshot(named: "session-archive-unarchived")
     }
 
+    /// The archived header is the dashboard's last section, so its rows publish
+    /// below the fold. Expanding must move the list up until they are on screen,
+    /// and the header's own icon is now the whole loading affordance: there is no
+    /// placeholder row to show instead.
+    @MainActor
+    func testSessionArchiveExpansionRevealsRowsInView() {
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.launchArguments = ["-tron-session-archive-fixture", "-tron-session-archive-reveal-fixture"]
+        app.launch()
+        defer { app.terminate() }
+
+        let container = app.buttons["archived-sessions-container"]
+        // The list is much longer than the screen, so the header starts off screen
+        // and the journey scrolls the dashboard to its end.
+        XCTAssertFalse(container.isHittable, app.debugDescription)
+        for _ in 0..<12 where !container.isHittable {
+            app.swipeUp()
+        }
+        XCTAssertTrue(container.isHittable, app.debugDescription)
+        XCTAssertGreaterThan(
+            container.frame.minY,
+            app.frame.midY,
+            "The archived header must start at the bottom of the screen"
+        )
+        let headerMinYBeforeExpanding = container.frame.minY
+        keepScreenshot(named: "session-archive-reveal-before")
+
+        let firstRow = app.buttons["archived-session-row-fixture:archived-session-0"]
+        container.tap()
+        // The fixture gates its first page read, so the loading window is
+        // observable: the header is expanded and no row has published yet. The
+        // placeholder row this journey replaced never appears.
+        XCTAssertFalse(firstRow.waitForExistence(timeout: 1), app.debugDescription)
+        XCTAssertFalse(app.staticTexts["Loading archived sessions…"].exists, app.debugDescription)
+        keepScreenshot(named: "session-archive-reveal-loading")
+
+        XCTAssertTrue(firstRow.waitForExistence(timeout: 10), app.debugDescription)
+        // The reveal is animated, so wait for the row to be inside the visible
+        // frame rather than sampling the scroll the moment it publishes.
+        let rowIsVisible = NSPredicate { element, _ in
+            guard let element = element as? XCUIElement else { return false }
+            return element.isHittable
+        }
+        expectation(for: rowIsVisible, evaluatedWith: firstRow)
+        waitForExpectations(timeout: 10)
+
+        // The list moved up to make room: the revealed rows are in view, the
+        // header is still visible and above its pre-expansion position, and the
+        // section's own rows sit below it.
+        XCTAssertLessThan(container.frame.minY, headerMinYBeforeExpanding, app.debugDescription)
+        XCTAssertTrue(container.isHittable, app.debugDescription)
+        XCTAssertGreaterThan(firstRow.frame.minY, container.frame.minY, app.debugDescription)
+        // The revealed row is inside the usable area, not peeking past the
+        // bottom edge behind the home indicator.
+        XCTAssertLessThan(
+            firstRow.frame.maxY,
+            app.frame.maxY - 40,
+            "The revealed row must be fully on screen"
+        )
+        XCTAssertFalse(app.staticTexts["Loading archived sessions…"].exists, app.debugDescription)
+        keepScreenshot(named: "session-archive-reveal-after")
+    }
+
     @MainActor
     func testSessionArchivePagingRetiresInFlightPassAndRestartsRefusedCursor() {
         continueAfterFailure = false

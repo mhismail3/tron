@@ -2,7 +2,7 @@
 
 - **Started:** 2026-09-26
 - **Status:** Active
-- **Last updated:** 2026-09-26, C-1
+- **Last updated:** 2026-09-26, C-3
 - **Goal:** A user can archive an idle session so it leaves the dashboard without being deleted, find it again in one collapsed Archived container or in search, and have it return automatically when it runs again.
 
 ## Goal and constraints
@@ -109,7 +109,8 @@ Current state, inspected 2026-09-26:
 | F-7 | Done | Moved out of this plan (user decision, 2026-09-26): pre-existing `switchSession` receipt split, not archive-owned; see `2026-09-26-switch-session-receipts.md` (Proposed) | R-5 | tron-coordinator, 2026-09-26 |
 | C-1 | Done | User change: no full-swipe archive or unarchive. Both are a revealed swipe action, then a tap, then the same confirmation sheet as Delete | R-4 | tron-coordinator, 2026-09-26 |
 | C-2 | Done | Archived count stuck after rapid archives: deferred catalog follow-up dropped when the final traversal was retired | C-1 | tron-coordinator, 2026-09-26 |
-| V-1 | Blocked | Cross-module checkpoint, user-performed Gateway rollout, and eyes-on device review; close the plan | G-2, I-2, I-3, F-3, F-4, F-5, F-6, R-1, R-2, R-3, R-4, R-5, C-1, C-2 | tron-coordinator, 2026-09-26 |
+| C-3 | Done | Archived header shows a spinner instead of a loading row; expanding scrolls the revealed rows into view | C-2 | tron-coordinator, 2026-09-26 |
+| V-1 | Blocked | Cross-module checkpoint, user-performed Gateway rollout, and eyes-on device review; close the plan | G-2, I-2, I-3, F-3, F-4, F-5, F-6, R-1, R-2, R-3, R-4, R-5, C-1, C-2, C-3 | tron-coordinator, 2026-09-26 |
 
 ## Task details
 
@@ -1852,3 +1853,51 @@ Gateway.
   after any invalidation race; a broader sync-hardening pass is still the user's
   later call. The two new tests fail by a named bounded wait rather than a
   watchdog expiry, so keep that helper when refactoring.
+
+### C-3 · Done · 2026-09-26 · tron-coordinator
+
+- Result: two dashboard tweaks from device feedback.
+  - **Loading state:** the placeholder row ("Loading archived sessions…") is
+    deleted. While the expansion's first page is reading and no row is shown yet,
+    the header's leading icon (`archivebox`) becomes a same-size tinted spinner
+    inside the same icon column, then returns to the expanded glyph. The layout
+    never moves, the hint says "Loading archived sessions", and the spinner is
+    hidden from accessibility because the header's own label/value/hint own it.
+  - **Reveal:** the user's own expansion now scrolls the dashboard list once its
+    first rows publish, so the revealed rows are on screen instead of below the
+    fold. Mechanism: `ScrollViewReader` around the dashboard `List` plus
+    `ScrollViewProxy.revealArchivedSection` anchored on the header's own id, in
+    `packages/ios-app/Sources/UI/Chat/ArchivedSessionsSection.swift`. No geometry
+    read and no timers: the archived section is always the list's last one, so
+    the header-top anchor is itself the clamp the product asked for — few rows
+    stop at the content end with the whole section visible at the bottom, many
+    rows bring the header to the top. The scroll waits one main-actor turn
+    because the rows were published in the same view update. `revealPending` is
+    set only by the user's expansion, so a background reload, a profile switch,
+    and "Show more" never move the list, and a pass that ends without a row
+    clears the flag.
+- Evidence (verified, failing first):
+  - Negative control: with the fixture's `onRevealRows` replaced by a no-op, the
+    new journey failed at the movement assertion (header still at 809.0 pt) in
+    16.2 s; restored, the same journey passes in 14.8 s.
+  - `TronSmokeUITests.testSessionArchiveExpansionRevealsRowsInView` (new),
+    `testSessionArchiveConfirmationAndArchivedContainerJourney` and
+    `testSessionArchivePagingRetiresInFlightPassAndRestartsRefusedCursor`:
+    3 tests, 0 failures, 52.3 s.
+  - `TronMobileTests/DashboardStateOwnerTests` + `AppModelCatalogSyncTests`:
+    78 tests passed (4.8 s).
+  - Screenshots (before, loading, after) exported to the internal workspace's
+    `files/session-archive/`.
+- Changes: `packages/ios-app/Sources/UI/Chat/ArchivedSessionsSection.swift`,
+  `packages/ios-app/Sources/UI/Chat/SessionShellView.swift`,
+  `packages/ios-app/Sources/App/HostedSessionArchiveFixture.swift`,
+  `packages/ios-app/UITests/TronSmokeUITests.swift`,
+  `packages/ios-app/docs/architecture.md`, `packages/ios-app/docs/development.md`.
+- Kept on purpose: the header-anchored clamp rather than measuring the header's
+  scrolled frame; the fixture's gated read is a delay in the reveal mode and the
+  existing hang in the paging mode, because each mode needs a different observable
+  window.
+- For the next agent: the reveal is proven on the "many rows" clamp (header to
+  the top). The few-row clamp follows from the same anchor plus list clamping;
+  it is not separately asserted.
+

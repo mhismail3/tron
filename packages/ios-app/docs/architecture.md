@@ -1398,7 +1398,17 @@ dashboard never claims a fabricated zero. `ArchivedSessionsContainerSection` own
 that visibility, the expansion, and the passes, so the same control flow runs in
 the dashboard and in the hosted journey. Expanding it reads one `archived: "only"`
 page per connected capable server under the dashboard's managed presentation
-activity and the model's exact per-purpose latest-request fence; a collapse retires
+activity and the model's exact per-purpose latest-request fence; while that first
+page is reading, the header's leading icon is a spinner in the archive glyph's
+place, so a loading expansion shows no placeholder row and the header never
+changes size. The user's own expansion also scrolls the dashboard list
+(`ScrollViewProxy.revealArchivedSection`, anchored on the header's own identity)
+once its first rows publish: the archived header is always the list's last
+section, so that anchor is the clamp the product asks for — a few rows stop at the
+content end with the whole section visible at the bottom, and many rows bring the
+header to the top with the rows filling the screen. Only that expansion movement
+scrolls the list; a background reload, a profile switch, and "Show more" never
+move it, and a collapse lets the list settle back naturally. A collapse retires
 the pass (generation and task) so a late page cannot reappear, and a capable server
 that is unreachable or whose page read failed is named inline instead of listing
 rows that may be stale. A first page is the whole authority for its server's rows

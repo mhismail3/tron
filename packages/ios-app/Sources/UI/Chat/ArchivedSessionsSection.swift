@@ -22,6 +22,9 @@ struct ArchivedSessionsContainerSection: View {
     let presentationActive: Bool
     /// One page from one server, under the caller's own read fence.
     let loadPage: (String, String?) async throws -> ArchivedSessionsLoadResult
+    /// Scrolls the dashboard list so the rows the user just asked for are in
+    /// view. The list owner supplies it, because it owns the scroll position.
+    let onRevealRows: () -> Void
     let onOpen: (SessionSummary) -> Void
     let onUnarchive: (SessionSummary) -> Void
     let onDelete: (SessionSummary) -> Void
@@ -31,6 +34,10 @@ struct ArchivedSessionsContainerSection: View {
     /// Identifies the installed pass. A pass retires only the handle it owns,
     /// so a cancel-and-reload installs a newer one this pass must not clear.
     @State private var loadPass = 0
+    /// True between the user's own expansion and the first rows it publishes.
+    /// Only that moment reveals rows, so a background reload, a profile switch,
+    /// or "Show more" never scrolls the list under the user.
+    @State private var revealPending = false
 
     var body: some View {
         Group {
@@ -52,6 +59,10 @@ struct ArchivedSessionsContainerSection: View {
                     ArchivedSessionsSectionHeader(
                         count: count,
                         isExpanded: container.isExpanded,
+                        // The expansion's first rows replace the placeholder row
+                        // the container used to show, so the header's leading
+                        // icon is the whole loading affordance.
+                        isAwaitingFirstPage: container.isLoading && container.rows.isEmpty,
                         onToggle: toggle
                     )
                 }
@@ -74,6 +85,16 @@ struct ArchivedSessionsContainerSection: View {
                 endLoad()
             }
         }
+        .onChange(of: container.rows.map(\.dashboardID)) { _, ids in
+            guard revealPending, !ids.isEmpty else { return }
+            revealPending = false
+            onRevealRows()
+        }
+        .onChange(of: container.isLoading) { _, isLoading in
+            // A pass that ends without a row reveals nothing, and the flag must
+            // not survive into a later background publication.
+            if !isLoading, container.rows.isEmpty { revealPending = false }
+        }
     }
 
     private var unavailableServerNames: [String] {
@@ -94,12 +115,15 @@ struct ArchivedSessionsContainerSection: View {
         if container.isExpanded {
             // Collapsing retires the pass: a page already in flight must never
             // publish into a closed container.
+            revealPending = false
             endLoad()
             withAnimation(TronDisclosureLayout.expansionAnimation) {
                 container.collapse()
             }
             return
         }
+        // The user's own expansion is the only moment the list may move.
+        revealPending = true
         withAnimation(TronDisclosureLayout.expansionAnimation) {
             container.expand()
         }
@@ -131,6 +155,9 @@ struct ArchivedSessionsContainerSection: View {
         let requests = container.pageRequests(for: sources, more: more)
         guard !requests.isEmpty else {
             container.finishLoading()
+            // Nothing readable to reveal: drop the pending reveal rather than
+            // let it move the list on some later background publication.
+            revealPending = false
             return
         }
         let generation = container.currentGeneration
@@ -190,15 +217,17 @@ struct ArchivedSessionsContainerSection: View {
 struct ArchivedSessionsSectionHeader: View {
     let count: Int
     let isExpanded: Bool
+    /// True while the expansion's first page is still reading and no row is
+    /// shown yet. The leading icon becomes a spinner in its place, so the
+    /// header never grows a placeholder row and its layout never moves.
+    let isAwaitingFirstPage: Bool
     let onToggle: () -> Void
 
     var body: some View {
         Button(action: onToggle) {
             HStack(spacing: SessionDashboardLayout.iconTextSpacing) {
-                Image(systemName: isExpanded ? "archivebox.fill" : "archivebox")
-                    .font(TronTypography.sans(size: SessionDashboardLayout.headerIconSize, weight: .semibold))
+                leadingIcon
                     .frame(width: SessionDashboardLayout.iconColumnWidth, height: SessionDashboardLayout.iconColumnWidth)
-                    .contentTransition(.symbolEffect(.replace))
                 Text("Archived (\(count))")
                     .font(TronTypography.code(size: TronTypography.sizeBodyLG, weight: .bold))
                     .lineLimit(1)
@@ -214,14 +243,70 @@ struct ArchivedSessionsSectionHeader: View {
             .frame(maxWidth: .infinity, alignment: .leading)
             .contentShape(Rectangle())
             .animation(TronDisclosureLayout.expansionAnimation, value: isExpanded)
+            .animation(TronDisclosureLayout.expansionAnimation, value: isAwaitingFirstPage)
         }
         .buttonStyle(.plain)
         .textCase(nil)
         .listRowInsets(SessionDashboardLayout.headerInsets)
+        .id(SessionArchiveScrollTarget.headerID)
         .accessibilityIdentifier("archived-sessions-container")
         .accessibilityLabel("Archived")
         .accessibilityValue("\(count)")
-        .accessibilityHint(isExpanded ? "Double tap to hide archived sessions" : "Double tap to show archived sessions")
+        .accessibilityHint(accessibilityHint)
+    }
+
+    /// The header's leading affordance: the archive glyph, or a spinner of the
+    /// same size while the first page is still loading.
+    @ViewBuilder
+    private var leadingIcon: some View {
+        if isAwaitingFirstPage {
+            ProgressView()
+                .controlSize(.small)
+                .tint(Color.tronEmerald)
+                .transition(.opacity)
+                .accessibilityHidden(true)
+        } else {
+            Image(systemName: isExpanded ? "archivebox.fill" : "archivebox")
+                .font(TronTypography.sans(size: SessionDashboardLayout.headerIconSize, weight: .semibold))
+                .contentTransition(.symbolEffect(.replace))
+        }
+    }
+
+    private var accessibilityHint: String {
+        if isAwaitingFirstPage { return "Loading archived sessions" }
+        return isExpanded
+            ? "Double tap to hide archived sessions"
+            : "Double tap to show archived sessions"
+    }
+}
+
+/// The archived header's scroll identity, and the one scroll that reveals an
+/// expansion.
+enum SessionArchiveScrollTarget {
+    static let headerID = "archived-sessions-header"
+}
+
+extension ScrollViewProxy {
+    /// Reveals the archived section the user just expanded. Anchoring the
+    /// header's top is exactly the clamp the product asks for and needs no
+    /// geometry read: the archived section is always the list's last one, so
+    /// with few rows the scroll stops at the content end and the whole section
+    /// sits at the bottom, and with many the header reaches the top and the
+    /// rows fill the screen. The list clamps the target, so it can never scroll
+    /// past the content.
+    ///
+    /// The revealed rows were published in the same view update, so the scroll
+    /// waits one main-actor turn: the list must own the new content before the
+    /// offset is resolved, or an early scroll would stop at the old content end
+    /// and reveal nothing. The caller supplies the motion, so Reduce Motion is
+    /// honored at its owner.
+    @MainActor
+    func revealArchivedSection(reduceMotion: Bool) {
+        Task { @MainActor in
+            withAnimation(TronDashboardContentMotion.animation(reduceMotion: reduceMotion)) {
+                scrollTo(SessionArchiveScrollTarget.headerID, anchor: .top)
+            }
+        }
     }
 }
 
@@ -240,9 +325,6 @@ struct ArchivedSessionsSectionRows: View {
     let onShowMore: () -> Void
 
     var body: some View {
-        if isLoading && sessions.isEmpty {
-            loadingRow
-        }
         ForEach(sessions, id: \.dashboardID) { session in
             archivedRow(session)
         }
@@ -284,20 +366,6 @@ struct ArchivedSessionsSectionRows: View {
                 .tint(Color.tronError)
                 .accessibilityIdentifier("session-delete-action-\(session.dashboardID)")
         }
-    }
-
-    private var loadingRow: some View {
-        HStack(spacing: SessionDashboardLayout.iconTextSpacing) {
-            ProgressView().tint(.tronEmerald)
-            Text("Loading archived sessions…")
-                .font(TronTypography.sans(size: TronTypography.sizeCaption, weight: .medium))
-                .foregroundStyle(Color.tronTextMuted)
-        }
-        .padding(.horizontal, SessionDashboardLayout.headerLeadingPadding)
-        .padding(.vertical, 8)
-        .listRowBackground(Color.clear)
-        .listRowSeparator(.hidden)
-        .listRowInsets(SessionDashboardLayout.headerInsets)
     }
 
     private func unavailableRow(_ name: String) -> some View {
