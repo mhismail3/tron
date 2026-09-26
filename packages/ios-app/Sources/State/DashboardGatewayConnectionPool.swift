@@ -29,6 +29,13 @@ protocol DashboardGatewayConnectionPoolDelegate: AnyObject {
     /// The Gateway-owned archived count for one background profile. `nil` means
     /// that profile has not published a count yet.
     func dashboardPoolDidUpdateArchivedCount(profileID: String, count: Int?)
+    /// One background profile's catalog projection is authoritative again: it
+    /// published a complete `session.list` page, or its connection epoch
+    /// retired. The dashboard's archived container reads its rows from exactly
+    /// those pages, so it must re-read even when the archived count is
+    /// unchanged — a renamed archived session, or one archived while another is
+    /// unarchived, changes rows and not the count.
+    func dashboardPoolDidPublishAuthoritativeCatalog(profileID: String)
 }
 
 extension DashboardGatewayConnectionPoolDelegate {
@@ -801,6 +808,7 @@ final class DashboardGatewayConnectionPool {
                 admitted.refreshFailedAttempts = 0
                 entries[profileID] = admitted
                 publish(profileID: profileID)
+                publishAuthoritativeCatalog(profileID: profileID)
                 return .published
             case .revisionMoved, .invalid:
                 return .retained
@@ -893,6 +901,9 @@ final class DashboardGatewayConnectionPool {
         entry.catalog.markDisconnected()
         entries[profileID] = entry
         publish(profileID: profileID)
+        // A server the container can no longer read loses its rows, so the
+        // archived projection changed with the epoch.
+        publishAuthoritativeCatalog(profileID: profileID)
     }
 
     private func publish(profileID: String) {
@@ -906,5 +917,13 @@ final class DashboardGatewayConnectionPool {
             profileID: profileID,
             count: entry.catalog.archivedCount
         )
+    }
+
+    /// Reports the one moment a background profile's catalog authority changes,
+    /// which is also the archived projection's own authority. `publish` alone
+    /// cannot carry this: it also runs for summary updates, where the archived
+    /// rows cannot change.
+    private func publishAuthoritativeCatalog(profileID: String) {
+        delegate?.dashboardPoolDidPublishAuthoritativeCatalog(profileID: profileID)
     }
 }

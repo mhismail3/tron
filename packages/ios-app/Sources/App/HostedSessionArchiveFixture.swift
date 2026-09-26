@@ -5,9 +5,18 @@ import SwiftUI
 /// row swipe actions and the real `ArchivedSessionsContainerSection`, so the
 /// journey drives the same visibility, expansion, zero-count collapse, and page
 /// handling the dashboard runs. Session membership is fixture input; the
-/// surfaces and the container's control flow are production code.
+/// surfaces and the container's control flow are production code. Its paging
+/// mode serves one archived session per page and refuses continuations, and
+/// hangs the first page read, so the journey can also drive a reload that lands
+/// while a pass is still reading and a continuation the Gateway refuses.
 struct HostedSessionArchiveFixture: View {
     private static let profileID = "fixture"
+    private static let pagesOneArchivedSessionPerRead =
+        ProcessInfo.processInfo.arguments.contains("-tron-session-archive-paging-fixture")
+    /// How many of the fixture's page reads hang. The first read is the one a
+    /// reload retires, so the journey decides which pass publishes without
+    /// racing a real network.
+    private static let stalledReadCount = pagesOneArchivedSessionPerRead ? 1 : 0
     /// The hosted harness is not the presented production dashboard, so it
     /// declares its own branch activity instead of inheriting the
     /// no-coordinator `.active` fallback. An active branch runs the dashboard's
@@ -25,6 +34,14 @@ struct HostedSessionArchiveFixture: View {
     /// Stands in for the dashboard's own archive projection revision: it
     /// advances whenever this fixture's Gateway-owned count changes.
     @State private var projectionRevision = 0
+    @State private var stalledReadsStarted = 0
+
+    init() {
+        guard Self.pagesOneArchivedSessionPerRead else { return }
+        _archived = State(initialValue: [
+            Self.session(id: "older-session", title: "Older archived session", archivedAt: "2026-09-25T09:30:00Z"),
+        ])
+    }
 
     private static func session(id: String, title: String, archivedAt: String?) -> SessionSummary {
         SessionSummary(
@@ -87,7 +104,12 @@ struct HostedSessionArchiveFixture: View {
                     projectionRevision: projectionRevision,
                     presentationActive: true,
                     loadPage: { _, cursor in
-                        await Self.admit(archived, cursor: cursor)
+                        // The page a real read answers with is the projection at
+                        // read time, so a pass that a reload retires can never
+                        // publish the newer rows either.
+                        let snapshot = archived
+                        await self.gateRead()
+                        return try await Self.page(archived: snapshot, cursor: cursor)
                     },
                     onOpen: { _ in },
                     onUnarchive: unarchive,
@@ -102,13 +124,34 @@ struct HostedSessionArchiveFixture: View {
 
     /// One page of the fixture's Gateway-side archived list, through the
     /// production admission so the container sees the same shape a real page
-    /// read produces.
-    private static func admit(
-        _ sessions: [SessionSummary],
+    /// read produces. The paging fixture serves one session per page and refuses
+    /// every continuation, which is what an expired cursor looks like.
+    private static func page(
+        archived: [SessionSummary],
         cursor: String?
-    ) async -> ArchivedSessionsLoadResult {
-        let page = ArchivedSessionsLoader.PageResponse(sessions: sessions, nextCursor: nil)
-        return await ArchivedSessionsLoader.admit(page, requestedCursor: cursor) { true }
+    ) async throws -> ArchivedSessionsLoadResult {
+        if cursor != nil, pagesOneArchivedSessionPerRead {
+            throw GatewayFailure(
+                code: "invalid_request",
+                message: "The session list cursor is invalid or expired",
+                retryable: true,
+                details: nil
+            )
+        }
+        let response = pagesOneArchivedSessionPerRead
+            ? ArchivedSessionsLoader.PageResponse(sessions: Array(archived.prefix(1)), nextCursor: "fixture-next")
+            : ArchivedSessionsLoader.PageResponse(sessions: archived, nextCursor: nil)
+        return await ArchivedSessionsLoader.admit(response, requestedCursor: cursor) { true }
+    }
+
+    /// Hangs the configured first reads. Cancelling the pass releases the sleep
+    /// immediately and the page then reaches a retired container, which is what a
+    /// response already in flight when a newer authority lands looks like. The
+    /// retirement, not the cancellation, is what keeps that page out.
+    private func gateRead() async {
+        guard stalledReadsStarted < Self.stalledReadCount else { return }
+        stalledReadsStarted += 1
+        try? await Task.sleep(for: .seconds(3_600))
     }
 
     private func archive(_ session: SessionSummary) {

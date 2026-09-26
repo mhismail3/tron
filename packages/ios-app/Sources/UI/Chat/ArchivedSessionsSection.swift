@@ -59,7 +59,12 @@ struct ArchivedSessionsContainerSection: View {
         }
         .onChange(of: count) { _, value in applyCount(value) }
         .onChange(of: projectionRevision) { _, _ in reloadIfExpanded() }
-        .onChange(of: profileID) { _, _ in reloadForProfileSwitch() }
+        .onChange(of: profileID) { _, _ in
+            // A profile switch keeps the user's expansion: every row is
+            // qualified by the server it came from, so the pass is re-read
+            // against the new source set instead of being thrown away.
+            reloadIfExpanded()
+        }
         .onChange(of: presentationActive) { _, active in
             // Leaving the dashboard retires the pass; returning to it re-reads an
             // already-expanded container instead of presenting pre-exit pages.
@@ -103,17 +108,18 @@ struct ArchivedSessionsContainerSection: View {
 
     private func reloadIfExpanded() {
         guard container.isExpanded, presentationActive else { return }
+        // A newer archive authority replaces a pass that is still reading, so
+        // the pass is retired and a fresh first-page pass starts. Dropping the
+        // reload while a page is in flight would leave the container showing
+        // rows the Gateway has already superseded.
+        endLoad()
+        container.retirePages()
         startLoad(more: false)
     }
 
-    /// A profile switch keeps the user's expansion: every row is qualified by
-    /// the server it came from, and the pass is re-read against the new source
-    /// set instead of being thrown away.
-    private func reloadForProfileSwitch() {
-        endLoad()
-        reloadIfExpanded()
-    }
-
+    /// Cancels the installed pass. Retirement is the container's job, not the
+    /// handle's: cancellation is cooperative, so a page already read is refused
+    /// by the pass generation instead.
     private func endLoad() {
         loadTask?.cancel()
         loadTask = nil
@@ -138,7 +144,11 @@ struct ArchivedSessionsContainerSection: View {
                     if container.isCurrent(generation) { container.finishLoading() }
                 }
             }
-            for request in requests {
+            // A refused continuation is replaced by that server's first page, so
+            // the work list can grow while the pass runs.
+            var pending = requests
+            while let request = pending.first {
+                pending.removeFirst()
                 guard container.isCurrent(generation) else { return }
                 do {
                     let result = try await loadPage(request.profileID, request.cursor)
@@ -152,10 +162,26 @@ struct ArchivedSessionsContainerSection: View {
                     return
                 } catch {
                     guard container.isCurrent(generation) else { return }
+                    if request.cursor != nil, Self.isRefusedCursor(error) {
+                        // The Gateway no longer knows this cursor, so retrying it
+                        // can never succeed: start this server over from its
+                        // first page and keep the rows already shown.
+                        if container.discardCursor(request.profileID) {
+                            pending.append((profileID: request.profileID, cursor: nil))
+                        }
+                        continue
+                    }
                     container.markUnavailable(request.profileID)
                 }
             }
         }
+    }
+
+    /// A continuation the Gateway refuses with `invalid_request` names a cursor
+    /// it no longer accepts: expired, evicted, or bound to a retired page lease.
+    private static func isRefusedCursor(_ error: Error) -> Bool {
+        guard let failure = error as? GatewayFailure else { return false }
+        return failure.code == "invalid_request"
     }
 }
 

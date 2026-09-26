@@ -1204,7 +1204,9 @@ archive fixture: a full swipe archives the row, the real
 `ArchivedSessionsContainerSection` appears with its count, expands to its row, and a full
 swipe there unarchives the session back into its workspace. The fixture supplies only
 session membership and a projection revision, so the journey exercises the container's
-production visibility, paging, and zero-count collapse. Its three retained screenshots are
+production visibility, expansion, and full-swipe control flow; paging, the zero-count
+collapse, and the pass retirement a reload performs are covered by the container's own
+focused tests. Its three retained screenshots are
 the visual evidence. Hosted fixtures that render real dashboard rows must declare an
 inactive branch presentation activity (the archive fixture does), because the production
 one-second row clock keeps the run loop busy and XCUI can never observe app quiescence while

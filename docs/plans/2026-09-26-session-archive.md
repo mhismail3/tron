@@ -2,7 +2,7 @@
 
 - **Started:** 2026-09-26
 - **Status:** Active
-- **Last updated:** 2026-09-26, R-3
+- **Last updated:** 2026-09-26, R-3 and R-4 merged
 - **Goal:** A user can archive an idle session so it leaves the dashboard without being deleted, find it again in one collapsed Archived container or in search, and have it return automatically when it runs again.
 
 ## Goal and constraints
@@ -104,7 +104,7 @@ Current state, inspected 2026-09-26:
 | R-1 | Done | Gateway fixes from the post-implementation review (see "Review findings"), including F-6 | G-2, F-5 | tron-coordinator, 2026-09-26 |
 | R-2 | Done | iOS fixes from the post-implementation review (see "Review findings") | I-2, I-3, F-3 | tron-coordinator, 2026-09-26 |
 | R-3 | Done | Gateway second-pass review fixes: stale `archived: true` response after the post-commit recheck, a queued backstop clear deleting a re-archive, migrate rekey ordering, prune retained set read outside the lane, doc drift, refused-compaction test and root-proof write-failure test | R-1 | tron-coordinator, 2026-09-26 |
-| R-4 | Claimed | iOS second-pass review fixes: a reload dropped while a load runs; background Mac container refreshes only on count change; "Show more" after cursor expiry; dead `GatewayClient` correlation field and overloads; automation form losing an archived target's name; doc drift; `AutomationFormView` formatting | R-2 | tron-coordinator, 2026-09-26 |
+| R-4 | Done | iOS second-pass review fixes: a reload dropped while a load runs; background Mac container refreshes only on count change; "Show more" after cursor expiry; dead `GatewayClient` correlation field and overloads; automation form losing an archived target's name; doc drift; `AutomationFormView` formatting | R-2 | tron-coordinator, 2026-09-26 |
 | V-1 | Blocked | Cross-module checkpoint, user-performed Gateway rollout, and eyes-on device review; close the plan | G-2, I-2, I-3, F-3, F-4, F-5, F-6, R-1, R-2, R-3, R-4 | tron-coordinator, 2026-09-26 |
 
 ## Task details
@@ -1597,3 +1597,100 @@ Gateway.
   new "run starts during the archive write" case fails if the post-commit
   recheck is removed. R-4 (iOS) is a separate branch, and V-1 still needs the
   user's Gateway rollout and the eyes-on device review.
+
+### R-4 · Done · 2026-09-26 · tron-coordinator
+
+- Result: the iOS second-pass review findings are closed. Every one was verified
+  against the code first; none was judged wrong.
+  - **P2-1 (a reload dropped while a pass is reading):** `reloadIfExpanded` now
+    cancels the installed pass, retires it in the container, and starts fresh
+    first pages; `reloadForProfileSwitch` was deleted because it was the same
+    operation. Retirement moved into `ArchivedSessionsContainerState.retirePages`
+    (which `collapse` now reuses), so a page already read cannot publish over a
+    newer authority even though cancellation is cooperative.
+  - **P2-2 (a background Mac refreshed only on a count change):**
+    `DashboardGatewayConnectionPool` gained one delegate report,
+    `dashboardPoolDidPublishAuthoritativeCatalog`, called when a background
+    profile's complete `session.list` page publishes and when its connection
+    epoch retires. `AppModel` advances `archiveProjectionRevision` from it and no
+    longer doubles the bump from the count; the count keeps its own dedupe.
+  - **P2-3 (a refused continuation could never succeed):** a continuation
+    refused with `invalid_request` now drops that server's cursor and re-reads
+    its first page inside the same pass, instead of marking the server
+    unavailable and re-offering the dead control. The dashboard catalog already
+    used this restart rule.
+  - **P2-4 (dead correlation plumbing):** `PendingRequest.correlation` and the
+    unused `correlation:` parameters on the two `expectedEpochID` overloads are
+    deleted. Verified the R-2 fix for finding 12 is complete and does not need
+    that field: the correlation label only seeds
+    `latestRequestIDByCorrelation`, which the labeled dashboard catalog read
+    writes and `AppModel`'s catalog-failure path reads, and archived-container
+    reads pass no label, so they cannot overwrite the identity a catalog
+    diagnostic reports.
+  - **P2-5 (an archived target's name lost while the form is open):** the
+    target lookup's task identity now includes whether the target is still in
+    `sessions` and the target mode it reads, so archiving the target elsewhere
+    re-runs the lookup instead of leaving "Choose a session".
+  - **P2-6 (docs):** the archive/snapshot text moved out of the delete paragraph
+    in `architecture.md`, with the re-read trigger, the continuation restart and
+    the reload retirement described as the code behaves; the journey paragraph in
+    `development.md` no longer claims paging and zero-count collapse, which the
+    container's focused tests own.
+  - **Minor note:** `SessionCatalogCoordinator.markArchived` no longer returns a
+    value only a test read.
+  - **Formatting glitch:** `AutomationFormView`'s `.onChange(of: actionKind)` is
+    on its own line.
+- Evidence (verified):
+  - `scripts/tron-ios-test build` clean; full unit target 1703 tests in 137
+    suites passed (182.5 s) on the committed state.
+  - Fragmented seed first, then the fix: reverting the four fixes to their old
+    behaviour (keeping the new API) failed the four new cases exactly as
+    intended — `retirePages` as a no-op failed "a reload retires an in-flight
+    pass…" and the collapse case; `discardCursor` returning false failed "a
+    refused continuation drops its cursor…"; the pool hook removed failed
+    "a background page that leaks an archived row…"; the `AppModel` hook removed
+    failed "a background catalog publication advances the archive projection".
+  - New journey `testSessionArchivePagingRetiresInFlightPassAndRestartsRefusedCursor`
+    (ui-validation, 13.3 s, 1/1) drives the production section through a
+    repeated archive: the archived row appears only after the reload retires the
+    stalled pass (failure at that assertion when the reload fix was reverted),
+    and after a refused continuation no server is reported unavailable and Show
+    more still works (failure at that assertion when only the restart was
+    reverted). The first archive journey still passes beside it (2 tests, 27.1 s
+    total on the committed state), and its screenshots plus the new paging
+    screenshot were regenerated into the Tron internal workspace
+    `files/session-archive/`.
+  - `python3 scripts/check-documentation-policy.py` and
+    `scripts/personal-info-guard.sh` pass.
+- Changes: this commit (`Sources/State/DashboardStateOwners.swift`,
+  `Sources/State/DashboardGatewayConnectionPool.swift`,
+  `Sources/State/AppModel.swift`, `Sources/UI/Chat/ArchivedSessionsSection.swift`,
+  `Sources/UI/Automations/AutomationFormView.swift`,
+  `Sources/Gateway/GatewayClient.swift`, `Sources/App/HostedSessionArchiveFixture.swift`,
+  `Tests/UI/DashboardStateOwnerTests.swift`,
+  `Tests/Gateway/AppModelCatalogSyncTests.swift`,
+  `UITests/TronSmokeUITests.swift`,
+  `packages/ios-app/docs/architecture.md`, `packages/ios-app/docs/development.md`,
+  and this plan).
+- Tasks added: none.
+- Kept on purpose:
+  - `retirePages` keeps the published rows: a newer first page replaces them
+    anyway, so clearing would only flash an empty container.
+  - The refused-cursor restart re-reads only that server's first page, inside the
+    running pass, so the other servers' pages and cursors are untouched.
+  - The automation target lookup's task identity gained the target mode it reads
+    and whether the target is still listed. Both are read by the lookup's own
+    guard, so leaving them out of its identity was the same dropped-refresh class
+    as P2-1 rather than an extra trigger.
+  - A background profile's epoch retirement also reports its catalog authority,
+    because a server the container can no longer read loses its rows; that is the
+    same authority change, not a second mechanism.
+  - `isRefusedCursor` matches only `invalid_request`, the code the Gateway
+    returns for an unknown or expired session-list cursor.
+- Deviations: the reviewer's P2-1 fix suggested `endLoad` before `startLoad`;
+  that alone leaves the retired page publishable (cancellation is cooperative),
+  so the pass generation moves as well. `reloadForProfileSwitch` became an alias
+  of `reloadIfExpanded` and was removed rather than kept as indirection.
+- For the next agent: V-1 still needs the full gateway suite,
+  `scripts/ios-gateway-e2e-test run`, the user-performed Gateway rollout, and the
+  eyes-on device review.
