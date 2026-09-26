@@ -518,7 +518,7 @@ export class KnowledgeService {
         if (!parameters.commandId || !parameters.id || !parameters.revisionId || !parameters.title) throw new GatewayError("invalid_request", "Note update requires commandId, id, revisionId, and title");
         const current = await this.store.read(parameters.id, parameters.revisionId);
         if (!current || current.kind !== "note") throw new GatewayError("conflict", "The note revision is unavailable");
-        const result = await this.store.updateNote({ commandId: parameters.commandId, recordId: current.id, expectedRevision: current.revisionId, record: { kind: "note", scope: parameters.scope ?? current.scope, provenance: { ...current.provenance, actor: "agent", source: current.provenance.source ?? "knowledge-tool" }, relations: current.relations, ...(current.temporal ? { temporal: current.temporal } : {}), ...(current.importOrigin ? { importOrigin: current.importOrigin } : {}), content: { ...current.content, title: parameters.title, confirmed: false, ...(parameters.noteBody === undefined ? {} : { body: parameters.noteBody }) } } });
+        const result = await this.store.updateNote({ commandId: parameters.commandId, recordId: current.id, expectedRevision: current.revisionId, record: { kind: "note", scope: parameters.scope ?? current.scope, provenance: { ...current.provenance, actor: "agent", source: current.provenance.source ?? "knowledge-tool" }, relations: current.relations, ...(current.temporal ? { temporal: current.temporal } : {}), content: { ...current.content, title: parameters.title, confirmed: false, ...(parameters.noteBody === undefined ? {} : { body: parameters.noteBody }) } } });
         return { text: `Updated note ${result.record.id}.`, details: result };
       }
       case "raindrop": {

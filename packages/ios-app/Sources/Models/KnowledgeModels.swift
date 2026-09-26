@@ -328,14 +328,13 @@ enum KnowledgeRecordContent: Codable, Hashable, Sendable {
 extension KnowledgeRecordContent {
     var sourcePreviewHash: String? { if case .source(let source) = self { return source.preview?.hash }; return nil }
 }
-struct KnowledgeImportOrigin: Codable, Hashable, Sendable { let store: String; let recordId: String; let revision: String; let importedAt: String; let review: KnowledgeImportReview? }
 struct KnowledgeImportReview: Codable, Hashable, Sendable { let batch: String?; let auditId: String?; let receiptId: String?; let resultRevision: String?; let basis: String? }
 struct KnowledgeRecord: Codable, Hashable, Identifiable, Sendable {
     let schemaVersion: Int; let id: String; let revisionId: String; let kind: KnowledgeRecordKind; let scope: KnowledgeScope; let createdAt: String; let updatedAt: String
-    let provenance: KnowledgeProvenance; let temporal: KnowledgeTemporalQualification?; let relations: [KnowledgeRelation]; var importOrigin: KnowledgeImportOrigin? = nil; let content: KnowledgeRecordContent
+    let provenance: KnowledgeProvenance; let temporal: KnowledgeTemporalQualification?; let relations: [KnowledgeRelation]; let content: KnowledgeRecordContent
 }
 struct KnowledgeRecordDraft: Codable, Hashable, Sendable {
-    let id: String?; let createdAt: String?; let updatedAt: String?; let kind: KnowledgeRecordKind; let scope: KnowledgeScope; let provenance: KnowledgeProvenance; let temporal: KnowledgeTemporalQualification?; let relations: [KnowledgeRelation]; var importOrigin: KnowledgeImportOrigin? = nil; let content: KnowledgeRecordContent
+    let id: String?; let createdAt: String?; let updatedAt: String?; let kind: KnowledgeRecordKind; let scope: KnowledgeScope; let provenance: KnowledgeProvenance; let temporal: KnowledgeTemporalQualification?; let relations: [KnowledgeRelation]; let content: KnowledgeRecordContent
 }
 
 struct KnowledgeEligibility: Codable, Hashable, Sendable {

@@ -52,15 +52,6 @@ export interface KnowledgeProvenance {
   evidence: KnowledgeEvidenceRef[];
 }
 
-/** Stable lineage for records reconstructed from a pinned legacy checkout. */
-export interface KnowledgeImportOrigin {
-  store: "personal-os" | "llm-wiki";
-  recordId: string;
-  revision: string;
-  importedAt: string;
-  review?: { batch?: string; auditId?: string; receiptId?: string; resultRevision?: string; basis?: string };
-}
-
 export interface KnowledgeTemporalQualification {
   eventAt?: string;
   validFrom?: string;
@@ -260,7 +251,6 @@ export interface KnowledgeRecordBase {
   provenance: KnowledgeProvenance;
   temporal?: KnowledgeTemporalQualification;
   relations: KnowledgeRelation[];
-  importOrigin?: KnowledgeImportOrigin;
 }
 
 export type KnowledgeRecord =
@@ -789,19 +779,6 @@ export function validateKnowledgeRecord(value: unknown): KnowledgeRecord {
   for (const relation of item.relations) {
     if (!relation || typeof relation !== "object" || !["supports", "contradicts", "corrects", "supersedes", "derivedFrom", "related"].includes((relation as Record<string, unknown>).type as string)) throw new Error("Invalid relation");
     assertKnowledgeId((relation as Record<string, unknown>).recordId, "relation record id");
-  }
-  const importOrigin = item.importOrigin;
-  if (importOrigin !== undefined) {
-    if (!importOrigin || typeof importOrigin !== "object" || Array.isArray(importOrigin)
-      || !["personal-os", "llm-wiki"].includes((importOrigin as Record<string, unknown>).store as string)) throw new Error("Invalid import origin");
-    boundedString((importOrigin as Record<string, unknown>).recordId, "import origin record id", 512);
-    boundedString((importOrigin as Record<string, unknown>).revision, "import origin revision", 200);
-    assertTimestamp((importOrigin as Record<string, unknown>).importedAt, "import origin importedAt");
-    const review = (importOrigin as Record<string, unknown>).review;
-    if (review !== undefined) {
-      if (!review || typeof review !== "object" || Array.isArray(review)) throw new Error("Invalid import review lineage");
-      for (const key of ["batch", "auditId", "receiptId", "resultRevision", "basis"]) if ((review as Record<string, unknown>)[key] !== undefined) boundedString((review as Record<string, unknown>)[key], `import review ${key}`, 512);
-    }
   }
   const temporal = item.temporal;
   if (temporal !== undefined) {
