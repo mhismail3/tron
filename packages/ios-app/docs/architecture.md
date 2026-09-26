@@ -1876,8 +1876,8 @@ then the read-only Tron Modules container (each module's name, purpose and tools
 connections a session would admit tools from). Resolved extensions are not duplicated beneath the installed list, and
 resolved skills and prompts left this sheet for Manage Session → Project Resources.
 Every Installed row opens that package's detail sheet: its source and scope, the shared distribution tag labeled once
-because every installed package is external, then the names the package provides as Provides groups in Skills, Prompts,
-Subagents, Tools, Commands, Themes order. An empty kind is hidden, a package that provides nothing says so in one line,
+because every installed package is external, then the names the package provides as Provides groups in Skills, Subagents,
+Prompts, Tools, Commands, Themes order. An empty kind is hidden, a package that provides nothing says so in one line,
 and a Gateway that predates `provides` shows no groups and no line at all. Each group reuses the Project Resources icon
 and colour for its kind, and the one bounded `providesDiagnostic` from the same read appears once as the standard
 notice. These names are the projection `packages.list` already carries beside each installed package, so this sheet

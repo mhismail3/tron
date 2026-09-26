@@ -1,14 +1,14 @@
 import SwiftUI
 
 /// One kind of resource an installed package provides, in the order the detail
-/// sheet presents them. Skills, prompts, subagents, tools and commands reuse the
+/// sheet presents them. Skills, subagents, prompts, tools and commands reuse the
 /// Project Resources kind they share a name with, so their group icon and colour
 /// cannot drift from that sheet's; themes have no Project Resources kind and
 /// keep the terminal-theme icon/colour Extensions and Locations already use.
 enum PackageProvidesKind: String, CaseIterable, Identifiable, Sendable {
     case skills = "Skills"
-    case prompts = "Prompts"
     case subagents = "Subagents"
+    case prompts = "Prompts"
     case tools = "Tools"
     case commands = "Commands"
     case themes = "Themes"

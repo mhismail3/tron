@@ -631,7 +631,7 @@ struct SessionContextSheet: View {
                 manageRow(
                     icon: "shippingbox",
                     title: "Project Resources",
-                    subtitle: "Skills, prompts, commands, tools, and subagents",
+                    subtitle: "Skills, subagents, prompts, tools, and commands",
                     accent: sessionRowAccent
                 ) { destination = .projectResources }
                 divider()

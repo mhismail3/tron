@@ -1,11 +1,12 @@
 import SwiftUI
 
 enum ProjectResourceKind: String, CaseIterable, Identifiable, Sendable {
+    // Declaration order is the sheet's section order.
     case skills = "Skills"
-    case prompts = "Prompts"
-    case commands = "Commands"
-    case tools = "Tools"
     case subagents = "Subagents"
+    case prompts = "Prompts"
+    case tools = "Tools"
+    case commands = "Commands"
 
     var id: String { rawValue }
     var key: String {

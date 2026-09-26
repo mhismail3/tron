@@ -200,7 +200,7 @@ struct PackageDetailPresentationTests {
     @Test("Provides groups keep plan order and hide every empty kind")
     func groupOrderAndEmptyHiding() {
         #expect(PackageProvidesKind.allCases.map(\.rawValue) ==
-            ["Skills", "Prompts", "Subagents", "Tools", "Commands", "Themes"])
+            ["Skills", "Subagents", "Prompts", "Tools", "Commands", "Themes"])
 
         let provides = PackageProvides(
             skills: ["repo-optimizer"],

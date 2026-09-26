@@ -101,8 +101,8 @@ struct ProjectResourcesOverviewTests {
     @Test("the overview groups every available resource once, in plan order")
     func groupOrderAndCompleteness() {
         let content = ProjectResourceOverviewPresentation.content(from: resources)
-        #expect(content.sections.map(\.kind) == [.skills, .prompts, .commands, .tools, .subagents])
-        #expect(content.sections.map(\.kind.rawValue) == ["Skills", "Prompts", "Commands", "Tools", "Subagents"])
+        #expect(content.sections.map(\.kind) == [.skills, .subagents, .prompts, .tools, .commands])
+        #expect(content.sections.map(\.kind.rawValue) == ["Skills", "Subagents", "Prompts", "Tools", "Commands"])
         // The Extensions section left this sheet; its wire field stays decoded
         // by the Hooks views, and no group may claim those rows here.
         #expect(!content.sections.contains { $0.kind.key == "extensions" })

@@ -174,3 +174,7 @@ new tag.
 ### R-6 · Blocked · 2026-09-25 · resources session
 
 - The simulator's Development app is unpaired, and the running Gateway predates R-1, R-2 and R-7, so a walkthrough now would show neither the new data nor a paired session. R-6 runs after the user's Gateway Rebuild from Source and an iOS install: on the phone, or on the simulator once the user pairs it. It must also tap an Installed row's ellipsis to confirm the menu opens, not the detail sheet.
+
+### Section order · 2026-09-25 · resources session
+
+- User decision: Project Resources orders its groups Skills, Subagents, Prompts, Tools, Commands; the package Provides groups use the same order, followed by Themes. The Manage Session subtitle and the iOS development doc match (the doc still described the retired Prompts, Skills, Tools, Extensions order).
