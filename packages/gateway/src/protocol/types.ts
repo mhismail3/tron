@@ -979,6 +979,21 @@ export interface TronModuleList {
   connections: McpToolSource[];
 }
 
+/** `packages.list`: the names one installed package provides, attributed from
+ * the resolution the read already performs, the subagent catalog, and one shared
+ * session-free extension load. Names are presentation only — the flat
+ * `resources` inventory stays authoritative for every resolved path — and each
+ * kind is capped. A kind whose source failed to resolve is empty, and the
+ * response carries one bounded `providesDiagnostic`. */
+export interface PackageProvides {
+  skills: string[];
+  prompts: string[];
+  themes: string[];
+  subagents: string[];
+  tools: string[];
+  commands: string[];
+}
+
 /** `hooks.list`: exactly the hook fields `session.resources` returns, for one
  * scope and without a session. */
 export type HooksProjection = HookRegistrationProjection;

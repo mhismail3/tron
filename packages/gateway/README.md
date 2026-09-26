@@ -252,6 +252,14 @@ bounded by the same 256 KiB projection envelope. The pinned SDK cannot cancel an
 extension-module load, so no wall-clock deadline is claimed for it. The
 `hooks.v1` capability advertises the method.
 
+`packages.list` additionally reports, for each installed package, the names it
+`provides` — skills, prompts, themes, subagents, and the tools and commands its
+extensions register — attributed from the resolution the read already performs,
+the subagent catalog and that same session-free extension load, capped at 256
+names per kind: a failed extension load or failed subagent discovery leaves the
+kinds that did resolve in place and adds one bounded `providesDiagnostic`
+instead of failing the read.
+
 ### Agent home
 
 Pi's canonical agent home is `<tronHome>/agent`: Stable uses `~/.tron/agent` and

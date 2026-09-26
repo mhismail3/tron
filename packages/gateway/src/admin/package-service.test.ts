@@ -216,4 +216,48 @@ describe("PackageService", () => {
     });
     expect(JSON.stringify(inventory)).toContain("prompt.md");
   });
+
+  it("reports what each installed package provides without failing on an empty kind", async () => {
+    const root = await mkdtemp(join(tmpdir(), "tron-package-provides-"));
+    const agentDir = join(root, "agent");
+    const workspace = join(root, "workspace");
+    const packageDir = join(root, "sample-package");
+    await Promise.all([
+      mkdir(agentDir),
+      mkdir(workspace),
+      mkdir(join(packageDir, "extensions"), { recursive: true }),
+      mkdir(join(packageDir, "skills", "sample-skill"), { recursive: true }),
+      mkdir(join(packageDir, "prompts"), { recursive: true }),
+    ]);
+    await writeFile(join(packageDir, "package.json"), `${JSON.stringify({
+      name: "sample",
+      pi: { extensions: ["./extensions/sample.js"], skills: ["./skills"], prompts: ["./prompts"] },
+    })}\n`);
+    await writeFile(join(packageDir, "extensions", "sample.js"), `export default function (pi) {\n  pi.registerTool({ name: "sample_tool", label: "Sample", description: "Probe", parameters: { type: "object", properties: {} }, execute: async () => ({ content: [{ type: "text", text: "ok" }] }) });\n  pi.registerCommand("sample-cmd", { description: "Probe", handler: async () => {} });\n}\n`);
+    await writeFile(join(packageDir, "skills", "sample-skill", "SKILL.md"), "---\nname: sample-skill\ndescription: Sample\n---\nBody\n");
+    await writeFile(join(packageDir, "prompts", "sample-prompt.md"), "Sample prompt\n");
+    const registry = new GatewayWorkRegistry("epoch", 8);
+    const service = new PackageService(agentDir, new TrustService(agentDir), () => {}, registry);
+    await service.mutate("install", packageDir, workspace, false);
+
+    const inventory = await service.list(workspace) as {
+      packages: Array<{ source: string; provides: Record<string, string[]> }>;
+      providesDiagnostic?: string;
+    };
+    // Pi stores an installed local source relative to its settings base, so the
+    // listing matches the single installed package rather than a raw path.
+    expect(inventory.packages).toHaveLength(1);
+    expect(inventory.packages[0]!.provides).toEqual({
+      skills: ["sample-skill"],
+      prompts: ["sample-prompt"],
+      themes: [],
+      subagents: [],
+      tools: ["sample_tool"],
+      commands: ["sample-cmd"],
+    });
+    // pi-subagents is not installed in this fixture: the read reports why the
+    // subagent kind is empty instead of failing.
+    expect(inventory.providesDiagnostic).toContain("pi-subagents is not installed");
+    expect(registry.size).toBe(0);
+  });
 });

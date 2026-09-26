@@ -131,7 +131,7 @@ import type { ConnectionOwner } from "../integrations/connection-owner.js";
 import type { McpAdapter } from "../integrations/mcp-adapter.js";
 import { projectHookRegistrations } from "./hook-projection.js";
 import { resourceDistribution } from "./resource-distribution.js";
-import { loadSubagentCatalog, type SubagentCatalog } from "./subagent-catalog.js";
+import { availableSubagentRow, loadSubagentCatalog, type SubagentCatalog } from "./subagent-catalog.js";
 
 // A lifecycle header is trusted only after RuntimeSlot has parsed and schema-
 // admitted the first property from the exact-owned status file. A payload key
@@ -7369,7 +7369,7 @@ export class RuntimeSlot {
     return safeJson({
       commands: this.commands(),
       ...this.resourcesValue(),
-      subagents: subagents.subagents,
+      subagents: subagents.subagents.map(availableSubagentRow),
       ...(subagents.diagnostic ? { subagentDiagnostics: subagents.diagnostic } : {}),
     });
   }

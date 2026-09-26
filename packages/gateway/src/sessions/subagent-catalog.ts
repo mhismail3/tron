@@ -21,6 +21,9 @@ export interface AvailableSubagent {
   thinking?: string;
   source: SubagentDiscoverySource;
   distribution: ResourceDistribution;
+  /** Absolute definition file, when discovery reports one. Internal attribution
+   * evidence for `packages.list` (`availableSubagentRow` keeps it off the wire). */
+  filePath?: string;
 }
 
 export interface SubagentCatalog {
@@ -87,6 +90,7 @@ function projectSubagent(value: unknown, groupSource?: SubagentDiscoverySource):
   const description = typeof record.description === "string" ? record.description : undefined;
   const model = typeof record.model === "string" ? record.model : undefined;
   const thinking = typeof record.thinking === "string" ? record.thinking : undefined;
+  const filePath = typeof record.filePath === "string" ? record.filePath : undefined;
   return {
     name,
     ...(description ? { description } : {}),
@@ -94,6 +98,21 @@ function projectSubagent(value: unknown, groupSource?: SubagentDiscoverySource):
     ...(thinking ? { thinking } : {}),
     source,
     distribution: subagentDistribution(source),
+    ...(filePath ? { filePath } : {}),
+  };
+}
+
+/** The wire row `session.resources` publishes for one subagent. The definition
+ * file path is Gateway-internal attribution evidence for `packages.list`, so it
+ * never leaves the process. */
+export function availableSubagentRow(subagent: AvailableSubagent): AvailableSubagent {
+  return {
+    name: subagent.name,
+    ...(subagent.description ? { description: subagent.description } : {}),
+    ...(subagent.model ? { model: subagent.model } : {}),
+    ...(subagent.thinking ? { thinking: subagent.thinking } : {}),
+    source: subagent.source,
+    distribution: subagent.distribution,
   };
 }
 

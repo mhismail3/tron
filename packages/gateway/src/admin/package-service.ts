@@ -9,15 +9,9 @@ import {
 import { GatewayError, asUncertainOutcome } from "../errors.js";
 import type { JsonValue } from "../protocol/types.js";
 import type { TrustService } from "./trust-service.js";
+import { loadPackageProvides, type InstalledPackage } from "./package-provides.js";
 import { AsyncMutex } from "../util/async-mutex.js";
 import type { GatewayWorkHandle, GatewayWorkRegistry } from "../sessions/gateway-work-registry.js";
-
-interface ConfiguredPackageProjection {
-  source: string;
-  scope: "user" | "project";
-  filtered: boolean;
-  installedPath?: string;
-}
 
 interface PackageUpdateProjection {
   source: string;
@@ -47,7 +41,7 @@ function validateUnique<T>(values: T[], identity: (value: T) => string, label: s
   }
 }
 
-export function validatePackageInventory(packages: ConfiguredPackageProjection[], resources: ResolvedPaths): void {
+export function validatePackageInventory(packages: InstalledPackage[], resources: ResolvedPaths): void {
   if (packages.length > MAXIMUM_PACKAGES) throw new GatewayError("conflict", "Package inventory exceeds its item limit");
   validateUnique(packages, (value) => `${value.scope}:${value.source}`, "Package inventory");
   for (const value of packages) {
@@ -160,11 +154,25 @@ export class PackageService {
 
   async list(cwd: string): Promise<unknown> {
     return this.trackAdministrative(() => this.mutex.run(async () => {
-      const { manager } = await this.manager(cwd, false);
+      const { manager, settings } = await this.manager(cwd, false);
       const packages = manager.listConfiguredPackages();
       const resources = await manager.resolve(async () => "skip");
       validatePackageInventory(packages, resources);
-      return { packages, resources };
+      // `provides` is additive and fails soft inside its own loader (extension
+      // tools/commands and subagent attribution), so it cannot fail this read.
+      const provides = await loadPackageProvides({
+        agentDir: this.agentDir,
+        trust: this.trust,
+        cwd,
+        settingsManager: settings,
+        packages,
+        resources,
+      });
+      return {
+        packages: provides.entries,
+        resources,
+        ...(provides.diagnostic !== undefined ? { providesDiagnostic: provides.diagnostic } : {}),
+      };
     }));
   }
 
