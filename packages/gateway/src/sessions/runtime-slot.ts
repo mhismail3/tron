@@ -33,8 +33,9 @@ import {
 } from "@earendil-works/pi-coding-agent";
 import { GatewayError, asUncertainOutcome, isUncertainOutcome, uncertainOutcome } from "../errors.js";
 import { abortAwareStream } from "../runtime/abort-aware-stream.js";
-import { compactionPolicyExtension, CompactionOperationPolicy } from "../runtime/compaction-policy.js";
-import { contextWindowExtension, SessionContextWindowPolicy } from "../providers/context-window-policy.js";
+import { CompactionOperationPolicy } from "../runtime/compaction-policy.js";
+import { SessionContextWindowPolicy } from "../providers/context-window-policy.js";
+import { tronModuleFactories } from "../extensions/tron-modules.js";
 import type {
   ChatOrigin,
   CommandDetail,
@@ -117,15 +118,10 @@ import {
 import type { ExtensionActivityHistoryPage } from "./extension-activity-history.js";
 import type { NotificationService } from "../notifications/notification-service.js";
 import type { GatewayWorkHandle, GatewayWorkKind, GatewayWorkRegistry } from "./gateway-work-registry.js";
-import { createTronNotifyExtension, notifyTronAgentTerminal, type AgentTerminalOutcome } from "../notifications/tron-notify-extension.js";
-import { createTronDisplayExtension } from "../display/tron-display-extension.js";
-import { createTronNativeCaptureExtension } from "../display/tron-native-capture-extension.js";
-import { createTronComputerExtension } from "../display/tron-computer-extension.js";
-import { createTronScheduleExtension, type ScheduleToolOperations } from "../automations/tron-schedule-extension.js";
-import { createTronAskUserExtension } from "../extensions/tron-ask-user-extension.js";
+import { notifyTronAgentTerminal, type AgentTerminalOutcome } from "../notifications/tron-notify-extension.js";
+import type { ScheduleToolOperations } from "../automations/tron-schedule-extension.js";
 import type { DisplayArtifactStore } from "../display/display-artifact-store.js";
 import type { TronWorkspace } from "../workspace/tron-workspace.js";
-import { createTronCoreExtension } from "../workspace/tron-core-extension.js";
 import { admitToolDisplayProjection, displayArtifactIDs } from "../display/display-contract.js";
 import type { BrowserLiveViewRegistry } from "../display/browser-live-view.js";
 import { DirectBashProcessOwner } from "./direct-bash-process-owner.js";
@@ -1345,7 +1341,6 @@ export class RuntimeSlot {
         // runtime creation would leave project code loaded after trust changes.
         resolveProjectTrust: async () => (await this.dependencies.trust.inspect(trust.cwd)).effectiveDecision === true,
       };
-      const notifications = this.dependencies.notifications;
       const mcpFactories = this.dependencies.mcp
         ? await this.dependencies.mcp.extensionFactories(this.id, this.runtimeGeneration)
         : [];
@@ -1356,51 +1351,27 @@ export class RuntimeSlot {
         resourceLoaderOptions: {
           extensionFactories: [
             ...mcpFactories.map((factory, index) => ({ name: `tron-mcp-${index}`, factory })),
-            { name: "tron-context-window", factory: contextWindowExtension(() => contextPolicy) },
-            { name: "tron-compaction-policy", factory: compactionPolicyExtension(
-              () => compactionPolicy,
+            ...tronModuleFactories({
+              sessionId: () => this.id,
+              cwd: () => this.cwd,
+              workspace: this.dependencies.workspace,
+              displayArtifacts: this.dependencies.displayArtifacts,
+              notificationTitle: () => this.notificationTitle(),
+              contextPolicy: () => contextPolicy,
+              compactionPolicy: () => compactionPolicy,
               // Summary auth can finish after Stop but before compaction_start
               // rotates the display ID. Automatic work retains its prompt fence.
-              (event) => (this.operation?.id !== undefined && this.abortedOperations.has(this.operation.id))
+              compactionStopped: (event) => (this.operation?.id !== undefined && this.abortedOperations.has(this.operation.id))
                 || (event.reason !== "manual" && this.activeOperationId !== undefined && this.abortedOperations.has(this.activeOperationId)),
-              () => { this.revision += 1; this.publishSnapshot(); },
-            ) },
-            { name: "tron-core", factory: createTronCoreExtension(this.dependencies.workspace, this.dependencies.knowledge, this.dependencies.jev, this.dependencies.connections) },
-            { name: "tron-ask-user", factory: createTronAskUserExtension() },
-            {
-              name: "tron-display",
-              factory: createTronDisplayExtension({
-                sessionId: () => this.id,
-                cwd: () => this.cwd,
-                artifacts: this.dependencies.displayArtifacts,
-                ...(this.dependencies.browserLiveViews ? { liveViews: this.dependencies.browserLiveViews } : {}),
-                internalFilesRoot: () => this.dependencies.workspace.filesRoot(),
-              }),
-            },
-            ...(this.dependencies.browserLiveViews ? [{
-              name: "tron-native-capture",
-              factory: createTronNativeCaptureExtension({ sessionId: () => this.id, views: this.dependencies.browserLiveViews }),
-            }] : []),
-            ...(process.platform === "darwin" ? [{
-              name: "tron-computer",
-              factory: createTronComputerExtension({ sessionId: () => this.id }),
-            }] : []),
-            ...(this.dependencies.scheduleToolOperations ? [{
-              name: "tron-schedule",
-              factory: createTronScheduleExtension({
-                sessionId: () => this.id,
-                operations: this.dependencies.scheduleToolOperations,
-              }),
-            }] : []),
-            ...(notifications ? [{
-              name: "tron-notify",
-              factory: createTronNotifyExtension({
-                sessionId: () => this.id,
-                sessionTitle: () => this.notificationTitle(),
-                ...(this.dependencies.machineId ? { machineId: this.dependencies.machineId } : {}),
-                enqueue: (input) => notifications.enqueue(input),
-              }),
-            }] : []),
+              compactionChanged: () => { this.revision += 1; this.publishSnapshot(); },
+              ...(this.dependencies.knowledge ? { knowledge: this.dependencies.knowledge } : {}),
+              ...(this.dependencies.jev ? { jev: this.dependencies.jev } : {}),
+              ...(this.dependencies.connections ? { connections: this.dependencies.connections } : {}),
+              ...(this.dependencies.browserLiveViews ? { browserLiveViews: this.dependencies.browserLiveViews } : {}),
+              ...(this.dependencies.notifications ? { notifications: this.dependencies.notifications } : {}),
+              ...(this.dependencies.scheduleToolOperations ? { scheduleToolOperations: this.dependencies.scheduleToolOperations } : {}),
+              ...(this.dependencies.machineId ? { machineId: this.dependencies.machineId } : {}),
+            }),
           ],
           extensionsOverride: (base) => attributeExtensions(base, this.dependencies.browserLiveViews ? {
             views: this.dependencies.browserLiveViews,
