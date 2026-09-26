@@ -1966,15 +1966,15 @@ describe.sequential("RuntimeRegistry with the pinned agent runtime", () => {
   });
 
   it("recognizes only the exact delegated-session producer topology", async () => {
-    const fixture = await coldFixture("topology-helper");
-    const internals = fixture.registry as unknown as {
-      delegatedSessionTopologies: (sessions: Array<{
-        id: string; path: string; parentSessionPath?: string;
-      }>) => ReadonlyMap<string, { parentSessionId?: string; contradictoryHeader: boolean }>;
-      catalogDirectory: () => string;
-    };
-    const root = join(await realpath(internals.catalogDirectory()), "topology");
+    const fixture = await coldFixture("delegated-topology");
+    const root = join(fixture.agentDir, "sessions", "topology");
+    const timestamp = new Date().toISOString();
+    const header = (id: string, parentSession?: string) => `${JSON.stringify({
+      type: "session", version: 3, id, timestamp, cwd: fixture.cwd,
+      ...(parentSession ? { parentSession } : {}),
+    })}\n`;
     const parent = join(root, "parent.jsonl");
+    const topLevelParented = join(root, "ordinary-fork.jsonl");
     const fork = join(root, "parent", "forks", "fork.jsonl");
     const fresh = join(root, "parent", "worker", "run-0", "session.jsonl");
     const interrupted = join(root, "parent", "reviewer", "run-1", "session.jsonl");
@@ -1983,25 +1983,38 @@ describe.sequential("RuntimeRegistry with the pinned agent runtime", () => {
     const extraDepthFork = join(root, "parent", "forks", "extra", "fork.jsonl");
     const wrongRunBasename = join(root, "parent", "worker", "run-4", "child.jsonl");
     const arbitraryDeep = join(root, "parent", "arbitrary", "deep", "session.jsonl");
-    const topLevelParented = join(root, "ordinary-fork.jsonl");
-
-    expect([...internals.delegatedSessionTopologies([
-      { id: "parent", path: parent },
-      { id: "fork", path: fork, parentSessionPath: parent },
-      { id: "fresh", path: fresh },
-      { id: "interrupted", path: interrupted },
-      { id: "contradictory", path: contradictory, parentSessionPath: topLevelParented },
-      { id: "extra-run", path: extraDepthRun },
-      { id: "extra-fork", path: extraDepthFork, parentSessionPath: parent },
-      { id: "wrong-basename", path: wrongRunBasename },
-      { id: "deep", path: arbitraryDeep },
-      { id: "ordinary", path: topLevelParented, parentSessionPath: parent },
-    ])]).toEqual([
-      [resolve(fork), { parentSessionId: "parent", contradictoryHeader: false }],
-      [resolve(fresh), { contradictoryHeader: false }],
-      [resolve(interrupted), { contradictoryHeader: false }],
-      [resolve(contradictory), { contradictoryHeader: true }],
+    await Promise.all([...new Set([parent, fork, fresh, interrupted, contradictory,
+      extraDepthRun, extraDepthFork, wrongRunBasename, arbitraryDeep, topLevelParented]
+      .map((path) => dirname(path)))].map((directory) => mkdir(directory, { recursive: true })));
+    await Promise.all([
+      writeFile(parent, header("parent")),
+      writeFile(topLevelParented, header("ordinary", parent)),
+      writeFile(fork, header("fork", parent)),
+      writeFile(fresh, header("fresh")),
+      writeFile(interrupted, header("interrupted")),
+      writeFile(contradictory, header("contradictory", topLevelParented)),
+      writeFile(extraDepthRun, header("extra-run")),
+      writeFile(extraDepthFork, header("extra-fork", parent)),
+      writeFile(wrongRunBasename, header("wrong-basename")),
+      writeFile(arbitraryDeep, header("deep")),
     ]);
+
+    // Requirement: only the exact pi-subagents reserved layouts beneath the
+    // canonical catalog are delegated sessions; any neighbouring depth or
+    // basename stays an ordinary user session, and a contradictory parent
+    // header keeps the reserved child immutable without publishing a row.
+    const rows = new Map((await fixture.registry.catalog("all")).sessions.map((row) => [row.id, row]));
+    expect(rows.get("fork")).toMatchObject({ kind: "subagent", parentSessionId: "parent" });
+    expect(rows.get("fresh")).toMatchObject({ kind: "subagent" });
+    expect(rows.get("fresh")?.parentSessionId).toBeUndefined();
+    expect(rows.get("interrupted")?.kind).toBe("subagent");
+    for (const id of ["extra-run", "extra-fork", "wrong-basename", "deep", "ordinary"]) {
+      expect(rows.get(id)?.kind).toBe("user");
+    }
+    expect(rows.has("contradictory")).toBe(false);
+    expect(existsSync(contradictory)).toBe(true);
+    await expect(fixture.registry.acquire("contradictory")).rejects.toMatchObject({ code: "conflict" });
+    await expect(fixture.registry.delete("contradictory")).rejects.toMatchObject({ code: "conflict" });
   });
 
   it("does not infer delegated identity from names, titles, or generic depth", async () => {
@@ -2165,6 +2178,10 @@ describe.sequential("RuntimeRegistry with the pinned agent runtime", () => {
     };
     const original = internals.buildCatalogAcquisition.bind(fixture.registry);
     let calls = 0;
+    // Requirement: an acquisition invalidated while it was being built is retried
+    // exactly once, and only an admission carrying the current invalidation
+    // generation may stand as current. The attempt count and that generation are
+    // private, and no published row differs when the fence is wrong.
     const build = vi.spyOn(internals, "buildCatalogAcquisition").mockImplementation(async (...arguments_) => {
       const resolution = await original(...arguments_);
       calls += 1;
@@ -2187,6 +2204,9 @@ describe.sequential("RuntimeRegistry with the pinned agent runtime", () => {
       catalogAcquisitionAdmission?: unknown;
     };
     const original = internals.catalogStructureEvidence.bind(fixture.registry);
+    // Requirement: a second invalidation exhausts the retry and fails closed with
+    // a retryable busy, and nothing is cached as admitted. Both facts are private
+    // state; the caller-visible error is the same busy a capacity bound throws.
     const evidence = vi.spyOn(internals, "catalogStructureEvidence").mockImplementation(async () => {
       const captured = await original();
       internals.invalidateCatalogAcquisition();
@@ -2206,6 +2226,10 @@ describe.sequential("RuntimeRegistry with the pinned agent runtime", () => {
     };
     const original = internals.sessionInfos.bind(fixture.registry);
     let calls = 0;
+    // Requirement: a full materialization invalidated mid-flight is never
+    // published as the current cut; it is rebuilt once and the resulting
+    // admission then serves the next acquire without another scan. The bound on
+    // that work is only visible as a scan count.
     const materialize = vi.spyOn(internals, "sessionInfos").mockImplementation(async () => {
       const infos = await original();
       calls += 1;
