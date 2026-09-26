@@ -11,7 +11,9 @@ Every result carries `archived`, the Gateway archive projection read from its
 owning store when the response is built. Archive state is never part of the
 index or canonical file, so archiving or unarchiving changes no indexed text
 and needs no reindex, and an archived session stays searchable and anchorable
-while its dashboard row is hidden. `session.archive.set` is the only writer; see
+while its dashboard row is hidden. the archive store is the only owner of that state (`session.archive.set`,
+run-admission clears, backstop clears, deletion, rebind and startup pruning all
+write it); see
 the archive contract in the Gateway README.
 
 Lexical index initialization is bounded and recoverable: an oversized or

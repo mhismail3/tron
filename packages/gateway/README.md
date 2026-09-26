@@ -1676,20 +1676,31 @@ unambiguous canonical session is required, a runtime-owned subagent session is
 rejected with `conflict`, a session whose deletion has begun is retryable
 `busy`, and archiving requires an idle session: running, compacting, retrying,
 waiting-for-input, detached-subagent, queued-prompt, automation-reserved and
-leased states all reject with `busy` (`session_operation_busy`). For a live
-runtime the idle check and the durable commit are one slot-lane critical
-section, so a run and its archive decision are serialized: whichever reaches
-the lane first decides, a run already inside the lane rejects the archive, and
-a committed archive clears itself before any run can start. The session lane
+leased states all reject with `busy` (`session_operation_busy`); a session whose
+only blocker is another request's work entry or an in-flight export rejects as
+retryable `busy` instead, because that clears by itself. For a live runtime the
+idle check and the durable commit are one slot-lane critical section, so a run
+and its archive decision are serialized: whichever reaches the lane first
+decides, a run already inside the lane rejects the archive, and a committed
+archive clears itself before any run can start. A long lane holder that the
+published projection cannot see (a branch summary, Bash before its phase lands,
+a reload) is rejected under the registry mutex before that wait, so archive
+admission never holds the Gateway-wide mutex for another operation's duration.
+That lane cannot cover a turn Pi starts on its own, so after the commit the
+registry rechecks the live projection and restores visibility if such a run is
+already working. The session lane
 nests the display-projection lane inside the registry mutex
 (registry mutex -> session lane -> attention/archive lane), and no path holds a
 display-projecting lane while waiting for a session lane or a registry mutex.
 A replay returns the original receipt, and archiving an
-already-archived session keeps its original timestamp. Archive state advances
-the list revision and emits `session.listChanged`; it moves with a true identity
-replacement, leaves a new or forked identity unarchived, is removed with a
-discarded identity and with session deletion, and is pruned at startup only from
-complete structural evidence.
+already-archived session keeps its original timestamp; a session whose earlier
+clear is still retrying gets a fresh timestamp, because that stale record is
+retired first rather than resurrected. Archive state advances the list revision
+and emits `session.listChanged`; it moves with a true identity replacement,
+leaves a new or forked identity unarchived, is removed with a discarded identity
+and with session deletion, and is pruned at startup only from complete
+structural evidence plus live ownership, so a session that was created or opened
+before recovery finished keeps its record.
 
 An archived session is always idle, and every new run clears the record before
 the run can do any work. Gateway-admitted work (`session.prompt`, including
@@ -1699,9 +1710,12 @@ that admits the run, after every synchronous rejection; a store failure rejects
 the run retryably so no work can start hidden. A turn Pi starts on its own (an
 extension's `triggerTurn`, a scheduled wake) never passes that boundary: when a
 slot publishes an active projection for an archived session, the row becomes
-visible immediately and the durable record is cleared behind it, retrying on the
-next active projection if that write fails. Both paths log
-`sessions.archive.auto-unarchived` with the boundary that cleared the record.
+visible immediately — that membership change reaches clients then, not when the
+durable clear lands — and the durable record is cleared behind it, retrying on
+the next active projection if that write fails. Gateway disposal settles that
+in-flight clear before the state directory is released, so a late write can
+never land after shutdown. Both paths log `sessions.archive.auto-unarchived`
+with the boundary that cleared the record.
 Opening, reading, renaming, marking read or unread, exporting, or searching an
 archived session leaves it archived. A live session's snapshot carries the same
 projection: `archivedAt` is present while the session is archived and absent
