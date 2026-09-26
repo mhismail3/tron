@@ -198,6 +198,7 @@ const sessions = new RuntimeRegistry({
   broadcast: (sessionId, topic, payload) => transport?.broadcastSession(sessionId, topic, payload),
   sessionSummaryChanged: (summary) => transport?.broadcast("session.summary", summary as unknown as JsonValue),
   sessionListChanged: () => transport?.notifySessionListChanged(),
+  recentModelsChanged: () => transport?.broadcast("models.recentChanged", {}),
   sessionRekeyed: (previousId, nextId) => transport?.rekeySession(previousId, nextId),
   beforeSessionRekey: (previousId, nextId) => automations.rekeySessionTarget(previousId, nextId),
   beforeSessionDelete: (sessionId) => automations.blockSessionTarget(sessionId),

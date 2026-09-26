@@ -380,6 +380,9 @@ export interface RuntimeSlotDependencies {
   compactionDiagnostic?: (diagnostic: { sessionId: string; operationId?: string; reason: "manual" | "threshold" | "overflow"; outcome: "success" | "failure" | "cancelled"; errorMessage?: string }) => void;
   /** Resolves inherited history once at canonical bind/rebind, never per snapshot. */
   resolveForkBoundary?: (manager: SessionManager) => Promise<ForkBoundaryAnchor | undefined>;
+  /** Bounded recency for the shared model picker. Called once per admitted
+   * user-session run start; implementations stay off the run's critical path. */
+  noteModelUsed?: (sessionId: string, model: { provider: string; id: string }) => void;
 }
 
 class CanonicalCustomEntryConflictError extends Error {}
@@ -2998,8 +3001,13 @@ export class RuntimeSlot {
         const observationCut = this.canonicalSessionEntries();
       this.observationStarts.set(this.activeOperationId, { entryIndex: observationCut.length, branchId: this.observationBranchId(observationCut) });
         if (!continuesToolSegment) {
-          if (beginsWithUserInput) this.ownToolSegment(this.activeOperationId);
-          else this.prepareAssistantOwnedToolSegment();
+          if (beginsWithUserInput) {
+            this.ownToolSegment(this.activeOperationId);
+            // Recency follows the admitted user run, so a background or
+            // assistant-continuation start never reports the selected model.
+            const usedModel = this.runtime.session.model;
+            if (usedModel) this.dependencies.noteModelUsed?.(this.id, { provider: usedModel.provider, id: usedModel.id });
+          } else this.prepareAssistantOwnedToolSegment();
         }
         const activeInvocation = this.invocationForOperation(this.activeOperationId);
         // A public session_compact hook can start the next Agent turn before

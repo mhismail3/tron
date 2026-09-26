@@ -23,6 +23,7 @@ import type {
   SessionSummaryUpdate,
 } from "../protocol/types.js";
 import { SessionAttentionStore, type SessionAttentionProjection } from "./session-attention-store.js";
+import { RecentModelStore, type RecentModelUsage } from "../providers/recent-models.js";
 import {
   SessionPresentationPresenceRegistry,
   type SessionPresentationPresenceProjection,
@@ -327,6 +328,7 @@ export class RuntimeRegistry {
   private readonly extensionActivityRecency = new ExtensionActivityRecency();
   private readonly processActivityRecency = new ProcessActivityRecency();
   private readonly attention: SessionAttentionStore;
+  private readonly recentModels: RecentModelStore;
   private readonly presentationPresence = new SessionPresentationPresenceRegistry();
   private readonly catalogMetadataIndex: CatalogMetadataIndex;
   private readonly configuredSessionDir: string | undefined;
@@ -389,6 +391,8 @@ export class RuntimeRegistry {
       broadcast: SessionBroadcast;
       sessionSummaryChanged: (summary: SessionSummaryUpdate) => void;
       sessionListChanged: () => void;
+      /** Global broadcast seam for `models.recentChanged`. */
+      recentModelsChanged?: () => void;
       sessionRekeyed?: (previousId: string, nextId: string) => void;
       beforeSessionRekey?: (previousId: string, nextId: string) => Promise<void>;
       beforeSessionDelete?: (sessionId: string) => Promise<void>;
@@ -426,6 +430,7 @@ export class RuntimeRegistry {
     }, Date.now, join(options.tronHome, "gateway", "exports"));
     this.markers = new RunMarkerStore(options.tronHome);
     this.attention = new SessionAttentionStore(options.tronHome);
+    this.recentModels = new RecentModelStore(options.tronHome);
     this.catalogMetadataIndex = new CatalogMetadataIndex(
       join(options.tronHome, "gateway"),
       (stage, durationMs, outcome) => this.options.stageTiming?.(`catalog-index.${stage}`, durationMs, outcome),
@@ -461,12 +466,29 @@ export class RuntimeRegistry {
 
   get administrativeWorkRegistry(): GatewayWorkRegistry { return this.workRegistry; }
 
+  /** Shared model recency for the model picker; newest first and bounded. */
+  recentModelUsage(): RecentModelUsage[] { return this.recentModels.entries(); }
+
+  /**
+   * Bounded best-effort recency for one admitted user-session run. Subagent
+   * sessions never acquire a Gateway runtime, so every reporting slot is a user
+   * session. A failed preference write must not disturb the admitted run.
+   */
+  private async noteModelUsed(sessionId: string, model: { provider: string; id: string }): Promise<void> {
+    try {
+      if (await this.recentModels.record(model.provider, model.id)) this.options.recentModelsChanged?.();
+    } catch {
+      this.options.persistenceDiagnostic?.(sessionId, "recent-model-record-failed");
+    }
+  }
+
   async initialize(onPhase?: (phase: "catalog-warming" | "attention-recovery") => void): Promise<void> {
     await this.workspace.initialize();
     // Load the durable recovery inputs before capturing catalog membership, as
     // before this optimization. The later evidence cut therefore cannot omit a
     // marker that was already admitted to this reconciliation pass.
     await this.timedStage("startup.attention.initialize", () => this.attention.initialize());
+    await this.timedStage("startup.recent-model.initialize", () => this.recentModels.initialize());
     const markerEvidence = await this.timedStage("startup.run-marker.read", () => this.markers.evidence());
     // Recovery can open and parse large session files. Do not hold listener
     // readiness on those full reads; recover them once the Gateway is serving.
@@ -978,6 +1000,7 @@ export class RuntimeRegistry {
       extensionActivityRecency: this.extensionActivityRecency,
       processActivityRecency: this.processActivityRecency,
       workRegistry: this.workRegistry,
+      noteModelUsed: (sessionId: string, model: { provider: string; id: string }) => { void this.noteModelUsed(sessionId, model); },
       ...(this.options.persistenceDiagnostic ? { persistenceDiagnostic: this.options.persistenceDiagnostic } : {}),
       ...(this.options.compactionDiagnostic ? { compactionDiagnostic: this.options.compactionDiagnostic } : {}),
       isSessionPresented: (sessionId: string) => this.isSessionPresented(sessionId),

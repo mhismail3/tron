@@ -4,6 +4,7 @@ import { performance } from "node:perf_hooks";
 import type { AuthType } from "@earendil-works/pi-ai";
 import type { ModelRuntime } from "@earendil-works/pi-coding-agent";
 import { contextWindowLimits } from "../providers/context-window-policy.js";
+import { modelReleaseDate } from "../providers/model-release-dates.js";
 import type { GatewayConfig } from "../config.js";
 import { GatewayError, isUncertainOutcome } from "../errors.js";
 import { runtimeIdentity } from "./runtime-identity.js";
@@ -1484,6 +1485,10 @@ export class GatewayService {
           ? this.dependencies.globalProviderResources.withStableSnapshot(() => this.models(modelRuntime, params.cursor, params.limit), client.signal)
           : this.models(modelRuntime, params.cursor, params.limit);
       }
+      case "model.recent":
+        // Global and session-free: usage recency is one Gateway-wide preference,
+        // not a per-session projection. params requires no fields.
+        return safeJson({ models: this.dependencies.sessions.recentModelUsage() });
       case "auth.begin": {
         const sessionId = optionalString(params.sessionId, "sessionId", 200);
         const providerId = string(params.providerId, "providerId", { max: 120 });
@@ -2030,17 +2035,23 @@ export class GatewayService {
   private async models(modelRuntime: ModelRuntime, cursor: unknown, limit: unknown): Promise<JsonValue> {
     const page = await this.modelCatalogPages.page(modelRuntime, cursor, limit, async () => {
       const available = new Set((await modelRuntime.getAvailable()).map((model) => `${model.provider}\0${model.id}`));
-      return modelRuntime.getModels().map((model) => ({
-        provider: model.provider,
-        id: model.id,
-        name: model.name,
-        reasoning: model.reasoning,
-        input: model.input,
-        contextWindow: model.contextWindow,
-        contextWindowLimits: contextWindowLimits(model),
-        maxTokens: model.maxTokens,
-        available: available.has(`${model.provider}\0${model.id}`),
-      }));
+      return modelRuntime.getModels().map((model) => {
+        // Undated models simply omit the field; the picker's provider sections
+        // list them without a release date.
+        const releaseDate = modelReleaseDate(model.provider, model.id);
+        return {
+          provider: model.provider,
+          id: model.id,
+          name: model.name,
+          reasoning: model.reasoning,
+          input: model.input,
+          contextWindow: model.contextWindow,
+          contextWindowLimits: contextWindowLimits(model),
+          maxTokens: model.maxTokens,
+          available: available.has(`${model.provider}\0${model.id}`),
+          ...(releaseDate === undefined ? {} : { releaseDate }),
+        };
+      });
     });
     return safeJson({ models: page.items, ...(page.nextCursor ? { nextCursor: page.nextCursor } : {}) });
   }

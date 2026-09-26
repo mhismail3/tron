@@ -1,0 +1,7 @@
+{
+  "openai-codex": "openai",
+  "azure-openai-responses": "openai",
+  "vercel-ai-gateway": "vercel",
+  "zai-coding-cn": "zai-coding-plan",
+  "fireworks": "fireworks-ai"
+}
