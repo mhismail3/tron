@@ -1932,6 +1932,39 @@ which lets it remove a malformed failed staging tree without touching an externa
 An unexpected process death remains an interruption represented by the durable run marker
 and is never automatically replayed.
 
+### Model recents and release dates
+
+`model.recent` serves the model picker's Recent rail: one Gateway-wide usage
+preference shared by every paired device, newest first, unique by `provider/id`,
+and bounded to 12 entries. It is global and session-free (`params` carries no
+fields) and returns `{"models":[{"provider","id","lastUsedAt"}]}`. Recency is
+recorded only when an admitted `agent_start` begins a run from user input in a
+user session, using that session's current model: merely selecting a model,
+changing a default, or running a background turn never counts. Delegated
+subagent sessions never acquire a Gateway runtime, so they can never report a
+model as recently used. The event `models.recentChanged` (empty payload)
+publishes a change in the visible order so an open picker can refetch. The
+document lives at `gateway/model-recents.json`, is owner-only, and is a
+disposable preference: a malformed or oversized document is replaced with an
+empty one instead of failing Gateway startup, because no canonical evidence
+exists to rebuild it from.
+
+`model.list` items carry an optional `releaseDate` (`YYYY-MM-DD`) that backs the
+picker's Latest rail; models with no known date omit the field and appear only
+in provider sections. The pinned Pi catalog drops the vendor's `release_date`,
+so Tron vendors the facts in `packages/gateway/src/providers/model-release-dates.json`
+instead of consulting the network while serving a request. The snapshot is
+maintained manually with `scripts/update-model-release-dates.mjs`, which reads
+the pinned SDK catalog to decide which providers to cover and normalizes a
+month-precision release to the first of that month. It requires an installed
+`packages/gateway/node_modules`; `--check` verifies the checked-in snapshot is
+current without writing. A Pi catalog update therefore needs a refresh. Platform
+providers that re-export another vendor's models (OpenAI Codex and Azure OpenAI
+over OpenAI, the Vercel AI Gateway over `vercel`, Fireworks over `fireworks-ai`,
+Z.ai's coding plan over `zai-coding-plan`) are resolved through the documented
+alias map in `packages/gateway/src/providers/model-release-date-aliases.json`,
+which the generator reads so a snapshot can never fall behind an alias.
+
 ### Prompt attachments and request size
 
 Pi bounds the images that enter session history through `read`, `@file` arguments,

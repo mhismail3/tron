@@ -211,6 +211,7 @@ Conventions used in the rows:
 | `uploads.storage-pressure` | info when pressure returns to `normal`, warning otherwise | `packages/gateway/src/gateway-main.ts` | a 10-minute maintenance pass changes storage pressure | free bytes and the floor in the message | Attachment storage has a floor, and crossing it must be visible before a write fails |
 | `canonical-ownership-persistence-retrying` | warning | `packages/gateway/src/sessions/runtime-slot.ts` | a canonical ownership write is retrying inside `retryDurableWrite` | `sessionId`; the event name is the diagnostic code | An unresolved write silently blocks the drain for the process lifetime |
 | `canonical-ownership-persistence-blocked` | warning | `packages/gateway/src/sessions/runtime-slot.ts` | the ownership write's retry window expired | `sessionId` | The slot is `suspect`; nothing may claim the write resolved |
+| `recent-model-record-failed` | warning | `packages/gateway/src/sessions/runtime-registry.ts` | the picker's Gateway-wide recent-model preference could not be persisted for an admitted user run | `sessionId` | The run continues; without this the Recent rail would silently stop updating |
 | `terminal-receipt-persistence-failed` | warning | `packages/gateway/src/sessions/runtime-slot.ts` | a terminal receipt was not proven durable | `sessionId` | The 2026-09-23 08:22 drain waited over 7 minutes on receipt persistence with no named owner |
 | `session_operation_busy` | warning reason on `rpc.error` | `packages/gateway/src/transport/server.ts`, raised at `packages/gateway/src/sessions/runtime-slot.ts` and `runtime-registry.ts` | model/delete mutation is rejected by real active session work | standard RPC correlation plus reason | The reason distinguishes a true foreground/deletion blocker from self-accounting work or detached child activity |
 | `session.compaction.completed` | error for failure, info for success/cancellation | `packages/gateway/src/gateway-main.ts`, raised from `packages/gateway/src/sessions/runtime-slot.ts` | each SDK compaction ends | `sessionId`, `operationId`, `reason`, `outcome`, bounded/redacted `errorMessage` on failure | Failed automatic summaries were silently dropped, so transient retries could not be correlated to session or operation |
@@ -221,8 +222,8 @@ Conventions used in the rows:
 | `auth.login.ended` | warning | `packages/gateway/src/admin/auth-broker.ts` | the operation retired without a stored credential, with its reason | provider, auth type and elapsed seconds in the message | A login that ends without a credential is a caller stop or a timeout, not a success |
 
 One Gateway name is not written as a literal. The `code` passed to the session's
-persistence diagnostic is used directly as the event, which is why the three
-`canonical-*` and `terminal-receipt-*` rows above are the values of
+persistence diagnostic is used directly as the event, which is why the
+`canonical-*`, `terminal-receipt-*` and `recent-model-*` rows above are the values of
 `event: code` at `packages/gateway/src/gateway-main.ts`.
 
 ### Deploy — `~/.tron/logs/deploy.jsonl`
