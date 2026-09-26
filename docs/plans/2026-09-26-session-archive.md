@@ -93,8 +93,8 @@ Current state, inspected 2026-09-26:
 | G-2 | Done | Every new run unarchives: an admission-time clear for Gateway-admitted runs, plus a backstop when an active phase is published | G-1 | tron-coordinator, 2026-09-26 |
 | G-3 | Done | Search results carry `archived`; `session-search.md` updated | G-1 | tron-coordinator, 2026-09-26 |
 | I-1 | Done | iOS model, mutation service, AppModel and capability gating; catalog membership follows authoritative responses | G-1 | tron-coordinator, 2026-09-26 |
-| I-2 | Ready | Dashboard full-swipe Archive, one collapsed "Archived (N)" container at the bottom, and archived-row actions | I-1 | |
-| I-3 | Ready | Search "Archived" label, automation picker exclusion, and display of an existing automation whose target is archived | I-1, G-3 | |
+| I-2 | Claimed | Dashboard full-swipe Archive, one collapsed "Archived (N)" container at the bottom, and archived-row actions | I-1 | tron-coordinator, 2026-09-26 |
+| I-3 | Claimed | Search "Archived" label, automation picker exclusion, and display of an existing automation whose target is archived | I-1, G-3 | tron-coordinator, 2026-09-26 |
 | F-1 | Needs scoping | The `session.fork` RPC rejects with retryable `busy` because its own admitted work entry satisfies the slot's idle check; decide the fix and cover the real path | none | |
 | F-2 | Needs scoping | The same self-work-entry rejection now also measured on `session.bash`, `session.navigate` and `session.setTools`; audit every mutation RPC whose slot method consults session work ownership and decide the fix (thread the request's work token, as `session.setModel` already does) | none | |
 | V-1 | Ready | Cross-module checkpoint, user-performed Gateway rollout, and eyes-on device review; close the plan | G-2, I-2, I-3 | |
