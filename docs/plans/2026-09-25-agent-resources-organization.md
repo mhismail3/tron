@@ -2,7 +2,7 @@
 
 - **Started:** 2026-09-25
 - **Status:** Active
-- **Last updated:** 2026-09-25, R-1, R-2
+- **Last updated:** 2026-09-25, R-7
 - **Goal:** Settings shows what is installed in or configured on the agent, and the session sheet shows what the agent can use, each in exactly one logical place with a clear origin tag.
 
 ## Goal and constraints
@@ -129,7 +129,7 @@ new tag.
 | R-3 | Claimed | iOS Project Resources: groups Skills, Prompts, Commands (extension commands only), Tools and Subagents, each row with the shared origin tag next to the existing scope badge; keep Diagnostics and Reload; remove the Extensions section only (the wire field stays); update the Manage Session row subtitle and the sheet caption | R-1 | resources session, 2026-09-25 |
 | R-4 | Claimed | iOS Settings: rename Packages to Extensions (`ExtensionsSettingsView`) with two containers, Installed (third-party, unchanged actions) and Tron Modules (read-only); remove the resolved Skills/Prompts/Themes lists from it; add the available Themes list to Settings → Appearance | R-2 | resources session, 2026-09-25 |
 | R-5 | Claimed | iOS Settings → Agent → Hooks: new row and sheet carrying today's full hooks view (By Event / By Extension, unregistered-events toggle, extension detail, load issues, omissions notice, refresh), plus the "Every Project / Current Project" scope row reused from Locations and Overrides; keep handler-less extensions listed; remove Project Hooks from Manage Session | R-2 | resources session, 2026-09-25 |
-| R-7 | Claimed | Gateway: `packages.list` gains, per installed package, `provides`: skills, prompts, themes (already resolved per package), subagents attributed to the package (pi-subagents `package` and `builtin` sources, by file path under the package root), and tools and commands from loading the package's extensions session-free (share one loader helper with `hooks.list`, same trust gating and work tracking). Additive fields only | R-2 | resources session, 2026-09-25 |
+| R-7 | Done | Gateway: `packages.list` gains, per installed package, `provides`: skills, prompts, themes (already resolved per package), subagents attributed to the package (pi-subagents `package` and `builtin` sources, by file path under the package root), and tools and commands from loading the package's extensions session-free (share one loader helper with `hooks.list`, same trust gating and work tracking). Additive fields only | R-2 | resources session, 2026-09-25 |
 | R-8 | Ready | iOS Settings → Extensions: each Installed package row opens a detail sheet with its Provides groups (Skills, Prompts, Subagents, Tools, Commands, Themes; empty groups hidden), reusing the Project Resources row and tag components; the sheet-level Themes list folds into this per-package view | R-4, R-7 | |
 | R-6 | Ready | E2E check and docs: one simulator run through Manage Session and Settings with screenshots of each changed sheet; update the iOS architecture doc and the Gateway README's resources section | R-3, R-4, R-5, R-8 | |
 
@@ -149,3 +149,9 @@ new tag.
 - Merge fix: R-1 made `resources()` async, so the supervisor added the missing `await` to R-2's two parity tests.
 - Evidence (verified): on combined `main`, Gateway `tsc` with declarations and 179 files / 1,898 tests pass. A live probe on this Mac found 14 subagents (11 built-in plus the user's `worker`, which replaces the built-in of the same name, `luna-worker` and `deepseek-worker`, each tagged `local` with its pinned model) and the 9 Tron modules with their tools.
 - For the next agent: iOS receives these fields only after the user's next Gateway source rebuild. R-5 should show when a project is untrusted, so global-only hooks are not read as "no project hooks".
+
+### R-7 · Done · 2026-09-25 · resources session (deepseek-worker, reviewed by the supervisor)
+
+- Result: each installed package in `packages.list` carries `provides` (skills, prompts, themes, subagents, tools, commands; capped at 256 names per kind, fail-soft with `providesDiagnostic`). `hooks.list` and `packages.list` share one session-free loader, `admin/session-free-extensions.ts`; the `session.resources` subagent row is unchanged.
+- Evidence (verified): full Gateway suite and `tsc` with declarations pass on combined `main`. A live probe on this Mac attributes correctly: `pi-subagents` provides 12 subagents, 2 skills, 6 prompts, `subagent` and `subagent_wait` and 19 commands; `pi-web-access` 4 tools and 4 commands; `pi-agent-browser-native` `agent_browser`; `pi-goal` 3 tools and `/goal`; `pi-anthropic-auth` 9 commands; its core library provides nothing. First call 862 ms, then 40 ms.
+- For the next agent: R-8 renders this per package; subagent attribution relies on pi-subagents reporting each agent's file path.
