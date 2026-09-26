@@ -78,6 +78,9 @@ export function collectSubagents(raw: unknown): AvailableSubagent[] {
 function projectSubagent(value: unknown, groupSource?: SubagentDiscoverySource): AvailableSubagent | undefined {
   if (value === null || typeof value !== "object") return undefined;
   const record = value as Record<string, unknown>;
+  // discoverAgentsAll returns every defined agent; only discoverAgents applies
+  // the package's disabled filtering, so drop disabled definitions here too.
+  if (record.disabled === true) return undefined;
   const name = typeof record.name === "string" ? record.name : undefined;
   const source = isDiscoverySource(record.source) ? record.source : groupSource;
   if (!name || !source) return undefined;
@@ -142,13 +145,13 @@ export async function loadPiSubagentsDiscovery(packageRoot: string): Promise<unk
   return createJiti(import.meta.url).import(join(packageRoot, "src", "agents", "agents.ts"));
 }
 
-async function discoverAgents(module: unknown, cwd: string): Promise<unknown> {
-  const discovery = module as {
+async function discoverAgents(discovery: unknown, cwd: string): Promise<unknown> {
+  const exports = discovery as {
     discoverAgentsAll?: (cwd: string) => unknown;
     discoverAgents?: (cwd: string, scope: string) => unknown;
   };
-  if (typeof discovery.discoverAgentsAll === "function") return await discovery.discoverAgentsAll(cwd);
-  if (typeof discovery.discoverAgents === "function") return await discovery.discoverAgents(cwd, "both");
+  if (typeof exports.discoverAgentsAll === "function") return await exports.discoverAgentsAll(cwd);
+  if (typeof exports.discoverAgents === "function") return await exports.discoverAgents(cwd, "both");
   throw new Error(`${SUBAGENT_PACKAGE} exposes no agent discovery`);
 }
 
@@ -159,8 +162,8 @@ export async function loadSubagentCatalog(request: SubagentCatalogRequest): Prom
   try {
     const packageRoot = installedSubagentPackageRoot(request.settingsManager, request.agentDir, request.cwd);
     if (!packageRoot) return unavailable(`${SUBAGENT_PACKAGE} is not installed`);
-    const module = await (request.loadDiscovery ?? loadPiSubagentsDiscovery)(packageRoot);
-    return { subagents: collectSubagents(await discoverAgents(module, request.cwd)) };
+    const discovery = await (request.loadDiscovery ?? loadPiSubagentsDiscovery)(packageRoot);
+    return { subagents: collectSubagents(await discoverAgents(discovery, request.cwd)) };
   } catch (error) {
     return unavailable(error instanceof Error ? error.message : String(error));
   }

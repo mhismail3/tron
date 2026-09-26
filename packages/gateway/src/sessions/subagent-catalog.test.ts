@@ -64,6 +64,15 @@ describe("subagent distribution", () => {
     ]);
   });
 
+  it("drops disabled agents that discovery still returns", () => {
+    const discovered = {
+      user: [{ name: "enabled", source: "user" }, { name: "disabled", source: "user", disabled: true }],
+    };
+    expect(collectSubagents(discovered)).toEqual<AvailableSubagent[]>([
+      { name: "enabled", source: "user", distribution: "local" },
+    ]);
+  });
+
   it("skips malformed records and unknown sources", () => {
     const discovered = [{ name: "" }, { name: "no-source" }, { source: "user" }, { name: "runtime-only", source: "runtime" }, null, 7];
     expect(collectSubagents(discovered)).toEqual<AvailableSubagent[]>([]);
