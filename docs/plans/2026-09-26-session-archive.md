@@ -2,7 +2,7 @@
 
 - **Started:** 2026-09-26
 - **Status:** Active
-- **Last updated:** 2026-09-26, G-2
+- **Last updated:** 2026-09-26, G-2/G-3 merge
 - **Goal:** A user can archive an idle session so it leaves the dashboard without being deleted, find it again in one collapsed Archived container or in search, and have it return automatically when it runs again.
 
 ## Goal and constraints
@@ -91,7 +91,7 @@ Current state, inspected 2026-09-26:
 | --- | --- | --- | --- | --- |
 | G-1 | Done | Gateway archive store, `session.archive.set` RPC, list filtering and count, delete/rekey/prune ownership, `session-archive.v1` capability | none | archive worker, 2026-09-26 |
 | G-2 | Done | Every new run unarchives: an admission-time clear for Gateway-admitted runs, plus a backstop when an active phase is published | G-1 | tron-coordinator, 2026-09-26 |
-| G-3 | Claimed | Search results carry `archived`; `session-search.md` updated | G-1 | tron-coordinator, 2026-09-26 |
+| G-3 | Done | Search results carry `archived`; `session-search.md` updated | G-1 | tron-coordinator, 2026-09-26 |
 | I-1 | Claimed | iOS model, mutation service, AppModel and capability gating; catalog membership follows authoritative responses | G-1 | tron-coordinator, 2026-09-26 |
 | I-2 | Ready | Dashboard full-swipe Archive, one collapsed "Archived (N)" container at the bottom, and archived-row actions | I-1 | |
 | I-3 | Ready | Search "Archived" label, automation picker exclusion, and display of an existing automation whose target is archived | I-1, G-3 | |
@@ -329,7 +329,6 @@ artifact. Accessibility identifiers use the existing
 ## Handoff log
 
 ### G-1 · Done · 2026-09-26 · archive worker
-
 - Result: the Gateway owns session archive state end to end. A new
   `SessionArchiveStore` persists `{ version: 1, sessions: { id: { archivedAt } } }`
   in `session-archive.json` under the Gateway home, atomically and with the
@@ -494,3 +493,85 @@ artifact. Accessibility identifiers use the existing
   measured fix is to pass the mutation's work token into the slot methods whose
   idle check consults session work ownership, exactly as `session.setModel`
   already does.
+
+### G-3 · Done · 2026-09-26 · tron-coordinator
+
+- Result: `SessionSearchResult` carries `archived`, the Gateway archive
+  projection read from the archive store at publication. A new read-only
+  `RuntimeRegistry.isArchived` seam is the only search involvement, so archive
+  state never enters the index: archiving or unarchiving a session changes no
+  indexed text, needs no reindex, and leaves the session searchable and
+  anchorable while its dashboard row is hidden.
+- Evidence (verified):
+  - `npm run build` clean.
+  - `npx vitest run src/transport/session-archive.integration.test.ts`: 10/10 in
+    2.8 s. The new case "keeps an archived session searchable and marked
+    archived" drives a real `SessionSearchIndex` and `SessionSearchService`
+    through the real WebSocket `session.search` and `session.search.anchor`: the
+    hit is `archived: false`, then `session.archive.set` hides the row from
+    `session.list` while the same canonical entry and content revision come back
+    as `archived: true`, an anchor still resolves the exact entry, the canonical
+    file is byte-identical, and unarchiving returns `archived: false`. Retained,
+    regenerable report: `test-results/session-archive.integration.json` in the
+    gateway package (gitignored output, not source).
+  - `npx vitest run src/sessions/session-search-service.test.ts
+    src/sessions/session-search-index.test.ts src/sessions/session-search-text.test.ts
+    src/transport/gateway-service-transcript.test.ts`: 36/36 in 1.4 s. No new
+    isolated test was written: the contract is fully exercised by the WebSocket
+    case above, and these files only needed their `any`-typed registry stubs to
+    answer `isArchived` because the published seam is now part of the service's
+    read contract.
+  - `python3 scripts/check-documentation-policy.py` and
+    `scripts/personal-info-guard.sh` both pass.
+- Changes: this commit (`packages/gateway/src/sessions/session-search-contract.ts`,
+  `packages/gateway/src/sessions/session-search-service.ts`,
+  `packages/gateway/src/sessions/runtime-registry.ts`,
+  `packages/gateway/src/transport/session-archive.integration.test.ts`,
+  `packages/gateway/src/sessions/session-search-service.test.ts`,
+  `packages/gateway/docs/session-search.md`).
+- Tasks added: none.
+- Kept on purpose:
+  - The search fixture wires `SessionSearchService` behind an opt-in `search`
+    option, so only the case that reads search results pays for a real SQLite
+    index; the other nine archive cases are unchanged.
+  - `readSearchCut` and `catalog` stay unfiltered by archive state. Search and
+    anchors need archived sessions addressable, and filtering here would have
+    silently changed the anchor contract.
+  - The archive label is read for each result while the response is assembled
+    rather than snapshotted once. Archive commits never invalidate a search, so
+    the only cost is that a session archived by another device mid-response can
+    show both labels in that one response; a later response is correct.
+- Findings (fixture traps, not product behavior):
+  - The pinned manager appends its own `thinking_level_change` entry the first
+    time a runtime opens a session file it created, and the first open can land
+    after the request that triggered it. Cross-query revision comparisons in one
+    test therefore need one warm query plus one warm anchor before the measured
+    reads, which is why the new case warms first.
+  - A hand-written canonical fixture message must carry a full assistant
+    envelope (`api`, `provider`, `model`, `stopReason`, and
+    `usage.cost.total`): opening that session for an anchor makes the runtime
+    project `message.usage`, and a message without one fails the request with an
+    internal error.
+- Deviations: none from the task's scope. The plan allowed either extending the
+  G-1 integration test or an owning search test; the WebSocket test won because
+  it is the real path, so the fixture now owns real search wiring and the hit's
+  exact canonical entry and content revision are compared across the archive
+  change on that path instead of against a stub.
+- For the next agent: I-3 consumes the new field. `SessionSearchResult` in
+  `packages/ios-app/Sources/Models/SessionSearchModels.swift` currently ignores
+  unknown response keys, so adding the iOS field is the whole client change; it
+  must decide whether `archived` is required (a Gateway without
+  `session-archive.v1` omits it) or gated on the capability. Nothing else on the
+  Gateway side labels, filters, or orders search results by archive state.
+
+### G-2/G-3 merge · Done · 2026-09-26 · tron-coordinator
+
+- Result: merged G-3 into the G-2 branch. `RuntimeRegistry.isArchived` now
+  reads the effective projection (`archivedAt`), so a session whose backstop
+  write failed and is pending restoration is already `archived: false` in
+  search, as the G-2 handoff asked.
+- Evidence: `npm run build` clean; archive integration, archive store, search
+  service and list pagination tests 49/49 (5.8 s).
+- Changes: merge commit.
+- Deviations: none.
+

@@ -22,6 +22,7 @@ const entries = [
 function sessionsFor(entriesValue = entries, forkBoundary?: { kind: "sessionFork"; inheritedEntryId: string; gapOrdinal: number }): any {
   return {
     setSearchInvalidator: () => {},
+    isArchived: () => false,
     catalog: async () => ({ sessions: [{ id: "s" }] }),
     readSearchCut: async () => ({ summary: { id: "s", name: "Fixture", firstMessage: "Fixture", cwd: "/tmp", modified: new Date("2026-01-01T00:00:00Z") }, entries: entriesValue, fileIdentity: "file-1", ...(forkBoundary ? { forkBoundary } : {}), leafEntryId: "semantic" }),
   };
@@ -108,6 +109,7 @@ describe("SessionSearchService backend seams", () => {
     const blocked = new Promise<void>(resolve => { release = resolve; });
     const sessions = {
       setSearchInvalidator(callback: typeof invalidate) { invalidate = callback; },
+      isArchived: () => false,
       catalog: async () => ({ sessions: [{ id: "s" }] }),
       readSearchCut: async () => {
         reads += 1;
@@ -160,6 +162,7 @@ describe("SessionSearchService backend seams", () => {
     const semanticStarted = new Promise<void>(resolve => { started = resolve; });
     const sessions = {
       setSearchInvalidator(callback: typeof invalidate) { invalidate = callback; },
+      isArchived: () => false,
       catalog: async () => ({ sessions: [{ id: "s" }] }),
       readSearchCut: async () => ({ summary: { id: "s", name: "Fixture", firstMessage: "Fixture", cwd: "/tmp", modified: new Date("2026-01-01T00:00:00Z") }, entries: currentEntries, fileIdentity: currentEntries === entries ? "file-1" : "file-2", leafEntryId: currentEntries.at(-1)?.id }),
     } as any;
