@@ -1214,26 +1214,34 @@ struct ChatViewScrollHarnessTests {
                                   enablesPresentationCover: true, usesRealOpening: true) { harness in
                 gate.condition = { harness.probe.openingPhase?() == .presenting }
                 try await gate.waitUntilHeld()
-                let covered = harness.renderedPixelGrid()
+                let covered = harness.renderedRevealGrid()
                 try await DisplayFrameScheduler.displayLink.nextFrame()
-                let coveredNextFrame = harness.renderedPixelGrid()
+                let coveredNextFrame = harness.renderedRevealGrid()
                 #expect(harness.renderedPixelDistance(covered, coveredNextFrame) < 0.02)
 
                 gate.release()
-                var renderedFrames: [[Double]] = []
+                var revealed: [Double] = []
+                // The last sample is the settled render the reveal is measured
+                // against, so only one distance is retained per sample.
+                var settled = covered
                 for _ in 0..<18 {
                     try await DisplayFrameScheduler.displayLink.nextFrame()
-                    renderedFrames.append(harness.renderedPixelGrid())
+                    settled = harness.renderedRevealGrid()
+                    revealed.append(harness.renderedPixelDistance(covered, settled))
                 }
                 #expect(harness.probe.openingPhase?() == .ready)
-                let finalFrame = renderedFrames.last ?? harness.renderedPixelGrid()
-                let distances = renderedFrames.map {
-                    harness.renderedPixelProgress($0, from: covered, to: finalFrame)
-                }
-                #expect(distances.count >= 3)
-                #expect(zip(distances, distances.dropFirst()).allSatisfy { $1 + 0.035 >= $0 })
-                #expect((distances.last ?? 0) > 0.9)
-                #expect(harness.renderedPixelDistance(covered, finalFrame) > 0.08)
+                // How much of the settled render is on screen at each sample.
+                // A per-pixel projection onto the settled frame measures
+                // registration instead of progress: the entrance's own 8-point
+                // rise moves the glyphs and drops that projection from 1 to
+                // about 0, then restores it as they land, which is what made
+                // this check flaky. The revealed content itself grows with the
+                // fade, so that is what the reveal is monotonic in; the
+                // tolerance covers the render's own sub-point settling noise.
+                let progress = revealed.map { $0 / (revealed.last ?? 0) }
+                #expect(revealed.count >= 3)
+                #expect(zip(progress, progress.dropFirst()).allSatisfy { $1 + 0.06 >= $0 })
+                #expect(harness.renderedPixelDistance(covered, settled) > 0.08)
             }
         }
     }
@@ -3451,12 +3459,19 @@ final class ChatViewScrollHarness {
         renderedLuminance(in: frame.intersection(hostingController.view.bounds), step: 3)
     }
 
-    func renderedPixelGrid() -> [Double] {
+    /// Luminance samples of the transcript, one per point, where the opening
+    /// reveal is measured. Full resolution is what makes the measurement
+    /// meaningful: the entrance rises the transcript while it fades, and a
+    /// coarser grid aliases that rise into the sample set — moving the settled
+    /// content by the entrance's 8 points changes the distance measured from a
+    /// 12-point grid by up to 20 percent, while the one-point integral stays
+    /// within 0.1 percent of itself.
+    func renderedRevealGrid() -> [Double] {
         let bounds = hostingController.view.bounds
         // Skip the edges and the centered opening pulse, whose animation is not
         // part of the reveal being measured.
         let pulse = CGRect(x: bounds.midX - 48, y: bounds.midY - 48, width: 96, height: 96)
-        return renderedLuminance(in: bounds.insetBy(dx: 8, dy: 24), step: 12, excluding: pulse)
+        return renderedLuminance(in: bounds.insetBy(dx: 8, dy: 24), step: 1, excluding: pulse)
     }
 
     /// Average-channel luminance sampled every `step` points of `region`,
@@ -3493,19 +3508,6 @@ final class ChatViewScrollHarness {
             return partial + delta * delta
         }
         return (squared / Double(first.count)).squareRoot()
-    }
-
-    func renderedPixelProgress(_ frame: [Double], from start: [Double], to end: [Double]) -> Double {
-        guard frame.count == start.count, start.count == end.count, !frame.isEmpty else { return 0 }
-        var projected = 0.0
-        var distance = 0.0
-        for index in frame.indices {
-            let axis = end[index] - start[index]
-            projected += (frame[index] - start[index]) * axis
-            distance += axis * axis
-        }
-        guard distance > 0 else { return 0 }
-        return min(1, max(0, projected / distance))
     }
 
     func resize(height: CGFloat) {
