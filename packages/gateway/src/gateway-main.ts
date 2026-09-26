@@ -11,6 +11,7 @@ import { TerminalService } from "./machine/terminal-service.js";
 import { SettingsService } from "./admin/settings-service.js";
 import { ModelConfigService } from "./admin/model-config-service.js";
 import { PackageService } from "./admin/package-service.js";
+import { HookResources } from "./admin/hook-resources.js";
 import { AuthBroker } from "./admin/auth-broker.js";
 import { GlobalProviderResources } from "./admin/global-provider-resources.js";
 import { RuntimeRegistry } from "./sessions/runtime-registry.js";
@@ -298,6 +299,9 @@ const packages = new PackageService(
   (topic, payload) => transport?.broadcast(topic, payload),
   workRegistry,
 );
+// Hook listings load extensions for a scope without a session; the owner never
+// touches a runtime, so no session or global registration is involved.
+const hookResources = new HookResources(config.agentDir, trust, workRegistry);
 const automationStore = new AutomationStore(config.tronHome, {
   changed: (automationId) => transport?.broadcast("automation.changed", {
     catalogRevision: automationStore.status().catalogRevision,
@@ -508,6 +512,7 @@ const service = new GatewayService({
   settings,
   modelConfig,
   packages,
+  hookResources,
   auth,
   globalProviderResources,
   logger,

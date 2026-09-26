@@ -67,6 +67,7 @@ import type { ConnectionOwner } from "../integrations/connection-owner.js";
 import type { ConnectionAction } from "../integrations/connection-contract.js";
 import { mcpToolSourceInstances } from "../integrations/mcp-adapter.js";
 import { MODULES_CAPABILITY, tronModuleSummaries } from "../extensions/tron-modules.js";
+import { HOOKS_CAPABILITY, type HookResources } from "../admin/hook-resources.js";
 
 const KNOWLEDGE_OBJECT_CHUNK_BYTES = 512_000;
 const KNOWLEDGE_OBJECT_TOTAL_BYTES = 8_000_000;
@@ -233,6 +234,8 @@ export interface GatewayServiceDependencies {
   settings: SettingsService;
   modelConfig: ModelConfigService;
   packages: PackageService;
+  /** Session-free hook listings for a scope; never opens or registers a session. */
+  hookResources: HookResources;
   auth: AuthBroker;
   globalProviderResources: Pick<GlobalProviderResources, "requestReload" | "withStableSnapshot">;
   /** Configured only by the LaunchAgent-owned update helper; never from RPC params. */
@@ -342,6 +345,7 @@ export class GatewayService {
         "settings.v1",
         "packages.v1",
         MODULES_CAPABILITY,
+        HOOKS_CAPABILITY,
         "trust.v1",
         "filesystem.v1",
         "source-control.v1",
@@ -1610,6 +1614,11 @@ export class GatewayService {
           })),
         });
       }
+      case "hooks.list":
+        rejectUnknownFields(params, ["cwd"], "Hook listing");
+        // Absent cwd lists the global scope only. Loading project extensions is
+        // the hook owner's decision under the canonical project trust state.
+        return safeJson(await this.dependencies.hookResources.list(optionalString(params.cwd, "cwd", 4_096)));
       case "packages.checkUpdates":
         rejectUnknownFields(params, ["cwd"], "Package update check");
         return safeJson(await this.dependencies.packages.checkUpdates(optionalString(params.cwd, "cwd", 4_096) ?? process.cwd()));

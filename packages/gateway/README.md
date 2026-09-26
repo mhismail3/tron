@@ -234,6 +234,24 @@ The `modules.v1` capability advertises the method. It is a bounded read: the
 module rows come from a fixed definition, and the connection rows are the
 already-redacted `connections.list` projection.
 
+`hooks.list` serves the same hook fields `session.resources` returns
+(`extensions`, `extensionLoadErrors`, `hookInventory`) for one scope without a
+session, so the Hooks sheet and a live session cannot decode differently. An
+absent `cwd` is the global scope: it loads the user's agent-home extensions
+against an untrusted home directory, and the Gateway process working directory
+never selects a project. A supplied `cwd` is canonicalized by the trust owner and
+loads that project's extensions only while the canonical trust decision is true,
+re-read during the load as `RuntimeSlot` does, so a decision change cannot leave
+project extension code loaded. Loading reuses the `PackageService` settings
+pattern (a fail-closed `SettingsManager` created for the resolved trust state) and
+the `DefaultResourceLoader` reload used by the global provider runtime; it never
+starts a session and never replays an extension's provider registrations into a
+runtime. Reads serialize on one mutex and are tracked as drain-aware
+administrative work exactly like `packages.list`, and the returned rows are
+bounded by the same 256 KiB projection envelope. The pinned SDK cannot cancel an
+extension-module load, so no wall-clock deadline is claimed for it. The
+`hooks.v1` capability advertises the method.
+
 ### Agent home
 
 Pi's canonical agent home is `<tronHome>/agent`: Stable uses `~/.tron/agent` and

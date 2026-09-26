@@ -20,7 +20,8 @@ const MAX_HOOK_STRING_CHARACTERS = 16 * 1_024;
 export const MAX_HOOK_PROJECTION_BYTES = 256 * 1_024;
 const GENERIC_RESOURCE_ARRAY_LIMIT = 1_000;
 
-interface HookRegistrationProjection {
+/** The bounded hook projection `session.resources` and `hooks.list` both return. */
+export interface HookRegistrationProjection {
   extensions: Array<Record<string, unknown>>;
   extensionLoadErrors: Array<{ path: string; error: string }>;
   hookInventory: {
