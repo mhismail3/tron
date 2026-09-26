@@ -2,7 +2,7 @@
 
 - **Started:** 2026-09-25
 - **Status:** Active
-- **Last updated:** 2026-09-25, R-3, R-4, R-5; R-8 claimed
+- **Last updated:** 2026-09-25, R-8; R-6 waits for the user's Gateway rebuild
 - **Goal:** Settings shows what is installed in or configured on the agent, and the session sheet shows what the agent can use, each in exactly one logical place with a clear origin tag.
 
 ## Goal and constraints
@@ -130,8 +130,8 @@ new tag.
 | R-4 | Done | iOS Settings: rename Packages to Extensions (`ExtensionsSettingsView`) with two containers, Installed (third-party, unchanged actions) and Tron Modules (read-only); remove the resolved Skills/Prompts/Themes lists from it; add the available Themes list to Settings → Appearance | R-2 | resources session, 2026-09-25 |
 | R-5 | Done | iOS Settings → Agent → Hooks: new row and sheet carrying today's full hooks view (By Event / By Extension, unregistered-events toggle, extension detail, load issues, omissions notice, refresh), plus the "Every Project / Current Project" scope row reused from Locations and Overrides; keep handler-less extensions listed; remove Project Hooks from Manage Session | R-2 | resources session, 2026-09-25 |
 | R-7 | Done | Gateway: `packages.list` gains, per installed package, `provides`: skills, prompts, themes (already resolved per package), subagents attributed to the package (pi-subagents `package` and `builtin` sources, by file path under the package root), and tools and commands from loading the package's extensions session-free (share one loader helper with `hooks.list`, same trust gating and work tracking). Additive fields only | R-2 | resources session, 2026-09-25 |
-| R-8 | Claimed | iOS Settings → Extensions: each Installed package row opens a detail sheet with its Provides groups (Skills, Prompts, Subagents, Tools, Commands, Themes; empty groups hidden), reusing the Project Resources row and tag components; the sheet-level Themes list folds into this per-package view | R-4, R-7 | resources session, 2026-09-25 |
-| R-6 | Ready | E2E check and docs: one simulator run through Manage Session and Settings with screenshots of each changed sheet; update the iOS architecture doc and the Gateway README's resources section | R-3, R-4, R-5, R-8 | |
+| R-8 | Done | iOS Settings → Extensions: each Installed package row opens a detail sheet with its Provides groups (Skills, Prompts, Subagents, Tools, Commands, Themes; empty groups hidden), reusing the Project Resources row and tag components; the sheet-level Themes list folds into this per-package view | R-4, R-7 | resources session, 2026-09-25 |
+| R-6 | Blocked | E2E check and docs: one simulator run through Manage Session and Settings with screenshots of each changed sheet; update the iOS architecture doc and the Gateway README's resources section | R-3, R-4, R-5, R-8 | |
 
 ## Handoff log
 
@@ -164,3 +164,13 @@ new tag.
 - Review fixes: one shared tag label instead of two copies of the capsule styling; the unread `distribution` fields on the command models removed.
 - Evidence (verified): full iOS unit suite on combined `main` 1,655 Swift Testing tests in 134 suites plus 80 XCTest (4 skipped), 0 failures; build 147 s, run 201 s. The branch run also passed. Negative controls in the lane report (capability guard, untrusted note, parity, item map, scope request).
 - Known limit: these sheets' rendered text cannot be asserted in the hosting harness (no UIKit labels), so tests assert presentation models and request frames; R-6 covers the rendered result.
+
+### R-8 · Done · 2026-09-25 · resources session (deepseek-worker, reviewed by the supervisor)
+
+- Result: each Installed package row on Settings → Extensions opens `PackageDetailSheet`: source and scope, one External tag in the header, then Provides groups (Skills, Prompts, Subagents, Tools, Commands, Themes) with empty groups hidden, a one-line empty state, and `providesDiagnostic` as the standard notice. `provides` is optional on the existing package model, so an older Gateway shows no groups. The sheet-level Themes list is gone; themes are reached through their package, and themes no package owns stay in a "Local themes" group shown only when some exist.
+- Evidence (verified): full iOS unit suite 1,660 Swift Testing tests in 135 suites plus 81 XCTest, 0 failures; six negative controls (optional decode, empty-group hiding, colour ownership, theme reachability, local themes, no extra request). `main` had no other iOS changes, so the result carries over.
+- Open for R-6: each Installed row is a button that contains the Update/Remove menu. Whether tapping the ellipsis opens the menu rather than the detail sheet has to be checked by tapping, not in the hosting harness.
+
+### R-6 · Blocked · 2026-09-25 · resources session
+
+- The simulator's Development app is unpaired, and the running Gateway predates R-1, R-2 and R-7, so a walkthrough now would show neither the new data nor a paired session. R-6 runs after the user's Gateway Rebuild from Source and an iOS install: on the phone, or on the simulator once the user pairs it. It must also tap an Installed row's ellipsis to confirm the menu opens, not the detail sheet.
