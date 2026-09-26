@@ -1,8 +1,7 @@
-import { randomBytes } from "node:crypto";
-import { mkdir, open, rename, rm } from "node:fs/promises";
-import { dirname, join } from "node:path";
+import { join } from "node:path";
 import { AsyncMutex } from "../util/async-mutex.js";
-import { readJson } from "../util/json.js";
+import { durablePublishBoundedJson } from "../util/durable-json.js";
+import { boundedString, boundedTimestamp, cloneDictionary, ownRecord, readJsonDocument } from "../util/json.js";
 
 const VERSION = 1;
 const MAXIMUM_BYTES = 2 * 1_048_576;
@@ -49,35 +48,33 @@ export class SessionAttentionStore {
   private readonly mutex = new AsyncMutex();
   private readonly write: ((path: string, value: unknown) => Promise<void>) | undefined;
   private readonly now: () => Date;
-  private document: SessionAttentionDocument;
+  /** Undefined until `initialize` admits the stored document. Read-only
+   * projections stay safe before that; every mutation is gated, so a change can
+   * never replace a document this owner has not read. */
+  private document: SessionAttentionDocument | undefined;
 
   constructor(tronHome: string, options: SessionAttentionStoreOptions = {}) {
     this.path = join(tronHome, "gateway", "session-attention.json");
     this.write = options.write;
     this.now = options.now ?? (() => new Date());
-    // Read-only projections are safe before initialize() in catalog-only test
-    // and diagnostic paths. Production mutation remains initialize-gated by the
-    // RuntimeRegistry lifecycle.
-    this.document = emptyDocument(this.now().toISOString());
   }
 
   async initialize(): Promise<void> {
-    const loaded = await readJson<unknown | undefined>(this.path, undefined, MAXIMUM_BYTES);
+    const loaded = await readJsonDocument(this.path, admitDocument, MAXIMUM_BYTES);
     if (loaded === undefined) {
-      const created = emptyDocument(this.now().toISOString());
-      await this.commit(created);
+      await this.commit(emptyDocument(this.now().toISOString()));
       return;
     }
-    this.document = admitDocument(loaded);
+    this.document = loaded;
   }
 
   reconciliationCursor(): string {
-    return this.requireDocument().reconciledThrough;
+    return this.document?.reconciledThrough ?? "";
   }
 
   projection(sessionId: string): SessionAttentionProjection {
-    const record = ownRecord(this.requireDocument().sessions, sessionId);
-    return projection(record);
+    const document = this.document;
+    return projection(document === undefined ? undefined : ownRecord(document.sessions, sessionId));
   }
 
   /** Admit an exact canonical successful assistant completion once. A
@@ -198,45 +195,23 @@ export class SessionAttentionStore {
   }
 
   private async commit(document: SessionAttentionDocument): Promise<void> {
-    const persisted = `${JSON.stringify(document, null, 2)}\n`;
-    if (Buffer.byteLength(persisted) > MAXIMUM_BYTES) {
-      throw new Error("Session attention document exceeds its byte limit");
+    if (this.write) {
+      const persisted = `${JSON.stringify(document, null, 2)}\n`;
+      if (Buffer.byteLength(persisted) > MAXIMUM_BYTES) {
+        throw new Error("Session attention document exceeds its byte limit");
+      }
+      await this.write(this.path, document);
+    } else {
+      await durablePublishBoundedJson(this.path, document, MAXIMUM_BYTES);
     }
-    if (this.write) await this.write(this.path, document);
-    else await durableWriteAttention(this.path, persisted);
     this.document = document;
   }
 
+  /** Mutations never run against an unread document: a change admitted before
+   * `initialize` would otherwise replace the stored file blind. */
   private requireDocument(): SessionAttentionDocument {
+    if (this.document === undefined) throw new Error("Session attention store is not initialized");
     return this.document;
-  }
-}
-
-async function durableWriteAttention(path: string, encoded: string): Promise<void> {
-  const directory = dirname(path);
-  await mkdir(directory, { recursive: true, mode: 0o700 });
-  const temporary = `${path}.${process.pid}.${randomBytes(6).toString("hex")}.tmp`;
-  let temporaryExists = false;
-  try {
-    const handle = await open(temporary, "wx", 0o600);
-    temporaryExists = true;
-    try {
-      await handle.writeFile(encoded, "utf8");
-      await handle.sync();
-    } finally {
-      await handle.close();
-    }
-    await rename(temporary, path);
-    temporaryExists = false;
-    const directoryHandle = await open(directory, "r");
-    try {
-      await directoryHandle.sync();
-    } finally {
-      await directoryHandle.close();
-    }
-  } catch (error) {
-    if (temporaryExists) await rm(temporary, { force: true }).catch(() => {});
-    throw error;
   }
 }
 
@@ -257,24 +232,8 @@ function projection(record: SessionAttentionRecord | undefined): SessionAttentio
   };
 }
 
-function ownRecord(dictionary: AttentionDictionary, sessionId: string): SessionAttentionRecord | undefined {
-  return Object.prototype.hasOwnProperty.call(dictionary, sessionId) ? dictionary[sessionId] : undefined;
-}
-
-function cloneDictionary(dictionary: AttentionDictionary): AttentionDictionary {
-  return Object.assign(Object.create(null) as AttentionDictionary, dictionary);
-}
-
-function boundedString(value: unknown, maximum: number): value is string {
-  return typeof value === "string" && value.length > 0 && Buffer.byteLength(value) <= maximum;
-}
-
 function boundedRevision(value: unknown): value is number {
   return Number.isSafeInteger(value) && (value as number) >= 0;
-}
-
-function boundedTimestamp(value: unknown): value is string {
-  return typeof value === "string" && value.length <= 40 && Number.isFinite(Date.parse(value));
 }
 
 function admitDocument(value: unknown): SessionAttentionDocument {
