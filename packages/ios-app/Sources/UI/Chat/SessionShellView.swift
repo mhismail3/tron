@@ -1564,6 +1564,7 @@ private struct SessionSearchGroupView: View {
                     .font(TronTypography.sans(size: TronTypography.sizeBody3, weight: .semibold))
                     .foregroundStyle(Color.tronTextPrimary)
                     .lineLimit(1)
+                if group.isArchived { archivedLabel }
                 Spacer(minLength: 8)
                 Text(group.profileLabel)
                     .font(TronTypography.code(size: TronTypography.sizeCaption))
@@ -1593,6 +1594,20 @@ private struct SessionSearchGroupView: View {
                 .buttonStyle(.plain)
             }
         }
+    }
+
+    /// One label for the whole session: every passage row in this group is the
+    /// same archived session, so repeating it per row would add noise without
+    /// new information. Opening a result never changes archive state.
+    private var archivedLabel: some View {
+        Text("Archived")
+            .font(TronTypography.code(size: TronTypography.sizeCaption, weight: .semibold))
+            .foregroundStyle(Color.tronTextMuted)
+            .fixedSize()
+            .padding(.horizontal, 6)
+            .padding(.vertical, 2)
+            .background(Capsule().fill(Color.tronSurfaceElevated))
+            .accessibilityIdentifier("session-search-archived-\(group.sessionId)")
     }
 
     private func row(title: String, detail: String, symbol: String) -> some View {
