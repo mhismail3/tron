@@ -97,10 +97,15 @@ new tag.
 - Project Resources keeps its Diagnostics group and its Reload action.
 - Its new Commands group lists only extension commands (`source == "extension"`):
   prompt and skill commands already appear under Prompts and Skills.
-- The Packages sheet's resolved Skills, Prompts and Themes lists leave Settings.
-  Skills and Prompts appear in Project Resources; Themes, which configure the
-  app's look rather than the agent, move to Settings → Appearance as a list of
-  available themes.
+- Resources an installed package brings in appear in both places, each in its
+  own form (user decision, 2026-09-25): Settings → Extensions shows, per
+  installed package, what it **provides** (Skills, Prompts, Subagents, Tools,
+  Commands, Themes), answering "what did this install bring in"; Project
+  Resources lists the same items by kind with the External tag, answering
+  "what can the agent use now". The flat resolved Skills/Prompts lists that
+  Packages showed are replaced by the per-package Provides view. Pi themes
+  affect only the Mac terminal, not the app's appearance, so they stay under
+  Extensions (R-4 finding).
 - The wire `extensions` array and `extensionLoadErrors` stay in
   `session.resources`; only the iOS Extensions section goes. The Hooks sheet
   keeps listing extensions that register tools or commands but no hooks, so a
@@ -124,7 +129,9 @@ new tag.
 | R-3 | Claimed | iOS Project Resources: groups Skills, Prompts, Commands (extension commands only), Tools and Subagents, each row with the shared origin tag next to the existing scope badge; keep Diagnostics and Reload; remove the Extensions section only (the wire field stays); update the Manage Session row subtitle and the sheet caption | R-1 | resources session, 2026-09-25 |
 | R-4 | Claimed | iOS Settings: rename Packages to Extensions (`ExtensionsSettingsView`) with two containers, Installed (third-party, unchanged actions) and Tron Modules (read-only); remove the resolved Skills/Prompts/Themes lists from it; add the available Themes list to Settings → Appearance | R-2 | resources session, 2026-09-25 |
 | R-5 | Claimed | iOS Settings → Agent → Hooks: new row and sheet carrying today's full hooks view (By Event / By Extension, unregistered-events toggle, extension detail, load issues, omissions notice, refresh), plus the "Every Project / Current Project" scope row reused from Locations and Overrides; keep handler-less extensions listed; remove Project Hooks from Manage Session | R-2 | resources session, 2026-09-25 |
-| R-6 | Ready | E2E check and docs: one simulator run through Manage Session and Settings with screenshots of each changed sheet; update the iOS architecture doc and the Gateway README's resources section | R-3, R-4, R-5 | |
+| R-7 | Ready | Gateway: `packages.list` gains, per installed package, `provides`: skills, prompts, themes (already resolved per package), subagents attributed to the package (pi-subagents `package` and `builtin` sources, by file path under the package root), and tools and commands from loading the package's extensions session-free (share one loader helper with `hooks.list`, same trust gating and work tracking). Additive fields only | R-2 | |
+| R-8 | Ready | iOS Settings → Extensions: each Installed package row opens a detail sheet with its Provides groups (Skills, Prompts, Subagents, Tools, Commands, Themes; empty groups hidden), reusing the Project Resources row and tag components; the sheet-level Themes list folds into this per-package view | R-4, R-7 | |
+| R-6 | Ready | E2E check and docs: one simulator run through Manage Session and Settings with screenshots of each changed sheet; update the iOS architecture doc and the Gateway README's resources section | R-3, R-4, R-5, R-8 | |
 
 ## Handoff log
 
