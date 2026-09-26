@@ -767,6 +767,47 @@ describe("session archive over the real Gateway", () => {
     };
   });
 
+  archiveCase("keeps the record of a session archived while startup recovery was scanning", async () => {
+    // Recovery already holds its retained set when a session is created and
+    // archived, so the archive prune must read live ownership again on the lane
+    // rather than reuse the set the attention prune above was given.
+    let liveSessionId = "";
+    let archiving: Promise<void> | undefined;
+    const f = await fixture({
+      duringStartupRecovery: async (registry, cwd) => {
+        const attention = (registry as unknown as {
+          attention: { prune(retainedSessionIds: ReadonlySet<string>): Promise<boolean> };
+        }).attention;
+        const durablePrune = attention.prune.bind(attention);
+        let entered!: () => void;
+        const inPrune = new Promise<void>((resolve) => { entered = resolve; });
+        let release!: () => void;
+        const barrier = new Promise<void>((resolve) => { release = resolve; });
+        attention.prune = async (retained) => {
+          entered();
+          await barrier;
+          return durablePrune(retained);
+        };
+        archiving = (async () => {
+          await inPrune;
+          const slot = await registry.create(cwd);
+          liveSessionId = slot.id;
+          await registry.setArchived(slot.id, true);
+          release();
+        })();
+      },
+    });
+    const client = await f.connect();
+    await archiving;
+    expect(await archivedRecord(f.root, liveSessionId)).toBeDefined();
+    expect(await listedIds(client, "only")).toEqual([liveSessionId]);
+    expect(await listedIds(client, "exclude")).not.toContain(liveSessionId);
+    return {
+      liveSessionId,
+      archivedRows: (await list(client, "only")).sessions.map((row) => row.archivedAt),
+    };
+  });
+
   archiveCase("unarchives a session while its run is still active", async () => {
     // Unarchiving is the recovery direction, so it never requires an idle
     // session: a client must be able to reverse a hidden row even if a run has
@@ -1075,6 +1116,54 @@ describe("session archive over the real Gateway", () => {
     return {
       queued: compaction.result.queued,
       canonicalRecord: (await archivedRecord(f.root, session.id)) ?? null,
+    };
+  });
+
+  archiveCase("keeps a refused manual compaction archived", async () => {
+    // Manual compaction is refused while another owner is producing a file, and
+    // an export in flight never clears archive state. That refusal is the exact
+    // boundary the run-admission clear must come after.
+    const f = await fixture();
+    const client = await f.connect();
+    // The export owner is initialized by the Gateway's storage-warming stage.
+    await f.current().registry.initializeBlobStorage();
+    const session = f.coldSession("refused-compaction");
+    await openSession(client, session.id);
+    await archiveSession(client, session.id, "refused-compaction-archive");
+
+    const exports = (f.current().registry as unknown as {
+      exports: { withFileProductionAdmission<T>(operation: () => Promise<T>): Promise<T> };
+    }).exports;
+    const durableAdmission = exports.withFileProductionAdmission.bind(exports);
+    let producing = false;
+    let releaseExport!: () => void;
+    const exportBarrier = new Promise<void>((resolve) => { releaseExport = resolve; });
+    exports.withFileProductionAdmission = async (operation) => {
+      producing = true;
+      await exportBarrier;
+      return durableAdmission(operation);
+    };
+    const exporting = client.request("refused-compaction-export", "session.export", { sessionId: session.id, format: "html" });
+    await until(() => producing, "export in flight");
+
+    const refused = await client.request("refused-compaction-request", "session.compact", {
+      commandId: "refused-compaction-command", sessionId: session.id,
+    });
+    expect(refused).toMatchObject({ ok: false, error: { code: "busy" } });
+    // The refusal happened before run ownership, so nothing cleared the record.
+    expect(await archivedRecord(f.root, session.id)).toBeDefined();
+    expect(await listedIds(client, "only")).toEqual([session.id]);
+    expect(await listedIds(client, "exclude")).not.toContain(session.id);
+    expect(f.archiveDiagnostic).not.toHaveBeenCalledWith({ outcome: "auto-unarchived", trigger: "admission" });
+
+    releaseExport();
+    const exported = await exporting;
+    expect(exported.ok, JSON.stringify(exported)).toBe(true);
+    exports.withFileProductionAdmission = durableAdmission;
+    return {
+      compactionError: refused.error.code,
+      retainedRecord: (await archivedRecord(f.root, session.id)) ?? null,
+      exportBlobId: exported.result.blobId,
     };
   });
 
@@ -1486,5 +1575,65 @@ describe("session archive over the real Gateway", () => {
       outcomes,
       visibleWhileRunning: duringRun?.phase,
     };
+  });
+
+  archiveCase("reports the restored row when a run starts during the archive write", async () => {
+    // A turn Pi starts on its own can begin while the durable record is still
+    // being written. The record then lands over a running session, so the
+    // authoritative answer is the restored row rather than the record this
+    // request wrote.
+    const f = await fixture({ extensions: [{ name: "wake.ts", source: wakeExtension }] });
+    const client = await f.connect();
+    const session = f.coldSession("started-during-write");
+    await openSession(client, session.id);
+    const store = (f.current().registry as unknown as {
+      archive: { archive(sessionId: string): Promise<string> };
+    }).archive;
+    const durableArchive = store.archive.bind(store);
+    let enteredWrite!: () => void;
+    const inWrite = new Promise<void>((resolve) => { enteredWrite = resolve; });
+    let releaseWrite!: () => void;
+    const writeBarrier = new Promise<void>((resolve) => { releaseWrite = resolve; });
+    store.archive = async (sessionId) => {
+      enteredWrite();
+      await writeBarrier;
+      return durableArchive(sessionId);
+    };
+    let releaseRun!: () => void;
+    const runBarrier = new Promise<void>((resolve) => { releaseRun = resolve; });
+    f.faux.setResponses([async () => { await runBarrier; return fauxAssistantMessage("woke during the write"); }]);
+    try {
+      const archiving = client.request("started-during-write-request", "session.archive.set", {
+        commandId: "started-during-write-command", sessionId: session.id, archived: true,
+      });
+      await inWrite;
+      // The extension's turn never passes Gateway run admission, so only the
+      // active projection the commit rechecks can notice it. Its frames arrive
+      // while the commit still holds the registry mutex, which is why this
+      // waits on the subscription rather than on a catalog read.
+      await writeFile(join(f.root, "wake-trigger"), "", "utf8");
+      await until(() => snapshotFrames(client, session.id).some(
+        (frame) => frame.payload?.phase === "running"), "externally started run");
+      releaseWrite();
+      const response = await archiving;
+      expect(response.ok, JSON.stringify(response)).toBe(true);
+      expect(response.result).toEqual({ archived: false });
+      expect(await listedIds(client, "exclude")).toContain(session.id);
+      await until(() => f.archiveDiagnostic.mock.calls.some(
+        (call) => JSON.stringify(call[0]) === JSON.stringify({ outcome: "auto-unarchived", trigger: "backstop" })),
+      "backstop diagnostic");
+      releaseRun();
+      await until(async () => (await archivedRecord(f.root, session.id)) === undefined, "record cleared behind the run");
+      await until(async () => (await list(client, "exclude")).sessions.some(
+        (row) => row.id === session.id && row.phase === "idle"), "run settled");
+      return {
+        response: response.result,
+        canonicalRecord: (await archivedRecord(f.root, session.id)) ?? null,
+      };
+    } finally {
+      releaseWrite();
+      releaseRun();
+      store.archive = durableArchive;
+    }
   });
 });

@@ -1712,10 +1712,10 @@ extension's `triggerTurn`, a scheduled wake) never passes that boundary: when a
 slot publishes an active projection for an archived session, the row becomes
 visible immediately — that membership change reaches clients then, not when the
 durable clear lands — and the durable record is cleared behind it, retrying on
-the next active projection if that write fails. Gateway disposal settles that
-in-flight clear before the state directory is released, so a late write can
-never land after shutdown. Both paths log `sessions.archive.auto-unarchived`
-with the boundary that cleared the record.
+the next published summary for that session if that write fails. Gateway
+disposal settles that in-flight clear before the state directory is released,
+so a late write can never land after shutdown. Both paths log
+`sessions.archive.auto-unarchived` with the boundary that cleared the record.
 Opening, reading, renaming, marking read or unread, exporting, or searching an
 archived session leaves it archived. A live session's snapshot carries the same
 projection: `archivedAt` is present while the session is archived and absent

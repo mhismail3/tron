@@ -1,4 +1,4 @@
-import { chmod, mkdir, mkdtemp, readFile, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
@@ -24,8 +24,9 @@ import { SessionArchiveStore } from "./session-archive-store.js";
  * 10. A mutation before `initialize` refuses instead of replacing the stored
  *    document it never read.
  *
- * A durable write failure is injected by making the store's directory
- * unwritable, so production code carries no write seam for tests.
+ * A durable write failure is injected by replacing the store's directory with a
+ * regular file, so production code carries no write seam for tests and the
+ * failure holds for any uid.
  */
 const documentPath = (home: string) => join(home, "gateway", "session-archive.json");
 
@@ -97,24 +98,29 @@ describe("SessionArchiveStore", () => {
     const revision = archive.revision;
     const persistedBefore = await readFile(documentPath(home), "utf8");
 
-    // A full or read-only disk: the directory accepts no new temporary file, so
-    // the atomic replacement cannot even start.
+    // A full or read-only disk: the store's directory is not a directory at all,
+    // so the atomic replacement cannot even create its temporary file. A mode bit
+    // would not hold for a root user; a regular file in the directory's place
+    // fails for every uid.
     const directory = join(home, "gateway");
-    await chmod(directory, 0o500);
+    await rm(directory, { recursive: true, force: true });
+    await writeFile(directory, "not a directory");
     try {
       await expect(archive.archive("session-2")).rejects.toThrow();
       expect(archive.archivedAt("session-2")).toBeUndefined();
       expect(archive.archivedAt("session-1")).toBeDefined();
       expect(archive.revision).toBe(revision);
-      expect(await readFile(documentPath(home), "utf8")).toBe(persistedBefore);
     } finally {
-      await chmod(directory, 0o700);
+      await rm(directory, { force: true });
+      await mkdir(directory, { mode: 0o700 });
     }
     // The rejected record is not half-applied: the next commit writes only the
-    // state that was admitted.
+    // state that was admitted, and the store recovers once its directory is
+    // writable again.
     await archive.archive("session-2");
     const persisted = JSON.parse(await readFile(documentPath(home), "utf8"));
     expect(Object.keys(persisted.sessions).sort()).toEqual(["session-1", "session-2"]);
+    expect(persisted.sessions["session-1"]).toEqual(JSON.parse(persistedBefore).sessions["session-1"]);
   });
 
   it("refuses a mutation that was admitted before its document was read", async () => {

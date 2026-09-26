@@ -728,7 +728,12 @@ export class RuntimeRegistry {
     // serializes with delete and rebind, and each dropped record names its live
     // slot so an open snapshot cannot keep a timestamp the store no longer has.
     await this.attentionLane.run(async () => {
-      const pruned = await this.archive.prune(retainedSessionIds);
+      // Live ownership is re-read inside the lane: a session created and archived
+      // while the attention prune above was awaiting must keep its record, and
+      // archive commits serialize on this same lane.
+      const archiveRetained = new Set(retainedSessionIds);
+      for (const sessionId of this.slots.keys()) archiveRetained.add(sessionId);
+      const pruned = await this.archive.prune(archiveRetained);
       if (pruned.length > 0) this.archiveChanged(pruned);
     });
     for (const [sessionId, markers] of markerEvidence) {
@@ -833,8 +838,10 @@ export class RuntimeRegistry {
         if (existing && existing !== slot) throw new GatewayError("conflict", "Replacement session is already active");
         // Every fallible admission check runs before the first change, so a
         // rejected rebind cannot leave attention and archive state out of step
-        // while the slot rolls back its identity.
-        if (disposition === "reset" || disposition === "discard") {
+        // while the slot rolls back its identity. A migrate rebind moves both
+        // records onto the replacement identity, so it needs the same admission;
+        // an in-place rebind already owns them.
+        if (previousId !== nextId) {
           await this.attention.assertAbsent(nextId);
           await this.archive.assertAbsent(nextId);
         }
@@ -1019,9 +1026,14 @@ export class RuntimeRegistry {
     try {
       const removed = await this.attentionLane.run(async () => {
         await this.flushPendingProjectionRemovals();
-        return this.archive.remove(sessionId);
+        // A re-archive that committed while this clear was queued behind it has
+        // already retired the restoration, so the record on disk is the new
+        // archive and must survive.
+        if (!this.pendingArchiveRestorations.has(sessionId)) return false;
+        const removed = await this.archive.remove(sessionId);
+        this.pendingArchiveRestorations.delete(sessionId);
+        return removed;
       });
-      this.pendingArchiveRestorations.delete(sessionId);
       if (removed) {
         this.archiveChanged();
         this.options.archiveDiagnostic?.({ outcome: "auto-unarchived", trigger: "backstop" });
@@ -3347,9 +3359,14 @@ export class RuntimeRegistry {
         // hold this Gateway-wide mutex for its whole duration, so it is rejected
         // here before the lane wait. The lane re-checks the same rule.
         slot.assertArchivable(initiatingWorkToken);
-        const result = await slot.commitArchiveWhileIdle(initiatingWorkToken, commit);
+        await slot.commitArchiveWhileIdle(initiatingWorkToken, commit);
+        // A run Pi started on its own during the durable write makes the row
+        // visible again, so the effective projection—not the record this request
+        // just wrote—is the authoritative response and the value the command
+        // receipt replays.
         this.restoreArchivedSessionIfWorking(sessionId, slot);
-        return result;
+        const effective = this.archivedAt(sessionId);
+        return effective === undefined ? { archived: false } : { archived: true, archivedAt: effective };
       }
       return commit();
     });
