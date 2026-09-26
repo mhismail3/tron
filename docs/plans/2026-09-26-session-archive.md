@@ -105,7 +105,8 @@ Current state, inspected 2026-09-26:
 | R-2 | Done | iOS fixes from the post-implementation review (see "Review findings") | I-2, I-3, F-3 | tron-coordinator, 2026-09-26 |
 | R-3 | Done | Gateway second-pass review fixes: stale `archived: true` response after the post-commit recheck, a queued backstop clear deleting a re-archive, migrate rekey ordering, prune retained set read outside the lane, doc drift, refused-compaction test and root-proof write-failure test | R-1 | tron-coordinator, 2026-09-26 |
 | R-4 | Done | iOS second-pass review fixes: a reload dropped while a load runs; background Mac container refreshes only on count change; "Show more" after cursor expiry; dead `GatewayClient` correlation field and overloads; automation form losing an archived target's name; doc drift; `AutomationFormView` formatting | R-2 | tron-coordinator, 2026-09-26 |
-| V-1 | Blocked | Cross-module checkpoint, user-performed Gateway rollout, and eyes-on device review; close the plan | G-2, I-2, I-3, F-3, F-4, F-5, F-6, R-1, R-2, R-3, R-4 | tron-coordinator, 2026-09-26 |
+| R-5 | Claimed | Third review regression from R-3: the rekey `assertAbsent` guard now runs for `preserve`, so an extension `switchSession` to a session that already has attention or archive state is refused and rolled back. Guard on `disposition !== "preserve"` and cover a real `switchSession` | R-3 | tron-coordinator, 2026-09-26 |
+| V-1 | Blocked | Cross-module checkpoint, user-performed Gateway rollout, and eyes-on device review; close the plan | G-2, I-2, I-3, F-3, F-4, F-5, F-6, R-1, R-2, R-3, R-4, R-5 | tron-coordinator, 2026-09-26 |
 
 ## Task details
 
