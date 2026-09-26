@@ -1038,7 +1038,7 @@ describe.sequential("RuntimeRegistry with the pinned agent runtime", () => {
     expect(after.sessions.map((session) => session.id).sort()).toEqual(beforeIDs);
   });
 
-  it("owns recursion without overlapping SDK directory materializations", async () => {
+  it("owns nested SDK session directories within its bounded directory budget", async () => {
     const root = await mkdtemp(join(tmpdir(), "tron-catalog-direct-sdk-listing-"));
     const agentDir = join(root, "agent");
     const catalog = join(agentDir, "sessions");
@@ -1049,6 +1049,9 @@ describe.sequential("RuntimeRegistry with the pinned agent runtime", () => {
     directSession.appendMessage(fauxAssistantMessage("direct catalog fixture"));
     childSession.appendMessage(fauxAssistantMessage("child catalog fixture"));
 
+    // Requirement: the pinned SDK lists one directory at a time, so recursion belongs
+    // to the registry; the catalog must still yield both nested sessions inside its
+    // bounded directory budget.
     expect((await SessionManager.listAll(catalog)).map((session) => session.id)).toEqual([
       directSession.getSessionId(),
     ]);
@@ -1389,12 +1392,22 @@ describe.sequential("RuntimeRegistry with the pinned agent runtime", () => {
     await fixture.registry.catalog("all");
     const indexPath = join(fixture.root, "tron", "gateway", "catalog-metadata-v2.json");
     await waitUntil(() => existsSync(indexPath));
-    const internals = fixture.registry as unknown as {
-      catalogStructuralIndex: unknown;
-      sessionInfos: () => Promise<unknown[]>;
-    };
-    internals.catalogStructuralIndex = undefined;
-    const scanner = vi.spyOn(internals, "sessionInfos");
+    // A restart is how a reader reaches the durable index with no in-memory cut.
+    // The append is injected inside reconciliation because no public caller can
+    // schedule work between the index read and its post-read evidence cut.
+    await fixture.registry.dispose();
+    const restarted = new RuntimeRegistry({
+      agentDir: fixture.agentDir,
+      tronHome: join(fixture.root, "tron"),
+      idleRuntimeMs: 60_000,
+      modelRuntimeFactory: async () => ModelRuntime.create({ modelsPath: null, refreshOnCreate: false }),
+      trust: new TrustService(fixture.agentDir),
+      broadcast: () => {},
+      sessionSummaryChanged: () => {},
+      sessionListChanged: () => {},
+    });
+    registries.push(restarted);
+    await restarted.initialize();
     const indexReconcile = CatalogMetadataIndex.prototype.reconcile;
     const reconcile = vi.spyOn(CatalogMetadataIndex.prototype, "reconcile");
     reconcile.mockImplementation(async function (this: CatalogMetadataIndex, ...args) {
@@ -1403,11 +1416,14 @@ describe.sequential("RuntimeRegistry with the pinned agent runtime", () => {
       return rows;
     });
     try {
-      await fixture.registry.catalog("all");
-      expect(scanner).toHaveBeenCalled();
+      // The indexed row is one message stale and its file is not runtime-owned,
+      // so the cut must be retired and rebuilt: the published row carries the
+      // appended body instead of the index's message count.
+      const listed = await restarted.catalog("all");
+      expect(listed.sessions.find((session) => session.id === fixture.manager.getSessionId()))
+        .toMatchObject({ messageCount: 2 });
     } finally {
       reconcile.mockRestore();
-      scanner.mockRestore();
     }
   });
 
@@ -1422,6 +1438,10 @@ describe.sequential("RuntimeRegistry with the pinned agent runtime", () => {
     };
     internals.catalogStructuralIndex = undefined;
     const scanner = vi.spyOn(internals, "sessionInfos");
+    // Requirement: a canonical file replaced under its indexed path during
+    // reconciliation retires the cached cut even when the bytes are unchanged,
+    // because the index is only valid for the exact file identity it read. That
+    // the materializer ran again is the only evidence the cut was not certified.
     const indexReconcile = CatalogMetadataIndex.prototype.reconcile;
     const reconcile = vi.spyOn(CatalogMetadataIndex.prototype, "reconcile");
     reconcile.mockImplementation(async function (this: CatalogMetadataIndex, ...args) {
@@ -1546,6 +1566,11 @@ describe.sequential("RuntimeRegistry with the pinned agent runtime", () => {
       return original(...arguments_);
     });
     const scanner = vi.spyOn(internals, "sessionInfos");
+    // Requirement: a durable load invalidated before publication must retire the
+    // index instead of publishing a cut whose evidence generation is stale, and
+    // fall back to exactly one fresh canonical scan. No public caller can
+    // schedule that invalidation inside the publication window, so the generation
+    // fence and the scan count are the only observers.
     try {
       const listing = restarted.catalog("all");
       await suspended;
