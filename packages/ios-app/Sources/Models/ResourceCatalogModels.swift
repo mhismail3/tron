@@ -1,5 +1,14 @@
 import Foundation
 
+/// Where an available resource comes from, derived by the Gateway from Pi
+/// sourceInfo. Pi built-ins carry no distribution, and `origin` keeps Pi's own
+/// package/top-level meaning on the separate scope badge.
+enum ResourceDistribution: String, Codable, Hashable, Sendable {
+    case external
+    case module
+    case local
+}
+
 struct CommandInfo: Codable, Hashable, Identifiable, Sendable {
     enum Source: String, Codable, Sendable { case `extension`, skill, prompt }
     enum ResourceScope: String, Codable, Sendable { case user, project, temporary }
@@ -48,6 +57,32 @@ struct CommandResourceDetail: Codable, Hashable, Sendable {
     let content: String?
     let contentBytes: Int?
     let contentTruncated: Bool?
+
+    init(
+        name: String,
+        description: String?,
+        argumentHint: String?,
+        source: CommandInfo.Source,
+        sourcePath: String?,
+        resourceSource: String?,
+        resourceScope: CommandInfo.ResourceScope?,
+        resourceOrigin: CommandInfo.ResourceOrigin?,
+        content: String?,
+        contentBytes: Int?,
+        contentTruncated: Bool?
+    ) {
+        self.name = name
+        self.description = description
+        self.argumentHint = argumentHint
+        self.source = source
+        self.sourcePath = sourcePath
+        self.resourceSource = resourceSource
+        self.resourceScope = resourceScope
+        self.resourceOrigin = resourceOrigin
+        self.content = content
+        self.contentBytes = contentBytes
+        self.contentTruncated = contentTruncated
+    }
 }
 
 enum CommandResourceDetailPolicy {
@@ -127,12 +162,58 @@ struct PackageSummary: Codable, Hashable, Identifiable, Sendable {
     let scope: Scope
     let filtered: Bool
     let installedPath: String?
+    /// The names this install contributes, projected by the Gateway from the
+    /// same resolution the package read already performs. Optional so a Gateway
+    /// that predates the field still decodes its listing; the detail sheet then
+    /// shows no Provides groups rather than an empty one.
+    var provides: PackageProvides? = nil
     var id: String { "\(scope.rawValue):\(source)" }
+    /// The scope word the installed row and its detail sheet both show.
+    var scopeLabel: String { scope == .project ? "Project" : "Global" }
+}
+
+/// The names one installed package provides, by kind. `packages.list` carries
+/// them beside each package and they stay names only: the flat resolved
+/// `resources` inventory remains authoritative for every path and status.
+struct PackageProvides: Codable, Hashable, Sendable {
+    let skills: [String]
+    let prompts: [String]
+    let themes: [String]
+    let subagents: [String]
+    let tools: [String]
+    let commands: [String]
 }
 
 struct PackageInventory: Codable, Hashable, Sendable {
     let packages: [PackageSummary]
     let resources: JSONValue
+    /// One bounded explanation for kinds `provides` could not resolve, so a
+    /// failed attribution never fails the package read itself.
+    var providesDiagnostic: String? = nil
+}
+
+/// One built-in Tron extension from `modules.list`. The commands are empty for
+/// every module today; they stay decoded because the Gateway reports them.
+struct TronModuleSummary: Codable, Hashable, Identifiable, Sendable {
+    let name: String
+    let purpose: String
+    let tools: [String]
+    let commands: [String]
+    var id: String { name }
+}
+
+/// One MCP connection a session would admit tools from. It names the source
+/// only: individual MCP tool names exist inside that session's runtime.
+struct McpToolSource: Codable, Hashable, Identifiable, Sendable {
+    let id: String
+    let definitionId: String
+    let health: String
+}
+
+/// `modules.list`: the installed Tron modules and the MCP tool sources.
+struct TronModuleList: Codable, Hashable, Sendable {
+    let modules: [TronModuleSummary]
+    let connections: [McpToolSource]
 }
 
 struct PackageUpdate: Codable, Hashable, Identifiable, Sendable {

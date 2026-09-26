@@ -1,18 +1,20 @@
 import SwiftUI
 
 enum ProjectResourceKind: String, CaseIterable, Identifiable, Sendable {
-    case prompts = "Prompts"
     case skills = "Skills"
+    case prompts = "Prompts"
+    case commands = "Commands"
     case tools = "Tools"
-    case extensions = "Extensions"
+    case subagents = "Subagents"
 
     var id: String { rawValue }
     var key: String {
         switch self {
-        case .extensions: "extensions"
         case .prompts: "prompts"
         case .skills: "skills"
+        case .commands: "commands"
         case .tools: "tools"
+        case .subagents: "subagents"
         }
     }
     var collectionKey: String? {
@@ -24,29 +26,32 @@ enum ProjectResourceKind: String, CaseIterable, Identifiable, Sendable {
     }
     var icon: String {
         switch self {
-        case .extensions: "shippingbox"
         case .prompts: "text.quote"
         case .skills: "sparkles"
+        case .commands: "command"
         case .tools: "wrench.and.screwdriver"
+        case .subagents: "person.2"
         }
     }
-    /// Prompt and skill accents are shared with the chat composer; other
+    /// Prompt and skill accents are shared with the chat composer; the other
     /// Project Resources categories retain their existing destination colors.
     @MainActor var accent: Color {
         switch self {
-        case .extensions: .tronPurple
         case .prompts: ChatSemanticPillRole.prompt.accent
         case .skills: .tronCyan
+        case .commands: ChatSemanticPillRole.command.accent
         case .tools: .tronAmber
+        case .subagents: .tronSubagent
         }
     }
     var emptyMessage: String { "No \(rawValue.lowercased()) were discovered for this project." }
     var explanation: String {
         switch self {
-        case .extensions: "Code modules currently loaded into this session. Extensions can add tools, commands, providers, and lifecycle behavior."
         case .prompts: "Reusable prompt templates available as slash commands."
         case .skills: "On-demand capability guides the agent can load when a task matches."
+        case .commands: "Slash commands registered by loaded extensions."
         case .tools: "Actions the active model can call in this session."
+        case .subagents: "Agent definitions this session can delegate work to."
         }
     }
 }
@@ -58,10 +63,14 @@ struct ProjectResourceSelection: Identifiable {
     let value: JSONValue
 
     var commandInfo: CommandInfo? {
-        guard kind == .prompts || kind == .skills,
+        guard kind == .prompts || kind == .skills || kind == .commands,
               let object = value.objectValue,
               let name = object["name"]?.stringValue, !name.isEmpty else { return nil }
-        let source: CommandInfo.Source = kind == .skills ? .skill : .prompt
+        let source: CommandInfo.Source = switch kind {
+        case .skills: .skill
+        case .commands: .extension
+        default: .prompt
+        }
         return CommandInfo(
             name: kind == .skills ? "skill:\(name)" : name,
             description: object["description"]?.stringValue,
@@ -76,19 +85,106 @@ struct ProjectResourceSelection: Identifiable {
 
 }
 
-private struct ProjectResourceOverviewRow: Identifiable, Equatable, Sendable {
+struct ProjectResourceOverviewRow: Identifiable, Equatable, Sendable {
     let id: String
     let title: String
     let subtitle: String?
     let value: JSONValue
     let resourceScope: CommandInfo.ResourceScope?
     let resourceOrigin: CommandInfo.ResourceOrigin?
+    let distribution: ResourceDistribution?
 }
 
-private struct ProjectResourceOverviewSection: Identifiable, Equatable, Sendable {
+struct ProjectResourceOverviewSection: Identifiable, Equatable, Sendable {
     var id: ProjectResourceKind { kind }
     let kind: ProjectResourceKind
     let rows: [ProjectResourceOverviewRow]
+}
+
+/// One projection of `session.resources` into the sheet's groups, so the
+/// sections the sheet shows are inspectable without mounting it.
+struct ProjectResourceOverviewContent: Equatable, Sendable {
+    static let empty = ProjectResourceOverviewContent(sections: [], diagnostics: .array([]), subagentDiagnostic: nil)
+
+    let sections: [ProjectResourceOverviewSection]
+    let diagnostics: JSONValue
+    let subagentDiagnostic: String?
+}
+
+enum ProjectResourceOverviewPresentation {
+    static func content(from resources: JSONValue?) -> ProjectResourceOverviewContent {
+        guard let root = resources?.objectValue else { return .empty }
+        let sections = ProjectResourceKind.allCases.map { kind in
+            ProjectResourceOverviewSection(kind: kind, rows: rows(kind: kind, root: root))
+        }
+        return ProjectResourceOverviewContent(
+            sections: sections,
+            diagnostics: diagnostics(from: root),
+            subagentDiagnostic: root["subagentDiagnostics"]?.stringValue
+        )
+    }
+
+    static func rows(kind: ProjectResourceKind, root: [String: JSONValue]) -> [ProjectResourceOverviewRow] {
+        let raw = root[kind.key]
+        let values: [JSONValue]
+        if kind == .commands {
+            values = extensionCommands(raw)
+        } else if let collectionKey = kind.collectionKey,
+                  let nested = raw?.objectValue?[collectionKey]?.arrayValue {
+            values = nested
+        } else {
+            values = raw?.arrayValue ?? []
+        }
+        return values.enumerated().map { index, value in
+            let title = ProjectResourceTitlePresentation.title(kind: kind, value: value)
+            let semanticID = value.objectValue?["id"]?.stringValue
+                ?? value.objectValue?["path"]?.stringValue
+                ?? value.objectValue?["name"]?.stringValue
+                ?? title
+            return ProjectResourceOverviewRow(
+                id: "\(kind.key):\(semanticID):\(index)",
+                title: title,
+                subtitle: kind == .subagents ? subagentSubtitle(value) : subtitle(value),
+                value: value,
+                resourceScope: value.objectValue?["scope"]?.stringValue.flatMap(CommandInfo.ResourceScope.init(rawValue:)),
+                resourceOrigin: value.objectValue?["origin"]?.stringValue.flatMap(CommandInfo.ResourceOrigin.init(rawValue:)),
+                distribution: value.objectValue?["distribution"]?.stringValue.flatMap(ResourceDistribution.init(rawValue:))
+            )
+        }
+    }
+
+    /// Only extension commands belong in the Commands group: prompt- and
+    /// skill-sourced entries already appear under Prompts and Skills.
+    private static func extensionCommands(_ raw: JSONValue?) -> [JSONValue] {
+        (raw?.arrayValue ?? []).filter { $0.objectValue?["source"]?.stringValue == "extension" }
+    }
+
+    private static func subtitle(_ value: JSONValue) -> String? {
+        guard let object = value.objectValue else { return nil }
+        if let description = object["description"]?.stringValue, !description.isEmpty {
+            return ProjectResourceTextPresentation.readableDescription(description)
+        }
+        let scope = object["scope"]?.stringValue?.capitalized
+        let source = object["source"]?.stringValue
+        if let scope, let source { return "\(scope) · \(source)" }
+        return scope ?? object["path"]?.stringValue
+    }
+
+    /// Subagent rows name their definition, describe its purpose, and name the
+    /// pinned model when pi-subagents resolved one.
+    private static func subagentSubtitle(_ value: JSONValue) -> String? {
+        let object = value.objectValue ?? [:]
+        let description = object["description"]?.stringValue.map(ProjectResourceTextPresentation.readableDescription)
+        let values = [description, object["model"]?.stringValue.map { "Model \($0)" }].compactMap { $0 }
+        return values.isEmpty ? nil : values.joined(separator: " · ")
+    }
+
+    private static func diagnostics(from root: [String: JSONValue]) -> JSONValue {
+        let values = ["skills", "prompts"].flatMap { key in
+            root[key]?.objectValue?["diagnostics"]?.arrayValue ?? []
+        }
+        return .array(values)
+    }
 }
 
 enum ProjectResourceTextPresentation {
@@ -119,6 +215,7 @@ struct ProjectResourceDetailPresentation: Equatable {
     let invocation: String?
     let availability: String?
     let path: String?
+    let model: String?
     let tools: [String]
     let commands: [String]
     let schemaSummary: String?
@@ -134,14 +231,6 @@ struct ProjectResourceDetailPresentation: Equatable {
         path = object["path"]?.stringValue ?? object["resolvedPath"]?.stringValue
 
         switch kind {
-        case .extensions:
-            purpose = description ?? "A loaded extension that can add commands, tools, and session behavior."
-            tools = Self.strings(object["tools"])
-            commands = Self.strings(object["commands"])
-            invocation = nil
-            availability = "Loaded for this session"
-            schemaSummary = nil
-            guidance = nil
         case .prompts:
             purpose = description ?? "A reusable prompt template."
             let rawHint = object["argumentHint"]?.stringValue?.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -162,6 +251,14 @@ struct ProjectResourceDetailPresentation: Equatable {
             commands = []
             schemaSummary = nil
             guidance = nil
+        case .commands:
+            purpose = description ?? "A command registered by a loaded extension."
+            invocation = "/\(name)"
+            availability = "Registered by a loaded extension"
+            tools = []
+            commands = []
+            schemaSummary = nil
+            guidance = nil
         case .tools:
             purpose = description ?? "An action available to the active model."
             invocation = name
@@ -175,11 +272,16 @@ struct ProjectResourceDetailPresentation: Equatable {
                 ? "No declared inputs"
                 : "\(propertyCount) input\(propertyCount == 1 ? "" : "s") · \(requiredCount) required"
             guidance = object["promptGuidelines"]?.stringValue.map(ProjectResourceTextPresentation.readableDescription)
+        case .subagents:
+            purpose = description ?? "An agent definition available for delegated work."
+            invocation = nil
+            availability = "Available for delegation"
+            tools = []
+            commands = []
+            schemaSummary = nil
+            guidance = nil
         }
-    }
-
-    private static func strings(_ value: JSONValue?) -> [String] {
-        value?.arrayValue?.compactMap(\.stringValue) ?? []
+        model = kind == .subagents ? object["model"]?.stringValue : nil
     }
 }
 
@@ -192,8 +294,7 @@ struct ProjectResourcesView: View {
     @State private var reloading = false
     @State private var loadGeneration = 0
     @State private var selected: ProjectResourceSelection?
-    @State private var overviewSections: [ProjectResourceOverviewSection] = []
-    @State private var diagnostics: JSONValue = .array([])
+    @State private var content = ProjectResourceOverviewContent.empty
 
     var body: some View {
         NavigationStack {
@@ -201,15 +302,27 @@ struct ProjectResourcesView: View {
                 LazyVStack(alignment: .leading, spacing: 18) {
                     if model.resources?.objectValue != nil {
                         VStack(alignment: .leading, spacing: 18) {
-                            ForEach(overviewSections) { section in
+                            ForEach(content.sections) { section in
                                 resourceGroup(section)
                             }
                         }
-                        .tronSettingsCaption("These are resolved resources actually available to this session. Open a row to inspect its source, path, capabilities, or schema.")
-                        if diagnostics != .array([]) {
+                        .tronSettingsCaption("These are resolved resources actually available to this session, tagged by where they come from. Open a row to inspect its source, path, capabilities, or schema.")
+                        if content.diagnostics != .array([]) || content.subagentDiagnostic != nil {
                             TronSettingsGroup("Diagnostics", accent: .tronError, surfaceStyle: .scrollOptimized) {
-                                TronStructuredJSONView(value: diagnostics, title: "Resource Diagnostics", accent: .tronError)
-                                    .padding(12)
+                                if let subagentDiagnostic = content.subagentDiagnostic {
+                                    TronSettingsRow(
+                                        icon: "person.2",
+                                        title: "Subagents",
+                                        subtitle: subagentDiagnostic,
+                                        subtitleLineLimit: 3,
+                                        accent: .tronError
+                                    )
+                                    if content.diagnostics != .array([]) { TronSettingsDivider(accent: .tronError) }
+                                }
+                                if content.diagnostics != .array([]) {
+                                    TronStructuredJSONView(value: content.diagnostics, title: "Resource Diagnostics", accent: .tronError)
+                                        .padding(12)
+                                }
                             }
                             .environment(\.tronSettingsVisualTheme, nil)
                         }
@@ -263,7 +376,7 @@ struct ProjectResourcesView: View {
                 presentationActive: presentationActivity.allowsPresentationPublication
             )) {
                 guard presentationActivity.allowsPresentationPublication else { return }
-                if overviewSections.isEmpty { installOverview() }
+                if content.sections.isEmpty { installOverview() }
                 await load()
             }
             .tronManagedSheet(
@@ -315,11 +428,17 @@ struct ProjectResourcesView: View {
                                 subtitleLineLimit: 1,
                                 accent: kind.accent
                             ) {
-                                ComposerResourceBadges(
-                                    origin: row.resourceOrigin,
-                                    scope: row.resourceScope,
-                                    accent: kind.accent
-                                )
+                                HStack(spacing: 4) {
+                                    ResourceDistributionTag(
+                                        distribution: row.distribution,
+                                        accent: kind.accent
+                                    )
+                                    ComposerResourceBadges(
+                                        origin: row.resourceOrigin,
+                                        scope: row.resourceScope,
+                                        accent: kind.accent
+                                    )
+                                }
                             }
                         }
                         .buttonStyle(.plain)
@@ -333,57 +452,8 @@ struct ProjectResourcesView: View {
         .environment(\.tronSettingsVisualTheme, nil)
     }
 
-    private func resourceDiagnostics(_ root: [String: JSONValue]) -> JSONValue {
-        let values = ["skills", "prompts"].flatMap { key in
-            root[key]?.objectValue?["diagnostics"]?.arrayValue ?? []
-        }
-        return .array(values)
-    }
-
-    private func resourceSubtitle(_ value: JSONValue) -> String? {
-        guard let object = value.objectValue else { return nil }
-        if let description = object["description"]?.stringValue, !description.isEmpty {
-            return ProjectResourceTextPresentation.readableDescription(description)
-        }
-        let scope = object["scope"]?.stringValue?.capitalized
-        let source = object["source"]?.stringValue
-        if let scope, let source { return "\(scope) · \(source)" }
-        return scope ?? object["path"]?.stringValue
-    }
-
     private func installOverview() {
-        guard let root = model.resources?.objectValue else {
-            overviewSections = []
-            diagnostics = .array([])
-            return
-        }
-        overviewSections = ProjectResourceKind.allCases.map { kind in
-            let raw = root[kind.key]
-            let values: [JSONValue]
-            if let collectionKey = kind.collectionKey,
-               let nested = raw?.objectValue?[collectionKey]?.arrayValue {
-                values = nested
-            } else {
-                values = raw?.arrayValue ?? []
-            }
-            let rows = values.enumerated().map { index, value in
-                let title = ProjectResourceTitlePresentation.title(kind: kind, value: value)
-                let semanticID = value.objectValue?["id"]?.stringValue
-                    ?? value.objectValue?["path"]?.stringValue
-                    ?? value.objectValue?["name"]?.stringValue
-                    ?? title
-                return ProjectResourceOverviewRow(
-                    id: "\(kind.key):\(semanticID):\(index)",
-                    title: title,
-                    subtitle: resourceSubtitle(value),
-                    value: value,
-                    resourceScope: value.objectValue?["scope"]?.stringValue.flatMap(CommandInfo.ResourceScope.init(rawValue:)),
-                    resourceOrigin: value.objectValue?["origin"]?.stringValue.flatMap(CommandInfo.ResourceOrigin.init(rawValue:))
-                )
-            }
-            return ProjectResourceOverviewSection(kind: kind, rows: rows)
-        }
-        diagnostics = resourceDiagnostics(root)
+        content = ProjectResourceOverviewPresentation.content(from: model.resources)
     }
 
     private func reload() {
@@ -577,6 +647,9 @@ struct ProjectResourceDetailSheet: View {
         }
         if let path = detail?.sourcePath ?? presentation.path, !path.isEmpty {
             items.append(.init(title: "Source file", value: path, icon: "doc.text"))
+        }
+        if let model = presentation.model {
+            items.append(.init(title: "Model", value: model, icon: "cpu"))
         }
         if !presentation.tools.isEmpty {
             items.append(.init(title: "Tools", value: presentation.tools.joined(separator: ", "), icon: "wrench.and.screwdriver"))

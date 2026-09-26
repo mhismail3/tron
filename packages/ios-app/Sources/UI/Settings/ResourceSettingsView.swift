@@ -184,18 +184,12 @@ struct ResourceSettingsView: View {
 
     private var scopeGroup: some View {
         TronSettingsGroup("Applies To", detail: scopeExplanation) {
-            if allowsProjectScope {
-                TronSelectionRow(icon: "scope", title: "Settings Scope", value: scope == .project ? "Current Project" : "Every Project") {
-                    Button("Every Project") { selectScope(.global) }
-                    Button("Current Project") { selectScope(.project) }
-                }
-            } else {
-                TronValueRow(
-                    icon: "scope",
-                    title: "Settings Scope",
-                    value: "Every Project"
-                )
-            }
+            SettingsScopeRow(
+                icon: "scope",
+                title: "Settings Scope",
+                scope: scope,
+                allowsProjectScope: allowsProjectScope
+            ) { selectScope($0) }
         }
     }
 

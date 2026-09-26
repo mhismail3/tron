@@ -1342,7 +1342,7 @@ backdrop filter for every row or a multi-screen card. Long settings screens use
 lazy outer stacks, while their small divider-owned sections remain eager. The main Settings sheet places its
 divider-owned rows in four category containers rather than one backdrop per destination, grouped by what the user
 configures: emerald This iPhone (Connections, Appearance, Sessions), purple Agent (Model Providers,
-Custom Models, Agent Defaults, Compaction), cyan Tools & Extensions (Packages, MCP Servers, Connected
+Custom Models, Agent Defaults, Compaction), cyan Tools & Extensions (Extensions, MCP Servers, Connected
 Services, Project Trust, Locations and Overrides), and blue Data & Diagnostics (dashboard-only Import, Logs). Row icons and dividers use the owning
 container accent. Connections retains the authorized-device detail identity across a server switch and refreshes its content in place; a transient device-list projection cannot dismiss the nested settings stack. Each progressive destination installs that row accent as an environment-owned visual theme
 for ordinary titles, controls, icons, dividers, fields, and containers, including nested sheets; informational
@@ -1840,22 +1840,22 @@ prepared once off the main actor when the bounded tree or selected mode changes;
 live session-state updates reuse those immutable rows, and dense cards use the
 static scroll surface rather than one live glass filter per event. Manage Session's model-card
 Compact Now action invokes Pi's canonical compaction through Gateway and can leave one authoritative request queued
-behind an active turn. Project Resources presents resolved extensions, prompts, skills,
-and tools as named rows over the canonical projection. Manage Session also exposes
-Project Hooks as a separate current-runtime registration inventory: each extension
-is grouped by its truthful User/Project/Runtime provenance, with event names and
-handler counts from the Gateway's public loader projection and load issues shown
-separately. Registration is not execution history or health. The bounded Gateway
-projection reports omitted extension/event/error/long-metadata counts and the
-sheet renders an incomplete notice rather than implying completeness. Resource
+behind an active turn. Project Resources presents resolved skills, prompts, extension commands,
+tools, and subagents as named rows over the canonical projection. Every row carries the
+Gateway-derived distribution tag (External, Module, or Local) beside the existing User/Project
+scope badge, and Pi built-ins carry none; both tags are one shared capsule
+component (`ResourceTagLabel`), so their styling cannot drift. Prompt- and skill-sourced commands stay in their own
+groups, so only extension commands appear under Commands. The Extensions section is gone from
+this sheet; the projection still carries its extension rows and load errors for the Settings
+Hooks sheet. Resource
 read failures are fenced to the mounted session and render retryable error state.
 Instruction files such as `AGENTS.md`
 have no duplicate row or Context Files section there: their assembled guidance belongs in
 Agent Instructions, which opens the complete document directly. Canonical resource discovery
 is unchanged. Project Resources, Session History, and Subagent History use the originating Manage Session teal titles and
-toolbar actions to match their originating Session rows. Project Hooks keeps one native scroll owner across loading and By Event/By Extension changes, so lazy content starts at the platform top anchor without imperative scroll resets. Hook event technical info opens the Event Details JSON reader directly rather than an intermediate technical-details card. Resource detail chrome instead
+toolbar actions to match their originating Session rows. Resource detail chrome instead
 matches its own category accent. Project Resource titles prefer authored labels, otherwise
-humanize tool/skill/prompt names using the shared composer formatter. Extension titles derive
+humanize tool/skill/prompt/command/subagent names using the shared composer formatter. Extension titles derive
 from npm/Git package names, meaningful local entrypoints, or named inline extensions rather
 than generic `index.ts` filenames and `<inline:…>` wrappers. First-party inline names read as
 Tron Core, Tron Context Window, Tron Display, Tron Automations, and Tron Notifications. Exact invocation
@@ -1870,20 +1870,30 @@ positional “Item” labels. The overview derives stable row titles, subtitles,
 and identities once per admitted resource revision, then reuses that projection
 while scrolling; large resource groups use the static scroll surface. Reload is owned by that sheet and publishes visible progress; the canonical
 `session.resourcesChanged` revision is the sole post-mutation read owner, so mutation and projection loads cannot race one shared busy flag.
-Packages starts with resource scope and inventory counts (Project Trust is its sibling Settings row, not repeated inside),
-then installed packages, a standalone Install Package action,
-then inline Skills, Prompts and Themes containers using Manage Session's emerald/cyan/teal resource
-accents. Resolved extensions are not duplicated beneath the installed list. Opaque, no-space source
+Extensions starts with resource scope and inventory counts (Project Trust is its sibling Settings row, not repeated inside),
+then the Installed container of third-party packages and a standalone Install Package action,
+then the read-only Tron Modules container (each module's name, purpose and tools, plus the MCP
+connections a session would admit tools from). Resolved extensions are not duplicated beneath the installed list, and
+resolved skills and prompts left this sheet for Manage Session → Project Resources.
+Every Installed row opens that package's detail sheet: its source and scope, the shared distribution tag labeled once
+because every installed package is external, then the names the package provides as Provides groups in Skills, Prompts,
+Subagents, Tools, Commands, Themes order. An empty kind is hidden, a package that provides nothing says so in one line,
+and a Gateway that predates `provides` shows no groups and no line at all. Each group reuses the Project Resources icon
+and colour for its kind, and the one bounded `providesDiagnostic` from the same read appears once as the standard
+notice. These names are the projection `packages.list` already carries beside each installed package, so this sheet
+opens no new read. Pi themes style the terminal rather than this app, so a theme an installed package owns appears only
+in that package's sheet, and the themes no package owns — including one whose package has left the listing — stay
+reachable in a single Local themes group that appears only while some exist. Opaque, no-space source
 titles remain continuous and horizontally inspectable; ordinary titles and provenance wrap naturally,
 with complete source/status information retained for accessibility. Resolved resource names use the
 same friendly title formatter as session resources, stripping Markdown/JSON suffixes and deriving a
 skill name from its directory. Raw paths, IDs and metadata remain untouched. Shared source/scope
 information appears once as a category caption, not repeated in each row; mixed sources retain row
-provenance. Empty categories use captions rather than empty info cards. Scope counts describe inventory,
+provenance. Scope counts describe inventory,
 not tools loaded into every existing conversation. Full technical resource data remains available separately, including extension-only
-or additive categories. Locations and Overrides is a separate sibling sheet in Tools & Extensions, retaining optional discovery paths, advanced Mac overrides and autosave. Session storage remains
+or additive categories. Locations and Overrides is a separate sibling sheet in Tools & Extensions, retaining optional discovery paths, advanced Mac overrides and autosave. Settings → Agent → Hooks shows one scope's hook inventory without a session: it reads `hooks.list` without a `cwd` for Every Project and with the project path for Current Project, reusing Locations and Overrides' Every Project/Current Project row, and it renders the By Event and By Extension projections, extension and event details, load issues and bounded-omissions notice a session used to show. A Gateway that does not advertise `hooks.v1` is never asked and shows the unavailable state, and an untrusted project says its hooks are not loaded with Project Trust beside that line, so a global-only answer is never read as an empty project. Session storage remains
 Gateway-owned and is not exposed as a location override. Package catalog admission failures remain
-local to the Packages sheet, preserving the sheet while presenting a bounded retry
+local to the Extensions sheet, preserving the sheet while presenting a bounded retry
 state instead of routing a projection error through a global modal alert. Visible Settings reads include
 the successful `foregroundReconciliationGeneration` in their task identities and publication fences.
 Foreground/reconnect readiness therefore reloads the current sheet and replaces stale offline errors;
@@ -1974,8 +1984,7 @@ Context slider endpoint labels are bold monospace; Default remains purple/semibo
 the code face. Its title and endpoint labels are white in dark mode. Custom Models uses
 the standard purple settings tint, while technical-detail rows retain their gray surface
 independently of the destination's toolbar accent. Additional Locations uses plural
-Extensions, Skills, Prompts and Terminal Themes row titles; empty resolved resource sections,
-including Themes, retain a standard Liquid Glass placeholder row.
+Extensions, Skills, Prompts and Terminal Themes row titles.
 
 Manage Session displays the runtime-projected latest cache-hit rate—the
 same canonical formula used by the terminal footer—and never derives a ratio

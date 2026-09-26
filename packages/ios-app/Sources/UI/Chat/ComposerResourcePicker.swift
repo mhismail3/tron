@@ -698,13 +698,7 @@ struct ComposerResourceBadges: View {
 
     var body: some View {
         ForEach(hookProvenance.map { [$0.rawValue] } ?? Self.titles(origin: origin, scope: scope), id: \.self) { title in
-            Text(title)
-                .font(TronTypography.sans(size: TronTypography.sizeXS, weight: .medium))
-                .foregroundStyle(accent)
-                .padding(.horizontal, 4)
-                .padding(.vertical, 1)
-                .background(accent.opacity(0.15), in: Capsule())
-                .fixedSize()
+            ResourceTagLabel(title: title, accent: accent)
         }
     }
 }

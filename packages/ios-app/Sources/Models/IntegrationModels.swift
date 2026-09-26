@@ -65,6 +65,20 @@ struct IntegrationInstance: Codable, Hashable, Sendable, Identifiable {
     }
 }
 
+/// One spelling of Gateway connection health for every sheet that shows it.
+enum IntegrationHealthPresentation {
+    static func label(_ health: String) -> String {
+        switch health {
+        case "ready": "Ready"
+        case "disabled": "Disabled"
+        case "auth-error": "Authentication error"
+        case "disconnected": "Disconnected"
+        case "setup-required": "Setup required"
+        default: "Unavailable"
+        }
+    }
+}
+
 struct IntegrationCapabilityStatus: Codable, Hashable, Sendable, Identifiable {
     let id: String
     let availability: String

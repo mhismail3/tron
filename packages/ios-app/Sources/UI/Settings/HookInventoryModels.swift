@@ -38,12 +38,12 @@ struct HookExtensionRecord: Identifiable, Equatable, Sendable {
     var handlerCount: Int { handlers.reduce(0) { $0 + $1.count } }
     var eventCount: Int { handlers.count }
     var friendlyName: String {
-        ProjectResourceTitlePresentation.title(kind: .extensions, value: .object([
+        ProjectResourceTitlePresentation.extensionTitle(name: name, object: [
             "name": .string(name),
             "path": path.map(JSONValue.string) ?? .null,
             "resolvedPath": resolvedPath.map(JSONValue.string) ?? .null,
             "source": source.map(JSONValue.string) ?? .null,
-        ]))
+        ])
     }
 
     init(value: JSONValue) {

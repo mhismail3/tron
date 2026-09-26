@@ -1,117 +1,5 @@
 import SwiftUI
 
-enum PackageResourceKind: String, CaseIterable, Identifiable, Sendable {
-    case extensions, skills, prompts, themes
-
-    var id: String { rawValue }
-
-    var title: String {
-        switch self {
-        case .extensions: "Extensions"
-        case .skills: "Skills"
-        case .prompts: "Prompts"
-        case .themes: "Themes"
-        }
-    }
-
-    var icon: String {
-        switch self {
-        case .extensions: "puzzlepiece.extension.fill"
-        case .skills: "sparkles"
-        case .prompts: "text.quote"
-        case .themes: "paintpalette.fill"
-        }
-    }
-
-    // Prompt and skill accents are owned by the chat picker and shared with
-    // Project Resources. Package extensions retain their purple category hue.
-    @MainActor var accent: Color {
-        switch self {
-        case .extensions: ProjectResourceKind.extensions.accent
-        case .skills: ProjectResourceKind.skills.accent
-        case .prompts: ProjectResourceKind.prompts.accent
-        case .themes: .tronTeal
-        }
-    }
-}
-
-struct PackageResolvedResourceItem: Identifiable, Equatable, Sendable {
-    let path: String
-    let enabled: Bool
-    let source: String?
-    let scope: String?
-    let origin: String?
-
-    var statusDescription: String { enabled ? "Ready to use" : "Turned off" }
-
-    var id: String { path }
-
-    var displayName: String { ProjectResourceTitlePresentation.resourcePathTitle(path) }
-
-    var sourceDescription: String? {
-        if source == "auto" { return "Discovered automatically" }
-        if let source, !source.isEmpty { return "From \(source)" }
-        return nil
-    }
-}
-
-struct PackageResolvedResourceCategory: Identifiable, Equatable, Sendable {
-    let kind: PackageResourceKind
-    let items: [PackageResolvedResourceItem]
-
-    var id: String { kind.id }
-    var enabledCount: Int { items.count(where: \.enabled) }
-    var disabledCount: Int { items.count - enabledCount }
-    var hasSharedSource: Bool { Set(items.map(\.source)).count == 1 }
-
-    var caption: String? {
-        guard !items.isEmpty else { return nil }
-        let scopes = Set(items.map { $0.scope == "user" ? "global" : $0.scope })
-        let scope = switch scopes {
-        case ["global"]: "Available in every project."
-        case ["project"]: "Available in the current project."
-        case ["temporary"]: "Available in this session."
-        default: "Source and scope details are available in Technical Details."
-        }
-        let provenance = hasSharedSource ? items.first?.sourceDescription : nil
-        return [provenance, scope].compactMap { $0 }.joined(separator: " · ")
-    }
-
-    var summary: String {
-        guard !items.isEmpty else { return "None resolved" }
-        if disabledCount == 0 {
-            return "\(items.count) ready to use"
-        }
-        return "\(enabledCount) ready · \(disabledCount) turned off"
-    }
-}
-
-struct PackageResolvedResourcesPresentation: Equatable, Sendable {
-    let categories: [PackageResolvedResourceCategory]
-
-    init(resources: JSONValue) {
-        let root = resources.objectValue ?? [:]
-        // Installed packages already occupy the first section. Do not render
-        // their extensions again in the resolved resource lists.
-        categories = [PackageResourceKind.skills, .prompts, .themes].map { kind in
-            let values = root[kind.rawValue]?.arrayValue ?? []
-            let items = values.compactMap { value -> PackageResolvedResourceItem? in
-                guard let object = value.objectValue,
-                      let path = object["path"]?.stringValue else { return nil }
-                let metadata = object["metadata"]?.objectValue
-                return PackageResolvedResourceItem(
-                    path: path,
-                    enabled: object["enabled"]?.boolValue != false,
-                    source: metadata?["source"]?.stringValue,
-                    scope: metadata?["scope"]?.stringValue,
-                    origin: metadata?["origin"]?.stringValue
-                )
-            }
-            return PackageResolvedResourceCategory(kind: kind, items: items)
-        }
-    }
-}
-
 enum PackageInstallDraftPolicy {
     static func afterSuccess(current: String, captured: String) -> String {
         current == captured ? "" : current
@@ -132,7 +20,7 @@ enum PackageMutationOperation: Hashable {
     }
 }
 
-struct PackagesSettingsView: View {
+struct ExtensionsSettingsView: View {
     @Environment(AppModel.self) private var model
     @Environment(\.tronPresentationActivity) private var presentationActivity
     let projectCWD: String?
@@ -148,8 +36,12 @@ struct PackagesSettingsView: View {
     @State private var reloading = false
     @State private var refreshError: String?
     @State private var mutationErrors: [PackageMutationOperation: String] = [:]
+    @State private var packageToInspect: PackageSummary?
     @State private var refreshGeneration = 0
     @State private var mutationToken = 0
+    @State private var modules: TronModuleList?
+    @State private var moduleError: String?
+    @State private var loadingModules = false
     private struct OwnedMutation {
         let token: Int
         let task: Task<Void, Never>
@@ -160,6 +52,26 @@ struct PackagesSettingsView: View {
         PackageLoadID(target: target, profileRevision: model.profileRevision,
                       invalidationGeneration: model.packageInvalidationGeneration,
                       refreshGeneration: refreshGeneration, foregroundGeneration: model.foregroundReconciliationGeneration)
+    }
+
+    /// Modules are session-free, so their read identity is the same sheet-wide
+    /// refresh identity without the package target.
+    private struct ModuleLoadID: Equatable {
+        let profileRevision: Int
+        let refreshGeneration: Int
+        let foregroundGeneration: Int
+    }
+
+    private var moduleLoadID: ModuleLoadID {
+        ModuleLoadID(profileRevision: model.profileRevision,
+                     refreshGeneration: refreshGeneration,
+                     foregroundGeneration: model.foregroundReconciliationGeneration)
+    }
+
+    /// A Gateway that predates `modules.list` simply has no module list to
+    /// show; it never renders as an empty container.
+    private var supportsModules: Bool {
+        model.gatewayInfo?.capabilities.contains("modules.v1") == true
     }
 
     private var packageError: String? {
@@ -205,9 +117,17 @@ struct PackagesSettingsView: View {
                 .tronGlassSurface(accent: .tronEmerald, tintOpacity: 0.06)
                 .tronSettingsCaption("Agent packages and extensions run with your Mac user authority. Review their source before installing.")
 
-                if let resources = inventory?.resources {
-                    PackageResolvedResourcesSection(resources: resources)
-                        .environment(\.tronSettingsVisualTheme, nil)
+                if supportsModules {
+                    modulesSection
+                }
+
+                if let inventory {
+                    localThemesGroup(inventory)
+                    if inventory.resources.objectValue?.isEmpty == false {
+                        TronTechnicalJSONRow(value: inventory.resources, title: "Technical Details",
+                                             subtitle: "View paths, provenance, status, and other resolved resource data",
+                                             sheetTitle: "Resolved Resources JSON", accent: .tronSlate)
+                    }
                 }
 
             }
@@ -215,7 +135,7 @@ struct PackagesSettingsView: View {
             .padding(.vertical, 18)
         }
         .tronScrollEdgeChrome()
-        .tronNavigationTitle("Packages")
+        .tronNavigationTitle("Extensions")
         .toolbar {
             ToolbarItem(placement: .topBarLeading) {
                 TronReloadToolbarButton(isReloading: reloading, action: reload)
@@ -226,6 +146,7 @@ struct PackagesSettingsView: View {
             presentationActive: presentationActivity.allowsPresentationPublication
         )) {
             await refreshPackages(loadID)
+            await refreshModules(moduleLoadID)
         }
         .onChange(of: target) { _, _ in
             revokeMutationTasks()
@@ -267,6 +188,12 @@ struct PackagesSettingsView: View {
                 onConfirm: { remove(package) }
             )
         }
+        .tronManagedSheet(
+            item: $packageToInspect,
+            identity: { _ in "settings.packages.detail" }
+        ) { package in
+            PackageDetailSheet(package: package, providesDiagnostic: inventory?.providesDiagnostic)
+        }
     }
 
     private var resolutionSection: some View {
@@ -276,7 +203,7 @@ struct PackagesSettingsView: View {
             accent: .tronBlue,
             surfaceStyle: .glass
         ) {
-            // Project Trust is one Settings row beside Packages, not repeated here.
+            // Project Trust is one Settings row beside Extensions, not repeated here.
             TronValueRow(icon: "scope", title: "Scope", value: projectCWD == nil ? "Global resources" : "Current project")
         }
     }
@@ -284,8 +211,8 @@ struct PackagesSettingsView: View {
     private var resolutionSummary: String {
         guard let inventory else { return "Waiting for the Gateway resource projection" }
         let packageCount = inventory.packages.count
-        let resourceCount = PackageResolvedResourcesPresentation(resources: inventory.resources).categories.reduce(0) { $0 + $1.items.count }
-        return "\(packageCount) installed package\(packageCount == 1 ? "" : "s") · \(resourceCount) resolved resource\(resourceCount == 1 ? "" : "s")"
+        let themeCount = PackageThemesPresentation.items(from: inventory.resources).count
+        return "\(packageCount) installed package\(packageCount == 1 ? "" : "s") · \(themeCount) resolved theme\(themeCount == 1 ? "" : "s")"
     }
 
     private func reload() {
@@ -313,6 +240,105 @@ struct PackagesSettingsView: View {
         // A successful foreground/reconnect pass invalidates even a late offline
         // failure. Only reads restart; accepted package commands are not replayed.
         !Task.isCancelled && presentationActivity.allowsPresentationPublication && request == loadID
+    }
+
+    /// The read-only module list: the built-in extensions this Gateway loads
+    /// and the MCP connections it would admit tools from.
+    private var modulesSection: some View {
+        TronSettingsGroup("Tron Modules", detail: modulesDetail, accent: .tronPurple, surfaceStyle: .glass) {
+            if let modules {
+                if modules.modules.isEmpty && modules.connections.isEmpty {
+                    TronPlaceholderState(
+                        title: "No modules reported",
+                        detail: "This Gateway reported neither built-in modules nor MCP tool sources.",
+                        icon: "shippingbox"
+                    )
+                } else {
+                    VStack(spacing: 0) {
+                        ForEach(Array(modules.modules.enumerated()), id: \.element.id) { index, module in
+                            if index > 0 { TronSettingsDivider(accent: .tronPurple) }
+                            moduleRow(module)
+                        }
+                        ForEach(Array(modules.connections.enumerated()), id: \.element.id) { index, source in
+                            if index > 0 || !modules.modules.isEmpty { TronSettingsDivider(accent: .tronPurple) }
+                            toolSourceRow(source)
+                        }
+                    }
+                }
+            } else if loadingModules {
+                TronLoadingState(label: "Loading Tron modules…", accent: .tronPurple)
+                    .padding(14)
+            } else if let moduleError {
+                TronSettingsRow(
+                    icon: "exclamationmark.triangle",
+                    title: "Modules unavailable",
+                    subtitle: moduleError,
+                    subtitleLineLimit: 3,
+                    accent: .tronError
+                )
+            }
+        }
+    }
+
+    private var modulesDetail: String {
+        guard let modules else { return "Built-in Tron extensions and MCP tool sources" }
+        var values = ["\(modules.modules.count) loaded module\(modules.modules.count == 1 ? "" : "s")"]
+        if !modules.connections.isEmpty {
+            values.append("\(modules.connections.count) MCP tool source\(modules.connections.count == 1 ? "" : "s")")
+        }
+        return values.joined(separator: " · ")
+    }
+
+    /// No Tron module registers a command today, so tools carry the row and
+    /// commands appear only when a module actually has them.
+    private func moduleRow(_ module: TronModuleSummary) -> some View {
+        let tools = module.tools.isEmpty ? "No tools" : "Tools: \(module.tools.joined(separator: ", "))"
+        let commands = module.commands.isEmpty ? nil : "Commands: \(module.commands.map { "/\($0)" }.joined(separator: ", "))"
+        return TronSettingsRow(
+            icon: "shippingbox.fill",
+            title: module.name,
+            subtitle: [module.purpose, tools, commands].compactMap { $0 }.joined(separator: " · "),
+            subtitleLineLimit: 3,
+            titleIsIdentifier: true,
+            accent: .tronPurple,
+            subtitleColor: .tronTextSecondary
+        )
+    }
+
+    /// One MCP connection a session would admit tools from. Individual tool
+    /// names need that session's runtime and are not claimed here.
+    private func toolSourceRow(_ source: McpToolSource) -> some View {
+        TronSettingsRow(
+            icon: "server.rack",
+            title: source.id,
+            subtitle: "MCP tool source · \(source.definitionId) · \(IntegrationHealthPresentation.label(source.health))",
+            subtitleLineLimit: 2,
+            titleIsIdentifier: true,
+            accent: .tronBlue,
+            subtitleColor: .tronTextSecondary
+        )
+    }
+
+    private func refreshModules(_ request: ModuleLoadID) async {
+        guard supportsModules, refreshModulesIsCurrent(request) else { return }
+        loadingModules = modules == nil
+        defer { if refreshModulesIsCurrent(request) { loadingModules = false } }
+        do {
+            let loaded: TronModuleList = try await model.client.request("modules.list", EmptyParams())
+            guard refreshModulesIsCurrent(request) else { return }
+            modules = loaded
+            moduleError = nil
+        } catch is CancellationError {
+            return
+        } catch {
+            guard refreshModulesIsCurrent(request) else { return }
+            modules = nil
+            moduleError = error.localizedDescription
+        }
+    }
+
+    private func refreshModulesIsCurrent(_ request: ModuleLoadID) -> Bool {
+        !Task.isCancelled && presentationActivity.allowsPresentationPublication && request == moduleLoadID
     }
 
     private func beginMutation(_ operation: PackageMutationOperation) -> Int {
@@ -434,27 +460,67 @@ struct PackagesSettingsView: View {
     }
 
     private func packageRow(_ package: PackageSummary) -> some View {
-        PackageSourceRow(
-            source: package.source,
-            detail: [
-                package.scope == .project ? "Project" : "Global",
-                package.filtered ? "Filtered" : nil,
-                updates.contains { $0.id == package.id } ? "Update available" : nil,
-            ].compactMap { $0 }.joined(separator: " · "),
-            accent: .tronBlue
-        ) {
-            if isMutating(package) {
-                TronPulseLoadingIndicator(size: 18)
-            } else {
-                Menu {
-                    Button("Update", systemImage: "arrow.clockwise") { update(package) }
-                    Button("Remove", systemImage: "trash", role: .destructive) { packageToRemove = package }
-                } label: {
-                    Image(systemName: "ellipsis")
-                        .frame(width: 32, height: 32)
-                        .contentShape(Rectangle())
+        Button {
+            packageToInspect = package
+        } label: {
+            PackageSourceRow(
+                source: package.source,
+                detail: [
+                    package.scopeLabel,
+                    package.filtered ? "Filtered" : nil,
+                    updates.contains { $0.id == package.id } ? "Update available" : nil,
+                ].compactMap { $0 }.joined(separator: " · "),
+                accent: .tronBlue
+            ) {
+                if isMutating(package) {
+                    TronPulseLoadingIndicator(size: 18)
+                } else {
+                    Menu {
+                        Button("Update", systemImage: "arrow.clockwise") { update(package) }
+                        Button("Remove", systemImage: "trash", role: .destructive) { packageToRemove = package }
+                    } label: {
+                        Image(systemName: "ellipsis")
+                            .frame(width: 32, height: 32)
+                            .contentShape(Rectangle())
+                    }
                 }
             }
+        }
+        .buttonStyle(.plain)
+        .accessibilityHint("Opens the resources this package provides")
+    }
+
+    /// Themes no installed package owns: every package's themes are listed in
+    /// its own detail sheet, so this group appears only while some remain.
+    @ViewBuilder
+    private func localThemesGroup(_ inventory: PackageInventory) -> some View {
+        let items = PackageThemesPresentation.localItems(
+            from: inventory.resources,
+            packages: inventory.packages
+        )
+        if !items.isEmpty {
+            TronSettingsGroup(
+                "Local themes",
+                detail: PackageThemesPresentation.summary(for: items),
+                accent: .tronTeal,
+                surfaceStyle: .scrollOptimized
+            ) {
+                VStack(spacing: 0) {
+                    ForEach(Array(items.enumerated()), id: \.element.id) { index, item in
+                        if index > 0 { TronSettingsDivider(accent: .tronTeal) }
+                        TronSettingsRow(icon: item.enabled ? "checkmark.circle.fill" : "minus.circle",
+                                        title: item.displayName,
+                                        subtitle: PackageThemesPresentation.hasSharedSource(items) ? nil : item.sourceDescription,
+                                        accent: item.enabled ? .tronTeal : .tronSlate,
+                                        subtitleColor: .tronTextSecondary) {
+                            TronDynamicValue(text: item.statusDescription, color: .tronTextSecondary)
+                        }
+                        .accessibilityValue(item.statusDescription)
+                    }
+                }
+            }
+            .tronSettingsCaption(PackageThemesPresentation.caption(for: items))
+            .environment(\.tronSettingsVisualTheme, nil)
         }
     }
 

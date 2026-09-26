@@ -135,7 +135,7 @@ struct IntegrationsSettingsView: View {
         TronSettingsRow(
             icon: instance.health == "ready" ? "checkmark.circle" : "exclamationmark.circle",
             title: instance.displayTitle,
-            subtitle: "\(healthLabel(instance.health)) · \(capabilitySummary)",
+            subtitle: "\(IntegrationHealthPresentation.label(instance.health)) · \(capabilitySummary)",
             subtitleLineLimit: 2,
             accent: instance.health == "ready" ? .tronEmerald : .tronAmber
         ) {
@@ -193,9 +193,6 @@ struct IntegrationsSettingsView: View {
         return unavailable.map { "\($0.id): \($0.detail ?? availabilityLabel($0.availability))" }.joined(separator: " · ")
     }
 
-    private func healthLabel(_ health: String) -> String {
-        switch health { case "ready": "Ready"; case "disabled": "Disabled"; case "auth-error": "Authentication error"; case "disconnected": "Disconnected"; case "setup-required": "Setup required"; default: "Unavailable" }
-    }
     private func availabilityLabel(_ value: String) -> String {
         switch value { case "available": "Available"; case "requires-setup": "Setup required"; case "disabled": "Disabled"; case "unsupported": "Unsupported"; default: "Unavailable" }
     }

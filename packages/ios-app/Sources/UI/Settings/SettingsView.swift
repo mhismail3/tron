@@ -72,11 +72,17 @@ struct SettingsView: View {
                         settingsLink("Compaction", summary: "Summaries, focus, and token budgets", icon: "arrow.triangle.2.circlepath", accent: .tronPurple) {
                             CompactionSettingsView(projectCWD: projectCWD, projectSessionID: projectSessionID)
                         }
+                        settingsDivider(accent: .tronPurple)
+                        // The row takes its group's accent; the sheet keeps the hook
+                        // inventory's teal, as Extensions keeps its resource colors.
+                        settingsLink("Hooks", summary: "Lifecycle hooks registered by extensions", icon: "bolt.horizontal.circle", accent: .tronPurple) {
+                            HooksSettingsView(projectCWD: projectCWD)
+                        }
                     }
 
                     TronSettingsGroup("Tools & Extensions", accent: .tronCyan) {
-                        settingsLink("Packages", summary: "Installed packages, skills, prompts, and themes", icon: "shippingbox", accent: .tronCyan) {
-                            PackagesSettingsView(projectCWD: projectCWD)
+                        settingsLink("Extensions", summary: "Installed packages, Tron modules, and themes", icon: "shippingbox", accent: .tronCyan) {
+                            ExtensionsSettingsView(projectCWD: projectCWD)
                         }
                         settingsDivider(accent: .tronCyan)
                         settingsLink("MCP Servers", summary: "Tools-only local and remote MCP connections", icon: "server.rack", accent: .tronCyan) {
