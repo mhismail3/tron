@@ -2,7 +2,7 @@
 
 - **Started:** 2026-09-23
 - **Status:** Active
-- **Last updated:** 2026-09-25, T-GW-KNOW-1, T-MAC-1/2, C-GW-TRANS-2, C-GW-MACH-1, C-GW-DISP-1, C-GW-ADMIN-1, C-GW-SMALL-1
+- **Last updated:** 2026-09-25, C-KNOW-UI-1, C-DEPS-1B; paused at the user's request
 - **Goal:** Every file, module, abstraction, dependency, comment and test in Tron has a specific, visible reason to exist, with no change to what users see or do.
 
 Follow the [plan protocol](README.md#protocol) to claim tasks and hand off.
@@ -552,3 +552,9 @@ These apply on top of `AGENTS.md`, which wins on any conflict.
 - The user's "Rebuild from Source" failed with "Gateway dependency lock changed; install a newly signed Tron build before rebuilding from source". That is by design: the supervised source update reuses the active payload's signed dependency tree and refuses any lockfile difference. C-DEPS-1 had changed `packages/gateway/package.json` and `package-lock.json`, which the supervisor missed. Both files are restored byte-identical to the active payload's copies; the source keeps importing `Type`/`Static` from `@earendil-works/pi-ai`, so the direct `typebox` dependency is now unused but installed. The dependency removal moves to C-DEPS-1B, to land with the next signed app build. Verified: `tsc`, `check-pi-sdk`, 173 files / 1,867 tests.
 - Rule for future lanes: never change `packages/gateway/package.json` or its lockfile in a batch meant for source rebuilds; dependency changes ship only with a signed Mac app build.
 - Re-landed the same day: the user chose a one-time signed app replacement, so the dependency change is back on `main` and ships with that Release build. Until the user installs it, "Rebuild from Source" refuses by design.
+
+### Pause · 2026-09-25 · simplification session
+
+- Paused at the user's request after C-KNOW-UI-1 and the signed app reinstall that shipped C-DEPS-1B (installed app verified with `scripts/tron mac verify`; the installed lockfile matches `main`, so source rebuilds are admitted again).
+- State: 84 rows Done, 4 Superseded, 15 Ready, 5 Needs scoping; nothing Claimed. All `simplify/*` worktrees and branches are removed.
+- For the next agent: V-0-UX (simulator screenshot baseline) gates the whole iOS track (S-IOS-*). The largest Gateway items left are the runtime-slot, registry and projection scopings (S-GW-SESS-SLOT-1, S-GW-SESS-REGISTRY-1, S-GW-SESS-PROJ-1) and T-GW-SESS-2, which follows the E2E-first policy in `AGENTS.md`. Never change `packages/gateway/package.json` or its lockfile in a source-rebuild batch; dependency changes ship with a signed Mac app build.
