@@ -1218,9 +1218,9 @@ and model selection; dense rows must retain static tinted geometry without visib
 material churn. Open a large instructions/JSON document and verify immediate native
 scrolling. Manage Session checkpoints verify a compact emerald usage card and purple model card matching
 Settings' Agent group, then the adaptive teal Session order (Current Branch, Agent Instructions, Project Resources,
-Project Hooks, Session History, Subagent History) and headerless gray Export as HTML / Export as JSON actions. Project Hooks
-shows the selected runtime's registered handlers and separate load issues only; it never claims last-run or health state. Its By Extension and By Event views are two projections of the same fenced inventory; By Event can optionally show supported zero-handler events, while unknown runtime event names remain explicit.
-Project Hooks stays in the teal Manage Session section. Its By Event view is the default, while By Extension remains available for ownership-oriented inspection. The same teal accent must flow into its generic titles, controls, icons, and ordinary containers in both appearances.
+Session History, Subagent History) and headerless gray Export as HTML / Export as JSON actions.
+Settings → Agent → Hooks shows the selected scope's registered handlers through the same inventory as a session, with separate load issues only; it never claims last-run or health state. By Extension and By Event are two projections of the same fenced inventory; By Event can optionally show supported zero-handler events, while unknown runtime event names remain explicit.
+Every Project asks the Gateway for the global scope and Current Project for the project path; an untrusted project states that its hooks are not loaded and links to Project Trust. Hooks keeps its own teal accent rather than the Agent group's purple, because the sheet is the same surface a session used to show; its By Event view is the default, while By Extension remains available for ownership-oriented inspection.
 The cyan/teal accent uses a darker readable light-mode value and a lifted dark-mode value; the
 management shell stays emerald, model settings stay purple, and export stays neutral. Transcript
 and tool semantic colors do not inherit navigation teal. Usage counts and percentage share

@@ -1878,7 +1878,7 @@ information appears once as a category caption, not repeated in each row; mixed 
 provenance. An empty resolved Themes list uses a placeholder row and a scope caption rather than an empty
 info card. Scope counts describe inventory,
 not tools loaded into every existing conversation. Full technical resource data remains available separately, including extension-only
-or additive categories. Locations and Overrides is a separate sibling sheet in Tools & Extensions, retaining optional discovery paths, advanced Mac overrides and autosave. Session storage remains
+or additive categories. Locations and Overrides is a separate sibling sheet in Tools & Extensions, retaining optional discovery paths, advanced Mac overrides and autosave. Settings → Agent → Hooks shows one scope's hook inventory without a session: it reads `hooks.list` without a `cwd` for Every Project and with the project path for Current Project, reusing Locations and Overrides' Every Project/Current Project row, and it renders the By Event and By Extension projections, extension and event details, load issues and bounded-omissions notice a session used to show. A Gateway that does not advertise `hooks.v1` is never asked and shows the unavailable state, and an untrusted project says its hooks are not loaded with Project Trust beside that line, so a global-only answer is never read as an empty project. Session storage remains
 Gateway-owned and is not exposed as a location override. Package catalog admission failures remain
 local to the Packages sheet, preserving the sheet while presenting a bounded retry
 state instead of routing a projection error through a global modal alert. Visible Settings reads include

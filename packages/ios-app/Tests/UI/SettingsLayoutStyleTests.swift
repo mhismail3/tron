@@ -193,7 +193,105 @@ final class SettingsLayoutStyleTests: XCTestCase {
         }
     }
 
+    func testHooksSheetReadsTheSelectedScopeOnlyWhenTheGatewayAdvertisesHooks() async throws {
+        let projectDirectory = "/tmp/tron-hooks-project"
+        let socket = ScriptedGatewaySocket()
+        let client = GatewayClient(socketFactory: ScriptedGatewaySocketFactory(sockets: [socket]).factory)
+        let root = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString)
+        let model = AppModel(client: client, cache: SnapshotCache(root: root))
+        await socket.enqueue(try JSONEncoder.gateway.encode(JSONValue.object([
+            "type": .string("hello"), "gatewayVersion": .string("1.0.0"), "piVersion": .string("1.0.0"),
+            "protocolVersion": .number(5), "minProtocolVersion": .number(5), "machineId": .string("machine"),
+            "machineName": .string("Mac"), "gatewayChannel": .string("stable"),
+            "capabilities": .array([.string("sessions.v1"), .string("hooks.v1")]),
+        ])))
+        do {
+            try await model.connectHostedGateway(profile: GatewayProfile(id: "profile", label: "Mac", host: "gateway.test", port: 9_847,
+                machineId: "machine", deviceId: "device"), token: "token")
+            try await withHost(HooksSettingsView(projectCWD: projectDirectory).environment(model).tronPresentation().tronSettingsLayout(),
+                               size: CGSize(width: 440, height: 800)) { _ in
+                let listing = try await request(socket, method: "hooks.list")
+                // Every Project is the default scope, so the request carries no cwd.
+                let hooksParams = await frame(socket, method: "hooks.list")?.objectValue?["params"]?.objectValue
+                XCTAssertNil(hooksParams?["cwd"], "Every Project must ask the Gateway without a project path")
+                // The untrusted-project note reads the same trust state the
+                // Project Trust row reads, for this project.
+                let inspection = try await request(socket, method: "trust.inspect")
+                let inspectionCwd = await frame(socket, method: "trust.inspect")?.objectValue?["params"]?.objectValue?["cwd"]?.stringValue
+                XCTAssertEqual(inspectionCwd, projectDirectory)
+                await socket.enqueue(try reply(inspection.id, .object([
+                    "cwd": .string(projectDirectory), "requiresDecision": .bool(true), "savedDecision": .bool(false),
+                    "defaultDecision": .string("ask"), "effectiveDecision": .bool(false),
+                ])))
+                await socket.enqueue(try reply(listing.id, .object([
+                    "extensions": .array([.object([
+                        "name": .string("tron-notify"), "path": .string("<inline:tron-notify>"),
+                        "resolvedPath": .string("<inline:tron-notify>"), "scope": .string("temporary"),
+                        "source": .string("inline"), "origin": .string("top-level"),
+                        "tools": .array([.string("notify")]), "commands": .array([]),
+                        "handlers": .array([.object(["event": .string("agent_end"), "count": .number(1)])]),
+                    ])]),
+                    "extensionLoadErrors": .array([]),
+                    "hookInventory": .object([:]),
+                ])))
+                try await Task.sleep(for: .milliseconds(80))
+                // The note's decision itself is asserted by
+                // HooksSettingsPresentationTests: this harness renders SwiftUI
+                // text without UIKit labels, so only the read that feeds the
+                // note is observable here.
+                let settledCwd = await frame(socket, method: "trust.inspect")?.objectValue?["params"]?.objectValue?["cwd"]?.stringValue
+                XCTAssertEqual(settledCwd, projectDirectory, "The note's input is the current project's trust state")
+            }
+        } catch {
+            await model.teardown(); await client.close(); try? FileManager.default.removeItem(at: root)
+            throw error
+        }
+        await model.teardown(); await client.close(); try? FileManager.default.removeItem(at: root)
+    }
+
+    func testHooksSheetWithoutTheCapabilityAsksForNothing() async throws {
+        let socket = ScriptedGatewaySocket()
+        let client = GatewayClient(socketFactory: ScriptedGatewaySocketFactory(sockets: [socket]).factory)
+        let root = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString)
+        let model = AppModel(client: client, cache: SnapshotCache(root: root))
+        await socket.enqueue(try JSONEncoder.gateway.encode(JSONValue.object([
+            "type": .string("hello"), "gatewayVersion": .string("1.0.0"), "piVersion": .string("1.0.0"),
+            "protocolVersion": .number(5), "minProtocolVersion": .number(5), "machineId": .string("machine"),
+            "machineName": .string("Mac"), "gatewayChannel": .string("stable"),
+            "capabilities": .array([.string("sessions.v1")]),
+        ])))
+        do {
+            try await model.connectHostedGateway(profile: GatewayProfile(id: "profile", label: "Mac", host: "gateway.test", port: 9_847,
+                machineId: "machine", deviceId: "device"), token: "token")
+            try await withHost(HooksSettingsView(projectCWD: nil).environment(model).tronPresentation().tronSettingsLayout(),
+                               size: CGSize(width: 440, height: 800)) { _ in
+                try await Task.sleep(for: .milliseconds(120))
+                let methods = await socket.sentFrames().compactMap {
+                    try? JSONDecoder.gateway.decode(SettingsRequest.self, from: $0).method
+                }
+                XCTAssertFalse(methods.contains("hooks.list"),
+                               "A Gateway without hooks.v1 is never asked for an inventory it cannot answer")
+                XCTAssertFalse(methods.contains("trust.inspect"),
+                               "Without a project path there is no project trust state to explain")
+            }
+        } catch {
+            await model.teardown(); await client.close(); try? FileManager.default.removeItem(at: root)
+            throw error
+        }
+        await model.teardown(); await client.close(); try? FileManager.default.removeItem(at: root)
+    }
+
     private struct SettingsRequest: Decodable { let id: String; let method: String }
+
+    /// The complete sent frame for one method, for asserting the request's
+    /// params rather than only its method.
+    private func frame(_ socket: ScriptedGatewaySocket, method: String) async -> JSONValue? {
+        for data in await socket.sentFrames() {
+            let value = try? JSONDecoder.gateway.decode(JSONValue.self, from: data)
+            if value?.objectValue?["method"]?.stringValue == method { return value }
+        }
+        return nil
+    }
     private func request(_ socket: ScriptedGatewaySocket, method: String, startingAt: Int = 0) async throws -> SettingsRequest {
         var index = startingAt
         while true {
