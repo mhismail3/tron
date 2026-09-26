@@ -47,14 +47,9 @@ enum SessionArchiveCapability {
 
 /// Authoritative `session.archive.set` response. Archive membership is
 /// Gateway-owned display state; iOS never derives it from a local row.
-struct SessionArchiveState: Codable, Equatable, Sendable {
+struct SessionArchiveState: Codable, Sendable {
     let archived: Bool
     let archivedAt: String?
-
-    init(archived: Bool, archivedAt: String? = nil) {
-        self.archived = archived
-        self.archivedAt = archivedAt
-    }
 }
 
 struct SessionSummary: Codable, Hashable, Identifiable, Sendable {
@@ -83,9 +78,9 @@ struct SessionSummary: Codable, Hashable, Identifiable, Sendable {
     let completionRevision: Int
     let attentionRevision: Int
     let isUnread: Bool
-    /// Set only on an archived row. The dashboard's default list projection
-    /// omits archived sessions, so this is present only for the archived
-    /// container and for a row whose archive state changed under a live read.
+    /// Set only on a row from the Gateway's `archived: "only"` projection. The
+    /// dashboard's default list projection omits archived sessions entirely, so
+    /// a row carrying this field can never come from the dashboard read.
     let archivedAt: String?
     /// Dashboard-only ownership metadata. Gateway payloads omit these fields.
     let gatewayProfileID: String?

@@ -2,10 +2,10 @@
 import SwiftUI
 
 /// Hosted journey for the dashboard's archived container. It renders the real
-/// archived section, the real row swipe actions, and the real container state
-/// with fixture-owned session lists, so archiving, expanding, and unarchiving
-/// can be exercised without a Gateway. Session membership is fixture input; the
-/// surfaces and their identifiers are production code.
+/// row swipe actions and the real `ArchivedSessionsContainerSection`, so the
+/// journey drives the same visibility, expansion, zero-count collapse, and page
+/// handling the dashboard runs. Session membership is fixture input; the
+/// surfaces and the container's control flow are production code.
 struct HostedSessionArchiveFixture: View {
     private static let profileID = "fixture"
     /// The hosted harness is not the presented production dashboard, so it
@@ -18,11 +18,13 @@ struct HostedSessionArchiveFixture: View {
     /// presentation activity, so only the row's relative-time clock is affected.
     private static let branchActivity = PresentationSurfaceActivity.covered
 
-    @State private var container = ArchivedSessionsContainerState()
     @State private var live: [SessionSummary] = [
         Self.session(id: "live-session", title: "Live session", archivedAt: nil),
     ]
     @State private var archived: [SessionSummary] = []
+    /// Stands in for the dashboard's own archive projection revision: it
+    /// advances whenever this fixture's Gateway-owned count changes.
+    @State private var projectionRevision = 0
 
     private static func session(id: String, title: String, archivedAt: String?) -> SessionSummary {
         SessionSummary(
@@ -78,33 +80,35 @@ struct HostedSessionArchiveFixture: View {
                         .listRowInsets(SessionDashboardLayout.headerInsets)
                 }
 
-                if !archived.isEmpty {
-                    Section {
-                        if container.isExpanded {
-                            ArchivedSessionsSectionRows(
-                                sessions: container.rows,
-                                unavailableServerNames: [],
-                                isLoading: container.isLoading,
-                                hasMore: container.hasMore,
-                                onOpen: { _ in },
-                                onUnarchive: unarchive,
-                                onDelete: { _ in },
-                                onShowMore: {}
-                            )
-                        }
-                    } header: {
-                        ArchivedSessionsSectionHeader(
-                            count: archived.count,
-                            isExpanded: container.isExpanded,
-                            onToggle: toggleContainer
-                        )
-                    }
-                }
+                ArchivedSessionsContainerSection(
+                    count: archived.count,
+                    sources: sources,
+                    profileID: Self.profileID,
+                    projectionRevision: projectionRevision,
+                    presentationActive: true,
+                    loadPage: { _, cursor in
+                        await Self.admit(archived, cursor: cursor)
+                    },
+                    onOpen: { _ in },
+                    onUnarchive: unarchive,
+                    onDelete: { _ in }
+                )
             }
             .listStyle(.plain)
             .environment(\.defaultMinListRowHeight, 38)
         }
         .environment(\.tronPresentationActivity, Self.branchActivity)
+    }
+
+    /// One page of the fixture's Gateway-side archived list, through the
+    /// production admission so the container sees the same shape a real page
+    /// read produces.
+    private static func admit(
+        _ sessions: [SessionSummary],
+        cursor: String?
+    ) async -> ArchivedSessionsLoadResult {
+        let page = ArchivedSessionsLoader.PageResponse(sessions: sessions, nextCursor: nil)
+        return await ArchivedSessionsLoader.admit(page, requestedCursor: cursor) { true }
     }
 
     private func archive(_ session: SessionSummary) {
@@ -114,33 +118,13 @@ struct HostedSessionArchiveFixture: View {
             Self.session(id: session.id, title: session.title, archivedAt: "2026-09-26T09:30:00Z"),
             at: 0
         )
-        publishArchivePage()
+        projectionRevision &+= 1
     }
 
     private func unarchive(_ session: SessionSummary) {
         archived.removeAll { $0.dashboardID == session.dashboardID }
         live.append(Self.session(id: session.id, title: session.title, archivedAt: nil))
-        container.remove(sessionID: session.id, profileID: session.gatewayProfileID)
-        if archived.isEmpty { container.collapse() }
-    }
-
-    private func toggleContainer() {
-        if container.isExpanded {
-            container.collapse()
-            return
-        }
-        container.expand()
-        publishArchivePage()
-    }
-
-    private func publishArchivePage() {
-        container.reconcile(sources)
-        guard container.isExpanded else { return }
-        Task { @MainActor in
-            let page = ArchivedSessionsLoader.PageResponse(sessions: archived, nextCursor: nil)
-            let result = await ArchivedSessionsLoader.admit(page, requestedCursor: nil) { true }
-            container.apply(result, profileID: Self.profileID, generation: container.currentGeneration)
-        }
+        projectionRevision &+= 1
     }
 }
 #endif

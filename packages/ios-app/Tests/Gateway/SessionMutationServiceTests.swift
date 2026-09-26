@@ -730,8 +730,10 @@ struct SessionMutationServiceTests {
             #expect(!unarchived.archived)
             #expect(unarchived.archivedAt == nil)
 
-            // A running session refuses the archive. The exact code and its
-            // retryability must survive to the caller.
+            // A running session refuses the archive. The refusal is the
+            // Gateway's own wire shape: `session_operation_busy` is only the
+            // internal diagnostic reason, so the caller sees a plain
+            // non-retryable `busy`.
             let refused = Task {
                 try await harness.service.setArchived(sessionID: "session-a", archived: true)
             }
@@ -742,9 +744,9 @@ struct SessionMutationServiceTests {
                 "id": .string(refusal.id),
                 "ok": .bool(false),
                 "error": .object([
-                    "code": .string("session_operation_busy"),
+                    "code": .string("busy"),
                     "message": .string("Stop the session before archiving it"),
-                    "retryable": .bool(true),
+                    "retryable": .bool(false),
                     "details": .null,
                 ]),
             ])))
@@ -752,8 +754,8 @@ struct SessionMutationServiceTests {
                 _ = try await valueOfOwnedTask(refused)
                 Issue.record("a busy archive unexpectedly succeeded")
             } catch let failure as GatewayFailure {
-                #expect(failure.code == "session_operation_busy")
-                #expect(failure.retryable)
+                #expect(failure.code == "busy")
+                #expect(!failure.retryable)
             }
             await harness.client.close()
         }

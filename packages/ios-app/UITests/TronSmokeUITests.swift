@@ -324,6 +324,16 @@ final class TronSmokeUITests: XCTestCase {
         XCTAssertTrue(app.staticTexts["Run Details"].waitForExistence(timeout: 5), app.debugDescription)
     }
 
+    /// Completes a row's full-swipe action: a press-and-drag across the row
+    /// crosses UIKit's full-swipe threshold, so the row's first trailing action
+    /// (Archive on a dashboard row, Unarchive on an archived row) runs without a
+    /// second tap.
+    private func fullSwipe(_ row: XCUIElement) {
+        let start = row.coordinate(withNormalizedOffset: CGVector(dx: 0.98, dy: 0.5))
+        let end = row.coordinate(withNormalizedOffset: CGVector(dx: 0.02, dy: 0.5))
+        start.press(forDuration: 0.1, thenDragTo: end)
+    }
+
     @MainActor
     func testSessionArchiveSwipeAndArchivedContainerJourney() {
         continueAfterFailure = false
@@ -337,14 +347,9 @@ final class TronSmokeUITests: XCTestCase {
         // A zero archived count keeps the container off the dashboard.
         XCTAssertFalse(app.buttons["archived-sessions-container"].exists)
 
-        // A bounded drag reveals the trailing actions without completing the
-        // full-swipe gesture.
-        let start = liveRow.coordinate(withNormalizedOffset: CGVector(dx: 0.95, dy: 0.5))
-        let end = liveRow.coordinate(withNormalizedOffset: CGVector(dx: 0.62, dy: 0.5))
-        start.press(forDuration: 0.5, thenDragTo: end)
-        let archiveAction = app.buttons["session-archive-action-fixture:live-session"]
-        XCTAssertTrue(archiveAction.waitForExistence(timeout: 3), app.debugDescription)
-        archiveAction.tap()
+        // Archive is the row's full-swipe action, so the journey completes the
+        // real gesture instead of tapping a revealed button.
+        fullSwipe(liveRow)
 
         let container = app.buttons["archived-sessions-container"]
         XCTAssertTrue(container.waitForExistence(timeout: 5), app.debugDescription)
@@ -357,12 +362,7 @@ final class TronSmokeUITests: XCTestCase {
         XCTAssertTrue(archivedRow.waitForExistence(timeout: 5), app.debugDescription)
         keepScreenshot(named: "session-archive-container-expanded")
 
-        let archivedStart = archivedRow.coordinate(withNormalizedOffset: CGVector(dx: 0.95, dy: 0.5))
-        let archivedEnd = archivedRow.coordinate(withNormalizedOffset: CGVector(dx: 0.62, dy: 0.5))
-        archivedStart.press(forDuration: 0.5, thenDragTo: archivedEnd)
-        let unarchiveAction = app.buttons["session-unarchive-action-fixture:live-session"]
-        XCTAssertTrue(unarchiveAction.waitForExistence(timeout: 3), app.debugDescription)
-        unarchiveAction.tap()
+        fullSwipe(archivedRow)
 
         // The count returns to zero, so the container hides and the session is
         // back among its workspace rows.

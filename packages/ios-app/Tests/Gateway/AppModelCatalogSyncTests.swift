@@ -696,13 +696,17 @@ struct AppModelCatalogSyncTests {
         try await withHarness(capabilities: ["sessions.v1", "session-archive.v1"]) { harness in
             let model = harness.model
             let first = Task {
-                try await model.loadArchivedSessions(profileID: "profile", cursor: nil) { true }
+                try await model.loadArchivedSessions(
+                    profileID: "profile", cursor: nil, purpose: .container
+                ) { true }
             }
             let firstRequest = try await archivedRequest(harness.socket, from: 1)
             #expect(firstRequest.request.params?["archived"] == .string("only"))
             #expect(firstRequest.request.params?["scope"] == .string("user"))
             let second = Task {
-                try await model.loadArchivedSessions(profileID: "profile", cursor: nil) { true }
+                try await model.loadArchivedSessions(
+                    profileID: "profile", cursor: nil, purpose: .container
+                ) { true }
             }
             let secondRequest = try await archivedRequest(harness.socket, from: firstRequest.index + 1)
             #expect(secondRequest.request.id != firstRequest.request.id)
@@ -732,14 +736,83 @@ struct AppModelCatalogSyncTests {
         }
     }
 
-    @Test("an inactive surface and an incapable profile publish no archived page")
+    @Test("archived pages carry the Gateway that owns each row")
+    func archivedRowsCarryOwningGateway() async throws {
+        try await withHarness(capabilities: ["sessions.v1", "session-archive.v1"]) { harness in
+            let model = harness.model
+            try Self.storePairedProfile(model)
+            let read = Task {
+                try await model.loadArchivedSessions(
+                    profileID: "profile", cursor: nil, purpose: .container
+                ) { true }
+            }
+            let request = try await archivedRequest(harness.socket, from: 1)
+            await harness.socket.enqueue(response(
+                id: request.request.id,
+                sessions: [summary(id: "archived", revision: 1, archivedAt: "2026-01-02T00:00:00Z")],
+                listRevision: 1
+            ))
+            guard case let .loaded(page) = try await read.value else {
+                Issue.record("an archived page was not published")
+                return
+            }
+            // Two servers can own equal session IDs, so an archived row must
+            // carry the Gateway it came from: every action on it is addressed
+            // to that Gateway, and the dashboard identity is qualified by it.
+            let row = try #require(page.sessions.first)
+            #expect(row.gatewayProfileID == "profile")
+            #expect(row.gatewayProfileLabel == "Mac")
+            #expect(row.dashboardID == "profile:archived")
+        }
+    }
+
+    @Test("a container pass does not retire the automation form's target lookup")
+    func archivedReadPurposesFenceIndependently() async throws {
+        try await withHarness(capabilities: ["sessions.v1", "session-archive.v1"]) { harness in
+            let model = harness.model
+            let lookup = Task {
+                try await model.archivedSessionSummary(
+                    profileID: "profile", sessionID: "target", presentationActive: { true }
+                )
+            }
+            let lookupRequest = try await archivedRequest(harness.socket, from: 1)
+            // A container pass starts while the lookup is in flight. They read
+            // the same projection for different surfaces, so the container's
+            // read fence must not retire the lookup.
+            let container = Task {
+                try await model.loadArchivedSessions(
+                    profileID: "profile", cursor: nil, purpose: .container
+                ) { true }
+            }
+            let containerRequest = try await archivedRequest(harness.socket, from: lookupRequest.index + 1)
+            await harness.socket.enqueue(response(
+                id: lookupRequest.request.id,
+                sessions: [summary(id: "target", revision: 1, archivedAt: "2026-01-02T00:00:00Z")],
+                listRevision: 1
+            ))
+            await harness.socket.enqueue(response(
+                id: containerRequest.request.id,
+                sessions: [summary(id: "other", revision: 1, archivedAt: "2026-01-03T00:00:00Z")],
+                listRevision: 1
+            ))
+            #expect(try await lookup.value?.id == "target")
+            guard case let .loaded(page) = try await container.value else {
+                Issue.record("the container's page was not published")
+                return
+            }
+            #expect(page.sessions.map(\.id) == ["other"])
+        }
+    }
+
+    @Test("an inactive surface publishes no archived page")
     func archivedReadAdmission() async throws {
         try await withHarness(capabilities: ["sessions.v1", "session-archive.v1"]) { harness in
             try Self.storePairedProfile(harness.model)
             let sentBefore = await harness.socket.sentFrames().count
             let inactive = try await harness.model.loadArchivedSessions(
                 profileID: "profile",
-                cursor: nil
+                cursor: nil,
+                purpose: .container
             ) { false }
             guard case .retired = inactive else {
                 Issue.record("an inactive surface received an archived page")
@@ -753,7 +826,11 @@ struct AppModelCatalogSyncTests {
     func archivedTargetLookupWalksBoundedPages() async throws {
         try await withHarness(capabilities: ["sessions.v1", "session-archive.v1"]) { harness in
             try Self.storePairedProfile(harness.model)
-            let lookup = Task { try await harness.model.archivedSessionSummary(profileID: "profile", sessionID: "target") }
+            let lookup = Task {
+                try await harness.model.archivedSessionSummary(
+                    profileID: "profile", sessionID: "target", presentationActive: { true }
+                )
+            }
             let first = try await archivedRequest(harness.socket, from: 1)
             await harness.socket.enqueue(response(
                 id: first.request.id,
@@ -776,7 +853,11 @@ struct AppModelCatalogSyncTests {
         // existing fallback rather than reading forever.
         try await withHarness(capabilities: ["sessions.v1", "session-archive.v1"]) { harness in
             try Self.storePairedProfile(harness.model)
-            let lookup = Task { try await harness.model.archivedSessionSummary(profileID: "profile", sessionID: "target") }
+            let lookup = Task {
+                try await harness.model.archivedSessionSummary(
+                    profileID: "profile", sessionID: "target", presentationActive: { true }
+                )
+            }
             var index = 1
             for page in 0..<SessionArchiveTargetLookup.maximumPages {
                 let read = try await archivedRequest(harness.socket, from: index)
@@ -795,7 +876,9 @@ struct AppModelCatalogSyncTests {
         // A Gateway without the archive contract is never asked to walk.
         try await withHarness { harness in
             let sentBefore = await harness.socket.sentFrames().count
-            let unsupported = try await harness.model.archivedSessionSummary(profileID: "profile", sessionID: "target")
+            let unsupported = try await harness.model.archivedSessionSummary(
+                profileID: "profile", sessionID: "target", presentationActive: { true }
+            )
             #expect(unsupported == nil)
             #expect(await harness.socket.sentFrames().count == sentBefore)
         }

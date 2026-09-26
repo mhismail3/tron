@@ -502,8 +502,9 @@ actor GatewayClient {
         let profileID: String?
         let profileLabel: String?
         let connectionID: Int
-        let diagnosticPurpose: String?
-        let diagnosticPage: Int?
+        /// The caller's correlation label, when it needs to report this
+        /// request's identity later. `nil` means the request is not correlated.
+        let correlation: String?
         let timeout: Task<Void, Never>
         var send: Task<Void, Never>?
         var transmission: GatewayRequestTransmissionState
@@ -541,7 +542,11 @@ actor GatewayClient {
     private let performanceSignposts: any PerformanceSignposting
     private var connection: ConnectionEpoch?
     private var connectionDiagnostics: [GatewayConnectionDiagnostic] = []
-    private var latestSessionListRequestID: String?
+    /// Newest request identity per correlation label. A caller that needs to
+    /// join its own projection-level diagnostic to the transport request
+    /// declares a label on that request, so a competing read of another purpose
+    /// cannot overwrite the identity it reports.
+    private var latestRequestIDByCorrelation: [String: String] = [:]
     private var diagnosticSequence = 0
     private var firstDiagnosticSequenceByEpisode: [String: Int] = [:]
     private let diagnosticStore: IOSClientDiagnosticStore?
@@ -571,9 +576,9 @@ actor GatewayClient {
         appLog = log
     }
 
-    /// Joins projection-level catalog records to the request diagnostic already
-    /// owned by this actor without copying request lifecycle state into AppModel.
-    func sessionListRequestID() -> String? { latestSessionListRequestID }
+    /// Joins projection-level records to the request diagnostic already owned
+    /// by this actor without copying request lifecycle state into AppModel.
+    func sessionListRequestID(correlation: String) -> String? { latestRequestIDByCorrelation[correlation] }
 
     private func recordRPCDiagnostic(
         request: PendingRequest,
@@ -1019,12 +1024,11 @@ actor GatewayClient {
         _ params: P,
         as responseType: R.Type = R.self,
         timeout: Duration = .seconds(30),
-        diagnosticPurpose: String? = nil,
-        diagnosticPage: Int? = nil
+        correlation: String? = nil
     ) async throws -> R {
         let value = try await requestValue(
             method, params, timeout: timeout,
-            diagnosticPurpose: diagnosticPurpose, diagnosticPage: diagnosticPage
+            correlation: correlation
         )
         return try GatewayResponseDecoding.decode(value, as: responseType, method: method)
     }
@@ -1033,16 +1037,14 @@ actor GatewayClient {
         _ method: String,
         _ params: P,
         timeout: Duration = .seconds(30),
-        diagnosticPurpose: String? = nil,
-        diagnosticPage: Int? = nil
+        correlation: String? = nil
     ) async throws -> JSONValue {
         try await requestValue(
             method,
             params,
             timeout: timeout,
             epochExpectation: .current,
-            diagnosticPurpose: diagnosticPurpose,
-            diagnosticPage: diagnosticPage
+            correlation: correlation
         )
     }
 
@@ -1052,16 +1054,14 @@ actor GatewayClient {
         as responseType: R.Type = R.self,
         timeout: Duration = .seconds(30),
         expectedEpochID: Int,
-        diagnosticPurpose: String? = nil,
-        diagnosticPage: Int? = nil
+        correlation: String? = nil
     ) async throws -> R {
         let value = try await requestValue(
             method,
             params,
             timeout: timeout,
             expectedEpochID: expectedEpochID,
-            diagnosticPurpose: diagnosticPurpose,
-            diagnosticPage: diagnosticPage
+            correlation: correlation
         )
         return try GatewayResponseDecoding.decode(value, as: responseType, method: method)
     }
@@ -1087,16 +1087,14 @@ actor GatewayClient {
         _ params: P,
         timeout: Duration = .seconds(30),
         expectedEpochID: Int,
-        diagnosticPurpose: String? = nil,
-        diagnosticPage: Int? = nil
+        correlation: String? = nil
     ) async throws -> JSONValue {
         try await requestValue(
             method,
             params,
             timeout: timeout,
             epochExpectation: .id(expectedEpochID),
-            diagnosticPurpose: diagnosticPurpose,
-            diagnosticPage: diagnosticPage
+            correlation: correlation
         )
     }
 
@@ -1125,8 +1123,7 @@ actor GatewayClient {
         _ params: P,
         timeout: Duration,
         epochExpectation: EpochExpectation,
-        diagnosticPurpose: String? = nil,
-        diagnosticPage: Int? = nil
+        correlation: String? = nil
     ) async throws -> JSONValue {
         guard let epoch = connection, epoch.info != nil, epoch.eventsActivated else {
             throw Self.definitelyNotSentFailure()
@@ -1144,7 +1141,7 @@ actor GatewayClient {
         let epochID = epoch.id
         let socket = epoch.socket
         let id = uuidSource.next().uuidString
-        if method == "session.list" { latestSessionListRequestID = id }
+        if let correlation { latestRequestIDByCorrelation[correlation] = id }
         let frame = GatewayRequest(id: id, method: method, params: try JSONValue.encode(params))
         let data = try JSONEncoder.gateway.encode(frame)
         return try await withTaskCancellationHandler {
@@ -1170,8 +1167,7 @@ actor GatewayClient {
                     profileID: current.profileID,
                     profileLabel: current.profileLabel,
                     connectionID: epochID,
-                    diagnosticPurpose: diagnosticPurpose,
-                    diagnosticPage: diagnosticPage,
+                    correlation: correlation,
                     timeout: timeoutTask,
                     send: nil,
                     transmission: .queued
