@@ -38,6 +38,14 @@ struct ChatHostedScrollState: Sendable {
 struct ChatHostedGeometryTraceSample: Sendable, Equatable {
     let frame: Int
     let offsetY: CGFloat
+    /// The `LazyVStack` content estimate the coordinator reads as content
+    /// height, and the container height it was published against. Both are part
+    /// of the sample's identity by construction: a lazy stack re-derives the
+    /// estimate when the container or inset changes, and can drop thousands of
+    /// points under a held offset without moving the offset, the inset or a row
+    /// frame — the transient a blank transcript is reported from.
+    let contentHeight: CGFloat
+    let containerHeight: CGFloat
     let bottomInset: CGFloat
     let composerHeight: CGFloat
     let rowFrames: [String: CGRect]
@@ -241,6 +249,8 @@ final class ChatHostedProbe {
     private func recordGeometryTrace() {
         if let previous = geometryTrace.last,
            previous.offsetY == geometry.offsetY,
+           previous.contentHeight == geometry.contentHeight,
+           previous.containerHeight == geometry.containerHeight,
            previous.bottomInset == geometry.bottomInset,
            previous.composerHeight == composerHeight,
            previous.rowFrames == rowFrames {
@@ -249,6 +259,8 @@ final class ChatHostedProbe {
         geometryTrace.append(ChatHostedGeometryTraceSample(
             frame: geometryTrace.last.map { $0.frame + 1 } ?? 0,
             offsetY: geometry.offsetY,
+            contentHeight: geometry.contentHeight,
+            containerHeight: geometry.containerHeight,
             bottomInset: geometry.bottomInset,
             composerHeight: composerHeight,
             rowFrames: rowFrames

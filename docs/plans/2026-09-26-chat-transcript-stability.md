@@ -2,7 +2,7 @@
 
 - **Started:** 2026-09-26
 - **Status:** Active
-- **Last updated:** 2026-09-26, CT-8
+- **Last updated:** 2026-09-26, CT-2
 - **Goal:** The chat transcript stays on screen and pinned by construction, so the scroll repairs that compensate for SwiftUI's lazy-stack estimates can be deleted rather than extended.
 
 ## Goal and constraints
@@ -95,7 +95,7 @@ breaks context-menu previews.
 | CT-1 | Done | Test isolation: `scripts/tron-ios-test` uses per-worktree derived data by default, records the source revision and worktree in each run's metadata, and refuses to run products built from another worktree; update `packages/ios-app/docs/development.md` | none | chat scroll investigation session, 2026-09-26 |
 | CT-8 | Done | Stabilize `hostedOpeningRevealIsMonotonic`: find why the opening reveal's sampled distance is non-monotonic in about one run in three and fix the cause (product or oracle), with evidence from repeated runs | CT-1 | chat scroll investigation session, 2026-09-26 |
 | CT-9 | Ready | `ChatViewScrollHarnessTests.displacedRetainedResume` exceeded its 15-second watchdog once in six full-suite runs while the host was contended (suite wall 88.7 s against 74 s); decide whether the fixture's own work or the watchdog budget owns it, as the plan's context notes for the heavy hosted fixtures | CT-1 | |
-| CT-2 | Claimed | Baseline: port the hosted reproduction fixtures from `fix/chat-blank-evidence` to `main` as measurements, not pass/fail gates. Record blank boundaries, estimate-to-truth ratio after keyboard cycles, tail displacements, repair commands and frame cost on the worst shapes (tall reply at the tail, many tall replies, 180+ rows), three runs each | CT-1 | chat scroll investigation session, 2026-09-26 |
+| CT-2 | Done | Baseline: port the hosted reproduction fixtures from `fix/chat-blank-evidence` to `main` as measurements, not pass/fail gates. Record blank boundaries, estimate-to-truth ratio after keyboard cycles, tail displacements, repair commands and frame cost on the worst shapes (tall reply at the tail, many tall replies, 180+ rows), three runs each | CT-1 | chat scroll investigation session, 2026-09-26 |
 | CT-3 | Ready | Prototype A on a throwaway branch: segment long assistant content at Markdown block boundaries into bounded physical rows, with pinning from visible row identity; measure against CT-2. The prototype does not need product polish, but it must show whether the blank and the estimate swing disappear | CT-2 | |
 | CT-4 | Needs approval | The user chooses A or B from CT-3's numbers and a device build of the prototype | CT-3 | |
 | CT-5 | Needs scoping | Implement the chosen option in production. For A: segment identity, streaming into the last segment, whole-message copy/menus/accessibility, one entrance per message, segment chrome; pinned state from visibility. Scope into rows once CT-4 decides | CT-4 | |
@@ -103,6 +103,101 @@ breaks context-menu previews.
 | CT-7 | Needs scoping | Device validation with the user: the send choreography checklist in `packages/ios-app/docs/development.md`, plus long sessions with tall replies across keyboard, foreground and resume | CT-6 | |
 
 ## Handoff log
+
+### CT-2 · Done · 2026-09-26 · chat scroll investigation session
+
+- Result: the blank-transcript investigation's hosted reproduction fixtures are on
+  `main` as measurements, not gates. `ChatViewScrollHarnessTests.ct2ManyTallRepliesMetrics`
+  drives one keyboard-sized contraction, one send and the keyboard dismissal that
+  lands in the same display window, over 140 rows whose last eight are ~1,300 pt
+  tall. `ChatViewScrollHarnessTests.repeatedKeyboardAndSendCyclesKeepRealizedRowsOnScreen`
+  drives three keyboard up/down cycles (20/20/60 display boundaries after a
+  40-boundary settle), each carrying a send whose tail materialization and
+  dismissal land in one display window, over a history with one such row beside
+  the tail. Each prints one `CT2-METRICS` line per invocation and asserts only
+  that the scenario ran (every sampled boundary was taken, the single-send
+  shape's tall row was realized and measured >1,000 pt, and the sends
+  materialized a tail). The blank
+  recovery, the mounted-row ledger, the gap sampler and the `visibleRows`/
+  `terminalGap` trace fields are deliberately not ported: this plan deletes
+  compensations rather than adding them. No product behavior changed — the only
+  non-test change is the `HOSTED_TEST`-only geometry trace, which now carries the
+  content estimate and container height because a re-derivation inside one frame
+  is invisible without them.
+- Evidence (all in `/private/tmp/tron-ct82`, products built from this worktree's
+  own source state, run directories under `~/Library/Developer/Tron/ios/test-runs/`):
+  - Both fixtures pass from the committed source state, 2.2 s and 6.5 s, 8.7 s
+    together (`20260926T193600Z-run.wTjey8`); the same two passed 2.3 s and 6.6 s
+    one build earlier (`20260926T193430Z-run.WCYJMY`).
+  - Raw lines, both ported fixtures in each of those two invocations. The
+    numbers move run to run with how much of the history the opening happened to
+    realize; the blank count moves most of all:
+
+    ```
+    CT2-METRICS shape=many-tall-replies samples=72 blankBoundaries=12/72 blankAfterSettle=10 longestBlankRun=12 blankPhases=p1:12 maxEstimateRatio=2.8 estimateOpen=64430.0 estimateMin=64430.0 estimateMax=180064.0 pastBottomBoundaries=0 reDerivations=5 maxReDerivation=115634.0 tallRowHeight=1286.0 tailDisplacements=3 repairCommands=materialize:1,physical:0,pastEnd:0 pastEndRepairs=0 tailErrorSettled=0.0
+    CT2-METRICS shape=keyboard-cycles-with-sends samples=340 blankBoundaries=80/340 blankAfterSettle=76 longestBlankRun=60 blankPhases=p5:20,p9:60 maxEstimateRatio=2.4 estimateOpen=27014.0 estimateMin=27014.0 estimateMax=63819.0 pastBottomBoundaries=0 reDerivations=15 maxReDerivation=64944.0 tallRowHeight=1286.0 tailDisplacements=10 repairCommands=materialize:1,physical:0,pastEnd:0 pastEndRepairs=0 tailErrorSettled=0.0
+    CT2-METRICS shape=many-tall-replies samples=72 blankBoundaries=12/72 blankAfterSettle=10 longestBlankRun=12 blankPhases=p1:12 maxEstimateRatio=4.2 estimateOpen=43122.0 estimateMin=43122.0 estimateMax=180064.0 pastBottomBoundaries=0 reDerivations=6 maxReDerivation=136942.0 tallRowHeight=1286.0 tailDisplacements=3 repairCommands=materialize:1,physical:0,pastEnd:0 pastEndRepairs=0 tailErrorSettled=0.0
+    CT2-METRICS shape=keyboard-cycles-with-sends samples=340 blankBoundaries=140/340 blankAfterSettle=134 longestBlankRun=60 blankPhases=p4:20,p6:60,p9:60 maxEstimateRatio=2.3 estimateOpen=28176.0 estimateMin=28176.0 estimateMax=63819.0 pastBottomBoundaries=0 reDerivations=19 maxReDerivation=63782.0 tallRowHeight=1286.0 tailDisplacements=10 repairCommands=materialize:1,physical:0,pastEnd:0 pastEndRepairs=0 tailErrorSettled=0.0
+    ```
+
+  - The blank reproduces on `main` in both fixtures' terms, and always as a whole
+    phase: the many-tall-reply shape leaves the viewport with no mounted row for
+    the entire 12-boundary keyboard-up phase, and the cycle shape for whole
+    phases — one or two 20-boundary phases and one 60-boundary dismissal phase,
+    longest consecutive run 60 — the same shape the branch measured at 240-280 of
+    600 over eight cycles. The estimate is the swing the plan's context
+    describes: the published content estimate reaches 180,064 pt against a
+    ~9,000 pt history, which is the 140-row count times the tall row's measured
+    1,286 pt — a re-derivation that measured only the tall row.
+  - One clean-build run of the wider shape set was taken before the user's time
+    box trimmed it, single run each: tall reply at the tail 0/72 blank boundaries
+    (ratio 1.9, largest single-frame re-derivation 161,825 pt), tall reply beside
+    the tail 0/72 (1.2, 55,725 pt), 190 rows of mixed height 32/72 (1.4,
+    99,814 pt, one physical-tail repair). The 190-row shape also failed to open
+    once when four shapes ran in one invocation, so it is the one shape whose
+    measurement is not trustworthy.
+  - `python3 scripts/check-documentation-policy.py` and
+    `scripts/personal-info-guard.sh` pass. This plan entry was appended after the
+    two runs above, so by CT-1's rule the products stamped before it are stale
+    until the next build; the code they measured is this commit's.
+- Changes: this commit (`packages/ios-app/Sources/Support/ChatHostedProbe.swift`,
+  `packages/ios-app/Tests/UI/ChatViewScrollHarnessTests.swift`,
+  `packages/ios-app/docs/development.md`, this plan).
+- Tasks added: none.
+- Kept on purpose: the branch's `ChatHostedGeometryTraceSample` content-estimate
+  fields are the only probe surface the fixtures needed. The native,
+  unmount-aware visible-row count already exists on `main` as the harness's
+  `nativeRows(in:)`, which reads the row hosts in the live hierarchy and excludes
+  markers without a window, so the ported sampler needed no new view scan. The
+  branch's `close()` change (reset the root view before teardown) belongs to the
+  recovery's retirement, not to the measurement, and stayed out.
+- Deviations, all from the user's mid-task time box:
+  - Only two shapes are ported and each is measured once per clean build, not
+    three times: the plan rule's repetition is the runner's own repeated
+    invocation, and the `CT2-METRICS` line carries no run number for that reason.
+  - Not measured, with the reason: the tall-reply-at-the-tail and 180+-row shapes
+    (only their single pre-trim run above exists), and frame cost — the line
+    reports no per-frame cost, and neither the chat performance signposts nor
+    display-link frame intervals were collected. If CT-3 needs them, they are new
+    work, not a fix to this one.
+  - `maxEstimateRatio` is a documented proxy: the largest published content
+    estimate over the smallest. The harness has no independent measurement of the
+    history's realized height — a lazy stack never realizes all of it, and the
+    offsets of the rows it does place are themselves estimate-derived — so the
+    proxy is the estimate's own excursion during the journey, with
+    `estimateOpen`/`Min`/`Max` printed beside it.
+  - Trying to drive the plan rule's three runs from one invocation (a
+    `TRON_CT2_RUNS` scheme environment variable) did not work: an expanded scheme
+    variable does not reach the simulator test process, and the attempt was
+    reverted rather than left as a knob that does nothing.
+- For the next agent: `scripts/tron-ios-test build` then
+  `scripts/tron-ios-test run --only-testing TronMobileTests/ChatViewScrollHarnessTests`
+  runs both fixtures in about 9 s on top of the suite, which is inside the task's
+  budget. Read the `CT2-METRICS` lines from the run log or the retained
+  `xcresult`. CT-3 should compare against the many-tall-reply numbers above first,
+  because that shape reproduces both the blank and the 180,064 pt estimate in
+  ~2 s; `blankAfterSettle` and `maxEstimateRatio` are the two fields that must
+  move when the estimate stops driving the viewport.
 
 ### CT-8 · Done · 2026-09-26 · chat scroll investigation session
 

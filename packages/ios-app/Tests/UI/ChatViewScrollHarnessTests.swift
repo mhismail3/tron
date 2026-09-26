@@ -774,6 +774,266 @@ struct ChatViewScrollHarnessTests {
         }
     }
 
+    // CT-2 baseline measurement fixtures. These are the blank-transcript
+    // investigation's hosted reproduction fixtures, ported as measurements
+    // rather than pass/fail gates: each drives one shape, prints one
+    // `CT2-METRICS` line and asserts only that the scenario ran. The blank
+    // recovery, the mounted-row ledger and the gap sampler that branch added
+    // alongside them are not ported — this plan deletes compensations rather
+    // than adding them, and the question these fixtures answer is how wrong the
+    // lazy estimate gets and how often a pinned viewport is left with no
+    // realized row on screen.
+    //
+    // Both shapes start from the plan's context: an assistant message renders as
+    // one physical row however long it is, and a `LazyVStack` derives its content
+    // estimate from the height of the rows it has placed, so a tall row near the
+    // tail is what makes the estimate swing when the container changes. One shape
+    // applies a single keyboard contraction, send and dismissal to a history
+    // whose tail holds many tall replies; the other repeats keyboard up/down
+    // cycles with sends.
+    //
+    // The metric line is one space-separated `key=value` set so repeated runs
+    // diff cleanly. Fields:
+    // - `blankBoundaries=<blank>/<samples>` and `blankAfterSettle`: sampled
+    //   display boundaries whose native viewport intersects no mounted transcript
+    //   row, and the same excluding the first two boundaries of each phase, where
+    //   the transition is still landing. The row set is read from the row hosts
+    //   in the live hierarchy, so a row that unmounted cannot be counted.
+    // - `longestBlankRun` and `blankPhases`: the longest consecutive blank run,
+    //   and which phases (`p<index>:<blank count>`) held any blank at all.
+    // - `maxEstimateRatio`: the largest published content estimate over the
+    //   smallest, i.e. how far the lazy stack's own estimate moved during the
+    //   journey. The harness has no independent measurement of the whole
+    //   history's realized height — a lazy stack never realizes all of it, and
+    //   the offsets of the rows it does place are themselves estimate-derived —
+    //   so this is the documented proxy the plan's CT-3 comparison holds constant
+    //   while the shape changes. `estimateOpen/Min/Max` carry the raw points.
+    // - `reDerivations`/`maxReDerivation`: content-estimate changes of at least
+    //   1,000 pt between consecutive callbacks, and the largest of them, read
+    //   from the probe's geometry trace (the only place a re-derivation inside one
+    //   frame is visible).
+    // - `tailDisplacements`: `chat.tail.first-displacement` diagnostics traced
+    //   during the journey; `repairCommands` the commands by origin, with
+    //   `pastEndRepairs` repeated on its own.
+    // - `pastBottomBoundaries`, `tallRowHeight`, `tailErrorSettled`: sampled
+    //   boundaries whose offset was past the legal content bottom, the tall
+    //   row's measured frame height, and the native signed offset error against
+    //   the legal bottom at the end of the journey.
+    //
+    // Each invocation runs one journey of each shape, so the line carries no run
+    // number: the plan rule's repeated runs are repeated invocations, named by
+    // the runner's own run directory.
+
+    @Test("CT-2 baseline: many tall replies measure the blank boundaries and estimate swing")
+    func ct2ManyTallRepliesMetrics() async throws {
+        try await withTestWatchdog(timeout: .seconds(60)) {
+            // 140 rows, the last eight of them ~1,300 pt tall: the incident's
+            // largest estimate excursion was the row count times one tall row's
+            // measured height, a re-derivation that measured only the tall row.
+            let rowCount = 140
+            let tallRowIndices = Set((rowCount - 8)..<rowCount)
+            let terminalSemanticID = "ct2-turn-\(rowCount - 1)"
+            var snapshot = try SessionScenarioBuilder(seed: 1_268)
+                .openingTail(targetEncodedBytes: 10_000)
+            snapshot.acceptsQueuedPrompts = false
+            snapshot.transcript = try (0..<rowCount).map { index in
+                try harnessRichAssistantMessage(
+                    id: "ct2-history-\(index)",
+                    presentationID: "ct2-turn-\(index)",
+                    thinkingLines: [],
+                    text: tallRowIndices.contains(index)
+                        ? harnessTallEstimateRowText(index)
+                        : "Short history row \(index) stays one line."
+                )
+            }
+            snapshot.transcriptStart = 0
+            snapshot.transcriptTotal = snapshot.transcript.count
+            try await withHarness(snapshot: snapshot, enablesComposerSubmission: true) { harness in
+                let ready = try await harness.recorder.waitUntil {
+                    $0.observation.isReady && $0.nativeRows.contains {
+                        $0.semanticID == terminalSemanticID && $0.isVisible
+                    }
+                }
+                // Phases, in order: settle the opened history the way a resumed
+                // conversation has by the time the reader types, the
+                // keyboard-sized contraction, the send's materialization, and the
+                // dismissal that lands in one display window with it.
+                let phaseLengths = [16, 12, 12, 32]
+                let baselines = (materializations: ready.observation.tailMaterializationCommandCount,
+                                 physicalRepairs: ready.observation.physicalTailRepairCommandCount,
+                                 pastEndRepairs: ready.observation.pastEndRepairCommandCount,
+                                 displacements: harness.tailDisplacementRecordCount)
+                let traceFrame = (harness.probeObservation.geometryTrace.last?.frame ?? 0) + 1
+                var samples: [CT2BoundarySample] = []
+                let measurePhase: @MainActor (Int) async throws -> Void = { length in
+                    for _ in 0..<length {
+                        try await harness.driveFrameBoundary()
+                        try samples.append(harness.ct2BoundarySample(tallSemanticID: terminalSemanticID))
+                    }
+                }
+                try await measurePhase(phaseLengths[0])
+                let openingSample = try #require(samples.last)
+                harness.resize(height: 620)
+                try await measurePhase(phaseLengths[1])
+                try harness.setComposerDraftText("Keep this resumed conversation stable.")
+                harness.submitPrompt()
+                try await measurePhase(phaseLengths[2])
+                harness.resize(height: 844)
+                try await measurePhase(phaseLengths[3])
+
+                let metrics = try ct2Metrics(
+                    shape: "many-tall-replies", harness: harness, samples: samples,
+                    phaseLengths: phaseLengths, baselines: baselines, traceFrame: traceFrame,
+                    estimateOpen: openingSample.contentHeight,
+                    tallRowHeight: openingSample.tallRowFrame?.height ?? 0
+                )
+                print(metrics.line)
+                #expect(
+                    samples.count == phaseLengths.reduce(0, +),
+                    "the scenario ran every sampled display boundary"
+                )
+                #expect(
+                    metrics.tallRowHeight > 1_000,
+                    "the shape's tall row was realized and measured as the estimate-stressing row"
+                )
+                #expect(metrics.materializations > 0, "the send materialized its tail")
+            }
+        }
+    }
+
+    // The second shape drives the reader's actual journey instead of one send:
+    // repeated keyboard up/down cycles, each carrying a send whose tail
+    // materialization and keyboard dismissal land in one display window. The
+    // single-send shape settles against the same estimate; this one measures
+    // whether the pinned viewport is ever left with no realized row on screen
+    // once each transition has landed.
+    //
+    // Measured on the branch that reproduced the 2026-09-26 blank, before any
+    // recovery existed, over eight cycles of 20/20/60 boundaries: 240-280 of 600
+    // sampled boundaries blank, every blank beginning at a phase boundary and
+    // persisting for that whole phase. This journey is three cycles at
+    // 20/20/60 after a 40-boundary settle; if it records no blank on a given
+    // baseline, the estimate still swings and the displacement warnings are
+    // still traced, and the plan's numbers come from the first shape.
+    @Test("CT-2 baseline: repeated keyboard and send cycles measure the realized rows left on screen")
+    func repeatedKeyboardAndSendCyclesKeepRealizedRowsOnScreen() async throws {
+        try await withTestWatchdog(timeout: .seconds(60)) {
+            let rowCount = 140
+            let tallRowIndex = rowCount - 2
+            let terminalSemanticID = "tall-estimate-turn-\(rowCount - 1)"
+            let tallSemanticID = "tall-estimate-turn-\(tallRowIndex)"
+            let cycles = 3
+            // A phase boundary is where the container changes, so the first two
+            // boundaries of every phase are the transition still landing.
+            let phaseLengths = [40] + Array(repeating: [20, 20, 60], count: cycles).flatMap { $0 }
+            var snapshot = try SessionScenarioBuilder(seed: 1_268)
+                .openingTail(targetEncodedBytes: 10_000)
+            snapshot.acceptsQueuedPrompts = false
+            snapshot.transcript = try (0..<rowCount).map { index in
+                try harnessRichAssistantMessage(
+                    id: "tall-estimate-history-\(index)",
+                    presentationID: "tall-estimate-turn-\(index)",
+                    thinkingLines: [],
+                    text: index == tallRowIndex
+                        ? harnessTallEstimateRowText(index)
+                        : "Short history row \(index) stays one line."
+                )
+            }
+            snapshot.transcriptStart = 0
+            snapshot.transcriptTotal = snapshot.transcript.count
+            try await withHarness(snapshot: snapshot, enablesComposerSubmission: true) { harness in
+                let ready = try await harness.recorder.waitUntil {
+                    $0.observation.isReady && $0.nativeRows.contains {
+                        $0.semanticID == terminalSemanticID && $0.isVisible
+                    }
+                }
+                let baselines = (materializations: ready.observation.tailMaterializationCommandCount,
+                                 physicalRepairs: ready.observation.physicalTailRepairCommandCount,
+                                 pastEndRepairs: ready.observation.pastEndRepairCommandCount,
+                                 displacements: harness.tailDisplacementRecordCount)
+                let traceFrame = (harness.probeObservation.geometryTrace.last?.frame ?? 0) + 1
+                var samples: [CT2BoundarySample] = []
+                let measurePhase: @MainActor (Int) async throws -> Void = { length in
+                    for _ in 0..<length {
+                        try await harness.driveFrameBoundary()
+                        try samples.append(harness.ct2BoundarySample(tallSemanticID: tallSemanticID))
+                    }
+                }
+                try await measurePhase(phaseLengths[0])
+                let openingSample = try #require(samples.last)
+                for _ in 0..<cycles {
+                    harness.resize(height: 620)
+                    try await measurePhase(phaseLengths[1])
+                    try harness.setComposerDraftText("Keep this resumed conversation stable.")
+                    harness.submitPrompt()
+                    try await measurePhase(phaseLengths[2])
+                    harness.resize(height: 844)
+                    try await measurePhase(phaseLengths[3])
+                }
+
+                let metrics = try ct2Metrics(
+                    shape: "keyboard-cycles-with-sends", harness: harness, samples: samples,
+                    phaseLengths: phaseLengths, baselines: baselines, traceFrame: traceFrame,
+                    estimateOpen: openingSample.contentHeight,
+                    tallRowHeight: openingSample.tallRowFrame?.height ?? 0
+                )
+                print(metrics.line)
+                #expect(
+                    samples.count == phaseLengths.reduce(0, +),
+                    "the scenario ran every sampled display boundary"
+                )
+                #expect(
+                    metrics.materializations > 0,
+                    "the cycles sent prompts and their tail materialization ran"
+                )
+            }
+        }
+    }
+
+    /// Assemble the CT-2 metric line for one journey. `baselines` are the
+    /// observation's command counts and the trace's displacement count at the
+    /// journey's start, and `traceFrame` the probe geometry trace's last frame
+    /// then, so every counted command and estimate change belongs to the journey.
+    private func ct2Metrics(
+        shape: String,
+        harness: ChatViewScrollHarness,
+        samples: [CT2BoundarySample],
+        phaseLengths: [Int],
+        baselines: (materializations: Int, physicalRepairs: Int, pastEndRepairs: Int, displacements: Int),
+        traceFrame: Int,
+        estimateOpen: CGFloat,
+        tallRowHeight: CGFloat
+    ) throws -> CT2Metrics {
+        let observation = harness.probeObservation
+        let transitionTrace = observation.geometryTrace.filter { $0.frame >= traceFrame }
+        let estimates = samples.map(\.contentHeight)
+        let reDerivations = zip(transitionTrace, transitionTrace.dropFirst())
+            .map { abs($1.contentHeight - $0.contentHeight) }
+        let blankShape = ct2BlankShape(samples: samples, phaseLengths: phaseLengths)
+        var metrics = CT2Metrics()
+        metrics.shape = shape
+        metrics.samples = samples.count
+        metrics.blankBoundaries = blankShape.blank
+        metrics.blankAfterSettle = blankShape.afterSettle
+        metrics.longestBlankRun = blankShape.longestRun
+        metrics.blankPhases = blankShape.phases
+        metrics.estimateOpen = estimateOpen
+        metrics.estimateMin = estimates.min() ?? 0
+        metrics.estimateMax = estimates.max() ?? 0
+        metrics.pastBottomBoundaries = samples.filter {
+            $0.offsetY - max(0, $0.contentHeight + $0.bottomInset - $0.containerHeight) > 2
+        }.count
+        metrics.reDerivations = reDerivations.filter { $0 >= 1_000 }.count
+        metrics.maxReDerivation = reDerivations.max() ?? 0
+        metrics.tallRowHeight = tallRowHeight
+        metrics.tailDisplacements = harness.tailDisplacementRecordCount - baselines.displacements
+        metrics.materializations = observation.tailMaterializationCommandCount - baselines.materializations
+        metrics.physicalRepairs = observation.physicalTailRepairCommandCount - baselines.physicalRepairs
+        metrics.pastEndRepairs = observation.pastEndRepairCommandCount - baselines.pastEndRepairs
+        metrics.tailErrorSettled = try harness.nativeTranscriptSignedTailError()
+        return metrics
+    }
+
     enum SendHistory: CaseIterable, Sendable { case short, shortToOverflow, long }
 
     @Test("short and long history preserve the mounted prompt through acknowledgement and successor", arguments: SendHistory.allCases, [false, true])
@@ -2820,6 +3080,117 @@ private func harnessTallTailHistoryRowText(_ index: Int) -> String {
     return "Short history row \(index) stays one line."
 }
 
+/// The ~1,300 pt assistant body the CT-2 shapes put beside the tail: 27 wrapped
+/// paragraphs measure 1,286 pt on the owned simulator, which is the one row
+/// whose measured height makes a `LazyVStack` re-derive its content estimate by
+/// the whole row count when the container changes. Every other row is one line,
+/// so the tall rows are the only structural difference from an ordinary history.
+private func harnessTallEstimateRowText(_ index: Int) -> String {
+    Array(
+        repeating: "Tall history row \(index) renders a body long enough to stand one screen above its neighbours.",
+        count: 27
+    ).joined(separator: "\n\n")
+}
+
+/// One display boundary of a CT-2 shape, sampled directly from the native
+/// transcript scroll view.
+struct CT2BoundarySample {
+    let contentHeight: CGFloat
+    let offsetY: CGFloat
+    let containerHeight: CGFloat
+    let bottomInset: CGFloat
+    let visibleRowCount: Int
+    let tallRowFrame: CGRect?
+}
+
+/// One `CT2-METRICS` line. The fields are the CT-2 baseline's shared
+/// vocabulary across shapes, so a shape that cannot measure one reports zero
+/// rather than dropping the key, and every line diffs against every other.
+private struct CT2Metrics {
+    var shape = ""
+    var samples = 0
+    var blankBoundaries = 0
+    var blankAfterSettle = 0
+    var longestBlankRun = 0
+    var blankPhases = "none"
+    var estimateOpen: CGFloat = 0
+    var estimateMin: CGFloat = 0
+    var estimateMax: CGFloat = 0
+    var pastBottomBoundaries = 0
+    var reDerivations = 0
+    var maxReDerivation: CGFloat = 0
+    var tallRowHeight: CGFloat = 0
+    var tailDisplacements = 0
+    var materializations = 0
+    var physicalRepairs = 0
+    var pastEndRepairs = 0
+    var tailErrorSettled: CGFloat = 0
+
+    var maxEstimateRatio: CGFloat { estimateMin > 0 ? estimateMax / estimateMin : 0 }
+
+    var line: String {
+        "CT2-METRICS"
+            + " shape=\(shape) samples=\(samples)"
+            + " blankBoundaries=\(blankBoundaries)/\(samples)"
+            + " blankAfterSettle=\(blankAfterSettle)"
+            + " longestBlankRun=\(longestBlankRun)"
+            + " blankPhases=\(blankPhases)"
+            + " maxEstimateRatio=\(ct2Number(maxEstimateRatio))"
+            + " estimateOpen=\(ct2Number(estimateOpen))"
+            + " estimateMin=\(ct2Number(estimateMin))"
+            + " estimateMax=\(ct2Number(estimateMax))"
+            + " pastBottomBoundaries=\(pastBottomBoundaries)"
+            + " reDerivations=\(reDerivations)"
+            + " maxReDerivation=\(ct2Number(maxReDerivation))"
+            + " tallRowHeight=\(ct2Number(tallRowHeight))"
+            + " tailDisplacements=\(tailDisplacements)"
+            + " repairCommands=materialize:\(materializations),physical:\(physicalRepairs),pastEnd:\(pastEndRepairs)"
+            + " pastEndRepairs=\(pastEndRepairs)"
+            + " tailErrorSettled=\(ct2Number(tailErrorSettled))"
+    }
+}
+
+private func ct2Number(_ value: CGFloat) -> String {
+    String(format: "%.1f", Double(value))
+}
+
+/// The blank-boundary shape of one planned sample sequence: how many sampled
+/// display boundaries showed no mounted transcript row, how many of those
+/// survived the settling bound, the longest consecutive blank run, and which
+/// phases (`p<index>:<blank count>`) held any blank at all. `phaseLengths`
+/// describes the sampled sequence in order, so a phase's first boundaries are
+/// the ones where its transition is still landing.
+private func ct2BlankShape(
+    samples: [CT2BoundarySample],
+    phaseLengths: [Int],
+    settlingBoundaries: Int = 2
+) -> (blank: Int, afterSettle: Int, longestRun: Int, phases: String) {
+    var blank = 0
+    var afterSettle = 0
+    var longestRun = 0
+    var currentRun = 0
+    var phases: [String] = []
+    var index = 0
+    for (phase, length) in phaseLengths.enumerated() {
+        var phaseBlanks = 0
+        for offset in 0..<length where index < samples.count {
+            let isBlank = samples[index].visibleRowCount == 0
+            index += 1
+            guard isBlank else {
+                currentRun = 0
+                continue
+            }
+            blank += 1
+            phaseBlanks += 1
+            currentRun += 1
+            longestRun = max(longestRun, currentRun)
+            if offset >= settlingBoundaries { afterSettle += 1 }
+        }
+        if phaseBlanks > 0 { phases.append("p\(phase):\(phaseBlanks)") }
+    }
+    return (blank, afterSettle, longestRun, phases.isEmpty ? "none" : phases.joined(separator: ","))
+}
+
 private func harnessInlineMarkdownDisplaySnapshot() throws -> SessionSnapshot {
     var snapshot = try SessionScenarioBuilder(seed: 1_210).openingTail(targetEncodedBytes: 10_000)
     snapshot.transcript = try decodeTranscriptFixture(
@@ -3288,6 +3659,14 @@ final class ChatViewScrollHarness {
     }
 
     var probeObservation: ChatHostedObservation { probe.observation }
+
+    /// `chat.tail.first-displacement` diagnostics seen so far. The incident's
+    /// trace ring held 99 of them and evicted the geometry records they shared
+    /// the ring with, so the CT-2 fixtures count them explicitly.
+    var tailDisplacementRecordCount: Int {
+        traceRecords.count { "\($0.record.event)".contains("first-displacement") }
+    }
+
     var traceRecords: [GatewayProfileLogRecord] { model.chatInteractionTrace.diagnosticRecords(limit: 256) }
     var screenScale: CGFloat { window.screen.scale }
 
@@ -3427,6 +3806,25 @@ final class ChatViewScrollHarness {
                 + scrollView.adjustedContentInset.bottom
         )
         return scrollView.contentOffset.y - maximum
+    }
+
+    /// One display boundary of a CT-2 shape, sampled directly from the native
+    /// transcript scroll view: the content estimate the lazy stack publishes,
+    /// the native offset, container and bottom inset, and the mounted row hosts
+    /// with their native visibility. Native rows come from the live hierarchy
+    /// and exclude markers whose view has no window, so a row that unmounted
+    /// cannot be counted as visible.
+    func ct2BoundarySample(tallSemanticID: String) throws -> CT2BoundarySample {
+        let scrollView = try nativeTranscriptScrollView()
+        let rows = Self.nativeRows(in: hostingController.view)
+        return CT2BoundarySample(
+            contentHeight: scrollView.contentSize.height,
+            offsetY: scrollView.contentOffset.y,
+            containerHeight: scrollView.bounds.height,
+            bottomInset: scrollView.adjustedContentInset.bottom,
+            visibleRowCount: rows.filter(\.isVisible).count,
+            tallRowFrame: rows.first { $0.semanticID == tallSemanticID }?.frame
+        )
     }
 
     func nativeTranscriptDistanceFromTail() throws -> CGFloat {
