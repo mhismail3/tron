@@ -2,7 +2,7 @@
 
 - **Started:** 2026-09-25
 - **Status:** Active
-- **Last updated:** 2026-09-25, approved; R-0 claimed
+- **Last updated:** 2026-09-25, R-0
 - **Goal:** Settings shows what is installed in or configured on the agent, and the session sheet shows what the agent can use, each in exactly one logical place with a clear origin tag.
 
 ## Goal and constraints
@@ -56,25 +56,62 @@ State on 2026-09-25 (inspected):
 ## Plan rules
 
 **Origin tags.** Every resource row carries exactly one tag, derived by the
-Gateway from `sourceInfo`, never guessed on iOS:
+Gateway from Pi `sourceInfo` (R-0 verified these rules against the pinned SDK),
+never guessed on iOS. The tag is a NEW field, `originTag`; the existing
+`origin` field keeps Pi's `package`/`top-level` meaning, because iOS already
+decodes it (`ResourceCatalogModels.swift`).
 
-| Tag | Meaning |
-| --- | --- |
-| External | Provided by an installed third-party package or extension |
-| Module | Provided by a Tron module, including MCP tools from Connections |
-| Local | From the user's own or the project's files (skills, prompts, agent definitions, instructions) |
-| (none) | Pi built-in tools such as read, bash and edit |
+| Tag | Rule | Examples |
+| --- | --- | --- |
+| External | `origin == "package"` | `subagent` from `npm:pi-subagents`; the adapted ask-user package |
+| Module | `source == "inline"` (Tron's extension factories, including `tron-mcp-*` MCP tools) | `knowledge`, `display`, `schedule`, `notify` |
+| Local | `origin == "top-level"` and `source` is `local`, `auto` or `cli` | skills in `~/.tron/agent/skills`, prompts, project `.agents` files |
+| (none) | `source` is `builtin` or `sdk` | `read`, `bash`, `edit` |
+
+Subagents use their discovery source instead: `builtin` and `package` agents
+come from the pi-subagents package, so they are External; `user` and `project`
+agents are Local. The existing "User"/"Project" scope badge stays next to the
+new tag.
+
+**Placement decisions** (from the R-0 audit, within the user's intent):
+
+- Project Resources keeps its Diagnostics group and its Reload action.
+- Its new Commands group lists only extension commands (`source == "extension"`):
+  prompt and skill commands already appear under Prompts and Skills.
+- The Packages sheet's resolved Skills, Prompts and Themes lists leave Settings.
+  Skills and Prompts appear in Project Resources; Themes, which configure the
+  app's look rather than the agent, move to Settings → Appearance as a list of
+  available themes.
+- The wire `extensions` array and `extensionLoadErrors` stay in
+  `session.resources`; only the iOS Extensions section goes. The Hooks sheet
+  keeps listing extensions that register tools or commands but no hooks, so a
+  handler-less extension is never lost.
+- `contextFiles` is shown today only through Agent Instructions; unchanged.
+- Settings → Tools & Extensions → Locations and Overrides is untouched; its
+  "Every Project / Current Project" row is the shared scope component the
+  Hooks sheet reuses.
+- One module definition: the Tron module list moves out of `RuntimeSlot` into a
+  shared definition, so Settings and sessions cannot drift.
+- No Tron module registers a command today, so the Tron Modules list shows each
+  module's tools, and its commands only when it has some.
 
 ## Tasks
 
 | ID | Status | Scope | Depends on | Owner |
 | --- | --- | --- | --- | --- |
-| R-0 | Claimed | Audit: list every item each affected sheet shows today and where it lands afterwards; confirm how `sourceInfo` distinguishes packages, Tron modules, local files and Pi built-ins | none | resources session, 2026-09-25 |
-| R-1 | Ready | Gateway: add an `origin` tag (external, module, local) to each tool, skill, prompt and command in `session.resources`, and a `subagents` list (name, description, origin, model if set) from the same discovery `pi-subagents` uses | R-0 | |
-| R-2 | Ready | Gateway: list Tron modules (name, one-line purpose, the tools and commands each provides) for Settings, and let hooks be listed per scope (Global or a project folder) without an open session | R-0 | |
-| R-3 | Ready | iOS Project Resources: groups Skills, Prompts, Commands, Tools and Subagents, each row with the shared origin tag; remove the Extensions section; update the row subtitle | R-1 | |
-| R-4 | Ready | iOS Settings: rename Packages to Extensions with two containers, Installed (third-party, as today) and Tron Modules (read-only); move the resolved Skills list out to Project Resources | R-2 | |
-| R-5 | Ready | iOS Settings → Agent → Hooks: new row and sheet with the same Global/Current project scope picker; remove Project Hooks from Manage Session | R-2 | |
+| R-0 | Done | Audit: list every item each affected sheet shows today and where it lands afterwards; confirm how `sourceInfo` distinguishes packages, Tron modules, local files and Pi built-ins | none | resources session, 2026-09-25 |
+| R-1 | Ready | Gateway: add `originTag` (external, module, local, or absent) to each tool, skill, prompt and command in `session.resources`, deriving it from Pi `sourceInfo` per the Plan rules; add a `subagents` list (name, description, model, thinking, source, originTag) using pi-subagents' own discovery loaded through its declared `jiti` dependency, pinned to the installed version and failing soft to an empty list with a diagnostic | R-0 | |
+| R-2 | Ready | Gateway: move the Tron module list out of `RuntimeSlot` into one shared definition; add an RPC listing modules (name, purpose, tools, commands) for Settings; add a hooks listing per scope (Global or a project folder) without a session, reusing the `PackageService` settings pattern and a `DefaultResourceLoader` under project trust, returning the same shape as `session.resources` hook fields | R-0 | |
+| R-3 | Ready | iOS Project Resources: groups Skills, Prompts, Commands (extension commands only), Tools and Subagents, each row with the shared origin tag next to the existing scope badge; keep Diagnostics and Reload; remove the Extensions section only (the wire field stays); update the Manage Session row subtitle and the sheet caption | R-1 | |
+| R-4 | Ready | iOS Settings: rename Packages to Extensions with two containers, Installed (third-party, unchanged actions) and Tron Modules (read-only); remove the resolved Skills/Prompts/Themes lists from it; add the available Themes list to Settings → Appearance | R-2 | |
+| R-5 | Ready | iOS Settings → Agent → Hooks: new row and sheet carrying today's full hooks view (By Event / By Extension, unregistered-events toggle, extension detail, load issues, omissions notice, refresh), plus the "Every Project / Current Project" scope row reused from Locations and Overrides; keep handler-less extensions listed; remove Project Hooks from Manage Session | R-2 | |
 | R-6 | Ready | E2E check and docs: one simulator run through Manage Session and Settings with screenshots of each changed sheet; update the iOS architecture doc and the Gateway README's resources section | R-3, R-4, R-5 | |
 
 ## Handoff log
+
+### R-0 · Done · 2026-09-25 · resources session (deepseek-worker, checked by the supervisor)
+
+- Result: a complete map of every item on Manage Session, Project Resources, Project Hooks, Packages, Locations and Overrides and the Settings groups, each with a destination. The plan's rules and tasks were corrected from it (see Plan rules).
+- Corrections to the draft: the new tag cannot reuse `origin`, which iOS already decodes as Pi's `package`/`top-level` (verified in `ResourceCatalogModels.swift` and the composer badges); tools, skills and prompts do not carry an origin today, so R-1 derives it; commands include prompt and skill entries, so the Commands group filters to extension commands; Prompts and Themes in Packages had no destination; handler-less extensions would have vanished with the Extensions section; the module list is session-owned and needs one shared definition.
+- Evidence: SDK source rules verified in the pinned `pi-coding-agent` (`source-info`, `package-manager`, `extensions/loader`, `resource-loader`); pi-subagents discovery exercised read-only through `jiti` (12 built-in, 3 user agents); hooks without a session require loading extensions under project trust (no loader-free path).
+- For the next agent: R-1 and R-2 are Gateway-only and independent; R-3 to R-5 follow.
