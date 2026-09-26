@@ -1,5 +1,9 @@
 # Tron Mac architecture
 
+The Mac app owns onboarding, launchd supervision of the Gateway, the signed
+Gateway payload and launcher, the menu bar, and the native capture helper. It
+does not own sessions, agent state or the Gateway protocol; the Gateway does.
+
 ## Mac app logging
 
 The wrapper writes redacted shared-format JSONL to `<Tron home>/logs/mac.jsonl`

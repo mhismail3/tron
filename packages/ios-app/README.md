@@ -4,6 +4,10 @@ The native SwiftUI client is Tron's primary interface. It pairs with the
 always-running Tron agent on a Mac over Tailscale and the authenticated Tron
 Gateway protocol.
 
+It owns presentation, local caches and device credentials in the Keychain. It
+does not own sessions, settings or provider credentials: those stay canonical on
+the Mac, and every cache here is a bounded projection of them.
+
 See:
 
 - [Architecture](docs/architecture.md)
