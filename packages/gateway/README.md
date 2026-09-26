@@ -1670,15 +1670,34 @@ unambiguous canonical session is required, a runtime-owned subagent session is
 rejected with `conflict`, a session whose deletion has begun is retryable
 `busy`, and archiving requires an idle session: running, compacting, retrying,
 waiting-for-input, detached-subagent, queued-prompt, automation-reserved and
-leased states all reject with `busy` (`session_operation_busy`). That idle check
-runs under the registry mutex and, when a runtime exists, on the same slot lane
-that admits runs, so a prompt already inside that lane is observed before an
-archive commits. A replay returns the original receipt, and archiving an
+leased states all reject with `busy` (`session_operation_busy`). For a live
+runtime the idle check and the durable commit are one slot-lane critical
+section, so a run and its archive decision are serialized: whichever reaches
+the lane first decides, a run already inside the lane rejects the archive, and
+a committed archive clears itself before any run can start. The session lane
+nests the display-projection lane inside the registry mutex
+(registry mutex -> session lane -> attention/archive lane), and no path holds a
+display-projecting lane while waiting for a session lane or a registry mutex.
+A replay returns the original receipt, and archiving an
 already-archived session keeps its original timestamp. Archive state advances
 the list revision and emits `session.listChanged`; it moves with a true identity
 replacement, leaves a new or forked identity unarchived, is removed with a
 discarded identity and with session deletion, and is pruned at startup only from
 complete structural evidence.
+
+An archived session is always idle, and every new run clears the record before
+the run can do any work. Gateway-admitted work (`session.prompt`, including
+automation and scheduled prompts, `session.bash`, `session.compact`, and a
+branch summary from `session.navigate`) clears it on the same session-lane turn
+that admits the run, after every synchronous rejection; a store failure rejects
+the run retryably so no work can start hidden. A turn Pi starts on its own (an
+extension's `triggerTurn`, a scheduled wake) never passes that boundary: when a
+slot publishes an active projection for an archived session, the row becomes
+visible immediately and the durable record is cleared behind it, retrying on the
+next active projection if that write fails. Both paths log
+`sessions.archive.auto-unarchived` with the boundary that cleared the record.
+Opening, reading, renaming, marking read or unread, exporting, or searching an
+archived session leaves it archived.
 
 `session.list` accepts an optional `archived` filter. `exclude`, the default,
 drops archived rows from every page of that traversal and returns

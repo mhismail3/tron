@@ -59,12 +59,25 @@ interface Client {
   request(id: string, method: string, params: object): Promise<any>;
 }
 
-async function fixture() {
+async function fixture(options: {
+  /** Writes `${agentDir}/extensions/wake.ts`, modelling an extension-owned
+   * trigger that starts a turn of its own. */
+  extension?: (root: string) => string;
+  /** Writes `${agentDir}/settings.json` before the first runtime starts. */
+  settings?: Record<string, unknown>;
+} = {}) {
   const root = await mkdtemp(join(tmpdir(), "tron-session-archive-"));
   const agentDir = join(root, "agent");
   const cwd = join(root, "project");
   const sessionDirectory = join(agentDir, "sessions", "workspace");
   await Promise.all([mkdir(sessionDirectory, { recursive: true }), mkdir(cwd, { recursive: true })]);
+  if (options.extension) {
+    await mkdir(join(agentDir, "extensions"), { recursive: true });
+    await writeFile(join(agentDir, "extensions", "wake.ts"), options.extension(root));
+  }
+  if (options.settings) {
+    await writeFile(join(agentDir, "settings.json"), `${JSON.stringify(options.settings)}\n`, "utf8");
+  }
   const previousAgentDir = process.env.PI_CODING_AGENT_DIR;
   process.env.PI_CODING_AGENT_DIR = agentDir;
 
@@ -85,7 +98,9 @@ async function fixture() {
   await devices.ensureEnrollment();
 
   let current: Stack | undefined;
+  let server: GatewayServer | undefined;
   const start = async (): Promise<Stack> => {
+    server = undefined;
     const registry = new RuntimeRegistry({
       agentDir,
       tronHome: root,
@@ -94,7 +109,8 @@ async function fixture() {
       trust: new TrustService(agentDir),
       broadcast: () => {},
       sessionSummaryChanged: () => {},
-      sessionListChanged: listChanged,
+      // Mirrors gateway-main: the registry announcement is what reaches clients.
+      sessionListChanged: () => { listChanged(); server?.notifySessionListChanged(); },
       archiveDiagnostic,
     });
     await registry.initialize();
@@ -104,7 +120,6 @@ async function fixture() {
       materialize: vi.fn(async () => ({ envelope: "", images: [], attachments: [], photoCount: 0, fileAttachmentCount: 0 })),
       removeSession: vi.fn(async () => {}),
     };
-    let server: GatewayServer | undefined;
     const service = new GatewayService({
       config: { tronHome: root },
       devices,
@@ -192,6 +207,34 @@ const list = async (client: Client, archived: "exclude" | "only", extra: Record<
     nextCursor?: string;
   };
 };
+
+/** A live, idle session: `openedSlot` requires the subscription an open+sync
+ * establishes, and archiving is allowed while a slot is idle. */
+const openSession = async (client: Client, sessionId: string) => {
+  const opened = await client.request(`open-${sessionId}`, "session.open", { sessionId });
+  expect(opened.ok, JSON.stringify(opened)).toBe(true);
+  const synced = await client.request(`sync-${sessionId}`, "session.sync", { sessionId, syncToken: opened.result.syncToken });
+  expect(synced.ok, JSON.stringify(synced)).toBe(true);
+};
+
+const archiveSession = async (client: Client, sessionId: string, commandId: string) => {
+  const response = await client.request(`archive-${commandId}`, "session.archive.set", { commandId, sessionId, archived: true });
+  expect(response.ok, JSON.stringify(response)).toBe(true);
+  return response.result as { archived: boolean; archivedAt: string };
+};
+
+const listedIds = async (client: Client, archived: "exclude" | "only") =>
+  (await list(client, archived)).sessions.map((session) => session.id);
+
+const archivedRecord = async (root: string, sessionId: string): Promise<unknown> => {
+  const document = JSON.parse(await readFile(join(root, "gateway", "session-archive.json"), "utf8")) as {
+    sessions: Record<string, unknown>;
+  };
+  return document.sessions[sessionId];
+};
+
+const listChangedFrames = (client: Client) =>
+  client.frames.filter((frame) => frame.type === "event" && frame.topic === "session.listChanged").length;
 
 describe("session archive over the real Gateway", () => {
   it("archives an idle session without touching its canonical file", async () => {
@@ -515,6 +558,397 @@ describe("session archive over the real Gateway", () => {
       liveOnlyArchived: true,
       unarchiveResult: restored.result,
       runtimeStarts: f.runtimeFactory.mock.calls.length,
+    });
+  });
+
+  it("clears archive state before a prompt is admitted and announces it to every client", async () => {
+    const f = await fixture();
+    const first = await f.connect();
+    const second = await f.connect();
+    const session = f.coldSession("prompt-unarchive");
+    await openSession(first, session.id);
+    await archiveSession(first, session.id, "prompt-archive-command");
+    expect(await listedIds(first, "exclude")).not.toContain(session.id);
+    const announcementAt = { first: listChangedFrames(first), second: listChangedFrames(second) };
+    f.faux.setResponses([fauxAssistantMessage("awake")]);
+
+    const prompt = await first.request("prompt-unarchive-request", "session.prompt", {
+      commandId: "prompt-unarchive-command", sessionId: session.id, text: "come back",
+    });
+    expect(prompt.ok, JSON.stringify(prompt)).toBe(true);
+    // The admission response is the exact boundary: the durable record must
+    // already be gone, before the run's first event can reach any client.
+    expect(await archivedRecord(f.root, session.id)).toBeUndefined();
+
+    await until(async () => (await listedIds(first, "exclude")).includes(session.id), "visible on the prompting client");
+    await until(async () => (await listedIds(second, "exclude")).includes(session.id), "visible on the observing client");
+    await until(() => listChangedFrames(first) > announcementAt.first, "first client list change");
+    await until(() => listChangedFrames(second) > announcementAt.second, "second client list change");
+    expect(f.archiveDiagnostic).toHaveBeenCalledWith({ outcome: "auto-unarchived", trigger: "admission" });
+    await until(async () => (await list(first, "exclude")).sessions.some(
+      (row) => row.id === session.id && row.phase === "idle"), "settled");
+    record("clears archive state before a prompt is admitted and announces it to every client", {
+      recordClearedAtAdmission: true,
+      promptingClientListChanged: listChangedFrames(first) - announcementAt.first,
+      observingClientListChanged: listChangedFrames(second) - announcementAt.second,
+    });
+  });
+
+  it("clears archive state when Bash is admitted", async () => {
+    const f = await fixture();
+    const client = await f.connect();
+    const session = f.coldSession("bash-unarchive");
+    await openSession(client, session.id);
+    await archiveSession(client, session.id, "bash-archive-command");
+
+    // Bash is driven on the owning runtime because the `session.bash` RPC is
+    // rejected by its own admitted work entry before this boundary is reached.
+    // That defect is reported separately; the archive ownership under test is
+    // the same one that RPC reaches.
+    const slot = await f.current().registry.acquire(session.id);
+    await slot.executeBash("echo archive-bash", true);
+    expect(await archivedRecord(f.root, session.id)).toBeUndefined();
+    expect(await listedIds(client, "exclude")).toContain(session.id);
+    expect(f.archiveDiagnostic).toHaveBeenCalledWith({ outcome: "auto-unarchived", trigger: "admission" });
+    await until(async () => !(await f.current().registry.acquire(session.id)).isBusy, "settled");
+    record("clears archive state when Bash is admitted", {
+      bashAdmitted: true,
+      recordCleared: (await archivedRecord(f.root, session.id)) === undefined,
+      rpcBlockedByOwnWorkEntry: true,
+    });
+  });
+
+  it("clears archive state when a manual compaction is admitted", async () => {
+    // A tiny compaction budget gives the session history that manual compaction
+    // can actually summarize, so the admitted work is observable end to end.
+    const f = await fixture({ settings: { compaction: { enabled: true, reserveTokens: 1_024, keepRecentTokens: 0 } } });
+    const client = await f.connect();
+    const session = f.coldSession("compaction-unarchive");
+    await openSession(client, session.id);
+    f.faux.setResponses([
+      fauxAssistantMessage(`History for compaction. ${"detail ".repeat(200)}`),
+      // Compaction may summarize the recent turn prefix before the main summary.
+      fauxAssistantMessage("turn prefix summary"),
+      fauxAssistantMessage("compacted summary"),
+      fauxAssistantMessage("compacted summary"),
+    ]);
+    const primed = await client.request("compaction-prime", "session.prompt", {
+      commandId: "compaction-prime-command", sessionId: session.id, text: `Prime the history. ${"context ".repeat(200)}`,
+    });
+    expect(primed.ok, JSON.stringify(primed)).toBe(true);
+    await until(async () => (await list(client, "exclude")).sessions.some(
+      (row) => row.id === session.id && row.phase === "idle"), "primed history settled");
+    await archiveSession(client, session.id, "compaction-archive-command");
+
+    const compaction = await client.request("compaction-unarchive-request", "session.compact", {
+      commandId: "compaction-unarchive-command", sessionId: session.id,
+    });
+    expect(compaction.ok, JSON.stringify(compaction)).toBe(true);
+    expect(compaction.result).toMatchObject({ compacted: true });
+    // Either compaction path (immediate or queued behind a run) is admitted
+    // through the same boundary, so the record must be gone once it returns.
+    expect(await archivedRecord(f.root, session.id)).toBeUndefined();
+    expect(await listedIds(client, "exclude")).toContain(session.id);
+    expect(f.archiveDiagnostic).toHaveBeenCalledWith({ outcome: "auto-unarchived", trigger: "admission" });
+    record("clears archive state when a manual compaction is admitted", {
+      compactionRpcAccepted: true,
+      queued: compaction.result.queued,
+      recordCleared: true,
+    });
+  });
+
+  it("clears archive state for an automation-owned prompt on an existing session", async () => {
+    const f = await fixture();
+    const client = await f.connect();
+    const session = f.coldSession("automation-unarchive");
+    await openSession(client, session.id);
+    await archiveSession(client, session.id, "automation-archive-command");
+    f.faux.setResponses([fauxAssistantMessage("scheduled response")]);
+
+    // Mirrors AutomationExecutor: take the automation lease for a persisted
+    // session, then admit the prompt with its exact operation ownership.
+    const lease = await f.current().registry.acquireAutomationLease(session.id);
+    const admission = await lease.slot.prompt(
+      "scheduled run",
+      [],
+      undefined,
+      { text: "scheduled run", attachmentEnvelope: "", attachmentCount: 0 },
+      undefined,
+      {
+        operationId: "automation:fixture-operation",
+        origin: { kind: "gateway", ownerId: "fixture-automation", title: "Automation", confidence: "boundary" },
+        onTerminal: () => {},
+      },
+    );
+    lease.release();
+    expect(admission.operationId).toBe("automation:fixture-operation");
+    expect(await archivedRecord(f.root, session.id)).toBeUndefined();
+    await until(async () => (await listedIds(client, "exclude")).includes(session.id), "automation target visible");
+    await until(async () => !(await f.current().registry.acquire(session.id)).isBusy, "automation run settled");
+    record("clears archive state for an automation-owned prompt on an existing session", {
+      operationId: admission.operationId,
+      recordClearedAtAdmission: true,
+    });
+  });
+
+  it("treats a queued prompt as busy for archive admission", async () => {
+    const f = await fixture();
+    const client = await f.connect();
+    const session = f.coldSession("queued-unarchive");
+    await openSession(client, session.id);
+    let release!: () => void;
+    const barrier = new Promise<void>((resolve) => { release = resolve; });
+    f.faux.setResponses([async () => { await barrier; return fauxAssistantMessage("finished"); }]);
+
+    const running = await client.request("queued-running-prompt", "session.prompt", {
+      commandId: "queued-running-prompt-command", sessionId: session.id, text: "stay running",
+    });
+    expect(running.ok, JSON.stringify(running)).toBe(true);
+    await until(async () => (await list(client, "exclude")).sessions.some(
+      (row) => row.id === session.id && row.phase === "running"), "running phase");
+    const queued = await client.request("queued-follow-up", "session.prompt", {
+      commandId: "queued-follow-up-command", sessionId: session.id, text: "queued follow-up", behavior: "followUp",
+    });
+    expect(queued.ok, JSON.stringify(queued)).toBe(true);
+
+    const archive = await client.request("queued-archive", "session.archive.set", {
+      commandId: "queued-archive-command", sessionId: session.id, archived: true,
+    });
+    expect(archive).toMatchObject({ ok: false, error: { code: "busy" } });
+    release();
+    await until(async () => (await list(client, "exclude")).sessions.some(
+      (row) => row.id === session.id && row.phase === "idle"), "settled");
+    expect(await archivedRecord(f.root, session.id)).toBeUndefined();
+    record("treats a queued prompt as busy for archive admission", {
+      archiveError: archive.error.code,
+      queuedOperationId: queued.result.operationId,
+    });
+  });
+
+  it("clears archive state when an extension starts a turn without Gateway admission", async () => {
+    // An extension-owned trigger (a scheduled wake) starts the turn inside Pi,
+    // so no Gateway run admission can see it. The active projection is the only
+    // boundary that can restore visibility, and it must do so immediately.
+    const f = await fixture({
+      extension: (root) => `
+        import { existsSync } from "node:fs";
+        import { setTimeout as delay } from "node:timers/promises";
+        export default function (pi) {
+          void (async () => {
+            for (;;) {
+              if (existsSync(${JSON.stringify(join(root, "wake-trigger"))})) {
+                pi.sendMessage({ customType: "external-wake", content: "external wake", display: false }, { triggerTurn: true });
+                return;
+              }
+              await delay(5);
+            }
+          })();
+        }
+      `,
+    });
+    const client = await f.connect();
+    const session = f.coldSession("backstop-unarchive");
+    await openSession(client, session.id);
+    await archiveSession(client, session.id, "backstop-archive-command");
+    expect(await listedIds(client, "exclude")).not.toContain(session.id);
+    let release!: () => void;
+    const barrier = new Promise<void>((resolve) => { release = resolve; });
+    f.faux.setResponses([async () => { await barrier; return fauxAssistantMessage("woke by itself"); }]);
+    try {
+      await writeFile(join(f.root, "wake-trigger"), "", "utf8");
+      await until(async () => (await list(client, "exclude")).sessions.some(
+        (row) => row.id === session.id && row.phase === "running"), "externally started run");
+      // The row is visible from the moment the active projection is published,
+      // and the durable record is cleared behind it rather than only hidden in
+      // memory.
+      const visibleWhileRunning = (await list(client, "exclude")).sessions.find((row) => row.id === session.id);
+      expect(visibleWhileRunning?.phase).toBe("running");
+      expect(visibleWhileRunning?.archivedAt).toBeUndefined();
+      await until(() => f.archiveDiagnostic.mock.calls.some(
+        (call) => JSON.stringify(call[0]) === JSON.stringify({ outcome: "auto-unarchived", trigger: "backstop" })),
+      "backstop diagnostic");
+      expect(await archivedRecord(f.root, session.id)).toBeUndefined();
+      release();
+      await until(async () => (await list(client, "exclude")).sessions.some(
+        (row) => row.id === session.id && row.phase === "idle"), "settled");
+      record("clears archive state when an extension starts a turn without Gateway admission", {
+        visibleWhileRunning: visibleWhileRunning?.phase,
+        durableRecordCleared: true,
+        trigger: "backstop",
+      });
+    } finally {
+      release();
+    }
+  });
+
+  it("rejects a prompt retryably when archive state cannot be cleared", async () => {
+    const f = await fixture();
+    const client = await f.connect();
+    const session = f.coldSession("persist-failure");
+    await openSession(client, session.id);
+    await archiveSession(client, session.id, "failure-archive-command");
+    const registry = f.current().registry as unknown as {
+      archive: { remove(sessionId: string): Promise<boolean> };
+      markers: { evidence(): Promise<ReadonlyMap<string, readonly unknown[]>> };
+    };
+    const durableRemove = registry.archive.remove.bind(registry.archive);
+    // A failing durable write leaves the in-memory projection untouched, which
+    // is exactly what a full or failing disk produces.
+    registry.archive.remove = async () => { throw new Error("Fixture archive write failure"); };
+    f.faux.setResponses([fauxAssistantMessage("must never run")]);
+
+    let prompt: any;
+    try {
+      prompt = await client.request("failure-prompt", "session.prompt", {
+        commandId: "failure-prompt-command", sessionId: session.id, text: "must not run",
+      });
+    } finally {
+      registry.archive.remove = durableRemove;
+    }
+    expect(prompt).toMatchObject({ ok: false, error: { code: "busy", retryable: true } });
+    expect(f.archiveDiagnostic).toHaveBeenCalledWith({ outcome: "failure", stage: "auto-unarchive" });
+    // Fail closed: the session stays archived, no run marker exists, and no
+    // runtime work was admitted for the rejected prompt.
+    expect(await archivedRecord(f.root, session.id)).toBeDefined();
+    expect(await listedIds(client, "only")).toEqual([session.id]);
+    expect([...(await registry.markers.evidence()).keys()]).not.toContain(session.id);
+    const slot = await f.current().registry.acquire(session.id);
+    expect(slot.isBusy).toBe(false);
+    expect(slot.snapshot().phase).toBe("idle");
+    record("rejects a prompt retryably when archive state cannot be cleared", {
+      promptError: prompt.error.code,
+      retryable: prompt.error.retryable,
+      runMarkers: 0,
+      phaseAfterRejection: slot.snapshot().phase,
+    });
+  });
+
+  it("holds the session lane from archive admission through the durable commit", async () => {
+    // The review finding this covers: if archive admission released the session
+    // lane before its durable commit, a prompt could be admitted in the gap, and
+    // the archive would then commit over running work. Holding the durable write
+    // open inside the commit makes that gap observable.
+    const f = await fixture();
+    const client = await f.connect();
+    const session = f.coldSession("lane-hold");
+    await openSession(client, session.id);
+    const registry = f.current().registry as unknown as {
+      archive: { archive(sessionId: string): Promise<string> };
+    };
+    const durableArchive = registry.archive.archive.bind(registry.archive);
+    let enteredCommit!: () => void;
+    const inCommit = new Promise<void>((resolve) => { enteredCommit = resolve; });
+    let releaseCommit!: () => void;
+    const commitBarrier = new Promise<void>((resolve) => { releaseCommit = resolve; });
+    registry.archive.archive = async (sessionId: string) => {
+      enteredCommit();
+      await commitBarrier;
+      return durableArchive(sessionId);
+    };
+    f.faux.setResponses([fauxAssistantMessage("must not be hidden")]);
+    let promptSettled = false;
+    try {
+      const archivePromise = client.request("lane-hold-archive", "session.archive.set", {
+        commandId: "lane-hold-archive-command", sessionId: session.id, archived: true,
+      });
+      await inCommit;
+      const promptPromise = client.request("lane-hold-prompt", "session.prompt", {
+        commandId: "lane-hold-prompt-command", sessionId: session.id, text: "must not run hidden",
+      }).then((response) => { promptSettled = true; return response; });
+      await new Promise((resolve) => setTimeout(resolve, 100));
+      const admittedDuringCommit = promptSettled;
+      // The archive still owns the session lane, so no prompt may be admitted.
+      expect(admittedDuringCommit).toBe(false);
+      releaseCommit();
+      expect((await archivePromise).ok).toBe(true);
+      const prompt = await promptPromise;
+      // The prompt is admitted only after the commit, and it clears the record
+      // before it runs: the session is never both working and hidden.
+      expect(prompt.ok, JSON.stringify(prompt)).toBe(true);
+      expect(await archivedRecord(f.root, session.id)).toBeUndefined();
+      await until(async () => (await list(client, "exclude")).sessions.some((row) => row.id === session.id), "visible after the commit");
+      record("holds the session lane from archive admission through the durable commit", {
+        promptAdmittedDuringCommit: admittedDuringCommit,
+        archiveCommitted: true,
+        recordClearedAfterAdmission: true,
+      });
+    } finally {
+      releaseCommit();
+      registry.archive.archive = durableArchive;
+    }
+  });
+
+  it("never commits an archive over a run that admission already admitted", async () => {
+    const f = await fixture();
+    const client = await f.connect();
+    const session = f.coldSession("race");
+    await openSession(client, session.id);
+    const registry = f.current().registry as unknown as {
+      archive: { archivedAt(sessionId: string): string | undefined };
+    };
+    const slot = await f.current().registry.acquire(session.id);
+    const outcomes = { promptAdmitted: 0, archiveWonPromptRejected: 0, bothCommitted: 0 };
+    const rounds = 10;
+    for (let round = 0; round < rounds; round += 1) {
+      f.faux.setResponses([fauxAssistantMessage(`race response ${round}`)]);
+      // Warm the catalog acquisition on alternating rounds so the archive
+      // request can reach the session lane before the prompt does, instead of
+      // always losing the walk to it.
+      if (round % 2 === 1) await list(client, "exclude", { limit: 1 });
+      const [archive, prompt] = await Promise.all([
+        client.request(`race-archive-${round}`, "session.archive.set", {
+          commandId: `race-archive-command-${round}`, sessionId: session.id, archived: true,
+        }),
+        client.request(`race-prompt-${round}`, "session.prompt", {
+          commandId: `race-prompt-command-${round}`, sessionId: session.id, text: `race ${round}`,
+        }),
+      ]);
+      if (prompt.ok) {
+        outcomes.promptAdmitted += 1;
+        // The invariant this race protects: once a run owns the session, no
+        // archive record may exist, so it can never work while hidden.
+        expect(registry.archive.archivedAt(session.id)).toBeUndefined();
+        expect(await archivedRecord(f.root, session.id)).toBeUndefined();
+        expect(await listedIds(client, "exclude")).toContain(session.id);
+        if (archive.ok) outcomes.bothCommitted += 1;
+      } else {
+        expect(prompt).toMatchObject({ ok: false, error: { code: "busy" } });
+        expect(archive.ok, JSON.stringify(archive)).toBe(true);
+        outcomes.archiveWonPromptRejected += 1;
+      }
+      await until(() => !slot.isBusy, "race run settled");
+      // Reset for the next round: an unarchive is a no-op when the prompt won.
+      const reset = await client.request(`race-reset-${round}`, "session.archive.set", {
+        commandId: `race-reset-command-${round}`, sessionId: session.id, archived: false,
+      });
+      expect(reset.ok).toBe(true);
+    }
+
+    // One gated round with a committed record: the prompt then clears it and
+    // the row must be visible for the whole run that follows.
+    const gated = (() => {
+      let release!: () => void;
+      const barrier = new Promise<void>((resolve) => { release = resolve; });
+      return { barrier, release: () => release() };
+    })();
+    f.faux.setResponses([async () => { await gated.barrier; return fauxAssistantMessage("gated response"); }]);
+    await archiveSession(client, session.id, "race-gated-archive-command");
+    expect(await listedIds(client, "exclude")).not.toContain(session.id);
+    const gatedPrompt = await client.request("race-gated-prompt", "session.prompt", {
+      commandId: "race-gated-prompt-command", sessionId: session.id, text: "gated race",
+    });
+    expect(gatedPrompt.ok, JSON.stringify(gatedPrompt)).toBe(true);
+    await until(() => slot.snapshot().phase === "running", "gated run started");
+    expect(registry.archive.archivedAt(session.id)).toBeUndefined();
+    const duringRun = (await list(client, "exclude")).sessions.find((row) => row.id === session.id);
+    expect(duringRun?.phase).toBe("running");
+    expect(duringRun?.archivedAt).toBeUndefined();
+    gated.release();
+    await until(() => !slot.isBusy, "gated run settled");
+    record("never commits an archive over a run that admission already admitted", {
+      rounds,
+      outcomes,
+      visibleWhileRunning: duringRun?.phase,
     });
   });
 });

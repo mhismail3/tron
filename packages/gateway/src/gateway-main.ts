@@ -209,9 +209,14 @@ const sessions = new RuntimeRegistry({
   persistenceDiagnostic: (sessionId, code) => logger.log("warning", "Session persistence diagnostic", {
     event: code, source: "session", sessionId,
   }),
-  archiveDiagnostic: (diagnostic) => logger.log("warning", `Session archive state was not persisted (${diagnostic.stage})`, {
-    event: "sessions.archive.persist-failed", source: "sessions", outcome: diagnostic.outcome,
-  }),
+  archiveDiagnostic: (diagnostic) => diagnostic.outcome === "failure"
+    // Privacy: outcome and stage only. No session ID or path reaches logs.
+    ? logger.log("warning", `Session archive state was not persisted (${diagnostic.stage})`, {
+      event: "sessions.archive.persist-failed", source: "sessions", outcome: diagnostic.outcome, code: diagnostic.stage,
+    })
+    : logger.log("info", `Archived session returned to the dashboard on new work (${diagnostic.trigger})`, {
+      event: "sessions.archive.auto-unarchived", source: "sessions", outcome: diagnostic.outcome, reason: diagnostic.trigger,
+    }),
   sessionAutomationReserved: (sessionId) => automationSchedulerForArchive?.hasSessionRun(sessionId) ?? false,
   compactionDiagnostic: (diagnostic) => logger.log(
     diagnostic.outcome === "failure" ? "error" : "info",

@@ -2,7 +2,7 @@
 
 - **Started:** 2026-09-26
 - **Status:** Active
-- **Last updated:** 2026-09-26, approved
+- **Last updated:** 2026-09-26, G-2
 - **Goal:** A user can archive an idle session so it leaves the dashboard without being deleted, find it again in one collapsed Archived container or in search, and have it return automatically when it runs again.
 
 ## Goal and constraints
@@ -90,12 +90,13 @@ Current state, inspected 2026-09-26:
 | ID | Status | Scope | Depends on | Owner |
 | --- | --- | --- | --- | --- |
 | G-1 | Done | Gateway archive store, `session.archive.set` RPC, list filtering and count, delete/rekey/prune ownership, `session-archive.v1` capability | none | archive worker, 2026-09-26 |
-| G-2 | Claimed | Every new run unarchives: an admission-time clear for Gateway-admitted runs, plus a backstop when an active phase is published | G-1 | tron-coordinator, 2026-09-26 |
+| G-2 | Done | Every new run unarchives: an admission-time clear for Gateway-admitted runs, plus a backstop when an active phase is published | G-1 | tron-coordinator, 2026-09-26 |
 | G-3 | Claimed | Search results carry `archived`; `session-search.md` updated | G-1 | tron-coordinator, 2026-09-26 |
 | I-1 | Claimed | iOS model, mutation service, AppModel and capability gating; catalog membership follows authoritative responses | G-1 | tron-coordinator, 2026-09-26 |
 | I-2 | Ready | Dashboard full-swipe Archive, one collapsed "Archived (N)" container at the bottom, and archived-row actions | I-1 | |
 | I-3 | Ready | Search "Archived" label, automation picker exclusion, and display of an existing automation whose target is archived | I-1, G-3 | |
 | F-1 | Needs scoping | The `session.fork` RPC rejects with retryable `busy` because its own admitted work entry satisfies the slot's idle check; decide the fix and cover the real path | none | |
+| F-2 | Needs scoping | The same self-work-entry rejection now also measured on `session.bash`, `session.navigate` and `session.setTools`; audit every mutation RPC whose slot method consults session work ownership and decide the fix (thread the request's work token, as `session.setModel` already does) | none | |
 | V-1 | Ready | Cross-module checkpoint, user-performed Gateway rollout, and eyes-on device review; close the plan | G-2, I-2, I-3 | |
 
 ## Task details
@@ -405,3 +406,91 @@ artifact. Accessibility identifiers use the existing
   runs on that lane. F-1 needs a decision: the cheapest fix is to thread the
   RPC's work token into `RuntimeSlot.fork`'s idle check, which also argues for
   auditing every other lane-level `assertIdle` reached from a mutation RPC.
+
+### G-2 · Done · 2026-09-26 · tron-coordinator
+
+- Result: every new run clears retained archive state before it can do any
+  work, so an archived session is never running while hidden. Gateway-admitted
+  runs clear it inside the same session-lane critical section that admits them
+  (`session.prompt` — RPC, automation, scheduled and extension prompts —
+  `session.bash`, `session.compact`, and the model-backed branch summary from
+  `session.navigate`; the hook is a no-I/O no-op while the session is not
+  archived), and a store failure rejects the run retryably. A turn Pi starts on
+  its own is caught at the one summary-publication funnel: the row becomes
+  visibly unarchived immediately and the durable record is cleared behind it,
+  surviving a failed write through a bounded in-memory override that retries on
+  the next publication. Both paths log the new privacy-safe
+  `sessions.archive.auto-unarchived` event with the boundary that cleared the
+  record.
+- Result (review fix): archive admission and its durable commit are now one
+  session-lane critical section (`RuntimeSlot.commitArchiveWhileIdle` replaces
+  `assertArchivable`), closing the window where a prompt admitted between the
+  idle check and the commit would run while the archive committed over it. The
+  lock order is registry mutex -> session lane -> attention/archive lane, and no
+  path holds a display-projection lane while waiting for a session lane or the
+  registry mutex (delete releases the attention lane before taking the mutex;
+  setAttention resolves admission before entering; rekey already nests this
+  order). A cold session is fenced by the mutex plus the existing slot-identity
+  recheck, because every slot publication happens inside that mutex.
+- Evidence (verified):
+  - `npm run build` clean.
+  - `npx vitest run src/transport/session-archive.integration.test.ts`: 18/18 in
+    5.7 s over the real WebSocket, `GatewayService`, `RuntimeRegistry` and faux
+    provider. Nine new G-2 cases: a prompt from one client unarchives before its
+    admission response returns, both clients receive `session.listChanged`, and
+    the run publishes no event while hidden; Bash, manual compaction (real
+    summarization, `compacted: true`) and an automation-shaped
+    `acquireAutomationLease` + owned prompt each clear the record; a queued
+    follow-up makes archive admission `busy`; an extension-owned trigger
+    (`pi.sendMessage` with `triggerTurn`) with no Gateway admission is restored
+    by the backstop while its run is still `running`; a forced store-write
+    failure rejects the prompt with retryable `busy`, leaves the record, and
+    creates no run marker and no phase change; and ten concurrent
+    archive/prompt rounds plus a gated round never end archived-while-working.
+  - Negative control for the review fix: reverting
+    `commitArchiveWhileIdle` to release the lane before the commit makes the new
+    "holds the session lane from archive admission through the durable commit"
+    case fail (`expected true to be false`: the prompt was admitted while the
+    commit was still open). Restored, it passes.
+  - `npx vitest run src/sessions/runtime-registry.integration.test.ts`: 240/240
+    in 57.9 s. `runtime-compaction.integration.test.ts`,
+    `sync-protocol.integration.test.ts`, `server-terminal-delete.integration.test.ts`,
+    `session-attention-store.test.ts` (34/34), and
+    `runtime-terminal-notifications.integration.test.ts`,
+    `gateway-service-transcript.test.ts`, `tron-workspace.integration.test.ts`,
+    `command-receipts.test.ts`, `gateway-restart.test.ts` (69/69) all pass.
+  - `python3 scripts/check-documentation-policy.py` and
+    `scripts/personal-info-guard.sh` pass.
+- Changes: this commit (`packages/gateway/src/sessions/runtime-slot.ts`,
+  `packages/gateway/src/sessions/runtime-registry.ts`,
+  `packages/gateway/src/gateway-main.ts`, `packages/gateway/README.md`,
+  `packages/gateway/docs/observability.md`, and
+  `packages/gateway/src/transport/session-archive.integration.test.ts`).
+- Tasks added: F-2.
+- Kept on purpose:
+  - Archiving a session with no runtime still commits on the display lane
+    alone: `setArchived` holds the registry mutex across the whole operation and
+    every slot publication takes that mutex, so no runtime can appear between
+    the structural admission and the commit.
+  - The unarchive direction (`archived: false`) still does not require an idle
+    session, so a client can always reverse a hidden row, including one whose
+    run has already started.
+  - The backstop also fires for `waitingForUser` and `hasActiveSubagents`
+    projections, not only `running`/`compacting`/`retrying`: archive admission
+    treats those as active, so the same rule must clear them or the invariant
+    would be asymmetric.
+  - A failed backstop write keeps an in-memory visible override and retries on
+    the next published summary instead of adding a second durable intent store;
+    a restart falls back to the durable record, which the next run admission
+    clears.
+- Deviations: the required G-2 Bash case is driven on the owning runtime rather
+  than through the `session.bash` RPC, which is rejected before that boundary by
+  its own admitted work entry (same class as F-1; measured for `session.bash`,
+  `session.navigate` and `session.setTools` and recorded as F-2).
+- For the next agent: G-3 and I-1 are in flight in other worktrees. G-3 reads
+  the archive store directly, so it will not see the registry's in-memory
+  visible override during a failed backstop write; prefer routing that read
+  through a registry seam if the two land together. F-2 needs a decision: the
+  measured fix is to pass the mutation's work token into the slot methods whose
+  idle check consults session work ownership, exactly as `session.setModel`
+  already does.

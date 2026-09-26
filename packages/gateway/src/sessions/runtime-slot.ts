@@ -383,6 +383,12 @@ export interface RuntimeSlotDependencies {
   /** Bounded recency for the shared model picker. Called once per admitted
    * user-session run start; implementations stay off the run's critical path. */
   noteModelUsed?: (sessionId: string, model: { provider: string; id: string }) => void;
+  /** Clears retained archive state before the Gateway admits a run, so a
+   * session can never be working while it is hidden from the dashboard. Called
+   * inside this slot's lane after `assertUsable()` and before run ownership
+   * begins; a rejection aborts the run retryably. It must be a no-op with no
+   * I/O while the session is not archived. */
+  beforeRunAdmission: (sessionId: string) => Promise<void>;
 }
 
 class CanonicalCustomEntryConflictError extends Error {}
@@ -940,16 +946,19 @@ export class RuntimeSlot {
       this.touch();
     };
   }
-  /** Archive admission on the exact lane that admits runs: any run ownership
-   * that already entered the lane is observed before an archive can commit, so
-   * archiving can never hide admitted work. `exceptWorkToken` is the archiving
+  /** Archive idle admission and its durable commit inside ONE lane critical
+   * section. This lane is the exact boundary that admits runs, so no prompt,
+   * Bash call, compaction, or extension continuation can start between the idle
+   * check and the archive commit: whichever of the two enters the lane first
+   * decides, and the other observes it. `exceptWorkToken` is the archiving
    * request's own work, which is not the session running. */
-  async assertArchivable(exceptWorkToken?: string): Promise<void> {
-    await this.lane.run(() => {
+  async commitArchiveWhileIdle<T>(exceptWorkToken: string | undefined, commit: () => Promise<T>): Promise<T> {
+    return this.lane.run(async () => {
       this.assertUsable();
       if (this.isBusyExceptWorkToken(exceptWorkToken)) {
         throw new GatewayError("busy", "Stop the session before archiving it", false, undefined, "session_operation_busy");
       }
+      return commit();
     });
   }
 
@@ -6144,6 +6153,11 @@ export class RuntimeSlot {
       let queueDispositionFailure: unknown;
       let startPersisted = false;
       try {
+        // Retained archive state is cleared here, inside the same lane critical
+        // section that admits this run and after every synchronous rejection
+        // above. A prompt can therefore never start while the session is hidden
+        // from the dashboard, and a store failure rejects the prompt retryably.
+        await this.dependencies.beforeRunAdmission(this.id);
         this.invocations.set(invocationId, invocation);
         while (this.invocations.size > 128) this.invocations.delete(this.invocations.keys().next().value!);
         operationWork = this.beginOperationWork(operationId);
@@ -6994,6 +7008,9 @@ export class RuntimeSlot {
       let queuedCompletion: Promise<void> | undefined;
       const queued = await this.lane.run(async () => {
         this.assertUsable();
+        // Both the immediate and the queued compaction path are admitted here,
+        // so clearing archive state once at this boundary covers either.
+        await this.dependencies.beforeRunAdmission(this.id);
         if (this.manualCompactionClaim !== claim) {
           throw new GatewayError("conflict", "Manual compaction ownership changed", true);
         }
@@ -7120,6 +7137,9 @@ export class RuntimeSlot {
     try {
       return await this.lane.run(async () => {
         this.assertIdle();
+        // Bash is Gateway-admitted agent work, so it clears retained archive
+        // state on the same lane turn that admits it.
+        await this.dependencies.beforeRunAdmission(this.id);
         // Admission and the first canonical Bash call are in one lane turn with
         // no suspension between them. The new token therefore cannot make its
         // own idle check fail and no competing session mutation can enter.
@@ -7237,6 +7257,9 @@ export class RuntimeSlot {
   ): Promise<{ editorText?: string }> {
     return this.lane.run(async () => {
       this.assertIdle();
+      // Plain tree navigation is a read. Only the model-backed branch summary is
+      // work, so only it clears retained archive state.
+      if (options.summarize) await this.dependencies.beforeRunAdmission(this.id);
       const ownsBranchSummary = options.summarize;
       const work = ownsBranchSummary ? this.dependencies.workRegistry.begin({
         kind: "compaction-export",

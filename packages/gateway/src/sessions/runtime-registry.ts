@@ -151,6 +151,29 @@ function orderDashboardSessions<T extends DashboardOrderableSession>(sessions: r
   });
 }
 
+/** The dashboard shows work for a session whose projection is active. Archive
+ * admission and archive restoration share this rule: an archived session must
+ * be idle, so an active projection both blocks archiving and clears a record
+ * that a run reached without Gateway admission. */
+function sessionShowsWork(projection: {
+  phase?: SessionSummary["phase"] | undefined;
+  foregroundPhase?: SessionSummary["phase"] | undefined;
+  waitingForUser?: boolean | undefined;
+  hasActiveSubagents?: boolean | undefined;
+}): boolean {
+  const active = (phase: SessionSummary["phase"] | undefined) =>
+    phase === "running" || phase === "compacting" || phase === "retrying";
+  return active(projection.phase)
+    || active(projection.foregroundPhase)
+    || projection.waitingForUser === true
+    || projection.hasActiveSubagents === true;
+}
+
+/** Privacy-safe archive lifecycle signal, never a session ID or path. */
+export type ArchiveDiagnostic =
+  | { outcome: "failure"; stage: "set" | "remove" | "auto-unarchive" }
+  | { outcome: "auto-unarchived"; trigger: "admission" | "backstop" };
+
 /** The archived container is ordered by when each session was archived, newest
  * first. Archive timestamps are unique per session but a tie still needs one
  * deterministic order across pages. */
@@ -333,7 +356,15 @@ export class RuntimeRegistry {
   private catalogAcquisitionPromiseKey: string | undefined;
   /** Serializes attention membership checks with set/delete/rekey. Archive
    * state shares this lane: both are Gateway-owned display projections of one
-   * canonical session and must not outlive it. */
+   * canonical session and must not outlive it.
+   *
+   * Lock order is registry mutex -> session lane -> this lane. The archive
+   * commit and run admission both run on a session's lane and nest this lane
+   * inside it, and the rekey hook already holds a lane while it nests this one.
+   * Nothing holds this lane while it waits for a registry mutex or a session
+   * lane: delete releases this lane before taking the mutex, and setAttention
+   * resolves admission before entering. Keep that direction when adding work
+   * here, or runs and archive commits can deadlock. */
   private readonly attentionLane = new AsyncMutex();
   /** Linearizes display lease admission with canonical session deletion. */
   private readonly displayArtifactLane = new AsyncMutex();
@@ -362,6 +393,14 @@ export class RuntimeRegistry {
   private readonly latestSummaries = new Map<string, SessionSummaryUpdate>();
   private readonly pendingAttentionRemovals = new Set<string>();
   private readonly pendingArchiveRemovals = new Set<string>();
+  /** Archived IDs whose live projection already shows work. The row is visible
+   * from the moment the projection is published and the durable record is
+   * cleared behind it; a failed write stays visible here instead of leaving a
+   * running session hidden. */
+  private readonly pendingArchiveRestorations = new Set<string>();
+  /** One durable archive-clear attempt per ID, so a repeated active projection
+   * cannot queue another store write. */
+  private readonly archiveRestorationAttempts = new Map<string, Promise<void>>();
   private readonly deletingSessionIds = new Set<string>();
   private ambiguousSessionIds = new Set<string>();
   private readonly trustReloadProjects = new Set<string>();
@@ -419,8 +458,8 @@ export class RuntimeRegistry {
       beforeSessionDelete?: (sessionId: string) => Promise<void>;
       sessionClosed?: (sessionId: string) => void;
       persistenceDiagnostic?: (sessionId: string, code: string) => void;
-      /** Privacy-safe archive persistence outcome: stage only, never a session ID. */
-      archiveDiagnostic?: (diagnostic: { outcome: "failure"; stage: "set" | "remove" }) => void;
+      /** Privacy-safe archive lifecycle outcome, never a session ID. */
+      archiveDiagnostic?: (diagnostic: ArchiveDiagnostic) => void;
       /** Read-only automation admission query, so archiving cannot hide a
        * reserved or already-running automation target. */
       sessionAutomationReserved?: (sessionId: string) => boolean;
@@ -708,6 +747,14 @@ export class RuntimeRegistry {
     return {
       broadcast: this.options.broadcast,
       summaryChanged: (summary: SessionSummaryUpdate) => {
+        // A run that Pi started on its own (an extension's `triggerTurn`, a
+        // scheduled wake) never reached run admission, so this is the only
+        // boundary that can notice it. Visibility is restored before the
+        // publication so the row is never both working and hidden, and a
+        // retained override keeps retrying its durable clear.
+        if (this.pendingArchiveRestorations.has(summary.sessionId) || sessionShowsWork(summary)) {
+          this.restoreArchivedSession(summary.sessionId);
+        }
         this.publishRevisionedSummary({ ...summary, ...this.attention.projection(summary.sessionId) });
       },
       changed: () => {
@@ -784,6 +831,10 @@ export class RuntimeRegistry {
         if (disposition === "migrate") await this.archive.rekey(previousId, nextId);
         if (disposition === "reset" || disposition === "discard") await this.archive.assertAbsent(nextId);
         if (disposition === "discard") await this.archive.remove(previousId);
+        // A rebind ends any pending visible override: the identity changed, so
+        // the previous ID's run is no longer the owner of either record.
+        this.pendingArchiveRestorations.delete(previousId);
+        this.pendingArchiveRestorations.delete(nextId);
         // The forked branch already owns its exact canonical display references.
         // Publish those owner links before committing the new session identity so
         // a successful fork can never expose a dangling artifact reference.
@@ -855,6 +906,7 @@ export class RuntimeRegistry {
       try {
         if (await this.archive.remove(sessionId)) this.archiveChanged();
         this.pendingArchiveRemovals.delete(sessionId);
+        this.pendingArchiveRestorations.delete(sessionId);
       } catch {
         // Retain for the next lane operation; restart reconciliation also
         // prunes records with no canonical catalog owner.
@@ -869,10 +921,78 @@ export class RuntimeRegistry {
     this.options.sessionListChanged();
   }
 
-  private archivePersistFailed(stage: "set" | "remove"): void {
+  private archivePersistFailed(stage: "set" | "remove" | "auto-unarchive"): void {
     // Privacy: outcome and stage only. A session ID would turn a bounded
     // storage diagnostic into a session-identifying record.
     this.options.archiveDiagnostic?.({ outcome: "failure", stage });
+  }
+
+  /** Effective archive projection. A pending restoration is already visible:
+   * its durable record could not be removed yet, so the live outcome wins until
+   * the record is provably gone. */
+  private archivedAt(sessionId: string): string | undefined {
+    if (this.pendingArchiveRestorations.has(sessionId)) return undefined;
+    return this.archive.archivedAt(sessionId);
+  }
+
+  /** Clears retained archive state before the Gateway admits a run. The owning
+   * slot calls this inside its lane after every synchronous rejection and
+   * immediately before run ownership begins, so no run can start while the
+   * session is archived and a store failure rejects the run retryably instead of
+   * running it hidden. It must not acquire the registry mutex: the archive
+   * commit holds that mutex while it waits for the very lane this runs on. */
+  private async beforeRunAdmission(sessionId: string): Promise<void> {
+    // Cheap gate first: an unarchived session pays no store or lane cost. A
+    // retained visible override still needs its durable clear, so it continues.
+    if (!this.pendingArchiveRestorations.has(sessionId) && this.archive.archivedAt(sessionId) === undefined) return;
+    await this.attentionLane.run(async () => {
+      await this.flushPendingProjectionRemovals();
+      let removed: boolean;
+      try {
+        removed = await this.archive.remove(sessionId);
+      } catch {
+        this.archivePersistFailed("auto-unarchive");
+        throw new GatewayError("busy", "Session archive state could not be persisted", true);
+      }
+      this.pendingArchiveRestorations.delete(sessionId);
+      if (removed) {
+        this.archiveChanged();
+        this.options.archiveDiagnostic?.({ outcome: "auto-unarchived", trigger: "admission" });
+      }
+    });
+  }
+
+  /** A run that reached the runtime without Gateway admission is already
+   * underway and cannot be rejected, so its row becomes visible immediately and
+   * the durable record is cleared behind it. A failed write keeps the session
+   * visible and retries on the next publication. */
+  private restoreArchivedSession(sessionId: string): void {
+    if (!this.pendingArchiveRestorations.has(sessionId) && this.archive.archivedAt(sessionId) === undefined) return;
+    this.pendingArchiveRestorations.add(sessionId);
+    if (this.archiveRestorationAttempts.has(sessionId)) return;
+    const attempt = this.clearArchivedRecord(sessionId);
+    this.archiveRestorationAttempts.set(sessionId, attempt);
+    void attempt.finally(() => {
+      if (this.archiveRestorationAttempts.get(sessionId) === attempt) this.archiveRestorationAttempts.delete(sessionId);
+    });
+  }
+
+  private async clearArchivedRecord(sessionId: string): Promise<void> {
+    try {
+      const removed = await this.attentionLane.run(async () => {
+        await this.flushPendingProjectionRemovals();
+        return this.archive.remove(sessionId);
+      });
+      this.pendingArchiveRestorations.delete(sessionId);
+      if (removed) {
+        this.archiveChanged();
+        this.options.archiveDiagnostic?.({ outcome: "auto-unarchived", trigger: "backstop" });
+      }
+    } catch {
+      // The row stays visible through the pending restoration; the next
+      // published summary retries this exact record.
+      this.archivePersistFailed("auto-unarchive");
+    }
   }
 
   /** An archived session must be idle. The dashboard projection is checked as
@@ -881,13 +1001,13 @@ export class RuntimeRegistry {
    * subagents. */
   private assertArchiveIdle(sessionId: string, slot: RuntimeSlot | undefined): void {
     const latest = this.latestSummaries.get(sessionId);
-    const active = (phase: SessionSummary["phase"] | undefined) =>
-      phase === "running" || phase === "compacting" || phase === "retrying";
-    const phase = latest?.phase ?? (slot ? slot.catalogPhase : "idle");
-    const foregroundPhase = latest?.foregroundPhase ?? slot?.catalogForegroundPhase;
-    const waitingForUser = latest?.waitingForUser ?? slot?.catalogWaitingForUser ?? false;
-    const hasActiveSubagents = latest?.hasActiveSubagents ?? slot?.catalogHasActiveSubagents ?? false;
-    if (active(phase) || active(foregroundPhase) || waitingForUser || hasActiveSubagents) {
+    const projection = {
+      phase: latest?.phase ?? (slot ? slot.catalogPhase : "idle"),
+      foregroundPhase: latest?.foregroundPhase ?? slot?.catalogForegroundPhase,
+      waitingForUser: latest?.waitingForUser ?? slot?.catalogWaitingForUser ?? false,
+      hasActiveSubagents: latest?.hasActiveSubagents ?? slot?.catalogHasActiveSubagents ?? false,
+    };
+    if (sessionShowsWork(projection)) {
       throw new GatewayError("busy", "Stop the session before archiving it", false, undefined, "session_operation_busy");
     }
   }
@@ -1084,6 +1204,7 @@ export class RuntimeRegistry {
       ...(this.options.persistenceDiagnostic ? { persistenceDiagnostic: this.options.persistenceDiagnostic } : {}),
       ...(this.options.compactionDiagnostic ? { compactionDiagnostic: this.options.compactionDiagnostic } : {}),
       isSessionPresented: (sessionId: string) => this.isSessionPresented(sessionId),
+      beforeRunAdmission: (sessionId: string) => this.beforeRunAdmission(sessionId),
       ...(this.options.machineId ? { machineId: this.options.machineId } : {}),
       ...(this.options.notifications ? { notifications: this.options.notifications } : {}),
       ...(this.options.extensionArtifactWarning ? { extensionArtifactWarning: this.options.extensionArtifactWarning } : {}),
@@ -2281,7 +2402,7 @@ export class RuntimeRegistry {
         ?? liveTransitionParentSessionId;
       const latest = this.latestSummaries.get(session.id);
       const name = latest?.name ?? session.name;
-      const archivedAt = this.archive.archivedAt(session.id);
+      const archivedAt = this.archivedAt(session.id);
       seeds.push({
         id: session.id,
         ...(name ? { name } : {}),
@@ -2315,7 +2436,7 @@ export class RuntimeRegistry {
         const latest = this.latestSummaries.get(id);
         const parentSessionId = slot.catalogParentSessionId;
         const automationOwner = this.automationSessionOwners.get(slot);
-        const archivedAt = this.archive.archivedAt(id);
+        const archivedAt = this.archivedAt(id);
         seeds.push({
           id,
           ...(latest?.name ? { name: latest.name } : {}),
@@ -3112,17 +3233,8 @@ export class RuntimeRegistry {
           throw new GatewayError("busy", "Stop the session before archiving it", false, undefined, "session_operation_busy");
         }
         this.assertArchiveIdle(sessionId, slot);
-        // The slot's lane is the exact admission boundary for runs, so work that
-        // already entered it is observed here. The synchronous checks above
-        // reject every state that holds the lane for long, which is why this
-        // bounded wait can stay inside the mutex exactly as delete's dispose
-        // does.
-        if (slot && !slot.isDisposed) await slot.assertArchivable(initiatingWorkToken);
       }
-      // Commit on the attention lane: the same serialization owner as delete and
-      // rebind. The recheck rejects a rebind that migrated this exact identity
-      // while the structural admission above was in flight.
-      return this.attentionLane.run(async () => {
+      const commit = () => this.attentionLane.run(async () => {
         await this.flushPendingProjectionRemovals();
         if (this.deletingSessionIds.has(sessionId)) {
           throw new GatewayError("busy", "Session deletion is already in progress", true);
@@ -3138,6 +3250,7 @@ export class RuntimeRegistry {
             this.archivePersistFailed("remove");
             throw new GatewayError("busy", "Session archive state could not be persisted", true);
           }
+          this.pendingArchiveRestorations.delete(sessionId);
           if (removed) this.archiveChanged();
           return { archived: false };
         }
@@ -3148,9 +3261,19 @@ export class RuntimeRegistry {
           this.archivePersistFailed("set");
           throw new GatewayError("busy", "Session archive state could not be persisted", true);
         }
+        this.pendingArchiveRestorations.delete(sessionId);
         this.archiveChanged();
         return { archived: true, archivedAt };
       });
+      // A live slot owns the lane that admits runs, so its idle admission and
+      // the durable commit must be one critical section: a run admitted in the
+      // gap would otherwise be working while this record commits over it. A
+      // cold session has no lane to interleave with, and the recheck inside
+      // `commit` rejects any slot published while the commit was in flight.
+      if (archived && slot && !slot.isDisposed) {
+        return slot.commitArchiveWhileIdle(initiatingWorkToken, commit);
+      }
+      return commit();
     });
   }
 
@@ -3232,6 +3355,7 @@ export class RuntimeRegistry {
             } catch {
               this.pendingArchiveRemovals.add(sessionId);
             }
+            this.pendingArchiveRestorations.delete(sessionId);
             if (archiveRemoved) this.archiveChanged();
           }
         } finally {
