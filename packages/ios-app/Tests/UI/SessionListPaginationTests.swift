@@ -171,7 +171,7 @@ struct SessionListPaginationTests {
 
     @Test("workspace disclosure ignores stale delayed completions")
     func rejectsStaleWorkspaceCompletions() {
-        var disclosure = SessionListWorkspaceDisclosure()
+        var disclosure = TronDisclosureState()
         let collapse = disclosure.beginToggle("workspace")
         let expand = disclosure.beginToggle("workspace")
 

@@ -82,12 +82,8 @@ enum ModelDisplayFormatting {
         if ["claude-haiku-4-5", "claude-opus-4-5", "claude-sonnet-4-5"].contains(model.id) {
             return "Latest alias · \(identifier)"
         }
-        if let match = model.id.range(of: #"-(\d{8})$"#, options: .regularExpression) {
-            let date = String(model.id[match].dropFirst())
-            let year = date.prefix(4)
-            let month = date.dropFirst(4).prefix(2)
-            let day = date.suffix(2)
-            return "Pinned release · \(year)-\(month)-\(day) · \(identifier)"
+        if let date = ModelReleaseDate.pinnedReleaseDate(inID: model.id) {
+            return "Pinned release · \(date) · \(identifier)"
         }
         return "Model ID · \(identifier)"
     }
@@ -119,6 +115,28 @@ enum ModelDisplayFormatting {
     }
 }
 
+/// The one spelling of model release-date syntax. Gateway payloads, the
+/// "Pinned release" identity line, and the Latest rail all read it here so the
+/// wire format cannot drift between them.
+enum ModelReleaseDate {
+    static func admits(_ value: String) -> Bool {
+        value.range(of: #"^\d{4}-\d{2}-\d{2}$"#, options: .regularExpression) != nil
+    }
+
+    /// The date pinned by a date-suffixed model ID, e.g.
+    /// `claude-opus-4-5-20251101` becomes `2025-11-01`. Nil without a suffix.
+    static func pinnedReleaseDate(inID id: String) -> String? {
+        guard let match = id.range(of: #"-(\d{8})$"#, options: .regularExpression) else { return nil }
+        let digits = id[match].dropFirst()
+        return "\(digits.prefix(4))-\(digits.dropFirst(4).prefix(2))-\(digits.suffix(2))"
+    }
+
+    /// `2025-11-01` to `20251101`, the ID suffix that pins that release.
+    static func compact(_ value: String) -> String {
+        value.replacingOccurrences(of: "-", with: "")
+    }
+}
+
 extension ModelRef {
     var displayProviderName: String { ModelDisplayFormatting.provider(provider) }
     var displayName: String { ModelDisplayFormatting.model(id) }
@@ -135,6 +153,12 @@ extension ProviderSummary {
 
 extension ModelSummary {
     var pickerIdentity: String { ModelDisplayFormatting.pickerIdentity(for: self) }
+    /// The release date the picker may order by. A malformed or absent Gateway
+    /// value keeps the model out of the Latest rail instead of failing the
+    /// catalog read; the raw value stays canonical.
+    var admittedReleaseDate: String? {
+        releaseDate.flatMap { ModelReleaseDate.admits($0) ? $0 : nil }
+    }
     var displayProviderName: String { ModelDisplayFormatting.provider(provider) }
     var displayName: String {
         ModelDisplayFormatting.model(name.isEmpty ? id : name)

@@ -882,6 +882,10 @@ final class AppModel {
         providerAuth.installHostedCatalog(catalog, for: target)
     }
 
+    func installHostedRecentModels(_ models: [RecentModelRef]) {
+        providerAuth.installHostedRecentModels(models)
+    }
+
     func setHostedProviderInvalidationGeneration(_ generation: Int) {
         providerAuth.setHostedInvalidationGeneration(generation)
     }
@@ -1061,6 +1065,14 @@ final class AppModel {
 
     func providerCatalog(for target: ProviderCatalogTarget) -> ProviderCatalog? {
         providerAuth.catalog(for: target)
+    }
+
+    /// Gateway-recorded recently used models for the active profile. The picker
+    /// projects them; the Gateway owns the history.
+    var recentModels: [RecentModelRef] { providerAuth.recentModels }
+
+    func refreshRecentModels() async {
+        await providerAuth.loadRecentModels()
     }
 
     func preferredAvailableModel(for target: ProviderCatalogTarget) -> ModelRef? {
@@ -4240,6 +4252,8 @@ final class AppModel {
             packageConfiguration.notePackagesChanged()
         case "models.customChanged":
             customModelConfiguration.noteCustomModelsChanged()
+        case "models.recentChanged":
+            providerAuth.noteRecentModelsChanged()
         case "notification.inbox.changed":
             if let profile = profiles.selected { scheduleNotificationInboxRefresh(profile: profile) }
         case "devices.changed":

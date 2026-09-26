@@ -104,6 +104,31 @@ enum ModelCatalogPolicy {
     }
 }
 
+/// Admission for the Gateway's bounded recent-model history. The Gateway caps
+/// its own store; the client bounds again so a malformed or oversized response
+/// can never inflate the picker's Recent rail.
+enum RecentModelCatalogPolicy {
+    static let maximumItems = 12
+    static let maximumStringBytes = 512
+
+    static func admit(_ models: [RecentModelRef]) -> [RecentModelRef] {
+        var seen = Set<ModelRef>()
+        var admitted: [RecentModelRef] = []
+        admitted.reserveCapacity(min(models.count, maximumItems))
+        for model in models {
+            guard admitted.count < maximumItems,
+                  !model.provider.isEmpty,
+                  !model.id.isEmpty,
+                  model.provider.utf8.count <= maximumStringBytes,
+                  model.id.utf8.count <= maximumStringBytes,
+                  model.lastUsedAt.utf8.count <= maximumStringBytes,
+                  seen.insert(model.ref).inserted else { continue }
+            admitted.append(model)
+        }
+        return admitted
+    }
+}
+
 struct ModelCatalogAccumulator {
     private(set) var models: [ModelSummary] = []
     private var identities = Set<ModelRef>()
@@ -170,6 +195,9 @@ final class ProviderAuthCoordinator {
     private struct ModelParams: Codable { let sessionId: String?; let cursor: String?; let limit: Int }
     private struct ProviderResponse: Decodable { let providers: [ProviderSummary] }
     private struct ModelResponse: Decodable { let models: [ModelSummary]; let nextCursor: String? }
+    private struct RecentModelsResponse: Decodable { let models: [RecentModelRef] }
+    /// `model.recent` is global: it carries no session scope.
+    private struct RecentModelsParams: Codable { }
     private struct BeginParams: Codable {
         let providerId, authType: String
         let sessionId: String?
@@ -257,6 +285,8 @@ final class ProviderAuthCoordinator {
 
     private var catalogByTarget: [ProviderCatalogTarget: ProviderCatalog] = [:]
     private var loadGenerationByTarget: [ProviderCatalogTarget: Int] = [:]
+    private(set) var recentModels: [RecentModelRef] = []
+    private var recentModelsLoadGeneration = 0
     private var targetByAuthOperation: [String: ProviderCatalogTarget] = [:]
     private var providerByAuthOperation: [String: String] = [:]
     private var authTypeByAuthOperation: [String: String] = [:]
@@ -302,6 +332,34 @@ final class ProviderAuthCoordinator {
 
     func catalog(for target: ProviderCatalogTarget) -> ProviderCatalog? {
         catalogByTarget[target]
+    }
+
+    /// Reads the Gateway's recent-model history for the current profile.
+    /// Auxiliary presentation data: a failure — including a Gateway that
+    /// predates `model.recent` — keeps the last projection and surfaces no
+    /// error, because the picker's Recent rail must never block selection.
+    func loadRecentModels() async {
+        let admittedProfileGeneration = profileGeneration
+        let admittedLoadGeneration = recentModelsLoadGeneration
+        do {
+            let response: RecentModelsResponse = try await client.request(
+                "model.recent",
+                RecentModelsParams(),
+                diagnosticPurpose: "recent-models"
+            )
+            guard profileGeneration == admittedProfileGeneration,
+                  recentModelsLoadGeneration == admittedLoadGeneration else { return }
+            recentModels = RecentModelCatalogPolicy.admit(response.models)
+        } catch is CancellationError {
+        } catch {
+        }
+    }
+
+    /// The Gateway recorded a new recent model. Generation fencing discards a
+    /// read that loses the race with this one.
+    func noteRecentModelsChanged() {
+        recentModelsLoadGeneration &+= 1
+        Task { await loadRecentModels() }
     }
 
     /// The active operation when the Gateway recovered it for a fresh begin, so
@@ -796,8 +854,10 @@ final class ProviderAuthCoordinator {
         authBeginGeneration &+= 1
         authPresentationGeneration &+= 1
         loadGenerationByTarget = loadGenerationByTarget.mapValues { $0 &+ 1 }
+        recentModelsLoadGeneration &+= 1
         if clearCatalogs {
             catalogByTarget.removeAll()
+            recentModels.removeAll()
             // Pending cancellations belong to the retired profile's Gateway.
             pendingCancellationOperationIDs.removeAll()
         }
@@ -1045,6 +1105,11 @@ final class ProviderAuthCoordinator {
     #if HOSTED_TEST
     func installHostedCatalog(_ catalog: ProviderCatalog?, for target: ProviderCatalogTarget) {
         catalogByTarget[target] = catalog
+    }
+
+    func installHostedRecentModels(_ models: [RecentModelRef]) {
+        recentModelsLoadGeneration &+= 1
+        recentModels = RecentModelCatalogPolicy.admit(models)
     }
 
     func setHostedInvalidationGeneration(_ generation: Int) {

@@ -41,39 +41,20 @@ struct NewSessionSheet: View {
             ScrollView(.vertical, showsIndicators: true) {
                 VStack(spacing: 12) {
                     if !quickSelections.isEmpty {
-                        ScrollView(.horizontal, showsIndicators: false) {
-                            HStack(spacing: 8) {
-                                ForEach(quickSelections) { shortcut in
-                                    Button {
-                                        selectQuickSelection(shortcut)
-                                    } label: {
-                                        VStack(alignment: .leading, spacing: 2) {
-                                            Text(shortcut.projectName)
-                                                .font(TronTypography.sans(size: TronTypography.sizeBodySM, weight: .semibold))
-                                                .foregroundStyle(Color.tronAccentText)
-                                                .lineLimit(1)
-                                            Text(shortcut.serverName)
-                                                .font(TronTypography.secondaryDescription)
-                                                .foregroundStyle(Color.tronTextSecondary)
-                                                .lineLimit(1)
-                                        }
-                                        .frame(minWidth: 92, alignment: .leading)
-                                        .padding(.horizontal, 12)
-                                        .padding(.vertical, 7)
-                                    }
-                                    .buttonStyle(.plain)
-                                    .glassEffect(
-                                        .regular.tint(Color.tronEmerald.opacity(workspace == shortcut.path && activeProfileID == shortcut.serverID ? 0.30 : 0.15)).interactive(),
-                                        in: RoundedRectangle(cornerRadius: 12, style: .continuous)
-                                    )
-                                    .accessibilityElement(children: .combine)
-                                    .accessibilityLabel("\(shortcut.projectName), \(shortcut.serverName)")
-                                    .accessibilityValue(workspace == shortcut.path && activeProfileID == shortcut.serverID ? "Selected" : "")
-                                }
-                            }
-                            .padding(.vertical, 4)
+                        TronCardRail(
+                            items: quickSelections,
+                            identity: \.id,
+                            accent: .tronEmerald,
+                            isSelected: isSelectedQuickSelection,
+                            accessibilityLabel: { "\($0.projectName), \($0.serverName)" },
+                            accessibilityValue: { isSelectedQuickSelection($0) ? "Selected" : "" },
+                            action: selectQuickSelection
+                        ) { shortcut in
+                            TronRailCardLabel(
+                                primary: shortcut.projectName,
+                                secondary: shortcut.serverName
+                            )
                         }
-                        .scrollClipDisabled()
                     }
 
                     setupCard(
@@ -455,6 +436,10 @@ struct NewSessionSheet: View {
                   seen.insert(session.cwd).inserted else { return nil }
             return WorkspaceShortcut(path: session.cwd, title: session.workspaceName, icon: "clock.arrow.circlepath")
         }
+    }
+
+    private func isSelectedQuickSelection(_ shortcut: NewSessionQuickSelection) -> Bool {
+        workspace == shortcut.path && activeProfileID == shortcut.serverID
     }
 
     private func selectQuickSelection(_ shortcut: NewSessionQuickSelection) {

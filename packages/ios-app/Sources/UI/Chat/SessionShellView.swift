@@ -93,7 +93,7 @@ struct SessionShellView: View {
     @State private var sessionToDelete: SessionSummary?
     @State private var sessionToRename: SessionSummary?
     @State private var renameName = ""
-    @State private var workspaceDisclosure = SessionListWorkspaceDisclosure()
+    @State private var workspaceDisclosure = TronDisclosureState()
     @State private var sessionExpansion: SessionListSessionExpansion
     @State private var appSettings: AppLocalBehaviorSettings
     @State private var navigationOwner = DashboardNavigationOwner()
@@ -1005,9 +1005,7 @@ struct SessionShellView: View {
                         .lineLimit(1)
                         .truncationMode(.tail)
                 }
-                Image(systemName: "chevron.right")
-                    .font(TronTypography.sans(size: SessionDashboardLayout.headerChevronSize, weight: .bold))
-                    .rotationEffect(.degrees(isExpanded ? 90 : 0))
+                TronDisclosureChevron(isExpanded: isExpanded, size: SessionDashboardLayout.headerChevronSize)
             }
             .foregroundStyle(Color.tronEmerald)
             .padding(.leading, SessionDashboardLayout.headerLeadingPadding)
@@ -1016,7 +1014,7 @@ struct SessionShellView: View {
             .padding(.bottom, SessionDashboardLayout.headerBottomPadding)
             .frame(maxWidth: .infinity, alignment: .leading)
             .contentShape(Rectangle())
-            .animation(SessionDashboardLayout.expansionAnimation, value: isExpanded)
+            .animation(TronDisclosureLayout.expansionAnimation, value: isExpanded)
         }
         .buttonStyle(.plain)
         .textCase(nil)
@@ -1074,12 +1072,12 @@ struct SessionShellView: View {
 
     private func toggleWorkspaceGroup(_ groupID: String, itemCount: Int) {
         let direction = workspaceDisclosure.toggleDirection(for: groupID)
-        let transition: SessionListWorkspaceDisclosureTransition
+        let transition: TronDisclosureTransition
         switch direction {
         case .collapse:
             transition = workspaceDisclosure.beginToggle(groupID)
         case .expand:
-            transition = withAnimation(SessionDashboardLayout.expansionAnimation) {
+            transition = withAnimation(TronDisclosureLayout.expansionAnimation) {
                 workspaceDisclosure.beginToggle(groupID)
             }
         }
@@ -1091,7 +1089,7 @@ struct SessionShellView: View {
             try? await Task.sleep(for: delay)
             guard !Task.isCancelled else { return }
             if transition.direction == .collapse {
-                _ = withAnimation(SessionDashboardLayout.expansionAnimation) {
+                _ = withAnimation(TronDisclosureLayout.expansionAnimation) {
                     workspaceDisclosure.complete(transition)
                 }
             } else {
@@ -1114,7 +1112,7 @@ struct SessionShellView: View {
     }
 
     private func beginPaginationReveal(_ group: SessionListWorkspaceGroup) {
-        guard let transition = withAnimation(SessionDashboardLayout.expansionAnimation, {
+        guard let transition = withAnimation(TronDisclosureLayout.expansionAnimation, {
             sessionExpansion.beginRevealMore(
                 groupID: group.id,
                 totalCount: group.sessions.count
@@ -1144,7 +1142,7 @@ struct SessionShellView: View {
                 for: SessionDashboardLayout.disclosureCollapseDelay(itemCount: transition.affectedCount)
             )
             guard !Task.isCancelled else { return }
-            _ = withAnimation(SessionDashboardLayout.expansionAnimation) {
+            _ = withAnimation(TronDisclosureLayout.expansionAnimation) {
                 sessionExpansion.finish(transition)
             }
         }

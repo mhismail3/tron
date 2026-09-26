@@ -86,7 +86,7 @@ enum GatewayDiagnosticTopicAdmission {
         "system.stopping", "notification.inbox.changed", "auth.prompt", "auth.event",
         "auth.completed", "automation.changed", "settings.changed", "trust.changed",
         "providers.changed", "packages.changed", "packages.progress", "packages.completed",
-        "models.customChanged", "devices.changed", "terminal.output", "terminal.exit"
+        "models.customChanged", "models.recentChanged", "devices.changed", "terminal.output", "terminal.exit"
     ]
 
     static func admit(_ topic: String) -> String {

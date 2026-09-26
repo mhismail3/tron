@@ -313,6 +313,19 @@ struct ModelSummary: Codable, Hashable, Identifiable, Sendable {
     let maxTokens: Int
     let available: Bool
     var contextWindowLimits: ContextWindowLimits? = nil
+    /// Gateway canon release date (`YYYY-MM-DD`). Absent when the Gateway has no
+    /// recorded release for the model, which keeps it out of the Latest rail.
+    var releaseDate: String? = nil
+
+    var ref: ModelRef { ModelRef(provider: provider, id: id) }
+}
+
+/// One Gateway-recorded recently used model. The Gateway owns this history;
+/// iOS only projects it into the picker's Recent rail.
+struct RecentModelRef: Codable, Hashable, Sendable {
+    let provider: String
+    let id: String
+    let lastUsedAt: String
 
     var ref: ModelRef { ModelRef(provider: provider, id: id) }
 }

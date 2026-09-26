@@ -706,49 +706,141 @@ enum ModelPickerSearchPolicy {
     }
 }
 
+enum ModelPickerSectioning {
+    static let maximumRecentModels = 12
+    static let maximumLatestModels = 10
+
+    struct ProviderSection: Identifiable, Equatable {
+        let provider: String
+        let displayName: String
+        let models: [ModelSummary]
+
+        var id: String { provider }
+    }
+
+    struct Sections: Equatable {
+        let recent: [ModelSummary]
+        let latest: [ModelSummary]
+        let providers: [ProviderSection]
+    }
+
+    /// Builds the picker's three layers from the available catalog plus the
+    /// Gateway's recent history. Any query replaces the Recent and Latest rails
+    /// with matching provider sections, so every result stays visible.
+    static func sections(
+        models: [ModelSummary],
+        recent: [RecentModelRef],
+        selection: ModelRef?,
+        query: String
+    ) -> Sections {
+        let available = models.filter(\.available)
+        let providers = providerSections(
+            models: ModelPickerSearchPolicy.filtered(available, query: query),
+            selection: selection
+        )
+        guard query.isEmpty else {
+            return Sections(recent: [], latest: [], providers: providers)
+        }
+        return Sections(
+            recent: recentModels(recent, catalog: available),
+            latest: latestModels(available),
+            providers: providers
+        )
+    }
+
+    /// Recent order belongs to the Gateway. A ref that has left the available
+    /// catalog, or repeats an earlier one, is dropped.
+    static func recentModels(_ recent: [RecentModelRef], catalog: [ModelSummary]) -> [ModelSummary] {
+        let byRef = Dictionary(catalog.map { ($0.ref, $0) }, uniquingKeysWith: { first, _ in first })
+        var seen = Set<ModelRef>()
+        return recent.compactMap { entry in
+            guard seen.insert(entry.ref).inserted, let model = byRef[entry.ref] else { return nil }
+            return model
+        }
+        .prefix(maximumRecentModels)
+        .map { $0 }
+    }
+
+    /// Newest release date first. A latest alias and the pinned release its ID
+    /// names share that date, and the rail keeps the alias only; both stay
+    /// selectable in their provider section.
+    static func latestModels(_ catalog: [ModelSummary]) -> [ModelSummary] {
+        let dated = catalog.filter { $0.admittedReleaseDate != nil }
+        // Provider-scoped: two providers may publish the same model ID, and a
+        // pinned release may only collapse against its own provider's alias.
+        let byRef = Dictionary(dated.map { ($0.ref, $0) }, uniquingKeysWith: { first, _ in first })
+        let collapsedPinnedRefs = Set(dated.compactMap { pinned -> ModelRef? in
+            guard let releaseDate = pinned.admittedReleaseDate,
+                  ModelReleaseDate.pinnedReleaseDate(inID: pinned.id) == releaseDate,
+                  let alias = byRef[ModelRef(provider: pinned.provider, id: String(pinned.id.dropLast(9)))],
+                  alias.admittedReleaseDate == releaseDate else { return nil }
+            return pinned.ref
+        })
+        return dated
+            .filter { !collapsedPinnedRefs.contains($0.ref) }
+            .sorted { lhs, rhs in
+                let left = lhs.admittedReleaseDate ?? ""
+                let right = rhs.admittedReleaseDate ?? ""
+                if left != right { return left > right }
+                let nameOrder = lhs.displayName.localizedCaseInsensitiveCompare(rhs.displayName)
+                return nameOrder == .orderedSame ? lhs.id < rhs.id : nameOrder == .orderedAscending
+            }
+            .prefix(maximumLatestModels)
+            .map { $0 }
+    }
+
+    /// The selected model's provider leads so its section is reachable without
+    /// scrolling; the rest follow by provider display name. Model order inside a
+    /// section stays the Gateway catalog's.
+    static func providerSections(models: [ModelSummary], selection: ModelRef?) -> [ProviderSection] {
+        var grouped: [String: [ModelSummary]] = [:]
+        var catalogOrder: [String] = []
+        for model in models {
+            if grouped[model.provider] == nil { catalogOrder.append(model.provider) }
+            grouped[model.provider, default: []].append(model)
+        }
+        return catalogOrder
+            .map {
+                ProviderSection(
+                    provider: $0,
+                    displayName: ModelDisplayFormatting.provider($0),
+                    models: grouped[$0] ?? []
+                )
+            }
+            .sorted { lhs, rhs in
+                let lhsSelected = lhs.provider == selection?.provider
+                let rhsSelected = rhs.provider == selection?.provider
+                if lhsSelected != rhsSelected { return lhsSelected }
+                let nameOrder = lhs.displayName.localizedCaseInsensitiveCompare(rhs.displayName)
+                return nameOrder == .orderedSame ? lhs.provider < rhs.provider : nameOrder == .orderedAscending
+            }
+    }
+}
+
 struct ModelPicker: View {
     @Binding var selection: ModelRef?
     let models: [ModelSummary]
     @State private var search = ""
     @State private var showingSearch = false
     @State private var closingSearch = false
+    /// A toggle lands here first so the section repaints immediately; the store
+    /// keeps the choice for the next picker over this gateway profile.
+    @State private var providerExpansionOverrides: [String: Bool] = [:]
+    @State private var providerExpansion = ModelProviderExpansionStore.shared
     @Environment(\.tronSettingsVisualTheme) private var settingsTheme
+    @Environment(AppModel.self) private var model
 
     var body: some View {
         ScrollView(.vertical, showsIndicators: true) {
-            LazyVStack(spacing: 8) {
-                ForEach(filtered, id: \.ref) { model in
-                    Button { selection = model.ref } label: {
-                        HStack(spacing: 12) {
-                            Image(systemName: selection == model.ref ? "checkmark.circle.fill" : "cpu")
-                                .foregroundStyle(
-                                    settingsTheme?.accent
-                                        ?? (selection == model.ref ? Color.tronEmerald : Color.tronSlate)
-                                )
-                                .frame(width: 22)
-                            VStack(alignment: .leading, spacing: 3) {
-                                Text(model.displayName)
-                                    .font(TronTypography.sans(size: TronTypography.sizeBody, weight: .semibold))
-                                    .foregroundStyle(Color.tronTextPrimary)
-                                Text(model.pickerIdentity)
-                                    .font(TronTypography.secondaryDescription)
-                                    .foregroundStyle(Color.tronTextPrimary)
-                            }
-                            Spacer(minLength: 8)
-                        }
-                        .padding(.horizontal, 14)
-                        .padding(.vertical, 10)
-                        .frame(maxWidth: .infinity, minHeight: 54, alignment: .leading)
-                        .contentShape(Rectangle())
-                    }
-                    .buttonStyle(.plain)
-                    .tronScrollSurface(
-                        accent: rowAccent(isSelected: selection == model.ref),
-                        cornerRadius: 14,
-                        tintOpacity: selection == model.ref ? 0.18 : 0.08
-                    )
-                    .accessibilityLabel("\(model.displayName), \(model.pickerIdentity)")
-                    .accessibilityValue(selection == model.ref ? "Selected" : "")
+            LazyVStack(alignment: .leading, spacing: 8) {
+                if !sections.recent.isEmpty {
+                    cardRail(title: "Recent", models: sections.recent)
+                }
+                if !sections.latest.isEmpty {
+                    cardRail(title: "Latest", models: sections.latest)
+                }
+                ForEach(sections.providers) { section in
+                    providerSection(section)
                 }
             }
             .padding(.horizontal, 16)
@@ -776,18 +868,20 @@ struct ModelPicker: View {
         .toolbar {
             ToolbarItem(placement: .topBarLeading) {
                 if !showingSearch {
-                    Button {
-                        withAnimation(.snappy(duration: 0.18)) { showingSearch = true }
-                    } label: {
+                    Button { beginSearch() } label: {
                         Image(systemName: "magnifyingglass")
                             .font(TronTypography.sans(size: TronTypography.sizeBody, weight: .bold))
                             .foregroundStyle(settingsTheme?.accent ?? .tronEmerald)
                     }
                     .accessibilityLabel("Search models")
+                    #if HOSTED_TEST
+                    .modifier(ModelPickerHostedActionModifier(id: "picker.search", action: beginSearch))
+                    #endif
                 }
             }
         }
         .interactiveDismissDisabled(showingSearch)
+        .task { await model.refreshRecentModels() }
         .task(id: closingSearch) {
             guard closingSearch else { return }
             try? await Task.sleep(for: .milliseconds(300))
@@ -799,6 +893,156 @@ struct ModelPicker: View {
         }
     }
 
+    private var sections: ModelPickerSectioning.Sections {
+        ModelPickerSectioning.sections(
+            models: models,
+            recent: model.recentModels,
+            selection: selection,
+            query: search
+        )
+    }
+
+    private var accent: Color { settingsTheme?.accent ?? .tronEmerald }
+
+    private func cardRail(title: String, models: [ModelSummary]) -> some View {
+        TronCardRail(
+            title: title,
+            items: models,
+            identity: \.ref,
+            accent: accent,
+            isSelected: { $0.ref == selection },
+            accessibilityLabel: { "\($0.displayName), \($0.displayProviderName)" },
+            accessibilityValue: { $0.ref == selection ? "Selected" : "" },
+            action: { select($0.ref) }
+        ) { model in
+            TronRailCardLabel(
+                primary: model.displayName,
+                secondary: model.displayProviderName,
+                primaryLineLimit: 2,
+                minimumWidth: 132,
+                selectionAccent: model.ref == selection ? rowAccent(isSelected: true) : nil
+            )
+            #if HOSTED_TEST
+            .modifier(ModelPickerHostedActionModifier(
+                id: "picker.card.\(model.provider)/\(model.id)",
+                action: { select(model.ref) }
+            ))
+            #endif
+        }
+    }
+
+    @ViewBuilder
+    private func providerSection(_ section: ModelPickerSectioning.ProviderSection) -> some View {
+        let isExpanded = isSectionExpanded(section.provider)
+        VStack(alignment: .leading, spacing: 8) {
+            Button { toggleExpansion(section.provider) } label: {
+                HStack(spacing: 8) {
+                    Text(section.displayName)
+                        .font(TronTypography.sheetSectionHeader)
+                        .lineLimit(1)
+                    Text("\(section.models.count)")
+                        .font(TronTypography.secondaryDescription)
+                        .foregroundStyle(Color.tronTextSecondary)
+                    Spacer(minLength: 8)
+                    TronDisclosureChevron(isExpanded: isExpanded)
+                }
+                .foregroundStyle(accent)
+                .frame(minHeight: 32, alignment: .leading)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .contentShape(Rectangle())
+                .animation(TronDisclosureLayout.expansionAnimation, value: isExpanded)
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel(section.displayName)
+            .accessibilityValue(isExpanded ? "expanded" : "collapsed")
+            .accessibilityHint(isExpanded ? "Double tap to hide models" : "Double tap to show models")
+            #if HOSTED_TEST
+            .modifier(ModelPickerHostedActionModifier(
+                id: "picker.provider.\(section.provider)",
+                action: { toggleExpansion(section.provider) }
+            ))
+            #endif
+
+            if isExpanded {
+                ForEach(section.models, id: \.ref) { model in
+                    row(model)
+                }
+            }
+        }
+    }
+
+    private func row(_ model: ModelSummary) -> some View {
+        Button { select(model.ref) } label: {
+            HStack(spacing: 12) {
+                Image(systemName: selection == model.ref ? "checkmark.circle.fill" : "cpu")
+                    .foregroundStyle(
+                        settingsTheme?.accent
+                            ?? (selection == model.ref ? Color.tronEmerald : Color.tronSlate)
+                    )
+                    .frame(width: 22)
+                VStack(alignment: .leading, spacing: 3) {
+                    Text(model.displayName)
+                        .font(TronTypography.sans(size: TronTypography.sizeBody, weight: .semibold))
+                        .foregroundStyle(Color.tronTextPrimary)
+                    Text(model.pickerIdentity)
+                        .font(TronTypography.secondaryDescription)
+                        .foregroundStyle(Color.tronTextPrimary)
+                }
+                Spacer(minLength: 8)
+            }
+            .padding(.horizontal, 14)
+            .padding(.vertical, 10)
+            .frame(maxWidth: .infinity, minHeight: 54, alignment: .leading)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .tronScrollSurface(
+            accent: rowAccent(isSelected: selection == model.ref),
+            cornerRadius: 14,
+            tintOpacity: selection == model.ref ? 0.18 : 0.08
+        )
+        .accessibilityLabel("\(model.displayName), \(model.pickerIdentity)")
+        .accessibilityValue(selection == model.ref ? "Selected" : "")
+        #if HOSTED_TEST
+        .modifier(ModelPickerHostedActionModifier(
+            id: "picker.row.\(model.provider)/\(model.id)",
+            action: { select(model.ref) }
+        ))
+        #endif
+    }
+
+    /// A search shows every match, so a result never hides behind a collapsed
+    /// section. Clearing the query restores the remembered expansion.
+    private func isSectionExpanded(_ provider: String) -> Bool {
+        guard search.isEmpty else { return true }
+        if let override = providerExpansionOverrides[provider] { return override }
+        return providerExpansion.isExpanded(
+            profileID: model.profiles.selected?.id,
+            provider: provider,
+            selectedProvider: selection?.provider
+        )
+    }
+
+    private func beginSearch() {
+        withAnimation(.snappy(duration: 0.18)) { showingSearch = true }
+    }
+
+    private func select(_ ref: ModelRef) {
+        selection = ref
+    }
+
+    private func toggleExpansion(_ provider: String) {
+        let expanded = !isSectionExpanded(provider)
+        withAnimation(TronDisclosureLayout.expansionAnimation) {
+            providerExpansionOverrides[provider] = expanded
+        }
+        providerExpansion.setExpanded(
+            expanded,
+            profileID: model.profiles.selected?.id,
+            provider: provider
+        )
+    }
+
     private func rowAccent(isSelected: Bool) -> Color {
         settingsTheme?.accent ?? (isSelected ? .tronEmerald : .tronSlate)
     }
@@ -807,9 +1051,5 @@ struct ModelPicker: View {
         guard ModelPickerSearchPolicy.shouldClose(showingSearch: showingSearch, query: search), !closingSearch else { return }
         search = ""
         closingSearch = true
-    }
-
-    private var filtered: [ModelSummary] {
-        ModelPickerSearchPolicy.filtered(models, query: search)
     }
 }

@@ -1748,7 +1748,13 @@ Terminal icons, mirroring the dashboard's grouped actions, while Done stays trai
 Rename keeps the dashboard's clearable native text-entry alert and trimmed nonempty admission.
 The model action opens the progressive searchable `ModelPicker` with purple title, controls,
 and cards. Its sheet title is **Models**, also used by the picker within Settings → Agent Defaults → Model Defaults;
-the parent settings destination retains its existing name. The model card scopes the same purple theme to
+the parent settings destination retains its existing name. The picker organizes one catalog read
+into device-preference presentation only: a Recent rail projected from the Gateway's bounded
+recent-model history, a Latest rail ordered by the Gateway's optional release date, and one
+collapsible section per provider. The Gateway keeps the history, the release dates, and the
+availability that the rails filter on, and no picker-local usage list or date table exists. The
+collapsible provider sections reuse the dashboard's shared disclosure primitive, and both rails
+reuse the shared card rail, so section chrome has one owner. The model card scopes the same purple theme to
 its inline controls and nested sheets. An in-flight choice appears immediately without replacing canonical authority.
 Context-window model/revision guards, Thinking's available-level list, and compaction
 queue/export/active-operation admission stay owned by the existing session mutations.
