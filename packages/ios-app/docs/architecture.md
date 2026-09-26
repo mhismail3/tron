@@ -56,7 +56,15 @@ replacing the active chat connection. Profiles sharing the selected
 `machineGroupID`, profiles with a provisional legacy group (`machineGroupID == machineId`),
 or profiles disabled in Connections settings, remain paired but are blocked from
 background admission. Their last-known bounded dashboard buckets remain available as
-stale projections; transport retirement is not deletion. Selecting a legacy profile once
+stale projections; transport retirement is not deletion. Archived sessions follow the same
+ownership boundary: the Gateway's `session-archive.v1` contract owns archive membership, the
+dashboard's list projection excludes archived rows, `SessionCatalogCoordinator` keeps an
+archived ID hidden from live summaries until an authoritative page admits it again, and the
+archived container reads `archived: "only"` pages instead of deriving rows from a bucket. The
+count is summed per archive-capable profile and never fabricated as zero; each such read is a
+disposable presentation read fenced by the caller's managed activity and an exact per-profile
+latest-request generation, so a page superseded by a newer archive toggle or a surface exit is
+retired instead of published. Selecting a legacy profile once
 performs a verified Gateway handshake and persists its real physical-machine group before
 it can become a secondary connection. Connect and close invalidate older attempts across every suspension;
 late hello, frame, failure, liveness, completion, and close callbacks can only detach or publish
@@ -2046,7 +2054,9 @@ rounded UIKit fields, or system search and segmented styles.
 
 `SnapshotCache` persists only duplicate-free, bounded session summaries. It never restores or
 writes `SessionSnapshot` transcript/runtime state; legacy snapshot-bearing files decode only far
-enough to retain summaries and their snapshot values are ignored. File-size admission precedes reads,
+enough to retain summaries and their snapshot values are ignored. Archived rows are never cached:
+archive membership is Gateway-owned display state, so only its bounded count is persisted and
+restored. File-size admission precedes reads,
 which consume at most the exact ceiling. Load and save admit at most 250 unique rows in stored order;
 invalid or oversized rows and duplicate IDs are dropped, while a malformed envelope is discarded as a
 whole. Each admitted row is at most 128 KiB and the file remains below 8 MiB. Corrupt, obsolete, or

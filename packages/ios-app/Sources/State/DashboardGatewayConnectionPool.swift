@@ -26,11 +26,15 @@ protocol DashboardGatewayConnectionPoolDelegate: AnyObject {
     func dashboardPoolNotificationInboxChanged(profileID: String)
     func dashboardPoolAutomationChanged(profileID: String)
     func dashboardPoolDevicesChanged(profileID: String)
+    /// The Gateway-owned archived count for one background profile. `nil` means
+    /// that profile has not published a count yet.
+    func dashboardPoolDidUpdateArchivedCount(profileID: String, count: Int?)
 }
 
 extension DashboardGatewayConnectionPoolDelegate {
     func dashboardPoolAutomationChanged(profileID: String) {}
     func dashboardPoolDevicesChanged(profileID: String) {}
+    func dashboardPoolDidUpdateArchivedCount(profileID: String, count: Int?) {}
 }
 
 /// Maintains lightweight dashboard catalog connections for non-focused servers.
@@ -441,7 +445,10 @@ final class DashboardGatewayConnectionPool {
             }
             guard var current = entries[profileID] else { return }
             switch current.catalog.apply(update) {
-            case .stale:
+            case .stale, .archived:
+                // An archived row belongs to the archived container, not this
+                // dashboard projection; its page read or the next authoritative
+                // page restores it.
                 return
             case .unknownSession:
                 entries[profileID] = current
@@ -786,9 +793,13 @@ final class DashboardGatewayConnectionPool {
                 return .retained
             }
             switch loaded {
-            case let .loaded(rows, _, _):
+            case let .loaded(rows, _, _, archivedCount):
                 let sourced = rows.map { $0.withGatewaySource(id: profileID, label: seed.profile.label) }
-                guard admitted.catalog.publishAuthoritative(sourced, admission: admission) else { return .retained }
+                guard admitted.catalog.publishAuthoritative(
+                    sourced,
+                    admission: admission,
+                    archivedCount: archivedCount
+                ) else { return .retained }
                 admitted.state = .connected
                 admitted.refreshRetryAttempt = 0
                 admitted.refreshFailedAttempts = 0
@@ -894,6 +905,10 @@ final class DashboardGatewayConnectionPool {
             profileID: profileID,
             sessions: entry.catalog.sessions,
             state: entry.state
+        )
+        delegate?.dashboardPoolDidUpdateArchivedCount(
+            profileID: profileID,
+            count: entry.catalog.archivedCount
         )
     }
 }

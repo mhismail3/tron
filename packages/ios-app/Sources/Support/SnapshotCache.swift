@@ -6,17 +6,22 @@ enum SnapshotCachePolicy {
     static let maximumSessionCount = 250
     static let maximumEncodedSessionBytes = 128 * 1_024
     static let envelopeReserveBytes = 4 * 1_024
+    /// Archived rows are never cached; the Gateway-owned count is the only
+    /// archive projection this cache retains, within the catalog's row bound.
+    static let maximumArchivedCount = SessionCatalogLoadBounds.maximumRows
 }
 
 actor SnapshotCache {
     struct Value: Sendable {
         let sessions: [SessionSummary]
-        static let empty = Value(sessions: [])
+        let archivedCount: Int?
+        static let empty = Value(sessions: [], archivedCount: nil)
     }
 
     private struct Document: Codable {
         let version: Int
         let sessions: [SessionSummary]
+        let archivedCount: Int?
     }
 
     private let root: URL
@@ -86,7 +91,7 @@ actor SnapshotCache {
                     byteCount: data.count
                 )
             )
-            return Value(sessions: admittedSessions)
+            return Value(sessions: admittedSessions, archivedCount: Self.boundedArchivedCount(document.archivedCount))
         } catch {
             try? FileManager.default.removeItem(at: source)
             performanceSignposts.end(
@@ -102,6 +107,7 @@ actor SnapshotCache {
         profileID: String,
         generation: Int = 0,
         sessions: [SessionSummary],
+        archivedCount: Int? = nil,
     ) {
         guard !removedProfileIDs.contains(profileID),
               generation >= (latestSaveGenerationByProfile[profileID] ?? Int.min) else { return }
@@ -109,8 +115,14 @@ actor SnapshotCache {
         let interval = performanceSignposts.begin(.cacheSave)
         do {
             try prepareRoot()
-            // Session summaries are the only persisted projection.
-            let document = Document(version: 4, sessions: Self.boundedSessions(sessions))
+            // Session summaries are the only persisted projection. Archive
+            // membership is Gateway-owned display state: archived rows are
+            // never cached, only its bounded count.
+            let document = Document(
+                version: 4,
+                sessions: Self.boundedSessions(sessions),
+                archivedCount: Self.boundedArchivedCount(archivedCount)
+            )
             let data = try JSONEncoder.gateway.encode(document)
             guard data.count <= SnapshotCachePolicy.maximumEncodedBytes else {
                 throw CocoaError(.fileWriteOutOfSpace)
@@ -157,13 +169,19 @@ actor SnapshotCache {
         return root.appending(path: "\(digest).json", directoryHint: .notDirectory)
     }
 
+    private static func boundedArchivedCount(_ value: Int?) -> Int? {
+        guard let value, value >= 0, value <= SnapshotCachePolicy.maximumArchivedCount else { return nil }
+        return value
+    }
+
     private static func boundedSessions(_ sessions: [SessionSummary]) -> [SessionSummary] {
         let budget = SnapshotCachePolicy.maximumEncodedBytes - SnapshotCachePolicy.envelopeReserveBytes
         var estimatedBytes = 0
         var seen: Set<String> = []
         var admitted: [SessionSummary] = []
         for session in sessions where admitted.count < SnapshotCachePolicy.maximumSessionCount {
-            guard !session.id.isEmpty,
+            guard !session.isArchived,
+                  !session.id.isEmpty,
                   admitsEncodingShape(session, maximumBytes: SnapshotCachePolicy.maximumEncodedSessionBytes),
                   let encoded = try? JSONEncoder.gateway.encode(session),
                   encoded.count <= SnapshotCachePolicy.maximumEncodedSessionBytes,
