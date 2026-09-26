@@ -75,8 +75,8 @@ struct SettingsView: View {
                     }
 
                     TronSettingsGroup("Tools & Extensions", accent: .tronCyan) {
-                        settingsLink("Packages", summary: "Installed packages, skills, prompts, and themes", icon: "shippingbox", accent: .tronCyan) {
-                            PackagesSettingsView(projectCWD: projectCWD)
+                        settingsLink("Extensions", summary: "Installed packages, Tron modules, and themes", icon: "shippingbox", accent: .tronCyan) {
+                            ExtensionsSettingsView(projectCWD: projectCWD)
                         }
                         settingsDivider(accent: .tronCyan)
                         settingsLink("MCP Servers", summary: "Tools-only local and remote MCP connections", icon: "server.rack", accent: .tronCyan) {

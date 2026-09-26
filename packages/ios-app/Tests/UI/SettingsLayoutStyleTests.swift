@@ -109,7 +109,7 @@ final class SettingsLayoutStyleTests: XCTestCase {
         do {
             try await model.connectHostedGateway(profile: GatewayProfile(id: "profile", label: "Mac", host: "gateway.test", port: 9_847,
                 machineId: "machine", deviceId: "device"), token: "token")
-            try await withHost(PackagesSettingsView(projectCWD: nil).environment(model).tronPresentation().tronSettingsLayout(),
+            try await withHost(ExtensionsSettingsView(projectCWD: nil).environment(model).tronPresentation().tronSettingsLayout(),
                                size: CGSize(width: 440, height: 800)) { _ in
                 let failed = try await request(socket, count: 2)
                 XCTAssertEqual(failed.method, "packages.list")
@@ -141,6 +141,56 @@ final class SettingsLayoutStyleTests: XCTestCase {
             throw error
         }
         await model.teardown(); await client.close(); try? FileManager.default.removeItem(at: root)
+    }
+
+    func testExtensionsSheetReadsTronModulesOnlyWhenTheGatewayAdvertisesThem() async throws {
+        for capabilities in [["sessions.v1", "modules.v1"], ["sessions.v1"]] {
+            let socket = ScriptedGatewaySocket()
+            let client = GatewayClient(socketFactory: ScriptedGatewaySocketFactory(sockets: [socket]).factory)
+            let root = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString)
+            let model = AppModel(client: client, cache: SnapshotCache(root: root))
+            await socket.enqueue(try JSONEncoder.gateway.encode(JSONValue.object([
+                "type": .string("hello"), "gatewayVersion": .string("1.0.0"), "piVersion": .string("1.0.0"),
+                "protocolVersion": .number(5), "minProtocolVersion": .number(5), "machineId": .string("machine"),
+                "machineName": .string("Mac"), "gatewayChannel": .string("stable"),
+                "capabilities": .array(capabilities.map(JSONValue.string)),
+            ])))
+            do {
+                try await model.connectHostedGateway(profile: GatewayProfile(id: "profile", label: "Mac", host: "gateway.test", port: 9_847,
+                    machineId: "machine", deviceId: "device"), token: "token")
+                try await withHost(ExtensionsSettingsView(projectCWD: nil).environment(model).tronPresentation().tronSettingsLayout(),
+                                   size: CGSize(width: 440, height: 800)) { _ in
+                    let listing = try await request(socket, method: "packages.list")
+                    await socket.enqueue(try reply(listing.id, .object(["packages": .array([]), "resources": .object([
+                        "extensions": .array([]), "skills": .array([]), "prompts": .array([]), "themes": .array([])
+                    ])])))
+                    let updates = try await request(socket, method: "packages.checkUpdates")
+                    await socket.enqueue(try reply(updates.id, .object(["updates": .array([])])))
+                    if capabilities.contains("modules.v1") {
+                        let modules = try await request(socket, method: "modules.list")
+                        await socket.enqueue(try reply(modules.id, .object([
+                            "modules": .array([.object([
+                                "name": .string("tron-core"), "purpose": .string("Tron core extension"),
+                                "tools": .array([.string("knowledge")]), "commands": .array([]),
+                            ])]),
+                            "connections": .array([]),
+                        ])))
+                    }
+                    try await Task.sleep(for: .milliseconds(80))
+                    let methods = await socket.sentFrames().compactMap {
+                        try? JSONDecoder.gateway.decode(SettingsRequest.self, from: $0).method
+                    }.filter { $0.hasPrefix("packages.") || $0.hasPrefix("modules.") }
+                    XCTAssertEqual(methods, capabilities.contains("modules.v1")
+                        ? ["packages.list", "packages.checkUpdates", "modules.list"]
+                        : ["packages.list", "packages.checkUpdates"],
+                        "A Gateway without modules.v1 is never asked for a module list it cannot answer")
+                }
+            } catch {
+                await model.teardown(); await client.close(); try? FileManager.default.removeItem(at: root)
+                throw error
+            }
+            await model.teardown(); await client.close(); try? FileManager.default.removeItem(at: root)
+        }
     }
 
     private struct SettingsRequest: Decodable { let id: String; let method: String }

@@ -176,6 +176,30 @@ struct PackageInventory: Codable, Hashable, Sendable {
     let resources: JSONValue
 }
 
+/// One built-in Tron extension from `modules.list`. The commands are empty for
+/// every module today; they stay decoded because the Gateway reports them.
+struct TronModuleSummary: Codable, Hashable, Identifiable, Sendable {
+    let name: String
+    let purpose: String
+    let tools: [String]
+    let commands: [String]
+    var id: String { name }
+}
+
+/// One MCP connection a session would admit tools from. It names the source
+/// only: individual MCP tool names exist inside that session's runtime.
+struct McpToolSource: Codable, Hashable, Identifiable, Sendable {
+    let id: String
+    let definitionId: String
+    let health: String
+}
+
+/// `modules.list`: the installed Tron modules and the MCP tool sources.
+struct TronModuleList: Codable, Hashable, Sendable {
+    let modules: [TronModuleSummary]
+    let connections: [McpToolSource]
+}
+
 struct PackageUpdate: Codable, Hashable, Identifiable, Sendable {
     let source: String
     let displayName: String

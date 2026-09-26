@@ -1342,7 +1342,7 @@ backdrop filter for every row or a multi-screen card. Long settings screens use
 lazy outer stacks, while their small divider-owned sections remain eager. The main Settings sheet places its
 divider-owned rows in four category containers rather than one backdrop per destination, grouped by what the user
 configures: emerald This iPhone (Connections, Appearance, Sessions), purple Agent (Model Providers,
-Custom Models, Agent Defaults, Compaction), cyan Tools & Extensions (Packages, MCP Servers, Connected
+Custom Models, Agent Defaults, Compaction), cyan Tools & Extensions (Extensions, MCP Servers, Connected
 Services, Project Trust, Locations and Overrides), and blue Data & Diagnostics (dashboard-only Import, Logs). Row icons and dividers use the owning
 container accent. Connections retains the authorized-device detail identity across a server switch and refreshes its content in place; a transient device-list projection cannot dismiss the nested settings stack. Each progressive destination installs that row accent as an environment-owned visual theme
 for ordinary titles, controls, icons, dividers, fields, and containers, including nested sheets; informational
@@ -1863,16 +1863,20 @@ positional “Item” labels. The overview derives stable row titles, subtitles,
 and identities once per admitted resource revision, then reuses that projection
 while scrolling; large resource groups use the static scroll surface. Reload is owned by that sheet and publishes visible progress; the canonical
 `session.resourcesChanged` revision is the sole post-mutation read owner, so mutation and projection loads cannot race one shared busy flag.
-Packages starts with resource scope and inventory counts (Project Trust is its sibling Settings row, not repeated inside),
-then installed packages, a standalone Install Package action,
-then inline Skills, Prompts and Themes containers using Manage Session's emerald/cyan/teal resource
-accents. Resolved extensions are not duplicated beneath the installed list. Opaque, no-space source
+Extensions starts with resource scope and inventory counts (Project Trust is its sibling Settings row, not repeated inside),
+then the Installed container of third-party packages and a standalone Install Package action,
+then the read-only Tron Modules container (each module's name, purpose and tools, plus the MCP
+connections a session would admit tools from). Resolved extensions are not duplicated beneath the installed list, and
+resolved skills and prompts left this sheet for Manage Session → Project Resources. Pi themes style
+the terminal rather than this app, so the resolved Themes list stays on Extensions instead of
+Appearance, which owns the app's color mode and fonts. Opaque, no-space source
 titles remain continuous and horizontally inspectable; ordinary titles and provenance wrap naturally,
 with complete source/status information retained for accessibility. Resolved resource names use the
 same friendly title formatter as session resources, stripping Markdown/JSON suffixes and deriving a
 skill name from its directory. Raw paths, IDs and metadata remain untouched. Shared source/scope
 information appears once as a category caption, not repeated in each row; mixed sources retain row
-provenance. Empty categories use captions rather than empty info cards. Scope counts describe inventory,
+provenance. An empty resolved Themes list uses a placeholder row and a scope caption rather than an empty
+info card. Scope counts describe inventory,
 not tools loaded into every existing conversation. Full technical resource data remains available separately, including extension-only
 or additive categories. Locations and Overrides is a separate sibling sheet in Tools & Extensions, retaining optional discovery paths, advanced Mac overrides and autosave. Session storage remains
 Gateway-owned and is not exposed as a location override. Package catalog admission failures remain
@@ -1967,8 +1971,8 @@ Context slider endpoint labels are bold monospace; Default remains purple/semibo
 the code face. Its title and endpoint labels are white in dark mode. Custom Models uses
 the standard purple settings tint, while technical-detail rows retain their gray surface
 independently of the destination's toolbar accent. Additional Locations uses plural
-Extensions, Skills, Prompts and Terminal Themes row titles; empty resolved resource sections,
-including Themes, retain a standard Liquid Glass placeholder row.
+Extensions, Skills, Prompts and Terminal Themes row titles; the empty Themes section on
+Extensions retains a standard Liquid Glass placeholder row.
 
 Manage Session displays the runtime-projected latest cache-hit rate—the
 same canonical formula used by the terminal footer—and never derives a ratio
