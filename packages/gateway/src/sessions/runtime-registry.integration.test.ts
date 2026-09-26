@@ -596,6 +596,9 @@ describe.sequential("RuntimeRegistry with the pinned agent runtime", () => {
 
   it("resolves attention membership without materializing the full catalog", async () => {
     const fixture = await coldFixture("attention-scoped-resolution");
+    // Requirement: acknowledging attention resolves membership through the
+    // bounded acquisition, never the full row projection. That no heavy read
+    // happened is only observable by spying on the projection entry point.
     const catalog = vi.spyOn(fixture.registry, "catalog");
     const projection = await fixture.registry.setAttention(fixture.manager.getSessionId(), true);
     expect(projection.isUnread).toBe(true);
@@ -623,6 +626,9 @@ describe.sequential("RuntimeRegistry with the pinned agent runtime", () => {
     const sessionId = fixture.manager.getSessionId();
     const slot = await fixture.registry.acquire(sessionId);
     expect(slot.persistedSessionFile).toBeDefined();
+    // Requirement: an exact live runtime owner is itself the membership proof,
+    // so acknowledging attention must not walk catalog headers. The absent walk
+    // is visible only at the structure-evidence seam.
     const evidence = vi.spyOn(fixture.registry as any, "catalogStructureEvidence");
     await expect(fixture.registry.setAttention(sessionId, true)).resolves.toMatchObject({ isUnread: true });
     await expect(fixture.registry.setAttention(sessionId, false, 0)).resolves.toMatchObject({ isUnread: false });
@@ -693,6 +699,10 @@ describe.sequential("RuntimeRegistry with the pinned agent runtime", () => {
 
     const deleting = fixture.registry.delete(sessionId);
     await disposeEntered;
+    // Requirement (lock order): a rekey racing a deletion must fail closed with
+    // busy instead of holding the attention lane while the deletion waits on
+    // the slot lane. The private hook is the only rekey driver that does not
+    // itself queue behind that slot lane.
     const hooks = (fixture.registry as unknown as { hooks: () => {
       rekey: (
         previousId: string,
@@ -709,6 +719,11 @@ describe.sequential("RuntimeRegistry with the pinned agent runtime", () => {
   });
 
   it("projects empty live sessions until deletion, persistence, eviction, or restart", async () => {
+    // Requirement: an empty live session is a catalog row only while its exact
+    // slot exists, and retirement drops the row and both halves of its
+    // revisioned summary together. Idle eviction runs on a 60s interval, so the
+    // private trigger and the retained summary maps are the only way to reach
+    // that transition without a real-time sleep.
     const root = await mkdtemp(join(tmpdir(), "tron-live-empty-catalog-"));
     const agentDir = join(root, "agent");
     const cwd = join(root, "workspace");
