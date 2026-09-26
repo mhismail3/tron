@@ -98,7 +98,7 @@ breaks context-menu previews.
 | CT-2 | Done | Baseline: port the hosted reproduction fixtures from `fix/chat-blank-evidence` to `main` as measurements, not pass/fail gates. Record blank boundaries, estimate-to-truth ratio after keyboard cycles, tail displacements, repair commands and frame cost on the worst shapes (tall reply at the tail, many tall replies, 180+ rows), three runs each | CT-1 | chat scroll investigation session, 2026-09-26 |
 | CT-10 | Ready | Complete the baseline CT-2 trimmed: frame cost (chat performance signposts and display-link frame intervals) during streaming, sends and scrolling on `main`, the tall-reply-at-the-tail and 180+ row shapes, and why only the first of three submissions in the keyboard-cycles shape materialized a tail (`materialize:1`). CT-5 may not ship until CT-10's frame cost exists to compare against | CT-1 | |
 | CT-11 | Ready | Parallel test lanes: `scripts/tron-ios-test` picks a free owned simulator from a small pool (each with its own lease and state directory) instead of one shared simulator, so concurrent worktrees stop queueing; `clean` removes only its own lane's simulator and never another lane's retained runs; document the lane count against CPU and memory, and check the hosted timing fixtures under two concurrent lanes | CT-1 | |
-| CT-3 | Claimed | Prototype A on a throwaway branch: segment long assistant content at Markdown block boundaries into bounded physical rows, with pinning from visible row identity; measure against CT-2. The prototype does not need product polish, but it must show whether the blank and the estimate swing disappear | CT-2 | chat scroll investigation session, 2026-09-26 |
+| CT-3 | Done | Prototype A on a throwaway branch: segment long assistant content at Markdown block boundaries into bounded physical rows, with pinning from visible row identity; measure against CT-2. The prototype does not need product polish, but it must show whether the blank and the estimate swing disappear | CT-2 | chat scroll investigation session, 2026-09-26 |
 | CT-4 | Needs approval | The user chooses A or B from CT-3's numbers and a device build of the prototype | CT-3 | |
 | CT-5 | Needs scoping | Implement the chosen option in production. For A: segment identity, streaming into the last segment, whole-message copy/menus/accessibility, one entrance per message, segment chrome; pinned state from visibility. Scope into rows once CT-4 decides | CT-4 | |
 | CT-6 | Needs scoping | Delete the compensations CT-5 makes unnecessary, one per commit, each under the plan rules: past-end repair, physical tail repair, the materialization fail-open, geometry-based pinned evidence, and the trace fields that only diagnose them | CT-5 | |
@@ -376,3 +376,21 @@ breaks context-menu previews.
 - Changes: `packages/ios-app/TestPlans/UnitTests.xctestplan`, `packages/ios-app/docs/development.md`, the shape comment in `ChatViewScrollHarnessTests`, this plan.
 - Tasks added: CT-10.
 - For the next agent: the review's remaining P2 items (probe trace and diagnostic ring bounds can undercount `reDerivations` and `tailDisplacements` without saying so; `maxEstimateRatio` is a swing, not a truth ratio) belong to CT-10.
+
+### CT-3 · Done · 2026-09-26 · chat scroll investigation session
+
+- Result: option A (bounded rows) reduces the estimate swing but does not remove it or the blank, so it is not the fix. Long assistant text was cut into rows of at most about 1,200 bytes or 30 lines at paragraph breaks outside code fences, with long fences split into consecutive fences. After a keyboard dismissal the lazy stack still re-derived its estimate to about 38,000-51,500 pt for 8,800-12,100 pt of real content, and the pinned viewport followed the eager marker to that phantom bottom while every row was far above it. Whether a sampled boundary lands in the phantom region is timing, so blank counts vary between runs while the geometry is wrong in each.
+- Evidence (prototype branch `ct-3-segment-prototype`, commits `f67d92c0b` to `496910745`, not merged; the last three measurement runs on a private simulator lane):
+
+  | Metric | `main` baseline | Prototype, 3 runs |
+  | --- | --- | --- |
+  | many-tall blank boundaries | 12/72 | 0/72, 0/72, 0/72 (32/72 in 5 of 7 earlier runs on the shared lane) |
+  | many-tall estimate maximum | 180,064 pt | 51,972-53,742 pt |
+  | keyboard-cycles blank boundaries | 80/340, 140/340 | 40/340, 0/340, 0/340 |
+  | keyboard-cycles estimate maximum | 63,819 pt | 31,547-37,610 pt |
+
+  `ChatViewScrollHarnessTests` 55/55; full unit target 1,711 tests, 0 failures. A new hosted fixture showed a streamed segmented reply keeps one host per segment, takes one entrance and remounts nothing at canonical settlement.
+- Changes: none on `main`; the prototype branch stays for reference.
+- Kept on purpose: nothing from the prototype. It adds a segmentation owner, copy-menu and accessibility gaps and entrance rules without removing the cause.
+- Deviations: pinning from visible row identity (`onScrollTargetVisibilityChange`) was tried and reverted. The callback never fired in the hosted harness with either placement, and deciding pinning differently would still leave the viewport pinned to an estimated bottom.
+- For the next agent: CT-4 now chooses between B and a new option C, an eager, non-lazy stack over a bounded recent window with history paging. C removes estimation entirely at a layout cost that must be measured.
