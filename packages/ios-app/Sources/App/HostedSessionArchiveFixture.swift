@@ -8,6 +8,15 @@ import SwiftUI
 /// surfaces and their identifiers are production code.
 struct HostedSessionArchiveFixture: View {
     private static let profileID = "fixture"
+    /// The hosted harness is not the presented production dashboard, so it
+    /// declares its own branch activity instead of inheriting the
+    /// no-coordinator `.active` fallback. An active branch runs the dashboard's
+    /// one-second row clock (a repeating `TimelineView`), and XCUI never
+    /// observes app quiescence while that clock keeps the run loop busy, so every
+    /// query in the journey would time out before its first assertion. The
+    /// surfaces under test—row swipes and the archived container—read no
+    /// presentation activity, so only the row's relative-time clock is affected.
+    private static let branchActivity = PresentationSurfaceActivity.covered
 
     @State private var container = ArchivedSessionsContainerState()
     @State private var live: [SessionSummary] = [
@@ -41,18 +50,25 @@ struct HostedSessionArchiveFixture: View {
             List {
                 Section {
                     ForEach(live, id: \.dashboardID) { session in
-                        HistoricalSessionRow(session: session, activity: .idle, showsContext: true)
-                            .listRowBackground(Color.clear)
-                            .listRowSeparator(.hidden)
-                            .listRowInsets(SessionDashboardLayout.rowInsets)
-                            .accessibilityIdentifier("session-row-\(session.dashboardID)")
-                            .sessionRowTrailingSwipe(
-                                session: session,
-                                archiveIsAvailable: true,
-                                onArchive: { archive(session) },
-                                onDelete: {},
-                                onRename: {}
-                            )
+                        // Mirrors the dashboard's own row: the identifier and the
+                        // swipe actions belong to the row button, not to the row
+                        // content, so the journey reaches the same element
+                        // production exposes. The fixture has no navigation.
+                        Button(action: {}) {
+                            HistoricalSessionRow(session: session, activity: .idle, showsContext: true)
+                        }
+                        .buttonStyle(.plain)
+                        .accessibilityIdentifier("session-row-\(session.dashboardID)")
+                        .listRowBackground(Color.clear)
+                        .listRowSeparator(.hidden)
+                        .listRowInsets(SessionDashboardLayout.rowInsets)
+                        .sessionRowTrailingSwipe(
+                            session: session,
+                            archiveIsAvailable: true,
+                            onArchive: { archive(session) },
+                            onDelete: {},
+                            onRename: {}
+                        )
                     }
                 } header: {
                     Text("Fixture workspace")
@@ -88,6 +104,7 @@ struct HostedSessionArchiveFixture: View {
             .listStyle(.plain)
             .environment(\.defaultMinListRowHeight, 38)
         }
+        .environment(\.tronPresentationActivity, Self.branchActivity)
     }
 
     private func archive(_ session: SessionSummary) {

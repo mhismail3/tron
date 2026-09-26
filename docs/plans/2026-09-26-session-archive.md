@@ -2,7 +2,7 @@
 
 - **Started:** 2026-09-26
 - **Status:** Active
-- **Last updated:** 2026-09-26, F-3
+- **Last updated:** 2026-09-26, F-4
 - **Goal:** A user can archive an idle session so it leaves the dashboard without being deleted, find it again in one collapsed Archived container or in search, and have it return automatically when it runs again.
 
 ## Goal and constraints
@@ -98,7 +98,7 @@ Current state, inspected 2026-09-26:
 | F-1 | Needs scoping | The `session.fork` RPC rejects with retryable `busy` because its own admitted work entry satisfies the slot's idle check; decide the fix and cover the real path | none | |
 | F-2 | Needs scoping | The same self-work-entry rejection now also measured on `session.bash`, `session.navigate` and `session.setTools`; audit every mutation RPC whose slot method consults session work ownership and decide the fix (thread the request's work token, as `session.setModel` already does) | none | |
 | F-3 | Done | Coordinator review of I-3: chat archive state comes from a bounded iOS observation list (parallel state). Make the Gateway `SessionSnapshot` carry `archivedAt` (republished on change) and delete the observation list | I-3 | tron-coordinator, 2026-09-26 |
-| F-4 | Claimed | I-2's hosted UI journey never passed (app never idled; simulator contention). Make it pass on a healthy simulator, fixing the fixture if it is the cause, and keep its screenshots | I-2 | tron-coordinator, 2026-09-26 |
+| F-4 | Done | I-2's hosted UI journey never passed (app never idled; simulator contention). Make it pass on a healthy simulator, fixing the fixture if it is the cause, and keep its screenshots | I-2 | tron-coordinator, 2026-09-26 |
 | V-1 | Ready | Cross-module checkpoint, user-performed Gateway rollout, and eyes-on device review; close the plan | G-2, I-2, I-3, F-3, F-4 | |
 
 ## Task details
@@ -881,3 +881,54 @@ artifact. Accessibility identifiers use the existing
 - For the next agent: F-4 (the hosted UI journey) is next. V-1 should still
   confirm on device that an archived session opened from the container shows the
   Manage Session row, now fed by the snapshot.
+
+### F-4 · Done · 2026-09-26 · archive worker
+
+- Result: the hosted journey passes and keeps its three screenshots. Two causes,
+  both in the fixture and the journey rather than the simulator: (1) the fixture
+  rendered the production row without declaring a branch presentation activity,
+  so it inherited the no-coordinator `.active` fallback and ran the dashboard's
+  one-second `TimelineView` row clock, which kept the app busy so XCUI never
+  observed quiescence; the fixture now declares `PresentationSurfaceActivity.covered`
+  (the surfaces under test read no presentation activity, so only the row's
+  relative-time clock changes). (2) The fixture applied the row identifier and
+  swipe modifier to `HistoricalSessionRow` instead of to a row `Button`, so
+  `session-row-<id>` was an `Other` element while the journey queried `buttons`;
+  the fixture now mirrors the dashboard's own row button. The journey's drag was
+  also completing the full-swipe Archive instead of revealing the actions, so the
+  reveal drag is bounded at 38% of the row width.
+- Evidence (verified):
+  - Control first: `TronSmokeUITests/testAgentDefaultsThinkingSliderOpensAfterDefaultsConsolidation`
+    passed (9.3 s) on the same owned simulator, so the environment was healthy
+    before the archive journey was diagnosed.
+  - The journey passed in three consecutive runs: 20.7 s, 20.5 s, 20.5 s.
+    First passing run: `~/Library/Developer/Tron/ios/test-runs/20260926T124536Z-run.bWDqZI`.
+  - Screenshots exported from that xcresult with
+    `xcrun xcresulttool export attachments` and copied to the Tron workspace's
+    `session-archive/` files area as `session-archive-container-collapsed.png`,
+    `session-archive-container-expanded.png` and
+    `session-archive-unarchived.png`. Visual inspection confirms the workspace
+    with only the `Archived (1)` container, the expanded archived row, and the
+    restored workspace row with the container gone.
+  - `scripts/tron-ios-test build` for the ui-validation tier: TEST BUILD
+    SUCCEEDED (scoped `TRON_IOS_TEST_DERIVED_DATA`).
+  - `python3 scripts/check-documentation-policy.py` and
+    `scripts/personal-info-guard.sh` pass.
+- Changes: this commit (`packages/ios-app/Sources/App/HostedSessionArchiveFixture.swift`,
+  `packages/ios-app/UITests/TronSmokeUITests.swift`,
+  `packages/ios-app/docs/development.md`, and this plan).
+- Tasks added: none.
+- Kept on purpose:
+  - The fixture still renders the production row, swipe modifier and archived
+    section instead of synthetic stand-ins, so the journey exercises the real
+    identifiers and the real full-swipe/partial-swipe configuration. Only the
+    branch activity and the row's button wrapper changed.
+  - The journey keeps its three screenshot names and its assertions on the
+    container count, the archived row, and the restored workspace row.
+- Deviations: the drag distance is a bounded constant, not a measured gesture
+  model. It reveals the trailing actions without crossing UIKit's full-swipe
+  threshold on the canonical iPhone 17 Pro simulator; a future geometry change to
+  the row or actions could require re-tuning it.
+- For the next agent: F-3 and F-4 are done, so V-1 is the only remaining row. It
+  still needs the full gateway suite, `scripts/ios-gateway-e2e-test run`, the
+  user-performed Gateway rollout, and the eyes-on device review.

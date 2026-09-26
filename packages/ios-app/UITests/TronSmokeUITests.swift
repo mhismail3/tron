@@ -337,11 +337,11 @@ final class TronSmokeUITests: XCTestCase {
         // A zero archived count keeps the container off the dashboard.
         XCTAssertFalse(app.buttons["archived-sessions-container"].exists)
 
-        // A slow, bounded drag reveals the trailing actions without completing
-        // the full-swipe gesture.
+        // A bounded drag reveals the trailing actions without completing the
+        // full-swipe gesture.
         let start = liveRow.coordinate(withNormalizedOffset: CGVector(dx: 0.95, dy: 0.5))
-        let end = liveRow.coordinate(withNormalizedOffset: CGVector(dx: 0.25, dy: 0.5))
-        start.press(forDuration: 0.6, thenDragTo: end)
+        let end = liveRow.coordinate(withNormalizedOffset: CGVector(dx: 0.62, dy: 0.5))
+        start.press(forDuration: 0.5, thenDragTo: end)
         let archiveAction = app.buttons["session-archive-action-fixture:live-session"]
         XCTAssertTrue(archiveAction.waitForExistence(timeout: 3), app.debugDescription)
         archiveAction.tap()
@@ -358,8 +358,8 @@ final class TronSmokeUITests: XCTestCase {
         keepScreenshot(named: "session-archive-container-expanded")
 
         let archivedStart = archivedRow.coordinate(withNormalizedOffset: CGVector(dx: 0.95, dy: 0.5))
-        let archivedEnd = archivedRow.coordinate(withNormalizedOffset: CGVector(dx: 0.25, dy: 0.5))
-        archivedStart.press(forDuration: 0.6, thenDragTo: archivedEnd)
+        let archivedEnd = archivedRow.coordinate(withNormalizedOffset: CGVector(dx: 0.62, dy: 0.5))
+        archivedStart.press(forDuration: 0.5, thenDragTo: archivedEnd)
         let unarchiveAction = app.buttons["session-unarchive-action-fixture:live-session"]
         XCTAssertTrue(unarchiveAction.waitForExistence(timeout: 3), app.debugDescription)
         unarchiveAction.tap()

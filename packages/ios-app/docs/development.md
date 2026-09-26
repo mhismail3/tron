@@ -1158,6 +1158,14 @@ isolates navigation ownership without contacting a Gateway or any provider.
 checks that accepted success/failure settles while covered, publishes only when active again,
 and never replays the command. Global default trust retains the standard autosave error/retry notice.
 
+`TronSmokeUITests.testSessionArchiveSwipeAndArchivedContainerJourney` drives the hosted
+archive fixture: a bounded partial drag reveals the row's Archive action, the archived
+container appears with its count, expands to its row, and a revealed Unarchive returns the
+session to its workspace. Its three retained screenshots are the visual evidence. Hosted
+fixtures that render real dashboard rows must declare an inactive branch presentation
+activity (the archive fixture does), because the production one-second row clock keeps the
+run loop busy and XCUI can never observe app quiescence while it ticks.
+
 The Ask User fixture's socket is test-only and records the real `extension.respond` RPC;
 no Gateway or provider is contacted. The test taps the rendered form controls,
 checks allow-cancel versus close behavior, restores the ID-keyed draft, and
