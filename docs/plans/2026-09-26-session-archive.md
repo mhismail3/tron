@@ -2,7 +2,7 @@
 
 - **Started:** 2026-09-26
 - **Status:** Active
-- **Last updated:** 2026-09-26, I-1
+- **Last updated:** 2026-09-26, I-2
 - **Goal:** A user can archive an idle session so it leaves the dashboard without being deleted, find it again in one collapsed Archived container or in search, and have it return automatically when it runs again.
 
 ## Goal and constraints
@@ -93,7 +93,7 @@ Current state, inspected 2026-09-26:
 | G-2 | Done | Every new run unarchives: an admission-time clear for Gateway-admitted runs, plus a backstop when an active phase is published | G-1 | tron-coordinator, 2026-09-26 |
 | G-3 | Done | Search results carry `archived`; `session-search.md` updated | G-1 | tron-coordinator, 2026-09-26 |
 | I-1 | Done | iOS model, mutation service, AppModel and capability gating; catalog membership follows authoritative responses | G-1 | tron-coordinator, 2026-09-26 |
-| I-2 | Claimed | Dashboard full-swipe Archive, one collapsed "Archived (N)" container at the bottom, and archived-row actions | I-1 | tron-coordinator, 2026-09-26 |
+| I-2 | Done | Dashboard full-swipe Archive, one collapsed "Archived (N)" container at the bottom, and archived-row actions | I-1 | tron-coordinator, 2026-09-26 |
 | I-3 | Claimed | Search "Archived" label, automation picker exclusion, and display of an existing automation whose target is archived | I-1, G-3 | tron-coordinator, 2026-09-26 |
 | F-1 | Needs scoping | The `session.fork` RPC rejects with retryable `busy` because its own admitted work entry satisfies the slot's idle check; decide the fix and cover the real path | none | |
 | F-2 | Needs scoping | The same self-work-entry rejection now also measured on `session.bash`, `session.navigate` and `session.setTools`; audit every mutation RPC whose slot method consults session work ownership and decide the fix (thread the request's work token, as `session.setModel` already does) | none | |
@@ -646,3 +646,70 @@ artifact. Accessibility identifiers use the existing
   `model.invalidateArchivedSessionsReads(profileID:)` after deleting from the
   container. `markArchived` invalidates in-flight loads, so a refresh is required
   after archive; the Gateway's `session.listChanged` already triggers it.
+
+### I-2 · Done (hosted journey unverified) · 2026-09-26 · tron-coordinator
+
+- Result: the dashboard owns archiving and the archived container. The session
+  row's trailing swipe is one shared modifier (`sessionRowTrailingSwipe`): Archive
+  is the full-swipe action with a neutral tint and appears only for a Gateway that
+  advertises `session-archive.v1`, Delete keeps its confirmation, Rename is
+  unchanged, and the leading Mark Read/Unread swipe is untouched. One collapsed
+  `Archived (N)` section sits after every workspace group in both dashboard sort
+  modes and stays hidden until a capable Gateway publishes a non-zero count. Its
+  owner (`ArchivedSessionsContainerState`) pages `archived: "only"` from every
+  connected capable server under the caller's managed activity and the model's
+  per-profile latest-request fence, retires every in-flight page on collapse or a
+  profile switch, names an unreachable or failed server inline instead of showing
+  stale rows, drops rows/cursors for a server it can no longer read, and offers
+  Unarchive (full swipe) and Delete (the dashboard's own confirmation, which
+  invalidates that server's archived reads). A Gateway list change refreshes the
+  count and, while expanded, the pages.
+- Failure modes written before the isolated tests (the hosted journey cannot
+  reproduce them):
+  - FM-1 a page from a superseded expansion generation is published after a
+    collapse;
+  - FM-2 a `.retired` read publishes rows or marks the server unavailable;
+  - FM-3 a malformed page publishes rows instead of naming the server;
+  - FM-4 a server that is no longer capable or connected keeps rows, cursors, or
+    reads;
+  - FM-5 paging reads a disconnected server or reports more pages than exist;
+  - FM-6 removing one server's row drops an equal session ID owned by another
+    server.
+- Evidence (verified):
+  - `scripts/tron-ios-test build` (unit tier): TEST BUILD SUCCEEDED; the
+    ui-validation tier build also succeeded.
+  - `scripts/tron-ios-test run --only-testing TronMobileTests/DashboardStateOwnerTests`:
+    44/44 passed, including the three new archived-container cases.
+    Retained bundle: `~/Library/Developer/Tron/ios/test-runs/20260926T120537Z-run.itlxjC`.
+  - Not verified: the new hosted journey
+    `TronSmokeUITests.testSessionArchiveSwipeAndArchivedContainerJourney` did not
+    pass. First run hung at app launch and hit the process deadline (status 75);
+    the second run reached the assertions but the app never reported an idle
+    event loop ("App event loop idle notification not received"), so every element
+    query timed out (`Failed to get matching snapshots`) before the first
+    screenshot. The same machine produced `dyld_sim _dyld_sim_prepare` SIGBUS
+    crashes and launch hangs for other sessions during the same window. The
+    journey, its fixture, and its screenshots still need one run on a healthy
+    simulator; treat I-2's UI proof as open.
+- Changes: this commit (`ArchivedSessionsSection.swift`, `SessionRowSwipeActions.swift`,
+  `HostedSessionArchiveFixture.swift`, `SessionShellView.swift`,
+  `DashboardStateOwners.swift`, `TronMobileApp.swift`,
+  `DashboardStateOwnerTests.swift`, `TronSmokeUITests.swift`,
+  `packages/ios-app/docs/architecture.md`).
+- Kept on purpose:
+  - Archive applies only the authoritative response. Nothing is staged locally:
+    the row leaves the dashboard when the Gateway's own list change lands, and a
+    collapsed container never reads archived pages.
+  - The archived container is not filtered by the dashboard server filter,
+    because the count it presents is the Gateway's unfiltered projection.
+  - Archived rows reuse `HistoricalSessionRow` and the dashboard's layout
+    constants (both made internal) so the container cannot grow a second row
+    design.
+- Deviations: the container renders its rows and its Unarchive/Delete swipes
+  through a dedicated section view rather than extending `sessionButton`, which
+  would have coupled an archived row to the workspace-group and rename flows that
+  do not apply to it. The `archive` action is not offered for a row whose
+  `gatewayProfileID` is unknown, since capability is per server.
+- For the next agent: re-run the hosted journey before V-1's eyes-on review.
+  I-3 owns the search annotation, the automation picker, and the chat-surface
+  archived state.
