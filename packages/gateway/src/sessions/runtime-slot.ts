@@ -935,6 +935,22 @@ export class RuntimeSlot {
       || this.activeExports > 0
       || this.retainedLeaseCount > 0;
   }
+  /** Why this session cannot be archived right now. Archive admission uses the
+   * same ownership rule as delete (`isBusyExceptWorkToken`); the split is only
+   * about retryability, so a client is not told to stop a session that is only
+   * waiting on another request. A concurrent request's work entry or an
+   * in-flight export clears by itself, while a blocked ownership write, detached
+   * work, a pending completion or a retained lease is real activity. */
+  archiveBlocker(exceptWorkToken?: string): "none" | "transient" | "active" {
+    if (this.hasBlockedOwnershipWrite
+      || this.lifecycle.preventsNonRuntimeQuiescence
+      || this.hasDetachedDashboardWork()
+      || this.pendingAssistantCompletion !== undefined
+      || this.retainedLeaseCount > 0) return "active";
+    return this.dependencies.workRegistry.hasSessionWork(this.id, exceptWorkToken) || this.activeExports > 0
+      ? "transient"
+      : "none";
+  }
   /** Retained operation and exact automation leases protect automatic idle eviction. */
   get isEvictionProtected(): boolean { return this.hasBlockedOwnershipWrite || this.lifecycle.preventsEviction || this.retainedLeaseCount > 0; }
 
@@ -951,19 +967,29 @@ export class RuntimeSlot {
     };
   }
   /** Archive idle admission and its durable commit inside ONE lane critical
-   * section. This lane is the exact boundary that admits runs, so no prompt,
-   * Bash call, compaction, or extension continuation can start between the idle
-   * check and the archive commit: whichever of the two enters the lane first
-   * decides, and the other observes it. `exceptWorkToken` is the archiving
-   * request's own work, which is not the session running. */
+   * section. This lane is the exact boundary that Gateway-admitted runs enter,
+   * so no prompt, Bash call or compaction can start between the idle check and
+   * the archive commit: whichever of the two enters the lane first decides, and
+   * the other observes it. It cannot cover a turn Pi starts on its own (an
+   * extension `triggerTurn` never enters this lane); the registry restores the
+   * row if such a run is live when the record lands. `exceptWorkToken` is the
+   * archiving request's own work, which is not the session running. */
   async commitArchiveWhileIdle<T>(exceptWorkToken: string | undefined, commit: () => Promise<T>): Promise<T> {
     return this.lane.run(async () => {
       this.assertUsable();
-      if (this.isBusyExceptWorkToken(exceptWorkToken)) {
-        throw new GatewayError("busy", "Stop the session before archiving it", false, undefined, "session_operation_busy");
-      }
+      this.assertArchivable(exceptWorkToken);
       return commit();
     });
+  }
+
+  /** Shared by archive admission's pre-lane check and its in-lane commit, so
+   * both report the same reason and retryability for the same state. */
+  assertArchivable(exceptWorkToken?: string): void {
+    const blocker = this.archiveBlocker(exceptWorkToken);
+    if (blocker === "transient") throw new GatewayError("busy", "Another request is using this session", true);
+    if (blocker === "active") {
+      throw new GatewayError("busy", "Stop the session before archiving it", false, undefined, "session_operation_busy");
+    }
   }
 
   /** Administrative drain blockers plus session work entries, optionally
@@ -7034,13 +7060,15 @@ export class RuntimeSlot {
       let queuedCompletion: Promise<void> | undefined;
       const queued = await this.lane.run(async () => {
         this.assertUsable();
-        // Both the immediate and the queued compaction path are admitted here,
-        // so clearing archive state once at this boundary covers either.
-        await this.dependencies.beforeRunAdmission(this.id);
         if (this.manualCompactionClaim !== claim) {
           throw new GatewayError("conflict", "Manual compaction ownership changed", true);
         }
         if (this.hasActiveAgentRun) {
+          // A run is live, so this hands off behind it rather than starting now.
+          // Clears retained archive state only after the ownership rejection
+          // above: a compaction that cannot be admitted must not unarchive the
+          // session.
+          await this.dependencies.beforeRunAdmission(this.id);
           // Accepted maintenance owns its own durable marker, never a prior
           // prompt's. A handoff can be deferred behind more than one run.
           await this.trackOwnershipWrite(
@@ -7065,6 +7093,10 @@ export class RuntimeSlot {
         }
 
         this.assertIdleForManualCompaction(claim);
+        // Only after every rejection above is retained archive state cleared, so
+        // a compaction refused here (an export in flight, Bash running) leaves
+        // the session archived.
+        await this.dependencies.beforeRunAdmission(this.id);
         await this.performManualCompaction(instructions, false, operationId, work);
         return false;
       });

@@ -1,7 +1,7 @@
-import { mkdir, mkdtemp, readFile, writeFile } from "node:fs/promises";
+import { chmod, mkdir, mkdtemp, readFile, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { dirname, join } from "node:path";
-import { describe, expect, it, vi } from "vitest";
+import { join } from "node:path";
+import { describe, expect, it } from "vitest";
 import { SessionArchiveStore } from "./session-archive-store.js";
 
 /**
@@ -20,6 +20,12 @@ import { SessionArchiveStore } from "./session-archive-store.js";
  * 6. `rekey` moves one record and refuses to overwrite an existing target.
  * 7. `assertAbsent` fails a rebind to an identity that already carries state.
  * 8. The change revision advances only for a committed change.
+ * 9. An empty or whitespace-only document is corruption, not an empty store.
+ * 10. A mutation before `initialize` refuses instead of replacing the stored
+ *    document it never read.
+ *
+ * A durable write failure is injected by making the store's directory
+ * unwritable, so production code carries no write seam for tests.
  */
 const documentPath = (home: string) => join(home, "gateway", "session-archive.json");
 
@@ -61,6 +67,8 @@ describe("SessionArchiveStore", () => {
     expect(reloaded.archivedAt("session-1")).toBe(persisted.sessions["session-1"].archivedAt);
 
     for (const invalid of [
+      "",
+      "   \n",
       "{",
       "[]",
       JSON.stringify({ version: 2, sessions: {} }),
@@ -84,27 +92,43 @@ describe("SessionArchiveStore", () => {
 
   it("keeps the in-memory projection unchanged when the durable write fails", async () => {
     const home = await mkdtemp(join(tmpdir(), "tron-archive-write-failure-"));
-    let fail = false;
-    const write = vi.fn(async (path: string, value: unknown) => {
-      if (fail) throw new Error("simulated disk failure");
-      await mkdir(dirname(path), { recursive: true, mode: 0o700 });
-      await writeFile(path, `${JSON.stringify(value, null, 2)}\n`, "utf8");
-    });
-    const archive = await store(home, { write });
+    const archive = await store(home);
     await archive.archive("session-1");
     const revision = archive.revision;
+    const persistedBefore = await readFile(documentPath(home), "utf8");
 
-    fail = true;
-    await expect(archive.archive("session-2")).rejects.toThrow(/simulated disk failure/);
-    expect(archive.archivedAt("session-2")).toBeUndefined();
-    expect(archive.archivedAt("session-1")).toBeDefined();
-    expect(archive.revision).toBe(revision);
-    fail = false;
+    // A full or read-only disk: the directory accepts no new temporary file, so
+    // the atomic replacement cannot even start.
+    const directory = join(home, "gateway");
+    await chmod(directory, 0o500);
+    try {
+      await expect(archive.archive("session-2")).rejects.toThrow();
+      expect(archive.archivedAt("session-2")).toBeUndefined();
+      expect(archive.archivedAt("session-1")).toBeDefined();
+      expect(archive.revision).toBe(revision);
+      expect(await readFile(documentPath(home), "utf8")).toBe(persistedBefore);
+    } finally {
+      await chmod(directory, 0o700);
+    }
     // The rejected record is not half-applied: the next commit writes only the
     // state that was admitted.
     await archive.archive("session-2");
     const persisted = JSON.parse(await readFile(documentPath(home), "utf8"));
     expect(Object.keys(persisted.sessions).sort()).toEqual(["session-1", "session-2"]);
+  });
+
+  it("refuses a mutation that was admitted before its document was read", async () => {
+    const home = await mkdtemp(join(tmpdir(), "tron-archive-uninitialized-"));
+    const initialized = await store(home);
+    await initialized.archive("session-1");
+    const persisted = await readFile(documentPath(home), "utf8");
+
+    // A second owner that never ran `initialize` must not overwrite the stored
+    // document with the state it assumed was empty.
+    const uninitialized = new SessionArchiveStore(home);
+    expect(uninitialized.archivedAt("session-1")).toBeUndefined();
+    await expect(uninitialized.archive("session-2")).rejects.toThrow(/not initialized/);
+    expect(await readFile(documentPath(home), "utf8")).toBe(persisted);
   });
 
   it("moves one record on rekey and refuses to overwrite a target", async () => {
@@ -129,9 +153,9 @@ describe("SessionArchiveStore", () => {
     await archive.archive("retained");
     await archive.archive("stale");
     const revision = archive.revision;
-    expect(await archive.prune(new Set(["retained", "stale"]))).toBe(false);
+    expect(await archive.prune(new Set(["retained", "stale"]))).toEqual([]);
     expect(archive.revision).toBe(revision);
-    expect(await archive.prune(new Set(["retained"]))).toBe(true);
+    expect(await archive.prune(new Set(["retained"]))).toEqual(["stale"]);
     expect(archive.archivedAt("stale")).toBeUndefined();
     expect(archive.archivedAt("retained")).toBeDefined();
     expect(archive.revision).toBe(revision + 1);

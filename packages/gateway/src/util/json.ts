@@ -27,10 +27,52 @@ async function readFileBounded(path: string, maximumBytes: number): Promise<stri
   }
 }
 
+/** Read one owner-written JSON document and admit it through `admit`. A missing
+ * file is the only admissible absence: an empty, whitespace-only or malformed
+ * document throws, because an owner that replaced it would silently discard its
+ * state (`readJson`'s fallback exists for optional preferences, not for these). */
+export async function readJsonDocument<T>(
+  path: string,
+  admit: (value: unknown) => T,
+  maximumBytes?: number,
+): Promise<T | undefined> {
+  let content: string;
+  try {
+    content = maximumBytes === undefined ? await readFile(path, "utf8") : await readFileBounded(path, maximumBytes);
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") return undefined;
+    throw error;
+  }
+  if (!content.trim()) throw new Error("JSON document is empty");
+  return admit(JSON.parse(content) as unknown);
+}
+
+/** Own-property lookup for a null-prototype record dictionary, so a
+ * prototype-named key can never resolve to inherited state. */
+export function ownRecord<T>(dictionary: Record<string, T>, key: string): T | undefined {
+  return Object.prototype.hasOwnProperty.call(dictionary, key) ? dictionary[key] : undefined;
+}
+
+/** Copy one record dictionary without carrying its prototype into the result. */
+export function cloneDictionary<T>(dictionary: Record<string, T>): Record<string, T> {
+  return Object.assign(Object.create(null) as Record<string, T>, dictionary);
+}
+
+/** Admitted-document field bounds shared by the Gateway's durable record
+ * stores. A record identity is non-empty and byte-bounded; an instant is a
+ * bounded ISO-8601 string. */
+export function boundedString(value: unknown, maximum: number): value is string {
+  return typeof value === "string" && value.length > 0 && Buffer.byteLength(value) <= maximum;
+}
+
+export function boundedTimestamp(value: unknown): value is string {
+  return typeof value === "string" && value.length <= 40 && Number.isFinite(Date.parse(value));
+}
+
 export async function readJson<T>(path: string, fallback: T, maximumBytes?: number): Promise<T> {
   try {
     const content = maximumBytes === undefined ? await readFile(path, "utf8") : await readFileBounded(path, maximumBytes);
-    return content.trim() ? JSON.parse(content) as T : fallback;
+    return content.trim() ? (JSON.parse(content) as T) : fallback;
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code === "ENOENT") return fallback;
     throw error;

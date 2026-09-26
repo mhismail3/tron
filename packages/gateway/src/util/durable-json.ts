@@ -62,6 +62,19 @@ export async function durableAtomicWriteJson(
   }
 }
 
+/** Publish one bounded owner-written JSON document. The exact encoded size is
+ * checked before the atomic replacement, so an oversized document is never
+ * written at all. */
+export async function durablePublishBoundedJson(
+  path: string,
+  document: unknown,
+  maximumBytes: number,
+): Promise<void> {
+  const encoded = `${JSON.stringify(document, null, 2)}\n`;
+  if (Buffer.byteLength(encoded) > maximumBytes) throw new Error("JSON document exceeds its byte limit");
+  await durableAtomicWriteJson(path, document);
+}
+
 /** Remove one published document durably. Missing is already the desired state. */
 export async function durableRemove(
   path: string,

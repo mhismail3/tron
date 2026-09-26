@@ -1,8 +1,7 @@
-import { randomBytes } from "node:crypto";
-import { mkdir, open, rename, rm } from "node:fs/promises";
-import { dirname, join } from "node:path";
+import { join } from "node:path";
 import { AsyncMutex } from "../util/async-mutex.js";
-import { readJson } from "../util/json.js";
+import { durablePublishBoundedJson } from "../util/durable-json.js";
+import { boundedString, boundedTimestamp, cloneDictionary, ownRecord, readJsonDocument } from "../util/json.js";
 
 const VERSION = 1;
 const MAXIMUM_BYTES = 2 * 1_048_576;
@@ -25,7 +24,6 @@ interface SessionArchiveDocument {
 }
 
 interface SessionArchiveStoreOptions {
-  write?: (path: string, value: unknown) => Promise<void>;
   now?: () => Date;
 }
 
@@ -39,28 +37,25 @@ interface SessionArchiveStoreOptions {
 export class SessionArchiveStore {
   private readonly path: string;
   private readonly mutex = new AsyncMutex();
-  private readonly write: ((path: string, value: unknown) => Promise<void>) | undefined;
   private readonly now: () => Date;
-  private document: SessionArchiveDocument;
+  /** Undefined until `initialize` admits the stored document. Read-only
+   * projections stay safe before that; every mutation is gated, so a change can
+   * never replace a document this owner has not read. */
+  private document: SessionArchiveDocument | undefined;
   private changeRevision = 0;
 
   constructor(tronHome: string, options: SessionArchiveStoreOptions = {}) {
     this.path = join(tronHome, "gateway", "session-archive.json");
-    this.write = options.write;
     this.now = options.now ?? (() => new Date());
-    // Read-only projections are safe before initialize() in catalog-only test
-    // and diagnostic paths. Production mutation remains initialize-gated by the
-    // RuntimeRegistry lifecycle.
-    this.document = emptyDocument();
   }
 
   async initialize(): Promise<void> {
-    const loaded = await readJson<unknown | undefined>(this.path, undefined, MAXIMUM_BYTES);
+    const loaded = await readJsonDocument(this.path, admitDocument, MAXIMUM_BYTES);
     if (loaded === undefined) {
       await this.commit(emptyDocument());
       return;
     }
-    this.document = admitDocument(loaded);
+    this.document = loaded;
   }
 
   /** Monotonic count of committed changes. It joins the catalog page-source
@@ -70,7 +65,8 @@ export class SessionArchiveStore {
   }
 
   archivedAt(sessionId: string): string | undefined {
-    return ownRecord(this.document.sessions, sessionId)?.archivedAt;
+    const document = this.document;
+    return document === undefined ? undefined : ownRecord(document.sessions, sessionId)?.archivedAt;
   }
 
   /** Archive once. An already-archived session keeps its original timestamp, so
@@ -117,18 +113,19 @@ export class SessionArchiveStore {
     });
   }
 
-  /** Drop records with no canonical owner. Callers must pass a retained set
-   * derived from complete structural evidence; a partial scan cannot prove that
-   * a session disappeared. */
-  async prune(retainedSessionIds: ReadonlySet<string>): Promise<boolean> {
+  /** Drop records with no canonical owner, and name the dropped IDs so their
+   * owners can republish. Callers must pass a retained set derived from complete
+   * structural evidence plus live ownership; a partial scan cannot prove that a
+   * session disappeared. */
+  async prune(retainedSessionIds: ReadonlySet<string>): Promise<readonly string[]> {
     return this.mutex.run(async () => {
       const document = this.requireDocument();
       const stale = Object.keys(document.sessions).filter((sessionId) => !retainedSessionIds.has(sessionId));
-      if (stale.length === 0) return false;
+      if (stale.length === 0) return [];
       const sessions = cloneDictionary(document.sessions);
       stale.forEach((sessionId) => { delete sessions[sessionId]; });
       await this.commit({ ...document, sessions });
-      return true;
+      return stale;
     });
   }
 
@@ -141,67 +138,21 @@ export class SessionArchiveStore {
   }
 
   private async commit(document: SessionArchiveDocument): Promise<void> {
-    const persisted = `${JSON.stringify(document, null, 2)}\n`;
-    if (Buffer.byteLength(persisted) > MAXIMUM_BYTES) {
-      throw new Error("Session archive document exceeds its byte limit");
-    }
-    if (this.write) await this.write(this.path, document);
-    else await durableWriteArchive(this.path, persisted);
+    await durablePublishBoundedJson(this.path, document, MAXIMUM_BYTES);
     this.document = document;
     this.changeRevision += 1;
   }
 
+  /** Mutations never run against an unread document: a change admitted before
+   * `initialize` would otherwise replace the stored file blind. */
   private requireDocument(): SessionArchiveDocument {
+    if (this.document === undefined) throw new Error("Session archive store is not initialized");
     return this.document;
-  }
-}
-
-async function durableWriteArchive(path: string, encoded: string): Promise<void> {
-  const directory = dirname(path);
-  await mkdir(directory, { recursive: true, mode: 0o700 });
-  const temporary = `${path}.${process.pid}.${randomBytes(6).toString("hex")}.tmp`;
-  let temporaryExists = false;
-  try {
-    const handle = await open(temporary, "wx", 0o600);
-    temporaryExists = true;
-    try {
-      await handle.writeFile(encoded, "utf8");
-      await handle.sync();
-    } finally {
-      await handle.close();
-    }
-    await rename(temporary, path);
-    temporaryExists = false;
-    const directoryHandle = await open(directory, "r");
-    try {
-      await directoryHandle.sync();
-    } finally {
-      await directoryHandle.close();
-    }
-  } catch (error) {
-    if (temporaryExists) await rm(temporary, { force: true }).catch(() => {});
-    throw error;
   }
 }
 
 function emptyDocument(): SessionArchiveDocument {
   return { version: VERSION, sessions: Object.create(null) as ArchiveDictionary };
-}
-
-function ownRecord(dictionary: ArchiveDictionary, sessionId: string): SessionArchiveRecord | undefined {
-  return Object.prototype.hasOwnProperty.call(dictionary, sessionId) ? dictionary[sessionId] : undefined;
-}
-
-function cloneDictionary(dictionary: ArchiveDictionary): ArchiveDictionary {
-  return Object.assign(Object.create(null) as ArchiveDictionary, dictionary);
-}
-
-function boundedString(value: unknown, maximum: number): value is string {
-  return typeof value === "string" && value.length > 0 && Buffer.byteLength(value) <= maximum;
-}
-
-function boundedTimestamp(value: unknown): value is string {
-  return typeof value === "string" && value.length <= 40 && Number.isFinite(Date.parse(value));
 }
 
 function admitDocument(value: unknown): SessionArchiveDocument {

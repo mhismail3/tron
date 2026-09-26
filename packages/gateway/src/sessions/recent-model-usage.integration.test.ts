@@ -1,4 +1,4 @@
-import { mkdtemp, mkdir, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { basename, dirname, join } from "node:path";
 import { ModelRuntime, SessionManager } from "@earendil-works/pi-coding-agent";
@@ -111,6 +111,30 @@ describe.sequential("recent model usage", () => {
         message: expect.stringContaining("Subagent sessions are informational"),
       });
       expect(fixture_.registry.recentModelUsage().map((model) => model.id).slice(0, 3)).toEqual(["recent-a", "recent-b", "model-00"]);
+    } finally {
+      await rm(fixture_.root, { recursive: true, force: true });
+    }
+  });
+
+  it("settles the recorded preference before disposal releases the state directory", async () => {
+    // The recording path is fire-and-forget from an admitted run, so its write
+    // can still be in flight when the registry reports disposal. Disposal must
+    // make that write this owner's last, or a temp file and its rename can land
+    // after the state directory was released.
+    const fixture_ = await fixture("disposal");
+    const model = fixture_.faux.getModel("recent-a")!;
+    try {
+      const slot = await fixture_.registry.acquire(fixture_.parentId);
+      await run(slot, model, "record before disposal");
+      const path = join(fixture_.root, "tron", "gateway", "model-recents.json");
+      await fixture_.registry.dispose();
+      const document = JSON.parse(await readFile(path, "utf8")) as { models: Array<{ id: string }> };
+      expect(document.models.map((entry) => entry.id)).toContain("recent-a");
+      // The owner is closed: a later admission cannot publish into the
+      // directory this disposal released.
+      const store = (fixture_.registry as unknown as { recentModels: { record(provider: string, id: string): Promise<boolean> } }).recentModels;
+      expect(await store.record("session-archive-fixture", "faux-1")).toBe(false);
+      expect(JSON.parse(await readFile(path, "utf8"))).toEqual(document);
     } finally {
       await rm(fixture_.root, { recursive: true, force: true });
     }

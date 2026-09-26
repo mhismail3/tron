@@ -1,7 +1,7 @@
 import { join } from "node:path";
 import { AsyncMutex } from "../util/async-mutex.js";
 import { durableAtomicWriteJson } from "../util/durable-json.js";
-import { readJson } from "../util/json.js";
+import { boundedString, boundedTimestamp, readJson } from "../util/json.js";
 
 const VERSION = 1;
 const MAXIMUM_BYTES = 64 * 1_024;
@@ -34,6 +34,7 @@ export class RecentModelStore {
   private readonly path: string;
   private readonly mutex = new AsyncMutex();
   private document: RecentModelsDocument;
+  private closed = false;
 
   constructor(tronHome: string) {
     this.path = join(tronHome, "gateway", "model-recents.json");
@@ -55,6 +56,16 @@ export class RecentModelStore {
     if (admitted === undefined && loaded !== undefined) await this.write(this.document);
   }
 
+  /** Its caller records recency fire-and-forget (a run must not wait for a
+   * preference write), so the write can still be in flight when the owning
+   * registry reports disposal. Shutdown owns that window: refuse new writes and
+   * settle the admitted one, or a temp file and its rename can land in the
+   * Gateway state directory after its owner released it. */
+  async dispose(): Promise<void> {
+    this.closed = true;
+    await this.mutex.run(() => {});
+  }
+
   /** Newest-first copy; callers never mutate stored order. */
   entries(): RecentModelUsage[] {
     return this.document.models.map((model) => ({ ...model }));
@@ -66,6 +77,9 @@ export class RecentModelStore {
       throw new Error("Recent model identity exceeds its bound");
     }
     return this.mutex.run(async () => {
+      // Checked inside the mutex: a record queued after disposal began, but
+      // before its drain, must observe the closed owner instead of publishing.
+      if (this.closed) return false;
       const previous = this.document.models;
       const next: RecentModelUsage[] = [
         { provider, id, lastUsedAt: new Date().toISOString() },
@@ -109,10 +123,3 @@ function admitDocument(value: unknown): RecentModelsDocument | undefined {
   return { version: VERSION, models };
 }
 
-function boundedString(value: unknown, maximum: number): value is string {
-  return typeof value === "string" && value.length > 0 && Buffer.byteLength(value) <= maximum;
-}
-
-function boundedTimestamp(value: unknown): value is string {
-  return typeof value === "string" && value.length <= 40 && Number.isFinite(Date.parse(value));
-}

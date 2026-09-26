@@ -212,8 +212,12 @@ describe("SessionAttentionStore", () => {
     const home = await mkdtemp(join(tmpdir(), "tron-attention-invalid-"));
     const path = join(home, "gateway", "session-attention.json");
     await import("node:fs/promises").then(({ mkdir }) => mkdir(join(home, "gateway"), { recursive: true }));
-    await writeFile(path, "{bad");
-    await expect(new SessionAttentionStore(home).initialize()).rejects.toThrow();
+    // An empty or whitespace-only document is corruption too: admitting it
+    // would silently discard every stored completion instead of failing closed.
+    for (const invalid of ["", "   \n", "{bad"]) {
+      await writeFile(path, invalid);
+      await expect(new SessionAttentionStore(home).initialize()).rejects.toThrow();
+    }
     await writeFile(path, "x".repeat(2 * 1_048_576 + 1));
     await expect(new SessionAttentionStore(home).initialize()).rejects.toThrow();
   });

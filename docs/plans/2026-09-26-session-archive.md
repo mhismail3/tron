@@ -2,7 +2,7 @@
 
 - **Started:** 2026-09-26
 - **Status:** Active
-- **Last updated:** 2026-09-26, V-1 checkpoint
+- **Last updated:** 2026-09-26, R-1 landed; R-2 returned to Ready
 - **Goal:** A user can archive an idle session so it leaves the dashboard without being deleted, find it again in one collapsed Archived container or in search, and have it return automatically when it runs again.
 
 ## Goal and constraints
@@ -100,9 +100,9 @@ Current state, inspected 2026-09-26:
 | F-3 | Done | Coordinator review of I-3: chat archive state comes from a bounded iOS observation list (parallel state). Make the Gateway `SessionSnapshot` carry `archivedAt` (republished on change) and delete the observation list | I-3 | tron-coordinator, 2026-09-26 |
 | F-4 | Done | I-2's hosted UI journey never passed (app never idled; simulator contention). Make it pass on a healthy simulator, fixing the fixture if it is the cause, and keep its screenshots | I-2 | tron-coordinator, 2026-09-26 |
 | F-5 | Done | `session-archive.integration.test.ts` "rejects a prompt retryably when archive state cannot be cleared" failed once in four full-suite runs (passes alone and under targeted load); reproduce, find the root cause, fix | G-2 | tron-coordinator, 2026-09-26 |
-| F-6 | Claimed | Same class as F-5, unproven: `RuntimeRegistry` line 1216 also writes `gateway/model-recents.json` fire-and-forget (`void this.noteModelUsed(...)` → `await this.recentModels.record(...)`), so its durable write can equally outlive `dispose()`. Decide whether `RecentModelStore` gets the same disposal drain | F-5 | tron-coordinator, 2026-09-26 (in R-1) |
-| R-1 | Claimed | Gateway fixes from the post-implementation review (see "Review findings"), including F-6 | G-2, F-5 | tron-coordinator, 2026-09-26 |
-| R-2 | Claimed | iOS fixes from the post-implementation review (see "Review findings") | I-2, I-3, F-3 | tron-coordinator, 2026-09-26 |
+| F-6 | Done | Same class as F-5, unproven: `RuntimeRegistry` line 1216 also writes `gateway/model-recents.json` fire-and-forget (`void this.noteModelUsed(...)` → `await this.recentModels.record(...)`), so its durable write can equally outlive `dispose()`. Decide whether `RecentModelStore` gets the same disposal drain | F-5 | tron-coordinator, 2026-09-26 (in R-1) |
+| R-1 | Done | Gateway fixes from the post-implementation review (see "Review findings"), including F-6 | G-2, F-5 | tron-coordinator, 2026-09-26 |
+| R-2 | Ready | iOS fixes from the post-implementation review (see "Review findings") | I-2, I-3, F-3 | |
 | V-1 | Blocked | Cross-module checkpoint, user-performed Gateway rollout, and eyes-on device review; close the plan | G-2, I-2, I-3, F-3, F-4, F-5, F-6, R-1, R-2 | tron-coordinator, 2026-09-26 |
 
 ## Task details
@@ -1226,6 +1226,143 @@ Gateway.
      - prompting an archived session so it returns to the dashboard;
      - Manage Session → Unarchive;
      - an automation firing into an archived target.
-  3. Then close the plan. F-6 stays Needs scoping and may explain the
-     `recent-model-usage` flake.
+  3. Then close the plan. R-1 is done; F-6 is fixed inside it (the
+     `recent-model-usage` failure is a load-dependent ordering flake, not the
+     disposal window).
 
+### R-1 (+F-6) · Done · 2026-09-26 · tron-coordinator
+
+- Result: every Gateway finding from the review is closed, and the record stores
+  are deduplicated and hardened.
+  - **1 (mutex stall):** `RuntimeSlot.assertArchivable` classifies ownership in
+    one place; `setArchived` calls it under the registry mutex before the lane
+    wait, so a long lane holder that the published projection cannot see (a
+    branch summary, Bash before its phase lands, a reload, an extension command)
+    can no longer hold the Gateway-wide mutex for its duration.
+  - **2 (hidden working row):** the backstop's visibility flip now publishes the
+    membership change (`revision` plus `session.listChanged`) when it happens,
+    instead of only after the durable clear succeeds.
+  - **3 (Pi-started run during the commit):** after an archive commit the
+    registry rechecks the live projection and restores the row if a run Pi
+    started on its own is already working.
+  - **4 + F-6 (unowned writes at disposal):** `disposeSharedStores` drains the
+    pending backstop clears until none remains, and `RecentModelStore` gained the
+    catalog index's disposal contract (`closed` inside its write mutex, refusal
+    of not-yet-started writes).
+  - **5 (startup prune):** the retained set now includes live slot IDs, the
+    archive prune runs on the attention lane, and `prune` returns the dropped
+    IDs so their owners republish.
+  - **6 (retryability):** `archiveBlocker` returns `transient` when the only
+    blocker is another request's session work entry or an in-flight export, and
+    that rejection is retryable `busy`.
+  - **7 (rekey order):** both `assertAbsent` checks run before the first
+    attention or archive change.
+  - **8 (store):** an empty or whitespace document is corruption (both stores);
+    an uninitialized store refuses every mutation instead of replacing a
+    document it never read; the durable write, dictionary and bound helpers are
+    shared (`util/durable-json.ts`, `util/json.ts`) instead of copied; the
+    test-only `write` constructor option is gone (the store test makes its own
+    directory unwritable to inject a real failure).
+  - **9 (stale timestamps):** re-archiving a pending restoration retires the
+    stale record first and returns a fresh `archivedAt`; the effective
+    projection treats a pending removal as unarchived.
+  - **10 (compaction order):** `session.compact` clears archive state only after
+    the claim and idle rejections.
+  - **11 (docs):** delete's record-removal failure now emits
+    `sessions.archive.persist-failed` (stage `remove`); the observability rows
+    for that event and `session_operation_busy`, the `session-search.md` owner
+    wording, and the README archive contract are corrected.
+  - **12 (tests):** the report records each case's real outcome and its measured
+    evidence; the waiting-for-user projection is now a real pending interaction
+    driven through `extension.respond`; new cases cover the long lane holder,
+    the transient blocker, the automation lease, unarchive during a run, a
+    failed backstop write, a re-archive with a pending restoration, the startup
+    recovery window, and the disposal drain.
+- Evidence (verified):
+  - `npm run build` clean.
+  - `npx vitest run src/transport/session-archive.integration.test.ts`: 29/29 in
+    7.4 s over the real WebSocket, `GatewayService`, `RuntimeRegistry`, paired
+    device and faux provider. Retained report: `session-archive.integration.json`
+    under `packages/gateway/test-results/` (gitignored output, not source).
+  - `npx vitest run src/sessions/runtime-registry.integration.test.ts`: 240/240
+    in 44.7 s, run twice.
+  - `npx vitest run` (full suite): 1957 of 1958 pass. The one failure is the
+    known `logger.test.ts` 40 MB rotation flake, which also fails on the
+    pre-change tree. Two further load-dependent failures appeared once
+    (`recent-model-usage` ordering and `runtime-registry` streaming progress);
+    both pass in isolation and in their own files' full runs, and neither
+    touches archive state.
+  - Focused files: `session-archive-store.test.ts` 7/7, `session-attention-store.test.ts`
+    35/35, `session-list-pagination.test.ts`, `rpc-idle-admission.integration.test.ts`,
+    `recent-models.test.ts` 1/1 (new), `recent-model-usage.integration.test.ts`
+    4/4 — 60/60 in the combined focused run.
+  - Negative controls, each reverted after measuring:
+    - pre-lane check removed → the long-holder case times out (the request hangs
+      on the mutex);
+    - restoration membership change removed → the failed-write case times out
+      waiting for `session.listChanged`;
+    - live slot IDs removed from the retained set → the startup-window case
+      loses the record (`expected undefined to be defined`);
+    - pending-restoration pre-clear removed → the re-archive case returns the
+      stale timestamp (`expected 1790453569174 to be greater than 1790453569174`);
+    - `archiveBlocker` collapsed to the old busy rule → the transient case
+      receives `retryable: false`;
+    - the disposal drain removed → disposal resolves while the write is blocked
+      (`expected 'disposed' to be 'waiting'`);
+    - a deliberately failing case in the integration file → the retained report
+      keeps it as `passed: false` with the assertion error.
+  - `python3 scripts/check-documentation-policy.py` and
+    `scripts/personal-info-guard.sh` pass.
+- Changes: this branch (`packages/gateway/src/util/json.ts`,
+  `packages/gateway/src/util/durable-json.ts`,
+  `packages/gateway/src/sessions/session-archive-store.ts`,
+  `packages/gateway/src/sessions/session-attention-store.ts`,
+  `packages/gateway/src/sessions/runtime-registry.ts`,
+  `packages/gateway/src/sessions/runtime-slot.ts`,
+  `packages/gateway/src/providers/recent-models.ts`,
+  `packages/gateway/src/transport/session-archive.integration.test.ts`,
+  `packages/gateway/src/sessions/session-archive-store.test.ts`,
+  `packages/gateway/src/sessions/session-attention-store.test.ts`,
+  `packages/gateway/src/sessions/recent-model-usage.integration.test.ts`,
+  `packages/gateway/src/providers/recent-models.test.ts` (new),
+  `packages/gateway/README.md`, `packages/gateway/docs/observability.md`,
+  `packages/gateway/docs/session-search.md`).
+- Tasks added: none.
+- Kept on purpose:
+  - The `waitingForUser`/`hasActiveSubagents` guard still sits on the published
+    projection, and the busy case still injects `hasActiveSubagents` there: only
+    the pi-subagents async-artifact protocol registers a detached run activity
+    that outlives its parent turn, so no public fixture can produce it. The
+    waiting-for-user half is now a real interaction, and the injected half is
+    the exact projection the guard reads.
+  - `SessionAttentionStore` keeps its `write` option: two pre-existing tests use
+    it as a write counter and as a targeted failure injector for attention
+    semantics this change does not own. The archive store's identical option was
+    removed because a real unwritable directory covers it.
+  - The archive store keeps its `now` clock seam (deterministic timestamps in
+    the store test); it is a clock, not a write path.
+  - The transient fixture in the integration test creates one real
+    `rpc-mutation` session-scoped work entry through the registry's own work
+    registry, which is exactly the state a concurrent rename or attention toggle
+    holds; no other state is fabricated.
+- Deviations:
+  - Finding 6's "archive retryably when only a work entry or export blocks it"
+    is implemented for both, but only the work-entry half is covered: gating a
+    real export deterministically would need a fixture the archive owner does
+    not have. The export check shares the same branch.
+  - Finding 12's "drive the real scheduler" for the automation reservation query
+    was not done: the fixture has no `AutomationScheduler`, and the query is
+    wired in `gateway-main.ts` with a late-bound option. Instead the case drives
+    the real `acquireAutomationLease` path, which is the same ownership the
+    reservation protects; the reservation query itself remains covered by the
+    automation owner's own tests.
+  - Finding 3's suspected race is fixed by the post-commit recheck, which cannot
+    be reproduced deterministically: the window is a non-lane turn starting
+    inside a store write. It is reasoned and reviewed, not measured.
+  - The archive store no longer has `archiveChanged` called with a pruned ID that
+    can never be live (live IDs are retained). The pruned-ID republish is kept
+    for the concurrent-slot window between the retained-set read and the prune.
+- For the next agent: R-2 (iOS) was claimed on `main` for this branch but was
+  not started, so it is returned to Ready with no owner. V-1 still needs
+  the user's Gateway rollout and the eyes-on device review. The two
+  load-dependent suite flakes named above are pre-existing and unrelated.

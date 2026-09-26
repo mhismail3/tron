@@ -23,8 +23,22 @@ const report: {
   cases: Array<{ name: string; passed: boolean; evidence: Record<string, unknown> }>;
 } = { generatedAt: new Date().toISOString(), cases: [] };
 
-function record(name: string, evidence: Record<string, unknown>): void {
-  report.cases.push({ name, passed: true, evidence });
+/** One archive case. The body returns the values it measured, and this records
+ * the case's real outcome, so a failing case stays visible in the report with
+ * its error instead of disappearing from it. */
+function archiveCase(name: string, body: () => Promise<Record<string, unknown>>): void {
+  it(name, async () => {
+    try {
+      report.cases.push({ name, passed: true, evidence: await body() });
+    } catch (error) {
+      report.cases.push({
+        name,
+        passed: false,
+        evidence: { error: error instanceof Error ? error.message : String(error) },
+      });
+      throw error;
+    }
+  });
 }
 
 afterAll(async () => {
@@ -62,22 +76,26 @@ interface Client {
 }
 
 async function fixture(options: {
-  /** Writes `${agentDir}/extensions/wake.ts`, modelling an extension-owned
-   * trigger that starts a turn of its own. */
-  extension?: (root: string) => string;
+  /** Writes one extension source into `${agentDir}/extensions/<name>`. */
+  extensions?: Array<{ name: string; source: (root: string) => string }>;
   /** Writes `${agentDir}/settings.json` before the first runtime starts. */
   settings?: Record<string, unknown>;
   /** Wires a real search index and service into GatewayService. */
   search?: boolean;
+  /** Runs after startup admission but before attention recovery, which is the
+   * window the real Gateway already serves from. */
+  duringStartupRecovery?: (registry: RuntimeRegistry, cwd: string) => Promise<void>;
 } = {}) {
   const root = await mkdtemp(join(tmpdir(), "tron-session-archive-"));
   const agentDir = join(root, "agent");
   const cwd = join(root, "project");
   const sessionDirectory = join(agentDir, "sessions", "workspace");
   await Promise.all([mkdir(sessionDirectory, { recursive: true }), mkdir(cwd, { recursive: true })]);
-  if (options.extension) {
+  if (options.extensions?.length) {
     await mkdir(join(agentDir, "extensions"), { recursive: true });
-    await writeFile(join(agentDir, "extensions", "wake.ts"), options.extension(root));
+    for (const extension of options.extensions) {
+      await writeFile(join(agentDir, "extensions", extension.name), extension.source(root));
+    }
   }
   if (options.settings) {
     await writeFile(join(agentDir, "settings.json"), `${JSON.stringify(options.settings)}\n`, "utf8");
@@ -122,6 +140,7 @@ async function fixture(options: {
       archiveDiagnostic,
     });
     await registry.initialize();
+    await options.duringStartupRecovery?.(registry, cwd);
     await registry.recoverCanonicalAttention();
     // The search owner is optional in the Gateway, so only the traversal that
     // exercises the search projection pays for a real index and coordinator.
@@ -238,6 +257,47 @@ async function fixture(options: {
   return { root, agentDir, cwd, sessionDirectory, devices, paired, faux, runtimeFactory, listChanged, archiveDiagnostic, connect, coldSession, rawSession, restart, current: () => current! };
 }
 
+/** An extension-owned trigger that starts a turn of its own. */
+const wakeExtension = (root: string) => `
+        import { existsSync } from "node:fs";
+        import { setTimeout as delay } from "node:timers/promises";
+        export default function (pi) {
+          void (async () => {
+            for (;;) {
+              if (existsSync(${JSON.stringify(join(root, "wake-trigger"))})) {
+                pi.sendMessage({ customType: "external-wake", content: "external wake", display: false }, { triggerTurn: true });
+                return;
+              }
+              await delay(5);
+            }
+          })();
+        }
+      `;
+
+/** A command that holds its own admission until the test releases it, the way
+ * a long branch summary or resource reload holds the session lane. */
+const holdCommandExtension = (root: string) => `
+        import { existsSync } from "node:fs";
+        import { setTimeout as delay } from "node:timers/promises";
+        export default function (pi) {
+          pi.registerCommand("hold", { handler: async (_args, ctx) => {
+            ctx.ui.setStatus("hold", "waiting");
+            while (!existsSync(${JSON.stringify(join(root, "hold-release"))})) await delay(5);
+            ctx.ui.setStatus("hold", "released");
+          }});
+        }
+      `;
+
+/** A command that blocks on a real semantic user interaction. */
+const selectCommandExtension = () => `
+        export default function (pi) {
+          pi.registerCommand("select-hold", { handler: async (_args, ctx) => {
+            const answer = await ctx.ui.select("Choose a path", ["Keep", "Change"]);
+            ctx.ui.setStatus("answer", answer ?? "Cancelled");
+          }});
+        }
+      `;
+
 const list = async (client: Client, archived: "exclude" | "only", extra: Record<string, unknown> = {}) => {
   const response = await client.request(`list-${archived}-${Math.random().toString(36).slice(2, 8)}`, "session.list", { scope: "user", archived, ...extra });
   expect(response.ok, JSON.stringify(response)).toBe(true);
@@ -273,6 +333,15 @@ const archivedRecord = async (root: string, sessionId: string): Promise<unknown>
   return document.sessions[sessionId];
 };
 
+/** Fails every durable archive-record removal from now on, modelling a full or
+ * failing disk at the store's exact write boundary. */
+function failArchiveRemovals(registry: RuntimeRegistry): () => void {
+  const store = (registry as unknown as { archive: { remove(sessionId: string): Promise<boolean> } }).archive;
+  const durable = store.remove.bind(store);
+  store.remove = async () => { throw new Error("Fixture archive write failure"); };
+  return () => { store.remove = durable; };
+}
+
 const listChangedFrames = (client: Client) =>
   client.frames.filter((frame) => frame.type === "event" && frame.topic === "session.listChanged").length;
 
@@ -293,7 +362,7 @@ const search = async (client: Client, query: string) => {
 };
 
 describe("session archive over the real Gateway", () => {
-  it("keeps an archived session searchable and marked archived", async () => {
+  archiveCase("keeps an archived session searchable and marked archived", async () => {
     const f = await fixture({ search: true });
     const client = await f.connect();
     const session = await f.rawSession("searchable", "searchable-archive-session");
@@ -348,16 +417,16 @@ describe("session archive over the real Gateway", () => {
     expect(restored.ok, JSON.stringify(restored)).toBe(true);
     const afterUnarchive = await search(client, "searchable");
     expect(afterUnarchive.results.find((result) => result.sessionId === session.id)?.archived).toBe(false);
-    record("keeps an archived session searchable and marked archived", {
+    return {
       entryId: hiddenHit?.entryId,
       archivedResult: hiddenHit?.archived,
       unchangedContentRevision: hiddenHit?.anchorRevision.branchDigest === visibleHit!.anchorRevision.branchDigest,
       anchorableWhileArchived: anchorWhileArchived.ok,
       archivedAfterUnarchive: afterUnarchive.results.find((result) => result.sessionId === session.id)?.archived,
-    });
+    };
   });
 
-  it("archives an idle session without touching its canonical file", async () => {
+  archiveCase("archives an idle session without touching its canonical file", async () => {
     const f = await fixture();
     const client = await f.connect();
     const archived = f.coldSession("archived");
@@ -392,16 +461,16 @@ describe("session archive over the real Gateway", () => {
     const row = (await list(client, "exclude")).sessions.find((session) => session.id === visible.id);
     expect(row).toBeDefined();
     expect(f.runtimeFactory.mock.calls.length).toBe(factoryCallsBeforeArchive);
-    record("archives an idle session without touching its canonical file", {
+    return {
       archivedAt: response.result.archivedAt,
       archivedCount: excluded.archivedCount,
-      canonicalBytesUnchanged: true,
+      canonicalBytes: before.length,
       updatedAtUnchanged: only.sessions[0]?.updatedAt === beforeRow!.updatedAt,
       runtimeStartsDuringArchive: f.runtimeFactory.mock.calls.length - factoryCallsBeforeArchive,
-    });
+    };
   });
 
-  it("keeps one receipt, one timestamp and one archived row for a replayed command", async () => {
+  archiveCase("keeps one receipt, one timestamp and one archived row for a replayed command", async () => {
     const f = await fixture();
     const client = await f.connect();
     const session = f.coldSession("replay");
@@ -423,14 +492,13 @@ describe("session archive over the real Gateway", () => {
     });
     expect(third.result).toEqual(first.result);
     expect((await list(client, "only")).sessions).toHaveLength(1);
-    record("keeps one receipt, one timestamp and one archived row for a replayed command", {
+    return {
       archivedAt: first.result.archivedAt,
-      replayMatched: true,
-      archivedRows: 1,
-    });
+      archivedRows: (await list(client, "only")).sessions.length,
+    };
   });
 
-  it("binds a list cursor to its archive filter and orders the archived list newest first", async () => {
+  archiveCase("binds a list cursor to its archive filter and orders the archived list newest first", async () => {
     const f = await fixture();
     const client = await f.connect();
     const older = f.coldSession("cursor-archived-older");
@@ -473,14 +541,14 @@ describe("session archive over the real Gateway", () => {
       scope: "user", archived: "only", limit: 1, cursor: excludeCursor,
     });
     expect(mismatched).toMatchObject({ ok: false, error: { code: "invalid_request" } });
-    record("binds a list cursor to its archive filter and orders the archived list newest first", {
+    return {
       archivedOnlyOrder: [newer.id, older.id],
       excludeTraversal: received,
       mismatchedFilterRejected: mismatched.error.code,
-    });
+    };
   });
 
-  it("rejects archiving a session that is running, waiting for input, or working through subagents", async () => {
+  archiveCase("rejects archiving a session that is running or working through detached subagents", async () => {
     const f = await fixture();
     const client = await f.connect();
     const session = f.coldSession("busy");
@@ -502,21 +570,16 @@ describe("session archive over the real Gateway", () => {
     release();
     await until(async () => (await list(client, "exclude")).sessions.some((row) => row.id === session.id && row.phase === "idle"), "idle phase");
 
-    // Waiting for a semantic interaction and detached subagent work are the
-    // other two projections a user sees as active. The session is idle, so no
-    // heartbeat can replace the injected projection before the request runs.
+    // Detached subagent work is the third projection a user sees as active, and
+    // no public fixture can produce it: only the pi-subagents async-artifact
+    // protocol registers a detached run activity that outlives its parent turn.
+    // The published projection is the exact input this guard reads, so it is
+    // injected here; the real waiting-for-user projection has its own case.
     const internals = f.current().registry as unknown as { latestSummaries: Map<string, Record<string, unknown>> };
     const published = internals.latestSummaries.get(session.id);
     expect(published).toBeDefined();
-    let waitingCode: string | undefined;
     let subagentCode: string | undefined;
     try {
-      internals.latestSummaries.set(session.id, { ...published!, phase: "idle", foregroundPhase: undefined, waitingForUser: true });
-      const waiting = await client.request("waiting-archive", "session.archive.set", {
-        commandId: "waiting-archive-command", sessionId: session.id, archived: true,
-      });
-      expect(waiting).toMatchObject({ ok: false, error: { code: "busy" } });
-      waitingCode = waiting.error.code;
       internals.latestSummaries.set(session.id, { ...published!, foregroundPhase: undefined, waitingForUser: false, hasActiveSubagents: true });
       const subagents = await client.request("subagent-archive", "session.archive.set", {
         commandId: "subagent-archive-command", sessionId: session.id, archived: true,
@@ -528,15 +591,213 @@ describe("session archive over the real Gateway", () => {
     }
     expect((await list(client, "exclude")).sessions.map((row) => row.id)).toContain(session.id);
     expect((await list(client, "only")).sessions).toHaveLength(0);
-    record("rejects archiving a session that is running, waiting for input, or working through subagents", {
+    return {
       running: running.error.code,
-      waitingForUser: waitingCode,
       hasActiveSubagents: subagentCode,
-      archivedRowsAfterRejections: 0,
-    });
+      archivedRowsAfterRejections: (await list(client, "only")).sessions.length,
+    };
   });
 
-  it("keeps archive state across a Gateway restart and an open", async () => {
+  archiveCase("rejects archive promptly while a long session-lane request is in flight", async () => {
+    // A branch summary or resource reload holds the session lane while the
+    // published projection still reads idle. Archive admission must reject that
+    // before it waits on the lane, or it would hold the Gateway-wide registry
+    // mutex — and every cold open, create, delete and automation lease — for the
+    // whole request.
+    const f = await fixture({ extensions: [{ name: "hold.ts", source: holdCommandExtension }] });
+    const client = await f.connect();
+    const held = f.coldSession("lane-holder");
+    const unrelated = f.coldSession("lane-bystander");
+    await openSession(client, held.id);
+
+    const holding = client.request("lane-hold-prompt", "session.prompt", {
+      commandId: "lane-hold-prompt-command", sessionId: held.id, text: "/hold",
+    });
+    const registry = f.current().registry as unknown as { slots: Map<string, { isBusy: boolean }> };
+    await until(() => registry.slots.get(held.id)?.isBusy === true, "held session lane");
+    // The projection still reads idle: that is exactly the window this guards.
+    const projection = (await list(client, "exclude")).sessions.find((row) => row.id === held.id);
+    expect(projection?.phase).toBe("idle");
+
+    const archive = await client.request("lane-hold-archive", "session.archive.set", {
+      commandId: "lane-hold-archive-command", sessionId: held.id, archived: true,
+    });
+    expect(archive).toMatchObject({ ok: false, error: { code: "busy" } });
+    // The Gateway mutex was never held for the lane wait: an unrelated cold open
+    // and list read both complete while the holder is still running.
+    const bystander = await client.request("lane-bystander-open", "session.open", { sessionId: unrelated.id });
+    expect(bystander.ok, JSON.stringify(bystander)).toBe(true);
+    expect(await listedIds(client, "exclude")).toContain(unrelated.id);
+    expect(registry.slots.get(held.id)?.isBusy).toBe(true);
+
+    await writeFile(join(f.root, "hold-release"), "", "utf8");
+    const released = await holding;
+    expect(released.ok, JSON.stringify(released)).toBe(true);
+    expect(await archivedRecord(f.root, held.id)).toBeUndefined();
+    return {
+      archiveError: archive.error.code,
+      archiveRetryable: archive.error.retryable,
+      projectionWhileHeld: projection?.phase,
+      unrelatedOpenWhileHeld: bystander.ok,
+    };
+  });
+
+  archiveCase("rejects an archive retryably when only another request's entry blocks it", async () => {
+    // Nothing about this session is working: another request (a rename, an
+    // attention toggle, a second device's archive) holds one session-scoped work
+    // entry. That clears by itself, so the client may retry instead of being
+    // told to stop a session that is not running.
+    const f = await fixture();
+    const client = await f.connect();
+    const session = f.coldSession("transient-blocker");
+    await openSession(client, session.id);
+    const work = (f.current().registry as unknown as {
+      workRegistry: { begin(admission: { kind: string; method: string; sessionId: string; hostEpoch: string }): { settle(): void } };
+    }).workRegistry.begin({
+      kind: "rpc-mutation", method: "session.rename", sessionId: session.id, hostEpoch: "",
+    });
+    try {
+      const archive = await client.request("transient-archive", "session.archive.set", {
+        commandId: "transient-archive-command", sessionId: session.id, archived: true,
+      });
+      expect(archive).toMatchObject({ ok: false, error: { code: "busy", retryable: true } });
+      expect(await archivedRecord(f.root, session.id)).toBeUndefined();
+      expect(await listedIds(client, "exclude")).toContain(session.id);
+    } finally {
+      work.settle();
+    }
+    const retried = await archiveSession(client, session.id, "transient-retry-archive-command");
+    return {
+      retriedArchivedAt: retried.archivedAt,
+      archivedRows: (await list(client, "only")).sessions.map((row) => row.id),
+    };
+  });
+
+  archiveCase("keeps a session unarchived when an automation holds its lease", async () => {
+    // The automation lease is retained for the whole scheduled run. Archive
+    // admission must see that ownership as real activity rather than as another
+    // request's transient entry.
+    const f = await fixture();
+    const client = await f.connect();
+    const session = f.coldSession("automation-lease");
+    await openSession(client, session.id);
+    const lease = await f.current().registry.acquireAutomationLease(session.id);
+    try {
+      const archive = await client.request("automation-lease-archive", "session.archive.set", {
+        commandId: "automation-lease-archive-command", sessionId: session.id, archived: true,
+      });
+      expect(archive).toMatchObject({ ok: false, error: { code: "busy" } });
+      expect(await archivedRecord(f.root, session.id)).toBeUndefined();
+      expect(await listedIds(client, "exclude")).toContain(session.id);
+      return { archiveError: archive.error.code, archiveRetryable: archive.error.retryable };
+    } finally {
+      lease.release();
+    }
+  });
+
+  archiveCase("rejects archiving a session waiting for a real user interaction", async () => {
+    const f = await fixture({ extensions: [{ name: "select-hold.ts", source: selectCommandExtension }] });
+    const client = await f.connect();
+    const session = f.coldSession("waiting-interaction");
+    await openSession(client, session.id);
+    const command = client.request("waiting-command", "session.prompt", {
+      commandId: "waiting-command-command", sessionId: session.id, text: "/select-hold",
+    });
+    await until(async () => (await list(client, "exclude")).sessions.some(
+      (row) => row.id === session.id && row.waitingForUser === true), "waiting for user");
+    const projection = (await list(client, "exclude")).sessions.find((row) => row.id === session.id);
+    // The pending interaction the user must answer is published on the opened
+    // snapshot, which is the same projection a phone renders.
+    const reopened = await client.request("waiting-reopen", "session.open", { sessionId: session.id });
+    const pending = reopened.result.session.extensionPresentation.pendingInteractions[0] as {
+      id: string; hostEpoch: string; presentationRevision: number; method: string;
+    };
+    expect(pending, "pending interaction").toBeDefined();
+
+    const archive = await client.request("waiting-archive", "session.archive.set", {
+      commandId: "waiting-archive-command", sessionId: session.id, archived: true,
+    });
+    expect(archive).toMatchObject({ ok: false, error: { code: "busy", retryable: false } });
+    expect(await archivedRecord(f.root, session.id)).toBeUndefined();
+
+    const answered = await client.request("waiting-respond", "extension.respond", {
+      commandId: "waiting-respond-command",
+      sessionId: session.id,
+      interactionId: pending.id,
+      hostEpoch: pending.hostEpoch,
+      presentationRevision: pending.presentationRevision,
+      value: "Keep",
+    });
+    expect(answered.ok, JSON.stringify(answered)).toBe(true);
+    await until(async () => !(await list(client, "exclude")).sessions.some(
+      (row) => row.id === session.id && row.waitingForUser === true), "interaction settled");
+    await command;
+
+    const retried = await archiveSession(client, session.id, "waiting-retry-archive-command");
+    expect(retried.archivedAt).toBeDefined();
+    return {
+      archiveError: archive.error.code,
+      archiveRetryable: archive.error.retryable,
+      waitingForUserProjection: projection?.waitingForUser,
+      interactionMethod: pending.method,
+      archivedAfterAnswer: (await list(client, "only")).sessions.map((row) => row.id),
+    };
+  });
+
+  archiveCase("keeps the record of a session that started before startup recovery finished", async () => {
+    // The Gateway serves before attention recovery completes, so a session can
+    // be created and archived inside that window. Recovery prunes records with
+    // no canonical owner, and a live session that has not reached disk yet is an
+    // owner: its record must survive.
+    let liveSessionId = "";
+    const f = await fixture({
+      duringStartupRecovery: async (registry, cwd) => {
+        const slot = await registry.create(cwd);
+        liveSessionId = slot.id;
+        await registry.setArchived(slot.id, true);
+      },
+    });
+    const client = await f.connect();
+    expect(await archivedRecord(f.root, liveSessionId)).toBeDefined();
+    expect(await listedIds(client, "only")).toEqual([liveSessionId]);
+    expect(await listedIds(client, "exclude")).not.toContain(liveSessionId);
+    return {
+      liveSessionId,
+      archivedRows: (await list(client, "only")).sessions.map((row) => row.archivedAt),
+    };
+  });
+
+  archiveCase("unarchives a session while its run is still active", async () => {
+    // Unarchiving is the recovery direction, so it never requires an idle
+    // session: a client must be able to reverse a hidden row even if a run has
+    // already started.
+    const f = await fixture();
+    const client = await f.connect();
+    const session = f.coldSession("unarchive-running");
+    await openSession(client, session.id);
+    let release!: () => void;
+    const barrier = new Promise<void>((resolve) => { release = resolve; });
+    f.faux.setResponses([async () => { await barrier; return fauxAssistantMessage("running"); }]);
+    await archiveSession(client, session.id, "unarchive-running-archive-command");
+    const prompt = await client.request("unarchive-running-prompt", "session.prompt", {
+      commandId: "unarchive-running-prompt-command", sessionId: session.id, text: "run while I unarchive",
+    });
+    expect(prompt.ok, JSON.stringify(prompt)).toBe(true);
+    await until(async () => (await list(client, "exclude")).sessions.some(
+      (row) => row.id === session.id && row.phase === "running"), "running phase");
+    const unarchive = await client.request("unarchive-running-reset", "session.archive.set", {
+      commandId: "unarchive-running-reset-command", sessionId: session.id, archived: false,
+    });
+    expect(unarchive.ok, JSON.stringify(unarchive)).toBe(true);
+    release();
+    return {
+      runningPhase: (await list(client, "exclude")).sessions.find((row) => row.id === session.id)?.phase,
+      unarchiveResult: unarchive.result,
+      archivedRows: (await list(client, "only")).sessions.length,
+    };
+  });
+
+  archiveCase("keeps archive state across a Gateway restart and an open", async () => {
     const f = await fixture();
     const first = await f.connect();
     const session = f.coldSession("restart");
@@ -556,14 +817,14 @@ describe("session archive over the real Gateway", () => {
     await second.request("restart-sync", "session.sync", { sessionId: session.id, syncToken: opened.result.syncToken });
     expect((await list(second, "exclude")).sessions.map((row) => row.id)).not.toContain(session.id);
     expect((await list(second, "only")).sessions.map((row) => row.id)).toEqual([session.id]);
-    record("keeps archive state across a Gateway restart and an open", {
+    return {
       archivedAt: archived.result.archivedAt,
-      hiddenAfterRestart: true,
-      hiddenAfterOpen: true,
-    });
+      archivedRowsAfterRestart: (await list(second, "only")).sessions.map((row) => row.id),
+      archivedRowsAfterOpen: (await list(second, "only")).sessions.map((row) => row.id),
+    };
   });
 
-  it("keeps a renamed session archived and forks an unarchived child", async () => {
+  archiveCase("keeps a renamed session archived and forks an unarchived child", async () => {
     const f = await fixture();
     const client = await f.connect();
     const parent = f.coldSession("fork-parent");
@@ -595,14 +856,14 @@ describe("session archive over the real Gateway", () => {
     expect(child).toBeDefined();
     expect(child?.archivedAt).toBeUndefined();
     expect((await list(client, "only")).sessions.map((row) => row.id)).toEqual([parent.id]);
-    record("keeps a renamed session archived and forks an unarchived child", {
+    return {
       childId,
-      childArchived: false,
+      childArchivedAt: child?.archivedAt ?? null,
       archivedRows: (await list(client, "only")).sessions.map((row) => row.id),
-    });
+    };
   });
 
-  it("rejects archiving a runtime-owned subagent session", async () => {
+  archiveCase("rejects archiving a runtime-owned subagent session", async () => {
     const f = await fixture();
     const client = await f.connect();
     const parent = f.coldSession("subagent-parent");
@@ -617,10 +878,10 @@ describe("session archive over the real Gateway", () => {
     });
     expect(rejected).toMatchObject({ ok: false, error: { code: "conflict" } });
     expect((await list(client, "only")).sessions).toHaveLength(0);
-    record("rejects archiving a runtime-owned subagent session", { code: rejected.error.code });
+    return { code: rejected.error.code };
   });
 
-  it("deletes an archived session and never resurrects its archive record", async () => {
+  archiveCase("deletes an archived session and never resurrects its archive record", async () => {
     const f = await fixture();
     const client = await f.connect();
     const session = f.coldSession("delete");
@@ -649,14 +910,14 @@ describe("session archive over the real Gateway", () => {
     expect(afterRecreate.sessions.map((row) => row.id)).toContain(session.id);
     expect(afterRecreate.archivedCount).toBe(0);
     expect((await list(client, "only")).sessions).toHaveLength(0);
-    record("deletes an archived session and never resurrects its archive record", {
-      storeAfterDelete: [],
-      recreatedSessionVisible: true,
+    return {
+      storeAfterDelete: Object.keys(store.sessions),
+      recreatedSessionVisible: afterRecreate.sessions.some((row) => row.id === session.id),
       archivedCountAfterRecreate: afterRecreate.archivedCount,
-    });
+    };
   });
 
-  it("archives a live idle session and unarchives it again", async () => {
+  archiveCase("archives a live idle session and unarchives it again", async () => {
     const f = await fixture();
     const client = await f.connect();
     const slot = await f.current().registry.create(f.cwd);
@@ -675,14 +936,14 @@ describe("session archive over the real Gateway", () => {
     expect(restored.result).toEqual({ archived: false });
     expect((await list(client, "only")).sessions).toHaveLength(0);
     expect((await list(client, "exclude")).sessions.map((row) => row.id)).toEqual([slot.id]);
-    record("archives a live idle session and unarchives it again", {
-      liveOnlyArchived: true,
+    return {
+      liveOnlyArchivedAt: response.result.archivedAt,
       unarchiveResult: restored.result,
       runtimeStarts: f.runtimeFactory.mock.calls.length,
-    });
+    };
   });
 
-  it("carries archive state on the opened snapshot and republishes it on every change", async () => {
+  archiveCase("carries archive state on the opened snapshot and republishes it on every change", async () => {
     const f = await fixture();
     const client = await f.connect();
     const session = f.coldSession("snapshot-archive");
@@ -718,15 +979,15 @@ describe("session archive over the real Gateway", () => {
     expect(prompt.ok, JSON.stringify(prompt)).toBe(true);
     expect(await archivedRecord(f.root, session.id)).toBeUndefined();
     await until(() => latestSnapshot(client, session.id)?.archivedAt === undefined, "admission republish");
-    record("carries archive state on the opened snapshot and republishes it on every change", {
+    return {
       archivedAtOnOpen: opened.result.session.archivedAt,
-      unarchiveRepublish: true,
-      archiveRepublish: latestSnapshot(client, session.id)?.archivedAt ?? archivedWhileLive.archivedAt,
-      admissionRepublish: true,
-    });
+      snapshotWhileArchived: archivedWhileLive.archivedAt,
+      snapshotAfterUnarchive: latestSnapshot(client, session.id)?.archivedAt ?? null,
+      snapshotWhileRunning: latestSnapshot(client, session.id)?.archivedAt ?? null,
+    };
   });
 
-  it("clears archive state before a prompt is admitted and announces it to every client", async () => {
+  archiveCase("clears archive state before a prompt is admitted and announces it to every client", async () => {
     const f = await fixture();
     const first = await f.connect();
     const second = await f.connect();
@@ -752,14 +1013,14 @@ describe("session archive over the real Gateway", () => {
     expect(f.archiveDiagnostic).toHaveBeenCalledWith({ outcome: "auto-unarchived", trigger: "admission" });
     await until(async () => (await list(first, "exclude")).sessions.some(
       (row) => row.id === session.id && row.phase === "idle"), "settled");
-    record("clears archive state before a prompt is admitted and announces it to every client", {
-      recordClearedAtAdmission: true,
+    return {
+      canonicalRecord: (await archivedRecord(f.root, session.id)) ?? null,
       promptingClientListChanged: listChangedFrames(first) - announcementAt.first,
       observingClientListChanged: listChangedFrames(second) - announcementAt.second,
-    });
+    };
   });
 
-  it("clears archive state when Bash is admitted", async () => {
+  archiveCase("clears archive state when Bash is admitted", async () => {
     const f = await fixture();
     const client = await f.connect();
     const session = f.coldSession("bash-unarchive");
@@ -773,13 +1034,13 @@ describe("session archive over the real Gateway", () => {
     expect(await archivedRecord(f.root, session.id)).toBeUndefined();
     expect(await listedIds(client, "exclude")).toContain(session.id);
     expect(f.archiveDiagnostic).toHaveBeenCalledWith({ outcome: "auto-unarchived", trigger: "admission" });
-    record("clears archive state when Bash is admitted", {
-      bashRpcAccepted: true,
-      recordCleared: (await archivedRecord(f.root, session.id)) === undefined,
-    });
+    return {
+      canonicalRecord: (await archivedRecord(f.root, session.id)) ?? null,
+      archivedRows: (await list(client, "only")).sessions.length,
+    };
   });
 
-  it("clears archive state when a manual compaction is admitted", async () => {
+  archiveCase("clears archive state when a manual compaction is admitted", async () => {
     // A tiny compaction budget gives the session history that manual compaction
     // can actually summarize, so the admitted work is observable end to end.
     const f = await fixture({ settings: { compaction: { enabled: true, reserveTokens: 1_024, keepRecentTokens: 0 } } });
@@ -811,14 +1072,13 @@ describe("session archive over the real Gateway", () => {
     expect(await archivedRecord(f.root, session.id)).toBeUndefined();
     expect(await listedIds(client, "exclude")).toContain(session.id);
     expect(f.archiveDiagnostic).toHaveBeenCalledWith({ outcome: "auto-unarchived", trigger: "admission" });
-    record("clears archive state when a manual compaction is admitted", {
-      compactionRpcAccepted: true,
+    return {
       queued: compaction.result.queued,
-      recordCleared: true,
-    });
+      canonicalRecord: (await archivedRecord(f.root, session.id)) ?? null,
+    };
   });
 
-  it("clears archive state for an automation-owned prompt on an existing session", async () => {
+  archiveCase("clears archive state for an automation-owned prompt on an existing session", async () => {
     const f = await fixture();
     const client = await f.connect();
     const session = f.coldSession("automation-unarchive");
@@ -846,13 +1106,13 @@ describe("session archive over the real Gateway", () => {
     expect(await archivedRecord(f.root, session.id)).toBeUndefined();
     await until(async () => (await listedIds(client, "exclude")).includes(session.id), "automation target visible");
     await until(async () => !(await f.current().registry.acquire(session.id)).isBusy, "automation run settled");
-    record("clears archive state for an automation-owned prompt on an existing session", {
+    return {
       operationId: admission.operationId,
-      recordClearedAtAdmission: true,
-    });
+      canonicalRecord: (await archivedRecord(f.root, session.id)) ?? null,
+    };
   });
 
-  it("treats a queued prompt as busy for archive admission", async () => {
+  archiveCase("treats a queued prompt as busy for archive admission", async () => {
     const f = await fixture();
     const client = await f.connect();
     const session = f.coldSession("queued-unarchive");
@@ -880,33 +1140,17 @@ describe("session archive over the real Gateway", () => {
     await until(async () => (await list(client, "exclude")).sessions.some(
       (row) => row.id === session.id && row.phase === "idle"), "settled");
     expect(await archivedRecord(f.root, session.id)).toBeUndefined();
-    record("treats a queued prompt as busy for archive admission", {
+    return {
       archiveError: archive.error.code,
       queuedOperationId: queued.result.operationId,
-    });
+    };
   });
 
-  it("clears archive state when an extension starts a turn without Gateway admission", async () => {
+  archiveCase("clears archive state when an extension starts a turn without Gateway admission", async () => {
     // An extension-owned trigger (a scheduled wake) starts the turn inside Pi,
     // so no Gateway run admission can see it. The active projection is the only
     // boundary that can restore visibility, and it must do so immediately.
-    const f = await fixture({
-      extension: (root) => `
-        import { existsSync } from "node:fs";
-        import { setTimeout as delay } from "node:timers/promises";
-        export default function (pi) {
-          void (async () => {
-            for (;;) {
-              if (existsSync(${JSON.stringify(join(root, "wake-trigger"))})) {
-                pi.sendMessage({ customType: "external-wake", content: "external wake", display: false }, { triggerTurn: true });
-                return;
-              }
-              await delay(5);
-            }
-          })();
-        }
-      `,
-    });
+    const f = await fixture({ extensions: [{ name: "wake.ts", source: wakeExtension }] });
     const client = await f.connect();
     const session = f.coldSession("backstop-unarchive");
     await openSession(client, session.id);
@@ -932,30 +1176,161 @@ describe("session archive over the real Gateway", () => {
       release();
       await until(async () => (await list(client, "exclude")).sessions.some(
         (row) => row.id === session.id && row.phase === "idle"), "settled");
-      record("clears archive state when an extension starts a turn without Gateway admission", {
+      return {
         visibleWhileRunning: visibleWhileRunning?.phase,
-        durableRecordCleared: true,
-        trigger: "backstop",
-      });
+        canonicalRecord: (await archivedRecord(f.root, session.id)) ?? null,
+        diagnostics: f.archiveDiagnostic.mock.calls.map((call) => call[0]),
+      };
     } finally {
       release();
     }
   });
 
-  it("rejects a prompt retryably when archive state cannot be cleared", async () => {
+  archiveCase("restores visibility and retries the record when the backstop write fails", async () => {
+    // A run Pi starts on its own cannot be rejected, so visibility is restored
+    // in memory first. The device that archived the session must still be told:
+    // it is the one hiding the row, and it learns about the change from the
+    // membership change rather than from the durable write.
+    const f = await fixture({ extensions: [{ name: "wake.ts", source: wakeExtension }] });
+    const client = await f.connect();
+    const session = f.coldSession("backstop-write-failure");
+    await openSession(client, session.id);
+    await archiveSession(client, session.id, "backstop-failure-archive-command");
+    const listChangesBefore = listChangedFrames(client);
+    const restoreRemovals = failArchiveRemovals(f.current().registry);
+    let release!: () => void;
+    const barrier = new Promise<void>((resolve) => { release = resolve; });
+    f.faux.setResponses([async () => { await barrier; return fauxAssistantMessage("woke by itself"); }]);
+    try {
+      await writeFile(join(f.root, "wake-trigger"), "", "utf8");
+      await until(() => listChangedFrames(client) > listChangesBefore, "restoration membership change");
+      const visible = (await list(client, "exclude")).sessions.find((row) => row.id === session.id);
+      expect(visible?.phase).toBe("running");
+      expect(visible?.archivedAt).toBeUndefined();
+      expect(f.archiveDiagnostic).toHaveBeenCalledWith({ outcome: "failure", stage: "auto-unarchive" });
+      // Fail closed on the durable half: the record survives a failed write.
+      expect(await archivedRecord(f.root, session.id)).toBeDefined();
+
+      // The next published summary retries the exact record once the store
+      // recovers, so the retry is not lost.
+      restoreRemovals();
+      release();
+      await until(async () => (await archivedRecord(f.root, session.id)) === undefined, "record cleared on retry");
+      await until(async () => (await list(client, "only")).sessions.length === 0, "archived projection empty");
+      return {
+        listChanges: listChangedFrames(client) - listChangesBefore,
+        visibleWhileRunning: visible?.phase,
+        canonicalRecordAfterRetry: (await archivedRecord(f.root, session.id)) ?? null,
+        archivedRowsAfterRetry: (await list(client, "only")).sessions.length,
+      };
+    } finally {
+      restoreRemovals();
+      release();
+    }
+  });
+
+  archiveCase("settles a pending backstop write before disposal resolves", async () => {
+    // The backstop clears records fire-and-forget while sessions publish, so its
+    // write can still be in flight when the owning registry reports disposal.
+    // Whoever released the Gateway state directory — a shutdown, a reinstall, a
+    // test fixture — must be able to assume this owner is done writing.
+    const f = await fixture({ extensions: [{ name: "wake.ts", source: wakeExtension }] });
+    const client = await f.connect();
+    const session = f.coldSession("dispose-drain");
+    await openSession(client, session.id);
+    await archiveSession(client, session.id, "dispose-drain-archive-command");
+    const registry = f.current().registry;
+    const store = (registry as unknown as { archive: { remove(sessionId: string): Promise<boolean> } }).archive;
+    const durable = store.remove.bind(store);
+    let release!: () => void;
+    const barrier = new Promise<void>((resolve) => { release = resolve; });
+    let entered = false;
+    let settled = false;
+    store.remove = async (sessionId: string) => {
+      entered = true;
+      await barrier;
+      const removed = await durable(sessionId);
+      settled = true;
+      return removed;
+    };
+    let resume!: () => void;
+    const runBarrier = new Promise<void>((resolve) => { resume = resolve; });
+    f.faux.setResponses([async () => { await runBarrier; return fauxAssistantMessage("woke by itself"); }]);
+    await writeFile(join(f.root, "wake-trigger"), "", "utf8");
+    await until(() => entered, "backstop write in flight");
+    // The run may finish; only the blocked clear must still be in flight.
+    resume();
+
+    const disposing = registry.dispose();
+    const outcome = await Promise.race([
+      disposing.then(() => "disposed" as const),
+      new Promise<"waiting">((resolve) => { setTimeout(() => resolve("waiting"), 250); }),
+    ]);
+    // Disposal must not report itself done while the write it owns is in flight.
+    expect(outcome).toBe("waiting");
+    release();
+    await disposing;
+    expect(settled).toBe(true);
+    expect(await archivedRecord(f.root, session.id)).toBeUndefined();
+    return {
+      outcomeWhileWriteBlocked: outcome,
+      settledBeforeDisposeResolved: settled,
+      recordAfterDispose: (await archivedRecord(f.root, session.id)) ?? null,
+      pendingAttempts: (registry as unknown as { archiveRestorationAttempts: Map<string, unknown> })
+        .archiveRestorationAttempts.size,
+    };
+  });
+
+  archiveCase("re-archives a pending restoration with its own timestamp", async () => {
+    const f = await fixture({ extensions: [{ name: "wake.ts", source: wakeExtension }] });
+    const client = await f.connect();
+    const session = f.coldSession("pending-restoration");
+    await openSession(client, session.id);
+    const first = await archiveSession(client, session.id, "pending-archive-command");
+    const restoreRemovals = failArchiveRemovals(f.current().registry);
+    let release!: () => void;
+    const barrier = new Promise<void>((resolve) => { release = resolve; });
+    f.faux.setResponses([async () => { await barrier; return fauxAssistantMessage("woke by itself"); }]);
+    try {
+      await writeFile(join(f.root, "wake-trigger"), "", "utf8");
+      await until(async () => (await list(client, "exclude")).sessions.some(
+        (row) => row.id === session.id && row.phase === "running"), "externally started run");
+      release();
+      await until(() => !(f.current().registry as unknown as { slots: Map<string, { isBusy: boolean }> })
+        .slots.get(session.id)?.isBusy, "run settled");
+      // The durable clear still failed, so the stale record is what a re-archive
+      // would otherwise resurrect.
+      expect(await archivedRecord(f.root, session.id)).toBeDefined();
+      restoreRemovals();
+      // Archive timestamps are the container's ordering source, so the second
+      // archive must not reuse the first one's position.
+      await new Promise((resolve) => setTimeout(resolve, 5));
+      const second = await archiveSession(client, session.id, "pending-rearchive-command");
+      expect(Date.parse(second.archivedAt)).toBeGreaterThan(Date.parse(first.archivedAt));
+      const stored = await archivedRecord(f.root, session.id) as { archivedAt: string };
+      expect(stored.archivedAt).toBe(second.archivedAt);
+      return {
+        firstArchivedAt: first.archivedAt,
+        secondArchivedAt: second.archivedAt,
+        archivedRows: (await list(client, "only")).sessions.map((row) => row.archivedAt),
+      };
+    } finally {
+      restoreRemovals();
+    }
+  });
+
+  archiveCase("rejects a prompt retryably when archive state cannot be cleared", async () => {
     const f = await fixture();
     const client = await f.connect();
     const session = f.coldSession("persist-failure");
     await openSession(client, session.id);
     await archiveSession(client, session.id, "failure-archive-command");
     const registry = f.current().registry as unknown as {
-      archive: { remove(sessionId: string): Promise<boolean> };
       markers: { evidence(): Promise<ReadonlyMap<string, readonly unknown[]>> };
     };
-    const durableRemove = registry.archive.remove.bind(registry.archive);
     // A failing durable write leaves the in-memory projection untouched, which
     // is exactly what a full or failing disk produces.
-    registry.archive.remove = async () => { throw new Error("Fixture archive write failure"); };
+    const restoreRemovals = failArchiveRemovals(f.current().registry);
     f.faux.setResponses([fauxAssistantMessage("must never run")]);
 
     let prompt: any;
@@ -964,7 +1339,7 @@ describe("session archive over the real Gateway", () => {
         commandId: "failure-prompt-command", sessionId: session.id, text: "must not run",
       });
     } finally {
-      registry.archive.remove = durableRemove;
+      restoreRemovals();
     }
     expect(prompt).toMatchObject({ ok: false, error: { code: "busy", retryable: true } });
     expect(f.archiveDiagnostic).toHaveBeenCalledWith({ outcome: "failure", stage: "auto-unarchive" });
@@ -976,15 +1351,15 @@ describe("session archive over the real Gateway", () => {
     const slot = await f.current().registry.acquire(session.id);
     expect(slot.isBusy).toBe(false);
     expect(slot.snapshot().phase).toBe("idle");
-    record("rejects a prompt retryably when archive state cannot be cleared", {
+    return {
       promptError: prompt.error.code,
       retryable: prompt.error.retryable,
-      runMarkers: 0,
+      runMarkers: (await registry.markers.evidence()).size,
       phaseAfterRejection: slot.snapshot().phase,
-    });
+    };
   });
 
-  it("holds the session lane from archive admission through the durable commit", async () => {
+  archiveCase("holds the session lane from archive admission through the durable commit", async () => {
     // The review finding this covers: if archive admission released the session
     // lane before its durable commit, a prompt could be admitted in the gap, and
     // the archive would then commit over running work. Holding the durable write
@@ -1028,18 +1403,18 @@ describe("session archive over the real Gateway", () => {
       expect(prompt.ok, JSON.stringify(prompt)).toBe(true);
       expect(await archivedRecord(f.root, session.id)).toBeUndefined();
       await until(async () => (await list(client, "exclude")).sessions.some((row) => row.id === session.id), "visible after the commit");
-      record("holds the session lane from archive admission through the durable commit", {
+      return {
         promptAdmittedDuringCommit: admittedDuringCommit,
-        archiveCommitted: true,
-        recordClearedAfterAdmission: true,
-      });
+        archiveCommitted: (await archivePromise).ok,
+        canonicalRecordAfterAdmission: (await archivedRecord(f.root, session.id)) ?? null,
+      };
     } finally {
       releaseCommit();
       registry.archive.archive = durableArchive;
     }
   });
 
-  it("never commits an archive over a run that admission already admitted", async () => {
+  archiveCase("never commits an archive over a run that admission already admitted", async () => {
     const f = await fixture();
     const client = await f.connect();
     const session = f.coldSession("race");
@@ -1106,10 +1481,10 @@ describe("session archive over the real Gateway", () => {
     expect(duringRun?.archivedAt).toBeUndefined();
     gated.release();
     await until(() => !slot.isBusy, "gated run settled");
-    record("never commits an archive over a run that admission already admitted", {
+    return {
       rounds,
       outcomes,
       visibleWhileRunning: duringRun?.phase,
-    });
+    };
   });
 });
