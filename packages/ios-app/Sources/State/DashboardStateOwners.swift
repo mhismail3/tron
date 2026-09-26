@@ -532,6 +532,13 @@ enum SessionCatalogLoader {
     }
 }
 
+/// Bounds the archived-page walk that names a session the dashboard projection
+/// cannot hold. A profile whose archived count exceeds this bound keeps the
+/// existing fallback label instead of an unbounded read.
+enum SessionArchiveTargetLookup {
+    static let maximumPages = 5
+}
+
 enum ArchivedSessionsLoadResult: Sendable {
     case loaded(page: ArchivedSessionsPage)
     /// The read was superseded by a newer request or its surface retired it.

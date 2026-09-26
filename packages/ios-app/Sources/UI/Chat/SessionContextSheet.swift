@@ -172,6 +172,7 @@ struct SessionContextSheet: View {
     @Environment(\.tronPresentationSurfaceToken) private var surfaceToken
     @State private var destination: ManageSessionDestination?
     @State private var showRename = false
+    @State private var unarchiving = false
     @State private var name = ""
     @State private var compacting = false
     @State private var exportedURL: URL?
@@ -619,6 +620,10 @@ struct SessionContextSheet: View {
     private func sessionSection(_ snapshot: SessionContextPresentation) -> some View {
         TronGlassCard(accent: sessionRowAccent) {
             VStack(spacing: 0) {
+                if isArchived {
+                    archiveRow
+                    divider()
+                }
                 gitRow
                 divider()
                 manageRow(
@@ -678,6 +683,46 @@ struct SessionContextSheet: View {
                 }
             }
         }
+    }
+
+    /// The chat's Gateway is always the selected profile: opening a route
+    /// activates the profile that owns the session before the chat mounts.
+    private var isArchived: Bool {
+        model.isSessionArchivedForPresentation(sessionID: sessionID, profileID: model.profiles.selected?.id)
+    }
+
+    /// Archive state is Gateway-owned and an archived row is absent from the
+    /// dashboard, so this surface is where the user restores it. Sending a
+    /// message needs no confirmation: the Gateway clears the archive before it
+    /// admits the run, and the row returns to the dashboard.
+    private var archiveRow: some View {
+        Button {
+            guard !unarchiving else { return }
+            unarchiving = true
+            Task {
+                do {
+                    try await model.setSessionArchived(
+                        sessionID: sessionID,
+                        profileID: model.profiles.selected?.id,
+                        archived: false
+                    )
+                } catch { surfaceActionError(error) }
+                unarchiving = false
+            }
+        } label: {
+            TronSettingsRow(
+                icon: "archivebox",
+                title: "Archived",
+                subtitle: "Hidden from the dashboard. Sending a message unarchives it.",
+                accent: sessionRowAccent
+            ) {
+                TronInlineActionLabel("Unarchive", icon: "arrow.uturn.backward", isWorking: unarchiving)
+            }
+        }
+        .buttonStyle(.plain)
+        .disabled(unarchiving)
+        .accessibilityLabel("Unarchive Session")
+        .accessibilityIdentifier("manage-session-unarchive")
     }
 
     private var gitRow: some View {

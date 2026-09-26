@@ -37,6 +37,10 @@ struct AutomationDetailView: View {
     @State private var isExecutingAction = false
     @State private var confirmation: AutomationDetailConfirmation?
     @State private var loadRevision = 0
+    /// The name of a target the dashboard projection cannot hold: an archived
+    /// row is excluded from it by contract, so the owning Gateway's archived
+    /// projection supplies the name instead of an invalid target.
+    @State private var archivedTargetTitle: String?
     @State private var runLoadGeneration = 0
     @State private var presentationReadGeneration = 0
     @State private var runLoadTask: Task<Void, Never>?
@@ -317,6 +321,15 @@ struct AutomationDetailView: View {
             // server transaction; later catalog invalidations trigger a new read.
             record = loadedRecord
             runs = loadedRuns
+            if case let .existingSession(sessionID) = loadedRecord.target {
+                await resolveArchivedTargetTitle(
+                    sessionID: sessionID,
+                    generation: generation,
+                    presentationGeneration: presentationGeneration
+                )
+            } else {
+                archivedTargetTitle = nil
+            }
         } catch is CancellationError {
             return
         } catch {
@@ -356,15 +369,42 @@ struct AutomationDetailView: View {
     private func targetLabel(_ target: GatewayAutomationTarget) -> String {
         switch target {
         case let .existingSession(sessionID):
-            return model.visibleSessions.first(where: {
-                $0.id == sessionID
-                    && ($0.gatewayProfileID == selection.profileID
-                        || ($0.gatewayProfileID == nil && selection.profileID == model.profiles.selected?.id))
-            })?.title ?? "Session \(sessionID)"
+            return projectedTargetTitle(sessionID: sessionID) ?? archivedTargetTitle ?? "Session \(sessionID)"
         case let .workspace(cwd, _):
             let name = URL(fileURLWithPath: cwd).lastPathComponent
             return "New session per run · \(name.isEmpty ? "Workspace" : name)"
         }
+    }
+
+    private func projectedTargetTitle(sessionID: String) -> String? {
+        model.visibleSessions.first(where: {
+            $0.id == sessionID
+                && ($0.gatewayProfileID == selection.profileID
+                    || ($0.gatewayProfileID == nil && selection.profileID == model.profiles.selected?.id))
+        })?.title
+    }
+
+    /// Resolves the archived target's name through the owning Gateway, under the
+    /// same read fences as the record it belongs to. A target that is not
+    /// archived inside the bounded page walk, a retired read, or an incapable
+    /// Gateway keeps the existing ID fallback rather than inventing a name.
+    private func resolveArchivedTargetTitle(
+        sessionID: String,
+        generation: Int,
+        presentationGeneration: Int
+    ) async {
+        guard projectedTargetTitle(sessionID: sessionID) == nil,
+              model.supportsSessionArchive(profileID: selection.profileID) else {
+            archivedTargetTitle = nil
+            return
+        }
+        let summary = try? await model.archivedSessionSummary(profileID: selection.profileID, sessionID: sessionID)
+        guard !Task.isCancelled,
+              generation == loadRevision,
+              presentationGeneration == presentationReadGeneration,
+              presentationActivity.allowsPresentationPublication,
+              scenePhase == .active else { return }
+        archivedTargetTitle = summary?.title
     }
 
     private func openExecutionSession(_ sessionID: String) {

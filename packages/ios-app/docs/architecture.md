@@ -454,7 +454,11 @@ authenticated, surface-scoped detail reads remain the only path to prompt or not
 Repeated invalidations coalesce in the connection event hub and become one dirty catalog refresh only
 while the dashboard is active. Create/edit supports only session prompts, optional skill/prompt resource
 invocations, and notifications; workspace targets are prompt-only, while notifications require an
-existing session. New-session interval schedules are limited to one run per 24 hours by Gateway
+existing session. A saved session target is named from the dashboard projection when it holds the row,
+and otherwise from the owning Gateway's archived projection, because an archived session is excluded
+from that projection by contract; the bounded page walk keeps the existing ID fallback rather than
+inventing a name, and the target itself is unchanged because each run unarchives it. New-session
+interval schedules are limited to one run per 24 hours by Gateway
 policy. Shell, webhook, extension-command, attachment, deployment, and Gateway lifecycle actions have
 no UI or wire path. Run-now, enable, cancellation, deletion, and uncertain-outcome
 resolution require explicit confirmation and retain optimistic definition revision fences.
@@ -1374,6 +1378,10 @@ until the Tron confirmation sheet completes the canonical mutation. The view doe
 not stage deletion beyond confirmation or suppress rows locally. The confirmed
 mutation receipt reconciles the selected profile-owned catalog immediately, while
 the revisioned Gateway list event repairs every connected dashboard from canonical truth.
+Archived sessions are reachable only through the dashboard's archived container and content search,
+and both name them without changing their archive state; a chat opened from either shows the archived
+state in Manage Session with an explicit Unarchive action, while sending a message needs no
+confirmation because the Gateway clears the archive before it admits the run.
 Cancelling can therefore close and reopen the flow without optimistic row removal
 or stale swipe state. Dashboard discovery and refresh never select or open a transcript and global Settings never
 infer project scope. Catalog loads are latest-generation-owned, and an asynchronous import may
@@ -2248,7 +2256,9 @@ configured provider, and is never enabled without the user's consent and
 allowance state.
 
 Search results retain the canonical session, entry ID, branch/file anchor
-revision, and nested passage identity. Selecting a result asks
+revision, and nested passage identity. Each result also carries the Gateway's own archive projection,
+so a row for an archived session is labeled **Archived** without a second read or an index change, and
+opening a result never unarchives it. Selecting a result asks
 `session.search.anchor` for a revision-checked bounded historical window, then
 uses the existing presentation store and scroll coordinator; results never own
 a second transcript cache or scroll position. The historical window carries its

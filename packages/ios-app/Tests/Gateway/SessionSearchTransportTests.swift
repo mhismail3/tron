@@ -39,6 +39,59 @@ final class SessionSearchTransportTests: XCTestCase {
         XCTAssertNotEqual(aggregate.profiles.first?.state, "offline")
     }
 
+    func testSearchRowsCarryArchiveStateForOlderAndCurrentGateways() async throws {
+        let socket = ScriptedGatewaySocket()
+        let client = GatewayClient(socketFactory: ScriptedGatewaySocketFactory(socket: socket).factory)
+        let defaultsName = "SessionSearchArchiveRowTests.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: defaultsName)!
+        let profile = GatewayProfile(id: "selected", label: "Selected", host: "gateway.test", port: 9847, machineId: "machine", deviceId: "device")
+        defaults.set(try JSONEncoder.gateway.encode([profile]), forKey: "gatewayProfiles.v1")
+        defaults.set(profile.id, forKey: "selectedGateway.v1")
+        let model = AppModel(client: client, profiles: GatewayProfileStore(defaults: defaults), cache: SnapshotCache(root: FileManager.default.temporaryDirectory.appending(path: defaultsName)))
+        defer {
+            Task { @MainActor in await model.teardown(); await client.close(); defaults.removePersistentDomain(forName: defaultsName) }
+        }
+        await socket.enqueue(Data(#"{"type":"hello","gatewayVersion":"1","piVersion":"1","protocolVersion":5,"minProtocolVersion":5,"machineId":"machine","machineName":"Mac","gatewayChannel":"stable","capabilities":["sessions.v1","session-search.v1"]}"#.utf8))
+        try await model.connectHostedGateway(profile: profile, token: "token")
+        try await Task.sleep(for: .milliseconds(100))
+        let target = SessionSearchProfileTarget(profileID: profile.id, label: profile.label, capabilities: ["session-search.v1"], isSelected: true)
+        let search = Task { await model.searchSessions(query: "needle", targets: [target]) }
+        let requestIndex = try await waitForRequest(method: "session.search", on: socket)
+        let frame = await socket.sentFrames()[requestIndex]
+        let request = try XCTUnwrap(JSONDecoder.gateway.decode(JSONValue.self, from: frame).objectValue)
+        let anchor: JSONValue = .object([
+            "indexRevision": .string("i"), "fileIdentity": .string("file"), "branchDigest": .string("branch"), "entryOrdinal": .number(1),
+        ])
+        func row(sessionID: String, archived: Bool?) -> JSONValue {
+            var value: [String: JSONValue] = [
+                "sessionId": .string(sessionID), "title": .string(sessionID), "cwd": .string("/tmp"),
+                "updatedAt": .string("2026-01-01T00:00:00Z"), "entryId": .string("\(sessionID):entry"),
+                "ordinal": .number(1), "passageKind": .string("user"), "snippet": .string("needle"),
+                "lexicalScore": .number(1), "anchorRevision": anchor,
+            ]
+            if let archived { value["archived"] = .bool(archived) }
+            return .object(value)
+        }
+        let response: JSONValue = .object([
+            "query": .string("needle"), "queryRevision": .string("q"), "corpusRevision": .string("c"), "indexRevision": .string("i"),
+            "coverage": .object(["state": .string("complete"), "sessionsIndexed": .number(2), "sessionsTotal": .number(2), "passagesIndexed": .number(2), "omittedSessions": .number(0)]),
+            "semantic": .object(["state": .string("unavailable"), "vectorsIndexed": .number(0), "vectorsTotal": .number(0), "reason": .string("synthetic")]),
+            "ranking": .object(["state": .string("lexical"), "jev": .string("disabled")]),
+            // One archived session, and one from a Gateway that predates the
+            // archive contract and therefore omits the field entirely.
+            "results": .array([row(sessionID: "archived", archived: true), row(sessionID: "older", archived: nil)]),
+        ])
+        await socket.enqueue(try JSONEncoder.gateway.encode(JSONValue.object([
+            "type": .string("response"), "id": request["id"] ?? .null, "ok": .bool(true), "result": response,
+        ])))
+        let aggregate = await search.value
+        let archived = try XCTUnwrap(aggregate.groups.first { $0.sessionId == "archived" })
+        let older = try XCTUnwrap(aggregate.groups.first { $0.sessionId == "older" })
+        XCTAssertTrue(archived.isArchived, "the Gateway's archive projection must reach the search row label")
+        XCTAssertEqual(archived.passages.first?.archived, true)
+        XCTAssertFalse(older.isArchived, "an older Gateway omits archived, which decodes as not archived")
+    }
+
     func testPolicyMutationsSerializeAndPreserveFinalIntent() async throws {
         let socket = ScriptedGatewaySocket()
         let client = GatewayClient(socketFactory: ScriptedGatewaySocketFactory(socket: socket).factory)

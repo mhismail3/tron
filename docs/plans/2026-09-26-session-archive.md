@@ -2,7 +2,7 @@
 
 - **Started:** 2026-09-26
 - **Status:** Active
-- **Last updated:** 2026-09-26, I-1
+- **Last updated:** 2026-09-26, I-3
 - **Goal:** A user can archive an idle session so it leaves the dashboard without being deleted, find it again in one collapsed Archived container or in search, and have it return automatically when it runs again.
 
 ## Goal and constraints
@@ -94,7 +94,7 @@ Current state, inspected 2026-09-26:
 | G-3 | Done | Search results carry `archived`; `session-search.md` updated | G-1 | tron-coordinator, 2026-09-26 |
 | I-1 | Done | iOS model, mutation service, AppModel and capability gating; catalog membership follows authoritative responses | G-1 | tron-coordinator, 2026-09-26 |
 | I-2 | Claimed | Dashboard full-swipe Archive, one collapsed "Archived (N)" container at the bottom, and archived-row actions | I-1 | tron-coordinator, 2026-09-26 |
-| I-3 | Claimed | Search "Archived" label, automation picker exclusion, and display of an existing automation whose target is archived | I-1, G-3 | tron-coordinator, 2026-09-26 |
+| I-3 | Done | Search "Archived" label, automation picker exclusion, and display of an existing automation whose target is archived | I-1, G-3 | tron-coordinator, 2026-09-26 |
 | F-1 | Needs scoping | The `session.fork` RPC rejects with retryable `busy` because its own admitted work entry satisfies the slot's idle check; decide the fix and cover the real path | none | |
 | F-2 | Needs scoping | The same self-work-entry rejection now also measured on `session.bash`, `session.navigate` and `session.setTools`; audit every mutation RPC whose slot method consults session work ownership and decide the fix (thread the request's work token, as `session.setModel` already does) | none | |
 | V-1 | Ready | Cross-module checkpoint, user-performed Gateway rollout, and eyes-on device review; close the plan | G-2, I-2, I-3 | |
@@ -646,3 +646,86 @@ artifact. Accessibility identifiers use the existing
   `model.invalidateArchivedSessionsReads(profileID:)` after deleting from the
   container. `markArchived` invalidates in-flight loads, so a refresh is required
   after archive; the Gateway's `session.listChanged` already triggers it.
+
+### I-3 · Done · 2026-09-26 · tron-coordinator
+
+- Result: search, the automation form, and chat now show Gateway-owned archive
+  state without owning it. `SessionSearchResult` carries `archived` and the
+  search group renders one **Archived** label for the session; opening a result
+  changes nothing. `AutomationFormView` and `AutomationDetailView` name a saved
+  target that the dashboard projection cannot hold (archived rows are excluded
+  from it by contract) by reading the owning Gateway's archived projection, so
+  the target is never empty or invalid; the picker keeps taking its input from
+  `model.visibleSessions`, which excludes archived rows. `SessionContextSheet`
+  shows an **Archived** row with an explicit Unarchive action for the presented
+  session, and sending a message still needs no confirmation because G-2 clears
+  the archive before admitting the run.
+- Decode decision (the G-3 note): `archived` decodes as
+  `decodeIfPresent(Bool.self) ?? false`. The field is additive, and search is
+  reachable against a Gateway older than the archive contract; the existing
+  rows already use this exact pattern for additive booleans and enums
+  (`hasActiveSubagents ?? false`, `kind ?? .user`). A required field would make
+  the whole search response undecodable against that Gateway, which is a
+  regression rather than a compatibility shim.
+- Failure modes written before the isolated tests (the Gateway lifecycle test
+  cannot reach them):
+  - FM-1 a required `archived` field fails the whole search decode against an
+    older Gateway, or the flag never reaches the row/group label;
+  - FM-2 the chat's archive label reads a stale fact — a session that has
+    unarchived (its row returned to the dashboard) still shows Archived, or a
+    session opened from the container/search is not labeled;
+  - FM-3 the archived-target name comes from an unbounded page walk, from the
+    dashboard bucket, or is invented for a non-archived/incapable Gateway.
+- Evidence (verified):
+  - `scripts/tron-ios-test build` (scoped `TRON_IOS_TEST_DERIVED_DATA`):
+    TEST BUILD SUCCEEDED.
+  - `scripts/tron-ios-test run --only-testing TronMobileTests/AppModelCatalogSyncTests
+    --only-testing TronMobileTests/SessionSearchTransportTests`: 34 tests plus
+    dynamic-parameter runs passed in run `20260926T111256Z-run.GXWRTS`
+    (`~/Library/Developer/Tron/ios/test-runs/`). The four new tests: two
+    AppModel cases (FM-2/FM-3, including the 5-page bound and the
+    incapable-Gateway no-read control) and one transport case (FM-1, decoding a
+    response that both includes `archived: true` and omits the field entirely).
+  - Negative control for FM-2 is inside the first case: the same session stops
+    being labeled once an authoritative `exclude` page returns its row, and a
+    deletion clears the observation.
+  - `python3 scripts/check-documentation-policy.py` and
+    `scripts/personal-info-guard.sh` pass.
+- Changes: this commit (`SessionSearchModels.swift`, `AppModel.swift`,
+  `DashboardStateOwners.swift`, `SessionSearchCoordinator.swift`,
+  `SessionShellView.swift`, `SessionContextSheet.swift`,
+  `AutomationFormView.swift`, `AutomationDetailView.swift`, the two owning test
+  files, and `packages/ios-app/docs/architecture.md`).
+- Kept on purpose:
+  - The chat's archive fact is a bounded per-profile observation list (256
+    newest IDs) fed by the archive response, an archived page, and search
+    evidence. The dashboard projection stays authoritative for a live row, so a
+    run that unarchives a session clears the label without any extra read. No
+    second archive store, no per-session Gateway read (which the frozen Gateway
+    does not have).
+  - The search label is one capsule on the session group header rather than one
+    per passage row: every passage in a group is the same session, so repeating
+    it would add noise without information.
+  - The archived-target read reuses the container's `loadArchivedSessions`, so it
+    shares that read's latest-request fence. A container read in flight is
+    retired and reloaded, and this lookup can itself be retired (then it keeps
+    the existing fallback name); a dedicated fence would have been a second
+    read owner for the same projection.
+  - The automation target keeps its exact `sessionId`; only the display name
+    changes, and the form's picker is disabled (not hidden) when an archived
+    target is the only session, so an empty picker cannot be opened.
+- Deviations: the plan's chat requirement names "the Archived container" as an
+  opening surface; I-2 owns the container tap, and this task records the archive
+  evidence in the two route builders (`navigationRoute(for:)` and
+  `navigationRoute(profileID:sessionID:...)`) plus the archived page read, so a
+  container-opened chat is labeled whichever builder I-2 uses, with no I-2
+  interface change.
+- For the next agent: the I-2 dashboard container is still the only surface with
+  archive controls; V-1 should confirm on device that an archived session opened
+  from the container shows the Manage Session row. The concurrent I-2 session
+  held the shared test-simulator lease for most of this task, and several
+  unrelated runs in both worktrees failed with `dyld ... _dyld_sim_prepare`
+  (EXC_BAD_ACCESS) before the test host bootstrapped; my focused suites passed
+  in the run named above, and the extra regression suites
+  (`SessionMutationServiceTests`, `SessionSearchCoordinatorTests`,
+  `SnapshotCacheTests`, `DashboardStateOwnerTests`) should be re-run at V-1.

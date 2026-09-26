@@ -749,6 +749,104 @@ struct AppModelCatalogSyncTests {
         }
     }
 
+    @Test("an archived session stays labeled until an authoritative row returns")
+    func archivedPresentationProjection() async throws {
+        try await withHarness(capabilities: ["sessions.v1", "session-archive.v1"]) { harness in
+            try Self.storePairedProfile(harness.model)
+            // Failure mode: a chat opened from the archived container reads a
+            // stale archive fact. The page that named the session is the
+            // evidence, and the dashboard projection is authoritative for a
+            // row that has returned.
+            let page = Task { try await harness.model.loadArchivedSessions(profileID: "profile", cursor: nil) { true } }
+            let read = try await archivedRequest(harness.socket, from: 1)
+            await harness.socket.enqueue(response(
+                id: read.request.id,
+                sessions: [summary(id: "archived", revision: 1, archivedAt: "2026-01-02T00:00:00Z")],
+                listRevision: 1
+            ))
+            guard case .loaded = try await page.value else {
+                Issue.record("the archived page was not published")
+                return
+            }
+            #expect(harness.model.isSessionArchivedForPresentation(sessionID: "archived", profileID: "profile"))
+            #expect(!harness.model.isSessionArchivedForPresentation(sessionID: "visible", profileID: "profile"))
+            #expect(!harness.model.isSessionArchivedForPresentation(sessionID: "archived", profileID: nil))
+
+            // A Gateway-admitted run clears the archive, and the row returns.
+            let refresh = Task { await harness.model.refreshSessions() }
+            let catalog = try await catalogRequest(harness.socket, from: read.index + 1)
+            await harness.socket.enqueue(response(
+                id: catalog.request.id,
+                sessions: [summary(id: "archived", revision: 2)],
+                listRevision: 2
+            ))
+            #expect(await refresh.value == .published)
+            #expect(!harness.model.isSessionArchivedForPresentation(sessionID: "archived", profileID: "profile"))
+
+            // A delete clears the observation too, so a stale mark cannot
+            // outlive the record the Gateway removed with it.
+            let deletion = Task { try await harness.model.deleteSession("archived") }
+            let deleted = try await mutationRequest(harness.socket, method: "session.delete", from: catalog.index + 1)
+            await harness.socket.enqueue(Data(
+                "{\"type\":\"response\",\"id\":\"\(deleted.request.id)\",\"ok\":true,\"result\":{\"deleted\":true}}".utf8
+            ))
+            try await deletion.value
+            #expect(!harness.model.isSessionArchivedForPresentation(sessionID: "archived", profileID: "profile"))
+        }
+    }
+
+    @Test("a session the dashboard cannot name is resolved through the archived projection")
+    func archivedTargetLookupWalksBoundedPages() async throws {
+        try await withHarness(capabilities: ["sessions.v1", "session-archive.v1"]) { harness in
+            try Self.storePairedProfile(harness.model)
+            let lookup = Task { try await harness.model.archivedSessionSummary(profileID: "profile", sessionID: "target") }
+            let first = try await archivedRequest(harness.socket, from: 1)
+            await harness.socket.enqueue(response(
+                id: first.request.id,
+                sessions: [summary(id: "other", revision: 1, archivedAt: "2026-01-02T00:00:00Z")],
+                listRevision: 1,
+                nextCursor: "page-2"
+            ))
+            let second = try await archivedRequest(harness.socket, from: first.index + 1)
+            #expect(second.request.params?["cursor"] == .string("page-2"))
+            await harness.socket.enqueue(response(
+                id: second.request.id,
+                sessions: [summary(id: "target", revision: 1, archivedAt: "2026-01-03T00:00:00Z")],
+                listRevision: 1
+            ))
+            let resolved = try await lookup.value
+            #expect(resolved?.id == "target")
+        }
+
+        // The page walk is bounded: an archived count beyond the bound keeps the
+        // existing fallback rather than reading forever.
+        try await withHarness(capabilities: ["sessions.v1", "session-archive.v1"]) { harness in
+            try Self.storePairedProfile(harness.model)
+            let lookup = Task { try await harness.model.archivedSessionSummary(profileID: "profile", sessionID: "target") }
+            var index = 1
+            for page in 0..<SessionArchiveTargetLookup.maximumPages {
+                let read = try await archivedRequest(harness.socket, from: index)
+                index = read.index + 1
+                await harness.socket.enqueue(response(
+                    id: read.request.id,
+                    sessions: [summary(id: "other-\(page)", revision: 1, archivedAt: "2026-01-02T00:00:00Z")],
+                    listRevision: 1,
+                    nextCursor: "page-\(page + 2)"
+                ))
+            }
+            let bounded = try await lookup.value
+            #expect(bounded == nil)
+        }
+
+        // A Gateway without the archive contract is never asked to walk.
+        try await withHarness { harness in
+            let sentBefore = await harness.socket.sentFrames().count
+            let unsupported = try await harness.model.archivedSessionSummary(profileID: "profile", sessionID: "target")
+            #expect(unsupported == nil)
+            #expect(await harness.socket.sentFrames().count == sentBefore)
+        }
+    }
+
     /// A paired profile is normally stored before it is selected; the hosted
     /// harness connects one directly, so archive counting needs the store
     /// projection that production has.
@@ -777,6 +875,34 @@ struct AppModelCatalogSyncTests {
         while true {
             let request = try await request(socket, index: index)
             if request.params?["archived"] == .string("only") { return (request, index) }
+            index += 1
+        }
+    }
+
+    /// Finds the next request for one exact method.
+    private func mutationRequest(
+        _ socket: ScriptedGatewaySocket,
+        method: String,
+        from startIndex: Int
+    ) async throws -> (request: Request, index: Int) {
+        var index = startIndex
+        while true {
+            let request = try await request(socket, index: index)
+            if request.method == method { return (request, index) }
+            index += 1
+        }
+    }
+
+    /// Finds the next dashboard catalog read, which never carries the archived
+    /// filter.
+    private func catalogRequest(
+        _ socket: ScriptedGatewaySocket,
+        from startIndex: Int
+    ) async throws -> (request: Request, index: Int) {
+        var index = startIndex
+        while true {
+            let request = try await request(socket, index: index)
+            if request.method == "session.list", request.params?["archived"] == nil { return (request, index) }
             index += 1
         }
     }

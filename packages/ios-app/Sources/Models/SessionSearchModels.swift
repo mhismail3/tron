@@ -18,6 +18,11 @@ struct SessionSearchForkBoundary: Codable, Hashable, Sendable {
 struct SessionSearchResult: Codable, Hashable, Sendable, Identifiable {
     let sessionId: String
     let gatewayProfileID: String?
+    /// The owning Gateway's archive projection for this session, read from its
+    /// archive store when the search response is built. It is never part of the
+    /// index, so archiving changes no indexed text. A Gateway without
+    /// `session-archive.v1` omits it, like every other additive row field.
+    let archived: Bool
     let title: String
     let cwd: String
     let updatedAt: String
@@ -31,6 +36,59 @@ struct SessionSearchResult: Codable, Hashable, Sendable, Identifiable {
     let jevScore: Double?
     let anchorRevision: SessionSearchAnchorRevision
     var id: String { "\(gatewayProfileID ?? "unknown"):\(sessionId):\(entryId)" }
+
+    init(
+        sessionId: String,
+        gatewayProfileID: String?,
+        archived: Bool = false,
+        title: String,
+        cwd: String,
+        updatedAt: String,
+        entryId: String,
+        parentEntryId: String?,
+        ordinal: Int,
+        passageKind: String,
+        snippet: String,
+        lexicalScore: Double,
+        semanticScore: Double?,
+        jevScore: Double?,
+        anchorRevision: SessionSearchAnchorRevision
+    ) {
+        self.sessionId = sessionId
+        self.gatewayProfileID = gatewayProfileID
+        self.archived = archived
+        self.title = title
+        self.cwd = cwd
+        self.updatedAt = updatedAt
+        self.entryId = entryId
+        self.parentEntryId = parentEntryId
+        self.ordinal = ordinal
+        self.passageKind = passageKind
+        self.snippet = snippet
+        self.lexicalScore = lexicalScore
+        self.semanticScore = semanticScore
+        self.jevScore = jevScore
+        self.anchorRevision = anchorRevision
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        sessionId = try container.decode(String.self, forKey: .sessionId)
+        gatewayProfileID = try container.decodeIfPresent(String.self, forKey: .gatewayProfileID)
+        archived = try container.decodeIfPresent(Bool.self, forKey: .archived) ?? false
+        title = try container.decode(String.self, forKey: .title)
+        cwd = try container.decode(String.self, forKey: .cwd)
+        updatedAt = try container.decode(String.self, forKey: .updatedAt)
+        entryId = try container.decode(String.self, forKey: .entryId)
+        parentEntryId = try container.decodeIfPresent(String.self, forKey: .parentEntryId)
+        ordinal = try container.decode(Int.self, forKey: .ordinal)
+        passageKind = try container.decode(String.self, forKey: .passageKind)
+        snippet = try container.decode(String.self, forKey: .snippet)
+        lexicalScore = try container.decode(Double.self, forKey: .lexicalScore)
+        semanticScore = try container.decodeIfPresent(Double.self, forKey: .semanticScore)
+        jevScore = try container.decodeIfPresent(Double.self, forKey: .jevScore)
+        anchorRevision = try container.decode(SessionSearchAnchorRevision.self, forKey: .anchorRevision)
+    }
 }
 
 struct SessionSearchProfileTarget: Sendable, Hashable {
@@ -66,6 +124,11 @@ struct SessionSearchSessionGroup: Identifiable, Sendable {
     let passages: [SessionSearchResult]
     let isLocalMatch: Bool
     var id: String { "\(profileID):\(sessionId)" }
+
+    /// Every passage of a session carries the same Gateway archive projection,
+    /// so the group label is the row's own state rather than a second read. A
+    /// group assembled without passages cannot claim one.
+    var isArchived: Bool { passages.contains(where: \.archived) }
 }
 
 struct SessionSearchAggregate: Sendable {

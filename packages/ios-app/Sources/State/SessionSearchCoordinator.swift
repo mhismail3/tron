@@ -89,7 +89,7 @@ final class SessionSearchCoordinator {
             indexRevision: decoded.indexRevision, coverage: decoded.coverage, semantic: decoded.semantic,
             ranking: decoded.ranking,
             results: decoded.results.map { result in
-                SessionSearchResult(sessionId: result.sessionId, gatewayProfileID: profileID, title: result.title, cwd: result.cwd, updatedAt: result.updatedAt, entryId: result.entryId, parentEntryId: result.parentEntryId, ordinal: result.ordinal, passageKind: result.passageKind, snippet: result.snippet, lexicalScore: result.lexicalScore, semanticScore: result.semanticScore, jevScore: result.jevScore, anchorRevision: result.anchorRevision)
+                SessionSearchResult(sessionId: result.sessionId, gatewayProfileID: profileID, archived: result.archived, title: result.title, cwd: result.cwd, updatedAt: result.updatedAt, entryId: result.entryId, parentEntryId: result.parentEntryId, ordinal: result.ordinal, passageKind: result.passageKind, snippet: result.snippet, lexicalScore: result.lexicalScore, semanticScore: result.semanticScore, jevScore: result.jevScore, anchorRevision: result.anchorRevision)
             }
         )
     }

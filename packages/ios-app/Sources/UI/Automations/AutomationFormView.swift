@@ -205,6 +205,11 @@ struct AutomationFormView: View {
     @State private var actionContent = ""
     @State private var targetMode: AutomationTargetMode = .workspace
     @State private var targetSessionID = ""
+    /// The name of a target the dashboard projection cannot hold. An archived
+    /// session is excluded from that projection by contract, so the owning
+    /// Gateway's archived projection supplies its name instead of showing an
+    /// empty or invalid target.
+    @State private var archivedTargetTitle: String?
     @State private var editingDateField: AutomationDateSelection?
     // Workspace paths are transient form state only. They are sent to the
     // owning Gateway and are never written to iOS preferences or caches.
@@ -376,11 +381,19 @@ struct AutomationFormView: View {
                   scenePhase == .active, targetMode == .workspace else { return }
             await inspectWorkspaceTrust(workspacePath)
         }
+        .task(id: PresentationActivityTaskID(
+            source: "target:\(selectedProfileID):\(targetSessionID):\(initialized):\(sessions.count):\(scenePhase == .active)",
+            presentationActive: presentationActivity.allowsPresentationPublication
+        )) {
+            guard initialized,
+                  presentationActivity.allowsPresentationPublication,
+                  scenePhase == .active else { return }
+            await resolveArchivedTargetTitle()
+        }
         .onChange(of: presentationActivity.allowsPresentationPublication) { _, _ in
             presentationReadGeneration &+= 1
             previewGeneration &+= 1
-        }
-        .onChange(of: actionKind) { _, next in
+        }        .onChange(of: actionKind) { _, next in
             if next == .notification {
                 targetMode = .existingSession
                 workspacePath = ""
@@ -527,7 +540,7 @@ struct AutomationFormView: View {
 
     private var existingSessionTarget: some View {
         Group {
-            if sessions.isEmpty {
+            if sessions.isEmpty && archivedTargetTitle == nil {
                 TronSettingsRow(
                     icon: "bubble.left",
                     title: "No sessions available",
@@ -535,11 +548,20 @@ struct AutomationFormView: View {
                     accent: .tronAutomation
                 )
             } else {
-                TronSettingsRow(icon: "bubble.left", title: "Session", accent: .tronAutomation) {
+                TronSettingsRow(
+                    icon: "bubble.left",
+                    title: "Session",
+                    subtitle: archivedTargetHint,
+                    accent: .tronAutomation
+                ) {
                     Button { showingSessionPicker = true } label: {
                         TronInlineActionLabel(selectedSessionTitle, accent: .tronAutomation)
                     }
                     .buttonStyle(.plain)
+                    // An archived-only Gateway has nothing to pick, so the
+                    // saved target stays named and read-only instead of opening
+                    // an empty picker.
+                    .disabled(sessions.isEmpty)
                     .accessibilityLabel("Choose session")
                     .accessibilityValue(selectedSessionTitle)
                 }
@@ -789,8 +811,47 @@ struct AutomationFormView: View {
         AutomationWorkspacePathPolicy.initialPath(selectedPath: workspacePath)
     }
 
+    /// Names a saved target the dashboard projection cannot: an archived row is
+    /// excluded from it by contract, so the owning Gateway's archived projection
+    /// is the only authority for its name. The lookup keeps the existing
+    /// fallback when the session is not archived inside the bounded page walk,
+    /// and a superseded or retired read publishes nothing.
+    private func resolveArchivedTargetTitle() async {
+        guard targetMode == .existingSession || actionKind == .notification,
+              !targetSessionID.isEmpty,
+              sessions.first(where: { $0.id == targetSessionID }) == nil else {
+            archivedTargetTitle = nil
+            return
+        }
+        let profileID = selectedProfileID
+        let requestedTarget = targetSessionID
+        guard model.supportsSessionArchive(profileID: profileID) else {
+            archivedTargetTitle = nil
+            return
+        }
+        let requestedGeneration = presentationReadGeneration
+        let summary = try? await model.archivedSessionSummary(profileID: profileID, sessionID: requestedTarget)
+        guard !Task.isCancelled,
+              requestedGeneration == presentationReadGeneration,
+              presentationActivity.allowsPresentationPublication,
+              scenePhase == .active,
+              selectedProfileID == profileID,
+              targetSessionID == requestedTarget else { return }
+        archivedTargetTitle = summary?.title
+    }
+
     private var selectedSessionTitle: String {
-        sessions.first(where: { $0.id == targetSessionID })?.title ?? "Choose a session"
+        sessions.first(where: { $0.id == targetSessionID })?.title
+            ?? archivedTargetTitle
+            ?? "Choose a session"
+    }
+
+    /// Explains why a saved target is not in the picker. The automation keeps
+    /// the target, and every run unarchives it.
+    private var archivedTargetHint: String? {
+        archivedTargetTitle == nil
+            ? nil
+            : "Archived · It stays this automation's target, and each run unarchives it."
     }
 
     private var workspaceName: String {
