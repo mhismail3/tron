@@ -1697,7 +1697,11 @@ visible immediately and the durable record is cleared behind it, retrying on the
 next active projection if that write fails. Both paths log
 `sessions.archive.auto-unarchived` with the boundary that cleared the record.
 Opening, reading, renaming, marking read or unread, exporting, or searching an
-archived session leaves it archived.
+archived session leaves it archived. A live session's snapshot carries the same
+projection: `archivedAt` is present while the session is archived and absent
+while it is visible, and a committed archive change republishes the owning
+slot's snapshot, so an already-open client sees the transition without
+reopening the session.
 
 `session.list` accepts an optional `archived` filter. `exclude`, the default,
 drops archived rows from every page of that traversal and returns

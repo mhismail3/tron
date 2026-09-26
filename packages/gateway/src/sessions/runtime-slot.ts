@@ -389,6 +389,10 @@ export interface RuntimeSlotDependencies {
    * begins; a rejection aborts the run retryably. It must be a no-op with no
    * I/O while the session is not archived. */
   beforeRunAdmission: (sessionId: string) => Promise<void>;
+  /** Gateway-owned archive projection for one session, read at snapshot time.
+   * Archive state is registry-owned display state, so a slot neither writes nor
+   * caches it: the value is absent while the session is visible. */
+  archivedAt: (sessionId: string) => string | undefined;
 }
 
 class CanonicalCustomEntryConflictError extends Error {}
@@ -5653,6 +5657,9 @@ export class RuntimeSlot {
     const activeToolSegmentId = acceptsQueuedPrompts && this.effectivePhase === "running"
       ? this.activeToolSegmentId()
       : undefined;
+    // Archive state is not canonical session content: it is read from its owner
+    // for each snapshot so an archive commit never has to reach into the slot.
+    const archivedAt = this.dependencies.archivedAt(this.id);
     // Canonical receipts are authoritative after runtime recreation; live maps
     // only enrich the current projection and never replace persisted facts.
     return fitSessionSnapshot({
@@ -5693,6 +5700,7 @@ export class RuntimeSlot {
       transcriptTotal: transcriptPage.total,
       ...(streaming ? { streaming } : {}),
       ...(session.sessionManager.getLeafId() ? { leafEntryId: session.sessionManager.getLeafId()! } : {}),
+      ...(archivedAt === undefined ? {} : { archivedAt }),
       ...(this.operation ? { operation: this.operation } : {}),
       ...(this.retry ? { retry: this.retry } : {}),
       ...(canonicalTranscriptPage.forkBoundary ? { forkBoundary: canonicalTranscriptPage.forkBoundary } : {}),
@@ -6708,6 +6716,14 @@ export class RuntimeSlot {
       }
     }
 
+    this.revision += 1;
+    this.publishSnapshot();
+  }
+
+  /** Republish this snapshot because the Gateway-owned archive projection
+   * changed. Archive commits happen outside the run-admission lane, so this
+   * mirrors `refreshCompactionPolicy`: publication, not an idle check. */
+  refreshArchiveProjection(): void {
     this.revision += 1;
     this.publishSnapshot();
   }

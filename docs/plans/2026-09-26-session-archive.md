@@ -2,7 +2,7 @@
 
 - **Started:** 2026-09-26
 - **Status:** Active
-- **Last updated:** 2026-09-26, I-2/I-3 merge
+- **Last updated:** 2026-09-26, F-3
 - **Goal:** A user can archive an idle session so it leaves the dashboard without being deleted, find it again in one collapsed Archived container or in search, and have it return automatically when it runs again.
 
 ## Goal and constraints
@@ -97,7 +97,7 @@ Current state, inspected 2026-09-26:
 | I-3 | Done | Search "Archived" label, automation picker exclusion, and display of an existing automation whose target is archived | I-1, G-3 | tron-coordinator, 2026-09-26 |
 | F-1 | Needs scoping | The `session.fork` RPC rejects with retryable `busy` because its own admitted work entry satisfies the slot's idle check; decide the fix and cover the real path | none | |
 | F-2 | Needs scoping | The same self-work-entry rejection now also measured on `session.bash`, `session.navigate` and `session.setTools`; audit every mutation RPC whose slot method consults session work ownership and decide the fix (thread the request's work token, as `session.setModel` already does) | none | |
-| F-3 | Claimed | Coordinator review of I-3: chat archive state comes from a bounded iOS observation list (parallel state). Make the Gateway `SessionSnapshot` carry `archivedAt` (republished on change) and delete the observation list | I-3 | tron-coordinator, 2026-09-26 |
+| F-3 | Done | Coordinator review of I-3: chat archive state comes from a bounded iOS observation list (parallel state). Make the Gateway `SessionSnapshot` carry `archivedAt` (republished on change) and delete the observation list | I-3 | tron-coordinator, 2026-09-26 |
 | F-4 | Claimed | I-2's hosted UI journey never passed (app never idled; simulator contention). Make it pass on a healthy simulator, fixing the fixture if it is the cause, and keep its screenshots | I-2 | tron-coordinator, 2026-09-26 |
 | V-1 | Ready | Cross-module checkpoint, user-performed Gateway rollout, and eyes-on device review; close the plan | G-2, I-2, I-3, F-3, F-4 | |
 
@@ -798,3 +798,86 @@ artifact. Accessibility identifiers use the existing
 - For the next agent: re-run the hosted journey before V-1's eyes-on review.
   I-3 owns the search annotation, the automation picker, and the chat-surface
   archived state.
+
+### F-3 · Done · 2026-09-26 · archive worker
+
+- Result: the chat's archive state is the Gateway's own projection. A live
+  session's snapshot carries `archivedAt` (present while archived, absent while
+  visible), read from `RuntimeRegistry.archivedAt` — the effective projection
+  that already honours a pending restoration — through a new `archivedAt`
+  slot-side dependency, and a committed archive change republishes that slot's
+  snapshot through the existing `archiveChanged` path (the same shape as
+  `refreshCompactionPolicy`). `AppModel.observedArchivedSessionsByProfile`,
+  `maximumObservedArchivedSessions`, `observeArchivedSessions`,
+  `isSessionArchivedForPresentation` and their call sites are deleted;
+  `SessionContextSheet` reads `SessionContextPresentation.archivedAt`, which is
+  derived from the decoded snapshot, so the Manage Session archive row needs no
+  second read and no parallel state. The automation target lookup
+  (`archivedSessionSummary`) stays: it names a session the dashboard projection
+  cannot hold, which a snapshot of an unopened session cannot answer.
+- Evidence (verified):
+  - `npm run build` clean.
+  - `npx vitest run src/transport/session-archive.integration.test.ts`: 20/20 in
+    5.9 s. New case "carries archive state on the opened snapshot and republishes
+    it on every change": an archived session's `session.open` snapshot already
+    carries the exact `archivedAt`; unarchiving republishes the subscribed
+    client's snapshot without the field; archiving a live idle session
+    republishes it with the field; the prompt that clears the record sees a
+    snapshot without it. Retained, regenerable report:
+    `test-results/session-archive.integration.json` in the gateway package.
+  - Negative controls: removing the `archivedAt` snapshot field fails the case
+    (`expected undefined to be '2026-09-26T12:34:07.522Z'`); removing the slot
+    republish from `archiveChanged` fails the same case at the republish
+    assertion. Both restored.
+  - `npx vitest run src/sessions/runtime-registry.integration.test.ts
+    src/transport/sync-protocol.integration.test.ts
+    src/transport/session-list-pagination.test.ts
+    src/transport/server-terminal-delete.integration.test.ts`: 257/257 in 45.2 s.
+    `session-archive-store`, `session-attention-store`,
+    `gateway-service-transcript`, `command-receipts`,
+    `runtime-terminal-notifications`, `session-search-service`: 64/64 in 2.1 s.
+  - `scripts/tron-ios-test build` (scoped `TRON_IOS_TEST_DERIVED_DATA`):
+    TEST BUILD SUCCEEDED.
+  - `scripts/tron-ios-test run --only-testing
+    TronMobileTests/AppModelCatalogSyncTests --only-testing
+    TronMobileTests/SessionPresentationStoreTests --only-testing
+    TronMobileTests/SessionMutationServiceTests --only-testing
+    TronMobileTests/DashboardStateOwnerTests`: 143 tests in 4 suites passed
+    (`~/Library/Developer/Tron/ios/test-runs/20260926T123344Z-run.l520P7`). The
+    removed-API test (`archivedPresentationProjection`) and its now-unused
+    `mutationRequest` helper are gone; the archive count, container-read fence
+    and automation-target cases remain.
+  - `python3 scripts/check-documentation-policy.py` and
+    `scripts/personal-info-guard.sh` pass.
+- Changes: this commit (`packages/gateway/src/protocol/types.ts`,
+  `packages/gateway/src/sessions/runtime-slot.ts`,
+  `packages/gateway/src/sessions/runtime-registry.ts`,
+  `packages/gateway/src/transport/session-archive.integration.test.ts`,
+  `packages/gateway/README.md`, `packages/ios-app/Sources/Models/SessionRuntimeModels.swift`,
+  `packages/ios-app/Sources/State/AppModel.swift`,
+  `packages/ios-app/Sources/UI/Chat/SessionContextSheet.swift`,
+  `packages/ios-app/Tests/Gateway/AppModelCatalogSyncTests.swift`,
+  `packages/ios-app/docs/architecture.md`, and this plan).
+- Tasks added: none.
+- Kept on purpose:
+  - `refreshArchiveProjection` does not take the session lane, exactly like
+    `refreshCompactionPolicy`; the archive commit already owns whichever lane
+    ordered it, and taking the lane again would deadlock a backstop that runs
+    inside the slot's own publication. The backstop therefore queues its
+    republish with `queueMicrotask` instead of re-entering the publisher.
+  - Only the four call sites that can have a live slot pass the session ID to
+    `archiveChanged`; startup pruning passes none (no slots exist yet), and the
+    durable removal in `clearArchivedRecord` passes none because dropping the
+    in-memory override does not change the projection the store already
+    reported.
+  - The fixture now forwards slot broadcasts to the server, mirroring
+    `gateway-main`, so the new case observes real `session.snapshot` frames;
+    this is fixture fidelity, not a test hook.
+- Deviations: the chat's archive row is no longer covered by an iOS unit test.
+  The removed case asserted the parallel-state API that this task deleted, and a
+  replacement unit test would only reassert a decoded passthrough; the contract
+  is covered by the Gateway integration case and remains listed for V-1's
+  eyes-on review.
+- For the next agent: F-4 (the hosted UI journey) is next. V-1 should still
+  confirm on device that an archived session opened from the container shows the
+  Manage Session row, now fed by the snapshot.

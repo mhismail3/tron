@@ -250,13 +250,6 @@ final class AppModel {
     private var dashboardArchivedCountsByProfile: [String: Int] = [:]
     /// Per-profile latest-request fence for the archived container's reads.
     private var archivedSessionsReadGenerations: [String: Int] = [:]
-    /// Archive facts iOS observed per profile but cannot read back per session:
-    /// `session.list` pages are the only authority, and an archived row is
-    /// absent from the dashboard projection by contract. Bounded to the most
-    /// recent observations, which is all a chat needs — it opens right after
-    /// the search result or archived page that named its session.
-    private var observedArchivedSessionsByProfile: [String: [String]] = [:]
-    private static let maximumObservedArchivedSessions = 256
     private var dashboardCacheLoadGeneration = 0
     var sessions: [SessionSummary] {
         get { sessionCatalog.sessions }
@@ -1427,32 +1420,12 @@ final class AppModel {
                 method: "session.list"
             )
         }
-        let admitted = await ArchivedSessionsLoader.admit(response, requestedCursor: cursor) { [weak self] in
+        return await ArchivedSessionsLoader.admit(response, requestedCursor: cursor) { [weak self] in
             guard let self, presentationActive() else { return false }
             guard self.admitsArchivedSessionsRead(profileID: profileID, generation: generation) else { return false }
             if isSelectedProfile { return self.lifecycle.selectedProfileID == profileID }
             return self.dashboardConnections.requestIdentity(for: profileID) == expectedPoolIdentity
         }
-        // An archived page is authoritative archive evidence, so it also feeds
-        // the per-session projection a chat reads when the dashboard row is
-        // absent. The dashboard bucket is unaffected.
-        if case let .loaded(page) = admitted {
-            observeArchivedSessions(profileID: profileID, sessionIDs: page.sessions.map(\.id), archived: true)
-        }
-        return admitted
-    }
-
-    /// Archive state for a chat the user opened. The dashboard projection owns
-    /// the live row — archived rows are excluded from it by contract, so a
-    /// present row is authoritative "not archived" and a prompt that unarchives
-    /// a session is reflected without a second read. When the row is absent,
-    /// the archive projection iOS observed for this exact session (an archive
-    /// response, an archived page, or search evidence) is the only signal a
-    /// surface that is not itself listing archived pages can use.
-    func isSessionArchivedForPresentation(sessionID: String, profileID: String?) -> Bool {
-        guard let profileID,
-              observedArchivedSessionsByProfile[profileID]?.contains(sessionID) == true else { return false }
-        return dashboardSessionsByProfile[profileID]?.contains { $0.id == sessionID } != true
     }
 
     /// Names a session the dashboard projection cannot: an archived row is
@@ -1475,22 +1448,6 @@ final class AppModel {
             }
         }
         return nil
-    }
-
-    /// Records one archive observation, newest last and deduplicated, capped at
-    /// `maximumObservedArchivedSessions`. A dropped older ID only costs a label
-    /// until the surface that opens that session observes it again.
-    private func observeArchivedSessions(profileID: String?, sessionIDs: [String], archived: Bool) {
-        guard let profileID, !sessionIDs.isEmpty else { return }
-        var observed = observedArchivedSessionsByProfile[profileID] ?? []
-        for sessionID in sessionIDs {
-            observed.removeAll { $0 == sessionID }
-            if archived { observed.append(sessionID) }
-        }
-        if observed.count > Self.maximumObservedArchivedSessions {
-            observed.removeFirst(observed.count - Self.maximumObservedArchivedSessions)
-        }
-        observedArchivedSessionsByProfile[profileID] = observed.isEmpty ? nil : observed
     }
 
     /// Invalidates in-flight archived reads for one profile. An archive toggle
@@ -3185,10 +3142,6 @@ final class AppModel {
 
     func navigationRoute(for session: SessionSummary) async throws -> SessionNavigationRoute {
         let owner = try await activateDashboardProfile(session.gatewayProfileID ?? profiles.selected?.id)
-        // A row the dashboard projection excludes because it is archived is
-        // authoritative archive evidence (the archived container's own page),
-        // so opening one keeps the chat's archive surface truthful.
-        observeArchivedSessions(profileID: owner.profileID, sessionIDs: [session.id], archived: session.isArchived)
         return SessionNavigationRoute(
             sessionID: session.id,
             editorText: nil,
@@ -3203,15 +3156,6 @@ final class AppModel {
     func navigationRoute(profileID: String, sessionID: String, historyEntryID: String? = nil, searchResult: SessionSearchResult? = nil) async throws -> SessionNavigationRoute {
         let owner = try await activateDashboardProfile(profileID)
         guard !sessionID.isEmpty else { throw CancellationError() }
-        // Search evidence is the Gateway's own archive projection, so opening a
-        // result also refines the per-session projection a chat reads.
-        if let searchResult, searchResult.sessionId == sessionID {
-            observeArchivedSessions(
-                profileID: owner.profileID,
-                sessionIDs: [searchResult.sessionId],
-                archived: searchResult.archived
-            )
-        }
         return SessionNavigationRoute(
             sessionID: sessionID,
             editorText: nil,
@@ -3625,7 +3569,7 @@ final class AppModel {
         let state = try await performOnOwningGateway(session) {
             try await self.sessionMutations.setArchived(sessionID: session.id, archived: archived)
         }
-        applyArchiveResponse(state, sessionID: session.id, profileID: session.gatewayProfileID ?? lifecycle.selectedProfileID)
+        applyArchiveResponse(state, sessionID: session.id)
     }
 
     /// The chat's Manage surface knows the presented session ID and the profile
@@ -3635,15 +3579,15 @@ final class AppModel {
         let state = try await performOnOwningGateway(profileID: profileID) {
             try await self.sessionMutations.setArchived(sessionID: sessionID, archived: archived)
         }
-        applyArchiveResponse(state, sessionID: sessionID, profileID: profileID ?? lifecycle.selectedProfileID)
+        applyArchiveResponse(state, sessionID: sessionID)
     }
 
     /// Applies one authoritative `session.archive.set` response: the archive
-    /// mark, the observed projection a chat reads, and the reads that response
-    /// invalidates. The owning profile is selected by then, so `sessionCatalog`
-    /// is that profile's catalog.
-    private func applyArchiveResponse(_ state: SessionArchiveState, sessionID: String, profileID: String?) {
-        observeArchivedSessions(profileID: profileID, sessionIDs: [sessionID], archived: state.archived)
+    /// mark and the reads it invalidates. The owning profile is selected by
+    /// then, so `sessionCatalog` is that profile's catalog. A chat reads the
+    /// state from its own Gateway snapshot instead, which the Gateway
+    /// republishes for this exact change.
+    private func applyArchiveResponse(_ state: SessionArchiveState, sessionID: String) {
         if state.archived {
             sessionCatalog.markArchived(sessionID: sessionID)
         }
@@ -3861,7 +3805,6 @@ final class AppModel {
             await composerDrafts.removeSession(profileID: profileID, sessionID: id).value
         }
         sessionCatalog.remove(id)
-        observeArchivedSessions(profileID: lifecycle.selectedProfileID, sessionIDs: [id], archived: false)
         // Deletion removes the Gateway's archive record too, so an archived page
         // already in flight must not publish the deleted row.
         invalidateArchivedSessionsReads(profileID: lifecycle.selectedProfileID)

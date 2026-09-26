@@ -904,7 +904,7 @@ export class RuntimeRegistry {
     }
     for (const sessionId of [...this.pendingArchiveRemovals]) {
       try {
-        if (await this.archive.remove(sessionId)) this.archiveChanged();
+        if (await this.archive.remove(sessionId)) this.archiveChanged(sessionId);
         this.pendingArchiveRemovals.delete(sessionId);
         this.pendingArchiveRestorations.delete(sessionId);
       } catch {
@@ -915,10 +915,13 @@ export class RuntimeRegistry {
   }
 
   /** A committed archive change is a dashboard membership change, not a
-   * transcript change, so it publishes a list revision instead of a summary. */
-  private archiveChanged(): void {
+   * transcript change, so it publishes a list revision instead of a summary.
+   * Archive state is also part of a live slot's snapshot, which therefore
+   * republishes in the same call; startup pruning has no slot to notify. */
+  private archiveChanged(sessionId?: string): void {
     this.revision += 1;
     this.options.sessionListChanged();
+    if (sessionId !== undefined) this.slots.get(sessionId)?.refreshArchiveProjection();
   }
 
   private archivePersistFailed(stage: "set" | "remove" | "auto-unarchive"): void {
@@ -956,7 +959,7 @@ export class RuntimeRegistry {
       }
       this.pendingArchiveRestorations.delete(sessionId);
       if (removed) {
-        this.archiveChanged();
+        this.archiveChanged(sessionId);
         this.options.archiveDiagnostic?.({ outcome: "auto-unarchived", trigger: "admission" });
       }
     });
@@ -968,7 +971,17 @@ export class RuntimeRegistry {
    * visible and retries on the next publication. */
   private restoreArchivedSession(sessionId: string): void {
     if (!this.pendingArchiveRestorations.has(sessionId) && this.archive.archivedAt(sessionId) === undefined) return;
+    const wasPending = this.pendingArchiveRestorations.has(sessionId);
     this.pendingArchiveRestorations.add(sessionId);
+    // The effective projection flips on that in-memory override, but this runs
+    // inside the slot's own publication (a summary is what noticed the run), so
+    // the republish is queued behind the publisher rather than re-entering it.
+    // A failed durable clear keeps the override and republishes again on the
+    // next active projection.
+    if (!wasPending) {
+      const slot = this.slots.get(sessionId);
+      if (slot) queueMicrotask(() => slot.refreshArchiveProjection());
+    }
     if (this.archiveRestorationAttempts.has(sessionId)) return;
     const attempt = this.clearArchivedRecord(sessionId);
     this.archiveRestorationAttempts.set(sessionId, attempt);
@@ -1205,6 +1218,7 @@ export class RuntimeRegistry {
       ...(this.options.compactionDiagnostic ? { compactionDiagnostic: this.options.compactionDiagnostic } : {}),
       isSessionPresented: (sessionId: string) => this.isSessionPresented(sessionId),
       beforeRunAdmission: (sessionId: string) => this.beforeRunAdmission(sessionId),
+      archivedAt: (sessionId: string) => this.archivedAt(sessionId),
       ...(this.options.machineId ? { machineId: this.options.machineId } : {}),
       ...(this.options.notifications ? { notifications: this.options.notifications } : {}),
       ...(this.options.extensionArtifactWarning ? { extensionArtifactWarning: this.options.extensionArtifactWarning } : {}),
@@ -3259,7 +3273,7 @@ export class RuntimeRegistry {
             throw new GatewayError("busy", "Session archive state could not be persisted", true);
           }
           this.pendingArchiveRestorations.delete(sessionId);
-          if (removed) this.archiveChanged();
+          if (removed) this.archiveChanged(sessionId);
           return { archived: false };
         }
         let archivedAt: string;
@@ -3270,7 +3284,7 @@ export class RuntimeRegistry {
           throw new GatewayError("busy", "Session archive state could not be persisted", true);
         }
         this.pendingArchiveRestorations.delete(sessionId);
-        this.archiveChanged();
+        this.archiveChanged(sessionId);
         return { archived: true, archivedAt };
       });
       // A live slot owns the lane that admits runs, so its idle admission and
@@ -3364,7 +3378,7 @@ export class RuntimeRegistry {
               this.pendingArchiveRemovals.add(sessionId);
             }
             this.pendingArchiveRestorations.delete(sessionId);
-            if (archiveRemoved) this.archiveChanged();
+            if (archiveRemoved) this.archiveChanged(sessionId);
           }
         } finally {
           this.deletingSessionIds.delete(sessionId);

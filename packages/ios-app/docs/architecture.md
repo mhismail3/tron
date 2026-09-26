@@ -1381,7 +1381,10 @@ the revisioned Gateway list event repairs every connected dashboard from canonic
 Archived sessions are reachable only through the dashboard's archived container and content search,
 and both name them without changing their archive state; a chat opened from either shows the archived
 state in Manage Session with an explicit Unarchive action, while sending a message needs no
-confirmation because the Gateway clears the archive before it admits the run.
+confirmation because the Gateway clears the archive before it admits the run. That state is read only
+from the presented session's own snapshot: `SessionSnapshot.archivedAt` is the Gateway's projection,
+the field is absent exactly while the session is visible, and the Gateway republishes the snapshot on
+each archive change, so iOS keeps no observation of its own for a session the dashboard cannot show.
 Cancelling can therefore close and reopen the flow without optimistic row removal
 or stale swipe state.
 One collapsed **Archived (N)** container row sits after every workspace group and

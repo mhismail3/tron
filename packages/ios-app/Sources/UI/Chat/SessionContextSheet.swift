@@ -620,7 +620,7 @@ struct SessionContextSheet: View {
     private func sessionSection(_ snapshot: SessionContextPresentation) -> some View {
         TronGlassCard(accent: sessionRowAccent) {
             VStack(spacing: 0) {
-                if isArchived {
+                if snapshot.archivedAt != nil {
                     archiveRow
                     divider()
                 }
@@ -685,16 +685,11 @@ struct SessionContextSheet: View {
         }
     }
 
-    /// The chat's Gateway is always the selected profile: opening a route
-    /// activates the profile that owns the session before the chat mounts.
-    private var isArchived: Bool {
-        model.isSessionArchivedForPresentation(sessionID: sessionID, profileID: model.profiles.selected?.id)
-    }
-
     /// Archive state is Gateway-owned and an archived row is absent from the
-    /// dashboard, so this surface is where the user restores it. Sending a
-    /// message needs no confirmation: the Gateway clears the archive before it
-    /// admits the run, and the row returns to the dashboard.
+    /// dashboard, so this surface is where the user restores it. The presented
+    /// snapshot is its only reader: the Gateway republishes it when the archive
+    /// changes, including when a run clears the record. Sending a message needs
+    /// no confirmation for the same reason.
     private var archiveRow: some View {
         Button {
             guard !unarchiving else { return }

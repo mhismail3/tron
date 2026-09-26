@@ -112,7 +112,10 @@ async function fixture(options: {
       idleRuntimeMs: 60_000,
       modelRuntimeFactory: runtimeFactory as never,
       trust: new TrustService(agentDir),
-      broadcast: () => {},
+      // Mirrors gateway-main: slot events reach subscribed sockets.
+      broadcast: (sessionId: string, topic: string, payload: unknown) => {
+        server?.broadcastSession(sessionId, topic, payload as never);
+      },
       sessionSummaryChanged: () => {},
       // Mirrors gateway-main: the registry announcement is what reaches clients.
       sessionListChanged: () => { listChanged(); server?.notifySessionListChanged(); },
@@ -272,6 +275,13 @@ const archivedRecord = async (root: string, sessionId: string): Promise<unknown>
 
 const listChangedFrames = (client: Client) =>
   client.frames.filter((frame) => frame.type === "event" && frame.topic === "session.listChanged").length;
+
+/** Snapshots a subscribed client actually received for one session, newest last. */
+const snapshotFrames = (client: Client, sessionId: string) =>
+  client.frames.filter((frame) => frame.type === "event" && frame.topic === "session.snapshot" && frame.sessionId === sessionId);
+
+const latestSnapshot = (client: Client, sessionId: string) =>
+  snapshotFrames(client, sessionId).at(-1)?.payload as { archivedAt?: string } | undefined;
 
 const search = async (client: Client, query: string) => {
   const response = await client.request(`search-${Math.random().toString(36).slice(2, 8)}`, "session.search", { query, maxResults: 10 });
@@ -668,6 +678,50 @@ describe("session archive over the real Gateway", () => {
       liveOnlyArchived: true,
       unarchiveResult: restored.result,
       runtimeStarts: f.runtimeFactory.mock.calls.length,
+    });
+  });
+
+  it("carries archive state on the opened snapshot and republishes it on every change", async () => {
+    const f = await fixture();
+    const client = await f.connect();
+    const session = f.coldSession("snapshot-archive");
+    // Archive before the session is ever opened: the projection belongs to the
+    // session, not to a subscription, so the first authoritative snapshot for
+    // an archived session already carries it.
+    const archivedWhileCold = await archiveSession(client, session.id, "snapshot-cold-archive-command");
+    await openSession(client, session.id);
+    const opened = client.frames.find((frame) => frame.id === `open-${session.id}`);
+    expect(opened.result.session.archivedAt).toBe(archivedWhileCold.archivedAt);
+
+    // Unarchiving republishes the snapshot of the live subscription, so a chat
+    // that is already open sees the row leave its archived state.
+    const beforeUnarchive = snapshotFrames(client, session.id).length;
+    const unarchive = await client.request("snapshot-unarchive", "session.archive.set", {
+      commandId: "snapshot-unarchive-command", sessionId: session.id, archived: false,
+    });
+    expect(unarchive.ok, JSON.stringify(unarchive)).toBe(true);
+    await until(() => snapshotFrames(client, session.id).length > beforeUnarchive
+      && latestSnapshot(client, session.id)?.archivedAt === undefined, "unarchive republish");
+
+    // Archiving a live idle session republishes it the same way.
+    const archivedWhileLive = await archiveSession(client, session.id, "snapshot-live-archive-command");
+    await until(() => latestSnapshot(client, session.id)?.archivedAt !== undefined, "archive republish");
+    expect(latestSnapshot(client, session.id)?.archivedAt).toBe(archivedWhileLive.archivedAt);
+
+    // The prompt that admits a run clears the record, and the snapshot the
+    // admission publishes no longer reports the session as archived.
+    f.faux.setResponses([fauxAssistantMessage("awake")]);
+    const prompt = await client.request("snapshot-prompt", "session.prompt", {
+      commandId: "snapshot-prompt-command", sessionId: session.id, text: "come back",
+    });
+    expect(prompt.ok, JSON.stringify(prompt)).toBe(true);
+    expect(await archivedRecord(f.root, session.id)).toBeUndefined();
+    await until(() => latestSnapshot(client, session.id)?.archivedAt === undefined, "admission republish");
+    record("carries archive state on the opened snapshot and republishes it on every change", {
+      archivedAtOnOpen: opened.result.session.archivedAt,
+      unarchiveRepublish: true,
+      archiveRepublish: latestSnapshot(client, session.id)?.archivedAt ?? archivedWhileLive.archivedAt,
+      admissionRepublish: true,
     });
   });
 

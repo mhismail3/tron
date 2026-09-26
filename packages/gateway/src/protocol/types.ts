@@ -929,6 +929,11 @@ export interface SessionSnapshot {
   processOverview?: SessionProcessOverview;
   extensionPresentation: ExtensionPresentationState;
   diagnostics: Array<{ type: string; message: string }>;
+  /** Gateway archive projection for this exact session: present while the
+   * session is archived, absent while it is visible. Opening a session does not
+   * change it, and a subscribed client sees the field appear or disappear on
+   * the snapshot published for the archive change. */
+  archivedAt?: string;
 }
 
 export interface SessionTreeNode {

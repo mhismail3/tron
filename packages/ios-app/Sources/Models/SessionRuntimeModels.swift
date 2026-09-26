@@ -503,6 +503,10 @@ struct SessionSnapshot: Codable, Hashable, Sendable {
     /// Optional on rolling gateways that do not advertise context-window.v1.
     var contextWindowPolicy: ContextWindowPolicy? = nil
     var compactionPolicy: CompactionPolicyProjection? = nil
+    /// Gateway archive projection for this exact session: present while it is
+    /// archived, absent while it is visible. The Gateway republishes the
+    /// snapshot on an archive change, so an open chat never infers it.
+    var archivedAt: String? = nil
 
     struct PromptAttachment: Codable, Hashable, Identifiable, Sendable {
         let id: String
@@ -564,6 +568,8 @@ struct SessionContextPresentation: Hashable, Sendable {
     let cwd: String
     let diagnostics: [RuntimeDiagnostic]
     let contextWindowPolicy: ContextWindowPolicy?
+    /// Gateway-owned archive state, so Manage Session needs no second read.
+    let archivedAt: String?
 
     init(_ snapshot: SessionSnapshot) {
         runtimeGeneration = snapshot.runtimeGeneration
@@ -583,6 +589,7 @@ struct SessionContextPresentation: Hashable, Sendable {
         cwd = snapshot.cwd
         diagnostics = snapshot.diagnostics
         contextWindowPolicy = snapshot.contextWindowPolicy
+        archivedAt = snapshot.archivedAt
     }
 }
 
