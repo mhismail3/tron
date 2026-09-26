@@ -91,6 +91,7 @@ struct SessionShellView: View {
     @State private var showingSearchOptions = false
     @State private var presentedSession: AppModel.SessionNavigationRoute?
     @State private var sessionToDelete: SessionSummary?
+    @State private var archiveConfirmation: SessionArchiveConfirmation?
     @State private var sessionToRename: SessionSummary?
     @State private var renameName = ""
     @State private var workspaceDisclosure = TronDisclosureState()
@@ -173,6 +174,9 @@ struct SessionShellView: View {
                     icon: "trash",
                     onConfirm: { delete(session) }
                 )
+            }
+            .sessionArchiveConfirmation($archiveConfirmation) { request in
+                setArchived(request.session, archived: request.archived)
             }
             .tronTextEntryAlert(
                 "Rename Session",
@@ -733,21 +737,13 @@ struct SessionShellView: View {
         }
     }
 
-    /// Archive is a reversible display change, so it applies only the
-    /// authoritative response: the row leaves the dashboard when that response is
-    /// accepted, and the Gateway's own list change is what returns it, or its
-    /// count, from canonical truth.
-    private func archive(_ session: SessionSummary) {
+    /// Runs only after the user confirms. Archive state is a reversible display
+    /// change, so this applies only the authoritative response: the row leaves
+    /// the dashboard when that response is accepted, and the Gateway's own list
+    /// change is what returns it, or its count, from canonical truth.
+    private func setArchived(_ session: SessionSummary, archived: Bool) {
         Task {
-            do { try await model.setSessionArchived(session, archived: true) }
-            catch is CancellationError { return }
-            catch { model.presentError(error) }
-        }
-    }
-
-    private func unarchive(_ session: SessionSummary) {
-        Task {
-            do { try await model.setSessionArchived(session, archived: false) }
+            do { try await model.setSessionArchived(session, archived: archived) }
             catch is CancellationError { return }
             catch { model.presentError(error) }
         }
@@ -990,7 +986,7 @@ struct SessionShellView: View {
                 )
             },
             onOpen: openArchivedSession,
-            onUnarchive: unarchive,
+            onUnarchive: { archiveConfirmation = SessionArchiveConfirmation(session: $0, archived: false) },
             onDelete: { sessionToDelete = $0 }
         )
     }
@@ -1055,7 +1051,7 @@ struct SessionShellView: View {
         .sessionRowTrailingSwipe(
             session: session,
             archiveIsAvailable: model.supportsSessionArchive(profileID: session.gatewayProfileID),
-            onArchive: { archive(session) },
+            onArchive: { archiveConfirmation = SessionArchiveConfirmation(session: session, archived: true) },
             onDelete: { sessionToDelete = session },
             onRename: { beginRename(session) }
         )

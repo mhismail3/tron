@@ -226,8 +226,8 @@ struct ArchivedSessionsSectionHeader: View {
 }
 
 /// Rows of one expanded archived container. Rows show their workspace and open
-/// the session; Unarchive is the full-swipe action and Delete keeps the
-/// dashboard's confirmation. A server whose pages cannot be shown is named
+/// the session; the swipe reveals Unarchive and Delete, and each asks for
+/// confirmation before it runs. A server whose pages cannot be shown is named
 /// inline instead of leaving a silent gap.
 struct ArchivedSessionsSectionRows: View {
     let sessions: [SessionSummary]
@@ -276,9 +276,7 @@ struct ArchivedSessionsSectionRows: View {
         .listRowSeparator(.hidden)
         .listRowInsets(SessionDashboardLayout.rowInsets)
         .transition(.opacity)
-        .swipeActions(edge: .trailing, allowsFullSwipe: true) {
-            // Unarchive is reversible, so it is the full-swipe action; Delete
-            // keeps the dashboard's confirmation.
+        .swipeActions(edge: .trailing, allowsFullSwipe: false) {
             Button("Unarchive", systemImage: "arrow.uturn.backward") { onUnarchive(session) }
                 .tint(Color.gray)
                 .accessibilityIdentifier("session-unarchive-action-\(session.dashboardID)")

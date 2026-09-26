@@ -2,7 +2,7 @@
 
 - **Started:** 2026-09-26
 - **Status:** Active
-- **Last updated:** 2026-09-26, final checkpoint
+- **Last updated:** 2026-09-26, C-1
 - **Goal:** A user can archive an idle session so it leaves the dashboard without being deleted, find it again in one collapsed Archived container or in search, and have it return automatically when it runs again.
 
 ## Goal and constraints
@@ -107,7 +107,8 @@ Current state, inspected 2026-09-26:
 | R-4 | Done | iOS second-pass review fixes: a reload dropped while a load runs; background Mac container refreshes only on count change; "Show more" after cursor expiry; dead `GatewayClient` correlation field and overloads; automation form losing an archived target's name; doc drift; `AutomationFormView` formatting | R-2 | tron-coordinator, 2026-09-26 |
 | R-5 | Done | Third review regression from R-3: the rekey `assertAbsent` guard now runs for `preserve`, so an extension `switchSession` to a session that already has attention or archive state is refused and rolled back. Guard on `disposition !== "preserve"` and cover a real `switchSession` | R-3 | tron-coordinator, 2026-09-26 |
 | F-7 | Done | Moved out of this plan (user decision, 2026-09-26): pre-existing `switchSession` receipt split, not archive-owned; see `2026-09-26-switch-session-receipts.md` (Proposed) | R-5 | tron-coordinator, 2026-09-26 |
-| V-1 | Blocked | Cross-module checkpoint, user-performed Gateway rollout, and eyes-on device review; close the plan | G-2, I-2, I-3, F-3, F-4, F-5, F-6, R-1, R-2, R-3, R-4, R-5 | tron-coordinator, 2026-09-26 |
+| C-1 | Done | User change: no full-swipe archive or unarchive. Both are a revealed swipe action, then a tap, then the same confirmation sheet as Delete | R-4 | tron-coordinator, 2026-09-26 |
+| V-1 | Blocked | Cross-module checkpoint, user-performed Gateway rollout, and eyes-on device review; close the plan | G-2, I-2, I-3, F-3, F-4, F-5, F-6, R-1, R-2, R-3, R-4, R-5, C-1 | tron-coordinator, 2026-09-26 |
 
 ## Task details
 
@@ -1767,4 +1768,30 @@ Gateway.
 - Changes: F-7 moved to its own Proposed plan (user decision).
 - For the next agent: run the eyes-on list in the earlier V-1 entry, then close
   the plan.
+
+### C-1 · Done · 2026-09-26 · tron-coordinator
+
+- Result: the user asked to remove the full-swipe archive and unarchive.
+  - Neither swipe list allows a full swipe any more.
+  - Archive, on dashboard rows, and Unarchive, on archived rows, now open a
+    `TronConfirmationSheet` exactly as Delete does. Only the confirmation sends
+    `session.archive.set`.
+  - One shared `sessionArchiveConfirmation` modifier in
+    `SessionRowSwipeActions.swift` serves both the dashboard and the hosted
+    fixture.
+  - The two `archive`/`unarchive` handlers in `SessionShellView` became one
+    confirmed `setArchived`.
+  - Manage Session's explicit Unarchive button is unchanged: it is already a
+    deliberate tap on a labeled control, not a gesture.
+- Evidence:
+  - The ui-validation build succeeded.
+  - `TronSmokeUITests/testSessionArchiveConfirmationAndArchivedContainerJourney`
+    (renamed from `…SwipeAnd…`) and the paging journey both pass: 2 tests, 0
+    failures, 38.8 s.
+  - The journey reveals the action, taps it, asserts the row has not moved
+    before the confirmation, then confirms.
+  - Screenshots, including the new `session-archive-confirmation.png`, were
+    refreshed in the internal workspace's `files/session-archive/`.
+- Eyes-on list for V-1: replace "full-swipe Archive" with "swipe, tap Archive,
+  confirm (and the same for Unarchive in the Archived section)".
 

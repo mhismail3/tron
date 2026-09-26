@@ -324,18 +324,32 @@ final class TronSmokeUITests: XCTestCase {
         XCTAssertTrue(app.staticTexts["Run Details"].waitForExistence(timeout: 5), app.debugDescription)
     }
 
-    /// Completes a row's full-swipe action: a press-and-drag across the row
-    /// crosses UIKit's full-swipe threshold, so the row's first trailing action
-    /// (Archive on a dashboard row, Unarchive on an archived row) runs without a
-    /// second tap.
-    private func fullSwipe(_ row: XCUIElement) {
-        let start = row.coordinate(withNormalizedOffset: CGVector(dx: 0.98, dy: 0.5))
-        let end = row.coordinate(withNormalizedOffset: CGVector(dx: 0.02, dy: 0.5))
-        start.press(forDuration: 0.1, thenDragTo: end)
+    /// Archive and Unarchive follow Delete's flow: the swipe reveals the
+    /// action, the tap asks for confirmation, and only the confirmation commits.
+    /// The journey therefore proves that the revealed action alone changes
+    /// nothing, then confirms.
+    @MainActor
+    private func swipeTapAndConfirm(
+        _ row: XCUIElement,
+        action identifier: String,
+        in app: XCUIApplication,
+        screenshot: String? = nil
+    ) {
+        row.swipeLeft()
+        let action = app.buttons[identifier]
+        XCTAssertTrue(action.waitForExistence(timeout: 5), app.debugDescription)
+        action.tap()
+        let confirm = app.buttons.matching(
+            NSPredicate(format: "identifier IN %@", ["confirmation-primary-content", "confirmation-primary-toolbar"])
+        ).firstMatch
+        XCTAssertTrue(confirm.waitForExistence(timeout: 5), app.debugDescription)
+        XCTAssertTrue(row.exists, "The row must not move before the change is confirmed")
+        if let screenshot { keepScreenshot(named: screenshot) }
+        confirm.tap()
     }
 
     @MainActor
-    func testSessionArchiveSwipeAndArchivedContainerJourney() {
+    func testSessionArchiveConfirmationAndArchivedContainerJourney() {
         continueAfterFailure = false
         let app = XCUIApplication()
         app.launchArguments = ["-tron-session-archive-fixture"]
@@ -347,9 +361,12 @@ final class TronSmokeUITests: XCTestCase {
         // A zero archived count keeps the container off the dashboard.
         XCTAssertFalse(app.buttons["archived-sessions-container"].exists)
 
-        // Archive is the row's full-swipe action, so the journey completes the
-        // real gesture instead of tapping a revealed button.
-        fullSwipe(liveRow)
+        swipeTapAndConfirm(
+            liveRow,
+            action: "session-archive-action-fixture:live-session",
+            in: app,
+            screenshot: "session-archive-confirmation"
+        )
 
         let container = app.buttons["archived-sessions-container"]
         XCTAssertTrue(container.waitForExistence(timeout: 5), app.debugDescription)
@@ -362,7 +379,7 @@ final class TronSmokeUITests: XCTestCase {
         XCTAssertTrue(archivedRow.waitForExistence(timeout: 5), app.debugDescription)
         keepScreenshot(named: "session-archive-container-expanded")
 
-        fullSwipe(archivedRow)
+        swipeTapAndConfirm(archivedRow, action: "session-unarchive-action-fixture:live-session", in: app)
 
         // The count returns to zero, so the container hides and the session is
         // back among its workspace rows.
@@ -391,7 +408,7 @@ final class TronSmokeUITests: XCTestCase {
         // row then advances the archive projection while that read is still in
         // flight, which is exactly the reload that a dropped pass would lose.
         container.tap()
-        fullSwipe(liveRow)
+        swipeTapAndConfirm(liveRow, action: "session-archive-action-fixture:live-session", in: app)
 
         let archivedLiveRow = app.buttons["archived-session-row-fixture:live-session"]
         XCTAssertTrue(archivedLiveRow.waitForExistence(timeout: 5), app.debugDescription)

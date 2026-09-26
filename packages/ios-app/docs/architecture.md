@@ -1377,7 +1377,7 @@ same 28-point status-icon anchor: 16 points of outer row inset plus 12 points of
 card content padding. Selectable app-owned cards have one full-card
 hit region and no decorative disclosure chevron. Dashboard session rows never
 retain a selected tint; their trailing swipe actions archive, rename, or request deletion of the exact
-swiped canonical session without changing navigation selection. Archive is the full-swipe action and is offered only for a Gateway that advertises `session-archive.v1`; it uses a neutral gray tint. Rename uses emerald, while both leading attention actions—Mark Read and Mark Unread—also use neutral gray. An archive applies only the authoritative response, so nothing is staged locally: the row leaves the dashboard as soon as that response is accepted, and the Gateway's own list change is what returns it (or its count) from canonical truth. Dashboard and Manage Session rename flows share one native text-entry alert whose fixed trailing circle-x clears the value; UIKit owns horizontal text scrolling beneath that control, so long names cannot displace it. The delete swipe
+swiped canonical session without changing navigation selection. Archive is offered only for a Gateway that advertises `session-archive.v1` and uses a neutral gray tint. Like Delete, no trailing action runs on a full swipe: tapping Archive or Unarchive opens the same Tron confirmation sheet, and only the confirmation sends `session.archive.set`. Rename uses emerald, while both leading attention actions—Mark Read and Mark Unread—also use neutral gray. An archive applies only the authoritative response, so nothing is staged locally: the row leaves the dashboard as soon as that response is accepted, and the Gateway's own list change is what returns it (or its count) from canonical truth. Dashboard and Manage Session rename flows share one native text-entry alert whose fixed trailing circle-x clears the value; UIKit owns horizontal text scrolling beneath that control, so long names cannot displace it. The delete swipe
 uses a red tint but no destructive button role, so UIKit keeps the row mounted
 until the Tron confirmation sheet completes the canonical mutation. The view does
 not stage deletion beyond confirmation or suppress rows locally. The confirmed
@@ -1406,8 +1406,8 @@ unknown cursor restarts that server from its first page instead of offering a
 control that can never succeed. The count reaching zero closes the container and
 stops its reads, and a profile switch re-reads the pass rather than discarding the
 user's expansion, because every row is qualified by its own server. Its rows show
-their workspace, open the session, and swipe to Unarchive (the full-swipe action)
-or Delete (the dashboard's own confirmation). Rows and cursors are dropped for a
+their workspace, open the session, and swipe to Unarchive or Delete, each
+confirmed through the same sheet as the dashboard's Delete. Rows and cursors are dropped for a
 server the container can no longer read, because a page read is their only
 authority, and the container re-reads only when a Gateway's archive projection
 changes — the focused profile's authoritative catalog page, or a background

@@ -35,6 +35,7 @@ struct HostedSessionArchiveFixture: View {
     /// advances whenever this fixture's Gateway-owned count changes.
     @State private var projectionRevision = 0
     @State private var stalledReadsStarted = 0
+    @State private var archiveConfirmation: SessionArchiveConfirmation?
 
     init() {
         guard Self.pagesOneArchivedSessionPerRead else { return }
@@ -84,7 +85,7 @@ struct HostedSessionArchiveFixture: View {
                         .sessionRowTrailingSwipe(
                             session: session,
                             archiveIsAvailable: true,
-                            onArchive: { archive(session) },
+                            onArchive: { archiveConfirmation = SessionArchiveConfirmation(session: session, archived: true) },
                             onDelete: {},
                             onRename: {}
                         )
@@ -112,12 +113,15 @@ struct HostedSessionArchiveFixture: View {
                         return try await Self.page(archived: snapshot, cursor: cursor)
                     },
                     onOpen: { _ in },
-                    onUnarchive: unarchive,
+                    onUnarchive: { archiveConfirmation = SessionArchiveConfirmation(session: $0, archived: false) },
                     onDelete: { _ in }
                 )
             }
             .listStyle(.plain)
             .environment(\.defaultMinListRowHeight, 38)
+            .sessionArchiveConfirmation($archiveConfirmation) { request in
+                if request.archived { archive(request.session) } else { unarchive(request.session) }
+            }
         }
         .environment(\.tronPresentationActivity, Self.branchActivity)
     }

@@ -1199,12 +1199,13 @@ isolates navigation ownership without contacting a Gateway or any provider.
 checks that accepted success/failure settles while covered, publishes only when active again,
 and never replays the command. Global default trust retains the standard autosave error/retry notice.
 
-`TronSmokeUITests.testSessionArchiveSwipeAndArchivedContainerJourney` drives the hosted
-archive fixture: a full swipe archives the row, the real
-`ArchivedSessionsContainerSection` appears with its count, expands to its row, and a full
-swipe there unarchives the session back into its workspace. The fixture supplies only
-session membership and a projection revision, so the journey exercises the container's
-production visibility, expansion, and full-swipe control flow; paging, the zero-count
+`TronSmokeUITests.testSessionArchiveConfirmationAndArchivedContainerJourney` drives the
+hosted archive fixture. It swipes the row, taps Archive, and confirms; the row must stay
+put until the confirmation. The real `ArchivedSessionsContainerSection` then appears with
+its count and expands to its row, and Unarchive, confirmed the same way, returns the
+session to its workspace. The fixture supplies only session membership and a projection
+revision, so the journey exercises the container's production visibility, expansion,
+and confirmation control flow; paging, the zero-count
 collapse, and the pass retirement a reload performs are covered by the container's own
 focused tests. Its three retained screenshots are
 the visual evidence. Hosted fixtures that render real dashboard rows must declare an
