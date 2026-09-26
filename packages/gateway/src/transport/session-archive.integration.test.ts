@@ -288,6 +288,16 @@ const holdCommandExtension = (root: string) => `
         }
       `;
 
+/** A command that replaces the live session with another canonical session
+ * file, the way a session-switching extension does. */
+const switchCommandExtension = () => `
+        export default function (pi) {
+          pi.registerCommand("switch", { handler: async (args, ctx) => {
+            await ctx.switchSession(args.trim());
+          }});
+        }
+      `;
+
 /** A command that blocks on a real semantic user interaction. */
 const selectCommandExtension = () => `
         export default function (pi) {
@@ -328,6 +338,13 @@ const listedIds = async (client: Client, archived: "exclude" | "only") =>
 
 const archivedRecord = async (root: string, sessionId: string): Promise<unknown> => {
   const document = JSON.parse(await readFile(join(root, "gateway", "session-archive.json"), "utf8")) as {
+    sessions: Record<string, unknown>;
+  };
+  return document.sessions[sessionId];
+};
+
+const attentionRecord = async (root: string, sessionId: string): Promise<unknown> => {
+  const document = JSON.parse(await readFile(join(root, "gateway", "session-attention.json"), "utf8")) as {
     sessions: Record<string, unknown>;
   };
   return document.sessions[sessionId];
@@ -1635,5 +1652,63 @@ describe("session archive over the real Gateway", () => {
       releaseRun();
       store.archive = durableArchive;
     }
+  });
+  archiveCase("keeps a session switch to a session that already has records admissible", async () => {
+    // An extension switching to an existing session (`ctx.switchSession`) must
+    // rebind onto that identity. The rebind is a `preserve`: it does not claim a
+    // new identity, so the target's existing attention and archive records are
+    // not a conflicting new-identity claim, and neither session's records may
+    // change.
+    const f = await fixture({ extensions: [{ name: "switch.ts", source: switchCommandExtension }] });
+    let client = await f.connect();
+    const target = f.coldSession("switch-target");
+    await openSession(client, target.id);
+    await client.request("switch-target-prompt", "session.prompt", {
+      commandId: "switch-target-prompt-command", sessionId: target.id, text: "target turn",
+    });
+    await until(async () => (await list(client, "exclude")).sessions.some(
+      (row) => row.id === target.id && row.phase === "idle"), "target run settled");
+    const attentionBefore = await attentionRecord(f.root, target.id);
+    expect(attentionBefore, "target attention record before the switch").toBeDefined();
+    await archiveSession(client, target.id, "switch-target-archive-command");
+    const archiveBefore = await archivedRecord(f.root, target.id);
+    expect(archiveBefore, "target archive record before the switch").toBeDefined();
+    // A restart leaves the records durable and takes the target's own runtime
+    // away, which is the normal state of a session switched back to later.
+    await f.restart();
+    client = await f.connect();
+    expect(await attentionRecord(f.root, target.id)).toEqual(attentionBefore);
+    expect(await archivedRecord(f.root, target.id)).toEqual(archiveBefore);
+
+    const source = f.coldSession("switch-source");
+    await openSession(client, source.id);
+    const registry = f.current().registry as unknown as { slots: Map<string, unknown> };
+    expect([...registry.slots.keys()]).toEqual([source.id]);
+    const switched = await client.request("switch-command", "session.prompt", {
+      commandId: "switch-command-command", sessionId: source.id, text: `/switch ${target.file}`,
+    });
+    expect(switched.ok, JSON.stringify(switched)).toBe(true);
+    await until(() => registry.slots.has(target.id), "session switch landed");
+    // A refused rebind also reports itself as an extension error; the switch
+    // must produce none.
+    expect(client.frames.filter((frame) => frame.type === "event" && frame.topic === "session.extensionError"
+      && JSON.stringify(frame.payload).includes("identity already has"))).toEqual([]);
+
+    // The rebind R-5 owns: exactly one live identity, the switched one, and the
+    // target stayed archived with both of its records byte-identical. The
+    // switched session's own projection is separately broken by a pre-existing
+    // receipt defect (F-7 in the plan), which is out of this row's scope and
+    // would otherwise mask these assertions.
+    expect([...registry.slots.keys()]).toEqual([target.id]);
+    expect(await attentionRecord(f.root, target.id)).toEqual(attentionBefore);
+    expect(await archivedRecord(f.root, target.id)).toEqual(archiveBefore);
+    expect(await listedIds(client, "only")).toEqual([target.id]);
+    expect(await listedIds(client, "exclude")).not.toContain(target.id);
+    return {
+      promptOk: switched.ok,
+      liveSlots: [...registry.slots.keys()],
+      archivedAfterSwitch: await archivedRecord(f.root, target.id),
+      attentionAfterSwitch: await attentionRecord(f.root, target.id),
+    };
   });
 });

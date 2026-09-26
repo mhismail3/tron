@@ -105,8 +105,9 @@ Current state, inspected 2026-09-26:
 | R-2 | Done | iOS fixes from the post-implementation review (see "Review findings") | I-2, I-3, F-3 | tron-coordinator, 2026-09-26 |
 | R-3 | Done | Gateway second-pass review fixes: stale `archived: true` response after the post-commit recheck, a queued backstop clear deleting a re-archive, migrate rekey ordering, prune retained set read outside the lane, doc drift, refused-compaction test and root-proof write-failure test | R-1 | tron-coordinator, 2026-09-26 |
 | R-4 | Done | iOS second-pass review fixes: a reload dropped while a load runs; background Mac container refreshes only on count change; "Show more" after cursor expiry; dead `GatewayClient` correlation field and overloads; automation form losing an archived target's name; doc drift; `AutomationFormView` formatting | R-2 | tron-coordinator, 2026-09-26 |
-| R-5 | Claimed | Third review regression from R-3: the rekey `assertAbsent` guard now runs for `preserve`, so an extension `switchSession` to a session that already has attention or archive state is refused and rolled back. Guard on `disposition !== "preserve"` and cover a real `switchSession` | R-3 | tron-coordinator, 2026-09-26 |
-| V-1 | Blocked | Cross-module checkpoint, user-performed Gateway rollout, and eyes-on device review; close the plan | G-2, I-2, I-3, F-3, F-4, F-5, F-6, R-1, R-2, R-3, R-4, R-5 | tron-coordinator, 2026-09-26 |
+| R-5 | Done | Third review regression from R-3: the rekey `assertAbsent` guard now runs for `preserve`, so an extension `switchSession` to a session that already has attention or archive state is refused and rolled back. Guard on `disposition !== "preserve"` and cover a real `switchSession` | R-3 | tron-coordinator, 2026-09-26 |
+| F-7 | Needs scoping | A preserve rebind (`ctx.switchSession`) writes the invocation's continuation receipts into the switched-to session's file while its start receipt stays in the old one, so the new session's own projection throws `invocation receipt has no start receipt`; the switch also renames the live identity without publishing a snapshot. Pre-existing (invocation-receipts.ts/projection.ts are untouched by this plan and `sessionId: this.id` is the writer). Measured 2026-09-26. Decide the fix: stamp an invocation's receipts with its origin session id, or re-key receipts on rebind | none | |
+| V-1 | Blocked | Cross-module checkpoint, user-performed Gateway rollout, and eyes-on device review; close the plan | G-2, I-2, I-3, F-3, F-4, F-5, F-6, F-7, R-1, R-2, R-3, R-4, R-5 | tron-coordinator, 2026-09-26 |
 
 ## Task details
 
@@ -1695,3 +1696,56 @@ Gateway.
 - For the next agent: V-1 still needs the full gateway suite,
   `scripts/ios-gateway-e2e-test run`, the user-performed Gateway rollout, and the
   eyes-on device review.
+
+### R-5 · Done · 2026-09-26 · tron-coordinator
+
+- Result: the R-3 regression is fixed. The rebind admission that R-3 extended to
+  `migrate` now covers only the dispositions that claim an identity owning
+  nothing yet (`reset`, `discard`, `migrate`); a `preserve` rebind — an extension
+  switching to an existing session — keeps the target's attention and archive
+  records instead of refusing the switch. The slot only calls the hook when the
+  identity changes, so the admission was reached by every switch.
+- Evidence (verified):
+  - `npm run build` clean.
+  - New E2E case `keeps a session switch to a session that already has records
+    admissible` in `src/transport/session-archive.integration.test.ts`: a real
+    `ctx.switchSession` from a registered extension command switches onto a
+    session that has a real completed run (attention record) and a real archive
+    record, after a Gateway restart so the target has no live runtime. It asserts
+    the switch lands on exactly one live identity (the target's), that no
+    "identity already has" extension error is reported, and that both stores'
+    records are unchanged and the target stays archived.
+  - `npx vitest run src/transport/session-archive.integration.test.ts
+    src/sessions/runtime-registry.integration.test.ts
+    src/sessions/session-attention-store.test.ts
+    src/sessions/session-archive-store.test.ts`: 290/290 in 48.4 s.
+    `sync-protocol.integration.test.ts`, `server-terminal-delete.integration.test.ts`,
+    `runtime-compaction.integration.test.ts` and
+    `tron-workspace.integration.test.ts`: 27/27.
+  - Negative control (measured, then reverted): with the `preserve` guard
+    removed again, the new case fails with `session switch landed timed out` —
+    the rebind's own `assertAbsent` refuses the target's records, the slot rolls
+    the identity back, and the extension reports "New session identity already
+    has attention state".
+- Changes: this commit (`packages/gateway/src/sessions/runtime-registry.ts`,
+  `packages/gateway/src/transport/session-archive.integration.test.ts`).
+- Tasks added: F-7.
+- Kept on purpose: the `previousId !== nextId` half of the condition, so an
+  in-place rebind still takes no admission at all.
+- Deviations: the new case does not assert anything about the switched session's
+  own projection. Driving a real switch measured a separate pre-existing defect
+  (F-7): after the switch, `session.open` on the switched-to session fails with
+  `internal: invocation receipt has no start receipt`. The fetch of the
+  `/switch` command's own invocation writes a `transition` receipt into the new
+  session's file (`sessionId: this.id`, `runtime-slot.ts`) while its `start`
+  receipt stays in the old file, and `invocationReceipts` filters by session id,
+  so the surviving continuation has no start. It reproduces on the pre-feature
+  commit's code path (a switch onto a session with no records at all fails the
+  same way, before and after this fix), and the identity is renamed without a
+  published snapshot. F-7 is recorded for the owner to decide; fixing it here
+  would mean choosing receipt ownership across an identity change, which is not
+  this row's scope.
+- For the next agent: F-7 needs a decision before any release that advertises
+  extension session switching; the archive feature itself is unaffected. V-1
+  still needs the full Gateway suite, `scripts/ios-gateway-e2e-test run`, the
+  user-performed Gateway rollout, and the eyes-on device review.

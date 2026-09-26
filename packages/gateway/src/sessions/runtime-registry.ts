@@ -838,10 +838,14 @@ export class RuntimeRegistry {
         if (existing && existing !== slot) throw new GatewayError("conflict", "Replacement session is already active");
         // Every fallible admission check runs before the first change, so a
         // rejected rebind cannot leave attention and archive state out of step
-        // while the slot rolls back its identity. A migrate rebind moves both
-        // records onto the replacement identity, so it needs the same admission;
-        // an in-place rebind already owns them.
-        if (previousId !== nextId) {
+        // while the slot rolls back its identity. A reset identity (a new session
+        // or a fork) starts unarchived, and a discarded identity takes its state
+        // away, so both must claim an identity that owns nothing yet. A migrate
+        // moves both records onto the replacement identity, which must therefore
+        // own nothing either. A preserve rebind (an extension switching to an
+        // existing session) is the opposite: the target already owns its records
+        // and keeps them, so it takes no admission here.
+        if (previousId !== nextId && disposition !== "preserve") {
           await this.attention.assertAbsent(nextId);
           await this.archive.assertAbsent(nextId);
         }
