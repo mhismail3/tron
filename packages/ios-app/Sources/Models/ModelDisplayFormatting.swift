@@ -189,6 +189,28 @@ enum ModelCardFacts {
         return "\(tokens)"
     }
 
+    /// `YYYY-MM-DD` as "Sep 2026". Fixed English month names keep the label
+    /// identical to the Gateway's wire date on every device locale.
+    static func releaseLabel(_ date: String?) -> String? {
+        guard let date, ModelReleaseDate.admits(date),
+              let month = Int(date.dropFirst(5).prefix(2)), (1...12).contains(month) else { return nil }
+        return "\(monthNames[month - 1]) \(date.prefix(4))"
+    }
+
+    /// The provider-row facts line: context, price, release, omitting any
+    /// the Gateway did not supply.
+    static func rowSummary(_ model: ModelSummary) -> String? {
+        let parts = [
+            contextLabel(model.contextWindow).map { "\($0) context" },
+            priceLabel(model.cost),
+            releaseLabel(model.releaseDate),
+        ].compactMap { $0 }
+        return parts.isEmpty ? nil : parts.joined(separator: " · ")
+    }
+
+    private static let monthNames = ["Jan", "Feb", "Mar", "Apr", "May", "Jun",
+                                     "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"]
+
     private static func dollars(_ value: Double) -> String {
         guard value.isFinite, value > 0 else { return "$0" }
         if value < 0.01 { return "<$0.01" }

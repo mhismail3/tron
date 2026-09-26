@@ -948,9 +948,6 @@ struct ModelPicker: View {
             identity: \.ref,
             accent: accent,
             cornerRadius: 16,
-            // Same static surface as the rows below: tall live-glass cards in a
-            // scrolling sheet cost frames and refract the section titles.
-            surface: .scroll,
             isSelected: { $0.ref == selection },
             accessibilityLabel: ModelRailCard.accessibilityLabel,
             accessibilityValue: { $0.ref == selection ? "Selected" : "" },
@@ -1016,9 +1013,14 @@ struct ModelPicker: View {
                     Text(model.displayName)
                         .font(TronTypography.sans(size: TronTypography.sizeBody, weight: .semibold))
                         .foregroundStyle(Color.tronTextPrimary)
+                    if let summary = ModelCardFacts.rowSummary(model) {
+                        Text(summary)
+                            .font(TronTypography.secondaryDescription)
+                            .foregroundStyle(Color.tronTextPrimary)
+                    }
                     Text(model.pickerIdentity)
                         .font(TronTypography.secondaryDescription)
-                        .foregroundStyle(Color.tronTextPrimary)
+                        .foregroundStyle(Color.tronTextSecondary)
                 }
                 Spacer(minLength: 8)
             }
@@ -1033,7 +1035,8 @@ struct ModelPicker: View {
             cornerRadius: 14,
             tintOpacity: selection == model.ref ? 0.18 : 0.08
         )
-        .accessibilityLabel("\(model.displayName), \(model.pickerIdentity)")
+        .accessibilityLabel([model.displayName, ModelCardFacts.rowSummary(model), model.pickerIdentity]
+            .compactMap { $0 }.joined(separator: ", "))
         .accessibilityValue(selection == model.ref ? "Selected" : "")
         #if HOSTED_TEST
         .modifier(ModelPickerHostedActionModifier(

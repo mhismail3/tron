@@ -1,6 +1,6 @@
 import SwiftUI
 
-/// Portrait (3:4) label for one model in the picker's Recent and Latest rails.
+/// Portrait label for one model in the picker's Recent and Latest rails.
 /// `TronCardRail` owns the glass surface and press behavior; this view owns
 /// only the card's content. Facts come straight from the Gateway catalog, and
 /// an absent fact is omitted rather than shown as zero.
@@ -11,7 +11,7 @@ struct ModelRailCard: View {
 
     static let width: CGFloat = 138
     /// A minimum, so larger Dynamic Type grows the card instead of clipping it.
-    static let minimumHeight: CGFloat = width * 4 / 3
+    static let minimumHeight: CGFloat = 168
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -32,18 +32,25 @@ struct ModelRailCard: View {
                 .foregroundStyle(Color.tronTextPrimary)
                 .lineLimit(3)
                 .fixedSize(horizontal: false, vertical: true)
-                .padding(.top, 6)
-            Spacer(minLength: 10)
-            VStack(alignment: .leading, spacing: 6) {
+                .padding(.top, 4)
+            Spacer(minLength: 8)
+            VStack(alignment: .leading, spacing: 5) {
                 if let context = ModelCardFacts.contextLabel(model.contextWindow) {
                     fact(value: context, caption: "Context")
                 }
                 if let price = ModelCardFacts.priceLabel(model.cost) {
                     fact(value: price, caption: "In / out per 1M")
                 }
+                if let released = ModelCardFacts.releaseLabel(model.releaseDate) {
+                    Text(released)
+                        .font(TronTypography.sans(size: TronTypography.sizeCaption, weight: .medium))
+                        .foregroundStyle(Color.tronTextSecondary)
+                        .lineLimit(1)
+                }
             }
         }
-        .padding(12)
+        .padding(.horizontal, 12)
+        .padding(.vertical, 10)
         .frame(width: Self.width, alignment: .topLeading)
         .frame(minHeight: Self.minimumHeight, alignment: .topLeading)
     }
@@ -70,6 +77,9 @@ struct ModelRailCard: View {
         if let cost = model.cost, let price = ModelCardFacts.priceLabel(cost) {
             let halves = price.components(separatedBy: " / ")
             parts.append("\(halves.first ?? price) input, \(halves.last ?? price) output per million tokens")
+        }
+        if let released = ModelCardFacts.releaseLabel(model.releaseDate) {
+            parts.append("released \(released)")
         }
         return parts.joined(separator: ", ")
     }

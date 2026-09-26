@@ -7,15 +7,6 @@ import SwiftUI
 /// The rail adds no horizontal inset: place it inside the surrounding content's
 /// existing padding so its first card lines up with the rows below it.
 /// Titles belong to the caller, which owns its section-header hierarchy.
-enum TronCardRailSurface {
-    /// Live interactive Liquid Glass, for short chip rails.
-    case glass
-    /// The static `tronScrollSurface` treatment, for tall cards inside a
-    /// scrolling sheet: live backdrop filters there cost frames on device and
-    /// refract neighbouring headers into the card.
-    case scroll
-}
-
 struct TronCardRail<Item, ID: Hashable, Content: View>: View {
     let items: [Item]
     /// Cards are keyed by an explicitly unique identity: a model's display name
@@ -23,7 +14,6 @@ struct TronCardRail<Item, ID: Hashable, Content: View>: View {
     let identity: KeyPath<Item, ID>
     let accent: Color
     let cornerRadius: CGFloat
-    let surface: TronCardRailSurface
     let isSelected: (Item) -> Bool
     let accessibilityLabel: (Item) -> String
     let accessibilityValue: ((Item) -> String)?
@@ -35,7 +25,6 @@ struct TronCardRail<Item, ID: Hashable, Content: View>: View {
         identity: KeyPath<Item, ID>,
         accent: Color,
         cornerRadius: CGFloat = 12,
-        surface: TronCardRailSurface = .glass,
         isSelected: @escaping (Item) -> Bool = { _ in false },
         accessibilityLabel: @escaping (Item) -> String,
         accessibilityValue: ((Item) -> String)? = nil,
@@ -46,7 +35,6 @@ struct TronCardRail<Item, ID: Hashable, Content: View>: View {
         self.identity = identity
         self.accent = accent
         self.cornerRadius = cornerRadius
-        self.surface = surface
         self.isSelected = isSelected
         self.accessibilityLabel = accessibilityLabel
         self.accessibilityValue = accessibilityValue
@@ -62,12 +50,16 @@ struct TronCardRail<Item, ID: Hashable, Content: View>: View {
                         content(item)
                     }
                     .buttonStyle(.plain)
-                    .modifier(CardSurface(
-                        surface: surface,
+                    // Callers resolve the accent from their own theme, so the
+                    // card never re-derives a different one from the ambient
+                    // settings theme.
+                    .tronGlassSurface(
                         accent: accent,
                         cornerRadius: cornerRadius,
-                        isSelected: isSelected(item)
-                    ))
+                        tintOpacity: isSelected(item) ? 0.30 : 0.15,
+                        interactive: true,
+                        respectsSettingsTheme: false
+                    )
                     .accessibilityElement(children: .combine)
                     .accessibilityLabel(accessibilityLabel(item))
                     .accessibilityValue(accessibilityValue?(item) ?? "")
@@ -76,34 +68,6 @@ struct TronCardRail<Item, ID: Hashable, Content: View>: View {
             .padding(.vertical, 4)
         }
         .scrollClipDisabled()
-    }
-}
-
-private struct CardSurface: ViewModifier {
-    let surface: TronCardRailSurface
-    let accent: Color
-    let cornerRadius: CGFloat
-    let isSelected: Bool
-
-    func body(content: Content) -> some View {
-        switch surface {
-        case .glass:
-            // Callers resolve the accent from their own theme, so the card never
-            // re-derives a different one from the ambient settings theme.
-            content.tronGlassSurface(
-                accent: accent,
-                cornerRadius: cornerRadius,
-                tintOpacity: isSelected ? 0.30 : 0.15,
-                interactive: true,
-                respectsSettingsTheme: false
-            )
-        case .scroll:
-            content.tronScrollSurface(
-                accent: accent,
-                cornerRadius: cornerRadius,
-                tintOpacity: isSelected ? 0.18 : 0.08
-            )
-        }
     }
 }
 

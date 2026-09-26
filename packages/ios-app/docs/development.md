@@ -261,12 +261,12 @@ release” with their date. These labels never merge or rewrite distinct model c
 
 The picker, top to bottom, is a **Recent** card rail, a **Latest** card rail, then every provider
 as a collapsible section. Both rails are the shared `TronCardRail`, so a rail and its cards have
-one styling owner. The picker's rails use its `.scroll` surface (the static `tronScrollSurface`
-the provider rows use) rather than the New Session chips' live `.glass`: tall live-glass cards in
-a scrolling sheet cost frames on device, and in captures they refracted the section titles into
-the cards. Each `ModelRailCard` is a 3:4 portrait card (a minimum height, so Dynamic Type grows it)
-showing provider, model name, context window, and input/output price per million tokens from
-the Gateway's optional `cost`; an absent fact is omitted, never shown as zero
+one styling owner. Picker cards use the same interactive tinted Liquid Glass as the New Session
+chips; glass lenses content just past its edge, so a faint echo of the rail title at a card's top
+edge is expected glass behavior rather than a layout overlap. Each `ModelRailCard` is a portrait
+card (168-point minimum height, so Dynamic Type grows it) showing provider, model name, context
+window, input/output price per million tokens from the Gateway's optional `cost`, and the release
+month ("Sep 2026"); an absent fact is omitted, never shown as zero or as a placeholder date
 (`ModelCardFactsTests`). Recent, Latest, and provider headers share one 16-point header size.
 Recent order and membership belong to the Gateway's bounded recent-model history read through
 `model.recent` and refreshed by the `models.recentChanged` event; a ref that has left the
@@ -275,7 +275,8 @@ Gateway's optional `releaseDate` (newest first, display-name ties) and keeps the
 its pinned release shares that date, while both stay selectable in the provider section; models
 without a (well-formed) date never enter the rail. Provider sections lead with the selected
 model's provider and are otherwise alphabetical by display name, each header carrying the
-provider name and its model count. Header and rows are separate `LazyVStack` children, so a long
+provider name and its model count. Each provider row's second line repeats those facts (`200K context ·
+$5 / $25 · Sep 2026`, omitting missing ones) above its canonical identity line. Header and rows are separate `LazyVStack` children, so a long
 expanded provider builds only on-screen rows (`testLongProviderSectionMountsOnlyVisibleRows`;
 nesting a section's rows in one child mounted all 60). The body builds `ModelPickerSectioning`
 once per evaluation. Rows enter with a short fade and drop from their header and leave with a
