@@ -22,7 +22,6 @@ struct CommandInfo: Codable, Hashable, Identifiable, Sendable {
     let resourceSource: String?
     let resourceScope: ResourceScope?
     let resourceOrigin: ResourceOrigin?
-    let distribution: ResourceDistribution?
     var id: String { "\(source.rawValue):\(name)" }
 
     init(
@@ -33,8 +32,7 @@ struct CommandInfo: Codable, Hashable, Identifiable, Sendable {
         sourcePath: String?,
         resourceSource: String? = nil,
         resourceScope: ResourceScope? = nil,
-        resourceOrigin: ResourceOrigin? = nil,
-        distribution: ResourceDistribution? = nil
+        resourceOrigin: ResourceOrigin? = nil
     ) {
         self.name = name
         self.description = description
@@ -44,7 +42,6 @@ struct CommandInfo: Codable, Hashable, Identifiable, Sendable {
         self.resourceSource = resourceSource
         self.resourceScope = resourceScope
         self.resourceOrigin = resourceOrigin
-        self.distribution = distribution
     }
 }
 
@@ -57,7 +54,6 @@ struct CommandResourceDetail: Codable, Hashable, Sendable {
     let resourceSource: String?
     let resourceScope: CommandInfo.ResourceScope?
     let resourceOrigin: CommandInfo.ResourceOrigin?
-    let distribution: ResourceDistribution?
     let content: String?
     let contentBytes: Int?
     let contentTruncated: Bool?
@@ -73,8 +69,7 @@ struct CommandResourceDetail: Codable, Hashable, Sendable {
         resourceOrigin: CommandInfo.ResourceOrigin?,
         content: String?,
         contentBytes: Int?,
-        contentTruncated: Bool?,
-        distribution: ResourceDistribution? = nil
+        contentTruncated: Bool?
     ) {
         self.name = name
         self.description = description
@@ -84,7 +79,6 @@ struct CommandResourceDetail: Codable, Hashable, Sendable {
         self.resourceSource = resourceSource
         self.resourceScope = resourceScope
         self.resourceOrigin = resourceOrigin
-        self.distribution = distribution
         self.content = content
         self.contentBytes = contentBytes
         self.contentTruncated = contentTruncated

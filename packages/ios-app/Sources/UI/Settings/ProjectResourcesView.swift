@@ -79,8 +79,7 @@ struct ProjectResourceSelection: Identifiable {
             sourcePath: object["path"]?.stringValue ?? object["resolvedPath"]?.stringValue,
             resourceSource: object["source"]?.stringValue,
             resourceScope: object["scope"]?.stringValue.flatMap(CommandInfo.ResourceScope.init(rawValue:)),
-            resourceOrigin: object["origin"]?.stringValue.flatMap(CommandInfo.ResourceOrigin.init(rawValue:)),
-            distribution: object["distribution"]?.stringValue.flatMap(ResourceDistribution.init(rawValue:))
+            resourceOrigin: object["origin"]?.stringValue.flatMap(CommandInfo.ResourceOrigin.init(rawValue:))
         )
     }
 

@@ -1837,7 +1837,8 @@ Compact Now action invokes Pi's canonical compaction through Gateway and can lea
 behind an active turn. Project Resources presents resolved skills, prompts, extension commands,
 tools, and subagents as named rows over the canonical projection. Every row carries the
 Gateway-derived distribution tag (External, Module, or Local) beside the existing User/Project
-scope badge, and Pi built-ins carry none. Prompt- and skill-sourced commands stay in their own
+scope badge, and Pi built-ins carry none; both tags are one shared capsule
+component (`ResourceTagLabel`), so their styling cannot drift. Prompt- and skill-sourced commands stay in their own
 groups, so only extension commands appear under Commands. The Extensions section is gone from
 this sheet; the projection still carries its extension rows and load errors for the Settings
 Hooks sheet. Resource

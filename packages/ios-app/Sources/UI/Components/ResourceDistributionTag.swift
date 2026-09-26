@@ -19,13 +19,7 @@ struct ResourceDistributionTag: View {
 
     var body: some View {
         if let title = Self.title(for: distribution) {
-            Text(title)
-                .font(TronTypography.sans(size: TronTypography.sizeXS, weight: .medium))
-                .foregroundStyle(accent)
-                .padding(.horizontal, 4)
-                .padding(.vertical, 1)
-                .background(accent.opacity(0.15), in: Capsule())
-                .fixedSize()
+            ResourceTagLabel(title: title, accent: accent)
         }
     }
 }

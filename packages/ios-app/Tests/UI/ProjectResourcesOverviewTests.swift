@@ -184,15 +184,15 @@ struct ProjectResourcesOverviewTests {
         #expect(ResourceDistributionTag.title(for: nil) == nil)
     }
 
-    @Test("Gateway-shaped command JSON decodes distribution on both command models")
+    @Test("Gateway-shaped command JSON decodes Pi's resource origin on both command models")
     func commandDecoding() throws {
         let command = try resources.objectValue?["commands"]?.arrayValue?[0].decode(CommandInfo.self)
-        #expect(command?.distribution == .module)
         #expect(command?.resourceOrigin == nil)
         let prompt = try resources.objectValue?["commands"]?.arrayValue?[1].decode(CommandInfo.self)
-        #expect(prompt?.distribution == .local)
         #expect(prompt?.resourceOrigin == .topLevel)
 
+        // The wire carries `distribution` for command rows; the sheet reads it
+        // from the raw projection, so the command models decode without it.
         let detail = try JSONValue.object([
             "name": .string("subagent"),
             "source": .string("extension"),
@@ -200,12 +200,12 @@ struct ProjectResourcesOverviewTests {
             "distribution": .string("external"),
             "content": .string("body"),
         ]).decode(CommandResourceDetail.self)
-        #expect(detail.distribution == .external)
-        // A Gateway that predates the field decodes without a tag.
+        #expect(detail.resourceOrigin == .package)
+        #expect(detail.content == "body")
         let legacy = try JSONValue.object([
             "name": .string("subagent"),
             "source": .string("extension"),
         ]).decode(CommandResourceDetail.self)
-        #expect(legacy.distribution == nil)
+        #expect(legacy.resourceOrigin == nil)
     }
 }
