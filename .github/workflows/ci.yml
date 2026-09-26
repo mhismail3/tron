@@ -58,6 +58,7 @@ jobs:
             scripts/tron_mac_reinstall.py \
             scripts/test-mac-reinstall.py \
             scripts/validate-ios-artifact.py \
+            scripts/ios-test-build-identity.py \
             scripts/ios-test-lock.py \
             scripts/ios-test-process.py \
             scripts/ios-test-simulator.py \

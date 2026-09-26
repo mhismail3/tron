@@ -497,12 +497,24 @@ always use diagnostics `Never` plus `-collect-test-diagnostics never`. Use
 it has a larger finite bound and never runs as an automatic retry. Every attempt
 retains a full log, metadata, process evidence, and a unique xcresult under
 `$HOME/Library/Developer/Tron/ios/test-runs`, with `latest` outside the bundle.
-The shared per-user iOS build root is `$HOME/Library/Developer/Tron/ios`:
-test products and runs use its `test-derived-data` and `test-runs` folders, and
-`scripts/tron-ios-simulator` builds into `simulator-derived-data`. The test
-runner's lease serializes the shared test products; the simulator helper takes
-no lease, so run one simulator build at a time. Device builds stay in the
-worktree's `packages/ios-app/build`. Exit 65 is
+The shared per-user iOS build root is `$HOME/Library/Developer/Tron/ios`: test
+runs use its `test-runs` folder, each worktree's test products use its own
+`test-derived-data/<worktree-key>` folder (its directory name plus a hash of its
+path), and `scripts/tron-ios-simulator` builds into `simulator-derived-data`.
+The lease serializes the one owned simulator and the retained runs, but products
+are never shared between worktrees: `build` stamps its products with the
+building worktree, its HEAD revision and a fingerprint of its dirty-tree content
+(`scripts/ios-test-build-identity.py`), and `run` re-proves that stamp, exiting
+74 with both identities named when they differ. `clean` removes this worktree's
+products (about 1 GB) and the retained runs; a products directory left behind by
+a deleted worktree is removable by hand, because it carries the runner's
+ownership marker. `TRON_IOS_TEST_DERIVED_DATA` still overrides the products
+directory, and an override inside the worktree must stay under a git-ignored
+path, because the stamp covers the worktree's non-ignored content. Any edit
+after a build, documentation included, therefore needs a rebuild before `run`.
+The simulator
+helper takes no lease, so run one simulator build at a time. Device builds stay
+in the worktree's `packages/ios-app/build`. Exit 65 is
 a product-test failure, 66 a destination failure, 70 a build failure, 73 a busy
 lease, 74 a runner failure, and 75 a process timeout.
 
@@ -518,6 +530,15 @@ scripts/tron-ios-test clean
   repository ownership marker, and passes only
   `platform=iOS Simulator,id=<exact-udid>` to Xcode. It never selects, erases, or
   deletes the persistent Development simulator.
+- Test products are worktree-local and source-stamped. `build` writes
+  `build-identity.json` next to the products only after a successful build, and
+  `run` refuses products stamped for another worktree or another source state
+  (worktree path, HEAD revision, dirty flag and a fingerprint of the tracked
+  diff plus untracked content), naming both identities. A products directory
+  that was replaced by another worktree, or left over from an earlier source
+  state, can therefore never be executed silently; exit 74 means the runner
+  refused it. Every run's `metadata.json` records the same source identity under
+  `source`.
 - `scripts/ios-test-process.py` owns each Xcode process group, streams the full
   log, enforces overall and no-output deadlines, captures bounded process and
   partial-result evidence, then terminates only that owned group. Product

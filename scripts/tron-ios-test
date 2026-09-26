@@ -14,13 +14,13 @@ MARKER="$STATE_ROOT/simulator.json"
 LOCK="$STATE_ROOT/lease.lock"
 DEVELOPMENT_STATE="${TRON_IOS_SIMULATOR_STATE_DIR:-$HOME/.tron/internal/run}/ios-simulator-udid"
 IOS_BUILD_ROOT="$HOME/Library/Developer/Tron/ios"
-DERIVED_DATA="${TRON_IOS_TEST_DERIVED_DATA:-$IOS_BUILD_ROOT/test-derived-data}"
 RESULTS_ROOT="${TRON_IOS_TEST_RESULTS_DIR:-$IOS_BUILD_ROOT/test-runs}"
 DEVICE_NAME="${TRON_IOS_TEST_DEVICE_NAME:-Tron iOS Tests}"
 EPHEMERAL="${TRON_IOS_TEST_EPHEMERAL:-0}"
 PROCESS="$ROOT/scripts/ios-test-process.py"
 SIMULATOR="$ROOT/scripts/ios-test-simulator.py"
 LOCKER="$ROOT/scripts/ios-test-lock.py"
+IDENTITY="$ROOT/scripts/ios-test-build-identity.py"
 
 EXIT_TEST_FAILURE=65
 EXIT_DESTINATION=66
@@ -49,11 +49,23 @@ Stable exits: 65 test failure, 66 destination, 70 build failure, 73 busy,
 74 runner failure, 75 process timeout. Signals retain their conventional exits.
 Routine runs are serial, use an exact owned simulator UDID, disable verbose test
 diagnostics, and preserve unique complete logs plus xcresults under
-$HOME/Library/Developer/Tron/ios/test-runs by default. diagnose never runs automatically.
+$HOME/Library/Developer/Tron/ios/test-runs by default. Test products are built
+per worktree under $HOME/Library/Developer/Tron/ios/test-derived-data and stamped
+with the worktree and source state that produced them; run refuses products
+stamped for another worktree or another source state. diagnose never runs
+automatically.
 USAGE
 }
 
 die() { echo "error: $*" >&2; exit "$EXIT_RUNNER"; }
+
+# The lease serializes the one owned simulator, but products built in one
+# worktree must never be executed from another: each worktree owns a directory
+# under the shared build root, and build stamps it with the source identity that
+# run re-proves before executing anything. TRON_IOS_TEST_DERIVED_DATA still wins.
+WORKTREE_KEY="$(python3 "$IDENTITY" worktree-key --worktree "$ROOT")" \
+  || die "cannot derive this worktree's test product directory"
+DERIVED_DATA="${TRON_IOS_TEST_DERIVED_DATA:-$IOS_BUILD_ROOT/test-derived-data/$WORKTREE_KEY}"
 
 simulator_args=(
   --marker "$MARKER"
@@ -117,7 +129,17 @@ if [[ "$command" == status ]]; then
   echo "Canonical device type: $TRON_CI_IOS_SIMULATOR_NAME"
   if [[ -s "$LOCK" ]]; then echo "Lease metadata: $(tr -d '\n' <"$LOCK")"; else echo "Lease: idle"; fi
   python3 "$SIMULATOR" status "${simulator_args[@]}" || exit "$EXIT_DESTINATION"
-  [[ -d "$DERIVED_DATA/Build/Products" ]] && echo "Test products: $DERIVED_DATA/Build/Products" || echo "Test products: not built"
+  echo "Worktree: $ROOT"
+  echo "Test products directory: $DERIVED_DATA"
+  if [[ -d "$DERIVED_DATA/Build/Products" ]]; then
+    if python3 "$IDENTITY" verify --worktree "$ROOT" --derived-data "$DERIVED_DATA" >/dev/null 2>&1; then
+      echo "Test products: built from this worktree's current source state"
+    else
+      echo "Test products: stale or built from another worktree's source state; run build"
+    fi
+  else
+    echo "Test products: not built"
+  fi
   if [[ -L "$RESULTS_ROOT/latest" ]]; then echo "Latest result: $(readlink "$RESULTS_ROOT/latest")"; else echo "Latest result: none"; fi
   exit 0
 fi
@@ -173,6 +195,10 @@ destination="platform=iOS Simulator,id=$simulator_id"
 
 owned_directory "$DERIVED_DATA"
 owned_directory "$RESULTS_ROOT"
+# One measurement per command: the same identity stamps the products a build
+# produces and lands in every metadata record of that command.
+source_identity="$(python3 "$IDENTITY" show --worktree "$ROOT")" \
+  || die "cannot determine this worktree's source identity"
 run_prefix="$(date -u '+%Y%m%dT%H%M%SZ')-$command"
 run_dir="$(mktemp -d "$RESULTS_ROOT/$run_prefix.XXXXXX")"
 run_identity="$(basename "$run_dir")"
@@ -186,6 +212,7 @@ write_metadata() {
   TRON_PHASE="$phase" TRON_STATUS="$status" TRON_COMMAND="$command" \
   TRON_DESTINATION="$destination" TRON_SIMULATOR_ID="$simulator_id" \
   TRON_DERIVED_DATA="$DERIVED_DATA" TRON_RESULT_BUNDLE="$result_bundle" \
+  TRON_SOURCE_IDENTITY="$source_identity" \
   TRON_MARKER="$MARKER" python3 - <<'PY'
 import hashlib, json, os, platform, subprocess
 from pathlib import Path
@@ -208,6 +235,7 @@ value = {
     "device_type_identifier": marker["device_type_identifier"],
     "derived_data": os.environ["TRON_DERIVED_DATA"],
     "result_bundle": os.environ["TRON_RESULT_BUNDLE"],
+    "source": json.loads(os.environ["TRON_SOURCE_IDENTITY"]),
     "runner_arch": platform.machine(),
     "xcode": xcode,
 }
@@ -256,6 +284,11 @@ build_products() {
       -derivedDataPath "$DERIVED_DATA" \
       -parallel-testing-enabled NO \
       -showBuildTimingSummary
+  # Stamp only after a successful build, so a failed rebuild never leaves
+  # products claiming a source state they were not built from.
+  printf '%s\n' "$source_identity" \
+    | python3 "$IDENTITY" write --worktree "$ROOT" --derived-data "$DERIVED_DATA" \
+    || die "cannot stamp the built test products with their source identity"
 }
 
 validate_test_summary() {
@@ -290,6 +323,10 @@ PY
 run_tests() {
   local diagnostics="$1" overall="$2" no_output="$3"
   [[ -d "$DERIVED_DATA/Build/Products" ]] || die "test products are missing; run '$0 build' first"
+  if ! python3 "$IDENTITY" verify --worktree "$ROOT" --derived-data "$DERIVED_DATA"; then
+    echo "error: run '$0 build' in this worktree before running tests" >&2
+    return "$EXIT_RUNNER"
+  fi
   local -a test_command=(
     xcodebuild test-without-building
     -project "$IOS/TronMobile.xcodeproj"

@@ -65,7 +65,8 @@ For an explicitly source-built Debug Gateway on 9848, use
 still verifies the source and iOS artifact contract but does not claim Stable is
 ready. Never use that target to bypass a mismatched Stable installation.
 
-The iOS build-output root and its shared-test lease ownership are documented
+The iOS build-output root, its worktree-local test products and its shared-test
+lease ownership are documented
 in [iOS development](../../../packages/ios-app/docs/development.md#test-runner-safety-contract).
 
 Generate Xcode with `scripts/tron ios generate`; it resolves the pinned

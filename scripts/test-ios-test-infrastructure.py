@@ -17,6 +17,8 @@ ROOT = Path(__file__).resolve().parent.parent
 SIMULATOR = ROOT / "scripts/ios-test-simulator.py"
 PROCESS = ROOT / "scripts/ios-test-process.py"
 LOCK = ROOT / "scripts/ios-test-lock.py"
+IDENTITY = ROOT / "scripts/ios-test-build-identity.py"
+RUNNER = ROOT / "scripts/tron-ios-test"
 RUNTIME_ID = "com.apple.CoreSimulator.SimRuntime.iOS-26-2"
 TYPE_ID = "com.apple.CoreSimulator.SimDeviceType.iPhone-17-Pro"
 UDID_A = "AAAAAAAA-AAAA-AAAA-AAAA-AAAAAAAAAAAA"
@@ -342,11 +344,32 @@ exit 0
         self.results = self.root / "results"
         self.state = self.root / "state"
         (self.derived / "Build/Products").mkdir(parents=True)
+        # Mirror what the runner's owned_directory installs before any build.
+        (self.derived / ".tron-ios-test-owned").write_text("tron.ios-test-owned.v1\n")
+        self.write_products_identity()
 
     def tearDown(self) -> None:
         self.temporary.cleanup()
 
-    def invoke(self, *, summary: str = '{"passedTests":1,"failedTests":0,"skippedTests":0,"totalTestCount":1}', mode: str = "success", xcode_status: int = 0) -> subprocess.CompletedProcess[str]:
+    def source_identity(self, worktree: Path = ROOT) -> dict[str, object]:
+        completed = subprocess.run(
+            [sys.executable, str(IDENTITY), "show", "--worktree", str(worktree)],
+            check=True, text=True, stdout=subprocess.PIPE,
+        )
+        return json.loads(completed.stdout)
+
+    def write_products_identity(self, value: dict[str, object] | None = None) -> None:
+        subprocess.run(
+            [sys.executable, str(IDENTITY), "write", "--worktree", str(ROOT), "--derived-data", str(self.derived)],
+            check=True, text=True, input=json.dumps(value if value is not None else self.source_identity()),
+            stdout=subprocess.DEVNULL,
+        )
+
+    def invoke(
+        self, *, command: str = "run", home: Path | None = None,
+        summary: str = '{"passedTests":1,"failedTests":0,"skippedTests":0,"totalTestCount":1}',
+        mode: str = "success", xcode_status: int = 0,
+    ) -> subprocess.CompletedProcess[str]:
         environment = os.environ.copy()
         environment.update({
             "PATH": f"{self.bin}:{environment['PATH']}",
@@ -364,7 +387,15 @@ exit 0
             "FAKE_RUNNER_MODE": mode,
             "FAKE_XCODE_STATUS": str(xcode_status),
         })
-        return subprocess.run([str(ROOT / "scripts/tron-ios-test"), "run"], env=environment, text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        if home is not None:
+            # Exercise the runner's own defaults under a synthetic HOME.
+            environment.pop("TRON_IOS_TEST_DERIVED_DATA", None)
+            environment.pop("TRON_IOS_TEST_RESULTS_DIR", None)
+            environment["HOME"] = str(home)
+        return subprocess.run([str(RUNNER), command], env=environment, text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+
+    def latest_metadata(self) -> dict[str, object]:
+        return json.loads(((self.results / "latest").resolve() / "metadata.json").read_text())
 
     def test_summary_validation_requires_real_passing_count(self) -> None:
         result = self.invoke()
@@ -395,6 +426,199 @@ exit 0
         self.assertEqual(result.returncode, 65, result.stderr)
         result = self.invoke(mode="timeout")
         self.assertEqual(result.returncode, 75, result.stderr)
+
+    def test_run_refuses_products_stamped_for_another_worktree(self) -> None:
+        foreign = self.source_identity()
+        foreign["worktree"] = "/private/tmp/tron-foreign"
+        foreign["worktree_key"] = "tron-foreign-0123456789ab"
+        (self.derived / "build-identity.json").write_text(json.dumps(foreign))
+        result = self.invoke()
+        self.assertEqual(result.returncode, 74, result.stderr)
+        self.assertIn("refusing to run", result.stderr)
+        self.assertIn("/private/tmp/tron-foreign", result.stderr)
+        self.assertIn(str(ROOT), result.stderr)
+
+    def test_run_refuses_products_from_a_changed_source_state(self) -> None:
+        build = self.source_identity()
+        build["revision"] = "0" * 40
+        build["source_fingerprint"] = "0" * 64
+        (self.derived / "build-identity.json").write_text(json.dumps(build))
+        result = self.invoke()
+        self.assertEqual(result.returncode, 74, result.stderr)
+        self.assertIn("revision 000000000", result.stderr)
+        self.assertIn(str(self.source_identity()["revision"])[:9], result.stderr)
+        self.assertIn("source fingerprint 000000000000", result.stderr)
+
+    def test_run_refuses_products_without_identity(self) -> None:
+        (self.derived / "build-identity.json").unlink()
+        result = self.invoke()
+        self.assertEqual(result.returncode, 74, result.stderr)
+        self.assertIn("carry no build identity", result.stderr)
+        self.assertIn("before running tests", result.stderr)
+
+    def test_build_stamps_products_and_records_source_in_metadata(self) -> None:
+        (self.derived / "build-identity.json").unlink()
+        result = self.invoke(command="build")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        stamp = json.loads((self.derived / "build-identity.json").read_text())
+        self.assertEqual(stamp["schema"], "tron.ios-test-build-identity.v1")
+        self.assertEqual(stamp["worktree"], str(ROOT))
+        self.assertEqual(stamp, self.source_identity())
+        metadata = self.latest_metadata()
+        self.assertEqual(metadata["source"], stamp)
+        self.assertEqual(metadata["source"]["revision"], subprocess.run(
+            ["git", "-C", str(ROOT), "rev-parse", "HEAD"], check=True, text=True, stdout=subprocess.PIPE,
+        ).stdout.strip())
+        self.assertIsInstance(metadata["source"]["dirty"], bool)
+
+    def test_run_records_the_source_it_verified(self) -> None:
+        result = self.invoke()
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(self.latest_metadata()["source"], self.source_identity())
+
+    def test_default_products_directory_is_scoped_to_this_worktree(self) -> None:
+        home = self.root / "home"
+        result = self.invoke(command="status", home=home)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        key = subprocess.run(
+            [sys.executable, str(IDENTITY), "worktree-key", "--worktree", str(ROOT)],
+            check=True, text=True, stdout=subprocess.PIPE,
+        ).stdout.strip()
+        expected = home / "Library/Developer/Tron/ios/test-derived-data" / key
+        self.assertIn(f"Test products directory: {expected}", result.stdout)
+        self.assertIn(f"Worktree: {ROOT}", result.stdout)
+
+    def test_clean_removes_only_this_worktrees_products(self) -> None:
+        sibling = self.derived.parent / "sibling-products"
+        (sibling / "Build/Products").mkdir(parents=True)
+        (sibling / ".tron-ios-test-owned").write_text("tron.ios-test-owned.v1\n")
+        result = self.invoke(command="clean")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertFalse(self.derived.exists())
+        self.assertTrue(sibling.exists())
+
+
+class BuildIdentityFixture(unittest.TestCase):
+    """Exercise the products identity owner against real git states."""
+
+    def setUp(self) -> None:
+        self.temporary = tempfile.TemporaryDirectory()
+        self.root = Path(self.temporary.name)
+        self.worktree = self.root / "worktree"
+        self.worktree.mkdir()
+        self.git("init", "-q")
+        self.git("config", "user.email", "tests@tron.invalid")
+        self.git("config", "user.name", "Tron Tests")
+        (self.worktree / "Source.swift").write_text("let value = 1\n")
+        self.git("add", "Source.swift")
+        self.git("commit", "-q", "-m", "initial")
+        self.derived = self.root / "products"
+        (self.derived / "Build/Products").mkdir(parents=True)
+
+    def tearDown(self) -> None:
+        self.temporary.cleanup()
+
+    def git(self, *arguments: str) -> str:
+        return subprocess.run(
+            ["git", "-C", str(self.worktree), *arguments],
+            check=True, text=True, stdout=subprocess.PIPE,
+        ).stdout.strip()
+
+    def identity(self, worktree: Path | None = None) -> dict[str, object]:
+        completed = subprocess.run(
+            [sys.executable, str(IDENTITY), "show", "--worktree", str(worktree or self.worktree)],
+            text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+        )
+        self.assertEqual(completed.returncode, 0, completed.stderr)
+        return json.loads(completed.stdout)
+
+    def stamp(self, value: dict[str, object]) -> subprocess.CompletedProcess[str]:
+        return subprocess.run(
+            [sys.executable, str(IDENTITY), "write", "--worktree", str(self.worktree), "--derived-data", str(self.derived)],
+            text=True, input=json.dumps(value), stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+        )
+
+    def verify(self) -> subprocess.CompletedProcess[str]:
+        return subprocess.run(
+            [sys.executable, str(IDENTITY), "verify", "--worktree", str(self.worktree), "--derived-data", str(self.derived)],
+            text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+        )
+
+    def test_directory_key_is_stable_and_unique_per_worktree(self) -> None:
+        first = subprocess.run(
+            [sys.executable, str(IDENTITY), "worktree-key", "--worktree", str(self.worktree)],
+            check=True, text=True, stdout=subprocess.PIPE,
+        ).stdout.strip()
+        self.assertEqual(first, self.identity()["worktree_key"])
+        self.assertNotIn("/", first)
+        other = self.root / "worktree"  # same path, no trailing component change
+        self.assertEqual(first, subprocess.run(
+            [sys.executable, str(IDENTITY), "worktree-key", "--worktree", str(other / ".")],
+            check=True, text=True, stdout=subprocess.PIPE,
+        ).stdout.strip())
+        second = subprocess.run(
+            [sys.executable, str(IDENTITY), "worktree-key", "--worktree", str(self.root / "another-worktree")],
+            check=True, text=True, stdout=subprocess.PIPE,
+        ).stdout.strip()
+        self.assertNotEqual(first, second)
+
+    def test_identity_tracks_tracked_and_untracked_content(self) -> None:
+        clean = self.identity()
+        self.assertFalse(clean["dirty"])
+        self.assertEqual(clean, self.identity())
+        self.assertEqual(self.stamp(clean).returncode, 0)
+        self.assertEqual(self.verify().returncode, 0, self.verify().stderr)
+
+        (self.worktree / "Source.swift").write_text("let value = 2\n")
+        edited = self.identity()
+        self.assertTrue(edited["dirty"])
+        self.assertNotEqual(edited["source_fingerprint"], clean["source_fingerprint"])
+        refused = self.verify()
+        self.assertEqual(refused.returncode, 1)
+        self.assertIn("refusing to run", refused.stderr)
+        self.assertIn("clean", refused.stderr)
+        self.assertIn("dirty", refused.stderr)
+
+        # An untracked source file changes the products too, including its content.
+        self.git("checkout", "--", "Source.swift")
+        added = self.worktree / "NewTests.swift"
+        added.write_text("let added = 1\n")
+        with_untracked = self.identity()
+        self.assertTrue(with_untracked["dirty"])
+        added.write_text("let added = 2\n")
+        self.assertNotEqual(self.identity()["source_fingerprint"], with_untracked["source_fingerprint"])
+
+    def test_verify_refuses_missing_or_foreign_identity(self) -> None:
+        missing = self.verify()
+        self.assertEqual(missing.returncode, 1)
+        self.assertIn("carry no build identity", missing.stderr)
+
+        foreign = self.identity()
+        foreign["worktree"] = "/private/tmp/tron-foreign"
+        foreign["worktree_key"] = "tron-foreign-ffffffffffff"
+        (self.derived / "build-identity.json").write_text(json.dumps(foreign))
+        mismatched = self.verify()
+        self.assertEqual(mismatched.returncode, 1)
+        self.assertIn("/private/tmp/tron-foreign", mismatched.stderr)
+        self.assertIn(str(self.worktree.resolve()), mismatched.stderr)
+
+    def test_write_rejects_a_foreign_worktree_document(self) -> None:
+        document = self.identity()
+        document["worktree"] = "/private/tmp/elsewhere"
+        result = self.stamp(document)
+        self.assertEqual(result.returncode, 1)
+        self.assertIn("not this worktree", result.stderr)
+        self.assertFalse((self.derived / "build-identity.json").exists())
+
+    def test_identity_requires_the_worktree_top_level(self) -> None:
+        nested = self.worktree / "packages"
+        nested.mkdir()
+        result = subprocess.run(
+            [sys.executable, str(IDENTITY), "show", "--worktree", str(nested)],
+            text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+        )
+        self.assertEqual(result.returncode, 1)
+        self.assertIn("not the top level of a worktree", result.stderr)
 
 
 class ProcessFixture(unittest.TestCase):

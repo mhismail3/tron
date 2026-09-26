@@ -2,7 +2,7 @@
 
 - **Started:** 2026-09-26
 - **Status:** Active
-- **Last updated:** 2026-09-26, approved
+- **Last updated:** 2026-09-26, CT-1
 - **Goal:** The chat transcript stays on screen and pinned by construction, so the scroll repairs that compensate for SwiftUI's lazy-stack estimates can be deleted rather than extended.
 
 ## Goal and constraints
@@ -92,7 +92,7 @@ breaks context-menu previews.
 
 | ID | Status | Scope | Depends on | Owner |
 | --- | --- | --- | --- | --- |
-| CT-1 | Claimed | Test isolation: `scripts/tron-ios-test` uses per-worktree derived data by default, records the source revision and worktree in each run's metadata, and refuses to run products built from another worktree; update `packages/ios-app/docs/development.md` | none | chat scroll investigation session, 2026-09-26 |
+| CT-1 | Done | Test isolation: `scripts/tron-ios-test` uses per-worktree derived data by default, records the source revision and worktree in each run's metadata, and refuses to run products built from another worktree; update `packages/ios-app/docs/development.md` | none | chat scroll investigation session, 2026-09-26 |
 | CT-8 | Ready | Stabilize `hostedOpeningRevealIsMonotonic`: find why the opening reveal's sampled distance is non-monotonic in about one run in three and fix the cause (product or oracle), with evidence from repeated runs | CT-1 | |
 | CT-2 | Ready | Baseline: port the hosted reproduction fixtures from `fix/chat-blank-evidence` to `main` as measurements, not pass/fail gates. Record blank boundaries, estimate-to-truth ratio after keyboard cycles, tail displacements, repair commands and frame cost on the worst shapes (tall reply at the tail, many tall replies, 180+ rows), three runs each | CT-1 | |
 | CT-3 | Ready | Prototype A on a throwaway branch: segment long assistant content at Markdown block boundaries into bounded physical rows, with pinning from visible row identity; measure against CT-2. The prototype does not need product polish, but it must show whether the blank and the estimate swing disappear | CT-2 | |
@@ -102,6 +102,80 @@ breaks context-menu previews.
 | CT-7 | Needs scoping | Device validation with the user: the send choreography checklist in `packages/ios-app/docs/development.md`, plus long sessions with tall replies across keyboard, foreground and resume | CT-6 | |
 
 ## Handoff log
+
+### CT-1 · Done · 2026-09-26 · chat scroll investigation session
+
+- Result: `scripts/tron-ios-test` can no longer execute products built by another
+  worktree or from another source state. Products live in
+  `$HOME/Library/Developer/Tron/ios/test-derived-data/<worktree-key>` (worktree
+  directory name plus 12 hex of a hash of its path), `build` writes
+  `build-identity.json` beside them only after a successful build (worktree path,
+  HEAD revision, dirty flag, sha256 fingerprint of the tracked diff plus the
+  content of every untracked non-ignored file), and `run` re-proves that stamp,
+  exiting 74 and naming both identities when they differ. Every build's and
+  run's `metadata.json` carries the same identity under `source`. The one
+  serialized simulator lease, the shared retained-runs root with its `latest`
+  symlink, and the `TRON_IOS_TEST_DERIVED_DATA` override are unchanged, as is
+  reuse of the build cache within a worktree.
+- Evidence (verified in `/private/tmp/tron-ct1` unless stated):
+  - `python3 scripts/test-ios-test-infrastructure.py`: 25 tests pass in 27 s (13
+    before; 12 new). Runner-level: products stamped for another worktree, for a
+    changed source state, and with no stamp are all refused with exit 74; a real
+    `build` stamps the products and records the same `source` in the run
+    metadata; a real `run` records the identity it verified; the default products
+    directory is `<HOME>/Library/Developer/Tron/ios/test-derived-data/<key>` under
+    a synthetic HOME; `clean` removes this worktree's products and leaves a
+    sibling worktree's directory. Identity-level (real temporary git repos): the
+    key is stable for one path and different for another, tracked edits and
+    untracked additions/edits each change the fingerprint, `verify` refuses a
+    missing or foreign stamp, `write` refuses a foreign worktree document, and a
+    nested directory is not accepted as the worktree.
+  - `scripts/tron-ios-test build`: `** TEST BUILD SUCCEEDED **`, cold per-worktree
+    products in 1 m 58 s, second incremental build 9 s (cache reuse kept).
+  - `scripts/tron-ios-test run --only-testing TronMobileTests/GatewayLogExportTests`:
+    17 tests in 1 suite passed, 14.6 s wall, run
+    `20260926T173154Z-run.Yi0cES` under `~/Library/Developer/Tron/ios/test-runs/`,
+    metadata `source` identical to the stamp.
+  - Negative control: after the build, one comment line was appended to
+    `packages/ios-app/Tests/Gateway/GatewayLogExportTests.swift` and `run` exited
+    74 with `built from: … source fingerprint 4b222e595247` versus
+    `current: … source fingerprint 19496bfa9b8b`, naming the worktree and
+    revision on both sides. `git checkout --` the file, with no rebuild, returned
+    `status` to "built from this worktree's current source state" and a rerun
+    passed 17/17, so the guard is not over-strict.
+  - Pre-change products are refused too: running with
+    `TRON_IOS_TEST_DERIVED_DATA=$HOME/Library/Developer/Tron/ios/test-derived-data`
+    (the old shared directory, still holding another session's products) exits 74
+    with "carry no build identity", naming the missing stamp.
+  - `python3 scripts/check-documentation-policy.py` and
+    `scripts/personal-info-guard.sh` pass.
+- Changes: this commit (`scripts/ios-test-build-identity.py` new,
+  `scripts/tron-ios-test`, `scripts/test-ios-test-infrastructure.py`,
+  `packages/ios-app/docs/development.md`, `.agents/skills/tron-ios/SKILL.md`,
+  `.github/workflows/ci.yml`).
+- Tasks added: none.
+- Kept on purpose: the serialized lease, the exact owned simulator, the shared
+  `test-runs` retention and `clean`'s semantics, which is what commit `8082a02dc`
+  set out to keep. Reuse survives inside a worktree (9 s incremental build), and
+  `TRON_IOS_TEST_DERIVED_DATA` still overrides; the retained-runs root stays
+  shared and is now attributable through `source.worktree` in each metadata.
+- Deviations: the identity covers the whole non-ignored worktree rather than
+  `packages/ios-app` alone, so an edit after a build — documentation included —
+  needs a rebuild before `run`; both the doc and the helper say so, and it is the
+  conservative reading of "the same source state as the build". The identity is
+  measured once per command, so an interrupted build leaves the previous stamp.
+  `status` now prints the worktree, the products directory and whether the
+  products match the current source, replacing the bare products path line. This
+  plan entry was appended after the runs above, which by the same rule makes the
+  products stamped before it stale until the next build.
+- For the next agent: CT-8 and CT-2 now get isolated products by default, so the
+  plan rule "each built from its own worktree with its own derived data" is what
+  `build` does when run in that worktree. A per-worktree products directory is
+  about 1 GB; `clean` removes this worktree's, and a directory for a deleted
+  worktree is removable by hand because it carries the runner's ownership marker.
+  Do not point `TRON_IOS_TEST_DERIVED_DATA` at a path inside the worktree unless
+  it is git-ignored, or the products themselves become part of the source state
+  the stamp covers.
 
 ### CT-0 · Done · 2026-09-26 · chat scroll investigation session
 
