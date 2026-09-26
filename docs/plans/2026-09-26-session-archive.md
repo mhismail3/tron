@@ -1,0 +1,329 @@
+# Session archive
+
+- **Started:** 2026-09-26
+- **Status:** Active
+- **Last updated:** 2026-09-26, approved
+- **Goal:** A user can archive an idle session so it leaves the dashboard without being deleted, find it again in one collapsed Archived container or in search, and have it return automatically when it runs again.
+
+## Goal and constraints
+
+Archiving hides a session from the dashboard. It never deletes or rewrites anything. The canonical session file and its transcript, name, attention state, artifacts and search index stay as they are. Unarchiving restores the session's normal dashboard position. Only the user's explicit **Delete** removes a session.
+
+These rules override an agent's own judgment:
+
+- **No hidden work.** An archived session is always idle. Archiving is rejected
+  while anything is active: the phase is running, compacting or retrying, the
+  session is waiting for the user, it has active subagents, or it has queued
+  prompts. Every new run clears the archive state before the run can do any
+  work. That covers a prompt from any device, an automation prompt, Bash,
+  manual compaction, and a turn started by an extension or a scheduled wake.
+- **Opening is not a run.** Opening, reading, renaming, marking read or unread,
+  exporting, or searching an archived session leaves it archived.
+- **Archive state is Gateway-owned display state.** It lives in a Gateway store,
+  like read/unread attention. It never goes in the Pi JSONL, and archiving never
+  appends an entry, changes `updatedAt`, or starts a runtime for an inactive
+  session.
+- **No compatibility shims.** A new capability `session-archive.v1` gates the
+  iOS UI. `session.list` keeps its current default for clients that don't send
+  the new parameter. Do not bump the protocol version for this additive
+  contract, and add no fallback paths.
+- **Where archived sessions appear.** Archived sessions are hidden from the
+  dashboard's workspace groups and from the automation session picker. They
+  appear in one collapsed **Archived (N)** container at the bottom of the
+  dashboard, and in session search results labeled **Archived**.
+- **Out of scope for this plan:** bulk archive, auto-archive after a period,
+  and archiving subagent sessions.
+- **No agent-run lifecycle actions.** Agents never rebuild or restart the
+  Gateway and never install over `/Applications/Tron.app`. Rollout of the
+  Gateway half is a user action (see V-1).
+
+## Context
+
+Current state, inspected 2026-09-26:
+
+- **Delete is the only removal.** `session.delete` in `packages/gateway/src/transport/gateway-service.ts` calls
+  `RuntimeRegistry.delete()` in `packages/gateway/src/sessions/runtime-registry.ts`. That call admits the
+  session against hardened structural identity, rejects busy and subagent sessions, disposes the slot,
+  deletes the canonical file, then removes attention state on the attention lane.
+- **Attention is the model to copy.** `SessionAttentionStore` (`packages/gateway/src/sessions/session-attention-store.ts`)
+  is a bounded, atomic, versioned JSON store under `~/.tron/gateway/`.
+  - It is pruned at startup only from *complete* structural evidence.
+  - It follows session re-keying through `SessionAttentionRebindDisposition`
+    (`migrate` / `reset` / `discard`, declared in `runtime-slot.ts`).
+  - It is projected into each catalog seed in `buildCatalogPageSeeds`.
+  - The archive store copies this ownership pattern. Its data stays separate.
+- **Listing.** `session.list` pages a `CatalogPageSource` through
+  `SessionListPaginationStore` (`packages/gateway/src/transport/session-list-pagination.ts`).
+  The cache generation key is `listRevision:projectionGeneration:scope`. iOS only ever requests
+  scope `user`. Membership changes reach clients through `session.listChanged`.
+- **Summary updates never add rows.** `session.summary` updates only rows iOS
+  already knows about. A row appears only when the catalog admits it.
+- **Prompt entry.** Gateway-admitted prompts, including automations
+  (`automation-executor.ts`), enter through `RuntimeSlot.prompt()` on the slot
+  lane. Bash and compaction have their own RPCs. Extension turns started with
+  `triggerTurn` start inside Pi without Gateway admission.
+- **iOS.**
+  - Dashboard rows are in `packages/ios-app/Sources/UI/Chat/SessionShellView.swift`. The trailing swipe
+    has Delete (with confirmation) and Rename. The leading swipe has Mark Read/Unread.
+  - Mutations go through `SessionMutationService` and `AppModel` using `performOnOwningGateway`.
+  - The dashboard combines several paired Gateways through `DashboardGatewayConnectionPool`.
+  - `SnapshotCache` persists dashboard buckets.
+  - `AutomationFormView` picks sessions from `model.visibleSessions`.
+- **Precedent.** Knowledge already has an `includeArchived` list flag
+  (`KnowledgeRPCClient.swift`). Session archive is a separate concept and does
+  not share that store.
+
+## Plan rules
+
+- **Testing.** Follow the AGENTS.md testing policy.
+  - The primary proof is one Gateway WebSocket integration test that exercises
+    the full lifecycle and writes a JSON report at a stable path.
+  - Before writing any isolated test (store, iOS state), list its failure modes
+    in the task's handoff entry. Each isolated test must target one listed mode
+    that the integration test cannot catch.
+- **Atomicity.** Each task ships its code, tests and owning docs together.
+  Gateway tasks must leave `session.list`'s default behavior correct at every
+  commit.
+
+## Tasks
+
+| ID | Status | Scope | Depends on | Owner |
+| --- | --- | --- | --- | --- |
+| G-1 | Ready | Gateway archive store, `session.archive.set` RPC, list filtering and count, delete/rekey/prune ownership, `session-archive.v1` capability | none | |
+| G-2 | Ready | Every new run unarchives: an admission-time clear for Gateway-admitted runs, plus a backstop when an active phase is published | G-1 | |
+| G-3 | Ready | Search results carry `archived`; `session-search.md` updated | G-1 | |
+| I-1 | Ready | iOS model, mutation service, AppModel and capability gating; catalog membership follows authoritative responses | G-1 | |
+| I-2 | Ready | Dashboard full-swipe Archive, one collapsed "Archived (N)" container at the bottom, and archived-row actions | I-1 | |
+| I-3 | Ready | Search "Archived" label, automation picker exclusion, and display of an existing automation whose target is archived | I-1, G-3 | |
+| V-1 | Ready | Cross-module checkpoint, user-performed Gateway rollout, and eyes-on device review; close the plan | G-2, I-2, I-3 | |
+
+## Task details
+
+### G-1 — Archive store, RPC and listing
+
+Owning files:
+
+- New `session-archive-store.ts` in `packages/gateway/src/sessions/`
+- `runtime-registry.ts`
+- `gateway-service.ts`
+- `session-list-pagination.ts`
+- `packages/gateway/src/protocol/types.ts`
+
+**Store** (`~/.tron/gateway/session-archive.json`):
+
+- **Format.** `{ version: 1, sessions: { [id]: { archivedAt } } }`.
+- **Bounds.** Size limits match the attention store: 50,000 sessions, 2 MiB,
+  200-byte IDs.
+- **Writes.** Write to a temp file, then rename. One mutex serializes writes.
+- **Corruption.** A corrupt, oversized or wrong-version file is handled the same
+  way the attention store handles one (read and match it; do not invent a new
+  policy). The store never silently resets to empty, because that would make
+  every archived session reappear.
+
+**RPC** `session.archive.set { sessionId, archived: boolean }`:
+
+- **Receipts.** It is a `mutation` with a command-ID receipt. Register it
+  wherever the existing method-admission lists name `session.rename` and
+  `session.delete`.
+- **Admission.** It reuses delete's hardened structural admission: the session
+  must be known and unambiguous. Subagent sessions are rejected with
+  `conflict`. A session being deleted gets `busy` (retryable).
+- **Archiving must be idle.** Archiving checks the rule in Goal and constraints
+  under the registry mutex, and inside the slot lane when a slot exists.
+  Otherwise it fails with `busy`, "Stop the session before archiving it", code
+  `session_operation_busy`. A pending automation dispatch reservation or lease
+  for the session also counts as busy.
+- **No runtime for inactive sessions.** A session with no slot is archived
+  without starting a runtime.
+- **Idempotent.** Archiving an already-archived session keeps its original
+  `archivedAt`. Unarchiving a session that isn't archived is a no-op success.
+- **Response.** The response returns the authoritative
+  `{ archived, archivedAt? }`.
+
+**Listing:**
+
+- **New parameter.** `session.list` takes `archived?: "exclude" | "only"`,
+  default `exclude`. `exclude` hides archived IDs from every list and cursor
+  page.
+- **`only` ordering.** `only` returns archived user sessions newest-archived
+  first. Ties break by ID.
+- **Count.** The first `exclude` page returns `archivedCount`.
+- **Summary field.** `SessionSummary.archivedAt?` is set only on archived rows.
+- **Cache key.** An archive-store revision joins the page-source generation key,
+  so a pagination lease can never mix archive states across pages.
+- **Change signal.** Each committed change bumps the registry revision and calls
+  `sessionListChanged`.
+
+**Ownership:**
+
+- **Delete.** Delete removes the archive record on the same lane and with the
+  same pending-retry discipline as attention removal.
+- **Re-keying.** It follows `SessionAttentionRebindDisposition`:
+  - `migrate` moves the record.
+  - `reset` (new session, fork) leaves the new ID unarchived. The source session
+    keeps its own state.
+  - `discard` removes the record.
+- **Startup pruning.** Startup prunes records only from complete structural
+  evidence. Incomplete evidence and duplicate IDs keep their records.
+
+**Capability.** Advertise `session-archive.v1` in `system.info`.
+
+**Observability.** Add a privacy-safe `sessions.archive.persist-failed` event
+(outcome and stage only, no IDs), and add its row to `packages/gateway/docs/observability.md`.
+
+**Tests.** Extend or add a WebSocket integration test beside `server-terminal-delete.integration.test.ts`. It writes its report to the test's retained artifact path and covers:
+
+1. Archive an inactive idle session. It is absent from `exclude`, present in
+   `only` with `archivedAt`, and `archivedCount` is 1.
+2. The session's JSONL bytes and `updatedAt` are unchanged, and no runtime
+   started.
+3. Replaying the same command ID returns the receipt.
+4. Archiving a running session, or one waiting for input, returns `busy`.
+5. After a Gateway restart the session is still archived.
+6. `session.open` on an archived session succeeds and it stays archived.
+7. Rename while archived keeps it archived.
+8. Delete removes the store record. Re-creating any file cannot resurrect it.
+9. Forking an archived session produces an unarchived child.
+10. Subagent archive returns `conflict`.
+
+**Docs.** Add an archive section to the session contract in `packages/gateway/README.md`.
+
+### G-2 — Every new run unarchives
+
+**Primary: clear at admission.** Gateway-admitted work clears the archive state
+durably before the run is admitted. This covers `RuntimeSlot.prompt()` (every
+RPC and automation prompt), `session.bash`, `session.compact`, and any other
+Gateway RPC that starts agent work. Enumerate those RPCs by reading
+`gateway-service.ts` and record the list in the handoff.
+
+- **Hook.** Use a registry-owned `beforeRunAdmission(sessionId)` hook that runs
+  inside the slot lane, after `assertUsable()` and before admission. The lane
+  ordering makes the result correct whichever of archive and prompt arrives
+  first.
+- **Fail closed.** If the unarchive write fails, reject the run as retryable
+  `busy` so that no work runs hidden. Log
+  `sessions.archive.persist-failed`.
+
+**Backstop: publishing an active phase.** An extension `triggerTurn` or
+scheduled wake starts inside Pi without Gateway admission. When a slot publishes
+an active phase for an archived ID, the registry clears the record and emits
+`session.listChanged`. The run is already underway, so this path cannot reject
+it. A persistence failure keeps the session visible through the live summary and
+retries on the next active summary. Log a privacy-safe
+`sessions.archive.auto-unarchived` event with a trigger category of `admission`
+or `backstop`, and add it to the observability row. It is the single signal
+that explains why an archived session reappeared.
+
+**Tests.** Add cases to the G-1 integration test:
+
+- A prompt to an archived session from a second client unarchives it before its
+  first event arrives, and both clients see `session.listChanged`.
+- Bash and compaction each unarchive.
+- An automation `existingSession` run unarchives.
+- A fixture extension that starts a turn on its own unarchives through the
+  backstop.
+- A negative control: a forced store-write failure rejects the prompt, and no
+  run marker is created.
+
+### G-3 — Search
+
+Add `archived: boolean` to `SessionSearchResult` (`session-search-contract.ts`).
+
+- It is read from the archive store when the response is built, never stored
+  in the search index, so archive changes need no reindex.
+- Archived sessions stay searchable and anchorable.
+- Add a search case to the G-1 integration test.
+- Update `packages/gateway/docs/session-search.md`.
+
+### I-1 — iOS state
+
+Owning files: `SessionCatalogModels.swift`, `SessionMutationService.swift`, `AppModel.swift`, `DashboardStateOwners.swift`, `SnapshotCache.swift`.
+
+- **Model.** Add optional `archivedAt` to `SessionSummary`.
+- **Mutation.** Add `SessionMutationService.setArchived` with a command ID and a
+  bounded timeout. It runs through `performOnOwningGateway`.
+- **Applying the response.** On success, the authoritative response removes the
+  row from the dashboard bucket (archive) or schedules a catalog read (unarchive)
+  and checkpoints the cache. It is applied monotonically like `applyAttention`,
+  with no optimistic state before the response arrives.
+- **Count.** `archivedCount` is stored per Gateway profile and summed across
+  the dashboard pool. A profile that is offline or doesn't advertise the
+  capability contributes nothing and is not shown as zero.
+- **Cache.** Archived rows are never persisted in `SnapshotCache`. Only the
+  count is.
+- **Gating.** Every archive UI control is hidden for a profile that doesn't
+  advertise `session-archive.v1`.
+
+Before writing any isolated test, list its failure modes. Candidates:
+
+- a late `session.summary` for an archived ID re-adding the row;
+- a stale archived-list read published after a newer unarchive;
+- count double-counting across the pool.
+
+### I-2 — Dashboard
+
+Owning file: `SessionShellView.swift`, plus a new archived-container view if the file would otherwise grow.
+
+**Trailing swipe:**
+
+- **Archive** is the full-swipe action, with a neutral tint.
+- **Delete** stays a partial-swipe action with its existing confirmation.
+- **Rename** is kept.
+- The leading **Mark Read/Unread** swipe is unchanged.
+
+**Archived (N) container:**
+
+- **Placement.** One container row at the bottom of the dashboard, after every
+  workspace group. It is hidden when N is 0 on every capable profile, and
+  collapsed by default.
+- **Loading.** Expansion pages `archived: "only"` from each capable, connected
+  profile. The read carries the managed presentation activity and a
+  latest-request fence. An unavailable profile shows an inline "unavailable"
+  note.
+- **Rows.** Rows show their workspace. Tapping opens the session. Swipes are
+  **Unarchive** (full swipe) and **Delete** (with confirmation).
+- **Refresh.** `session.listChanged` refreshes the count and, if the container
+  is expanded, the archived page.
+- **No disruption.** Keep chat identity and dashboard scroll position stable
+  when a row moves between the dashboard and the container.
+
+**Proof.** Extend `TronSmokeUITests` with a fixture journey: archive, the
+container count goes up, expand, unarchive. Keep its screenshots as the
+artifact. Accessibility identifiers use the existing
+`session-*-action-<dashboardID>` pattern.
+
+### I-3 — Search, automations, chat
+
+- **Search.** Search result rows with `archived == true` show an **Archived**
+  label. Opening one does not unarchive it.
+- **Automation picker.** `AutomationFormView` already reads
+  `model.visibleSessions`. Confirm archived rows are absent.
+- **Existing automations.** When the saved target of an existing automation is
+  archived, its detail and edit views must still name it rather than showing an
+  empty or invalid target. Resolve the name through the owning Gateway, not the
+  dashboard bucket. The automation keeps running, and each run unarchives the
+  target (G-2).
+- **Chat.** An archived session opened from search or the Archived container
+  shows its archived state wherever the session's Manage/context actions live,
+  with an **Unarchive** action. Sending a message needs no confirmation, because
+  G-2 unarchives it.
+
+### V-1 — Checkpoint and close
+
+1. Run the full Gateway suite and the focused iOS suites. Run
+   `scripts/ios-gateway-e2e-test run` once as the release checkpoint.
+2. Report the exact user action to roll out the Gateway. The user performs any
+   Gateway rebuild, update or restart.
+3. Eyes-on iPhone review, after the user installs:
+   - full swipe;
+   - the container across two paired Macs if available;
+   - unarchive by prompting from search;
+   - an automation firing into an archived session.
+4. Close the plan: move the lasting contract into the Gateway README,
+   `packages/gateway/docs/session-search.md`, `packages/gateway/docs/observability.md` and
+   `packages/ios-app/docs/architecture.md` (dashboard section). Add a
+   `docs/plans/HISTORY.md` entry and delete this file.
+
+## Handoff log
+
+(No entries yet.)
