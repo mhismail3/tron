@@ -107,8 +107,6 @@ struct SessionShellView: View {
     @State private var dashboardPresentation = DashboardPresentationSnapshot()
     @State private var dashboardPresentationIsActive = false
     @State private var dashboardReconcileTask: Task<Void, Never>?
-    @State private var archivedContainer = ArchivedSessionsContainerState()
-    @State private var archivedContainerLoadTask: Task<Void, Never>?
 
     init() {
         let appSettings = AppLocalBehaviorSettings.shared
@@ -192,11 +190,6 @@ struct SessionShellView: View {
             .onChange(of: model.profiles.selected?.id, initial: true) { previousProfileID, profileID in
                 if previousProfileID != profileID {
                     routeReplacementOwner.invalidate(); knowledgeDraftText = nil; knowledgeDraftIdentity = nil
-                    // The archived container is profile-qualified: a profile
-                    // switch retires its reads and rows.
-                    archivedContainerLoadTask?.cancel()
-                    archivedContainerLoadTask = nil
-                    _ = archivedContainer.collapse()
                     rankingPolicyTask?.cancel(); rankingPolicyTask = nil
                     remoteRankingEnabled = profileID.map(model.sessionSearchConsent(for:)) ?? false
                     remoteRankingError = nil
@@ -240,8 +233,6 @@ struct SessionShellView: View {
                 } else {
                     dashboardReconcileTask?.cancel()
                     dashboardReconcileTask = nil
-                    archivedContainerLoadTask?.cancel()
-                    archivedContainerLoadTask = nil
                     model.dismissSessionSearch()
                     searchLoading = false
                 }
@@ -249,8 +240,6 @@ struct SessionShellView: View {
             .onDisappear {
                 dashboardReconcileTask?.cancel()
                 dashboardReconcileTask = nil
-                archivedContainerLoadTask?.cancel()
-                archivedContainerLoadTask = nil
                 rankingPolicyTask?.cancel()
                 rankingPolicyTask = nil
             }
@@ -739,18 +728,15 @@ struct SessionShellView: View {
         Task {
             do {
                 try await model.performOnOwningGateway(session) { try await model.deleteSession(session.id) }
-                // A deleted session must not survive in the archived container,
-                // and a page already in flight for it must retire.
-                model.invalidateArchivedSessionsReads(profileID: session.gatewayProfileID)
-                archivedContainer.remove(sessionID: session.id, profileID: session.gatewayProfileID)
             } catch { model.presentError(error) }
             sessionToDelete = nil
         }
     }
 
     /// Archive is a reversible display change, so it applies only the
-    /// authoritative response: the Gateway's own list change removes the row
-    /// and moves the count.
+    /// authoritative response: the row leaves the dashboard when that response is
+    /// accepted, and the Gateway's own list change is what returns it, or its
+    /// count, from canonical truth.
     private func archive(_ session: SessionSummary) {
         Task {
             do { try await model.setSessionArchived(session, archived: true) }
@@ -763,17 +749,12 @@ struct SessionShellView: View {
         Task {
             do { try await model.setSessionArchived(session, archived: false) }
             catch is CancellationError { return }
-            catch {
-                model.presentError(error)
-                return
-            }
-            // The row leaves the container immediately; the authoritative
-            // archived page and count follow the Gateway's list change.
-            model.invalidateArchivedSessionsReads(profileID: session.gatewayProfileID)
-            archivedContainer.remove(sessionID: session.id, profileID: session.gatewayProfileID)
+            catch { model.presentError(error) }
         }
     }
 
+    /// Opens an archived row. The dashboard identity is server-qualified, so the
+    /// route is built for the exact Gateway that supplied the row.
     private func openArchivedSession(_ session: SessionSummary) {
         guard openingSessionID == nil else { return }
         openingSessionID = session.dashboardID
@@ -806,73 +787,6 @@ struct SessionShellView: View {
                     isConnected: $0.state == .connected
                 )
             }
-    }
-
-    private var archivedUnavailableServerNames: [String] {
-        archivedContainerSources
-            .filter { archivedContainer.unavailableProfileIDs.contains($0.profileID) }
-            .map(\.label)
-            .sorted()
-    }
-
-    private func toggleArchivedContainer() {
-        if archivedContainer.isExpanded {
-            // Collapsing retires the pass: a page already in flight must never
-            // publish into a closed container.
-            for source in archivedContainerSources {
-                model.invalidateArchivedSessionsReads(profileID: source.profileID)
-            }
-            withAnimation(TronDisclosureLayout.expansionAnimation) {
-                archivedContainer.collapse()
-            }
-            return
-        }
-        withAnimation(TronDisclosureLayout.expansionAnimation) {
-            archivedContainer.expand()
-        }
-        startArchivedContainerLoad(more: false)
-    }
-
-    /// Reads one page from every connected capable server, under the caller's
-    /// managed presentation activity and the model's per-profile latest-request
-    /// fence. Passes are serialized so a stale container never publishes over a
-    /// newer one.
-    private func startArchivedContainerLoad(more: Bool) {
-        guard dashboardPresentationIsActive, archivedContainerLoadTask == nil else { return }
-        let sources = archivedContainerSources
-        archivedContainer.reconcile(sources)
-        let requests = archivedContainer.pageRequests(for: sources, more: more)
-        guard !requests.isEmpty else {
-            archivedContainer.finishLoading()
-            return
-        }
-        let generation = archivedContainer.currentGeneration
-        archivedContainer.beginLoading()
-        archivedContainerLoadTask = Task { @MainActor in
-            defer {
-                archivedContainerLoadTask = nil
-                if archivedContainer.isCurrent(generation) { archivedContainer.finishLoading() }
-            }
-            for request in requests {
-                guard archivedContainer.isCurrent(generation) else { return }
-                do {
-                    let result = try await model.loadArchivedSessions(
-                        profileID: request.profileID,
-                        cursor: request.cursor,
-                        presentationActive: { dashboardPresentationIsActive }
-                    )
-                    guard archivedContainer.apply(
-                        result,
-                        profileID: request.profileID,
-                        generation: generation
-                    ) else { continue }
-                } catch is CancellationError {
-                    return
-                } catch {
-                    archivedContainer.markUnavailable(request.profileID)
-                }
-            }
-        }
     }
 
     private var isSessionDashboardInitiallyLoading: Bool {
@@ -1058,33 +972,27 @@ struct SessionShellView: View {
         archivedContainerSection
     }
 
-    /// One container row after every workspace group. It stays hidden until a
-    /// capable Gateway publishes a non-zero archived count, so a partial
-    /// dashboard never claims a fabricated zero.
-    @ViewBuilder
+    /// One container row after every workspace group, owned by
+    /// `ArchivedSessionsContainerSection`.
     private var archivedContainerSection: some View {
-        if let archivedCount = model.archivedSessionCount, archivedCount > 0 {
-            Section {
-                if archivedContainer.isExpanded {
-                    ArchivedSessionsSectionRows(
-                        sessions: archivedContainer.rows,
-                        unavailableServerNames: archivedUnavailableServerNames,
-                        isLoading: archivedContainer.isLoading,
-                        hasMore: archivedContainer.hasMore,
-                        onOpen: openArchivedSession,
-                        onUnarchive: unarchive,
-                        onDelete: { sessionToDelete = $0 },
-                        onShowMore: { startArchivedContainerLoad(more: true) }
-                    )
-                }
-            } header: {
-                ArchivedSessionsSectionHeader(
-                    count: archivedCount,
-                    isExpanded: archivedContainer.isExpanded,
-                    onToggle: toggleArchivedContainer
+        ArchivedSessionsContainerSection(
+            count: model.archivedSessionCount,
+            sources: archivedContainerSources,
+            profileID: model.profiles.selected?.id,
+            projectionRevision: model.archiveProjectionRevision,
+            presentationActive: dashboardPresentationIsActive,
+            loadPage: { profileID, cursor in
+                try await model.loadArchivedSessions(
+                    profileID: profileID,
+                    cursor: cursor,
+                    purpose: .container,
+                    presentationActive: { dashboardPresentationIsActive }
                 )
-            }
-        }
+            },
+            onOpen: openArchivedSession,
+            onUnarchive: unarchive,
+            onDelete: { sessionToDelete = $0 }
+        )
     }
 
     private var recentActivityHeader: some View {
@@ -1228,9 +1136,6 @@ struct SessionShellView: View {
             serverFilter.reconcile(profileIDs: sources.map(\.profileID))
         }
         if !sources.isEmpty { DashboardServerFilterPreferences.save(serverFilter) }
-        // A Gateway list change moves archived rows and their count, so an
-        // expanded container refreshes instead of keeping a superseded page.
-        if archivedContainer.isExpanded { startArchivedContainerLoad(more: false) }
     }
 
     private var filteredSessions: [SessionSummary] {

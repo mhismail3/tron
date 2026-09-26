@@ -1144,8 +1144,8 @@ struct DashboardStateOwnerTests {
         #expect(owner.hasConsistentIndex())
     }
 
-    @Test("an archived row stays hidden from live summaries until a page admits it")
-    func archivedRowsResistLiveSummaries() {
+    @Test("an archived row leaves the dashboard and only a page can return it")
+    func archivedRowsLeaveUntilAPageReturnsThem() {
         var owner = SessionCatalogCoordinator()
         let load = owner.beginLoad()
         let published = owner.publishAuthoritative([summary(revision: 1)], admission: load, archivedCount: 1)
@@ -1156,9 +1156,10 @@ struct DashboardStateOwnerTests {
         #expect(marked)
         #expect(owner.sessions.isEmpty)
         // The Gateway's summary projection carries no archive field, so a late
-        // update for the ID must not re-materialize the hidden row.
+        // update for the ID cannot re-materialize the row. The caller turns the
+        // admission into a list read instead.
         let lateUpdate = owner.apply(update(revision: 2, phase: .idle))
-        #expect(lateUpdate == .archived)
+        #expect(lateUpdate == .unknownSession)
         #expect(owner.sessions.isEmpty)
 
         // Only an authoritative exclude page proves the row is visible again.
@@ -1172,7 +1173,7 @@ struct DashboardStateOwnerTests {
         #expect(owner.hasConsistentIndex())
     }
 
-    @Test("the archived count survives an unavailable list and is replaced by the cache")
+    @Test("the archived count survives an unavailable list and is restored from the cache")
     func archivedCountRetention() {
         var owner = SessionCatalogCoordinator()
         let load = owner.beginLoad()
@@ -1180,15 +1181,13 @@ struct DashboardStateOwnerTests {
         #expect(published)
         #expect(owner.archivedCount == 3)
 
+        // A failed list read must not make the count look unknown.
         owner.markLoadUnavailable()
         #expect(owner.freshness == .stale)
         #expect(owner.archivedCount == 3)
 
         owner.installCached([summary(revision: 1)], archivedCount: 2)
         #expect(owner.archivedCount == 2)
-
-        owner.clear()
-        #expect(owner.archivedCount == nil)
     }
 
     @Test("archive counts sum only across capable profiles and never fabricate zero")
@@ -1366,7 +1365,12 @@ struct DashboardStateOwnerTests {
         let collapsed = container.collapse()
         #expect(collapsed != generation)
         let stale = ArchivedSessionsPage(sessions: [archivedSummary(profileID: "a", archivedAt: "2026-01-02T00:00:00Z")], nextCursor: nil)
-        let staleApplied = container.apply(.loaded(page: stale), profileID: "a", generation: generation)
+        let staleApplied = container.apply(
+            .loaded(page: stale),
+            profileID: "a",
+            generation: generation,
+            requestedCursor: nil
+        )
         #expect(!staleApplied)
         #expect(container.rows.isEmpty)
         #expect(!container.isExpanded)
@@ -1375,7 +1379,12 @@ struct DashboardStateOwnerTests {
         // unavailable server.
         let current = container.collapse()
         container.expand()
-        let retiredApplied = container.apply(.retired, profileID: "a", generation: current)
+        let retiredApplied = container.apply(
+            .retired,
+            profileID: "a",
+            generation: current,
+            requestedCursor: nil
+        )
         #expect(!retiredApplied)
         #expect(container.rows.isEmpty)
         #expect(container.unavailableProfileIDs.isEmpty)
@@ -1384,22 +1393,94 @@ struct DashboardStateOwnerTests {
         let invalidApplied = container.apply(
             .invalid(code: "invalid_response", reason: "archived-session-page"),
             profileID: "a",
-            generation: current
+            generation: current,
+            requestedCursor: nil
         )
         #expect(!invalidApplied)
         #expect(container.rows.isEmpty)
         #expect(container.unavailableProfileIDs == ["a"])
 
-        // An admitted page replaces the server's rows and clears its note.
+        // An admitted first page replaces the server's rows and clears its note.
         let page = ArchivedSessionsPage(
             sessions: [archivedSummary(profileID: "a", archivedAt: "2026-01-02T00:00:00Z")],
             nextCursor: "next"
         )
-        let applied = container.apply(.loaded(page: page), profileID: "a", generation: current)
+        let applied = container.apply(
+            .loaded(page: page),
+            profileID: "a",
+            generation: current,
+            requestedCursor: nil
+        )
         #expect(applied)
         #expect(container.rows.map(\.id) == ["session"])
         #expect(container.hasMore)
         #expect(container.unavailableProfileIDs.isEmpty)
+
+        // A continuation page extends the server's rows: "Show more" must not
+        // discard the pages the user already saw.
+        let continuation = ArchivedSessionsPage(
+            sessions: [
+                archivedSummary(profileID: "a", archivedAt: "2026-01-01T00:00:00Z"),
+                archivedSummary(profileID: "a", id: "second", archivedAt: "2026-01-03T00:00:00Z"),
+            ],
+            nextCursor: nil
+        )
+        let extended = container.apply(
+            .loaded(page: continuation),
+            profileID: "a",
+            generation: current,
+            requestedCursor: "next"
+        )
+        #expect(extended)
+        #expect(container.rows.map(\.id) == ["second", "session"])
+        #expect(!container.hasMore)
+
+        // A fresh first page is still the whole authority for the server.
+        let refreshed = container.apply(
+            .loaded(page: ArchivedSessionsPage(
+                sessions: [archivedSummary(profileID: "a", id: "second", archivedAt: "2026-01-03T00:00:00Z")],
+                nextCursor: nil
+            )),
+            profileID: "a",
+            generation: current,
+            requestedCursor: nil
+        )
+        #expect(refreshed)
+        #expect(container.rows.map(\.id) == ["second"])
+    }
+
+    @MainActor
+    @Test("a zero archive count closes the container and retires its pages")
+    func archivedContainerClosesAtZero() {
+        var container = ArchivedSessionsContainerState()
+        container.expand()
+        let generation = container.currentGeneration
+        _ = container.apply(
+            .loaded(page: ArchivedSessionsPage(
+                sessions: [archivedSummary(profileID: "a", archivedAt: "2026-01-02T00:00:00Z")],
+                nextCursor: "next"
+            )),
+            profileID: "a",
+            generation: generation,
+            requestedCursor: nil
+        )
+        #expect(container.rows.count == 1)
+
+        // An unknown count is not zero: the container keeps what it has.
+        let unknown = container.reconcileCount(nil)
+        #expect(!unknown)
+        #expect(container.isExpanded)
+        let stillArchived = container.reconcileCount(2)
+        #expect(!stillArchived)
+        #expect(container.isExpanded)
+
+        // Zero means no archived session exists on any capable server.
+        let closed = container.reconcileCount(0)
+        #expect(closed)
+        #expect(!container.isExpanded)
+        #expect(container.rows.isEmpty)
+        #expect(!container.hasMore)
+        #expect(container.currentGeneration != generation)
     }
 
     @MainActor
@@ -1416,7 +1497,7 @@ struct DashboardStateOwnerTests {
             sessions: [archivedSummary(profileID: "a", archivedAt: "2026-01-02T00:00:00Z")],
             nextCursor: "next"
         )
-        _ = container.apply(.loaded(page: page), profileID: "a", generation: generation)
+        _ = container.apply(.loaded(page: page), profileID: "a", generation: generation, requestedCursor: nil)
 
         // The first pass reads every connected server and never a disconnected
         // one.
@@ -1440,7 +1521,7 @@ struct DashboardStateOwnerTests {
     }
 
     @MainActor
-    @Test("archived rows keep server identity through removal and ordering")
+    @Test("archived rows keep server identity through ordering")
     func archivedRowIdentityAndOrder() {
         var container = ArchivedSessionsContainerState()
         let source = ArchivedSessionsProfileSource(profileID: "a", label: "A", isConnected: true)
@@ -1450,24 +1531,32 @@ struct DashboardStateOwnerTests {
         container.reconcile([source, second])
         let older = archivedSummary(profileID: "a", archivedAt: "2026-01-01T00:00:00Z")
         let newer = archivedSummary(profileID: "b", archivedAt: "2026-01-03T00:00:00Z")
-        _ = container.apply(.loaded(page: ArchivedSessionsPage(sessions: [older], nextCursor: nil)), profileID: "a", generation: generation)
-        _ = container.apply(.loaded(page: ArchivedSessionsPage(sessions: [newer], nextCursor: nil)), profileID: "b", generation: generation)
+        _ = container.apply(
+            .loaded(page: ArchivedSessionsPage(sessions: [older], nextCursor: nil)),
+            profileID: "a",
+            generation: generation,
+            requestedCursor: nil
+        )
+        _ = container.apply(
+            .loaded(page: ArchivedSessionsPage(sessions: [newer], nextCursor: nil)),
+            profileID: "b",
+            generation: generation,
+            requestedCursor: nil
+        )
 
         // Newest archived first, qualification-safe when two servers own equal
         // session IDs.
         #expect(container.rows.map(\.dashboardID) == [newer.dashboardID, older.dashboardID])
-
-        // Removing one server's row cannot drop the equal ID on another server.
-        container.remove(sessionID: older.id, profileID: "a")
-        #expect(container.rows.map(\.dashboardID) == [newer.dashboardID])
     }
 
-    private func archivedSummary(profileID: String, archivedAt: String) -> SessionSummary {
-        summary(revision: 1, archivedAt: archivedAt).withGatewaySource(id: profileID, label: profileID.uppercased())
+    private func archivedSummary(profileID: String, id: String = "session", archivedAt: String) -> SessionSummary {
+        summary(revision: 1, id: id, archivedAt: archivedAt)
+            .withGatewaySource(id: profileID, label: profileID.uppercased())
     }
 
     private func summary(
         revision: Int,
+        id: String = "session",
         phase: SessionPhase = .idle,
         foregroundPhase: SessionPhase? = nil,
         hasActiveSubagents: Bool = false,
@@ -1475,7 +1564,7 @@ struct DashboardStateOwnerTests {
         archivedAt: String? = nil
     ) -> SessionSummary {
         SessionSummary(
-            id: "session",
+            id: id,
             name: "Session",
             cwd: "/workspace",
             parentSessionId: nil,

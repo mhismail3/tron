@@ -382,7 +382,7 @@ struct AutomationFormView: View {
             await inspectWorkspaceTrust(workspacePath)
         }
         .task(id: PresentationActivityTaskID(
-            source: "target:\(selectedProfileID):\(targetSessionID):\(initialized):\(sessions.count):\(scenePhase == .active)",
+            source: "target:\(selectedProfileID):\(targetSessionID):\(initialized):\(scenePhase == .active)",
             presentationActive: presentationActivity.allowsPresentationPublication
         )) {
             guard initialized,
@@ -830,7 +830,11 @@ struct AutomationFormView: View {
             return
         }
         let requestedGeneration = presentationReadGeneration
-        let summary = try? await model.archivedSessionSummary(profileID: profileID, sessionID: requestedTarget)
+        let summary = try? await model.archivedSessionSummary(
+            profileID: profileID,
+            sessionID: requestedTarget,
+            presentationActive: { presentationActivity.allowsPresentationPublication && scenePhase == .active }
+        )
         guard !Task.isCancelled,
               requestedGeneration == presentationReadGeneration,
               presentationActivity.allowsPresentationPublication,
@@ -847,11 +851,12 @@ struct AutomationFormView: View {
     }
 
     /// Explains why a saved target is not in the picker. The automation keeps
-    /// the target, and every run unarchives it.
+    /// the target, and every run unarchives it. The hint disappears as soon as
+    /// the dashboard lists the target again, without another page walk.
     private var archivedTargetHint: String? {
-        archivedTargetTitle == nil
-            ? nil
-            : "Archived · It stays this automation's target, and each run unarchives it."
+        guard archivedTargetTitle != nil,
+              sessions.first(where: { $0.id == targetSessionID }) == nil else { return nil }
+        return "Archived · It stays this automation's target, and each run unarchives it."
     }
 
     private var workspaceName: String {

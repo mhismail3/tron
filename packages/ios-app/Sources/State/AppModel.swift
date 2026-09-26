@@ -248,8 +248,15 @@ final class AppModel {
     /// Gateway-owned archived-session counts, one per profile whose count is
     /// known. Absent means unknown, which is never presented as zero.
     private var dashboardArchivedCountsByProfile: [String: Int] = [:]
-    /// Per-profile latest-request fence for the archived container's reads.
-    private var archivedSessionsReadGenerations: [String: Int] = [:]
+    /// Advances when the Gateway's archive projection changes: an authoritative
+    /// dashboard page for the focused profile, or any capable profile's count.
+    /// The archived container is its only consumer, and it refreshes from this
+    /// rather than from the dashboard's summary stream.
+    private(set) var archiveProjectionRevision = 0
+    /// Per-profile, per-surface latest-request fences for archived reads. A
+    /// container pass and the automation form's target lookup never retire each
+    /// other's read.
+    private var archivedSessionsReadGenerations: [SessionArchiveReadKey: Int] = [:]
     private var dashboardCacheLoadGeneration = 0
     var sessions: [SessionSummary] {
         get { sessionCatalog.sessions }
@@ -1367,11 +1374,14 @@ final class AppModel {
     /// contract, so this read is their only authority. It is a disposable
     /// presentation read: no state is mutated before the response, and the
     /// caller's managed activity plus this owner's exact latest-request fence
-    /// are rechecked after the await, so a page that a newer archive toggle or
-    /// a surface exit already invalidated returns `.retired` instead of rows.
+    /// (one per purpose) are rechecked after the await, so a page that a newer
+    /// archive toggle or a surface exit already invalidated returns `.retired`
+    /// instead of rows. Every admitted row is qualified by the Gateway that owns
+    /// it, because two servers can own equal session IDs.
     func loadArchivedSessions(
         profileID: String,
         cursor: String?,
+        purpose: SessionArchiveReadPurpose,
         presentationActive: @escaping @MainActor () -> Bool
     ) async throws -> ArchivedSessionsLoadResult {
         guard presentationActive() else { return .retired }
@@ -1383,7 +1393,7 @@ final class AppModel {
                 details: nil
             )
         }
-        let generation = beginArchivedSessionsRead(profileID: profileID)
+        let generation = beginArchivedSessionsRead(profileID: profileID, purpose: purpose)
         let isSelectedProfile = profileID == lifecycle.selectedProfileID
         let expectedPoolIdentity: String?
         if isSelectedProfile {
@@ -1420,25 +1430,43 @@ final class AppModel {
                 method: "session.list"
             )
         }
-        return await ArchivedSessionsLoader.admit(response, requestedCursor: cursor) { [weak self] in
+        let admitted = await ArchivedSessionsLoader.admit(response, requestedCursor: cursor) { [weak self] in
             guard let self, presentationActive() else { return false }
-            guard self.admitsArchivedSessionsRead(profileID: profileID, generation: generation) else { return false }
+            guard self.admitsArchivedSessionsRead(profileID: profileID, purpose: purpose, generation: generation) else {
+                return false
+            }
             if isSelectedProfile { return self.lifecycle.selectedProfileID == profileID }
             return self.dashboardConnections.requestIdentity(for: profileID) == expectedPoolIdentity
         }
+        guard case let .loaded(page) = admitted else { return admitted }
+        let label = profiles.profiles.first(where: { $0.id == profileID })?.label ?? profileID
+        return .loaded(page: ArchivedSessionsPage(
+            sessions: page.sessions.map { $0.withGatewaySource(id: profileID, label: label) },
+            nextCursor: page.nextCursor
+        ))
     }
 
     /// Names a session the dashboard projection cannot: an archived row is
     /// excluded from it by contract, so an automation that targets one would
     /// otherwise show an empty target. The name comes only from the owning
-    /// Gateway's archived projection, bounded to the newest
-    /// `maximumPages` pages; callers re-check their own presentation generation
-    /// after this read before publishing the name.
-    func archivedSessionSummary(profileID: String, sessionID: String) async throws -> SessionSummary? {
+    /// Gateway's archived projection, bounded to the newest `maximumPages`
+    /// pages, and it carries the caller's real presentation activity; callers
+    /// re-check their own generation after this read before publishing the
+    /// name.
+    func archivedSessionSummary(
+        profileID: String,
+        sessionID: String,
+        presentationActive: @escaping @MainActor () -> Bool
+    ) async throws -> SessionSummary? {
         guard supportsSessionArchive(profileID: profileID) else { return nil }
         var cursor: String?
         for _ in 0..<SessionArchiveTargetLookup.maximumPages {
-            switch try await loadArchivedSessions(profileID: profileID, cursor: cursor) { true } {
+            switch try await loadArchivedSessions(
+                profileID: profileID,
+                cursor: cursor,
+                purpose: .targetLookup,
+                presentationActive: presentationActive
+            ) {
             case .retired, .invalid:
                 return nil
             case let .loaded(page):
@@ -1451,20 +1479,32 @@ final class AppModel {
     }
 
     /// Invalidates in-flight archived reads for one profile. An archive toggle
-    /// or a deletion must never be overwritten by a page already in flight.
+    /// or a deletion must never be overwritten by a page already in flight, and
+    /// any surface's read can be stale, so this retires all of them.
     func invalidateArchivedSessionsReads(profileID: String?) {
         guard let profileID else { return }
-        _ = beginArchivedSessionsRead(profileID: profileID)
+        for purpose in SessionArchiveReadPurpose.allCases {
+            _ = beginArchivedSessionsRead(profileID: profileID, purpose: purpose)
+        }
     }
 
-    private func beginArchivedSessionsRead(profileID: String) -> Int {
-        let generation = (archivedSessionsReadGenerations[profileID] ?? 0) &+ 1
-        archivedSessionsReadGenerations[profileID] = generation
+    private func beginArchivedSessionsRead(
+        profileID: String,
+        purpose: SessionArchiveReadPurpose
+    ) -> Int {
+        let key = SessionArchiveReadKey(profileID: profileID, purpose: purpose)
+        let generation = (archivedSessionsReadGenerations[key] ?? 0) &+ 1
+        archivedSessionsReadGenerations[key] = generation
         return generation
     }
 
-    private func admitsArchivedSessionsRead(profileID: String, generation: Int) -> Bool {
-        archivedSessionsReadGenerations[profileID] == generation
+    private func admitsArchivedSessionsRead(
+        profileID: String,
+        purpose: SessionArchiveReadPurpose,
+        generation: Int
+    ) -> Bool {
+        archivedSessionsReadGenerations[SessionArchiveReadKey(profileID: profileID, purpose: purpose)]
+            == generation
     }
 
     nonisolated static func dashboardProjection(
@@ -2166,6 +2206,9 @@ final class AppModel {
                 }
                 reconcileSelection()
                 installSelectedDashboardCatalog()
+                // An authoritative page is the archive projection's own list
+                // change, so the archived container re-reads from here.
+                archiveProjectionRevision &+= 1
                 scheduleCacheCheckpoint()
                 return CatalogTraversalResult(
                     outcome: .published,
@@ -2202,7 +2245,7 @@ final class AppModel {
             }
             let outcome = Self.catalogFailureOutcome(error)
             let failureDetails = Self.catalogFailureDetails(error)
-            let requestID = await client.sessionListRequestID()
+            let requestID = await client.sessionListRequestID(correlation: SessionListCorrelation.dashboardCatalog)
             let activeConnectionID = await client.activeConnectionID()
             if outcome == .transportFailure, activeConnectionID == key.connectionID {
                 return CatalogTraversalResult(
@@ -3586,7 +3629,10 @@ final class AppModel {
     /// mark and the reads it invalidates. The owning profile is selected by
     /// then, so `sessionCatalog` is that profile's catalog. A chat reads the
     /// state from its own Gateway snapshot instead, which the Gateway
-    /// republishes for this exact change.
+    /// republishes for this exact change. Both directions ask for an
+    /// authoritative list read: the row's membership and the Gateway-owned
+    /// count are the page's to publish, and the read this mutation just retired
+    /// cannot be the only one that was going to carry them.
     private func applyArchiveResponse(_ state: SessionArchiveState, sessionID: String) {
         if state.archived {
             sessionCatalog.markArchived(sessionID: sessionID)
@@ -3594,11 +3640,7 @@ final class AppModel {
         installSelectedDashboardCatalog()
         invalidateArchivedSessionsReads(profileID: lifecycle.selectedProfileID)
         scheduleCacheCheckpoint()
-        if !state.archived {
-            // Unarchive restores membership from an authoritative read rather
-            // than fabricating a row from the mutation response.
-            scheduleSessionListRefresh()
-        }
+        scheduleSessionListRefresh()
     }
 
     func compact(sessionID: String, instructions: String? = nil) async throws {
@@ -4492,11 +4534,12 @@ final class AppModel {
     private func apply(_ update: SessionSummaryUpdate) {
         sessionPresentation.observeAttentionSummary(update)
         switch sessionCatalog.apply(update) {
-        case .stale, .archived:
-            // An archived row is deliberately absent from the dashboard. The
-            // archived read or the next authoritative page restores it.
+        case .stale:
             return
         case .unknownSession:
+            // The ID has no row: an archived session, or one the Gateway has
+            // not listed yet. A summary never materializes a row, so the
+            // authoritative list read is the only way back to the dashboard.
             scheduleSessionListRefresh()
         case .updated:
             installSelectedDashboardCatalog()
@@ -4702,6 +4745,7 @@ extension AppModel: DashboardGatewayConnectionPoolDelegate {
         guard dashboardArchivedCountsByProfile[profileID] != count else { return }
         dashboardArchivedCountsByProfile[profileID] = count
         dashboardPresentationRevision &+= 1
+        archiveProjectionRevision &+= 1
     }
 
     func dashboardPoolDidUpdate(

@@ -344,8 +344,7 @@ final class ProviderAuthCoordinator {
         do {
             let response: RecentModelsResponse = try await client.request(
                 "model.recent",
-                RecentModelsParams(),
-                diagnosticPurpose: "recent-models"
+                RecentModelsParams()
             )
             guard profileGeneration == admittedProfileGeneration,
                   recentModelsLoadGeneration == admittedLoadGeneration else { return }
@@ -405,9 +404,7 @@ final class ProviderAuthCoordinator {
                         sessionId: target.sessionID,
                         cursor: cursor,
                         limit: ModelCatalogPolicy.requestPageSize
-                    ),
-                    diagnosticPurpose: "provider-model-catalog",
-                    diagnosticPage: accumulator.nextPageNumber
+                    )
                 )
                 guard admits(admission) else { return false }
                 try accumulator.append(response.models, hasNextPage: response.nextCursor != nil)

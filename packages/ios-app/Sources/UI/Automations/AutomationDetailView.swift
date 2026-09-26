@@ -398,7 +398,11 @@ struct AutomationDetailView: View {
             archivedTargetTitle = nil
             return
         }
-        let summary = try? await model.archivedSessionSummary(profileID: selection.profileID, sessionID: sessionID)
+        let summary = try? await model.archivedSessionSummary(
+            profileID: selection.profileID,
+            sessionID: sessionID,
+            presentationActive: { presentationActivity.allowsPresentationPublication && scenePhase == .active }
+        )
         guard !Task.isCancelled,
               generation == loadRevision,
               presentationGeneration == presentationReadGeneration,

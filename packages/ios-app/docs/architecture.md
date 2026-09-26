@@ -58,13 +58,18 @@ or profiles disabled in Connections settings, remain paired but are blocked from
 background admission. Their last-known bounded dashboard buckets remain available as
 stale projections; transport retirement is not deletion. Archived sessions follow the same
 ownership boundary: the Gateway's `session-archive.v1` contract owns archive membership, the
-dashboard's list projection excludes archived rows, `SessionCatalogCoordinator` keeps an
-archived ID hidden from live summaries until an authoritative page admits it again, and the
-archived container reads `archived: "only"` pages instead of deriving rows from a bucket. The
-count is summed per archive-capable profile and never fabricated as zero; each such read is a
-disposable presentation read fenced by the caller's managed activity and an exact per-profile
-latest-request generation, so a page superseded by a newer archive toggle or a surface exit is
-retired instead of published. Selecting a legacy profile once
+dashboard's list projection excludes archived rows, nothing on iOS keeps an archived ID hidden
+(a summary update can never materialize a row, so an archived row returns only from an
+authoritative page), and the archived container reads `archived: "only"` pages instead of
+deriving rows from a bucket. Every admitted row is qualified by the Gateway that owns it,
+because two servers can own equal session IDs. The count is summed per archive-capable profile
+and never fabricated as zero; each such read is a disposable presentation read fenced by the
+caller's managed activity and an exact per-profile latest-request generation — one fence per
+surface, so the container's pass and the automation form's bounded target lookup cannot retire
+each other — so a page superseded by a newer archive toggle or a surface exit is retired
+instead of published. The dashboard's own catalog read is the only `session.list` caller that
+declares a correlation label, so a catalog failure diagnostic names that request instead of
+whichever read ran last. Selecting a legacy profile once
 performs a verified Gateway handshake and persists its real physical-machine group before
 it can become a secondary connection. Connect and close invalidate older attempts across every suspension;
 late hello, frame, failure, liveness, completion, and close callbacks can only detach or publish
@@ -1372,7 +1377,7 @@ same 28-point status-icon anchor: 16 points of outer row inset plus 12 points of
 card content padding. Selectable app-owned cards have one full-card
 hit region and no decorative disclosure chevron. Dashboard session rows never
 retain a selected tint; their trailing swipe actions archive, rename, or request deletion of the exact
-swiped canonical session without changing navigation selection. Archive is the full-swipe action and is offered only for a Gateway that advertises `session-archive.v1`; it uses a neutral gray tint. Rename uses emerald, while both leading attention actions—Mark Read and Mark Unread—also use neutral gray. An archive applies only the authoritative response, so nothing is staged locally: the row leaves the dashboard when the Gateway's own list change lands. Dashboard and Manage Session rename flows share one native text-entry alert whose fixed trailing circle-x clears the value; UIKit owns horizontal text scrolling beneath that control, so long names cannot displace it. The delete swipe
+swiped canonical session without changing navigation selection. Archive is the full-swipe action and is offered only for a Gateway that advertises `session-archive.v1`; it uses a neutral gray tint. Rename uses emerald, while both leading attention actions—Mark Read and Mark Unread—also use neutral gray. An archive applies only the authoritative response, so nothing is staged locally: the row leaves the dashboard as soon as that response is accepted, and the Gateway's own list change is what returns it (or its count) from canonical truth. Dashboard and Manage Session rename flows share one native text-entry alert whose fixed trailing circle-x clears the value; UIKit owns horizontal text scrolling beneath that control, so long names cannot displace it. The delete swipe
 uses a red tint but no destructive button role, so UIKit keeps the row mounted
 until the Tron confirmation sheet completes the canonical mutation. The view does
 not stage deletion beyond confirmation or suppress rows locally. The confirmed
@@ -1389,16 +1394,24 @@ Cancelling can therefore close and reopen the flow without optimistic row remova
 or stale swipe state.
 One collapsed **Archived (N)** container row sits after every workspace group and
 stays hidden until a capable Gateway publishes a non-zero count, so a partial
-dashboard never claims a fabricated zero. Expanding it reads one `archived: "only"`
+dashboard never claims a fabricated zero. `ArchivedSessionsContainerSection` owns
+that visibility, the expansion, and the passes, so the same control flow runs in
+the dashboard and in the hosted journey. Expanding it reads one `archived: "only"`
 page per connected capable server under the dashboard's managed presentation
-activity and the model's exact per-profile latest-request fence; a collapse or a
-profile switch retires the pass so a late page cannot reappear, and a capable
-server that is unreachable or whose page read failed is named inline instead of
-listing rows that may be stale. Its rows show their workspace, open the session,
-and swipe to Unarchive (the full-swipe action) or Delete (the dashboard's own
-confirmation, which invalidates that server's in-flight archived reads). Rows and
-cursors are dropped for a server the container can no longer read, because a page
-read is their only authority. Dashboard discovery and refresh never select or open a transcript and global Settings never
+activity and the model's exact per-purpose latest-request fence; a collapse retires
+the pass (generation and task) so a late page cannot reappear, and a capable server
+that is unreachable or whose page read failed is named inline instead of listing
+rows that may be stale. A first page is the whole authority for its server's rows,
+while a continuation page extends them, so "Show more" cannot discard what the user
+already saw. The count reaching zero closes the container and stops its reads; a
+profile switch cancels and re-reads the pass rather than discarding the user's
+expansion, because every row is qualified by its own server. Its rows show their
+workspace, open the session, and swipe to Unarchive (the full-swipe action) or
+Delete (the dashboard's own confirmation). Rows and cursors are dropped for a
+server the container can no longer read, because a page read is their only
+authority, and the container re-reads only when the Gateway's archive projection
+changes — an authoritative dashboard page or a capable server's count — never on the
+dashboard's summary stream. Dashboard discovery and refresh never select or open a transcript and global Settings never
 infer project scope. Catalog loads are latest-generation-owned, and an asynchronous import may
 navigate only while its exact dashboard intent is still current. Reconnect restores only the
 still-mounted presentation; it never uses a dashboard row as a subscription fallback. The mounted chat route supplies an immutable

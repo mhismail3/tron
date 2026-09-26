@@ -34,7 +34,6 @@ protocol DashboardGatewayConnectionPoolDelegate: AnyObject {
 extension DashboardGatewayConnectionPoolDelegate {
     func dashboardPoolAutomationChanged(profileID: String) {}
     func dashboardPoolDevicesChanged(profileID: String) {}
-    func dashboardPoolDidUpdateArchivedCount(profileID: String, count: Int?) {}
 }
 
 /// Maintains lightweight dashboard catalog connections for non-focused servers.
@@ -445,10 +444,7 @@ final class DashboardGatewayConnectionPool {
             }
             guard var current = entries[profileID] else { return }
             switch current.catalog.apply(update) {
-            case .stale, .archived:
-                // An archived row belongs to the archived container, not this
-                // dashboard projection; its page read or the next authoritative
-                // page restores it.
+            case .stale:
                 return
             case .unknownSession:
                 entries[profileID] = current

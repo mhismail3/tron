@@ -1,9 +1,166 @@
 import SwiftUI
 
-/// The dashboard's archived container: one collapsed row after every workspace
-/// group, plus the pages its owner published when expanded. Archived sessions
-/// are hidden from the workspace groups and from the automation picker, so this
-/// section is their only dashboard surface.
+/// The dashboard's archived container. Visibility, the zero-count collapse, the
+/// profile-switch pass, and the page reads live here rather than in a caller's
+/// body, so the dashboard and the hosted journey drive the same control flow.
+/// Every read is a disposable presentation read: it is checked against the
+/// owner's exact latest-request generation and the caller's managed activity
+/// before it publishes, and a retired pass publishes nothing.
+struct ArchivedSessionsContainerSection: View {
+    /// The summed Gateway count across archive-capable servers. `nil` means no
+    /// capable server has published a count yet, which the dashboard never
+    /// presents as a fabricated zero.
+    let count: Int?
+    let sources: [ArchivedSessionsProfileSource]
+    /// The dashboard's focused profile. Reads are fenced per profile, so a
+    /// switch re-reads instead of collapsing the user's expansion.
+    let profileID: String?
+    /// Advances when the Gateway's archive projection changes: an authoritative
+    /// dashboard page, or a capable server's count. The container re-reads only
+    /// on these, so an agent run's summary stream cannot loop its page reads.
+    let projectionRevision: Int
+    let presentationActive: Bool
+    /// One page from one server, under the caller's own read fence.
+    let loadPage: (String, String?) async throws -> ArchivedSessionsLoadResult
+    let onOpen: (SessionSummary) -> Void
+    let onUnarchive: (SessionSummary) -> Void
+    let onDelete: (SessionSummary) -> Void
+
+    @State private var container = ArchivedSessionsContainerState()
+    @State private var loadTask: Task<Void, Never>?
+    /// Identifies the installed pass. A pass retires only the handle it owns,
+    /// so a cancel-and-reload installs a newer one this pass must not clear.
+    @State private var loadPass = 0
+
+    var body: some View {
+        Group {
+            if let count, count > 0 {
+                Section {
+                    if container.isExpanded {
+                        ArchivedSessionsSectionRows(
+                            sessions: container.rows,
+                            unavailableServerNames: unavailableServerNames,
+                            isLoading: container.isLoading,
+                            hasMore: container.hasMore,
+                            onOpen: onOpen,
+                            onUnarchive: onUnarchive,
+                            onDelete: onDelete,
+                            onShowMore: { startLoad(more: true) }
+                        )
+                    }
+                } header: {
+                    ArchivedSessionsSectionHeader(
+                        count: count,
+                        isExpanded: container.isExpanded,
+                        onToggle: toggle
+                    )
+                }
+            }
+        }
+        .onChange(of: count) { _, value in applyCount(value) }
+        .onChange(of: projectionRevision) { _, _ in reloadIfExpanded() }
+        .onChange(of: profileID) { _, _ in reloadForProfileSwitch() }
+        .onChange(of: presentationActive) { _, active in
+            // Leaving the dashboard retires the pass; returning to it re-reads an
+            // already-expanded container instead of presenting pre-exit pages.
+            if active {
+                reloadIfExpanded()
+            } else {
+                endLoad()
+            }
+        }
+    }
+
+    private var unavailableServerNames: [String] {
+        sources
+            .filter { container.unavailableProfileIDs.contains($0.profileID) }
+            .map(\.label)
+            .sorted()
+    }
+
+    /// A count of zero means no archived session exists on any capable server,
+    /// so the container closes instead of polling pages nobody can see.
+    private func applyCount(_ count: Int?) {
+        guard container.reconcileCount(count) else { return }
+        endLoad()
+    }
+
+    private func toggle() {
+        if container.isExpanded {
+            // Collapsing retires the pass: a page already in flight must never
+            // publish into a closed container.
+            endLoad()
+            withAnimation(TronDisclosureLayout.expansionAnimation) {
+                container.collapse()
+            }
+            return
+        }
+        withAnimation(TronDisclosureLayout.expansionAnimation) {
+            container.expand()
+        }
+        startLoad(more: false)
+    }
+
+    private func reloadIfExpanded() {
+        guard container.isExpanded, presentationActive else { return }
+        startLoad(more: false)
+    }
+
+    /// A profile switch keeps the user's expansion: every row is qualified by
+    /// the server it came from, and the pass is re-read against the new source
+    /// set instead of being thrown away.
+    private func reloadForProfileSwitch() {
+        endLoad()
+        reloadIfExpanded()
+    }
+
+    private func endLoad() {
+        loadTask?.cancel()
+        loadTask = nil
+    }
+
+    private func startLoad(more: Bool) {
+        guard presentationActive, loadTask == nil else { return }
+        container.reconcile(sources)
+        let requests = container.pageRequests(for: sources, more: more)
+        guard !requests.isEmpty else {
+            container.finishLoading()
+            return
+        }
+        let generation = container.currentGeneration
+        container.beginLoading()
+        loadPass &+= 1
+        let pass = loadPass
+        loadTask = Task { @MainActor in
+            defer {
+                if loadPass == pass {
+                    loadTask = nil
+                    if container.isCurrent(generation) { container.finishLoading() }
+                }
+            }
+            for request in requests {
+                guard container.isCurrent(generation) else { return }
+                do {
+                    let result = try await loadPage(request.profileID, request.cursor)
+                    guard container.apply(
+                        result,
+                        profileID: request.profileID,
+                        generation: generation,
+                        requestedCursor: request.cursor
+                    ) else { continue }
+                } catch is CancellationError {
+                    return
+                } catch {
+                    guard container.isCurrent(generation) else { return }
+                    container.markUnavailable(request.profileID)
+                }
+            }
+        }
+    }
+}
+
+/// The archived container's one disclosure header: the row that shows how many
+/// sessions are archived across every capable server and opens the container.
 struct ArchivedSessionsSectionHeader: View {
     let count: Int
     let isExpanded: Bool

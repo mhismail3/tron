@@ -182,9 +182,7 @@ enum NotificationInboxGatewayClient {
         let page: GatewayNotificationInboxPage = try await client.request(
             "notification.inbox.list",
             ListParams(cursor: cursor, limit: NotificationInboxAdmissionPolicy.maximumPageCount),
-            expectedEpochID: connectionID,
-            diagnosticPurpose: "notification-page",
-            diagnosticPage: cursor == nil ? 1 : 2
+            expectedEpochID: connectionID
         )
         #if HOSTED_TEST
         await hostedAfterPage?()
