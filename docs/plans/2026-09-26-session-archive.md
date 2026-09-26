@@ -99,7 +99,8 @@ Current state, inspected 2026-09-26:
 | F-2 | Done | The same self-work-entry rejection now also measured on `session.bash`, `session.navigate` and `session.setTools`; audit every mutation RPC whose slot method consults session work ownership and decide the fix (thread the request's work token, as `session.setModel` already does) | none | tron-coordinator, 2026-09-26 |
 | F-3 | Done | Coordinator review of I-3: chat archive state comes from a bounded iOS observation list (parallel state). Make the Gateway `SessionSnapshot` carry `archivedAt` (republished on change) and delete the observation list | I-3 | tron-coordinator, 2026-09-26 |
 | F-4 | Done | I-2's hosted UI journey never passed (app never idled; simulator contention). Make it pass on a healthy simulator, fixing the fixture if it is the cause, and keep its screenshots | I-2 | tron-coordinator, 2026-09-26 |
-| V-1 | Ready | Cross-module checkpoint, user-performed Gateway rollout, and eyes-on device review; close the plan | G-2, I-2, I-3, F-3, F-4 | |
+| F-5 | Claimed | `session-archive.integration.test.ts` "rejects a prompt retryably when archive state cannot be cleared" failed once in four full-suite runs (passes alone and under targeted load); reproduce, find the root cause, fix | G-2 | tron-coordinator, 2026-09-26 |
+| V-1 | Ready | Cross-module checkpoint, user-performed Gateway rollout, and eyes-on device review; close the plan | G-2, I-2, I-3, F-3, F-4, F-5 | |
 
 ## Task details
 
