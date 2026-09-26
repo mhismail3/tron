@@ -96,6 +96,7 @@ breaks context-menu previews.
 | CT-8 | Done | Stabilize `hostedOpeningRevealIsMonotonic`: find why the opening reveal's sampled distance is non-monotonic in about one run in three and fix the cause (product or oracle), with evidence from repeated runs | CT-1 | chat scroll investigation session, 2026-09-26 |
 | CT-9 | Ready | `ChatViewScrollHarnessTests.displacedRetainedResume` exceeded its 15-second watchdog once in six full-suite runs while the host was contended (suite wall 88.7 s against 74 s); decide whether the fixture's own work or the watchdog budget owns it, as the plan's context notes for the heavy hosted fixtures | CT-1 | |
 | CT-2 | Done | Baseline: port the hosted reproduction fixtures from `fix/chat-blank-evidence` to `main` as measurements, not pass/fail gates. Record blank boundaries, estimate-to-truth ratio after keyboard cycles, tail displacements, repair commands and frame cost on the worst shapes (tall reply at the tail, many tall replies, 180+ rows), three runs each | CT-1 | chat scroll investigation session, 2026-09-26 |
+| CT-10 | Ready | Complete the baseline CT-2 trimmed: frame cost (chat performance signposts and display-link frame intervals) during streaming, sends and scrolling on `main`, the tall-reply-at-the-tail and 180+ row shapes, and why only the first of three submissions in the keyboard-cycles shape materialized a tail (`materialize:1`). CT-5 may not ship until CT-10's frame cost exists to compare against | CT-1 | |
 | CT-3 | Ready | Prototype A on a throwaway branch: segment long assistant content at Markdown block boundaries into bounded physical rows, with pinning from visible row identity; measure against CT-2. The prototype does not need product polish, but it must show whether the blank and the estimate swing disappear | CT-2 | |
 | CT-4 | Needs approval | The user chooses A or B from CT-3's numbers and a device build of the prototype | CT-3 | |
 | CT-5 | Needs scoping | Implement the chosen option in production. For A: segment identity, streaming into the last segment, whole-message copy/menus/accessibility, one entrance per message, segment chrome; pinned state from visibility. Scope into rows once CT-4 decides | CT-4 | |
@@ -112,8 +113,8 @@ breaks context-menu previews.
   lands in the same display window, over 140 rows whose last eight are ~1,300 pt
   tall. `ChatViewScrollHarnessTests.repeatedKeyboardAndSendCyclesKeepRealizedRowsOnScreen`
   drives three keyboard up/down cycles (20/20/60 display boundaries after a
-  40-boundary settle), each carrying a send whose tail materialization and
-  dismissal land in one display window, over a history with one such row beside
+  40-boundary settle), each submitting a prompt before the keyboard dismisses,
+  over a history with one such row beside
   the tail. Each prints one `CT2-METRICS` line per invocation and asserts only
   that the scenario ran (every sampled boundary was taken, the single-send
   shape's tall row was realized and measured >1,000 pt, and the sends
@@ -146,8 +147,7 @@ breaks context-menu previews.
     phases — one or two 20-boundary phases and one 60-boundary dismissal phase,
     longest consecutive run 60 — the same shape the branch measured at 240-280 of
     600 over eight cycles. The estimate is the swing the plan's context
-    describes: the published content estimate reaches 180,064 pt against a
-    ~9,000 pt history, which is the 140-row count times the tall row's measured
+    describes: the published content estimate reaches 180,064 pt, which is the 140-row count times the tall row's measured
     1,286 pt — a re-derivation that measured only the tall row.
   - One clean-build run of the wider shape set was taken before the user's time
     box trimmed it, single run each: tall reply at the tail 0/72 blank boundaries
@@ -367,3 +367,11 @@ breaks context-menu previews.
 - Tasks added: CT-1 to CT-8 (CT-8 added at approval from the `main` baseline runs).
 - Kept on purpose: the past-end repair and trace changes already on `main` stay until CT-6 shows they are unnecessary.
 - For the next agent: the paused chat motion system plan touches the same rows and animations; sequence it after CT-5. The simplification program's IOS-CHAT scoping should account for CT-5 and CT-6.
+
+### CT-2 correction · Done · 2026-09-26 · chat scroll investigation session
+
+- Result: corrects the CT-2 entry above after review. The two measurement fixtures now run only in the `ui-validation` tier (`UnitTests.xctestplan` skips them), so they add no time or failure risk to the default unit gate. The keyboard-cycles shape submits a prompt in each of its three cycles, but the recorded runs show one tail materialization (`materialize:1`); the entry's claim that each cycle carries a send is withdrawn until CT-10 explains it. The 180,064 pt estimate is compared with no measured history height; the "~9,000 pt history" figure belonged to a different fixture.
+- Evidence: review of `ct-8-2-baseline` (P1 items 1-3, P2 item 5).
+- Changes: `packages/ios-app/TestPlans/UnitTests.xctestplan`, `packages/ios-app/docs/development.md`, the shape comment in `ChatViewScrollHarnessTests`, this plan.
+- Tasks added: CT-10.
+- For the next agent: the review's remaining P2 items (probe trace and diagnostic ring bounds can undercount `reDerivations` and `tailDisplacements` without saying so; `maxEstimateRatio` is a swing, not a truth ratio) belong to CT-10.

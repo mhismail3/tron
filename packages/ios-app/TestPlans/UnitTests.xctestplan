@@ -45,6 +45,8 @@
         "SessionSheetPresentationTests/testPendingPromptCopyMenuUsesNativeInteractionAcrossCardStates()",
         "SessionSheetPresentationTests/testPromptTemplateRowCollapsesExpandedContentWithoutChangingInput()",
         "SessionSheetPresentationTests/testTechnicalJSONRetainsReadingPositionAcrossActivityChanges()",
+        "ChatViewScrollHarnessTests/ct2ManyTallRepliesMetrics()",
+        "ChatViewScrollHarnessTests/repeatedKeyboardAndSendCyclesKeepRealizedRowsOnScreen()",
         "ChatViewScrollHarnessTests/pastedImagesUsePhotoAttachmentFlow()",
         "ChatViewScrollHarnessTests/longAssistantIntrinsicGeometry()",
         "ChatViewScrollHarnessTests/pinnedKeyboardViewportChangesPreserveTail()",

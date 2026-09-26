@@ -902,8 +902,9 @@ struct ChatViewScrollHarnessTests {
     }
 
     // The second shape drives the reader's actual journey instead of one send:
-    // repeated keyboard up/down cycles, each carrying a send whose tail
-    // materialization and keyboard dismissal land in one display window. The
+    // repeated keyboard up/down cycles, each submitting a prompt before the
+    // keyboard dismisses. The recorded runs show one tail materialization, so
+    // only the first submission is known to reach a send (plan CT-10). The
     // single-send shape settles against the same estimate; this one measures
     // whether the pinned viewport is ever left with no realized row on screen
     // once each transition has landed.

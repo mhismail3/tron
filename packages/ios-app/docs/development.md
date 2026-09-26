@@ -484,7 +484,8 @@ scripts/tron-ios-test run
 The hosted harness carries the plan's CT-2 baseline measurement fixtures,
 `ChatViewScrollHarnessTests.ct2ManyTallRepliesMetrics` and
 `ChatViewScrollHarnessTests.repeatedKeyboardAndSendCyclesKeepRealizedRowsOnScreen`.
-They are measurements, not gates: each drives one shape that stresses the lazy
+They are measurements, not gates, so `UnitTests.xctestplan` skips them and they
+run only in the `ui-validation` tier: each drives one shape that stresses the lazy
 content estimate, prints one `CT2-METRICS` line per journey and asserts only that
 the scenario ran. A line reports the sampled display boundaries whose native
 viewport held no mounted transcript row (`blankBoundaries` / `blankAfterSettle`,
@@ -495,7 +496,7 @@ and the settled native tail error. Collect repeated runs by invoking the command
 again; each run is named by its run directory.
 
 ```bash
-scripts/tron-ios-test run \
+TRON_IOS_TEST_TIER=ui-validation scripts/tron-ios-test run \
   --only-testing 'TronMobileTests/ChatViewScrollHarnessTests/ct2ManyTallRepliesMetrics()' \
   --only-testing 'TronMobileTests/ChatViewScrollHarnessTests/repeatedKeyboardAndSendCyclesKeepRealizedRowsOnScreen()'
 ```
