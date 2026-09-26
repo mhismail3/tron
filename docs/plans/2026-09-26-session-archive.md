@@ -2,7 +2,7 @@
 
 - **Started:** 2026-09-26
 - **Status:** Active
-- **Last updated:** 2026-09-26, R-1 and R-2 merged
+- **Last updated:** 2026-09-26, R-3
 - **Goal:** A user can archive an idle session so it leaves the dashboard without being deleted, find it again in one collapsed Archived container or in search, and have it return automatically when it runs again.
 
 ## Goal and constraints
@@ -103,7 +103,7 @@ Current state, inspected 2026-09-26:
 | F-6 | Done | Same class as F-5, unproven: `RuntimeRegistry` line 1216 also writes `gateway/model-recents.json` fire-and-forget (`void this.noteModelUsed(...)` → `await this.recentModels.record(...)`), so its durable write can equally outlive `dispose()`. Decide whether `RecentModelStore` gets the same disposal drain | F-5 | tron-coordinator, 2026-09-26 (in R-1) |
 | R-1 | Done | Gateway fixes from the post-implementation review (see "Review findings"), including F-6 | G-2, F-5 | tron-coordinator, 2026-09-26 |
 | R-2 | Done | iOS fixes from the post-implementation review (see "Review findings") | I-2, I-3, F-3 | tron-coordinator, 2026-09-26 |
-| R-3 | Claimed | Gateway second-pass review fixes: stale `archived: true` response after the post-commit recheck, a queued backstop clear deleting a re-archive, migrate rekey ordering, prune retained set read outside the lane, doc drift, refused-compaction test and root-proof write-failure test | R-1 | tron-coordinator, 2026-09-26 |
+| R-3 | Done | Gateway second-pass review fixes: stale `archived: true` response after the post-commit recheck, a queued backstop clear deleting a re-archive, migrate rekey ordering, prune retained set read outside the lane, doc drift, refused-compaction test and root-proof write-failure test | R-1 | tron-coordinator, 2026-09-26 |
 | R-4 | Claimed | iOS second-pass review fixes: a reload dropped while a load runs; background Mac container refreshes only on count change; "Show more" after cursor expiry; dead `GatewayClient` correlation field and overloads; automation form losing an archived target's name; doc drift; `AutomationFormView` formatting | R-2 | tron-coordinator, 2026-09-26 |
 | V-1 | Blocked | Cross-module checkpoint, user-performed Gateway rollout, and eyes-on device review; close the plan | G-2, I-2, I-3, F-3, F-4, F-5, F-6, R-1, R-2, R-3, R-4 | tron-coordinator, 2026-09-26 |
 
@@ -1522,3 +1522,78 @@ Gateway.
   user-performed Gateway rollout, and the eyes-on device review. V-1's eyes-on
   list should now include expanding the container on a filtered dashboard and
   archiving a session whose row came from a second paired Mac.
+### R-3 · Done · 2026-09-26 · tron-coordinator
+
+- Result: the six second-pass Gateway findings are closed.
+  - **1 (stale response):** `setArchived` now answers with the effective
+    projection, so a session its own post-commit recheck restored returns
+    `{ archived: false }`, and the command receipt replays that answer.
+  - **2 (queued clear deleting a re-archive):** `clearArchivedRecord` retires
+    the pending restoration and no-ops when the restoration was already
+    retired while it waited on the lane, so a clear queued behind a re-archive
+    commit can no longer delete the record that commit wrote.
+  - **3 (migrate rekey order):** the rebind admission now covers `migrate` whenever
+    the identity changes, so a replacement that already carries attention or
+    archive state fails before attention moves. An in-place rebind skips both
+    checks because it owns its records.
+  - **4 (startup prune):** the archive prune re-reads live ownership inside the
+    attention-lane closure, so a session created and archived while the
+    attention prune above was awaiting keeps its record.
+  - **5 (docs):** the observability row now says a failing backstop clear is
+    reported once per retry, the README says the clear retries on the next
+    published summary, and the sentence `session-search.md` had accidentally
+    lowercased is repaired.
+  - **6 (tests):** a new case drives a refused manual compaction while a real
+    export holds file production, and another drives a turn that starts during
+    the durable archive write. The store write-failure case now replaces the
+    directory with a regular file, which fails for any uid instead of relying on
+    a mode bit that root ignores.
+- Evidence (verified):
+  - `npm run build` clean.
+  - `npx vitest run`: 187 files, 1961 of 1961 pass.
+  - `npx vitest run src/transport/session-archive.integration.test.ts`: 32/32 in
+    ~7.5 s, which is the 29 R-1 cases plus the three added here. Retained report: `session-archive.integration.json` under
+    `packages/gateway/test-results/`.
+  - `npx vitest run src/sessions/runtime-registry.integration.test.ts
+    src/providers/recent-models.test.ts src/sessions/recent-model-usage.integration.test.ts`:
+    244/244 in 45.0 s. Focused stores, pagination, search and idle-admission
+    files: 46/46.
+  - Negative controls, each measured and reverted:
+    - response returned the written record instead of the effective projection →
+      the new "run starts during the archive write" case fails
+      (`expected { archived: true, ... } to deeply equal { archived: false }`);
+    - `session.compact` cleared before `assertIdleForManualCompaction` → the new
+      refused-compaction case fails (`expected undefined to be defined`);
+    - the archive prune reused the pre-lane retained set → the new recovery case
+      fails (`expected undefined to be defined`).
+- Changes: this commit (`packages/gateway/src/sessions/runtime-registry.ts`,
+  `packages/gateway/src/sessions/session-archive-store.test.ts`,
+  `packages/gateway/src/transport/session-archive.integration.test.ts`,
+  `packages/gateway/README.md`, `packages/gateway/docs/observability.md`,
+  `packages/gateway/docs/session-search.md`).
+- Tasks added: none.
+- Kept on purpose: the refused-compaction case releases the archive store write
+  through a barrier around the blob store's real file-production admission, so
+  the export is a real export and `activeExports` is set by production code.
+  The new recovery case gates the attention store's own `prune`, the same
+  injection style the R-1 cases use for `archive.remove`.
+- Deviations:
+  - Finding 2 has no case. The only publication that can queue a clear behind a
+    re-archive commit also reports work, and the post-commit recheck then removes
+    the record for the correct reason, so the constructible interleavings end the
+    same way with or without the guard. The fix is a traced guard, not a measured
+    one; it only changes behavior for a stale clear, whose owning path has always
+    already removed or retired that record.
+  - Finding 3 also has no case: driving a migrate rebind onto an occupied
+    replacement identity needs a Pi-side in-place identity change the fixture
+    cannot produce. Both stores' own `rekey` refusal is already covered by
+    `session-archive-store.test.ts` and the attention store's tests.
+  - The prune fix covers live ownership only. A session with no slot that is
+    archived during the attention prune, and whose canonical file appeared after
+    the structural cut that produced the retained set, can still be pruned. That
+    is the recovery window R-1 accepted; closing it needs a second structural cut
+    rather than a wider retained set.
+- For the next agent: R-1's finding 3 is now measured, not just reasoned: the
+  new "run starts during the archive write" case fails if the post-commit
+  recheck is removed. R-4 (iOS) is a separate branch, and V-1 still needs the
+  user's Gateway rollout and the eyes-on device review.
