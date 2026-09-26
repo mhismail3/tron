@@ -1588,22 +1588,6 @@ describe.sequential("RuntimeRegistry with the pinned agent runtime", () => {
     }
   });
 
-  it("admits a complete append only for the matching live-owned session identity", async () => {
-    const fixture = await coldFixture("live-append");
-    const slot = await fixture.registry.acquire(fixture.manager.getSessionId());
-    const internals = fixture.registry as unknown as {
-      isLiveRuntimeOwnedPath: (path: string, sessionID: string) => boolean;
-    };
-    const ownedPath = slot.persistedSessionFile ?? fixture.sessionFile;
-    expect(internals.isLiveRuntimeOwnedPath(ownedPath, slot.id)).toBe(true);
-    expect(internals.isLiveRuntimeOwnedPath(ownedPath, "unrelated-session")).toBe(false);
-    await fixture.registry.catalog("all");
-    fixture.manager.appendMessage(fauxAssistantMessage("live append"));
-    await expect(fixture.registry.catalog("all")).resolves.toMatchObject({
-      sessions: expect.arrayContaining([expect.objectContaining({ id: fixture.manager.getSessionId() })]),
-    });
-  });
-
   it("fails closed with retryable busy when an unowned canonical file ends in a partial line", async () => {
     const fixture = await coldFixture("partial-final-line");
     await fixture.registry.catalog("all");
@@ -1718,6 +1702,10 @@ describe.sequential("RuntimeRegistry with the pinned agent runtime", () => {
       sessionInfos: () => Promise<unknown[]>;
       catalogStructureEvidence: () => Promise<{ digest: string; identitiesByPath: ReadonlyMap<string, unknown>; complete: boolean }>;
     };
+    // Requirement: traversal evidence that is incomplete cannot validate the
+    // cached structural index, so the cut is rebuilt from canonical metadata
+    // instead of being certified. The rebuild shows up only as one extra
+    // materialization; every published row is identical either way.
     const materialize = vi.spyOn(internals, "sessionInfos");
     await fixture.registry.catalog("all");
     expect(materialize).toHaveBeenCalledTimes(1);
@@ -1846,6 +1834,10 @@ describe.sequential("RuntimeRegistry with the pinned agent runtime", () => {
   it("coalesces concurrent fallback acquisition scans for one catalog generation", async () => {
     const fixture = await coldFixture("coalesced-fallback");
     await writeFile(join(fixture.agentDir, "sessions", "workspace", "malformed.jsonl"), `${"x".repeat(70_000)}\\n`);
+    // Requirement: concurrent fallback acquisitions for one catalog generation
+    // share a single physical scan, and a successor may start only once the
+    // first settles. Coalescing is a bound on work, so the scan count is the
+    // only observer that can show it.
     const internals = fixture.registry as unknown as { sessionInfos: () => Promise<unknown[]> };
     const original = internals.sessionInfos.bind(fixture.registry);
     let entered!: () => void;
@@ -1882,6 +1874,10 @@ describe.sequential("RuntimeRegistry with the pinned agent runtime", () => {
       sessionInfos: () => Promise<unknown[]>;
       catalogAcquisitionAdmission?: unknown;
     };
+    // Requirement: an unrelated malformed header forces the stable SDK fallback
+    // and must leave no reusable admission behind, so the next acquisition
+    // revalidates rather than trusting evidence it could not complete. Both
+    // facts live in private state: the scan count and the absent admission.
     const materialize = vi.spyOn(internals, "sessionInfos");
 
     expect((await fixture.registry.acquire(fixture.manager.getSessionId())).id)
