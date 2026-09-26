@@ -236,6 +236,18 @@ actor ScriptedGatewaySocket: GatewaySocketConnection {
         try await wait(until: count, observedCount: sent.count, kind: .sent)
     }
 
+    /// Bounded `waitUntilSent` for the case where the awaited frame is exactly
+    /// what a regression drops: an unbounded wait turns that into a watchdog
+    /// expiry instead of a named failure.
+    func waitUntilSent(count: Int, within timeout: Duration) async -> Bool {
+        let deadline = ContinuousClock.now + timeout
+        while ContinuousClock.now < deadline {
+            if sent.count >= count { return true }
+            try? await Task.sleep(for: .milliseconds(1))
+        }
+        return sent.count >= count
+    }
+
     func waitUntilSendInvoked(count: Int) async throws {
         try await wait(until: count, observedCount: sendInvocations, kind: .sendInvocation)
     }

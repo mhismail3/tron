@@ -435,7 +435,6 @@ final class AppModel {
     private var catalogRefreshKey: SessionCatalogLoadKey?
     private var catalogRefreshRequestGeneration = 0
     private var catalogInvalidationGeneration = 0
-    private var catalogSatisfiedGeneration = 0
     private var catalogRefreshRetryAttempt = 0
     private var catalogRefreshFailedAttempts = 0
     private var catalogFailureOwner: SessionCatalogLoadKey?
@@ -2071,12 +2070,21 @@ final class AppModel {
                     retryAttempt: self.catalogRefreshFailedAttempts
                 )
                 let needsFollowUp = self.catalogDeferredFollowUpKey == key
-                let remainsDirty = self.catalogSatisfiedGeneration < self.catalogInvalidationGeneration
                 self.catalogDeferredFollowUpKey = nil
                 self.catalogRefreshTask = nil
                 self.catalogRefreshKey = nil
                 if self.currentCatalogLoadKey() == key {
-                    if needsFollowUp && result.outcome == .published {
+                    // A deferred follow-up means a newer invalidation arrived
+                    // while the final traversal was still reading — an archive,
+                    // rename, delete, or any other list change. That traversal
+                    // can therefore have been retired by the very change it was
+                    // meant to publish, so its page never became the catalog.
+                    // Honor the follow-up whenever the lease ended without a
+                    // genuine failure; after a failure the retry path below owns
+                    // the next attempt. The flag is only set by an invalidation
+                    // that arrived during that final traversal, so this bounded
+                    // catch-up cannot spin.
+                    if needsFollowUp && !result.genuineFailure {
                         _ = self.startCatalogRefresh(key: key, trigger: "invalidation-follow-up")
                     } else {
                         if result.outcome == .published {
@@ -2164,7 +2172,6 @@ final class AppModel {
                 return CatalogRefreshLeaseResult(outcome: .retained, genuineFailure: false, durationMilliseconds: 0)
             }
             if result.outcome == .published {
-                catalogSatisfiedGeneration = max(catalogSatisfiedGeneration, observedInvalidation)
                 catalogRefreshRetryAttempt = 0
                 catalogRefreshFailedAttempts = 0
             }

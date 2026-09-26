@@ -140,7 +140,8 @@ live-summary overlay, cached/stale/live provenance, and exact profile/lifecycle/
 remain scoped to each source. A session created by a workspace Automation carries only the Gateway-derived Automation definition identity in its shallow summary; the historical row renders the adaptive Automation clock immediately left of elapsed time, parallel to the fork marker, without an Automation catalog lookup or local run journal. Equivalent
 foreground, reconnect, unknown-summary, and structural invalidations share one
 catalog traversal; invalidation during a traversal sets one dirty bit and receives at most one immediate
-follow-up before handing newest truth to a new bounded lease. iOS requests user scope in 500-row pages,
+follow-up — including when that traversal was itself retired by the newer invalidation, so its page
+could never publish — before handing newest truth to a new bounded lease. iOS requests user scope in 500-row pages,
 rejects more than 50 pages/25,000 identities, duplicate IDs, cursor cycles, and mixed revisions, and
 publishes only a complete catalog. A mixed revision from an older Gateway or an expired continuation lease restarts silently once from a nil
 cursor; it is expected optimistic invalidation, not the former actionable “Sessions changed while loading

@@ -203,6 +203,80 @@ struct AppModelCatalogSyncTests {
         }
     }
 
+    @Test("an invalidation during the final traversal is never lost")
+    func invalidationDuringFinalTraversalStillPublishes() async throws {
+        try await withHarness(capabilities: ["sessions.v1", "session-archive.v1"]) { harness in
+            try Self.storePairedProfile(harness.model)
+            let model = harness.model
+            let loading = Task { await model.refreshSessions() }
+
+            // The lease's first traversal reads while a list change lands, so
+            // the lease owes a second traversal for the newer revision.
+            let firstTraversal = try await nextRequest(harness.socket, method: "session.list", from: 1)
+            await model.handle(GatewayEvent(
+                type: "event",
+                topic: "session.listChanged",
+                sessionId: nil,
+                payload: .object(["listRevision": .number(2)])
+            ))
+            await harness.socket.enqueue(response(
+                id: firstTraversal.request.id,
+                sessions: [summary(id: "visible", revision: 1)],
+                listRevision: 1,
+                archivedCount: 0
+            ))
+
+            // The second (final) traversal reads. An archive lands while it is
+            // in flight: its response invalidates in-flight loads and marks a
+            // newer archive revision, which is the general shape of every
+            // invalidation during a traversal — the same page cannot publish.
+            let finalTraversal = try await nextRequest(
+                harness.socket, method: "session.list", from: firstTraversal.index + 1
+            )
+            let archiving = Task {
+                try await model.setSessionArchived(sessionID: "gone", profileID: "profile", archived: true)
+            }
+            let archive = try await nextRequest(
+                harness.socket, method: "session.archive.set", from: finalTraversal.index + 1
+            )
+            await harness.socket.enqueue(Self.archiveResponse(id: archive.request.id, archivedAt: "2026-01-02T00:00:00Z"))
+            try await archiving.value
+            await harness.socket.enqueue(response(
+                id: finalTraversal.request.id,
+                sessions: [summary(id: "visible", revision: 1)],
+                listRevision: 3,
+                archivedCount: 1
+            ))
+            #expect(await loading.value == .retained)
+
+            // That retired page was the only read that could carry the count,
+            // so the lease must honor the follow-up it deferred. A dropped
+            // follow-up leaves the dashboard on stale truth until some
+            // unrelated list change.
+            let followUpIndex = archive.index + 1
+            let followUpArrived = await harness.socket.waitUntilSent(count: followUpIndex + 1, within: .seconds(2))
+            try #require(
+                followUpArrived,
+                "the deferred catalog follow-up was dropped after its final traversal was retired"
+            )
+            let followUp = try await request(harness.socket, index: followUpIndex)
+            #expect(followUp.method == "session.list")
+            await harness.socket.enqueue(response(
+                id: followUp.id,
+                sessions: [summary(id: "visible", revision: 1)],
+                listRevision: 3,
+                archivedCount: 1
+            ))
+            while model.archivedSessionCount != 1 {
+                try Task.checkCancellation()
+                await Task.yield()
+            }
+            #expect(model.archivedSessionCount == 1)
+            #expect(model.sessions.map(\.id) == ["visible"])
+            #expect(model.visibleNotices.isEmpty)
+        }
+    }
+
     @Test("mixed list revisions restart once without partial publication or a user notice")
     func mixedRevisionRetriesSilently() async throws {
         try await withHarness { harness in
@@ -1039,6 +1113,29 @@ struct AppModelCatalogSyncTests {
         if let archivedCount { result["archivedCount"] = archivedCount }
         return try! JSONSerialization.data(withJSONObject: [
             "type": "response", "id": id, "ok": true, "result": result,
+        ])
+    }
+
+    /// The next request of `method` at or after `startIndex`. Catalog refreshes
+    /// and mutations share one transport, so a traversal is identified by its
+    /// method rather than by a fixed frame index.
+    private func nextRequest(
+        _ socket: ScriptedGatewaySocket,
+        method: String,
+        from startIndex: Int
+    ) async throws -> (request: Request, index: Int) {
+        var index = startIndex
+        while true {
+            let request = try await request(socket, index: index)
+            if request.method == method { return (request, index) }
+            index += 1
+        }
+    }
+
+    private static func archiveResponse(id: String, archivedAt: String) -> Data {
+        try! JSONSerialization.data(withJSONObject: [
+            "type": "response", "id": id, "ok": true,
+            "result": ["archived": true, "archivedAt": archivedAt],
         ])
     }
 

@@ -681,7 +681,17 @@ final class DashboardGatewayConnectionPool {
                   current.refreshRequestGeneration == requestGeneration else { return }
             current.refreshTask = nil
             self.entries[profileID] = current
-            if result.needsImmediateFollowUp && result.outcome == .published {
+            if result.needsImmediateFollowUp
+                && (result.outcome == .published || result.outcome == .retained) {
+                // A newer invalidation arrived while the final traversal was
+                // reading, so that traversal can have been retired by the very
+                // change it was meant to publish: its page cannot be this
+                // profile's catalog. `.retained` covers that retirement as well
+                // as a page this client rejected, and both need the catch-up
+                // this lease owed — the fresh lease owns the next attempt and
+                // its own failure budget. The flag requires a fresh invalidation
+                // each time, so this cannot spin. `.retryRead` and
+                // `.transportFailure` keep their own backoff instead.
                 self.startRefreshLease(profileID: profileID, generation: generation, delay: .zero)
             } else {
                 if result.outcome == .published {

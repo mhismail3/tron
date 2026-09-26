@@ -108,7 +108,8 @@ Current state, inspected 2026-09-26:
 | R-5 | Done | Third review regression from R-3: the rekey `assertAbsent` guard now runs for `preserve`, so an extension `switchSession` to a session that already has attention or archive state is refused and rolled back. Guard on `disposition !== "preserve"` and cover a real `switchSession` | R-3 | tron-coordinator, 2026-09-26 |
 | F-7 | Done | Moved out of this plan (user decision, 2026-09-26): pre-existing `switchSession` receipt split, not archive-owned; see `2026-09-26-switch-session-receipts.md` (Proposed) | R-5 | tron-coordinator, 2026-09-26 |
 | C-1 | Done | User change: no full-swipe archive or unarchive. Both are a revealed swipe action, then a tap, then the same confirmation sheet as Delete | R-4 | tron-coordinator, 2026-09-26 |
-| V-1 | Blocked | Cross-module checkpoint, user-performed Gateway rollout, and eyes-on device review; close the plan | G-2, I-2, I-3, F-3, F-4, F-5, F-6, R-1, R-2, R-3, R-4, R-5, C-1 | tron-coordinator, 2026-09-26 |
+| C-2 | Done | Archived count stuck after rapid archives: deferred catalog follow-up dropped when the final traversal was retired | C-1 | tron-coordinator, 2026-09-26 |
+| V-1 | Blocked | Cross-module checkpoint, user-performed Gateway rollout, and eyes-on device review; close the plan | G-2, I-2, I-3, F-3, F-4, F-5, F-6, R-1, R-2, R-3, R-4, R-5, C-1, C-2 | tron-coordinator, 2026-09-26 |
 
 ## Task details
 
@@ -1795,3 +1796,59 @@ Gateway.
 - Eyes-on list for V-1: replace "full-swipe Archive" with "swipe, tap Archive,
   confirm (and the same for Unarchive in the Archived section)".
 
+### C-2 · Done · 2026-09-26 · tron-coordinator
+
+- Result: the user reported that archiving a few sessions quickly left the
+  Archived (N) section missing until an unrelated later catalog refresh. The
+  cause is in the shared catalog refresh owner, not in archive code: the lease
+  runs at most two traversals, and when a newer invalidation arrives during the
+  second (final) traversal it records that one follow-up is owed. Completion
+  only honored that record when the final traversal had *published*, so a final
+  traversal that the newer invalidation retired — its page could never become
+  the catalog — dropped the catch-up entirely. Anything the page alone carried,
+  such as the Gateway-owned `archivedCount`, then stayed stale until some later
+  list change. Rapid archives reproduce it whenever the archive response lands
+  during the final traversal, which is easy at the ~2 s list latency the user
+  measured.
+  - The fix is general, per the user's steer: the follow-up now runs whenever
+    the lease ended without a genuine failure. Archive is only one trigger;
+    delete, rename, a list change, or a reconnect invalidating the final
+    traversal take the same path. It stays event-bounded because the record is
+    set only by an invalidation that arrived during that final traversal, so it
+    cannot spin; plain revision churn with no new invalidation still schedules
+    nothing.
+  - The same dropped follow-up existed in the background-profile path
+    (`DashboardGatewayConnectionPool`), where a retired final traversal left a
+    paired Mac's rows and archived count stale and consumed its unavailable
+    budget. It now follows up identically.
+  - The dead `remainsDirty` computation and the `catalogSatisfiedGeneration`
+    field it was the only reader of are deleted: the deferred-follow-up record
+    is the live form of that signal.
+- Evidence (verified, failing first):
+  - Pre-fix, `TronMobileTests/AppModelCatalogSyncTests` failed:
+    `Expectation failed: followUpArrived` /
+    "the deferred catalog follow-up was dropped after its final traversal was
+    retired" (1 issue, 2.0 s).
+  - Pre-fix, `TronMobileTests/DashboardStateOwnerTests` failed with the same
+    shape for the background path: "the deferred catalog follow-up was dropped
+    after its final traversal was invalidated" (1 issue, 2.0 s).
+  - Post-fix: `AppModelCatalogSyncTests` 30/30; `DashboardStateOwnerTests`
+    +`SessionMutationServiceTests` 87/87; both repeated 3 times (78 tests each)
+    with no failures.
+  - Full iOS unit target: 1705 tests in 137 suites passed (183 s), up from 1703
+    with the two new tests.
+  - Negative control for the general rule: the new tests assert the exact frame
+    count for the catched-up lease, and `subagentCatalogChurnDoesNotSurfaceUnavailable`
+    (catalog churn with no new invalidation) still passes, so churn does not
+    schedule reads.
+- Changes: `packages/ios-app/Sources/State/AppModel.swift`,
+  `packages/ios-app/Sources/State/DashboardGatewayConnectionPool.swift`,
+  `packages/ios-app/Tests/Gateway/AppModelCatalogSyncTests.swift`,
+  `packages/ios-app/Tests/UI/DashboardStateOwnerTests.swift`,
+  `packages/ios-app/Tests/Support/ScriptedGatewaySocket.swift`,
+  `packages/ios-app/docs/architecture.md` (records that the one owed follow-up
+  also runs when the newer invalidation retired the traversal that owed it).
+- For the next agent: this is the shared invoice for stale dashboard truth
+  after any invalidation race; a broader sync-hardening pass is still the user's
+  later call. The two new tests fail by a named bounded wait rather than a
+  watchdog expiry, so keep that helper when refactoring.

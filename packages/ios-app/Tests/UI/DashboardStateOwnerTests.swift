@@ -391,6 +391,81 @@ struct DashboardStateOwnerTests {
     }
 
     @MainActor
+    @Test("a background catalog follows up when its final traversal is invalidated")
+    func secondaryCatalogFollowsUpAfterInvalidatedFinalTraversal() async throws {
+        try await withTestWatchdog { @MainActor in
+            let selected = GatewayProfile(
+                id: "selected", label: "Selected", host: "selected.test", port: 9_847,
+                machineId: "selected-runtime", machineGroupID: "selected-machine", deviceId: "device"
+            )
+            let remote = GatewayProfile(
+                id: "remote", label: "Remote", host: "remote.test", port: 9_847,
+                machineId: "remote-runtime", machineGroupID: "remote-machine", deviceId: "device"
+            )
+            let socket = ScriptedGatewaySocket()
+            let recorder = DashboardPoolRecorder()
+            let pool = DashboardGatewayConnectionPool(clientFactory: {
+                GatewayClient(socketFactory: ScriptedGatewaySocketFactory(socket: socket).factory)
+            })
+            pool.delegate = recorder
+            await socket.enqueue(Data(#"{"type":"hello","gatewayVersion":"1","piVersion":"1","protocolVersion":5,"minProtocolVersion":5,"machineId":"remote-runtime","machineGroupID":"remote-machine","machineName":"Remote","gatewayChannel":"stable","capabilities":[]}"#.utf8))
+            pool.reconcile(
+                profiles: [selected, remote],
+                selectedProfileID: selected.id,
+                token: { $0.id == remote.id ? "token" : nil }
+            )
+
+            // The first traversal publishes, and a list change that arrives
+            // during it leaves exactly one follow-up traversal owed.
+            try await socket.waitUntilSent(count: 2)
+            let first = try Self.requestFrame(await socket.sentFrames()[1])
+            await socket.enqueue(Self.listChangedEvent())
+            await socket.enqueue(Self.catalogResponse(
+                id: first.id,
+                sessions: [summary(revision: 1)],
+                listRevision: 1,
+                archivedCount: 0
+            ))
+
+            // The final traversal reads while another list change lands, and the
+            // Gateway answers with a page this client rejects. Nothing in that
+            // traversal can be published, so the newer count it was the only
+            // reader of has to arrive through the deferred follow-up.
+            try await socket.waitUntilSent(count: 3)
+            let rejected = try Self.requestFrame(await socket.sentFrames()[2])
+            await socket.enqueue(Self.listChangedEvent())
+            await socket.enqueue(Self.catalogResponse(
+                id: rejected.id,
+                sessions: [summary(revision: 2), summary(revision: 3)],
+                listRevision: 2,
+                archivedCount: 1
+            ))
+
+            let followUpArrived = await socket.waitUntilSent(count: 4, within: .seconds(2))
+            try #require(
+                followUpArrived,
+                "the deferred catalog follow-up was dropped after its final traversal was invalidated"
+            )
+            try await Task.sleep(for: .milliseconds(20))
+            #expect((await socket.sentFrames()).count == 4)
+            let followUp = try Self.requestFrame(await socket.sentFrames()[3])
+            #expect(followUp.method == "session.list")
+            await socket.enqueue(Self.catalogResponse(
+                id: followUp.id,
+                sessions: [summary(revision: 4)],
+                listRevision: 3,
+                archivedCount: 2
+            ))
+            try await Self.waitUntil { recorder.archivedCounts.last?.count == 2 }
+            #expect(recorder.authoritativeCatalogPublications.contains(remote.id))
+            #expect(recorder.updates.last?.state == .connected)
+
+            pool.retire()
+            await pool.waitForRetirement()
+        }
+    }
+
+    @MainActor
     @Test("secondary reconnect rejects the retired socket epoch and loads fresh truth")
     func secondaryReconnectAdmission() async throws {
         try await withTestWatchdog { @MainActor in
