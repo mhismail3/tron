@@ -2,7 +2,7 @@
 
 - **Started:** 2026-09-26
 - **Status:** Active
-- **Last updated:** 2026-09-26, V-1 checkpoint
+- **Last updated:** 2026-09-26, R-2
 - **Goal:** A user can archive an idle session so it leaves the dashboard without being deleted, find it again in one collapsed Archived container or in search, and have it return automatically when it runs again.
 
 ## Goal and constraints
@@ -102,7 +102,7 @@ Current state, inspected 2026-09-26:
 | F-5 | Done | `session-archive.integration.test.ts` "rejects a prompt retryably when archive state cannot be cleared" failed once in four full-suite runs (passes alone and under targeted load); reproduce, find the root cause, fix | G-2 | tron-coordinator, 2026-09-26 |
 | F-6 | Claimed | Same class as F-5, unproven: `RuntimeRegistry` line 1216 also writes `gateway/model-recents.json` fire-and-forget (`void this.noteModelUsed(...)` → `await this.recentModels.record(...)`), so its durable write can equally outlive `dispose()`. Decide whether `RecentModelStore` gets the same disposal drain | F-5 | tron-coordinator, 2026-09-26 (in R-1) |
 | R-1 | Claimed | Gateway fixes from the post-implementation review (see "Review findings"), including F-6 | G-2, F-5 | tron-coordinator, 2026-09-26 |
-| R-2 | Claimed | iOS fixes from the post-implementation review (see "Review findings") | I-2, I-3, F-3 | tron-coordinator, 2026-09-26 |
+| R-2 | Done | iOS fixes from the post-implementation review (see "Review findings") | I-2, I-3, F-3 | tron-coordinator, 2026-09-26 |
 | V-1 | Blocked | Cross-module checkpoint, user-performed Gateway rollout, and eyes-on device review; close the plan | G-2, I-2, I-3, F-3, F-4, F-5, F-6, R-1, R-2 | tron-coordinator, 2026-09-26 |
 
 ## Task details
@@ -1229,3 +1229,157 @@ Gateway.
   3. Then close the plan. F-6 stays Needs scoping and may explain the
      `recent-model-usage` flake.
 
+### R-2 · Done · 2026-09-26 · tron-coordinator
+
+- Result: the iOS half of the post-implementation review is fixed. Every iOS
+  finding except one (finding 7, below) is implemented, and the changes are
+  owned by production code rather than by the hosted fixture.
+- Fixed, per finding:
+  - **1 (P0)** `AppModel.loadArchivedSessions` now maps every admitted page row
+    through `withGatewaySource(id:label:)`, so an archived row carries the
+    Gateway that owns it. Unarchive, Delete and Open
+    (`performOnOwningGateway` / `navigationRoute(for:)`), the read
+    invalidation, and `dashboardID` are all addressed to that Gateway, and
+    `ForEach(id: \.dashboardID)` cannot collide when two servers own equal
+    session IDs. The old tests injected the identity the read never provided;
+    the new `archivedRowsCarryOwningGateway` case decodes the page from the
+    wire and asserts the profile ID, label and qualified `dashboardID`.
+  - **2** `ArchivedSessionsContainerState.apply` takes the `requestedCursor`:
+    a first page replaces a server's rows and a continuation page extends them
+    (deduplicated by ID), so "Show more" no longer discards the pages already
+    shown. Covered by `archivedContainerPublication`.
+  - **3** `ArchivedSessionsContainerSection` (new, in
+    `ArchivedSessionsSection.swift`) owns the container's visibility,
+    expansion, pass and reads. It refreshes only from the model's new
+    `archiveProjectionRevision` — an authoritative dashboard page or a capable
+    server's count — never from the dashboard's summary stream, so a running
+    agent cannot loop its page reads. A count of zero closes the container and
+    retires the pass (`reconcileCount`), and it is never polled while hidden.
+  - **4** A `profileID` change cancels the pass and re-reads an expanded
+    container instead of collapsing it, so a cross-Mac action (or returning
+    from an archived chat) keeps the user's place.
+  - **5** `applyArchiveResponse` now asks for an authoritative list read in both
+    directions. The read it just retired (via `markArchived`'s
+    `invalidateLoads`) can no longer be the only one that was going to publish
+    the row or the Gateway-owned count.
+  - **6** Every cancel path (collapse, profile switch, leaving the dashboard)
+    clears the pass handle, and a pass clears only the handle it owns (a
+    monotonic pass id), so a quick collapse and re-expand always reads.
+  - **8** `SessionCatalogCoordinator.archivedSessionIDs` and its `.archived`
+    admission, the pool's unreachable `.archived` branch, and
+    `ArchivedSessionsContainerState.remove` are deleted. They duplicated
+    Gateway-owned membership; removing them also restores the
+    `.unknownSession` → list-refresh self-heal, which is what brings a session
+    back after a run unarchives it. A summary update still cannot materialize a
+    row, so there is no resurrection path.
+  - **9** Dead code deleted: the unused `SessionArchiveState` memberwise
+    initializer and `Equatable` conformance, and the pool delegate extension's
+    default no-op `dashboardPoolDidUpdateArchivedCount` (the I-1 handoff's
+    silent-drop trap).
+  - **10** `SessionMutationServiceTests` now scripts the Gateway's real refusal
+    shape (`code: "busy"`, `retryable: false`); `session_operation_busy` is the
+    internal diagnostic reason, which `publicError` drops.
+  - **11** `SessionArchiveReadPurpose` gives the container and the automation
+    form's target lookup separate latest-request fences (a container pass can no
+    longer retire the lookup), the lookup now receives the caller's real
+    presentation activity instead of `{ true }`, and `AutomationFormView`'s
+    task id is keyed on the target rather than `sessions.count`, with the
+    "Archived" hint derived from the dashboard rows so it clears without
+    another page walk.
+  - **12** `GatewayClient` keeps the newest request identity per correlation
+    label and only `SessionCatalogLoader` declares one, so a catalog failure
+    diagnostic always names the dashboard catalog's request instead of the
+    archived container's page. The `diagnosticPurpose`/`diagnosticPage`
+    plumbing that lost its consumer in the L-3 observability change is removed
+    with its four call sites.
+  - **13** The hosted journey now drives production gating: the fixture renders
+    `ArchivedSessionsContainerSection`, and the journey performs real full
+    swipes (the archive row's full-swipe action, then the archived row's
+    Unarchive) instead of tapping revealed buttons. Its three screenshots were
+    regenerated from a passing run.
+  - **14** `architecture.md` and `development.md` describe the container's real
+    control flow, the row identity, the per-purpose fence, and the full swipe;
+    the `SessionSummary.archivedAt` comment no longer claims a state the loader
+    rejects, and the `archive`/`unarchive` comments match when the row actually
+    leaves.
+- Finding judged wrong (not fixed):
+  - **7 (SnapshotCache reads versions 3 and 4).** The finding's premise is that
+    the archive feature introduced this dual schema. It did not: `git show
+    cbf4cb72b:packages/ios-app/Sources/Support/SnapshotCache.swift` (the
+    pre-feature tree) already guards `version == 3 || document.version == 4`,
+    `git log -S "version == 3 || document.version == 4"` dates that guard to
+    2026-08-21 (`9c793e315`), and
+    `SnapshotCacheTests.ignoresLegacySnapshotValues` pins exactly that v3
+    retention. It is the documented legacy path for snapshot-bearing files
+    (`architecture.md`: "legacy snapshot-bearing files decode only far enough to
+    retain summaries and their snapshot values are ignored"), not a schema this
+    change added — the feature's own diff to the file only adds the optional
+    `archivedCount`. Removing it would delete an intentional, documented,
+    test-pinned compatibility path, which AGENTS.md requires the user to approve
+    rather than delete as part of an unrelated fix.
+- Evidence (verified):
+  - `scripts/tron-ios-test build` (unit tier): TEST BUILD SUCCEEDED; the
+    ui-validation tier build also succeeded.
+  - `scripts/tron-ios-test run` (full unit target): **1700 tests in 137 suites
+    passed** in 183.8 s (`~/Library/Developer/Tron/ios/test-runs/20260926T205722Z-run.uTroFa`).
+  - Focused suites during iteration: `DashboardStateOwnerTests`,
+    `AppModelCatalogSyncTests`, `SessionMutationServiceTests`,
+    `SnapshotCacheTests` — 91 tests in 4 suites passed.
+  - `TRON_IOS_TEST_TIER=ui-validation scripts/tron-ios-test run
+    --only-testing
+    'TronMobileUITests/TronSmokeUITests/testSessionArchiveSwipeAndArchivedContainerJourney'`:
+    passed three times with the full-swipe journey (16.5 s, 16.6 s, 14.6 s) and
+    twice more after the final edit (17.1 s, 16.8 s).
+  - Screenshots regenerated from the last passing run
+    (`20260926T205629Z-run.3khylW`) and copied to the Tron workspace's
+    `files/session-archive/` as `session-archive-container-collapsed.png`,
+    `session-archive-container-expanded.png` and
+    `session-archive-unarchived.png`. Visual inspection shows the workspace with the `Archived (1)`
+    container, the expanded archived row with its `fixture-project · Fixture
+    Mac` context line, and the session restored with the container gone.
+  - `python3 scripts/check-documentation-policy.py` and
+    `scripts/personal-info-guard.sh` pass.
+- Changes: `packages/ios-app/Sources/App/HostedSessionArchiveFixture.swift`,
+  `Sources/Gateway/GatewayClient.swift`,
+  `Sources/Models/SessionCatalogModels.swift`,
+  `Sources/Notifications/NotificationInboxCoordinator.swift`,
+  `Sources/State/AppModel.swift`,
+  `Sources/State/DashboardGatewayConnectionPool.swift`,
+  `Sources/State/DashboardStateOwners.swift`,
+  `Sources/State/ProviderAuthCoordinator.swift`,
+  `Sources/State/SessionPresentationStore.swift`,
+  `Sources/UI/Automations/AutomationDetailView.swift`,
+  `Sources/UI/Automations/AutomationFormView.swift`,
+  `Sources/UI/Chat/ArchivedSessionsSection.swift`,
+  `Sources/UI/Chat/SessionShellView.swift`,
+  `Tests/Gateway/AppModelCatalogSyncTests.swift`,
+  `Tests/Gateway/SessionMutationServiceTests.swift`,
+  `Tests/UI/DashboardStateOwnerTests.swift`,
+  `UITests/TronSmokeUITests.swift`,
+  `packages/ios-app/docs/architecture.md`,
+  `packages/ios-app/docs/development.md`, and this plan.
+- Kept on purpose:
+  - The container still owns no archived membership: rows come only from an
+    `archived: "only"` page, and delete/unarchive let the Gateway's count and
+    page remove the row instead of staging a local removal. That costs one list
+    read before the row leaves, which is the same authority rule the dashboard
+    already follows for live rows.
+  - `archiveProjectionRevision` advances on the focused profile's authoritative
+    page and on a secondary's count change. It is one small piece of model state
+    instead of a new read owner, and only the container consumes it.
+  - `SessionArchiveState` stays `Codable` because
+    `ConfirmedMutationExecutor.perform` re-encodes a response for its receipt;
+    only the unused explicit initializer and `Equatable` were removed.
+  - An archived row's Delete still uses the dashboard's shared confirmation
+    sheet, so no second confirmation identity was added.
+- Deviations: the reviewer's finding 13 asked the journey to prove
+  "count-driven visibility/collapse" too; the fixture supplies its own count
+  and projection revision (session membership is fixture input by design), so
+  the journey proves the production *gating and control flow* rather than a
+  Gateway's count value. The count's own arithmetic remains covered by
+  `SessionArchiveCountProjection` and the AppModel count cases.
+- For the next agent: R-1 (Gateway) is in flight in another worktree; V-1 then
+  needs the full gateway suite, `scripts/ios-gateway-e2e-test run`, the
+  user-performed Gateway rollout, and the eyes-on device review. V-1's eyes-on
+  list should now include expanding the container on a filtered dashboard and
+  archiving a session whose row came from a second paired Mac.
