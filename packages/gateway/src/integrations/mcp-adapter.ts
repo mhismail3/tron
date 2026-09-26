@@ -6,7 +6,7 @@ import type { Tool as McpTool } from "@modelcontextprotocol/sdk/types.js";
 import type { ExtensionFactory, ToolDefinition } from "@earendil-works/pi-coding-agent";
 import { GatewayError } from "../errors.js";
 import type { GatewayWorkRegistry } from "../sessions/gateway-work-registry.js";
-import type { ConnectionInstance, McpConnectionConfiguration } from "./connection-contract.js";
+import type { ConnectionInstance, ConnectionInstanceProjection, ConnectionOwnerSnapshot, McpConnectionConfiguration } from "./connection-contract.js";
 import type { ConnectionOwner } from "./connection-owner.js";
 import type { ConnectorCredentialStore } from "../knowledge/connector-credentials.js";
 
@@ -143,6 +143,14 @@ export interface McpAdapterOptions {
   workRegistry?: GatewayWorkRegistry;
 }
 
+/** The MCP instances a session runtime admits tools from. Listing and admission
+ * share this rule so Settings cannot name a source that a session would reject. */
+export function mcpToolSourceInstances(snapshot: ConnectionOwnerSnapshot): ConnectionInstanceProjection[] {
+  return snapshot.instances.filter(instance => instance.definitionId === "mcp.remote-http"
+    && (instance.health === "ready" || instance.health === "setup-required")
+    && instance.policy.enabled);
+}
+
 export class McpAdapter {
   private readonly lanes = new Map<string, AsyncMutex>();
 
@@ -159,7 +167,7 @@ export class McpAdapter {
    * a partially discovered tool set. */
   async extensionFactories(sessionId: string, hostEpoch: string): Promise<ExtensionFactory[]> {
     const snapshot = await this.options.connections.snapshot();
-    const instances = snapshot.instances.filter(instance => instance.definitionId === "mcp.remote-http" && (instance.health === "ready" || instance.health === "setup-required") && instance.policy.enabled);
+    const instances = mcpToolSourceInstances(snapshot);
     const factories: ExtensionFactory[] = [];
     const names = new Set<string>();
     const opened: ActiveConnection[] = [];

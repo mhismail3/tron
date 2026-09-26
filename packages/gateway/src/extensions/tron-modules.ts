@@ -1,4 +1,5 @@
 import type { ExtensionFactory, SessionBeforeCompactEvent } from "@earendil-works/pi-coding-agent";
+import type { TronModuleSummary } from "../protocol/types.js";
 import { compactionPolicyExtension, type CompactionOperationPolicy } from "../runtime/compaction-policy.js";
 import { contextWindowExtension, type SessionContextWindowPolicy } from "../providers/context-window-policy.js";
 import { createTronCoreExtension } from "../workspace/tron-core-extension.js";
@@ -162,4 +163,17 @@ export function tronModuleFactories(host: TronModuleHost): TronModuleRegistratio
     if (factory) registrations.push({ name: tronModule.name, factory });
   }
   return registrations;
+}
+
+export const MODULES_CAPABILITY = "modules.v1";
+
+/** The `modules.list` module rows, taken from the same definition RuntimeSlot
+ * registers so Settings cannot report a module a session does not load. */
+export function tronModuleSummaries(): TronModuleSummary[] {
+  return TRON_MODULES.map((tronModule) => ({
+    name: tronModule.name,
+    purpose: tronModule.purpose,
+    tools: [...tronModule.tools],
+    commands: [...tronModule.commands],
+  }));
 }

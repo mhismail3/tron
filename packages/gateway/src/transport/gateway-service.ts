@@ -65,6 +65,8 @@ import { KnowledgeStoreError } from "../knowledge/knowledge-store.js";
 import type { KnowledgeAction } from "../knowledge/knowledge-contract.js";
 import type { ConnectionOwner } from "../integrations/connection-owner.js";
 import type { ConnectionAction } from "../integrations/connection-contract.js";
+import { mcpToolSourceInstances } from "../integrations/mcp-adapter.js";
+import { MODULES_CAPABILITY, tronModuleSummaries } from "../extensions/tron-modules.js";
 
 const KNOWLEDGE_OBJECT_CHUNK_BYTES = 512_000;
 const KNOWLEDGE_OBJECT_TOTAL_BYTES = 8_000_000;
@@ -339,6 +341,7 @@ export class GatewayService {
         "auth.v1",
         "settings.v1",
         "packages.v1",
+        MODULES_CAPABILITY,
         "trust.v1",
         "filesystem.v1",
         "source-control.v1",
@@ -1590,6 +1593,23 @@ export class GatewayService {
       case "packages.list":
         rejectUnknownFields(params, ["cwd"], "Package listing");
         return safeJson(await this.dependencies.packages.list(optionalString(params.cwd, "cwd", 4_096) ?? process.cwd()));
+      case "modules.list": {
+        rejectUnknownFields(params, [], "Module listing");
+        // Names the installed modules and where MCP tools come from. A source row
+        // never carries transport configuration or credential references, and an
+        // individual MCP tool name is only knowable inside a session runtime.
+        const sources = this.dependencies.connections
+          ? mcpToolSourceInstances(await this.dependencies.connections.snapshot())
+          : [];
+        return safeJson({
+          modules: tronModuleSummaries(),
+          connections: sources.map((instance) => ({
+            id: instance.id,
+            definitionId: instance.definitionId,
+            health: instance.health,
+          })),
+        });
+      }
       case "packages.checkUpdates":
         rejectUnknownFields(params, ["cwd"], "Package update check");
         return safeJson(await this.dependencies.packages.checkUpdates(optionalString(params.cwd, "cwd", 4_096) ?? process.cwd()));

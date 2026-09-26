@@ -950,3 +950,25 @@ export interface CommandDetail extends CommandInfo {
   contentBytes?: number;
   contentTruncated?: boolean;
 }
+
+/** Wire projection of one built-in Tron extension definition. */
+export interface TronModuleSummary {
+  name: string;
+  purpose: string;
+  tools: string[];
+  commands: string[];
+}
+
+/** One MCP connection a session runtime would admit tools from. It names the
+ * source only: individual MCP tool names require that session's runtime. */
+export interface McpToolSource {
+  id: string;
+  definitionId: string;
+  health: string;
+}
+
+/** `modules.list`: the installed Tron modules and the MCP tool sources. */
+export interface TronModuleList {
+  modules: TronModuleSummary[];
+  connections: McpToolSource[];
+}

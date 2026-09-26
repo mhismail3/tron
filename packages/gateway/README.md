@@ -220,6 +220,20 @@ not projected, and `settings.update` ignores them; values already in `settings.j
 untouched. `telemetry.install` remains because the SDK uses it to gate provider
 attribution headers.
 
+`modules.list` reports Tron's built-in extensions for Settings without opening a
+session. It returns one row per entry of the single `TRON_MODULES` definition
+that `RuntimeSlot` also registers (`tron-modules.ts`: stable name, one-line
+purpose, declared tool and command names), so the installed list cannot name a
+module a session does not load or omit one it does. `connections` names the MCP
+instances a session runtime would admit tools from, using the same admission
+rule as the MCP adapter; it carries only the connection identity, its definition
+and health, and an unconfigured Connections owner yields an empty list. An
+individual MCP tool name is only discoverable inside a session runtime, so this
+read never opens a server, resolves credentials or admits a runtime binding.
+The `modules.v1` capability advertises the method. It is a bounded read: the
+module rows come from a fixed definition, and the connection rows are the
+already-redacted `connections.list` projection.
+
 ### Agent home
 
 Pi's canonical agent home is `<tronHome>/agent`: Stable uses `~/.tron/agent` and
