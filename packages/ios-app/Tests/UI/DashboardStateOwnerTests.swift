@@ -690,12 +690,14 @@ struct DashboardStateOwnerTests {
         id: String,
         sessions: [SessionSummary],
         listRevision: Int,
-        nextCursor: String? = nil
+        nextCursor: String? = nil,
+        archivedCount: Int? = nil
     ) -> Data {
         let encoded = try! JSONEncoder.gateway.encode(sessions)
         let rawSessions = try! JSONSerialization.jsonObject(with: encoded)
         var result: [String: Any] = ["sessions": rawSessions, "listRevision": listRevision]
         if let nextCursor { result["nextCursor"] = nextCursor }
+        if let archivedCount { result["archivedCount"] = archivedCount }
         return try! JSONSerialization.data(withJSONObject: [
             "type": "response", "id": id, "ok": true, "result": result,
         ])
@@ -1142,6 +1144,197 @@ struct DashboardStateOwnerTests {
         #expect(owner.hasConsistentIndex())
     }
 
+    @Test("an archived row stays hidden from live summaries until a page admits it")
+    func archivedRowsResistLiveSummaries() {
+        var owner = SessionCatalogCoordinator()
+        let load = owner.beginLoad()
+        let published = owner.publishAuthoritative([summary(revision: 1)], admission: load, archivedCount: 1)
+        #expect(published)
+        #expect(owner.archivedCount == 1)
+
+        let marked = owner.markArchived(sessionID: "session")
+        #expect(marked)
+        #expect(owner.sessions.isEmpty)
+        // The Gateway's summary projection carries no archive field, so a late
+        // update for the ID must not re-materialize the hidden row.
+        let lateUpdate = owner.apply(update(revision: 2, phase: .idle))
+        #expect(lateUpdate == .archived)
+        #expect(owner.sessions.isEmpty)
+
+        // Only an authoritative exclude page proves the row is visible again.
+        let refreshed = owner.beginLoad()
+        let republished = owner.publishAuthoritative([summary(revision: 3)], admission: refreshed, archivedCount: 0)
+        #expect(republished)
+        #expect(owner.sessions.map(\.id) == ["session"])
+        let visibleUpdate = owner.apply(update(revision: 4, phase: .idle))
+        #expect(visibleUpdate == .updated)
+        #expect(owner.archivedCount == 0)
+        #expect(owner.hasConsistentIndex())
+    }
+
+    @Test("the archived count survives an unavailable list and is replaced by the cache")
+    func archivedCountRetention() {
+        var owner = SessionCatalogCoordinator()
+        let load = owner.beginLoad()
+        let published = owner.publishAuthoritative([], admission: load, archivedCount: 3)
+        #expect(published)
+        #expect(owner.archivedCount == 3)
+
+        owner.markLoadUnavailable()
+        #expect(owner.freshness == .stale)
+        #expect(owner.archivedCount == 3)
+
+        owner.installCached([summary(revision: 1)], archivedCount: 2)
+        #expect(owner.archivedCount == 2)
+
+        owner.clear()
+        #expect(owner.archivedCount == nil)
+    }
+
+    @Test("archive counts sum only across capable profiles and never fabricate zero")
+    func archiveCountProjection() {
+        #expect(SessionArchiveCountProjection.total(countsByProfile: [:], capableProfileIDs: []) == nil)
+        // A capable profile whose count is not known yet is unknown, not zero.
+        #expect(SessionArchiveCountProjection.total(countsByProfile: [:], capableProfileIDs: ["a"]) == nil)
+        #expect(SessionArchiveCountProjection.total(countsByProfile: ["a": 2, "b": 3], capableProfileIDs: ["a", "b"]) == 5)
+        // An incapable or offline profile contributes nothing even when a value
+        // is still around for it.
+        #expect(SessionArchiveCountProjection.total(countsByProfile: ["a": 2, "b": 3], capableProfileIDs: ["a"]) == 2)
+        #expect(SessionArchiveCountProjection.total(countsByProfile: ["a": 2, "c": 4], capableProfileIDs: ["a"]) == 2)
+        // A published zero is a real contribution, distinct from unknown.
+        #expect(SessionArchiveCountProjection.total(countsByProfile: ["a": 0], capableProfileIDs: ["a"]) == 0)
+        #expect(SessionArchiveCountProjection.total(countsByProfile: ["a": -1], capableProfileIDs: ["a"]) == nil)
+    }
+
+    @MainActor
+    @Test("archived page admission rejects foreign rows and repeated cursors")
+    func archivedPageAdmission() async {
+        func response(_ sessions: [SessionSummary], nextCursor: String?) -> ArchivedSessionsLoader.PageResponse {
+            // Decoding through the wire shape keeps the admission checked
+            // against what the Gateway actually sends.
+            let rawSessions = try! JSONSerialization.jsonObject(with: JSONEncoder.gateway.encode(sessions))
+            var result: [String: Any] = ["sessions": rawSessions]
+            if let nextCursor { result["nextCursor"] = nextCursor }
+            let data = try! JSONSerialization.data(withJSONObject: result)
+            return try! JSONDecoder.gateway.decode(ArchivedSessionsLoader.PageResponse.self, from: data)
+        }
+        let archived = summary(revision: 1, archivedAt: "2026-01-02T00:00:00Z")
+
+        let admitted = await ArchivedSessionsLoader.admit(
+            response([archived], nextCursor: "next"),
+            requestedCursor: nil,
+            admitsPublication: { true }
+        )
+        guard case let .loaded(page) = admitted else {
+            Issue.record("an archived page was not admitted")
+            return
+        }
+        #expect(page.sessions.map(\.id) == ["session"])
+        #expect(page.sessions.first?.archivedAt == archived.archivedAt)
+        #expect(page.nextCursor == "next")
+
+        // A row without archive state cannot come from the `only` projection.
+        let foreign = await ArchivedSessionsLoader.admit(
+            response([summary(revision: 1)], nextCursor: nil),
+            requestedCursor: nil,
+            admitsPublication: { true }
+        )
+        guard case .invalid(_, let foreignReason) = foreign else {
+            Issue.record("a non-archived row in the archived projection was admitted")
+            return
+        }
+        #expect(foreignReason == "archived-session-page")
+
+        let repeated = await ArchivedSessionsLoader.admit(
+            response([archived], nextCursor: "cursor"),
+            requestedCursor: "cursor",
+            admitsPublication: { true }
+        )
+        guard case .invalid(_, let repeatedReason) = repeated else {
+            Issue.record("a repeated cursor was admitted")
+            return
+        }
+        #expect(repeatedReason == "repeated-cursor")
+
+        // The caller's managed activity is rechecked after the read, so a
+        // retired surface publishes nothing rather than a stale page.
+        let retired = await ArchivedSessionsLoader.admit(
+            response([archived], nextCursor: nil),
+            requestedCursor: nil,
+            admitsPublication: { false }
+        )
+        guard case .retired = retired else {
+            Issue.record("a page was published for an inactive surface")
+            return
+        }
+    }
+
+    @MainActor
+    @Test("a background page that leaks an archived row is rejected and its count is not published")
+    func backgroundCatalogRejectsArchivedRow() async throws {
+        try await withTestWatchdog { @MainActor in
+            let selected = GatewayProfile(
+                id: "selected", label: "Selected", host: "selected.test", port: 9_847,
+                machineId: "selected-runtime", machineGroupID: "selected-machine", deviceId: "device"
+            )
+            let remote = GatewayProfile(
+                id: "remote", label: "Remote", host: "remote.test", port: 9_847,
+                machineId: "remote-runtime", machineGroupID: "remote-machine", deviceId: "device"
+            )
+            let socket = ScriptedGatewaySocket()
+            let recorder = DashboardPoolRecorder()
+            let pool = DashboardGatewayConnectionPool(clientFactory: {
+                GatewayClient(socketFactory: ScriptedGatewaySocketFactory(socket: socket).factory)
+            })
+            pool.delegate = recorder
+            await socket.enqueue(Data(#"{"type":"hello","gatewayVersion":"1","piVersion":"1","protocolVersion":5,"minProtocolVersion":5,"machineId":"remote-runtime","machineGroupID":"remote-machine","machineName":"Remote","gatewayChannel":"stable","capabilities":["session-archive.v1"]}"#.utf8))
+            pool.reconcile(
+                profiles: [selected, remote],
+                selectedProfileID: selected.id,
+                token: { $0.id == remote.id ? "token" : nil }
+            )
+
+            try await socket.waitUntilSent(count: 2)
+            let leaked = try Self.requestFrame(await socket.sentFrames()[1])
+            #expect(leaked.method == "session.list")
+            // `exclude` hides archived sessions. A leaked row would put a hidden
+            // session on the dashboard, so the whole traversal is discarded and
+            // its count is never published.
+            await socket.enqueue(Self.catalogResponse(
+                id: leaked.id,
+                sessions: [summary(revision: 1, archivedAt: "2026-01-02T00:00:00Z")],
+                listRevision: 1,
+                archivedCount: 1
+            ))
+            try await Task.sleep(for: .milliseconds(50))
+            #expect((await socket.sentFrames()).count == 2)
+            #expect(recorder.updates.allSatisfy { $0.sessions.isEmpty })
+            // The rejected page's count never reaches the dashboard, and every
+            // count the pool did publish is for the owning profile only.
+            #expect(recorder.archivedCounts.count >= 2)
+            #expect(recorder.archivedCounts.allSatisfy { $0.count == nil })
+            #expect(recorder.archivedCounts.allSatisfy { $0.profileID == remote.id })
+
+            await socket.enqueue(Self.listChangedEvent())
+            try await socket.waitUntilSent(count: 3)
+            let retried = try Self.requestFrame(await socket.sentFrames()[2])
+            #expect(retried.method == "session.list")
+            await socket.enqueue(Self.catalogResponse(
+                id: retried.id,
+                sessions: [summary(revision: 1)],
+                listRevision: 2,
+                archivedCount: 5
+            ))
+            try await Self.waitUntil { recorder.archivedCounts.last?.count == 5 }
+            #expect(recorder.updates.last?.sessions.map(\.id) == ["session"])
+            #expect(recorder.archivedCounts.last?.profileID == remote.id)
+            #expect(!recorder.archivedCounts.contains { $0.count == 1 })
+
+            pool.retire()
+            await pool.waitForRetirement()
+        }
+    }
+
     @MainActor
     @Test("the AppModel sessions façade remains observable")
     func sessionsFacadeObservation() {
@@ -1164,7 +1357,8 @@ struct DashboardStateOwnerTests {
         phase: SessionPhase = .idle,
         foregroundPhase: SessionPhase? = nil,
         hasActiveSubagents: Bool = false,
-        waitingForUser: Bool = false
+        waitingForUser: Bool = false,
+        archivedAt: String? = nil
     ) -> SessionSummary {
         SessionSummary(
             id: "session",
@@ -1179,7 +1373,8 @@ struct DashboardStateOwnerTests {
             foregroundPhase: foregroundPhase,
             hasActiveSubagents: hasActiveSubagents,
             waitingForUser: waitingForUser,
-            summaryRevision: revision
+            summaryRevision: revision,
+            archivedAt: archivedAt
         )
     }
 
@@ -1233,9 +1428,19 @@ private final class DashboardPoolRecorder: DashboardGatewayConnectionPoolDelegat
         }
     }
     private(set) var notificationInvalidations: [String] = []
+    private(set) var archivedCounts: [ArchivedCount] = []
+
+    struct ArchivedCount: Sendable {
+        let profileID: String
+        let count: Int?
+    }
 
     func dashboardPoolNotificationInboxChanged(profileID: String) {
         notificationInvalidations.append(profileID)
+    }
+
+    func dashboardPoolDidUpdateArchivedCount(profileID: String, count: Int?) {
+        archivedCounts.append(ArchivedCount(profileID: profileID, count: count))
     }
 
     func dashboardPoolDidUpdate(

@@ -448,7 +448,7 @@ enum SessionCatalogLoadBounds {
 }
 
 enum SessionCatalogLoadResult: Sendable {
-    case loaded(rows: [SessionSummary], pageCount: Int, revision: Int)
+    case loaded(rows: [SessionSummary], pageCount: Int, revision: Int, archivedCount: Int?)
     case revisionMoved(pageCount: Int, revision: Int?)
     case retired
     case invalid(code: String, reason: String, pageCount: Int, revision: Int?)
@@ -460,6 +460,10 @@ enum SessionCatalogLoader {
         let sessions: [SessionSummary]
         let nextCursor: String?
         let listRevision: Int
+        /// Present on the first `exclude` page and nowhere else. Archived rows
+        /// are not part of this projection, so the count is the only way the
+        /// dashboard learns how many sessions are hidden.
+        let archivedCount: Int?
     }
 
     static func load(
@@ -473,6 +477,7 @@ enum SessionCatalogLoader {
             var seenCursors = Set<String>()
             var seenSessionIDs = Set<String>()
             var expectedRevision: Int?
+            var archivedCount: Int?
             var pageCount = 0
             var revisionChanged = false
             repeat {
@@ -501,9 +506,15 @@ enum SessionCatalogLoader {
                 expectedRevision = response.listRevision
                 guard response.sessions.count <= SessionCatalogLoadBounds.pageSize,
                       all.count <= SessionCatalogLoadBounds.maximumRows - response.sessions.count,
+                      response.archivedCount.map({ $0 >= 0 && $0 <= SessionCatalogLoadBounds.maximumRows }) ?? true,
+                      // `exclude` hides archived sessions. A row that still
+                      // carries archive state would leak a hidden session onto
+                      // the dashboard, so the projection is rejected instead.
+                      response.sessions.allSatisfy({ $0.archivedAt == nil }),
                       response.sessions.allSatisfy({ seenSessionIDs.insert($0.id).inserted }) else {
                     return .invalid(code: "invalid_response", reason: "session-list-page", pageCount: pageCount, revision: response.listRevision)
                 }
+                if archivedCount == nil { archivedCount = response.archivedCount }
                 all.append(contentsOf: response.sessions)
                 cursor = response.nextCursor
                 if let cursor, !seenCursors.insert(cursor).inserted {
@@ -515,9 +526,82 @@ enum SessionCatalogLoader {
                 if revisionAttempt == 0 { continue }
                 return .revisionMoved(pageCount: pageCount, revision: expectedRevision)
             }
-            return .loaded(rows: all, pageCount: pageCount, revision: expectedRevision ?? 0)
+            return .loaded(rows: all, pageCount: pageCount, revision: expectedRevision ?? 0, archivedCount: archivedCount)
         }
         return .revisionMoved(pageCount: 0, revision: nil)
+    }
+}
+
+enum ArchivedSessionsLoadResult: Sendable {
+    case loaded(page: ArchivedSessionsPage)
+    /// The read was superseded by a newer request or its surface retired it.
+    case retired
+    case invalid(code: String, reason: String)
+}
+
+struct ArchivedSessionsPage: Equatable, Sendable {
+    let sessions: [SessionSummary]
+    let nextCursor: String?
+}
+
+/// Reads the Gateway's `archived: "only"` projection for the dashboard's
+/// archived container. The dashboard bucket never supplies these rows: it
+/// excludes archived sessions by contract, so a page read is the only
+/// authority for them. One call reads exactly one page; the container owns
+/// expansion and the cursor. The caller's managed activity and its exact
+/// latest-request fence are rechecked after every await, so a page that a newer
+/// archive toggle already invalidated can never reach the surface.
+enum ArchivedSessionsLoader {
+    struct PageRequest: Encodable {
+        let cursor: String?
+        let limit: Int
+        let scope: String
+        let archived: String
+    }
+
+    struct PageResponse: Decodable {
+        let sessions: [SessionSummary]
+        let nextCursor: String?
+    }
+
+    static let pageSize = 200
+
+    /// Admits one response. Pure apart from the caller's publication fence, so
+    /// the bounds, the archived-rows contract, and cursor progress are testable
+    /// without a transport.
+    static func admit(
+        _ response: PageResponse,
+        requestedCursor: String?,
+        admitsPublication: @MainActor () -> Bool
+    ) async -> ArchivedSessionsLoadResult {
+        guard await admitsPublication() else { return .retired }
+        guard response.sessions.count <= pageSize,
+              response.sessions.allSatisfy({ $0.kind == .user && $0.isArchived }) else {
+            return .invalid(code: "invalid_response", reason: "archived-session-page")
+        }
+        if let nextCursor = response.nextCursor {
+            guard !nextCursor.isEmpty, nextCursor != requestedCursor else {
+                return .invalid(code: "invalid_response", reason: "repeated-cursor")
+            }
+        }
+        return .loaded(page: ArchivedSessionsPage(sessions: response.sessions, nextCursor: response.nextCursor))
+    }
+}
+
+/// Sums the Gateway-owned archived-session count across profiles. Only a
+/// profile that advertises `session-archive.v1` and has a known count
+/// contributes; `nil` therefore means "no archive projection yet", which the
+/// dashboard must never present as a fabricated zero.
+enum SessionArchiveCountProjection {
+    static func total(countsByProfile: [String: Int], capableProfileIDs: Set<String>) -> Int? {
+        var total = 0
+        var counted = false
+        for profileID in capableProfileIDs.sorted() {
+            guard let count = countsByProfile[profileID], count >= 0 else { continue }
+            total += count
+            counted = true
+        }
+        return counted ? total : nil
     }
 }
 
@@ -531,13 +615,24 @@ struct SessionCatalogCoordinator: Equatable {
         case stale
         case unknownSession
         case updated
+        /// The row is archived, so the Gateway's summary projection (which has
+        /// no archive field) must not materialize it again. The archived read
+        /// or the next authoritative dashboard page is the only re-entry point.
+        case archived
     }
 
     private(set) var sessions: [SessionSummary] = []
     private(set) var freshness: SessionCatalogFreshness = .stale
+    /// Gateway-owned archived-session count for this profile's dashboard
+    /// projection. Retained while a list is unavailable; `nil` means the count
+    /// has never been observed for this exact catalog.
+    private(set) var archivedCount: Int?
     private var indicesByID: [String: Int] = [:]
     private var liveUpdates: [String: SessionSummaryUpdate] = [:]
     private var liveSessionIDs: Set<String> = []
+    /// Session IDs whose archive response has been applied. They stay hidden
+    /// until an authoritative page admits the ID again.
+    private var archivedSessionIDs: Set<String> = []
     private var loadGeneration = 0
 
     mutating func beginLoad(key: SessionCatalogLoadKey? = nil) -> LoadAdmission {
@@ -577,7 +672,8 @@ struct SessionCatalogCoordinator: Equatable {
     @discardableResult
     mutating func publishAuthoritative(
         _ authoritative: [SessionSummary],
-        admission: LoadAdmission
+        admission: LoadAdmission,
+        archivedCount: Int? = nil
     ) -> Bool {
         guard admits(admission, key: admission.key) else { return false }
         let ids = Set(authoritative.map(\.id))
@@ -589,11 +685,17 @@ struct SessionCatalogCoordinator: Equatable {
         }
         rebuildIndex()
         liveSessionIDs = ids
+        // An `exclude` page omits archived sessions by contract, so a returned
+        // row proves the ID is no longer archived. Any ID still missing keeps
+        // its mark and stays hidden from live summaries.
+        archivedSessionIDs.subtract(ids)
+        self.archivedCount = archivedCount
         freshness = .live
         return true
     }
 
     mutating func apply(_ update: SessionSummaryUpdate) -> SummaryUpdateAdmission {
+        if archivedSessionIDs.contains(update.sessionId) { return .archived }
         if let current = liveUpdates[update.sessionId],
            update.summaryRevision <= current.summaryRevision {
             return .stale
@@ -665,6 +767,7 @@ struct SessionCatalogCoordinator: Equatable {
             completionRevision: projection.completionRevision,
             attentionRevision: projection.attentionRevision,
             isUnread: projection.isUnread,
+            archivedAt: current.archivedAt,
             gatewayProfileID: current.gatewayProfileID,
             gatewayProfileLabel: current.gatewayProfileLabel
         )
@@ -672,12 +775,13 @@ struct SessionCatalogCoordinator: Equatable {
         return true
     }
 
-    mutating func installCached(_ cached: [SessionSummary]) {
+    mutating func installCached(_ cached: [SessionSummary], archivedCount: Int? = nil) {
         invalidateLoads()
         liveUpdates.removeAll()
         liveSessionIDs.removeAll()
         sessions = cached
         rebuildIndex()
+        self.archivedCount = archivedCount
         freshness = .cached
     }
 
@@ -692,9 +796,29 @@ struct SessionCatalogCoordinator: Equatable {
         invalidateLoads()
         liveUpdates.removeValue(forKey: sessionID)
         liveSessionIDs.remove(sessionID)
+        // Deletion removes the Gateway's archive record too, so a later page
+        // can never resurrect this ID from a stale local mark.
+        archivedSessionIDs.remove(sessionID)
         guard let index = indicesByID[sessionID], sessions.indices.contains(index) else { return }
         sessions.remove(at: index)
         rebuildIndex()
+    }
+
+    /// Applies the authoritative archive response. The row leaves the dashboard
+    /// projection immediately, and the ID stays hidden from live summaries
+    /// until an authoritative `exclude` page admits it again.
+    @discardableResult
+    mutating func markArchived(sessionID: String) -> Bool {
+        let newlyMarked = archivedSessionIDs.insert(sessionID).inserted
+        let hadRow = indicesByID[sessionID] != nil || liveUpdates[sessionID] != nil
+        invalidateLoads()
+        liveUpdates.removeValue(forKey: sessionID)
+        liveSessionIDs.remove(sessionID)
+        if let index = indicesByID[sessionID], sessions.indices.contains(index) {
+            sessions.remove(at: index)
+            rebuildIndex()
+        }
+        return newlyMarked || hadRow
     }
 
     mutating func replaceForFacade(_ replacement: [SessionSummary]) {
@@ -703,6 +827,9 @@ struct SessionCatalogCoordinator: Equatable {
         sessions = replacement
         rebuildIndex()
         liveSessionIDs = Set(replacement.map(\.id))
+        // Rows the façade already holds are not archived; absent IDs keep
+        // their mark rather than silently returning to the dashboard.
+        archivedSessionIDs.subtract(liveSessionIDs)
         freshness = .live
     }
 
@@ -710,6 +837,8 @@ struct SessionCatalogCoordinator: Equatable {
         invalidateLoads()
         liveUpdates.removeAll()
         liveSessionIDs.removeAll()
+        archivedSessionIDs.removeAll()
+        archivedCount = nil
         sessions.removeAll()
         indicesByID.removeAll()
         freshness = .stale
@@ -774,6 +903,7 @@ struct SessionCatalogCoordinator: Equatable {
             completionRevision: preserve ? summary.completionRevision : update.completionRevision,
             attentionRevision: preserve ? summary.attentionRevision : update.attentionRevision,
             isUnread: preserve ? summary.isUnread : update.isUnread,
+            archivedAt: summary.archivedAt,
             gatewayProfileID: summary.gatewayProfileID,
             gatewayProfileLabel: summary.gatewayProfileLabel
         )

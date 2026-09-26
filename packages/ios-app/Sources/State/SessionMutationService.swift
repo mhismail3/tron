@@ -421,6 +421,17 @@ final class SessionMutationService {
         }
     }
 
+    /// Archive state is Gateway-owned display state. The response is the
+    /// authority for the row's membership; nothing here is applied optimistically.
+    func setArchived(sessionID: String, archived: Bool) async throws -> SessionArchiveState {
+        struct Params: Codable { let sessionId: String; let archived: Bool; let commandId: String }
+        let commandID = uuidSource.next().uuidString
+        let params = Params(sessionId: sessionID, archived: archived, commandId: commandID)
+        return try await executor.perform(method: "session.archive.set", commandID: commandID) {
+            try await client.request("session.archive.set", params, timeout: GatewayRequestTimeout.sessionArchive)
+        }
+    }
+
     func reloadResources(sessionID: String) async throws {
         struct Params: Codable { let sessionId, commandId: String }
         struct Response: Codable { let reloaded: Bool }

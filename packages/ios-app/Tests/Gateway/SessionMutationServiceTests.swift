@@ -694,6 +694,71 @@ struct SessionMutationServiceTests {
         }
     }
 
+    @Test("archive mutation carries the intent and keeps the Gateway's exact refusal")
+    func archiveMutation() async throws {
+        try await withTestWatchdog {
+            let harness = try await makeHarness()
+            var frameIndex = 1
+
+            let archiving = Task {
+                try await harness.service.setArchived(sessionID: "session-a", archived: true)
+            }
+            let archived: SessionArchiveState = try await complete(
+                archiving,
+                socket: harness.socket,
+                frameIndex: &frameIndex,
+                method: "session.archive.set",
+                result: .object(["archived": .bool(true), "archivedAt": .string("2026-01-02T00:00:00Z")]),
+                expectedParams: ["archived": .bool(true)]
+            )
+            #expect(archived.archived)
+            #expect(archived.archivedAt == "2026-01-02T00:00:00Z")
+
+            // Unarchive is the same command with the opposite intent, and its
+            // response carries no archive timestamp.
+            let unarchiving = Task {
+                try await harness.service.setArchived(sessionID: "session-a", archived: false)
+            }
+            let unarchived: SessionArchiveState = try await complete(
+                unarchiving,
+                socket: harness.socket,
+                frameIndex: &frameIndex,
+                method: "session.archive.set",
+                result: .object(["archived": .bool(false)]),
+                expectedParams: ["archived": .bool(false)]
+            )
+            #expect(!unarchived.archived)
+            #expect(unarchived.archivedAt == nil)
+
+            // A running session refuses the archive. The exact code and its
+            // retryability must survive to the caller.
+            let refused = Task {
+                try await harness.service.setArchived(sessionID: "session-a", archived: true)
+            }
+            let refusal = try await request(in: harness.socket, frameIndex: frameIndex)
+            frameIndex += 1
+            await harness.socket.enqueue(try JSONEncoder.gateway.encode(JSONValue.object([
+                "type": .string("response"),
+                "id": .string(refusal.id),
+                "ok": .bool(false),
+                "error": .object([
+                    "code": .string("session_operation_busy"),
+                    "message": .string("Stop the session before archiving it"),
+                    "retryable": .bool(true),
+                    "details": .null,
+                ]),
+            ])))
+            do {
+                _ = try await valueOfOwnedTask(refused)
+                Issue.record("a busy archive unexpectedly succeeded")
+            } catch let failure as GatewayFailure {
+                #expect(failure.code == "session_operation_busy")
+                #expect(failure.retryable)
+            }
+            await harness.client.close()
+        }
+    }
+
     private struct Harness {
         let socket: ScriptedGatewaySocket
         let replacement: ScriptedGatewaySocket

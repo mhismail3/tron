@@ -236,6 +236,53 @@ struct SnapshotCacheTests {
         #expect(loaded.sessions.first?.summaryRevision == 2)
     }
 
+    @Test("archived rows are never cached and the Gateway count stays bounded")
+    func archivedRowsAreExcludedAndCountIsBounded() async throws {
+        let root = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString, directoryHint: .isDirectory)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let cache = SnapshotCache(root: root)
+        let visible = SessionSummary(
+            id: "visible", name: nil, cwd: "/workspace", parentSessionId: nil,
+            createdAt: "2026-01-01T00:00:00Z", updatedAt: "2026-01-01T00:00:00Z",
+            messageCount: 0, firstMessage: "", phase: .idle
+        )
+        // Archive membership is Gateway-owned display state; a persisted row
+        // that still carries it would leak a hidden session into the dashboard
+        // after a relaunch.
+        let archived = SessionSummary(
+            id: "archived", name: nil, cwd: "/workspace", parentSessionId: nil,
+            createdAt: "2026-01-01T00:00:00Z", updatedAt: "2026-01-01T00:00:00Z",
+            messageCount: 0, firstMessage: "", phase: .idle, archivedAt: "2026-01-02T00:00:00Z"
+        )
+
+        await cache.save(profileID: "profile", sessions: [visible, archived], archivedCount: 4)
+        let loaded = await cache.load(profileID: "profile")
+        #expect(loaded.sessions.map(\.id) == ["visible"])
+        #expect(loaded.archivedCount == 4)
+
+        // A count with no rows still survives: the dashboard shows how many
+        // sessions are hidden even when its own rows are empty.
+        await cache.save(profileID: "profile", sessions: [], archivedCount: 0)
+        let empty = await cache.load(profileID: "profile")
+        #expect(empty.sessions.isEmpty)
+        #expect(empty.archivedCount == 0)
+
+        await cache.save(profileID: "profile", sessions: [visible], archivedCount: -1)
+        #expect((await cache.load(profileID: "profile")).archivedCount == nil)
+        await cache.save(
+            profileID: "profile",
+            sessions: [visible],
+            archivedCount: SnapshotCachePolicy.maximumArchivedCount + 1
+        )
+        #expect((await cache.load(profileID: "profile")).archivedCount == nil)
+        await cache.save(
+            profileID: "profile",
+            sessions: [visible],
+            archivedCount: SnapshotCachePolicy.maximumArchivedCount
+        )
+        #expect((await cache.load(profileID: "profile")).archivedCount == SnapshotCachePolicy.maximumArchivedCount)
+    }
+
     @Test("records unwritable cache destinations as failed saves")
     func recordsFailedSave() async throws {
         let root = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString, directoryHint: .notDirectory)

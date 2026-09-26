@@ -652,10 +652,140 @@ struct AppModelCatalogSyncTests {
         await client.close()
     }
 
+    @Test("archive support and its count come only from a capable Gateway")
+    func archivedCountRequiresCapability() async throws {
+        try await withHarness(capabilities: ["sessions.v1", "session-archive.v1"]) { harness in
+            try Self.storePairedProfile(harness.model)
+            #expect(harness.model.supportsSessionArchive(profileID: "profile"))
+            #expect(!harness.model.supportsSessionArchive(profileID: "unknown"))
+            #expect(!harness.model.supportsSessionArchive(profileID: nil))
+            let loading = Task { await harness.model.refreshSessions() }
+            let catalog = try await request(harness.socket, index: 1)
+            #expect(catalog.method == "session.list")
+            #expect(catalog.params?["archived"] == nil)
+            await harness.socket.enqueue(response(
+                id: catalog.id,
+                sessions: [summary(id: "visible", revision: 1)],
+                listRevision: 1,
+                archivedCount: 3
+            ))
+            #expect(await loading.value == .published)
+            #expect(harness.model.archivedSessionCount == 3)
+            #expect(harness.model.visibleSessions.map(\.id) == ["visible"])
+        }
+        // A Gateway without the capability publishes nothing: never a zero, and
+        // no archive controls.
+        try await withHarness { harness in
+            try Self.storePairedProfile(harness.model)
+            #expect(!harness.model.supportsSessionArchive(profileID: "profile"))
+            let loading = Task { await harness.model.refreshSessions() }
+            let catalog = try await request(harness.socket, index: 1)
+            await harness.socket.enqueue(response(
+                id: catalog.id,
+                sessions: [summary(id: "visible", revision: 1)],
+                listRevision: 1,
+                archivedCount: 3
+            ))
+            #expect(await loading.value == .published)
+            #expect(harness.model.archivedSessionCount == nil)
+        }
+    }
+
+    @Test("a superseded archived page is retired instead of replacing newer truth")
+    func archivedReadFence() async throws {
+        try await withHarness(capabilities: ["sessions.v1", "session-archive.v1"]) { harness in
+            let model = harness.model
+            let first = Task {
+                try await model.loadArchivedSessions(profileID: "profile", cursor: nil) { true }
+            }
+            let firstRequest = try await archivedRequest(harness.socket, from: 1)
+            #expect(firstRequest.request.params?["archived"] == .string("only"))
+            #expect(firstRequest.request.params?["scope"] == .string("user"))
+            let second = Task {
+                try await model.loadArchivedSessions(profileID: "profile", cursor: nil) { true }
+            }
+            let secondRequest = try await archivedRequest(harness.socket, from: firstRequest.index + 1)
+            #expect(secondRequest.request.id != firstRequest.request.id)
+
+            // The older page arrives after the newer read started. It must be
+            // retired rather than published over newer archive truth.
+            await harness.socket.enqueue(response(
+                id: firstRequest.request.id,
+                sessions: [summary(id: "older", revision: 1, archivedAt: "2026-01-02T00:00:00Z")],
+                listRevision: 1
+            ))
+            await harness.socket.enqueue(response(
+                id: secondRequest.request.id,
+                sessions: [summary(id: "newer", revision: 2, archivedAt: "2026-01-03T00:00:00Z")],
+                listRevision: 1
+            ))
+            guard case .retired = try await first.value else {
+                Issue.record("a superseded archived page was published")
+                return
+            }
+            guard case let .loaded(page) = try await second.value else {
+                Issue.record("the current archived page was not published")
+                return
+            }
+            #expect(page.sessions.map(\.id) == ["newer"])
+            #expect(page.sessions.first?.archivedAt == "2026-01-03T00:00:00Z")
+        }
+    }
+
+    @Test("an inactive surface and an incapable profile publish no archived page")
+    func archivedReadAdmission() async throws {
+        try await withHarness(capabilities: ["sessions.v1", "session-archive.v1"]) { harness in
+            try Self.storePairedProfile(harness.model)
+            let sentBefore = await harness.socket.sentFrames().count
+            let inactive = try await harness.model.loadArchivedSessions(
+                profileID: "profile",
+                cursor: nil
+            ) { false }
+            guard case .retired = inactive else {
+                Issue.record("an inactive surface received an archived page")
+                return
+            }
+            #expect(await harness.socket.sentFrames().count == sentBefore)
+        }
+    }
+
+    /// A paired profile is normally stored before it is selected; the hosted
+    /// harness connects one directly, so archive counting needs the store
+    /// projection that production has.
+    private static func storePairedProfile(_ model: AppModel) throws {
+        try model.profiles.save(
+            GatewayProfile(
+                id: "profile",
+                label: "Mac",
+                host: "gateway.test",
+                port: 9_847,
+                machineId: "machine",
+                deviceId: "device"
+            ),
+            token: "token",
+            selecting: true
+        )
+    }
+
+    /// Finds the next archived-container read. Catalog refreshes share the same
+    /// transport, so the unique `archived: "only"` parameter identifies it.
+    private func archivedRequest(
+        _ socket: ScriptedGatewaySocket,
+        from startIndex: Int
+    ) async throws -> (request: Request, index: Int) {
+        var index = startIndex
+        while true {
+            let request = try await request(socket, index: index)
+            if request.params?["archived"] == .string("only") { return (request, index) }
+            index += 1
+        }
+    }
+
     private func withHarness(
         sockets: [ScriptedGatewaySocket] = [ScriptedGatewaySocket()],
         manualClock: ManualClock? = nil,
         reconnectDelayPolicy: ReconnectDelayPolicy = .standard,
+        capabilities: [String] = ["sessions.v1"],
         operation: @escaping @MainActor @Sendable (Harness) async throws -> Void
     ) async throws {
         let socket = try #require(sockets.first)
@@ -677,7 +807,7 @@ struct AppModelCatalogSyncTests {
         )
         let harness = Harness(socket: socket, sockets: sockets, client: client, model: model, root: root)
         do {
-            await socket.enqueue(helloFrame())
+            await socket.enqueue(helloFrame(capabilities: capabilities))
             try await model.connectHostedGateway(profile: profile, token: "token")
             try await withTestWatchdog {
                 try await operation(harness)
@@ -697,12 +827,14 @@ struct AppModelCatalogSyncTests {
     private func summary(
         id: String,
         revision: Int,
-        phase: SessionPhase = .idle
+        phase: SessionPhase = .idle,
+        archivedAt: String? = nil
     ) -> SessionSummary {
         SessionSummary(
             id: id, name: id, cwd: "/workspace", parentSessionId: nil,
             createdAt: "2026-01-01T00:00:00Z", updatedAt: "2026-01-01T00:00:01Z",
-            messageCount: revision, firstMessage: id, phase: phase, summaryRevision: revision
+            messageCount: revision, firstMessage: id, phase: phase, summaryRevision: revision,
+            archivedAt: archivedAt
         )
     }
 
@@ -734,12 +866,14 @@ struct AppModelCatalogSyncTests {
         id: String,
         sessions: [SessionSummary],
         listRevision: Int,
-        nextCursor: String? = nil
+        nextCursor: String? = nil,
+        archivedCount: Int? = nil
     ) -> Data {
         let encoded = try! JSONEncoder.gateway.encode(sessions)
         let rawSessions = try! JSONSerialization.jsonObject(with: encoded)
         var result: [String: Any] = ["sessions": rawSessions, "listRevision": listRevision]
         if let nextCursor { result["nextCursor"] = nextCursor }
+        if let archivedCount { result["archivedCount"] = archivedCount }
         return try! JSONSerialization.data(withJSONObject: [
             "type": "response", "id": id, "ok": true, "result": result,
         ])
@@ -752,8 +886,10 @@ struct AppModelCatalogSyncTests {
         ])
     }
 
-    private func helloFrame() -> Data {
-        Data(#"{"type":"hello","gatewayVersion":"1.0.0","piVersion":"1.0.0","protocolVersion":5,"minProtocolVersion":5,"machineId":"machine","machineName":"Mac","gatewayChannel":"stable","capabilities":["sessions.v1"]}"#.utf8)
+    private func helloFrame(capabilities: [String] = ["sessions.v1"]) -> Data {
+        let listed = capabilities.map { "\"\($0)\"" }.joined(separator: ",")
+        return Data(#"{"type":"hello","gatewayVersion":"1.0.0","piVersion":"1.0.0","protocolVersion":5,"minProtocolVersion":5,"machineId":"machine","machineName":"Mac","gatewayChannel":"stable","capabilities":["#.utf8)
+            + Data(listed.utf8) + Data("]}".utf8)
     }
 
     private struct Request: Decodable {

@@ -39,6 +39,24 @@ struct SessionCreationOrigin: Codable, Hashable, Sendable {
     }
 }
 
+/// Gateway contract that owns archived-session display state. Archive controls
+/// stay hidden for a profile that does not advertise it.
+enum SessionArchiveCapability {
+    static let name = "session-archive.v1"
+}
+
+/// Authoritative `session.archive.set` response. Archive membership is
+/// Gateway-owned display state; iOS never derives it from a local row.
+struct SessionArchiveState: Codable, Equatable, Sendable {
+    let archived: Bool
+    let archivedAt: String?
+
+    init(archived: Bool, archivedAt: String? = nil) {
+        self.archived = archived
+        self.archivedAt = archivedAt
+    }
+}
+
 struct SessionSummary: Codable, Hashable, Identifiable, Sendable {
     enum Kind: String, Codable, Hashable, Sendable { case user, subagent }
 
@@ -65,6 +83,10 @@ struct SessionSummary: Codable, Hashable, Identifiable, Sendable {
     let completionRevision: Int
     let attentionRevision: Int
     let isUnread: Bool
+    /// Set only on an archived row. The dashboard's default list projection
+    /// omits archived sessions, so this is present only for the archived
+    /// container and for a row whose archive state changed under a live read.
+    let archivedAt: String?
     /// Dashboard-only ownership metadata. Gateway payloads omit these fields.
     let gatewayProfileID: String?
     let gatewayProfileLabel: String?
@@ -76,7 +98,7 @@ struct SessionSummary: Codable, Hashable, Identifiable, Sendable {
         firstMessage: String, phase: SessionPhase, foregroundPhase: SessionPhase? = nil,
         hasActiveSubagents: Bool = false, waitingForUser: Bool = false,
         summaryRevision: Int? = nil, completionRevision: Int = 0,
-        attentionRevision: Int = 0, isUnread: Bool = false,
+        attentionRevision: Int = 0, isUnread: Bool = false, archivedAt: String? = nil,
         gatewayProfileID: String? = nil, gatewayProfileLabel: String? = nil
     ) {
         self.id = id
@@ -98,13 +120,14 @@ struct SessionSummary: Codable, Hashable, Identifiable, Sendable {
         self.completionRevision = completionRevision
         self.attentionRevision = attentionRevision
         self.isUnread = isUnread
+        self.archivedAt = archivedAt
         self.gatewayProfileID = gatewayProfileID
         self.gatewayProfileLabel = gatewayProfileLabel
     }
 
     private enum CodingKeys: String, CodingKey {
         case id, name, cwd, kind, parentSessionId, creationOrigin, createdAt, updatedAt, activeSince, messageCount, firstMessage, phase, foregroundPhase, hasActiveSubagents, waitingForUser, summaryRevision
-        case completionRevision, attentionRevision, isUnread
+        case completionRevision, attentionRevision, isUnread, archivedAt
     }
 
     init(from decoder: Decoder) throws {
@@ -136,6 +159,7 @@ struct SessionSummary: Codable, Hashable, Identifiable, Sendable {
         completionRevision = decodedCompletionRevision
         attentionRevision = decodedAttentionRevision
         isUnread = try container.decodeIfPresent(Bool.self, forKey: .isUnread) ?? false
+        archivedAt = try container.decodeIfPresent(String.self, forKey: .archivedAt)
         gatewayProfileID = nil
         gatewayProfileLabel = nil
     }
@@ -161,10 +185,13 @@ struct SessionSummary: Codable, Hashable, Identifiable, Sendable {
             completionRevision: completionRevision,
             attentionRevision: attentionRevision,
             isUnread: isUnread,
+            archivedAt: archivedAt,
             gatewayProfileID: profileID,
             gatewayProfileLabel: label
         )
     }
+
+    var isArchived: Bool { archivedAt != nil }
 
     var dashboardID: String {
         gatewayProfileID.map { "\($0):\(id)" } ?? id

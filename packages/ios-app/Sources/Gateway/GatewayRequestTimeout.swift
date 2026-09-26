@@ -20,6 +20,8 @@ enum GatewayRequestTimeout {
     static let sessionNavigate: Duration = .seconds(300)
     // Delete can wait for runtime retirement and canonical resource cleanup.
     static let sessionDelete: Duration = .seconds(60)
+    // Archive state is a bounded display mutation on an idle session.
+    static let sessionArchive: Duration = .seconds(60)
     // Resource reload may inspect bounded project resources before responding.
     static let sessionReloadResources: Duration = .seconds(120)
     // Provider refresh calls external model catalogs before returning.

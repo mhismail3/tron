@@ -2,7 +2,7 @@
 
 - **Started:** 2026-09-26
 - **Status:** Active
-- **Last updated:** 2026-09-26, G-2/G-3 merge
+- **Last updated:** 2026-09-26, I-1
 - **Goal:** A user can archive an idle session so it leaves the dashboard without being deleted, find it again in one collapsed Archived container or in search, and have it return automatically when it runs again.
 
 ## Goal and constraints
@@ -92,7 +92,7 @@ Current state, inspected 2026-09-26:
 | G-1 | Done | Gateway archive store, `session.archive.set` RPC, list filtering and count, delete/rekey/prune ownership, `session-archive.v1` capability | none | archive worker, 2026-09-26 |
 | G-2 | Done | Every new run unarchives: an admission-time clear for Gateway-admitted runs, plus a backstop when an active phase is published | G-1 | tron-coordinator, 2026-09-26 |
 | G-3 | Done | Search results carry `archived`; `session-search.md` updated | G-1 | tron-coordinator, 2026-09-26 |
-| I-1 | Claimed | iOS model, mutation service, AppModel and capability gating; catalog membership follows authoritative responses | G-1 | tron-coordinator, 2026-09-26 |
+| I-1 | Done | iOS model, mutation service, AppModel and capability gating; catalog membership follows authoritative responses | G-1 | tron-coordinator, 2026-09-26 |
 | I-2 | Ready | Dashboard full-swipe Archive, one collapsed "Archived (N)" container at the bottom, and archived-row actions | I-1 | |
 | I-3 | Ready | Search "Archived" label, automation picker exclusion, and display of an existing automation whose target is archived | I-1, G-3 | |
 | F-1 | Needs scoping | The `session.fork` RPC rejects with retryable `busy` because its own admitted work entry satisfies the slot's idle check; decide the fix and cover the real path | none | |
@@ -575,3 +575,74 @@ artifact. Accessibility identifiers use the existing
 - Changes: merge commit.
 - Deviations: none.
 
+
+### I-1 · Done · 2026-09-26 · archive worker
+
+- Result: iOS carries archive state without owning it. `SessionSummary.archivedAt`
+  decodes the Gateway's row state, `session.list` pages admit `archivedCount`, and
+  `SessionMutationService.setArchived` sends `session.archive.set` with a command
+  ID and a 60 s bound. `AppModel.setSessionArchived` applies only the authoritative
+  response: archive removes the row and keeps the ID hidden from live summaries,
+  unarchive schedules an authoritative catalog read instead of fabricating a row.
+  The dashboard keeps one count per profile and sums it over archive-capable
+  profiles (`SessionArchiveCountProjection`), never as a zero, and a new
+  `loadArchivedSessions` reads `archived: "only"` pages for the archived container
+  under the caller's managed activity and an exact per-profile latest-request
+  fence. Archive controls are gated by `supportsSessionArchive(profileID:)`.
+- Failure modes written before the isolated tests (the Gateway lifecycle test
+  cannot reproduce them):
+  - F-A a late `session.summary` for an archived ID re-materializes the row on the
+    focused catalog or a background pool catalog;
+  - F-B a stale `archived: "only"` page is published after a newer archive toggle
+    or a surface exit;
+  - F-C the count double-counts, fabricates a zero for an incapable/unknown
+    profile, or drops a row's archive state from a copied summary;
+  - F-D `SnapshotCache` persists an archived row or loses the count across a
+    relaunch;
+  - F-E iOS encodes the wrong archive command or flattens the Gateway's
+    `session_operation_busy` refusal into a generic failure;
+  - F-F the loader admits a leaked archived row into the dashboard projection or a
+    foreign row into the archived projection.
+- Evidence (verified):
+  - `scripts/tron-ios-test build`: TEST BUILD SUCCEEDED.
+  - `scripts/tron-ios-test run --only-testing TronMobileTests/SnapshotCacheTests
+    --only-testing TronMobileTests/DashboardStateOwnerTests
+    --only-testing TronMobileTests/SessionMutationServiceTests
+    --only-testing TronMobileTests/AppModelCatalogSyncTests`: 84 tests in 4 suites
+    passed, including the ten new archive tests. The pool-level test uses
+    `TRON_IOS_TEST_DERIVED_DATA` scoped to this worktree, because the default
+    derived-data path is shared by concurrent sessions and another session's
+    build overwrote these products mid-verification. The retained result bundle
+    is under `~/Library/Developer/Tron/ios/test-runs/`.
+  - That test found a real defect in this change before it shipped: the pool's
+    new count callback was declared only in the delegate protocol extension, so
+    the subscription read it as a default no-op and the count never reached the
+    dashboard. It is now a protocol requirement.
+  - `python3 scripts/check-documentation-policy.py` and
+    `scripts/personal-info-guard.sh` pass.
+- Changes: this commit (`SessionCatalogModels.swift`, `SessionMutationService.swift`,
+  `AppModel.swift`, `DashboardStateOwners.swift`, `DashboardGatewayConnectionPool.swift`,
+  `SnapshotCache.swift`, `GatewayRequestTimeout.swift`, the four owning test files, and
+  `packages/ios-app/docs/architecture.md`).
+- Kept on purpose:
+  - The count is not adjusted locally on an archive response. It converges from
+    the Gateway's own list change, so a concurrent change on another device
+    cannot make iOS disagree with the store.
+  - An archived ID stays marked until an authoritative `exclude` page contains it
+    again, and `remove` clears the mark, so delete cannot resurrect a row.
+  - `installCached`/`markLoadUnavailable` retain the count, because a failed list
+    read must not make the count look unknown.
+  - Capability comes only from a live handshake (`system.info`), matching every
+    other capability-gated surface; a cached count contributes only once the
+    owning profile is actually capable.
+- Deviations: the plan's "a profile that is offline ... contributes nothing" is
+  implemented as "a profile with no known count contributes nothing". A capable
+  profile whose last-known count came from the cache or a failed read still
+  contributes it, which is the point of persisting the count; an incapable or
+  never-observed profile contributes nothing and is never shown as zero.
+- For the next agent: I-2 consumes `model.archivedSessionCount`,
+  `model.supportsSessionArchive(profileID:)` and
+  `model.loadArchivedSessions(profileID:cursor:presentationActive:)`, and must call
+  `model.invalidateArchivedSessionsReads(profileID:)` after deleting from the
+  container. `markArchived` invalidates in-flight loads, so a refresh is required
+  after archive; the Gateway's `session.listChanged` already triggers it.
