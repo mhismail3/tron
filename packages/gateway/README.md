@@ -1699,6 +1699,17 @@ and omitted row/handler/error counts describe the returned projection. The hook 
 extension, handler-event, load-error, and long-metadata counts that exactly
 describe the returned rows rather than a separately budgeted addition.
 This is a current runtime registration view, not execution history or health.
+Every tool, skill, prompt and command row also carries a `distribution` tag
+(`external`, `module` or `local`, absent for Pi built-ins) derived from Pi's
+`sourceInfo` by one Gateway rule: a `package` origin is external, an `inline`
+source is a Tron module, and a `top-level` `local`/`auto`/`cli` source is local.
+It is a separate key from Pi's `origin`, which keeps its `package`/`top-level`
+meaning. The same response lists available subagents (`name`, `description`,
+`model`, `thinking`, `source`, `distribution`) using the installed `pi-subagents`
+package's own discovery, loaded through its declared `jiti` dependency. Subagent
+discovery spawns nothing, is capped at 128 rows, is never cached across calls,
+and fails soft to an empty list plus one bounded `subagentDiagnostics` string
+when the package is absent, cannot load, or exposes an unexpected shape.
 `session.tree` returns the existing newest-first-selected, chronologically restored
 flat outline of at most 1,000 nodes and 700 KiB with depth, child-count, role, and
 current-path metadata; it never recursively serializes an unbounded canonical tree.
