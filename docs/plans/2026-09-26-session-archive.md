@@ -2,7 +2,7 @@
 
 - **Started:** 2026-09-26
 - **Status:** Active
-- **Last updated:** 2026-09-26, F-5
+- **Last updated:** 2026-09-26, V-1 checkpoint
 - **Goal:** A user can archive an idle session so it leaves the dashboard without being deleted, find it again in one collapsed Archived container or in search, and have it return automatically when it runs again.
 
 ## Goal and constraints
@@ -101,7 +101,7 @@ Current state, inspected 2026-09-26:
 | F-4 | Done | I-2's hosted UI journey never passed (app never idled; simulator contention). Make it pass on a healthy simulator, fixing the fixture if it is the cause, and keep its screenshots | I-2 | tron-coordinator, 2026-09-26 |
 | F-5 | Done | `session-archive.integration.test.ts` "rejects a prompt retryably when archive state cannot be cleared" failed once in four full-suite runs (passes alone and under targeted load); reproduce, find the root cause, fix | G-2 | tron-coordinator, 2026-09-26 |
 | F-6 | Needs scoping | Same class as F-5, unproven: `RuntimeRegistry` line 1216 also writes `gateway/model-recents.json` fire-and-forget (`void this.noteModelUsed(...)` → `await this.recentModels.record(...)`), so its durable write can equally outlive `dispose()`. Decide whether `RecentModelStore` gets the same disposal drain | F-5 | |
-| V-1 | Ready | Cross-module checkpoint, user-performed Gateway rollout, and eyes-on device review; close the plan | G-2, I-2, I-3, F-3, F-4, F-5, F-6 | |
+| V-1 | Blocked | Cross-module checkpoint, user-performed Gateway rollout, and eyes-on device review; close the plan | G-2, I-2, I-3, F-3, F-4, F-5, F-6 | tron-coordinator, 2026-09-26 |
 
 ## Task details
 
@@ -1106,3 +1106,35 @@ artifact. Accessibility identifiers use the existing
   the eyes-on device review. F-6 records the same fire-and-forget pattern on
   `model-recents.json`, which this task's probe did not observe (it lands early
   in these cases) but which is unowned at disposal for the same reason.
+
+### V-1 · Blocked · 2026-09-26 · tron-coordinator
+
+- Result: the automated cross-module checkpoint passes. V-1 is blocked on user
+  actions: the Gateway rollout and the eyes-on device review.
+- Evidence (verified):
+  - Full Gateway suite on main after F-5: 1945 passed and 1 failed. The failure
+    is the known `logger.test.ts` rotation flake, which also fails before these
+    changes.
+  - Focused iOS suites (`SessionMutationServiceTests`, `AppModelCatalogSyncTests`,
+    `SnapshotCacheTests`, `DashboardStateOwnerTests`, `SessionSearchTransportTests`)
+    through `scripts/tron-ios-test`: 88 tests passed.
+  - `scripts/ios-gateway-e2e-test prepare/build/run`: TEST EXECUTE SUCCEEDED,
+    focused run 25 s. It needs a plain Node 22.22.0 on PATH. The signed Gateway
+    payload's Node rejects unsigned native addons (library validation, different
+    Team ID), so it cannot load `node-pty` or rolldown.
+  - F-4 hosted archive journey screenshots are in the Tron internal workspace
+    under `files/session-archive/`.
+- Changes: none.
+- For the next agent / user:
+  1. The user rebuilds the Stable Gateway from this source, then installs the
+     iOS build. Agents must not do either.
+  2. Eyes-on review on an iPhone:
+     - full-swipe Archive;
+     - the Archived (N) container, across two Macs if paired;
+     - opening a search result labeled Archived;
+     - prompting an archived session so it returns to the dashboard;
+     - Manage Session → Unarchive;
+     - an automation firing into an archived target.
+  3. Then close the plan. F-6 stays Needs scoping and may explain the
+     `recent-model-usage` flake.
+
