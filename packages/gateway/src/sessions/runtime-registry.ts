@@ -1477,6 +1477,13 @@ export class RuntimeRegistry {
     return source;
   }
 
+  /** Read-only archive projection for derived reads such as session search.
+   * Archived sessions stay addressable, so this is a label rather than a
+   * filter, and the archive store remains the only writer. */
+  isArchived(sessionId: string): boolean {
+    return this.archive.archivedAt(sessionId) !== undefined;
+  }
+
   /** Read-only derived-search owner seam. Open sessions use the SDK-selected
    * branch held by their existing RuntimeSlot; cold sessions use one complete
    * canonical file parse after catalog admission and never create a runtime. */

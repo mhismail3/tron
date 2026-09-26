@@ -193,7 +193,10 @@ export class SessionSearchService {
       const currentAnchor = document.entries.find(item => item.id === candidate.entryId);
       if (!currentAnchor || currentAnchor.ordinal !== candidate.ordinal) continue;
       results.push({
-        sessionId: candidate.sessionId, title: candidate.title, cwd: candidate.cwd, updatedAt: candidate.updatedAt,
+        // Archive state is the owning store's display projection read at
+        // publication, never part of the index, so this needs no reindex.
+        sessionId: candidate.sessionId, archived: this.sessions.isArchived(candidate.sessionId),
+        title: candidate.title, cwd: candidate.cwd, updatedAt: candidate.updatedAt,
         entryId: candidate.entryId, ...(candidate.parentEntryId ? { parentEntryId: candidate.parentEntryId } : {}), ordinal: candidate.ordinal,
         passageKind: candidate.role, snippet: excerpt(entry.text, query), lexicalScore: candidate.lexicalScore,
         anchorRevision: candidate.anchorRevision,
@@ -220,7 +223,7 @@ export class SessionSearchService {
           const stored = this.semanticVectors.get(key);
           if (!document || !entry || !stored || !this.semanticModel || !sameSemanticGeneration(stored.generation, this.semanticModel) || stored.branchDigest !== document.branchDigest || stored.textDigest !== digest(entry.text)) continue;
           existing.add(key);
-          results.push({ sessionId: hit.sessionId, title: document.title, cwd: document.cwd, updatedAt: document.updatedAt, entryId: entry.id, ...(entry.parentId ? { parentEntryId: entry.parentId } : {}), ordinal: entry.ordinal, passageKind: entry.role, snippet: excerpt(entry.text, query), lexicalScore: 0, semanticScore: hit.score, anchorRevision: { indexRevision: this.index.stats().indexRevision, fileIdentity: document.fileIdentity, branchDigest: document.branchDigest, ...(document.leafEntryId ? { leafEntryId: document.leafEntryId } : {}), entryOrdinal: entry.ordinal, ...(document.forkBoundary ? { forkBoundary: document.forkBoundary } : {}) } });
+          results.push({ sessionId: hit.sessionId, archived: this.sessions.isArchived(hit.sessionId), title: document.title, cwd: document.cwd, updatedAt: document.updatedAt, entryId: entry.id, ...(entry.parentId ? { parentEntryId: entry.parentId } : {}), ordinal: entry.ordinal, passageKind: entry.role, snippet: excerpt(entry.text, query), lexicalScore: 0, semanticScore: hit.score, anchorRevision: { indexRevision: this.index.stats().indexRevision, fileIdentity: document.fileIdentity, branchDigest: document.branchDigest, ...(document.leafEntryId ? { leafEntryId: document.leafEntryId } : {}), entryOrdinal: entry.ordinal, ...(document.forkBoundary ? { forkBoundary: document.forkBoundary } : {}) } });
         }
       } catch (error) {
         if (signal?.aborted) throw error;

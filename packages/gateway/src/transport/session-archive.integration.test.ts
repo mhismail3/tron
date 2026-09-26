@@ -8,6 +8,8 @@ import { afterAll, afterEach, describe, expect, it, vi } from "vitest";
 import { TrustService } from "../admin/trust-service.js";
 import { DeviceStore } from "../security/device-store.js";
 import { RuntimeRegistry } from "../sessions/runtime-registry.js";
+import { SessionSearchIndex } from "../sessions/session-search-index.js";
+import { SessionSearchService } from "../sessions/session-search-service.js";
 import { CommandReceiptStore } from "./command-receipts.js";
 import { GatewayService } from "./gateway-service.js";
 import { GatewayServer } from "./server.js";
@@ -59,7 +61,7 @@ interface Client {
   request(id: string, method: string, params: object): Promise<any>;
 }
 
-async function fixture() {
+async function fixture(options: { search?: boolean } = {}) {
   const root = await mkdtemp(join(tmpdir(), "tron-session-archive-"));
   const agentDir = join(root, "agent");
   const cwd = join(root, "project");
@@ -85,6 +87,7 @@ async function fixture() {
   await devices.ensureEnrollment();
 
   let current: Stack | undefined;
+  let searchService: SessionSearchService | undefined;
   const start = async (): Promise<Stack> => {
     const registry = new RuntimeRegistry({
       agentDir,
@@ -99,6 +102,11 @@ async function fixture() {
     });
     await registry.initialize();
     await registry.recoverCanonicalAttention();
+    // The search owner is optional in the Gateway, so only the traversal that
+    // exercises the search projection pays for a real index and coordinator.
+    if (options.search) {
+      searchService = new SessionSearchService(registry, await SessionSearchIndex.open(join(root, "gateway", "session-search.sqlite")));
+    }
     const uploads = {
       acquire: vi.fn(),
       materialize: vi.fn(async () => ({ envelope: "", images: [], attachments: [], photoCount: 0, fileAttachmentCount: 0 })),
@@ -114,6 +122,7 @@ async function fixture() {
       terminals: { belongsToSession: () => false },
       logger: { log: () => {} },
       sessionDeleted: (sessionId: string) => server?.revokeSessionTerminals(sessionId),
+      ...(searchService ? { sessionSearch: searchService } : {}),
     } as never);
     server = new GatewayServer({
       host: "127.0.0.1",
@@ -136,6 +145,8 @@ async function fixture() {
     if (current) {
       sockets.forEach((socket) => socket.terminate());
       await current.server.close();
+      await searchService?.close();
+      searchService = undefined;
       await current.registry.dispose();
       current = undefined;
     }
@@ -149,6 +160,8 @@ async function fixture() {
     const previous = current!;
     current = undefined;
     await previous.server.close();
+    await searchService?.close();
+    searchService = undefined;
     await previous.registry.dispose();
     return start();
   };
@@ -180,7 +193,29 @@ async function fixture() {
     const file = manager.getSessionFile()!;
     return { id: manager.getSessionId(), file };
   };
-  return { root, agentDir, cwd, sessionDirectory, devices, paired, faux, runtimeFactory, listChanged, archiveDiagnostic, connect, coldSession, restart, current: () => current! };
+  /** A canonical session written directly instead of through the pinned
+   * manager, so the fixture controls its exact bytes and revisions. */
+  const rawSession = async (label: string, id: string): Promise<{ id: string; file: string; entryId: string }> => {
+    const timestamp = new Date().toISOString();
+    const entryId = `${label}-entry`;
+    const file = join(sessionDirectory, id, "session.jsonl");
+    await mkdir(dirname(file), { recursive: true });
+    await writeFile(file, [
+      JSON.stringify({ type: "session", version: 3, id, timestamp, cwd }),
+      JSON.stringify({
+        type: "message", id: entryId, parentId: null, timestamp,
+        // A canonical assistant envelope: the runtime projects its usage and
+        // stop reason when a search anchor opens this cold session.
+        message: {
+          role: "assistant", content: [{ type: "text", text: `${label} canonical response` }],
+          api: "faux", provider: "faux", model: "faux-1", stopReason: "stop",
+          usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, totalTokens: 0, cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 } },
+        },
+      }),
+    ].join("\n") + "\n", "utf8");
+    return { id, file, entryId };
+  };
+  return { root, agentDir, cwd, sessionDirectory, devices, paired, faux, runtimeFactory, listChanged, archiveDiagnostic, connect, coldSession, rawSession, restart, current: () => current! };
 }
 
 const list = async (client: Client, archived: "exclude" | "only", extra: Record<string, unknown> = {}) => {
@@ -193,7 +228,80 @@ const list = async (client: Client, archived: "exclude" | "only", extra: Record<
   };
 };
 
+const search = async (client: Client, query: string) => {
+  const response = await client.request(`search-${Math.random().toString(36).slice(2, 8)}`, "session.search", { query, maxResults: 10 });
+  expect(response.ok, JSON.stringify(response)).toBe(true);
+  return response.result as {
+    coverage: { omittedSessions: number };
+    results: Array<{ sessionId: string; entryId: string; archived: boolean; anchorRevision: unknown }>;
+  };
+};
+
 describe("session archive over the real Gateway", () => {
+  it("keeps an archived session searchable and marked archived", async () => {
+    const f = await fixture({ search: true });
+    const client = await f.connect();
+    const session = await f.rawSession("searchable", "searchable-archive-session");
+    // The pinned SDK records its effective thinking level the first time a
+    // runtime opens a canonical file. One warm query and anchor settle that
+    // write before the measured revisions below.
+    const warm = await search(client, "searchable");
+    const warmHit = warm.results.find((result) => result.sessionId === session.id);
+    expect(warmHit, JSON.stringify(warm)).toBeDefined();
+    const warmAnchor = await client.request("search-anchor-warmup", "session.search.anchor", {
+      sessionId: session.id, entryId: session.entryId, anchorRevision: warmHit!.anchorRevision,
+    });
+    expect(warmAnchor.ok, JSON.stringify(warmAnchor)).toBe(true);
+    const canonicalBytes = await readFile(session.file, "utf8");
+
+    const visible = await search(client, "searchable");
+    const visibleHit = visible.results.find((result) => result.sessionId === session.id);
+    expect(visibleHit, JSON.stringify(visible)).toBeDefined();
+    expect(visibleHit?.archived).toBe(false);
+    expect(visibleHit?.entryId).toBe(session.entryId);
+    expect(visible.coverage.omittedSessions).toBe(0);
+    const anchor = await client.request("search-anchor-visible", "session.search.anchor", {
+      sessionId: session.id, entryId: session.entryId, anchorRevision: visibleHit!.anchorRevision,
+    });
+    expect(anchor.ok, JSON.stringify(anchor)).toBe(true);
+
+    const archived = await client.request("search-archive", "session.archive.set", {
+      commandId: "search-archive-command", sessionId: session.id, archived: true,
+    });
+    expect(archived.ok, JSON.stringify(archived)).toBe(true);
+    expect((await list(client, "exclude")).sessions.map((row) => row.id)).not.toContain(session.id);
+
+    // Search reads archive state beside the index: the same canonical passage
+    // and content revision come back, only relabeled, and the session stays
+    // anchorable while its dashboard row is hidden.
+    const hidden = await search(client, "searchable");
+    const hiddenHit = hidden.results.find((result) => result.sessionId === session.id);
+    expect(hiddenHit, JSON.stringify(hidden)).toBeDefined();
+    expect(hiddenHit?.archived).toBe(true);
+    expect(hiddenHit?.entryId).toBe(session.entryId);
+    expect(hiddenHit?.anchorRevision.branchDigest).toBe(visibleHit!.anchorRevision.branchDigest);
+    expect(hiddenHit?.anchorRevision.fileIdentity).toBe(visibleHit!.anchorRevision.fileIdentity);
+    expect(await readFile(session.file, "utf8")).toBe(canonicalBytes);
+    const anchorWhileArchived = await client.request("search-anchor-archived", "session.search.anchor", {
+      sessionId: session.id, entryId: session.entryId, anchorRevision: hiddenHit!.anchorRevision,
+    });
+    expect(anchorWhileArchived.ok, JSON.stringify(anchorWhileArchived)).toBe(true);
+
+    const restored = await client.request("search-unarchive", "session.archive.set", {
+      commandId: "search-unarchive-command", sessionId: session.id, archived: false,
+    });
+    expect(restored.ok, JSON.stringify(restored)).toBe(true);
+    const afterUnarchive = await search(client, "searchable");
+    expect(afterUnarchive.results.find((result) => result.sessionId === session.id)?.archived).toBe(false);
+    record("keeps an archived session searchable and marked archived", {
+      entryId: hiddenHit?.entryId,
+      archivedResult: hiddenHit?.archived,
+      unchangedContentRevision: hiddenHit?.anchorRevision.branchDigest === visibleHit!.anchorRevision.branchDigest,
+      anchorableWhileArchived: anchorWhileArchived.ok,
+      archivedAfterUnarchive: afterUnarchive.results.find((result) => result.sessionId === session.id)?.archived,
+    });
+  });
+
   it("archives an idle session without touching its canonical file", async () => {
     const f = await fixture();
     const client = await f.connect();
