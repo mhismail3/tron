@@ -31,8 +31,6 @@ final class ModelPickerPresentationTests: XCTestCase {
         RecentModelRef(provider: "anthropic", id: "claude-haiku-4-6", lastUsedAt: "2026-01-15T00:00:00Z"),
     ]
 
-    private static let fixtureProviders = ["anthropic", "openai", "beta"]
-
     func testRailsAndProviderSectionsMountForLightAndDark() async throws {
         for scheme in [ColorScheme.light, .dark] {
             resetSharedExpansion()
@@ -172,9 +170,7 @@ final class ModelPickerPresentationTests: XCTestCase {
     /// The picker reads the app's device preference. Each fixture run starts
     /// from "nothing remembered" so an earlier run cannot decide this one.
     private func resetSharedExpansion() {
-        for provider in Self.fixtureProviders {
-            ModelProviderExpansionStore.shared.setExpanded(true, profileID: nil, provider: provider)
-        }
+        ModelProviderExpansionStore.shared.resetForHostedTest()
     }
 
     private func withPicker(

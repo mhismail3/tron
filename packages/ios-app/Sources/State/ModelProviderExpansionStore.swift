@@ -1,7 +1,8 @@
 import Foundation
 import Observation
 
-/// Per-device memory of which model-picker provider sections the user collapsed.
+/// Per-device memory of which model-picker provider sections the user expanded
+/// or collapsed.
 /// The paired Gateway profile and the provider ID key every entry, so each
 /// pairing keeps its own choices. This is a presentation preference only; the
 /// Gateway catalog stays canonical.
@@ -10,7 +11,8 @@ import Observation
 final class ModelProviderExpansionStore {
     private struct Document: Codable {
         let version: Int
-        let collapsed: [String]
+        /// Explicit user choice per `profile|provider`; true is expanded.
+        let expanded: [String: Bool]
     }
 
     static let documentKey = "modelPicker.providerExpansion.v1"
@@ -24,48 +26,52 @@ final class ModelProviderExpansionStore {
     private static let maximumDocumentBytes = 64 * 1024
 
     private let defaults: UserDefaults
-    private var collapsedKeys: Set<String>
+    private var choices: [String: Bool]
 
     init(defaults: UserDefaults = .standard) {
         self.defaults = defaults
-        collapsedKeys = Self.load(from: defaults)
+        choices = Self.load(from: defaults)
     }
 
     /// A section with no remembered choice starts expanded only when it holds
     /// the current selection.
     func isExpanded(profileID: String?, provider: String, selectedProvider: String?) -> Bool {
-        if collapsedKeys.contains(Self.key(profileID: profileID, provider: provider)) { return false }
-        return selectedProvider == provider
+        choices[Self.key(profileID: profileID, provider: provider)] ?? (selectedProvider == provider)
     }
 
     func setExpanded(_ expanded: Bool, profileID: String?, provider: String) {
         let key = Self.key(profileID: profileID, provider: provider)
         guard !key.isEmpty, key.utf8.count <= Self.maximumKeyBytes else { return }
-        if expanded {
-            guard collapsedKeys.remove(key) != nil else { return }
-        } else {
-            guard collapsedKeys.contains(key) || collapsedKeys.count < Self.maximumEntryCount,
-                  collapsedKeys.insert(key).inserted else { return }
-        }
-        let document = Document(version: Self.version, collapsed: collapsedKeys.sorted())
+        guard choices[key] != expanded,
+              choices[key] != nil || choices.count < Self.maximumEntryCount else { return }
+        choices[key] = expanded
+        let document = Document(version: Self.version, expanded: choices)
         guard let data = try? JSONEncoder().encode(document),
               data.count <= Self.maximumDocumentBytes else { return }
         defaults.set(data, forKey: Self.documentKey)
     }
 
+    #if HOSTED_TEST
+    /// Hosted picker tests share the app's store; each starts from no choices.
+    func resetForHostedTest() {
+        choices = [:]
+        defaults.removeObject(forKey: Self.documentKey)
+    }
+    #endif
+
     static func key(profileID: String?, provider: String) -> String {
         "\(profileID ?? "unpaired")|\(provider)"
     }
 
-    private static func load(from defaults: UserDefaults) -> Set<String> {
+    private static func load(from defaults: UserDefaults) -> [String: Bool] {
         guard let data = defaults.data(forKey: documentKey),
               data.count <= maximumDocumentBytes,
               let document = try? JSONDecoder().decode(Document.self, from: data),
               document.version == version,
-              document.collapsed.count <= maximumEntryCount,
-              document.collapsed.allSatisfy({ !$0.isEmpty && $0.utf8.count <= maximumKeyBytes }) else {
-            return []
+              document.expanded.count <= maximumEntryCount,
+              document.expanded.keys.allSatisfy({ !$0.isEmpty && $0.utf8.count <= maximumKeyBytes }) else {
+            return [:]
         }
-        return Set(document.collapsed)
+        return document.expanded
     }
 }

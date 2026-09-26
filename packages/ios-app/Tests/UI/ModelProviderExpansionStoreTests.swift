@@ -8,7 +8,8 @@ import Testing
 /// 1. an unremembered picker collapses everything, or expands everything, so the
 ///    selected model's provider cannot be found;
 /// 2. a collapse does not survive the next picker presentation;
-/// 3. expanding never clears a remembered collapse;
+/// 3. expanding never clears a remembered collapse, or an expanded section the
+///    selection does not hold reverts to collapsed on the next presentation;
 /// 4. one paired Gateway's collapse leaks into another pairing's picker;
 /// 5. a corrupt, wrong-version, or oversized stored document crashes or bleeds
 ///    state into the picker instead of falling back to defaults.
@@ -37,7 +38,17 @@ struct ModelProviderExpansionStoreTests {
         second.setExpanded(true, profileID: "profile-a", provider: "anthropic")
         let third = ModelProviderExpansionStore(defaults: defaults)
         #expect(third.isExpanded(profileID: "profile-a", provider: "anthropic", selectedProvider: "anthropic"),
-                "clearing the collapse restores the selection default")
+                "re-expanding is remembered")
+    }
+
+    @Test("expanding a provider without the selection survives the next presentation")
+    func expansionOfUnselectedProviderPersists() throws {
+        let defaults = try makeDefaults()
+        ModelProviderExpansionStore(defaults: defaults)
+            .setExpanded(true, profileID: "profile-a", provider: "openai")
+        let next = ModelProviderExpansionStore(defaults: defaults)
+        #expect(next.isExpanded(profileID: "profile-a", provider: "openai", selectedProvider: "anthropic"))
+        #expect(next.isExpanded(profileID: "profile-a", provider: "openai", selectedProvider: nil))
     }
 
     @Test("each paired profile remembers its own provider sections")
@@ -54,8 +65,8 @@ struct ModelProviderExpansionStoreTests {
     func corruptDocumentIsIgnored() throws {
         for stored in [
             Data("not json".utf8),
-            Data(#"{"version":99,"collapsed":["profile-a|anthropic"]}"#.utf8),
-            Data(#"{"version":1,"collapsed":[""]}"#.utf8),
+            Data(#"{"version":99,"expanded":{"profile-a|anthropic":false}}"#.utf8),
+            Data(#"{"version":1,"expanded":{"":false}}"#.utf8),
         ] {
             let defaults = try makeDefaults()
             defaults.set(stored, forKey: ModelProviderExpansionStore.documentKey)
