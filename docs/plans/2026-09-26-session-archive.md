@@ -103,7 +103,9 @@ Current state, inspected 2026-09-26:
 | F-6 | Done | Same class as F-5, unproven: `RuntimeRegistry` line 1216 also writes `gateway/model-recents.json` fire-and-forget (`void this.noteModelUsed(...)` → `await this.recentModels.record(...)`), so its durable write can equally outlive `dispose()`. Decide whether `RecentModelStore` gets the same disposal drain | F-5 | tron-coordinator, 2026-09-26 (in R-1) |
 | R-1 | Done | Gateway fixes from the post-implementation review (see "Review findings"), including F-6 | G-2, F-5 | tron-coordinator, 2026-09-26 |
 | R-2 | Done | iOS fixes from the post-implementation review (see "Review findings") | I-2, I-3, F-3 | tron-coordinator, 2026-09-26 |
-| V-1 | Blocked | Cross-module checkpoint, user-performed Gateway rollout, and eyes-on device review; close the plan | G-2, I-2, I-3, F-3, F-4, F-5, F-6, R-1, R-2 | tron-coordinator, 2026-09-26 |
+| R-3 | Claimed | Gateway second-pass review fixes: stale `archived: true` response after the post-commit recheck, a queued backstop clear deleting a re-archive, migrate rekey ordering, prune retained set read outside the lane, doc drift, refused-compaction test and root-proof write-failure test | R-1 | tron-coordinator, 2026-09-26 |
+| R-4 | Claimed | iOS second-pass review fixes: a reload dropped while a load runs; background Mac container refreshes only on count change; "Show more" after cursor expiry; dead `GatewayClient` correlation field and overloads; automation form losing an archived target's name; doc drift; `AutomationFormView` formatting | R-2 | tron-coordinator, 2026-09-26 |
+| V-1 | Blocked | Cross-module checkpoint, user-performed Gateway rollout, and eyes-on device review; close the plan | G-2, I-2, I-3, F-3, F-4, F-5, F-6, R-1, R-2, R-3, R-4 | tron-coordinator, 2026-09-26 |
 
 ## Task details
 
