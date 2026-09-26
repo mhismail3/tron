@@ -130,6 +130,8 @@ import type { JevDecisionClient } from "../knowledge/jev-client.js";
 import type { ConnectionOwner } from "../integrations/connection-owner.js";
 import type { McpAdapter } from "../integrations/mcp-adapter.js";
 import { projectHookRegistrations } from "./hook-projection.js";
+import { resourceDistribution } from "./resource-distribution.js";
+import { loadSubagentCatalog, type SubagentCatalog } from "./subagent-catalog.js";
 
 // A lifecycle header is trusted only after RuntimeSlot has parsed and schema-
 // admitted the first property from the exact-owned status file. A payload key
@@ -7281,34 +7283,46 @@ export class RuntimeSlot {
   commands(): CommandInfo[] {
     this.assertNoTrustReload();
     const session = this.runtime.session;
-    const extension: CommandInfo[] = session.extensionRunner.getRegisteredCommands().map((command) => ({
-      name: command.invocationName,
-      ...(command.description ? { description: command.description } : {}),
-      source: "extension",
-      sourcePath: command.sourceInfo.path,
-      resourceSource: command.sourceInfo.source,
-      resourceScope: command.sourceInfo.scope,
-      resourceOrigin: command.sourceInfo.origin,
-    }));
-    const prompts: CommandInfo[] = session.promptTemplates.map((prompt) => ({
-      name: prompt.name,
-      ...(prompt.description ? { description: prompt.description } : {}),
-      ...(prompt.argumentHint ? { argumentHint: prompt.argumentHint } : {}),
-      source: "prompt",
-      sourcePath: prompt.filePath,
-      resourceSource: prompt.sourceInfo.source,
-      resourceScope: prompt.sourceInfo.scope,
-      resourceOrigin: prompt.sourceInfo.origin,
-    }));
-    const skills: CommandInfo[] = session.resourceLoader.getSkills().skills.map((skill) => ({
-      name: `skill:${skill.name}`,
-      ...(skill.description ? { description: skill.description } : {}),
-      source: "skill",
-      sourcePath: skill.filePath,
-      resourceSource: skill.sourceInfo.source,
-      resourceScope: skill.sourceInfo.scope,
-      resourceOrigin: skill.sourceInfo.origin,
-    }));
+    const extension: CommandInfo[] = session.extensionRunner.getRegisteredCommands().map((command) => {
+      const distribution = resourceDistribution(command.sourceInfo);
+      return {
+        name: command.invocationName,
+        ...(command.description ? { description: command.description } : {}),
+        source: "extension" as const,
+        sourcePath: command.sourceInfo.path,
+        resourceSource: command.sourceInfo.source,
+        resourceScope: command.sourceInfo.scope,
+        resourceOrigin: command.sourceInfo.origin,
+        ...(distribution ? { distribution } : {}),
+      };
+    });
+    const prompts: CommandInfo[] = session.promptTemplates.map((prompt) => {
+      const distribution = resourceDistribution(prompt.sourceInfo);
+      return {
+        name: prompt.name,
+        ...(prompt.description ? { description: prompt.description } : {}),
+        ...(prompt.argumentHint ? { argumentHint: prompt.argumentHint } : {}),
+        source: "prompt" as const,
+        sourcePath: prompt.filePath,
+        resourceSource: prompt.sourceInfo.source,
+        resourceScope: prompt.sourceInfo.scope,
+        resourceOrigin: prompt.sourceInfo.origin,
+        ...(distribution ? { distribution } : {}),
+      };
+    });
+    const skills: CommandInfo[] = session.resourceLoader.getSkills().skills.map((skill) => {
+      const distribution = resourceDistribution(skill.sourceInfo);
+      return {
+        name: `skill:${skill.name}`,
+        ...(skill.description ? { description: skill.description } : {}),
+        source: "skill" as const,
+        sourcePath: skill.filePath,
+        resourceSource: skill.sourceInfo.source,
+        resourceScope: skill.sourceInfo.scope,
+        resourceOrigin: skill.sourceInfo.origin,
+        ...(distribution ? { distribution } : {}),
+      };
+    });
     return admitCommandCatalog(
       [...extension, ...prompts, ...skills].sort((a, b) => a.name.localeCompare(b.name)),
     );
@@ -7349,9 +7363,25 @@ export class RuntimeSlot {
     });
   }
 
-  resources(): JsonValue {
+  async resources(): Promise<JsonValue> {
     this.assertNoTrustReload();
-    return safeJson({ commands: this.commands(), ...this.resourcesValue() });
+    const subagents = await this.loadSubagents();
+    return safeJson({
+      commands: this.commands(),
+      ...this.resourcesValue(),
+      subagents: subagents.subagents,
+      ...(subagents.diagnostic ? { subagentDiagnostics: subagents.diagnostic } : {}),
+    });
+  }
+
+  /** Failure-soft and uncached: every call re-runs the package's own discovery,
+   * and an unavailable package yields an empty list plus one diagnostic. */
+  private async loadSubagents(): Promise<SubagentCatalog> {
+    return loadSubagentCatalog({
+      agentDir: this.dependencies.agentDir,
+      cwd: this.cwd,
+      settingsManager: this.runtime.session.settingsManager,
+    });
   }
 
   private resourcesValue(): Record<string, unknown> {
@@ -7377,35 +7407,47 @@ export class RuntimeSlot {
     const loadErrorValues = hookProjection.extensionLoadErrors;
     const hookInventory = hookProjection.hookInventory;
     return {
-      tools: session.getAllTools().map((tool) => ({
-        name: tool.name,
-        ...(this.toolLabel(tool.name) ? { label: this.toolLabel(tool.name)! } : {}),
-        description: tool.description,
-        scope: tool.sourceInfo.scope,
-        source: tool.sourceInfo.source,
-        parameters: tool.parameters,
-        promptGuidelines: tool.promptGuidelines,
-      })),
+      tools: session.getAllTools().map((tool) => {
+        const distribution = resourceDistribution(tool.sourceInfo);
+        return {
+          name: tool.name,
+          ...(this.toolLabel(tool.name) ? { label: this.toolLabel(tool.name)! } : {}),
+          description: tool.description,
+          scope: tool.sourceInfo.scope,
+          source: tool.sourceInfo.source,
+          ...(distribution ? { distribution } : {}),
+          parameters: tool.parameters,
+          promptGuidelines: tool.promptGuidelines,
+        };
+      }),
       skills: {
-        skills: loader.getSkills().skills.map((skill) => ({
-          name: skill.name,
-          description: skill.description,
-          path: skill.filePath,
-          scope: skill.sourceInfo.scope,
-          source: skill.sourceInfo.source,
-          disableModelInvocation: skill.disableModelInvocation,
-        })),
+        skills: loader.getSkills().skills.map((skill) => {
+          const distribution = resourceDistribution(skill.sourceInfo);
+          return {
+            name: skill.name,
+            description: skill.description,
+            path: skill.filePath,
+            scope: skill.sourceInfo.scope,
+            source: skill.sourceInfo.source,
+            ...(distribution ? { distribution } : {}),
+            disableModelInvocation: skill.disableModelInvocation,
+          };
+        }),
         diagnostics: loader.getSkills().diagnostics,
       },
       prompts: {
-        prompts: loader.getPrompts().prompts.map((prompt) => ({
-          name: prompt.name,
-          description: prompt.description,
-          argumentHint: prompt.argumentHint,
-          path: prompt.filePath,
-          scope: prompt.sourceInfo.scope,
-          source: prompt.sourceInfo.source,
-        })),
+        prompts: loader.getPrompts().prompts.map((prompt) => {
+          const distribution = resourceDistribution(prompt.sourceInfo);
+          return {
+            name: prompt.name,
+            description: prompt.description,
+            argumentHint: prompt.argumentHint,
+            path: prompt.filePath,
+            scope: prompt.sourceInfo.scope,
+            source: prompt.sourceInfo.source,
+            ...(distribution ? { distribution } : {}),
+          };
+        }),
         diagnostics: loader.getPrompts().diagnostics,
       },
       extensions: extensionValues,

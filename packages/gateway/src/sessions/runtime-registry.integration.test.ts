@@ -10289,7 +10289,7 @@ export default function (pi) {
     await registry.initialize();
 
     const slot = await registry.create(cwd);
-    const resources = slot.resources() as any;
+    const resources = await slot.resources() as any;
     // The inventory is the complete display-safe registration view for every
     // loaded extension: this project extension plus Tron's own inline
     // capabilities. Assert the accounting contract rather than a fixed count,
@@ -10327,7 +10327,7 @@ export default function (pi) {
 
     resourceEvents.length = 0;
     await registry.reloadProject(cwd, false, false);
-    expect(() => slot.resources()).toThrow("Project trust is being reconfigured");
+    await expect(slot.resources()).rejects.toThrow("Project trust is being reconfigured");
     expect(() => slot.modelRuntime).toThrow("Project trust is being reconfigured");
     expect(() => slot.sessionEnvironment()).toThrow("Project trust is being reconfigured");
     expect(() => slot.respondToInteraction("pending", "host", 0, null, true)).toThrow("Project trust is being reconfigured");
@@ -10337,11 +10337,90 @@ export default function (pi) {
     expect(resourceEvents).not.toContain("session.resourcesChanged");
     await trust.set(cwd, false);
     await registry.commitProjectReload(cwd);
-    const untrusted = slot.resources() as any;
+    const untrusted = await slot.resources() as any;
     expect(untrusted.tools).not.toEqual(expect.arrayContaining([
       expect.objectContaining({ name: "project_echo" }),
     ]));
     expect(resourceEvents).toContain("session.resourcesChanged");
+  });
+
+  /** A real runtime slot whose project, user and settings-listed package
+   * resources exercise every distribution branch, with pi-subagents absent. */
+  async function distributionFixture(): Promise<any> {
+    const root = await mkdtemp(join(tmpdir(), "tron-resource-distribution-"));
+    const agentDir = join(root, "agent");
+    const cwd = join(root, "workspace");
+    const pi = join(cwd, ".pi");
+    const packageRoot = join(root, "vendor-subagent-package");
+    await Promise.all([
+      mkdir(join(agentDir, "skills", "user-skill"), { recursive: true }),
+      mkdir(join(pi, "extensions"), { recursive: true }),
+      mkdir(join(pi, "prompts"), { recursive: true }),
+      mkdir(join(pi, "skills", "review"), { recursive: true }),
+      mkdir(join(packageRoot, "extensions"), { recursive: true }),
+    ]);
+    // A settings-listed local package resolves with Pi's `package` origin, the
+    // same shape an npm-installed tool carries, without installing anything.
+    await writeFile(join(agentDir, "settings.json"), JSON.stringify({ packages: [packageRoot] }));
+    await Promise.all([
+      writeFile(join(agentDir, "skills", "user-skill", "SKILL.md"), `---\nname: user-skill\ndescription: A user skill\n---\nUse it.\n`),
+      writeFile(join(pi, "extensions", "tool.ts"), `export default function (pi) { pi.registerTool({ name: "project_echo", label: "Project echo", description: "Echo project text", parameters: { type: "object", properties: {} }, execute: async () => ({ content: [{ type: "text", text: "ok" }], details: {} }) }); }\n`),
+      writeFile(join(pi, "prompts", "review.md"), `---\ndescription: Review the current change\n---\nReview $ARGUMENTS\n`),
+      writeFile(join(pi, "skills", "review", "SKILL.md"), `---\nname: review-skill\ndescription: Inspect a code change\n---\nReview carefully.\n`),
+      writeFile(join(packageRoot, "extensions", "package-tool.ts"), `export default function (pi) { pi.registerTool({ name: "package_echo", label: "Package echo", description: "Echo packaged text", parameters: { type: "object", properties: {} }, execute: async () => ({ content: [{ type: "text", text: "ok" }], details: {} }) }); }\n`),
+    ]);
+    const trust = new TrustService(agentDir);
+    await trust.set(cwd, true);
+    const registry = new RuntimeRegistry({
+      agentDir,
+      tronHome: join(root, "tron"),
+      idleRuntimeMs: 60_000,
+      trust,
+      broadcast: () => {},
+      sessionSummaryChanged: () => {},
+      sessionListChanged: () => {},
+    });
+    registries.push(registry);
+    await registry.initialize();
+    return registry.create(cwd);
+  }
+
+  it("tags every available resource with its distribution", async () => {
+    const slot = await distributionFixture();
+    const resources = await slot.resources() as any;
+    const tool = (name: string) => resources.tools.find((candidate: any) => candidate.name === name);
+
+    // External: a settings-listed package's tool carries Pi's package origin.
+    expect(tool("package_echo")).toMatchObject({ distribution: "external" });
+    // Module: an inline Tron extension factory tool.
+    expect(tool("ask_user")).toMatchObject({ distribution: "module" });
+    // Local: a project extension's tool.
+    expect(tool("project_echo")).toMatchObject({ distribution: "local" });
+    // Pi built-ins carry no tag at all.
+    expect(Object.prototype.hasOwnProperty.call(tool("read"), "distribution")).toBe(false);
+    expect(Object.prototype.hasOwnProperty.call(tool("bash"), "distribution")).toBe(false);
+
+    expect(resources.skills.skills).toEqual(expect.arrayContaining([
+      expect.objectContaining({ name: "user-skill", scope: "user", distribution: "local" }),
+      expect.objectContaining({ name: "review-skill", scope: "project", distribution: "local" }),
+    ]));
+    expect(resources.prompts.prompts).toEqual(expect.arrayContaining([
+      expect.objectContaining({ name: "review", scope: "project", distribution: "local" }),
+    ]));
+
+    // Commands keep Pi's resourceOrigin and gain the separate distribution tag.
+    const promptCommand = resources.commands.find((candidate: any) => candidate.source === "prompt" && candidate.name === "review");
+    expect(promptCommand).toMatchObject({ resourceOrigin: "top-level", distribution: "local" });
+    const skillCommand = resources.commands.find((candidate: any) => candidate.source === "skill" && candidate.name === "skill:user-skill");
+    expect(skillCommand).toMatchObject({ resourceOrigin: "top-level", distribution: "local" });
+  });
+
+  it("fails soft for subagents when pi-subagents is absent", async () => {
+    const slot = await distributionFixture();
+    const resources = await slot.resources() as any;
+    // Discovery must not take down the whole response.
+    expect(resources.subagents).toEqual([]);
+    expect(typeof resources.subagentDiagnostics).toBe("string");
   });
 
   it("rekeys the owning slot when a completed session is forked", async () => {
