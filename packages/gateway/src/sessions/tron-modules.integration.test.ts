@@ -45,7 +45,7 @@ describe.sequential("RuntimeSlot Tron module registration", () => {
     await registry.initialize();
 
     const slot = await registry.create(cwd);
-    const registered = inlineModuleNames(slot.resources() as Record<string, any>);
+    const registered = inlineModuleNames(await slot.resources() as Record<string, any>);
     const definitionNames = TRON_MODULES.map((tronModule) => tronModule.name);
     const undefinedModules = registered.filter((name) => !definitionNames.includes(name));
     // A module the runtime registers but the definition does not is exactly the drift

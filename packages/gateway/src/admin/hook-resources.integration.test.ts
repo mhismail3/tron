@@ -40,7 +40,7 @@ describe.sequential("hook listing against a live session's resources", () => {
     await registry.initialize();
     const slot = await registry.create(cwd);
 
-    const sessionRow = (slot.resources() as any).extensions.find((extension: any) => extension.name === "project-probe.ts");
+    const sessionRow = (await slot.resources() as any).extensions.find((extension: any) => extension.name === "project-probe.ts");
     expect(sessionRow).toBeDefined();
 
     const projection = await new HookResources(agentDir, trust).list(cwd);
