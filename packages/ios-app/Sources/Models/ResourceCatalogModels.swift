@@ -162,12 +162,34 @@ struct PackageSummary: Codable, Hashable, Identifiable, Sendable {
     let scope: Scope
     let filtered: Bool
     let installedPath: String?
+    /// The names this install contributes, projected by the Gateway from the
+    /// same resolution the package read already performs. Optional so a Gateway
+    /// that predates the field still decodes its listing; the detail sheet then
+    /// shows no Provides groups rather than an empty one.
+    var provides: PackageProvides? = nil
     var id: String { "\(scope.rawValue):\(source)" }
+    /// The scope word the installed row and its detail sheet both show.
+    var scopeLabel: String { scope == .project ? "Project" : "Global" }
+}
+
+/// The names one installed package provides, by kind. `packages.list` carries
+/// them beside each package and they stay names only: the flat resolved
+/// `resources` inventory remains authoritative for every path and status.
+struct PackageProvides: Codable, Hashable, Sendable {
+    let skills: [String]
+    let prompts: [String]
+    let themes: [String]
+    let subagents: [String]
+    let tools: [String]
+    let commands: [String]
 }
 
 struct PackageInventory: Codable, Hashable, Sendable {
     let packages: [PackageSummary]
     let resources: JSONValue
+    /// One bounded explanation for kinds `provides` could not resolve, so a
+    /// failed attribution never fails the package read itself.
+    var providesDiagnostic: String? = nil
 }
 
 /// One built-in Tron extension from `modules.list`. The commands are empty for

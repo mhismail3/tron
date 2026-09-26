@@ -1868,20 +1868,26 @@ Extensions starts with resource scope and inventory counts (Project Trust is its
 then the Installed container of third-party packages and a standalone Install Package action,
 then the read-only Tron Modules container (each module's name, purpose and tools, plus the MCP
 connections a session would admit tools from). Resolved extensions are not duplicated beneath the installed list, and
-resolved skills and prompts left this sheet for Manage Session → Project Resources. Pi themes style
-the terminal rather than this app, so the resolved Themes list stays on Extensions instead of
-Appearance, which owns the app's color mode and fonts. Opaque, no-space source
+resolved skills and prompts left this sheet for Manage Session → Project Resources.
+Every Installed row opens that package's detail sheet: its source and scope, the shared distribution tag labeled once
+because every installed package is external, then the names the package provides as Provides groups in Skills, Prompts,
+Subagents, Tools, Commands, Themes order. An empty kind is hidden, a package that provides nothing says so in one line,
+and a Gateway that predates `provides` shows no groups and no line at all. Each group reuses the Project Resources icon
+and colour for its kind, and the one bounded `providesDiagnostic` from the same read appears once as the standard
+notice. These names are the projection `packages.list` already carries beside each installed package, so this sheet
+opens no new read. Pi themes style the terminal rather than this app, so a theme an installed package owns appears only
+in that package's sheet, and the themes no package owns — including one whose package has left the listing — stay
+reachable in a single Local themes group that appears only while some exist. Opaque, no-space source
 titles remain continuous and horizontally inspectable; ordinary titles and provenance wrap naturally,
 with complete source/status information retained for accessibility. Resolved resource names use the
 same friendly title formatter as session resources, stripping Markdown/JSON suffixes and deriving a
 skill name from its directory. Raw paths, IDs and metadata remain untouched. Shared source/scope
 information appears once as a category caption, not repeated in each row; mixed sources retain row
-provenance. An empty resolved Themes list uses a placeholder row and a scope caption rather than an empty
-info card. Scope counts describe inventory,
+provenance. Scope counts describe inventory,
 not tools loaded into every existing conversation. Full technical resource data remains available separately, including extension-only
 or additive categories. Locations and Overrides is a separate sibling sheet in Tools & Extensions, retaining optional discovery paths, advanced Mac overrides and autosave. Settings → Agent → Hooks shows one scope's hook inventory without a session: it reads `hooks.list` without a `cwd` for Every Project and with the project path for Current Project, reusing Locations and Overrides' Every Project/Current Project row, and it renders the By Event and By Extension projections, extension and event details, load issues and bounded-omissions notice a session used to show. A Gateway that does not advertise `hooks.v1` is never asked and shows the unavailable state, and an untrusted project says its hooks are not loaded with Project Trust beside that line, so a global-only answer is never read as an empty project. Session storage remains
 Gateway-owned and is not exposed as a location override. Package catalog admission failures remain
-local to the Packages sheet, preserving the sheet while presenting a bounded retry
+local to the Extensions sheet, preserving the sheet while presenting a bounded retry
 state instead of routing a projection error through a global modal alert. Visible Settings reads include
 the successful `foregroundReconciliationGeneration` in their task identities and publication fences.
 Foreground/reconnect readiness therefore reloads the current sheet and replaces stale offline errors;
@@ -1972,8 +1978,7 @@ Context slider endpoint labels are bold monospace; Default remains purple/semibo
 the code face. Its title and endpoint labels are white in dark mode. Custom Models uses
 the standard purple settings tint, while technical-detail rows retain their gray surface
 independently of the destination's toolbar accent. Additional Locations uses plural
-Extensions, Skills, Prompts and Terminal Themes row titles; the empty Themes section on
-Extensions retains a standard Liquid Glass placeholder row.
+Extensions, Skills, Prompts and Terminal Themes row titles.
 
 Manage Session displays the runtime-projected latest cache-hit rate—the
 same canonical formula used by the terminal footer—and never derives a ratio

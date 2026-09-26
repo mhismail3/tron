@@ -1,47 +1,11 @@
 import SwiftUI
 
-/// Resolved theme files from installed packages. Pi themes style the terminal,
-/// not this app (Appearance owns the app's color mode and fonts), so the
-/// Extensions sheet keeps this list rather than losing it to Appearance.
-struct PackageThemesSection: View {
-    let resources: JSONValue
-
-    var body: some View {
-        let items = PackageThemesPresentation.items(from: resources)
-        VStack(alignment: .leading, spacing: 18) {
-            if items.isEmpty {
-                TronSettingsGroup("Themes", accent: .tronTeal) {
-                    TronSettingsRow(icon: "tray", title: "No themes are currently available.", accent: .tronTeal)
-                }
-                .environment(\.tronSettingsVisualTheme, nil)
-            } else {
-                TronSettingsGroup("Themes", detail: PackageThemesPresentation.summary(for: items), accent: .tronTeal) {
-                    VStack(spacing: 0) {
-                        ForEach(Array(items.enumerated()), id: \.element.id) { index, item in
-                            if index > 0 { TronSettingsDivider(accent: .tronTeal) }
-                            TronSettingsRow(icon: item.enabled ? "checkmark.circle.fill" : "minus.circle",
-                                            title: item.displayName,
-                                            subtitle: PackageThemesPresentation.hasSharedSource(items) ? nil : item.sourceDescription,
-                                            accent: item.enabled ? .tronTeal : .tronSlate,
-                                            subtitleColor: .tronTextSecondary) {
-                                TronDynamicValue(text: item.statusDescription, color: .tronTextSecondary)
-                            }
-                            .accessibilityValue(item.statusDescription)
-                        }
-                    }
-                }
-                .tronSettingsCaption(PackageThemesPresentation.caption(for: items))
-                .environment(\.tronSettingsVisualTheme, nil)
-            }
-        }
-    }
-}
-
 struct PackageThemeItem: Identifiable, Equatable, Sendable {
     let path: String
     let enabled: Bool
     let source: String?
     let scope: String?
+    let origin: String?
 
     var id: String { path }
     var displayName: String { ProjectResourceTitlePresentation.resourcePathTitle(path) }
@@ -54,6 +18,10 @@ struct PackageThemeItem: Identifiable, Equatable, Sendable {
     }
 }
 
+/// Resolved theme files. Pi themes style the terminal, not this app (Appearance
+/// owns the app's color mode and fonts), so a theme an installed package owns is
+/// listed in that package's detail sheet and the Extensions sheet keeps one
+/// Local themes group for the themes no package owns.
 enum PackageThemesPresentation {
     static func items(from resources: JSONValue) -> [PackageThemeItem] {
         let values = resources.objectValue?["themes"]?.arrayValue ?? []
@@ -65,8 +33,22 @@ enum PackageThemesPresentation {
                 path: path,
                 enabled: object["enabled"]?.boolValue != false,
                 source: metadata?["source"]?.stringValue,
-                scope: metadata?["scope"]?.stringValue
+                scope: metadata?["scope"]?.stringValue,
+                origin: metadata?["origin"]?.stringValue
             )
+        }
+    }
+
+    /// Themes no installed package owns. A theme whose package is gone from the
+    /// listing has no detail sheet to appear in, so it stays local rather than
+    /// vanishing from the app.
+    static func localItems(from resources: JSONValue, packages: [PackageSummary]) -> [PackageThemeItem] {
+        items(from: resources).filter { item in
+            !packages.contains { package in
+                item.origin == "package"
+                    && item.source == package.source
+                    && item.scope == package.scope.rawValue
+            }
         }
     }
 

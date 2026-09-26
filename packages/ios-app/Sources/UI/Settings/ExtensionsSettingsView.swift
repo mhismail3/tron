@@ -36,6 +36,7 @@ struct ExtensionsSettingsView: View {
     @State private var reloading = false
     @State private var refreshError: String?
     @State private var mutationErrors: [PackageMutationOperation: String] = [:]
+    @State private var packageToInspect: PackageSummary?
     @State private var refreshGeneration = 0
     @State private var mutationToken = 0
     @State private var modules: TronModuleList?
@@ -120,11 +121,10 @@ struct ExtensionsSettingsView: View {
                     modulesSection
                 }
 
-                if let resources = inventory?.resources {
-                    PackageThemesSection(resources: resources)
-                        .environment(\.tronSettingsVisualTheme, nil)
-                    if resources.objectValue?.isEmpty == false {
-                        TronTechnicalJSONRow(value: resources, title: "Technical Details",
+                if let inventory {
+                    localThemesGroup(inventory)
+                    if inventory.resources.objectValue?.isEmpty == false {
+                        TronTechnicalJSONRow(value: inventory.resources, title: "Technical Details",
                                              subtitle: "View paths, provenance, status, and other resolved resource data",
                                              sheetTitle: "Resolved Resources JSON", accent: .tronSlate)
                     }
@@ -187,6 +187,12 @@ struct ExtensionsSettingsView: View {
                 icon: "shippingbox.and.arrow.down",
                 onConfirm: { remove(package) }
             )
+        }
+        .tronManagedSheet(
+            item: $packageToInspect,
+            identity: { _ in "settings.packages.detail" }
+        ) { package in
+            PackageDetailSheet(package: package, providesDiagnostic: inventory?.providesDiagnostic)
         }
     }
 
@@ -454,27 +460,67 @@ struct ExtensionsSettingsView: View {
     }
 
     private func packageRow(_ package: PackageSummary) -> some View {
-        PackageSourceRow(
-            source: package.source,
-            detail: [
-                package.scope == .project ? "Project" : "Global",
-                package.filtered ? "Filtered" : nil,
-                updates.contains { $0.id == package.id } ? "Update available" : nil,
-            ].compactMap { $0 }.joined(separator: " · "),
-            accent: .tronBlue
-        ) {
-            if isMutating(package) {
-                TronPulseLoadingIndicator(size: 18)
-            } else {
-                Menu {
-                    Button("Update", systemImage: "arrow.clockwise") { update(package) }
-                    Button("Remove", systemImage: "trash", role: .destructive) { packageToRemove = package }
-                } label: {
-                    Image(systemName: "ellipsis")
-                        .frame(width: 32, height: 32)
-                        .contentShape(Rectangle())
+        Button {
+            packageToInspect = package
+        } label: {
+            PackageSourceRow(
+                source: package.source,
+                detail: [
+                    package.scopeLabel,
+                    package.filtered ? "Filtered" : nil,
+                    updates.contains { $0.id == package.id } ? "Update available" : nil,
+                ].compactMap { $0 }.joined(separator: " · "),
+                accent: .tronBlue
+            ) {
+                if isMutating(package) {
+                    TronPulseLoadingIndicator(size: 18)
+                } else {
+                    Menu {
+                        Button("Update", systemImage: "arrow.clockwise") { update(package) }
+                        Button("Remove", systemImage: "trash", role: .destructive) { packageToRemove = package }
+                    } label: {
+                        Image(systemName: "ellipsis")
+                            .frame(width: 32, height: 32)
+                            .contentShape(Rectangle())
+                    }
                 }
             }
+        }
+        .buttonStyle(.plain)
+        .accessibilityHint("Opens the resources this package provides")
+    }
+
+    /// Themes no installed package owns: every package's themes are listed in
+    /// its own detail sheet, so this group appears only while some remain.
+    @ViewBuilder
+    private func localThemesGroup(_ inventory: PackageInventory) -> some View {
+        let items = PackageThemesPresentation.localItems(
+            from: inventory.resources,
+            packages: inventory.packages
+        )
+        if !items.isEmpty {
+            TronSettingsGroup(
+                "Local themes",
+                detail: PackageThemesPresentation.summary(for: items),
+                accent: .tronTeal,
+                surfaceStyle: .scrollOptimized
+            ) {
+                VStack(spacing: 0) {
+                    ForEach(Array(items.enumerated()), id: \.element.id) { index, item in
+                        if index > 0 { TronSettingsDivider(accent: .tronTeal) }
+                        TronSettingsRow(icon: item.enabled ? "checkmark.circle.fill" : "minus.circle",
+                                        title: item.displayName,
+                                        subtitle: PackageThemesPresentation.hasSharedSource(items) ? nil : item.sourceDescription,
+                                        accent: item.enabled ? .tronTeal : .tronSlate,
+                                        subtitleColor: .tronTextSecondary) {
+                            TronDynamicValue(text: item.statusDescription, color: .tronTextSecondary)
+                        }
+                        .accessibilityValue(item.statusDescription)
+                    }
+                }
+            }
+            .tronSettingsCaption(PackageThemesPresentation.caption(for: items))
+            .environment(\.tronSettingsVisualTheme, nil)
         }
     }
 
