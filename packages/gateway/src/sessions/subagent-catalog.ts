@@ -94,13 +94,31 @@ function projectSubagent(value: unknown, groupSource?: SubagentDiscoverySource):
   };
 }
 
-/** Resolves the installed pi-subagents root from the agent home's configured
- * packages; undefined when it is not installed. */
+/** Resolves the installed pi-subagents root from the packages the agent home's
+ * settings (user first, then the current project's) configure; undefined when it
+ * is not installed. Only the matching entry is resolved, so an unrelated broken
+ * package cannot slow this read down. */
 export function installedSubagentPackageRoot(settingsManager: SettingsManager, agentDir: string, cwd: string): string | undefined {
-  const manager = new DefaultPackageManager({ cwd, agentDir, settingsManager });
-  return manager.listConfiguredPackages()
-    .find((entry) => entry.installedPath !== undefined && packageName(entry.source) === SUBAGENT_PACKAGE)
-    ?.installedPath;
+  const candidates: Array<{ source: string; scope: "user" | "project" }> = [
+    ...settingsManager.getPackages().map((pkg) => ({ source: packageSourceString(pkg), scope: "user" as const })),
+    ...projectPackages(settingsManager).map((pkg) => ({ source: packageSourceString(pkg), scope: "project" as const })),
+  ];
+  const match = candidates.find((candidate) => packageName(candidate.source) === SUBAGENT_PACKAGE);
+  if (!match) return undefined;
+  return new DefaultPackageManager({ cwd, agentDir, settingsManager }).getInstalledPath(match.source, match.scope);
+}
+
+/** Untrusted project settings are not loaded; project packages cannot apply. */
+function projectPackages(settingsManager: SettingsManager): Array<string | { source: string }> {
+  try {
+    return settingsManager.getProjectSettings().packages ?? [];
+  } catch {
+    return [];
+  }
+}
+
+function packageSourceString(source: string | { source: string }): string {
+  return typeof source === "string" ? source : source.source;
 }
 
 function packageName(source: string): string {
