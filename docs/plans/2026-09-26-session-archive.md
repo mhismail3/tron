@@ -2,7 +2,7 @@
 
 - **Started:** 2026-09-26
 - **Status:** Active
-- **Last updated:** 2026-09-26, R-3 and R-4 merged
+- **Last updated:** 2026-09-26, final checkpoint
 - **Goal:** A user can archive an idle session so it leaves the dashboard without being deleted, find it again in one collapsed Archived container or in search, and have it return automatically when it runs again.
 
 ## Goal and constraints
@@ -106,8 +106,8 @@ Current state, inspected 2026-09-26:
 | R-3 | Done | Gateway second-pass review fixes: stale `archived: true` response after the post-commit recheck, a queued backstop clear deleting a re-archive, migrate rekey ordering, prune retained set read outside the lane, doc drift, refused-compaction test and root-proof write-failure test | R-1 | tron-coordinator, 2026-09-26 |
 | R-4 | Done | iOS second-pass review fixes: a reload dropped while a load runs; background Mac container refreshes only on count change; "Show more" after cursor expiry; dead `GatewayClient` correlation field and overloads; automation form losing an archived target's name; doc drift; `AutomationFormView` formatting | R-2 | tron-coordinator, 2026-09-26 |
 | R-5 | Done | Third review regression from R-3: the rekey `assertAbsent` guard now runs for `preserve`, so an extension `switchSession` to a session that already has attention or archive state is refused and rolled back. Guard on `disposition !== "preserve"` and cover a real `switchSession` | R-3 | tron-coordinator, 2026-09-26 |
-| F-7 | Needs scoping | A preserve rebind (`ctx.switchSession`) writes the invocation's continuation receipts into the switched-to session's file while its start receipt stays in the old one, so the new session's own projection throws `invocation receipt has no start receipt`; the switch also renames the live identity without publishing a snapshot. Pre-existing (invocation-receipts.ts/projection.ts are untouched by this plan and `sessionId: this.id` is the writer). Measured 2026-09-26. Decide the fix: stamp an invocation's receipts with its origin session id, or re-key receipts on rebind | none | |
-| V-1 | Blocked | Cross-module checkpoint, user-performed Gateway rollout, and eyes-on device review; close the plan | G-2, I-2, I-3, F-3, F-4, F-5, F-6, F-7, R-1, R-2, R-3, R-4, R-5 | tron-coordinator, 2026-09-26 |
+| F-7 | Done | Moved out of this plan (user decision, 2026-09-26): pre-existing `switchSession` receipt split, not archive-owned; see `2026-09-26-switch-session-receipts.md` (Proposed) | R-5 | tron-coordinator, 2026-09-26 |
+| V-1 | Blocked | Cross-module checkpoint, user-performed Gateway rollout, and eyes-on device review; close the plan | G-2, I-2, I-3, F-3, F-4, F-5, F-6, R-1, R-2, R-3, R-4, R-5 | tron-coordinator, 2026-09-26 |
 
 ## Task details
 
@@ -1749,3 +1749,22 @@ Gateway.
   extension session switching; the archive feature itself is unaffected. V-1
   still needs the full Gateway suite, `scripts/ios-gateway-e2e-test run`, the
   user-performed Gateway rollout, and the eyes-on device review.
+
+### V-1 checkpoint (after R-1 to R-5) · Blocked · 2026-09-26 · tron-coordinator
+
+- Result: three review rounds are closed. V-1 is blocked only on the user's
+  Gateway rollout and the eyes-on device review.
+- Evidence (verified on `main` after R-5):
+  - Full Gateway suite: 1961/1962. The one failure is `logger.test.ts`
+    rotation, which also fails on the pre-feature base `cbf4cb72b`. So does
+    `recent-model-usage` ordering, which passed this time; on the base it
+    failed 2 of 2 runs.
+  - Archive integration, registry, rpc-idle, archive store and attention store
+    files: 292/292 in each of 3 repeats.
+  - Full iOS unit target: 1703 tests in 137 suites passed.
+  - Both hosted archive UI journeys passed (2/2).
+  - `scripts/ios-gateway-e2e-test prepare/build/run` passed (24 s).
+- Changes: F-7 moved to its own Proposed plan (user decision).
+- For the next agent: run the eyes-on list in the earlier V-1 entry, then close
+  the plan.
+
