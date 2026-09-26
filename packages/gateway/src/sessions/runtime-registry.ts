@@ -18,11 +18,13 @@ import type {
   AdministrativeDrainBlockerSummary,
   AdministrativeDrainPhase,
   AdministrativeDrainSnapshot,
+  SessionArchiveFilter,
   SessionCreationOrigin,
   SessionSummary,
   SessionSummaryUpdate,
 } from "../protocol/types.js";
 import { SessionAttentionStore, type SessionAttentionProjection } from "./session-attention-store.js";
+import { SessionArchiveStore } from "./session-archive-store.js";
 import { RecentModelStore, type RecentModelUsage } from "../providers/recent-models.js";
 import {
   SessionPresentationPresenceRegistry,
@@ -149,6 +151,20 @@ function orderDashboardSessions<T extends DashboardOrderableSession>(sessions: r
   });
 }
 
+/** The archived container is ordered by when each session was archived, newest
+ * first. Archive timestamps are unique per session but a tie still needs one
+ * deterministic order across pages. */
+function orderArchivedSessions<T extends { id: string; archivedAt?: string }>(sessions: readonly T[]): T[] {
+  return [...sessions].sort((left, right) => {
+    const leftInstant = left.archivedAt === undefined ? Number.NaN : Date.parse(left.archivedAt);
+    const rightInstant = right.archivedAt === undefined ? Number.NaN : Date.parse(right.archivedAt);
+    if (Number.isFinite(leftInstant) && Number.isFinite(rightInstant) && leftInstant !== rightInstant) {
+      return rightInstant - leftInstant;
+    }
+    return left.id.localeCompare(right.id);
+  });
+}
+
 async function readOpenedSessionHeader(
   handle: Awaited<ReturnType<typeof open>>,
   byteCount: number,
@@ -261,6 +277,7 @@ interface CatalogPageSeed {
   readonly hasActiveSubagents?: boolean;
   readonly waitingForUser?: boolean;
   readonly summaryRevision: number;
+  readonly archivedAt?: string;
   readonly attention: SessionAttentionProjection;
 }
 
@@ -314,7 +331,9 @@ export class RuntimeRegistry {
   private readonly catalogAcquisitionMutex = new AsyncMutex();
   private catalogAcquisitionPromise: Promise<CatalogAcquisitionResolution> | undefined;
   private catalogAcquisitionPromiseKey: string | undefined;
-  /** Serializes attention membership checks with set/delete/rekey. */
+  /** Serializes attention membership checks with set/delete/rekey. Archive
+   * state shares this lane: both are Gateway-owned display projections of one
+   * canonical session and must not outlive it. */
   private readonly attentionLane = new AsyncMutex();
   /** Linearizes display lease admission with canonical session deletion. */
   private readonly displayArtifactLane = new AsyncMutex();
@@ -328,6 +347,7 @@ export class RuntimeRegistry {
   private readonly extensionActivityRecency = new ExtensionActivityRecency();
   private readonly processActivityRecency = new ProcessActivityRecency();
   private readonly attention: SessionAttentionStore;
+  private readonly archive: SessionArchiveStore;
   private readonly recentModels: RecentModelStore;
   private readonly presentationPresence = new SessionPresentationPresenceRegistry();
   private readonly catalogMetadataIndex: CatalogMetadataIndex;
@@ -341,6 +361,7 @@ export class RuntimeRegistry {
   private readonly summaryRevisions = new Map<string, number>();
   private readonly latestSummaries = new Map<string, SessionSummaryUpdate>();
   private readonly pendingAttentionRemovals = new Set<string>();
+  private readonly pendingArchiveRemovals = new Set<string>();
   private readonly deletingSessionIds = new Set<string>();
   private ambiguousSessionIds = new Set<string>();
   private readonly trustReloadProjects = new Set<string>();
@@ -398,6 +419,11 @@ export class RuntimeRegistry {
       beforeSessionDelete?: (sessionId: string) => Promise<void>;
       sessionClosed?: (sessionId: string) => void;
       persistenceDiagnostic?: (sessionId: string, code: string) => void;
+      /** Privacy-safe archive persistence outcome: stage only, never a session ID. */
+      archiveDiagnostic?: (diagnostic: { outcome: "failure"; stage: "set" | "remove" }) => void;
+      /** Read-only automation admission query, so archiving cannot hide a
+       * reserved or already-running automation target. */
+      sessionAutomationReserved?: (sessionId: string) => boolean;
       compactionDiagnostic?: RuntimeSlotDependencies["compactionDiagnostic"];
       catalogDiscoveryLimits?: Partial<typeof DEFAULT_CATALOG_DISCOVERY_LIMITS>;
       stageTiming?: (
@@ -430,6 +456,7 @@ export class RuntimeRegistry {
     }, Date.now, join(options.tronHome, "gateway", "exports"));
     this.markers = new RunMarkerStore(options.tronHome);
     this.attention = new SessionAttentionStore(options.tronHome);
+    this.archive = new SessionArchiveStore(options.tronHome);
     this.recentModels = new RecentModelStore(options.tronHome);
     this.catalogMetadataIndex = new CatalogMetadataIndex(
       join(options.tronHome, "gateway"),
@@ -488,6 +515,7 @@ export class RuntimeRegistry {
     // before this optimization. The later evidence cut therefore cannot omit a
     // marker that was already admitted to this reconciliation pass.
     await this.timedStage("startup.attention.initialize", () => this.attention.initialize());
+    await this.timedStage("startup.archive.initialize", () => this.archive.initialize());
     await this.timedStage("startup.recent-model.initialize", () => this.recentModels.initialize());
     const markerEvidence = await this.timedStage("startup.run-marker.read", () => this.markers.evidence());
     // Recovery can open and parse large session files. Do not hold listener
@@ -648,7 +676,11 @@ export class RuntimeRegistry {
       candidates.push({ path, identity });
       byID.set(identity.id, candidates);
     }
-    await this.attention.prune(new Set(byID.keys()));
+    const retainedSessionIds = new Set(byID.keys());
+    await this.attention.prune(retainedSessionIds);
+    // Archive state is a display projection of the same membership, so it
+    // recovers from the same complete cut or keeps its records untouched.
+    if (await this.archive.prune(retainedSessionIds)) this.archiveChanged();
     for (const [sessionId, markers] of markerEvidence) {
       const candidates = byID.get(sessionId);
       // Duplicate IDs are intentionally not recoverable: choosing one file
@@ -735,17 +767,23 @@ export class RuntimeRegistry {
         disposition: SessionAttentionRebindDisposition,
         commitIdentity: () => void,
       ) => this.attentionLane.run(async () => {
-        await this.flushPendingAttentionRemovals();
+        await this.flushPendingProjectionRemovals();
         if (this.deletingSessionIds.has(previousId) || this.deletingSessionIds.has(nextId)) {
           throw new GatewayError("busy", "Session identity is being deleted", true);
         }
         const existing = this.slots.get(nextId);
         if (existing && existing !== slot) throw new GatewayError("conflict", "Replacement session is already active");
-        // Complete every fallible attention write while the slot and registry
-        // still own previousId, then commit both in one synchronous turn.
+        // Complete every fallible attention and archive write while the slot and
+        // registry still own previousId, then commit both in one synchronous turn.
         if (disposition === "migrate") await this.attention.rekey(previousId, nextId);
         if (disposition === "reset" || disposition === "discard") await this.attention.assertAbsent(nextId);
         if (disposition === "discard") await this.attention.remove(previousId);
+        // A reset identity (a new session or a fork) starts unarchived; a
+        // migrated identity carries its archive state; a discarded identity
+        // takes it away.
+        if (disposition === "migrate") await this.archive.rekey(previousId, nextId);
+        if (disposition === "reset" || disposition === "discard") await this.archive.assertAbsent(nextId);
+        if (disposition === "discard") await this.archive.remove(previousId);
         // The forked branch already owns its exact canonical display references.
         // Publish those owner links before committing the new session identity so
         // a successful fork can never expose a dangling artifact reference.
@@ -800,15 +838,57 @@ export class RuntimeRegistry {
     this.options.sessionSummaryChanged(revisioned);
   }
 
-  private async flushPendingAttentionRemovals(): Promise<void> {
+  /** Both pending sets are display projections of a deleted canonical session
+   * and share one retry owner: the next lane operation, or restart
+   * reconciliation for records with no canonical catalog owner. */
+  private async flushPendingProjectionRemovals(): Promise<void> {
     for (const sessionId of [...this.pendingAttentionRemovals]) {
       try {
         await this.attention.remove(sessionId);
         this.pendingAttentionRemovals.delete(sessionId);
       } catch {
-        // Retain for the next attention operation; restart reconciliation also
+        // Retain for the next lane operation; restart reconciliation also
         // prunes records with no canonical catalog owner.
       }
+    }
+    for (const sessionId of [...this.pendingArchiveRemovals]) {
+      try {
+        if (await this.archive.remove(sessionId)) this.archiveChanged();
+        this.pendingArchiveRemovals.delete(sessionId);
+      } catch {
+        // Retain for the next lane operation; restart reconciliation also
+        // prunes records with no canonical catalog owner.
+      }
+    }
+  }
+
+  /** A committed archive change is a dashboard membership change, not a
+   * transcript change, so it publishes a list revision instead of a summary. */
+  private archiveChanged(): void {
+    this.revision += 1;
+    this.options.sessionListChanged();
+  }
+
+  private archivePersistFailed(stage: "set" | "remove"): void {
+    // Privacy: outcome and stage only. A session ID would turn a bounded
+    // storage diagnostic into a session-identifying record.
+    this.options.archiveDiagnostic?.({ outcome: "failure", stage });
+  }
+
+  /** An archived session must be idle. The dashboard projection is checked as
+   * well as the slot's own run ownership, so a user can never archive a row
+   * that still shows running, waiting for input, or working through detached
+   * subagents. */
+  private assertArchiveIdle(sessionId: string, slot: RuntimeSlot | undefined): void {
+    const latest = this.latestSummaries.get(sessionId);
+    const active = (phase: SessionSummary["phase"] | undefined) =>
+      phase === "running" || phase === "compacting" || phase === "retrying";
+    const phase = latest?.phase ?? (slot ? slot.catalogPhase : "idle");
+    const foregroundPhase = latest?.foregroundPhase ?? slot?.catalogForegroundPhase;
+    const waitingForUser = latest?.waitingForUser ?? slot?.catalogWaitingForUser ?? false;
+    const hasActiveSubagents = latest?.hasActiveSubagents ?? slot?.catalogHasActiveSubagents ?? false;
+    if (active(phase) || active(foregroundPhase) || waitingForUser || hasActiveSubagents) {
+      throw new GatewayError("busy", "Stop the session before archiving it", false, undefined, "session_operation_busy");
     }
   }
 
@@ -864,7 +944,7 @@ export class RuntimeRegistry {
     for (let attempt = 0; attempt < 2; attempt += 1) {
       const admission = await this.resolveAttentionAdmission(sessionId);
       const result = await this.attentionLane.run(async () => {
-        await this.flushPendingAttentionRemovals();
+        await this.flushPendingProjectionRemovals();
         if (this.deletingSessionIds.has(sessionId)) {
           throw new GatewayError("not_found", "Tron session was not found");
         }
@@ -1358,17 +1438,31 @@ export class RuntimeRegistry {
       && headerIdentity.fileIdentity === `${metadata.dev}:${metadata.ino}`;
   }
 
-  async pageSource(scope: "user" | "all" = "user"): Promise<CatalogPageSource> {
-    // Structural materialization is the admission boundary. Live summary and
-    // attention overlays are captured synchronously below, after I/O completes,
-    // so ordinary heartbeat churn cannot starve catalog reads.
+  async pageSource(
+    scope: "user" | "all" = "user",
+    archived: SessionArchiveFilter = "exclude",
+  ): Promise<CatalogPageSource> {
+    // Structural materialization is the admission boundary. Live summary,
+    // attention and archive overlays are captured synchronously below, after
+    // I/O completes, so ordinary heartbeat churn cannot starve catalog reads.
     const materialized = await this.sharedCatalogMaterialization(scope);
     const projectionGeneration = this.catalogProjectionGeneration;
-    const generation = `${materialized.listRevision}:${projectionGeneration}:${scope}`;
+    // The archive filter and its committed revision are part of the generation:
+    // one pagination lease can never mix archive states or serve a stale filter.
+    const generation = `${materialized.listRevision}:${projectionGeneration}:${scope}:${archived}:${this.archive.revision}`;
     const existing = this.catalogPageSources.get(generation)?.deref();
     if (existing) return existing;
     const seeds = this.buildCatalogPageSeeds(materialized.infos, scope, materialized.ambiguousIDs);
-    const source = this.createCatalogPageSource(generation, materialized.listRevision, seeds);
+    const archivedCount = seeds.reduce((total, seed) => total + (seed.archivedAt === undefined ? 0 : 1), 0);
+    const visible = archived === "only"
+      ? orderArchivedSessions(seeds.filter((seed) => seed.archivedAt !== undefined))
+      : seeds.filter((seed) => seed.archivedAt === undefined);
+    const source = this.createCatalogPageSource(
+      generation,
+      materialized.listRevision,
+      visible,
+      archived === "exclude" ? archivedCount : undefined,
+    );
     // RuntimeRegistry does not strongly retain disposable sources. Multi-page
     // leases own them; one-page responses become collectible immediately.
     this.catalogPageSources.set(generation, new WeakRef(source));
@@ -2187,6 +2281,7 @@ export class RuntimeRegistry {
         ?? liveTransitionParentSessionId;
       const latest = this.latestSummaries.get(session.id);
       const name = latest?.name ?? session.name;
+      const archivedAt = this.archive.archivedAt(session.id);
       seeds.push({
         id: session.id,
         ...(name ? { name } : {}),
@@ -2210,6 +2305,7 @@ export class RuntimeRegistry {
           ? { waitingForUser: latest.waitingForUser }
           : slot ? { waitingForUser: slot.catalogWaitingForUser } : {}),
         summaryRevision: latest?.summaryRevision ?? 0,
+        ...(archivedAt === undefined ? {} : { archivedAt }),
         attention: this.attention.projection(session.id),
       });
     }
@@ -2219,6 +2315,7 @@ export class RuntimeRegistry {
         const latest = this.latestSummaries.get(id);
         const parentSessionId = slot.catalogParentSessionId;
         const automationOwner = this.automationSessionOwners.get(slot);
+        const archivedAt = this.archive.archivedAt(id);
         seeds.push({
           id,
           ...(latest?.name ? { name: latest.name } : {}),
@@ -2238,6 +2335,7 @@ export class RuntimeRegistry {
           hasActiveSubagents: latest?.hasActiveSubagents ?? slot.catalogHasActiveSubagents,
           waitingForUser: latest?.waitingForUser ?? slot.catalogWaitingForUser,
           summaryRevision: latest?.summaryRevision ?? 0,
+          ...(archivedAt === undefined ? {} : { archivedAt }),
           attention: this.attention.projection(id),
         });
       }
@@ -2245,7 +2343,12 @@ export class RuntimeRegistry {
     return orderDashboardSessions(seeds);
   }
 
-  private createCatalogPageSource(generation: string, listRevision: number, seeds: readonly CatalogPageSeed[]): CatalogPageSource {
+  private createCatalogPageSource(
+    generation: string,
+    listRevision: number,
+    seeds: readonly CatalogPageSeed[],
+    archivedCount?: number,
+  ): CatalogPageSource {
     const uniqueIDs = new Set(seeds.map((seed) => seed.id));
     if (uniqueIDs.size !== seeds.length) {
       throw new GatewayError("busy", "Session catalog identity is ambiguous", true, undefined, "catalog_identity_ambiguous");
@@ -2257,6 +2360,7 @@ export class RuntimeRegistry {
       + (seed.foregroundPhase ? Buffer.byteLength(seed.foregroundPhase) : 0)
       + (seed.activeSince ? Buffer.byteLength(seed.activeSince) : 0)
       + (seed.name ? Buffer.byteLength(seed.name) : 0)
+      + (seed.archivedAt ? Buffer.byteLength(seed.archivedAt) : 0)
       + (seed.parentSessionId ? Buffer.byteLength(seed.parentSessionId) : 0)
       + (seed.creationOrigin ? Buffer.byteLength(seed.creationOrigin.kind)
         + Buffer.byteLength(seed.creationOrigin.automationId) : 0)
@@ -2265,6 +2369,7 @@ export class RuntimeRegistry {
       + 160, 0);
     return Object.freeze({
       generation, listRevision, count: seeds.length, compactByteEstimate,
+      ...(archivedCount === undefined ? {} : { archivedCount }),
       page: async (offset: number, limit: number) => seeds.slice(offset, offset + limit).map((seed) => ({
         id: seed.id,
         ...(seed.name ? { name: seed.name } : {}),
@@ -2286,6 +2391,7 @@ export class RuntimeRegistry {
           ? { waitingForUser: seed.waitingForUser }
           : {}),
         summaryRevision: seed.summaryRevision,
+        ...(seed.archivedAt ? { archivedAt: seed.archivedAt } : {}),
         ...seed.attention,
       })),
     });
@@ -2974,9 +3080,83 @@ export class RuntimeRegistry {
     });
   }
 
+  /** Archive or unarchive one canonical session. Archiving is a dashboard
+   * projection: it never rewrites a session file, never changes its transcript
+   * or `updatedAt`, and never starts a runtime for an inactive session. */
+  async setArchived(
+    sessionId: string,
+    archived: boolean,
+    initiatingWorkToken?: string,
+  ): Promise<{ archived: boolean; archivedAt?: string }> {
+    return this.mutex.run(async () => {
+      // Archive state is written for an admitted canonical session, so it needs
+      // the same hardened structural cut delete uses rather than a mutable
+      // presentation projection. A cached admission could name a duplicate or
+      // replaced file that another client populated before this request.
+      const evidence = await this.catalogStructureEvidence();
+      const acquisition = await this.buildCatalogAcquisition(evidence);
+      this.requireUnambiguousSessionId(sessionId, acquisition.ambiguousIDs);
+      const entry = acquisition.entriesByID.get(sessionId);
+      const slot = this.slots.get(sessionId);
+      if (!entry && (!slot || slot.persistedSessionFile !== undefined)) {
+        throw new GatewayError("not_found", "Tron session was not found");
+      }
+      if (entry?.structuralSubagent) {
+        throw new GatewayError("conflict", "Archive the originating user session instead of mutating its runtime-owned subagent session");
+      }
+      if (archived) {
+        if (this.deletingSessionIds.has(sessionId)) {
+          throw new GatewayError("busy", "Session deletion is already in progress", true);
+        }
+        if (this.options.sessionAutomationReserved?.(sessionId)) {
+          throw new GatewayError("busy", "Stop the session before archiving it", false, undefined, "session_operation_busy");
+        }
+        this.assertArchiveIdle(sessionId, slot);
+        // The slot's lane is the exact admission boundary for runs, so work that
+        // already entered it is observed here. The synchronous checks above
+        // reject every state that holds the lane for long, which is why this
+        // bounded wait can stay inside the mutex exactly as delete's dispose
+        // does.
+        if (slot && !slot.isDisposed) await slot.assertArchivable(initiatingWorkToken);
+      }
+      // Commit on the attention lane: the same serialization owner as delete and
+      // rebind. The recheck rejects a rebind that migrated this exact identity
+      // while the structural admission above was in flight.
+      return this.attentionLane.run(async () => {
+        await this.flushPendingProjectionRemovals();
+        if (this.deletingSessionIds.has(sessionId)) {
+          throw new GatewayError("busy", "Session deletion is already in progress", true);
+        }
+        if (this.slots.get(sessionId) !== slot) {
+          throw new GatewayError("busy", "Session identity changed while archiving", true, undefined, "catalog_changed");
+        }
+        if (!archived) {
+          let removed: boolean;
+          try {
+            removed = await this.archive.remove(sessionId);
+          } catch {
+            this.archivePersistFailed("remove");
+            throw new GatewayError("busy", "Session archive state could not be persisted", true);
+          }
+          if (removed) this.archiveChanged();
+          return { archived: false };
+        }
+        let archivedAt: string;
+        try {
+          archivedAt = await this.archive.archive(sessionId);
+        } catch {
+          this.archivePersistFailed("set");
+          throw new GatewayError("busy", "Session archive state could not be persisted", true);
+        }
+        this.archiveChanged();
+        return { archived: true, archivedAt };
+      });
+    });
+  }
+
   async delete(sessionId: string, initiatingWorkToken?: string): Promise<void> {
     await this.attentionLane.run(async () => {
-      await this.flushPendingAttentionRemovals();
+      await this.flushPendingProjectionRemovals();
       if (this.deletingSessionIds.has(sessionId)) throw new GatewayError("busy", "Session deletion is already in progress", true);
       this.deletingSessionIds.add(sessionId);
     });
@@ -3039,14 +3219,24 @@ export class RuntimeRegistry {
       });
     } finally {
       await this.attentionLane.run(async () => {
-        if (deleted) {
-          try {
-            await this.attention.remove(sessionId);
-          } catch {
-            this.pendingAttentionRemovals.add(sessionId);
+        try {
+          if (deleted) {
+            try {
+              await this.attention.remove(sessionId);
+            } catch {
+              this.pendingAttentionRemovals.add(sessionId);
+            }
+            let archiveRemoved = false;
+            try {
+              archiveRemoved = await this.archive.remove(sessionId);
+            } catch {
+              this.pendingArchiveRemovals.add(sessionId);
+            }
+            if (archiveRemoved) this.archiveChanged();
           }
+        } finally {
+          this.deletingSessionIds.delete(sessionId);
         }
-        this.deletingSessionIds.delete(sessionId);
       });
     }
   }

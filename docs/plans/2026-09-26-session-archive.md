@@ -89,12 +89,13 @@ Current state, inspected 2026-09-26:
 
 | ID | Status | Scope | Depends on | Owner |
 | --- | --- | --- | --- | --- |
-| G-1 | Claimed | Gateway archive store, `session.archive.set` RPC, list filtering and count, delete/rekey/prune ownership, `session-archive.v1` capability | none | tron-coordinator, 2026-09-26 |
+| G-1 | Done | Gateway archive store, `session.archive.set` RPC, list filtering and count, delete/rekey/prune ownership, `session-archive.v1` capability | none | archive worker, 2026-09-26 |
 | G-2 | Ready | Every new run unarchives: an admission-time clear for Gateway-admitted runs, plus a backstop when an active phase is published | G-1 | |
 | G-3 | Ready | Search results carry `archived`; `session-search.md` updated | G-1 | |
 | I-1 | Ready | iOS model, mutation service, AppModel and capability gating; catalog membership follows authoritative responses | G-1 | |
 | I-2 | Ready | Dashboard full-swipe Archive, one collapsed "Archived (N)" container at the bottom, and archived-row actions | I-1 | |
 | I-3 | Ready | Search "Archived" label, automation picker exclusion, and display of an existing automation whose target is archived | I-1, G-3 | |
+| F-1 | Needs scoping | The `session.fork` RPC rejects with retryable `busy` because its own admitted work entry satisfies the slot's idle check; decide the fix and cover the real path | none | |
 | V-1 | Ready | Cross-module checkpoint, user-performed Gateway rollout, and eyes-on device review; close the plan | G-2, I-2, I-3 | |
 
 ## Task details
@@ -326,4 +327,81 @@ artifact. Accessibility identifiers use the existing
 
 ## Handoff log
 
-(No entries yet.)
+### G-1 · Done · 2026-09-26 · archive worker
+
+- Result: the Gateway owns session archive state end to end. A new
+  `SessionArchiveStore` persists `{ version: 1, sessions: { id: { archivedAt } } }`
+  in `session-archive.json` under the Gateway home, atomically and with the
+  attention store's bounds, and `RuntimeRegistry.setArchived` exposes it through
+  the `session.archive.set` mutation RPC. `session.list` takes
+  `archived: "exclude" | "only"` (default `exclude`), returns `archivedCount` on
+  a first `exclude` page, and marks archived rows with `archivedAt`. State
+  follows delete, rebind, and startup prune from complete structural evidence,
+  and `session-archive.v1` advertises the contract. Nothing else about a session
+  changes: no file rewrite, no `updatedAt` change, no runtime for a cold session.
+- Evidence (verified):
+  - `npm run build` clean.
+  - `npx vitest run src/transport/session-archive.integration.test.ts`
+    (new): 9/9 in 2.5 s over a real WebSocket, real `GatewayService`, real
+    `RuntimeRegistry`, paired device and faux provider. Covers idle archive with
+    `archivedAt`/`archivedCount` and byte-identical JSONL with zero runtime
+    starts, command replay, cursor/filter binding and newest-first archived
+    order, `busy` for running and for the waiting-for-input and active-subagent
+    projections, restart persistence plus open-stays-archived, rename-while-
+    archived and an unarchived fork child, subagent `conflict`, and delete with
+    a re-created file that cannot resurrect the record. Retained, regenerable
+    report: `test-results/session-archive.integration.json` in the gateway
+    package (gitignored output, not source).
+  - `npx vitest run src/sessions/session-archive-store.test.ts` (new): 6/6,
+    targeting only the failure modes the lifecycle test cannot reproduce:
+    corrupt/oversized/wrong-version documents fail closed and leave the file
+    untouched instead of resetting to empty; a failed durable write leaves the
+    in-memory projection and the revision unchanged; the capacity bound rejects;
+    re-archive keeps the original timestamp; prune removes exactly the
+    unretained IDs; rekey never overwrites a target; `assertAbsent` blocks a
+    rebind onto existing state.
+  - `npx vitest run src/sessions/runtime-registry.integration.test.ts`: 240/240
+    in 44.3 s. `src/transport/session-list-pagination.test.ts`,
+    `src/sessions/session-attention-store.test.ts`,
+    `src/transport/server-terminal-delete.integration.test.ts`,
+    `src/transport/server-revocation.integration.test.ts`,
+    `src/client/terminal-chat.test.ts`, `src/transport/gateway-service-transcript.test.ts`,
+    `src/transport/command-receipts.test.ts`, `src/transport/gateway-restart.test.ts`,
+    `src/admin/hook-resources.integration.test.ts`: 70/70 and 39/39 in the two
+    focused runs.
+  - `python3 scripts/check-documentation-policy.py` and
+    `scripts/personal-info-guard.sh` both pass.
+- Changes: this commit (`packages/gateway/src/sessions/session-archive-store.ts`,
+  `packages/gateway/src/sessions/runtime-registry.ts`,
+  `packages/gateway/src/sessions/runtime-slot.ts`, `packages/gateway/src/transport/gateway-service.ts`,
+  `packages/gateway/src/transport/session-list-pagination.ts`,
+  `packages/gateway/src/protocol/types.ts`, `packages/gateway/src/gateway-main.ts`,
+  `packages/gateway/src/automations/automation-scheduler.ts`,
+  `packages/gateway/README.md`, `packages/gateway/docs/observability.md`, `.gitignore`,
+  and the two new test files).
+- Tasks added: F-1.
+- Kept on purpose:
+  - Archiving a live-only session (created but not yet persisted) writes a
+    record for an ID that may never reach disk. Startup prune removes it, and
+    `archivedCount` counts only rows the catalog admits, so no phantom row or
+    count can appear in-process.
+  - The idle check runs under the registry mutex and then on the target slot's
+    lane, mirroring delete's idle-check-then-dispose ordering. The synchronous
+    projection and work checks make the lane wait bounded; splitting them would
+    reopen delete's admission-to-commit window.
+  - `RuntimeRegistry.catalog`/`catalogSnapshot` stay unfiltered, because session
+    search and `readSearchCut` must keep archived sessions addressable (G-3).
+  - The automation reservation query is one read-only method on the scheduler
+    plus a late-bound registry option, because the scheduler is constructed
+    after the registry and the reservation window exists before the executor
+    takes its session lease.
+- Deviations: the plan's case 9 calls for forking through `session.fork`; that
+  RPC is rejected by its own admitted work entry, so the fork is driven on the
+  owning runtime and the RPC defect is recorded as F-1 rather than fixed here.
+- For the next agent: G-2 is next. Its clear-at-admission hook belongs inside
+  `RuntimeSlot`'s lane immediately after `assertUsable()` in `prompt`,
+  `executeBash`, and compaction, and it must fail closed on a store write
+  failure; `RuntimeSlot.assertArchivable` is the G-1-side check that already
+  runs on that lane. F-1 needs a decision: the cheapest fix is to thread the
+  RPC's work token into `RuntimeSlot.fork`'s idle check, which also argues for
+  auditing every other lane-level `assertIdle` reached from a mutation RPC.

@@ -207,6 +207,20 @@ export class AutomationScheduler {
     }
   }
 
+  /** Read-only admission query for another owner: this exact canonical session
+   * already has a dispatched reservation or a running automation execution.
+   * The reservation window exists before the executor takes its session lease,
+   * so a lease check alone cannot see it. */
+  hasSessionRun(sessionId: string): boolean {
+    for (const active of this.active.values()) {
+      if (active.sessionId === sessionId) return true;
+    }
+    for (const pending of this.dispatchReservations.values()) {
+      if (pending.sessionId === sessionId) return true;
+    }
+    return false;
+  }
+
   async dispose(): Promise<void> {
     this.beginDrain();
     this.cancelPendingAdmissions();

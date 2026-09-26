@@ -188,6 +188,9 @@ const jevClient = new JevDecisionClient(knowledgeCredentials);
 const mcp = new McpAdapter({ connections, credentials: knowledgeCredentials, workRegistry });
 let automations!: AutomationService;
 let automationToolOperations!: GatewayScheduleToolOperations;
+// Late-bound: the scheduler is constructed after the registry, and archiving
+// must not hide a session whose automation run is already dispatched.
+let automationSchedulerForArchive: Pick<AutomationScheduler, "hasSessionRun"> | undefined;
 const sessions = new RuntimeRegistry({
   agentDir: config.agentDir,
   tronHome: config.tronHome,
@@ -206,6 +209,10 @@ const sessions = new RuntimeRegistry({
   persistenceDiagnostic: (sessionId, code) => logger.log("warning", "Session persistence diagnostic", {
     event: code, source: "session", sessionId,
   }),
+  archiveDiagnostic: (diagnostic) => logger.log("warning", `Session archive state was not persisted (${diagnostic.stage})`, {
+    event: "sessions.archive.persist-failed", source: "sessions", outcome: diagnostic.outcome,
+  }),
+  sessionAutomationReserved: (sessionId) => automationSchedulerForArchive?.hasSessionRun(sessionId) ?? false,
   compactionDiagnostic: (diagnostic) => logger.log(
     diagnostic.outcome === "failure" ? "error" : "info",
     `Session compaction ${diagnostic.outcome}`,
@@ -339,6 +346,7 @@ const automationScheduler = new AutomationScheduler(automationStore, automationE
     });
   },
 });
+automationSchedulerForArchive = automationScheduler;
 // Parts of the `automation-recovery` startup step, as a separate event so the
 // startup steps of one restart still sum without double counting.
 automations = new AutomationService(automationStore, automationScheduler, sessions, undefined, (step, durationMs, detail) => {

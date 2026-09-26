@@ -940,6 +940,19 @@ export class RuntimeSlot {
       this.touch();
     };
   }
+  /** Archive admission on the exact lane that admits runs: any run ownership
+   * that already entered the lane is observed before an archive can commit, so
+   * archiving can never hide admitted work. `exceptWorkToken` is the archiving
+   * request's own work, which is not the session running. */
+  async assertArchivable(exceptWorkToken?: string): Promise<void> {
+    await this.lane.run(() => {
+      this.assertUsable();
+      if (this.isBusyExceptWorkToken(exceptWorkToken)) {
+        throw new GatewayError("busy", "Stop the session before archiving it", false, undefined, "session_operation_busy");
+      }
+    });
+  }
+
   get isDrainBusy(): boolean {
     return this.dependencies.workRegistry.hasSessionWork(this.id)
       || this.administrativeDrainBlockers().length > 0;

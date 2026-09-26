@@ -1660,6 +1660,34 @@ Delete removes attention metadata, true identity replacement moves it without
 overwriting a target, switches preserve both identities, and new/imported/forked
 sessions begin read.
 
+`session.archive.set` archives or unarchives one canonical session under an
+ordinary command receipt and returns `{ archived, archivedAt? }`. Archiving is a
+Gateway-owned display projection in a separate durable store
+(`session-archive.json` under the Gateway home): it never rewrites the session
+file, changes that file's `updatedAt`, or starts a runtime for an inactive
+session. Admission reuses delete's hardened structural identity check, so an
+unambiguous canonical session is required, a runtime-owned subagent session is
+rejected with `conflict`, a session whose deletion has begun is retryable
+`busy`, and archiving requires an idle session: running, compacting, retrying,
+waiting-for-input, detached-subagent, queued-prompt, automation-reserved and
+leased states all reject with `busy` (`session_operation_busy`). That idle check
+runs under the registry mutex and, when a runtime exists, on the same slot lane
+that admits runs, so a prompt already inside that lane is observed before an
+archive commits. A replay returns the original receipt, and archiving an
+already-archived session keeps its original timestamp. Archive state advances
+the list revision and emits `session.listChanged`; it moves with a true identity
+replacement, leaves a new or forked identity unarchived, is removed with a
+discarded identity and with session deletion, and is pruned at startup only from
+complete structural evidence.
+
+`session.list` accepts an optional `archived` filter. `exclude`, the default,
+drops archived rows from every page of that traversal and returns
+`archivedCount` on its first page only; `only` lists the archived rows,
+newest-archived first. Archived rows carry `archivedAt` and are otherwise
+unchanged, and a list cursor is bound to the filter that created it. The
+`session-archive.v1` capability advertises the method and the filter; the
+additive field and parameter leave protocol version 5 unchanged.
+
 `session.open` carries a
 byte-bounded authoritative transcript tail with `transcriptStart` and
 `transcriptTotal`; `session.transcript` pages backward through the same canonical

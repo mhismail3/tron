@@ -95,7 +95,14 @@ export interface SessionSummary {
   completionRevision?: number;
   attentionRevision?: number;
   isUnread?: boolean;
+  /** Set only on an archived row. Archiving hides a session from the dashboard
+   * without changing its canonical file. */
+  archivedAt?: string;
 }
+
+/** `session.list` archive filter. `exclude` is the dashboard projection; `only`
+ * is the archived container. */
+export type SessionArchiveFilter = "exclude" | "only";
 
 /** Bounded global projection used to update dashboard rows without subscribing
  * every client to every full session transcript. */

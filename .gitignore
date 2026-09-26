@@ -56,6 +56,9 @@ temp/
 *.tmp
 *.dump
 
+# Retained test artifacts (regenerable, not source)
+test-results/
+
 # Logs
 *.log
 

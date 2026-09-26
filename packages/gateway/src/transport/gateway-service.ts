@@ -15,6 +15,7 @@ import type { DeviceStore } from "../security/device-store.js";
 import type { RuntimeRegistry } from "../sessions/runtime-registry.js";
 import type { SessionSearchService } from "../sessions/session-search-service.js";
 import { EXTENSION_ACTIVITY_HISTORY_CAPABILITY } from "../sessions/extension-activity-history.js";
+import { SESSION_ARCHIVE_CAPABILITY } from "../sessions/session-archive-store.js";
 import {
   PROCESS_ACTIVITY_CAPABILITY,
   PROCESS_ACTIVITY_HISTORY_CAPABILITY,
@@ -363,6 +364,7 @@ export class GatewayService {
         PROCESS_ACTIVITY_CAPABILITY,
         PROCESS_ACTIVITY_HISTORY_CAPABILITY,
         "session-history-pages.v1",
+        SESSION_ARCHIVE_CAPABILITY,
         PROCESS_TRANSCRIPT_CAPABILITY,
         PROCESS_TRANSCRIPT_ABORT_CAPABILITY,
         "queue-management.v1",
@@ -893,11 +895,16 @@ export class GatewayService {
       }
       case "session.list": {
         const scope = params.scope === undefined ? "user" : oneOf(params.scope, "scope", ["user", "all"] as const);
+        // `exclude` is the dashboard projection; archived rows are then absent
+        // from every page of this traversal. `only` lists the archived rows.
+        const archived = params.archived === undefined
+          ? "exclude"
+          : oneOf(params.archived, "archived", ["exclude", "only"] as const);
         const cursor = optionalString(params.cursor, "cursor", 96);
         const limit = params.limit === undefined ? 100 : integer(params.limit, "limit", 1, 500);
         this.requireObserverAdmission(client);
         if (cursor !== undefined) {
-          const page = await this.sessionListPages.nextPage(client.id, scope, cursor, limit);
+          const page = await this.sessionListPages.nextPage(client.id, scope, cursor, limit, archived);
           if (client.isRevoked()) {
             this.sessionListPages.releaseClient(client.id);
             throw new GatewayError("unauthenticated", "This device is no longer authorized");
@@ -905,10 +912,10 @@ export class GatewayService {
           return safeJson(page);
         }
         const source = await awaitWhileClientConnected(
-          this.dependencies.sessions.pageSource(scope),
+          this.dependencies.sessions.pageSource(scope, archived),
           client.signal,
         );
-        const page = await this.sessionListPages.firstPage(client.id, scope, source, limit);
+        const page = await this.sessionListPages.firstPage(client.id, scope, source, limit, archived);
         if (client.isRevoked()) {
           this.sessionListPages.releaseClient(client.id);
           throw new GatewayError("unauthenticated", "This device is no longer authorized");
@@ -1181,6 +1188,14 @@ export class GatewayService {
         if (closed) this.processTranscriptLeases.releaseParent(client.id, sessionId, subscriptionToken);
         return { closed };
       }
+      case "session.archive.set":
+        // Archive state is display state, so the receipt and the command ID are
+        // the whole admission: a replay returns the first authoritative result.
+        return this.mutation(client, method, params, async (workToken) => {
+          const sessionId = string(params.sessionId, "sessionId", { max: 200 });
+          const archived = boolean(params.archived, "archived");
+          return safeJson(await this.dependencies.sessions.setArchived(sessionId, archived, workToken));
+        });
       case "session.delete":
         return this.mutation(client, method, params, async (workToken) => {
           const sessionId = string(params.sessionId, "sessionId", { max: 200 });

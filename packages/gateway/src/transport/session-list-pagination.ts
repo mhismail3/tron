@@ -1,11 +1,14 @@
 import { createHmac, randomBytes } from "node:crypto";
 import { GatewayError } from "../errors.js";
-import type { SessionSummary } from "../protocol/types.js";
+import type { SessionArchiveFilter, SessionSummary } from "../protocol/types.js";
 
 export interface SessionListPage {
   sessions: SessionSummary[];
   listRevision: number;
   nextCursor?: string;
+  /** Visible archived sessions for the requesting scope. Present only on the
+   * first `exclude` page. */
+  archivedCount?: number;
 }
 
 export interface SessionListPageSource {
@@ -13,6 +16,8 @@ export interface SessionListPageSource {
   readonly listRevision: number;
   readonly count: number;
   readonly compactByteEstimate: number;
+  /** Present only for an `exclude` source; `only` lists the archived rows. */
+  readonly archivedCount?: number;
   page(offset: number, limit: number): Promise<SessionSummary[]>;
 }
 
@@ -28,6 +33,7 @@ interface SessionListLease {
   id: string;
   clientID: string;
   scope: "user" | "all";
+  archived: SessionArchiveFilter;
   generationKey: string;
   sessionCount: number;
   byteCount: number;
@@ -76,15 +82,22 @@ export class SessionListPaginationStore {
     this.pruneGenerations();
   }
 
-  async firstPage(clientID: string, scope: "user" | "all", source: SessionListPageSource, limit: number): Promise<SessionListPage> {
+  async firstPage(
+    clientID: string,
+    scope: "user" | "all",
+    source: SessionListPageSource,
+    limit: number,
+    archived: SessionArchiveFilter = "exclude",
+  ): Promise<SessionListPage> {
     this.prune();
     this.validateSource(source, limit);
     // Hydration and wire validation happen before admitting a lease. A broken
     // source or oversized first page therefore cannot leak traversal state or
     // evict a valid lease.
     const page = await this.hydratePage(source, 0, limit);
+    const count = source.archivedCount === undefined ? {} : { archivedCount: source.archivedCount };
     if (source.count <= limit) {
-      return { sessions: page, listRevision: source.listRevision };
+      return { sessions: page, listRevision: source.listRevision, ...count };
     }
 
     this.prune();
@@ -100,17 +113,24 @@ export class SessionListPaginationStore {
     const now = this.now();
     let id: string;
     do { id = randomBytes(6).toString("hex"); } while (this.leases.has(id));
-    const lease: SessionListLease = { id, clientID, scope, generationKey: source.generation, sessionCount: source.count, byteCount, listRevision: source.listRevision, expiresAt: now + (this.options.leaseTTLms ?? 30_000), lastAccess: now };
+    const lease: SessionListLease = { id, clientID, scope, archived, generationKey: source.generation, sessionCount: source.count, byteCount, listRevision: source.listRevision, expiresAt: now + (this.options.leaseTTLms ?? 30_000), lastAccess: now };
     this.leases.set(id, lease);
-    return { sessions: page, listRevision: source.listRevision, nextCursor: this.cursor(lease, page.length) };
+    return { sessions: page, listRevision: source.listRevision, nextCursor: this.cursor(lease, page.length), ...count };
   }
 
-  async nextPage(clientID: string, scope: "user" | "all", cursor: string, limit: number): Promise<SessionListPage> {
+  async nextPage(
+    clientID: string,
+    scope: "user" | "all",
+    cursor: string,
+    limit: number,
+    archived: SessionArchiveFilter = "exclude",
+  ): Promise<SessionListPage> {
     this.prune();
     const parsed = this.parse(cursor);
     const lease = this.leases.get(parsed.leaseID);
     const generation = lease ? this.generations.get(lease.generationKey) : undefined;
-    if (!lease || !generation?.source || lease.clientID !== clientID || lease.scope !== scope || parsed.signature !== this.signature(lease, parsed.offset)
+    if (!lease || !generation?.source || lease.clientID !== clientID || lease.scope !== scope
+      || lease.archived !== archived || parsed.signature !== this.signature(lease, parsed.offset)
       || parsed.offset <= 0 || parsed.offset >= lease.sessionCount) this.invalidCursor();
     lease.lastAccess = this.now();
     let sessions: SessionSummary[];
@@ -175,7 +195,7 @@ export class SessionListPaginationStore {
 
   private signature(lease: SessionListLease, offset: number): string {
     return createHmac("sha256", this.secret)
-      .update(`${lease.id}\0${lease.clientID}\0${lease.scope}\0${lease.listRevision}\0${lease.generationKey}\0${offset}`)
+      .update(`${lease.id}\0${lease.clientID}\0${lease.scope}\0${lease.archived}\0${lease.listRevision}\0${lease.generationKey}\0${offset}`)
       .digest("base64url")
       .slice(0, 11);
   }
