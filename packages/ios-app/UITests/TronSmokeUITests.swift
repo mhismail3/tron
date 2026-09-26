@@ -372,6 +372,48 @@ final class TronSmokeUITests: XCTestCase {
     }
 
     @MainActor
+    func testSessionArchivePagingRetiresInFlightPassAndRestartsRefusedCursor() {
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.launchArguments = ["-tron-session-archive-fixture", "-tron-session-archive-paging-fixture"]
+        app.launch()
+        defer { app.terminate() }
+
+        let liveRow = app.buttons["session-row-fixture:live-session"]
+        XCTAssertTrue(liveRow.waitForExistence(timeout: 8), app.debugDescription)
+        let container = app.buttons["archived-sessions-container"]
+        XCTAssertTrue(container.waitForExistence(timeout: 5), app.debugDescription)
+        // The fixture serves one archived session per page, so the first pass
+        // both populates the container and offers Show more.
+        XCTAssertEqual(container.value as? String, "1", app.debugDescription)
+
+        // Expanding starts the pass whose first read hangs. Archiving the live
+        // row then advances the archive projection while that read is still in
+        // flight, which is exactly the reload that a dropped pass would lose.
+        container.tap()
+        fullSwipe(liveRow)
+
+        let archivedLiveRow = app.buttons["archived-session-row-fixture:live-session"]
+        XCTAssertTrue(archivedLiveRow.waitForExistence(timeout: 5), app.debugDescription)
+        XCTAssertFalse(app.buttons["archived-session-row-fixture:older-session"].exists, app.debugDescription)
+
+        // A continuation the Gateway refuses is replaced by that server's first
+        // page: the rows stay, and no server is reported unavailable. The
+        // control's label carries the section it expands.
+        let showMore = app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "Show more")).firstMatch
+        XCTAssertTrue(showMore.waitForExistence(timeout: 5), app.debugDescription)
+        showMore.tap()
+        XCTAssertTrue(archivedLiveRow.waitForExistence(timeout: 5), app.debugDescription)
+        XCTAssertTrue(showMore.waitForExistence(timeout: 5), app.debugDescription)
+        XCTAssertFalse(
+            app.staticTexts.matching(NSPredicate(format: "label BEGINSWITH %@", "Archived sessions unavailable"))
+                .firstMatch.exists,
+            app.debugDescription
+        )
+        keepScreenshot(named: "session-archive-paging-restart")
+    }
+
+    @MainActor
     func testAskUserOtherEditorExpandsMediumSheetAndOpensKeyboard() {
         let app = launchAskUser()
         waitForAskUserForm(in: app)

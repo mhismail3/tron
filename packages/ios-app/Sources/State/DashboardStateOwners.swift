@@ -693,12 +693,24 @@ struct ArchivedSessionsContainerState: Equatable {
     /// pages.
     @discardableResult
     mutating func collapse() -> Int {
-        generation &+= 1
+        let generation = retirePages()
         isExpanded = false
-        isLoading = false
         rowsByProfile = [:]
         nextCursorByProfile = [:]
         unavailableProfileIDs = []
+        return generation
+    }
+
+    /// Retires the pages in flight without clearing what is already published.
+    /// A newer archive authority must replace a pass that is still reading: the
+    /// pass's task is cancelled as a best effort, and its page was read before
+    /// that authority landed, so the generation moves here and the late page is
+    /// refused. Published rows stay because the fresh pass's first page is the
+    /// whole authority for its server and replaces them.
+    @discardableResult
+    mutating func retirePages() -> Int {
+        generation &+= 1
+        isLoading = false
         return generation
     }
 
@@ -764,6 +776,16 @@ struct ArchivedSessionsContainerState: Equatable {
     /// Records that a server's page could not be read.
     mutating func markUnavailable(_ profileID: String) {
         unavailableProfileIDs.insert(profileID)
+    }
+
+    /// Drops a server's continuation cursor after the Gateway refused it as
+    /// unknown (expired or evicted). The same cursor can never succeed, so the
+    /// caller re-reads that server's first page and paging starts over instead
+    /// of leaving a control that repeats the refusal. Reports whether a cursor
+    /// was actually dropped.
+    @discardableResult
+    mutating func discardCursor(_ profileID: String) -> Bool {
+        nextCursorByProfile.removeValue(forKey: profileID) != nil
     }
 
     /// Applies the dashboard's summed archive count. Zero means no archived
@@ -978,9 +1000,7 @@ struct SessionCatalogCoordinator: Equatable {
     /// projection immediately. Membership stays Gateway-owned, so nothing here
     /// remembers the ID — an archived row is absent from the `exclude`
     /// projection, and a summary update can never materialize a row on its own.
-    @discardableResult
-    mutating func markArchived(sessionID: String) -> Bool {
-        let hadRow = indicesByID[sessionID] != nil || liveUpdates[sessionID] != nil
+    mutating func markArchived(sessionID: String) {
         invalidateLoads()
         liveUpdates.removeValue(forKey: sessionID)
         liveSessionIDs.remove(sessionID)
@@ -988,7 +1008,6 @@ struct SessionCatalogCoordinator: Equatable {
             sessions.remove(at: index)
             rebuildIndex()
         }
-        return hadRow
     }
 
     mutating func replaceForFacade(_ replacement: [SessionSummary]) {

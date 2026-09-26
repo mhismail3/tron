@@ -502,9 +502,6 @@ actor GatewayClient {
         let profileID: String?
         let profileLabel: String?
         let connectionID: Int
-        /// The caller's correlation label, when it needs to report this
-        /// request's identity later. `nil` means the request is not correlated.
-        let correlation: String?
         let timeout: Task<Void, Never>
         var send: Task<Void, Never>?
         var transmission: GatewayRequestTransmissionState
@@ -1053,15 +1050,13 @@ actor GatewayClient {
         _ params: P,
         as responseType: R.Type = R.self,
         timeout: Duration = .seconds(30),
-        expectedEpochID: Int,
-        correlation: String? = nil
+        expectedEpochID: Int
     ) async throws -> R {
         let value = try await requestValue(
             method,
             params,
             timeout: timeout,
-            expectedEpochID: expectedEpochID,
-            correlation: correlation
+            expectedEpochID: expectedEpochID
         )
         return try GatewayResponseDecoding.decode(value, as: responseType, method: method)
     }
@@ -1086,15 +1081,13 @@ actor GatewayClient {
         _ method: String,
         _ params: P,
         timeout: Duration = .seconds(30),
-        expectedEpochID: Int,
-        correlation: String? = nil
+        expectedEpochID: Int
     ) async throws -> JSONValue {
         try await requestValue(
             method,
             params,
             timeout: timeout,
-            epochExpectation: .id(expectedEpochID),
-            correlation: correlation
+            epochExpectation: .id(expectedEpochID)
         )
     }
 
@@ -1167,7 +1160,6 @@ actor GatewayClient {
                     profileID: current.profileID,
                     profileLabel: current.profileLabel,
                     connectionID: epochID,
-                    correlation: correlation,
                     timeout: timeoutTask,
                     send: nil,
                     transmission: .queued

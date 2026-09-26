@@ -1382,16 +1382,15 @@ uses a red tint but no destructive button role, so UIKit keeps the row mounted
 until the Tron confirmation sheet completes the canonical mutation. The view does
 not stage deletion beyond confirmation or suppress rows locally. The confirmed
 mutation receipt reconciles the selected profile-owned catalog immediately, while
-the revisioned Gateway list event repairs every connected dashboard from canonical truth.
-Archived sessions are reachable only through the dashboard's archived container and content search,
-and both name them without changing their archive state; a chat opened from either shows the archived
-state in Manage Session with an explicit Unarchive action, while sending a message needs no
+the revisioned Gateway list event repairs every connected dashboard from canonical truth. Cancelling can
+therefore close and reopen the flow without optimistic row removal
+or stale swipe state. Archived sessions are reachable only through the dashboard's archived container and content
+search, and both name them without changing their archive state; a chat opened from either shows the
+archived state in Manage Session with an explicit Unarchive action, while sending a message needs no
 confirmation because the Gateway clears the archive before it admits the run. That state is read only
 from the presented session's own snapshot: `SessionSnapshot.archivedAt` is the Gateway's projection,
 the field is absent exactly while the session is visible, and the Gateway republishes the snapshot on
 each archive change, so iOS keeps no observation of its own for a session the dashboard cannot show.
-Cancelling can therefore close and reopen the flow without optimistic row removal
-or stale swipe state.
 One collapsed **Archived (N)** container row sits after every workspace group and
 stays hidden until a capable Gateway publishes a non-zero count, so a partial
 dashboard never claims a fabricated zero. `ArchivedSessionsContainerSection` owns
@@ -1401,17 +1400,20 @@ page per connected capable server under the dashboard's managed presentation
 activity and the model's exact per-purpose latest-request fence; a collapse retires
 the pass (generation and task) so a late page cannot reappear, and a capable server
 that is unreachable or whose page read failed is named inline instead of listing
-rows that may be stale. A first page is the whole authority for its server's rows,
-while a continuation page extends them, so "Show more" cannot discard what the user
-already saw. The count reaching zero closes the container and stops its reads; a
-profile switch cancels and re-reads the pass rather than discarding the user's
-expansion, because every row is qualified by its own server. Its rows show their
-workspace, open the session, and swipe to Unarchive (the full-swipe action) or
-Delete (the dashboard's own confirmation). Rows and cursors are dropped for a
+rows that may be stale. A first page is the whole authority for its server's rows
+and a continuation page extends them; a continuation the Gateway refuses as an
+unknown cursor restarts that server from its first page instead of offering a
+control that can never succeed. The count reaching zero closes the container and
+stops its reads, and a profile switch re-reads the pass rather than discarding the
+user's expansion, because every row is qualified by its own server. Its rows show
+their workspace, open the session, and swipe to Unarchive (the full-swipe action)
+or Delete (the dashboard's own confirmation). Rows and cursors are dropped for a
 server the container can no longer read, because a page read is their only
-authority, and the container re-reads only when the Gateway's archive projection
-changes — an authoritative dashboard page or a capable server's count — never on the
-dashboard's summary stream. Dashboard discovery and refresh never select or open a transcript and global Settings never
+authority, and the container re-reads only when a Gateway's archive projection
+changes — the focused profile's authoritative catalog page, or a background
+profile's own authoritative page or retired connection — never on the dashboard's
+summary stream. A newer authority retires a pass that is still reading and starts
+fresh first pages rather than dropping the reload. Dashboard discovery and refresh never select or open a transcript and global Settings never
 infer project scope. Catalog loads are latest-generation-owned, and an asynchronous import may
 navigate only while its exact dashboard intent is still current. Reconnect restores only the
 still-mounted presentation; it never uses a dashboard row as a subscription fallback. The mounted chat route supplies an immutable

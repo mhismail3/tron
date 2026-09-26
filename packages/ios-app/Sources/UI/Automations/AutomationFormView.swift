@@ -382,7 +382,8 @@ struct AutomationFormView: View {
             await inspectWorkspaceTrust(workspacePath)
         }
         .task(id: PresentationActivityTaskID(
-            source: "target:\(selectedProfileID):\(targetSessionID):\(initialized):\(scenePhase == .active)",
+            source: "target:\(selectedProfileID):\(targetSessionID):\(targetMode):\(initialized):"
+                + "\(scenePhase == .active):\(sessions.contains { $0.id == targetSessionID })",
             presentationActive: presentationActivity.allowsPresentationPublication
         )) {
             guard initialized,
@@ -393,7 +394,8 @@ struct AutomationFormView: View {
         .onChange(of: presentationActivity.allowsPresentationPublication) { _, _ in
             presentationReadGeneration &+= 1
             previewGeneration &+= 1
-        }        .onChange(of: actionKind) { _, next in
+        }
+        .onChange(of: actionKind) { _, next in
             if next == .notification {
                 targetMode = .existingSession
                 workspacePath = ""

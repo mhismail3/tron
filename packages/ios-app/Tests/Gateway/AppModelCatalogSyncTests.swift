@@ -736,6 +736,34 @@ struct AppModelCatalogSyncTests {
         }
     }
 
+    @Test("a background catalog publication advances the archive projection")
+    func backgroundCatalogPublicationAdvancesArchiveProjection() async throws {
+        try await withHarness { harness in
+            let model = harness.model
+            try Self.storePairedProfile(model)
+            try model.profiles.save(
+                GatewayProfile(
+                    id: "remote", label: "Remote", host: "remote.test", port: 9_847,
+                    machineId: "remote-machine", deviceId: "device"
+                ),
+                token: "token",
+                selecting: false
+            )
+            let before = model.archiveProjectionRevision
+            // The container's rows come from a background profile's own page,
+            // so its every authoritative publication is a new authority — the
+            // archived count is not: it can stay the same while rows change.
+            model.dashboardPoolDidPublishAuthoritativeCatalog(profileID: "remote")
+            #expect(model.archiveProjectionRevision == before + 1)
+            // The focused profile's authority arrives through its own catalog
+            // publication, so a pool report for it is not a second one.
+            model.dashboardPoolDidPublishAuthoritativeCatalog(profileID: "profile")
+            #expect(model.archiveProjectionRevision == before + 1)
+            model.dashboardPoolDidPublishAuthoritativeCatalog(profileID: "forgotten")
+            #expect(model.archiveProjectionRevision == before + 1)
+        }
+    }
+
     @Test("archived pages carry the Gateway that owns each row")
     func archivedRowsCarryOwningGateway() async throws {
         try await withHarness(capabilities: ["sessions.v1", "session-archive.v1"]) { harness in

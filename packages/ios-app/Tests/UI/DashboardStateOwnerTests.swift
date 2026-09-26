@@ -1152,8 +1152,7 @@ struct DashboardStateOwnerTests {
         #expect(published)
         #expect(owner.archivedCount == 1)
 
-        let marked = owner.markArchived(sessionID: "session")
-        #expect(marked)
+        owner.markArchived(sessionID: "session")
         #expect(owner.sessions.isEmpty)
         // The Gateway's summary projection carries no archive field, so a late
         // update for the ID cannot re-materialize the row. The caller turns the
@@ -1329,6 +1328,27 @@ struct DashboardStateOwnerTests {
             #expect(recorder.archivedCounts.last?.profileID == remote.id)
             #expect(!recorder.archivedCounts.contains { $0.count == 1 })
 
+            // Rows can change while the archived count does not (one session
+            // archived as another is unarchived, or a renamed archived
+            // session). The container reads its rows from this page, not from
+            // the count, so the page's own publication must be reported.
+            let publicationsBefore = recorder.authoritativeCatalogPublications.count
+            await socket.enqueue(Self.listChangedEvent())
+            try await socket.waitUntilSent(count: 4)
+            let republished = try Self.requestFrame(await socket.sentFrames()[3])
+            #expect(republished.method == "session.list")
+            await socket.enqueue(Self.catalogResponse(
+                id: republished.id,
+                sessions: [summary(revision: 1), summary(revision: 1, id: "second")],
+                listRevision: 3,
+                archivedCount: 5
+            ))
+            try await Self.waitUntil { recorder.updates.last?.sessions.count == 2 }
+            // The count is unchanged, so only the page's own publication can
+            // tell the container its rows moved.
+            #expect(recorder.archivedCounts.last?.count == 5)
+            #expect(recorder.authoritativeCatalogPublications.count > publicationsBefore)
+
             pool.retire()
             await pool.waitForRetirement()
         }
@@ -1447,6 +1467,79 @@ struct DashboardStateOwnerTests {
         )
         #expect(refreshed)
         #expect(container.rows.map(\.id) == ["second"])
+    }
+
+    @MainActor
+    @Test("a reload retires an in-flight pass instead of letting its page win")
+    func archivedContainerReloadRetiresInFlightPass() {
+        var container = ArchivedSessionsContainerState()
+        container.expand()
+        let inFlight = container.currentGeneration
+        // A pass is in flight when a newer archive authority lands. Retiring it
+        // must move the generation, because cancellation is cooperative.
+        let fresh = container.retirePages()
+        #expect(fresh != inFlight)
+        #expect(!container.isCurrent(inFlight))
+
+        // The retired pass's page is refused even though the container stays
+        // expanded and holds no fabricated rows.
+        let late = ArchivedSessionsPage(
+            sessions: [archivedSummary(profileID: "a", archivedAt: "2026-01-02T00:00:00Z")],
+            nextCursor: "next"
+        )
+        let lateApplied = container.apply(
+            .loaded(page: late),
+            profileID: "a",
+            generation: inFlight,
+            requestedCursor: nil
+        )
+        #expect(!lateApplied)
+        #expect(container.rows.isEmpty)
+        #expect(!container.hasMore)
+
+        // The fresh pass publishes under the generation retirement installed.
+        let freshApplied = container.apply(
+            .loaded(page: late),
+            profileID: "a",
+            generation: fresh,
+            requestedCursor: nil
+        )
+        #expect(freshApplied)
+        #expect(container.rows.map(\.id) == ["session"])
+    }
+
+    @MainActor
+    @Test("a refused continuation drops its cursor so the server restarts from its first page")
+    func archivedContainerRestartsAfterRefusedCursor() {
+        var container = ArchivedSessionsContainerState()
+        let source = ArchivedSessionsProfileSource(profileID: "a", label: "A", isConnected: true)
+        container.expand()
+        let generation = container.currentGeneration
+        _ = container.apply(
+            .loaded(page: ArchivedSessionsPage(
+                sessions: [archivedSummary(profileID: "a", archivedAt: "2026-01-02T00:00:00Z")],
+                nextCursor: "next"
+            )),
+            profileID: "a",
+            generation: generation,
+            requestedCursor: nil
+        )
+        #expect(container.hasMore)
+
+        // The Gateway refused the cursor, so retrying that exact continuation
+        // could only fail again. Dropping it is what lets the caller re-read a
+        // first page instead of offering a control that always fails.
+        let dropped = container.discardCursor("a")
+        #expect(dropped)
+        #expect(!container.hasMore)
+        let droppedAgain = container.discardCursor("a")
+        #expect(!droppedAgain)
+        #expect(container.pageRequests(for: [source], more: true).isEmpty)
+        #expect(container.pageRequests(for: [source], more: false).first?.cursor == nil)
+        // Rows the user already saw stay until the fresh first page replaces
+        // them: a refusal is not evidence that the server is unreadable.
+        #expect(container.rows.map(\.id) == ["session"])
+        #expect(container.unavailableProfileIDs.isEmpty)
     }
 
     @MainActor
@@ -1632,6 +1725,7 @@ private final class DashboardPoolRecorder: DashboardGatewayConnectionPoolDelegat
     }
     private(set) var notificationInvalidations: [String] = []
     private(set) var archivedCounts: [ArchivedCount] = []
+    private(set) var authoritativeCatalogPublications: [String] = []
 
     struct ArchivedCount: Sendable {
         let profileID: String
@@ -1640,6 +1734,10 @@ private final class DashboardPoolRecorder: DashboardGatewayConnectionPoolDelegat
 
     func dashboardPoolNotificationInboxChanged(profileID: String) {
         notificationInvalidations.append(profileID)
+    }
+
+    func dashboardPoolDidPublishAuthoritativeCatalog(profileID: String) {
+        authoritativeCatalogPublications.append(profileID)
     }
 
     func dashboardPoolDidUpdateArchivedCount(profileID: String, count: Int?) {

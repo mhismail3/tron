@@ -248,10 +248,11 @@ final class AppModel {
     /// Gateway-owned archived-session counts, one per profile whose count is
     /// known. Absent means unknown, which is never presented as zero.
     private var dashboardArchivedCountsByProfile: [String: Int] = [:]
-    /// Advances when the Gateway's archive projection changes: an authoritative
-    /// dashboard page for the focused profile, or any capable profile's count.
-    /// The archived container is its only consumer, and it refreshes from this
-    /// rather than from the dashboard's summary stream.
+    /// Advances when a Gateway's archive projection changes: an authoritative
+    /// dashboard page for the focused profile, or a background profile's own
+    /// authoritative page or retired connection. The archived container is its
+    /// only consumer, and it refreshes from this rather than from the
+    /// dashboard's summary stream.
     private(set) var archiveProjectionRevision = 0
     /// Per-profile, per-surface latest-request fences for archived reads. A
     /// container pass and the automation form's target lookup never retire each
@@ -4745,6 +4746,14 @@ extension AppModel: DashboardGatewayConnectionPoolDelegate {
         guard dashboardArchivedCountsByProfile[profileID] != count else { return }
         dashboardArchivedCountsByProfile[profileID] = count
         dashboardPresentationRevision &+= 1
+    }
+
+    /// One background profile's catalog authority advanced. Its archived rows
+    /// come from that same page, so the container re-reads here too — a renamed
+    /// archived session changes rows and not the count.
+    func dashboardPoolDidPublishAuthoritativeCatalog(profileID: String) {
+        guard profileID != profiles.selected?.id,
+              profiles.profiles.contains(where: { $0.id == profileID }) else { return }
         archiveProjectionRevision &+= 1
     }
 
