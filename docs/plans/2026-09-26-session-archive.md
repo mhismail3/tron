@@ -89,7 +89,7 @@ Current state, inspected 2026-09-26:
 
 | ID | Status | Scope | Depends on | Owner |
 | --- | --- | --- | --- | --- |
-| G-1 | Ready | Gateway archive store, `session.archive.set` RPC, list filtering and count, delete/rekey/prune ownership, `session-archive.v1` capability | none | |
+| G-1 | Claimed | Gateway archive store, `session.archive.set` RPC, list filtering and count, delete/rekey/prune ownership, `session-archive.v1` capability | none | tron-coordinator, 2026-09-26 |
 | G-2 | Ready | Every new run unarchives: an admission-time clear for Gateway-admitted runs, plus a backstop when an active phase is published | G-1 | |
 | G-3 | Ready | Search results carry `archived`; `session-search.md` updated | G-1 | |
 | I-1 | Ready | iOS model, mutation service, AppModel and capability gating; catalog membership follows authoritative responses | G-1 | |
