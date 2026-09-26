@@ -80,6 +80,8 @@ struct TronMobileApp: App {
                 HostedSessionPaginationFixture()
             } else if ProcessInfo.processInfo.arguments.contains("-tron-automation-fixture") {
                 HostedAutomationFixtureView()
+            } else if ProcessInfo.processInfo.arguments.contains("-tron-session-archive-fixture") {
+                HostedSessionArchiveFixture()
             } else if ProcessInfo.processInfo.arguments.contains("-tron-dashboard-menu-fixture") {
                 HostedDashboardMenuFixtureView()
             } else if ProcessInfo.processInfo.arguments.contains("-tron-accessibility-fixture") {

@@ -325,6 +325,53 @@ final class TronSmokeUITests: XCTestCase {
     }
 
     @MainActor
+    func testSessionArchiveSwipeAndArchivedContainerJourney() {
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.launchArguments = ["-tron-session-archive-fixture"]
+        app.launch()
+        defer { app.terminate() }
+
+        let liveRow = app.buttons["session-row-fixture:live-session"]
+        XCTAssertTrue(liveRow.waitForExistence(timeout: 8), app.debugDescription)
+        // A zero archived count keeps the container off the dashboard.
+        XCTAssertFalse(app.buttons["archived-sessions-container"].exists)
+
+        // A slow, bounded drag reveals the trailing actions without completing
+        // the full-swipe gesture.
+        let start = liveRow.coordinate(withNormalizedOffset: CGVector(dx: 0.95, dy: 0.5))
+        let end = liveRow.coordinate(withNormalizedOffset: CGVector(dx: 0.25, dy: 0.5))
+        start.press(forDuration: 0.6, thenDragTo: end)
+        let archiveAction = app.buttons["session-archive-action-fixture:live-session"]
+        XCTAssertTrue(archiveAction.waitForExistence(timeout: 3), app.debugDescription)
+        archiveAction.tap()
+
+        let container = app.buttons["archived-sessions-container"]
+        XCTAssertTrue(container.waitForExistence(timeout: 5), app.debugDescription)
+        XCTAssertEqual(container.value as? String, "1")
+        XCTAssertFalse(app.buttons["session-row-fixture:live-session"].exists)
+        keepScreenshot(named: "session-archive-container-collapsed")
+
+        container.tap()
+        let archivedRow = app.buttons["archived-session-row-fixture:live-session"]
+        XCTAssertTrue(archivedRow.waitForExistence(timeout: 5), app.debugDescription)
+        keepScreenshot(named: "session-archive-container-expanded")
+
+        let archivedStart = archivedRow.coordinate(withNormalizedOffset: CGVector(dx: 0.95, dy: 0.5))
+        let archivedEnd = archivedRow.coordinate(withNormalizedOffset: CGVector(dx: 0.25, dy: 0.5))
+        archivedStart.press(forDuration: 0.6, thenDragTo: archivedEnd)
+        let unarchiveAction = app.buttons["session-unarchive-action-fixture:live-session"]
+        XCTAssertTrue(unarchiveAction.waitForExistence(timeout: 3), app.debugDescription)
+        unarchiveAction.tap()
+
+        // The count returns to zero, so the container hides and the session is
+        // back among its workspace rows.
+        XCTAssertTrue(app.buttons["session-row-fixture:live-session"].waitForExistence(timeout: 5), app.debugDescription)
+        XCTAssertFalse(app.buttons["archived-sessions-container"].waitForExistence(timeout: 2))
+        keepScreenshot(named: "session-archive-unarchived")
+    }
+
+    @MainActor
     func testAskUserOtherEditorExpandsMediumSheetAndOpensKeyboard() {
         let app = launchAskUser()
         waitForAskUserForm(in: app)

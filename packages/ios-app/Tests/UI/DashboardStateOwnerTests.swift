@@ -1352,6 +1352,120 @@ struct DashboardStateOwnerTests {
         #expect(model.dashboardPresentationRevision > presentationRevision)
     }
 
+    // MARK: Archived container
+
+    @MainActor
+    @Test("archived container publishes only current, admitted pages")
+    func archivedContainerPublication() {
+        var container = ArchivedSessionsContainerState()
+        #expect(!container.isExpanded)
+        container.expand()
+        let generation = container.currentGeneration
+
+        // A page from a superseded pass cannot reappear after a collapse.
+        let collapsed = container.collapse()
+        #expect(collapsed != generation)
+        let stale = ArchivedSessionsPage(sessions: [archivedSummary(profileID: "a", archivedAt: "2026-01-02T00:00:00Z")], nextCursor: nil)
+        let staleApplied = container.apply(.loaded(page: stale), profileID: "a", generation: generation)
+        #expect(!staleApplied)
+        #expect(container.rows.isEmpty)
+        #expect(!container.isExpanded)
+
+        // A retired read publishes nothing and is not presented as an
+        // unavailable server.
+        let current = container.collapse()
+        container.expand()
+        let retiredApplied = container.apply(.retired, profileID: "a", generation: current)
+        #expect(!retiredApplied)
+        #expect(container.rows.isEmpty)
+        #expect(container.unavailableProfileIDs.isEmpty)
+
+        // A malformed page is named as unavailable instead of publishing rows.
+        let invalidApplied = container.apply(
+            .invalid(code: "invalid_response", reason: "archived-session-page"),
+            profileID: "a",
+            generation: current
+        )
+        #expect(!invalidApplied)
+        #expect(container.rows.isEmpty)
+        #expect(container.unavailableProfileIDs == ["a"])
+
+        // An admitted page replaces the server's rows and clears its note.
+        let page = ArchivedSessionsPage(
+            sessions: [archivedSummary(profileID: "a", archivedAt: "2026-01-02T00:00:00Z")],
+            nextCursor: "next"
+        )
+        let applied = container.apply(.loaded(page: page), profileID: "a", generation: current)
+        #expect(applied)
+        #expect(container.rows.map(\.id) == ["session"])
+        #expect(container.hasMore)
+        #expect(container.unavailableProfileIDs.isEmpty)
+    }
+
+    @MainActor
+    @Test("archived container reads only capable connected servers")
+    func archivedContainerReconciliation() {
+        var container = ArchivedSessionsContainerState()
+        let capable = ArchivedSessionsProfileSource(profileID: "a", label: "A", isConnected: true)
+        let offline = ArchivedSessionsProfileSource(profileID: "b", label: "B", isConnected: false)
+        container.expand()
+        let generation = container.currentGeneration
+        container.reconcile([capable, offline])
+        #expect(container.unavailableProfileIDs == ["b"])
+        let page = ArchivedSessionsPage(
+            sessions: [archivedSummary(profileID: "a", archivedAt: "2026-01-02T00:00:00Z")],
+            nextCursor: "next"
+        )
+        _ = container.apply(.loaded(page: page), profileID: "a", generation: generation)
+
+        // The first pass reads every connected server and never a disconnected
+        // one.
+        let firstPages = container.pageRequests(for: [capable, offline], more: false)
+        #expect(firstPages.count == 1)
+        #expect(firstPages.first?.profileID == "a")
+        #expect(firstPages.first?.cursor == nil)
+        // "Show more" reads exactly the servers with an unpublished page.
+        let morePages = container.pageRequests(for: [capable, offline], more: true)
+        #expect(morePages.count == 1)
+        #expect(morePages.first?.cursor == "next")
+
+        // A server that stops being connected (or capable) loses its rows and
+        // cursors: a page read is their only authority.
+        container.reconcile([offline])
+        #expect(container.rows.isEmpty)
+        #expect(!container.hasMore)
+        #expect(container.pageRequests(for: [offline], more: false).isEmpty)
+        container.reconcile([])
+        #expect(container.unavailableProfileIDs.isEmpty)
+    }
+
+    @MainActor
+    @Test("archived rows keep server identity through removal and ordering")
+    func archivedRowIdentityAndOrder() {
+        var container = ArchivedSessionsContainerState()
+        let source = ArchivedSessionsProfileSource(profileID: "a", label: "A", isConnected: true)
+        let second = ArchivedSessionsProfileSource(profileID: "b", label: "B", isConnected: true)
+        container.expand()
+        let generation = container.currentGeneration
+        container.reconcile([source, second])
+        let older = archivedSummary(profileID: "a", archivedAt: "2026-01-01T00:00:00Z")
+        let newer = archivedSummary(profileID: "b", archivedAt: "2026-01-03T00:00:00Z")
+        _ = container.apply(.loaded(page: ArchivedSessionsPage(sessions: [older], nextCursor: nil)), profileID: "a", generation: generation)
+        _ = container.apply(.loaded(page: ArchivedSessionsPage(sessions: [newer], nextCursor: nil)), profileID: "b", generation: generation)
+
+        // Newest archived first, qualification-safe when two servers own equal
+        // session IDs.
+        #expect(container.rows.map(\.dashboardID) == [newer.dashboardID, older.dashboardID])
+
+        // Removing one server's row cannot drop the equal ID on another server.
+        container.remove(sessionID: older.id, profileID: "a")
+        #expect(container.rows.map(\.dashboardID) == [newer.dashboardID])
+    }
+
+    private func archivedSummary(profileID: String, archivedAt: String) -> SessionSummary {
+        summary(revision: 1, archivedAt: archivedAt).withGatewaySource(id: profileID, label: profileID.uppercased())
+    }
+
     private func summary(
         revision: Int,
         phase: SessionPhase = .idle,

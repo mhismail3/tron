@@ -612,6 +612,147 @@ enum SessionArchiveCountProjection {
     }
 }
 
+/// One archive-capable server the dashboard container can read. Only a live
+/// connection may be read; a capable but unreachable Gateway is named as a note
+/// instead of listing rows that may be stale.
+struct ArchivedSessionsProfileSource: Equatable, Identifiable, Sendable {
+    let profileID: String
+    let label: String
+    let isConnected: Bool
+
+    var id: String { profileID }
+}
+
+/// Owns the dashboard's archived container: one collapsed disclosure plus the
+/// per-profile pages it reads when expanded. Archive membership stays
+/// Gateway-owned, so this owner holds only the current page projection and
+/// every publish is checked against the expansion generation: a page that a
+/// collapse or a newer pass already superseded can never reach the surface.
+struct ArchivedSessionsContainerState: Equatable {
+    private(set) var isExpanded = false
+    private(set) var isLoading = false
+    private(set) var rowsByProfile: [String: [SessionSummary]] = [:]
+    private(set) var nextCursorByProfile: [String: String] = [:]
+    /// Servers whose pages cannot be shown: a capable Gateway that is not
+    /// connected, or one whose page read failed. The container names them
+    /// inline rather than presenting stale rows.
+    private(set) var unavailableProfileIDs: Set<String> = []
+    private var generation = 0
+
+    /// Rows in Gateway archive order (newest archived first). Ordering is
+    /// identity-qualified because two servers can own equal session IDs.
+    var rows: [SessionSummary] {
+        rowsByProfile.values.flatMap { $0 }.sorted { left, right in
+            let leftInstant = left.archivedAt.flatMap(GatewayTimestamp.parse)
+            let rightInstant = right.archivedAt.flatMap(GatewayTimestamp.parse)
+            switch (leftInstant, rightInstant) {
+            case let (leftDate?, rightDate?) where leftDate != rightDate:
+                return leftDate > rightDate
+            case (_?, nil): return true
+            case (nil, _?): return false
+            default: return left.dashboardID < right.dashboardID
+            }
+        }
+    }
+
+    /// True while a server still has an unpublished page.
+    var hasMore: Bool { !nextCursorByProfile.isEmpty }
+
+    var currentGeneration: Int { generation }
+
+    func isCurrent(_ generation: Int) -> Bool { generation == self.generation }
+
+    mutating func expand() {
+        isExpanded = true
+    }
+
+    /// Collapsing retires every in-flight page: the generation moves so a late
+    /// publish is dropped, and the next expansion starts from fresh first
+    /// pages.
+    @discardableResult
+    mutating func collapse() -> Int {
+        generation &+= 1
+        isExpanded = false
+        isLoading = false
+        rowsByProfile = [:]
+        nextCursorByProfile = [:]
+        unavailableProfileIDs = []
+        return generation
+    }
+
+    /// Reconciles with the current capable-server snapshot. Rows and cursors of
+    /// a server that is no longer capable or connected are dropped, because a
+    /// page read is their only authority.
+    mutating func reconcile(_ sources: [ArchivedSessionsProfileSource]) {
+        let readable = Set(sources.filter(\.isConnected).map(\.profileID))
+        rowsByProfile = rowsByProfile.filter { readable.contains($0.key) }
+        nextCursorByProfile = nextCursorByProfile.filter { readable.contains($0.key) }
+        unavailableProfileIDs.formIntersection(Set(sources.map(\.profileID)))
+        for source in sources where !source.isConnected {
+            unavailableProfileIDs.insert(source.profileID)
+        }
+    }
+
+    /// The reads for one pass: first pages for connected servers, or the
+    /// unpublished next pages when the user asked for more.
+    func pageRequests(
+        for sources: [ArchivedSessionsProfileSource],
+        more: Bool
+    ) -> [(profileID: String, cursor: String?)] {
+        sources.filter(\.isConnected).compactMap { source in
+            guard more else { return (source.profileID, nil) }
+            guard let cursor = nextCursorByProfile[source.profileID] else { return nil }
+            return (source.profileID, cursor)
+        }
+    }
+
+    mutating func beginLoading() { isLoading = true }
+
+    mutating func finishLoading() { isLoading = false }
+
+    /// Publishes one admitted page. Returns false when the pass was retired or
+    /// the read did not produce a page, so the caller stops paging.
+    @discardableResult
+    mutating func apply(
+        _ result: ArchivedSessionsLoadResult,
+        profileID: String,
+        generation: Int
+    ) -> Bool {
+        guard isCurrent(generation) else { return false }
+        switch result {
+        case let .loaded(page):
+            // A page replaces the profile's rows: the Gateway's list alone
+            // decides which archived sessions exist.
+            rowsByProfile[profileID] = page.sessions
+            nextCursorByProfile[profileID] = page.nextCursor
+            unavailableProfileIDs.remove(profileID)
+            return true
+        case .retired:
+            return false
+        case .invalid:
+            unavailableProfileIDs.insert(profileID)
+            return false
+        }
+    }
+
+    /// Records that a server's page could not be read.
+    mutating func markUnavailable(_ profileID: String) {
+        unavailableProfileIDs.insert(profileID)
+    }
+
+    /// Drops a row after the user unarchived or deleted it. The Gateway's list
+    /// change stays the authority for the next page.
+    mutating func remove(sessionID: String, profileID: String?) {
+        guard let profileID else {
+            for key in rowsByProfile.keys {
+                rowsByProfile[key]?.removeAll { $0.id == sessionID }
+            }
+            return
+        }
+        rowsByProfile[profileID]?.removeAll { $0.id == sessionID }
+    }
+}
+
 struct SessionCatalogCoordinator: Equatable {
     struct LoadAdmission: Equatable, Sendable {
         fileprivate let generation: Int
