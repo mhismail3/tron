@@ -437,6 +437,7 @@ export class RuntimeRegistry {
   private blobsDisposed = false;
   private exportsDisposed = false;
   private workspaceDisposed = false;
+  private catalogIndexDisposed = false;
 
   constructor(
     private readonly options: {
@@ -3933,6 +3934,13 @@ export class RuntimeRegistry {
     }
     if (!this.workspaceDisposed) {
       pending.push(this.workspace.dispose().then(() => { this.workspaceDisposed = true; }));
+    }
+    // The catalog acceleration index is written fire-and-forget from catalog
+    // reads, so disposal must settle its exact in-flight write. Otherwise a
+    // temp file and rename can still land in the Gateway state directory after
+    // this owner reports shutdown.
+    if (!this.catalogIndexDisposed) {
+      pending.push(this.catalogMetadataIndex.dispose().then(() => { this.catalogIndexDisposed = true; }));
     }
     const results = await Promise.allSettled(pending);
     const failure = results.find((result): result is PromiseRejectedResult => result.status === "rejected");

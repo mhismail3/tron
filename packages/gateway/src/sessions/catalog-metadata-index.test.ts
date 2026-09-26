@@ -1,4 +1,4 @@
-import { appendFile, mkdtemp, readFile, rename, truncate, writeFile } from "node:fs/promises";
+import { appendFile, mkdtemp, readdir, readFile, rename, truncate, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import {
@@ -340,6 +340,31 @@ describe("CatalogMetadataIndex", () => {
     ]);
     const loaded = await reconcileSaved(index, f.catalog, [row]);
     expect(loaded).toHaveLength(1);
+  });
+
+  it("settles an in-flight save before disposal and refuses later writes", async () => {
+    const f = await fixture();
+    const index = new CatalogMetadataIndex(f.gateway);
+    const row = (await index.entryFromSummary(summary(f.path)))!;
+    // A catalog read publishes this acceleration index fire-and-forget, so any
+    // owner releasing the Gateway state directory (shutdown, a reinstall, or a
+    // test fixture) can race the write's temp file and rename. Two failure
+    // modes: a write still landing after disposal resolved, and a stale read
+    // recreating the directory after shutdown.
+    const inFlight = index.save(f.catalog, [row]);
+    // Let the admitted write reach its temp file before disposal, so this
+    // exercises the drain instead of the refusal path below.
+    await new Promise((resolve) => setImmediate(resolve));
+    await index.dispose();
+    // Disposal, not the later await, must have published the document: a
+    // disposal that returned first is exactly the raced window above.
+    const published = JSON.parse(await readFile(index.path, "utf8")) as { rows: unknown[] };
+    expect(published.rows).toHaveLength(1);
+    expect((await readdir(f.gateway)).filter((name) => name.includes(".tmp-"))).toEqual([]);
+    expect(await inFlight).toBe(true);
+    // A stale read after shutdown must not recreate the directory it raced.
+    expect(await index.save(f.catalog, [row])).toBe(false);
+    expect(await readdir(f.gateway)).toEqual(["catalog-metadata-v2.json"]);
   });
 
   it("fails closed on symlinked canonical files and persistence errors", async () => {

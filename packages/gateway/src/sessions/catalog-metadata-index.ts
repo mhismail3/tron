@@ -129,14 +129,28 @@ export class CatalogMetadataIndex {
   readonly path: string;
   private readonly diagnostics: CatalogMetadataIndexDiagnostics | undefined;
   private readonly writeMutex = new AsyncMutex();
+  private closed = false;
 
   constructor(private readonly gatewayStateRoot: string, diagnostics?: CatalogMetadataIndexDiagnostics) {
     this.path = join(gatewayStateRoot, "catalog-metadata-v2.json");
     this.diagnostics = diagnostics;
   }
 
+  /** Its caller persists this index fire-and-forget (a catalog read must not
+   * wait for acceleration), so the write can still be in flight when the owning
+   * registry reports disposal. Shutdown owns that window: refuse new writes and
+   * settle the admitted one, or a temp file and its rename can land in the
+   * Gateway state directory after the owner has released it. */
+  async dispose(): Promise<void> {
+    this.closed = true;
+    await this.writeMutex.run(() => {});
+  }
+
   async save(catalogRoot: string, rows: readonly CatalogMetadataIndexRow[]): Promise<boolean> {
     return this.writeMutex.run(async () => {
+      // Checked inside the mutex: a write queued after disposal began, but
+      // before its drain, must observe the closed owner instead of publishing.
+      if (this.closed) return false;
       const started = Date.now();
     if (rows.length > CATALOG_METADATA_INDEX_MAX_ENTRIES) {
       this.note("save", started, "failure");

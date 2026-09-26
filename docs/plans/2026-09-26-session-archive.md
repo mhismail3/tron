@@ -2,7 +2,7 @@
 
 - **Started:** 2026-09-26
 - **Status:** Active
-- **Last updated:** 2026-09-26, F-4
+- **Last updated:** 2026-09-26, F-5
 - **Goal:** A user can archive an idle session so it leaves the dashboard without being deleted, find it again in one collapsed Archived container or in search, and have it return automatically when it runs again.
 
 ## Goal and constraints
@@ -99,8 +99,9 @@ Current state, inspected 2026-09-26:
 | F-2 | Done | The same self-work-entry rejection now also measured on `session.bash`, `session.navigate` and `session.setTools`; audit every mutation RPC whose slot method consults session work ownership and decide the fix (thread the request's work token, as `session.setModel` already does) | none | tron-coordinator, 2026-09-26 |
 | F-3 | Done | Coordinator review of I-3: chat archive state comes from a bounded iOS observation list (parallel state). Make the Gateway `SessionSnapshot` carry `archivedAt` (republished on change) and delete the observation list | I-3 | tron-coordinator, 2026-09-26 |
 | F-4 | Done | I-2's hosted UI journey never passed (app never idled; simulator contention). Make it pass on a healthy simulator, fixing the fixture if it is the cause, and keep its screenshots | I-2 | tron-coordinator, 2026-09-26 |
-| F-5 | Claimed | `session-archive.integration.test.ts` "rejects a prompt retryably when archive state cannot be cleared" failed once in four full-suite runs (passes alone and under targeted load); reproduce, find the root cause, fix | G-2 | tron-coordinator, 2026-09-26 |
-| V-1 | Ready | Cross-module checkpoint, user-performed Gateway rollout, and eyes-on device review; close the plan | G-2, I-2, I-3, F-3, F-4, F-5 | |
+| F-5 | Done | `session-archive.integration.test.ts` "rejects a prompt retryably when archive state cannot be cleared" failed once in four full-suite runs (passes alone and under targeted load); reproduce, find the root cause, fix | G-2 | tron-coordinator, 2026-09-26 |
+| F-6 | Needs scoping | Same class as F-5, unproven: `RuntimeRegistry` line 1216 also writes `gateway/model-recents.json` fire-and-forget (`void this.noteModelUsed(...)` → `await this.recentModels.record(...)`), so its durable write can equally outlive `dispose()`. Decide whether `RecentModelStore` gets the same disposal drain | F-5 | |
+| V-1 | Ready | Cross-module checkpoint, user-performed Gateway rollout, and eyes-on device review; close the plan | G-2, I-2, I-3, F-3, F-4, F-5, F-6 | |
 
 ## Task details
 
@@ -1021,3 +1022,87 @@ artifact. Accessibility identifiers use the existing
   `scripts/ios-gateway-e2e-test run`, the user-performed Gateway rollout, and the
   eyes-on device review. Note that the iOS app's own full-swipe Archive action
   and the archived container were validated against the UI fixture, not a device.
+
+### F-5 · Done · 2026-09-26 · tron-coordinator
+
+- Result: the flake was not in the archive behavior oracle. The failing
+  assertion was the fixture's `afterEach` cleanup: `rm(root, { recursive: true,
+  force: true })` threw `ENOTEMPTY: directory not empty, rmdir
+  '<root>/gateway'`, which vitest attributes to whichever test's cleanup ran
+  (observed on "rejects a prompt retryably when archive state cannot be
+  cleared" and on "clears archive state when Bash is admitted"). Root cause is a
+  product ownership gap, not a test-ordering bug: a catalog read persists the
+  `gateway/catalog-metadata-v2.json` acceleration index fire-and-forget
+  (`materializeCatalogSnapshot` → `void this.persistDurableCatalogIndex(...)`,
+  `runtime-registry.ts`), whose temp file is created in that same `gateway`
+  directory and renamed onto the final path later. `RuntimeRegistry.dispose()`
+  shut down slots and the blob/export/workspace stores but never awaited this
+  index, so the write (and its directory entry) could land after disposal had
+  returned, racing whoever removes the state directory — exactly what a fixture
+  cleanup, a reinstall, or an owner-side directory replace does. Fix at the
+  owning boundary: `CatalogMetadataIndex.dispose()` sets a closed flag and
+  drains its `writeMutex` (refusing writes that had not started), and
+  `RuntimeRegistry.disposeSharedStores()` awaits it.
+- Evidence (verified), node `v25.9.0` via `PATH=/opt/homebrew/bin:$PATH`:
+  - Reproduction of the reported failure (baseline, before the fix): 4
+    concurrent runs of this file, 6 rounds = 24 runs → 5 case failures, every
+    one `Error: ENOTEMPTY: directory not empty, rmdir '<tmp root>/gateway'`
+    (3 × "clears archive state when Bash is admitted", 2 × the persist-failure
+    case). It had also appeared in a full-suite run on this branch
+    (`Tests 3 failed | 1942 passed (1945)`, this case next to the two unrelated
+    flakes) and once in the coordinator's four full-suite runs. Six sequential
+    full-suite runs did not reproduce it (only the known
+    `logger.test.ts`/`recent-model-usage.integration.test.ts` flakes failed),
+    which is why the load-dependent 4-concurrent stress above is the
+    reproduction method, not the suite itself.
+  - Mechanism evidence: a temporary probe that snapshotted the
+    `gateway` state directory (name, inode, size, mtime) 250 ms after each
+    `registry.dispose()` plus an `fs.watch` log of the rm window, run over 32
+    concurrent runs (640 cleanups): 45 late-write windows, **every one** the
+    catalog index (`catalog-metadata-v2.json` created/renamed, or its
+    `catalog-metadata-v2.json.tmp-<pid>-<uuid>` temp file replaced). No other
+    store wrote after disposal.
+  - After the fix, the same probe and load: 0 late-write windows in 640
+    cleanups (32 concurrent runs).
+  - After the fix, the original uninstrumented reproduction: 12 rounds × 4
+    concurrent runs of this file = 48/48 runs, 960/960 cases passed, 0
+    failures (baseline 5 failures / 24 runs).
+  - After the fix, full `npx vitest run` twice: `1945 passed | 1 failed` both
+    times, the single failure being the unrelated pre-existing
+    `logger.test.ts` "rotates across eight 5 MB segments" flake (it also failed
+    6/6 full-suite runs on this branch before the change; the other known flake,
+    `recent-model-usage.integration.test.ts`, passed in both).
+  - Focused regression: `catalog-metadata-index.test.ts` 16/16, including the
+    new "settles an in-flight save before disposal and refuses later writes"
+    (5/5 repeat runs). Negative controls, each restored afterwards: removing the
+    disposal drain fails the case deterministically 3/3 (the document is not yet
+    published when disposal resolves; the failure output shows the
+    `.tmp-<pid>-<uuid>` → `catalog-metadata-v2.json` rename still pending), and
+    removing the closed flag fails it deterministically (`expected true to be
+    false` — the post-disposal save wrote anyway).
+  - `python3 scripts/check-documentation-policy.py` and
+    `scripts/personal-info-guard.sh` pass.
+- Changes: this commit (`packages/gateway/src/sessions/catalog-metadata-index.ts`,
+  `packages/gateway/src/sessions/catalog-metadata-index.test.ts`,
+  `packages/gateway/src/sessions/runtime-registry.ts`,
+  `packages/gateway/README.md`, and this plan).
+- Tasks added: F-6.
+- Kept on purpose:
+  - The read path still persists the index without awaiting it: awaiting
+    acceleration in every catalog read would put a disk transaction on the list
+    path for no authority gain ("persistence is acceleration only"). Only
+    disposal gained ownership of the write.
+  - The archive integration test and its oracle are unchanged: the fix is
+    entirely in the owning product boundary, so no assertion was weakened,
+    retried, or removed to make the report green.
+  - The fixture cleanup has no `rm` retry. Adding `maxRetries` would mask the
+    real cause; the probe found no writer other than the drained index.
+- Deviations: none in the archive behavior itself. The task's suggested
+  hypotheses (a second admission path, a backstop calling the real `remove`, a
+  republish leaving the slot busy, the monkeypatch restored too early) were all
+  eliminated: every late write belonged to the catalog index.
+- For the next agent: V-1 remains and still needs the full gateway suite,
+  `scripts/ios-gateway-e2e-test run`, the user-performed Gateway rollout, and
+  the eyes-on device review. F-6 records the same fire-and-forget pattern on
+  `model-recents.json`, which this task's probe did not observe (it lands early
+  in these cases) but which is unowned at disposal for the same reason.
