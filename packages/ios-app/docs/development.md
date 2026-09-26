@@ -275,7 +275,8 @@ Gateway's optional `releaseDate` (newest first, display-name ties) and keeps the
 its pinned release shares that date, while both stay selectable in the provider section; models
 without a (well-formed) date never enter the rail. Provider sections lead with the selected
 model's provider and are otherwise alphabetical by display name, each header carrying the
-provider name and its model count. Each provider row's second line repeats those facts (`200K context ·
+provider name and its model count. Within a section, models run newest release first (same-day ties by
+display name, the Latest rail's ordering), then undated models in Gateway catalog order. Each provider row's second line repeats those facts (`200K context ·
 $5 / $25 · Sep 2026`, omitting missing ones) above its canonical identity line. Header and rows are separate `LazyVStack` children, so a long
 expanded provider builds only on-screen rows (`testLongProviderSectionMountsOnlyVisibleRows`;
 nesting a section's rows in one child mounted all 60). The body builds `ModelPickerSectioning`

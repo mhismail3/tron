@@ -21,6 +21,9 @@ import Testing
 /// 9. an unavailable model creates a provider section of its own;
 /// 10. a query leaves the Recent/Latest rails visible or hides a match behind a
 ///     provider section.
+/// 11. a provider section buries its newest model below older ones, orders
+///     same-day releases differently between renders, or lets undated or
+///     malformed-date models jump ahead of dated ones.
 @Suite("Model picker search")
 struct ModelPickerSearchTests {
     @Test("shared picker filters provider, id, and display name")
@@ -148,6 +151,29 @@ struct ModelPickerSearchTests {
 
         let unselected = ModelPickerSectioning.sections(models: catalog, recent: [], selection: nil, query: "")
         #expect(unselected.providers.map(\.provider) == ["anthropic", "deepseek", "openai", "xai"])
+    }
+
+    @Test("each provider section lists its newest release first")
+    func providerSectionModelsNewestFirst() {
+        let catalog = [
+            model("anthropic", "claude-haiku-4-5", "Claude Haiku 4.5", releaseDate: "2025-10-15"),
+            model("anthropic", "undated-b", "Undated B"),
+            model("anthropic", "claude-opus-5-5", "Claude Opus 5.5", releaseDate: "2026-09-22"),
+            model("anthropic", "malformed", "Malformed", releaseDate: "Sep 2026"),
+            model("anthropic", "undated-a", "Undated A"),
+            model("anthropic", "claude-sonnet-5", "Claude Sonnet 5", releaseDate: "2026-06-29"),
+            model("anthropic", "claude-fable-5", "Claude Fable 5", releaseDate: "2026-06-29"),
+        ]
+        let section = ModelPickerSectioning.sections(models: catalog, recent: [], selection: nil, query: "")
+            .providers.first
+        // Same-day ties by display name; undated and malformed keep catalog order last.
+        #expect(section?.models.map(\.id) == [
+            "claude-opus-5-5", "claude-fable-5", "claude-sonnet-5", "claude-haiku-4-5",
+            "undated-b", "malformed", "undated-a",
+        ])
+        let searched = ModelPickerSectioning.sections(models: catalog, recent: [], selection: nil, query: "claude")
+        #expect(searched.providers.first?.models.map(\.id)
+            == ["claude-opus-5-5", "claude-fable-5", "claude-sonnet-5", "claude-haiku-4-5"])
     }
 
     @Test("an unavailable model never creates a provider section")

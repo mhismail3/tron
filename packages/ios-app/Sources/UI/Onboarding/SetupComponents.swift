@@ -776,22 +776,29 @@ enum ModelPickerSectioning {
                   alias.admittedReleaseDate == releaseDate else { return nil }
             return pinned.ref
         })
-        // Sort keys are resolved once per model, not once per comparison.
-        return dated
-            .filter { !collapsedPinnedRefs.contains($0.ref) }
-            .map { (model: $0, date: $0.admittedReleaseDate ?? "", name: $0.displayName) }
+        return newestFirst(dated.filter { !collapsedPinnedRefs.contains($0.ref) })
+            .prefix(maximumLatestModels)
+            .map { $0 }
+    }
+
+    /// Newest release first, same-day ties by display name. Models without an
+    /// admitted date follow in their Gateway catalog order. Sort keys are
+    /// resolved once per model, not once per comparison.
+    static func newestFirst(_ models: [ModelSummary]) -> [ModelSummary] {
+        let dated = models
+            .compactMap { model in model.admittedReleaseDate.map { (model: model, date: $0, name: model.displayName) } }
             .sorted { lhs, rhs in
                 if lhs.date != rhs.date { return lhs.date > rhs.date }
                 let nameOrder = lhs.name.localizedCaseInsensitiveCompare(rhs.name)
                 return nameOrder == .orderedSame ? lhs.model.id < rhs.model.id : nameOrder == .orderedAscending
             }
-            .prefix(maximumLatestModels)
             .map(\.model)
+        return dated + models.filter { $0.admittedReleaseDate == nil }
     }
 
     /// The selected model's provider leads so its section is reachable without
-    /// scrolling; the rest follow by provider display name. Model order inside a
-    /// section stays the Gateway catalog's.
+    /// scrolling; the rest follow by provider display name. Inside a section the
+    /// newest release leads (`newestFirst`).
     static func providerSections(models: [ModelSummary], selection: ModelRef?) -> [ProviderSection] {
         var grouped: [String: [ModelSummary]] = [:]
         var catalogOrder: [String] = []
@@ -804,7 +811,7 @@ enum ModelPickerSectioning {
                 ProviderSection(
                     provider: $0,
                     displayName: ModelDisplayFormatting.provider($0),
-                    models: grouped[$0] ?? []
+                    models: newestFirst(grouped[$0] ?? [])
                 )
             }
             .sorted { lhs, rhs in
