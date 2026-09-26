@@ -581,12 +581,13 @@ describe("session archive over the real Gateway", () => {
     await client.request("fork-sync", "session.sync", { sessionId: parent.id, syncToken: opened.result.syncToken });
     const entryId = (SessionManager.open(parent.file).getBranch().at(-1) as { id?: string } | undefined)?.id;
     expect(typeof entryId).toBe("string");
-    // The fork itself runs on the owning runtime, because the `session.fork` RPC
-    // path is blocked by its own admitted work entry (reported separately). The
-    // archive ownership under test is the rebind hook either path reaches.
-    const parentSlot = await f.current().registry.acquire(parent.id);
-    const forked = await parentSlot.fork(entryId!, "at");
-    const childId = forked.sessionId;
+    // The fork runs through its real RPC, so the rebind hook and the archive
+    // ownership under test are reached exactly as a client reaches them.
+    const forked = await client.request("fork-request", "session.fork", {
+      commandId: "fork-command", sessionId: parent.id, entryId: entryId!, position: "at",
+    });
+    expect(forked.ok, JSON.stringify(forked)).toBe(true);
+    const childId = forked.result.sessionId as string;
     expect(childId).not.toBe(parent.id);
 
     const excluded = await list(client, "exclude");
@@ -765,20 +766,16 @@ describe("session archive over the real Gateway", () => {
     await openSession(client, session.id);
     await archiveSession(client, session.id, "bash-archive-command");
 
-    // Bash is driven on the owning runtime because the `session.bash` RPC is
-    // rejected by its own admitted work entry before this boundary is reached.
-    // That defect is reported separately; the archive ownership under test is
-    // the same one that RPC reaches.
-    const slot = await f.current().registry.acquire(session.id);
-    await slot.executeBash("echo archive-bash", true);
+    const bash = await client.request("bash-unarchive-request", "session.bash", {
+      commandId: "bash-unarchive-command", sessionId: session.id, command: "echo archive-bash", excludeFromContext: true,
+    });
+    expect(bash.ok, JSON.stringify(bash)).toBe(true);
     expect(await archivedRecord(f.root, session.id)).toBeUndefined();
     expect(await listedIds(client, "exclude")).toContain(session.id);
     expect(f.archiveDiagnostic).toHaveBeenCalledWith({ outcome: "auto-unarchived", trigger: "admission" });
-    await until(async () => !(await f.current().registry.acquire(session.id)).isBusy, "settled");
     record("clears archive state when Bash is admitted", {
-      bashAdmitted: true,
+      bashRpcAccepted: true,
       recordCleared: (await archivedRecord(f.root, session.id)) === undefined,
-      rpcBlockedByOwnWorkEntry: true,
     });
   });
 

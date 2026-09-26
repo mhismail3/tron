@@ -966,9 +966,19 @@ export class RuntimeSlot {
     });
   }
 
-  get isDrainBusy(): boolean {
-    return this.dependencies.workRegistry.hasSessionWork(this.id)
+  /** Administrative drain blockers plus session work entries, optionally
+   * ignoring the caller's own entry. A receipt-backed RPC holds one
+   * `rpc-mutation` session work entry for its whole operation, so an idle check
+   * that counted it would always reject the very request that owns it. Nothing
+   * else is excluded: another request's entry and administrative drain blockers
+   * still make the session busy. */
+  private drainBusyExcept(exceptWorkToken?: string): boolean {
+    return this.dependencies.workRegistry.hasSessionWork(this.id, exceptWorkToken)
       || this.administrativeDrainBlockers().length > 0;
+  }
+
+  get isDrainBusy(): boolean {
+    return this.drainBusyExcept();
   }
 
   administrativeDrainBlockers(): RuntimeDrainBlockerFact[] {
@@ -6958,9 +6968,9 @@ export class RuntimeSlot {
     });
   }
 
-  async setContextWindow(provider: string, modelId: string, contextWindow: unknown, expectedRevision: number, expectedRuntimeGeneration: string): Promise<void> {
+  async setContextWindow(provider: string, modelId: string, contextWindow: unknown, expectedRevision: number, expectedRuntimeGeneration: string, initiatingWorkToken?: string): Promise<void> {
     await this.lane.run(() => {
-      this.assertIdle();
+      this.assertIdle(false, initiatingWorkToken);
       if (expectedRuntimeGeneration !== this.runtimeGeneration || expectedRevision !== this.revision) {
         throw new GatewayError("conflict", "Session changed; refresh before changing its context window");
       }
@@ -6978,18 +6988,18 @@ export class RuntimeSlot {
     });
   }
 
-  async setThinking(level: "off" | "minimal" | "low" | "medium" | "high" | "xhigh" | "max"): Promise<void> {
+  async setThinking(level: "off" | "minimal" | "low" | "medium" | "high" | "xhigh" | "max", initiatingWorkToken?: string): Promise<void> {
     await this.lane.run(() => {
-      this.assertIdle();
+      this.assertIdle(false, initiatingWorkToken);
       this.runtime.session.setThinkingLevel(level);
       this.revision += 1;
       this.publishSnapshot();
     });
   }
 
-  async setTools(toolNames: string[]): Promise<void> {
+  async setTools(toolNames: string[], initiatingWorkToken?: string): Promise<void> {
     await this.lane.run(() => {
-      this.assertIdle();
+      this.assertIdle(false, initiatingWorkToken);
       const known = new Set(this.runtime.session.getAllTools().map((tool) => tool.name));
       const unknown = toolNames.filter((name) => !known.has(name));
       if (unknown.length > 0) throw new GatewayError("invalid_request", `Unknown agent tools: ${unknown.join(", ")}`);
@@ -7148,11 +7158,11 @@ export class RuntimeSlot {
     if (operationError !== undefined) throw operationError;
   }
 
-  async executeBash(command: string, excludeFromContext: boolean): Promise<JsonValue> {
+  async executeBash(command: string, excludeFromContext: boolean, initiatingWorkToken?: string): Promise<JsonValue> {
     let work: GatewayWorkHandle | undefined;
     try {
       return await this.lane.run(async () => {
-        this.assertIdle();
+        this.assertIdle(false, initiatingWorkToken);
         // Bash is Gateway-admitted agent work, so it clears retained archive
         // state on the same lane turn that admits it.
         await this.dependencies.beforeRunAdmission(this.id);
@@ -7239,9 +7249,9 @@ export class RuntimeSlot {
     });
   }
 
-  async setLabel(entryId: string, label?: string): Promise<void> {
+  async setLabel(entryId: string, label?: string, initiatingWorkToken?: string): Promise<void> {
     await this.lane.run(() => {
-      this.assertIdle();
+      this.assertIdle(false, initiatingWorkToken);
       if (!this.sessionManager.getEntry(entryId)) throw new GatewayError("not_found", "Session entry was not found");
       this.sessionManager.appendLabelChange(entryId, label?.trim() || undefined);
       this.summaryContentDirty = true;
@@ -7251,9 +7261,9 @@ export class RuntimeSlot {
     });
   }
 
-  async fork(entryId: string, position: "before" | "at" = "at"): Promise<{ sessionId: string; selectedText?: string }> {
+  async fork(entryId: string, position: "before" | "at" = "at", initiatingWorkToken?: string): Promise<{ sessionId: string; selectedText?: string }> {
     return this.lane.run(async () => {
-      this.assertIdle();
+      this.assertIdle(false, initiatingWorkToken);
       const parentSessionId = this.id;
       const result = await this.withRebindAttentionDisposition("reset", () => this.runtime.fork(entryId, { position }));
       if (result.cancelled) throw new GatewayError("cancelled", "Fork was cancelled by an extension");
@@ -7270,9 +7280,10 @@ export class RuntimeSlot {
   async navigate(
     targetId: string,
     options: { summarize: boolean; instructions?: string; replaceInstructions?: boolean; label?: string },
+    initiatingWorkToken?: string,
   ): Promise<{ editorText?: string }> {
     return this.lane.run(async () => {
-      this.assertIdle();
+      this.assertIdle(false, initiatingWorkToken);
       // Plain tree navigation is a read. Only the model-backed branch summary is
       // work, so only it clears retained archive state.
       if (options.summarize) await this.dependencies.beforeRunAdmission(this.id);
@@ -7551,10 +7562,10 @@ export class RuntimeSlot {
     this.trustReloadPending = true;
   }
 
-  async reload(projectTrusted?: boolean, publish = true, trustTransition = false): Promise<void> {
+  async reload(projectTrusted?: boolean, publish = true, trustTransition = false, initiatingWorkToken?: string): Promise<void> {
     await this.lane.run(async () => {
       if (this.trustReloadWork) this.assertUsable(true);
-      else this.assertIdle(trustTransition);
+      else this.assertIdle(trustTransition, initiatingWorkToken);
       const work = this.trustReloadWork ?? this.dependencies.workRegistry.begin({
         kind: "administrative-provider-package-operation",
         sessionId: this.id,
@@ -7978,8 +7989,13 @@ export class RuntimeSlot {
     }
   }
 
-  private assertIdle(allowTrustReload = false): void {
+  /** `exceptWorkToken` is the initiating request's own work entry, which is not
+   * the session running. Every other entry, including a different request's,
+   * still makes this busy. */
+  private assertIdle(allowTrustReload = false, exceptWorkToken?: string): void {
     this.assertUsable(allowTrustReload);
-    if (this.runtime.session.isStreaming || this.isDrainBusy) throw new GatewayError("busy", "Session must be idle for this operation");
+    if (this.runtime.session.isStreaming || this.drainBusyExcept(exceptWorkToken)) {
+      throw new GatewayError("busy", "Session must be idle for this operation");
+    }
   }
 }

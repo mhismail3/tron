@@ -1334,9 +1334,12 @@ export class GatewayService {
           ));
         }, true);
       case "session.bash":
-        return this.mutation(client, method, params, async () => (await this.openedSlot(client, params)).executeBash(
+        // The idle checks below exclude this request's own work entry, which
+        // every receipt-backed mutation holds for its whole operation.
+        return this.mutation(client, method, params, async (workToken) => (await this.openedSlot(client, params)).executeBash(
           string(params.command, "command", { max: 100_000 }),
           params.excludeFromContext === undefined ? false : boolean(params.excludeFromContext, "excludeFromContext"),
+          workToken,
         ));
       case "session.setModel":
         return this.mutation(client, method, params, async (workToken) => {
@@ -1344,24 +1347,25 @@ export class GatewayService {
           return { updated: true };
         });
       case "session.setContextWindow":
-        return this.mutation(client, method, params, async () => {
+        return this.mutation(client, method, params, async (workToken) => {
           await (await this.openedSlot(client, params)).setContextWindow(
             string(params.provider, "provider", { max: 120 }),
             string(params.modelId, "modelId", { max: 300 }),
             params.contextWindow,
             integer(params.expectedRevision, "expectedRevision", 0, Number.MAX_SAFE_INTEGER),
             string(params.expectedRuntimeGeneration, "expectedRuntimeGeneration", { max: 200 }),
+            workToken,
           );
           return { updated: true };
         });
       case "session.setThinking":
-        return this.mutation(client, method, params, async () => {
-          await (await this.openedSlot(client, params)).setThinking(oneOf(params.level, "level", thinkingLevels));
+        return this.mutation(client, method, params, async (workToken) => {
+          await (await this.openedSlot(client, params)).setThinking(oneOf(params.level, "level", thinkingLevels), workToken);
           return { updated: true };
         });
       case "session.setTools":
-        return this.mutation(client, method, params, async () => {
-          await (await this.openedSlot(client, params)).setTools(arrayOfStrings(params.tools, "tools", 256));
+        return this.mutation(client, method, params, async (workToken) => {
+          await (await this.openedSlot(client, params)).setTools(arrayOfStrings(params.tools, "tools", 256), workToken);
           return { updated: true };
         });
       case "session.compact":
@@ -1375,12 +1379,13 @@ export class GatewayService {
           return { updated: true };
         });
       case "session.fork":
-        return this.mutation(client, method, params, async () => safeJson(await (await this.openedSlot(client, params)).fork(
+        return this.mutation(client, method, params, async (workToken) => safeJson(await (await this.openedSlot(client, params)).fork(
           string(params.entryId, "entryId", { max: 200 }),
           params.position === undefined ? "at" : oneOf(params.position, "position", ["before", "at"] as const),
+          workToken,
         )));
       case "session.navigate":
-        return this.mutation(client, method, params, async () => safeJson(await (await this.openedSlot(client, params)).navigate(
+        return this.mutation(client, method, params, async (workToken) => safeJson(await (await this.openedSlot(client, params)).navigate(
           string(params.entryId, "entryId", { max: 200 }),
           {
             summarize: params.summarize === undefined ? false : boolean(params.summarize, "summarize"),
@@ -1388,12 +1393,14 @@ export class GatewayService {
             ...(params.replaceInstructions === undefined ? {} : { replaceInstructions: boolean(params.replaceInstructions, "replaceInstructions") }),
             ...(params.label === undefined ? {} : { label: string(params.label, "label", { max: 200 }) }),
           },
+          workToken,
         )));
       case "session.label":
-        return this.mutation(client, method, params, async () => {
+        return this.mutation(client, method, params, async (workToken) => {
           await (await this.openedSlot(client, params)).setLabel(
             string(params.entryId, "entryId", { max: 200 }),
             optionalString(params.label, "label", 200),
+            workToken,
           );
           return { updated: true };
         });
@@ -1439,8 +1446,8 @@ export class GatewayService {
       case "session.resources":
         return (await this.openedSlot(client, params)).resources();
       case "session.reloadResources":
-        return this.mutation(client, method, params, async () => {
-          await (await this.openedSlot(client, params)).reload();
+        return this.mutation(client, method, params, async (workToken) => {
+          await (await this.openedSlot(client, params)).reload(undefined, true, false, workToken);
           return { reloaded: true };
         });
       case "extension.respond":

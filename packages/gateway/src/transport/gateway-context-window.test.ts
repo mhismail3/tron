@@ -25,9 +25,11 @@ describe("context window transport", () => {
     const service = new GatewayService({ receipts: new CommandReceiptStore(root), sessions: { isSubscribed, acquire } } as unknown as GatewayServiceDependencies);
     const params = { sessionId: "owned", provider: "openai-codex", modelId: "gpt-6-astra", contextWindow: 1_050_000, expectedRevision: 7, expectedRuntimeGeneration: "generation-1", commandId: "context-change-1" };
     await Promise.all([service.invoke(client, "session.setContextWindow", params), service.invoke(client, "session.setContextWindow", params)]);
-    expect(setContextWindow).toHaveBeenCalledExactlyOnceWith("openai-codex", "gpt-6-astra", 1_050_000, 7, "generation-1");
+    // The trailing argument is the mutation's own work token, which is absent
+    // without a work registry in this transport fixture.
+    expect(setContextWindow).toHaveBeenCalledExactlyOnceWith("openai-codex", "gpt-6-astra", 1_050_000, 7, "generation-1", undefined);
     await service.invoke(client, "session.setContextWindow", { ...params, contextWindow: null, commandId: "context-reset-1" });
-    expect(setContextWindow).toHaveBeenLastCalledWith("openai-codex", "gpt-6-astra", null, 7, "generation-1");
+    expect(setContextWindow).toHaveBeenLastCalledWith("openai-codex", "gpt-6-astra", null, 7, "generation-1", undefined);
     await expect(service.invoke(client, "session.setContextWindow", { ...params, sessionId: "unopened", commandId: "context-change-2" })).rejects.toMatchObject({ code: "invalid_request" });
     expect(acquire).toHaveBeenCalledTimes(2);
     for (const expectedRevision of [undefined, -1, 1.5, "7"]) {

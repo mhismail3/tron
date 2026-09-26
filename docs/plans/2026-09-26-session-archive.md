@@ -95,8 +95,8 @@ Current state, inspected 2026-09-26:
 | I-1 | Done | iOS model, mutation service, AppModel and capability gating; catalog membership follows authoritative responses | G-1 | tron-coordinator, 2026-09-26 |
 | I-2 | Done | Dashboard full-swipe Archive, one collapsed "Archived (N)" container at the bottom, and archived-row actions | I-1 | tron-coordinator, 2026-09-26 |
 | I-3 | Done | Search "Archived" label, automation picker exclusion, and display of an existing automation whose target is archived | I-1, G-3 | tron-coordinator, 2026-09-26 |
-| F-1 | Claimed | The `session.fork` RPC rejects with retryable `busy` because its own admitted work entry satisfies the slot's idle check; decide the fix and cover the real path | none | tron-coordinator, 2026-09-26 |
-| F-2 | Claimed | The same self-work-entry rejection now also measured on `session.bash`, `session.navigate` and `session.setTools`; audit every mutation RPC whose slot method consults session work ownership and decide the fix (thread the request's work token, as `session.setModel` already does) | none | tron-coordinator, 2026-09-26 |
+| F-1 | Done | The `session.fork` RPC rejects with retryable `busy` because its own admitted work entry satisfies the slot's idle check; decide the fix and cover the real path | none | tron-coordinator, 2026-09-26 |
+| F-2 | Done | The same self-work-entry rejection now also measured on `session.bash`, `session.navigate` and `session.setTools`; audit every mutation RPC whose slot method consults session work ownership and decide the fix (thread the request's work token, as `session.setModel` already does) | none | tron-coordinator, 2026-09-26 |
 | F-3 | Done | Coordinator review of I-3: chat archive state comes from a bounded iOS observation list (parallel state). Make the Gateway `SessionSnapshot` carry `archivedAt` (republished on change) and delete the observation list | I-3 | tron-coordinator, 2026-09-26 |
 | F-4 | Done | I-2's hosted UI journey never passed (app never idled; simulator contention). Make it pass on a healthy simulator, fixing the fixture if it is the cause, and keep its screenshots | I-2 | tron-coordinator, 2026-09-26 |
 | V-1 | Ready | Cross-module checkpoint, user-performed Gateway rollout, and eyes-on device review; close the plan | G-2, I-2, I-3, F-3, F-4 | |
@@ -932,3 +932,91 @@ artifact. Accessibility identifiers use the existing
 - For the next agent: F-3 and F-4 are done, so V-1 is the only remaining row. It
   still needs the full gateway suite, `scripts/ios-gateway-e2e-test run`, the
   user-performed Gateway rollout, and the eyes-on device review.
+
+### F-1 · F-2 · Done · 2026-09-26 · tron-coordinator
+
+- Result: a receipt-backed mutation no longer rejects itself. `GatewayService.mutation`
+  holds one `rpc-mutation` GatewayWorkRegistry entry for the whole operation, and
+  the session idle check counted that entry, so every idle-checked mutation
+  returned retryable `busy` for its own request. The check now excludes exactly
+  the initiating request's token. `RuntimeSlot.assertIdle(allowTrustReload,
+  exceptWorkToken)` resolves through a private `drainBusyExcept(token)` helper, so
+  `isDrainBusy` keeps its exact previous meaning (work entries plus administrative
+  drain blockers) and only the eight idle-checked mutation handlers pass their
+  token: `session.bash`, `session.setThinking`, `session.setTools`,
+  `session.setContextWindow`, `session.label`, `session.fork`,
+  `session.navigate` and `session.reloadResources`. Nothing else is excluded:
+  another request's entry, detached extension work, administrative drain blockers,
+  a running prompt and a streaming session all still reject them.
+- Audit of every `this.mutation(...)` case in `gateway-service.ts`
+  (58 call sites) for a handler that reaches a slot/registry method consulting
+  session work ownership:
+  - Fixed (reached `RuntimeSlot.assertIdle` → `isDrainBusy` → `hasSessionWork`):
+    `session.bash`, `session.setThinking`, `session.setTools`,
+    `session.setContextWindow`, `session.label`, `session.fork`,
+    `session.navigate`, `session.reloadResources`.
+  - Already correct: `session.setModel`
+    (`assertModelChangeIdle(initiatingWorkToken)`), `session.archive.set`
+    (`RuntimeRegistry.setArchived` → `commitArchiveWhileIdle(token)`),
+    `session.delete` (`RuntimeRegistry.delete` → `isBusyExceptWorkToken(token)`).
+  - Not affected: `session.prompt`, `session.abort`, `session.clearQueue`,
+    `session.queue.replace`, `session.compact` (`assertIdleForManualCompaction`
+    consults no work entry), `session.rename`, `session.reloadResources`' sibling
+    reads, `extension.respond` and the remaining mutation RPCs, none of which call
+    `assertIdle`/`isBusyExceptWorkToken`.
+  - Not a mutation RPC and deliberately unchanged:
+    `RuntimeSlot.beginTrustReload()` (trust-service path, no request token) and
+    `reload`'s registry trust-transition call site, which still pass no token.
+- Evidence (verified):
+  - `npm run build` clean.
+  - `npx vitest run src/transport/rpc-idle-admission.integration.test.ts`: 2/2 in
+    7.4 s over the real WebSocket, `GatewayService`, `RuntimeRegistry` and faux
+    provider. Case 1 drives all eight fixed RPCs on an idle session and asserts
+    each is admitted, including a real Bash result and a real fork to a new
+    session ID. Case 2 is the negative control: a running prompt rejects four of
+    them with `busy`, and a concurrently in-flight Bash RPC still rejects
+    `session.setTools` with `busy` after the run settles. Report:
+    `test-results/rpc-idle-admission.integration.json`.
+  - Negative control for the fix itself: with the two source files reverted
+    (`git stash push -- runtime-slot.ts gateway-service.ts`), case 1 fails on its
+    first RPC with `busy`/`Session must be idle for this operation` and case 2
+    fails waiting for the held Bash run. Restored, both pass.
+  - `npx vitest run src/transport/session-archive.integration.test.ts`: 20/20 in
+    5.9 s, now driving the real `session.bash` and `session.fork` RPCs.
+  - `npx vitest run` over `rpc-idle-admission.integration.test.ts`,
+    `session-archive.integration.test.ts`, `runtime-registry.integration.test.ts`,
+    `sync-protocol.integration.test.ts`, `gateway-work-registry.test.ts` and
+    `restart-drain.test.ts`: 280/280 in 48.0 s.
+  - Full `npx vitest run`: 1943 passed, 2 failed. `gateway-context-window.test.ts`
+    failed on the new trailing token argument and was updated; the other two are
+    unrelated flakes (`logger.test.ts` segment rotation,
+    `recent-model-usage.integration.test.ts`, both of which also fail on `main`
+    or pass in isolation).
+  - `python3 scripts/check-documentation-policy.py` and
+    `scripts/personal-info-guard.sh` pass.
+- Changes: this commit (`packages/gateway/src/sessions/runtime-slot.ts`,
+  `packages/gateway/src/transport/gateway-service.ts`,
+  `packages/gateway/src/transport/rpc-idle-admission.integration.test.ts`,
+  `packages/gateway/src/transport/session-archive.integration.test.ts`,
+  `packages/gateway/src/transport/gateway-context-window.test.ts`,
+  `packages/gateway/README.md`, and this plan).
+- Tasks added: none.
+- Kept on purpose:
+  - `isDrainBusy` keeps its original two conditions. Folding
+    `hasRuntimeWork`/detached-dashboard work into it looks tidier but changes
+    drain semantics: `runtime-registry.integration.test.ts`'s paused-workflow
+    drain case then times out because a paused detached activity keeps
+    `isDrainBusy` true forever. The token exclusion therefore lives in
+    `drainBusyExcept` only, which is stale-free for the idle check as well: it
+    matches the pre-existing `assertIdle` conditions exactly.
+  - No new flag, mode or optional "allow busy" parameter: the token is the
+    existing owner identity, and every call site that has no request token keeps
+    the previous behavior.
+- Deviations: `session.reloadResources` was not in the F-2 row's measured list
+  but reaches `RuntimeSlot.reload` → `assertIdle`, so it is fixed with the others.
+  The archive integration test's Bash and fork workarounds were replaced by the
+  real RPCs, which is how the G-2 deviation is now closed.
+- For the next agent: V-1 remains, and it still needs the full gateway suite,
+  `scripts/ios-gateway-e2e-test run`, the user-performed Gateway rollout, and the
+  eyes-on device review. Note that the iOS app's own full-swipe Archive action
+  and the archived container were validated against the UI fixture, not a device.
