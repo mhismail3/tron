@@ -100,8 +100,10 @@ Current state, inspected 2026-09-26:
 | F-3 | Done | Coordinator review of I-3: chat archive state comes from a bounded iOS observation list (parallel state). Make the Gateway `SessionSnapshot` carry `archivedAt` (republished on change) and delete the observation list | I-3 | tron-coordinator, 2026-09-26 |
 | F-4 | Done | I-2's hosted UI journey never passed (app never idled; simulator contention). Make it pass on a healthy simulator, fixing the fixture if it is the cause, and keep its screenshots | I-2 | tron-coordinator, 2026-09-26 |
 | F-5 | Done | `session-archive.integration.test.ts` "rejects a prompt retryably when archive state cannot be cleared" failed once in four full-suite runs (passes alone and under targeted load); reproduce, find the root cause, fix | G-2 | tron-coordinator, 2026-09-26 |
-| F-6 | Needs scoping | Same class as F-5, unproven: `RuntimeRegistry` line 1216 also writes `gateway/model-recents.json` fire-and-forget (`void this.noteModelUsed(...)` → `await this.recentModels.record(...)`), so its durable write can equally outlive `dispose()`. Decide whether `RecentModelStore` gets the same disposal drain | F-5 | |
-| V-1 | Blocked | Cross-module checkpoint, user-performed Gateway rollout, and eyes-on device review; close the plan | G-2, I-2, I-3, F-3, F-4, F-5, F-6 | tron-coordinator, 2026-09-26 |
+| F-6 | Claimed | Same class as F-5, unproven: `RuntimeRegistry` line 1216 also writes `gateway/model-recents.json` fire-and-forget (`void this.noteModelUsed(...)` → `await this.recentModels.record(...)`), so its durable write can equally outlive `dispose()`. Decide whether `RecentModelStore` gets the same disposal drain | F-5 | tron-coordinator, 2026-09-26 (in R-1) |
+| R-1 | Claimed | Gateway fixes from the post-implementation review (see "Review findings"), including F-6 | G-2, F-5 | tron-coordinator, 2026-09-26 |
+| R-2 | Claimed | iOS fixes from the post-implementation review (see "Review findings") | I-2, I-3, F-3 | tron-coordinator, 2026-09-26 |
+| V-1 | Blocked | Cross-module checkpoint, user-performed Gateway rollout, and eyes-on device review; close the plan | G-2, I-2, I-3, F-3, F-4, F-5, F-6, R-1, R-2 | tron-coordinator, 2026-09-26 |
 
 ## Task details
 
@@ -329,6 +331,95 @@ artifact. Accessibility identifiers use the existing
    `packages/gateway/docs/session-search.md`, `packages/gateway/docs/observability.md` and
    `packages/ios-app/docs/architecture.md` (dashboard section). Add a
    `docs/plans/HISTORY.md` entry and delete this file.
+
+## Findings
+
+### Review findings (2026-09-26, four read-only reviewers at 132446f7b)
+
+Gateway (R-1):
+
+1. `setArchived` holds the registry mutex while it waits on the session lane.
+   Branch summary, Bash marker I/O and reload hold the lane while the
+   projection still reads idle, so every cold acquire, create, delete and
+   automation lease stalls. Fix: check `isBusyExceptWorkToken` under the mutex
+   before the lane wait, as delete does.
+2. The backstop restoration flip publishes no membership change. If the store
+   write fails, the archiving device keeps hiding a running session. Fix:
+   bump the revision and emit `sessionListChanged` when the override turns on.
+3. Suspected race: Pi can start a turn on its own during the archive commit's
+   store write. The backstop sees no record yet, then the commit lands over the
+   running turn. Fix: recheck the live projection after the commit and restore
+   if it shows work.
+4. Durable writes are not drained at dispose: the backstop's
+   `archiveRestorationAttempts`, and `model-recents.json` (F-6).
+5. Startup prune omits live-only slot IDs and runs outside the attention lane.
+   Its `archiveChanged` names no session, so an open snapshot keeps a stale
+   `archivedAt`.
+6. Unrelated concurrent mutation entries (rename, attention, export) make
+   archive fail with non-retryable "Stop the session". They should be
+   retryable.
+7. Rekey commits attention writes before archive `assertAbsent`/`rekey`, so a
+   failed archive step leaves the two stores out of step. Run the checks before
+   any change.
+8. Store: an empty or whitespace file silently resets to empty.
+   `requireDocument` does not enforce `initialize`. The durable write, clone and
+   validation helpers duplicate the attention store and
+   `util/durable-json.ts`. There is a test-only `write` constructor option.
+9. Re-archiving while a backstop restoration is pending returns the old
+   `archivedAt`. `archivedAt()` ignores `pendingArchiveRemovals`, so a delete
+   whose removal failed and a re-created ID read as archived.
+10. Manual compaction clears the archive before its own rejections (export in
+    progress, Bash running).
+11. Docs and observability:
+    - delete/flush removal failures emit no `persist-failed`;
+    - `session-search.md` says "only writer";
+    - the `observability.md` `session_operation_busy` row still says
+      "model/delete";
+    - the README overstates the backstop.
+12. Tests:
+    - the waiting-for-user and subagent busy cases patch private
+      `latestSummaries`;
+    - the report hard-codes `passed` and several evidence literals;
+    - no coverage for the automation reservation, unarchive during a run, a
+      failed backstop write, or archive during Bash/branch summary.
+
+iOS (R-2):
+
+1. P0: archived-container rows carry no `gatewayProfileID`. With two Macs,
+   Unarchive, Delete and Open on another Mac's row go to the selected Gateway,
+   and `dashboardID` can collide.
+2. "Show more" replaces rows instead of appending.
+3. The expanded container re-reads on every dashboard presentation revision,
+   not only on list changes, and keeps polling while hidden at 0. It never
+   collapses at 0.
+4. A profile switch (every cross-Mac action) collapses the container.
+5. The archived count can stay stale when the list read triggered by the
+   archive is retired by `markArchived`. Schedule a refresh in both
+   directions.
+6. Collapse does not cancel the in-flight load, so a quick re-expand shows no
+   rows.
+7. `SnapshotCache` accepts versions 3 and 4, a dual schema.
+8. The `archivedSessionIDs` set and the `.archived` admission duplicate Gateway
+   state and suppress the self-heal refresh.
+9. Dead code: `SessionArchiveState` memberwise init and `Codable`, and the
+   default no-op delegate method.
+10. `SessionMutationServiceTests` scripts an error shape the Gateway never
+    sends.
+11. `archivedSessionSummary` passes `{ true }` as the activity check. The
+    container and the automation lookup share one read fence.
+    `AutomationFormView`'s task id includes `sessions.count`.
+12. `GatewayClient` `latestSessionListRequestID` also records archived reads, so
+    catalog failure diagnostics can name the wrong request.
+13. The hosted journey exercises fixture-owned gating and a partial drag, not a
+    full swipe.
+14. Docs: the row leaves on the archive response, not on the list change. The
+    archive text splits the delete paragraph. The `SessionSummary.archivedAt`
+    comment is wrong.
+
+Kept on purpose: `SessionSearchResult.archived` decodes as absent → false. A
+Gateway without `session-archive.v1` cannot have archived sessions, so absent
+means false; making the field required would break search against such a
+Gateway.
 
 ## Handoff log
 
