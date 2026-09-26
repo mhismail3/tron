@@ -1,5 +1,14 @@
 import Foundation
 
+/// Where an available resource comes from, derived by the Gateway from Pi
+/// sourceInfo. Pi built-ins carry no distribution, and `origin` keeps Pi's own
+/// package/top-level meaning on the separate scope badge.
+enum ResourceDistribution: String, Codable, Hashable, Sendable {
+    case external
+    case module
+    case local
+}
+
 struct CommandInfo: Codable, Hashable, Identifiable, Sendable {
     enum Source: String, Codable, Sendable { case `extension`, skill, prompt }
     enum ResourceScope: String, Codable, Sendable { case user, project, temporary }
@@ -13,6 +22,7 @@ struct CommandInfo: Codable, Hashable, Identifiable, Sendable {
     let resourceSource: String?
     let resourceScope: ResourceScope?
     let resourceOrigin: ResourceOrigin?
+    let distribution: ResourceDistribution?
     var id: String { "\(source.rawValue):\(name)" }
 
     init(
@@ -23,7 +33,8 @@ struct CommandInfo: Codable, Hashable, Identifiable, Sendable {
         sourcePath: String?,
         resourceSource: String? = nil,
         resourceScope: ResourceScope? = nil,
-        resourceOrigin: ResourceOrigin? = nil
+        resourceOrigin: ResourceOrigin? = nil,
+        distribution: ResourceDistribution? = nil
     ) {
         self.name = name
         self.description = description
@@ -33,6 +44,7 @@ struct CommandInfo: Codable, Hashable, Identifiable, Sendable {
         self.resourceSource = resourceSource
         self.resourceScope = resourceScope
         self.resourceOrigin = resourceOrigin
+        self.distribution = distribution
     }
 }
 
@@ -45,9 +57,38 @@ struct CommandResourceDetail: Codable, Hashable, Sendable {
     let resourceSource: String?
     let resourceScope: CommandInfo.ResourceScope?
     let resourceOrigin: CommandInfo.ResourceOrigin?
+    let distribution: ResourceDistribution?
     let content: String?
     let contentBytes: Int?
     let contentTruncated: Bool?
+
+    init(
+        name: String,
+        description: String?,
+        argumentHint: String?,
+        source: CommandInfo.Source,
+        sourcePath: String?,
+        resourceSource: String?,
+        resourceScope: CommandInfo.ResourceScope?,
+        resourceOrigin: CommandInfo.ResourceOrigin?,
+        content: String?,
+        contentBytes: Int?,
+        contentTruncated: Bool?,
+        distribution: ResourceDistribution? = nil
+    ) {
+        self.name = name
+        self.description = description
+        self.argumentHint = argumentHint
+        self.source = source
+        self.sourcePath = sourcePath
+        self.resourceSource = resourceSource
+        self.resourceScope = resourceScope
+        self.resourceOrigin = resourceOrigin
+        self.distribution = distribution
+        self.content = content
+        self.contentBytes = contentBytes
+        self.contentTruncated = contentTruncated
+    }
 }
 
 enum CommandResourceDetailPolicy {

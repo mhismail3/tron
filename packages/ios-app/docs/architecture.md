@@ -1834,22 +1834,21 @@ prepared once off the main actor when the bounded tree or selected mode changes;
 live session-state updates reuse those immutable rows, and dense cards use the
 static scroll surface rather than one live glass filter per event. Manage Session's model-card
 Compact Now action invokes Pi's canonical compaction through Gateway and can leave one authoritative request queued
-behind an active turn. Project Resources presents resolved extensions, prompts, skills,
-and tools as named rows over the canonical projection. Manage Session also exposes
-Project Hooks as a separate current-runtime registration inventory: each extension
-is grouped by its truthful User/Project/Runtime provenance, with event names and
-handler counts from the Gateway's public loader projection and load issues shown
-separately. Registration is not execution history or health. The bounded Gateway
-projection reports omitted extension/event/error/long-metadata counts and the
-sheet renders an incomplete notice rather than implying completeness. Resource
+behind an active turn. Project Resources presents resolved skills, prompts, extension commands,
+tools, and subagents as named rows over the canonical projection. Every row carries the
+Gateway-derived distribution tag (External, Module, or Local) beside the existing User/Project
+scope badge, and Pi built-ins carry none. Prompt- and skill-sourced commands stay in their own
+groups, so only extension commands appear under Commands. The Extensions section is gone from
+this sheet; the projection still carries its extension rows and load errors for the Settings
+Hooks sheet. Resource
 read failures are fenced to the mounted session and render retryable error state.
 Instruction files such as `AGENTS.md`
 have no duplicate row or Context Files section there: their assembled guidance belongs in
 Agent Instructions, which opens the complete document directly. Canonical resource discovery
 is unchanged. Project Resources, Session History, and Subagent History use the originating Manage Session teal titles and
-toolbar actions to match their originating Session rows. Project Hooks keeps one native scroll owner across loading and By Event/By Extension changes, so lazy content starts at the platform top anchor without imperative scroll resets. Hook event technical info opens the Event Details JSON reader directly rather than an intermediate technical-details card. Resource detail chrome instead
+toolbar actions to match their originating Session rows. Resource detail chrome instead
 matches its own category accent. Project Resource titles prefer authored labels, otherwise
-humanize tool/skill/prompt names using the shared composer formatter. Extension titles derive
+humanize tool/skill/prompt/command/subagent names using the shared composer formatter. Extension titles derive
 from npm/Git package names, meaningful local entrypoints, or named inline extensions rather
 than generic `index.ts` filenames and `<inline:…>` wrappers. First-party inline names read as
 Tron Core, Tron Context Window, Tron Display, Tron Automations, and Tron Notifications. Exact invocation

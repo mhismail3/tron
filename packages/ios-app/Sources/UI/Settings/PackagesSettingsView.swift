@@ -27,7 +27,7 @@ enum PackageResourceKind: String, CaseIterable, Identifiable, Sendable {
     // Project Resources. Package extensions retain their purple category hue.
     @MainActor var accent: Color {
         switch self {
-        case .extensions: ProjectResourceKind.extensions.accent
+        case .extensions: .tronPurple
         case .skills: ProjectResourceKind.skills.accent
         case .prompts: ProjectResourceKind.prompts.accent
         case .themes: .tronTeal

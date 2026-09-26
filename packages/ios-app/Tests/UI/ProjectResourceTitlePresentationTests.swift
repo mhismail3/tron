@@ -16,9 +16,9 @@ struct ProjectResourceTitlePresentationTests {
             ("https://github.com/example/my-tools.git", "/packages/my-tools/index.js", "My Tools"),
         ]
         for (source, path, expected) in fixtures {
-            let value: JSONValue = .object(["name": .string("index.ts"), "source": .string(source), "path": .string(path)])
-            #expect(ProjectResourceTitlePresentation.title(kind: .extensions, value: value) == expected)
-            #expect(ProjectResourceDetailPresentation(kind: .extensions, value: value).path == path)
+            #expect(ProjectResourceTitlePresentation.extensionTitle(name: "index.ts", object: [
+                "name": .string("index.ts"), "source": .string(source), "path": .string(path),
+            ]) == expected)
         }
     }
 
@@ -34,9 +34,9 @@ struct ProjectResourceTitlePresentationTests {
             ("/project/extensions/my-extension/index.ts", "My Extension"),
             ("/project/extensions/review.ts", "Review"),
         ] {
-            let value: JSONValue = .object(["path": .string(path), "source": .string("inline")])
-            #expect(ProjectResourceTitlePresentation.title(kind: .extensions, value: value) == expected)
-            #expect(ProjectResourceDetailPresentation(kind: .extensions, value: value).path == path)
+            #expect(ProjectResourceTitlePresentation.extensionTitle(name: nil, object: [
+                "path": .string(path), "source": .string("inline"),
+            ]) == expected)
         }
     }
 

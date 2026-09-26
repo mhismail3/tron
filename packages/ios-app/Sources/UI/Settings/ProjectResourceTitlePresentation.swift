@@ -9,9 +9,6 @@ enum ProjectResourceTitlePresentation {
             if let text = nonempty(object[key]?.stringValue) { return text }
         }
         let name = nonempty(object["name"]?.stringValue) ?? nonempty(value.stringValue)
-        if kind == .extensions {
-            return extensionTitle(name: name, object: object)
-        }
         if let name {
             if kind == .tools, let label = toolLabels[name] { return label }
             return ComposerResourceNameFormatter.friendly(name)
@@ -41,7 +38,10 @@ enum ProjectResourceTitlePresentation {
         "grep": "Search File Contents", "find": "Find Files", "ls": "List Files",
     ]
 
-    private static func extensionTitle(name: String?, object: [String: JSONValue]) -> String {
+    /// Extension identities come from package resolutions or inline factory
+    /// paths, so they need their own naming rule; the Hooks sheet owns this
+    /// presentation now that Project Resources lists no extensions.
+    static func extensionTitle(name: String?, object: [String: JSONValue]) -> String {
         let path = nonempty(object["path"]?.stringValue)
             ?? nonempty(object["resolvedPath"]?.stringValue) ?? name ?? ""
         if path.hasPrefix("<inline:"), path.hasSuffix(">") {
