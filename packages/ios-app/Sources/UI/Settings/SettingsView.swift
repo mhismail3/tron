@@ -73,9 +73,9 @@ struct SettingsView: View {
                             CompactionSettingsView(projectCWD: projectCWD, projectSessionID: projectSessionID)
                         }
                         settingsDivider(accent: .tronPurple)
-                        // Hooks keep the hook inventory's own accent: the sheet is
-                        // the same surface a session used to show.
-                        settingsLink("Hooks", summary: "Lifecycle hooks registered by extensions", icon: "bolt.horizontal.circle", accent: .tronSessionTeal) {
+                        // The row takes its group's accent; the sheet keeps the hook
+                        // inventory's teal, as Extensions keeps its resource colors.
+                        settingsLink("Hooks", summary: "Lifecycle hooks registered by extensions", icon: "bolt.horizontal.circle", accent: .tronPurple) {
                             HooksSettingsView(projectCWD: projectCWD)
                         }
                     }
