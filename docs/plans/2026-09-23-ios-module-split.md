@@ -2,26 +2,36 @@
 
 - **Started:** 2026-09-23
 - **Status:** Active
-- **Last updated:** 2026-09-26, MS-1 done; MS-2 needs the user's decisions
-- **Goal:** Split stable iOS code out of the single `TronMobile` module so a typical edit rebuilds and re-optimizes only the module it touches.
+- **Last updated:** 2026-09-26, goal restated by the user; MS-2 waits for D1 and D2
+- **Goal:** Give the iOS app compiler-enforced layers, so its structure stays clean, one-directional and easy for agents to work in, and cannot silently regress into cycles.
 
 Follow the [plan protocol](README.md#protocol) to claim tasks and hand off.
 
 ## Goal and constraints
 
-Every iOS build compiles one 106k-line module. Any edit re-runs the whole
-module's interface step, and the whole-module Profile build re-optimizes
-everything. Splitting stable layers into local modules makes those costs
-proportional to what changed and lets modules build in parallel.
+The app is one module of about 110,000 lines, and MS-1 found every layer
+except App and Auth in a single dependency cycle. Nothing stops a low layer
+from reaching up into State or UI, so structure erodes one convenient reference
+at a time. Separate modules make the layering a compiler rule: a lower module
+cannot see a higher one, each module declares the surface it offers, and an
+agent editing a module sees only what that module may use. The user set this
+goal on 2026-09-26: a robust, maintainable and extensible codebase that agents
+can work in without introducing regressions. Faster incremental builds are a
+possible side effect, not the reason.
 
 - **No product change:** UI, UX, scroll continuity, composer and keyboard
   behavior, persisted data, Keychain entries and signed artifacts stay the
   same. This is a build-structure change only.
 - **One owner per type:** a type moves to exactly one module. No duplicate
   copies, re-export shims or compatibility typealiases in the app module.
-- **Measure, don't assume:** each split lands with before/after timings for a
-  cold build, a no-change build and a one-file edit, taken as in Context.
-  A split that does not measurably help is reverted, not kept.
+- **Structure is the acceptance test:** each split lands with its module
+  boundary compiling with no cycle, no widened access beyond what another
+  module actually uses (`package` by default, `public` only when required),
+  the full iOS test suite passing, and the product unchanged.
+- **Builds must not get worse:** each split records before/after timings for
+  a cold build, a no-change build and a one-file edit (recipe in the MS-1
+  handoff). A clear slowdown is a finding to fix or bring to the user, not a
+  reason to keep the change silently.
 - **Tooling stays canonical:** project structure lives in
   `packages/ios-app/project.yml`; device installs keep using
   `scripts/tron-ios-device`; tests keep using `scripts/tron-ios-test`.
@@ -72,7 +82,7 @@ directly, and unit tests reach the app through `@testable import TronMobile`.
 | ID | Status | Scope | Depends on | Owner |
 | --- | --- | --- | --- | --- |
 | MS-1 | Done | Map the dependency graph of Models, Gateway, Support, State and UI/Theme; propose module boundaries with no cycles | none | module-split session, 2026-09-26 |
-| MS-2 | Needs approval | Spike: one XcodeGen framework target, `Core`, holding only a few leaf types, with `SWIFT_PACKAGE_NAME` set so `package` access works; prove signing, embedding, the Share Extension, `@testable` tests, the test plans, the source-policy scripts, device install and **Product → Profile**; take baseline timings with the MS-1 recipe | MS-1, user decisions D1–D3 | |
+| MS-2 | Needs approval | Spike: one XcodeGen framework target, `Core`, holding only a few leaf types, with `SWIFT_PACKAGE_NAME` set so `package` access works; prove signing, embedding, the Share Extension, `@testable` tests, the test plans, the source-policy scripts, device install and **Product → Profile**; take baseline timings with the MS-1 recipe | MS-1, user decisions D1 and D2 | |
 | MS-3 | Needs scoping | Extract `Core` (Models, Gateway, Auth and Support, with the MS-1 moves) and record timings | MS-2 | |
 | MS-4 | Needs scoping | Extract `Notifications`, then `State`, then `UI`, one per task, each with timings; split UI further only if its timing justifies it | MS-3 | |
 | MS-5 | Needs scoping | Move the share extension onto `Core` instead of compiling `SharedContent.swift` itself | MS-3 | |
@@ -157,9 +167,8 @@ except `App` and `Auth` sits in one cycle of 12 layers. Examples: Models throws 
   only; its moves are small and mechanical), or wait for that cleanup.
 - D2 Module form: XcodeGen framework targets (fits `project.yml`, schemes and signing today) or a local Swift
   package. MS-1 recommends framework targets with `SWIFT_PACKAGE_NAME`.
-- D3 Value check: MS-1 did not build. Its proposal promises lower `SwiftEmitModule` cost only for edits outside
-  `Core`; most edits are in UI and State. MS-2 should measure a baseline and the one-module spike first, and
-  stop the plan if the gain is small.
+- D3 Value check: resolved by the user on 2026-09-26. The goal is structure (see Goal and constraints), so
+  timings guard against a slowdown instead of deciding whether the split is worth doing.
 
 ## Handoff log
 
