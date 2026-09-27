@@ -82,3 +82,40 @@ Append entries in this format when closing a plan (see [the plan protocol](READM
 - Deviations: R-0 showed the tag could not reuse Pi's `origin`, so it became a new `distribution` field. The user added R-7/R-8 so installed packages show what they provide, and later set the group order to Skills, Subagents, Prompts, Tools, Commands. Pi themes stayed under Extensions because they affect only the Mac terminal. R-6's simulator walkthrough became the user's on-device check after the rebuild, because the simulator app was unpaired.
 - Lessons: Settle one vocabulary table against the repository before wire work; it prevented a colliding `origin`/`provenance` field. The iOS hosting harness cannot assert rendered SwiftUI text or nested-control tap routing (an Installed row button containing a menu), so those need a device or UI-test check. New Gateway fields reach iOS only after a user rebuild, so iOS decodes them optionally.
 - Knowledge moved to: `packages/gateway/README.md` (distribution rule, subagents, `modules.list`, `hooks.list`, package `provides`), `packages/ios-app/docs/architecture.md` and `packages/ios-app/docs/development.md` (Settings versus Project Resources ownership, sheets and group order).
+
+## 2026-09-26 → 2026-09-26 · Session archive · Completed
+
+- Plan: `2026-09-26-session-archive.md`, deleted in commit `docs(plans): close session archive`.
+- Outcome: an idle session can be archived instead of deleted.
+  - It leaves the dashboard for one collapsed Archived (N) section at the bottom, and stays searchable, labeled Archived.
+  - Any new run unarchives it; opening or reading it does not.
+  - Archive state is a Gateway-owned store (`session-archive.json`) behind `session-archive.v1`, never written into the Pi JSONL.
+  - On iOS, a swipe reveals Archive or Unarchive, which then confirm like Delete. Expanding the section shows a header spinner and scrolls the revealed rows into view.
+  - The user rebuilt the Gateway and iOS and confirmed it on the phone.
+- Key commits:
+  - Gateway: `bf521117e` (G-1), `5e718feb7` (G-2), `60e8773c9` (G-3).
+  - iOS: `e8cf7b6ef` (I-1), `9a5934a54` (I-2), `064803d95` (I-3).
+  - Follow-ups: `2dddf1f56` (F-3), `83994c2fd` (F-4), `1005048c5` (F-1/F-2), `db2ad600d` (F-5).
+  - Review fixes: `ba0428e3a`, `4fbc144e4`, `6652c02a2` (R-1, F-6); `4fff91115` (R-2); `d07c068ea` (R-3); `d6924459f` (R-4); `9fc3b3e58` (R-5).
+  - User changes: `8ea4c5507` (C-1), `b00626e38` (C-2), `58847d0b5` (C-3).
+- Deviations:
+  - Three independent review rounds found and fixed real defects, including:
+    - archived rows with no owning Gateway, so two-Mac actions went to the wrong one;
+    - a registry-mutex stall while waiting on a session lane;
+    - a running session hidden after a failed write;
+    - an iOS parallel archived-ID set;
+    - a round-two regression that blocked extension `switchSession`.
+  - Pre-existing defects fixed along the way:
+    - mutation RPCs rejecting themselves as busy (F-1/F-2);
+    - unwaited durable writes at disposal (F-5/F-6);
+    - a dropped deferred catalog refresh after a retired traversal (C-2), fixed generally in both the selected and pool catalog paths.
+  - By the user's decisions:
+    - full-swipe archive was replaced by tap-and-confirm (C-1);
+    - the pre-existing `switchSession` receipt split moved to its own proposal (F-7).
+- Lessons:
+  - Parallel workers need a supervisor review of each merged branch; every round found real bugs that the workers' own green tests missed, often because tests injected state that production never supplies.
+  - Hosted UI fixtures must render production containers and declare their presentation activity, or XCUI never idles.
+  - A catalog refresh that retires its own read must still owe a follow-up.
+  - Gateway vitest needs Homebrew or nvm Node, and `scripts/ios-gateway-e2e-test` needs a plain Node 22.22.0, because the signed payload Node rejects unsigned native addons.
+- Knowledge moved to: `packages/gateway/README.md` (archive contract, run-unarchive rule, disposal drains, mutation idle admission), `packages/gateway/docs/observability.md` (archive events), `packages/gateway/docs/session-search.md` (`archived` label), `packages/ios-app/docs/architecture.md` and `development.md` (dashboard archive flow, container, journeys).
+- Follow-up (not in this plan): the Proposed `2026-09-26-switch-session-receipts.md`, and a later general dashboard sync-hardening pass, including the ~2 s `session.list` on the user's Mac.
