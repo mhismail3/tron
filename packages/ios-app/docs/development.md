@@ -479,6 +479,71 @@ Read the numbers with these limits:
   `control` workload and variants with extra CPU work, synced disk writes and a
   200 Hz timer, and fails unless each shows a regression beyond the noise bound.
 
+#### Attribution: finding the owner
+
+`compare` says *whether* a scenario got more expensive; `--trace` says *where*
+the cost is. Add it to the scenario that showed the cost:
+
+```bash
+scripts/tron-profile ios --self-test --trace time-profiler   # proves attribution too
+scripts/tron-profile ios --scenario streaming-reply --trace time-profiler --iterations 2
+```
+
+The profiler records an Instruments trace (`xcrun xctrace`) of the hosted test
+process. The scenario waits, bounded, until the recording is confirmed started
+(xctrace's `--notify-tracing-started`), reports each measured window's
+wall-clock bounds, and after its last iteration waits until the recording is
+stopped. `scripts/tron_profile_attribution.py` exports the trace and writes
+`attribution.json` and `attribution.md` into the run directory beside the
+`.trace`: CPU per thread and the top symbols by self and total time for all
+threads and for the main thread (plus main-thread total time over app frames
+only, since harness and run-loop frames hold nearly all of it), counting only samples inside the measured
+windows (XCTest's discarded warm-up iteration, setup and teardown are counted
+separately, and the leaf symbols just outside the windows are listed as
+evidence). Frames Instruments could not symbolicate appear as
+`<unresolved address in IMAGE>` with a per-image resolved/unresolved split, so
+missing symbols are visible. The optimized products keep their symbol tables,
+so app and test frames resolve by name; heavy inlining attributes inlined work
+to its caller. Exports are streamed row by row (a host-wide export of a loaded
+Mac is large); `scripts/test-tron-profile-attribution.py` covers the export
+parsing failure modes.
+
+A traced report is marked (`context.trace` and a warning): Instruments
+overhead distorts every resource metric in it, and `compare` refuses it.
+Measure with untraced runs; trace only to attribute. `--self-test --trace
+time-profiler` additionally requires the CPU variant's `controlExtraCPUWorkload`
+among the top five self-time symbols inside the windows and absent outside
+them. Keep `--iterations` small (1–3): the trace grows with window length.
+
+Templates and what was verified (Xcode 26.6, iOS 26.5 simulator runtime):
+
+| `--trace` | Recording | Status |
+|---|---|---|
+| `time-profiler` | Host-wide Time Profiler (`--all-processes`), filtered to the test host's pid | Verified: samples and symbolicates the simulator process |
+| `swiftui` | SwiftUI template on the simulator device (`--device <sim> --attach <pid>`) | Unverified: simulator-device recording never started here (see below) |
+| `points-of-interest` | `os_signpost` and Points of Interest on the simulator device | Unverified, same reason |
+
+A host-wide recording cannot read the simulator's own `logd`, so
+`time-profiler` attribution has no `com.tron.mobile` signposts; the summary says
+so instead of printing an empty table. Simulator-device recording (needed for
+signposts and the SwiftUI instrument) never started on the development host
+— for any template, including a blank one, after a simulator reboot and with no
+other Instruments session running — with xctrace logging "Device disconnected
+while trying to set tap configuration"; the profiler aborts it after its bounded
+start timeout. When SwiftUI data is unavailable the attribution says so rather
+than emitting empty tables; use Instruments on a physical device
+(`scripts/tron-profile device`, below) for SwiftUI body counts.
+
+Instruments' kernel profiling admits one session per Mac (`could not lock
+kperf`). Traced runs therefore serialize on
+`~/Library/Developer/Tron/profiles-instruments.lock`, wait up to 15 minutes
+(`TRON_PROFILE_TRACE_HOST_WAIT_SECONDS`) for any other session's `xctrace` or
+Instruments to exit, then fail with exit 73 naming the process; a recording
+that still lost kperf (for example to another session's lingering
+`DTServiceHub`) fails with that reason. The profiler signals only the xctrace
+it started and that xctrace's own `DTServiceHub` helpers, which otherwise
+linger for minutes.
+
 Use the same optimized app for the normal-use → capture → fix → repeat loop; do
 not maintain a profiling-only product or copy app state into a shadow bundle.
 The user-owned, physical-device workflow is:
@@ -493,6 +558,22 @@ reproduction with Tron signposts and Logs → Share; inspect operation duration,
 waiting/serialization/transport/rendering ownership, then rank contributors
 before editing. Add **SwiftUI** to inspect body/update/layout cost and the
 **Concurrency** tools/System Trace when actor or queue contention is plausible.
+   To capture a fixed window from the command line instead, the user launches
+   the app, then runs (or asks an agent to run) an attach-only capture that
+   never installs, launches, signs or touches app data and refuses anything but
+   an explicitly named, connected physical device:
+
+   ```bash
+   scripts/tron-profile device --attach --device <UDID> --template time-profiler --seconds 30
+   scripts/tron-profile device --attach --device <UDID> --template power-profiler --seconds 60
+   ```
+
+   It writes the `.trace` plus the same `attribution.json`/`attribution.md`
+   (whole window, filtered to the attached process) under
+   `~/Library/Developer/Tron/profiles/device/`; for Power Profiler it
+   summarizes whatever power, energy or thermal tables the trace exports.
+   Device runs are user-owned; agents run this only when the user asks. The
+   device capture path has not been exercised on hardware yet.
 3. Stop the capture, retain the `.trace` and the bounded exported Logs file
 locally, fix one owner, and repeat the same interaction under the same device,
 thermal, cache, and Gateway conditions. Keep a focused regression test and

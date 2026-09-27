@@ -68,7 +68,10 @@ jobs:
             scripts/tron-profile-gateway \
             scripts/test-tron-profile.py \
             scripts/tron-profile-ios \
-            scripts/test-tron-profile-ios.py
+            scripts/test-tron-profile-ios.py \
+            scripts/tron_profile_attribution.py \
+            scripts/tron-profile-device \
+            scripts/test-tron-profile-attribution.py
       - name: Check profiler JavaScript and TypeScript syntax
         run: |
           node --check scripts/tron-profile-gateway-driver.mjs
@@ -80,6 +83,7 @@ jobs:
         run: |
           python3 scripts/test-tron-profile.py
           python3 scripts/test-tron-profile-ios.py
+          python3 scripts/test-tron-profile-attribution.py
       - run: python3 scripts/check-documentation-policy.py
       - name: Check shell syntax
         run: |

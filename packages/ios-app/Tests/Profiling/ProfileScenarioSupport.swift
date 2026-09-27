@@ -83,7 +83,9 @@ extension XCTestCase {
     ) throws {
         let configuration = try ProfileRunConfiguration.selected(scenario, defaultWindow: defaultWindow)
         ProfileResourceSample.captureMainThread()
+        let trace = try ProfileTraceHandshake.requested()
         print("TRON_PROFILE_SCENARIO_START name=\(scenario) iterations=\(configuration.iterations) window_ms=\(configuration.window.profileMilliseconds)")
+        try trace?.awaitRecording()
         let options = XCTMeasureOptions()
         options.iterationCount = configuration.iterations
         options.invocationOptions = [.manuallyStart, .manuallyStop]
@@ -127,6 +129,7 @@ extension XCTestCase {
                 }
                 let created = prepared!
                 run = created
+                let window = trace?.beginWindow()
                 startMeasuring()
                 measuring = true
                 try ProfileMainLoop.wait(configuration.window + .seconds(30), phase: "\(scenario) workload") {
@@ -134,6 +137,7 @@ extension XCTestCase {
                 }
                 stopMeasuring()
                 measuring = false
+                if let window { try trace?.endWindow(window, iteration: iteration) }
                 do {
                     try ProfileMainLoop.wait(.seconds(30), phase: "\(scenario) verification") { try await created.verify() }
                 } catch {
@@ -151,6 +155,7 @@ extension XCTestCase {
             }
             print("TRON_PROFILE_ITERATION name=\(scenario) index=\(iteration) status=\(failure == nil ? "ok" : "failed")")
         }
+        try trace?.finishMeasurement()
         if let failure {
             XCTFail("TRON_PROFILE_FAILURE scenario=\(scenario): \(failure)")
         }
@@ -169,6 +174,96 @@ extension XCTestCase {
         attachment.name = name
         attachment.lifetime = .keepAlways
         add(attachment)
+    }
+}
+
+/// Bounded file handshake with `scripts/tron-profile ios --trace`, active only
+/// when the profiler names a handshake directory. The simulator process shares
+/// the host file system, so the test writes its pid and waits until the
+/// profiler's xctrace recording is confirmed started before the first
+/// iteration, appends each measured window's wall-clock bounds to
+/// `windows.jsonl` (the profiler attributes only samples inside them), and
+/// after the last iteration waits until the profiler has stopped the
+/// recording, so the process outlives the capture.
+///
+/// Wall-clock bounds rather than signposts: a host-wide Time Profiler
+/// recording cannot read the simulator's logd, and simulator and host share
+/// one clock, which the trace's start date maps to within about a millisecond.
+@MainActor
+final class ProfileTraceHandshake {
+    private let directory: URL
+    private let recordingTimeout: Duration
+    private let stopTimeout: Duration
+
+    private init(directory: URL, recordingTimeout: Duration, stopTimeout: Duration) {
+        self.directory = directory
+        self.recordingTimeout = recordingTimeout
+        self.stopTimeout = stopTimeout
+    }
+
+    static func requested() throws -> ProfileTraceHandshake? {
+        let environment = ProcessInfo.processInfo.environment
+        guard let path = environment["TRON_PROFILE_TRACE_HANDSHAKE_DIR"], !path.isEmpty else { return nil }
+        func seconds(_ name: String) throws -> Duration {
+            guard let value = Int64(environment[name] ?? ""), (1...3_600).contains(value) else {
+                throw ProfileScenarioError.invalidConfiguration("\(name) must be 1...3600 when tracing")
+            }
+            return .seconds(value)
+        }
+        return ProfileTraceHandshake(
+            directory: URL(filePath: path, directoryHint: .isDirectory),
+            recordingTimeout: try seconds("TRON_PROFILE_TRACE_RECORDING_TIMEOUT_SECONDS"),
+            stopTimeout: try seconds("TRON_PROFILE_TRACE_STOP_TIMEOUT_SECONDS")
+        )
+    }
+
+    func awaitRecording() throws {
+        let pid = ProcessInfo.processInfo.processIdentifier
+        try Data("{\"pid\": \(pid)}\n".utf8).write(to: directory.appending(path: "process.json"), options: .atomic)
+        print("TRON_PROFILE_TRACE_WAITING pid=\(pid)")
+        try wait(for: "recording", timeout: recordingTimeout)
+        print("TRON_PROFILE_TRACE_RECORDING")
+    }
+
+    /// Taken just before `startMeasuring()`, so the window contains the metric's.
+    func beginWindow() -> Date { Date() }
+
+    /// Called after `stopMeasuring()`: the file write is outside the window.
+    func endWindow(_ start: Date, iteration: Int) throws {
+        let end = Date()
+        let line = "{\"iteration\": \(iteration), \"start\": \(start.timeIntervalSince1970), \"end\": \(end.timeIntervalSince1970)}\n"
+        let url = directory.appending(path: "windows.jsonl")
+        if !FileManager.default.fileExists(atPath: url.path) {
+            FileManager.default.createFile(atPath: url.path, contents: nil)
+        }
+        let handle = try FileHandle(forWritingTo: url)
+        defer { try? handle.close() }
+        try handle.seekToEnd()
+        try handle.write(contentsOf: Data(line.utf8))
+    }
+
+    func finishMeasurement() throws {
+        try Data().write(to: directory.appending(path: "measured"), options: .atomic)
+        print("TRON_PROFILE_TRACE_MEASURED")
+        try wait(for: "stopped", timeout: stopTimeout)
+    }
+
+    /// Outside every measured window, so plain polling adds nothing measured.
+    /// The profiler writes `abort` (with its reason) when the recording
+    /// cannot start or failed, so the test fails at once instead of waiting.
+    private func wait(for name: String, timeout: Duration) throws {
+        let marker = directory.appending(path: name).path
+        let abort = directory.appending(path: "abort")
+        let deadline = ContinuousClock.now + timeout
+        while !FileManager.default.fileExists(atPath: marker) {
+            if let reason = try? String(contentsOf: abort, encoding: .utf8) {
+                throw ProfileScenarioError.notReady("the profiler aborted tracing: \(reason)")
+            }
+            guard ContinuousClock.now < deadline else {
+                throw ProfileScenarioError.timedOut("trace handshake waiting for \(name)")
+            }
+            Thread.sleep(forTimeInterval: 0.1)
+        }
     }
 }
 

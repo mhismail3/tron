@@ -75,7 +75,7 @@ private final class ProfileControlRun: ProfileScenarioRun {
             ProfileScenarioLedger.shared.add("control.ticks")
             switch extra {
             case .cpu:
-                ProfileSink.consume(Self.arithmetic(seed: UInt64(index) &+ 7, rounds: Self.workPerTick))
+                ProfileSink.consume(Self.controlExtraCPUWorkload(seed: UInt64(index) &+ 7, rounds: Self.workPerTick))
                 ProfileScenarioLedger.shared.add("control.extra_work")
             case .disk:
                 let url = directory.appending(path: "tick-\(index)")
@@ -105,6 +105,22 @@ private final class ProfileControlRun: ProfileScenarioRun {
     func teardown() async {
         timer?.invalidate()
         try? FileManager.default.removeItem(at: directory)
+    }
+
+    /// The CPU variant's known cost as its own frame: `--self-test --trace
+    /// time-profiler` fails unless attribution ranks this symbol among the top
+    /// self-time symbols (CONTROL_WORKLOAD_SYMBOL in scripts/tron-profile-ios).
+    /// Its loop differs from `arithmetic` on purpose: an identical body would
+    /// be merged or tail-called by the optimizer, and this frame would vanish.
+    @inline(never)
+    static func controlExtraCPUWorkload(seed: UInt64, rounds: Int) -> UInt64 {
+        var state = seed | 1
+        for _ in 0..<rounds {
+            state ^= state << 7
+            state ^= state >> 9
+            state ^= state << 8
+        }
+        return state
     }
 
     /// Fixed xorshift rounds; the result feeds `ProfileSink` so -O keeps it.

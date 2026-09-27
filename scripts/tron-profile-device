@@ -1,0 +1,190 @@
+#!/usr/bin/env python3
+"""Attach-only Instruments capture behind `scripts/tron-profile device`.
+
+Records Time Profiler or Power Profiler for a fixed window against a Tron app
+that the user already launched on an explicitly named physical device, then
+writes the same attribution summary as `scripts/tron-profile ios --trace`
+(`scripts/tron_profile_attribution.py`). It never installs, launches, signs,
+or touches app data: xctrace `--attach` fails when the process is not running.
+Device runs are user-owned; an agent runs this only when the user asks and has
+launched the app.
+"""
+
+from __future__ import annotations
+
+import argparse
+from datetime import datetime, timezone
+import os
+from pathlib import Path
+import re
+import secrets
+import signal
+import subprocess
+import sys
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import tron_profile_attribution as attribution  # noqa: E402
+
+EXIT_OK = 0
+EXIT_USAGE = 2
+EXIT_DESTINATION = 66
+EXIT_RECORDING = 74
+EXIT_TIMEOUT = 75
+
+MAX_SECONDS = 600
+# xctrace needs time after the window to stop and save (and, for a device,
+# copy the recording back to the Mac).
+SAVE_ALLOWANCE_SECONDS = 300
+LIST_TIMEOUT_SECONDS = 60
+
+
+class DeviceProfileError(Exception):
+    def __init__(self, message: str, code: int = EXIT_RECORDING) -> None:
+        super().__init__(message)
+        self.code = code
+
+
+def connected_physical_devices(listing: str) -> dict[str, str]:
+    """{identifier: line} for the `== Devices ==` section of
+    `xctrace list devices`: connected hardware, which includes this Mac but
+    never simulators or offline devices."""
+    devices: dict[str, str] = {}
+    section = None
+    for line in listing.splitlines():
+        heading = re.match(r"^== (.+) ==$", line.strip())
+        if heading:
+            section = heading.group(1)
+            continue
+        identifier = re.search(r"\(([0-9A-Fa-f-]{20,})\)\s*$", line.strip())
+        if section == "Devices" and identifier:
+            devices[identifier.group(1).upper()] = line.strip()
+    return devices
+
+
+def host_identifier() -> str | None:
+    output = subprocess.run(["system_profiler", "SPHardwareDataType"], capture_output=True, text=True,
+                            timeout=LIST_TIMEOUT_SECONDS).stdout
+    # xctrace lists this Mac under its hardware UUID.
+    match = re.search(r"Hardware UUID:\s*(\S+)", output)
+    return match.group(1).upper() if match else None
+
+
+def resolve_device(requested: str, listing: str, host: str | None) -> str:
+    devices = connected_physical_devices(listing)
+    identifier = requested.upper()
+    if identifier not in devices:
+        raise DeviceProfileError(
+            f"{requested} is not a connected physical device (xctrace list devices shows: "
+            f"{', '.join(devices.values()) or 'none'}); simulators and offline devices are refused",
+            EXIT_DESTINATION,
+        )
+    if identifier == host:
+        raise DeviceProfileError(f"{requested} is this Mac, not a phone; name the device's identifier", EXIT_DESTINATION)
+    return identifier
+
+
+def record(arguments: argparse.Namespace, run_dir: Path, device: str) -> Path:
+    template, instruments = attribution.DEVICE_TEMPLATES[arguments.template]
+    output = run_dir / f"{arguments.template}.trace"
+    command = ["xcrun", "xctrace", "record", "--device", device, "--attach", arguments.process,
+               "--output", str(output), "--no-prompt", "--time-limit", f"{arguments.seconds}s"]
+    if template:
+        command += ["--template", template]
+    for instrument in instruments:
+        command += ["--instrument", instrument]
+    log = run_dir / "xctrace.log"
+    print(f"Attaching {arguments.template} to running '{arguments.process}' on {device} for {arguments.seconds} s", flush=True)
+    with log.open("wb") as handle:
+        process = subprocess.Popen(command, stdout=handle, stderr=subprocess.STDOUT, stdin=subprocess.DEVNULL,
+                                   start_new_session=True)
+
+    def forward(_signum: int, _frame: object) -> None:
+        if process.poll() is None:
+            process.send_signal(signal.SIGINT)  # xctrace saves what it recorded
+
+    previous = {signum: signal.signal(signum, forward) for signum in (signal.SIGINT, signal.SIGTERM, signal.SIGHUP)}
+    try:
+        try:
+            status = process.wait(timeout=arguments.seconds + SAVE_ALLOWANCE_SECONDS)
+        except subprocess.TimeoutExpired:
+            process.send_signal(signal.SIGINT)
+            try:
+                process.wait(timeout=60)
+            except subprocess.TimeoutExpired:
+                process.kill()
+                process.wait()
+            raise DeviceProfileError(f"xctrace did not finish within its bound; log: {log}", EXIT_TIMEOUT)
+    finally:
+        for signum, handler in previous.items():
+            signal.signal(signum, handler)
+    if status or not output.exists():
+        raise DeviceProfileError(
+            f"xctrace exited {status} (is '{arguments.process}' running on the device?); log: {log}"
+        )
+    return output
+
+
+def parse_arguments(argv: list[str]) -> argparse.Namespace:
+    parser = argparse.ArgumentParser(
+        prog="scripts/tron-profile device",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        description=(
+            "Attach Instruments to a Tron app the user already launched on a physical device and summarize it.\n"
+            "Never installs, launches, signs or touches app data. Device runs are user-owned: agents run this\n"
+            "only when the user asks."
+        ),
+        epilog=(
+            "Exit status: 0 success, 2 usage, 66 device not connected or not a phone, 74 recording or export\n"
+            "failure (including no running process), 75 deadline exceeded. Writes to\n"
+            "$HOME/Library/Developer/Tron/profiles/device/<run>/ (override with TRON_PROFILE_RESULTS_DIR)."
+        ),
+    )
+    parser.add_argument("--attach", action="store_true", required=True,
+                        help="required: attach to an already running process (the only supported mode)")
+    parser.add_argument("--device", required=True, metavar="UDID",
+                        help="identifier of the connected physical device (see 'xcrun xctrace list devices')")
+    parser.add_argument("--template", required=True, choices=sorted(attribution.DEVICE_TEMPLATES))
+    parser.add_argument("--seconds", required=True, type=int, help=f"recording window, 1...{MAX_SECONDS}")
+    parser.add_argument("--process", default="TronMobile", help="running process name or pid (default TronMobile)")
+    arguments = parser.parse_args(argv)
+    if not 1 <= arguments.seconds <= MAX_SECONDS:
+        parser.error(f"--seconds must be 1...{MAX_SECONDS}")
+    if not arguments.device.strip():
+        parser.error("--device must name the device identifier")
+    return arguments
+
+
+def main(argv: list[str]) -> int:
+    arguments = parse_arguments(argv)
+    try:
+        listing = subprocess.run(["xcrun", "xctrace", "list", "devices"], capture_output=True, text=True,
+                                 timeout=LIST_TIMEOUT_SECONDS)
+        if listing.returncode:
+            raise DeviceProfileError(f"xctrace list devices failed: {listing.stderr.strip()}", EXIT_DESTINATION)
+        device = resolve_device(arguments.device, listing.stdout, host_identifier())
+        root = Path(os.environ.get("TRON_PROFILE_RESULTS_DIR", Path.home() / "Library/Developer/Tron/profiles"))
+        run_id = (f"{datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%SZ')}-{arguments.template}-"
+                  f"{secrets.token_hex(3)}")
+        run_dir = root.expanduser() / "device" / run_id
+        run_dir.mkdir(parents=True)
+        trace = record(arguments, run_dir, device)
+        document = attribution.attribute(trace, arguments.template, None, None)
+        document["device"] = device
+        document["warnings"].append("device capture: whole recording window, not a deterministic scenario")
+        paths = attribution.write(document, run_dir)
+    except attribution.AttributionError as error:
+        print(f"error: attribution failed: {error}", file=sys.stderr)
+        return EXIT_RECORDING
+    except DeviceProfileError as error:
+        print(f"error: {error}", file=sys.stderr)
+        return error.code
+    except subprocess.TimeoutExpired as error:
+        print(f"error: {' '.join(map(str, error.cmd))} exceeded its bound", file=sys.stderr)
+        return EXIT_TIMEOUT
+    sys.stdout.write(attribution.markdown(document))
+    print(f"\nTrace: {trace}\nAttribution: {paths[1]}")
+    return EXIT_OK
+
+
+if __name__ == "__main__":
+    raise SystemExit(main(sys.argv[1:]))

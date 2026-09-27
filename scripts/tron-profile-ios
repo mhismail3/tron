@@ -8,6 +8,16 @@ per-iteration `com.tron.profile.*` XCTMetric values back from the xcresult, and
 hands them to `scripts/tron_profile_report.py`, which owns the report schema and
 comparison policy. A value the process could not measure is omitted with a
 warning; a run that did not execute the scenario fails with evidence paths.
+
+With `--trace TEMPLATE` it also records an xctrace capture of the hosted test
+process: the scenario waits (bounded) until the recording is confirmed started,
+reports each measured window's wall-clock bounds, and waits after its last
+iteration until the recording is stopped. Instruments' kernel profiling is
+exclusive to one session per Mac, so traced runs serialize on a host-wide lock
+and wait (bounded) for any other Instruments session to end. `scripts/tron_profile_attribution.py`
+turns the trace into `attribution.json`/`attribution.md`. Instruments overhead
+distorts the resource metrics of a traced run, so its report is marked traced
+and `scripts/tron-profile compare` refuses it.
 """
 
 from __future__ import annotations
@@ -15,14 +25,21 @@ from __future__ import annotations
 import argparse
 from datetime import datetime, timezone
 import json
+import fcntl
 import os
 from pathlib import Path
+import re
 import secrets
 import shlex
 import signal
 import subprocess
 import sys
+import threading
+import time
 from typing import Any
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import tron_profile_attribution as attribution  # noqa: E402
 
 ROOT = Path(__file__).resolve().parent.parent
 IOS = ROOT / "packages/ios-app"
@@ -105,6 +122,30 @@ METRICS: dict[str, tuple[str, str]] = {
     "time.wall": ("ns", "Wall time of the measured window."),
 }
 ESSENTIAL_METRICS = ("time.wall", "cpu.time")
+
+# Tracing handshake bounds (seconds), passed to the hosted test so both sides
+# give up at the same time: attaching and starting the recording, and stopping
+# and saving it after the last window.
+TRACE_RECORDING_TIMEOUT = 300
+TRACE_STOP_TIMEOUT = 600
+# How long a traced run waits for the host-wide trace lock and for another
+# session's Instruments processes to exit before failing.
+TRACE_HOST_WAIT = int(os.environ.get("TRON_PROFILE_TRACE_HOST_WAIT_SECONDS", 900))
+TRACE_HOST_LOCK = Path.home() / "Library/Developer/Tron/profiles-instruments.lock"
+# Recording clients. Their DTServiceHub helpers are not matched on their own:
+# xcodebuild test runs of every session spawn DTServiceHub too, and idle
+# orphans linger for minutes without recording.
+INSTRUMENTS_PROCESS = re.compile(r"(/usr/bin/xctrace |/Instruments\.app/Contents/MacOS/Instruments)")
+KPERF_LOCKED = "could not lock kperf"
+# The CPU control variant's workload function
+# (ProfileControlScenarioTests.swift); `--self-test --trace time-profiler`
+# requires it among the top self-time symbols of a traced control-cpu run.
+CONTROL_WORKLOAD_SYMBOL = "controlExtraCPUWorkload"
+CONTROL_WORKLOAD_RANK = 5
+TRACED_WARNING = (
+    "traced run: Instruments overhead distorts every resource metric in this report; use it only to attribute "
+    "cost (attribution.md), never for compare decisions (compare refuses traced reports)"
+)
 
 
 class ProfileError(Exception):
@@ -272,6 +313,240 @@ def bounded(log: Path, evidence: Path, overall: float, no_output: float, artifac
             signal.signal(signum, handler)
 
 
+class TraceRecorder:
+    """Owns one `xctrace record --attach` of the hosted test process.
+
+    A background thread waits for the test's `process.json`, starts xctrace
+    against that pid on the owned simulator, confirms the recording through
+    xctrace's `--notify-tracing-started` Darwin notification, then writes
+    `recording`. When the test writes `measured` (or `finish()` is called) it
+    stops xctrace with SIGINT so the trace is saved, and writes `stopped`.
+    Only processes this object started are ever signalled.
+    """
+
+    def __init__(self, template: str, simulator_id: str, handshake: Path, output: Path, log: Path,
+                 time_limit: float) -> None:
+        self.template = template
+        self.simulator_id = simulator_id
+        self.handshake = handshake
+        self.output = output
+        self.log = log
+        self.time_limit = time_limit
+        self.pid: int | None = None
+        self.error: str | None = None
+        self.recording_started = False
+        self._finish = threading.Event()
+        self._xctrace: subprocess.Popen[bytes] | None = None
+        self._notifier: subprocess.Popen[bytes] | None = None
+        self._thread = threading.Thread(target=self._run, name="xctrace-recorder", daemon=True)
+
+    def start(self) -> None:
+        self.handshake.mkdir(parents=True)
+        self._thread.start()
+
+    def command(self, pid: int, notification: str) -> list[str]:
+        mode, template, instruments = attribution.TEMPLATES[self.template]
+        # Host mode samples every process and attribution keeps only `pid`.
+        target = ["--all-processes"] if mode == "host" else ["--device", self.simulator_id, "--attach", str(pid)]
+        command = ["xcrun", "xctrace", "record", *target, "--output", str(self.output), "--no-prompt",
+                   "--notify-tracing-started", notification, "--time-limit", f"{int(self.time_limit)}s"]
+        if template:
+            command += ["--template", template]
+        for instrument in instruments:
+            command += ["--instrument", instrument]
+        return command
+
+    def _marker(self, name: str, content: str = "") -> None:
+        temporary = self.handshake / f".{name}.tmp"
+        temporary.write_text(content)
+        temporary.replace(self.handshake / name)
+
+    def _abort(self, reason: str) -> None:
+        self.error = reason
+        self._marker("abort", reason)
+
+    def _wait_for(self, name: str, timeout: float) -> bool:
+        deadline = time.monotonic() + timeout
+        while not (self.handshake / name).exists():
+            if self._finish.is_set() or time.monotonic() > deadline:
+                return False
+            if self._xctrace is not None and self._xctrace.poll() is not None:
+                return False
+            time.sleep(0.2)
+        return True
+
+    def _run(self) -> None:
+        try:
+            if not self._wait_for("process.json", self.time_limit):
+                if not self._finish.is_set():
+                    self._abort("the hosted test never reported its process id")
+                return
+            self.pid = int(json.loads((self.handshake / "process.json").read_text())["pid"])
+            notification = f"com.tron.profile.recording.{secrets.token_hex(8)}"
+            self._notifier = subprocess.Popen(["notifyutil", "-1", notification],
+                                              stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            time.sleep(0.5)  # let notifyutil register before xctrace can post
+            with self.log.open("ab") as log:
+                self._xctrace = subprocess.Popen(
+                    self.command(self.pid, notification), stdout=log, stderr=subprocess.STDOUT,
+                    stdin=subprocess.DEVNULL, start_new_session=True,
+                )
+            print(f"Recording {self.template} trace of pid {self.pid}: {self.output}", flush=True)
+            deadline = time.monotonic() + TRACE_RECORDING_TIMEOUT - 30
+            while self._notifier.poll() is None:
+                if self._xctrace.poll() is not None:
+                    self._abort(f"xctrace exited with status {self._xctrace.returncode} before recording; log: {self.log}")
+                    return
+                if self._finish.is_set() or time.monotonic() > deadline:
+                    self._abort(f"xctrace did not confirm recording in time; log: {self.log}")
+                    return
+                time.sleep(0.1)
+            self.recording_started = True
+            self._marker("recording")
+            self._wait_for("measured", self.time_limit)
+            if self._xctrace.poll() is not None:
+                self._abort(f"xctrace exited with status {self._xctrace.returncode} during the measured windows; "
+                            f"log: {self.log}")
+                return
+        except (OSError, ValueError, KeyError) as error:
+            self._abort(f"trace recorder failed: {error}")
+        finally:
+            self._stop()
+
+    def _stop(self) -> None:
+        if self._notifier is not None and self._notifier.poll() is None:
+            self._notifier.kill()
+            self._notifier.wait()
+        process = self._xctrace
+        helpers = self._helpers()
+        if process is not None and process.poll() is None:
+            process.send_signal(signal.SIGINT)
+            # A started recording needs time to save; one that never started
+            # has nothing to save.
+            try:
+                process.wait(timeout=TRACE_STOP_TIMEOUT - 60 if self.recording_started else 30)
+            except subprocess.TimeoutExpired:
+                self._kill_group(process)
+                self.error = self.error or f"xctrace did not stop within its bound; log: {self.log}"
+        self._reap_helpers(helpers)
+        if process is not None and process.returncode not in (0, None) and self.error is None:
+            detail = self.log.read_text(errors="replace") if self.log.exists() else ""
+            if KPERF_LOCKED in detail:
+                self.error = ("another Instruments session holds this Mac's kernel profiling (kperf) and the "
+                              f"recording is empty; retry when it ends; log: {self.log}")
+            else:
+                self.error = f"xctrace exited with status {process.returncode}; log: {self.log}"
+        self._marker("stopped")
+
+    def _helpers(self) -> list[int]:
+        """DTServiceHub helpers of our running xctrace (their own process
+        groups, so signalling xctrace's group does not reach them)."""
+        if self._xctrace is None or self._xctrace.poll() is not None:
+            return []
+        children = run(["pgrep", "-P", str(self._xctrace.pid)], capture_output=True, timeout=30).stdout.split()
+        return [int(pid) for pid in children if pid.isdigit()]
+
+    @staticmethod
+    def _reap_helpers(helpers: list[int]) -> None:
+        """xctrace leaves its DTServiceHub behind for minutes after exiting;
+        stop the ones this recording started (re-checked by name, so a reused
+        pid is never signalled)."""
+        for pid in helpers:
+            command = run(["ps", "-o", "command=", "-p", str(pid)], capture_output=True, timeout=30).stdout
+            if "DTServiceHub" in command:
+                try:
+                    os.kill(pid, signal.SIGKILL)  # it ignores SIGTERM
+                except ProcessLookupError:
+                    pass
+
+    @staticmethod
+    def _kill_group(process: subprocess.Popen[bytes]) -> None:
+        """Kill xctrace with the helpers it spawned (its own session)."""
+        try:
+            os.killpg(process.pid, signal.SIGKILL)
+        except ProcessLookupError:
+            pass
+        process.wait()
+
+    def finish(self) -> None:
+        """Stop and reap everything this recorder started (idempotent)."""
+        self._finish.set()
+        self._thread.join(timeout=TRACE_STOP_TIMEOUT)
+        if self._thread.is_alive():
+            # The thread is stuck; reclaim its processes directly.
+            if self._notifier is not None and self._notifier.poll() is None:
+                self._notifier.kill()
+            if self._xctrace is not None and self._xctrace.poll() is None:
+                self._kill_group(self._xctrace)
+            self.error = self.error or "the trace recorder did not finish within its bound"
+
+
+def foreign_instruments(own_groups: set[int]) -> list[str]:
+    """Host Instruments processes (xctrace, Instruments, DTServiceHub) that do
+    not belong to this profiler's own process groups."""
+    listing = run(["ps", "-axo", "pid=,pgid=,command="], capture_output=True, timeout=30).stdout
+    # (A traced run holds the host lock before starting xctrace, so none of
+    # this profiler's own processes match while it waits.)
+    found = []
+    for line in listing.splitlines():
+        fields = line.strip().split(None, 2)
+        if len(fields) != 3 or not fields[1].isdigit():
+            continue
+        if int(fields[1]) in own_groups or int(fields[0]) == os.getpid():
+            continue
+        if INSTRUMENTS_PROCESS.search(fields[2]):
+            found.append(f"pid {fields[0]}: {fields[2][:160]}")
+    return found
+
+
+class HostTraceLock:
+    """Serializes traced runs on this Mac (kperf admits one session) and
+    waits, bounded and logged, for other sessions' Instruments to finish."""
+
+    def __init__(self, wait_seconds: float) -> None:
+        self.wait_seconds = wait_seconds
+        self.handle: Any = None
+
+    def __enter__(self) -> "HostTraceLock":
+        TRACE_HOST_LOCK.parent.mkdir(parents=True, exist_ok=True)
+        self.handle = TRACE_HOST_LOCK.open("a+")
+        deadline = time.monotonic() + self.wait_seconds
+        announced = False
+        while True:
+            try:
+                fcntl.flock(self.handle, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                break
+            except BlockingIOError:
+                if time.monotonic() > deadline:
+                    self.handle.close()
+                    raise ProfileError(f"another traced profile run held {TRACE_HOST_LOCK} for "
+                                       f"{self.wait_seconds:.0f} s", EXIT_LOCKED)
+                if not announced:
+                    print(f"Waiting (up to {self.wait_seconds:.0f} s) for another traced run ({TRACE_HOST_LOCK})",
+                          flush=True)
+                    announced = True
+                time.sleep(2)
+        announced = False
+        while foreign := foreign_instruments(set()):
+            if time.monotonic() > deadline:
+                self.__exit__()
+                raise ProfileError(
+                    "another Instruments session holds the host (kernel profiling admits one): "
+                    + "; ".join(foreign[:3]), EXIT_LOCKED)
+            if not announced:
+                print(f"Waiting (up to {self.wait_seconds:.0f} s) for another session's Instruments to finish: "
+                      + "; ".join(foreign[:3]), flush=True)
+                announced = True
+            time.sleep(5)
+        return self
+
+    def __exit__(self, *_: object) -> None:
+        if self.handle is not None:
+            fcntl.flock(self.handle, fcntl.LOCK_UN)
+            self.handle.close()
+            self.handle = None
+
+
 class Profiler:
     def __init__(self, arguments: argparse.Namespace) -> None:
         self.arguments = arguments
@@ -389,11 +664,12 @@ class Profiler:
             raise ProfileError(f"xcresulttool {' '.join(arguments)} failed: {output.stderr.strip()}")
         return json.loads(output.stdout)
 
-    def run_scenario(self, scenario: str) -> Path:
+    def run_scenario(self, scenario: str, trace: str | None = None) -> Path:
         test, default_window, description = ALL_SCENARIOS[scenario]
         iterations = self.arguments.iterations
         window = self.arguments.window_seconds or default_window
-        run_id = f"{datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%SZ')}-{scenario}-{secrets.token_hex(3)}"
+        run_id = (f"{datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%SZ')}-{scenario}"
+                  f"{'-trace-' + trace if trace else ''}-{secrets.token_hex(3)}")
         run_dir = self.results_root / run_id
         run_dir.mkdir(parents=True)
         result_bundle = run_dir / "TestResults.xcresult"
@@ -408,21 +684,45 @@ class Profiler:
         # Launch and installation dominate short scenarios; every iteration
         # also gets its readiness and teardown allowance.
         overall = 420 + iterations * (window + 120)
-        status = bounded(
-            log, run_dir / "test-evidence", overall, overall, result_bundle,
-            ["xcodebuild", "test-without-building", "-project", str(IOS / "TronMobile.xcodeproj"),
-             "-scheme", SCHEME, "-configuration", CONFIGURATION, "-destination", self.destination(),
-             "-derivedDataPath", str(self.derived_data), "-resultBundlePath", str(result_bundle),
-             "-parallel-testing-enabled", "NO", "-collect-test-diagnostics", "never",
-             f"-only-testing:TronMobileTests/{test}"],
-            environment,
-        )
+        recorder: TraceRecorder | None = None
+        if trace:
+            # The hosted test waits for these markers; both sides share the bounds.
+            overall += TRACE_RECORDING_TIMEOUT + TRACE_STOP_TIMEOUT
+            recorder = TraceRecorder(trace, self.simulator_id, run_dir / "trace-handshake",
+                                     run_dir / f"{scenario}.trace", run_dir / "xctrace.log", overall)
+            environment.update({
+                "TEST_RUNNER_TRON_PROFILE_TRACE_HANDSHAKE_DIR": str(recorder.handshake),
+                "TEST_RUNNER_TRON_PROFILE_TRACE_RECORDING_TIMEOUT_SECONDS": str(TRACE_RECORDING_TIMEOUT),
+                "TEST_RUNNER_TRON_PROFILE_TRACE_STOP_TIMEOUT_SECONDS": str(TRACE_STOP_TIMEOUT),
+            })
+        lock = HostTraceLock(TRACE_HOST_WAIT) if recorder else None
+        if lock:
+            lock.__enter__()
+            recorder.start()
+        try:
+            status = bounded(
+                log, run_dir / "test-evidence", overall, overall, result_bundle,
+                ["xcodebuild", "test-without-building", "-project", str(IOS / "TronMobile.xcodeproj"),
+                 "-scheme", SCHEME, "-configuration", CONFIGURATION, "-destination", self.destination(),
+                 "-derivedDataPath", str(self.derived_data), "-resultBundlePath", str(result_bundle),
+                 "-parallel-testing-enabled", "NO", "-collect-test-diagnostics", "never",
+                 f"-only-testing:TronMobileTests/{test}"],
+                environment,
+            )
+        finally:
+            if recorder:
+                recorder.finish()
+            if lock:
+                lock.__exit__()
         if status == 124:
             raise ProfileError(f"{scenario} exceeded its {overall:.0f} s deadline; evidence: {run_dir / 'test-evidence'}", EXIT_TIMEOUT)
         if status >= 128:
             raise ProfileError(f"{scenario} was interrupted (status {status}); evidence: {run_dir}", status)
         if not result_bundle.is_dir():
             raise ProfileError(f"{scenario} produced no xcresult (xcodebuild status {status}); log: {log}")
+        if recorder and (recorder.error or not recorder.recording_started):
+            raise ProfileError(f"{scenario}: tracing failed: {recorder.error or 'recording never started'}; "
+                               f"evidence: {run_dir}")
         summary = self.xcresult_json(result_bundle, "summary")
         (run_dir / "xctest-summary.json").write_text(json.dumps(summary, indent=2, sort_keys=True) + "\n")
         try:
@@ -431,6 +731,15 @@ class Profiler:
             raise ProfileError(f"{error}; evidence: {run_dir}", error.code) from error
         if status:
             raise ProfileError(f"{scenario}: xcodebuild exited {status} although the test passed; log: {log}")
+        traced: dict[str, Any] | None = None
+        if recorder:
+            try:
+                windows, discarded = attribution.load_windows(recorder.handshake / "windows.jsonl", iterations, skip=1)
+                traced = attribution.attribute(recorder.output, trace, recorder.pid, windows,
+                                               discarded_epoch=discarded)
+            except attribution.AttributionError as error:
+                raise ProfileError(f"{scenario}: attribution failed: {error}; trace kept at {recorder.output}") from error
+            attribution_paths = attribution.write(traced, run_dir)
         metrics_document = self.xcresult_json(result_bundle, "metrics")
         (run_dir / "xcresult-metrics.json").write_text(json.dumps(metrics_document, indent=2, sort_keys=True) + "\n")
         context = {
@@ -447,6 +756,9 @@ class Profiler:
                 "simulator values measure host CPU work of the app process; they are a proxy, not device battery",
             ],
         }
+        if traced is not None:
+            context["trace"] = {"template": trace, "trace": str(recorder.output), "pid": recorder.pid}
+            context["warnings"].append(TRACED_WARNING)
         retries = [line for line in log.read_text(errors="replace").splitlines()
                    if line.startswith("TRON_PROFILE_SETUP_RETRY ")]
         if retries:
@@ -467,6 +779,9 @@ class Profiler:
         ]
         if self.build_log:
             artifacts.append(f"build_log={self.build_log}")
+        if traced is not None:
+            artifacts += [f"trace={recorder.output}", f"xctrace_log={recorder.log}",
+                          f"attribution={attribution_paths[0]}", f"attribution_summary={attribution_paths[1]}"]
         written = run(
             [sys.executable, str(REPORT), "write", "--tool", "ios", "--scenario", scenario,
              "--samples", str(samples_path), "--run-dir", str(run_dir), "--worktree", str(ROOT),
@@ -474,10 +789,18 @@ class Profiler:
         )
         if written.returncode:
             raise ProfileError(f"the report module rejected the samples; evidence: {run_dir}")
+        if traced is not None:
+            print(f"\n{attribution.markdown(traced, top=10)}\nAttribution: {attribution_paths[1]}", flush=True)
         return run_dir
 
     def self_test(self) -> int:
         reports = {name: self.run_scenario(name) for name in CONTROL_SCENARIOS}
+        traced_row: tuple[str, str, str, bool] | None = None
+        if self.arguments.trace:
+            traced = self.run_scenario("control-cpu", self.arguments.trace)
+            document = json.loads((traced / "attribution.json").read_text())
+            traced_row = control_attribution_verdict(document)
+            reports["control-cpu (traced)"] = traced
         comparisons = {}
         for variant in SELF_TEST_EXPECTATIONS:
             compared = run(
@@ -489,11 +812,16 @@ class Profiler:
                 raise ProfileError(f"compare failed for {variant}: {compared.stderr.strip()}")
             comparisons[variant] = json.loads(compared.stdout)
         rows = self_test_verdicts(comparisons)
+        if traced_row:
+            rows.append(traced_row)
         print("\nSelf-test (control vs. known-bad variant):")
         for variant, metric, verdict, passed in rows:
             detail = comparisons.get(variant, {}).get("metrics", {}).get(metric, {})
             delta = f" {detail['relative'] * 100:+.1f}% (noise bound {detail['noise_bound']:.4g})" if "relative" in detail else ""
             print(f"  {'PASS' if passed else 'FAIL'}  {variant:<16} {metric:<20} {verdict}{delta}")
+        if traced_row:
+            print(f"  (attribution: {CONTROL_WORKLOAD_SYMBOL} must rank within the top {CONTROL_WORKLOAD_RANK} "
+                  "self-time symbols of the traced control-cpu windows)")
         for name, directory in reports.items():
             print(f"  {name}: {directory}")
         if all(passed for *_, passed in rows):
@@ -502,6 +830,26 @@ class Profiler:
         print("Self-test FAILED: the measurement path did not detect a known cost; do not trust product numbers.",
               file=sys.stderr)
         return EXIT_SELF_TEST
+
+
+def control_attribution_verdict(document: dict[str, Any]) -> tuple[str, str, str, bool]:
+    """Self-test row: the traced control-cpu run must rank the known workload
+    function among the top self-time symbols inside the measured windows,
+    resolved by name, and (since it runs only inside them) must be all but
+    absent from the samples just outside the windows."""
+    profile = document.get("time_profile", {})
+    ranking = profile.get("all_threads", {}).get("self", [])
+    for rank, row in enumerate(ranking[:CONTROL_WORKLOAD_RANK], start=1):
+        if CONTROL_WORKLOAD_SYMBOL in row.get("symbol", ""):
+            leaked = sum(item.get("ms", 0.0) for item in profile.get("outside_windows_self", [])
+                         if CONTROL_WORKLOAD_SYMBOL in item.get("symbol", ""))
+            if leaked > 0.01 * row["ms"] + 2.0:
+                return ("control-cpu", "trace windows", f"{leaked:.0f} ms of {CONTROL_WORKLOAD_SYMBOL} fell outside "
+                        f"the measured windows ({row['ms']:.0f} ms inside); window placement is wrong", False)
+            return ("control-cpu", "trace self time",
+                    f"rank {rank} ({row['share'] * 100:.1f}%), {leaked:.0f} ms outside windows", True)
+    top = ", ".join(row.get("symbol", "?") for row in ranking[:CONTROL_WORKLOAD_RANK]) or "no samples"
+    return ("control-cpu", "trace self time", f"{CONTROL_WORKLOAD_SYMBOL} not in top {CONTROL_WORKLOAD_RANK}: {top}", False)
 
 
 def parse_arguments(argv: list[str]) -> argparse.Namespace:
@@ -525,6 +873,10 @@ def parse_arguments(argv: list[str]) -> argparse.Namespace:
                         help="reuse products only if they were built from this worktree's current source state")
     parser.add_argument("--self-test", action="store_true",
                         help="run the control scenario and its known-bad variants and verify the expected deltas")
+    parser.add_argument("--trace", choices=sorted(attribution.TEMPLATES), metavar="TEMPLATE",
+                        help="also record an xctrace capture of the measured windows and write attribution.json/.md "
+                             f"({', '.join(sorted(attribution.TEMPLATES))}); the report is marked traced and "
+                             "compare refuses it; with --self-test (time-profiler only) also verify attribution")
     arguments = parser.parse_args(argv)
     if not 1 <= arguments.iterations <= 50:
         parser.error("--iterations must be 1...50")
@@ -543,6 +895,8 @@ def parse_arguments(argv: list[str]) -> argparse.Namespace:
         parser.error("choose --scenario NAME, --scenario all, --self-test, or --list")
     if arguments.self_test and arguments.scenario:
         parser.error("--self-test runs only the control scenarios; run product scenarios separately")
+    if arguments.self_test and arguments.trace not in (None, "time-profiler"):
+        parser.error("--self-test verifies attribution only with --trace time-profiler")
     return arguments
 
 
@@ -575,7 +929,7 @@ def main(argv: list[str]) -> int:
         failures: list[tuple[str, ProfileError]] = []
         for name in arguments.scenario:
             try:
-                written.append(profiler.run_scenario(name))
+                written.append(profiler.run_scenario(name, arguments.trace))
             except ProfileError as error:
                 print(f"error: {error}", file=sys.stderr)
                 failures.append((name, error))

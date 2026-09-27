@@ -3,8 +3,9 @@
 
 Each case targets one way a comparison could silently mislead an agent:
 a real regression passing, noise or an improvement failing a change, a missing
-or relabeled metric being read as zero, or a malformed/truncated report being
-accepted. The profiler lanes' own self-tests cover measurement end to end.
+or relabeled metric being read as zero, a malformed/truncated report being
+accepted, or a run recorded under an Instruments trace (whose metrics carry
+tracing overhead) deciding a comparison. The profiler lanes' own self-tests cover measurement end to end.
 """
 
 from __future__ import annotations
@@ -125,6 +126,17 @@ class ComparisonVerdicts(ReportFixture):
         other = self.write("other", samples({"cpu.time": ("ns", "lower", [1, 1, 1])}), scenario="idle-dashboard")
         self.assertEqual(self.compare(base, other).returncode, 2)
         self.assertEqual(self.compare(base, other, "--allow-mismatch").returncode, 0)
+
+
+    def test_traced_reports_never_decide_a_comparison(self) -> None:
+        plain = self.write("plain", samples({"cpu.instructions": ("instructions", "lower", [100, 100, 100])}))
+        traced_samples = samples({"cpu.instructions": ("instructions", "lower", [150, 150, 150])})
+        traced_samples["context"] = {"trace": {"template": "time-profiler"}}
+        traced = self.write("traced", traced_samples)
+        for base, candidate in ((plain, traced), (traced, plain)):
+            result = self.compare(base, candidate)
+            self.assertEqual(result.returncode, 2, result.stdout + result.stderr)
+            self.assertIn("Instruments trace", result.stderr)
 
 
 class InputAdmission(ReportFixture):

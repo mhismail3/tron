@@ -15,13 +15,16 @@ Usage: scripts/tron-profile COMMAND [ARGS...]
 Commands:
   ios ...                 Profile a deterministic iOS scenario on the owned simulator.
   gateway ...             Profile Gateway wire traffic against an isolated fixture Gateway.
+  device --attach ...     Attach Instruments to a Tron app the user already launched on a
+                          named physical device (user-owned; never installs or launches).
   compare BASE CANDIDATE  Compare two reports (run directories or report.json files).
                           Options: --floor FRACTION (default 0.03), --json, --allow-mismatch.
   status                  Show the latest report of each tool.
   environment             Print the host conditions recorded with every report.
 
-Run 'scripts/tron-profile ios --help' or 'scripts/tron-profile gateway --help' for
-scenario lists and options. Reports live under
+Run 'scripts/tron-profile ios --help', 'scripts/tron-profile gateway --help' or
+'scripts/tron-profile device --help' for scenarios and options; 'ios --trace' adds an
+Instruments attribution summary of a scenario's measured windows. Reports live under
 $HOME/Library/Developer/Tron/profiles/<tool>/<run>/ (override with
 TRON_PROFILE_RESULTS_DIR); each tool keeps a 'latest' link.
 
@@ -33,7 +36,7 @@ USAGE
 command="${1:-}"
 (($#)) && shift
 case "$command" in
-  ios|gateway)
+  ios|gateway|device)
     tool="$ROOT/scripts/tron-profile-$command"
     [[ -x "$tool" ]] || { echo "error: the $command profiler is not installed in this checkout ($tool)" >&2; exit 2; }
     exec "$tool" "$@"

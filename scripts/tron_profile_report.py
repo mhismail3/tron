@@ -322,6 +322,14 @@ def compare_metric(base: dict[str, Any], candidate: dict[str, Any], floor: float
 
 
 def compare(base: dict[str, Any], candidate: dict[str, Any], floor: float, allow_mismatch: bool) -> dict[str, Any]:
+    # A traced run (`ios --trace`) carries Instruments overhead in every
+    # resource metric; it attributes cost but never decides a comparison.
+    for role, report in (("base", base), ("candidate", candidate)):
+        if (report.get("context") or {}).get("trace"):
+            raise ReportError(
+                f"the {role} report {report.get('run_id')} was recorded under an Instruments trace; its metrics include "
+                "tracing overhead, so compare only untraced runs"
+            )
     mismatch = [
         key for key in ("tool", "scenario") if base.get(key) != candidate.get(key)
     ]

@@ -23,6 +23,17 @@ warnings and the verdicts in the handoff. Add a scenario (in
 one exercises the path. Details:
 [iOS scenario profiler](../../../packages/ios-app/docs/development.md#ios-scenario-profiler).
 
+To find the owner of a measured cost, rerun that scenario with
+`--trace time-profiler` (after `--self-test --trace time-profiler` on the host)
+and read `attribution.md` in its run directory: main-thread and all-thread
+symbols by self and total time inside the measured windows. Rank contributors
+there before editing; decide the fix's value only with untraced runs and
+`compare` (it refuses traced reports). Traces take a host-wide Instruments lock
+and wait for other sessions' Instruments. Physical-device captures
+(`scripts/tron-profile device --attach`) are user-owned: run them only when the
+user asks and has launched the app. Details:
+[Attribution](../../../packages/ios-app/docs/development.md#attribution-finding-the-owner).
+
 ## Choose the question
 
 - **A reported bottleneck:** reproduce the user-visible cost, profile the full
