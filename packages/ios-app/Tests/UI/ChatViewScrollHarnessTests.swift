@@ -801,13 +801,13 @@ struct ChatViewScrollHarnessTests {
     //   in the live hierarchy, so a row that unmounted cannot be counted.
     // - `longestBlankRun` and `blankPhases`: the longest consecutive blank run,
     //   and which phases (`p<index>:<blank count>`) held any blank at all.
-    // - `maxEstimateRatio`: the largest published content estimate over the
-    //   smallest, i.e. how far the lazy stack's own estimate moved during the
-    //   journey. The harness has no independent measurement of the whole
-    //   history's realized height — a lazy stack never realizes all of it, and
-    //   the offsets of the rows it does place are themselves estimate-derived —
-    //   so this is the documented proxy the plan's CT-3 comparison holds constant
-    //   while the shape changes. `estimateOpen/Min/Max` carry the raw points.
+    // - `maxEstimateRatio`: the estimate's swing, the largest published content
+    //   estimate over the smallest (max/min), i.e. how far the lazy stack's own
+    //   estimate moved during the journey. It is not a truth ratio: the harness
+    //   has no independent measurement of the whole history's realized height —
+    //   a lazy stack never realizes all of it, and the offsets of the rows it
+    //   does place are themselves estimate-derived — so this is the estimate's
+    //   own excursion, with `estimateOpen`/`Min`/`Max` carrying the raw points.
     // - `reDerivations`/`maxReDerivation`: content-estimate changes of at least
     //   1,000 pt between consecutive callbacks, and the largest of them, read
     //   from the probe's geometry trace (the only place a re-derivation inside one
@@ -815,6 +815,13 @@ struct ChatViewScrollHarnessTests {
     // - `tailDisplacements`: `chat.tail.first-displacement` diagnostics traced
     //   during the journey; `repairCommands` the commands by origin, with
     //   `pastEndRepairs` repeated on its own.
+    // - `traceCoverage`: whether the two bounded buffers those counts are read
+    //   from were full when the journey ended — the probe's geometry trace keeps
+    //   its last 240 samples and the chat trace ring its last 256 records, each
+    //   with its own eviction order. `saturated` means the buffer may have
+    //   evicted records this journey counted, so `reDerivations` and
+    //   `tailDisplacements` are lower bounds then; `complete` means neither
+    //   buffer was full.
     // - `pastBottomBoundaries`, `tallRowHeight`, `tailErrorSettled`: sampled
     //   boundaries whose offset was past the legal content bottom, the tall
     //   row's measured frame height, and the native signed offset error against
@@ -903,11 +910,16 @@ struct ChatViewScrollHarnessTests {
 
     // The second shape drives the reader's actual journey instead of one send:
     // repeated keyboard up/down cycles, each submitting a prompt before the
-    // keyboard dismisses. The recorded runs show one tail materialization, so
-    // only the first submission is known to reach a send (plan CT-10). The
-    // single-send shape settles against the same estimate; this one measures
-    // whether the pinned viewport is ever left with no realized row on screen
-    // once each transition has landed.
+    // keyboard dismisses. The first recorded baseline materialized one tail for
+    // three submissions, because the journey never acknowledged its first send:
+    // `ComposerDraftCoordinator` holds an admitted submission until an
+    // authoritative snapshot publishes its canonical user row, and refuses the
+    // next prompt meanwhile (`submission_in_progress`), so only the first send
+    // reached the transcript (plan CT-10). The journey now installs that
+    // canonical row after each cycle, the way a Gateway publishes it, so every
+    // cycle's send is admitted. The single-send shape settles against the same
+    // estimate; this one measures whether the pinned viewport is ever left with
+    // no realized row on screen once each transition has landed.
     //
     // Measured on the branch that reproduced the 2026-09-26 blank, before any
     // recovery existed, over eight cycles of 20/20/60 boundaries: 240-280 of 600
@@ -942,7 +954,8 @@ struct ChatViewScrollHarnessTests {
             }
             snapshot.transcriptStart = 0
             snapshot.transcriptTotal = snapshot.transcript.count
-            try await withHarness(snapshot: snapshot, enablesComposerSubmission: true) { harness in
+            let opened = snapshot
+            try await withHarness(snapshot: opened, enablesComposerSubmission: true) { harness in
                 let ready = try await harness.recorder.waitUntil {
                     $0.observation.isReady && $0.nativeRows.contains {
                         $0.semanticID == terminalSemanticID && $0.isVisible
@@ -962,7 +975,8 @@ struct ChatViewScrollHarnessTests {
                 }
                 try await measurePhase(phaseLengths[0])
                 let openingSample = try #require(samples.last)
-                for _ in 0..<cycles {
+                var acknowledged = opened
+                for cycle in 0..<cycles {
                     harness.resize(height: 620)
                     try await measurePhase(phaseLengths[1])
                     try harness.setComposerDraftText("Keep this resumed conversation stable.")
@@ -970,6 +984,14 @@ struct ChatViewScrollHarnessTests {
                     try await measurePhase(phaseLengths[2])
                     harness.resize(height: 844)
                     try await measurePhase(phaseLengths[3])
+                    // The Gateway's canonical row for the prompt just sent, so
+                    // the next cycle's submission is admitted.
+                    acknowledged = try harnessAcknowledgedSnapshot(
+                        acknowledged,
+                        promptIndex: cycle,
+                        text: "Keep this resumed conversation stable."
+                    )
+                    harness.replaceAuthoritativeSnapshot(acknowledged)
                 }
 
                 let metrics = try ct2Metrics(
@@ -984,8 +1006,8 @@ struct ChatViewScrollHarnessTests {
                     "the scenario ran every sampled display boundary"
                 )
                 #expect(
-                    metrics.materializations > 0,
-                    "the cycles sent prompts and their tail materialization ran"
+                    metrics.materializations >= cycles,
+                    "every cycle's admitted send materialized its tail"
                 )
             }
         }
@@ -1032,6 +1054,7 @@ struct ChatViewScrollHarnessTests {
         metrics.physicalRepairs = observation.physicalTailRepairCommandCount - baselines.physicalRepairs
         metrics.pastEndRepairs = observation.pastEndRepairCommandCount - baselines.pastEndRepairs
         metrics.tailErrorSettled = try harness.nativeTranscriptSignedTailError()
+        metrics.traceCoverage = ct2TraceCoverage(harness: harness)
         return metrics
     }
 
@@ -3068,6 +3091,45 @@ struct ChatViewScrollHarnessTests {
     }
 }
 
+/// The operation identity the hosted composer send stub returns for every
+/// submission (`composerSubmissionHarness`). An acknowledgement must carry it:
+/// `ComposerDraftCoordinator` reconciles an admitted submission only against a
+/// canonical user row whose `presentationId` is that operation ID.
+let harnessHostedPromptOperationID = "hosted-prompt-operation"
+
+/// The authoritative snapshot a Gateway publishes once it has accepted a
+/// prompt: the canonical user row for that send. The CT-2 cycle shape installs
+/// it after each send because an unacknowledged submission keeps
+/// `ComposerDraftCoordinator` from admitting the next prompt
+/// (`submission_in_progress`), which is why the first baseline materialized one
+/// tail for three submissions.
+private func harnessAcknowledgedSnapshot(
+    _ snapshot: SessionSnapshot,
+    promptIndex: Int,
+    text: String
+) throws -> SessionSnapshot {
+    var acknowledged = snapshot
+    acknowledged.transcript.append(try decodeTranscriptFixture(
+        TranscriptItem.self,
+        from: JSONSerialization.data(withJSONObject: [
+            "id": "cycle-prompt-\(promptIndex)",
+            "parentId": NSNull(),
+            "presentationId": harnessHostedPromptOperationID,
+            "timestamp": "2026-01-01T00:01:00Z",
+            "kind": "message",
+            "role": "user",
+            "content": [[
+                "id": "cycle-prompt-\(promptIndex)-text",
+                "ordinal": 0,
+                "type": "text",
+                "text": text
+            ]]
+        ])
+    ))
+    acknowledged.transcriptTotal = acknowledged.transcript.count
+    return acknowledged
+}
+
 /// Mixed-height lazy history for the tall-tailed send fixture: a realized tail
 /// of one-line rows, with six rows near the end rendering many screens tall so
 /// an estimate derived from the mounted rows can be wrong in both directions.
@@ -3126,6 +3188,7 @@ private struct CT2Metrics {
     var physicalRepairs = 0
     var pastEndRepairs = 0
     var tailErrorSettled: CGFloat = 0
+    var traceCoverage = "none"
 
     var maxEstimateRatio: CGFloat { estimateMin > 0 ? estimateMax / estimateMin : 0 }
 
@@ -3148,11 +3211,29 @@ private struct CT2Metrics {
             + " repairCommands=materialize:\(materializations),physical:\(physicalRepairs),pastEnd:\(pastEndRepairs)"
             + " pastEndRepairs=\(pastEndRepairs)"
             + " tailErrorSettled=\(ct2Number(tailErrorSettled))"
+            + " traceCoverage=\(traceCoverage)"
     }
 }
 
 private func ct2Number(_ value: CGFloat) -> String {
     String(format: "%.1f", Double(value))
+}
+
+/// Whether the two bounded buffers the journey's counts are read from were full
+/// when it ended. `reDerivations` is derived from the probe's geometry trace,
+/// which keeps its last 240 samples (`ChatHostedProbe.recordGeometryTrace`),
+/// and `tailDisplacements` from the chat trace ring, which keeps its last
+/// `ChatInteractionTrace.maximumRecords` (256) records with its own eviction
+/// order. A saturated buffer may have evicted records this journey counted, so
+/// the line labels those two counts as lower bounds instead of reporting them
+/// as complete.
+@MainActor
+private func ct2TraceCoverage(harness: ChatViewScrollHarness) -> String {
+    let geometryTraceBound = 240
+    let geometrySaturated = harness.probeObservation.geometryTrace.count >= geometryTraceBound
+    let chatSaturated = harness.traceRecords.count >= ChatInteractionTrace.maximumRecords
+    return "geometry:\(geometrySaturated ? "saturated" : "complete")"
+        + ",chat:\(chatSaturated ? "saturated" : "complete")"
 }
 
 /// The blank-boundary shape of one planned sample sequence: how many sampled
@@ -3455,7 +3536,7 @@ final class ChatViewScrollHarness {
             GatewayClient()
         }
         let hostedSend: ComposerSendOperation = {
-            _, _, _, _, _ in "hosted-prompt-operation"
+            _, _, _, _, _ in harnessHostedPromptOperationID
         }
         let composerSend: ComposerSendOperation? = enablesComposerSubmission
             ? hostedSend
