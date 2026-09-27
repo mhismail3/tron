@@ -682,3 +682,9 @@ pass only through eager-only repairs, stop and report.
 - Evidence: branch `ct-22-exact-tail` (final commit `0cf021bb5`, switch default today's path); extracts `/tmp/ct22-evidence/`; run directories from `20260927T094401Z-run.v5MJIm` to `20260927T100831Z-run.aLyMHd`. Supervisor checked the CT-2 and scale figures against the extracts; no independent review yet.
 - Deviations: variant A was not run; it cannot affect rows the stack never measured.
 - For the next agent: the user decides the direction.
+
+### CT-22 round 3 checkpoint · 2026-09-27 · chat scroll investigation session
+
+- Result: the chat scroll coordinator no longer observes its per-frame layout evidence (row frames, scroll geometry, physical-tail evidence and repair bookkeeping). Row and scroll geometry callbacks run during layout and read and write those fields; no view body reads them, so observing them only let UIKit's layout observation tracking treat every callback as an invalidation of the hosting view. With several rows publishing per pass (the eager tail band) that produced `Observation tracking feedback loop detected` and repeated layout passes; after the change, five of five band runs had none.
+- Evidence: `ChatScrollCoordinatorTests` and `ChatViewScrollHarnessTests`, 172 tests pass on `main` plus the change. The loop and its key paths are in the band runs' console (`[ObservationTracking] ... semanticFrames changed`).
+- Changes: `ChatScrollCoordinator.swift` on `main`. The band itself stays on the throwaway branch `ct-22-exact-tail` (round 3: event-driven, boundary keyed by row identity, opening median 1.08x today). Open: streaming frame interval about 50 ms against 33 ms today; layout costs under 2 ms a frame on both paths, and main-thread time outside layout (28 ms a frame today, 38 ms with the band) is being measured.
