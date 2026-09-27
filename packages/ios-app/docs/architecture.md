@@ -1382,7 +1382,14 @@ focus, detents, configuration readiness, or creation admission. Tron preserves i
 catalog, existing `fontFamily`/`monoFontFamily`/`fontAxisValues` preferences, and
 variable font axes. `TronFontLoader` builds `UIFontDescriptor` instances for
 custom weights, Recursive `MONO`/`CASL`, and Source Serif optical sizing; missing
-bundled faces fall back to the matching system text or monospaced role.
+bundled faces fall back to the matching system text or monospaced role. Views
+build fonts in `body`, so the loader reuses each created font, bounded, by every
+input that shapes it (resolved family, size, weight, mono, the family's weight
+axis and Recursive's casual value); building the key performs the same
+`FontSettings` reads, so setting changes still invalidate their readers, and
+Dynamic Type scaling stays with SwiftUI and `UIFontMetrics` at render time.
+Adaptive palette colors parse their hex values once and only select by
+interface style when resolved.
 Semantic SwiftUI font metadata and a Dynamic-Type-aware secure pairing field
 keep custom typography scalable.
 

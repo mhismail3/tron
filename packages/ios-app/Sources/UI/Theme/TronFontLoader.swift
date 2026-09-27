@@ -18,10 +18,15 @@ enum TronFontLoader {
         family: FontFamily? = nil,
         settings: FontSettings = .shared
     ) -> Font {
-        let base = createUIFont(size: size, weight: weight, mono: mono, casual: casual, family: family, settings: settings)
+        let key = cacheKey(size: size, weight: weight, mono: mono, casual: casual, family: family, settings: settings)
+        if let cached = fontCache[key] { return cached }
+        let base = uiFont(for: key)
         // `relativeTo:` carries Dynamic Type metadata into SwiftUI's environment;
         // wrapping a UIFont/CTFont alone renders the right pixels but audits as fixed.
-        return .custom(base.fontName, size: size, relativeTo: textStyle(for: size))
+        let font = Font.custom(base.fontName, size: size, relativeTo: textStyle(for: size))
+        if fontCache.count >= cacheLimit { fontCache.removeAll(keepingCapacity: true) }
+        fontCache[key] = font
+        return font
     }
 
     static func createUIFont(
@@ -32,16 +37,73 @@ enum TronFontLoader {
         family: FontFamily? = nil,
         settings: FontSettings = .shared
     ) -> UIFont {
+        uiFont(for: cacheKey(size: size, weight: weight, mono: mono, casual: casual, family: family, settings: settings))
+    }
+
+    /// Every input that shapes the created font. Views call these loaders from
+    /// their bodies, so resolved fonts are reused by exact key; building the key
+    /// reads the same `FontSettings` properties as an uncached build, so font
+    /// setting changes still invalidate the calling views through observation.
+    /// Dynamic Type is not an input: SwiftUI (`relativeTo:`) and callers'
+    /// `UIFontMetrics` scale the unscaled base at render time.
+    private struct CacheKey: Hashable {
+        let family: FontFamily
+        let size: CGFloat
+        let weight: Weight
+        let mono: Bool
+        let preferredWeight: Double
+        /// Recursive's effective `CASL` value; nil for every other family.
+        let casual: CGFloat?
+    }
+
+    /// Bounds the caches when continuous axis sliders produce new keys.
+    private static let cacheLimit = 256
+    private static var uiFontCache: [CacheKey: UIFont] = [:]
+    private static var fontCache: [CacheKey: Font] = [:]
+
+    private static func cacheKey(
+        size: CGFloat,
+        weight: Weight,
+        mono: Bool,
+        casual: CGFloat?,
+        family: FontFamily?,
+        settings: FontSettings
+    ) -> CacheKey {
         let resolved = mono ? (family ?? settings.selectedMonoFamily) : (family ?? settings.selectedFamily)
-        let preferred = CGFloat(settings.axisValue(for: resolved, axis: .weight))
+        return CacheKey(
+            family: resolved,
+            size: size,
+            weight: weight,
+            mono: mono,
+            preferredWeight: settings.axisValue(for: resolved, axis: .weight),
+            casual: resolved == .recursive
+                ? casual ?? CGFloat(settings.axisValue(for: resolved, axis: .casual))
+                : nil
+        )
+    }
+
+    private static func uiFont(for key: CacheKey) -> UIFont {
+        if let cached = uiFontCache[key] { return cached }
+        let font = makeUIFont(for: key)
+        if uiFontCache.count >= cacheLimit { uiFontCache.removeAll(keepingCapacity: true) }
+        uiFontCache[key] = font
+        return font
+    }
+
+    private static func makeUIFont(for key: CacheKey) -> UIFont {
+        let resolved = key.family
+        let size = key.size
+        let weight = key.weight
+        let mono = key.mono
+        let preferred = CGFloat(key.preferredWeight)
         let shifted = weight.rawValue + preferred - CGFloat(FontAxis.weight.defaultValue(for: resolved))
         let clamped = min(max(shifted, CGFloat(resolved.weightRange.lowerBound)), CGFloat(resolved.weightRange.upperBound))
         let descriptor: UIFontDescriptor
         if resolved.isVariable {
             var variations: [UInt32: CGFloat] = [FontAxis.weight.tag: clamped]
-            if resolved == .recursive {
+            if resolved == .recursive, let casual = key.casual {
                 variations[0x4D4F4E4F] = mono ? 1 : 0 // MONO
-                variations[FontAxis.casual.tag] = casual ?? CGFloat(settings.axisValue(for: resolved, axis: .casual))
+                variations[FontAxis.casual.tag] = casual
                 variations[0x736C6E74] = 0 // slnt
                 variations[0x43525356] = 0 // CRSV
             }
