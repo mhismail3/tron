@@ -2207,6 +2207,61 @@ struct ChatTranscriptPresentationStoreTests {
         }
     }
 
+    @Test("canonical takeover of a displayed live call grants no new entrance")
+    func canonicalTakeoverOfDisplayedCallIsNotAnEntrance() async throws {
+        try await withTestWatchdog { @MainActor in
+            var snapshot = try SessionScenarioBuilder(seed: 1_228)
+                .openingTail(targetEncodedBytes: 8_000)
+            snapshot.phase = .running
+            snapshot.transcript = []
+            snapshot.transcriptStart = 0
+            snapshot.transcriptTotal = 0
+            snapshot.toolExecutions = []
+            let store = ChatTranscriptPresentationStore()
+            var tag = ChatTranscriptProjectionTag(snapshot: snapshot, presentationGeneration: 26)
+            store.submit(snapshot: snapshot, tag: tag)
+            _ = try await store.waitForInstall(of: tag)
+
+            // Two ungrouped running members of one segment share one live row
+            // whose semantic owner is the newest call.
+            snapshot.toolExecutions = [
+                storeRuntimeTool(
+                    id: "call-one", output: "running", progressSequence: 1,
+                    toolSegmentID: "segment:turn"
+                ),
+                storeRuntimeTool(
+                    id: "call-two", output: "running", progressSequence: 2,
+                    toolSegmentID: "segment:turn", order: 1
+                ),
+            ]
+            snapshot.eventSequence += 1
+            tag = ChatTranscriptProjectionTag(snapshot: snapshot, presentationGeneration: 26)
+            store.submit(snapshot: snapshot, tag: tag)
+            let live = try await store.waitForInstall(of: tag)
+            let liveRowID = try #require(live.timeline.items.live.first?.id)
+            #expect(store.pendingEntranceIDs == [liveRowID])
+            #expect(store.resolveEntrance(id: liveRowID, installationTag: tag, isVisible: true))
+            store.consumeTranscriptEntrance(id: liveRowID)
+            #expect(store.pendingEntranceIDs.isEmpty)
+
+            // The canonical transcript takes over the newest call. Its new
+            // canonical row carries the semantic owner the live row already
+            // displayed, so the takeover is an update, not an entrance.
+            snapshot.transcript = [try decodeTranscriptFixture(TranscriptItem.self, from: Data("""
+            {"id":"assistant-two","parentId":null,"timestamp":"2026-01-01T00:00:00Z","kind":"message","role":"assistant","content":[{"id":"part-two","type":"toolCall","toolCallId":"call-two","name":"read","arguments":{},"toolSegmentId":"segment:turn"}]}
+            """.utf8))]
+            snapshot.transcriptTotal = 1
+            snapshot.eventSequence += 1
+            tag = ChatTranscriptProjectionTag(snapshot: snapshot, presentationGeneration: 26)
+            store.submit(snapshot: snapshot, tag: tag)
+            let takeover = try await store.waitForInstall(of: tag)
+            let fusion = try #require(takeover.toolBoundaryFusion)
+            #expect(!live.containsDisplayedID(fusion.canonicalRenderedID))
+            #expect(store.pendingEntranceIDs.isEmpty)
+            #expect(store.entranceState(for: fusion.canonicalRenderedID) == .none)
+        }
+    }
+
     @Test("canonical and live segment members keep one physical chip through takeover")
     func canonicalLiveToolBoundaryKeepsPhysicalHost() async throws {
         try await withTestWatchdog { @MainActor in

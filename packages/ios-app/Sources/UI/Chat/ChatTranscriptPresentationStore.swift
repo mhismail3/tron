@@ -837,6 +837,28 @@ enum ChatTranscriptTransitionPolicy {
 
         var inserted: [String] = []
         var insertedSet = Set<String>()
+        // Built at most once per install, and only when a candidate passes the
+        // cheaper ID checks, so the pass stays linear in the displayed rows.
+        // A row outside the semantic index has a nil semantic ID; a nil next
+        // semantic ID matches any such previous row, exactly as an optional
+        // equality against every previous row would.
+        var previousSemantics: (indexed: Set<String>, includesUnindexed: Bool)?
+        func previouslyDisplayedSemantic(_ semanticID: String?) -> Bool {
+            let semantics = previousSemantics ?? {
+                var indexed = Set<String>()
+                var includesUnindexed = false
+                for item in previous.displayedItems {
+                    if let id = previous.semanticID(forDisplayedID: item.id) {
+                        indexed.insert(id)
+                    } else {
+                        includesUnindexed = true
+                    }
+                }
+                return (indexed, includesUnindexed)
+            }()
+            previousSemantics = semantics
+            return semanticID.map(semantics.indexed.contains) ?? semantics.includesUnindexed
+        }
         func admit<S: Sequence>(_ candidates: S) where S.Element == String {
             for id in candidates {
                 guard inserted.count < ChatTranscriptPageRequest.maximumItemCount else { return }
@@ -848,18 +870,14 @@ enum ChatTranscriptTransitionPolicy {
                 let entranceID = id == next.toolBoundaryFusion?.liveRenderedID
                     ? (next.toolBoundaryFusion?.canonicalRenderedID ?? id)
                     : id
-                let semanticAlreadyDisplayed = previous.displayedItems.contains { item in
-                    previous.semanticID(forDisplayedID: item.id)
-                        == next.semanticID(forDisplayedID: entranceID)
-                }
+                guard !previous.containsDisplayedID(entranceID) else { continue }
                 let physicalHost = next.physicalHostID(forDisplayedID: entranceID)
-                let physicalHostAlreadyDisplayed = physicalHost != entranceID
-                    && previous.containsUnaliasedPhysicalID(physicalHost)
-                if !previous.containsDisplayedID(entranceID),
-                   !semanticAlreadyDisplayed,
-                   !physicalHostAlreadyDisplayed {
-                    inserted.append(entranceID)
-                }
+                guard physicalHost == entranceID
+                    || !previous.containsUnaliasedPhysicalID(physicalHost) else { continue }
+                guard !previouslyDisplayedSemantic(
+                    next.semanticID(forDisplayedID: entranceID)
+                ) else { continue }
+                inserted.append(entranceID)
             }
         }
         if sharesCanonicalIdentity {

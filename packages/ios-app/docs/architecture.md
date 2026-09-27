@@ -359,7 +359,11 @@ presentation binding. The Gateway additionally refuses to project Pi's briefly r
 and fail closed before row-local preparation rather than trapping or being collision-disambiguated;
 one transient invalid mounted projection requests one fresh authoritative synchronization cut in the
 same presentation generation, while a repeated malformed cut fails with authored actionable copy.
-Semantic identity continues to own entrance and resilience state. The
+Semantic identity continues to own entrance and resilience state. Classifying an install's entrances
+is one linear pass that indexes the previously displayed semantic identities once; a row whose
+semantic owner was already displayed under another rendered ID, such as a canonical tool takeover,
+is an update rather than an entrance
+(`ChatTranscriptPresentationStoreTests.canonicalTakeoverOfDisplayedCallIsNotAnEntrance`). The
 projection worker prepares immutable row-local
 markdown/thinking slices with entry-local revision tokens, so render rows perform only cheap revision
 equality and never reslice the transcript-wide cache. `ToolExecutionStatePolicy` is shared with
