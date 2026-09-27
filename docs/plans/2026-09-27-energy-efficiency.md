@@ -2,7 +2,7 @@
 
 - **Started:** 2026-09-27
 - **Status:** Active (approved in chat by the user on 2026-09-27)
-- **Last updated:** 2026-09-27, P-3 scoped and claimed
+- **Last updated:** 2026-09-27, P-1 and P-4 done
 - **Goal:** Tron for iPhone does measurably less CPU, disk, timer and radio work per minute of real use, proven by a reliable profiler that every agent can run, with no change to what the user sees or does.
 
 ## Goal and constraints
@@ -96,6 +96,30 @@ phone with no protocol or iOS change; with context takeover, a cumulative
 streaming frame compresses to roughly its new text. The iOS simulator runtime
 still has to confirm the same offer (T3-DEFLATE).
 
+Baselines recorded 2026-09-27 (P-4; medians of five iterations on the owned
+simulator, optimized `DevicePerformance`, source = P-1 profiler over `main` at
+`8e1a58ccb`; Gateway medians of three iterations at `060697d21`, before
+T3-DEFLATE):
+
+| iOS scenario (window) | Instructions | Main-thread CPU | Interrupt wakeups | Logical writes |
+| --- | ---: | ---: | ---: | ---: |
+| idle-dashboard (30 s) | 8.24 G | 2.36 s | 3,834 | 420 KiB |
+| idle-chat (30 s) | 0.01 G | 0.00 s | 39 | 0 |
+| streaming-reply (12 s) | 31.5 G | 3.05 s | 1,119 | 16 KiB |
+| tool-loop (15 s) | 136.3 G | 8.95 s | 1,482 | 764 KiB |
+| composer-typing (10 s) | 8.32 G | 1.21 s | 675 | 236 KiB |
+| summary-storm (15 s) | 28.7 G | 3.04 s | 1,614 | 3,624 KiB |
+
+| Gateway scenario | Phone socket bytes | Phone frames |
+| --- | ---: | ---: |
+| stream-reply | 705 KiB | 165 |
+| tool-loop | 15.5 MiB | 219 |
+| idle (60 s) | 468 B | 1 |
+
+The streaming-reply workload replays the corrected T1-GW cadence; with the old
+two-frames-per-window cadence the same scenario measured 60.9 G instructions and
+5.44 s of main-thread CPU, so T1-GW roughly halved phone-side streaming work.
+
 ## Plan rules
 
 - **Measure, then keep.** Every T task records the relevant profiler scenario
@@ -123,10 +147,10 @@ still has to confirm the same offer (T3-DEFLATE).
 
 | ID | Status | Scope | Depends on | Owner |
 | --- | --- | --- | --- | --- |
-| P-1 | Claimed | iOS scenario profiler (new `tron-profile` in `scripts/`, `ios` subcommand), optimized profiling build, in-process energy metrics, deterministic scenarios, control self-test, JSON reports (details below) | none | energy-efficiency supervisor, worker lane p1, 2026-09-27 |
+| P-1 | Done | iOS scenario profiler (new `tron-profile` in `scripts/`, `ios` subcommand), optimized profiling build, in-process energy metrics, deterministic scenarios, control self-test, JSON reports (details below) | none | energy-efficiency supervisor, worker lane p1, 2026-09-27 |
 | P-2 | Done | Gateway wire-traffic profiler (`gateway` subcommand), isolated fixture Gateway with a faux model, recording client, per-topic frame and byte report (details below) | none | energy-efficiency supervisor, worker lane p2, 2026-09-27 |
 | P-3 | Claimed | Attribution: `--trace` for iOS scenarios (xctrace Time Profiler, SwiftUI, Points of Interest; exported top-symbol summary) and an attach-only `device` mode for a user-launched LocalDevice app | P-1 | energy-efficiency supervisor, worker lane p3, 2026-09-27 |
-| P-4 | Needs scoping | Baseline: run every P-1 and P-2 scenario on `main`, record the numbers and host state in this plan's Context | P-1, P-2 | |
+| P-4 | Done | Baseline: run every P-1 and P-2 scenario on `main`, record the numbers and host state in this plan's Context | P-1, P-2 | energy-efficiency supervisor, 2026-09-27 |
 | T1-GW | Done | Gateway: re-arm the streaming throttle; delete `session.bashProgress` and `session.heartbeat`; skip the heartbeat ping while a client proved liveness within the interval, keeping today's detection bound | none (keep decision: P-1, P-2) | energy-efficiency supervisor, worker lane t1-gw, 2026-09-27 |
 | T1-CACHE | Claimed | `SnapshotCache`: drop checkpoints that cannot change it, coalesce summary checkpoints and checkpoint on background, drop the save-path double admission pass | none (keep decision: P-1, P-2) | energy-efficiency supervisor, worker lane t1-persist, 2026-09-27 |
 | T1-DRAFTS | Claimed | `ComposerDraftStore`: in-memory logical clock, size accounting without re-hashing, manifest-only writes when attachments are unchanged; no observable mutation for unchanged text | none (keep decision: P-1, P-2) | energy-efficiency supervisor, worker lane t1-persist, 2026-09-27 |
@@ -143,6 +167,7 @@ still has to confirm the same offer (T3-DEFLATE).
 | T3-STREAM | Needs scoping | Streaming text append deltas for `session.progress`, same rules; only if P-2 shows progress bytes or decode cost still material after T3-DEFLATE | T3-DEFLATE | |
 | T3-TOOLPROG | Needs scoping | Tool progress omits a `partialResult` the phone can reconstruct exactly, same rules; only if still material after T3-DEFLATE | T3-DEFLATE | |
 | T3-CATALOG | Needs scoping | Conditional `session.list` on foreground: an unchanged catalog generation keeps the retained rows | P-4 | |
+| R-OPEN | Needs scoping | Investigate whether an unanswered optional older-history page during chat opening fails the opening ("layout did not settle") instead of falling back to the usable tail as `architecture.md` promises; fix the owner if so | none | |
 | V-1 | Needs scoping | Close-out: full Gateway and iOS suites, parity gates, profiler comparison against P-4, owning docs, user device check | all | |
 
 ## Task details
@@ -452,4 +477,42 @@ time.
   compressed bytes: cumulative streaming frames already compress to about 1.3%,
   so their remaining value is phone decode CPU, not radio. T3-TRANSCRIPT still
   removes the phone's decode of up to 800 KB per snapshot.
+
+### P-1 · Done · 2026-09-27 · energy-efficiency supervisor (worker lane p1)
+
+- Result: `scripts/tron-profile ios` builds the optimized `DevicePerformance`
+  hosted tests (Swift `-O` whole-module, testability and `HOSTED_TEST` kept)
+  and runs six deterministic scenarios on the owned simulator under the
+  `scripts/tron-ios-test` lease, using production `AppModel`, `GatewayClient`
+  over a scripted socket, `SessionShellView`, `ChatView` and the real draft
+  store. In-process metrics (instructions, cycles, CPU energy, disk and logical
+  writes, peak footprint, wakeups, main-thread and process CPU, wall time) and
+  workload counters land in the xcresult and become one report per scenario.
+- Evidence: `--self-test` passed three times (CPU, disk and wakeup controls
+  each detected beyond the noise bound); two full runs moved median
+  instructions by 0.3–2.6%; an identical control at load 100 versus 9 moved
+  instructions 0.4% while cycles and CPU time moved 10–30%, so only
+  instructions decide keeps. Full unit tier 1,796 passed with the profiling
+  tests skipped.
+- Changes: `scripts/tron-profile-ios`, `scripts/test-tron-profile-ios.py`,
+  `packages/ios-app/Tests/Profiling/`, the optimized
+  `packages/ios-app/Configuration/DevicePerformance.xcconfig`,
+  `packages/ios-app/project.yml` (the baseline test now reads
+  `TEST_RUNNER_TRON_PERFORMANCE_BASELINE`, the only form that reaches a hosted
+  test), docs, both skills, CI. The supervisor updated the streaming script to
+  replay the corrected T1-GW throttle.
+- Kept on purpose: idle wakeups read 0 on the simulator and physical disk bytes
+  follow the host cache; interrupt wakeups and logical writes are the stable
+  counters.
+- For the next agent: `packages/ios-app/scripts/test-build-matrix-policy.sh`
+  already failed on `main` before this work (UI Validation configuration
+  expectation). Opening a page-bound chat surfaced "Conversation unavailable —
+  the conversation layout did not settle" when the optional older-history page
+  read went unanswered, which may be a real resilience gap (see R-OPEN).
+
+### P-4 · Done · 2026-09-27 · energy-efficiency supervisor
+
+- Result: baselines in Context. Evidence: the iOS and Gateway reports under
+  `~/Library/Developer/Tron/profiles/`. Host load varied 5–100; decisions use
+  instructions, byte and frame counts.
 
