@@ -3832,6 +3832,24 @@ final class ChatViewScrollHarness {
         abs(try nativeTranscriptSignedTailError())
     }
 
+    /// Round the transcript's native offset to a whole point. The parity gate
+    /// compares rendered pixels, and the lazy stack's settled offset moves by a
+    /// fraction of a point run to run, which at 1x rendering re-rasterizes every
+    /// glyph and reads as a whole-frame difference unrelated to what the gate is
+    /// about. Snapping first makes the rendered position a deterministic
+    /// function of the layout instead of of the estimate; it changes no layout,
+    /// row, or state the product owns.
+    func snapNativeTranscriptOffsetToWholePoint() throws {
+        let scrollView = try nativeTranscriptScrollView()
+        let snapped = scrollView.contentOffset.y.rounded()
+        guard abs(snapped - scrollView.contentOffset.y) > 0.01 else { return }
+        scrollView.setContentOffset(
+            CGPoint(x: scrollView.contentOffset.x, y: snapped),
+            animated: false
+        )
+        scrollView.layoutIfNeeded()
+    }
+
     func isNativeTranscriptInteractionEnabled() throws -> Bool {
         let scrollView = try nativeTranscriptScrollView()
         return scrollView.isScrollEnabled && scrollView.isUserInteractionEnabled
