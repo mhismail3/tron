@@ -510,7 +510,7 @@ def run_scenario(scenario: Scenario, args: argparse.Namespace, results_dir: Path
         try:
             fixture = FixtureGateway(evidence, args.tokens_per_second, run_dir / "cpu-profile" if args.cpu_profile else None)
             fixture.prepare()
-            warmup = 0 if scenario.prompt is None else args.warmup
+            warmup = args.warmup
             seeded = fixture.seed(warmup + args.iterations) if scenario.seeded else []
             fixture.start()
             log(f"{scenario.name}: fixture Gateway pid {fixture.process.pid} on 127.0.0.1:{fixture.port}")
@@ -549,10 +549,14 @@ def run_scenario(scenario: Scenario, args: argparse.Namespace, results_dir: Path
             context["warnings"].append(f"seeded transcript page holds only {opened[0]['items']} items")
         report_samples(run_dir, scenario, result, context)
         return run_dir
-    except ProfileFailure as failure:
+    except (ProfileFailure, Interrupted) as failure:
+        # A run directory without report.json always says why.
+        interrupted = isinstance(failure, Interrupted)
         (run_dir / "failure.json").write_text(json.dumps({
-            "schema": "tron.profile-gateway-failure.v1", "scenario": scenario.name, "error": str(failure),
-            "exit": failure.code, "evidence": str(failure.evidence) if failure.evidence else None,
+            "schema": "tron.profile-gateway-failure.v1", "scenario": scenario.name,
+            "error": f"interrupted by signal {failure.signal_number}" if interrupted else str(failure),
+            "exit": EXIT_INTERRUPTED if interrupted else failure.code,
+            "evidence": None if interrupted or not failure.evidence else str(failure.evidence),
         }, indent=2) + "\n")
         raise
 
@@ -628,7 +632,7 @@ def parse(argv: list[str]) -> argparse.Namespace:
     parser.add_argument("--scenario", action="append", default=[], metavar="NAME", help="scenario to run (repeatable, or 'all')")
     parser.add_argument("--iterations", type=int, default=3, help="measured iterations per scenario (default 3)")
     parser.add_argument("--warmup", type=int, default=1,
-                        help="unmeasured warm-up iterations before prompt scenarios (default 1)")
+                        help="unmeasured warm-up iterations of the same workload (default 1)")
     parser.add_argument("--window-seconds", type=float, default=60.0, help="idle scenario window (default 60)")
     parser.add_argument("--tokens-per-second", type=float, default=80.0, help="faux model streaming rate (default 80)")
     parser.add_argument("--no-build", action="store_true", help="use the existing packages/gateway/dist build")

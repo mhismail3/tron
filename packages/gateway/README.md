@@ -2312,7 +2312,8 @@ device drives `dashboard-observer`.
 | `idle` | Mobile mounted in an idle chat, dashboard connected, nothing runs | `--window-seconds` (60) |
 | `dashboard-observer` | Only the dashboard records while another client runs the tool loop | Prompt to idle plus 1.5 s |
 
-One unmeasured warm-up iteration (`--warmup`) precedes prompt scenarios. A run is
+One unmeasured warm-up iteration (`--warmup`) of the same workload precedes the
+measured ones, keeping post-start work out of the samples. A run is
 rejected (exit 6) unless every iteration ends idle with exactly the scripted
 canonical outcome (final text length, tool results) and the recorded clients saw
 the workload. Metrics, one sample per iteration, all lower-is-better:
