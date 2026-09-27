@@ -2,7 +2,7 @@
 
 - **Started:** 2026-09-23
 - **Status:** Active
-- **Last updated:** 2026-09-23, none
+- **Last updated:** 2026-09-26, MS-1 claimed
 - **Goal:** Split stable iOS code out of the single `TronMobile` module so a typical edit rebuilds and re-optimizes only the module it touches.
 
 Follow the [plan protocol](README.md#protocol) to claim tasks and hand off.
@@ -69,7 +69,7 @@ directly, and unit tests reach the app through `@testable import TronMobile`.
 
 | ID | Status | Scope | Depends on | Owner |
 | --- | --- | --- | --- | --- |
-| MS-1 | Needs scoping | Map the dependency graph of Models, Gateway, Support, State and UI/Theme; propose module boundaries with no cycles | none | |
+| MS-1 | Claimed | Map the dependency graph of Models, Gateway, Support, State and UI/Theme; propose module boundaries with no cycles | none | module-split session, 2026-09-26 |
 | MS-2 | Needs scoping | Choose the module form (XcodeGen framework targets or a local Swift package) and prove signing, share-extension embedding and the Profile action still work | MS-1 | |
 | MS-3 | Needs scoping | Extract the lowest layer (likely Models plus Gateway protocol types) and record timings | MS-2 | |
 | MS-4 | Needs scoping | Extract further layers MS-1 identifies, one per task, each with timings | MS-3 | |
