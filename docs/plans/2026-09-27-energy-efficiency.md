@@ -113,8 +113,8 @@ Highest-cost mechanisms found:
 
 | ID | Status | Scope | Depends on | Owner |
 | --- | --- | --- | --- | --- |
-| P-1 | Ready | iOS scenario profiler: `scripts/tron-profile ios`, optimized profiling build, in-process energy metrics, deterministic scenarios, control self-test, JSON reports and `compare` (details below) | none | |
-| P-2 | Ready | Gateway wire-traffic profiler: `scripts/tron-profile gateway`, isolated fixture Gateway with a faux model, recording client, per-topic frame and byte report (details below) | none | |
+| P-1 | Ready | iOS scenario profiler (new `tron-profile` in `scripts/`, `ios` subcommand), optimized profiling build, in-process energy metrics, deterministic scenarios, control self-test, JSON reports and `compare` (details below) | none | |
+| P-2 | Ready | Gateway wire-traffic profiler (`gateway` subcommand), isolated fixture Gateway with a faux model, recording client, per-topic frame and byte report (details below) | none | |
 | P-3 | Needs scoping | Attribution: `--trace` for iOS scenarios (xctrace Time Profiler, SwiftUI, Points of Interest; exported top-symbol summary) and an attach-only `device` mode for a user-launched LocalDevice app | P-1 | |
 | P-4 | Needs scoping | Baseline: run every P-1 and P-2 scenario on `main`, record the numbers and host state in this plan's Context | P-1, P-2 | |
 | T1-GW | Needs scoping | Gateway: re-arm the streaming throttle; delete `session.bashProgress` and `session.heartbeat`; skip the heartbeat ping while a client proved liveness within the interval, keeping today's detection bound | P-4 | |
@@ -182,7 +182,7 @@ so it must be boring to run and hard to misread.
 
 ### P-2 — Gateway wire-traffic profiler
 
-- `scripts/tron-profile gateway --scenario <name>` builds the Gateway, starts
+- The profiler's `gateway --scenario <name>` subcommand builds the Gateway, starts
   an isolated fixture Gateway in a temporary home (the pattern in
   `scripts/ios-gateway-e2e-test`: faux provider, fixed tokens per second, no
   user state), connects recording WebSocket clients (one subscribed mobile
