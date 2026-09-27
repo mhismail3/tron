@@ -2,7 +2,7 @@
 
 - **Started:** 2026-09-23
 - **Status:** Active
-- **Last updated:** 2026-09-26, goal restated by the user; MS-2 waits for D1 and D2
+- **Last updated:** 2026-09-26, D1 and D2 decided; MS-2 claimed
 - **Goal:** Give the iOS app compiler-enforced layers, so its structure stays clean, one-directional and easy for agents to work in, and cannot silently regress into cycles.
 
 Follow the [plan protocol](README.md#protocol) to claim tasks and hand off.
@@ -82,9 +82,9 @@ directly, and unit tests reach the app through `@testable import TronMobile`.
 | ID | Status | Scope | Depends on | Owner |
 | --- | --- | --- | --- | --- |
 | MS-1 | Done | Map the dependency graph of Models, Gateway, Support, State and UI/Theme; propose module boundaries with no cycles | none | module-split session, 2026-09-26 |
-| MS-2 | Needs approval | Spike: one XcodeGen framework target, `Core`, holding only a few leaf types, with `SWIFT_PACKAGE_NAME` set so `package` access works; prove signing, embedding, the Share Extension, `@testable` tests, the test plans, the source-policy scripts, device install and **Product → Profile**; take baseline timings with the MS-1 recipe | MS-1, user decisions D1 and D2 | |
-| MS-3 | Needs scoping | Extract `Core` (Models, Gateway, Auth and Support, with the MS-1 moves) and record timings | MS-2 | |
-| MS-4 | Needs scoping | Extract `Notifications`, then `State`, then `UI`, one per task, each with timings; split UI further only if its timing justifies it | MS-3 | |
+| MS-2 | Claimed | First real slice of `TronMobileCore`, an XcodeGen framework target with `SWIFT_PACKAGE_NAME` set so `package` access works: move a few leaf types from Models, Gateway or Support into it (kept, not a throwaway spike); prove all five configurations build, the share extension, `@testable` tests, both test plans and the source-policy scripts; record baseline and after timings. Device install and **Product → Profile** are checked by the user or supervisor | MS-1, D1, D2 | module-split session, 2026-09-26 |
+| MS-3 | Needs scoping | Extract the rest of `Core` into `TronMobileCore` (Models, Gateway, Auth and Support, with the MS-1 moves) and record timings | MS-2 | |
+| MS-4 | Needs scoping | Extract `Notifications`, then `State`, then `UI`, one per task, each with timings, after the simplification program has cleaned up State and Chat (D1); split UI by folder where its boundaries are clean | MS-3, simplification S-IOS-STATE and S-IOS-CHAT work | |
 | MS-5 | Needs scoping | Move the share extension onto `Core` instead of compiling `SharedContent.swift` itself | MS-3 | |
 
 ## Task details
@@ -162,11 +162,15 @@ except `App` and `Auth` sits in one cycle of 12 layers. Examples: Models throws 
 
 **Decisions needed before MS-2 (user).**
 
-- D1 Coordination: `Core` needs 24 types moved out of State and 9 out of UI/Chat, which is the code the
-  simplification program's IOS-STATE and IOS-CHAT cleanup will rework. Options: do the split first (`Core`
-  only; its moves are small and mechanical), or wait for that cleanup.
-- D2 Module form: XcodeGen framework targets (fits `project.yml`, schemes and signing today) or a local Swift
-  package. MS-1 recommends framework targets with `SWIFT_PACKAGE_NAME`.
+- D1 Coordination: decided by the user on 2026-09-26. Extract `Core` now (its moves out of State and UI/Chat
+  are small and mechanical), and split State and UI only after the simplification program cleans that code up.
+  The `Core` boundary then protects that cleanup: lower code cannot reach back up.
+- D2 Module form: the user asked for the most robust and scalable form; the supervisor chose XcodeGen framework
+  targets on 2026-09-26. `Core` code has `HOSTED_TEST` blocks (`GatewayClient`, `DisplayModels`,
+  `ChatInteractionTrace`) and the app has five build configurations. Framework targets inherit every
+  configuration and condition exactly; a Swift package knows only debug and release and would need unsafe flags
+  per configuration. The module is named `TronMobileCore`, not `TronCore`, because `tron-core` already names a
+  Gateway extension.
 - D3 Value check: resolved by the user on 2026-09-26. The goal is structure (see Goal and constraints), so
   timings guard against a slowdown instead of deciding whether the split is worth doing.
 
