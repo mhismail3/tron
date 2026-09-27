@@ -229,7 +229,9 @@ extension Duration {
 }
 
 /// Sleeps until an absolute offset from a window start, so a scripted cadence
-/// does not drift with the work each step does.
+/// does not drift with the work each step does. The explicit tolerance keeps
+/// an idle process's timer coalescing from stretching the window (a default
+/// sleep ended a 30 s idle window about 2 s late).
 func profileSleep(until offset: Duration, from start: ContinuousClock.Instant) async throws {
-    try await Task.sleep(until: start + offset, clock: .continuous)
+    try await Task.sleep(until: start + offset, tolerance: .milliseconds(5), clock: .continuous)
 }
