@@ -31,7 +31,15 @@ import UIKit
 ///
 /// These are measurements, not gates: each shape prints `CT13-METRICS` and
 /// `CT13-PHASE` lines and asserts only that the journey ran. They live in the
-/// `ui-validation` tier (skipped by `UnitTests.xctestplan`).
+/// `ui-validation` tier: `UnitTests.xctestplan` lists them as skipped, but a
+/// plan's `skippedTests` is not honored for Swift Testing tests on this path and
+/// `-only-testing` overrides it in any case (measured: a unit-tier
+/// `--only-testing TronMobileTests/ChatTranscriptScaleMeasurementTests` ran all
+/// three shapes for 34.8 s), so the suite refuses to run unless xcodebuild is
+/// running the `UIValidation` plan, which it records in the test process's own
+/// environment. A scheme or test-plan environment variable cannot carry that
+/// flag: measured on this lane, neither the shell environment nor the scheme's
+/// test-action variables reach the test process.
 ///
 /// Simulator timings are indicative only: the hosted harness keeps a
 /// display-link recorder and a probe in the same process, and the machine is
@@ -43,15 +51,6 @@ import UIKit
 /// stopped for the cost phases (`scroll`, `stream`, `send`): that walk costs
 /// more the more row markers are mounted, which would penalize the eager
 /// container for the recorder's own work rather than for layout.
-///
-/// `UnitTests.xctestplan` skips these shapes, but `-only-testing` overrides a
-/// test plan's skipped tests: measured on the unit tier, `--only-testing
-/// TronMobileTests/ChatTranscriptScaleMeasurementTests` executed all three
-/// shapes (34.8 s) despite their skip entries. The suite therefore also refuses
-/// to run unless xcodebuild is running the `UIValidation` plan, which it records
-/// in the test process's own environment. A scheme or test-plan environment
-/// variable cannot carry that flag: measured on this lane, neither the shell
-/// environment nor the scheme's test-action variables reach the test process.
 private let scaleMeasurementTierEnabled =
     ProcessInfo.processInfo.environment["XCODE_TEST_PLAN_NAME"] == "UIValidation"
 

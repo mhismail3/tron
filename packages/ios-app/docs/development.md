@@ -484,8 +484,12 @@ scripts/tron-ios-test run
 The hosted harness carries the plan's CT-2 baseline measurement fixtures,
 `ChatViewScrollHarnessTests.ct2ManyTallRepliesMetrics` and
 `ChatViewScrollHarnessTests.repeatedKeyboardAndSendCyclesKeepRealizedRowsOnScreen`.
-They are measurements, not gates, so `UnitTests.xctestplan` skips them and they
-run only in the `ui-validation` tier: each drives one shape that stresses the lazy
+They are measurements, not gates, so `UnitTests.xctestplan` lists them as
+skipped and they are meant to run only in the `ui-validation` tier. Measured on
+this path, xcodebuild does not honor a test plan's `skippedTests` for Swift
+Testing tests: a full unit run executes both shapes (9.5 s together) as well as
+the CT-12 gate below (51 s), while `-skip-testing:` on the command line skips the
+same test ID. Each drives one shape that stresses the lazy
 content estimate, prints one `CT2-METRICS` line per journey and asserts only that
 the scenario ran. A line reports the sampled display boundaries whose native
 viewport held no mounted transcript row (`blankBoundaries` / `blankAfterSettle`,
@@ -529,15 +533,16 @@ because that walk costs more the more row markers are mounted and would attribut
 the recorder's work to the container; simulator milliseconds are indicative, not
 device frame times.
 
-`UnitTests.xctestplan` skips all three shapes, but `-only-testing` overrides a
-test plan's skipped tests (measured: a unit-tier `--only-testing
+`UnitTests.xctestplan` skips all three shapes, but a plan's `skippedTests` is not
+honored for Swift Testing tests on this path, and `-only-testing` overrides it in
+any case (measured: a unit-tier `--only-testing
 TronMobileTests/ChatTranscriptScaleMeasurementTests` ran all three for 34.8 s),
-so the suite also refuses to run unless xcodebuild is running the `UIValidation`
-plan, which it records in the test process's own environment
-(`XCODE_TEST_PLAN_NAME`). A unit-tier selector for the suite therefore reports it
-skipped, and `run` exits 65 because the runner requires a non-empty passing run.
-Neither the shell environment nor the scheme's test-action variables can carry
-such a flag: measured on this lane, neither reaches the test process.
+so the suite refuses to run unless xcodebuild is running the `UIValidation` plan,
+which it records in the test process's own environment (`XCODE_TEST_PLAN_NAME`).
+That is what makes a unit run — full or selected — report the suite skipped; `run`
+exits 65 there only because the runner requires a non-empty passing run. Neither
+the shell environment nor the scheme's test-action variables can carry such a
+flag: measured on this lane, neither reaches the test process.
 
 ```bash
 TRON_IOS_TEST_TIER=ui-validation scripts/tron-ios-test run \
