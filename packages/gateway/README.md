@@ -2302,8 +2302,12 @@ no parameters, send `hello` with the current protocol version and
 `session.list` (500, `user`). The **mobile** client mounts a chat as
 `SessionPresentationStore` does: `session.open`, `session.sync`, a visible
 `session.presentation.set` renewed every 15 s, then hidden and `session.close`
-when it leaves. The **dashboard** client has no subscription. A third, unrecorded
-device drives `dashboard-observer`.
+when it leaves. Before each window the acting client also selects the profile
+model with `session.setModel`: Pi 0.87.1 can cold-open a session whose provider
+an extension registers without any model (an availability-refresh race), and the
+report warns whenever an opened session needed that repair. The **dashboard**
+client has no subscription. A third, unrecorded device drives
+`dashboard-observer`.
 
 | Scenario | Workload per iteration (fresh session each) | Window |
 | --- | --- | --- |
@@ -2327,8 +2331,11 @@ the workload. Metrics, one sample per iteration, all lower-is-better:
   including WebSocket framing and any negotiated compression. The negotiated
   extension of each client is in the report context; a compression change moves
   these while message bytes stay constant.
-- `wire.<client>.pings_received|pongs_sent` (server heartbeat) and
-  `pings_sent|pongs_received` (client liveness).
+- `wire.<client>.pings_received|pongs_sent` (server heartbeat),
+  `pings_sent|pongs_received` (client liveness), and `pong_deadline_misses`
+  (client pings unanswered within the phone's 8 s deadline, where a phone would
+  reconnect; the recorder keeps measuring and the report warns). Fixture
+  `gateway.event-loop-delay` records also become a report warning.
 - `gateway.cpu.time|instructions|cycles` and `gateway.wakeups.interrupt` of the
   fixture Gateway process from `proc_pid_rusage`; tool subprocesses are excluded.
 

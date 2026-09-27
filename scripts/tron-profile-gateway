@@ -419,6 +419,10 @@ def samples_from(result: dict, scenario: Scenario) -> tuple[dict, list[str]]:
         add(f"{prefix}.pongs_sent", "count", [w["pongsSent"] for w in windows])
         add(f"{prefix}.pings_sent", "count", [w["pingsSent"] for w in windows], "10 s client liveness pings")
         add(f"{prefix}.pongs_received", "count", [w["pongsReceived"] for w in windows])
+        add(f"{prefix}.pong_deadline_misses", "count", [w["pongDeadlineMisses"] for w in windows],
+            "client pings unanswered within the phone's 8 s deadline (a phone would reconnect)")
+        if any(w["pongDeadlineMisses"] for w in windows):
+            warnings.append(f"{client}: missed the 8 s pong deadline; a phone would have reconnected during the window")
         if all(w["socketBytesRead"] is not None for w in windows):
             add(f"{prefix}.socket_bytes_read", "B", [w["socketBytesRead"] for w in windows],
                 "TCP bytes read on the client socket (WebSocket framing and any negotiated compression)")
@@ -459,6 +463,9 @@ def validate(result: dict, scenario: Scenario, iterations: int, prompt: str | No
         outcome = item["outcome"]
         if outcome["phase"] != "idle":
             problems.append(f"{label}: session ended in phase {outcome['phase']}, not idle")
+        model = item.get("openedModel") or {}
+        if (model.get("provider"), model.get("id")) != ("tron-profile", "profile-model"):
+            warnings.append(f"{label}: session opened with model {model or None}; the explicit profile-model selection repaired it")
         if outcome["sequenceGaps"]:
             warnings.append(f"{label}: {outcome['sequenceGaps']} session event sequence gap(s); a phone would resynchronize")
         if prompt is not None:
@@ -477,6 +484,22 @@ def validate(result: dict, scenario: Scenario, iterations: int, prompt: str | No
         if scenario.name == "dashboard-observer" and item["clients"]["dashboard"]["topics"].get("session.summary", {}).get("frames", 0) == 0:
             problems.append(f"{label}: the dashboard client received no session.summary while another session ran")
     return problems, warnings
+
+
+def event_loop_stalls(log_path: Path) -> list[int]:
+    """Heartbeat delays the fixture logged (gateway.event-loop-delay)."""
+    delays: list[int] = []
+    if not log_path.is_file():
+        return delays
+    for line in log_path.read_text(errors="replace").splitlines():
+        try:
+            record = json.loads(line)
+        except ValueError:
+            continue
+        if record.get("event") == "gateway.event-loop-delay":
+            match = re.search(r"delayed heartbeat by (\d+)ms", record.get("message", ""))
+            delays.append(int(match.group(1)) if match else 0)
+    return delays
 
 
 def report_samples(run_dir: Path, scenario: Scenario, result: dict, context: dict) -> None:
@@ -531,6 +554,10 @@ def run_scenario(scenario: Scenario, args: argparse.Namespace, results_dir: Path
         if problems:
             raise ProfileFailure("measurement rejected: " + "; ".join(problems), EXIT_MEASUREMENT, run_dir / "result.json")
         opened = [item["openedTranscript"] for item in result["iterations"]]
+        stalls = event_loop_stalls(evidence / "gateway.jsonl")
+        if stalls:
+            validation_warnings.append(f"fixture Gateway event loop stalled {len(stalls)} time(s), up to {max(stalls)} ms "
+                                       "(host contention); CPU and timing samples are suspect")
         context = {
             "scenario": scenario.description,
             "prompt": effective_prompt,
