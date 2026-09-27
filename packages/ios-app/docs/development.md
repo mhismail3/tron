@@ -428,8 +428,9 @@ Scenarios drive production owners (`AppModel`, the real `GatewayClient` over a
 scripted socket, `SessionShellView`, `ChatView`, `ComposerDraftCoordinator` and
 `ComposerDraftStore` on a temporary root) with pre-encoded frames at fixed
 offsets, fixed seeds and a fixed window. Setup, the real `session.list` /
-`session.open` / `session.sync` opening and readiness happen before the window;
-after it each scenario proves its workload was admitted (no resynchronization,
+`session.open` / `session.sync` opening and readiness happen before the window,
+and no event is sent in its last second, so the window contains the processing
+of every event it delivered. After it each scenario proves its workload was admitted (no resynchronization,
 expected event sequence, summary revisions or saved draft), otherwise the run
 fails with its evidence path and a screenshot of the surface. Chat readiness is
 the app's own first-ready-frame signpost; a setup that does not reach readiness

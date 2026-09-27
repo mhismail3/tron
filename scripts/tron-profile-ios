@@ -19,6 +19,7 @@ import os
 from pathlib import Path
 import secrets
 import shlex
+import signal
 import subprocess
 import sys
 from typing import Any
@@ -254,9 +255,21 @@ def bounded(log: Path, evidence: Path, overall: float, no_output: float, artifac
         "--overall-seconds", str(int(overall)), "--no-output-seconds", str(int(no_output)),
         "--artifact", str(artifact), "--", *command,
     ]
-    return subprocess.run(
+    child = subprocess.Popen(
         process, env={**os.environ, "NSUnbufferedIO": "YES", **(environment or {})}, stdout=subprocess.DEVNULL
-    ).returncode
+    )
+    # The lease holder forwards SIGTERM/SIGHUP only to this process; relay it
+    # to the bounded runner, which stops its xcodebuild process group.
+    def forward(signum: int, _frame: object) -> None:
+        if child.poll() is None:
+            child.send_signal(signum)
+
+    previous = {signum: signal.signal(signum, forward) for signum in (signal.SIGINT, signal.SIGTERM, signal.SIGHUP)}
+    try:
+        return child.wait()
+    finally:
+        for signum, handler in previous.items():
+            signal.signal(signum, handler)
 
 
 class Profiler:

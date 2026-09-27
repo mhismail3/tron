@@ -52,6 +52,10 @@ struct ProfileScriptedFrame {
 
 @MainActor
 final class ProfileChatRun: ProfileScenarioRun {
+    /// No frame is sent in the window's last second, so the window contains
+    /// the processing of every frame it delivered.
+    static let drainTail = Duration.seconds(1)
+
     let fixture: ProfileGatewayFixture
     let snapshot: SessionSnapshot
     private let frames: [ProfileScriptedFrame]
@@ -209,7 +213,7 @@ final class ProfileChatRun: ProfileScenarioRun {
         let ledger = ProfileScenarioLedger.shared
         let resynchronizationsBefore = ledger.snapshot()["rpc.resynchronizations"] ?? 0
         let start = ContinuousClock.now
-        for frame in frames where frame.offset < window {
+        for frame in frames where frame.offset < window - Self.drainTail {
             try await profileSleep(until: frame.offset, from: start)
             try await fixture.deliver(frame: frame.data)
             if lostMount == nil, fixture.model.mountedPresentationTarget?.sessionID != snapshot.sessionId {
@@ -220,7 +224,7 @@ final class ProfileChatRun: ProfileScenarioRun {
         }
         try await profileSleep(until: window, from: start)
         self.resynchronizationsBefore = resynchronizationsBefore
-        expectedSequence = frames.last(where: { $0.offset < window && $0.eventSequence != nil })?.eventSequence
+        expectedSequence = frames.last(where: { $0.offset < window - Self.drainTail && $0.eventSequence != nil })?.eventSequence
     }
 
     func verify() async throws {
@@ -232,7 +236,13 @@ final class ProfileChatRun: ProfileScenarioRun {
         }
         if let expected = expectedSequence {
             let model = fixture.model
-            let installed = model.authoritativeSnapshot(for: snapshot.sessionId)?.eventSequence
+            let sessionID = snapshot.sessionId
+            // The drain tail normally covers the last frame's processing; a
+            // loaded host gets a bounded grace period outside the window.
+            try? await profileWaitUntil("last scripted event installed", timeout: .seconds(10)) {
+                (model.authoritativeSnapshot(for: sessionID)?.eventSequence ?? 0) >= expected
+            }
+            let installed = model.authoritativeSnapshot(for: sessionID)?.eventSequence
             guard installed == expected else {
                 let target = model.mountedPresentationTarget
                 throw ProfileScenarioError.workloadDiverged(

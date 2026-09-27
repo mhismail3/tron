@@ -121,7 +121,10 @@ final class ProfileComposerRun: ProfileScenarioRun {
         let scope = ComposerDraftScope(profileID: chat.fixture.profile.id, sessionID: chat.snapshot.sessionId)
         let manifest = await store.hostedPath(for: scope).appending(path: "manifest.json")
         struct Manifest: Decodable { let text: String }
-        let saved = try? JSONDecoder().decode(Manifest.self, from: Data(contentsOf: manifest)).text
+        func readSaved() -> String? { try? JSONDecoder().decode(Manifest.self, from: Data(contentsOf: manifest)).text }
+        let typed = typed
+        try? await profileWaitUntil("the debounced draft save", timeout: .seconds(10)) { readSaved() == typed }
+        let saved = readSaved()
         guard saved == typed else {
             throw ProfileScenarioError.workloadDiverged("the draft store holds \(saved.map { "\($0.count) characters" } ?? "no draft"), expected \(typed.count)")
         }

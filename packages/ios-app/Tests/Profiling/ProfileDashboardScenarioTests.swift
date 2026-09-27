@@ -117,7 +117,8 @@ final class ProfileDashboardRun: ProfileScenarioRun {
 
     func workload(window: Duration) async throws {
         let start = ContinuousClock.now
-        let events = schedule(window: window)
+        // As in the chat scenarios, the last second of the window only drains.
+        let events = schedule(window: window - ProfileChatRun.drainTail)
         var revisions = Array(repeating: 1, count: activeSessions)
         for (offset, index) in events {
             try await profileSleep(until: offset, from: start)
@@ -141,9 +142,13 @@ final class ProfileDashboardRun: ProfileScenarioRun {
     }
 
     func verify() async throws {
+        let model = fixture.model
         for (index, revision) in finalRevisions.enumerated() where revision > 1 {
             let id = sessions[index].id
-            guard fixture.model.sessions.first(where: { $0.id == id })?.summaryRevision == revision else {
+            try? await profileWaitUntil("\(id) summary revision \(revision)", timeout: .seconds(10)) {
+                model.sessions.first(where: { $0.id == id })?.summaryRevision == revision
+            }
+            guard model.sessions.first(where: { $0.id == id })?.summaryRevision == revision else {
                 throw ProfileScenarioError.workloadDiverged("\(id) did not reach summary revision \(revision)")
             }
         }
