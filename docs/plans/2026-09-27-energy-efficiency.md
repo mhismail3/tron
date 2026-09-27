@@ -2,7 +2,7 @@
 
 - **Started:** 2026-09-27
 - **Status:** Active (approved in chat by the user on 2026-09-27)
-- **Last updated:** 2026-09-27, P-3 done; attribution tasks added
+- **Last updated:** 2026-09-27, T2-FONTS, T2-COLORS and T2-PULSE claimed
 - **Goal:** Tron for iPhone does measurably less CPU, disk, timer and radio work per minute of real use, proven by a reliable profiler that every agent can run, with no change to what the user sees or does.
 
 ## Goal and constraints
@@ -159,9 +159,9 @@ two-frames-per-window cadence the same scenario measured 60.9 G instructions and
 | T1-CLOCKS | Claimed | Timeline schedules that fire when a label can change: dashboard rows, tool elapsed timers (sub-minute cadence preserved), static inbox formatter | none (keep decision: P-1, P-2) | energy-efficiency supervisor, worker lane t1-clocks, 2026-09-27 |
 | T1-NET | Claimed | One shared ping grid for every socket (no interval ever longer than today), lease renewal on that grid at no longer than today's interval, one shared `URLSession` for idempotent GETs with per-task delegates | none (keep decision: P-1, P-2) | energy-efficiency supervisor, worker lane t1-net, 2026-09-27 |
 | T3-DEFLATE | Done | Negotiate `permessage-deflate` for paired (non-loopback) clients that offer it; confirm the offer from the iOS simulator app, keep inbound size bounds on decompressed bytes, and keep outbound queue accounting and backpressure exact | none (keep decision: P-2) | energy-efficiency supervisor, worker lane t3-deflate, 2026-09-27 |
-| T2-FONTS | Ready | Stop rebuilding fonts on view updates: `TronFontLoader.createUIFont` and `UIFont(descriptor:size:)` take 5–8% of main-thread time in every traced scenario; cache the created fonts by exact descriptor and size with identical output (Dynamic Type and settings changes still invalidate) | none (keep decision: P-1) | |
-| T2-COLORS | Ready | Stop re-parsing theme colors per body (`Color(lightHex:darkHex:)`, `UIColor(hex:)` in the idle-dashboard trace): resolve each theme color once with identical light/dark and settings behavior | none (keep decision: P-1) | |
-| T2-PULSE | Ready | Cut the per-frame main-thread cost of `TronPulseLoadingIndicator` (11% of idle-dashboard main-thread time) without changing a rendered frame, cadence or gating | none (keep decision: P-1) | |
+| T2-FONTS | Claimed | Stop rebuilding fonts on view updates: `TronFontLoader.createUIFont` and `UIFont(descriptor:size:)` take 5–8% of main-thread time in every traced scenario; cache the created fonts by exact descriptor and size with identical output (Dynamic Type and settings changes still invalidate) | none (keep decision: P-1) | energy-efficiency supervisor, worker lane t2-theme, 2026-09-27 |
+| T2-COLORS | Claimed | Stop re-parsing theme colors per body (`Color(lightHex:darkHex:)`, `UIColor(hex:)` in the idle-dashboard trace): resolve each theme color once with identical light/dark and settings behavior | none (keep decision: P-1) | energy-efficiency supervisor, worker lane t2-theme, 2026-09-27 |
+| T2-PULSE | Claimed | Cut the per-frame main-thread cost of `TronPulseLoadingIndicator` (11% of idle-dashboard main-thread time) without changing a rendered frame, cadence or gating | none (keep decision: P-1) | energy-efficiency supervisor, worker lane t2-pulse, 2026-09-27 |
 | T2-CHATVIEW | Needs scoping | Transcript install cost from the traces: `ChatPhysicalTranscriptReplacementHost.body` with `renderedContent`/`replacementContent` (21% of tool-loop main-thread time), whole-transcript equality (`InstalledChatTranscript ==`, `ChatTranscriptItems ==`, 7.5% of streaming) and render-item copies (memmove 8–10%); ChatView observes the snapshot and the installed transcript in separate scopes | T1-TEXT | |
 | T2-DASH | Needs scoping | Dashboard root stops re-evaluating on every summary; parsed ordering instants; cheaper per-row path helpers; filter preferences saved only on change | T1-CLOCKS | |
 | T2-THINK | Needs scoping | Thinking trace measures its visible text instead of a hidden full copy | T1-TEXT | |
