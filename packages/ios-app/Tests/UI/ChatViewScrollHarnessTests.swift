@@ -3213,7 +3213,7 @@ private func harnessInlineMarkdownDisplaySnapshot() throws -> SessionSnapshot {
     return snapshot
 }
 
-private func harnessRuntimeTool(
+func harnessRuntimeTool(
     id: String = "active-race",
     order: Int = 0,
     status: ToolExecutionState.Status,
@@ -3244,7 +3244,7 @@ private func harnessRuntimeTool(
     )
 }
 
-private func harnessAssistantMessage(
+func harnessAssistantMessage(
     id: String,
     presentationID: String,
     text: String
@@ -3257,7 +3257,7 @@ private func harnessAssistantMessage(
     )
 }
 
-private func harnessRichAssistantMessage(
+func harnessRichAssistantMessage(
     id: String,
     presentationID: String,
     thinkingLines: [String],
@@ -3300,7 +3300,7 @@ private func harnessCompactionItem(id: String) throws -> TranscriptItem {
     )
 }
 
-private func harnessMessage(id: String) throws -> TranscriptItem {
+func harnessMessage(id: String) throws -> TranscriptItem {
     try decodeTranscriptFixture(
         TranscriptItem.self,
         from: Data("""
@@ -3873,18 +3873,63 @@ final class ChatViewScrollHarness {
         return renderedLuminance(in: bounds.insetBy(dx: 8, dy: 24), step: 1, excluding: pulse)
     }
 
-    /// Average-channel luminance sampled every `step` points of `region`,
-    /// rendered at 1x from the current hierarchy.
-    private func renderedLuminance(in region: CGRect, step: Int, excluding hole: CGRect = .null) -> [Double] {
+    /// The rendered window as one byte of average-channel luminance per point,
+    /// row-major, plus the PNG a recording run retains as its per-frame artifact.
+    /// The visual parity gate's fingerprint is derived from this plane, so a
+    /// frame is rendered once and every consumer reads the same pixels.
+    func renderedWindowFrame(includingPNG: Bool) -> RenderedWindowFrame {
+        let image = renderedWindowImage()
+        guard let cgImage = image.cgImage,
+              let data = cgImage.dataProvider?.data,
+              let bytes = CFDataGetBytePtr(data) else {
+            return RenderedWindowFrame(width: 0, height: 0, luminance: [], png: nil)
+        }
+        let width = cgImage.width
+        let height = cgImage.height
+        let bytesPerPixel = cgImage.bitsPerPixel / 8
+        var luminance = [UInt8](repeating: 0, count: width * height)
+        for y in 0..<height {
+            let row = y * cgImage.bytesPerRow
+            for x in 0..<width {
+                let offset = row + x * bytesPerPixel
+                luminance[y * width + x] = UInt8(
+                    (Int(bytes[offset]) + Int(bytes[offset + 1]) + Int(bytes[offset + 2])) / 3
+                )
+            }
+        }
+        return RenderedWindowFrame(
+            width: width,
+            height: height,
+            luminance: luminance,
+            png: includingPNG ? image.pngData() : nil
+        )
+    }
+
+    struct RenderedWindowFrame {
+        let width: Int
+        let height: Int
+        let luminance: [UInt8]
+        let png: Data?
+    }
+
+    /// The hosted window rendered at 1x from the current hierarchy, including
+    /// any in-flight presentation values an entrance or size change is showing.
+    private func renderedWindowImage() -> UIImage {
         let view = hostingController.view!
         view.setNeedsLayout()
         view.layoutIfNeeded()
         let format = UIGraphicsImageRendererFormat()
         format.scale = 1
         format.opaque = true
-        let image = UIGraphicsImageRenderer(bounds: view.bounds, format: format).image { _ in
+        return UIGraphicsImageRenderer(bounds: view.bounds, format: format).image { _ in
             view.drawHierarchy(in: view.bounds, afterScreenUpdates: true)
         }
+    }
+
+    /// Average-channel luminance sampled every `step` points of `region`,
+    /// rendered at 1x from the current hierarchy.
+    private func renderedLuminance(in region: CGRect, step: Int, excluding hole: CGRect = .null) -> [Double] {
+        let image = renderedWindowImage()
         guard let cgImage = image.cgImage,
               let data = cgImage.dataProvider?.data,
               let bytes = CFDataGetBytePtr(data) else { return [] }
