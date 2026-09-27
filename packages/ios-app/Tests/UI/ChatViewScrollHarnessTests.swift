@@ -3891,12 +3891,18 @@ final class ChatViewScrollHarness {
         return renderedLuminance(in: bounds.insetBy(dx: 8, dy: 24), step: 1, excluding: pulse)
     }
 
-    /// The rendered window as one byte of average-channel luminance per point,
+    /// The rendered window as one byte of average-channel luminance per pixel,
     /// row-major, plus the PNG a recording run retains as its per-frame artifact.
     /// The visual parity gate's fingerprint is derived from this plane, so a
-    /// frame is rendered once and every consumer reads the same pixels.
-    func renderedWindowFrame(includingPNG: Bool) -> RenderedWindowFrame {
-        let image = renderedWindowImage()
+    /// frame is rendered once and every consumer reads the same pixels. Sampling
+    /// at `scale` below 1 with `afterScreenUpdates` false is what keeps a sample
+    /// short enough to land on the display frame it was driven for.
+    func renderedWindowFrame(
+        includingPNG: Bool,
+        scale: CGFloat = 1,
+        afterScreenUpdates: Bool = true
+    ) -> RenderedWindowFrame {
+        let image = renderedWindowImage(scale: scale, afterScreenUpdates: afterScreenUpdates)
         guard let cgImage = image.cgImage,
               let data = cgImage.dataProvider?.data,
               let bytes = CFDataGetBytePtr(data) else {
@@ -3930,17 +3936,17 @@ final class ChatViewScrollHarness {
         let png: Data?
     }
 
-    /// The hosted window rendered at 1x from the current hierarchy, including
-    /// any in-flight presentation values an entrance or size change is showing.
-    private func renderedWindowImage() -> UIImage {
+    /// The hosted window rendered from the current hierarchy, including any
+    /// in-flight presentation values an entrance or size change is showing.
+    private func renderedWindowImage(scale: CGFloat = 1, afterScreenUpdates: Bool = true) -> UIImage {
         let view = hostingController.view!
         view.setNeedsLayout()
         view.layoutIfNeeded()
         let format = UIGraphicsImageRendererFormat()
-        format.scale = 1
+        format.scale = scale
         format.opaque = true
         return UIGraphicsImageRenderer(bounds: view.bounds, format: format).image { _ in
-            view.drawHierarchy(in: view.bounds, afterScreenUpdates: true)
+            view.drawHierarchy(in: view.bounds, afterScreenUpdates: afterScreenUpdates)
         }
     }
 

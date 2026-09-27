@@ -501,6 +501,73 @@ TRON_IOS_TEST_TIER=ui-validation scripts/tron-ios-test run \
   --only-testing 'TronMobileTests/ChatViewScrollHarnessTests/repeatedKeyboardAndSendCyclesKeepRealizedRowsOnScreen()'
 ```
 
+`ChatVisualParityTests.recordedReferenceFramesMatchRenderedTranscript` is the
+CT-12 visual parity gate. It renders the actual `ChatView` in the same fixed
+390x844 hosted window and samples the rendered window at every display boundary
+of seven scenarios: an opened long mixed history at rest, an ordinary send with
+the keyboard modelled as the viewport contraction the coordinator consumes
+(outgoing entrance, composer collapse, dismissal), the tail assistant row's
+streaming growth, a queued card's replacement by its sent row, a tool chip's
+entrance and completion, an earlier-page load at rest, and a detached reader's
+catch-up. It exists so a candidate transcript container can be measured against
+the chat as it renders today, before that container ships.
+
+The reference is `Tests/Fixtures/ChatVisualParityManifest.json`: one fingerprint
+per sampled boundary, recorded from the unchanged chat. A fingerprint is the mean
+luminance of each 2-point row band of the rendered window plus each 8-point
+column band, base64-encoded; the committed file is 72 KB for 91 frames.
+Per-frame PNG artifacts are retained under the git-ignored
+`build/parity-reference/<scenario>/`, and every verify run writes
+`build/parity-reference/report.json`: every frame's diff, the rendered frame it
+matched, and the bound it was judged against, worst first.
+
+Two bounds are stated, both set from measurement and never widened to make a run
+pass. `ChatVisualParitySpec.tolerance` (0.014) is the per-frame bound where
+neither the recording nor the rendering moved by more than that from its
+neighbour; three determinism runs on unchanged code measured a worst
+stable-frame diff of 0.0068. `ChatVisualParitySpec.transitionTolerance` (0.060)
+is the bound where either side moved that much, because the recorded container's
+transform-only entrances are not reproducible frame by frame on this lane: while
+a sample cost about 110 ms (it forces a screen update for the full window), each
+sample skipped six or seven frames of a 280 ms entrance, so which animated state
+landed on a recorded frame index differed run to run by up to 0.047. Sampling is
+normalized so the compared states reproduce wherever they can: the transcript's
+native offset is snapped to a whole point before a frame is rendered, a rendered
+frame may be re-aligned by up to 2 points vertically in half-point steps, may be
+matched to a recorded frame up to three boundaries away, and each scenario
+settles on the rendered pixels (not the recorder's layout sample stream) before
+its fixed frame sequence begins. The suite runs in about 45-50 s.
+
+Three negative controls, each applied temporarily and reverted, measured against
+the committed reference: a 2-point row spacing change fails all seven scenarios
+(0.037-0.048 against the 0.014 bound), rendering an assistant row's Markdown as
+plain text fails six of seven (0.036-0.053), and a 14-point entrance rise in
+place of 20 points is not rejected — the recorded container's own entrance
+jitter (0.047) is larger than the 0.022 that change produces, so the gate
+compares that a transform entrance happens and lands, not its exact rise. Until
+a lane can sample that entrance reproducibly, qualify the send choreography's
+rise on a device with the checklist below.
+
+Recording is a switch, not a flag: the gate verifies while
+`Tests/Fixtures/ChatVisualParityManifest.json` exists and records when it does
+not, so a candidate branch compares against the recorded reference unless it
+deliberately re-records one.
+
+```bash
+# record a reference (writes build/parity-reference/manifest.json; commit a copy)
+mv packages/ios-app/Tests/Fixtures/ChatVisualParityManifest.json /tmp/parity-reference.json
+scripts/tron-ios-test build
+TRON_IOS_TEST_TIER=ui-validation scripts/tron-ios-test run \
+  --only-testing 'TronMobileTests/ChatVisualParityTests/recordedReferenceFramesMatchRenderedTranscript()'
+cp packages/ios-app/build/parity-reference/manifest.json \
+   packages/ios-app/Tests/Fixtures/ChatVisualParityManifest.json
+
+# verify against the committed reference
+scripts/tron-ios-test build
+TRON_IOS_TEST_TIER=ui-validation scripts/tron-ios-test run \
+  --only-testing 'TronMobileTests/ChatVisualParityTests/recordedReferenceFramesMatchRenderedTranscript()'
+```
+
 `scripts/tron-ios-test checkpoint` is the shared local/CI unit checkpoint: it
 verifies the pinned toolchain, provisions the exact owned test simulator,
 generates, builds once, and runs the complete unit target serially. CI's
