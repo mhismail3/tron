@@ -2,7 +2,7 @@
 
 - **Started:** 2026-09-23
 - **Status:** Active
-- **Last updated:** 2026-09-27, MS-2 done; the user checks a device install and Profile
+- **Last updated:** 2026-09-27, MS-2 verified on device; MS-3 is next
 - **Goal:** Give the iOS app compiler-enforced layers, so its structure stays clean, one-directional and easy for agents to work in, and cannot silently regress into cycles.
 
 Follow the [plan protocol](README.md#protocol) to claim tasks and hand off.
@@ -207,7 +207,16 @@ except `App` and `Auth` sits in one cycle of 12 layers. Examples: Models throws 
   slowdown.
 - Deviation: the MS-1 timing script had three bugs (an inverted assertion, a fresh DerivedData per case, and a
   hard-coded mode name); the worker fixed its copy in `/tmp`, so the recipe in the MS-1 handoff stands.
-- Open (user): a signed device install through **Rebuild and Install Tron** and one **Product → Profile** run,
-  to confirm signing and embedding of the framework on a real device. MS-3 can start before that.
+- Device check (verified 2026-09-27): the user rebuilt the Gateway and installed the phone from `55d3b4074`.
+  The Gateway runs that revision; the installed LocalDevice app embeds `TronMobileCore.framework` signed by the
+  team, passes `scripts/validate-ios-artifact.py --configuration LocalDevice --require-profile` and a strict
+  deep `codesign --verify`; the phone has since connected as a paired mobile client with no Gateway errors. A
+  **Product → Profile** run is optional and not yet done; nothing in MS-2 changed the Profile action's
+  configuration.
+- Found while verifying, fixed on `main` outside this plan (`1491db2dc`, `e1f8e23ac`): the iOS source policy
+  and the documentation policy already failed on `main` (two raw sheets; a comment naming a gitignored
+  `test-results/` file), and `TronAccessibilityUITests` had stale dashboard menu expectations. All three now pass.
+  Run `packages/ios-app/scripts/test-source-policy.sh` and `python3 scripts/check-documentation-policy.py` as
+  part of each MS task.
 - For the next agent: `packages/ios-app/scripts/presentation-source-policy.py` scans only `Sources/`, which is
   correct while `Core` holds no SwiftUI; the module that receives State must extend that scan.
