@@ -8,7 +8,9 @@ import re
 import subprocess
 
 ROOT = Path(__file__).resolve().parent.parent
-EXCLUDED_PARTS = {"build", "dist", "node_modules", "DerivedData", ".build"}
+# Generated roots: absent from clean checkouts but valid documentation subjects.
+# test-results/ holds the regenerable E2E evidence AGENTS.md asks tests to retain.
+EXCLUDED_PARTS = {"build", "dist", "node_modules", "DerivedData", ".build", "test-results"}
 MARKDOWN_LINK = re.compile(r"\[[^\]]*\]\(([^)]+)\)")
 BACKTICK = re.compile(r"`([^`]+)`")
 FENCED_PATH = re.compile(

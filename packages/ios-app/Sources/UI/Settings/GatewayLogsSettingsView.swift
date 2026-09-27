@@ -123,7 +123,7 @@ struct GatewayLogsSettingsView: View {
             }
         }
         .sensoryFeedback(.success, trigger: copySucceeded)
-        .sheet(item: $shareURL, onDismiss: {
+        .tronManagedSheet(item: $shareURL, identity: { _ in "settings.gateway-logs-share" }, onDismiss: {
             if let url = exportArtifactURL {
                 exportArtifactURL = nil
                 Task { await model.discardExportArtifact(url) }

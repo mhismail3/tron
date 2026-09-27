@@ -31,7 +31,7 @@ struct HostedAccessibilityFixtureView: View {
                     }
                     .navigationTitle("Accessibility fixtures")
                 }
-                .sheet(item: $destination) { item in
+                .tronManagedSheet(item: $destination, identity: { "fixture.accessibility.\($0.rawValue)" }) { item in
                     switch item {
                     case .metadata:
                         GatewayServerInfoSheet(
