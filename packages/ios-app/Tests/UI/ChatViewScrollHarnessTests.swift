@@ -3770,6 +3770,7 @@ final class ChatViewScrollHarness {
         try await probe.driveFrameBoundary()
     }
 
+
     var firstReadyEvents: [RecordingPerformanceSignposts.Event] {
         signposts.events().filter { $0.operation == .firstReadyFrame }
     }
@@ -3891,63 +3892,133 @@ final class ChatViewScrollHarness {
         return renderedLuminance(in: bounds.insetBy(dx: 8, dy: 24), step: 1, excluding: pulse)
     }
 
-    /// The rendered window as one byte of average-channel luminance per pixel,
-    /// row-major, plus the PNG a recording run retains as its per-frame artifact.
-    /// The visual parity gate's fingerprint is derived from this plane, so a
-    /// frame is rendered once and every consumer reads the same pixels. Sampling
-    /// at `scale` below 1 with `afterScreenUpdates` false is what keeps a sample
-    /// short enough to land on the display frame it was driven for.
-    func renderedWindowFrame(
-        includingPNG: Bool,
-        scale: CGFloat = 1,
-        afterScreenUpdates: Bool = true
-    ) -> RenderedWindowFrame {
-        let image = renderedWindowImage(scale: scale, afterScreenUpdates: afterScreenUpdates)
+    /// The parity gate's rendered frame: the mean luminance per row and per
+    /// column band of the transcript region, plus the PNG a recording run
+    /// retains as its per-frame artifact.
+    ///
+    /// This capture is the gate's frame clock. The gate samples one frame per
+    /// driven display boundary, so a capture that costs more than a display
+    /// period makes the app skip the frames in between: a full-window capture at
+    /// 1x was measured at about 110 ms (about 45 ms rendering, 45 ms flattening
+    /// the pixels to luminance, 20 ms building the profiles), so a 280 ms
+    /// entrance landed on two or three samples and most of its frames were never
+    /// compared. Rendering the transcript below the navigation bar at half scale,
+    /// and accumulating both profiles in one pass over the image's bytes, costs
+    /// about a third of that, so the entrance's own frames are sampled. The
+    /// artifact encoding is part of the capture in every mode, so a recording run
+    /// and a verifying run sample the same instants; only writing it differs.
+    ///
+    /// The screen update is forced. A sample that reads the last committed state
+    /// without forcing one shows the same picture for tens of boundaries while an
+    /// entrance runs: the app commits its layer tree only a few times per
+    /// transition, so a stale sample cannot carry the animation at all (measured
+    /// on the recorded send scenario, whose captured frames were identical for
+    /// runs of 20 to 37 boundaries). Forcing the update makes the frame carry the
+    /// animation state the display is showing at that instant, which is what the
+    /// gate compares.
+    ///
+    /// The region is the transcript: below the navigation bar (whose glass
+    /// material re-renders with pixel noise unrelated to it, as the reveal oracle
+    /// already assumes) and above the composer (whose own material and spring
+    /// dominated the run-to-run difference of a frame that included it, at up to
+    /// 0.06 against 0.015 for the transcript alone).
+    func renderedParityFrame(
+        scale: CGFloat,
+        rowBandPixels: Int,
+        columnBandPixels: Int,
+        includingPNG: Bool
+    ) -> ParityFrame {
+        let view = hostingController.view!
+        let top = min(Self.parityTopInset, view.bounds.height)
+        let bottom = min(top + Self.parityBottomInset, view.bounds.height)
+        let region = CGRect(
+            x: 0,
+            y: top,
+            width: view.bounds.width,
+            height: max(0, view.bounds.height - bottom)
+        )
+        let image = renderedImage(in: region, scale: scale, afterScreenUpdates: true)
+        let empty = ParityFrame(width: 0, height: 0, rows: [], columns: [], png: nil)
         guard let cgImage = image.cgImage,
               let data = cgImage.dataProvider?.data,
-              let bytes = CFDataGetBytePtr(data) else {
-            return RenderedWindowFrame(width: 0, height: 0, luminance: [], png: nil)
-        }
+              let bytes = CFDataGetBytePtr(data) else { return empty }
         let width = cgImage.width
         let height = cgImage.height
         let bytesPerPixel = cgImage.bitsPerPixel / 8
-        var luminance = [UInt8](repeating: 0, count: width * height)
+        let rowBands = max(1, (height + rowBandPixels - 1) / rowBandPixels)
+        let columnBands = max(1, (width + columnBandPixels - 1) / columnBandPixels)
+        var rowSums = [Int](repeating: 0, count: rowBands)
+        var columnSums = [Int](repeating: 0, count: columnBands)
         for y in 0..<height {
-            let row = y * cgImage.bytesPerRow
+            let line = y * cgImage.bytesPerRow
+            let rowBand = y / rowBandPixels
             for x in 0..<width {
-                let offset = row + x * bytesPerPixel
-                luminance[y * width + x] = UInt8(
-                    (Int(bytes[offset]) + Int(bytes[offset + 1]) + Int(bytes[offset + 2])) / 3
-                )
+                let offset = line + x * bytesPerPixel
+                let value = Int(bytes[offset]) + Int(bytes[offset + 1]) + Int(bytes[offset + 2])
+                rowSums[rowBand] += value
+                columnSums[x / columnBandPixels] += value
             }
         }
-        return RenderedWindowFrame(
+        func bands(_ sums: [Int], total: Int, step: Int, divisor: Int) -> [UInt8] {
+            sums.enumerated().map { index, sum in
+                let length = min(step, total - index * step)
+                return UInt8(sum / (3 * length * divisor))
+            }
+        }
+        return ParityFrame(
             width: width,
             height: height,
-            luminance: luminance,
+            rows: bands(rowSums, total: height, step: rowBandPixels, divisor: width),
+            columns: bands(columnSums, total: width, step: columnBandPixels, divisor: height),
             png: includingPNG ? image.pngData() : nil
         )
     }
 
-    struct RenderedWindowFrame {
+    struct ParityFrame {
         let width: Int
         let height: Int
-        let luminance: [UInt8]
+        let rows: [UInt8]
+        let columns: [UInt8]
         let png: Data?
     }
 
-    /// The hosted window rendered from the current hierarchy, including any
-    /// in-flight presentation values an entrance or size change is showing.
-    private func renderedWindowImage(scale: CGFloat = 1, afterScreenUpdates: Bool = true) -> UIImage {
+    /// The parity gate's rendered region: the transcript, below the navigation
+    /// bar (whose glass material re-renders with pixel noise) and above the
+    /// composer (whose own material and spring are not the transcript, and whose
+    /// animated height was measured as the largest source of run-to-run
+    /// difference in a frame). Both insets are fixed so a frame's region has the
+    /// same shape whatever the composer is doing.
+    private static let parityTopInset: CGFloat = 100
+    private static let parityBottomInset: CGFloat = 200
+
+    /// A region of the hosted window rendered from the current hierarchy,
+    /// including any in-flight presentation values an entrance or size change is
+    /// showing. `drawHierarchy` renders at the view's coordinates, so the context
+    /// is translated by the region's origin.
+    private func renderedImage(in region: CGRect, scale: CGFloat, afterScreenUpdates: Bool) -> UIImage {
         let view = hostingController.view!
         view.setNeedsLayout()
         view.layoutIfNeeded()
         let format = UIGraphicsImageRendererFormat()
         format.scale = scale
         format.opaque = true
-        return UIGraphicsImageRenderer(bounds: view.bounds, format: format).image { _ in
-            view.drawHierarchy(in: view.bounds, afterScreenUpdates: afterScreenUpdates)
+        return UIGraphicsImageRenderer(
+            bounds: CGRect(origin: .zero, size: region.size),
+            format: format
+        ).image { context in
+            context.cgContext.translateBy(x: -region.minX, y: -region.minY)
+            view.drawHierarchy(in: region, afterScreenUpdates: afterScreenUpdates)
         }
+    }
+
+    /// The hosted window rendered from the current hierarchy, including any
+    /// in-flight presentation values an entrance or size change is showing.
+    private func renderedWindowImage(scale: CGFloat = 1, afterScreenUpdates: Bool = true) -> UIImage {
+        renderedImage(
+            in: hostingController.view.bounds,
+            scale: scale,
+            afterScreenUpdates: afterScreenUpdates
+        )
     }
 
     /// Average-channel luminance sampled every `step` points of `region`,

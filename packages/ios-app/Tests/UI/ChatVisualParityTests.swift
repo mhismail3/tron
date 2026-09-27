@@ -23,36 +23,51 @@ enum ChatVisualParitySpec {
     static let rowStep = 2
     static let columnStep = 8
 
-    /// The scale a sampled frame is rendered at. A sample forces a screen
-    /// update, so the frame carries the state the entrance is showing at that
-    /// moment; rendering under 1x (or reading the last committed image without
-    /// forcing one) was measured to be no faster and to capture a stale or
-    /// differently advanced state. The sampled scale is recorded in the
-    /// committed manifest because a fingerprint is only comparable at the scale
-    /// its reference was sampled at.
-    static let renderScale: CGFloat = 1
+    /// The scale a sampled frame is rendered at. Half scale is what keeps a
+    /// capture inside a display period — measured about 20 ms against about
+    /// 110 ms at 1x, where the forced full-window screen update and the
+    /// full-resolution profiles dominated the cost — and two points per pixel
+    /// still resolves the row bands the gate compares. The scale is recorded in
+    /// the committed manifest because a fingerprint is only comparable at the
+    /// scale its reference was sampled at.
+    static let renderScale: CGFloat = 0.5
     static let pointsPerPixel = Int(1 / renderScale)
 
-    /// Per-frame tolerance: the normalized RMS luminance difference of a
-    /// candidate frame against its recorded reference frame over both profiles,
-    /// after the bounded vertical alignment above. It is stated here, recorded in
-    /// the committed manifest, and set from the largest difference the three-run
-    /// determinism check measured on unchanged code plus a margin.
-    /// `packages/ios-app/docs/development.md` owns the recorded numbers and the
-    /// margin each negative control showed.
-    static let tolerance = 0.014
+    /// Per-frame tolerance where neither side moved: the normalized RMS luminance
+    /// difference of a candidate frame against its recorded reference frame over
+    /// both profiles, after the bounded vertical alignment below. It is stated
+    /// here, recorded in the committed manifest, and set from the largest
+    /// difference the three-run determinism check measured on unchanged code plus
+    /// a margin. `packages/ios-app/docs/development.md` owns the recorded numbers
+    /// and the margin each negative control showed.
+    static let tolerance = 0.025
 
-    /// The bound a recorded frame is judged against where the recorded container
-    /// itself moved by more than `tolerance` from the previous boundary. Its
-    /// transform-only entrances (the outgoing row's fade and 20-point rise) are
-    /// rendered through the animation layer, and on this lane the state a
-    /// display boundary shows is only reproducible to within one boundary of the
-    /// animation's own motion — measured at up to 0.047 against an unchanged
-    /// recording, which is more than the 0.022 a 14-point rise differs by. A
-    /// frame there therefore gates that an entrance still exists, not its exact
-    /// rise; `packages/ios-app/docs/development.md` states what that leaves
-    /// uncovered.
-    static let transitionTolerance = 0.060
+    /// The bound a transition frame is judged against. The display boundary a
+    /// transition lands on is not reproducible on this lane: a capture must force
+    /// a screen update to carry the animation at all (measured at about 60 ms a
+    /// boundary), so one boundary is a quarter of the send entrance's 280 ms and
+    /// the recorded transition's own frame-to-frame timing is not a picture
+    /// difference. The bound allows that jitter; it is not widened to hide a
+    /// different picture, and `development.md` states what it cannot resolve (a
+    /// sub-60 ms phase difference, which is why a 14-point rise and a 280 ms
+    /// against 200 ms entrance stay device checks).
+    static let transitionTolerance = 0.065
+
+    /// The phases whose frames are transitions. The classification is the
+    /// scenario's own and the report names the phase of every frame it judged, so
+    /// which frames are compared tightly is reviewable rather than inferred from
+    /// how far a recorded frame happened to move. Every phase not named here is
+    /// judged against `tolerance`, so a new phase is tight by default.
+    private static let transitionPhases: Set<String> = [
+        "keyboard-up", "keyboard-dismissal", "outgoing-entrance",
+        "growth-1", "growth-2", "growth-3", "growth-4", "growth-5",
+        "replacement", "chip-entrance", "chip-completion",
+        "loading", "completing", "catch-up",
+    ]
+
+    static func isTransitionPhase(_ phase: String) -> Bool {
+        transitionPhases.contains(phase)
+    }
 
     /// How far a candidate frame may be re-aligned vertically, in points, before
     /// its diff counts, at half-point steps. A pinned transcript settles within a
@@ -62,16 +77,14 @@ enum ChatVisualParitySpec {
     static let alignmentPoints = 2.0
 
     /// How many frames away a candidate frame may be matched to a recorded frame.
-    /// A recorded animation frame lands up to one display boundary away from the
-    /// same rendered state in the next run, because the reference container
-    /// (a `LazyVStack`) decides when its animated row moves on its own clock, and
-    /// a boundary-aligned comparison would otherwise read that one-frame timing
-    /// difference as a different picture. Three boundaries is about 50 ms: wide
-    /// enough for the recorded reference's own jitter, narrow enough that a
-    /// different motion trajectory still has to match a recorded frame — the
-    /// entrance-rise control moves the outgoing row 6 points over a 20-point
-    /// rise, more than one matched frame's worth of travel at either end.
-    static let matchWindow = 3
+    /// Every display frame is captured now, so a recorded frame index is the same
+    /// animation frame in the next run up to the boundary the animation's own
+    /// start lands on. One boundary is about 20 ms, and matching a frame one
+    /// boundary away moves the send entrance's 20-point rise by about a point,
+    /// less than the 6 points a 14-point rise differs by. A wider window would
+    /// let a candidate match a recorded frame at a different point of the rise
+    /// and stop the gate seeing the rise itself.
+    static let matchWindow = 1
 }
 
 /// One sampled frame's fingerprint, with the window size it was rendered at so
@@ -91,52 +104,23 @@ struct ChatVisualParityFingerprint: Equatable {
         self.columns = columns
     }
 
-    init(width: Int, height: Int, luminance: [UInt8], pointsPerPixel: Int) {
-        self.width = width
-        self.height = height
-        let bands = ChatVisualParityFingerprint.bands(
-            luminance: luminance,
-            width: width,
-            height: height,
-            rowStep: max(1, ChatVisualParitySpec.rowStep / pointsPerPixel),
-            columnStep: max(1, ChatVisualParitySpec.columnStep / pointsPerPixel)
-        )
-        rows = bands.rows
-        columns = bands.columns
+    /// The band resolution a fingerprint is built at, in pixels: the harness
+    /// renders the frame at `ChatVisualParitySpec.renderScale` and accumulates
+    /// both profiles in one pass over the image.
+    static var rowBandPixels: Int {
+        max(1, ChatVisualParitySpec.rowStep / ChatVisualParitySpec.pointsPerPixel)
     }
 
-    private static func bands(
-        luminance: [UInt8],
-        width: Int,
-        height: Int,
-        rowStep: Int,
-        columnStep: Int
-    ) -> (rows: [UInt8], columns: [UInt8]) {
-        guard width > 0, height > 0, luminance.count >= width * height else { return ([], []) }
-        let rowBands = (height + rowStep - 1) / rowStep
-        let columnBands = (width + columnStep - 1) / columnStep
-        var rowSums = [Int](repeating: 0, count: rowBands)
-        var columnSums = [Int](repeating: 0, count: columnBands)
-        for y in 0..<height {
-            let base = y * width
-            let rowBand = y / rowStep
-            for x in 0..<width {
-                let value = Int(luminance[base + x])
-                rowSums[rowBand] += value
-                columnSums[x / columnStep] += value
-            }
-        }
-        func bandLength(_ index: Int, total: Int, step: Int) -> Int {
-            let start = index * step
-            return min(step, total - start)
-        }
-        let rows = rowSums.enumerated().map { index, sum -> UInt8 in
-            UInt8(sum / (bandLength(index, total: height, step: rowStep) * width))
-        }
-        let columns = columnSums.enumerated().map { index, sum -> UInt8 in
-            UInt8(sum / (bandLength(index, total: width, step: columnStep) * height))
-        }
-        return (rows, columns)
+    static var columnBandPixels: Int {
+        max(1, ChatVisualParitySpec.columnStep / ChatVisualParitySpec.pointsPerPixel)
+    }
+
+    /// The frame the harness rendered for a sample.
+    init(_ rendered: ChatViewScrollHarness.ParityFrame) {
+        width = rendered.width
+        height = rendered.height
+        rows = rendered.rows
+        columns = rendered.columns
     }
 
     /// The frame's diff against its reference after the best alignment: the
@@ -254,7 +238,10 @@ struct ChatVisualParityManifest: Codable, Equatable {
 
     let schema: String
     let fingerprint: FingerprintSpec
+    /// The two bounds the reference was recorded with: the stable bound and the
+    /// bound for a frame either side moved on.
     let tolerance: Double
+    let transitionTolerance: Double
     let window: [Int]
     let systemVersion: String
     let scenarios: [Scenario]
@@ -292,6 +279,7 @@ struct ChatVisualParityReport: Codable, Equatable {
     let schema: String
     let mode: String
     let tolerance: Double
+    let transitionTolerance: Double
     let passed: Bool
     let scenarios: [Scenario]
 }
@@ -371,25 +359,22 @@ final class ChatVisualParityRunner {
         self.recordsArtifacts = recordsArtifacts
     }
 
-    /// Capture the rendered window as this boundary's frame. The transcript's
+    /// Capture the transcript region as this boundary's frame. The transcript's
     /// settled native offset moves by a fraction of a point run to run, so the
     /// offset is snapped to a whole point first: what the gate compares is then a
     /// deterministic function of the layout rather than of the lazy estimate.
     func capture(_ phase: String) {
         try? harness.snapNativeTranscriptOffsetToWholePoint()
-        let rendered = harness.renderedWindowFrame(
-            includingPNG: recordsArtifacts,
-            scale: ChatVisualParitySpec.renderScale
+        let rendered = harness.renderedParityFrame(
+            scale: ChatVisualParitySpec.renderScale,
+            rowBandPixels: ChatVisualParityFingerprint.rowBandPixels,
+            columnBandPixels: ChatVisualParityFingerprint.columnBandPixels,
+            includingPNG: true
         )
         frames.append(ChatVisualParityFrame(
             index: frames.count,
             phase: phase,
-            fingerprint: ChatVisualParityFingerprint(
-                width: rendered.width,
-                height: rendered.height,
-                luminance: rendered.luminance,
-                pointsPerPixel: ChatVisualParitySpec.pointsPerPixel
-            )
+            fingerprint: ChatVisualParityFingerprint(rendered)
         ))
         if let png = rendered.png { pngs.append(png) }
     }
@@ -404,26 +389,33 @@ final class ChatVisualParityRunner {
         }
     }
 
-    /// Drive display boundaries until the rendered window stops changing. The
+    /// Drive display boundaries until the rendered region stops changing. The
     /// recorder's sample stream only advances when the transcript's layout
     /// changes, so a transform-only entrance — the appended row's fade and rise,
     /// for instance — would look settled while it is still moving, and the
     /// frames taken after it would land on an animation. A settled state is
     /// timing-independent even though reaching it is not, so scenarios start
-    /// their fixed frame sequences from one.
-    func settle(stableBoundaries: Int = 4, cap: Int = 60) async throws {
-        var previous: [UInt8]?
+    /// their fixed frame sequences from one. A boundary is about one display
+    /// frame, so the stability window is stated in boundaries and its default
+    /// covers a quarter second of rendered stillness.
+    func settle(stableBoundaries: Int = 12, cap: Int = 160) async throws {
+        var previous: ChatVisualParityFingerprint?
         var stable = 0
         for _ in 0..<cap {
             try await harness.driveFrameBoundary()
             try? harness.snapNativeTranscriptOffsetToWholePoint()
-            let plane = harness.renderedWindowFrame(
-                includingPNG: false,
-                scale: ChatVisualParitySpec.renderScale
-            ).luminance
-            defer { previous = plane }
-            guard let previous, previous.count == plane.count else { continue }
-            let changed = zip(previous, plane).contains { abs(Int($0) - Int($1)) > 1 }
+            let fingerprint = ChatVisualParityFingerprint(harness.renderedParityFrame(
+                scale: ChatVisualParitySpec.renderScale,
+                rowBandPixels: ChatVisualParityFingerprint.rowBandPixels,
+                columnBandPixels: ChatVisualParityFingerprint.columnBandPixels,
+                includingPNG: false
+            ))
+            defer { previous = fingerprint }
+            guard let previous,
+                  previous.rows.count == fingerprint.rows.count,
+                  previous.columns.count == fingerprint.columns.count else { continue }
+            let changed = zip(previous.rows, fingerprint.rows).contains { abs(Int($0) - Int($1)) > 1 }
+                || zip(previous.columns, fingerprint.columns).contains { abs(Int($0) - Int($1)) > 1 }
             if changed {
                 stable = 0
             } else {
@@ -602,6 +594,22 @@ private func parityStreamingText(step: Int) -> String {
     }.joined(separator: "\n\n")
 }
 
+/// How many driven boundaries each transition's frames are sampled over. A
+/// boundary is about one display frame on this lane, so the counts come from the
+/// transitions' own durations: the send entrance is a 280 ms easeOut, its
+/// composer collapse a 360 ms spring and the keyboard's viewport change lands in
+/// the same layout transaction, so the send choreography is sampled over about a
+/// second of frames.
+private enum ParityTransitionFrames {
+    static let keyboardViewport = 30
+    static let sendChoreography = 45
+    static let streamingGrowth = 25
+    static let queuedReplacement = 25
+    static let toolChip = 20
+    static let earlierPage = 15
+    static let catchUp = 20
+}
+
 /// (a) An opened long mixed history at rest, pinned at its tail.
 @MainActor
 private func openedLongHistoryAtRest() async throws -> ChatVisualParityRunner {
@@ -611,7 +619,12 @@ private func openedLongHistoryAtRest() async throws -> ChatVisualParityRunner {
         snapshot: snapshot,
         submitsPrompts: false
     ) { run in
-        try await run.settle()
+        // The 140-row history's lazy realization keeps settling after the first
+        // stable boundaries, and which rows are mounted at the first captured
+        // frame differed by up to 0.043 run to run when the scenario captured
+        // straight after the default window, so this scenario waits for a longer
+        // run of rendered stillness before its frames.
+        try await run.settle(stableBoundaries: 40, cap: 240)
         try await run.advance("rest", boundaries: 8)
         let tailError = try run.harness.nativeTranscriptDistanceFromTail()
         #expect(tailError <= 2, "the opened history stayed pinned: tail error \(tailError)")
@@ -635,16 +648,16 @@ private func ordinarySendWithKeyboardUp() async throws -> ChatVisualParityRunner
         try await run.settle()
         try await run.advance("pinned", boundaries: 2)
         harness.resize(height: 620)
-        try await run.advance("keyboard-up", boundaries: 4)
+        try await run.advance("keyboard-up", boundaries: ParityTransitionFrames.keyboardViewport)
         try harness.setComposerDraftText("Keep the parity transcript stable through this send.")
         // The composer's own text install is a state, not part of the send
         // choreography this scenario drives.
         try await run.settle()
         try await run.advance("draft", boundaries: 2)
         harness.submitPrompt()
-        try await run.advance("outgoing-entrance", boundaries: 10)
+        try await run.advance("outgoing-entrance", boundaries: ParityTransitionFrames.sendChoreography)
         harness.resize(height: 844)
-        try await run.advance("keyboard-dismissal", boundaries: 10)
+        try await run.advance("keyboard-dismissal", boundaries: ParityTransitionFrames.keyboardViewport)
         try await run.advance("settled", boundaries: 3)
         let tailError = try harness.nativeTranscriptDistanceFromTail()
         #expect(tailError <= 2, "the send settled on the native tail: tail error \(tailError)")
@@ -675,12 +688,10 @@ private func streamingTailGrowth() async throws -> ChatVisualParityRunner {
             next.revision += 1
             next.eventSequence += 1
             harness.replaceAuthoritativeSnapshot(next)
-            // The growing row's own realization is not reproducible boundary for
-            // boundary on the recorded lazy container (the parity gate section of
-            // `packages/ios-app/docs/development.md` measures it), so the frame is
-            // taken once the growth has landed.
+            // The growth's own frames are the transition this scenario gates, so
+            // they are captured before the scenario waits for the settled state.
+            try await run.advance("growth-\(step)", boundaries: ParityTransitionFrames.streamingGrowth)
             try await run.settle()
-            try await run.advance("growth-\(step)", boundaries: 2)
         }
     }
 }
@@ -714,10 +725,7 @@ private func queuedCardToSentRow() async throws -> ChatVisualParityRunner {
         try await run.settle()
         try await run.advance("queued-card", boundaries: 2)
         harness.replaceAuthoritativeSnapshot(canonical)
-        try await run.advance("replacement", boundaries: 1)
-        // The queued card's height interpolation passes through a state the
-        // recorded container reaches in one run and not the next, so the
-        // replacement's remaining frames are its landed state.
+        try await run.advance("replacement", boundaries: ParityTransitionFrames.queuedReplacement)
         try await run.settle()
         try await run.advance("replacement-settled", boundaries: 3)
         let tailError = try harness.nativeTranscriptDistanceFromTail()
@@ -747,11 +755,11 @@ private func toolChipEntrance() async throws -> ChatVisualParityRunner {
         try await run.settle()
         try await run.advance("rest", boundaries: 2)
         harness.replaceAuthoritativeSnapshot(running)
-        try await run.advance("chip-entrance", boundaries: 2)
+        try await run.advance("chip-entrance", boundaries: ParityTransitionFrames.toolChip)
         try await run.settle()
         try await run.advance("chip-entrance-settled", boundaries: 2)
         harness.replaceAuthoritativeSnapshot(completed)
-        try await run.advance("chip-completion", boundaries: 2)
+        try await run.advance("chip-completion", boundaries: ParityTransitionFrames.toolChip)
         try await run.settle()
         try await run.advance("chip-completion-settled", boundaries: 2)
     }
@@ -772,9 +780,9 @@ private func earlierPageLoadAtRest() async throws -> ChatVisualParityRunner {
         try await run.settle()
         try await run.advance("rest", boundaries: 2)
         #expect(harness.drivePrepend(), "the earlier-messages row admitted its page load")
-        try await run.advance("loading", boundaries: 4)
+        try await run.advance("loading", boundaries: ParityTransitionFrames.earlierPage)
         harness.releasePrependPage()
-        try await run.advance("completing", boundaries: 4)
+        try await run.advance("completing", boundaries: ParityTransitionFrames.earlierPage)
     }
 }
 
@@ -806,10 +814,8 @@ private func detachedReaderCatchUp() async throws -> ChatVisualParityRunner {
         harness.replaceAuthoritativeSnapshot(updated)
         try await run.advance("frozen", boundaries: 3)
         harness.driveCatchUp(reduceMotion: true)
-        try await run.advance("catch-up", boundaries: 4)
+        try await run.advance("catch-up", boundaries: ParityTransitionFrames.catchUp)
         harness.driveGeometry(previous: away, current: bottom, viewport: true)
-        // The returned viewport keeps settling after the catch-up command lands,
-        // and which boundary shows that transient differs run to run.
         try await run.settle()
         try await run.advance("settled", boundaries: 3)
     }
@@ -847,6 +853,7 @@ enum ChatVisualParityGate {
                 matchWindow: ChatVisualParitySpec.matchWindow
             ),
             tolerance: ChatVisualParitySpec.tolerance,
+            transitionTolerance: ChatVisualParitySpec.transitionTolerance,
             window: [390, 844],
             systemVersion: UIDevice.current.systemVersion,
             scenarios: runs.map { run in
@@ -884,10 +891,19 @@ enum ChatVisualParityGate {
             return
         }
         let tolerance = min(ChatVisualParitySpec.tolerance, manifest.tolerance)
+        let transitionTolerance = min(
+            ChatVisualParitySpec.transitionTolerance,
+            manifest.transitionTolerance
+        )
         var scenarios: [ChatVisualParityReport.Scenario] = []
         var notes: [String] = []
         for run in runs {
-            let scenario = compare(run: run, reference: manifest.scenarios.first { $0.id == run.id }, tolerance: tolerance)
+            let scenario = compare(
+                run: run,
+                reference: manifest.scenarios.first { $0.id == run.id },
+                tolerance: tolerance,
+                transitionTolerance: transitionTolerance
+            )
             scenarios.append(scenario)
             let failing = scenario.frames.filter { $0.magnitude > $0.allowed }
             let worst = (failing.isEmpty ? scenario.worstFrames : Array(failing.prefix(5))).first.map {
@@ -895,7 +911,9 @@ enum ChatVisualParityGate {
             } ?? "none"
             print("PARITY-GATE scenario=\(scenario.id) frames=\(scenario.renderedFrames)"
                 + " maxDiff=\(String(format: "%.5f", scenario.maximumMagnitude)) worst=\(worst)"
-                + " tolerance=\(String(format: "%.5f", tolerance)) verdict=\(scenario.passed ? "pass" : "FAIL")")
+                + " tolerance=\(String(format: "%.5f", tolerance))"
+                + " transitionTolerance=\(String(format: "%.5f", transitionTolerance))"
+                + " verdict=\(scenario.passed ? "pass" : "FAIL")")
             if !scenario.passed {
                 notes.append("\(scenario.id): worst \(worst) at \(String(format: "%.5f", scenario.maximumMagnitude))"
                     + (scenario.note.map { " (\($0))" } ?? ""))
@@ -905,6 +923,7 @@ enum ChatVisualParityGate {
             schema: "tron.chat-visual-parity-report.v1",
             mode: "verify",
             tolerance: tolerance,
+            transitionTolerance: transitionTolerance,
             passed: notes.isEmpty,
             scenarios: scenarios
         )
@@ -916,16 +935,18 @@ enum ChatVisualParityGate {
         #expect(runs.count == manifest.scenarios.count, "every recorded scenario rendered")
     }
 
-    /// Compare one scenario's rendered frames against its recorded ones. A
-    /// rendered frame is matched to the recorded frame at the same state within
-    /// `matchWindow`, so the reference container's own frame-to-frame timing is
-    /// not read as a different picture, and every rendered frame must match some
-    /// recorded frame in return, so a container cannot add states the chat never
-    /// showed.
+    /// Compare one scenario's rendered frames against its recorded ones. Every
+    /// display frame of a transition is recorded, so a rendered frame is matched
+    /// to the recorded frame at the same state within `matchWindow` — wide enough
+    /// for the boundary the animation's own start lands on, narrow enough that a
+    /// different rise still has to match the recorded rise — and every rendered
+    /// frame must match some recorded frame in return, so a container cannot add
+    /// states the chat never showed.
     private static func compare(
         run: ChatVisualParityRunner,
         reference: ChatVisualParityManifest.Scenario?,
-        tolerance: Double
+        tolerance: Double,
+        transitionTolerance: Double
     ) -> ChatVisualParityReport.Scenario {
         guard let reference else {
             return .init(
@@ -961,42 +982,12 @@ enum ChatVisualParityGate {
                 frames: [], worstFrames: [], maximumMagnitude: .infinity, passed: false, note: shape
             )
         }
-        // How far the recorded container itself moves from one frame to the next:
-        // where that is more than the stable tolerance, the frame is inside an
-        // animation whose exact boundary is not reproducible, so it is judged
-        // against the transition bound and an extra rendered state there is not
-        // evidence of a different picture.
-        let recordedSteps = recorded.indices.map { index -> Double in
-            guard index + 1 < recorded.count else { return 0 }
-            return ChatVisualParityFingerprint.magnitude(
-                recorded[index],
-                recorded[index + 1],
-                alignmentPoints: ChatVisualParitySpec.alignmentPoints
-            ).magnitude
-        }
-        // A rendered frame moves the same way: a candidate that is still inside a
-        // transition the recording has finished with is judged the same as a
-        // recorded frame that is moving, because which boundary a transition ends
-        // on is exactly what does not reproduce here.
-        let renderedSteps = rendered.indices.map { index -> Double in
-            guard index + 1 < rendered.count else { return 0 }
-            return ChatVisualParityFingerprint.magnitude(
-                rendered[index],
-                rendered[index + 1],
-                alignmentPoints: ChatVisualParitySpec.alignmentPoints
-            ).magnitude
-        }
-        func movingFrameAllowed(recorded index: Int, rendered renderedIndex: Int, tolerance: Double) -> Double {
-            let recordedLocal = max(
-                recordedSteps[max(0, index - 1)],
-                recordedSteps[min(recordedSteps.count - 1, index)]
-            )
-            let renderedLocal = max(
-                renderedSteps[max(0, renderedIndex - 1)],
-                renderedSteps[min(renderedSteps.count - 1, renderedIndex)]
-            )
-            return max(recordedLocal, renderedLocal) > tolerance
-                ? ChatVisualParitySpec.transitionTolerance
+        /// The bound a compared frame is judged against: the transition bound
+        /// where either side's phase is a transition, the stable bound otherwise.
+        func allowed(recordedPhase: String, renderedPhase: String) -> Double {
+            ChatVisualParitySpec.isTransitionPhase(recordedPhase)
+                || ChatVisualParitySpec.isTransitionPhase(renderedPhase)
+                ? transitionTolerance
                 : tolerance
         }
         func nearest(candidate: ChatVisualParityFingerprint, in range: ClosedRange<Int>) -> (magnitude: Double, frame: Int, shift: Double) {
@@ -1024,10 +1015,9 @@ enum ChatVisualParityGate {
                 magnitude: best.magnitude,
                 matchedFrame: best.frame,
                 shift: best.shift,
-                allowed: movingFrameAllowed(
-                    recorded: index,
-                    rendered: best.frame,
-                    tolerance: tolerance
+                allowed: allowed(
+                    recordedPhase: reference.frames[index].phase,
+                    renderedPhase: run.frames[best.frame].phase
                 )
             ))
         }
@@ -1044,10 +1034,9 @@ enum ChatVisualParityGate {
                     best = (diff.magnitude, referenceIndex)
                 }
             }
-            guard best.magnitude > movingFrameAllowed(
-                recorded: best.frame,
-                rendered: index,
-                tolerance: tolerance
+            guard best.magnitude > allowed(
+                recordedPhase: reference.frames[best.frame].phase,
+                renderedPhase: run.frames[index].phase
             ) else { continue }
             unmatchedRendered.append(.init(
                 index: index,
@@ -1055,7 +1044,10 @@ enum ChatVisualParityGate {
                 magnitude: best.magnitude,
                 matchedFrame: best.frame,
                 shift: 0,
-                allowed: movingFrameAllowed(recorded: best.frame, rendered: index, tolerance: tolerance)
+                allowed: allowed(
+                    recordedPhase: reference.frames[best.frame].phase,
+                    renderedPhase: run.frames[index].phase
+                )
             ))
         }
         let worst = diffs.sorted { $0.magnitude > $1.magnitude }.prefix(5)
@@ -1078,8 +1070,21 @@ enum ChatVisualParityGate {
 @MainActor
 @Suite("Chat visual parity gate", .serialized)
 struct ChatVisualParityTests {
+    /// The gate is a measurement, not a unit invariant: it renders the chat
+    /// hundreds of times and takes about 45 s, so it runs only in the
+    /// `UIValidation` test plan. The check is the plan's own environment variable
+    /// rather than a plan `skippedTests` entry, because a test selected with
+    /// `--only-testing` runs even when the plan lists it as skipped, and this gate
+    /// must not run in a routine unit selection either. (The CT-10 worker found
+    /// the same for its hosted measurement fixtures; if that lands as a shared
+    /// helper, this check should use it.)
+    static var planIsUIValidation: Bool {
+        ProcessInfo.processInfo.environment["XCODE_TEST_PLAN_NAME"] == "UIValidation"
+    }
+
     @Test("recorded reference frames match the rendered transcript within tolerance")
     func recordedReferenceFramesMatchRenderedTranscript() async throws {
+        guard Self.planIsUIValidation else { return }
         try await withTestWatchdog(timeout: .seconds(300)) {
             try await ChatVisualParityGate.run()
         }

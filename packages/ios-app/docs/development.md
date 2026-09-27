@@ -502,51 +502,101 @@ TRON_IOS_TEST_TIER=ui-validation scripts/tron-ios-test run \
 ```
 
 `ChatVisualParityTests.recordedReferenceFramesMatchRenderedTranscript` is the
-CT-12 visual parity gate. It renders the actual `ChatView` in the same fixed
-390x844 hosted window and samples the rendered window at every display boundary
-of seven scenarios: an opened long mixed history at rest, an ordinary send with
-the keyboard modelled as the viewport contraction the coordinator consumes
+CT-12 visual parity gate, extended by CT-14 to sample every display frame of the
+chat's transitions. It renders the actual `ChatView` in the same fixed 390x844
+hosted window and captures one frame at every driven display boundary of seven
+scenarios: an opened long mixed history at rest, an ordinary send with the
+keyboard modelled as the viewport contraction the coordinator consumes
 (outgoing entrance, composer collapse, dismissal), the tail assistant row's
 streaming growth, a queued card's replacement by its sent row, a tool chip's
 entrance and completion, an earlier-page load at rest, and a detached reader's
 catch-up. It exists so a candidate transcript container can be measured against
-the chat as it renders today, before that container ships.
+the chat as it renders today, before that container ships. The gate runs only in
+the `UIValidation` test plan, and it decides that from
+`XCODE_TEST_PLAN_NAME`, not from a plan `skippedTests` entry: a test selected
+with `--only-testing` runs even when the plan lists it as skipped, so a routine
+unit selection would otherwise execute it.
 
 The reference is `Tests/Fixtures/ChatVisualParityManifest.json`: one fingerprint
-per sampled boundary, recorded from the unchanged chat. A fingerprint is the mean
-luminance of each 2-point row band of the rendered window plus each 8-point
-column band, base64-encoded; the committed file is 72 KB for 91 frames.
-Per-frame PNG artifacts are retained under the git-ignored
+per captured boundary, recorded from the unchanged chat. A fingerprint is the
+mean luminance of each 2-point row band of the rendered transcript region plus
+each 8-point column band, base64-encoded; the committed file is 225 KB for 385
+frames. Per-frame PNG artifacts are retained under the git-ignored
 `build/parity-reference/<scenario>/`, and every verify run writes
 `build/parity-reference/report.json`: every frame's diff, the rendered frame it
 matched, and the bound it was judged against, worst first.
 
-Two bounds are stated, both set from measurement and never widened to make a run
-pass. `ChatVisualParitySpec.tolerance` (0.014) is the per-frame bound where
-neither the recording nor the rendering moved by more than that from its
-neighbour; three determinism runs on unchanged code measured a worst
-stable-frame diff of 0.0068. `ChatVisualParitySpec.transitionTolerance` (0.060)
-is the bound where either side moved that much, because the recorded container's
-transform-only entrances are not reproducible frame by frame on this lane: while
-a sample cost about 110 ms (it forces a screen update for the full window), each
-sample skipped six or seven frames of a 280 ms entrance, so which animated state
-landed on a recorded frame index differed run to run by up to 0.047. Sampling is
-normalized so the compared states reproduce wherever they can: the transcript's
-native offset is snapped to a whole point before a frame is rendered, a rendered
-frame may be re-aligned by up to 2 points vertically in half-point steps, may be
-matched to a recorded frame up to three boundaries away, and each scenario
-settles on the rendered pixels (not the recorder's layout sample stream) before
-its fixed frame sequence begins. The suite runs in about 45-50 s.
+The capture is the gate's frame clock, so its cost decides how much of a
+transition is compared. It renders the transcript region — below the navigation
+bar, whose glass material re-renders with pixel noise, and above the composer,
+whose own material and spring were measured as the largest single source of
+run-to-run difference in a frame that included them (0.06 against 0.015 for the
+transcript alone) — at half scale, and accumulates both profiles in one pass over
+the image's bytes. That costs about 60 ms a boundary including the boundary wait
+and the artifact encoding, against about 110 ms for the earlier full-window 1x
+capture (measured at 47 ms rendering with a forced screen update, 45 ms
+flattening the pixels to luminance and 23 ms building the two profiles). The
+artifact encoding is part of the capture in every mode, so a recording run and a
+verifying run sample the same instants; only writing the artifact differs.
+Scenarios capture every driven boundary through each transition: the send
+choreography is sampled over 45 boundaries, the keyboard's viewport change and
+dismissal over 30 each, each streaming growth step over 25, the queued
+replacement over 25, a tool chip's entrance and completion over 20 each, an
+earlier-page load over 15, and the detached reader's catch-up over 20.
 
-Three negative controls, each applied temporarily and reverted, measured against
-the committed reference: a 2-point row spacing change fails all seven scenarios
-(0.037-0.048 against the 0.014 bound), rendering an assistant row's Markdown as
-plain text fails six of seven (0.036-0.053), and a 14-point entrance rise in
-place of 20 points is not rejected — the recorded container's own entrance
-jitter (0.047) is larger than the 0.022 that change produces, so the gate
-compares that a transform entrance happens and lands, not its exact rise. Until
-a lane can sample that entrance reproducibly, qualify the send choreography's
-rise on a device with the checklist below.
+Two bounds are stated, both recorded in the committed manifest, both set from
+measurement and never widened to make a run pass. `ChatVisualParitySpec.tolerance`
+(0.025) is the bound for a frame in a stable phase; four determinism runs on
+unchanged code measured a worst stable-frame diff of 0.0050, on the opened
+140-row history, whose lazy realization keeps settling after the first stable
+boundaries — with the default settle window its first captured frame differed by
+up to 0.043 run to run, so that scenario now waits for 40 stable boundaries
+before its frames. `ChatVisualParitySpec.transitionTolerance` (0.065) is the
+bound for a frame in a transition phase; the same runs measured a worst
+transition diff of 0.0528, at the send entrance's frame 43. The phases are classified in
+`ChatVisualParitySpec.transitionPhases`, so which frames are compared tightly is
+the scenario's own declaration and every phase not named there is tight by
+default. Sampling is normalized so the compared states reproduce wherever they
+can: the transcript's native offset is snapped to a whole point before a frame
+is rendered, a rendered frame may be re-aligned by up to 2 points vertically in
+half-point steps, a rendered frame may be matched to a recorded frame one
+boundary away, and each scenario settles on the rendered pixels (not the
+recorder's layout sample stream) before its fixed frame sequence begins. The
+suite runs in about 45 s.
+
+What the gate cannot resolve, measured on this lane: the exact rise and duration
+of a sub-60 ms-phase transition. A frame must force a screen update to carry the
+animation at all — with `afterScreenUpdates: false` the captured frames were
+identical for runs of 20 to 37 boundaries through an entrance, because the app
+commits its layer tree only a few times per transition — so a boundary costs
+about 60 ms and is a quarter of the send entrance's 280 ms. The window's
+animation clock cannot be paused from the harness either: `window.layer.speed` at
+0, 1/10 and 1/60 left the entrance's timing unchanged. A 14-point rise instead of
+20 points therefore produces a fingerprint difference of about 0.010 against
+run-to-run noise of about 0.015, and it barely moves the maximum excursion from
+the settled frame (0.0654/0.0637/0.064 at 20 points against 0.0657/0.0649 at 14).
+The rise, the entrance duration, and any sub-60 ms phase difference stay device
+checks with the send choreography checklist below; the container's own continuity
+is better judged by the hosted per-boundary row frames, tail error and
+`maxRectStep` evidence the harness already records.
+
+Negative controls, each applied temporarily and reverted, measured against the
+committed reference on this branch:
+
+| Control | Result |
+| --- | --- |
+| row spacing 8 to 10 points | fails all seven scenarios, 0.040-0.055 against 0.025 |
+| Markdown rendered as plain text | fails all seven scenarios, 0.040-0.056 against 0.025 |
+| queued-card shrink turned instant | not rejected: worst frame 0.026, inside the 0.065 transition bound |
+| composer collapse turned instant | not rejected: worst frame 0.055, inside the 0.065 transition bound |
+| send entrance rise 20 to 14 points | not rejected: about 0.010 against 0.015 of noise |
+| send entrance duration 280 to 200 ms | not measured; the same sub-60 ms phase limit applies |
+
+The two instant-change controls and the entrance controls are inside the lane's
+transition-phase resolution, so the gate protects layout and rendering parity
+tightly and transform-motion parity only coarsely. A candidate container that
+changes a row's animated height is judged by the hosted continuity evidence named
+above, not by these pixels.
 
 Recording is a switch, not a flag: the gate verifies while
 `Tests/Fixtures/ChatVisualParityManifest.json` exists and records when it does

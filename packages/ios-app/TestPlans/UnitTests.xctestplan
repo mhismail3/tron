@@ -46,7 +46,6 @@
         "SessionSheetPresentationTests/testPromptTemplateRowCollapsesExpandedContentWithoutChangingInput()",
         "SessionSheetPresentationTests/testTechnicalJSONRetainsReadingPositionAcrossActivityChanges()",
         "ChatViewScrollHarnessTests/ct2ManyTallRepliesMetrics()",
-        "ChatVisualParityTests/recordedReferenceFramesMatchRenderedTranscript()",
         "ChatViewScrollHarnessTests/repeatedKeyboardAndSendCyclesKeepRealizedRowsOnScreen()",
         "ChatViewScrollHarnessTests/pastedImagesUsePhotoAttachmentFlow()",
         "ChatViewScrollHarnessTests/longAssistantIntrinsicGeometry()",
