@@ -578,3 +578,17 @@ reports exact frames itself. No other shared code changes.
 
 - Result: the user approved the container design in Task details. CT-20, the spike that settles its four unverified assumptions, starts on a throwaway branch.
 - Changes: this plan.
+
+### CT-20 stage 1 · Blocked · 2026-09-27 · chat scroll investigation session
+
+- Result: assumption 1 does not hold. A SwiftUI row hosted in a `UICollectionView` cell does not drive the cell's height during its own animation, by any of three hosting approaches or a per-display-frame measurement probe. The row's content animates inside the cell while the cell stays at its old height, jumps to the final height, or lags. So a container cannot follow a row's animated height by measuring it; it would have to drive the height itself on the row's curve, which means knowing every row animation's timing outside the row. Assumption 2 holds only for a reused `UIHostingController` with containment: under `UIHostingConfiguration` a user prompt row lost its context menu interaction and rendered at 18 pt instead of 44 pt.
+
+  | Animation | Today (`LazyVStack`), pinned tail error | Best container approach, cell height versus row content | Container tail error |
+  | --- | --- | --- | --- |
+  | compact row entrance, 280 ms | 0.35 pt | 26 pt drift (cell jumps to final height) | 13-21 pt |
+  | streaming growth | 0.80 pt | 101-134 pt drift (cell steps six times) | 52-77 pt |
+  | queued-card shrink | 21.4 pt transient | 62 pt drift | 31 pt |
+
+- Evidence: branch `ct-20-container-spike` (commits `f00e8ad0f` to `5ccd21e0c`, not merged; today's path unchanged with the switch off); run `20260927T073900Z-run.UAKWRO` with `ct20-spike-evidence.log` (15 measured journeys, 37-47 display boundaries each, native frames). The automated review step failed on a tool-permission error; the supervisor checked the claims against the evidence log and the diff.
+- Changes: none on `main`.
+- For the next agent: stage 2 did not run. The user decides how to proceed (see the options recorded when this is resolved).
