@@ -397,7 +397,6 @@ final class ComposerDraftCoordinator {
     private struct Draft: Equatable {
         var text: String
         var revision: Int
-        var lastAccess: UInt64
     }
 
     private struct PresentationLease: Equatable {
@@ -513,7 +512,12 @@ final class ComposerDraftCoordinator {
     @ObservationIgnored private var dirtyScopes: Set<ComposerDraftScope> = []
     @ObservationIgnored private var storageGenerationByScope: [ComposerDraftScope: UInt64] = [:]
     @ObservationIgnored private var persistenceTask: Task<Void, Never>?
-    private var sequence: UInt64 = 0
+    /// LRU access order for `drafts`, kept outside observed state so an access
+    /// that changes no draft (an unchanged `setText`, a reopen) does not
+    /// invalidate views reading draft text. Keys always equal `drafts`' keys.
+    @ObservationIgnored private var lastAccessByScope: [ComposerDraftScope: UInt64] = [:]
+    /// Monotonic source for LRU access and local identities; never presented.
+    @ObservationIgnored private var sequence: UInt64 = 0
 
     init(
         upload: @escaping ComposerUploadOperation,
@@ -557,15 +561,16 @@ final class ComposerDraftCoordinator {
 
     func setText(_ text: String, for scope: ComposerDraftScope) {
         sequence &+= 1
-        var draft = drafts[scope] ?? Draft(text: "", revision: 0, lastAccess: sequence)
+        lastAccessByScope[scope] = sequence
+        var draft = drafts[scope] ?? Draft(text: "", revision: 0)
         guard draft.text != text else {
-            draft.lastAccess = sequence
-            drafts[scope] = draft
+            // Unchanged text is still an LRU access, recorded above; only a
+            // scope without a draft yet changes observed state.
+            if drafts[scope] == nil { drafts[scope] = draft }
             return
         }
         draft.text = text
         draft.revision &+= 1
-        draft.lastAccess = sequence
         drafts[scope] = draft
         textMutationRevisionByScope[scope, default: 0] &+= 1
         schedulePersistence(for: scope)
@@ -1559,6 +1564,7 @@ final class ComposerDraftCoordinator {
         dirtyScopes.remove(scope)
         storageGenerationByScope[scope, default: 0] &+= 1
         drafts[scope] = nil
+        lastAccessByScope[scope] = nil
         attachmentsByScope[scope] = nil
         loadedScopes.remove(scope)
         textMutationRevisionByScope[scope] = nil
@@ -1585,6 +1591,7 @@ final class ComposerDraftCoordinator {
         }
         dirtyScopes = dirtyScopes.filter { $0.profileID != profileID }
         drafts = drafts.filter { $0.key.profileID != profileID }
+        lastAccessByScope = lastAccessByScope.filter { $0.key.profileID != profileID }
         attachmentsByScope = attachmentsByScope.filter { $0.key.profileID != profileID }
         loadedScopes = loadedScopes.filter { $0.profileID != profileID }
         textMutationRevisionByScope = textMutationRevisionByScope.filter {
@@ -1657,14 +1664,14 @@ final class ComposerDraftCoordinator {
               storageGenerationByScope[scope, default: 0] == startingStorageGeneration else { return }
 
         sequence &+= 1
-        var draft = drafts[scope] ?? Draft(text: "", revision: 0, lastAccess: sequence)
+        lastAccessByScope[scope] = sequence
+        var draft = drafts[scope] ?? Draft(text: "", revision: 0)
         if let value,
            textMutationRevisionByScope[scope, default: 0] == 0,
            draft.text != value.text {
             draft.text = value.text
             draft.revision &+= 1
         }
-        draft.lastAccess = sequence
         drafts[scope] = draft
         let liveAttachments = attachmentsByScope[scope] ?? []
         let mergedAttachments = restoredAttachments + liveAttachments
@@ -1846,17 +1853,14 @@ final class ComposerDraftCoordinator {
 
     private func touch(_ scope: ComposerDraftScope, installing initialText: String?) {
         sequence &+= 1
-        if var draft = drafts[scope] {
-            // Route editor text seeds only a previously absent draft. Reopen or
-            // repeated preparation can never replace retained user edits.
-            draft.lastAccess = sequence
-            drafts[scope] = draft
-        } else {
+        lastAccessByScope[scope] = sequence
+        // Route editor text seeds only a previously absent draft. Reopen or
+        // repeated preparation can never replace retained user edits.
+        if drafts[scope] == nil {
             let seed = initialText ?? ""
             drafts[scope] = Draft(
                 text: seed,
-                revision: seed.isEmpty ? 0 : 1,
-                lastAccess: sequence
+                revision: seed.isEmpty ? 0 : 1
             )
         }
         evictInactiveDraftsIfNeeded()
@@ -1920,7 +1924,7 @@ final class ComposerDraftCoordinator {
                 details: nil
             )
         }
-        let draft = drafts[scope] ?? Draft(text: "", revision: 0, lastAccess: sequence)
+        let draft = drafts[scope] ?? Draft(text: "", revision: 0)
         let rawOutgoing = draft.text.trimmingCharacters(in: .whitespacesAndNewlines)
         let submittedAttachments = attachmentsByScope[scope] ?? []
         let submittedResource = selectedResourceByScope[scope]
@@ -2417,14 +2421,17 @@ final class ComposerDraftCoordinator {
         var inactive = Array(drafts.filter { !protectedScopes.contains($0.key) })
         guard inactive.count > Self.maxInactiveDrafts else { return }
         inactive.sort {
-            if $0.value.lastAccess != $1.value.lastAccess {
-                return $0.value.lastAccess < $1.value.lastAccess
+            let lhsAccess = lastAccessByScope[$0.key, default: 0]
+            let rhsAccess = lastAccessByScope[$1.key, default: 0]
+            if lhsAccess != rhsAccess {
+                return lhsAccess < rhsAccess
             }
             if $0.key.profileID != $1.key.profileID { return $0.key.profileID < $1.key.profileID }
             return $0.key.sessionID < $1.key.sessionID
         }
         for (scope, _) in inactive.prefix(inactive.count - Self.maxInactiveDrafts) {
             drafts[scope] = nil
+            lastAccessByScope[scope] = nil
             attachmentsByScope[scope] = nil
             loadedScopes.remove(scope)
             textMutationRevisionByScope[scope] = nil

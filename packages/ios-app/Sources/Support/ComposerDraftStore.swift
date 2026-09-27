@@ -33,15 +33,39 @@ actor ComposerDraftStore {
         let attachments: [AttachmentManifest]
     }
 
-    private struct AttachmentManifest: Codable {
+    private struct AttachmentManifest: Codable, Equatable {
         let name: String
         let mimeType: String
         let size: Int
         let payload: String
     }
 
+    /// The attachments of the one directory this actor last wrote or fully
+    /// verified, with the payload file identities it left there. A save whose
+    /// attachments equal them, while every payload is still that exact file,
+    /// replaces only the manifest. Holding one draft bounds the retained bytes
+    /// to one attachment budget, usually shared with the composer's own copy.
+    private struct PersistedAttachments {
+        let scope: ComposerDraftScope
+        let attachments: [Attachment]
+        let manifests: [AttachmentManifest]
+        let payloadIdentities: [PayloadIdentity]
+    }
+
+    /// Any rewrite, replacement or link swap of a payload changes one of these.
+    private struct PayloadIdentity: Equatable {
+        let fileNumber: UInt64
+        let modificationDate: Date
+        let size: UInt64
+    }
+
     private let root: URL
+    /// Recovered from every valid manifest at first use in this process, then
+    /// advanced in memory: this actor is the only writer of `root`, so no other
+    /// manifest can move ahead of it until the next process recovers again.
     private var logicalClock: UInt64 = 0
+    private var hasRecoveredLogicalClock = false
+    private var persistedAttachments: PersistedAttachments?
     #if HOSTED_TEST
     private let hostedBlocksLoads: Bool
     private var hostedLoadWaiters: [CheckedContinuation<Void, Never>] = []
@@ -85,7 +109,7 @@ actor ComposerDraftStore {
         let directory = path(for: scope)
         do {
             try prepareRoot()
-            _ = try validatedEntries(cleaningInvalid: true)
+            absorbRecoveredClock(try validatedEntries(cleaningInvalid: true, verifyingPayloads: true))
             let manifestURL = directory.appending(path: "manifest.json", directoryHint: .notDirectory)
             let manifestData = try readBounded(
                 manifestURL,
@@ -102,6 +126,7 @@ actor ComposerDraftStore {
             var seenPayloads: Set<String> = []
             var totalBytes = 0
             var attachments: [Attachment] = []
+            var payloadIdentities: [PayloadIdentity?] = []
             for (index, item) in manifest.attachments.enumerated() {
                 guard item.size > 0,
                       item.size <= ComposerAttachmentPolicy.maximumTotalBytes,
@@ -120,6 +145,7 @@ actor ComposerDraftStore {
                 }
                 totalBytes += data.count
                 attachments.append(Attachment(name: item.name, mimeType: item.mimeType, data: data))
+                payloadIdentities.append(Self.payloadIdentity(payloadURL))
             }
             let expectedNames = seenPayloads.union(["manifest.json"])
             let actualNames = Set(try FileManager.default.contentsOfDirectory(
@@ -143,9 +169,12 @@ actor ComposerDraftStore {
             guard refreshedData.count <= ComposerDraftStorePolicy.maximumManifestBytes else {
                 throw CocoaError(.fileWriteOutOfSpace)
             }
-            try refreshedData.write(
-                to: manifestURL,
-                options: [.atomic, .completeFileProtectionUntilFirstUserAuthentication]
+            try replaceManifest(refreshedData, in: directory)
+            rememberPersistedAttachments(
+                attachments,
+                manifests: manifest.attachments,
+                payloadIdentities: payloadIdentities,
+                for: scope
             )
             return Value(text: manifest.text, attachments: attachments)
         } catch {
@@ -167,60 +196,16 @@ actor ComposerDraftStore {
         )
         do {
             try prepareRoot()
+            if !hasRecoveredLogicalClock {
+                absorbRecoveredClock(try validatedEntries(cleaningInvalid: true, verifyingPayloads: true))
+            }
             logicalClock = try nextLogicalClock()
-            try FileManager.default.createDirectory(
-                at: profileDirectory,
-                withIntermediateDirectories: true,
-                attributes: [.protectionKey: FileProtectionType.completeUntilFirstUserAuthentication]
-            )
-            try FileManager.default.createDirectory(
-                at: staging,
-                withIntermediateDirectories: false,
-                attributes: [
-                    .posixPermissions: 0o700,
-                    .protectionKey: FileProtectionType.completeUntilFirstUserAuthentication,
-                ]
-            )
-            var manifests: [AttachmentManifest] = []
-            for (index, attachment) in value.attachments.enumerated() {
-                let payloadName = "\(Self.digest(prefix: Data("\(index)\u{0}".utf8), body: attachment.data)).payload"
-                try attachment.data.write(
-                    to: staging.appending(path: payloadName, directoryHint: .notDirectory),
-                    options: [.atomic, .completeFileProtectionUntilFirstUserAuthentication]
-                )
-                manifests.append(AttachmentManifest(
-                    name: attachment.name,
-                    mimeType: attachment.mimeType,
-                    size: attachment.data.count,
-                    payload: payloadName
-                ))
-            }
-            let manifest = Manifest(
-                version: ComposerDraftStorePolicy.version,
-                updatedAt: logicalClock,
-                text: value.text,
-                attachments: manifests
-            )
-            let manifestData = try JSONEncoder().encode(manifest)
-            guard manifestData.count <= ComposerDraftStorePolicy.maximumManifestBytes else {
-                throw CocoaError(.fileWriteOutOfSpace)
-            }
-            try manifestData.write(
-                to: staging.appending(path: "manifest.json", directoryHint: .notDirectory),
-                options: [.atomic, .completeFileProtectionUntilFirstUserAuthentication]
-            )
-            if FileManager.default.fileExists(atPath: directory.path) {
-                _ = try FileManager.default.replaceItemAt(
-                    directory,
-                    withItemAt: staging,
-                    backupItemName: nil,
-                    options: []
-                )
-            } else {
-                try FileManager.default.moveItem(at: staging, to: directory)
+            if try !replaceManifestKeepingPayloads(value, scope: scope, directory: directory) {
+                try writeDraftDirectory(value, scope: scope, directory: directory, staging: staging)
             }
             try enforceGlobalBounds(preserving: directory)
         } catch {
+            if persistedAttachments?.scope == scope { persistedAttachments = nil }
             if ownsProfileDirectory(scope.profileID) {
                 try? FileManager.default.removeItem(at: staging)
             }
@@ -228,12 +213,168 @@ actor ComposerDraftStore {
         }
     }
 
+    /// Writes every payload and the manifest into a fresh hidden staging
+    /// directory, then swaps it in for the draft directory, so a crash leaves
+    /// either the previous or the new complete directory plus abandoned
+    /// staging that recovery and accounting remove.
+    private func writeDraftDirectory(
+        _ value: Value,
+        scope: ComposerDraftScope,
+        directory: URL,
+        staging: URL
+    ) throws {
+        let profileDirectory = directory.deletingLastPathComponent()
+        // A link or file where a directory belongs is removed as an entry,
+        // never followed, before the replacement is created beside it.
+        Self.removeNonDirectoryEntry(at: profileDirectory)
+        try FileManager.default.createDirectory(
+            at: profileDirectory,
+            withIntermediateDirectories: true,
+            attributes: [.protectionKey: FileProtectionType.completeUntilFirstUserAuthentication]
+        )
+        Self.removeNonDirectoryEntry(at: directory)
+        try FileManager.default.createDirectory(
+            at: staging,
+            withIntermediateDirectories: false,
+            attributes: [
+                .posixPermissions: 0o700,
+                .protectionKey: FileProtectionType.completeUntilFirstUserAuthentication,
+            ]
+        )
+        var manifests: [AttachmentManifest] = []
+        for (index, attachment) in value.attachments.enumerated() {
+            let payloadName = "\(Self.digest(prefix: Data("\(index)\u{0}".utf8), body: attachment.data)).payload"
+            try attachment.data.write(
+                to: staging.appending(path: payloadName, directoryHint: .notDirectory),
+                options: [.atomic, .completeFileProtectionUntilFirstUserAuthentication]
+            )
+            manifests.append(AttachmentManifest(
+                name: attachment.name,
+                mimeType: attachment.mimeType,
+                size: attachment.data.count,
+                payload: payloadName
+            ))
+        }
+        let manifest = Manifest(
+            version: ComposerDraftStorePolicy.version,
+            updatedAt: logicalClock,
+            text: value.text,
+            attachments: manifests
+        )
+        let manifestData = try JSONEncoder().encode(manifest)
+        guard manifestData.count <= ComposerDraftStorePolicy.maximumManifestBytes else {
+            throw CocoaError(.fileWriteOutOfSpace)
+        }
+        try manifestData.write(
+            to: staging.appending(path: "manifest.json", directoryHint: .notDirectory),
+            options: [.atomic, .completeFileProtectionUntilFirstUserAuthentication]
+        )
+        if FileManager.default.fileExists(atPath: directory.path) {
+            _ = try FileManager.default.replaceItemAt(
+                directory,
+                withItemAt: staging,
+                backupItemName: nil,
+                options: []
+            )
+        } else {
+            try FileManager.default.moveItem(at: staging, to: directory)
+        }
+        rememberPersistedAttachments(
+            value.attachments,
+            manifests: manifests,
+            payloadIdentities: manifests.map {
+                Self.payloadIdentity(directory.appending(path: $0.payload, directoryHint: .notDirectory))
+            },
+            for: scope
+        )
+    }
+
+    private func rememberPersistedAttachments(
+        _ attachments: [Attachment],
+        manifests: [AttachmentManifest],
+        payloadIdentities: [PayloadIdentity?],
+        for scope: ComposerDraftScope
+    ) {
+        let identities = payloadIdentities.compactMap { $0 }
+        persistedAttachments = identities.count == manifests.count
+            ? PersistedAttachments(
+                scope: scope,
+                attachments: attachments,
+                manifests: manifests,
+                payloadIdentities: identities
+            )
+            : nil
+    }
+
+    /// Typing changes only the manifest. When `value` carries exactly the
+    /// attachments this actor last wrote or verified for `scope`, and the draft
+    /// directory still holds exactly those payload files, the new manifest
+    /// replaces the old one in one rename and no payload is rewritten. Returns
+    /// false, having touched nothing, whenever that cannot be shown.
+    private func replaceManifestKeepingPayloads(
+        _ value: Value,
+        scope: ComposerDraftScope,
+        directory: URL
+    ) throws -> Bool {
+        guard let persisted = persistedAttachments,
+              persisted.scope == scope,
+              persisted.attachments == value.attachments,
+              ownsProfileDirectory(scope.profileID),
+              Self.isOwnedDirectory(directory),
+              let names = try? FileManager.default.contentsOfDirectory(atPath: directory.path),
+              Set(names) == Set(persisted.manifests.map(\.payload)).union(["manifest.json"]),
+              Self.isRegularFile(directory.appending(path: "manifest.json", directoryHint: .notDirectory)),
+              persisted.manifests.indices.allSatisfy({ index in
+                  Self.payloadIdentity(
+                      directory.appending(path: persisted.manifests[index].payload, directoryHint: .notDirectory)
+                  ) == persisted.payloadIdentities[index]
+              }) else { return false }
+        let manifestData = try JSONEncoder().encode(Manifest(
+            version: ComposerDraftStorePolicy.version,
+            updatedAt: logicalClock,
+            text: value.text,
+            attachments: persisted.manifests
+        ))
+        guard manifestData.count <= ComposerDraftStorePolicy.maximumManifestBytes else {
+            throw CocoaError(.fileWriteOutOfSpace)
+        }
+        try replaceManifest(manifestData, in: directory)
+        return true
+    }
+
+    /// Replaces `directory/manifest.json` with one rename(2). The new bytes are
+    /// written beside the draft directories, never inside one: until the
+    /// rename the draft still holds its previous complete manifest, and an
+    /// interrupted write leaves only an unhashed profile-level file that
+    /// recovery and accounting remove.
+    private func replaceManifest(_ data: Data, in directory: URL) throws {
+        let temporary = directory.deletingLastPathComponent().appending(
+            path: ".manifest-\(UUID().uuidString)",
+            directoryHint: .notDirectory
+        )
+        do {
+            try data.write(
+                to: temporary,
+                options: [.withoutOverwriting, .completeFileProtectionUntilFirstUserAuthentication]
+            )
+            let destination = directory.appending(path: "manifest.json", directoryHint: .notDirectory)
+            guard rename(temporary.path, destination.path) == 0 else {
+                throw POSIXError(POSIXErrorCode(rawValue: errno) ?? .EIO)
+            }
+        } catch {
+            try? FileManager.default.removeItem(at: temporary)
+            throw error
+        }
+    }
+
     func remove(_ scope: ComposerDraftScope) {
+        if persistedAttachments?.scope == scope { persistedAttachments = nil }
         guard ownsProfileDirectory(scope.profileID) else { return }
         try? FileManager.default.removeItem(at: path(for: scope))
     }
 
     func removeProfile(_ profileID: String) {
+        if persistedAttachments?.scope.profileID == profileID { persistedAttachments = nil }
         guard Self.isOwnedDirectory(root) else { return }
         try? FileManager.default.removeItem(at: profilePath(profileID))
     }
@@ -247,6 +388,28 @@ actor ComposerDraftStore {
         // or following a link into another in-sandbox owner during cleanup.
         let attributes = try? FileManager.default.attributesOfItem(atPath: url.path)
         return attributes?[.type] as? FileAttributeType == .typeDirectory
+    }
+
+    private static func isRegularFile(_ url: URL) -> Bool {
+        let attributes = try? FileManager.default.attributesOfItem(atPath: url.path)
+        return attributes?[.type] as? FileAttributeType == .typeRegular
+    }
+
+    private static func removeNonDirectoryEntry(at url: URL) {
+        guard let attributes = try? FileManager.default.attributesOfItem(atPath: url.path),
+              attributes[.type] as? FileAttributeType != .typeDirectory else { return }
+        try? FileManager.default.removeItem(at: url)
+    }
+
+    private static func payloadIdentity(_ url: URL) -> PayloadIdentity? {
+        guard let attributes = try? FileManager.default.attributesOfItem(atPath: url.path),
+              attributes[.type] as? FileAttributeType == .typeRegular,
+              let fileNumber = (attributes[.systemFileNumber] as? NSNumber)?.uint64Value,
+              let modificationDate = attributes[.modificationDate] as? Date,
+              let size = (attributes[.size] as? NSNumber)?.uint64Value else {
+            return nil
+        }
+        return PayloadIdentity(fileNumber: fileNumber, modificationDate: modificationDate, size: size)
     }
 
     #if HOSTED_TEST
@@ -290,8 +453,11 @@ actor ComposerDraftStore {
         return data
     }
 
+    /// Accounting reads manifests and payload file sizes only. Payload digests
+    /// are verified at first use in each process and by `load` before any
+    /// restore; every structural fault is still removed here.
     private func enforceGlobalBounds(preserving preserved: URL) throws {
-        var entries = try validatedEntries(cleaningInvalid: true)
+        var entries = try validatedEntries(cleaningInvalid: true, verifyingPayloads: false)
         entries.sort {
             if $0.updatedAt != $1.updatedAt { return $0.updatedAt < $1.updatedAt }
             return $0.url.path < $1.url.path
@@ -306,6 +472,9 @@ actor ComposerDraftStore {
             guard let index = entries.firstIndex(where: { $0.url != preserved }) else { break }
             let removed = entries.remove(at: index)
             total = max(0, total - removed.bytes)
+            if let persisted = persistedAttachments, path(for: persisted.scope) == removed.url {
+                persistedAttachments = nil
+            }
             try? FileManager.default.removeItem(at: removed.url)
         }
     }
@@ -318,11 +487,12 @@ actor ComposerDraftStore {
 
     /// The persisted clock is recovered from every valid manifest so a new
     /// process cannot make a recently edited draft look older than prior data.
+    private func absorbRecoveredClock(_ entries: [Entry]) {
+        logicalClock = max(logicalClock, entries.map(\.updatedAt).max() ?? 0)
+        hasRecoveredLogicalClock = true
+    }
+
     private func nextLogicalClock() throws -> UInt64 {
-        let latest = try validatedEntries(cleaningInvalid: true)
-            .map(\.updatedAt)
-            .max() ?? 0
-        logicalClock = max(logicalClock, latest)
         guard logicalClock < UInt64.max else { throw CocoaError(.fileWriteUnknown) }
         return logicalClock + 1
     }
@@ -330,7 +500,7 @@ actor ComposerDraftStore {
     /// Validates the complete on-disk shape while collecting LRU accounting.
     /// Hidden crash-staging directories and every non-hash path are removed so
     /// neither corruption nor abandoned payloads can escape the global bound.
-    private func validatedEntries(cleaningInvalid: Bool) throws -> [Entry] {
+    private func validatedEntries(cleaningInvalid: Bool, verifyingPayloads: Bool) throws -> [Entry] {
         let profileURLs = try FileManager.default.contentsOfDirectory(
             at: root,
             includingPropertiesForKeys: [.isDirectoryKey],
@@ -357,7 +527,7 @@ actor ComposerDraftStore {
                     continue
                 }
                 do {
-                    entries.append(try validatedEntry(at: url))
+                    entries.append(try validatedEntry(at: url, verifyingPayloads: verifyingPayloads))
                 } catch {
                     if cleaningInvalid { try? FileManager.default.removeItem(at: url) }
                 }
@@ -369,7 +539,7 @@ actor ComposerDraftStore {
         return entries
     }
 
-    private func validatedEntry(at directory: URL) throws -> Entry {
+    private func validatedEntry(at directory: URL, verifyingPayloads: Bool) throws -> Entry {
         let manifestData = try readBounded(
             directory.appending(path: "manifest.json", directoryHint: .notDirectory),
             maximumBytes: ComposerDraftStorePolicy.maximumManifestBytes
@@ -395,10 +565,17 @@ actor ComposerDraftStore {
                 throw CocoaError(.fileReadCorruptFile)
             }
             let payloadURL = directory.appending(path: item.payload)
-            let data = try readBounded(payloadURL, maximumBytes: item.size)
-            guard data.count == item.size,
-                  item.payload == "\(Self.digest(prefix: Data("\(index)\u{0}".utf8), body: data)).payload" else {
-                throw CocoaError(.fileReadCorruptFile)
+            if verifyingPayloads {
+                let data = try readBounded(payloadURL, maximumBytes: item.size)
+                guard data.count == item.size,
+                      item.payload == "\(Self.digest(prefix: Data("\(index)\u{0}".utf8), body: data)).payload" else {
+                    throw CocoaError(.fileReadCorruptFile)
+                }
+            } else {
+                let values = try payloadURL.resourceValues(forKeys: [.fileSizeKey, .isRegularFileKey])
+                guard values.isRegularFile == true, values.fileSize == item.size else {
+                    throw CocoaError(.fileReadCorruptFile)
+                }
             }
             bytes += item.size
         }

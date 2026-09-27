@@ -417,6 +417,39 @@ struct ComposerDraftCoordinatorTests {
         }
     }
 
+    @Test("unchanged text is an LRU access that changes no observed draft state")
+    func unchangedTextIsUnobservedLRUAccess() async throws {
+        try await withTestWatchdog { @MainActor in
+            let harness = ComposerHarness()
+            let coordinator = harness.coordinator
+            let scopes = (0 ..< ComposerDraftCoordinator.maxInactiveDrafts).map { index in
+                coordinator.prepareDraft(profileID: "lru", sessionID: "session-\(index)", initialText: "draft-\(index)")
+            }
+            let oldest = scopes[0]
+            let revision = coordinator.revision(for: oldest)
+            let changed = Mutex(false)
+            withObservationTracking {
+                _ = coordinator.text(for: oldest)
+                _ = coordinator.revision(for: oldest)
+            } onChange: {
+                changed.withLock { $0 = true }
+            }
+
+            // A text field re-sending its current value must not invalidate
+            // views reading the draft, yet it still counts as the latest use.
+            coordinator.setText("draft-0", for: oldest)
+            #expect(!changed.withLock { $0 })
+            #expect(coordinator.text(for: oldest) == "draft-0")
+            #expect(coordinator.revision(for: oldest) == revision)
+
+            _ = coordinator.prepareDraft(profileID: "lru", sessionID: "session-new", initialText: "new")
+            #expect(coordinator.hostedDraftCount == ComposerDraftCoordinator.maxInactiveDrafts)
+            #expect(coordinator.text(for: oldest) == "draft-0")
+            #expect(coordinator.text(for: scopes[1]).isEmpty)
+            #expect(coordinator.text(for: scopes[2]) == "draft-2")
+        }
+    }
+
     @Test("independent uploads retain exact bytes and stable invocation-order chips")
     func independentUploads() async throws {
         try await withTestWatchdog { @MainActor in
