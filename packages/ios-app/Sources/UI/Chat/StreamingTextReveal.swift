@@ -86,12 +86,22 @@ private struct ChatStreamingTextToken: Identifiable {
 }
 
 /// One mounted inline owns one bounded tokenization cache. Animation ticks read
-/// immutable slices instead of repeatedly splitting and rebuilding token IDs.
+/// immutable slices instead of repeatedly splitting and rebuilding token IDs,
+/// and the rendered text is concatenated once per token revision rather than
+/// on every body evaluation.
 private final class ChatStreamingTextTokenCache {
     private var source: String?
     private var hasPreparedAttributes = false
     private var identity: String?
     private var value: [ChatStreamingTextToken] = []
+    private var opaqueText: AttributedString?
+    private var revealedPrefix = AttributedString()
+    private var revealedPrefixCount = 0
+    private var revealedPrefixEpoch = 0
+    /// Advanced by every reconciliation, the only place revealed IDs can be
+    /// removed. Between advances they only grow, so a memoized fully revealed
+    /// prefix stays exact and a reveal tick appends only its pending tail.
+    var revealedEpoch = 0
 
     func resolve(
         inline: MarkdownPresentation.Inline,
@@ -106,8 +116,103 @@ private final class ChatStreamingTextTokenCache {
             self.hasPreparedAttributes = hasPreparedAttributes
             self.identity = identity
             value = build()
+            opaqueText = nil
+            revealedPrefix = AttributedString()
+            revealedPrefixCount = 0
+            revealedPrefixEpoch = revealedEpoch
         }
         return value
+    }
+
+    /// Every token at full opacity: the rendered text whenever no fade applies.
+    func resolvedOpaqueText() -> AttributedString {
+        if let opaqueText { return opaqueText }
+        var result = AttributedString()
+        for token in value { result += token.value }
+        opaqueText = result
+        return result
+    }
+
+    /// The longest leading run of tokens that render unmodified because each
+    /// is whitespace-only or already revealed, and its token count.
+    func resolvedRevealedPrefix(revealedIDs: Set<String>) -> (text: AttributedString, count: Int) {
+        if revealedPrefixEpoch != revealedEpoch {
+            revealedPrefixEpoch = revealedEpoch
+            revealedPrefix = AttributedString()
+            revealedPrefixCount = 0
+        }
+        while revealedPrefixCount < value.count {
+            let token = value[revealedPrefixCount]
+            guard !token.isWord || revealedIDs.contains(token.id) else { break }
+            revealedPrefix += token.value
+            revealedPrefixCount += 1
+        }
+        return (revealedPrefix, revealedPrefixCount)
+    }
+}
+
+/// Reveal bookkeeping recorded while text is not streaming, applied only if
+/// the same mounted inline later streams. Settling complete text therefore
+/// writes no view state (and costs no second body evaluation), while a later
+/// switch to streaming still treats every word settled here as revealed.
+private final class ChatStreamingTextSettlement {
+    private struct Source {
+        let text: String
+        let hasPreparedAttributes: Bool
+        let identity: String
+        let tokens: [ChatStreamingTextToken]
+    }
+
+    /// Distinct sources settled while covered accumulate until one is folded
+    /// into view state; this bounds that accumulation.
+    static let maximumSources = 8
+
+    /// Whether an uncovered settlement replaced the view's revealed IDs.
+    private var replacesStoredIDs = false
+    private var sources: [Source] = []
+
+    var isEmpty: Bool { sources.isEmpty }
+    var isFull: Bool { sources.count >= Self.maximumSources }
+
+    /// Uncovered settlement reveals exactly the settled words; covered
+    /// settlement adds them to whatever was revealed before.
+    func settle(
+        inline: MarkdownPresentation.Inline,
+        identity: String,
+        tokens: [ChatStreamingTextToken],
+        surfaceActive: Bool
+    ) {
+        let source = Source(
+            text: inline.source,
+            hasPreparedAttributes: inline.attributedString != nil,
+            identity: identity,
+            tokens: tokens
+        )
+        if surfaceActive {
+            replacesStoredIDs = true
+            sources = [source]
+            return
+        }
+        // The token cache's key: equal keys always carry equal tokens.
+        let isKnown = sources.contains { known in
+            known.text == source.text
+                && known.hasPreparedAttributes == source.hasPreparedAttributes
+                && known.identity == source.identity
+        }
+        if !isKnown { sources.append(source) }
+    }
+
+    func revealedIDs(stored: Set<String>) -> Set<String> {
+        var result: Set<String> = replacesStoredIDs ? [] : stored
+        for source in sources {
+            for token in source.tokens where token.isWord { result.insert(token.id) }
+        }
+        return result
+    }
+
+    func reset() {
+        replacesStoredIDs = false
+        sources.removeAll()
     }
 }
 
@@ -128,6 +233,7 @@ struct ChatStreamingInlineText: View {
     @State private var animationTick = 0
     @State private var hasAdmittedInitialContent = false
     @State private var tokenCache = ChatStreamingTextTokenCache()
+    @State private var settlement = ChatStreamingTextSettlement()
 
     var body: some View {
         let _ = animationTick
@@ -161,15 +267,33 @@ struct ChatStreamingInlineText: View {
     }
 
     private func renderedText(tokens: [ChatStreamingTextToken]) -> Text {
-        var result = AttributedString()
+        guard ChatStreamingTextRevealPolicy.shouldAnimate(
+            streaming: streaming,
+            reduceMotion: reduceMotion,
+            surfaceActive: presentationActivity.allowsContinuousAnimation
+        ) else { return Text(tokenCache.resolvedOpaqueText()) }
+        // A settlement recorded before streaming began has not been folded
+        // into view state until the reconcile task runs; read through it.
+        let settlementPending = !settlement.isEmpty
+        // The first body evaluation happens before the bookkeeping task. Keep
+        // the authoritative initial source visible during that handoff; a
+        // missing reveal start is only hidden for tokens admitted later.
+        guard hasAdmittedInitialContent || settlementPending else {
+            return Text(tokenCache.resolvedOpaqueText())
+        }
+        let revealed = settlementPending ? settlement.revealedIDs(stored: revealedIDs) : revealedIDs
+        let prefix = settlementPending
+            ? (text: AttributedString(), count: 0)
+            : tokenCache.resolvedRevealedPrefix(revealedIDs: revealed)
+        var result = prefix.text
         let now = Date.now
-        for token in tokens {
+        for token in tokens[prefix.count...] {
             var value = token.value
             guard token.isWord else {
                 result += value
                 continue
             }
-            let opacity = tokenOpacity(token.id, now: now)
+            let opacity = tokenOpacity(token.id, revealed: revealed, now: now)
             if opacity < 0.999 {
                 // Markdown presentation intents and links remain attached to
                 // the slice. Only the temporary foreground alpha is changed.
@@ -180,17 +304,8 @@ struct ChatStreamingInlineText: View {
         return Text(result)
     }
 
-    private func tokenOpacity(_ id: String, now: Date) -> Double {
-        guard ChatStreamingTextRevealPolicy.shouldAnimate(
-            streaming: streaming,
-            reduceMotion: reduceMotion,
-            surfaceActive: presentationActivity.allowsContinuousAnimation
-        ) else { return 1 }
-        // The first body evaluation happens before the bookkeeping task. Keep
-        // the authoritative initial source visible during that handoff; a
-        // missing reveal start is only hidden for tokens admitted later.
-        guard hasAdmittedInitialContent else { return 1 }
-        if revealedIDs.contains(id) { return 1 }
+    private func tokenOpacity(_ id: String, revealed: Set<String>, now: Date) -> Double {
+        if revealed.contains(id) { return 1 }
         guard let started = revealStarts[id] else { return 0 }
         return ChatStreamingTextRevealPolicy.opacity(
             elapsedMilliseconds: max(0, Int(now.timeIntervalSince(started) * 1_000))
@@ -199,7 +314,23 @@ struct ChatStreamingInlineText: View {
 
     @MainActor
     private func reconcile(tokens: [ChatStreamingTextToken]) async {
-        let currentIDs = Set(tokens.filter(\.isWord).map(\.id))
+        tokenCache.revealedEpoch &+= 1
+        guard streaming else {
+            // Complete text is fully visible whatever this bookkeeping holds.
+            // Record it without writing view state; a later switch to
+            // streaming folds it in below before any fade starts.
+            if !revealStarts.isEmpty { revealStarts.removeAll() }
+            if settlement.isFull { foldSettlement() }
+            settlement.settle(
+                inline: inline,
+                identity: identity,
+                tokens: tokens,
+                surfaceActive: presentationActivity.allowsContinuousAnimation
+            )
+            return
+        }
+        foldSettlement()
+        let currentIDs = Set(tokens.lazy.filter(\.isWord).map(\.id))
         guard presentationActivity.allowsContinuousAnimation else {
             // Covered content must never replay a reveal backlog when it is
             // uncovered; its authoritative text remains immediately visible.
@@ -211,14 +342,16 @@ struct ChatStreamingInlineText: View {
         revealedIDs.formIntersection(currentIDs)
         revealStarts = revealStarts.filter { currentIDs.contains($0.key) }
 
-        guard streaming, !reduceMotion else {
+        guard !reduceMotion else {
             revealedIDs.formUnion(currentIDs)
             revealStarts.removeAll()
             hasAdmittedInitialContent = true
             return
         }
 
-        let pendingIDs = tokens.filter { $0.isWord && !revealedIDs.contains($0.id) && revealStarts[$0.id] == nil }
+        let pendingCount = tokens.lazy
+            .filter { $0.isWord && !revealedIDs.contains($0.id) && revealStarts[$0.id] == nil }
+            .count
         if !hasAdmittedInitialContent {
             // The first mounted frame is already authoritative and measured.
             // Never render it transparent while the bookkeeping task starts:
@@ -229,7 +362,7 @@ struct ChatStreamingInlineText: View {
             revealedIDs.formUnion(currentIDs)
             revealStarts.removeAll()
             return
-        } else if ChatStreamingTextRevealPolicy.shouldCatchUp(pendingTokenCount: pendingIDs.count) {
+        } else if ChatStreamingTextRevealPolicy.shouldCatchUp(pendingTokenCount: pendingCount) {
             // A slow renderer/network update must never make the native UI lag
             // behind the authoritative stream by an unbounded word queue.
             revealedIDs.formUnion(currentIDs)
@@ -238,9 +371,10 @@ struct ChatStreamingInlineText: View {
         }
 
         while !Task.isCancelled {
-            let pending = tokens.filter { $0.isWord && !revealedIDs.contains($0.id) && revealStarts[$0.id] == nil }
             let startedNewToken: Bool
-            if let next = pending.first {
+            if let next = tokens.first(where: {
+                $0.isWord && !revealedIDs.contains($0.id) && revealStarts[$0.id] == nil
+            }) {
                 revealStarts[next.id] = .now
                 startedNewToken = true
             } else {
@@ -267,6 +401,16 @@ struct ChatStreamingInlineText: View {
                     : 33
             ))
         }
+    }
+
+    /// Applies a settlement recorded while not streaming to view state, as
+    /// the settling reconciliation itself would have written it.
+    @MainActor
+    private func foldSettlement() {
+        guard !settlement.isEmpty else { return }
+        revealedIDs = settlement.revealedIDs(stored: revealedIDs)
+        settlement.reset()
+        hasAdmittedInitialContent = true
     }
 
     private struct TaskKey: Equatable {

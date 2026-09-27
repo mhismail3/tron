@@ -1632,7 +1632,10 @@ with unchanged SwiftUI identity and private state. While an authoritative assist
 streaming, `ChatStreamingInlineText` keeps the complete source in layout and reveals only newly admitted lexical
 words through presentation-only foreground opacity. Stable message/block/run identities preserve the reveal ledger
 across projection snapshots; a large initial/backlogged stream catches up immediately, oversized bodies bypass
-per-word tokenization, and completion shows the full source without replay. The eager Markdown block stack publishes its exact wrapped vertical ideal even when its
+per-word tokenization, and completion shows the full source without replay. Rendered text is concatenated once per
+token revision; a reveal tick reuses the memoized fully revealed prefix and rebuilds only the pending or fading tail.
+Settling text that is not streaming writes no view state; the settled words are recorded lazily and folded in only if
+the same inline later streams, so they still never fade. The eager Markdown block stack publishes its exact wrapped vertical ideal even when its
 single outer transcript row receives a finite lazy-stack proposal; long responses therefore cannot leave viewport-sized
 or stale row estimates that separate later rows, inflate the tail, or compound across turns. Reduce Motion and
 accessibility never hide authoritative text. Under exact tail bounds,
