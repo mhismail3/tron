@@ -99,8 +99,8 @@ breaks context-menu previews.
 | CT-10 | Ready | Complete the baseline CT-2 trimmed: frame cost (chat performance signposts and display-link frame intervals) during streaming, sends and scrolling on `main`, the tall-reply-at-the-tail and 180+ row shapes, and why only the first of three submissions in the keyboard-cycles shape materialized a tail (`materialize:1`). CT-5 may not ship until CT-10's frame cost exists to compare against | CT-1 | |
 | CT-11 | Ready | Parallel test lanes: `scripts/tron-ios-test` picks a free owned simulator from a small pool (each with its own lease and state directory) instead of one shared simulator, so concurrent worktrees stop queueing; `clean` removes only its own lane's simulator and never another lane's retained runs; document the lane count against CPU and memory, and check the hosted timing fixtures under two concurrent lanes | CT-1 | |
 | CT-3 | Done | Prototype A on a throwaway branch: segment long assistant content at Markdown block boundaries into bounded physical rows, with pinning from visible row identity; measure against CT-2. The prototype does not need product polish, but it must show whether the blank and the estimate swing disappear | CT-2 | chat scroll investigation session, 2026-09-26 |
-| CT-12 | Claimed | Visual parity gate: a hosted frame-recording suite that captures today's chat (send, keyboard up/down, streaming growth, queued-card replacement, tool chips, long history open, earlier-page load, detached reader and catch-up) as reference frames and compares any candidate transcript container against them within a stated tolerance; the recorded reference comes from `main` before any container change | CT-1 | chat scroll investigation session, 2026-09-26 |
-| CT-13 | Claimed | Option C prototype: replace the transcript `LazyVStack` with an eager stack over the existing bounded source window (at most 512 items) on a throwaway branch; measure blank boundaries, estimate error, opening time, frame cost and memory at 150, 300 and 512 heavy rows | CT-2 | chat scroll investigation session, 2026-09-26 |
+| CT-12 | Done | Visual parity gate: a hosted frame-recording suite that captures today's chat (send, keyboard up/down, streaming growth, queued-card replacement, tool chips, long history open, earlier-page load, detached reader and catch-up) as reference frames and compares any candidate transcript container against them within a stated tolerance; the recorded reference comes from `main` before any container change | CT-1 | chat scroll investigation session, 2026-09-26 |
+| CT-13 | Done | Option C prototype: replace the transcript `LazyVStack` with an eager stack over the existing bounded source window (at most 512 items) on a throwaway branch; measure blank boundaries, estimate error, opening time, frame cost and memory at 150, 300 and 512 heavy rows | CT-2 | chat scroll investigation session, 2026-09-26 |
 | CT-4 | Needs approval | The user chooses C, or B (a `UICollectionView` container hosting the unchanged SwiftUI rows), from CT-13's numbers, CT-12's parity result and a device build | CT-12, CT-13 | |
 | CT-5 | Needs scoping | Implement the chosen option in production. For A: segment identity, streaming into the last segment, whole-message copy/menus/accessibility, one entrance per message, segment chrome; pinned state from visibility. Scope into rows once CT-4 decides | CT-4 | |
 | CT-6 | Needs scoping | Delete the compensations CT-5 makes unnecessary, one per commit, each under the plan rules: past-end repair, physical tail repair, the materialization fail-open, geometry-based pinned evidence, and the trace fields that only diagnose them | CT-5 | |
@@ -401,3 +401,30 @@ breaks context-menu previews.
 
 - Result: the user requires no visible UI change and a dependable result. Option A is ruled out by CT-3. The remaining choice is C (keep the SwiftUI rows, replace the lazy container with an eager one over the existing bounded window) or B (a `UICollectionView` container hosting the unchanged SwiftUI rows). An earlier UIKit rewrite (`agent/uikit-chat-rewrite`, reverted in `132aa9858`) re-implemented the rows and composer in UIKit and lost visual parity, so B here keeps every SwiftUI row and only replaces the container.
 - Tasks added: CT-12 (visual parity gate, required before any container ships) and CT-13 (option C prototype and measurement). CT-4 now depends on both.
+
+### CT-13 · Done · 2026-09-26 · chat scroll investigation session
+
+- Result: an eager `VStack` over the whole loaded window removes the blank and the estimate swing completely, but it cannot carry the window: 300 and 512 heavy rows never reached a ready frame inside the product's 30-second opening deadline, and 150 heavy rows opened in about 2.3 s instead of 0.35 s. Option C as specified is therefore rejected on cost.
+- Evidence (prototype branch `ct-13-eager-prototype`, commits `73f56edcd` to `d9e8e6856`, not merged; simulator lane CT13; one invocation per shape per side, simulator timings indicative only):
+
+  | Metric | Lazy (`main`) | Eager |
+  | --- | --- | --- |
+  | many-tall blank boundaries, 3 runs | 44/72, 0/72, 12/72 | 0/72 x3 |
+  | keyboard-cycles blank boundaries, 3 runs | 80/340 x3 | 0/340 x3 |
+  | estimate swing (max/min) | 1.7-4.2 | 1.0 |
+  | 150 heavy rows: first ready frame | 351 ms | 2,304 ms |
+  | 150 heavy rows: memory at ready | +36 MB | +247 MB |
+  | 150 heavy rows: scroll step median | 0.8 ms | 4.8 ms |
+  | 300 / 512 heavy rows: first ready frame | 368 / 486 ms | never (30 s deadline) |
+  | lazy content estimate after a send, 512 rows | 212,363 pt for 113,117 pt | measured, not estimated |
+
+  `ChatViewScrollHarnessTests` on eager: 49/54; four failures assert the lazy materialization lease (their visible invariants held), one (`maximumRowOpeningNeverPresentsBlankViewport`, 275 light rows) timed out at 10 s against 0.58 s lazy.
+- Changes: none on `main`.
+- For the next agent: the prototype's code reading lists the coordinator mechanisms an exact-height container would make unnecessary (materialization lease and its fail-open, 1 pt entrance footprint, lazy-realization opening proof, layout-epoch frame invalidation, tail-affordance overlap). Physical tail repair and past-end repair were not shown redundant by these measurements.
+
+### CT-12 · Done · 2026-09-26 · chat scroll investigation session
+
+- Result: a visual parity gate exists on branch `ct-12-parity-gate` (commits `e23e0f388`, `3241da2be`, `10521718a`, not yet merged). `ChatVisualParityTests` drives the real `ChatView` through seven deterministic scenarios (long history at rest, send with keyboard contraction and dismissal, streaming growth, queued-card replacement, tool chip, earlier-page load, detached reader and catch-up), fingerprints every rendered display boundary (per-2 pt row bands and per-8 pt column bands of luminance), and compares against a committed 91-frame manifest; it writes a JSON report naming the worst frames.
+- Evidence: three runs on unchanged code pass; stable-frame noise at most 0.0068 (bound 0.014), in-transition frames at most 0.047 (bound 0.060). Negative controls: row spacing 8 to 10 pt fails all seven scenarios; Markdown as plain text fails six of seven. An entrance rise of 14 pt instead of 20 pt is not detected, because the harness samples about every 110 ms and skips most frames of a 280 ms entrance; motion parity therefore still needs a device check (CT-7). Gate runtime 44-50 s; full unit tier 1,913 passed, 0 failures, gate skipped there.
+- Deviations: motion sensitivity is below the requirement; layout and rendering sensitivity meet it.
+- For the next agent: merge CT-12 before any container change so its manifest is the reference; improving motion sampling (per-frame capture during transitions) is worthwhile if B proceeds.
