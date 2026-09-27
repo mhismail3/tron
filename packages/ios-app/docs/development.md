@@ -1644,7 +1644,7 @@ not eligible for App Store distribution.
 
 Validate this chrome on a physical device while scrolling high-contrast content
 beneath the chat, dashboard, and representative medium/large sheet toolbars.
-Chat uses a 188-point fade, dashboard 176 points, and sheets a compact 124 points.
+Chat and the dashboard use a 176-point fade, and sheets a compact 116 points.
 Check that each top stays legible, the lower edge has no visible cutoff, toolbar
 controls remain tappable, and light/dark modes retain the same gradual
 transition. Immersive camera and image-preview sheets intentionally have no
