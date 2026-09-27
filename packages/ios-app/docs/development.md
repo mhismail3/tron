@@ -461,7 +461,12 @@ Read the numbers with these limits:
 
 - **Instructions are the primary CPU metric.** They are the least sensitive to
   other work on the host; CPU time, cycles and energy move with host load,
-  frequency and core type. Compare runs only through `scripts/tron-profile compare`.
+  frequency and core type. Two self-test runs of the identical `control`
+  workload at 1-minute loads of about 100 and 9 differed by 0.4% in
+  instructions but 9.5% in cycles and 30% in CPU time, so `compare` can call
+  host-induced time/cycle movement a regression or improvement; decide CPU
+  changes on `cpu.instructions`. Compare runs only through
+  `scripts/tron-profile compare`.
 - **Simulator values are host-CPU proxies, not device battery.** The simulator
   app runs on the Mac's cores; there is no radio, GPU or display power, and
   `wakeups.idle` is near zero on a busy host. Physical-device Instruments
