@@ -8,28 +8,28 @@ extension ChatNotificationTone {
     var primaryColor: Color {
         switch self {
         case .accent: .tronAccentText
-        case .command: Color(lightHex: "#4338CA", darkHex: "#C7D2FE")
+        case .command: ChatCompactPillPalette.commandPrimary
         case .tool: .tronAccentText
-        case .information: Color(lightHex: "#0369A1", darkHex: "#38BDF8")
-        case .purple: Color(lightHex: "#6D28D9", darkHex: "#C4B5FD")
-        case .subagent: Color(lightHex: "#006657", darkHex: "#5DE0CE")
-        case .warning: Color(lightHex: "#92400E", darkHex: "#FBBF24")
+        case .information: ChatCompactPillPalette.informationPrimary
+        case .purple: ChatCompactPillPalette.purplePrimary
+        case .subagent: ChatCompactPillPalette.subagentPrimary
+        case .warning: ChatCompactPillPalette.warningPrimary
         case .error: .tronError
-        case .neutral: Color(lightHex: "#475569", darkHex: "#CBD5E1")
+        case .neutral: ChatCompactPillPalette.neutralPrimary
         }
     }
 
     var secondaryColor: Color {
         switch self {
-        case .accent: Color(lightHex: "#047857", darkHex: "#A7F3D0")
-        case .command: Color(lightHex: "#3730A3", darkHex: "#E0E7FF")
-        case .tool: Color(lightHex: "#047857", darkHex: "#A7F3D0")
-        case .information: Color(lightHex: "#075985", darkHex: "#7DD3FC")
-        case .purple: Color(lightHex: "#5B21B6", darkHex: "#DDD6FE")
-        case .subagent: Color(lightHex: "#00594D", darkHex: "#A0EFE3")
-        case .warning: Color(lightHex: "#78350F", darkHex: "#FDE68A")
-        case .error: Color(lightHex: "#991B1B", darkHex: "#FCA5A5")
-        case .neutral: Color(lightHex: "#334155", darkHex: "#E2E8F0")
+        case .accent: ChatCompactPillPalette.accentSecondary
+        case .command: ChatCompactPillPalette.commandSecondary
+        case .tool: ChatCompactPillPalette.accentSecondary
+        case .information: ChatCompactPillPalette.informationSecondary
+        case .purple: ChatCompactPillPalette.purpleSecondary
+        case .subagent: ChatCompactPillPalette.subagentSecondary
+        case .warning: ChatCompactPillPalette.warningSecondary
+        case .error: ChatCompactPillPalette.errorSecondary
+        case .neutral: ChatCompactPillPalette.neutralSecondary
         }
     }
 
@@ -46,6 +46,26 @@ extension ChatNotificationTone {
         case .neutral: .tronSlate
         }
     }
+}
+
+/// Compact-pill foregrounds are built once: tone colors are read in transcript
+/// and tool-row bodies, and a fresh dynamic color per read re-parses its hex.
+private enum ChatCompactPillPalette {
+    static let commandPrimary = Color(lightHex: "#4338CA", darkHex: "#C7D2FE")
+    static let informationPrimary = Color(lightHex: "#0369A1", darkHex: "#38BDF8")
+    static let purplePrimary = Color(lightHex: "#6D28D9", darkHex: "#C4B5FD")
+    static let subagentPrimary = Color(lightHex: "#006657", darkHex: "#5DE0CE")
+    static let warningPrimary = Color(lightHex: "#92400E", darkHex: "#FBBF24")
+    static let neutralPrimary = Color(lightHex: "#475569", darkHex: "#CBD5E1")
+
+    static let accentSecondary = Color(lightHex: "#047857", darkHex: "#A7F3D0")
+    static let commandSecondary = Color(lightHex: "#3730A3", darkHex: "#E0E7FF")
+    static let informationSecondary = Color(lightHex: "#075985", darkHex: "#7DD3FC")
+    static let purpleSecondary = Color(lightHex: "#5B21B6", darkHex: "#DDD6FE")
+    static let subagentSecondary = Color(lightHex: "#00594D", darkHex: "#A0EFE3")
+    static let warningSecondary = Color(lightHex: "#78350F", darkHex: "#FDE68A")
+    static let errorSecondary = Color(lightHex: "#991B1B", darkHex: "#FCA5A5")
+    static let neutralSecondary = Color(lightHex: "#334155", darkHex: "#E2E8F0")
 }
 
 /// Stable semantic palette for compact transcript chrome. Producer identity is

@@ -4,9 +4,13 @@ import UIKit
 // MARK: - Preserved Tron palette
 
 extension Color {
+    /// Parses both hex values once; the dynamic provider runs on every trait
+    /// resolution (per body on the dashboard), so it only selects a color.
     init(lightHex: String, darkHex: String) {
+        let light = UIColor(hex: lightHex)
+        let dark = UIColor(hex: darkHex)
         self.init(uiColor: UIColor { traits in
-            traits.userInterfaceStyle == .dark ? UIColor(hex: darkHex) : UIColor(hex: lightHex)
+            traits.userInterfaceStyle == .dark ? dark : light
         })
     }
 
