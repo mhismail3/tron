@@ -1068,23 +1068,12 @@ enum ChatVisualParityGate {
 }
 
 @MainActor
-@Suite("Chat visual parity gate", .serialized)
+@Suite("Chat visual parity gate", .serialized, .enabled(if: UIValidationTier.isActive))
 struct ChatVisualParityTests {
-    /// The gate is a measurement, not a unit invariant: it renders the chat
-    /// hundreds of times and takes about 45 s, so it runs only in the
-    /// `UIValidation` test plan. The check is the plan's own environment variable
-    /// rather than a plan `skippedTests` entry, because a test selected with
-    /// `--only-testing` runs even when the plan lists it as skipped, and this gate
-    /// must not run in a routine unit selection either. (The CT-10 worker found
-    /// the same for its hosted measurement fixtures; if that lands as a shared
-    /// helper, this check should use it.)
-    static var planIsUIValidation: Bool {
-        ProcessInfo.processInfo.environment["XCODE_TEST_PLAN_NAME"] == "UIValidation"
-    }
-
+    // A measurement, not a unit invariant: it renders the chat hundreds of
+    // times, so it runs only in the UIValidation tier (see `UIValidationTier`).
     @Test("recorded reference frames match the rendered transcript within tolerance")
     func recordedReferenceFramesMatchRenderedTranscript() async throws {
-        guard Self.planIsUIValidation else { return }
         try await withTestWatchdog(timeout: .seconds(300)) {
             try await ChatVisualParityGate.run()
         }
