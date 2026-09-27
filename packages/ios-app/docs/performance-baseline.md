@@ -32,13 +32,18 @@ physical memory are the more stable comparison values.
 | iPhone 17 Pro simulator | iOS 26.4.1 | `Test` | 60 Hz maximum | nominal | off |
 | Pinned `iPhone18,2` | iOS 27.0 | `DevicePerformance` | 120 Hz maximum | nominal | off |
 
-`DevicePerformance` is a debug, `HOSTED_TEST` configuration using the provisioned app
-identity. It exists only to run the same deterministic hosted fixture on the
-pinned phone; it is not a distribution configuration, and the scheme's archive
-scheme has no archive action. For normal-use profiling, use the optimized
-`Tron Device`/`LocalDevice` Profile action instead; this hosted fixture must not
-be treated as release-like device evidence. `Release` is reserved for the
-separate `Tron Release` archive/analyze/profile scheme.
+The Phase 0 pinned-device row was recorded when `DevicePerformance` was an
+unoptimized debug build. `DevicePerformance` is now the optimized hosted-test
+measurement configuration: Swift `-O` with whole-module compilation and optimized
+Clang, like `LocalDevice`, while keeping `ENABLE_TESTABILITY` and `HOSTED_TEST`
+because the hosted test bundle imports the app with `@testable` and uses hosted
+fixtures. It uses the provisioned app identity, is not a distribution
+configuration, and its scheme has no archive action. It is the build behind
+`scripts/tron-profile ios` on the owned simulator. For normal-use profiling of
+the shipping code path, use the `Tron Device`/`LocalDevice` Profile action;
+testability still prevents some cross-module optimizations, so hosted numbers
+are close to, not identical to, release-like evidence. `Release` is reserved for
+the separate `Tron Release` archive/analyze/profile scheme.
 
 ## Results
 
@@ -140,16 +145,21 @@ bounded media loading are complete; physical acceptance and the Phase 6 exit gat
 
 ## Reproduction
 
-Generate and build before either run. The performance test skips unless the
-explicit environment value is enabled, so normal focused/full suites remain fast.
+Generate and build before either run. The performance tests skip unless the
+hosted test process sees `TRON_PERFORMANCE_BASELINE=1`, so normal focused/full
+suites remain fast. xcodebuild forwards a caller environment variable to the test
+process only with the `TEST_RUNNER_` prefix (which it strips); a scheme
+environment macro such as `$(NAME)` is not expanded from the caller's
+environment or from a command-line build setting (verified 2026-09-27 with
+Xcode 26.6: both variants skipped, the prefixed form ran).
 
 ```bash
-# Exact repository-owned simulator; unique log/result paths are automatic.
-TRON_PERFORMANCE_BASELINE_VALUE=1 scripts/tron-ios-test run \
+# Exact repository-owned simulator (Test configuration); unique log/result paths are automatic.
+TEST_RUNNER_TRON_PERFORMANCE_BASELINE=1 scripts/tron-ios-test run \
   --only-testing TronMobileTests/ChatPerformanceBaselineTests
 
-# Provisioned pinned device
-TRON_PERFORMANCE_BASELINE_VALUE=1 xcodebuild test-without-building \
+# Provisioned pinned device, optimized DevicePerformance build
+TEST_RUNNER_TRON_PERFORMANCE_BASELINE=1 xcodebuild test-without-building \
   -project TronMobile.xcodeproj -scheme 'Tron Device Performance' \
   -configuration DevicePerformance -destination 'platform=iOS,id=<pinned-device-udid>' \
   -derivedDataPath /tmp/tron-perf-device-derived \

@@ -1,0 +1,579 @@
+#!/usr/bin/env python3
+"""Deterministic iOS scenario profiler behind `scripts/tron-profile ios`.
+
+Builds the optimized `DevicePerformance` hosted-test products for this
+worktree, runs one selected scenario test per report on the repository-owned
+test simulator under the same lease as `scripts/tron-ios-test`, reads the
+per-iteration `com.tron.profile.*` XCTMetric values back from the xcresult, and
+hands them to `scripts/tron_profile_report.py`, which owns the report schema and
+comparison policy. A value the process could not measure is omitted with a
+warning; a run that did not execute the scenario fails with evidence paths.
+"""
+
+from __future__ import annotations
+
+import argparse
+from datetime import datetime, timezone
+import json
+import os
+from pathlib import Path
+import secrets
+import shlex
+import subprocess
+import sys
+from typing import Any
+
+ROOT = Path(__file__).resolve().parent.parent
+IOS = ROOT / "packages/ios-app"
+REPORT = ROOT / "scripts/tron_profile_report.py"
+LOCKER = ROOT / "scripts/ios-test-lock.py"
+SIMULATOR = ROOT / "scripts/ios-test-simulator.py"
+PROCESS = ROOT / "scripts/ios-test-process.py"
+IDENTITY = ROOT / "scripts/ios-test-build-identity.py"
+SCHEME = "Tron Device Performance"
+CONFIGURATION = "DevicePerformance"
+METRIC_PREFIX = "com.tron.profile."
+
+EXIT_OK = 0
+EXIT_USAGE = 2
+EXIT_SCENARIO_FAILURE = 65
+EXIT_DESTINATION = 66
+EXIT_BUILD_FAILURE = 70
+EXIT_LOCKED = 73
+EXIT_RUNNER = 74
+EXIT_TIMEOUT = 75
+EXIT_SELF_TEST = 77
+
+# name -> (test identifier, default window seconds, description). The Swift
+# tests skip unless TRON_PROFILE_SCENARIO names them, so these must match.
+SCENARIOS: dict[str, tuple[str, float, str]] = {
+    "idle-dashboard": (
+        "ProfileDashboardScenarioTests/testIdleDashboard", 30.0,
+        "Dashboard mounted over 60 sessions in 6 workspaces; 3 running sessions send a session.summary heartbeat every 10 s.",
+    ),
+    "idle-chat": (
+        "ProfileChatScenarioTests/testIdleChat", 30.0,
+        "Chat mounted on a 200-row transcript; no events.",
+    ),
+    "streaming-reply": (
+        "ProfileChatScenarioTests/testStreamingReply", 12.0,
+        "Chat on history; cumulative session.progress frames (thinking, then Markdown text) at the Gateway's 150 ms leading+trailing cadence.",
+    ),
+    "tool-loop": (
+        "ProfileChatScenarioTests/testToolLoop", 15.0,
+        "Chat near the 512-item/600 KB page bound; a session.snapshot per canonical append, session.toolProgress at 5/s per running tool, a session.summary per snapshot.",
+    ),
+    "composer-typing": (
+        "ProfileComposerScenarioTests/testComposerTyping", 10.0,
+        "Typing into the composer through ComposerDraftCoordinator and the real ComposerDraftStore while 4 drafts hold image attachments; 400 ms pauses.",
+    ),
+    "summary-storm": (
+        "ProfileDashboardScenarioTests/testSummaryStorm", 15.0,
+        "Dashboard mounted; 5 running sessions each send a session.summary every 750 ms (snapshot rate).",
+    ),
+}
+CONTROL_SCENARIOS: dict[str, tuple[str, float, str]] = {
+    "control": ("ProfileControlScenarioTests/testControl", 2.0, "Fixed synthetic 10 Hz main-thread workload."),
+    "control-cpu": ("ProfileControlScenarioTests/testControlExtraCPU", 2.0, "control plus the same arithmetic again each tick."),
+    "control-disk": ("ProfileControlScenarioTests/testControlExtraDisk", 2.0, "control plus a synced 256 KiB file write each tick."),
+    "control-wakeups": ("ProfileControlScenarioTests/testControlExtraWakeups", 2.0, "control plus a 200 Hz main-run-loop timer."),
+}
+ALL_SCENARIOS = {**SCENARIOS, **CONTROL_SCENARIOS}
+# Self-test: each variant must regress its metric beyond the noise bound
+# against `control`. CPU falls back to process CPU time only where the kernel
+# exposes no instruction counter.
+SELF_TEST_EXPECTATIONS = {
+    "control-cpu": ("cpu.instructions", "cpu.time"),
+    "control-disk": ("disk.logical_writes",),
+    "control-wakeups": ("wakeups.interrupt",),
+}
+
+# Report metadata for every value the Swift ProfileResourceMetric emits.
+METRICS: dict[str, tuple[str, str]] = {
+    "cpu.instructions": ("instructions", "Instructions retired by the whole app process in the window (primary CPU metric; least sensitive to host contention)."),
+    "cpu.cycles": ("cycles", "CPU cycles of the whole app process in the window."),
+    "cpu.time": ("ns", "Process CPU time, user plus system, all threads."),
+    "cpu.main_thread_time": ("ns", "CPU time of the main thread."),
+    "energy.cpu": ("nJ", "Kernel-estimated CPU energy of the process (host CPU, not device battery)."),
+    "wakeups.interrupt": ("wakeups", "Times a thread of the process was woken by an interrupt (timers, I/O)."),
+    "wakeups.idle": ("wakeups", "Wakeups that brought the CPU package out of idle; near zero on a busy host."),
+    "disk.bytes_written": ("B", "Bytes the process wrote to storage (physical I/O attributed at write-back)."),
+    "disk.bytes_read": ("B", "Bytes the process read from storage (cache hits are free)."),
+    "disk.logical_writes": ("B", "Bytes the process wrote through the file system, before caching."),
+    "memory.peak_footprint": ("B", "Peak physical footprint during the window."),
+    "time.wall": ("ns", "Wall time of the measured window."),
+}
+ESSENTIAL_METRICS = ("time.wall", "cpu.time")
+
+
+class ProfileError(Exception):
+    def __init__(self, message: str, code: int = EXIT_RUNNER) -> None:
+        super().__init__(message)
+        self.code = code
+
+
+# ---------------------------------------------------------------- xcresult ---
+
+def _walk(value: Any):
+    if isinstance(value, dict):
+        yield value
+        for child in value.values():
+            yield from _walk(child)
+    elif isinstance(value, list):
+        for child in value:
+            yield from _walk(child)
+
+
+def extract_measurements(metrics_document: Any, test_identifier: str) -> dict[str, dict[str, Any]]:
+    """Return {metric id: {unit, polarity, values}} for one test's profile metrics.
+
+    `xcresulttool get test-results metrics` lists each test with its runs and
+    every measurement's per-iteration values. Only `com.tron.profile.*`
+    identifiers are read; XCTest's own metrics are ignored.
+    """
+    found: dict[str, dict[str, Any]] = {}
+    tests = [
+        node for node in _walk(metrics_document)
+        if isinstance(node.get("testIdentifier"), str)
+        and node["testIdentifier"].removesuffix("()") == test_identifier
+    ]
+    for test in tests:
+        for node in _walk(test):
+            identifier = node.get("identifier")
+            if not isinstance(identifier, str) or not identifier.startswith(METRIC_PREFIX):
+                continue
+            values = node.get("measurements")
+            if not isinstance(values, list) or not values:
+                raise ProfileError(f"measurement {identifier} in the xcresult has no per-iteration values")
+            numbers = []
+            for value in values:
+                if isinstance(value, bool) or not isinstance(value, (int, float)):
+                    raise ProfileError(f"measurement {identifier} has a non-numeric value {value!r}")
+                numbers.append(float(value))
+            metric_id = identifier[len(METRIC_PREFIX):]
+            if metric_id in found:
+                raise ProfileError(f"measurement {identifier} appears more than once for {test_identifier}")
+            found[metric_id] = {
+                "unit": node.get("unitOfMeasurement"),
+                "polarity": node.get("polarity"),
+                "values": numbers,
+            }
+    return found
+
+
+def build_samples(
+    measurements: dict[str, dict[str, Any]],
+    iterations: int,
+    context: dict[str, Any],
+) -> dict[str, Any]:
+    """Map extracted values to a tron.profile-samples.v1 document.
+
+    Fails when the run did not measure the essentials or produced a different
+    iteration count; omits (with a warning) any known metric the process could
+    not provide, instead of reporting it as zero.
+    """
+    if not measurements:
+        raise ProfileError("the xcresult contains no com.tron.profile measurements; the scenario did not measure anything")
+    for metric_id in ESSENTIAL_METRICS:
+        if metric_id not in measurements:
+            raise ProfileError(f"the xcresult lacks the essential metric {metric_id}")
+    warnings = list(context.get("warnings", []))
+    metrics: dict[str, Any] = {}
+    for metric_id, measurement in sorted(measurements.items()):
+        values = measurement["values"]
+        if len(values) != iterations:
+            raise ProfileError(
+                f"{metric_id} has {len(values)} values for {iterations} requested iterations; refusing a partial run"
+            )
+        if metric_id in METRICS:
+            unit, description = METRICS[metric_id]
+            if measurement["unit"] not in (None, unit):
+                raise ProfileError(f"{metric_id} arrived in unit {measurement['unit']!r}, expected {unit!r}")
+        elif metric_id.startswith("scenario."):
+            unit = measurement["unit"] or "count"
+            description = "Workload applied by the scenario's scripted transport or driver in the window."
+        else:
+            raise ProfileError(f"unknown profile metric {metric_id}; add it to METRICS with its unit and meaning")
+        metrics[metric_id] = {"unit": unit, "better": "lower", "values": values, "description": description}
+    if all(value == 0 for value in metrics["cpu.time"]["values"]):
+        raise ProfileError("process CPU time is zero in every iteration; the measurement path is broken")
+    for metric_id in METRICS:
+        if metric_id not in metrics:
+            warnings.append(f"{metric_id} not measured: this process does not expose it (omitted, not zero)")
+    return {"schema": "tron.profile-samples.v1", "metrics": metrics, "context": {**context, "warnings": warnings}}
+
+
+def validate_summary(summary: Any, scenario: str) -> None:
+    if not isinstance(summary, dict):
+        raise ProfileError("invalid XCTest summary")
+    counts = {key: summary.get(key) for key in ("passedTests", "failedTests", "skippedTests", "totalTestCount")}
+    if any(not isinstance(value, int) or isinstance(value, bool) for value in counts.values()):
+        raise ProfileError(f"XCTest summary lacks test counts: {counts}")
+    if counts["failedTests"]:
+        failures = [
+            str(item.get("failureText", "")).strip()
+            for item in summary.get("testFailures", []) if isinstance(item, dict)
+        ]
+        raise ProfileError(
+            f"scenario {scenario} failed: " + ("; ".join(failures) or "see the xcresult"), EXIT_SCENARIO_FAILURE
+        )
+    if counts["passedTests"] != 1 or counts["totalTestCount"] != 1:
+        raise ProfileError(
+            f"scenario {scenario} did not execute exactly one passing test (counts {counts}); "
+            "a skipped test means the scenario selection did not reach the test process",
+            EXIT_SCENARIO_FAILURE,
+        )
+
+
+def self_test_verdicts(comparisons: dict[str, dict[str, Any]]) -> list[tuple[str, str, str, bool]]:
+    """Return (variant, metric, verdict, passed) for each self-test expectation."""
+    rows = []
+    for variant, candidates in SELF_TEST_EXPECTATIONS.items():
+        comparison = comparisons.get(variant)
+        metrics = (comparison or {}).get("metrics", {})
+        metric = next((name for name in candidates if name in metrics and "delta" in metrics[name]), None)
+        if metric is None:
+            rows.append((variant, "/".join(candidates), "not measured", False))
+            continue
+        verdict = metrics[metric]["verdict"]
+        rows.append((variant, metric, verdict, verdict == "regression"))
+    return rows
+
+
+# ------------------------------------------------------------------ runner ---
+
+def run(command: list[str], **kwargs: Any) -> subprocess.CompletedProcess[str]:
+    return subprocess.run(command, text=True, **kwargs)
+
+
+def bounded(log: Path, evidence: Path, overall: float, no_output: float, artifact: Path, command: list[str],
+            environment: dict[str, str] | None = None) -> int:
+    """Run under scripts/ios-test-process.py; the complete output goes only to `log`."""
+    process = [
+        sys.executable, str(PROCESS), "--log", str(log), "--evidence-dir", str(evidence),
+        "--overall-seconds", str(int(overall)), "--no-output-seconds", str(int(no_output)),
+        "--artifact", str(artifact), "--", *command,
+    ]
+    return subprocess.run(
+        process, env={**os.environ, "NSUnbufferedIO": "YES", **(environment or {})}, stdout=subprocess.DEVNULL
+    ).returncode
+
+
+class Profiler:
+    def __init__(self, arguments: argparse.Namespace) -> None:
+        self.arguments = arguments
+        toolchain = self._toolchain()
+        self.runtime = toolchain["TRON_CI_IOS_RUNTIME_VERSION"]
+        self.device_type = toolchain["TRON_CI_IOS_SIMULATOR_NAME"]
+        self.state_root = Path(os.environ.get("TRON_IOS_TEST_STATE_DIR", Path.home() / ".tron/internal/ios-test"))
+        self.device_name = os.environ.get("TRON_IOS_TEST_DEVICE_NAME", "Tron iOS Tests")
+        self.development_state = Path(
+            os.environ.get("TRON_IOS_SIMULATOR_STATE_DIR", Path.home() / ".tron/internal/run")
+        ) / "ios-simulator-udid"
+        worktree_key = run(
+            [sys.executable, str(IDENTITY), "worktree-key", "--worktree", str(ROOT)],
+            capture_output=True, check=True,
+        ).stdout.strip()
+        build_root = Path.home() / "Library/Developer/Tron/ios"
+        self.derived_data = Path(
+            os.environ.get("TRON_PROFILE_IOS_DERIVED_DATA", build_root / "profile-derived-data" / worktree_key)
+        )
+        self.results_root = Path(
+            os.environ.get("TRON_PROFILE_RESULTS_DIR", Path.home() / "Library/Developer/Tron/profiles")
+        ).expanduser() / "ios"
+        self.simulator_id = ""
+        self.build_log: Path | None = None
+
+    @staticmethod
+    def _toolchain() -> dict[str, str]:
+        output = run(
+            ["bash", "-c", f"source {shlex.quote(str(ROOT / 'config/ci-toolchain.env'))} && "
+             "printf '%s\\n%s\\n' \"$TRON_CI_IOS_RUNTIME_VERSION\" \"$TRON_CI_IOS_SIMULATOR_NAME\""],
+            capture_output=True, check=True,
+        ).stdout.splitlines()
+        return {"TRON_CI_IOS_RUNTIME_VERSION": output[0], "TRON_CI_IOS_SIMULATOR_NAME": output[1]}
+
+    def simulator_arguments(self) -> list[str]:
+        return [
+            "--marker", str(self.state_root / "simulator.json"), "--runtime", self.runtime,
+            "--device-type", self.device_type, "--name", self.device_name,
+            "--development-state", str(self.development_state),
+        ]
+
+    def provision(self) -> None:
+        result = run([sys.executable, str(SIMULATOR), "provision", *self.simulator_arguments()],
+                     capture_output=True, timeout=600)
+        sys.stderr.write(result.stderr)
+        udid = result.stdout.strip()
+        if result.returncode != 0 or len(udid) != 36:
+            raise ProfileError("cannot provision the owned test simulator", EXIT_DESTINATION)
+        self.simulator_id = udid
+
+    def destination(self) -> str:
+        return f"platform=iOS Simulator,id={self.simulator_id}"
+
+    def owned_directory(self, directory: Path) -> None:
+        if directory.is_symlink() or directory in (Path("/"), Path.home(), ROOT, IOS):
+            raise ProfileError(f"refusing unsafe profiler-owned directory: {directory}")
+        directory.mkdir(parents=True, exist_ok=True)
+        (directory / ".tron-profile-owned").write_text("tron.profile-ios-owned.v1\n")
+
+    def products_match_source(self) -> bool:
+        return (self.derived_data / "Build/Products").is_dir() and run(
+            [sys.executable, str(IDENTITY), "verify", "--worktree", str(ROOT), "--derived-data", str(self.derived_data)],
+            capture_output=True,
+        ).returncode == 0
+
+    def build(self) -> None:
+        self.owned_directory(self.derived_data)
+        if run([str(ROOT / "scripts/verify-ci-toolchain.sh"), "ios", "xcodegen"],
+               env={**os.environ, "PATH": f"{ROOT / '.ci-tools/bin'}:/opt/homebrew/bin:{os.environ.get('PATH', '')}"}).returncode:
+            raise ProfileError("the Apple toolchain does not match the repository pins", EXIT_BUILD_FAILURE)
+        identity = run([sys.executable, str(IDENTITY), "show", "--worktree", str(ROOT)],
+                       capture_output=True, check=True).stdout
+        if run([str(ROOT / "scripts/generate-xcode-project"), "ios", "--quiet"]).returncode:
+            raise ProfileError("project generation failed", EXIT_BUILD_FAILURE)
+        stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+        logs = self.derived_data / "tron-profile-builds" / f"{stamp}-{secrets.token_hex(3)}"
+        self.build_log = logs / "build.log"
+        print(f"Building {SCHEME} ({CONFIGURATION}, Swift -O whole-module); log: {self.build_log}", flush=True)
+        status = bounded(
+            self.build_log, logs / "evidence",
+            float(os.environ.get("TRON_PROFILE_IOS_BUILD_TIMEOUT_SECONDS", 2400)),
+            # One whole-module compile prints nothing until it finishes.
+            float(os.environ.get("TRON_PROFILE_IOS_BUILD_NO_OUTPUT_SECONDS", 1500)),
+            self.derived_data / "Build/Products",
+            ["xcodebuild", "build-for-testing", "-project", str(IOS / "TronMobile.xcodeproj"),
+             "-scheme", SCHEME, "-configuration", CONFIGURATION, "-destination", self.destination(),
+             "-derivedDataPath", str(self.derived_data), "-parallel-testing-enabled", "NO"],
+        )
+        if status == 124:
+            raise ProfileError(f"the build exceeded its deadline; evidence: {logs / 'evidence'}", EXIT_TIMEOUT)
+        if status >= 128:
+            raise ProfileError(f"the build was interrupted (status {status})", status)
+        if status:
+            raise ProfileError(f"the {CONFIGURATION} build failed; log: {self.build_log}", EXIT_BUILD_FAILURE)
+        stamped = run([sys.executable, str(IDENTITY), "write", "--worktree", str(ROOT),
+                       "--derived-data", str(self.derived_data)], input=identity)
+        if stamped.returncode:
+            raise ProfileError("cannot stamp the profiling products with their source identity")
+
+    def ensure_products(self) -> None:
+        if self.arguments.no_build:
+            if not self.products_match_source():
+                raise ProfileError(
+                    f"--no-build refused: the products at {self.derived_data} were not built from this worktree's "
+                    "current source state; run without --no-build"
+                )
+            print(f"Reusing profiling products built from this source state: {self.derived_data}", flush=True)
+            return
+        self.build()
+
+    def xcresult_json(self, result_bundle: Path, *arguments: str) -> Any:
+        output = run(["xcrun", "xcresulttool", "get", "test-results", *arguments, "--path", str(result_bundle)],
+                     capture_output=True, timeout=300)
+        if output.returncode:
+            raise ProfileError(f"xcresulttool {' '.join(arguments)} failed: {output.stderr.strip()}")
+        return json.loads(output.stdout)
+
+    def run_scenario(self, scenario: str) -> Path:
+        test, default_window, description = ALL_SCENARIOS[scenario]
+        iterations = self.arguments.iterations
+        window = self.arguments.window_seconds or default_window
+        run_id = f"{datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%SZ')}-{scenario}-{secrets.token_hex(3)}"
+        run_dir = self.results_root / run_id
+        run_dir.mkdir(parents=True)
+        result_bundle = run_dir / "TestResults.xcresult"
+        log = run_dir / "test.log"
+        print(f"\n== {scenario}: {iterations} iteration(s) x {window:g} s window -> {run_dir}", flush=True)
+        environment = {
+            "TEST_RUNNER_TRON_PROFILE_SCENARIO": scenario,
+            "TEST_RUNNER_TRON_PROFILE_ITERATIONS": str(iterations),
+        }
+        if self.arguments.window_seconds:
+            environment["TEST_RUNNER_TRON_PROFILE_WINDOW_SECONDS"] = f"{window:g}"
+        # Launch and installation dominate short scenarios; every iteration
+        # also gets its readiness and teardown allowance.
+        overall = 420 + iterations * (window + 120)
+        status = bounded(
+            log, run_dir / "test-evidence", overall, overall, result_bundle,
+            ["xcodebuild", "test-without-building", "-project", str(IOS / "TronMobile.xcodeproj"),
+             "-scheme", SCHEME, "-configuration", CONFIGURATION, "-destination", self.destination(),
+             "-derivedDataPath", str(self.derived_data), "-resultBundlePath", str(result_bundle),
+             "-parallel-testing-enabled", "NO", "-collect-test-diagnostics", "never",
+             f"-only-testing:TronMobileTests/{test}"],
+            environment,
+        )
+        if status == 124:
+            raise ProfileError(f"{scenario} exceeded its {overall:.0f} s deadline; evidence: {run_dir / 'test-evidence'}", EXIT_TIMEOUT)
+        if status >= 128:
+            raise ProfileError(f"{scenario} was interrupted (status {status}); evidence: {run_dir}", status)
+        if not result_bundle.is_dir():
+            raise ProfileError(f"{scenario} produced no xcresult (xcodebuild status {status}); log: {log}")
+        summary = self.xcresult_json(result_bundle, "summary")
+        (run_dir / "xctest-summary.json").write_text(json.dumps(summary, indent=2, sort_keys=True) + "\n")
+        try:
+            validate_summary(summary, scenario)
+        except ProfileError as error:
+            raise ProfileError(f"{error}; evidence: {run_dir}", error.code) from error
+        if status:
+            raise ProfileError(f"{scenario}: xcodebuild exited {status} although the test passed; log: {log}")
+        metrics_document = self.xcresult_json(result_bundle, "metrics")
+        (run_dir / "xcresult-metrics.json").write_text(json.dumps(metrics_document, indent=2, sort_keys=True) + "\n")
+        context = {
+            "scenario_description": description,
+            "iterations": iterations,
+            "window_seconds": window,
+            "configuration": CONFIGURATION,
+            "scheme": SCHEME,
+            "test": f"TronMobileTests/{test}",
+            "simulator": {"device_type": self.device_type, "runtime": self.runtime},
+            "xcode": run(["xcodebuild", "-version"], capture_output=True).stdout.strip().replace("\n", " "),
+            "products": str(self.derived_data),
+            "warnings": [
+                "simulator values measure host CPU work of the app process; they are a proxy, not device battery",
+            ],
+        }
+        try:
+            samples = build_samples(extract_measurements(metrics_document, test), iterations, context)
+        except ProfileError as error:
+            raise ProfileError(f"{scenario}: {error}; evidence: {run_dir}", error.code) from error
+        samples_path = run_dir / "samples.json"
+        samples_path.write_text(json.dumps(samples, indent=2, sort_keys=True) + "\n")
+        artifacts = [
+            f"xcresult={result_bundle}", f"test_log={log}", f"samples={samples_path}",
+            f"xcresult_metrics={run_dir / 'xcresult-metrics.json'}",
+        ]
+        if self.build_log:
+            artifacts.append(f"build_log={self.build_log}")
+        written = run(
+            [sys.executable, str(REPORT), "write", "--tool", "ios", "--scenario", scenario,
+             "--samples", str(samples_path), "--run-dir", str(run_dir), "--worktree", str(ROOT),
+             *[item for artifact in artifacts for item in ("--artifact", artifact)]],
+        )
+        if written.returncode:
+            raise ProfileError(f"the report module rejected the samples; evidence: {run_dir}")
+        return run_dir
+
+    def self_test(self) -> int:
+        reports = {name: self.run_scenario(name) for name in CONTROL_SCENARIOS}
+        comparisons = {}
+        for variant in SELF_TEST_EXPECTATIONS:
+            compared = run(
+                [sys.executable, str(REPORT), "compare", str(reports["control"]), str(reports[variant]),
+                 "--json", "--allow-mismatch"],
+                capture_output=True,
+            )
+            if compared.returncode not in (0, 3):
+                raise ProfileError(f"compare failed for {variant}: {compared.stderr.strip()}")
+            comparisons[variant] = json.loads(compared.stdout)
+        rows = self_test_verdicts(comparisons)
+        print("\nSelf-test (control vs. known-bad variant):")
+        for variant, metric, verdict, passed in rows:
+            detail = comparisons.get(variant, {}).get("metrics", {}).get(metric, {})
+            delta = f" {detail['relative'] * 100:+.1f}% (noise bound {detail['noise_bound']:.4g})" if "relative" in detail else ""
+            print(f"  {'PASS' if passed else 'FAIL'}  {variant:<16} {metric:<20} {verdict}{delta}")
+        for name, directory in reports.items():
+            print(f"  {name}: {directory}")
+        if all(passed for *_, passed in rows):
+            print("Self-test passed: every known cost was detected beyond the noise bound.")
+            return EXIT_OK
+        print("Self-test FAILED: the measurement path did not detect a known cost; do not trust product numbers.",
+              file=sys.stderr)
+        return EXIT_SELF_TEST
+
+
+def parse_arguments(argv: list[str]) -> argparse.Namespace:
+    parser = argparse.ArgumentParser(
+        prog="scripts/tron-profile ios",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        description="Profile deterministic iOS scenarios on the owned test simulator (optimized DevicePerformance build).",
+        epilog=(
+            "Exit status: 0 success, 2 usage, 65 scenario failed or did not run, 66 destination, 70 build failure,\n"
+            "73 simulator lease busy, 74 runner or extraction failure, 75 deadline exceeded, 77 self-test failed.\n"
+            "Honors TRON_IOS_TEST_DEVICE_NAME and TRON_IOS_TEST_STATE_DIR (shared with scripts/tron-ios-test),\n"
+            "TRON_PROFILE_RESULTS_DIR, and TRON_PROFILE_IOS_DERIVED_DATA."
+        ),
+    )
+    parser.add_argument("--list", action="store_true", help="list scenarios and exit")
+    parser.add_argument("--scenario", action="append", default=[], metavar="NAME",
+                        help="scenario to run (repeatable); 'all' runs every product scenario")
+    parser.add_argument("--iterations", type=int, default=5, help="measured iterations per scenario (default 5)")
+    parser.add_argument("--window-seconds", type=float, help="override each scenario's measured window")
+    parser.add_argument("--no-build", action="store_true",
+                        help="reuse products only if they were built from this worktree's current source state")
+    parser.add_argument("--self-test", action="store_true",
+                        help="run the control scenario and its known-bad variants and verify the expected deltas")
+    arguments = parser.parse_args(argv)
+    if not 1 <= arguments.iterations <= 50:
+        parser.error("--iterations must be 1...50")
+    if arguments.window_seconds is not None and not 0.5 <= arguments.window_seconds <= 600:
+        parser.error("--window-seconds must be 0.5...600")
+    names = []
+    for name in arguments.scenario:
+        if name == "all":
+            names.extend(SCENARIOS)
+        elif name in ALL_SCENARIOS:
+            names.append(name)
+        else:
+            parser.error(f"unknown scenario {name!r}; see --list")
+    arguments.scenario = list(dict.fromkeys(names))
+    if not arguments.list and not arguments.self_test and not arguments.scenario:
+        parser.error("choose --scenario NAME, --scenario all, --self-test, or --list")
+    if arguments.self_test and arguments.scenario:
+        parser.error("--self-test runs only the control scenarios; run product scenarios separately")
+    return arguments
+
+
+def main(argv: list[str]) -> int:
+    arguments = parse_arguments(argv)
+    if arguments.list:
+        for group, table in (("Scenarios", SCENARIOS), ("Self-test controls", CONTROL_SCENARIOS)):
+            print(f"{group}:")
+            for name, (_, window, description) in table.items():
+                print(f"  {name:<16} {window:>5g} s  {description}")
+        return EXIT_OK
+    state_root = Path(os.environ.get("TRON_IOS_TEST_STATE_DIR", Path.home() / ".tron/internal/ios-test"))
+    if os.environ.get("TRON_IOS_TEST_LOCK_HELD") != "1":
+        # The same lease as scripts/tron-ios-test: profiling and tests on the
+        # owned simulator never overlap.
+        state_root.mkdir(parents=True, exist_ok=True)
+        os.chmod(state_root, 0o700)
+        return subprocess.run(
+            [sys.executable, str(LOCKER), "--lock", str(state_root / "lease.lock"), "--", str(Path(__file__).resolve()), *argv]
+        ).returncode
+    try:
+        profiler = Profiler(arguments)
+        profiler.provision()
+        profiler.ensure_products()
+        if arguments.self_test:
+            return profiler.self_test()
+        # A failing scenario does not hide the others' measurements; the first
+        # failure's status is the command's status.
+        written: list[Path] = []
+        failures: list[tuple[str, ProfileError]] = []
+        for name in arguments.scenario:
+            try:
+                written.append(profiler.run_scenario(name))
+            except ProfileError as error:
+                print(f"error: {error}", file=sys.stderr)
+                failures.append((name, error))
+                if error.code >= 128:
+                    break  # interrupted: stop instead of starting the next scenario
+        if len(arguments.scenario) > 1:
+            print("\nReports:")
+            for directory in written:
+                print(f"  {directory}")
+            for name, error in failures:
+                print(f"  {name}: FAILED ({error.code})")
+        return failures[0][1].code if failures else EXIT_OK
+    except ProfileError as error:
+        print(f"error: {error}", file=sys.stderr)
+        return error.code
+    except subprocess.CalledProcessError as error:
+        print(f"error: {' '.join(map(str, error.cmd))} failed with status {error.returncode}", file=sys.stderr)
+        return EXIT_RUNNER
+
+
+if __name__ == "__main__":
+    raise SystemExit(main(sys.argv[1:]))

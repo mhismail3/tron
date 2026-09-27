@@ -347,7 +347,7 @@ suites rather than by new tests for moved types:
 | `Development` | Simulator app iteration | `com.tron.mobile.beta` | beta route, APNs sandbox |
 | `Test` | Hosted unit/UI tests | `com.tron.mobile.testhost` | no real APNs lane |
 | `LocalDevice` | Optimized ordinary physical-device development and profiling; supervised UI install can opt into Fast debug | `com.tron.mobile` | production-sandbox route |
-| `DevicePerformance` | Physical hosted performance fixture | `com.tron.mobile` | production-sandbox route |
+| `DevicePerformance` | Optimized (`-O`, whole-module) hosted performance fixture: `scripts/tron-profile ios` on the owned simulator and the pinned device | `com.tron.mobile` | production-sandbox route |
 | `Release` | Manual distribution archive only | `com.tron.mobile` | production route |
 
 The corresponding schemes are `Tron Development`, `Tron Device`, `Tron UI
@@ -394,6 +394,81 @@ a delta counts only beyond a 3% floor, three robust standard deviations and, for
 integer-valued metrics such as frame counts, one unit; the command exits 3 on a
 regression. `scripts/tron_profile_report.py` owns
 that schema and policy; `scripts/test-tron-profile.py` covers its failure modes.
+
+#### iOS scenario profiler
+
+`scripts/tron-profile ios` (implemented by `scripts/tron-profile-ios`) runs
+deterministic hosted scenarios on the owned test simulator and is the default
+way for an agent to measure an iOS change:
+
+```bash
+scripts/tron-profile ios --list
+scripts/tron-profile ios --self-test          # prove the measurement path first
+scripts/tron-profile ios --scenario idle-chat --scenario tool-loop
+scripts/tron-profile ios --scenario all --iterations 5
+scripts/tron-profile ios --scenario streaming-reply --no-build
+scripts/tron-profile compare BASE_RUN_DIR CANDIDATE_RUN_DIR
+```
+
+It takes the same lease and simulator overrides as `scripts/tron-ios-test`
+(`TRON_IOS_TEST_DEVICE_NAME`, `TRON_IOS_TEST_STATE_DIR`), so profiling and tests
+never share the simulator at once. It builds the optimized `DevicePerformance`
+configuration with the `Tron Device Performance` scheme into
+`~/Library/Developer/Tron/ios/profile-derived-data/<worktree-key>`, stamped with
+the worktree's source identity; `--no-build` reuses those products only when the
+stamp matches the current source state. Each scenario gets one run directory
+under `~/Library/Developer/Tron/profiles/ios/` with `report.json`, `summary.md`,
+the raw `samples.json`, the xcresult (including a screenshot of the mounted
+surface at the end of the first window), the extracted XCTest metrics, and the
+test log. Stable exits: 2 usage, 65 scenario failed or did not execute, 66
+destination, 70 build failure, 73 lease busy, 74 runner or extraction failure,
+75 deadline exceeded, 77 self-test failed.
+
+Scenarios drive production owners (`AppModel`, the real `GatewayClient` over a
+scripted socket, `SessionShellView`, `ChatView`, `ComposerDraftCoordinator` and
+`ComposerDraftStore` on a temporary root) with pre-encoded frames at fixed
+offsets, fixed seeds and a fixed window. Setup, the real `session.list` /
+`session.open` / `session.sync` opening and readiness happen before the window;
+after it each scenario proves its workload was admitted (no resynchronization,
+expected event sequence, summary revisions or saved draft), otherwise the run
+fails with its evidence path. The tests in `Tests/Profiling/` skip unless the
+profiler selects them, so ordinary unit runs are unaffected.
+
+| Scenario | Default window | Workload |
+|---|---:|---|
+| `idle-dashboard` | 30 s | Dashboard over 60 sessions in 6 workspaces; 3 running sessions send a `session.summary` every 10 s |
+| `idle-chat` | 30 s | Chat mounted on a 200-row transcript; no events |
+| `streaming-reply` | 12 s | Cumulative `session.progress` at the Gateway's 150 ms leading+trailing cadence: 3 s of thinking, then Markdown |
+| `tool-loop` | 15 s | Page-bound transcript (≤512 items, ≤600 KB); per 1.5 s tool call a `session.snapshot` and `session.summary` per append plus `session.toolProgress` at 5/s |
+| `composer-typing` | 10 s | Typing through `ComposerDraftCoordinator` with 400 ms pauses (longer than the 200 ms save debounce) while 4 other drafts hold image attachments |
+| `summary-storm` | 15 s | Dashboard; 5 running sessions each send a `session.summary` every 750 ms |
+
+Metrics come from an in-process `XCTMetric` (`Tests/Profiling/ProfileResourceMetric.swift`)
+and are deltas over one measured window: `cpu.instructions` and `cpu.cycles`
+(`proc_pid_rusage`), `cpu.time` (process user+system), `cpu.main_thread_time`,
+`energy.cpu` (kernel CPU energy estimate), `wakeups.interrupt` and
+`wakeups.idle` (`TASK_POWER_INFO_V2`), `disk.bytes_written`, `disk.bytes_read`,
+`disk.logical_writes`, `memory.peak_footprint`, `time.wall`, and `scenario.*`
+workload counters (frames and bytes the scripted socket delivered, RPCs
+answered, keystrokes, summaries). A counter the simulator process does not
+expose is omitted with a report warning, never reported as zero.
+
+Read the numbers with these limits:
+
+- **Instructions are the primary CPU metric.** They are the least sensitive to
+  other work on the host; CPU time, cycles and energy move with host load,
+  frequency and core type. Compare runs only through `scripts/tron-profile compare`.
+- **Simulator values are host-CPU proxies, not device battery.** The simulator
+  app runs on the Mac's cores; there is no radio, GPU or display power, and
+  `wakeups.idle` is near zero on a busy host. Physical-device Instruments
+  evidence remains authoritative for battery claims.
+- **Physical disk bytes are attributed at write-back** and depend on the host's
+  file cache; `disk.logical_writes` is the stable write metric.
+- The window includes SwiftUI rendering in the simulator but not the render
+  server, keyboard or text-input system work.
+- Run `--self-test` on the host before trusting numbers: it runs a fixed
+  `control` workload and variants with extra CPU work, synced disk writes and a
+  200 Hz timer, and fails unless each shows a regression beyond the noise bound.
 
 Use the same optimized app for the normal-use → capture → fix → repeat loop; do
 not maintain a profiling-only product or copy app state into a shadow bundle.
@@ -1319,7 +1394,8 @@ per-token publication or layout workload.
 
 `ChatPerformanceBaselineTests` is diagnostic-only and opt-in. The default
 checkpoint discovers and skips its three entry points, so they contribute no
-correctness evidence. An explicit baseline run records five post-warm-up timing,
+correctness evidence. Enable them with `TEST_RUNNER_TRON_PERFORMANCE_BASELINE=1`
+in the xcodebuild (or `scripts/tron-ios-test`) environment. An explicit baseline run records five post-warm-up timing,
 CPU, physical-memory, and malloc-zone allocation samples. Its opening benchmark
 also records the scroll-animation signpost against the 10,000-entry hosted fixture;
 separate microbenchmarks measure cumulative Markdown preparation throughput and

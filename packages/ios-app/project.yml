@@ -301,8 +301,9 @@ schemes:
       config: DevicePerformance
     test:
       config: DevicePerformance
-      environmentVariables:
-        TRON_PERFORMANCE_BASELINE: "$(TRON_PERFORMANCE_BASELINE_VALUE)"
+      # Per-run values reach the hosted test process only as TEST_RUNNER_*
+      # xcodebuild environment (for example TEST_RUNNER_TRON_PERFORMANCE_BASELINE=1);
+      # a scheme macro is not expanded from the caller's environment.
       testPlans:
         - path: TestPlans/UnitTests.xctestplan
           defaultPlan: true

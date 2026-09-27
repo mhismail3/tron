@@ -15,6 +15,7 @@ distributed Beta product.
 | Unit tests | Tron Development or Tron Device | Test | `HOSTED_TEST`, isolated test host |
 | Physical development device | Tron Device | LocalDevice | optimized development, production-sandbox, `com.tron.mobile` |
 | Device performance tests | Tron Device Performance | DevicePerformance | hosted test, production-sandbox |
+| Scenario profiling (agents) | `scripts/tron-profile ios` (Tron Device Performance) | DevicePerformance | optimized hosted test on the owned test simulator, shared lease |
 | Manual release archive | Tron Release | Release | production; archive/analyze/profile only |
 | UI validation | Tron UI Validation | Development / Test action | Development app, Test UI host |
 
@@ -77,7 +78,12 @@ Use `scripts/validate-ios-artifact.py` on signed products and
 archive. Never install Release or DevicePerformance through the ordinary helper.
 Do not archive, upload, deploy, or erase app/Keychain data.
 
-For a real slowdown, the user selects **Product → Profile** on `Tron Device` to
+To measure an iOS change, agents run `scripts/tron-profile ios --self-test`,
+then the relevant `--scenario`, before and after, and judge with
+`scripts/tron-profile compare`; usage, scenarios, metrics and caveats are in
+[iOS development](../../../packages/ios-app/docs/development.md#ios-scenario-profiler).
+
+For a real slowdown on a device, the user selects **Product → Profile** on `Tron Device` to
 open Instruments, or attaches Instruments to an already normally launched
 optimized app. Start with Time Profiler, Points of Interest, SwiftUI, and
 Concurrency/System Trace as indicated by the hypothesis; correlate existing

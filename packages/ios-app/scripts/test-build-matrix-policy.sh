@@ -37,7 +37,7 @@ expected = {
     "Development": ("com.tron.mobile.beta", "beta", "development", "development", "NO", "DEBUG TRON_DEVELOPMENT"),
     "Test": ("com.tron.mobile.testhost", "beta", "none", "none", "NO", "DEBUG HOSTED_TEST"),
     "LocalDevice": ("com.tron.mobile", "production-sandbox", "development", "development", "YES", "TRON_PRIVATE_VARIABLE_BLUR"),
-    "DevicePerformance": ("com.tron.mobile", "production-sandbox", "development", "development", "NO", "DEBUG HOSTED_TEST"),
+    "DevicePerformance": ("com.tron.mobile", "production-sandbox", "development", "development", "NO", "HOSTED_TEST"),
     "Release": ("com.tron.mobile", "production", "production", "production", "NO", None),
 }
 for name, (bundle, route, apns, attest, blur, flags) in expected.items():
@@ -64,6 +64,12 @@ for name, (bundle, route, apns, attest, blur, flags) in expected.items():
         assert "#include \"Debug.xcconfig\"" not in text
     if name == "DevicePerformance":
         assert "TRON_PRIVATE_VARIABLE_BLUR" not in text
+        # The profiler's measurement build: optimized like LocalDevice, with
+        # testability kept for the @testable hosted test bundle.
+        assert "#include \"Debug.xcconfig\"" not in text
+        for setting in ("SWIFT_OPTIMIZATION_LEVEL = -O", "SWIFT_COMPILATION_MODE = wholemodule",
+                        "GCC_OPTIMIZATION_LEVEL = 3", "ENABLE_TESTABILITY = YES"):
+            assert setting in text, (name, setting)
     entitlements = {
         "Development": ("TronMobileDevelopment.entitlements", "development", "development"),
         "LocalDevice": ("TronMobileLocalDevice.entitlements", "development", "development"),

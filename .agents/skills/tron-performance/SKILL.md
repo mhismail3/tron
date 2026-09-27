@@ -9,6 +9,20 @@ Apply [project rules](../../../AGENTS.md). Measurements guide the decision; code
 size, abstraction count, test duration, and a plausible hotspot are not evidence
 of improved product performance. Keep experiments within the authorized scope.
 
+## Measure with the profiler
+
+`scripts/tron-profile` is the default measurement path. For iOS work run
+`scripts/tron-profile ios --self-test` once on the current host, then the
+scenario that exercises the change (`scripts/tron-profile ios --list`) on the
+baseline and the candidate, and decide only with
+`scripts/tron-profile compare BASE CANDIDATE`, which applies the shared noise
+bound. Instructions retired is the primary iOS CPU metric; simulator numbers are
+host-CPU proxies, not device battery. Record both run directories, the host
+warnings and the verdicts in the handoff. Add a scenario (in
+`packages/ios-app/Tests/Profiling/`) rather than an ad hoc timer when no existing
+one exercises the path. Details:
+[iOS scenario profiler](../../../packages/ios-app/docs/development.md#ios-scenario-profiler).
+
 ## Choose the question
 
 - **A reported bottleneck:** reproduce the user-visible cost, profile the full
