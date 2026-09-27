@@ -8,6 +8,7 @@ implementation detail; all user-facing language calls the agent Tron.
 
 | Directory | Owner |
 |---|---|
+| `Core` | the `TronMobileCore` framework: the app's lowest layer, shared with the unit tests |
 | `Sources/App` | app composition and lifecycle |
 | `Sources/Gateway` | pairing, Keychain profiles, HTTP, WebSocket protocol |
 | `Sources/Models` | provider-qualified model and snapshot DTOs |
@@ -20,6 +21,41 @@ implementation detail; all user-facing language calls the agent Tron.
 | `Sources/UI/Terminal` | sheet composition, presentation lifecycle, and SwiftTerm renderer |
 | `Sources/UI/Theme` | historical Tron colors and descriptor-based bundled typography |
 | `ShareExtension` | app-group share handoff |
+
+## Modules
+
+The app is two Swift modules: the application target `TronMobile` and the
+framework `TronMobileCore`, whose sources live in `Core/` and which the app
+embeds. The split makes the layering a compiler rule instead of a convention: a
+lower module cannot see a higher one, each module declares the surface it
+offers, and code in a module can only use what that module may reach.
+
+`Core` owns the app's lowest layer. It currently holds the compiled-in Gateway
+wire contract — `Core/Gateway/GatewayProtocolContract.swift`,
+`Core/Gateway/GatewayRequestTimeout.swift` and
+`Core/Gateway/GatewayConnectionPolicy.swift`. Models, Gateway, Auth and Support
+move in as the split proceeds, each file keeping the layer directory it will own
+there.
+
+Access is the module boundary:
+
+- A declaration another module uses is `package`, and only `public` if a
+  consumer outside this package ever needs it. The app target, the framework
+  and the unit-test target all set `SWIFT_PACKAGE_NAME = TronIOSApp` in
+  `packages/ios-app/project.yml`; that shared value is what makes package
+  access visible across them.
+- A declaration nothing outside `Core` uses stays `internal`, including
+  test-only fixtures; tests reach those with `@testable import TronMobileCore`.
+- A type has exactly one owner: no duplicate copies, re-export shims or
+  compatibility typealiases in the app module.
+
+The application target and its unit tests import the framework the same way any
+other client would, so the boundary stays visible in the source: a `Core` file
+that reaches for a State or UI type fails to compile rather than quietly
+reintroducing a layer cycle.
+
+How a type moves into the module is in the
+[development guide](development.md#module-layout).
 
 The dashboard selector's template logo has a bounded 24-point intrinsic size in its source asset; the full-resolution SVG view box must never become UIKit toolbar layout authority.
 

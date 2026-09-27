@@ -317,6 +317,29 @@ scripts/tron-ios-simulator install
 The generated Xcode project is not architectural truth; edit `project.yml` and
 source files, then regenerate. Because the application uses a checked-in plist, `Sources/Info.plist` is the sole runtime orientation authority: iPhone is portrait-only while iPad supports portrait, upside-down portrait, and both landscape orientations. Do not add competing `INFOPLIST_KEY_UISupportedInterfaceOrientations*` settings to `project.yml`; run `packages/ios-app/scripts/test-source-policy.sh` from the repository root to guard this boundary, the bundled notification sound, and the rule that app-owned sheets use the activity-managed presentation modifiers.
 
+### Module layout
+
+The application target `TronMobile` and the framework `TronMobileCore`
+(`Core/`) are separate Swift modules; [Modules](architecture.md#modules) owns
+their ownership and access rules. The framework is built and embedded for
+every configuration, so a configuration needs no framework entry of its own,
+and a `Core` move never touches the share extension.
+
+One slice of `Core` moves at a time, proven by the compiler and the existing
+suites rather than by new tests for moved types:
+
+1. Move the whole file into the matching `Core/<Layer>/` directory. A type has
+   one owner, so nothing is copied or shimmed behind it.
+2. Mark the declarations and members other modules use `package`, and give a
+   struct another module constructs an explicit `package init`. Leave test-only
+   fixtures and everything else `internal`.
+3. Add `import TronMobileCore` to the app files that use the moved API, and
+   `@testable import TronMobileCore` to tests that use its internals.
+4. Regenerate with `scripts/tron ios generate`, then build all five
+   configurations and run `scripts/tron-ios-test run`. A file that carries the
+   Gateway protocol constants must have its path updated in
+   `scripts/gateway_protocol_contract.py` in the same change.
+
 ### Build matrix
 
 | Configuration | Intended workflow | Bundle identity | Push environment |

@@ -3,7 +3,7 @@ import Foundation
 /// One lockstep wire contract shared by every first-party Gateway client.
 /// `config/GatewayProtocol.json` is the repository authority; build policy
 /// verifies these compile-time values and the final signed artifact metadata.
-enum TronGatewayProtocolContract {
-    static let protocolVersion = 5
-    static let minimumProtocolVersion = 5
+package enum TronGatewayProtocolContract {
+    package static let protocolVersion = 5
+    package static let minimumProtocolVersion = 5
 }

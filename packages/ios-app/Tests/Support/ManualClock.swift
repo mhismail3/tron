@@ -1,6 +1,7 @@
 import Foundation
 import Synchronization
 @testable import TronMobile
+@testable import TronMobileCore
 
 final class ManualClock: Sendable {
     private struct Sleeper {

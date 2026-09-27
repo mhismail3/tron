@@ -1,4 +1,5 @@
 import Foundation
+import TronMobileCore
 
 struct SessionForkOutcome: Equatable {
     let sessionID: String

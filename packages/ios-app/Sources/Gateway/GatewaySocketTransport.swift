@@ -1,4 +1,5 @@
 import Foundation
+import TronMobileCore
 
 final class GatewayPingCompletion: @unchecked Sendable {
     private let lock = NSLock()

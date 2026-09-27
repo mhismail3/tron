@@ -1,5 +1,6 @@
 import Foundation
 import Observation
+import TronMobileCore
 
 struct SessionPresentationIdentity: Hashable, Sendable {
     let sessionID: String

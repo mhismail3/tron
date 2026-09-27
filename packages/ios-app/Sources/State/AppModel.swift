@@ -1,5 +1,6 @@
 import Foundation
 import Observation
+import TronMobileCore
 import UIKit
 
 final class ChatMediaMemoryPressureObserver: @unchecked Sendable {

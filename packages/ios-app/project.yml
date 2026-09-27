@@ -83,6 +83,33 @@ settings:
     STRING_CATALOG_GENERATE_SYMBOLS: YES
 
 targets:
+  # The app's lowest layer: shared value types and wire contracts that no
+  # higher module may reach into (docs/architecture.md#modules). Its sources
+  # live in Core/ and keep the layer directory they will own in the finished
+  # module split.
+  TronMobileCore:
+    type: framework
+    platform: iOS
+    sources:
+      - path: Core
+        createIntermediateGroups: true
+    settings:
+      base:
+        # The per-configuration xcconfigs give every target the app's bundle
+        # identifier, so a framework needs its own; it also needs a generated
+        # Info.plist because it is a bundle of its own.
+        PRODUCT_BUNDLE_IDENTIFIER: com.tron.mobile.core
+        GENERATE_INFOPLIST_FILE: YES
+        # The project-level INFOPLIST_KEY_* settings generate the app's plist
+        # keys; a framework must not advertise a scene manifest, a launch
+        # screen, or app input handling.
+        INFOPLIST_KEY_UIApplicationSceneManifest_Generation: NO
+        INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents: NO
+        INFOPLIST_KEY_UILaunchScreen_Generation: NO
+        # Package access is what the app and the unit tests use to reach this
+        # module's API; the value must match theirs exactly.
+        SWIFT_PACKAGE_NAME: TronIOSApp
+
   TronMobile:
     type: application
     platform: iOS
@@ -124,11 +151,16 @@ targets:
         embed:
           codeSign: true
           removeHeadersOnCopy: true
+      - target: TronMobileCore
+        embed:
+          codeSign: true
+          removeHeadersOnCopy: true
       - package: SwiftTerm
     settings:
       base:
         INFOPLIST_FILE: Sources/Info.plist
         SWIFT_OBJC_BRIDGING_HEADER: Sources/Support/PrivateVariableBlurBridge.h
+        SWIFT_PACKAGE_NAME: TronIOSApp
         ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME: AccentColor
         GENERATE_INFOPLIST_FILE: NO
         SWIFT_EMIT_LOC_STRINGS: YES
@@ -181,12 +213,17 @@ targets:
         buildPhase: resources
     dependencies:
       - target: TronMobile
+      - target: TronMobileCore
+        # The host app already embeds the framework; a second copy inside the
+        # test bundle would load a duplicate TronMobileCore image at runtime.
+        embed: false
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.tron.mobile.testhost.tests
         BUNDLE_LOADER: "$(TEST_HOST)"
         TEST_HOST: "$(BUILT_PRODUCTS_DIR)/TronMobile.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/TronMobile"
         GENERATE_INFOPLIST_FILE: YES
+        SWIFT_PACKAGE_NAME: TronIOSApp
         TEST_RUNNER_WAIT_FOR_DEBUGGER: NO
 
   TronMobileUITests:

@@ -1,5 +1,6 @@
 import Foundation
 import Observation
+import TronMobileCore
 
 struct ProviderAuthPromptState: Identifiable, Hashable {
     enum Kind: String { case text, secret, select, manualCode = "manual_code" }

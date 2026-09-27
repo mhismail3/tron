@@ -1,6 +1,7 @@
 import Foundation
 import Testing
 @testable import TronMobile
+@testable import TronMobileCore
 
 private final class WeakGatewayClient {
     weak var value: GatewayClient?

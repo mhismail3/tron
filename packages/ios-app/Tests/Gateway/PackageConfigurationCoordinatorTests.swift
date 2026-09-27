@@ -3,6 +3,7 @@ import Observation
 import Synchronization
 import Testing
 @testable import TronMobile
+@testable import TronMobileCore
 
 @MainActor
 @Suite("Package configuration coordinator")

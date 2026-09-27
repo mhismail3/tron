@@ -120,13 +120,15 @@ def verify_source_contract(root: Path = ROOT) -> GatewayProtocolContract:
     _expect_equal(launcher_contract, expected, "Mac launcher")
 
     for path, label in (
-        (root / "packages/ios-app/Sources/Gateway/GatewayProtocolContract.swift", "iOS"),
+        (root / "packages/ios-app/Core/Gateway/GatewayProtocolContract.swift", "iOS"),
         (root / "packages/mac-app/Sources/Server/Health/GatewayProtocolContract.swift", "Mac"),
     ):
+        # The iOS constants carry package access (never public) because the app and its unit
+        # tests read them across the TronMobileCore framework boundary.
         source = _read(path)
         actual = GatewayProtocolContract(
-            _exact_integer(source, r"^\s*static let protocolVersion\s*=\s*(\d+)\s*$", f"{label} protocol"),
-            _exact_integer(source, r"^\s*static let minimumProtocolVersion\s*=\s*(\d+)\s*$", f"{label} minimum protocol"),
+            _exact_integer(source, r"^\s*(?:package )?static let protocolVersion\s*=\s*(\d+)\s*$", f"{label} protocol"),
+            _exact_integer(source, r"^\s*(?:package )?static let minimumProtocolVersion\s*=\s*(\d+)\s*$", f"{label} minimum protocol"),
         )
         _expect_equal(actual, expected, f"{label} source")
 
