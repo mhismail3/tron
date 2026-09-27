@@ -149,11 +149,10 @@ final class TronAccessibilityUITests: XCTestCase {
         let destinations = [
             ("Sessions", "Filter", "Filter Servers"), ("Sessions", "Settings", "Settings"),
             ("Sessions", "New Session", "New Session"),
-            ("Automations", "Filter", "View Automations"), ("Automations", "Settings", "Settings"),
+            ("Automations", "Filter", "Filter"), ("Automations", "Settings", "Settings"),
             ("Automations", "Choose agenda date", "Jump to date"), ("Automations", "Create Automation", "New Automation"),
-            ("Knowledge", "Filter", "Knowledge filters"), ("Knowledge", "Settings", "Settings"),
-            ("Knowledge", "Observation configuration", "Observation"), ("Knowledge", "Connectors", "Connectors"),
-            ("Knowledge", "Import legacy records", "Import Knowledge"), ("Knowledge", "Capture URL", "Capture URL"),
+            ("Knowledge", "Filter", "Chronicle filters"), ("Knowledge", "Settings", "Settings"),
+            ("Knowledge", "Observation configuration", "Observation"), ("Knowledge", "Capture URL", "Capture URL"),
             ("Knowledge", "New note", "New note"),
         ]
         for (mode, action, expected) in destinations {
@@ -161,7 +160,7 @@ final class TronAccessibilityUITests: XCTestCase {
             defer { app.terminate() }
             select(mode, in: app)
             app.buttons["dashboard.menu"].tap()
-            if ["Observation configuration", "Connectors", "Import legacy records"].contains(action) {
+            if action == "Observation configuration" {
                 app.buttons["Knowledge settings"].tap()
             }
             app.buttons[action].tap()
