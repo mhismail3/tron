@@ -132,7 +132,6 @@ protocol SessionPresentationStoreDelegate: AnyObject {
     func sessionPresentationStoreRemoveNotice(_ key: InAppNoticeKey, scope: InAppNoticeScope?)
     func sessionPresentationStoreRetireNoticeScope(_ scope: InAppNoticeScope)
     func sessionPresentationStoreSurface(_ error: Error)
-    func sessionPresentationStoreCheckpointCache()
     func sessionPresentationStoreMeasuredEventWork(_ phase: GatewayEventConsumerPhase, duration: Duration)
 }
 
@@ -918,7 +917,6 @@ final class SessionPresentationStore {
         )
         transcriptLoadState = .idle
         advanceChatProjection(canonical: true)
-        delegate?.sessionPresentationStoreCheckpointCache()
         return true
     }
 
@@ -1259,7 +1257,6 @@ final class SessionPresentationStore {
                 self.snapshot?.forkBoundary = response.forkBoundary
                 advanceChatProjection(canonical: true)
                 updateTranscriptLoadState(.idle, for: loadTarget)
-                delegate?.sessionPresentationStoreCheckpointCache()
                 return .installed
             } catch is CancellationError {
                 updateTranscriptLoadState(.idle, for: loadTarget)
@@ -1497,7 +1494,6 @@ final class SessionPresentationStore {
             advanceChatProjection(canonical: true)
             isAuthoritative = mountedTarget?.sessionID == authoritative.sessionId
             delegate?.sessionPresentationStoreRemoveNotice(.sessionCatchUp, scope: noticeScope)
-            delegate?.sessionPresentationStoreCheckpointCache()
             return
         }
         guard admitsSequencedEvent(event) else { return }
@@ -1932,7 +1928,6 @@ final class SessionPresentationStore {
                     automaticSynchronization = nil
                 }
                 delegate?.sessionPresentationStoreRemoveNotice(.sessionCatchUp, scope: noticeScope)
-                delegate?.sessionPresentationStoreCheckpointCache()
                 return true
             case .retry(let delay):
                 if let delay {
@@ -3178,10 +3173,6 @@ final class SessionPresentationStore {
             mountedTranscriptWindow = reconciledPrefix
             snapshot = admitted
             advanceChatProjection(canonical: true)
-            if admitted.transcriptStart == incoming.transcriptStart,
-               admitted.transcript.count == incoming.transcript.count {
-                delegate?.sessionPresentationStoreCheckpointCache()
-            }
         case .ignore:
             break
         case .resynchronize(let sessionID):

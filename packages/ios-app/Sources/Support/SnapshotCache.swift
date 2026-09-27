@@ -9,6 +9,14 @@ enum SnapshotCachePolicy {
     /// Archived rows are never cached; the Gateway-owned count is the only
     /// archive projection this cache retains, within the catalog's row bound.
     static let maximumArchivedCount = SessionCatalogLoadBounds.maximumRows
+    /// A live `session.summary` checkpoint trails the first unsaved summary by
+    /// this fixed window, so a burst (several summaries per tool call) becomes
+    /// one write of its newest rows. The window is not extended by later
+    /// summaries, so a continuous stream still saves every two seconds. Scene
+    /// inactivation, backgrounding and profile retirement write it at once,
+    /// so only an abrupt process death inside the window can lose it; the
+    /// next authoritative page replaces cached rows either way.
+    static let summaryCheckpointDelay: Duration = .seconds(2)
 }
 
 actor SnapshotCache {
@@ -18,7 +26,7 @@ actor SnapshotCache {
         static let empty = Value(sessions: [], archivedCount: nil)
     }
 
-    private struct Document: Codable {
+    private struct Document: Decodable {
         let version: Int
         let sessions: [SessionSummary]
         let archivedCount: Int?
@@ -82,7 +90,7 @@ actor SnapshotCache {
             // Admission is intentionally lossy: malformed or oversized rows
             // and duplicate IDs are dropped in stored order, while a malformed
             // envelope still discards the whole file in the outer catch.
-            let admittedSessions = Self.boundedSessions(document.sessions)
+            let admittedSessions = Self.admittedSessions(document.sessions).map(\.summary)
             performanceSignposts.end(
                 interval,
                 result: .success,
@@ -117,13 +125,14 @@ actor SnapshotCache {
             try prepareRoot()
             // Session summaries are the only persisted projection. Archive
             // membership is Gateway-owned display state: archived rows are
-            // never cached, only its bounded count.
-            let document = Document(
-                version: 4,
-                sessions: Self.boundedSessions(sessions),
+            // never cached, only its bounded count. Admission already encoded
+            // each admitted row once; the document reuses those exact bytes
+            // instead of encoding every row a second time.
+            let rows = Self.admittedSessions(sessions)
+            let data = Self.encodedDocument(
+                rows: rows.map(\.encoded),
                 archivedCount: Self.boundedArchivedCount(archivedCount)
             )
-            let data = try JSONEncoder.gateway.encode(document)
             guard data.count <= SnapshotCachePolicy.maximumEncodedBytes else {
                 throw CocoaError(.fileWriteOutOfSpace)
             }
@@ -136,7 +145,7 @@ actor SnapshotCache {
                 interval,
                 result: .success,
                 metrics: PerformanceMetrics(
-                    itemCount: document.sessions.count,
+                    itemCount: rows.count,
                     byteCount: data.count
                 )
             )
@@ -174,23 +183,47 @@ actor SnapshotCache {
         return value
     }
 
-    private static func boundedSessions(_ sessions: [SessionSummary]) -> [SessionSummary] {
+    /// Load and save share this admission so both keep the same row, byte and
+    /// duplicate bounds; save writes the returned encodings verbatim.
+    private static func admittedSessions(
+        _ sessions: [SessionSummary]
+    ) -> [(summary: SessionSummary, encoded: Data)] {
         let budget = SnapshotCachePolicy.maximumEncodedBytes - SnapshotCachePolicy.envelopeReserveBytes
+        let encoder = JSONEncoder.gateway
         var estimatedBytes = 0
         var seen: Set<String> = []
-        var admitted: [SessionSummary] = []
+        var admitted: [(summary: SessionSummary, encoded: Data)] = []
         for session in sessions where admitted.count < SnapshotCachePolicy.maximumSessionCount {
             guard !session.isArchived,
                   !session.id.isEmpty,
                   admitsEncodingShape(session, maximumBytes: SnapshotCachePolicy.maximumEncodedSessionBytes),
-                  let encoded = try? JSONEncoder.gateway.encode(session),
+                  let encoded = try? encoder.encode(session),
                   encoded.count <= SnapshotCachePolicy.maximumEncodedSessionBytes,
                   estimatedBytes <= budget - encoded.count,
                   seen.insert(session.id).inserted else { continue }
-            admitted.append(session)
+            admitted.append((session, encoded))
             estimatedBytes += encoded.count
         }
         return admitted
+    }
+
+    /// The version 4 `Document` envelope assembled from already-encoded rows.
+    /// It decodes to exactly what `JSONEncoder.gateway.encode(Document)` would
+    /// produce (`SnapshotCacheTests` checks this against generated catalogs);
+    /// a nil count is omitted, as synthesized `Codable` omits it.
+    private static func encodedDocument(rows: [Data], archivedCount: Int?) -> Data {
+        var data = Data(#"{"version":4,"sessions":["#.utf8)
+        data.reserveCapacity(rows.reduce(64) { $0 + $1.count + 1 })
+        for (index, row) in rows.enumerated() {
+            if index > 0 { data.append(UInt8(ascii: ",")) }
+            data.append(row)
+        }
+        data.append(UInt8(ascii: "]"))
+        if let archivedCount {
+            data.append(contentsOf: Data(#","archivedCount":\#(archivedCount)"#.utf8))
+        }
+        data.append(UInt8(ascii: "}"))
+        return data
     }
 
     private static func admitsEncodingShape<T>(_ value: T, maximumBytes: Int) -> Bool {

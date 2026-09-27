@@ -444,6 +444,10 @@ final class AppModel {
     private var sceneAllowsCatalogRefresh = true
     private var cacheCheckpointTask: Task<Void, Never>?
     private var cacheCheckpointTaskGeneration = 0
+    /// Present only while a trailing summary checkpoint waits for its window
+    /// and no save is draining; `startCacheCheckpointDrain` retires it.
+    private var cacheCheckpointDelayTask: Task<Void, Never>?
+    private var cacheCheckpointDelayGeneration = 0
     private var cacheCheckpointGeneration = 0
     private var pendingCacheCheckpoint: CacheCheckpoint?
     private var workspaceLoadGeneration = 0
@@ -1687,6 +1691,9 @@ final class AppModel {
         pushNavigationActivationReady = false
         pushNavigationActivationGeneration &+= 1
         noticeCenter.setBackgrounded(true)
+        // The app switcher can terminate an inactive scene without a background
+        // transition, so a trailing catalog checkpoint is written now.
+        startCacheCheckpointDrain()
     }
 
     @discardableResult
@@ -1741,7 +1748,19 @@ final class AppModel {
         // Provider login is stable-device-owned on the Gateway. Retire only
         // this transport delivery epoch and retain the operation for auth.resume.
         providerAuth.retireConnection()
-        return draftCheckpoint
+        // Summary checkpoints trail their burst; write the pending one inside
+        // the same background assertion so a later cold start restores today's
+        // rows. Expiration cancels both writes.
+        guard let cacheCheckpoint = startCacheCheckpointDrain() else { return draftCheckpoint }
+        return Task { @MainActor in
+            await withTaskCancellationHandler {
+                await draftCheckpoint.value
+                await cacheCheckpoint.value
+            } onCancel: {
+                draftCheckpoint.cancel()
+                cacheCheckpoint.cancel()
+            }
+        }
     }
 
     func pair(_ invitation: PairingInvitation, selectingProfile: Bool = true) async throws {
@@ -4587,7 +4606,7 @@ final class AppModel {
             scheduleSessionListRefresh()
         case .updated:
             installSelectedDashboardCatalog()
-            scheduleCacheCheckpoint()
+            scheduleCacheCheckpoint(.trailing)
         }
     }
 
@@ -4729,7 +4748,14 @@ final class AppModel {
         installSelectedDashboardCatalog()
     }
 
-    private func scheduleCacheCheckpoint() {
+    private enum CacheCheckpointTiming {
+        /// Authoritative pages and user mutation responses write at once.
+        case immediate
+        /// Live summaries coalesce inside `SnapshotCachePolicy.summaryCheckpointDelay`.
+        case trailing
+    }
+
+    private func scheduleCacheCheckpoint(_ timing: CacheCheckpointTiming = .immediate) {
         guard let profileID = profiles.selected?.id else { return }
         cacheCheckpointGeneration &+= 1
         pendingCacheCheckpoint = CacheCheckpoint(
@@ -4738,7 +4764,30 @@ final class AppModel {
             sessions: sessions,
             archivedCount: sessionCatalog.archivedCount
         )
-        guard cacheCheckpointTask == nil else { return }
+        switch timing {
+        case .immediate:
+            startCacheCheckpointDrain()
+        case .trailing:
+            // A draining save writes the newest pending checkpoint next, and an
+            // armed window already covers it; neither is extended.
+            guard cacheCheckpointTask == nil, cacheCheckpointDelayTask == nil else { return }
+            cacheCheckpointDelayGeneration &+= 1
+            let delayGeneration = cacheCheckpointDelayGeneration
+            cacheCheckpointDelayTask = Task { @MainActor [weak self, clock] in
+                do { try await clock.sleep(SnapshotCachePolicy.summaryCheckpointDelay) } catch { return }
+                guard let self, self.cacheCheckpointDelayGeneration == delayGeneration else { return }
+                self.startCacheCheckpointDrain()
+            }
+        }
+    }
+
+    /// Writes any pending checkpoint now, ending a trailing window early.
+    /// Returns the save that owns the newest checkpoint, if any.
+    @discardableResult
+    private func startCacheCheckpointDrain() -> Task<Void, Never>? {
+        cancelCacheCheckpointDelay()
+        guard cacheCheckpointTask == nil else { return cacheCheckpointTask }
+        guard pendingCacheCheckpoint != nil else { return nil }
         cacheCheckpointTaskGeneration &+= 1
         let taskGeneration = cacheCheckpointTaskGeneration
         cacheCheckpointTask = Task { @MainActor [weak self] in
@@ -4756,9 +4805,38 @@ final class AppModel {
                 self.cacheCheckpointTask = nil
             }
         }
+        return cacheCheckpointTask
+    }
+
+    private func cancelCacheCheckpointDelay() {
+        cacheCheckpointDelayGeneration &+= 1
+        cacheCheckpointDelayTask?.cancel()
+        cacheCheckpointDelayTask = nil
+    }
+
+    /// Profile retirement keeps the immediate-save contract: an in-flight save
+    /// finishes and a checkpoint queued behind it is dropped. A checkpoint still
+    /// inside its trailing window stands where an immediate save would already
+    /// be in flight, so it is written before the retirement completes. A later
+    /// `SnapshotCache.remove` still deletes it and tombstones the profile.
+    private func retireCacheCheckpoints() -> Task<Void, Never>? {
+        let inFlight = cacheCheckpointTask
+        let deferred = cacheCheckpointDelayTask == nil ? nil : pendingCacheCheckpoint
+        cancelCacheCheckpoints()
+        guard let deferred else { return inFlight }
+        return Task { @MainActor [cache] in
+            await inFlight?.value
+            await cache.save(
+                profileID: deferred.profileID,
+                generation: deferred.generation,
+                sessions: deferred.sessions,
+                archivedCount: deferred.archivedCount
+            )
+        }
     }
 
     private func cancelCacheCheckpoints() {
+        cancelCacheCheckpointDelay()
         cacheCheckpointTaskGeneration &+= 1
         pendingCacheCheckpoint = nil
         cacheCheckpointTask?.cancel()
@@ -4958,10 +5036,6 @@ extension AppModel: SessionPresentationStoreDelegate {
 
     func sessionPresentationStoreSurface(_ error: Error) {
         surface(error)
-    }
-
-    func sessionPresentationStoreCheckpointCache() {
-        scheduleCacheCheckpoint()
     }
 }
 
@@ -5178,11 +5252,10 @@ extension AppModel: GatewayLifecycleProjectionDelegate {
         mountedOptionalRefreshConnectionID = nil
         finishRecoveryDisplayEpisode()
         let catalog = catalogRefreshTask
-        let cacheCheckpoint = cacheCheckpointTask
+        let cacheCheckpoint = retireCacheCheckpoints()
         let events = final ? eventTask : nil
         let terminalRetirement = terminal.beginRetirement()
         cancelCatalogRefresh()
-        cancelCacheCheckpoints()
         if final {
             events?.cancel()
             eventTask = nil

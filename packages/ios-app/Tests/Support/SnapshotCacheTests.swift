@@ -283,6 +283,68 @@ struct SnapshotCacheTests {
         #expect((await cache.load(profileID: "profile")).archivedCount == SnapshotCachePolicy.maximumArchivedCount)
     }
 
+    @Test("saved envelope equals the Codable document encoding over generated catalogs")
+    func savedEnvelopeMatchesCodableDocument() async throws {
+        // The document the cache wrote before it reused admission's row
+        // encodings; both must parse to the same JSON value.
+        struct CodableDocument: Encodable {
+            let version: Int
+            let sessions: [SessionSummary]
+            let archivedCount: Int?
+        }
+        var generator = SeededGenerator(seed: 0x7E57_CAC4E)
+        let fragments = ["a", "Z", "/", "\\", "\"", "\n", "\u{01}", "\u{7F}", "é", "漢", "🙂", " ", "</"]
+        func text(_ maximum: Int) -> String {
+            (0..<Int.random(in: 0...maximum, using: &generator))
+                .map { _ in fragments.randomElement(using: &generator)! }
+                .joined()
+        }
+        for round in 0..<60 {
+            let root = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString, directoryHint: .isDirectory)
+            defer { try? FileManager.default.removeItem(at: root) }
+            let cache = SnapshotCache(root: root)
+            let rows = (0..<Int.random(in: 0...12, using: &generator)).map { index in
+                SessionSummary(
+                    id: Bool.random(using: &generator) ? "row-\(index % 5)" : (index == 0 ? "" : "row-\(round)-\(index)"),
+                    name: Bool.random(using: &generator) ? text(6) : nil,
+                    cwd: "/workspace/" + text(4),
+                    kind: Bool.random(using: &generator) ? .user : .subagent,
+                    parentSessionId: Bool.random(using: &generator) ? "parent-\(index)" : nil,
+                    createdAt: "2026-01-01T00:00:00Z",
+                    updatedAt: "2026-01-01T00:00:0\(index % 10)Z",
+                    activeSince: Bool.random(using: &generator) ? "2026-01-01T00:00:00Z" : nil,
+                    messageCount: Int.random(in: 0...10_000, using: &generator),
+                    firstMessage: text(20),
+                    phase: [.idle, .running, .interrupted].randomElement(using: &generator)!,
+                    foregroundPhase: Bool.random(using: &generator) ? .running : nil,
+                    hasActiveSubagents: Bool.random(using: &generator),
+                    waitingForUser: Bool.random(using: &generator),
+                    summaryRevision: Bool.random(using: &generator) ? Int.random(in: 0...Int(Int32.max), using: &generator) : nil,
+                    completionRevision: Int.random(in: 0...9, using: &generator),
+                    attentionRevision: Int.random(in: 0...9, using: &generator),
+                    isUnread: Bool.random(using: &generator),
+                    archivedAt: Int.random(in: 0..<5, using: &generator) == 0 ? "2026-01-02T00:00:00Z" : nil
+                )
+            }
+            let archivedCount = [nil, 0, 7, -1, SnapshotCachePolicy.maximumArchivedCount + 1]
+                .randomElement(using: &generator)!
+            await cache.save(profileID: "profile", sessions: rows, archivedCount: archivedCount)
+
+            var seen: Set<String> = []
+            let admitted = rows.filter { !$0.isArchived && !$0.id.isEmpty && seen.insert($0.id).inserted }
+            let boundedCount = archivedCount.flatMap { (0...SnapshotCachePolicy.maximumArchivedCount).contains($0) ? $0 : nil }
+            let expected = try JSONEncoder.gateway.encode(
+                CodableDocument(version: 4, sessions: admitted, archivedCount: boundedCount)
+            )
+            let file = try #require(FileManager.default.contentsOfDirectory(at: root, includingPropertiesForKeys: nil).first)
+            let written = try Data(contentsOf: file)
+            let writtenValue = try #require(JSONSerialization.jsonObject(with: written) as? NSDictionary)
+            let expectedValue = try #require(JSONSerialization.jsonObject(with: expected) as? NSDictionary)
+            #expect(writtenValue == expectedValue, "round \(round)")
+            #expect(await cache.load(profileID: "profile").sessions == admitted, "round \(round)")
+        }
+    }
+
     @Test("records unwritable cache destinations as failed saves")
     func recordsFailedSave() async throws {
         let root = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString, directoryHint: .notDirectory)
@@ -297,5 +359,18 @@ struct SnapshotCacheTests {
             .begin(.cacheSave),
             .end(.cacheSave, .failure, .none),
         ])
+    }
+}
+
+/// Deterministic SplitMix64 so a generated-catalog failure reproduces.
+private struct SeededGenerator: RandomNumberGenerator {
+    private var state: UInt64
+    init(seed: UInt64) { state = seed }
+    mutating func next() -> UInt64 {
+        state &+= 0x9E37_79B9_7F4A_7C15
+        var value = state
+        value = (value ^ (value >> 30)) &* 0xBF58_476D_1CE4_E5B9
+        value = (value ^ (value >> 27)) &* 0x94D0_49BB_1331_11EB
+        return value ^ (value >> 31)
     }
 }

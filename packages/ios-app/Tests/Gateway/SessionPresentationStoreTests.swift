@@ -3478,7 +3478,6 @@ private final class NoticeScopeProbe: SessionPresentationStoreDelegate {
     func sessionPresentationStoreRemoveNotice(_ key: InAppNoticeKey, scope: InAppNoticeScope?) {}
     func sessionPresentationStoreRetireNoticeScope(_ scope: InAppNoticeScope) { retiredScopes.append(scope) }
     func sessionPresentationStoreSurface(_ error: Error) {}
-    func sessionPresentationStoreCheckpointCache() {}
     func sessionPresentationStoreMeasuredEventWork(_ phase: GatewayEventConsumerPhase, duration: Duration) {}
 }
 
@@ -3509,6 +3508,5 @@ private final class SecondaryErrorProbe: SessionPresentationStoreDelegate {
     func sessionPresentationStoreRemoveNotice(_ key: InAppNoticeKey, scope: InAppNoticeScope?) {}
     func sessionPresentationStoreRetireNoticeScope(_ scope: InAppNoticeScope) {}
     func sessionPresentationStoreSurface(_ error: Error) { errors.append(error.localizedDescription) }
-    func sessionPresentationStoreCheckpointCache() {}
     func sessionPresentationStoreMeasuredEventWork(_ phase: GatewayEventConsumerPhase, duration: Duration) {}
 }

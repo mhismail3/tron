@@ -986,6 +986,147 @@ struct AppModelCatalogSyncTests {
         }
     }
 
+    // MARK: Session-list cache checkpoints
+
+    @Test("a live summary burst becomes one trailing cache write of its newest rows")
+    func summaryBurstCoalescesIntoOneCacheWrite() async throws {
+        let clock = ManualClock()
+        let signposts = RecordingPerformanceSignposts()
+        try await withHarness(manualClock: clock, cacheSignposts: signposts) { harness in
+            try Self.storePairedProfile(harness.model)
+            try await publishCatalog(harness, sessions: [summary(id: "known", revision: 0), summary(id: "other", revision: 0)])
+            // An authoritative page is written without waiting for a window.
+            try await waitForCacheSaves(signposts, count: 1)
+            signposts.reset()
+
+            for revision in 1...5 {
+                await harness.model.handle(summaryEvent(id: "known", revision: revision, phase: .running))
+            }
+            try await clock.waitUntilSleeping(count: 1, duration: SnapshotCachePolicy.summaryCheckpointDelay)
+            #expect(cacheSaveCount(signposts) == 0)
+            #expect(await SnapshotCache(root: harness.root).load(profileID: "profile")
+                .sessions.first { $0.id == "known" }?.summaryRevision == 0)
+
+            clock.advance(by: SnapshotCachePolicy.summaryCheckpointDelay)
+            try await waitForCacheSaves(signposts, count: 1)
+            let restored = await SnapshotCache(root: harness.root).load(profileID: "profile")
+            #expect(restored.sessions == harness.model.sessions)
+            #expect(restored.sessions.first { $0.id == "known" }?.summaryRevision == 5)
+
+            // The burst owned one window; nothing else is armed or written.
+            clock.advance(by: SnapshotCachePolicy.summaryCheckpointDelay)
+            try await settleCacheWork()
+            #expect(cacheSaveCount(signposts) == 1)
+        }
+    }
+
+    @Test("backgrounding writes a pending summary checkpoint that a cold start restores")
+    func backgroundFlushesPendingCacheCheckpoint() async throws {
+        let clock = ManualClock()
+        let signposts = RecordingPerformanceSignposts()
+        try await withHarness(manualClock: clock, cacheSignposts: signposts) { harness in
+            try Self.storePairedProfile(harness.model)
+            try await publishCatalog(harness, sessions: [summary(id: "known", revision: 0), summary(id: "other", revision: 0)])
+            try await waitForCacheSaves(signposts, count: 1)
+            signposts.reset()
+
+            await harness.model.handle(summaryEvent(id: "known", revision: 1, phase: .running))
+            await harness.model.handle(summaryEvent(id: "other", revision: 1, phase: .running))
+            try await clock.waitUntilSleeping(count: 1, duration: SnapshotCachePolicy.summaryCheckpointDelay)
+            let lastCatalog = harness.model.sessions
+
+            // The returned task is what the background assertion retains; the
+            // write completes inside it without the window elapsing.
+            await harness.model.enteredBackground().value
+            #expect(cacheSaveCount(signposts) == 1)
+            let restored = await SnapshotCache(root: harness.root).load(profileID: "profile")
+            #expect(restored.sessions == lastCatalog)
+            #expect(restored.sessions.allSatisfy { $0.summaryRevision == 1 })
+
+            clock.advance(by: SnapshotCachePolicy.summaryCheckpointDelay)
+            try await settleCacheWork()
+            #expect(cacheSaveCount(signposts) == 1)
+        }
+    }
+
+    @Test("an inactive scene writes a pending summary checkpoint before the app switcher can end it")
+    func inactiveSceneFlushesPendingCacheCheckpoint() async throws {
+        let clock = ManualClock()
+        let signposts = RecordingPerformanceSignposts()
+        try await withHarness(manualClock: clock, cacheSignposts: signposts) { harness in
+            try Self.storePairedProfile(harness.model)
+            try await publishCatalog(harness, sessions: [summary(id: "known", revision: 0)])
+            try await waitForCacheSaves(signposts, count: 1)
+            signposts.reset()
+
+            await harness.model.handle(summaryEvent(id: "known", revision: 1, phase: .running))
+            try await clock.waitUntilSleeping(count: 1, duration: SnapshotCachePolicy.summaryCheckpointDelay)
+            harness.model.becameInactive()
+            try await waitForCacheSaves(signposts, count: 1)
+            #expect(await SnapshotCache(root: harness.root).load(profileID: "profile").sessions == harness.model.sessions)
+
+            clock.advance(by: SnapshotCachePolicy.summaryCheckpointDelay)
+            try await settleCacheWork()
+            #expect(cacheSaveCount(signposts) == 1)
+        }
+    }
+
+    @Test("forgetting a server inside a trailing window never leaves or resurrects its cache")
+    func profileRemovalDuringTrailingWindowNeverWrites() async throws {
+        let clock = ManualClock()
+        let signposts = RecordingPerformanceSignposts()
+        try await withHarness(manualClock: clock, cacheSignposts: signposts) { harness in
+            try Self.storePairedProfile(harness.model)
+            try await publishCatalog(harness, sessions: [summary(id: "known", revision: 0)])
+            try await waitForCacheSaves(signposts, count: 1)
+            await harness.model.handle(summaryEvent(id: "known", revision: 1, phase: .running))
+            try await clock.waitUntilSleeping(count: 1, duration: SnapshotCachePolicy.summaryCheckpointDelay)
+
+            await harness.model.forgetCurrentGateway()
+            #expect(try cacheFiles(harness.root).isEmpty)
+
+            clock.advance(by: SnapshotCachePolicy.summaryCheckpointDelay)
+            try await settleCacheWork()
+            #expect(try cacheFiles(harness.root).isEmpty)
+            #expect(await SnapshotCache(root: harness.root).load(profileID: "profile").sessions.isEmpty)
+        }
+    }
+
+    private func publishCatalog(_ harness: Harness, sessions: [SessionSummary]) async throws {
+        let loading = Task { await harness.model.refreshSessions() }
+        let list = try await nextRequest(harness.socket, method: "session.list", from: 1)
+        await harness.socket.enqueue(response(id: list.request.id, sessions: sessions, listRevision: 1))
+        #expect(await loading.value == .published)
+    }
+
+    private func cacheSaveCount(_ signposts: RecordingPerformanceSignposts) -> Int {
+        signposts.events().filter { $0 == .begin(.cacheSave) }.count
+    }
+
+    /// Cache saves complete on the `SnapshotCache` actor, off the main actor.
+    private func waitForCacheSaves(_ signposts: RecordingPerformanceSignposts, count: Int) async throws {
+        while signposts.events().filter({
+            if case .end(.cacheSave, _, _) = $0 { return true }
+            return false
+        }).count < count {
+            try await Task.sleep(for: .milliseconds(2))
+        }
+    }
+
+    /// Gives an erroneously armed window or save time to reach the cache actor.
+    private func settleCacheWork() async throws {
+        for _ in 0..<10 {
+            await Task.yield()
+            try await Task.sleep(for: .milliseconds(5))
+        }
+    }
+
+    private func cacheFiles(_ root: URL) throws -> [URL] {
+        guard FileManager.default.fileExists(atPath: root.path) else { return [] }
+        return try FileManager.default.contentsOfDirectory(at: root, includingPropertiesForKeys: nil)
+            .filter { $0.pathExtension == "json" }
+    }
+
     /// A paired profile is normally stored before it is selected; the hosted
     /// harness connects one directly, so archive counting needs the store
     /// projection that production has.
@@ -1023,6 +1164,7 @@ struct AppModelCatalogSyncTests {
         manualClock: ManualClock? = nil,
         reconnectDelayPolicy: ReconnectDelayPolicy = .standard,
         capabilities: [String] = ["sessions.v1"],
+        cacheSignposts: RecordingPerformanceSignposts? = nil,
         operation: @escaping @MainActor @Sendable (Harness) async throws -> Void
     ) async throws {
         let socket = try #require(sockets.first)
@@ -1034,7 +1176,10 @@ struct AppModelCatalogSyncTests {
         let model = AppModel(
             client: client,
             profiles: GatewayProfileStore(defaults: defaults),
-            cache: SnapshotCache(root: root),
+            cache: SnapshotCache(
+                root: root,
+                performanceSignposts: cacheSignposts ?? SystemPerformanceSignposts.shared
+            ),
             clock: manualClock?.clock ?? .continuous,
             reconnectDelayPolicy: reconnectDelayPolicy
         )

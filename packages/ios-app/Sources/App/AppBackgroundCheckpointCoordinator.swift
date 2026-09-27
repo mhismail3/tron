@@ -12,7 +12,7 @@ struct AppBackgroundTaskAccess {
     static let live = AppBackgroundTaskAccess(
         begin: { expiration in
             let identifier = UIApplication.shared.beginBackgroundTask(
-                withName: "Composer draft checkpoint",
+                withName: "Background checkpoint",
                 expirationHandler: {
                     Task { @MainActor in expiration() }
                 }
@@ -28,9 +28,10 @@ struct AppBackgroundTaskAccess {
     )
 }
 
-/// Retains only the bounded composer checkpoint while iOS grants background
-/// execution time. Expiration cancels both the checkpoint and its waiter before
-/// releasing the UIApplication assertion.
+/// Retains only the bounded background checkpoint (composer drafts and the
+/// pending session-list cache write, see `AppModel.enteredBackground`) while iOS
+/// grants background execution time. Expiration cancels both the checkpoint and
+/// its waiter before releasing the UIApplication assertion.
 @MainActor
 final class AppBackgroundCheckpointCoordinator {
     private struct ActiveCheckpoint {

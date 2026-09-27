@@ -2160,6 +2160,14 @@ complete-until-first-authentication protection as part of atomic creation, profi
 its hashed file, and generation ordering rejects stale checkpoints. Load/save signposts report only
 admitted summary and encoded-byte counts. It is disposable catalog presentation state, not session truth.
 
+`AppModel` owns when it is written, and only catalog changes write it: an authoritative page, an
+archive, unread or delete response saves at once, while live `session.summary` updates coalesce into
+one trailing save of the newest rows (`SnapshotCachePolicy.summaryCheckpointDelay`). Scene
+inactivation and backgrounding write a pending checkpoint at once, the background write inside the
+same UIApplication assertion as the composer draft checkpoint, and profile retirement writes it before
+retiring. Mounted chat snapshots never write it. Save reuses the per-row encodings from admission
+instead of encoding the catalog twice.
+
 ## Removed architecture
 
 The app has no Engine transport, SQLite event store, reconstruction plugins,
