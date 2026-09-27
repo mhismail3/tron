@@ -1898,8 +1898,11 @@ prepared once off the main actor when the bounded tree or selected mode changes;
 live session-state updates reuse those immutable rows, and dense cards use the
 static scroll surface rather than one live glass filter per event. Manage Session's model-card
 Compact Now action invokes Pi's canonical compaction through Gateway and can leave one authoritative request queued
-behind an active turn. Project Resources presents resolved skills, prompts, extension commands,
-tools, and subagents as named rows over the canonical projection. Every row carries the
+behind an active turn. Settings owns what is installed in or configured on the agent (Extensions,
+Tron Modules, Hooks, Connections); Project Resources owns what the agent can use. Resources a
+package brings in appear in both, in two forms: per package under Extensions and by kind here.
+Project Resources presents resolved skills, subagents, prompts, tools, and extension commands
+as named rows over the canonical projection. Every row carries the
 Gateway-derived distribution tag (External, Module, or Local) beside the existing User/Project
 scope badge, and Pi built-ins carry none; both tags are one shared capsule
 component (`ResourceTagLabel`), so their styling cannot drift. Prompt- and skill-sourced commands stay in their own
