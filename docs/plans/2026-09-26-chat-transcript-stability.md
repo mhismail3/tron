@@ -104,11 +104,109 @@ breaks context-menu previews.
 | CT-4 | Done | The user chose B (a `UICollectionView` container hosting the unchanged SwiftUI rows) after CT-13 rejected C on cost and CT-12 provided the parity gate | CT-12, CT-13 | chat scroll investigation session, 2026-09-26 |
 | CT-14 | Claimed | Motion parity: extend the CT-12 gate to capture every display frame during transitions (send entrance, keyboard, composer collapse, streaming growth, queued-card shrink, tool chip), so a 14 pt instead of 20 pt entrance rise fails; record the new reference from `main` before any container change | CT-12| chat scroll investigation session, 2026-09-27 |
 | CT-15 | Claimed | Container design: a written design, reviewed before code, for the `UICollectionView` container hosting the unchanged SwiftUI row views through `UIHostingConfiguration`: exact self-sizing and a per-row height cache keyed by row identity and width; bottom anchoring owned by the layout (content offset preserved from the bottom across inserts, size changes and keyboard insets); the current `ChatScrollCoordinator` contract mapped item by item to the container (pinned and detached modes, catch-up, prepend anchoring, opening position, unread tracking); how a row's animated height change (entrance growth, streaming growth, queued-card shrink) drives the cell height in the same frame; row identity and entrance leases; keyboard and composer inset ownership; accessibility, context menus and scroll-edge chrome. Lists every coordinator mechanism the container retires | CT-4| chat scroll investigation session, 2026-09-27 |
-| CT-16 | Needs scoping | Build the container beside today's `LazyVStack` transcript behind a single development switch; no row, composer or animation code changes. Split into rows by CT-15 | CT-15 | |
+| CT-20 | Needs approval | Spike on a throwaway branch: settle CT-15's four unverified assumptions with a minimal container hosting the real row views, judged by the CT-12 and CT-14 gates and CT-10's numbers. Starts after the user approves CT-15 | CT-15, CT-14, CT-10 | |
+| CT-16 | Needs scoping | Build the container beside today's `LazyVStack` transcript behind a single development switch; no row, composer or animation code changes. Split into rows by CT-15 | CT-15, CT-20 | |
 | CT-17 | Needs scoping | Qualification: with the switch on, the CT-12 and CT-14 gates pass against the `main` reference, the CT-2 fixtures and a 512-row blank fixture read zero blank boundaries, every `ChatViewScrollHarnessTests` visible invariant holds, and frame cost, opening time and memory at 150, 300 and 512 heavy rows are no worse than CT-10's baseline | CT-16, CT-14, CT-10 | |
 | CT-18 | Needs approval | Device comparison: the user runs both containers on the phone through the send, keyboard, streaming, long-session and resume checklist and approves the cutover | CT-17 | |
 | CT-19 | Needs scoping | Cutover: make the container the only transcript, then delete the `LazyVStack` path and the compensations it needed, one per commit, each with its tests, trace events and docs (materialization lease and fail-open, 1 pt entrance footprint, lazy-realization opening proof, layout-epoch frame invalidation, tail-affordance overlap, past-end repair and physical tail repair if CT-17 shows them unused); update `packages/ios-app/docs/architecture.md` and `packages/ios-app/docs/development.md` | CT-18 | |
 | CT-7 | Needs scoping | Final device validation with the user after cutover: the send choreography checklist in `packages/ios-app/docs/development.md`, plus long sessions with tall replies across keyboard, foreground and resume | CT-19 | |
+
+## Task details
+
+### CT-15 — transcript container design (proposed for review)
+
+**Principle.** Replace only the transcript's scroll container. Every row view,
+the composer, the opening cover, the top blur and every animation stay the
+same SwiftUI code. The container owns three things SwiftUI's lazy stack
+estimated: each row's measured height, where the bottom is, and which rows are
+on screen. No content estimate may decide the visible position.
+
+**Structure.** `ChatView` keeps its layout: the composer as the only bottom
+safe-area inset, the top blur overlay, the floating display overlay and the
+opening cover over the transcript. The `ScrollView { VStack { LazyVStack … } }`
+in `ChatTranscriptScrollView` is replaced by a `UIViewControllerRepresentable`
+around a `UICollectionView` with one custom `UICollectionViewLayout`. Each
+physical row becomes one item, keyed by its existing physical row ID in a
+diffable data source. A cell hosts that row's existing SwiftUI content (the
+same `physicalRowHost` builder, unchanged), with the SwiftUI environment
+forwarded explicitly, as `ChatMessageContextMenu.swift` already does for its
+nested host. The "earlier messages" button is the first item. The 12 pt top
+padding and the 12 pt tail space become section insets, so spacing is
+identical.
+
+**Sizing (exact, not estimated).**
+- A row's height is measured by its own SwiftUI content when it is realized and
+  cached by physical row ID and width. It is re-measured when its payload or
+  animated height changes, and invalidated on width or Dynamic Type changes.
+- A row never realized has a height estimate per row kind (user prompt,
+  assistant text by length, tool run, notification), never an average over
+  measured rows. Estimates only affect rows far from the viewport, and the
+  layout compensates for them (next point), so they can never move what is on
+  screen.
+- Content-size changes above the viewport are applied with an equal offset
+  correction in the same layout pass, so visible rows never move when an
+  off-screen height becomes known.
+
+**Anchoring (owned by the layout, synchronous).**
+- Pinned: every layout pass places the content so the last item's measured
+  bottom sits at the visible bottom (above the composer and keyboard insets).
+  Content growth, row height animations and inset changes are absorbed in the
+  same pass. There is no marker, no settlement proof and no repair: the bottom
+  is computed from measured rows, not estimated.
+- Detached reader: every pass keeps the reader's top visible item at the same
+  screen position (item-relative), so streaming, estimate corrections and
+  keyboard changes do not move what they are reading.
+- Prepend: the same item-relative rule keeps the pre-load anchor row in place,
+  replacing the current offset corrections and their deadlines.
+- Opening: the first layout pass is already positioned at the bottom, before
+  the first displayed frame. The opening cover and its fade and rise stay
+  unchanged; its positioning proof becomes a single synchronous check.
+
+**Motion.** Rows keep their SwiftUI animations. The container's job is to
+follow a row's animated height every frame in the same transaction, so a
+growing row pushes its neighbors exactly as it does today while a pinned tail
+stays still. This is the design's main risk (see CT-20). If a SwiftUI hosting
+cell does not report its animated height per frame, the fallback is for the
+container to drive that row's cell height on the same curve the row uses; that
+fallback must still pass the CT-14 motion gate.
+
+**Interaction.** `UIScrollViewDelegate` provides exact dragging,
+deceleration and scroll-to-top events, replacing today's inference from
+geometry samples (the status-bar heuristic, `isPositionedByUser`,
+rubber-band tolerance checks). Interactive keyboard dismissal, disabled
+scrolling before ready, and the iOS 26 soft scroll-edge effect are set on the
+collection view directly.
+
+**Coordinator mapping.** `ChatScrollCoordinator` keeps what is policy and
+loses what compensated for estimates:
+- Keeps: the pinned and detached viewport modes and their reducer, unread
+  tracking and the catch-up button (a smooth scroll to the bottom), history
+  paging admission, the send `ChatLayoutTransaction`, entrance receipts in the
+  presentation store, opening phases.
+- Retires after cutover (CT-19): the tail marker and its classification,
+  tail materialization leases and their fail-open, physical tail repair,
+  past-end repair, layout-epoch frame invalidation, semantic frame caching for
+  anchors, prepend and restore offset corrections and their deadlines, the
+  opening marker proof and its retry budget, the 1 pt entrance footprint and the
+  12 pt affordance overlap.
+
+**Coexistence.** Both containers exist behind one development switch until
+cutover. Row wrappers that publish SwiftUI scroll-space geometry
+(`stableRow`'s geometry observation) are disabled in the new container, which
+reports exact frames itself. No other shared code changes.
+
+**Unverified assumptions (CT-20 must settle them before CT-16).**
+1. A SwiftUI row hosted in a cell reports its height every animation frame for
+   the entrance growth layout, the streaming growth host and the queued-card
+   interpolation.
+2. The hosting approach supports rows that contain
+   `UIViewControllerRepresentable` (message context menus). If
+   `UIHostingConfiguration` does not, cells host a reused `UIHostingController`
+   with view-controller containment instead.
+3. The iOS 26 navigation bar and scroll-edge integration behave the same with a
+   `UICollectionView` inside the SwiftUI `NavigationStack`.
+4. Opening, scrolling and streaming with 512 heavy rows cost no more than
+   CT-10's baseline.
 
 ## Handoff log
 
@@ -441,3 +539,10 @@ breaks context-menu previews.
 - Tasks added: CT-14 to CT-19.
 - Kept on purpose: the earlier UIKit rewrite (`agent/uikit-chat-rewrite`, reverted in `132aa9858`) re-implemented rows and the composer in UIKit and lost visual parity. This plan forbids changing row, composer or animation code in CT-16, and CT-17 gates the cutover on the recorded `main` reference.
 - For the next agent: start with CT-14 and CT-10 (independent), and CT-15's design in parallel. CT-15 is reviewed by the user before CT-16 starts.
+
+### CT-15 · Claimed · 2026-09-27 · chat scroll investigation session
+
+- Result: design drafted in Task details from a contract map of the current transcript (every input, callback, scroll behavior, row-height animation, chrome dependency and per-row state). Awaiting the user's review; CT-20 and CT-16 do not start before approval.
+- Changes: this plan; CT-20 added.
+- Kept on purpose: the send `ChatLayoutTransaction`, entrance receipts, viewport modes and catch-up are policy, not estimate compensation, and survive.
+- For the next agent: the four unverified assumptions decide whether B is feasible without touching row code. Assumption 1 is the largest risk.
