@@ -599,3 +599,24 @@ reports exact frames itself. No other shared code changes.
 - Result: the user chose to keep today's SwiftUI container and fix only the estimated bottom (CT-22). Option B as designed in CT-15 is set aside because a hosted row cannot drive its cell's animated height (stage 1 above); CT-16 to CT-19 stay in the table until CT-22 shows whether they are needed.
 - Kept on purpose: the spike branch `ct-20-container-spike` stays for reference.
 - For the next agent: variant (a) cannot cover rows that were never measured (history above the tail on a fresh open), which is where the lazy stack's estimate comes from; variant (b) is the one expected to remove the blank. Its costs to measure are eager layout of the window and row remounts when the boundary moves (per-row `@State`, entrance receipts are store-owned and must not replay).
+
+### CT-22 variant B · Measured · 2026-09-27 · chat scroll investigation session
+
+- Result: an eager `VStack` of the newest 48 rows below a `LazyVStack` of older history removes the blank by construction, but fails on cost and on today's alignment code. Measured on lane CT22, three runs, switch on versus off:
+
+  | Yardstick | Today | Eager tail, 48 rows |
+  | --- | --- | --- |
+  | CT-2 many tall replies, blank boundaries | 12/72 each run | 0/72 each run |
+  | CT-2 keyboard cycles, blank boundaries | 20-123/340 | 0/340 each run |
+  | Estimate swing | 1.7-4.2x | 1.0-1.2x |
+  | First ready frame, 150/300/512 heavy rows | 356/390/560 ms | 1,320-2,232 / one of three never opened / 1,434-1,522 ms |
+  | Streaming frame interval median | 33-50 ms | about 100 ms |
+  | Parity gate | 7/7 pass | 4 of 7 fail, and rest tail error 39.7 pt |
+  | Scroll harness | 54/54 pass | 26 issues in 9 tests (opening 2,083 pt off the bottom, tail-materialization evidence no longer fires) |
+  | Tail error during entrance/streaming/shrink | 0.35/0.80/14-15 pt | 0.35/0.33/14-15 pt |
+  | Rows changing stack on screen at a boundary move; entrance replays | n/a | 0; none |
+
+  A 20-row window halves the opening cost but moves on-screen rows (39 events) and its harness run exceeded its deadline. A row-count window cannot suit both short and heavy rows.
+- Evidence: branch `ct-22-exact-tail` (final commit `0cf021bb5`, switch default today's path); extracts `/tmp/ct22-evidence/`; run directories from `20260927T094401Z-run.v5MJIm` to `20260927T100831Z-run.aLyMHd`. Supervisor checked the CT-2 and scale figures against the extracts; no independent review yet.
+- Deviations: variant A was not run; it cannot affect rows the stack never measured.
+- For the next agent: the user decides the direction.
