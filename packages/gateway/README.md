@@ -979,8 +979,8 @@ ordinal, including after leading live-tail trimming. Pi's `message_end` callback
 precedes canonical append, so the runtime binds that same presentation ID to the
 new canonical entry in the following microtask before publishing the settled
 snapshot. The binding ledger is capped beyond the maximum mobile transcript page;
-canonical entry IDs and JSONL remain authoritative and unmodified. Active operations also emit a bounded sequenced heartbeat, so
-a long tool with no output remains distinguishable from a broken mobile stream.
+canonical entry IDs and JSONL remain authoritative and unmodified. A long tool with no output
+publishes no session event; the connection's own ping and pong traffic proves the stream is live.
 Tool lifecycle state is a disposable overlay, not a second transcript: the pinned Pi SDK's ordinary
 `toolResult` persistence is observed at its exact `message_end` handoff (not only through
 `entry_appended`) and verified against canonical ownership in the following microtask, so a

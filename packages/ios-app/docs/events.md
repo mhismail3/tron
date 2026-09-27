@@ -439,9 +439,9 @@ is capped at 600 KB and 512 items, carries exact `start`/`end`/`total` bounds, a
 gaps, stale anchors, and mismatched presentation/runtime/subscription leases are discarded rather
 than concatenated into plausible history. Event-buffer
 overflow closes the connection and forces global/session/terminal reconciliation;
-correctness must not depend on receiving every event while disconnected. A bounded
-sequenced session heartbeat advances the cursor during silent long-running tools;
-it proves the owning runtime connection is live without manufacturing tool output. Event-driven desired
+correctness must not depend on receiving every event while disconnected. A silent
+long-running tool publishes no session event; transport pings prove the connection
+is live without manufacturing tool output. Event-driven desired
 projection advancement does not replace the exact installation currently on screen: pending row geometry
 remains tagged to that displayed installation until an actual installed transition occurs. Unanchored runtime
 tool ordering is status-independent, and only rendered IDs retained by the next installed output preserve a

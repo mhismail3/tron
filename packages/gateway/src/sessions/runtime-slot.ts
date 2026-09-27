@@ -3719,9 +3719,6 @@ export class RuntimeSlot {
         this.scheduleSnapshot();
         break;
       }
-      case "bash_execution_update":
-        this.emit("session.bashProgress", safeJson(event));
-        break;
       case "entry_appended":
         this.summaryContentDirty = true;
         if (event.entry.type === "message" && event.entry.message.role === "toolResult") {
@@ -5215,16 +5212,11 @@ export class RuntimeSlot {
       this.stopActivityHeartbeat();
       return;
     }
-    this.noteDashboardActivity();
-    this.emit("session.heartbeat", safeJson({
-      phase: this.effectivePhase,
-      ...(this.activeOperationId ? { operationId: this.activeOperationId } : {}),
-      activeToolCallIds: [...this.toolExecutions.values()]
-        .filter((tool) => tool.status === "running")
-        .map((tool) => tool.toolCallId),
-    }));
     // Heartbeats keep a legitimately active foreground or detached session's
     // catalog timestamp current without rebuilding its transcript snapshot.
+    // They publish no session event: no client consumes one, and client pings
+    // already prove the connection is live.
+    this.noteDashboardActivity();
     this.publishSummary();
   }
 
