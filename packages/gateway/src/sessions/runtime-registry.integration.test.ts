@@ -6942,7 +6942,9 @@ export default function (pi) {
     vi.spyOn(internal.runtime.session, "isStreaming", "get").mockReturnValue(true);
     internal.activeOperationId = "prior-agent-operation";
     const compactingSnapshot = slot.snapshot();
-    expect(compactingSnapshot.acceptsQueuedPrompts).toBe(false);
+    // The Gateway queues compaction-time input itself; no Agent tool segment
+    // is live while the summary runs.
+    expect(compactingSnapshot.acceptsQueuedPrompts).toBe(true);
     expect(compactingSnapshot.activeToolSegmentId).toBeUndefined();
     internal.activeOperationId = undefined;
     let queued = false;
@@ -6963,10 +6965,11 @@ export default function (pi) {
     internal.operation = undefined;
     internal.publishSnapshot();
 
-    await expect(prompting).resolves.toMatchObject({ operationId: expect.any(String) });
-    expect(invoked).toBe(true);
+    const { operationId } = await prompting;
+    await waitUntil(() => invoked);
+    await waitUntil(() => slot.snapshot().queuedItems.length === 1 && queued);
     expect(slot.snapshot().queuedItems).toEqual([
-      expect.objectContaining({ id: expect.any(String), behavior: "steer", text: "after compaction" }),
+      expect.objectContaining({ id: operationId, behavior: "steer", text: "after compaction" }),
     ]);
   });
 
@@ -7052,9 +7055,10 @@ export default function (pi) {
     expect(beforeSegment).toBe(toolSegmentId("operation-before-compaction"));
 
     internal.onEvent({ type: "compaction_start", reason: "threshold" });
+    // Compaction-time input is Gateway-queued, yet no Agent segment is live.
     expect(slot.snapshot()).toMatchObject({
       phase: "compacting",
-      acceptsQueuedPrompts: false,
+      acceptsQueuedPrompts: true,
     });
     expect(slot.snapshot().activeToolSegmentId).toBeUndefined();
 

@@ -477,89 +477,149 @@ describe.sequential("compaction operation admission and authoritative reconcilia
     expect((await item.entries()).some(entry => entry.type === "compaction")).toBe(false);
   });
 
-  it("projects a prompt held behind manual compaction to every client until it becomes canonical", async () => {
-    // Incident 2026-09-27: a prompt sent during manual compaction waited inside
-    // the RPC with no snapshot projection. When the sending connection closed,
-    // a reconnecting client saw neither a queued row nor a pending prompt.
-    const item = await boundaryFixture();
+  /** Manual compaction owns the session lane for its whole summary. Messages
+   * sent meanwhile join a Gateway-owned queue (Pi's own front end keeps the
+   * same "after compaction" queue) instead of waiting invisibly inside RPCs. */
+  async function blockedManualCompaction(item: Awaited<ReturnType<typeof boundaryFixture>>, replies: string[]) {
     let releaseSummary!: () => void;
     const summaryBarrier = new Promise<void>(resolve => { releaseSummary = resolve; });
     let summaryStarted = false;
-    item.faux.setResponses(Array.from({ length: 4 }, () => async (context) => {
+    const pendingReplies = [...replies];
+    item.faux.setResponses(Array.from({ length: replies.length + 2 }, () => async (context) => {
       if (getCurrentSystemPrompt(context.messages).includes("User-configured summary focus:")) {
         summaryStarted = true;
         await summaryBarrier;
         return fauxAssistantMessage("Preserved the API contract.");
       }
-      return fauxAssistantMessage("Picked up after compaction");
+      return fauxAssistantMessage(pendingReplies.shift() ?? "unexpected reply");
     }));
     const compacting = item.slot.compact();
-    let prompting: Promise<{ operationId: string }> | undefined;
-    try {
-      await waitUntil(() => summaryStarted);
-      expect(item.slot.snapshot().phase).toBe("compacting");
-      prompting = item.slot.prompt("Have it pick up where it left off");
-      await waitUntil(() => item.slot.snapshot().pendingPrompt !== undefined);
-      // A fresh client receives this authoritative snapshot on open/reconnect.
-      const held = item.slot.snapshot();
-      expect(held).toMatchObject({
-        phase: "compacting",
-        pendingPrompt: { text: "Have it pick up where it left off", attachmentCount: 0 },
-        queuedItems: [],
-      });
-      expect(held.pendingPrompt!.behavior).toBeUndefined();
-      expect(item.snapshots.at(-1)?.pendingPrompt?.id).toBe(held.pendingPrompt!.id);
+    await waitUntil(() => summaryStarted);
+    expect(item.slot.snapshot().phase).toBe("compacting");
+    return { compacting, release: () => releaseSummary() };
+  }
 
-      releaseSummary();
+  const userTexts = (entries: Array<Record<string, any>>) => entries
+    .filter(entry => entry.message?.role === "user")
+    .map(entry => JSON.stringify(entry.message.content));
+
+  it("queues every prompt sent during manual compaction and delivers them in order afterwards", async () => {
+    // Incident 2026-09-27: a prompt sent during manual compaction waited inside
+    // its RPC with no projection, so a reconnecting phone saw nothing, and a
+    // second message could not be queued at all.
+    const item = await boundaryFixture();
+    const { compacting, release } = await blockedManualCompaction(item, ["Answered first", "Answered second"]);
+    try {
+      expect(item.slot.snapshot().acceptsQueuedPrompts).toBe(true);
+      // Admission into the waiting queue is the RPC result; it does not wait
+      // for the minute-long summary.
+      const first = await item.slot.prompt("Have it pick up where it left off", [], "steer");
+      const second = await item.slot.prompt("Then summarize the result", [], "followUp");
+      const waiting = item.slot.snapshot();
+      expect(waiting).toMatchObject({
+        phase: "compacting",
+        queuedItems: [
+          { id: first.operationId, behavior: "steer", text: "Have it pick up where it left off", attachmentCount: 0 },
+          { id: second.operationId, behavior: "followUp", text: "Then summarize the result", attachmentCount: 0 },
+        ],
+      });
+      expect(waiting.pendingPrompt).toBeUndefined();
+      expect(item.snapshots.at(-1)?.queuedItems.map(queued => queued.id)).toEqual([first.operationId, second.operationId]);
+
+      const start = item.snapshots.length;
+      release();
       await compacting;
-      const { operationId } = await prompting;
-      // One identity from hold through admission: clients never see a second row.
-      expect(operationId).toBe(held.pendingPrompt!.id);
-      const heldIndex = item.snapshots.findIndex(snapshot => snapshot.pendingPrompt?.id === operationId);
-      const handoff = item.snapshots.slice(heldIndex);
-      const lastPending = handoff.findLastIndex(snapshot => snapshot.pendingPrompt?.id === operationId);
-      expect(handoff.slice(0, lastPending + 1).every(snapshot => snapshot.pendingPrompt?.id === operationId)).toBe(true);
       await expectSettled(item);
-      expect(item.slot.snapshot().pendingPrompt).toBeUndefined();
       const entries = await item.entries();
       const compactionIndex = entries.findIndex(entry => entry.type === "compaction");
-      const userIndex = entries.findIndex(entry => entry.message?.role === "user"
-        && JSON.stringify(entry.message.content).includes("Have it pick up where it left off"));
+      const firstIndex = entries.findIndex(entry => JSON.stringify(entry.message?.content ?? "").includes("Have it pick up"));
+      const secondIndex = entries.findIndex(entry => JSON.stringify(entry.message?.content ?? "").includes("Then summarize"));
       expect(compactionIndex).toBeGreaterThan(-1);
-      expect(userIndex).toBeGreaterThan(compactionIndex);
+      expect(firstIndex).toBeGreaterThan(compactionIndex);
+      expect(secondIndex).toBeGreaterThan(firstIndex);
+      expect(entries.filter(entry => entry.message?.role === "assistant").map(entry => entry.message.content[0]?.text).slice(-2))
+        .toEqual(["Answered first", "Answered second"]);
+      // One visible owner per message through the handoff: never a queued card
+      // and a pending prompt for the same message at once, and never absent
+      // before its canonical user entry exists.
+      for (const snapshot of item.snapshots.slice(start)) {
+        const pendingID = snapshot.pendingPrompt?.id;
+        if (pendingID) expect(snapshot.queuedItems.some(queued => queued.id === pendingID)).toBe(false);
+      }
+      expect(item.slot.snapshot().queuedItems).toEqual([]);
     } finally {
-      releaseSummary();
+      release();
       await compacting.catch(() => {});
-      await prompting?.catch(() => {});
     }
   });
 
-  it("withdraws a held prompt that admission rejects after compaction", async () => {
+  it("removes and clears waiting prompts without waiting for compaction to finish", async () => {
     const item = await boundaryFixture();
-    let releaseSummary!: () => void;
-    const summaryBarrier = new Promise<void>(resolve => { releaseSummary = resolve; });
-    let summaryStarted = false;
-    item.faux.setResponses(Array.from({ length: 3 }, () => async () => {
-      summaryStarted = true;
-      await summaryBarrier;
-      return fauxAssistantMessage("Preserved the API contract.");
-    }));
-    const compacting = item.slot.compact();
+    const { compacting, release } = await blockedManualCompaction(item, ["Answered kept message"]);
     try {
-      await waitUntil(() => summaryStarted);
-      // Descriptor/count mismatch is rejected only once the lane admits it.
-      const prompting = item.slot.prompt("Invalid attachment claim", [], undefined, {
-        text: "Invalid attachment claim", attachmentEnvelope: "", attachmentCount: 2, attachments: [],
-      }).catch(error => error);
-      await waitUntil(() => item.slot.snapshot().pendingPrompt !== undefined);
-      releaseSummary();
+      const dropped = await item.slot.prompt("Drop this one", [], "steer");
+      const kept = await item.slot.prompt("Keep this one", [], "steer");
+      const before = item.slot.snapshot();
+      const replaced = await item.slot.replaceQueue(before.queueRevision, [
+        { id: kept.operationId, behavior: "followUp", text: "Keep this edited one" },
+      ]);
+      expect(replaced.items).toEqual([
+        expect.objectContaining({ id: kept.operationId, behavior: "followUp", text: "Keep this edited one" }),
+      ]);
+      expect(item.slot.snapshot().phase).toBe("compacting");
+      expect(item.slot.snapshot().queuedItems.map(queued => queued.id)).toEqual([kept.operationId]);
+      await expect(item.slot.replaceQueue(before.queueRevision, [])).rejects.toMatchObject({ code: "conflict" });
+      expect(dropped.operationId).not.toBe(kept.operationId);
+
+      const cleared = await item.slot.prompt("Clear this one", [], "steer");
+      expect(item.slot.snapshot().queuedItems.map(queued => queued.id)).toEqual([kept.operationId, cleared.operationId]);
+      // Clearing while compacting removes the whole waiting queue at once.
+      await item.slot.clearQueue();
+      expect(item.slot.snapshot()).toMatchObject({ phase: "compacting", queuedItems: [] });
+      const survivor = await item.slot.prompt("Only this one runs", [], "steer");
+
+      release();
       await compacting;
-      expect(await prompting).toMatchObject({ code: "invalid_request" });
       await expectSettled(item);
-      expect(item.slot.snapshot().pendingPrompt).toBeUndefined();
-      expect(item.snapshots.at(-1)?.pendingPrompt).toBeUndefined();
+      const users = userTexts(await item.entries()).join("\n");
+      expect(users).toContain("Only this one runs");
+      expect(users).not.toContain("Drop this one");
+      expect(users).not.toContain("Keep this edited one");
+      expect(users).not.toContain("Clear this one");
+      expect(survivor.operationId).toEqual(expect.any(String));
     } finally {
-      releaseSummary();
+      release();
+      await compacting.catch(() => {});
+    }
+  });
+
+  it("reports a waiting prompt that fails admission after compaction as an exact operation failure", async () => {
+    const item = await boundaryFixture();
+    const { compacting, release } = await blockedManualCompaction(item, ["Answered survivor"]);
+    try {
+      const failing = await item.slot.prompt("This one fails at admission", [], "steer");
+      const survivor = await item.slot.prompt("This one still runs", [], "steer");
+      const prompt = item.session.prompt.bind(item.session);
+      const spy = vi.spyOn(item.session, "prompt").mockImplementation(async (text, options) => {
+        if (text === "This one fails at admission") throw new Error("provider rejected the request");
+        return prompt(text, options);
+      });
+      try {
+        release();
+        await compacting;
+        await expectSettled(item);
+      } finally { spy.mockRestore(); }
+      expect(item.sessionEvents).toContainEqual({
+        topic: "session.operationFailed",
+        payload: expect.objectContaining({ data: expect.objectContaining({ operationId: failing.operationId }) }),
+      });
+      const users = userTexts(await item.entries()).join("\n");
+      expect(users).toContain("This one still runs");
+      expect(users).not.toContain("This one fails at admission");
+      expect(item.slot.snapshot().queuedItems).toEqual([]);
+      expect(survivor.operationId).toEqual(expect.any(String));
+    } finally {
+      release();
       await compacting.catch(() => {});
     }
   });

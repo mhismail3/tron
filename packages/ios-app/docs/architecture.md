@@ -1184,8 +1184,8 @@ settlement waits for durable run-marker retirement. The confirmed mutation stays
 canonical completion; shutdown cancels only work that has not started. Older Gateways may omit queued and effective
 automatic-compaction evidence.
 A non-empty draft replaces the trailing Stop action with Send. The Gateway's
-`acceptsQueuedPrompts` snapshot fact, derived from live Pi streaming state, decides whether
-that draft can steer; broad running/compacting/retrying presentation phases and queue CRUD
+`acceptsQueuedPrompts` snapshot fact, derived from live Pi streaming state or the Gateway's
+compaction-time waiting queue, decides whether that draft can steer; broad running/compacting/retrying presentation phases and queue CRUD
 capability do not. Without that exact capability the draft remains an ordinary prompt and
 retains the neutral post-compaction presentation. An empty running composer retains Stop. Stop is a preemptive control rather than an ordinary serialized
 composer mutation: the mounted route's session ID and optional authoritative operation ID

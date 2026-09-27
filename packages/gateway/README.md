@@ -1180,7 +1180,21 @@ queue records. RuntimeSlot therefore retains the exact admission ID before accep
 queued mutation, publishes it from the same serialized lane, and treats later text arrays only
 as bounded live-runtime delivery evidence. Every snapshot separately exposes
 `acceptsQueuedPrompts`, derived directly from Pi streaming state rather than broad presentation
-phase or the queue-management CRUD capability. A Gateway process restart does not replay or claim
+phase or the queue-management CRUD capability, except that it is also true while compaction runs.
+Pi rejects input during manual compaction, and its own front end keeps an "after compaction"
+queue; RuntimeSlot is that front end for Tron. A client prompt sent while the session is
+compacting, or while earlier such prompts still wait, returns its operation ID at once and joins
+a Gateway-owned waiting queue projected after Pi's queue in `queuedItems` (default behavior
+steer). `session.queue.replace` and `session.clearQueue` edit, reorder, and remove waiting entries
+synchronously rather than behind the compaction that owns the session lane; one edit spanning
+waiting entries and Pi's queue is rejected as a retryable conflict. When compaction settles,
+including after Stop, the waiting entries are admitted in order through the ordinary prompt path:
+the first starts a run when the session is idle and becomes its `pendingPrompt` in the same
+publication, and later ones join Pi's queue with their behavior. A new compaction pauses that
+flush. An entry proven unable to start emits `session.operationFailed` with its operation ID; an
+uncertain outcome emits a diagnostic. Waiting entries hold `queued-mutation` work, so an
+administrative drain waits for them, and they are process-local like Pi's queue. Automation
+prompts and extension commands never join it. A Gateway process restart does not replay or claim
 identity for an SDK-only queue; reconnect reports only surviving canonical/runtime truth. If the
 runtime generation changes before canonical delivery, iOS restores unresolved accepted work for
 explicit user review without replay. This includes the one bounded local handoff retained after an
@@ -1214,13 +1228,7 @@ instead of retaining a stale queue latch. A Pi call rejected before any of those
 terminalizes and releases the exact admission rather than leaving the serialized RPC pending. It does not race preflight against a local deadline that could report rejection while
 the same uncancelled runtime call later starts canonical work. While the canonical user
 entry is pending, the snapshot's bounded `pendingPrompt` projection carries ordinary display
-content only; requested queue behavior appears only after Pi actually enqueues it. A prompt that arrives
-while manual compaction owns the session lane, or while admission waits behind a settling run, is
-projected through the same `pendingPrompt` field before it enters the lane, under the operation ID its
-admission later returns. Every client, including one reconnecting after the sender's transport closed,
-therefore sees it waiting; admission hands the projection to the preflight prompt in the same published
-turn, and a prompt rejected at admission withdraws it. Only one waiting prompt is projectable; a later
-waiter remains visible only to its own RPC. The Gateway claims the exact Pi user-message object,
+content only; requested queue behavior appears only after Pi actually enqueues it. The Gateway claims the exact Pi user-message object,
 retires the projection only for that same message at persistence, and exposes the prompt
 operation ID as the canonical user's bounded `presentationId`; repeated text therefore
 cannot settle the wrong mobile admission. A known operation ID never falls back to content matching on
