@@ -431,7 +431,10 @@ offsets, fixed seeds and a fixed window. Setup, the real `session.list` /
 `session.open` / `session.sync` opening and readiness happen before the window;
 after it each scenario proves its workload was admitted (no resynchronization,
 expected event sequence, summary revisions or saved draft), otherwise the run
-fails with its evidence path. The tests in `Tests/Profiling/` skip unless the
+fails with its evidence path and a screenshot of the surface. Chat readiness is
+the app's own first-ready-frame signpost; a setup that does not reach readiness
+(for example an opening whose layout did not settle on a loaded host) is rebuilt
+up to three times before measuring, and the report lists each retry as a warning. The tests in `Tests/Profiling/` skip unless the
 profiler selects them, so ordinary unit runs are unaffected.
 
 | Scenario | Default window | Workload |

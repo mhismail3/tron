@@ -1,4 +1,5 @@
 import Foundation
+import Synchronization
 import SwiftUI
 import XCTest
 @testable import TronMobile
@@ -30,9 +31,10 @@ final class ProfileChatScenarioTests: XCTestCase {
 
     func testToolLoop() throws {
         try profileScenario("tool-loop", defaultWindow: .seconds(15)) { window in
-            let snapshot = try ProfileTranscript.pageBoundSnapshot(seed: 7_301)
+            let (history, snapshot) = try ProfileTranscript.pageBoundSession(seed: 7_301)
             return try await ProfileChatRun.make(
                 snapshot: snapshot,
+                history: history,
                 frames: ProfileToolLoopScript.frames(base: snapshot, window: window)
             )
         }
@@ -54,8 +56,11 @@ final class ProfileChatRun: ProfileScenarioRun {
     let snapshot: SessionSnapshot
     private let frames: [ProfileScriptedFrame]
     private var host: UIHostingController<AnyView>?
+    let signposts = ProfileOpeningSignposts()
+    private var history: [TranscriptItem] = []
     private var resynchronizationsBefore = 0
     private var expectedSequence: Int?
+    private var lostMount: String?
 
     private init(fixture: ProfileGatewayFixture, snapshot: SessionSnapshot, frames: [ProfileScriptedFrame]) {
         self.fixture = fixture
@@ -65,22 +70,27 @@ final class ProfileChatRun: ProfileScenarioRun {
 
     /// Connects, publishes a catalog containing the session, answers the chat
     /// opening RPCs with `snapshot`, and mounts the production chat.
+    /// `history` is the whole canonical session when `snapshot` holds only
+    /// its newest page; older pages are served from it like the Gateway does.
     static func make(
         snapshot: SessionSnapshot,
+        history: [TranscriptItem]? = nil,
         frames: [ProfileScriptedFrame],
         draftStore: ((URL) -> ComposerDraftStore)? = nil
     ) async throws -> ProfileChatRun {
         ProfileScenarioLedger.shared.reset()
         let fixture = try ProfileGatewayFixture(composerDraftStore: draftStore)
         let run = ProfileChatRun(fixture: fixture, snapshot: snapshot, frames: frames)
+        run.history = history ?? snapshot.transcript
         do {
             try run.scriptChatOpening()
             try await fixture.connect(capabilities: ["sessions.v1", "skill-prompt.v1"])
             guard await fixture.model.refreshSessions() == .published else {
                 throw ProfileScenarioError.notReady("session.list did not publish the fixture session")
             }
+            let signposts = run.signposts
             run.host = try fixture.mount(NavigationStack {
-                ChatView(sessionID: snapshot.sessionId)
+                ChatView(sessionID: snapshot.sessionId, performanceSignposts: signposts)
             })
         } catch {
             await fixture.teardown()
@@ -107,11 +117,59 @@ final class ProfileChatRun: ProfileScenarioRun {
             ])
         }
         fixture.handle("session.sync") { _ in .object(["synchronized": .bool(true)]) }
+        fixture.handle("session.transcript") { [weak self] params in
+            guard let self else { throw CancellationError() }
+            return try self.olderPage(params)
+        }
         fixture.handle("session.close") { _ in .object(["closed": .bool(true)]) }
+        // An empty catalog: the composer's model picker loads it on open, and an
+        // unanswered read would put an error notice on screen during the window.
+        fixture.handle("provider.list") { _ in .object(["providers": .array([])]) }
+        fixture.handle("model.list") { _ in .object(["models": .array([]), "nextCursor": .null]) }
+        fixture.handle("session.presentation.set") { params in
+            .object([
+                "visible": params?.objectValue?["visible"] ?? .bool(true),
+                "revision": params?.objectValue?["revision"] ?? .number(0),
+            ])
+        }
         fixture.handle("session.commands") { _ in .object(["commands": .array([])]) }
         fixture.handle("session.attention.read") { _ in
             .object(["completionRevision": .number(0), "attentionRevision": .number(0), "isUnread": .bool(false)])
         }
+    }
+
+    /// The Gateway's `projectTranscriptPage`: newest-first up to 512 items and
+    /// 600 KB before `before`, against the current authoritative branch.
+    private func olderPage(_ params: JSONValue?) throws -> JSONValue {
+        guard let before = params?.objectValue?["before"]?.intValue else {
+            throw ProfileScenarioError.workloadDiverged("unscripted forward transcript page")
+        }
+        let current = fixture.model.authoritativeSnapshot(for: snapshot.sessionId) ?? snapshot
+        let pageStart = current.transcriptStart ?? 0
+        let total = current.transcriptTotal ?? current.transcript.count
+        func entry(_ index: Int) -> TranscriptItem? {
+            if index >= pageStart, index - pageStart < current.transcript.count { return current.transcript[index - pageStart] }
+            return history.indices.contains(index) ? history[index] : nil
+        }
+        guard before >= 0, before <= total else { throw ProfileScenarioError.workloadDiverged("transcript page before \(before) of \(total)") }
+        var start = before
+        var bytes = 2
+        var items: [TranscriptItem] = []
+        while start > 0, items.count < ProfileTranscript.pageItemBound, let item = entry(start - 1) {
+            let itemBytes = try JSONEncoder.gateway.encode(item).count + 1
+            if bytes + itemBytes > ProfileTranscript.pageByteBound, !items.isEmpty { break }
+            items.insert(item, at: 0)
+            bytes += itemBytes
+            start -= 1
+        }
+        ProfileScenarioLedger.shared.add("rpc.transcript_pages")
+        var page: [String: JSONValue] = [
+            "items": try JSONValue.encode(items), "start": .number(Double(start)), "end": .number(Double(before)),
+            "total": .number(Double(total)), "runtimeGeneration": .string(current.runtimeGeneration),
+        ]
+        if let leaf = current.leafEntryId { page["leafEntryId"] = .string(leaf) }
+        if let next = entry(before) { page["nextEntryId"] = .string(next.id) }
+        return .object(page)
     }
 
     func ready() async throws {
@@ -125,9 +183,26 @@ final class ProfileChatRun: ProfileScenarioRun {
         try await profileWaitUntil("transcript rows rendered in the native scroll view") {
             profileViews(UIScrollView.self, in: view).contains { $0.contentSize.height > $0.bounds.height * 2 }
         }
-        // Opening settles scroll position, text preparation and media over
-        // several frames; the window measures steady state after it.
+        // The production opening ends its first-ready-frame interval once the
+        // transcript is positioned at the tail, or fails it when the layout did
+        // not settle within ChatView's own bound.
+        let signposts = signposts
+        try await profileWaitUntil("chat opening finished its first ready frame", timeout: .seconds(60)) {
+            signposts.firstReadyFrameResult != nil
+        }
+        guard signposts.firstReadyFrameResult == .success else {
+            throw ProfileScenarioError.notReady("chat opening did not settle (first ready frame \(signposts.firstReadyFrameResult.map { "\($0)" } ?? "missing"))")
+        }
+        // Scroll settlement, text preparation and media finish over the next
+        // frames; the window measures steady state after them.
         try await Task.sleep(for: .seconds(2))
+        guard let target = model.mountedPresentationTarget, target.sessionID == sessionID,
+              model.hasMountedSessionAuthority(target) else {
+            throw ProfileScenarioError.notReady("chat lost its mounted session authority while settling")
+        }
+        guard model.visibleNotices.isEmpty else {
+            throw ProfileScenarioError.notReady("an in-app notice is on screen: \(model.visibleNotices.map(\.title))")
+        }
     }
 
     func workload(window: Duration) async throws {
@@ -137,7 +212,11 @@ final class ProfileChatRun: ProfileScenarioRun {
         for frame in frames where frame.offset < window {
             try await profileSleep(until: frame.offset, from: start)
             try await fixture.deliver(frame: frame.data)
-            ledger.add("frames.\(frame.topic)")
+            if lostMount == nil, fixture.model.mountedPresentationTarget?.sessionID != snapshot.sessionId {
+                lostMount = "before \(frame.topic) at \(frame.offset)"
+            }
+            ledger.add("transport.frames.\(frame.topic)")
+            ledger.add("transport.bytes.\(frame.topic)", frame.data.count)
         }
         try await profileSleep(until: window, from: start)
         self.resynchronizationsBefore = resynchronizationsBefore
@@ -152,9 +231,19 @@ final class ProfileChatRun: ProfileScenarioRun {
             )
         }
         if let expected = expectedSequence {
-            let installed = fixture.model.authoritativeSnapshot(for: snapshot.sessionId)?.eventSequence
+            let model = fixture.model
+            let installed = model.authoritativeSnapshot(for: snapshot.sessionId)?.eventSequence
             guard installed == expected else {
-                throw ProfileScenarioError.workloadDiverged("installed event sequence \(installed.map(String.init) ?? "none"), expected \(expected)")
+                let target = model.mountedPresentationTarget
+                throw ProfileScenarioError.workloadDiverged(
+                    "installed event sequence \(installed.map(String.init) ?? "none"), expected \(expected); "
+                        + "mounted \(target.map { "\($0.sessionID)#\($0.generation)" } ?? "none"), "
+                        + "authority \(target.map(model.hasMountedSessionAuthority) ?? false), "
+                        + "selected sequence \(model.selectedSnapshot.map { String($0.eventSequence) } ?? "none"), "
+                        + "mount lost \(lostMount ?? "never"), "
+                        + "connection \(model.connectionState), notices \(model.visibleNotices.map(\.title)), "
+                        + "ledger \(ProfileScenarioLedger.shared.snapshot().sorted { $0.key < $1.key })"
+                )
             }
         }
     }
@@ -300,11 +389,12 @@ enum ProfileTranscript {
     static let pageItemBound = SessionSnapshot.maximumTranscriptItems
     static let pageByteBound = 600_000
 
-    static func pageBoundSnapshot(seed: Int) throws -> SessionSnapshot {
+    /// A 1,200-entry canonical session and its newest page at the bounds.
+    static func pageBoundSession(seed: Int) throws -> (history: [TranscriptItem], snapshot: SessionSnapshot) {
         let items = history(seed: seed, items: 1_200, toolOutputBytes: 2_400)
         var page = Array(items.suffix(pageItemBound))
         while try encodedBytes(page) > pageByteBound - 20_000 { page.removeFirst() }
-        return try snapshot(seed: seed, items: page, priorItems: items.count - page.count)
+        return (items, try snapshot(seed: seed, items: page, priorItems: items.count - page.count))
     }
 
     static func encodedBytes(_ items: [TranscriptItem]) throws -> Int {
@@ -521,5 +611,24 @@ extension Duration {
     var profileMicroseconds: Int64 {
         let (seconds, attoseconds) = components
         return seconds * 1_000_000 + attoseconds / 1_000_000_000_000
+    }
+}
+
+/// Forwards every chat signpost to the production signposter and records the
+/// outcome of the opening's first ready frame, the app's own readiness signal.
+final class ProfileOpeningSignposts: PerformanceSignposting {
+    private let result = Mutex<PerformanceResult?>(nil)
+
+    var firstReadyFrameResult: PerformanceResult? { result.withLock { $0 } }
+
+    func begin(_ operation: PerformanceOperation) -> PerformanceInterval {
+        SystemPerformanceSignposts.shared.begin(operation)
+    }
+
+    func end(_ interval: PerformanceInterval, result outcome: PerformanceResult, metrics: PerformanceMetrics) {
+        if interval.operation == .firstReadyFrame {
+            result.withLock { if $0 == nil || $0 == .discarded || $0 == .cancelled { $0 = outcome } }
+        }
+        SystemPerformanceSignposts.shared.end(interval, result: outcome, metrics: metrics)
     }
 }

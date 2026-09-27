@@ -434,6 +434,14 @@ class Profiler:
                 "simulator values measure host CPU work of the app process; they are a proxy, not device battery",
             ],
         }
+        retries = [line for line in log.read_text(errors="replace").splitlines()
+                   if line.startswith("TRON_PROFILE_SETUP_RETRY ")]
+        if retries:
+            context["setup_retries"] = retries
+            context["warnings"].append(
+                f"{len(retries)} scenario setup(s) did not reach readiness and were rebuilt before measuring; "
+                "see setup_retries (usually a chat opening that did not settle on a loaded host)"
+            )
         try:
             samples = build_samples(extract_measurements(metrics_document, test), iterations, context)
         except ProfileError as error:

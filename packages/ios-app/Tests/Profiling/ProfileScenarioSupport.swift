@@ -69,6 +69,8 @@ extension ProfileScenarioRun {
 }
 
 extension XCTestCase {
+    static var profileSetupAttempts: Int { 3 }
+
     /// Runs `iterations` fresh scenario instances under `ProfileResourceMetric`.
     /// Setup and readiness happen before `startMeasuring`, teardown after
     /// `stopMeasuring`, so each sample covers only the scripted window.
@@ -100,11 +102,30 @@ extension XCTestCase {
             var run: (any ProfileScenarioRun)?
             var measuring = false
             do {
-                let created = try ProfileMainLoop.wait(readinessTimeout, phase: "\(scenario) setup") {
-                    let run = try await make(configuration.window)
-                    do { try await run.ready() } catch { await run.teardown(); throw error }
-                    return run
+                // Setup is outside the window, so a scenario that did not reach
+                // readiness (for example a chat opening that did not settle on a
+                // loaded host) is rebuilt from scratch a bounded number of times.
+                // Retries are printed; the profiler reports them as warnings.
+                var attempt = 0
+                var prepared: (any ProfileScenarioRun)?
+                while prepared == nil {
+                    attempt += 1
+                    do {
+                        prepared = try ProfileMainLoop.wait(readinessTimeout, phase: "\(scenario) setup") {
+                            let run = try await make(configuration.window)
+                            do { try await run.ready() } catch {
+                                self.attachSurface(of: run, name: "\(scenario)-not-ready-\(iteration)-\(attempt)")
+                                await run.teardown()
+                                throw error
+                            }
+                            return run
+                        }
+                    } catch let error as ProfileScenarioError {
+                        guard case .notReady = error, attempt < Self.profileSetupAttempts else { throw error }
+                        print("TRON_PROFILE_SETUP_RETRY name=\(scenario) iteration=\(iteration) attempt=\(attempt) reason=\(error)")
+                    }
                 }
+                let created = prepared!
                 run = created
                 startMeasuring()
                 measuring = true
@@ -113,16 +134,13 @@ extension XCTestCase {
                 }
                 stopMeasuring()
                 measuring = false
-                try ProfileMainLoop.wait(.seconds(30), phase: "\(scenario) verification") { try await created.verify() }
-                if iteration == 1, let view = created.surface {
-                    let image = UIGraphicsImageRenderer(bounds: view.bounds).image { _ in
-                        view.drawHierarchy(in: view.bounds, afterScreenUpdates: false)
-                    }
-                    let attachment = XCTAttachment(image: image)
-                    attachment.name = "\(scenario)-window-end"
-                    attachment.lifetime = .keepAlways
-                    add(attachment)
+                do {
+                    try ProfileMainLoop.wait(.seconds(30), phase: "\(scenario) verification") { try await created.verify() }
+                } catch {
+                    attachSurface(of: created, name: "\(scenario)-window-end-failed-\(iteration)")
+                    throw error
                 }
+                if iteration == 1 { attachSurface(of: created, name: "\(scenario)-window-end") }
             } catch {
                 failure = error
                 if !measuring { startMeasuring() }
@@ -136,6 +154,21 @@ extension XCTestCase {
         if let failure {
             XCTFail("TRON_PROFILE_FAILURE scenario=\(scenario): \(failure)")
         }
+    }
+}
+
+extension XCTestCase {
+    /// Evidence of what the window measured: the mounted surface as drawn.
+    @MainActor
+    func attachSurface(of run: any ProfileScenarioRun, name: String) {
+        guard let view = run.surface, view.bounds.width > 0, view.bounds.height > 0 else { return }
+        let image = UIGraphicsImageRenderer(bounds: view.bounds).image { _ in
+            view.drawHierarchy(in: view.bounds, afterScreenUpdates: false)
+        }
+        let attachment = XCTAttachment(image: image)
+        attachment.name = name
+        attachment.lifetime = .keepAlways
+        add(attachment)
     }
 }
 

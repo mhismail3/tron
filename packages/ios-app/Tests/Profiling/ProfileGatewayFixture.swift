@@ -28,7 +28,7 @@ final class ProfileGatewayFixture {
     private var window: UIWindow?
 
     static let ledgerNames = [
-        "frames.delivered", "bytes.delivered", "rpc.requests", "rpc.unanswered", "rpc.resynchronizations",
+        "transport.frames", "transport.bytes", "rpc.requests", "rpc.unanswered", "rpc.resynchronizations",
     ]
 
     init(composerDraftStore: ((URL) -> ComposerDraftStore)? = nil) throws {
@@ -115,8 +115,8 @@ final class ProfileGatewayFixture {
     }
 
     func deliver(frame data: Data) async throws {
-        ProfileScenarioLedger.shared.add("frames.delivered")
-        ProfileScenarioLedger.shared.add("bytes.delivered", data.count)
+        ProfileScenarioLedger.shared.add("transport.frames")
+        ProfileScenarioLedger.shared.add("transport.bytes", data.count)
         await socket.enqueue(data)
     }
 

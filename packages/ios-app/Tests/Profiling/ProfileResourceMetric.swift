@@ -69,7 +69,7 @@ final class ProfileResourceMetric: NSObject, XCTMetric {
         }
         for name in Set(scenarioStart.keys).union(scenarioEnd.keys).sorted() {
             let delta = (scenarioEnd[name] ?? 0) - (scenarioStart[name] ?? 0)
-            values.append(Self.measurement("scenario.\(name)", "Scenario \(name)", Double(delta), ProfileScenarioLedger.unit(for: name)))
+            values.append(Self.measurement("scenario.\(ProfileScenarioLedger.metricID(name))", "Scenario \(name)", Double(delta), ProfileScenarioLedger.unit(for: name)))
         }
         return values
     }
@@ -183,7 +183,15 @@ final class ProfileScenarioLedger: Sendable {
 
     func reset() { counters.withLock { $0.removeAll() } }
 
+    /// Report metric ids are lowercase: `session.toolProgress` becomes
+    /// `session.tool_progress`.
+    static func metricID(_ name: String) -> String {
+        name.reduce(into: "") { result, character in
+            if character.isUppercase { result += "_" + character.lowercased() } else { result.append(character) }
+        }
+    }
+
     static func unit(for name: String) -> String {
-        name.hasSuffix("bytes") ? "B" : "count"
+        name.split(separator: ".").contains { $0 == "bytes" || $0.hasSuffix("_bytes") } ? "B" : "count"
     }
 }
