@@ -2,7 +2,7 @@
 
 - **Started:** 2026-09-27
 - **Status:** Active (approved in chat by the user on 2026-09-27)
-- **Last updated:** 2026-09-27, P-1 and P-2 claimed
+- **Last updated:** 2026-09-27, T1 scoped; T1-GW and T1-TEXT claimed
 - **Goal:** Tron for iPhone does measurably less CPU, disk, timer and radio work per minute of real use, proven by a reliable profiler that every agent can run, with no change to what the user sees or does.
 
 ## Goal and constraints
@@ -117,12 +117,12 @@ Highest-cost mechanisms found:
 | P-2 | Claimed | Gateway wire-traffic profiler (`gateway` subcommand), isolated fixture Gateway with a faux model, recording client, per-topic frame and byte report (details below) | none | energy-efficiency supervisor, worker lane p2, 2026-09-27 |
 | P-3 | Needs scoping | Attribution: `--trace` for iOS scenarios (xctrace Time Profiler, SwiftUI, Points of Interest; exported top-symbol summary) and an attach-only `device` mode for a user-launched LocalDevice app | P-1 | |
 | P-4 | Needs scoping | Baseline: run every P-1 and P-2 scenario on `main`, record the numbers and host state in this plan's Context | P-1, P-2 | |
-| T1-GW | Needs scoping | Gateway: re-arm the streaming throttle; delete `session.bashProgress` and `session.heartbeat`; skip the heartbeat ping while a client proved liveness within the interval, keeping today's detection bound | P-4 | |
-| T1-CACHE | Needs scoping | `SnapshotCache`: drop checkpoints that cannot change it, coalesce summary checkpoints and checkpoint on background, drop the save-path double admission pass | P-4 | |
-| T1-DRAFTS | Needs scoping | `ComposerDraftStore`: in-memory logical clock, size accounting without re-hashing, manifest-only writes when attachments are unchanged; no observable mutation for unchanged text | P-4 | |
-| T1-TEXT | Needs scoping | `discreteInsertedIDs` to O(n) with an equivalence check; `ChatStreamingInlineText` keeps settled text whole (preserving the streaming-flip reveal state) and caches the revealed prefix | P-4 | |
-| T1-CLOCKS | Needs scoping | Timeline schedules that fire when a label can change: dashboard rows, tool elapsed timers (sub-minute cadence preserved), static inbox formatter | P-4 | |
-| T1-NET | Needs scoping | One shared ping grid for every socket (no interval ever longer than today), lease renewal on that grid at no longer than today's interval, one shared `URLSession` for idempotent GETs with per-task delegates | P-4 | |
+| T1-GW | Claimed | Gateway: re-arm the streaming throttle; delete `session.bashProgress` and `session.heartbeat`; skip the heartbeat ping while a client proved liveness within the interval, keeping today's detection bound | none (keep decision: P-1, P-2) | energy-efficiency supervisor, worker lane t1-gw, 2026-09-27 |
+| T1-CACHE | Ready | `SnapshotCache`: drop checkpoints that cannot change it, coalesce summary checkpoints and checkpoint on background, drop the save-path double admission pass | none (keep decision: P-1, P-2) | |
+| T1-DRAFTS | Ready | `ComposerDraftStore`: in-memory logical clock, size accounting without re-hashing, manifest-only writes when attachments are unchanged; no observable mutation for unchanged text | none (keep decision: P-1, P-2) | |
+| T1-TEXT | Claimed | `discreteInsertedIDs` to O(n) with an equivalence check; `ChatStreamingInlineText` keeps settled text whole (preserving the streaming-flip reveal state) and caches the revealed prefix | none (keep decision: P-1, P-2) | energy-efficiency supervisor, worker lane t1-text, 2026-09-27 |
+| T1-CLOCKS | Ready | Timeline schedules that fire when a label can change: dashboard rows, tool elapsed timers (sub-minute cadence preserved), static inbox formatter | none (keep decision: P-1, P-2) | |
+| T1-NET | Ready | One shared ping grid for every socket (no interval ever longer than today), lease renewal on that grid at no longer than today's interval, one shared `URLSession` for idempotent GETs with per-task delegates | none (keep decision: P-1, P-2) | |
 | T2-CHATVIEW | Needs scoping | ChatView observes the snapshot and the installed transcript in separate child scopes; response state computed with the installed transcript | T1-TEXT | |
 | T2-DASH | Needs scoping | Dashboard root stops re-evaluating on every summary; parsed ordering instants; cheaper per-row path helpers; filter preferences saved only on change | T1-CLOCKS | |
 | T2-THINK | Needs scoping | Thinking trace measures its visible text instead of a hidden full copy | T1-TEXT | |
@@ -194,5 +194,110 @@ so it must be boring to run and hard to misread.
   client, per-second rates, largest frame, pings and pongs each way, and
   optional Node CPU profile. Always stops and removes the fixture Gateway,
   including on failure and timeout.
+
+### T1 tasks — shared rules
+
+Implementation may start before P-4; the keep decision needs the profilers
+(P-1 for iOS, P-2 for the Gateway) and a baseline measured on the same host
+state. Each T1 task names its primary scenario; the supervisor runs the
+comparison before merging.
+
+### T1-GW — Gateway send discipline
+
+Primary scenario: Gateway `stream-reply`, `tool-loop`, `idle`.
+
+- `emitProgress`: keep the immediate first frame after a quiet window, then at
+  most one frame per `STREAMING_PROGRESS_FLUSH_MS`: when the timer fires with a
+  pending message, flush it and re-arm; clear the timer only when nothing was
+  pending. Existing flush points (`publishSnapshot`, message end, dispose) keep
+  their ordering guarantee. Tighten the integration bound that today admits up
+  to 40 frames so the doubled cadence fails it.
+- Delete the `session.bashProgress` and `session.heartbeat` emissions after
+  proving no consumer in Gateway, iOS, Mac, scripts or fixtures; the
+  heartbeat's `publishSummary()` stays.
+- Heartbeat: every tick still counts toward `unansweredHeartbeats` (so a dead
+  client is retired at exactly today's tick), but the ping is sent only when
+  the connection has been silent for at least one heartbeat interval. A client
+  that pings every 10 s is never pinged; a silent or pong-only client still is.
+  Update `packages/gateway/docs/connection-resilience.md` and the heartbeat
+  tests, including a dead-client termination-time test.
+
+### T1-CACHE — Session list cache writes
+
+Primary scenario: iOS `tool-loop`, `summary-storm` (disk bytes written,
+logical writes).
+
+- Prove what `SnapshotCache` stores, then delete checkpoint requests that
+  cannot change it (the `sessionPresentationStoreCheckpointCache` path) with
+  their delegate method.
+- Summary updates schedule a trailing, coalesced checkpoint instead of an
+  immediate one; authoritative page publication, archive and delete keep their
+  immediate checkpoint; entering the background flushes a pending checkpoint
+  inside the existing background task assertion
+  (`packages/ios-app/Sources/App/AppBackgroundCheckpointCoordinator.swift`).
+  A cold start after a normal background exit must show exactly today's rows.
+- Remove duplicate admission work on the save path only if the load path
+  keeps every bound.
+
+### T1-DRAFTS — Composer draft persistence
+
+Primary scenario: iOS `composer-typing` (disk bytes read and written,
+instructions).
+
+- The store actor owns its root, so recover the logical clock once per process
+  and keep it in memory; global bounds use manifest sizes and file sizes, not
+  payload reads and hashes; a save whose attachments are unchanged rewrites
+  only the manifest, atomically. `load()` keeps full verification, so corrupt
+  drafts are still discarded before restore.
+- `setText` with unchanged text must not mutate observed state.
+- Crash-consistency contract unchanged: a crash at any point leaves either the
+  previous or the new complete draft.
+
+### T1-TEXT — Transcript text work
+
+Primary scenarios: iOS `streaming-reply`, `tool-loop` (main-thread CPU,
+instructions); gates: CT-12/CT-14 parity, focused transcript suites.
+
+- `ChatTranscriptTransitionPolicy.discreteInsertedIDs`: build the previous
+  semantic-ID set once and hoist the next semantic lookup, so the pass is
+  linear; identical output for every input (verify against the old
+  implementation over generated transitions before deleting it).
+- `ChatStreamingInlineText`: when not streaming, keep the text as one
+  authoritative token (no word split) while preserving exactly what a later
+  switch to streaming would reveal or fade; while revealing, build the fully
+  revealed prefix once per token revision and append only the pending tail,
+  so a tick costs the ≤ 18 pending words instead of the whole block.
+  Rendered attributed text must be identical frame for frame.
+
+### T1-CLOCKS — Presentation clocks
+
+Primary scenarios: iOS `idle-dashboard`, `tool-loop` (wakeups,
+instructions).
+
+- Dashboard rows: a `TimelineSchedule` that yields the next instant at which
+  the row's relative label (and its accessibility text) can change, so a row
+  re-renders when its text changes and not otherwise. The label shown at any
+  instant must equal today's label at that instant or be fresher by less than
+  today's one-second lag.
+- Tool elapsed timers: keep each view's current sub-minute cadence (0.1 s,
+  0.5 s, 1 s) and phase; after a minute tick on whole-second boundaries of the
+  elapsed value, after an hour on whole minutes.
+- Notification inbox: one formatter with identical output instead of one per
+  row per second.
+
+### T1-NET — Wakeup alignment and connection reuse
+
+Primary scenarios: iOS `idle-chat`, `idle-dashboard` (wakeups); live view by
+manual comparison.
+
+- Every socket's liveness ping fires on one shared 10 s grid derived from the
+  injected `MonotonicClock`, so N sockets wake together. The first ping after
+  connect comes at the next grid tick (never later than today's 10 s), later
+  pings exactly every 10 s; pong deadline and teardown unchanged.
+- Presentation-lease renewal runs on the same grid ticks, never longer apart
+  than today's 15 s.
+- One shared `URLSession` per HTTP transport for idempotent GET requests, with
+  per-task delegates carrying today's bounds, redirect and cancellation
+  behavior; uploads and other non-idempotent requests keep a fresh session.
 
 ## Handoff log
