@@ -2,7 +2,7 @@
 
 - **Started:** 2026-09-27
 - **Status:** Active (approved in chat by the user on 2026-09-27)
-- **Last updated:** 2026-09-27, T1-CLOCKS and T1-NET claimed
+- **Last updated:** 2026-09-27, P-3 scoped and claimed
 - **Goal:** Tron for iPhone does measurably less CPU, disk, timer and radio work per minute of real use, proven by a reliable profiler that every agent can run, with no change to what the user sees or does.
 
 ## Goal and constraints
@@ -125,7 +125,7 @@ still has to confirm the same offer (T3-DEFLATE).
 | --- | --- | --- | --- | --- |
 | P-1 | Claimed | iOS scenario profiler (new `tron-profile` in `scripts/`, `ios` subcommand), optimized profiling build, in-process energy metrics, deterministic scenarios, control self-test, JSON reports (details below) | none | energy-efficiency supervisor, worker lane p1, 2026-09-27 |
 | P-2 | Done | Gateway wire-traffic profiler (`gateway` subcommand), isolated fixture Gateway with a faux model, recording client, per-topic frame and byte report (details below) | none | energy-efficiency supervisor, worker lane p2, 2026-09-27 |
-| P-3 | Needs scoping | Attribution: `--trace` for iOS scenarios (xctrace Time Profiler, SwiftUI, Points of Interest; exported top-symbol summary) and an attach-only `device` mode for a user-launched LocalDevice app | P-1 | |
+| P-3 | Claimed | Attribution: `--trace` for iOS scenarios (xctrace Time Profiler, SwiftUI, Points of Interest; exported top-symbol summary) and an attach-only `device` mode for a user-launched LocalDevice app | P-1 | energy-efficiency supervisor, worker lane p3, 2026-09-27 |
 | P-4 | Needs scoping | Baseline: run every P-1 and P-2 scenario on `main`, record the numbers and host state in this plan's Context | P-1, P-2 | |
 | T1-GW | Done | Gateway: re-arm the streaming throttle; delete `session.bashProgress` and `session.heartbeat`; skip the heartbeat ping while a client proved liveness within the interval, keeping today's detection bound | none (keep decision: P-1, P-2) | energy-efficiency supervisor, worker lane t1-gw, 2026-09-27 |
 | T1-CACHE | Claimed | `SnapshotCache`: drop checkpoints that cannot change it, coalesce summary checkpoints and checkpoint on background, drop the save-path double admission pass | none (keep decision: P-1, P-2) | energy-efficiency supervisor, worker lane t1-persist, 2026-09-27 |
@@ -204,6 +204,24 @@ so it must be boring to run and hard to misread.
   client, per-second rates, largest frame, pings and pongs each way, and
   optional Node CPU profile. Always stops and removes the fixture Gateway,
   including on failure and timeout.
+
+### P-3 — Attribution
+
+- `--trace TEMPLATE` on `ios` scenarios records an xctrace capture of the
+  hosted test process covering exactly the measured windows (the scenario waits,
+  bounded, for the profiler to confirm recording before its first measured
+  iteration), keeps the `.trace`, and writes an attribution summary beside the
+  report: top symbols by self and total time for all threads and for the main
+  thread, per-thread CPU, and, for the SwiftUI template, view-body update counts
+  by view type; Points of Interest summarizes the app's signpost intervals.
+- Symbols must resolve for the app and test binaries (keep the matching debug
+  symbols); the summary names unresolved frames rather than dropping them.
+- Self-test: tracing the CPU control variant must attribute its known workload
+  function among the top self-time symbols.
+- `device --attach` records Time Profiler or Power Profiler for a fixed window
+  on an explicitly named physical device against an already running app,
+  never installing, launching or signing anything; it refuses without an
+  explicit device identifier and documents that the user owns device runs.
 
 ### T1 tasks — shared rules
 
