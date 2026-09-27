@@ -347,6 +347,32 @@ export async function lookupPublicXPost(input: string, get: XPostGet, signal: Ab
     if (entries.length + 1 >= maxItems) { stop = "max-items"; break; }
     cursor = parsed.cursor;
   }
+  // FxEmbed's conversation endpoint intermittently answers 404 for public posts
+  // that its single-status endpoint still serves. Only that not-found answer
+  // earns one root read from the same v2 contract; 429/5xx keep their fences.
+  let statusEndpoint: string | undefined;
+  if (!root && page === 1 && attempts.at(-1)?.outcome === "unavailable" && attempts.at(-1)?.status === 404) {
+    const endpoint = `https://api.fxtwitter.com/2/status/${identity.id}`;
+    let response: XPostResponse | undefined;
+    try { signal.throwIfAborted(); response = await get(endpoint, signal); }
+    catch { signal.throwIfAborted(); attempts.push({ provider: "fxembed-v2", outcome: "network-error", page: 1 }); }
+    signal.throwIfAborted();
+    if (response?.status === 429) { const retry = retryAt(response); attempts.push({ provider: "fxembed-v2", outcome: "rate-limited", status: 429, page: 1, ...(retry ? { retryAt: retry } : {}) }); }
+    else if (response && response.status !== 200) attempts.push({ provider: "fxembed-v2", outcome: "unavailable", status: response.status, page: 1 });
+    else if (response) {
+      const raw = response.body; const bodyBytes = raw ? Buffer.byteLength(raw, "utf8") : 0;
+      const parsed = !response.truncated && raw && bodyBytes <= maxBodyBytes ? parseV2Page(raw, identity.id, endpoint, 1, "root") : undefined;
+      if (!parsed) attempts.push({ provider: "fxembed-v2", outcome: "invalid-response", status: 200, page: 1 });
+      else {
+        attempts.push({ provider: "fxembed-v2", outcome: "ok", status: 200, page: 1 });
+        pages.push(raw!); root = parsed.root; rootLimitations = parsed.rootLimitations; rootLinksTruncated = parsed.rootLinksTruncated; statusEndpoint = endpoint;
+        // A root request is fully answered by the status endpoint; wider
+        // coverage keeps its unavailable stop and stays incomplete.
+        if (coverage === "root") stop = undefined;
+        else rootLimitations = [...rootLimitations, `FxEmbed v2 ${coverage} endpoint returned 404; the root was read from the v2 status endpoint and replies were not enumerated.`];
+      }
+    }
+  }
   if (root) {
     const safeEntries = entries.filter(entry => !conflictingIds.has(entry.id));
     const selectedResult = selectConversation(root, safeEntries, coverage);
@@ -359,7 +385,7 @@ export async function lookupPublicXPost(input: string, get: XPostGet, signal: Ab
     const complete = !relationshipIncomplete && (stop === "cursor-exhausted" || coverage === "root");
     const rootQualityPartial = rootLimitations.length > 0;
     const rootLimitationsExtra = linkLimitReached ? ["Provider-declared outbound links exceeded the bounded retained URL/reference limit; omitted links were not silently treated as complete."] : [];
-    return { ...identity, provider: "fxembed-v2", endpoint: endpointFor(), text: root.text, readableText: readableConversationText(root, selected), ...(root.article ? { article: root.article } : {}), title: root.article?.title || `X post by ${root.authorId}`, authorId: root.authorId, coverage, coverageComplete: complete, continuations: selected, commentary: selectedResult.commentary, posts: allPosts, stopReasons: reasons, disposition: coverage === "root" && complete && !rootQualityPartial ? "complete" : "partial", limitations: [...limitations(coverage, reasons, complete, selected.length + 1), ...rootLimitations, ...rootLimitationsExtra], ...(linkLimitReached ? { linkLimitReached: true } : {}), ...(linked.urls.length ? { linkedUrls: linked.urls, linkedReferences: linked.references } : {}), attempts, ...(pages[0] ? { raw: pages[0] } : {}), ...(pages.length > 1 ? { rawPages: pages } : {}) };
+    return { ...identity, provider: "fxembed-v2", endpoint: statusEndpoint ?? endpointFor(), text: root.text, readableText: readableConversationText(root, selected), ...(root.article ? { article: root.article } : {}), title: root.article?.title || `X post by ${root.authorId}`, authorId: root.authorId, coverage, coverageComplete: complete, continuations: selected, commentary: selectedResult.commentary, posts: allPosts, stopReasons: reasons, disposition: coverage === "root" && complete && !rootQualityPartial ? "complete" : "partial", limitations: [...limitations(coverage, reasons, complete, selected.length + 1), ...rootLimitations, ...rootLimitationsExtra], ...(linkLimitReached ? { linkLimitReached: true } : {}), ...(linked.urls.length ? { linkedUrls: linked.urls, linkedReferences: linked.references } : {}), attempts, ...(pages[0] ? { raw: pages[0] } : {}), ...(pages.length > 1 ? { rawPages: pages } : {}) };
   }
   // The independent syndication fallback is root-only and never parses the
   // retired FxTwitter v1 response shape.

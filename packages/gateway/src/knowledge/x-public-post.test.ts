@@ -115,6 +115,19 @@ describe("public X v2 hydration", () => {
     const result = await lookupPublicXPost(url, get, signal());
     expect(result.provider).toBe("x-syndication"); expect(result.disposition).toBe("partial"); expect(result.text).toBe("Fallback"); expect(get).toHaveBeenCalledTimes(2); expect(get.mock.calls[1]?.[0]).toContain(`token=${xEmbedToken("123456789")}`);
   });
+  // Failure mode: FxEmbed's conversation endpoint intermittently answers 404 for
+  // a public post its single-status endpoint still serves, so a lookup silently
+  // degrades to root-only syndication and loses the Article body.
+  it("reads the v2 status endpoint when the conversation endpoint reports not found", async () => {
+    const status = JSON.stringify({ code: 200, status: { id: "123456789", text: "", author: { id: "42", protected: false }, replying_to: null, article: article(), raw_text: { facets: [] } }, thread: [], author: { id: "42" } });
+    const get = vi.fn().mockResolvedValueOnce({ status: 404 }).mockResolvedValueOnce({ status: 200, body: status });
+    const result = await lookupPublicXPost(url, get, signal());
+    expect(get.mock.calls.map(call => call[0])).toEqual(["https://api.fxtwitter.com/2/conversation/123456789", "https://api.fxtwitter.com/2/status/123456789"]);
+    expect(result.provider).toBe("fxembed-v2"); expect(result.endpoint).toBe("https://api.fxtwitter.com/2/status/123456789");
+    expect(result.text).toContain("The article body is evidence.");
+    const conversation = await lookupPublicXPost(url, vi.fn().mockResolvedValueOnce({ status: 404 }).mockResolvedValueOnce({ status: 200, body: status }), signal(), { coverage: "conversation" });
+    expect(conversation.text).toContain("The article body is evidence."); expect(conversation.coverageComplete).toBe(false); expect(conversation.stopReasons).toContain("unavailable");
+  });
   it("honors 429 without retrying the provider and retains safe diagnostics", async () => {
     const get = vi.fn().mockResolvedValueOnce({ status: 429, retryAfter: "120" }).mockResolvedValueOnce({ status: 429 });
     const result = await lookupPublicXPost(url, get, signal());

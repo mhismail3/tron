@@ -296,7 +296,11 @@ parsing, bounded cursor selection, and ordered fallback; the source owner
 supplies DNS-pinned HTTP, public-destination checks, 2 MB per-page body bounds,
 8 pages, 256 items, 8 MB retained raw-page bound, zero provider redirects, a
 15-second total deadline, and 5-second attempt deadlines. Each page/provider is
-tried once. The DNS-pinned transport sends only the bounded descriptive
+tried once. FxEmbed's conversation endpoint intermittently answers 404 for public
+posts that its v2 single-status endpoint still serves, so only a first-page 404
+earns one root read from `/2/status/{id}` before syndication; non-root coverage
+from that read stays incomplete with an explicit limitation, and 429/5xx answers
+never trigger it. The DNS-pinned transport sends only the bounded descriptive
 `Tron/0.1 (public-source-capture)` User-Agent (no cookies or authorization); this
 is required by the public providers and is not identity impersonation. A 429 is
 reported with an honest stop reason, never immediately retried at that provider;
@@ -477,9 +481,14 @@ Destination remains the separately configured collection.
 
 Each item keeps its bounded complete Raindrop JSON as a `provider-api` source
 representation, the fetched linked evidence separately, and the source
-collection ID as provenance. X/Twitter links are reference-only and generic
-GitHub UI links are partial unless a later capture establishes better evidence;
-neither is silently assessed as a complete article. Knowledge's Jev adapter owns
+collection ID as provenance. X/Twitter post permalinks are read through the
+public post reader above under the bookmark's identity, so they retain post and
+Article text with the provider's truthful partial disposition; other X/Twitter
+pages are reference-only. Generic GitHub UI links are partial unless a later
+capture establishes better evidence. Neither is silently assessed as a complete
+article, and an incomplete capture leaves the bookmark pending without moving it.
+It never revokes an admission already decided (`retained` or `archived`) for the
+same canonical source. Knowledge's Jev adapter owns
 its rubric, bounded text, relevant source metadata, and persisted interests.
 It consumes the shared typed `JevDecisionClient`, also exposed as the first-party
 `jev` tool for caller-supplied `choice`, `noul`, and `score` questions. This is not

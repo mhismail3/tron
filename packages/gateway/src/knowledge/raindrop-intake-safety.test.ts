@@ -12,7 +12,7 @@ const roots: string[] = [];
 afterEach(async () => { await Promise.all(roots.splice(0).map(root => rm(root, { recursive: true, force: true }))); });
 const response = (value: unknown, status = 200): ConnectorHTTPResponse => ({ status, headers: new Headers(), body: JSON.stringify(value) });
 
-async function fixture(options: { failFirstMove?: boolean; initialScope?: string } = {}) {
+async function fixture(options: { failFirstMove?: boolean; initialScope?: string; links?: Record<string, string>; sourceFetch?: (url: string) => Promise<Response> } = {}) {
   const root = await mkdtemp(join(tmpdir(), "tron-intake-safety-")); roots.push(root);
   const store = new KnowledgeStore(new TronWorkspace(root));
   const observed = { assessmentCalls: 0, moves: [] as string[] };
@@ -20,13 +20,13 @@ async function fixture(options: { failFirstMove?: boolean; initialScope?: string
   const extension = new KnowledgeConnectorExtension(store, {
     credentials: new InMemoryConnectorCredentialStore(new Map([["connector:raindrop:synthetic", "synthetic-only"]])),
     resolveHost: async () => ["93.184.216.34"],
-    sourceFetch: async url => new Response(`Distinct complete source evidence for ${url}`, { headers: { "content-type": "text/plain" } }),
+    sourceFetch: options.sourceFetch ?? (async url => new Response(`Distinct complete source evidence for ${url}`, { headers: { "content-type": "text/plain" } })),
     sleep: async () => {},
     assessment: { async assess(_input, _signal, context) { await context?.beforeDispatch?.(); observed.assessmentCalls += 1; return { summary: "Synthetic classification", evidenceQuality: "none", freshness: "unknown", recommendation: "retained", model: "jev-1.13.0" }; } },
     http: async (url, init) => {
       if (url.endsWith("/user")) return response({ user: { _id: 42 } });
       const list = new URL(url).pathname.match(/\/raindrops\/(\d+)$/);
-      if (list) return response({ items: [...remote].filter(([, collection]) => collection === list[1]).map(([id, collection]) => ({ _id: Number(id), title: `Source ${id}`, link: `https://example.test/${id}`, collection: { $id: Number(collection) } })) });
+      if (list) return response({ items: [...remote].filter(([, collection]) => collection === list[1]).map(([id, collection]) => ({ _id: Number(id), title: `Source ${id}`, link: options.links?.[id] ?? `https://example.test/${id}`, collection: { $id: Number(collection) } })) });
       const item = new URL(url).pathname.match(/\/raindrop\/(\d+)$/)?.[1];
       if (item) {
         if (init.method === "PUT") {
@@ -75,5 +75,41 @@ describe("Raindrop intake safety boundaries", () => {
     await store.updateConnectorState("safety-crash-reservation", "raindrop", state => ({ ...state!, assessmentPilot: { id: "safety-pilot", maxItems: 1, budgetCents: 100, usedItems: 0, reservedCents: 1, accountId: "42", sourceCollection: "111", profileVersion: jevProfileVersion([]), itemIds: ["1"] }, assessmentAttempts: { "1": { status: "dispatched", chargeCents: 1 } } }));
     await intake("safety-after-crash", 1);
     expect(observed.assessmentCalls).toBe(0);
+  });
+
+  // Failure modes: a bookmarked X permalink is read as x.com's HTML app shell
+  // (no post text), the connector's blanket X downgrade discards the provider's
+  // truthful partial disposition, and an incomplete re-capture demotes a source
+  // whose admission was already decided out of normal retrieval.
+  describe("X permalink bookmarks", () => {
+    const post = "https://x.com/synthetic/status/123456789?s=12&t=share";
+    const fxBody = JSON.stringify({ code: 200, status: { id: "123456789", text: "Bookmarked post evidence", author: { id: "42", protected: false }, replying_to: null, raw_text: { facets: [] }, is_note_tweet: false, media: { photos: [{}] } }, thread: [], replies: [], cursor: {} });
+    const xFixture = async (seen: string[]) => fixture({ links: { "1": post }, sourceFetch: async url => { seen.push(url); return url.startsWith("https://api.fxtwitter.com/") ? new Response(fxBody, { headers: { "content-type": "application/json" } }) : new Response("<html><body>JavaScript is not available.</body></html>", { headers: { "content-type": "text/html" } }); } });
+
+    it("captures post text through the public post reader under the bookmark identity", async () => {
+      const seen: string[] = [];
+      const { store, observed, intake } = await xFixture(seen);
+      await intake("x-intake-reader", 1);
+      expect(seen[0]).toBe("https://api.fxtwitter.com/2/conversation/123456789");
+      expect(seen.some(url => new URL(url).hostname === "x.com")).toBe(false);
+      const source = await store.sourceByIdentity({ provider: "raindrop", accountId: "42", itemId: "1" });
+      expect(source?.content.text).toContain("Bookmarked post evidence");
+      expect(source?.content.captureDisposition).toBe("partial");
+      expect(source?.content.admission?.status).toBe("pending");
+      expect(observed.assessmentCalls).toBe(0);
+      expect(observed.moves).toEqual([]);
+    });
+
+    it("keeps an already decided admission when a re-capture is still incomplete", async () => {
+      const seen: string[] = [];
+      const { store, intake } = await xFixture(seen);
+      await intake("x-intake-first", 1);
+      const first = await store.sourceByIdentity({ provider: "raindrop", accountId: "42", itemId: "1" });
+      await store.setSourceAdmission({ commandId: "x-intake-user-retain", recordId: first!.id, expectedRevision: first!.revisionId, status: "retained", reason: "User retained provisional X evidence" });
+      await intake("x-intake-second", 1);
+      const second = await store.sourceByIdentity({ provider: "raindrop", accountId: "42", itemId: "1" });
+      expect(second?.id).toBe(first!.id);
+      expect(second?.content.admission?.status).toBe("retained");
+    });
   });
 });
