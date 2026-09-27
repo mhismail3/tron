@@ -2344,9 +2344,9 @@ the workload. Metrics, one sample per iteration, all lower-is-better:
 
 Most wire counts repeat exactly, but a few Gateway publications depend on
 timing: prompt admission sometimes sends one extra same-size `session.snapshot`,
-and throttled summaries and tool progress can shift by a frame. A one-frame move
-between runs is therefore not a regression by itself; check `timeline.jsonl`
-or run more iterations. Gateway CPU varies with host load and garbage
+and throttled summaries and tool progress can shift by a frame. `compare`
+therefore never treats a one-unit move in an integer count as a verdict; for a
+larger unexplained move check `timeline.jsonl` or run more iterations. Gateway CPU varies with host load and garbage
 collection, so compare CPU only between runs on a quiet host. Reports live under
 `~/Library/Developer/Tron/profiles/gateway/<run>/` with `timeline.jsonl` (every
 frame and control ping/pong with client, direction, topic, bytes and time),

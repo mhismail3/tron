@@ -2,7 +2,7 @@
 
 - **Started:** 2026-09-27
 - **Status:** Active (approved in chat by the user on 2026-09-27)
-- **Last updated:** 2026-09-27, T1-CACHE, T1-DRAFTS and T3-DEFLATE claimed
+- **Last updated:** 2026-09-27, P-2 done
 - **Goal:** Tron for iPhone does measurably less CPU, disk, timer and radio work per minute of real use, proven by a reliable profiler that every agent can run, with no change to what the user sees or does.
 
 ## Goal and constraints
@@ -124,7 +124,7 @@ still has to confirm the same offer (T3-DEFLATE).
 | ID | Status | Scope | Depends on | Owner |
 | --- | --- | --- | --- | --- |
 | P-1 | Claimed | iOS scenario profiler (new `tron-profile` in `scripts/`, `ios` subcommand), optimized profiling build, in-process energy metrics, deterministic scenarios, control self-test, JSON reports (details below) | none | energy-efficiency supervisor, worker lane p1, 2026-09-27 |
-| P-2 | Claimed | Gateway wire-traffic profiler (`gateway` subcommand), isolated fixture Gateway with a faux model, recording client, per-topic frame and byte report (details below) | none | energy-efficiency supervisor, worker lane p2, 2026-09-27 |
+| P-2 | Done | Gateway wire-traffic profiler (`gateway` subcommand), isolated fixture Gateway with a faux model, recording client, per-topic frame and byte report (details below) | none | energy-efficiency supervisor, worker lane p2, 2026-09-27 |
 | P-3 | Needs scoping | Attribution: `--trace` for iOS scenarios (xctrace Time Profiler, SwiftUI, Points of Interest; exported top-symbol summary) and an attach-only `device` mode for a user-launched LocalDevice app | P-1 | |
 | P-4 | Needs scoping | Baseline: run every P-1 and P-2 scenario on `main`, record the numbers and host state in this plan's Context | P-1, P-2 | |
 | T1-GW | Claimed | Gateway: re-arm the streaming throttle; delete `session.bashProgress` and `session.heartbeat`; skip the heartbeat ping while a client proved liveness within the interval, keeping today's detection bound | none (keep decision: P-1, P-2) | energy-efficiency supervisor, worker lane t1-gw, 2026-09-27 |
@@ -333,3 +333,36 @@ time.
   just under the 1 MiB ceiling and one over it.
 
 ## Handoff log
+
+### P-2 · Done · 2026-09-27 · energy-efficiency supervisor (worker lane p2)
+
+- Result: `scripts/tron-profile gateway` runs `stream-reply`, `tool-loop`,
+  `idle` and `dashboard-observer` against an isolated fixture Gateway (faux
+  model, private temporary home, free loopback port) with recording clients that
+  pair and behave like the phone, including its exact `permessage-deflate`
+  offer, 10 s pings, `session.open`/`sync` and 15 s presentation renewals. Each
+  report carries per-client frames and bytes per topic, TCP socket bytes, pings
+  and pongs, largest frame and fixture CPU, plus `timeline.jsonl`.
+- Evidence: all four scenarios twice, three iterations each (idle wire metrics
+  identical across six iterations; stream-reply total bytes within 1%;
+  tool-loop within 3.5%, from a real extra snapshot the Gateway sometimes sends
+  at prompt admission). `--self-test` passed twice: halving the faux reply
+  moved progress frames 0.567× (expected 0.559) beyond the noise bound. Ctrl-C,
+  wrong Node, busy lock and bad usage exit with their documented codes and leave
+  no fixture behind. First measurement: ten tool calls on a 512-item session
+  send the phone about 16 MB of `session.snapshot`, and a 6,000-character reply
+  sends 1.2 MiB of cumulative `session.progress`.
+- Changes: `scripts/tron-profile-gateway` with its driver and faux-model
+  extension; `packages/gateway/README.md` (Wire-traffic profile); the
+  tron-performance skill; CI syntax checks. The supervisor added automatic
+  selection of a pinned Node that can load `node-pty` (Tron agent sessions put
+  the Gateway payload's signed runtime first on `PATH`) and made `compare` treat
+  a one-unit count change as noise.
+- Kept on purpose: the fixture selects the profile model with `session.setModel`
+  outside the measured window, because Pi 0.87.1 can cold-open a session whose
+  extension-registered provider has no model yet; the report warns when that
+  repair was needed.
+- For the next agent: record P-4 on a quiet host (loads above 100 were seen
+  during this work); the duplicate prompt-admission snapshot is a candidate for
+  a later Gateway task; report the Pi model-restore race upstream.
+
