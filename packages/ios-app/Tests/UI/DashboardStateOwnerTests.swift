@@ -798,7 +798,8 @@ struct DashboardStateOwnerTests {
 
     private static func notificationInboxChangedEvent() -> Data {
         try! JSONSerialization.data(withJSONObject: [
-            "type": "event", "topic": "notification.inbox.changed", "payload": [:],
+            "type": "event", "topic": "notification.inbox.changed",
+            "payload": ["revision": "revision-remote", "unreadCount": 2],
         ])
     }
 
@@ -1807,7 +1808,7 @@ private final class DashboardPoolRecorder: DashboardGatewayConnectionPoolDelegat
         let count: Int?
     }
 
-    func dashboardPoolNotificationInboxChanged(profileID: String) {
+    func dashboardPoolNotificationInboxChanged(profileID: String, change: NotificationInboxChanged?) {
         notificationInvalidations.append(profileID)
     }
 

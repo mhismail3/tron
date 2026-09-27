@@ -115,27 +115,31 @@ struct AppModelReconnectTests {
             await start.value
             var index = 1
             var catalog: (id: String, method: String)?
-            var inbox: (id: String, method: String)?
-            while catalog == nil || inbox == nil {
+            var inboxFilters: [String] = []
+            // The inbox refresh reads one page per server window, so wait for
+            // both filters before asserting the startup request set.
+            while catalog == nil || Set(inboxFilters) != ["all", "unread"] {
                 try await socket.waitUntilSent(count: index + 1)
-                let request = try requestFrame(await socket.sentFrames()[index])
+                let frame = try JSONDecoder.gateway.decode(JSONValue.self, from: await socket.sentFrames()[index]).objectValue
+                let method = try #require(frame?["method"]?.stringValue)
+                let id = try #require(frame?["id"]?.stringValue)
                 index += 1
-                if request.method == "session.list" {
-                    catalog = request
-                } else if request.method == "notification.inbox.list" {
-                    inbox = request
+                if method == "session.list" {
+                    catalog = (id: id, method: method)
+                } else if method == "notification.inbox.list" {
+                    inboxFilters.append(frame?["params"]?.objectValue?["filter"]?.stringValue ?? "")
                 } else {
-                    #expect(["provider.list", "model.list", "settings.get", "device.list"].contains(request.method))
+                    #expect(["provider.list", "model.list", "settings.get", "device.list"].contains(method))
                 }
             }
             let catalogRequest = try #require(catalog)
-            #expect(inbox != nil)
+            #expect(inboxFilters.sorted() == ["all", "unread"])
             #expect(fixture.model.sessionCatalogIsLoading)
             let startedMethods = try await socket.sentFrames().dropFirst().map { try requestFrame($0).method }
             #expect(Set(startedMethods).isSubset(of: [
                 "session.list", "notification.inbox.list", "provider.list", "model.list", "settings.get", "device.list",
             ]))
-            #expect(startedMethods.filter { $0 == "notification.inbox.list" }.count == 1)
+            #expect(startedMethods.filter { $0 == "notification.inbox.list" }.count == 2)
             let sessions = try JSONValue.encode([startupSummary("loaded")])
             let reply = Task {
                 await socket.enqueue(successResponse(id: catalogRequest.id, result: .object([

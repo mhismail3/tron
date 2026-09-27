@@ -1314,14 +1314,15 @@ struct GatewayClientTransportTests {
             let loading = Task {
                 try await NotificationInboxGatewayClient.list(
                     client: client,
+                    filter: .unread,
                     cursor: "older-cursor",
-                    expectedRevision: "same-revision",
                     expectedConnectionID: connectionID
                 )
             }
             try await socket.waitUntilSent(count: 2)
             let request = try await decodedValue(in: socket, index: 1)
             #expect(request.objectValue?["method"] == .string("notification.inbox.list"))
+            #expect(request.objectValue?["params"]?.objectValue?["filter"] == .string("unread"))
             #expect(request.objectValue?["params"]?.objectValue?["cursor"] == .string("older-cursor"))
             #expect(request.objectValue?["params"]?.objectValue?["limit"] == .number(50))
             let id = try #require(request.objectValue?["id"]?.stringValue)
@@ -1350,7 +1351,7 @@ struct GatewayClientTransportTests {
                 _ = try await client.connect(profile: profile, token: "synthetic-token")
                 read = Task {
                     try await NotificationInboxGatewayClient.$hostedAfterPage.withValue({ await gate.wait() }) {
-                        try await NotificationInboxGatewayClient.list(client: client)
+                        try await NotificationInboxGatewayClient.list(client: client, filter: .all)
                     }
                 }
                 try await sockets[0].waitUntilSent(count: 2)

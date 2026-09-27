@@ -18,12 +18,6 @@ struct NotificationInboxToolbarButton: View {
     }
 }
 
-private enum NotificationInboxFilter: String, CaseIterable, Identifiable {
-    case all = "All"
-    case unread = "Unread"
-    var id: String { rawValue }
-}
-
 enum NotificationInboxPresentationPolicy {
     static let recentLimit = 15
 
@@ -31,32 +25,28 @@ enum NotificationInboxPresentationPolicy {
         Array(notifications.prefix(recentLimit))
     }
 
-    static func hasHistory(after notifications: [NotificationInboxItem]) -> Bool {
-        notifications.count > recentLimit
+    /// View More opens the full bounded history when the current filter has more
+    /// rows than its recent prefix, or when its server window still has older
+    /// pages that the prefix does not show.
+    static func showsHistoryLink(rowCount: Int, hasOlderPages: Bool) -> Bool {
+        rowCount > recentLimit || hasOlderPages
     }
 }
 
+/// Settings → Notifications: the primary sheet. It renders the selected
+/// filter's server window and opens the shared history list for the rest.
 struct NotificationInboxView: View {
     let onOpenSession: (AppModel.SessionNavigationRoute) -> Void
     @Environment(AppModel.self) private var model
     @Environment(\.dismiss) private var dismiss
     @Environment(\.tronPresentationActivity) private var presentationActivity
-    @Environment(\.scenePhase) private var scenePhase
     @State private var filter: NotificationInboxFilter = .unread
     @State private var selectedItem: NotificationInboxItem?
     @State private var openingItemID: String?
     @State private var showsHistory = false
-    @State private var hasRefreshed = false
 
-    private var filteredNotifications: [NotificationInboxItem] {
-        switch filter {
-        case .all: model.notificationInbox.notifications
-        case .unread: model.notificationInbox.notifications.filter(\.notification.isUnread)
-        }
-    }
-
-    private var recentNotifications: [NotificationInboxItem] {
-        NotificationInboxPresentationPolicy.recent(filteredNotifications)
+    private var window: [NotificationInboxItem] {
+        model.notificationInbox.notifications(filter: filter)
     }
 
     var body: some View {
@@ -64,48 +54,33 @@ struct NotificationInboxView: View {
             ScrollView(.vertical, showsIndicators: true) {
                 VStack(alignment: .leading, spacing: TronSpacing.lg) {
                     filterControl
-                    if model.notificationInbox.isLoading && model.notificationInbox.notifications.isEmpty {
-                        TronLoadingState(label: "Loading notifications from paired Gateways…", accent: .tronEmerald)
-                            .frame(maxWidth: .infinity, minHeight: 220)
-                    } else if filteredNotifications.isEmpty {
-                        emptyState
-                    } else {
-                        if PresentationClockPolicy.runs(
-                            surfaceActive: presentationActivity.allowsContinuousAnimation,
-                            sceneActive: scenePhase == .active
-                        ) {
-                            TimelineView(.periodic(from: .now, by: DashboardActivityClock.refreshInterval)) { timeline in
-                                LazyVStack(spacing: TronSpacing.md) {
-                                    ForEach(recentNotifications) { item in
-                                        notificationRow(item, relativeTo: timeline.date, style: .glass)
-                                    }
-                                }
-                            }
-                        } else {
-                            LazyVStack(spacing: TronSpacing.md) {
-                                ForEach(recentNotifications) { item in
-                                    notificationRow(item, relativeTo: .now, style: .glass)
-                                }
-                            }
-                        }
-                    }
-                    if NotificationInboxPresentationPolicy.hasHistory(after: model.notificationInbox.notifications) {
+                    NotificationInboxRowList(
+                        notifications: NotificationInboxPresentationPolicy.recent(window),
+                        filter: filter,
+                        style: .glass,
+                        pagesOlderRows: false,
+                        onSelect: select
+                    )
+                    if NotificationInboxPresentationPolicy.showsHistoryLink(
+                        rowCount: window.count,
+                        hasOlderPages: model.notificationInbox.hasOlderPages(filter: filter)
+                    ) {
                         viewMoreRow
                     }
                     if let failure = model.notificationInbox.failure {
-                        TronGlassCard(accent: .tronAmber) {
-                            Label(failure, systemImage: "exclamationmark.triangle")
-                                .font(TronTypography.secondaryDescription)
-                                .foregroundStyle(Color.tronTextSecondary)
-                                .frame(maxWidth: .infinity, alignment: .leading)
-                                .padding(TronSpacing.lg)
-                        }
+                        TronSettingsNotice(
+                            message: failure,
+                            accent: .tronAmber,
+                            retry: { Task { await model.refreshNotificationInbox() } }
+                        )
                     }
                 }
                 .padding(.horizontal, 20)
                 .padding(.top, 18)
                 .padding(.bottom, 40)
             }
+            .scrollBounceBehavior(.always)
+            .refreshable { await model.refreshNotificationInbox() }
             .tronScrollEdgeChrome()
             .navigationTitle("")
             .navigationBarTitleDisplayMode(.inline)
@@ -115,12 +90,12 @@ struct NotificationInboxView: View {
         .tronPresentation()
         .presentationDetents([.medium, .large])
         .presentationDragIndicator(.hidden)
-        .task(id: presentationActivity.allowsPresentationPublication) {
-            guard presentationActivity.allowsPresentationPublication,
-                  !hasRefreshed else { return }
+        .task(id: PresentationActivityTaskID(
+            source: "notifications/inbox",
+            presentationActive: presentationActivity.allowsPresentationPublication
+        )) {
+            guard presentationActivity.allowsPresentationPublication else { return }
             await model.refreshNotificationInbox()
-            guard !Task.isCancelled else { return }
-            hasRefreshed = true
         }
         .tronManagedSheet(
             item: $selectedItem,
@@ -152,11 +127,11 @@ struct NotificationInboxView: View {
                 TronToolbarTextLabel(
                     "Mark Read",
                     systemImage: "envelope.open",
-                    isWorking: model.notificationInbox.isLoading
+                    isWorking: model.notificationInbox.isMarkingAllRead
                 )
             }
             .tronToolbarAction(accent: model.notificationInbox.unreadCount > 0 ? .tronEmerald : .tronTextMuted)
-            .disabled(model.notificationInbox.unreadCount == 0 || model.notificationInbox.isLoading)
+            .disabled(model.notificationInbox.unreadCount == 0 || model.notificationInbox.isMarkingAllRead)
             .accessibilityLabel("Mark all notifications read")
         }
         ToolbarItem(placement: .principal) { TronSheetTitle(title: "Notifications") }
@@ -172,21 +147,11 @@ struct NotificationInboxView: View {
 
     private var filterControl: some View {
         TronSegmentedControl(
-            options: NotificationInboxFilter.allCases.map { ($0.rawValue, $0) },
+            options: NotificationInboxFilter.allCases.map { ($0.label, $0) },
             selection: $filter
         )
         .accessibilityLabel("Notification filter")
-        .accessibilityValue(filter.rawValue)
-    }
-
-    private var emptyState: some View {
-        TronPlaceholderState(
-            title: filter == .unread ? "No unread notifications" : "No notifications yet",
-            detail: emptyDescription,
-            icon: filter == .unread ? "bell.slash" : "bell",
-            accent: .tronEmerald
-        )
-        .frame(minHeight: 280)
+        .accessibilityValue(filter.label)
     }
 
     private var viewMoreRow: some View {
@@ -203,23 +168,11 @@ struct NotificationInboxView: View {
         .accessibilityLabel("View full notification history")
     }
 
-    private func notificationRow(
-        _ item: NotificationInboxItem,
-        relativeTo now: Date,
-        style: NotificationInboxRowStyle
-    ) -> some View {
-        NotificationInboxRow(item: item, relativeTo: now, style: style) {
-            selectedItem = item
-            if item.notification.isUnread {
-                Task { await model.markNotificationRead(item) }
-            }
+    private func select(_ item: NotificationInboxItem) {
+        selectedItem = item
+        if item.notification.isUnread {
+            Task { await model.markNotificationRead(item) }
         }
-    }
-
-    private var emptyDescription: String {
-        filter == .unread
-            ? "New agent alerts will appear here until you mark them read."
-            : "Agent alerts from paired Gateways will appear here."
     }
 
     private func openSession(_ item: NotificationInboxItem) {
@@ -242,82 +195,138 @@ struct NotificationInboxView: View {
     }
 }
 
+/// The one row list both inbox sheets mount: the selected filter's server
+/// window, its loading/empty states, and — for full history — one keyset page
+/// trigger per profile. The primary sheet passes its recent prefix and glass
+/// rows; history passes the whole window and plain tinted rows.
+struct NotificationInboxRowList: View {
+    let notifications: [NotificationInboxItem]
+    let filter: NotificationInboxFilter
+    let style: NotificationInboxRowStyle
+    let pagesOlderRows: Bool
+    let onSelect: (NotificationInboxItem) -> Void
+
+    @Environment(AppModel.self) private var model
+    @Environment(\.tronPresentationActivity) private var presentationActivity
+    @Environment(\.scenePhase) private var scenePhase
+
+    var body: some View {
+        if model.notificationInbox.isLoading && notifications.isEmpty {
+            TronLoadingState(label: "Loading notifications from paired Gateways…", accent: .tronEmerald)
+                .frame(maxWidth: .infinity, minHeight: 220)
+        } else if notifications.isEmpty {
+            NotificationInboxEmptyState(filter: filter)
+        } else if PresentationClockPolicy.runs(
+            surfaceActive: presentationActivity.allowsContinuousAnimation,
+            sceneActive: scenePhase == .active
+        ) {
+            TimelineView(.periodic(from: .now, by: DashboardActivityClock.refreshInterval)) { timeline in
+                rows(relativeTo: timeline.date)
+            }
+        } else {
+            rows(relativeTo: .now)
+        }
+    }
+
+    @ViewBuilder
+    private func rows(relativeTo date: Date) -> some View {
+        LazyVStack(spacing: TronSpacing.md) {
+            ForEach(notifications) { item in
+                NotificationInboxRow(item: item, relativeTo: date, style: style) { onSelect(item) }
+            }
+            if pagesOlderRows {
+                ForEach(model.notificationInbox.olderPageTriggers(filter: filter), id: \.self) { trigger in
+                    NotificationInboxOlderPageRow(isLoading: model.notificationInbox.isLoadingOlder(trigger))
+                        // The cursor is part of the identity, so a completed page
+                        // re-arms the trigger instead of stalling on one fetch.
+                        .task(id: PresentationActivityTaskID(
+                            source: trigger,
+                            presentationActive: presentationActivity.allowsPresentationPublication
+                        )) {
+                            guard presentationActivity.allowsPresentationPublication else { return }
+                            await model.loadMoreNotificationHistory(
+                                profileID: trigger.profileID,
+                                filter: trigger.filter
+                            )
+                        }
+                }
+            }
+        }
+    }
+}
+
+struct NotificationInboxEmptyState: View {
+    let filter: NotificationInboxFilter
+
+    var body: some View {
+        TronPlaceholderState(
+            title: filter == .unread ? "No unread notifications" : "No notifications yet",
+            detail: filter == .unread
+                ? "New agent alerts will appear here until you mark them read."
+                : "Agent alerts from paired Gateways will appear here.",
+            icon: filter == .unread ? "bell.slash" : "bell",
+            accent: .tronEmerald
+        )
+        .frame(minHeight: 280)
+    }
+}
+
+private struct NotificationInboxOlderPageRow: View {
+    let isLoading: Bool
+
+    var body: some View {
+        Label(
+            isLoading ? "Loading older notifications…" : "Loading older notifications as you scroll",
+            systemImage: "arrow.down.circle"
+        )
+        .font(TronTypography.secondaryDescription)
+        .foregroundStyle(Color.tronTextSecondary)
+        .frame(maxWidth: .infinity)
+        .padding(.vertical, TronSpacing.md)
+        .accessibilityLabel(isLoading ? "Loading older notifications" : "Scroll for older notifications")
+    }
+}
+
 private struct NotificationInboxHistoryView: View {
     let openingItemID: String?
     let onOpenSession: (NotificationInboxItem) -> Void
     @Environment(AppModel.self) private var model
     @Environment(\.dismiss) private var dismiss
-    @Environment(\.tronPresentationActivity) private var presentationActivity
-    @Environment(\.scenePhase) private var scenePhase
     @State private var filter: NotificationInboxFilter = .all
     @State private var selectedItem: NotificationInboxItem?
-
-    private var visibleNotifications: [NotificationInboxItem] {
-        switch filter {
-        case .all: model.notificationInbox.notifications
-        case .unread: model.notificationInbox.notifications.filter(\.notification.isUnread)
-        }
-    }
-
-    @ViewBuilder
-    private func notificationHistoryRows(relativeTo date: Date) -> some View {
-        LazyVStack(spacing: TronSpacing.sm) {
-            ForEach(visibleNotifications) { item in
-                NotificationInboxRow(item: item, relativeTo: date, style: .plain) {
-                    selectedItem = item
-                    if item.notification.isUnread {
-                        Task { await model.markNotificationRead(item) }
-                    }
-                }
-            }
-            ForEach(model.notificationInbox.profilesWithOlderPages, id: \.self) { profileID in
-                Label(
-                    model.notificationInbox.loadingOlderProfiles.contains(profileID)
-                        ? "Loading older notifications…"
-                        : "Loading older notifications as you scroll",
-                    systemImage: "arrow.down.circle"
-                )
-                .font(TronTypography.secondaryDescription)
-                .foregroundStyle(Color.tronTextSecondary)
-                .frame(maxWidth: .infinity)
-                .padding(.vertical, TronSpacing.md)
-                .task(id: presentationActivity.allowsPresentationPublication) {
-                    guard presentationActivity.allowsPresentationPublication else { return }
-                    await model.loadMoreNotificationHistory(profileID: profileID)
-                    guard !Task.isCancelled, presentationActivity.allowsPresentationPublication else { return }
-                }
-            }
-        }
-    }
 
     var body: some View {
         NavigationStack {
             ScrollView(.vertical, showsIndicators: true) {
                 VStack(alignment: .leading, spacing: TronSpacing.lg) {
                     TronSegmentedControl(
-                        options: NotificationInboxFilter.allCases.map { ($0.rawValue, $0) },
+                        options: NotificationInboxFilter.allCases.map { ($0.label, $0) },
                         selection: $filter
                     )
                     .accessibilityLabel("Notification history filter")
-                    .accessibilityValue(filter.rawValue)
+                    .accessibilityValue(filter.label)
 
-                    if visibleNotifications.isEmpty {
-                        historyEmptyState
-                    } else if PresentationClockPolicy.runs(
-                        surfaceActive: presentationActivity.allowsContinuousAnimation,
-                        sceneActive: scenePhase == .active
-                    ) {
-                        TimelineView(.periodic(from: .now, by: DashboardActivityClock.refreshInterval)) { timeline in
-                            notificationHistoryRows(relativeTo: timeline.date)
-                        }
-                    } else {
-                        notificationHistoryRows(relativeTo: .now)
+                    NotificationInboxRowList(
+                        notifications: model.notificationInbox.notifications(filter: filter),
+                        filter: filter,
+                        style: .plain,
+                        pagesOlderRows: true,
+                        onSelect: select
+                    )
+                    if let failure = model.notificationInbox.failure {
+                        TronSettingsNotice(
+                            message: failure,
+                            accent: .tronAmber,
+                            retry: { Task { await model.refreshNotificationInbox() } }
+                        )
                     }
                 }
                 .padding(.horizontal, 20)
                 .padding(.top, 18)
                 .padding(.bottom, 40)
             }
+            .scrollBounceBehavior(.always)
+            .refreshable { await model.refreshNotificationInbox() }
             .tronScrollEdgeChrome()
             .navigationTitle("")
             .navigationBarTitleDisplayMode(.inline)
@@ -349,17 +358,15 @@ private struct NotificationInboxHistoryView: View {
         }
     }
 
-    private var historyEmptyState: some View {
-        TronPlaceholderState(
-            title: filter == .unread ? "No unread notifications" : "No notification history",
-            icon: filter == .unread ? "bell.slash" : "clock.arrow.circlepath",
-            accent: .tronEmerald
-        )
-        .frame(minHeight: 280)
+    private func select(_ item: NotificationInboxItem) {
+        selectedItem = item
+        if item.notification.isUnread {
+            Task { await model.markNotificationRead(item) }
+        }
     }
 }
 
-private enum NotificationInboxRowStyle {
+enum NotificationInboxRowStyle {
     case glass
     case plain
 }

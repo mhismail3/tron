@@ -36,7 +36,9 @@ struct AppModelInboxDrainTests {
                 try await model.connectHostedGateway(profile: profile, token: "synthetic-token")
                 withObservationTracking { _ = model.noticeCenter.notices } onChange: { changed.continuation.yield(()) }
                 await socket.enqueue(Data(#"{"type":"event","topic":"notification.inbox.changed","payload":{}}"#.utf8))
-                try await socket.waitUntilSent(count: 2)
+                // The invalidation refresh reads both server windows, so the two
+                // inbox pages are the only frames beyond the connect frame.
+                try await socket.waitUntilSent(count: 3)
                 flight = model.notificationInbox.scheduleRefresh(profile: profile) { _, _ in
                     Issue.record("The active refresh must retain its operation owner")
                 }
@@ -48,10 +50,10 @@ struct AppModelInboxDrainTests {
                 guard await iterator.next() != nil else { throw CancellationError() }
                 #expect(model.noticeCenter.notices.contains { $0.title == "Package operation completed" })
                 #expect(model.notificationInbox.isLoading)
-                #expect(await socket.sentFrames().count == 2)
+                #expect(await socket.sentFrames().count == 3)
                 let local = await model.loadGatewayLogsResult(includeRemote: false)
                 #expect(!local.records.isEmpty)
-                #expect(await socket.sentFrames().count == 2)
+                #expect(await socket.sentFrames().count == 3)
                 let connectionID = try #require(await client.activeConnectionID())
                 foreground = Task {
                     do {
@@ -106,21 +108,29 @@ struct AppModelInboxDrainTests {
                 try await foreground?.value
                 var replacementRequests: [[String: JSONValue]?] = []
                 var replacementFrameIndex = 1
-                var replacementMethods: Set<String> = []
-                while !replacementMethods.isSuperset(of: Set(["session.list", "notification.inbox.list"])) {
+                var replacementFilters: [String] = []
+                var replacementStartedCatalog = false
+                // One page per window: wait until both filters and the catalog
+                // read are on the wire before asserting the request set.
+                while !replacementStartedCatalog || Set(replacementFilters) != ["all", "unread"] {
                     try await replacement.waitUntilSent(count: replacementFrameIndex + 1)
                     let request = try JSONDecoder.gateway.decode(
                         JSONValue.self,
                         from: await replacement.sentFrames()[replacementFrameIndex]
                     ).objectValue
                     replacementRequests.append(request)
-                    if let method = request?["method"]?.stringValue {
-                        replacementMethods.insert(method)
+                    switch request?["method"]?.stringValue {
+                    case "session.list":
+                        replacementStartedCatalog = true
+                    case "notification.inbox.list":
+                        replacementFilters.append(request?["params"]?.objectValue?["filter"]?.stringValue ?? "")
+                    default:
+                        break
                     }
                     replacementFrameIndex += 1
                 }
                 #expect(replacementRequests.filter { $0?["method"]?.stringValue == "session.list" }.count == 1)
-                #expect(replacementRequests.filter { $0?["method"]?.stringValue == "notification.inbox.list" }.count == 1)
+                #expect(replacementFilters.sorted() == ["all", "unread"])
                 let replacementCatalog = try #require(replacementRequests.first { $0?["method"]?.stringValue == "session.list" })
                 let replacementRequestID = try #require(replacementCatalog?["id"]?.stringValue)
                 await replacement.enqueue(try JSONEncoder.gateway.encode(JSONValue.object([

@@ -349,6 +349,7 @@ actor GatewayEventHub {
         switch delivery.event.preparation {
         case .sessionSummary(let update): return "\(prefix)summary:\(update.sessionId)"
         case .none where delivery.event.topic == "session.listChanged": return "\(prefix)listChanged"
+        case .notificationInboxChanged: return "\(prefix)notificationInboxChanged"
         case .none where delivery.event.topic == "notification.inbox.changed": return "\(prefix)notificationInboxChanged"
         case .none where delivery.event.topic == "knowledge.changed": return "\(prefix)knowledgeChanged"
         case .none where delivery.event.topic == "devices.changed": return "\(prefix)devicesChanged"

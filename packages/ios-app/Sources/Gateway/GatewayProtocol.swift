@@ -91,6 +91,7 @@ enum GatewayEventPreparation: Sendable, Equatable {
     case sessionEvent(PreparedSessionEvent)
     case processTranscriptChanged(ProcessTranscriptChanged)
     case automationChanged(AutomationChanged)
+    case notificationInboxChanged(NotificationInboxChanged)
     case terminalEvent(PreparedTerminalEvent)
 }
 
@@ -163,6 +164,11 @@ struct GatewayEvent: Decodable, Sendable, Equatable {
         return event
     }
 
+    var preparedNotificationInboxChanged: NotificationInboxChanged? {
+        guard case .notificationInboxChanged(let change) = preparation else { return nil }
+        return change
+    }
+
     var sessionCursor: GatewayEventCursor? {
         switch preparation {
         case .sessionSnapshot(let snapshot):
@@ -180,7 +186,8 @@ struct GatewayEvent: Decodable, Sendable, Equatable {
                 runtimeGeneration: event.envelope.runtimeGeneration,
                 eventSequence: event.envelope.eventSequence
             )
-        case .none, .sessionSummary, .processTranscriptChanged, .automationChanged, .terminalEvent:
+        case .none, .sessionSummary, .processTranscriptChanged, .automationChanged,
+             .notificationInboxChanged, .terminalEvent:
             return nil
         }
     }
@@ -196,7 +203,8 @@ struct GatewayEvent: Decodable, Sendable, Equatable {
             return true
         case .none:
             return !topic.hasPrefix("session.")
-        case .sessionSummary, .processTranscriptChanged, .automationChanged, .terminalEvent:
+        case .sessionSummary, .processTranscriptChanged, .automationChanged,
+             .notificationInboxChanged, .terminalEvent:
             return true
         }
     }
@@ -226,6 +234,10 @@ struct GatewayEvent: Decodable, Sendable, Equatable {
             return (try? adapter.decode(SessionSummaryUpdate.self)).map(GatewayEventPreparation.sessionSummary) ?? .none
         case "automation.changed":
             return (try? adapter.decode(AutomationChanged.self)).map(GatewayEventPreparation.automationChanged) ?? .none
+        case "notification.inbox.changed":
+            guard let change = try? adapter.decode(NotificationInboxChanged.self),
+                  NotificationInboxAdmissionPolicy.admits(change) else { return .none }
+            return .notificationInboxChanged(change)
         case "session.snapshot":
             guard let snapshot = try? adapter.decode(SessionSnapshot.self),
                   SessionSnapshotTranscriptAdmissionPolicy.admit(snapshot),

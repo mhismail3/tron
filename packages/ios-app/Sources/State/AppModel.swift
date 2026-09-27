@@ -2985,14 +2985,14 @@ final class AppModel {
         for profile in enabled { await scheduleNotificationInboxRefresh(profile: profile).value }
     }
 
-    func loadMoreNotificationHistory(profileID: String) async {
+    func loadMoreNotificationHistory(profileID: String, filter: NotificationInboxFilter) async {
         guard let profile = notificationInboxProfiles().first(where: { $0.id == profileID }) else { return }
         let selectedProfileID = profiles.selected?.id
         let usesSelectedClient = selectedProfileID == profileID
         func connectionID() async -> Int? {
             usesSelectedClient ? await client.activeConnectionID() : await dashboardConnections.connectionID(for: profileID)
         }
-        await notificationInbox.loadNextPage(profileID: profileID) { [weak self] cursor, revision, expectedConnectionID in
+        await notificationInbox.loadNextPage(profileID: profileID, filter: filter) { [weak self] cursor, expectedConnectionID in
             guard let self, !Task.isCancelled else { throw CancellationError() }
             let before = await connectionID()
             guard before == expectedConnectionID,
@@ -3002,14 +3002,14 @@ final class AppModel {
             let page = usesSelectedClient
                 ? try await NotificationInboxGatewayClient.list(
                     client: self.client,
+                    filter: filter,
                     cursor: cursor,
-                    expectedRevision: revision,
                     expectedConnectionID: expectedConnectionID
                 )
                 : try await self.dashboardConnections.notificationInbox(
                     for: profileID,
+                    filter: filter,
                     cursor: cursor,
-                    revision: revision,
                     connectionID: expectedConnectionID
                 )
             let after = await connectionID()
@@ -3039,12 +3039,14 @@ final class AppModel {
     }
 
     func markAllNotificationsRead() async {
-        let profileIDs = notificationInbox.buckets.compactMap { $0.value.unreadCount > 0 ? $0.key : nil }
-        guard !profileIDs.isEmpty else { return }
-        notificationInbox.markAllReadOptimistically()
-        for profileID in profileIDs {
+        let targets = notificationInbox.readAllTargets
+        guard !targets.isEmpty, !notificationInbox.isMarkingAllRead else { return }
+        notificationInbox.beginMarkingAllRead()
+        defer { notificationInbox.finishMarkingAllRead() }
+        for target in targets {
+            notificationInbox.markAllReadOptimistically(target)
             do {
-                try await sendAllNotificationsRead(profileID: profileID)
+                try await sendAllNotificationsRead(profileID: target.profileID, through: target.through)
             } catch {
                 presentError((error as? GatewayFailure)?.message ?? "Unable to mark notifications read.")
             }
@@ -3108,15 +3110,36 @@ final class AppModel {
         guard profiles.selected?.id == selectedProfileID,
               profiles.profiles.first(where: { $0.id == profile.id }) == profile else { return }
         do {
-            let snapshot = usesSelectedClient
-                ? try await NotificationInboxGatewayClient.list(client: client)
-                : try await dashboardConnections.notificationInbox(for: profile.id)
+            // Both server windows refresh together: `all` is the shared row
+            // source and `unread` is the only source for the Unread filter.
+            func page(_ filter: NotificationInboxFilter) async throws -> NotificationInboxGatewayClient.Snapshot {
+                usesSelectedClient
+                    ? try await NotificationInboxGatewayClient.list(
+                        client: client,
+                        filter: filter,
+                        expectedConnectionID: initialConnectionID
+                    )
+                    : try await dashboardConnections.notificationInbox(
+                        for: profile.id,
+                        filter: filter,
+                        connectionID: initialConnectionID
+                    )
+            }
+            async let all = page(.all)
+            async let unread = page(.unread)
+            let (allPage, unreadPage) = try await (all, unread)
             let currentConnectionID = await connectionID()
             guard profiles.selected?.id == selectedProfileID,
                   profiles.profiles.first(where: { $0.id == profile.id }) == profile,
                   currentConnectionID == initialConnectionID,
-                  snapshot.connectionID == initialConnectionID else { return }
-            notificationInbox.install(profile: profile, snapshot: snapshot, generation: generation)
+                  allPage.connectionID == initialConnectionID,
+                  unreadPage.connectionID == initialConnectionID else { return }
+            notificationInbox.merge(
+                profile: profile,
+                all: allPage,
+                unread: unreadPage,
+                generation: generation
+            )
         } catch let failure as GatewayFailure where failure.code == "unsupported" {
             let currentConnectionID = await connectionID()
             guard currentConnectionID == initialConnectionID,
@@ -3161,21 +3184,25 @@ final class AppModel {
         }
     }
 
-    private func sendAllNotificationsRead(profileID: String) async throws {
+    private func sendAllNotificationsRead(profileID: String, through: String) async throws {
         let commandID = uuidSource.next().uuidString
         if profileID == profiles.selected?.id {
-            struct Params: Encodable { let commandId: String }
+            struct Params: Encodable { let commandId: String; let through: String }
             _ = try await mutationExecutor.performValue(
                 method: "notification.inbox.readAll",
                 commandID: commandID
             ) {
                 try await self.client.request(
                     "notification.inbox.readAll",
-                    Params(commandId: commandID)
+                    Params(commandId: commandID, through: through)
                 ) as JSONValue
             }
         } else {
-            try await dashboardConnections.markAllNotificationsRead(profileID: profileID, commandID: commandID)
+            try await dashboardConnections.markAllNotificationsRead(
+                profileID: profileID,
+                through: through,
+                commandID: commandID
+            )
         }
     }
 
@@ -4502,7 +4529,15 @@ final class AppModel {
         case "models.recentChanged":
             providerAuth.noteRecentModelsChanged()
         case "notification.inbox.changed":
-            if let profile = profiles.selected { scheduleNotificationInboxRefresh(profile: profile) }
+            // The payload is Gateway authority for the bell; only an unread
+            // revision is a real invalidation of this projection.
+            if let profile = profiles.selected,
+               notificationInbox.applyInboxChanged(
+                   profileID: profile.id,
+                   change: event.preparedNotificationInboxChanged
+               ) {
+                scheduleNotificationInboxRefresh(profile: profile)
+            }
         case "devices.changed":
             deviceCatalogRevision &+= 1
         case "automation.changed":
@@ -4740,8 +4775,9 @@ extension AppModel: DashboardGatewayConnectionPoolDelegate {
         automationCatalog.invalidate(profileID: profileID)
     }
 
-    func dashboardPoolNotificationInboxChanged(profileID: String) {
+    func dashboardPoolNotificationInboxChanged(profileID: String, change: NotificationInboxChanged?) {
         guard let profile = profiles.profiles.first(where: { $0.id == profileID }) else { return }
+        guard notificationInbox.applyInboxChanged(profileID: profileID, change: change) else { return }
         scheduleNotificationInboxRefresh(profile: profile)
     }
 

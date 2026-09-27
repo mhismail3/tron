@@ -23,7 +23,7 @@ protocol DashboardGatewayConnectionPoolDelegate: AnyObject {
         sessions: [SessionSummary],
         state: DashboardServerConnectionState
     )
-    func dashboardPoolNotificationInboxChanged(profileID: String)
+    func dashboardPoolNotificationInboxChanged(profileID: String, change: NotificationInboxChanged?)
     func dashboardPoolAutomationChanged(profileID: String)
     func dashboardPoolDevicesChanged(profileID: String)
     /// The Gateway-owned archived count for one background profile. `nil` means
@@ -199,8 +199,8 @@ final class DashboardGatewayConnectionPool {
 
     func notificationInbox(
         for profileID: String,
+        filter: NotificationInboxFilter,
         cursor: String? = nil,
-        revision: String? = nil,
         connectionID: Int? = nil
     ) async throws -> NotificationInboxGatewayClient.Snapshot {
         guard let client = entries[profileID]?.client else {
@@ -208,8 +208,8 @@ final class DashboardGatewayConnectionPool {
         }
         return try await NotificationInboxGatewayClient.list(
             client: client,
+            filter: filter,
             cursor: cursor,
-            expectedRevision: revision,
             expectedConnectionID: connectionID
         )
     }
@@ -228,11 +228,11 @@ final class DashboardGatewayConnectionPool {
         try await NotificationInboxGatewayClient.markRead(requestID: requestID, client: client, commandID: commandID)
     }
 
-    func markAllNotificationsRead(profileID: String, commandID: String) async throws {
+    func markAllNotificationsRead(profileID: String, through: String, commandID: String) async throws {
         guard let client = entries[profileID]?.client else {
             throw GatewayFailure(code: "disconnected", message: "The Mac gateway is offline.", retryable: true, details: nil)
         }
-        try await NotificationInboxGatewayClient.markAllRead(client: client, commandID: commandID)
+        try await NotificationInboxGatewayClient.markAllRead(client: client, commandID: commandID, through: through)
     }
 
     func devices(for profileID: String) async throws -> [PairedDevice] {
@@ -463,7 +463,10 @@ final class DashboardGatewayConnectionPool {
         case "session.listChanged":
             scheduleRefresh(profileID: profileID, generation: generation)
         case "notification.inbox.changed":
-            delegate?.dashboardPoolNotificationInboxChanged(profileID: profileID)
+            delegate?.dashboardPoolNotificationInboxChanged(
+                profileID: profileID,
+                change: event.preparedNotificationInboxChanged
+            )
         case "devices.changed":
             delegate?.dashboardPoolDevicesChanged(profileID: profileID)
         case "automation.changed":
