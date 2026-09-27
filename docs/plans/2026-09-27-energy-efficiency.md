@@ -2,7 +2,7 @@
 
 - **Started:** 2026-09-27
 - **Status:** Active (approved in chat by the user on 2026-09-27)
-- **Last updated:** 2026-09-27, P-2 done
+- **Last updated:** 2026-09-27, T1-GW done
 - **Goal:** Tron for iPhone does measurably less CPU, disk, timer and radio work per minute of real use, proven by a reliable profiler that every agent can run, with no change to what the user sees or does.
 
 ## Goal and constraints
@@ -127,7 +127,7 @@ still has to confirm the same offer (T3-DEFLATE).
 | P-2 | Done | Gateway wire-traffic profiler (`gateway` subcommand), isolated fixture Gateway with a faux model, recording client, per-topic frame and byte report (details below) | none | energy-efficiency supervisor, worker lane p2, 2026-09-27 |
 | P-3 | Needs scoping | Attribution: `--trace` for iOS scenarios (xctrace Time Profiler, SwiftUI, Points of Interest; exported top-symbol summary) and an attach-only `device` mode for a user-launched LocalDevice app | P-1 | |
 | P-4 | Needs scoping | Baseline: run every P-1 and P-2 scenario on `main`, record the numbers and host state in this plan's Context | P-1, P-2 | |
-| T1-GW | Claimed | Gateway: re-arm the streaming throttle; delete `session.bashProgress` and `session.heartbeat`; skip the heartbeat ping while a client proved liveness within the interval, keeping today's detection bound | none (keep decision: P-1, P-2) | energy-efficiency supervisor, worker lane t1-gw, 2026-09-27 |
+| T1-GW | Done | Gateway: re-arm the streaming throttle; delete `session.bashProgress` and `session.heartbeat`; skip the heartbeat ping while a client proved liveness within the interval, keeping today's detection bound | none (keep decision: P-1, P-2) | energy-efficiency supervisor, worker lane t1-gw, 2026-09-27 |
 | T1-CACHE | Claimed | `SnapshotCache`: drop checkpoints that cannot change it, coalesce summary checkpoints and checkpoint on background, drop the save-path double admission pass | none (keep decision: P-1, P-2) | energy-efficiency supervisor, worker lane t1-persist, 2026-09-27 |
 | T1-DRAFTS | Claimed | `ComposerDraftStore`: in-memory logical clock, size accounting without re-hashing, manifest-only writes when attachments are unchanged; no observable mutation for unchanged text | none (keep decision: P-1, P-2) | energy-efficiency supervisor, worker lane t1-persist, 2026-09-27 |
 | T1-TEXT | Claimed | `discreteInsertedIDs` to O(n) with an equivalence check; `ChatStreamingInlineText` keeps settled text whole (preserving the streaming-flip reveal state) and caches the revealed prefix | none (keep decision: P-1, P-2) | energy-efficiency supervisor, worker lane t1-text, 2026-09-27 |
@@ -365,4 +365,33 @@ time.
 - For the next agent: record P-4 on a quiet host (loads above 100 were seen
   during this work); the duplicate prompt-admission snapshot is a candidate for
   a later Gateway task; report the Pi model-restore race upstream.
+
+### T1-GW · Done · 2026-09-27 · energy-efficiency supervisor (worker lane t1-gw)
+
+- Result: the streaming throttle re-arms after a sending window, so continuous
+  streaming sends one `session.progress` per 150 ms instead of two;
+  `session.bashProgress` and `session.heartbeat` are no longer emitted; the
+  server heartbeat still counts every tick but pings only a client that sent
+  no message or ping of its own in the last interval.
+- Evidence: `scripts/tron-profile gateway` on `main` (`982956b39`) versus this
+  branch, three iterations each: stream-reply progress frames 284 → 148 and
+  mobile bytes 1.29 MiB → 716 KiB (−46%); tool-loop total frames 330 → 219;
+  idle server pings to each phone 3 → 0 per minute. Gateway CPU time and
+  cycles moved within host contention (baseline load 115, instructions
+  unchanged); these are Mac-side. New `server-heartbeat.integration.test.ts`
+  proves dead-client termination on today's exact tick and pings for pong-only
+  and silent clients; negative controls failed as expected (old throttle,
+  pong-suppressed pings, counting only pinged ticks). Full Gateway suite
+  1984/1985 (the logger rotation timeout passes alone).
+- Changes: `runtime-slot.ts`, `server.ts`, the heartbeat and coalescing tests,
+  `packages/gateway/README.md`, `packages/gateway/docs/connection-resilience.md`,
+  `packages/gateway/docs/observability.md`, `packages/ios-app/docs/events.md`,
+  `packages/ios-app/docs/architecture.md`.
+- Deviations: the user's supervisor chose the client-initiated rule for the
+  heartbeat (pongs never suppress a ping); its only residual is documented in
+  `connection-resilience.md`: a client that goes quiet after sending may get its
+  first server ping one tick later, so its pong must return within about 50 s
+  instead of 75 s.
+- For the next agent: the Gateway sometimes sends an extra `session.snapshot`
+  at prompt admission (P-2 timeline); a candidate for a later task.
 
