@@ -2,7 +2,7 @@
 
 - **Started:** 2026-09-27
 - **Status:** Active (approved in chat by the user on 2026-09-27)
-- **Last updated:** 2026-09-27, T1-GW done
+- **Last updated:** 2026-09-27, T3-DEFLATE done
 - **Goal:** Tron for iPhone does measurably less CPU, disk, timer and radio work per minute of real use, proven by a reliable profiler that every agent can run, with no change to what the user sees or does.
 
 ## Goal and constraints
@@ -133,7 +133,7 @@ still has to confirm the same offer (T3-DEFLATE).
 | T1-TEXT | Claimed | `discreteInsertedIDs` to O(n) with an equivalence check; `ChatStreamingInlineText` keeps settled text whole (preserving the streaming-flip reveal state) and caches the revealed prefix | none (keep decision: P-1, P-2) | energy-efficiency supervisor, worker lane t1-text, 2026-09-27 |
 | T1-CLOCKS | Ready | Timeline schedules that fire when a label can change: dashboard rows, tool elapsed timers (sub-minute cadence preserved), static inbox formatter | none (keep decision: P-1, P-2) | |
 | T1-NET | Ready | One shared ping grid for every socket (no interval ever longer than today), lease renewal on that grid at no longer than today's interval, one shared `URLSession` for idempotent GETs with per-task delegates | none (keep decision: P-1, P-2) | |
-| T3-DEFLATE | Claimed | Negotiate `permessage-deflate` for paired (non-loopback) clients that offer it; confirm the offer from the iOS simulator app, keep inbound size bounds on decompressed bytes, and keep outbound queue accounting and backpressure exact | none (keep decision: P-2) | energy-efficiency supervisor, worker lane t3-deflate, 2026-09-27 |
+| T3-DEFLATE | Done | Negotiate `permessage-deflate` for paired (non-loopback) clients that offer it; confirm the offer from the iOS simulator app, keep inbound size bounds on decompressed bytes, and keep outbound queue accounting and backpressure exact | none (keep decision: P-2) | energy-efficiency supervisor, worker lane t3-deflate, 2026-09-27 |
 | T2-CHATVIEW | Needs scoping | ChatView observes the snapshot and the installed transcript in separate child scopes; response state computed with the installed transcript | T1-TEXT | |
 | T2-DASH | Needs scoping | Dashboard root stops re-evaluating on every summary; parsed ordering instants; cheaper per-row path helpers; filter preferences saved only on change | T1-CLOCKS | |
 | T2-THINK | Needs scoping | Thinking trace measures its visible text instead of a hidden full copy | T1-TEXT | |
@@ -394,4 +394,44 @@ time.
   instead of 75 s.
 - For the next agent: the Gateway sometimes sends an extra `session.snapshot`
   at prompt admission (P-2 timeline); a candidate for a later task.
+
+### T3-DEFLATE · Done · 2026-09-27 · energy-efficiency supervisor (worker lane t3-deflate)
+
+- Result: paired clients that offer `permessage-deflate` get compressed frames
+  with context takeover (zlib level 6, memLevel 8, 15 window bits, two
+  concurrent zlib jobs); local-credential clients stay uncompressed through a
+  second WebSocket server chosen in the upgrade handler by the existing
+  credential check. `connection.opened` records the negotiated compression.
+- Evidence: `scripts/tron-profile gateway` against `main` at `060697d21`,
+  three iterations each: phone socket bytes for stream-reply 705 KiB → 13.6 KiB
+  (−98%), tool-loop 15.5 MiB → 1.6 MiB (−89.5%), idle 468 B → 198 B. Mac-side
+  cost: tool-loop Gateway instructions +47% (about 14 ms of zlib per 600 KB
+  snapshot, 0.1 ms per streaming frame); the +3.6% message-byte move is the
+  Gateway's timing-dependent extra admission snapshot noted under P-2, not
+  compression. The real iOS simulator app negotiated compression on all ten
+  connections of `scripts/ios-gateway-e2e-test run` (fixture proxy log and
+  Gateway `connection.opened` records), with every existing fault case passing;
+  a compressed frame of exactly 1 MiB decodes and one byte more retires the
+  epoch with `frame_too_large`. New `server-compression.integration.test.ts`
+  proves over-limit payloads are refused before compression on all five send
+  paths and that `maxPayload` bounds inflated inbound size; negative controls
+  (compressing local clients, numeric window options, raised `maxPayload`,
+  letting fallback frames through, an uncompressed proxy) all failed as
+  expected. Transport suite 295/295 after rebasing over T1-GW.
+- Changes: `server.ts`, the compression and capacity tests,
+  `scripts/ios-gateway-fault-proxy.mjs` (mirrors the app's offer; exact-size
+  `inject-frame`), `RealGatewayPiBoundaryTests` (test code only),
+  `packages/gateway/docs/connection-resilience.md` (Frame compression),
+  `packages/gateway/docs/observability.md`, `packages/gateway/README.md`,
+  `packages/ios-app/docs/architecture.md`.
+- Deviations: CFNetwork's `maximumMessageSize` bounds compressed wire bytes, so
+  the phone now rejects an over-ceiling frame after inflation
+  (`frame_too_large`) instead of in URLSession; correct traffic is unchanged
+  because the Gateway refuses decoded frames over 1 MiB before enqueue. The
+  residual (memory before rejection against a broken or malicious paired
+  Gateway) is documented and was accepted by the supervisor.
+- For the next agent: T3-STREAM and T3-TOOLPROG are now judged against
+  compressed bytes: cumulative streaming frames already compress to about 1.3%,
+  so their remaining value is phone decode CPU, not radio. T3-TRANSCRIPT still
+  removes the phone's decode of up to 800 KB per snapshot.
 
