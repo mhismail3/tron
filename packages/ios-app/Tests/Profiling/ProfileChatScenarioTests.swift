@@ -468,11 +468,11 @@ enum ProfileTranscript {
 }
 
 /// `session.progress` at the Gateway's cadence: the SDK reports a token every
-/// 12.5 ms; `RuntimeSlot.emitProgress` sends the first update at once, starts
-/// a 150 ms timer, sends the latest pending update when it fires, and the next
-/// update after that starts a new window (so about two frames per window).
-/// Every frame carries the cumulative reply: a thinking segment for the first
-/// 3 s, then Markdown text.
+/// 12.5 ms; `RuntimeSlot.emitProgress` sends the first update after a quiet
+/// window at once, then at most one frame per 150 ms window (a window that
+/// sent re-arms the timer; only an empty window ends the throttle). Every frame
+/// carries the cumulative reply: a thinking segment for the first 3 s, then
+/// Markdown text.
 enum ProfileStreamingScript {
     static let tokenInterval = Duration.microseconds(12_500)
     static let flushWindow = Duration.milliseconds(150)
@@ -511,7 +511,8 @@ enum ProfileStreamingScript {
                 id: "streaming", parent: promptID, role: .assistant, content: content, presentationID: "stream:profile"
             ))
         }
-        // Replay RuntimeSlot's leading-edge + trailing-timer coalescing.
+        // Replay RuntimeSlot's throttle: an immediate first frame, then one
+        // frame per window while updates keep arriving.
         var timerFires: Duration?
         var pending: Int?
         func emit(_ tokens: Int, at offset: Duration) throws {
@@ -521,12 +522,19 @@ enum ProfileStreamingScript {
                 data: .object(["message": message(tokens: tokens + 1)]), offset: offset
             ))
         }
-        for (offset, tokens) in updates {
-            if let fires = timerFires, fires <= offset {
-                timerFires = nil
-                if let pending { try emit(pending, at: fires) }
-                pending = nil
+        func fireTimers(through offset: Duration, inclusive: Bool) throws {
+            while let fires = timerFires, inclusive ? fires <= offset : fires < offset {
+                if let sent = pending {
+                    try emit(sent, at: fires)
+                    pending = nil
+                    timerFires = fires + flushWindow
+                } else {
+                    timerFires = nil
+                }
             }
+        }
+        for (offset, tokens) in updates {
+            try fireTimers(through: offset, inclusive: true)
             pending = tokens
             if timerFires == nil {
                 timerFires = offset + flushWindow
@@ -534,7 +542,7 @@ enum ProfileStreamingScript {
                 pending = nil
             }
         }
-        if let fires = timerFires, let pending, fires < window { try emit(pending, at: fires) }
+        try fireTimers(through: window, inclusive: false)
         return frames
     }
 }
