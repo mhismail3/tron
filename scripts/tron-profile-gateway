@@ -176,6 +176,65 @@ def bounded(phase: str, command: list[str], evidence_root: Path, overall: float,
         raise ProfileFailure(f"{phase} failed (exit {status})", failure_code, log_path)
 
 
+def _node_candidates(version: str) -> list[Path]:
+    """Bin directories that may hold the pinned Node, most explicit first."""
+    candidates: list[Path] = []
+    override = os.environ.get("TRON_PROFILE_NODE_BIN")
+    if override:
+        candidates.append(Path(override).expanduser())
+    for entry in os.environ.get("PATH", "").split(os.pathsep):
+        if entry and (Path(entry) / "node").is_file():
+            candidates.append(Path(entry))
+    candidates.append(Path.home() / f".nvm/versions/node/v{version}/bin")
+    candidates += [Path("/opt/homebrew/opt/node@22/bin"), Path("/opt/homebrew/bin"), Path("/usr/local/bin")]
+    unique: list[Path] = []
+    for candidate in candidates:
+        if candidate not in unique:
+            unique.append(candidate)
+    return unique
+
+
+def _node_admitted(bin_dir: Path, version: str) -> bool:
+    """Exact pinned version, npm beside it, and able to load the Gateway's
+    native addon. A signed runtime (for example a Gateway payload's node,
+    which is first on PATH inside Tron agent sessions) rejects unsigned
+    addons, so an installed addon is probed rather than assumed."""
+    node, npm = bin_dir / "node", bin_dir / "npm"
+    if not node.is_file() or not npm.exists():
+        return False
+    try:
+        observed = subprocess.run([str(node), "--version"], capture_output=True, text=True, timeout=20).stdout.strip()
+    except (OSError, subprocess.SubprocessError):
+        return False
+    if observed != f"v{version}":
+        return False
+    addon = GATEWAY / "node_modules/node-pty"
+    if addon.is_dir():
+        try:
+            probe = subprocess.run([str(node), "-e", "require(process.argv[1])", str(addon)],
+                                   capture_output=True, text=True, timeout=60)
+        except (OSError, subprocess.SubprocessError):
+            return False
+        return probe.returncode == 0
+    return "/.tron/gateway/payloads/" not in str(node.resolve())
+
+
+def adopt_pinned_node() -> None:
+    """Put an admissible pinned Node first on PATH for this process and every
+    child (npm, the fixture Gateway, the driver), so agents need no setup."""
+    version = (ROOT / ".node-version").read_text().strip()
+    for bin_dir in _node_candidates(version):
+        if _node_admitted(bin_dir, version):
+            os.environ["PATH"] = os.pathsep.join([str(bin_dir), os.environ.get("PATH", "")])
+            log(f"using Node {version} from {bin_dir}")
+            return
+    raise ProfileFailure(
+        f"no Node v{version} that can load the Gateway's native addon was found; install the "
+        "repository-pinned Node (.node-version) or set TRON_PROFILE_NODE_BIN to its bin directory",
+        EXIT_FIXTURE,
+    )
+
+
 def build_gateway(evidence_root: Path) -> None:
     toolchain = subprocess.run([str(ROOT / "scripts/verify-ci-toolchain.sh"), "node"], check=False,
                                capture_output=True, text=True, timeout=60)
@@ -302,8 +361,8 @@ class FixtureGateway:
                 hint = ""
                 if "Failed to load native module" in self.log_path.read_text(errors="replace"):
                     hint = (f"; {shutil.which('node')} could not load the Gateway's native addon (a signed runtime "
-                            "such as a Gateway payload's node rejects it), so put the repository-pinned Node "
-                            "(.node-version) first on PATH")
+                            "such as a Gateway payload's node rejects it); set TRON_PROFILE_NODE_BIN to the "
+                            "repository-pinned Node's bin directory")
                 raise ProfileFailure(f"fixture Gateway exited during startup (exit {self.process.returncode}){hint}",
                                      EXIT_FIXTURE, self.log_path)
             if enrollment.is_file() and self.healthy():
@@ -740,6 +799,7 @@ def main(argv: list[str]) -> int:
     root = report_module.profile_root()
     try:
         with profile_lock(root / "gateway", args.lock_wait_seconds):
+            adopt_pinned_node()
             if args.no_build:
                 if not ENTRY.is_file():
                     raise ProfileFailure(f"--no-build requires an existing build at {ENTRY}", EXIT_BUILD)

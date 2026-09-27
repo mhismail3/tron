@@ -2290,10 +2290,13 @@ home on a free loopback port, with the faux model in
 default, answers derived only from the prompt directive and canonical context),
 no user state, and analytics off. It never contacts the user's Gateway. The
 orchestrator stops the fixture after checking its PID and command, then removes
-its home on success, failure, deadline and interruption. The fixture needs the
-repository-pinned Node on `PATH`; a signed runtime `node` (such as a Gateway
-payload's) cannot load the unsigned `node-pty` addon, and startup fails with that
-hint. Runs are serialized per host by a lock under the profile root.
+its home on success, failure, deadline and interruption. The profiler finds the
+repository-pinned Node itself: the first bin directory (`TRON_PROFILE_NODE_BIN`,
+then `PATH`, then the nvm and Homebrew locations) whose `node` has the exact
+`.node-version`, has `npm` beside it and can load the Gateway's unsigned
+`node-pty` addon. A signed runtime such as a Gateway payload's `node`, which
+Tron agent sessions have first on `PATH`, rejects that addon and is skipped.
+Runs are serialized per host by a lock under the profile root.
 
 `scripts/tron-profile-gateway-driver.mjs` pairs through `POST /v1/pair` and
 connects clients that behave like the phone: they offer `permessage-deflate` with
