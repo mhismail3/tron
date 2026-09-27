@@ -413,6 +413,9 @@ struct QueuedMessageRow: View {
     let canMoveEarlier: Bool
     let canMoveLater: Bool
     let onMove: (Int) -> Void
+    /// True while the session compacts; the Gateway delivers queued messages
+    /// only after the summary settles.
+    var waitsForCompaction = false
 
     private var isManageable: Bool { managementAvailability.isManageable }
 
@@ -423,7 +426,8 @@ struct QueuedMessageRow: View {
     }
 
     private var deliveryDetail: String {
-        behavior == .steer ? "After the current turn" : "After current work"
+        if waitsForCompaction { return "After compaction" }
+        return behavior == .steer ? "After the current turn" : "After current work"
     }
 
     private var displayText: String {

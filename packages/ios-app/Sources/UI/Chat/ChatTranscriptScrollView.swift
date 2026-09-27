@@ -1064,7 +1064,8 @@ struct ChatTranscriptScrollView<Earlier: View, Opening: View>: View {
                     canMoveEarlier: index > 0 && messages[index - 1].behavior == message.behavior,
                     canMoveLater: index + 1 < messages.count
                         && messages[index + 1].behavior == message.behavior,
-                    onMove: { onMoveQueuedMessage(message.id, $0) }
+                    onMove: { onMoveQueuedMessage(message.id, $0) },
+                    waitsForCompaction: installed.tag.layoutIdentity.phase == .compacting
                 )
                 .padding(.bottom, ChatTranscriptLayoutConstants.rowSpacing)
             }
