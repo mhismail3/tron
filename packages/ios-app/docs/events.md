@@ -151,7 +151,7 @@ admits and reduces mounted-session topics:
   owner is invoked, and success is returned only after the fenced foreground work settles.
   `pendingPrompt` is the companion transient admission for a prompt
   whose canonical user entry is still being prepared, including automatic compaction
-  during prompt preflight. The snapshot's `acceptsQueuedPrompts` fact comes directly
+  during prompt preflight and a prompt the Gateway holds behind manual compaction. The snapshot's `acceptsQueuedPrompts` fact comes directly
   from live Pi streaming state and is distinct from broad session phase and queue CRUD
   capability. Without it a prompt remains semantically ordinary (never a fabricated
   `queuedItem`) and uses the shared

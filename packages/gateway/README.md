@@ -1214,7 +1214,13 @@ instead of retaining a stale queue latch. A Pi call rejected before any of those
 terminalizes and releases the exact admission rather than leaving the serialized RPC pending. It does not race preflight against a local deadline that could report rejection while
 the same uncancelled runtime call later starts canonical work. While the canonical user
 entry is pending, the snapshot's bounded `pendingPrompt` projection carries ordinary display
-content only; requested queue behavior appears only after Pi actually enqueues it. The Gateway claims the exact Pi user-message object,
+content only; requested queue behavior appears only after Pi actually enqueues it. A prompt that arrives
+while manual compaction owns the session lane, or while admission waits behind a settling run, is
+projected through the same `pendingPrompt` field before it enters the lane, under the operation ID its
+admission later returns. Every client, including one reconnecting after the sender's transport closed,
+therefore sees it waiting; admission hands the projection to the preflight prompt in the same published
+turn, and a prompt rejected at admission withdraws it. Only one waiting prompt is projectable; a later
+waiter remains visible only to its own RPC. The Gateway claims the exact Pi user-message object,
 retires the projection only for that same message at persistence, and exposes the prompt
 operation ID as the canonical user's bounded `presentationId`; repeated text therefore
 cannot settle the wrong mobile admission. A known operation ID never falls back to content matching on

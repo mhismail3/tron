@@ -250,6 +250,13 @@ describe("WebSocket connection and outbound capacity", () => {
     await bounded(waitUntil(() => (gateway as any).clients.size === 1), "overload capacity release");
     expect(invoke.mock.calls.map((call) => call[1])).toEqual(["accepted-command", "system.info"]);
     expect(completedCommands).toBe(1);
+    // The command finished; only its response was undeliverable. The log must
+    // not report the accepted work itself as failed.
+    const completion = () => logger.log.mock.calls.find((call) =>
+      call[2]?.event === "rpc.completed" && call[2]?.method === "accepted-command");
+    await bounded(waitUntil(() => completion() !== undefined), "accepted command completion log");
+    expect(completion()?.[2]).toMatchObject({ outcome: "connectionClosed" });
+    expect(completion()?.[1]).toContain("(connectionClosed)");
     expect(sessions.unsubscribeClient).toHaveBeenCalledExactlyOnceWith(connection.id);
     expect(healthy.peer.readyState).toBe(WebSocket.OPEN);
     await open(); // Capacity can be used again without a Gateway restart.

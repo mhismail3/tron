@@ -651,6 +651,11 @@ export class RuntimeSlot {
   private queuedMessages: RuntimeQueuedMessage[] = [];
   private pendingQueueAdmission: PendingQueueAdmission | undefined;
   private pendingPrompt: PendingPromptState | undefined;
+  /** Prompt received while compaction or a settling run blocks admission. It
+   * has no operation yet but is projected as `pendingPrompt`, so every client
+   * (including one reconnecting after the sender's transport closed) sees the
+   * waiting message. Admission hands off to `pendingPrompt` under the same id. */
+  private heldPrompt: PendingPromptState | undefined;
   /** Exact Pi message object claimed by the foreground pending prompt. */
   private pendingPromptMessage: AgentMessage | undefined;
   /** Canonical user messages produced by queued resource/plain invocations. */
@@ -5691,6 +5696,7 @@ export class RuntimeSlot {
     // runtime row.
     const canonicalToolResultIDs = canonicalToolResultCallIDsFromBranch(canonicalBranch);
     const queuedItems = this.projectedQueue();
+    const projectedPendingPrompt = this.pendingPrompt ?? this.heldPrompt;
     const processProjection = this.currentProcessProjection();
     const acceptsQueuedPrompts = session.isStreaming && !this.isAgentAdmissionSettling;
     const activeToolSegmentId = acceptsQueuedPrompts && this.effectivePhase === "running"
@@ -5731,7 +5737,7 @@ export class RuntimeSlot {
       },
       queueRevision: this.queueRevision,
       queuedItems,
-      ...(this.pendingPrompt ? { pendingPrompt: this.pendingPrompt } : {}),
+      ...(projectedPendingPrompt ? { pendingPrompt: projectedPendingPrompt } : {}),
       compactionQueued: this.pendingManualCompaction !== undefined,
       automaticCompactionEnabled: session.autoCompactionEnabled,
       transcript: transcriptPage.items,
@@ -6072,6 +6078,10 @@ export class RuntimeSlot {
     onAdmitted?: (result: { operationId: string }) => void,
     ownership?: PromptOwnership,
   ): Promise<{ operationId: string }> {
+    // Allocated before the hold so the held projection and the admitted
+    // operation share one identity across the handoff.
+    const operationId = ownership?.operationId ?? randomUUID();
+    this.holdPromptWhileAdmissionWaits(operationId, text, images, queueDisplay);
     return this.lane.run(async () => {
       ownership?.signal?.throwIfAborted();
       this.assertUsable();
@@ -6132,7 +6142,6 @@ export class RuntimeSlot {
         this.contextPolicies.get(session)?.apply();
       }
       let queuesIntoActiveRun = session.isStreaming && behavior !== undefined && !isExactExtensionCommand;
-      const operationId = ownership?.operationId ?? randomUUID();
       if (ownership && this.automationTerminalObservers.has(operationId)) {
         throw new GatewayError("conflict", "Automation operation is already registered", true);
       }
@@ -6282,6 +6291,10 @@ export class RuntimeSlot {
           };
         }
 
+        // Each branch below publishes its successor state in the same turn, so
+        // a held prompt never disappears between hold and admission.
+        const releasedHold = this.heldPrompt?.id === operationId;
+        if (releasedHold) this.heldPrompt = undefined;
         if (isExactExtensionCommand) {
           this.pendingExtensionCommand = { id: operationId, kind: "command", startedAt: new Date().toISOString(), invocationId, lifecycle: "staged" };
           // Exact commands run before Pi's preflight callback and can wait on UI
@@ -6296,33 +6309,14 @@ export class RuntimeSlot {
           this.phase = "running";
           this.operation = { id: operationId, kind: "prompt", startedAt: new Date().toISOString(), invocationId, lifecycle: "staged" };
           this.pendingPromptMessage = undefined;
-          this.pendingPrompt = {
-            id: operationId,
-            createdAt: new Date().toISOString(),
-            // Requested queue behavior is advisory until Pi actually enqueues.
-            // A prompt admitted after the run settles remains ordinary.
-            text: boundedSummaryText(
-              queueDisplay?.text ?? text,
-              MAXIMUM_PENDING_PROMPT_BYTES
-            ),
-            attachmentCount: queueDisplay?.attachmentCount ?? images.length,
-            ...(queueDisplay?.resourceInvocation === undefined
-              ? {}
-              : { resourceInvocation: queueDisplay.resourceInvocation }),
-            ...(queueDisplay?.photoCount === undefined && images.length === 0
-              ? {}
-              : { photoCount: queueDisplay?.photoCount ?? images.length }),
-            ...(queueDisplay?.fileAttachmentCount === undefined && images.length === 0
-              ? {}
-              : {
-                  fileAttachmentCount: queueDisplay?.fileAttachmentCount
-                    ?? Math.max(0, (queueDisplay?.attachmentCount ?? images.length) - (queueDisplay?.photoCount ?? images.length)),
-                }),
-            ...(queueDisplay?.attachments === undefined ? {} : { attachments: queueDisplay.attachments }),
-          };
+          this.pendingPrompt = this.promptDisplay(operationId, text, images, queueDisplay);
           this.revision += 1;
           // Publish before entering Pi preflight. Automatic compaction can begin
           // inside that call before the RPC receives its admission result.
+          this.publishSnapshot();
+        } else if (releasedHold) {
+          // Queued delivery: the queue projection takes over once Pi enqueues.
+          this.revision += 1;
           this.publishSnapshot();
         }
 
@@ -6697,7 +6691,67 @@ export class RuntimeSlot {
         await settleWithoutAgent(terminalLifecycle);
       }
       return { operationId };
+    }).finally(() => {
+      // Only a prompt rejected before admission still owns its hold here.
+      if (this.heldPrompt?.id !== operationId) return;
+      this.heldPrompt = undefined;
+      this.revision += 1;
+      this.publishSnapshot();
     });
+  }
+
+  /** Manual compaction owns the session lane, and a settling run blocks
+   * admission inside it; either can last a minute. Project the waiting prompt
+   * now instead of leaving it visible only to the sender's open RPC. One
+   * pending prompt is projectable, so later waiters remain RPC-only. */
+  private holdPromptWhileAdmissionWaits(
+    operationId: string,
+    text: string,
+    images: ImageContent[],
+    queueDisplay: Parameters<RuntimeSlot["prompt"]>[3],
+  ): void {
+    const session = this.runtime?.session;
+    if (!session || this.heldPrompt || !this.isAgentAdmissionSettling) return;
+    // Extension commands execute rather than render as a message, and clients
+    // reject extension resources in pending prompt state.
+    if (queueDisplay?.resourceInvocation?.source === "extension") return;
+    const command = parsePiLiteralCommand(text)?.name;
+    if (command !== undefined && session.extensionRunner.getCommand(command) !== undefined) return;
+    this.heldPrompt = this.promptDisplay(operationId, text, images, queueDisplay);
+    this.revision += 1;
+    this.publishSnapshot();
+  }
+
+  private promptDisplay(
+    operationId: string,
+    text: string,
+    images: ImageContent[],
+    queueDisplay: Parameters<RuntimeSlot["prompt"]>[3],
+  ): PendingPromptState {
+    return {
+      id: operationId,
+      createdAt: new Date().toISOString(),
+      // Requested queue behavior is advisory until Pi actually enqueues.
+      // A prompt admitted after the run settles remains ordinary.
+      text: boundedSummaryText(
+        queueDisplay?.text ?? text,
+        MAXIMUM_PENDING_PROMPT_BYTES
+      ),
+      attachmentCount: queueDisplay?.attachmentCount ?? images.length,
+      ...(queueDisplay?.resourceInvocation === undefined
+        ? {}
+        : { resourceInvocation: queueDisplay.resourceInvocation }),
+      ...(queueDisplay?.photoCount === undefined && images.length === 0
+        ? {}
+        : { photoCount: queueDisplay?.photoCount ?? images.length }),
+      ...(queueDisplay?.fileAttachmentCount === undefined && images.length === 0
+        ? {}
+        : {
+            fileAttachmentCount: queueDisplay?.fileAttachmentCount
+              ?? Math.max(0, (queueDisplay?.attachmentCount ?? images.length) - (queueDisplay?.photoCount ?? images.length)),
+          }),
+      ...(queueDisplay?.attachments === undefined ? {} : { attachments: queueDisplay.attachments }),
+    };
   }
 
   async abort(

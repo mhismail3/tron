@@ -477,6 +477,93 @@ describe.sequential("compaction operation admission and authoritative reconcilia
     expect((await item.entries()).some(entry => entry.type === "compaction")).toBe(false);
   });
 
+  it("projects a prompt held behind manual compaction to every client until it becomes canonical", async () => {
+    // Incident 2026-09-27: a prompt sent during manual compaction waited inside
+    // the RPC with no snapshot projection. When the sending connection closed,
+    // a reconnecting client saw neither a queued row nor a pending prompt.
+    const item = await boundaryFixture();
+    let releaseSummary!: () => void;
+    const summaryBarrier = new Promise<void>(resolve => { releaseSummary = resolve; });
+    let summaryStarted = false;
+    item.faux.setResponses(Array.from({ length: 4 }, () => async (context) => {
+      if (getCurrentSystemPrompt(context.messages).includes("User-configured summary focus:")) {
+        summaryStarted = true;
+        await summaryBarrier;
+        return fauxAssistantMessage("Preserved the API contract.");
+      }
+      return fauxAssistantMessage("Picked up after compaction");
+    }));
+    const compacting = item.slot.compact();
+    let prompting: Promise<{ operationId: string }> | undefined;
+    try {
+      await waitUntil(() => summaryStarted);
+      expect(item.slot.snapshot().phase).toBe("compacting");
+      prompting = item.slot.prompt("Have it pick up where it left off");
+      await waitUntil(() => item.slot.snapshot().pendingPrompt !== undefined);
+      // A fresh client receives this authoritative snapshot on open/reconnect.
+      const held = item.slot.snapshot();
+      expect(held).toMatchObject({
+        phase: "compacting",
+        pendingPrompt: { text: "Have it pick up where it left off", attachmentCount: 0 },
+        queuedItems: [],
+      });
+      expect(held.pendingPrompt!.behavior).toBeUndefined();
+      expect(item.snapshots.at(-1)?.pendingPrompt?.id).toBe(held.pendingPrompt!.id);
+
+      releaseSummary();
+      await compacting;
+      const { operationId } = await prompting;
+      // One identity from hold through admission: clients never see a second row.
+      expect(operationId).toBe(held.pendingPrompt!.id);
+      const heldIndex = item.snapshots.findIndex(snapshot => snapshot.pendingPrompt?.id === operationId);
+      const handoff = item.snapshots.slice(heldIndex);
+      const lastPending = handoff.findLastIndex(snapshot => snapshot.pendingPrompt?.id === operationId);
+      expect(handoff.slice(0, lastPending + 1).every(snapshot => snapshot.pendingPrompt?.id === operationId)).toBe(true);
+      await expectSettled(item);
+      expect(item.slot.snapshot().pendingPrompt).toBeUndefined();
+      const entries = await item.entries();
+      const compactionIndex = entries.findIndex(entry => entry.type === "compaction");
+      const userIndex = entries.findIndex(entry => entry.message?.role === "user"
+        && JSON.stringify(entry.message.content).includes("Have it pick up where it left off"));
+      expect(compactionIndex).toBeGreaterThan(-1);
+      expect(userIndex).toBeGreaterThan(compactionIndex);
+    } finally {
+      releaseSummary();
+      await compacting.catch(() => {});
+      await prompting?.catch(() => {});
+    }
+  });
+
+  it("withdraws a held prompt that admission rejects after compaction", async () => {
+    const item = await boundaryFixture();
+    let releaseSummary!: () => void;
+    const summaryBarrier = new Promise<void>(resolve => { releaseSummary = resolve; });
+    let summaryStarted = false;
+    item.faux.setResponses(Array.from({ length: 3 }, () => async () => {
+      summaryStarted = true;
+      await summaryBarrier;
+      return fauxAssistantMessage("Preserved the API contract.");
+    }));
+    const compacting = item.slot.compact();
+    try {
+      await waitUntil(() => summaryStarted);
+      // Descriptor/count mismatch is rejected only once the lane admits it.
+      const prompting = item.slot.prompt("Invalid attachment claim", [], undefined, {
+        text: "Invalid attachment claim", attachmentEnvelope: "", attachmentCount: 2, attachments: [],
+      }).catch(error => error);
+      await waitUntil(() => item.slot.snapshot().pendingPrompt !== undefined);
+      releaseSummary();
+      await compacting;
+      expect(await prompting).toMatchObject({ code: "invalid_request" });
+      await expectSettled(item);
+      expect(item.slot.snapshot().pendingPrompt).toBeUndefined();
+      expect(item.snapshots.at(-1)?.pendingPrompt).toBeUndefined();
+    } finally {
+      releaseSummary();
+      await compacting.catch(() => {});
+    }
+  });
+
   it("reconciles overflow compaction and automatic continuation without an intermediate idle owner", async () => {
     const item = await boundaryFixture();
     await item.update({ enabled: true, reserveTokens: 4_096, keepRecentTokens: 0 });

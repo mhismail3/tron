@@ -1821,12 +1821,18 @@ export class GatewayServer {
       connection.inFlight.delete(frame.id);
       connection.requestControllers.delete(frame.id);
       const durationMs = Math.max(0, Math.round(performance.now() - rpcStartedAt));
+      // Closing a connection aborts its requests, yet accepted domain work
+      // (a prompt held behind compaction) keeps running. Name the undelivered
+      // response rather than reporting that work as failed.
+      const loggedOutcome = rpcOutcome === "failure" && requestController.signal.aborted
+        ? "connectionClosed"
+        : rpcOutcome;
       this.options.logger.log(
-        rpcOutcome === "failure" || durationMs >= SLOW_RPC_WARNING_MS ? "warning" : "debug",
-        `RPC ${frame.method} for client ${connection.id} completed in ${durationMs}ms (${rpcOutcome})`,
+        loggedOutcome !== "success" || durationMs >= SLOW_RPC_WARNING_MS ? "warning" : "debug",
+        `RPC ${frame.method} for client ${connection.id} completed in ${durationMs}ms (${loggedOutcome})`,
         {
           event: "rpc.completed", source: "transport", method: frame.method,
-          requestID: diagnosticID, connectionId: connection.id, ...rpcCorrelation, outcome: rpcOutcome, durationMs,
+          requestID: diagnosticID, connectionId: connection.id, ...rpcCorrelation, outcome: loggedOutcome, durationMs,
         },
       );
     }
