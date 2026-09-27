@@ -2,7 +2,7 @@
 
 - **Started:** 2026-09-27
 - **Status:** Active (approved in chat by the user on 2026-09-27)
-- **Last updated:** 2026-09-27, T3-TRANSCRIPT design
+- **Last updated:** 2026-09-27, T1-CACHE and T1-DRAFTS done
 - **Goal:** Tron for iPhone does measurably less CPU, disk, timer and radio work per minute of real use, proven by a reliable profiler that every agent can run, with no change to what the user sees or does.
 
 ## Goal and constraints
@@ -152,8 +152,8 @@ two-frames-per-window cadence the same scenario measured 60.9 G instructions and
 | P-3 | Claimed | Attribution: `--trace` for iOS scenarios (xctrace Time Profiler, SwiftUI, Points of Interest; exported top-symbol summary) and an attach-only `device` mode for a user-launched LocalDevice app | P-1 | energy-efficiency supervisor, worker lane p3, 2026-09-27 |
 | P-4 | Done | Baseline: run every P-1 and P-2 scenario on `main`, record the numbers and host state in this plan's Context | P-1, P-2 | energy-efficiency supervisor, 2026-09-27 |
 | T1-GW | Done | Gateway: re-arm the streaming throttle; delete `session.bashProgress` and `session.heartbeat`; skip the heartbeat ping while a client proved liveness within the interval, keeping today's detection bound | none (keep decision: P-1, P-2) | energy-efficiency supervisor, worker lane t1-gw, 2026-09-27 |
-| T1-CACHE | Claimed | `SnapshotCache`: drop checkpoints that cannot change it, coalesce summary checkpoints and checkpoint on background, drop the save-path double admission pass | none (keep decision: P-1, P-2) | energy-efficiency supervisor, worker lane t1-persist, 2026-09-27 |
-| T1-DRAFTS | Claimed | `ComposerDraftStore`: in-memory logical clock, size accounting without re-hashing, manifest-only writes when attachments are unchanged; no observable mutation for unchanged text | none (keep decision: P-1, P-2) | energy-efficiency supervisor, worker lane t1-persist, 2026-09-27 |
+| T1-CACHE | Done | `SnapshotCache`: drop checkpoints that cannot change it, coalesce summary checkpoints and checkpoint on background, drop the save-path double admission pass | none (keep decision: P-1, P-2) | energy-efficiency supervisor, worker lane t1-persist, 2026-09-27 |
+| T1-DRAFTS | Done | `ComposerDraftStore`: in-memory logical clock, size accounting without re-hashing, manifest-only writes when attachments are unchanged; no observable mutation for unchanged text | none (keep decision: P-1, P-2) | energy-efficiency supervisor, worker lane t1-persist, 2026-09-27 |
 | T1-TEXT | Claimed | `discreteInsertedIDs` to O(n) with an equivalence check; `ChatStreamingInlineText` keeps settled text whole (preserving the streaming-flip reveal state) and caches the revealed prefix | none (keep decision: P-1, P-2) | energy-efficiency supervisor, worker lane t1-text, 2026-09-27 |
 | T1-CLOCKS | Claimed | Timeline schedules that fire when a label can change: dashboard rows, tool elapsed timers (sub-minute cadence preserved), static inbox formatter | none (keep decision: P-1, P-2) | energy-efficiency supervisor, worker lane t1-clocks, 2026-09-27 |
 | T1-NET | Claimed | One shared ping grid for every socket (no interval ever longer than today), lease renewal on that grid at no longer than today's interval, one shared `URLSession` for idempotent GETs with per-task delegates | none (keep decision: P-1, P-2) | energy-efficiency supervisor, worker lane t1-net, 2026-09-27 |
@@ -559,4 +559,33 @@ re-projection is a material share of that time.
 - Result: baselines in Context. Evidence: the iOS and Gateway reports under
   `~/Library/Developer/Tron/profiles/`. Host load varied 5–100; decisions use
   instructions, byte and frame counts.
+
+### T1-CACHE and T1-DRAFTS · Done · 2026-09-27 · energy-efficiency supervisor (worker lane t1-persist)
+
+- Result: `SnapshotCache` is written only when the catalog it stores changes:
+  the five `SessionPresentationStore` checkpoint requests (left over from when
+  the cache held chat snapshots) are gone; summaries start one fixed 2 s
+  coalescing window; authoritative pages, archive, unread and delete still
+  write immediately; background, inactive and profile retirement flush a
+  pending write. The save path reuses admission's per-row bytes instead of
+  encoding every row twice. `ComposerDraftStore` fully verifies once per
+  process, keeps its logical clock in memory, bounds from manifests plus file
+  sizes, and rewrites only the manifest (one atomic rename) when a draft's
+  attachments are the exact files it last wrote; `load()` still verifies what
+  it restores. Unchanged composer text no longer mutates observed state.
+- Evidence: `scripts/tron-profile ios` against the P-4 baseline, five
+  iterations each: tool-loop logical writes 764 → 104 KiB (−86%),
+  summary-storm 3.54 MiB → 436 KiB (−88%) and instructions −8%,
+  composer-typing instructions −18.5%; no scenario regressed. Ten new
+  behavioral tests (coalesced burst, background and inactive flush, removal
+  during a pending window, document equivalence over 60 generated catalogs,
+  manifest-only save, replaced-payload detection, crash consistency, LRU and
+  count bounds, unchanged-text observation), each with a negative control that
+  failed as expected. Full unit tier 1,729 passed; focused suites passed again
+  after rebasing onto the profilers.
+- Deviations: after an abrupt process death within 2 s of a summary burst the
+  cached rows can be up to 2 s old until the first authoritative list replaces
+  them; a payload tampered in place with its size and nanosecond timestamps
+  restored is no longer rewritten by typing saves and is instead discarded at
+  the next load (corrupt bytes are still never restored).
 
