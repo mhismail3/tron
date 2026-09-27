@@ -65,7 +65,12 @@ jobs:
             scripts/patch-ios-gateway-e2e-xctestrun.py \
             scripts/test-ios-test-infrastructure.py \
             scripts/tron_profile_report.py \
+            scripts/tron-profile-gateway \
             scripts/test-tron-profile.py
+      - name: Check profiler JavaScript and TypeScript syntax
+        run: |
+          node --check scripts/tron-profile-gateway-driver.mjs
+          node --experimental-strip-types --check scripts/tron-profile-gateway-extension.ts
       - name: Test iOS runner infrastructure without hardware
         run: |
           python3 scripts/test-ios-test-infrastructure.py

@@ -1,0 +1,727 @@
+#!/usr/bin/env python3
+"""Gateway wire-traffic profiler: `scripts/tron-profile gateway`.
+
+Builds this checkout's Gateway, starts an isolated fixture Gateway (private
+temporary home, loopback port, faux model, no user state), drives one scripted
+scenario with phone-faithful recording clients
+(scripts/tron-profile-gateway-driver.mjs), and hands one sample per iteration
+to scripts/tron_profile_report.py. The fixture process and its home belong to
+this invocation only; they are stopped and removed on success, failure,
+timeout, and interruption. The user's Gateway is never contacted.
+"""
+
+from __future__ import annotations
+
+import argparse
+import contextlib
+import ctypes
+from dataclasses import dataclass
+from datetime import datetime, timezone
+import fcntl
+import hashlib
+import json
+import os
+from pathlib import Path
+import re
+import secrets
+import shutil
+import signal
+import socket
+import subprocess
+import sys
+import tempfile
+import time
+import urllib.error
+import urllib.request
+
+ROOT = Path(__file__).resolve().parent.parent
+GATEWAY = ROOT / "packages/gateway"
+ENTRY = GATEWAY / "dist/index.js"
+DRIVER = ROOT / "scripts/tron-profile-gateway-driver.mjs"
+EXTENSION = ROOT / "scripts/tron-profile-gateway-extension.ts"
+REPORT = ROOT / "scripts/tron_profile_report.py"
+PROCESS_OWNER = ROOT / "scripts/ios-test-process.py"
+sys.path.insert(0, str(ROOT / "scripts"))
+import tron_profile_report as report_module  # noqa: E402
+
+EXIT_OK = 0
+EXIT_USAGE = 2
+EXIT_BUILD = 4
+EXIT_FIXTURE = 5
+EXIT_MEASUREMENT = 6
+EXIT_SELF_TEST = 7
+EXIT_TIMEOUT = 75
+EXIT_INTERRUPTED = 130
+
+# The user's Gateway ports (production, development). The fixture never binds
+# them even if they happen to be free.
+RESERVED_PORTS = {9847, 9848}
+FIXTURE_MARKER = ".tron-profile-gateway-fixture"
+
+
+class ProfileFailure(Exception):
+    def __init__(self, message: str, code: int, evidence: Path | None = None) -> None:
+        super().__init__(message)
+        self.code = code
+        self.evidence = evidence
+
+
+class Interrupted(BaseException):
+    def __init__(self, signal_number: int) -> None:
+        super().__init__(signal_number)
+        self.signal_number = signal_number
+
+
+@dataclass(frozen=True)
+class Scenario:
+    name: str
+    description: str
+    recorded: tuple[str, ...]
+    prompt: str | None
+    seeded: bool
+
+
+STREAM_PROMPT = "tron-profile stream-reply chars={chars} thinking=800 seed=1"
+TOOL_PROMPT = "tron-profile tool-loop tools=10 lines=24 chars=1500 seed=1"
+SCENARIOS = {
+    scenario.name: scenario
+    for scenario in (
+        Scenario("stream-reply", "one prompt; faux reply streams an 800-character thinking block, then 6,000 "
+                 "characters of Markdown; window runs from prompt to settlement",
+                 ("mobile", "dashboard"), STREAM_PROMPT.format(chars=6000), False),
+        Scenario("tool-loop", "seeded session whose transcript page reaches its 512-item/600 KB bound; one prompt "
+                 "runs ten sequential bash tool calls (about 1.7 KB output each) and a 1,500-character answer",
+                 ("mobile", "dashboard"), TOOL_PROMPT, True),
+        Scenario("idle", "both clients connected, mobile mounted in an idle chat holding its presentation lease; "
+                 "no activity for --window-seconds", ("mobile", "dashboard"), None, False),
+        Scenario("dashboard-observer", "only a dashboard mobile client records while an unrecorded paired client "
+                 "runs the tool-loop workload in another session", ("dashboard",), TOOL_PROMPT, True),
+    )
+}
+
+# Seeded history: every turn is user text, assistant thinking/text/tool call,
+# tool result, and assistant text. 160 turns exceed the 512-item and 600 KB
+# snapshot transcript bounds, so session.open returns a full bounded tail page.
+SEED = {"turns": 160, "userChars": 240, "thinkingChars": 280, "assistantChars": 480, "toolChars": 470, "seed": 7}
+
+
+def utc_stamp() -> str:
+    return datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+
+
+def log(message: str) -> None:
+    print(f"[tron-profile gateway] {message}", file=sys.stderr, flush=True)
+
+
+# --- Process CPU accounting --------------------------------------------------
+
+class RUsageInfoV4(ctypes.Structure):
+    _fields_ = [("ri_uuid", ctypes.c_uint8 * 16)] + [
+        (name, ctypes.c_uint64)
+        for name in (
+            "ri_user_time", "ri_system_time", "ri_pkg_idle_wkups", "ri_interrupt_wkups", "ri_pageins",
+            "ri_wired_size", "ri_resident_size", "ri_phys_footprint", "ri_proc_start_abstime",
+            "ri_proc_exit_abstime", "ri_child_user_time", "ri_child_system_time", "ri_child_pkg_idle_wkups",
+            "ri_child_interrupt_wkups", "ri_child_pageins", "ri_child_elapsed_abstime", "ri_diskio_bytesread",
+            "ri_diskio_byteswritten", "ri_cpu_time_qos_default", "ri_cpu_time_qos_maintenance",
+            "ri_cpu_time_qos_background", "ri_cpu_time_qos_utility", "ri_cpu_time_qos_legacy",
+            "ri_cpu_time_qos_user_initiated", "ri_cpu_time_qos_user_interactive", "ri_billed_system_time",
+            "ri_serviced_system_time", "ri_logical_writes", "ri_lifetime_max_phys_footprint",
+            "ri_instructions", "ri_cycles", "ri_billed_energy", "ri_serviced_energy",
+            "ri_interval_max_phys_footprint", "ri_runnable_time",
+        )
+    ]
+
+
+class MachTimebase(ctypes.Structure):
+    _fields_ = [("numer", ctypes.c_uint32), ("denom", ctypes.c_uint32)]
+
+
+def process_usage(pid: int) -> dict[str, int]:
+    """Cumulative CPU counters of one process (proc_pid_rusage, flavor 4)."""
+    library = ctypes.CDLL("/usr/lib/libproc.dylib", use_errno=True)
+    info = RUsageInfoV4()
+    if library.proc_pid_rusage(pid, 4, ctypes.byref(info)) != 0:
+        raise OSError(ctypes.get_errno(), f"proc_pid_rusage({pid}) failed")
+    timebase = MachTimebase()
+    ctypes.CDLL("/usr/lib/libSystem.dylib").mach_timebase_info(ctypes.byref(timebase))
+    to_ns = timebase.numer / timebase.denom
+    return {
+        "cpuTimeNs": round((info.ri_user_time + info.ri_system_time) * to_ns),
+        "instructions": info.ri_instructions,
+        "cycles": info.ri_cycles,
+        "interruptWakeups": info.ri_interrupt_wkups,
+        "idleWakeups": info.ri_pkg_idle_wkups,
+    }
+
+
+# --- Bounded subprocesses ----------------------------------------------------
+
+def bounded(phase: str, command: list[str], evidence_root: Path, overall: float, no_output: float,
+            failure_code: int, cwd: Path | None = None) -> None:
+    """Run one build step through scripts/ios-test-process.py (process-group
+    deadline, no-output deadline, retained log and timeout evidence)."""
+    log_path = evidence_root / f"{phase}.log"
+    evidence = evidence_root / f"{phase}-evidence"
+    status = subprocess.run(
+        [sys.executable, str(PROCESS_OWNER), "--log", str(log_path), "--evidence-dir", str(evidence),
+         "--overall-seconds", str(overall), "--no-output-seconds", str(no_output), "--", *command],
+        cwd=cwd, stdout=subprocess.DEVNULL, check=False,
+    ).returncode
+    if status == 124:
+        raise ProfileFailure(f"{phase} timed out", EXIT_TIMEOUT, evidence)
+    if status >= 128:
+        raise Interrupted(status - 128)
+    if status != 0:
+        raise ProfileFailure(f"{phase} failed (exit {status})", failure_code, log_path)
+
+
+def build_gateway(evidence_root: Path) -> None:
+    toolchain = subprocess.run([str(ROOT / "scripts/verify-ci-toolchain.sh"), "node"], check=False,
+                               capture_output=True, text=True, timeout=60)
+    if toolchain.returncode != 0:
+        raise ProfileFailure(f"repository-pinned Node toolchain required: {toolchain.stderr.strip()}", EXIT_BUILD)
+    node, npm = shutil.which("node"), shutil.which("npm")
+    if not node or not npm or Path(node).parent.resolve() != Path(npm).parent.resolve():
+        raise ProfileFailure("npm must come from the repository-pinned Node bin directory", EXIT_BUILD)
+    lock_hash = hashlib.sha256((GATEWAY / "package-lock.json").read_bytes()).hexdigest()
+    stamp = GATEWAY / "node_modules/.tron-profile-gateway-lock.sha256"
+    installed = stamp.read_text().strip() if stamp.is_file() else ""
+    if not (GATEWAY / "node_modules").is_dir() or installed != lock_hash:
+        log("installing Gateway dependencies (npm ci)")
+        bounded("npm-ci", ["npm", "--prefix", str(GATEWAY), "ci"], evidence_root, 900, 300, EXIT_BUILD)
+        stamp.write_text(lock_hash + "\n")
+    log("building the Gateway (npm run build)")
+    bounded("gateway-build", ["npm", "--prefix", str(GATEWAY), "run", "build"], evidence_root, 600, 300, EXIT_BUILD)
+
+
+def free_loopback_port() -> int:
+    for _ in range(20):
+        with socket.socket() as probe:
+            probe.bind(("127.0.0.1", 0))
+            port = probe.getsockname()[1]
+        if port not in RESERVED_PORTS:
+            return port
+    raise ProfileFailure("no free loopback port", EXIT_FIXTURE)
+
+
+def scrubbed_environment() -> dict[str, str]:
+    """Parent environment without Tron/Pi overrides or provider credentials."""
+    return {
+        key: value for key, value in os.environ.items()
+        if not key.startswith(("TRON_", "PI_")) and not key.endswith(("_API_KEY", "_AUTH_TOKEN"))
+    }
+
+
+# --- Fixture Gateway ---------------------------------------------------------
+
+class FixtureGateway:
+    """One owned fixture: temporary home, faux-model agent dir, Gateway child."""
+
+    def __init__(self, evidence: Path, tokens_per_second: float, cpu_profile_dir: Path | None) -> None:
+        self.evidence = evidence
+        self.tokens_per_second = tokens_per_second
+        self.cpu_profile_dir = cpu_profile_dir
+        self.root = Path(tempfile.mkdtemp(prefix="tron-profile-gateway-")).resolve()
+        (self.root / FIXTURE_MARKER).write_text("tron.profile-gateway-fixture.v1\n")
+        self.home = self.root / "home"
+        self.workspace = self.home / "workspace"
+        self.tron_home = self.root / "tron"
+        self.agent_dir = self.root / "agent"
+        self.process: subprocess.Popen[bytes] | None = None
+        self.port = 0
+
+    def prepare(self) -> None:
+        for directory in (self.home, self.workspace, self.tron_home / "gateway", self.agent_dir / "extensions"):
+            directory.mkdir(parents=True, exist_ok=True)
+            directory.chmod(0o700)
+        gateway_json = self.tron_home / "gateway/gateway.json"
+        gateway_json.write_text(json.dumps({"version": 1, "machineId": "tron-profile", "machineName": "Tron Profile"}) + "\n")
+        gateway_json.chmod(0o600)
+        shutil.copyfile(EXTENSION, self.agent_dir / "extensions/tron-profile.ts")
+        (self.agent_dir / "settings.json").write_text(json.dumps({
+            "defaultProvider": "tron-profile",
+            "defaultModel": "profile-model",
+            "defaultThinkingLevel": "low",
+            "defaultProjectTrust": "never",
+            "enableAnalytics": False,
+            "enableInstallTelemetry": False,
+        }, indent=2) + "\n")
+
+    def seed(self, count: int) -> list[dict[str, str]]:
+        config = {**SEED, "gatewayDir": str(GATEWAY), "workspace": str(self.workspace), "agentDir": str(self.agent_dir),
+                  "count": count, "output": str(self.root / "seeded.json")}
+        config_path = self.root / "seed-config.json"
+        config_path.write_text(json.dumps(config))
+        environment = {**scrubbed_environment(), "HOME": str(self.home), "PI_CODING_AGENT_DIR": str(self.agent_dir)}
+        try:
+            result = subprocess.run(["node", str(DRIVER), "seed", str(config_path)], env=environment,
+                                    capture_output=True, text=True, timeout=120, check=False)
+        except subprocess.TimeoutExpired as error:
+            raise ProfileFailure("seeding canonical sessions timed out", EXIT_TIMEOUT) from error
+        if result.returncode != 0:
+            (self.evidence / "seed.log").write_text(result.stdout + result.stderr)
+            raise ProfileFailure("seeding canonical sessions failed", EXIT_FIXTURE, self.evidence / "seed.log")
+        return json.loads((self.root / "seeded.json").read_text())["sessions"]
+
+    def command_matches(self) -> bool:
+        if self.process is None or self.process.poll() is not None:
+            return False
+        observed = subprocess.run(["ps", "-p", str(self.process.pid), "-o", "command="], capture_output=True,
+                                  text=True, check=False, timeout=10).stdout.strip()
+        return observed.startswith("node ") and observed.endswith(f" {ENTRY}")
+
+    def start(self, deadline_seconds: float = 90) -> None:
+        self.port = free_loopback_port()
+        environment = {
+            **scrubbed_environment(),
+            "HOME": str(self.home),
+            "TRON_DATA_DIR": str(self.tron_home),
+            "PI_CODING_AGENT_DIR": str(self.agent_dir),
+            "PI_SUBAGENTS_TEMP_ROOT": str(self.home / "internal/subagents"),
+            "TRON_MACHINE_GROUP_ID": "tron-profile",
+            "TRON_GATEWAY_HOST": "127.0.0.1",
+            "TRON_GATEWAY_PORT": str(self.port),
+            "TRON_PROFILE_TOKENS_PER_SECOND": str(self.tokens_per_second),
+        }
+        command = ["node"]
+        if self.cpu_profile_dir is not None:
+            self.cpu_profile_dir.mkdir(parents=True, exist_ok=True)
+            command += ["--cpu-prof", f"--cpu-prof-dir={self.cpu_profile_dir}"]
+        command.append(str(ENTRY))
+        self.log_path = self.evidence / "gateway.stdout.log"
+        with self.log_path.open("wb") as output:
+            # Own session: a terminal Ctrl-C reaches this orchestrator, which
+            # then stops the fixture deliberately instead of racing it.
+            self.process = subprocess.Popen(command, cwd=self.workspace, env=environment, stdin=subprocess.DEVNULL,
+                                            stdout=output, stderr=subprocess.STDOUT, start_new_session=True)
+        enrollment = self.tron_home / "gateway/enrollment.json"
+        deadline = time.monotonic() + deadline_seconds
+        while time.monotonic() < deadline:
+            if self.process.poll() is not None:
+                hint = ""
+                if "different Team IDs" in self.log_path.read_text(errors="replace"):
+                    hint = ("; the node on PATH is a signed runtime that cannot load the Gateway's native modules, "
+                            "so put the repository-pinned Node (.node-version) first on PATH")
+                raise ProfileFailure(f"fixture Gateway exited during startup (exit {self.process.returncode}){hint}",
+                                     EXIT_FIXTURE, self.log_path)
+            if enrollment.is_file() and self.healthy():
+                break
+            time.sleep(0.2)
+        else:
+            raise ProfileFailure("fixture Gateway did not become ready", EXIT_TIMEOUT, self.log_path)
+        if not self.command_matches():
+            raise ProfileFailure("ready fixture Gateway does not match its owned command", EXIT_FIXTURE, self.log_path)
+
+    def healthy(self) -> bool:
+        try:
+            with urllib.request.urlopen(f"http://127.0.0.1:{self.port}/health", timeout=2) as response:
+                return response.status == 200 and json.loads(response.read()).get("status") == "ok"
+        except (urllib.error.URLError, OSError, ValueError):
+            return False
+
+    def stop(self) -> None:
+        """Stop the owned child (verified by PID and command) and its group."""
+        process = self.process
+        if process is not None and process.poll() is None:
+            if not self.command_matches():
+                raise ProfileFailure(f"refusing to signal PID {process.pid}: not the owned fixture Gateway", EXIT_FIXTURE)
+            process.send_signal(signal.SIGTERM)
+            try:
+                process.wait(timeout=20)
+            except subprocess.TimeoutExpired:
+                log(f"fixture Gateway {process.pid} ignored SIGTERM for 20 s; killing it")
+                process.kill()
+                process.wait(timeout=10)
+        if process is not None:
+            # The group id is the fixture's own PID (start_new_session); only
+            # its descendants can still hold it.
+            with contextlib.suppress(ProcessLookupError, PermissionError):
+                os.killpg(process.pid, signal.SIGKILL)
+
+    def retain_logs(self) -> None:
+        source = self.tron_home / "logs/gateway.jsonl"
+        if source.is_file():
+            data = source.read_bytes()
+            (self.evidence / "gateway.jsonl").write_bytes(data[-8 * 1024 * 1024:])
+
+    def remove(self) -> None:
+        if (self.root / FIXTURE_MARKER).is_file() and self.root.name.startswith("tron-profile-gateway-"):
+            shutil.rmtree(self.root, ignore_errors=True)
+
+
+# --- Scenario execution --------------------------------------------------------
+
+def run_driver(fixture: FixtureGateway, scenario: Scenario, output: Path, warmup: int, iterations: int,
+               window_seconds: float, seeded: list[dict[str, str]], prompt: str | None) -> dict:
+    run_deadline = 240
+    per_iteration = (window_seconds if scenario.name == "idle" else run_deadline) + 40
+    overall = 90 + (warmup + iterations) * per_iteration
+    config = {
+        "gatewayDir": str(GATEWAY), "orchestrator": str(Path(__file__).resolve()), "gatewayPid": fixture.process.pid,
+        "port": fixture.port, "tronHome": str(fixture.tron_home), "workspace": str(fixture.workspace),
+        "scenario": scenario.name, "warmup": warmup, "iterations": iterations, "windowSeconds": window_seconds, "prompt": prompt,
+        "seededSessions": seeded, "outputDir": str(output), "runDeadlineSeconds": run_deadline,
+        "quietMs": 1500, "settleBeforeMs": 1000, "settleBetweenMs": 1000,
+    }
+    config_path = output / "driver-config.json"
+    config_path.write_text(json.dumps(config, indent=2) + "\n")
+    driver_log = output / "driver.log"
+    with driver_log.open("wb") as handle:
+        driver = subprocess.Popen(["node", str(DRIVER), "run", str(config_path)], env=scrubbed_environment(),
+                                  stdout=handle, stderr=subprocess.STDOUT, start_new_session=True)
+        try:
+            status = driver.wait(timeout=overall)
+        except subprocess.TimeoutExpired as error:
+            raise ProfileFailure(f"scenario driver exceeded its {overall:.0f} s deadline", EXIT_TIMEOUT, driver_log) from error
+        finally:
+            if driver.poll() is None:
+                with contextlib.suppress(ProcessLookupError):
+                    os.killpg(driver.pid, signal.SIGKILL)
+                driver.wait(timeout=10)
+    if status != 0:
+        raise ProfileFailure(f"scenario driver failed (exit {status})", EXIT_MEASUREMENT, driver_log)
+    return json.loads((output / "result.json").read_text())
+
+
+def topic_metric_key(topic: str) -> str:
+    """Event topic or response method as a lowercase dotted metric segment."""
+    kind, _, name = topic.partition(":") if topic.startswith(("response:", "request:")) else ("", "", topic)
+    snake = "".join(f"_{char.lower()}" if char.isupper() else char for char in name)
+    key = "".join(char if char.isalnum() or char in "._-" else "_" for char in snake).strip("_.")
+    return f"{kind}.{key}" if kind else key
+
+
+def samples_from(result: dict, scenario: Scenario) -> tuple[dict, list[str]]:
+    iterations = result["iterations"]
+    metrics: dict[str, dict] = {}
+    warnings: list[str] = []
+
+    def add(metric_id: str, unit: str, values: list[float], description: str | None = None) -> None:
+        entry = {"unit": unit, "better": "lower", "values": values}
+        if description:
+            entry["description"] = description
+        metrics[metric_id] = entry
+
+    add("window.seconds", "s", [item["windowSeconds"] for item in iterations],
+        "measured window: prompt to settlement plus 1.5 s quiet, or the fixed idle window")
+    for client in scenario.recorded:
+        windows = [item["clients"][client] for item in iterations]
+        prefix = f"wire.{client}"
+        add(f"{prefix}.total.frames", "count", [w["frames"] for w in windows], "inbound WebSocket messages")
+        add(f"{prefix}.total.bytes", "B", [w["bytes"] for w in windows], "inbound message bytes after decompression")
+        add(f"{prefix}.bytes_per_second", "B/s",
+            [w["bytes"] / item["windowSeconds"] for w, item in zip(windows, iterations)])
+        add(f"{prefix}.largest_frame", "B", [w["largestFrame"] for w in windows])
+        add(f"{prefix}.outbound.frames", "count", [w["outboundFrames"] for w in windows], "client requests sent")
+        add(f"{prefix}.outbound.bytes", "B", [w["outboundBytes"] for w in windows])
+        add(f"{prefix}.pings_received", "count", [w["pingsReceived"] for w in windows], "server heartbeat pings")
+        add(f"{prefix}.pongs_sent", "count", [w["pongsSent"] for w in windows])
+        add(f"{prefix}.pings_sent", "count", [w["pingsSent"] for w in windows], "10 s client liveness pings")
+        add(f"{prefix}.pongs_received", "count", [w["pongsReceived"] for w in windows])
+        if all(w["socketBytesRead"] is not None for w in windows):
+            add(f"{prefix}.socket_bytes_read", "B", [w["socketBytesRead"] for w in windows],
+                "TCP bytes read on the client socket (WebSocket framing and any negotiated compression)")
+            add(f"{prefix}.socket_bytes_written", "B", [w["socketBytesWritten"] for w in windows])
+        else:
+            warnings.append(f"{client}: socket byte counters unavailable; socket_bytes metrics omitted")
+        topics = sorted({topic for w in windows for topic in w["topics"]})
+        for topic in topics:
+            key = topic_metric_key(topic)
+            add(f"{prefix}.{key}.frames", "count", [w["topics"].get(topic, {}).get("frames", 0) for w in windows])
+            add(f"{prefix}.{key}.bytes", "B", [w["topics"].get(topic, {}).get("bytes", 0) for w in windows])
+    gateway = [item.get("gateway") or {} for item in iterations]
+    for key, metric_id, unit in (("cpuTimeNs", "gateway.cpu.time", "ns"), ("instructions", "gateway.cpu.instructions", "instructions"),
+                                 ("cycles", "gateway.cpu.cycles", "cycles"), ("interruptWakeups", "gateway.wakeups.interrupt", "count")):
+        values = [usage.get(key) for usage in gateway]
+        if all(isinstance(value, (int, float)) for value in values) and (key != "instructions" or any(values)):
+            add(metric_id, unit, values, "fixture Gateway process only (not its tool subprocesses) over the window")
+        else:
+            warnings.append(f"fixture Gateway {key} unavailable; {metric_id} omitted")
+    return metrics, warnings
+
+
+def directive_values(prompt: str | None) -> dict[str, int]:
+    return {key: int(value) for key, value in re.findall(r" ([a-z]+)=(\d+)", prompt or "")}
+
+
+def validate(result: dict, scenario: Scenario, iterations: int, prompt: str | None) -> tuple[list[str], list[str]]:
+    """Refuse a run whose workload did not complete exactly as scripted or whose
+    recording path evidently did not observe it; return (problems, warnings)."""
+    problems: list[str] = []
+    warnings: list[str] = []
+    items = result.get("iterations", [])
+    if len(items) != iterations:
+        problems.append(f"expected {iterations} iterations, driver reported {len(items)}")
+    expected = directive_values(prompt)
+    for item in items:
+        label = item["label"]
+        outcome = item["outcome"]
+        if outcome["phase"] != "idle":
+            problems.append(f"{label}: session ended in phase {outcome['phase']}, not idle")
+        if outcome["sequenceGaps"]:
+            warnings.append(f"{label}: {outcome['sequenceGaps']} session event sequence gap(s); a phone would resynchronize")
+        if prompt is not None:
+            wanted_tools = expected.get("tools", 0) if scenario.name != "stream-reply" else 0
+            if not outcome["promptFound"] or outcome["finalTextChars"] != expected.get("chars") \
+                    or outcome["toolResults"] != wanted_tools:
+                problems.append(f"{label}: canonical outcome {outcome} does not match the scripted workload {expected}")
+        for client in scenario.recorded:
+            window = item["clients"].get(client)
+            if window is None:
+                problems.append(f"{label}: no window for recorded client {client}")
+            elif scenario.prompt is not None and window["frames"] == 0:
+                problems.append(f"{label}: {client} received no frames during an active run")
+        if scenario.name == "stream-reply" and item["clients"]["mobile"]["topics"].get("session.progress", {}).get("frames", 0) == 0:
+            problems.append(f"{label}: the subscribed client received no session.progress while the reply streamed")
+        if scenario.name == "dashboard-observer" and item["clients"]["dashboard"]["topics"].get("session.summary", {}).get("frames", 0) == 0:
+            problems.append(f"{label}: the dashboard client received no session.summary while another session ran")
+    return problems, warnings
+
+
+def report_samples(run_dir: Path, scenario: Scenario, result: dict, context: dict) -> None:
+    metrics, warnings = samples_from(result, scenario)
+    context["warnings"] = context.get("warnings", []) + warnings
+    samples_path = run_dir / "samples.json"
+    samples_path.write_text(json.dumps({"schema": report_module.SAMPLES_SCHEMA, "metrics": metrics, "context": context},
+                                       indent=2) + "\n")
+    artifacts = [f"timeline={run_dir / 'timeline.jsonl'}", f"driver-result={run_dir / 'result.json'}",
+                 f"gateway-log={run_dir / 'fixture/gateway.jsonl'}"]
+    if (run_dir / "cpu-profile").is_dir():
+        artifacts.append(f"cpu-profile={run_dir / 'cpu-profile'}")
+    command = [sys.executable, str(REPORT), "write", "--tool", "gateway", "--scenario", scenario.name,
+               "--samples", str(samples_path), "--run-dir", str(run_dir), "--worktree", str(ROOT)]
+    for artifact in artifacts:
+        command += ["--artifact", artifact]
+    written = subprocess.run(command, capture_output=True, text=True, check=False, timeout=120)
+    if written.returncode != 0:
+        raise ProfileFailure(f"report write failed: {written.stderr.strip()}", EXIT_MEASUREMENT, samples_path)
+    sys.stdout.write(written.stdout)
+    sys.stdout.flush()
+
+
+def run_scenario(scenario: Scenario, args: argparse.Namespace, results_dir: Path, prompt: str | None = None) -> Path:
+    run_dir = results_dir / f"{utc_stamp()}-{scenario.name}-{secrets.token_hex(3)}"
+    evidence = run_dir / "fixture"
+    evidence.mkdir(parents=True)
+    log(f"{scenario.name}: {args.iterations} iteration(s); results {run_dir}")
+    fixture: FixtureGateway | None = None
+    try:
+        try:
+            fixture = FixtureGateway(evidence, args.tokens_per_second, run_dir / "cpu-profile" if args.cpu_profile else None)
+            fixture.prepare()
+            warmup = 0 if scenario.prompt is None else args.warmup
+            seeded = fixture.seed(warmup + args.iterations) if scenario.seeded else []
+            fixture.start()
+            log(f"{scenario.name}: fixture Gateway pid {fixture.process.pid} on 127.0.0.1:{fixture.port}")
+            result = run_driver(fixture, scenario, run_dir, warmup, args.iterations, args.window_seconds, seeded,
+                                prompt if prompt is not None else scenario.prompt)
+        finally:
+            if fixture is not None:
+                try:
+                    fixture.stop()
+                finally:
+                    fixture.retain_logs()
+                    # A child that could not be stopped keeps its home; the
+                    # failure names it instead of deleting state under it.
+                    if fixture.process is None or fixture.process.poll() is not None:
+                        fixture.remove()
+        effective_prompt = prompt if prompt is not None else scenario.prompt
+        problems, validation_warnings = validate(result, scenario, args.iterations, effective_prompt)
+        if problems:
+            raise ProfileFailure("measurement rejected: " + "; ".join(problems), EXIT_MEASUREMENT, run_dir / "result.json")
+        opened = [item["openedTranscript"] for item in result["iterations"]]
+        context = {
+            "scenario": scenario.description,
+            "prompt": effective_prompt,
+            "iterations": args.iterations,
+            "warmup_iterations": warmup,
+            "tokens_per_second": args.tokens_per_second,
+            "window_seconds": args.window_seconds if scenario.name == "idle" else None,
+            "recorded_clients": list(scenario.recorded),
+            "clients": result["clients"],
+            "gateway": result.get("gateway"),
+            "opened_transcript": opened[0] if opened else None,
+            "seed": SEED if scenario.seeded else None,
+            "warnings": validation_warnings,
+        }
+        if scenario.seeded and opened and opened[0]["items"] < 400:
+            context["warnings"].append(f"seeded transcript page holds only {opened[0]['items']} items")
+        report_samples(run_dir, scenario, result, context)
+        return run_dir
+    except ProfileFailure as failure:
+        (run_dir / "failure.json").write_text(json.dumps({
+            "schema": "tron.profile-gateway-failure.v1", "scenario": scenario.name, "error": str(failure),
+            "exit": failure.code, "evidence": str(failure.evidence) if failure.evidence else None,
+        }, indent=2) + "\n")
+        raise
+
+
+# --- Recording-path self-test --------------------------------------------------
+
+def self_test(args: argparse.Namespace, root: Path) -> int:
+    """Negative control: halving the streamed reply must move session.progress
+    frames and bytes beyond the report's noise bound, in the expected ratio,
+    while the unsubscribed dashboard never receives session.progress."""
+    results_dir = root / "gateway-self-test" / f"{utc_stamp()}-self-test-{secrets.token_hex(3)}"
+    scenario = SCENARIOS["stream-reply"]
+    base_chars, variant_chars, thinking = 6000, 3000, 800
+    base = run_scenario(scenario, args, results_dir, STREAM_PROMPT.format(chars=base_chars))
+    variant = run_scenario(scenario, args, results_dir, STREAM_PROMPT.format(chars=variant_chars))
+    base_report, variant_report = report_module.load_report(base), report_module.load_report(variant)
+    comparison = report_module.compare(base_report, variant_report, report_module.DEFAULT_FLOOR, False)
+    expected_frames = (thinking + variant_chars) / (thinking + base_chars)
+    checks = []
+
+    def check(name: str, passed: bool, detail: str) -> None:
+        checks.append({"check": name, "passed": passed, "detail": detail})
+
+    def median(report: dict, metric: str) -> float:
+        return report["metrics"][metric]["median"] if metric in report["metrics"] else 0.0
+
+    for metric in ("wire.mobile.session.progress.frames", "wire.mobile.session.progress.bytes"):
+        verdict = comparison["metrics"].get(metric, {}).get("verdict")
+        check(f"{metric} moves beyond noise", verdict == "improvement", f"verdict {verdict}")
+    frames_ratio = median(variant_report, "wire.mobile.session.progress.frames") / max(1.0, median(base_report, "wire.mobile.session.progress.frames"))
+    bytes_ratio = median(variant_report, "wire.mobile.session.progress.bytes") / max(1.0, median(base_report, "wire.mobile.session.progress.bytes"))
+    check("progress frames scale with streamed characters", abs(frames_ratio / expected_frames - 1) <= 0.25,
+          f"ratio {frames_ratio:.3f}, expected {expected_frames:.3f} ±25%")
+    check("progress bytes shrink faster than frames (each frame carries the reply so far)", bytes_ratio < frames_ratio,
+          f"bytes ratio {bytes_ratio:.3f} vs frames ratio {frames_ratio:.3f}")
+    for label, report in (("base", base_report), ("variant", variant_report)):
+        leaked = median(report, "wire.dashboard.session.progress.frames")
+        check(f"{label}: unsubscribed dashboard receives no session.progress", leaked == 0, f"median {leaked:.0f}")
+        total, progress = median(report, "wire.mobile.total.bytes"), median(report, "wire.mobile.session.progress.bytes")
+        check(f"{label}: per-topic bytes are within the client total", 0 < progress <= total, f"{progress:.0f} of {total:.0f}")
+    passed = all(item["passed"] for item in checks)
+    verdict = {"schema": "tron.profile-gateway-self-test.v1", "passed": passed, "base": str(base), "variant": str(variant),
+               "checks": checks}
+    (results_dir / "self-test.json").write_text(json.dumps(verdict, indent=2) + "\n")
+    print(f"\nSelf-test {'PASSED' if passed else 'FAILED'} ({results_dir / 'self-test.json'})")
+    for item in checks:
+        print(f"  [{'ok' if item['passed'] else 'FAIL'}] {item['check']}: {item['detail']}")
+    return EXIT_OK if passed else EXIT_SELF_TEST
+
+
+# --- Entry point ---------------------------------------------------------------
+
+USAGE_EPILOG = """\
+Scenarios (--list for descriptions): stream-reply, tool-loop, idle, dashboard-observer, or all.
+
+Each scenario run starts a fresh fixture Gateway and writes one report under
+<profile root>/gateway/<UTC>-<scenario>-<id>/ (profile root: $TRON_PROFILE_RESULTS_DIR
+or ~/Library/Developer/Tron/profiles) with summary.md, report.json, samples.json,
+timeline.jsonl (every frame: client, direction, topic, bytes, time), and fixture logs.
+Compare runs with 'scripts/tron-profile compare BASE CANDIDATE'.
+
+Exit status: 0 success; 2 invalid usage; 4 Gateway install/build failed; 5 fixture
+failed to start; 6 scenario or measurement rejected; 7 self-test failed; 75 a
+deadline expired; 130 interrupted. Failures print the evidence path.
+"""
+
+
+def parse(argv: list[str]) -> argparse.Namespace:
+    parser = argparse.ArgumentParser(
+        prog="scripts/tron-profile gateway", description="Profile Gateway wire traffic against an isolated fixture Gateway.",
+        epilog=USAGE_EPILOG, formatter_class=argparse.RawDescriptionHelpFormatter)
+    parser.add_argument("--list", action="store_true", help="list scenarios and exit")
+    parser.add_argument("--scenario", action="append", default=[], metavar="NAME", help="scenario to run (repeatable, or 'all')")
+    parser.add_argument("--iterations", type=int, default=3, help="measured iterations per scenario (default 3)")
+    parser.add_argument("--warmup", type=int, default=1,
+                        help="unmeasured warm-up iterations before prompt scenarios (default 1)")
+    parser.add_argument("--window-seconds", type=float, default=60.0, help="idle scenario window (default 60)")
+    parser.add_argument("--tokens-per-second", type=float, default=80.0, help="faux model streaming rate (default 80)")
+    parser.add_argument("--no-build", action="store_true", help="use the existing packages/gateway/dist build")
+    parser.add_argument("--cpu-profile", action="store_true", help="also write a Node CPU profile of the fixture Gateway")
+    parser.add_argument("--self-test", action="store_true", help="prove the recording path with a known-factor control")
+    parser.add_argument("--lock-wait-seconds", type=float, default=900.0, help="wait for another gateway profile (default 900)")
+    args = parser.parse_args(argv)
+    names: list[str] = []
+    for name in args.scenario:
+        for item in (SCENARIOS if name == "all" else [name]):
+            if item not in SCENARIOS:
+                parser.error(f"unknown scenario {item!r}; choose from {', '.join(SCENARIOS)} or all")
+            if item not in names:
+                names.append(item)
+    args.scenario = names
+    if not args.list and not names and not args.self_test:
+        parser.error("choose --scenario NAME, --self-test, or --list")
+    if not 1 <= args.iterations <= 50:
+        parser.error("--iterations must be between 1 and 50")
+    if not 0 <= args.warmup <= 5:
+        parser.error("--warmup must be between 0 and 5")
+    if not 5 <= args.window_seconds <= 3600:
+        parser.error("--window-seconds must be between 5 and 3600")
+    if not 1 <= args.tokens_per_second <= 10_000:
+        parser.error("--tokens-per-second must be between 1 and 10000")
+    return args
+
+
+@contextlib.contextmanager
+def profile_lock(directory: Path, wait_seconds: float):
+    """Serialize gateway profiles on this host so CPU samples do not overlap."""
+    directory.mkdir(parents=True, exist_ok=True)
+    with (directory / ".profile.lock").open("a") as handle:
+        deadline = time.monotonic() + wait_seconds
+        announced = False
+        while True:
+            try:
+                fcntl.flock(handle, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                break
+            except BlockingIOError:
+                if time.monotonic() > deadline:
+                    raise ProfileFailure("another gateway profile holds the lock", EXIT_TIMEOUT, directory / ".profile.lock")
+                if not announced:
+                    log("waiting for another gateway profile to finish")
+                    announced = True
+                time.sleep(1)
+        yield
+
+
+def main(argv: list[str]) -> int:
+    if argv[:1] == ["_rusage"]:
+        # Internal: the driver samples fixture CPU counters at window edges.
+        print(json.dumps(process_usage(int(argv[1]))))
+        return EXIT_OK
+    args = parse(argv)
+    if args.list:
+        for scenario in SCENARIOS.values():
+            print(f"{scenario.name:<20} {scenario.description}")
+        return EXIT_OK
+
+    def interrupt(signal_number: int, _frame: object) -> None:
+        for handled in (signal.SIGINT, signal.SIGTERM, signal.SIGHUP):
+            signal.signal(handled, signal.SIG_IGN)  # cleanup must finish
+        raise Interrupted(signal_number)
+
+    for handled in (signal.SIGINT, signal.SIGTERM, signal.SIGHUP):
+        signal.signal(handled, interrupt)
+    root = report_module.profile_root()
+    try:
+        with profile_lock(root / "gateway", args.lock_wait_seconds):
+            if args.no_build:
+                if not ENTRY.is_file():
+                    raise ProfileFailure(f"--no-build requires an existing build at {ENTRY}", EXIT_BUILD)
+            else:
+                build_evidence = root / "gateway" / f".build-{utc_stamp()}-{secrets.token_hex(3)}"
+                build_evidence.mkdir(parents=True)
+                build_gateway(build_evidence)
+                shutil.rmtree(build_evidence, ignore_errors=True)
+            status = EXIT_OK
+            if args.self_test:
+                status = self_test(args, root)
+            for name in args.scenario:
+                run_scenario(SCENARIOS[name], args, root / "gateway")
+            return status
+    except ProfileFailure as failure:
+        print(f"error: {failure}", file=sys.stderr)
+        if failure.evidence:
+            print(f"evidence: {failure.evidence}", file=sys.stderr)
+        return failure.code
+    except Interrupted as interrupted:
+        print(f"interrupted by signal {interrupted.signal_number}; fixture stopped and removed", file=sys.stderr)
+        return EXIT_INTERRUPTED
+
+
+if __name__ == "__main__":
+    raise SystemExit(main(sys.argv[1:]))

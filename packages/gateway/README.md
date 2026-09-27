@@ -2270,6 +2270,80 @@ credentials. Additional deterministic tests exercise interactive API-key and
 OAuth brokering, project trust, and native local-package persistence,
 and credential separation.
 
+### Wire-traffic profile
+
+`scripts/tron-profile gateway` measures what this checkout's Gateway sends to
+phones. It is the evidence source for Gateway energy and bandwidth work; compare
+a change against its baseline with `scripts/tron-profile compare BASE CANDIDATE`.
+
+```bash
+scripts/tron-profile gateway --list
+scripts/tron-profile gateway --self-test            # prove the recording path first
+scripts/tron-profile gateway --scenario stream-reply # or tool-loop, idle, dashboard-observer, all
+scripts/tron-profile gateway --scenario idle --window-seconds 60 --iterations 3 --no-build --cpu-profile
+```
+
+Each scenario run builds the Gateway (`npm ci` only when the lockfile changed),
+then starts a fresh fixture Gateway from `dist/index.js` in a private temporary
+home on a free loopback port, with the faux model in
+`scripts/tron-profile-gateway-extension.ts` (fixed chunk size, 80 tokens/s by
+default, answers derived only from the prompt directive and canonical context),
+no user state, and analytics off. It never contacts the user's Gateway. The
+orchestrator stops the fixture after checking its PID and command, then removes
+its home on success, failure, deadline and interruption. The fixture needs the
+repository-pinned Node on `PATH`; a signed runtime `node` (such as a Gateway
+payload's) cannot load the unsigned `node-pty` addon, and startup fails with that
+hint. Runs are serialized per host by a lock under the profile root.
+
+`scripts/tron-profile-gateway-driver.mjs` pairs through `POST /v1/pair` and
+connects clients that behave like the phone: they offer `permessage-deflate` with
+no parameters, send `hello` with the current protocol version and
+`clientRole: "mobile"`, ping every 10 s, answer server pings, and load
+`session.list` (500, `user`). The **mobile** client mounts a chat as
+`SessionPresentationStore` does: `session.open`, `session.sync`, a visible
+`session.presentation.set` renewed every 15 s, then hidden and `session.close`
+when it leaves. The **dashboard** client has no subscription. A third, unrecorded
+device drives `dashboard-observer`.
+
+| Scenario | Workload per iteration (fresh session each) | Window |
+| --- | --- | --- |
+| `stream-reply` | One prompt; an 800-character thinking block, then 6,000 characters of Markdown | Prompt to idle plus 1.5 s without frames |
+| `tool-loop` | Seeded canonical session whose open page fills the 512-item/600 KB transcript bound; ten sequential `bash` calls (about 1.7 KB output each), then 1,500 characters | Prompt to idle plus 1.5 s |
+| `idle` | Mobile mounted in an idle chat, dashboard connected, nothing runs | `--window-seconds` (60) |
+| `dashboard-observer` | Only the dashboard records while another client runs the tool loop | Prompt to idle plus 1.5 s |
+
+One unmeasured warm-up iteration (`--warmup`) precedes prompt scenarios. A run is
+rejected (exit 6) unless every iteration ends idle with exactly the scripted
+canonical outcome (final text length, tool results) and the recorded clients saw
+the workload. Metrics, one sample per iteration, all lower-is-better:
+
+- `wire.<client>.<topic>.frames|bytes` per event topic or `response.<method>`,
+  lowercased with camel case as `_` (`session.toolProgress` becomes
+  `session.tool_progress`); `wire.<client>.total.*`, `bytes_per_second`,
+  `largest_frame`, and `outbound.*` for requests. Message bytes are the
+  decompressed payload the phone decodes.
+- `wire.<client>.socket_bytes_read|written`: TCP bytes on the client socket,
+  including WebSocket framing and any negotiated compression. The negotiated
+  extension of each client is in the report context; a compression change moves
+  these while message bytes stay constant.
+- `wire.<client>.pings_received|pongs_sent` (server heartbeat) and
+  `pings_sent|pongs_received` (client liveness).
+- `gateway.cpu.time|instructions|cycles` and `gateway.wakeups.interrupt` of the
+  fixture Gateway process from `proc_pid_rusage`; tool subprocesses are excluded.
+
+Wire counts are deterministic for an unchanged Gateway (zero spread in
+practice); Gateway CPU varies with host load and garbage collection, so compare
+CPU only between runs on a quiet host. Reports live under
+`~/Library/Developer/Tron/profiles/gateway/<run>/` with `timeline.jsonl` (every
+frame and control ping/pong with client, direction, topic, bytes and time),
+`result.json`, the fixture Gateway log, and with `--cpu-profile` a V8
+`.cpuprofile`. The self-test runs `stream-reply` with 6,000 and 3,000 reply
+characters and exits 7 unless `session.progress` frames and bytes move beyond
+the report's noise bound in the expected ratio and the unsubscribed client never
+receives `session.progress`. Limits: the faux model bypasses provider network
+streams, Knowledge is unconfigured, the recording clients are Node `ws`, not
+`URLSessionWebSocketTask`, and the loopback socket has no radio cost.
+
 ## Session subagent activity
 
 The additive `process-activity.v1` projection observes only structured synchronous and
