@@ -209,10 +209,6 @@ struct SessionSummary: Codable, Hashable, Identifiable, Sendable {
         URL(fileURLWithPath: cwd).lastPathComponent.isEmpty ? cwd : URL(fileURLWithPath: cwd).lastPathComponent
     }
 
-    func relativeActivityDescription(relativeTo now: Date = .now) -> String {
-        GatewayTimestamp.relativeDescription(updatedAt, relativeTo: now)
-    }
-
     static func dashboardSessions(_ sessions: [SessionSummary]) -> [SessionSummary] {
         sessions.filter { $0.kind == .user }
     }

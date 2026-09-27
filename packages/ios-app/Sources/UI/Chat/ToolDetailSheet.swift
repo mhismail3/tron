@@ -378,7 +378,7 @@ private struct ToolStatusChip: View {
                     sceneActive: scenePhase == .active,
                     viewportVisible: isVisible
                 ) {
-                    TimelineView(.periodic(from: .now, by: 0.5)) { _ in
+                    TimelineView(timelineSchedule) { _ in
                         content(runningPresentation(), showsSpinner: true)
                     }
                 } else {
@@ -397,9 +397,32 @@ private struct ToolStatusChip: View {
     }
 
     private func runningPresentation() -> ToolStatusChipPresentation {
-        let elapsed = localClock?.milliseconds(at: ProcessInfo.processInfo.systemUptime)
-            ?? tool.elapsedMilliseconds(at: .now)
+        let elapsed = Self.milliseconds(
+            tool: tool,
+            localClock: localClock,
+            at: .now,
+            uptime: ProcessInfo.processInfo.systemUptime
+        )
         return ToolStatusChipPresentation.make(tool: tool, elapsedMilliseconds: elapsed)
+    }
+
+    /// Only the chip's duration changes while it runs, so the schedule follows
+    /// the elapsed value alone.
+    private var timelineSchedule: ToolElapsedTimelineSchedule {
+        let tool = tool
+        let localClock = localClock
+        return ToolElapsedTimelineSchedule(interval: 0.5) { date, uptime in
+            Self.milliseconds(tool: tool, localClock: localClock, at: date, uptime: uptime)
+        }
+    }
+
+    private static func milliseconds(
+        tool: ChatToolPresentation,
+        localClock: ToolElapsedClock?,
+        at date: Date,
+        uptime: TimeInterval
+    ) -> Int? {
+        localClock?.milliseconds(at: uptime) ?? tool.elapsedMilliseconds(at: date, uptime: uptime)
     }
 
     private func synchronizeLocalClock() {

@@ -409,11 +409,18 @@ private struct DisplayToolElapsedText: View {
             surfaceActive: activity.allowsContinuousAnimation,
             sceneActive: scenePhase == .active
         ) {
-            TimelineView(.periodic(from: .now, by: 1)) { context in
+            TimelineView(timelineSchedule) { context in
                 value(at: context.date)
             }
         } else {
             value(at: .now)
+        }
+    }
+
+    private var timelineSchedule: ToolElapsedTimelineSchedule {
+        let tool = tool
+        return ToolElapsedTimelineSchedule(interval: 1) { date, uptime in
+            tool.elapsedMilliseconds(at: date, uptime: uptime)
         }
     }
 

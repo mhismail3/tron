@@ -31,9 +31,10 @@ struct HostedSessionArchiveFixture: View {
     /// The hosted harness is not the presented production dashboard, so it
     /// declares its own branch activity instead of inheriting the
     /// no-coordinator `.active` fallback. An active branch runs the dashboard's
-    /// one-second row clock (a repeating `TimelineView`), and XCUI never
-    /// observes app quiescence while that clock keeps the run loop busy, so every
-    /// query in the journey would time out before its first assertion. The
+    /// row clock (a `TimelineView` that ticks every second while a label counts
+    /// seconds), and XCUI never observes app quiescence while that clock keeps
+    /// the run loop busy, so every query in the journey would time out before
+    /// its first assertion. The
     /// surfaces under test—row swipes and the archived container—read no
     /// presentation activity, so only the row's relative-time clock is affected.
     private static let branchActivity = PresentationSurfaceActivity.covered

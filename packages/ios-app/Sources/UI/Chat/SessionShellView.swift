@@ -1411,27 +1411,28 @@ struct HistoricalSessionRow: View {
     @State private var isVisible = false
 
     var body: some View {
+        let clock = DashboardActivityClock(updatedAt: session.updatedAt)
         Group {
             if PresentationClockPolicy.runs(
                 surfaceActive: presentationActivity.allowsContinuousAnimation,
                 sceneActive: scenePhase == .active,
                 viewportVisible: isVisible
             ) {
-                TimelineView(.periodic(from: .now, by: DashboardActivityClock.refreshInterval)) { timeline in
+                // The whole row re-renders so its accessibility label ages too.
+                TimelineView(clock) { timeline in
                     // A summary may arrive between ticks; the last scheduled
                     // tick must not make its newer timestamp look future-dated.
-                    row(relativeTo: max(timeline.date, .now))
+                    row(relativeActivity: clock.label(relativeTo: max(timeline.date, .now)))
                 }
             } else {
-                row(relativeTo: .now)
+                row(relativeActivity: clock.label(relativeTo: .now))
             }
         }
         .onAppear { isVisible = true }
         .onDisappear { isVisible = false }
     }
 
-    private func row(relativeTo now: Date) -> some View {
-        let relativeActivity = session.relativeActivityDescription(relativeTo: now)
+    private func row(relativeActivity: String) -> some View {
         let trailingStatus = activity == .waitingForUser ? "Waiting for you" : relativeActivity
         return HStack(spacing: SessionDashboardLayout.iconTextSpacing) {
             ZStack {

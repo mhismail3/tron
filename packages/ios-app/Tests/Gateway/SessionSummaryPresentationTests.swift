@@ -1,4 +1,5 @@
 import Foundation
+import SwiftUI
 import Testing
 @testable import TronMobile
 
@@ -83,12 +84,15 @@ struct SessionSummaryPresentationTests {
         let first = session("a", updatedAt: "2026-01-01T00:00:00Z")
         let second = session("b", updatedAt: "2026-01-01T00:00:00.000Z")
         let completion = GatewayTimestamp.parse(first.updatedAt)!
-        let initial = first.relativeActivityDescription(relativeTo: completion)
-        let nextTick = completion.addingTimeInterval(DashboardActivityClock.refreshInterval)
+        let clock = DashboardActivityClock(updatedAt: first.updatedAt)
+        let initial = clock.label(relativeTo: completion)
+        var ticks = clock.entries(from: completion, mode: .normal).makeIterator()
 
+        #expect(ticks.next() == completion)
+        let nextTick = ticks.next()!
         #expect(nextTick.timeIntervalSince(completion) == 1)
-        #expect(first.relativeActivityDescription(relativeTo: nextTick) != initial)
-        #expect(first.relativeActivityDescription(relativeTo: completion.addingTimeInterval(5)) != initial)
+        #expect(clock.label(relativeTo: nextTick) != initial)
+        #expect(clock.label(relativeTo: completion.addingTimeInterval(5)) != initial)
         for rows in [[first, second], [second, first]] {
             #expect(SessionSummary.orderedForDashboard(rows).map(\.id) == ["a", "b"])
         }

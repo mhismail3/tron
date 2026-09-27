@@ -1572,8 +1572,8 @@ spinner observable, and the reveal must bring the rows into view with the header
 visible. Its three retained screenshots are
 its visual evidence, as are the confirmation journey's. Hosted fixtures that render real dashboard rows must declare an
 inactive branch presentation activity (the archive fixture does), because the production
-one-second row clock keeps the run loop busy and XCUI can never observe app quiescence while
-it ticks.
+row clock ticks every second while a label counts seconds, which keeps the run loop busy, and
+XCUI can never observe app quiescence while it ticks.
 
 The Ask User fixture's socket is test-only and records the real `extension.respond` RPC;
 no Gateway or provider is contacted. The test taps the rendered form controls,

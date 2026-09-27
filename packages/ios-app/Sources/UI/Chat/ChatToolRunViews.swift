@@ -970,6 +970,96 @@ struct ToolElapsedClock: Equatable {
     }
 }
 
+/// A running tool timer's `TimelineView` schedule. Below one minute of elapsed
+/// time it is exactly the view's historical `.periodic(from: .now, by:)` clock,
+/// started when the body ran, so the tenths it shows keep their cadence and
+/// phase. From the first periodic tick at one minute the label shows only whole
+/// seconds (whole minutes from one hour), so the schedule fires exactly when
+/// that text changes instead of polling.
+struct ToolElapsedTimelineSchedule: TimelineSchedule {
+    /// Below this the label shows milliseconds or tenths of a second.
+    static let periodicLimitMilliseconds = 60_000
+    /// Past the periodic limit the label changes at least once a minute; an
+    /// unchanged horizon entry only re-renders the same text.
+    static let changeSearchHorizon: TimeInterval = 61
+
+    let periodic: PeriodicTimelineSchedule
+    /// Wall-clock and uptime instants read together. They map a future render
+    /// date to the uptime the view's clocks will read at that date.
+    let anchorDate: Date
+    let anchorUptime: TimeInterval
+    /// The view's displayed elapsed value for a render at `date` and `uptime`.
+    let milliseconds: @Sendable (_ date: Date, _ uptime: TimeInterval) -> Int?
+
+    init(
+        anchorDate: Date,
+        anchorUptime: TimeInterval,
+        interval: TimeInterval,
+        milliseconds: @escaping @Sendable (_ date: Date, _ uptime: TimeInterval) -> Int?
+    ) {
+        self.anchorDate = anchorDate
+        self.anchorUptime = anchorUptime
+        periodic = .periodic(from: anchorDate, by: interval)
+        self.milliseconds = milliseconds
+    }
+
+    /// Reads uptime before the date, so a mapped uptime never runs ahead of the
+    /// uptime a render at that date reads and a change entry never renders the
+    /// previous text.
+    init(
+        interval: TimeInterval,
+        milliseconds: @escaping @Sendable (_ date: Date, _ uptime: TimeInterval) -> Int?
+    ) {
+        let uptime = ProcessInfo.processInfo.systemUptime
+        self.init(anchorDate: .now, anchorUptime: uptime, interval: interval, milliseconds: milliseconds)
+    }
+
+    func milliseconds(renderedAt date: Date) -> Int? {
+        milliseconds(date, anchorUptime + date.timeIntervalSince(anchorDate))
+    }
+
+    func label(renderedAt date: Date) -> String {
+        milliseconds(renderedAt: date).map(ToolTiming.format(milliseconds:)) ?? ""
+    }
+
+    func entries(from startDate: Date, mode: TimelineScheduleMode) -> Entries {
+        Entries(schedule: self, periodic: periodic.entries(from: startDate, mode: mode))
+    }
+
+    struct Entries: Sequence, IteratorProtocol {
+        let schedule: ToolElapsedTimelineSchedule
+        var periodic: PeriodicTimelineSchedule.Entries
+        private var previous: Date?
+        private var tracksChanges = false
+
+        init(schedule: ToolElapsedTimelineSchedule, periodic: PeriodicTimelineSchedule.Entries) {
+            self.schedule = schedule
+            self.periodic = periodic
+        }
+
+        mutating func next() -> Date? {
+            if tracksChanges, let previous {
+                let change = PresentationLabelChange.next(
+                    after: previous,
+                    horizon: ToolElapsedTimelineSchedule.changeSearchHorizon,
+                    label: schedule.label(renderedAt:)
+                )
+                self.previous = change
+                return change
+            }
+            guard let tick = periodic.next() else { return nil }
+            // The first periodic tick at a minute still fires, exactly as
+            // today, so the transition out of tenths is unchanged.
+            if let elapsed = schedule.milliseconds(renderedAt: tick),
+               elapsed >= ToolElapsedTimelineSchedule.periodicLimitMilliseconds {
+                tracksChanges = true
+            }
+            previous = tick
+            return tick
+        }
+    }
+}
+
 private struct ToolElapsedClockKey: Hashable {
     let id: String
     let startedAt: String?
@@ -1001,7 +1091,7 @@ private struct ToolElapsedText: View {
                    sceneActive: scenePhase == .active,
                    viewportVisible: isVisible
                ) {
-                TimelineView(.periodic(from: .now, by: 0.1)) { _ in
+                TimelineView(timelineSchedule) { _ in
                     elapsed(at: .now)
                 }
             } else {
@@ -1032,13 +1122,36 @@ private struct ToolElapsedText: View {
         }
     }
 
-    private func milliseconds(at date: Date) -> Int? {
-        guard needsLocalClock,
-              clockKey == ToolElapsedClockKey(tool),
-              let localClock else {
-            return tool.elapsedMilliseconds(at: date)
+    private var timelineSchedule: ToolElapsedTimelineSchedule {
+        let tool = tool
+        let localClock = currentLocalClock
+        return ToolElapsedTimelineSchedule(interval: 0.1) { date, uptime in
+            Self.milliseconds(tool: tool, localClock: localClock, at: date, uptime: uptime)
         }
-        return localClock.milliseconds(at: ProcessInfo.processInfo.systemUptime)
+    }
+
+    private var currentLocalClock: ToolElapsedClock? {
+        guard needsLocalClock, clockKey == ToolElapsedClockKey(tool) else { return nil }
+        return localClock
+    }
+
+    private func milliseconds(at date: Date) -> Int? {
+        Self.milliseconds(
+            tool: tool,
+            localClock: currentLocalClock,
+            at: date,
+            uptime: ProcessInfo.processInfo.systemUptime
+        )
+    }
+
+    private static func milliseconds(
+        tool: ChatToolDescriptor,
+        localClock: ToolElapsedClock?,
+        at date: Date,
+        uptime: TimeInterval
+    ) -> Int? {
+        guard let localClock else { return tool.elapsedMilliseconds(at: date, uptime: uptime) }
+        return localClock.milliseconds(at: uptime)
     }
 
     private func synchronizeLocalClock() {
@@ -1075,7 +1188,7 @@ private struct ToolRunElapsedText: View {
                    sceneActive: scenePhase == .active,
                    viewportVisible: isVisible
                ) {
-                TimelineView(.periodic(from: .now, by: 0.1)) { _ in
+                TimelineView(timelineSchedule) { _ in
                     elapsed(at: .now)
                 }
             } else {
@@ -1101,12 +1214,33 @@ private struct ToolRunElapsedText: View {
         }
     }
 
+    private var timelineSchedule: ToolElapsedTimelineSchedule {
+        let tools = run.tools
+        let localClocks = localClocks
+        return ToolElapsedTimelineSchedule(interval: 0.1) { date, uptime in
+            Self.milliseconds(tools: tools, localClocks: localClocks, at: date, uptime: uptime)
+        }
+    }
+
     private func milliseconds(at date: Date) -> Int? {
-        let uptime = ProcessInfo.processInfo.systemUptime
-        let values = run.tools.compactMap { tool -> Int? in
+        Self.milliseconds(
+            tools: run.tools,
+            localClocks: localClocks,
+            at: date,
+            uptime: ProcessInfo.processInfo.systemUptime
+        )
+    }
+
+    private static func milliseconds(
+        tools: [ChatToolDescriptor],
+        localClocks: [ToolElapsedClockKey: ToolElapsedClock],
+        at date: Date,
+        uptime: TimeInterval
+    ) -> Int? {
+        let values = tools.compactMap { tool -> Int? in
             guard tool.isActivelyExecuting,
                   let localClock = localClocks[ToolElapsedClockKey(tool)] else {
-                return tool.elapsedMilliseconds(at: date)
+                return tool.elapsedMilliseconds(at: date, uptime: uptime)
             }
             return localClock.milliseconds(at: uptime)
         }

@@ -220,7 +220,7 @@ struct NotificationInboxRowList: View {
             surfaceActive: presentationActivity.allowsContinuousAnimation,
             sceneActive: scenePhase == .active
         ) {
-            TimelineView(.periodic(from: .now, by: DashboardActivityClock.refreshInterval)) { timeline in
+            TimelineView(.periodic(from: .now, by: 1)) { timeline in
                 rows(relativeTo: timeline.date)
             }
         } else {
@@ -371,6 +371,27 @@ enum NotificationInboxRowStyle {
     case plain
 }
 
+/// The inbox rows' relative time, identical to formatting with a new default
+/// `RelativeDateTimeFormatter` for every row on every tick. A new formatter
+/// snapshots the current locale (its calendar follows the current one), so the
+/// shared formatter is rebuilt whenever the current locale or calendar differs
+/// from the one it was built under.
+@MainActor
+enum NotificationInboxRelativeTime {
+    private static var shared: (locale: Locale, calendar: Calendar, formatter: RelativeDateTimeFormatter)?
+
+    static func string(for date: Date, relativeTo reference: Date) -> String {
+        let locale = Locale.current
+        let calendar = Calendar.current
+        if let shared, shared.locale == locale, shared.calendar == calendar {
+            return shared.formatter.localizedString(for: date, relativeTo: reference)
+        }
+        let formatter = RelativeDateTimeFormatter()
+        shared = (locale, calendar, formatter)
+        return formatter.localizedString(for: date, relativeTo: reference)
+    }
+}
+
 private struct NotificationInboxRow: View {
     let item: NotificationInboxItem
     let relativeTo: Date
@@ -428,7 +449,7 @@ private struct NotificationInboxRow: View {
 
     private var rowDetail: String {
         let created = GatewayTimestamp.parse(item.notification.createdAt)
-        let relative = created.map { RelativeDateTimeFormatter().localizedString(for: $0, relativeTo: relativeTo) } ?? "Recently"
+        let relative = created.map { NotificationInboxRelativeTime.string(for: $0, relativeTo: relativeTo) } ?? "Recently"
         return "\(item.profileLabel) · \(item.notification.kind.label) · \(relative)"
     }
 }

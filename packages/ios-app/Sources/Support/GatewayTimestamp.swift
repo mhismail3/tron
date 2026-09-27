@@ -46,7 +46,11 @@ enum GatewayTimestamp {
 
     static func relativeDescription(_ value: String, relativeTo reference: Date) -> String {
         guard let date = parse(value) else { return "" }
-        return relative.string(for: date, relativeTo: reference)
+        return relativeDescription(date, relativeTo: reference)
+    }
+
+    static func relativeDescription(_ date: Date, relativeTo reference: Date) -> String {
+        relative.string(for: date, relativeTo: reference)
     }
 }
 

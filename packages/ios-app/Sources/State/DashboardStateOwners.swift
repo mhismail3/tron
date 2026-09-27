@@ -1,4 +1,5 @@
 import Foundation
+import SwiftUI
 
 /// Requires the mounted chat generation to retire before a different route mounts.
 struct SessionRouteReplacementOwner: Equatable {
@@ -104,10 +105,63 @@ struct DashboardPresentationSnapshot: Equatable {
     }
 }
 
-enum DashboardActivityClock {
-    /// Labels include seconds, so even settled rows must age once per second.
-    /// This visible-surface clock never changes catalog timestamps or ordering.
-    static let refreshInterval: TimeInterval = 1
+/// A dashboard row's relative-activity label and the `TimelineView` schedule
+/// that re-renders the row exactly when that label can change: every second
+/// while it shows seconds, then once a minute, an hour, a day and so on. The
+/// change instants come from the shared formatter itself, never from assumed
+/// unit boundaries. This visible-surface clock never changes catalog timestamps
+/// or ordering.
+struct DashboardActivityClock: TimelineSchedule {
+    /// Longer than the formatter's slowest unit (a leap year plus a DST hour),
+    /// so a search always reaches the next change; an unchanged horizon entry
+    /// only re-renders the same text.
+    static let changeSearchHorizon: TimeInterval = 400 * 86_400
+
+    /// Parsed once per row value rather than on every render.
+    let updatedAt: Date?
+
+    init(updatedAt: String) {
+        self.updatedAt = GatewayTimestamp.parse(updatedAt)
+    }
+
+    /// Malformed timestamps keep today's empty label and never schedule a tick.
+    func label(relativeTo reference: Date) -> String {
+        updatedAt.map { GatewayTimestamp.relativeDescription($0, relativeTo: reference) } ?? ""
+    }
+
+    func entries(from startDate: Date, mode _: TimelineScheduleMode) -> Entries {
+        Entries(clock: self, start: startDate)
+    }
+
+    /// Yields the start, then each later instant at which the label changes.
+    /// SwiftUI pulls one entry ahead, so each search runs as the previous
+    /// change renders.
+    struct Entries: Sequence, IteratorProtocol {
+        let clock: DashboardActivityClock
+        let start: Date
+        private var previous: Date?
+
+        init(clock: DashboardActivityClock, start: Date) {
+            self.clock = clock
+            self.start = start
+        }
+
+        mutating func next() -> Date? {
+            guard let previous else {
+                previous = start
+                return start
+            }
+            guard let updatedAt = clock.updatedAt else { return nil }
+            let change = PresentationLabelChange.next(
+                after: previous,
+                horizon: DashboardActivityClock.changeSearchHorizon,
+                lattice: updatedAt,
+                label: clock.label(relativeTo:)
+            )
+            self.previous = change
+            return change
+        }
+    }
 }
 
 enum DashboardServerConnectionState: Hashable, Sendable {
