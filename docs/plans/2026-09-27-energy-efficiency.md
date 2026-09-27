@@ -2,7 +2,7 @@
 
 - **Started:** 2026-09-27
 - **Status:** Active (approved in chat by the user on 2026-09-27)
-- **Last updated:** 2026-09-27, T1 scoped; T1-GW and T1-TEXT claimed
+- **Last updated:** 2026-09-27, T3 reshaped by the deflate probe
 - **Goal:** Tron for iPhone does measurably less CPU, disk, timer and radio work per minute of real use, proven by a reliable profiler that every agent can run, with no change to what the user sees or does.
 
 ## Goal and constraints
@@ -86,6 +86,16 @@ Highest-cost mechanisms found:
 - `session.bashProgress` (per stdout chunk, unthrottled) and `session.heartbeat`
   have no consumer anywhere.
 
+Measured 2026-09-27 with a throwaway local probe: Apple's
+`URLSessionWebSocketTask` (macOS 26 CFNetwork, the stack iOS shares) offers
+`Sec-WebSocket-Extensions: permessage-deflate` with no parameters and decodes
+compressed context-takeover messages correctly. The Gateway's WebSocket server
+sets `perMessageDeflate: false` in `packages/gateway/src/transport/server.ts`,
+so nothing is negotiated today. Enabling it would compress every frame to the
+phone with no protocol or iOS change; with context takeover, a cumulative
+streaming frame compresses to roughly its new text. The iOS simulator runtime
+still has to confirm the same offer (T3-DEFLATE).
+
 ## Plan rules
 
 - **Measure, then keep.** Every T task records the relevant profiler scenario
@@ -123,15 +133,15 @@ Highest-cost mechanisms found:
 | T1-TEXT | Claimed | `discreteInsertedIDs` to O(n) with an equivalence check; `ChatStreamingInlineText` keeps settled text whole (preserving the streaming-flip reveal state) and caches the revealed prefix | none (keep decision: P-1, P-2) | energy-efficiency supervisor, worker lane t1-text, 2026-09-27 |
 | T1-CLOCKS | Ready | Timeline schedules that fire when a label can change: dashboard rows, tool elapsed timers (sub-minute cadence preserved), static inbox formatter | none (keep decision: P-1, P-2) | |
 | T1-NET | Ready | One shared ping grid for every socket (no interval ever longer than today), lease renewal on that grid at no longer than today's interval, one shared `URLSession` for idempotent GETs with per-task delegates | none (keep decision: P-1, P-2) | |
+| T3-DEFLATE | Ready | Negotiate `permessage-deflate` for paired (non-loopback) clients that offer it; confirm the offer from the iOS simulator app, keep inbound size bounds on decompressed bytes, and keep outbound queue accounting and backpressure exact | none (keep decision: P-2) | |
 | T2-CHATVIEW | Needs scoping | ChatView observes the snapshot and the installed transcript in separate child scopes; response state computed with the installed transcript | T1-TEXT | |
 | T2-DASH | Needs scoping | Dashboard root stops re-evaluating on every summary; parsed ordering instants; cheaper per-row path helpers; filter preferences saved only on change | T1-CLOCKS | |
 | T2-THINK | Needs scoping | Thinking trace measures its visible text instead of a hidden full copy | T1-TEXT | |
 | T2-TEXTPREP | Needs scoping | Text preparation reuses history rows on the isolated streaming path and memoizes closed Markdown blocks | T1-TEXT | |
 | T2-SMALL | Needs scoping | AppLog debug encode and restore ordering, diagnostics sanitized once, debounced extension drafts flushed on close and background, direct thumbnail images, push token writes only on change | P-4 | |
-| T3-DEFLATE | Needs scoping | Probe whether the iPhone's WebSocket offers `permessage-deflate`; if it does, enable it for offering clients above a size threshold | P-2 | |
-| T3-TRANSCRIPT | Needs scoping | Transcript append deltas for `session.snapshot`, negotiated per connection, exact-or-full on the Gateway, fail-closed resync on the phone | T3-DEFLATE | |
-| T3-STREAM | Needs scoping | Streaming text append deltas for `session.progress`, same rules, unless T3-DEFLATE already removes the cost | T3-DEFLATE | |
-| T3-TOOLPROG | Needs scoping | Tool progress omits a `partialResult` the phone can reconstruct exactly, same rules | T3-DEFLATE | |
+| T3-TRANSCRIPT | Needs scoping | Transcript append deltas for `session.snapshot` (deflate cuts its radio bytes but not the phone's decode of up to 800 KB per snapshot), negotiated per connection, exact-or-full on the Gateway, digest-verified with fail-closed resync on the phone | T3-DEFLATE | |
+| T3-STREAM | Needs scoping | Streaming text append deltas for `session.progress`, same rules; only if P-2 shows progress bytes or decode cost still material after T3-DEFLATE | T3-DEFLATE | |
+| T3-TOOLPROG | Needs scoping | Tool progress omits a `partialResult` the phone can reconstruct exactly, same rules; only if still material after T3-DEFLATE | T3-DEFLATE | |
 | T3-CATALOG | Needs scoping | Conditional `session.list` on foreground: an unchanged catalog generation keeps the retained rows | P-4 | |
 | V-1 | Needs scoping | Close-out: full Gateway and iOS suites, parity gates, profiler comparison against P-4, owning docs, user device check | all | |
 
@@ -299,5 +309,27 @@ manual comparison.
 - One shared `URLSession` per HTTP transport for idempotent GET requests, with
   per-task delegates carrying today's bounds, redirect and cancellation
   behavior; uploads and other non-idempotent requests keep a fresh session.
+
+### T3-DEFLATE — WebSocket compression
+
+Primary scenarios: Gateway `stream-reply`, `tool-loop`, `idle` (socket bytes
+read per client), iOS `streaming-reply` and `tool-loop` (instructions, energy)
+to confirm inflate cost on the phone stays below the saved decode-free radio
+time.
+
+- Loopback clients (the Mac app, CLI) keep uncompressed frames; paired clients
+  that offer the extension get it. The ws server negotiates per server
+  instance, so choose deliberately (for example two server instances selected
+  in the upgrade handler) rather than compressing loopback traffic.
+- Pick level, memory level, threshold and context takeover from P-2
+  measurements (Mac CPU per client versus bytes saved); cap concurrent zlib
+  work.
+- Inbound `maxPayload` and the phone's 1 MiB frame ceiling must bound
+  decompressed size (no decompression bomb); the outbound queue's frame and
+  byte accounting, write-progress and heartbeat diagnostics must stay exact
+  with asynchronous compression (extend the server capacity tests).
+- Prove the iOS app negotiates and decodes it: a hosted or E2E run of the real
+  `GatewaySocketTransport` against a compressing server, including a frame
+  just under the 1 MiB ceiling and one over it.
 
 ## Handoff log
