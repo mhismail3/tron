@@ -122,7 +122,10 @@ the MainActor reducer installs typed `Sendable` values instead of re-encoding an
 decoding dynamic payloads. Raw event payloads remain attached for global extension
 points and unknown topics. The ordered client event hub admits the Gateway's complete 1,024-event synchronization quarantine under a stricter 2 MiB aggregate byte ceiling; overflow retires the epoch and rebaselines rather than silently dropping sequence. Every Gateway coder is fresh per operation; shared static Foundation
 coder instances are forbidden across concurrent frame preparation. Inbound bytes reject frames above
-the Gateway's 1 MiB protocol ceiling before JSON parsing. Dynamic `JSONValue` admission
+the Gateway's 1 MiB protocol ceiling before JSON parsing. The Gateway accepts URLSession's `permessage-deflate`
+offer for paired devices; CFNetwork inflates before delivery and its `maximumMessageSize` bounds only wire
+bytes, so this check on the inflated bytes is the phone's decoded-size bound
+([frame compression](../../gateway/docs/connection-resilience.md#frame-compression)). Dynamic `JSONValue` admission
 is capped at depth 64, 32,768 nodes, 8,192 members per collection, 1 MiB per UTF-8 string, and
 4 MiB of aggregate strings including object keys. Non-finite numbers fail coding, and integer
 projection uses exact range-safe conversion. Malformed known event data preserves its former live-reducer no-op semantics rather than becoming a transport failure; malformed

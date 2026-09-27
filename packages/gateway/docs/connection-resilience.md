@@ -110,6 +110,60 @@ owner of accepted commands; mobile reconnect never replays a prompt blindly.
   blocker session, category, state and age. Persistence diagnostics are logged to
   the Gateway log, whose active/rotated files remain bounded to one MiB each.
 
+## Frame compression
+
+Paired devices that offer `permessage-deflate` (URLSession offers it with no
+parameters) receive compressed frames; local-credential clients (the Mac app,
+CLI) stay uncompressed even when they offer it. `ws` negotiates per server
+instance, so the upgrade handler picks one of two instances by the
+authenticated credential kind (`PAIRED_PER_MESSAGE_DEFLATE` in
+`src/transport/server.ts`). A paired client that does not offer the extension
+keeps today's uncompressed frames.
+
+- **Settings:** server context takeover stays on, so a cumulative
+  `session.progress` frame compresses to roughly its new text. A client may
+  still request `server_no_context_takeover`; it is honored rather than
+  rejected, and only then does `ws`'s 1 KiB threshold leave small frames
+  uncompressed. Otherwise every frame is compressed. zlib level 6, memLevel 8,
+  window bits 15. `ws`'s zlib limiter is process-global and shared by inflate and
+  deflate; it is capped at two concurrent operations so file I/O keeps half of
+  libuv's four-thread pool. Retained deflate/inflate state is about 300 KiB per
+  compressed connection, bounded by the 32-socket cap.
+- **Measured (2026-09-27, Apple silicon Mac, host load about 10):** the real
+  `GatewayServer` broadcasting to one paired client. Repository TypeScript,
+  Swift and Markdown filled the recorded snapshot-burst fixture's transcript
+  text (`packages/ios-app/Tests/Fixtures/gateway-real-burst.json.zlib`). Nine
+  600 KB `session.snapshot` frames went from 5,465,624 to 1,132,866 wire bytes
+  (20.7%). 223 cumulative `session.progress` frames up to 24 KiB went from
+  3,038,448 to 39,157 (1.3%). 200 small responses and summaries went from 51,199
+  to 6,817 (13.3%). Isolated zlib deflate cost about 24 ms of Mac CPU per
+  uncompressed MB for snapshots, about 14 ms per 600 KB snapshot, and about
+  0.1 ms per progress frame. Levels 1/3 saved 2–4 points less on snapshots and
+  gave 7×/1.6× the progress bytes. Level 9 cost 1.5× the CPU for no gain, and
+  memLevel 9 or 7 changed bytes by under 0.2%. Without context takeover, the
+  progress sequence stayed at 33.8% of its size.
+- **Bounds:** inbound `maxPayload` (the 1 MiB frame ceiling) bounds each
+  message after inflation as well as on the wire, and an over-limit message
+  closes with 1009 before dispatch. Outbound, the 1 MiB frame ceiling and the
+  8 MiB / 4,096-frame queue count uncompressed bytes as queued, exactly as for
+  uncompressed peers. A frame completes, and advances `completedFrames` and
+  write progress, only from `ws`'s send callback. That callback runs after the
+  compressed frame is written, and `ws` compresses one message at a time per
+  socket, so order is unchanged. `wsBufferedBytes` includes uncompressed bytes
+  awaiting compression. As without compression, a frame not yet written when the
+  peer vanishes is reported as `connection.write-error`. Compression lengthens
+  that window by the deflate time. Heartbeat pings wait behind an in-progress
+  deflate of at most one frame.
+- **Phone:** CFNetwork inflates before delivery. Its `maximumMessageSize` (1 MiB)
+  bounds only compressed wire bytes. A macOS 26 probe received 8 MiB and 256 MiB
+  inflated messages that uncompressed would fail with POSIX 40. The phone's
+  decoded-size check is `GatewayFramePolicy`, after inflation (`frame_too_large`).
+  The Gateway's decoded 1 MiB outbound ceiling is therefore the primary bound
+  on what a phone allocates.
+- **Diagnosis:** `connection.opened` carries `compression=permessage-deflate`
+  or `compression=none`. `ws` answers a malformed `Sec-WebSocket-Extensions`
+  offer from a paired client with HTTP 400; URLSession never sends one.
+
 ## Collect evidence before recovery
 
 1. Export iOS Logs. Keep its capture time, represented time range, app build,
@@ -154,7 +208,10 @@ stall. A current low-RSS process likewise does not describe its historical peak.
 `server-capacity.integration.test.ts` protects payload-reference accounting,
 count/byte admission, stalled-close retirement, late subscription rejection and
 unrelated-client responsiveness. Its regression controls fail against the old
-unaccounted-retention/admission behavior. The synchronization and revocation
+unaccounted-retention/admission behavior. Its ordered-burst and overflow cases
+run for local and compressed paired clients; `server-compression.integration.test.ts`
+covers negotiation by credential kind, URLSession's bare offer, a requested
+`server_no_context_takeover`, and the inflated-size inbound bound. The synchronization and revocation
 integration suites protect ordering and accepted-command ownership. iOS recovery
 and dashboard owner tests cover attempt exhaustion, explicit retry and entry
 replacement without silently resetting the budget.
@@ -199,6 +256,9 @@ workers, speculative caches, or higher queue limits to conceal them.
 - `scripts/ios-gateway-e2e-test all` uses a private Gateway and a fixture-only
   bounded proxy. The proxy verifies the harness's sibling Gateway process, its
   birth/command identity and ownership of the loopback listener before forwarding.
+  The proxy accepts the app's `permessage-deflate` offer and offers it upstream
+  only when the app negotiated it. Its `proxy.bridge-opened` lines and the Gateway's
+  `connection.opened` records show what the app negotiated.
   It exercises delayed hello/open/sync, blackholed traffic, HTTP upgrade statuses,
   remote-close metadata, and loss of an accepted response followed by durable
   receipt/canonical exactly-once verification. A skipped boundary case fails the

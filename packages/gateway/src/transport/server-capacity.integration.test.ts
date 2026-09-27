@@ -121,11 +121,16 @@ describe("WebSocket connection and outbound capacity", () => {
     expect(overflow).not.toHaveBeenCalled();
   });
 
-  it("delivers a real same-turn burst above the retired 2 MiB threshold in exact order", async () => {
+  // Paired clients negotiate permessage-deflate, so their frames finish
+  // asynchronous compression before the write callback; order, completion and
+  // byte accounting (uncompressed, as queued) must match the local path.
+  it.each(["local", "paired"] as const)("delivers a real same-turn burst above the retired 2 MiB threshold in exact order to a %s client", async (credential) => {
     const root = await mkdtemp(join(tmpdir(), "tron-server-large-burst-"));
     const devices = new DeviceStore(root, "machine");
     await devices.initialize();
-    const token = JSON.parse(await readFile(join(root, "gateway", "local-auth.json"), "utf8")).bearerToken;
+    const token = credential === "local"
+      ? JSON.parse(await readFile(join(root, "gateway", "local-auth.json"), "utf8")).bearerToken
+      : (await devices.pair((await devices.ensureEnrollment()).code, "Phone")).token;
     const port = await unusedPort();
     const logger = { log: vi.fn() };
     const gateway = new GatewayServer({
@@ -149,29 +154,43 @@ describe("WebSocket connection and outbound capacity", () => {
     cleanups.push(async () => { await gateway.close(); });
 
     const socket = new WebSocket(`ws://127.0.0.1:${port}/v1/socket`, { headers: { authorization: `Bearer ${token}` } });
-    const sequences: number[] = [];
+    const sequences: string[] = [];
     socket.on("message", (raw) => {
       const frame = JSON.parse(raw.toString());
-      if (frame.topic === "test.large") sequences.push(frame.payload.sequence);
+      if (frame.topic?.startsWith("test.")) sequences.push(`${frame.topic}:${frame.payload.sequence}`);
     });
     await new Promise<void>((resolve) => socket.once("open", () => resolve()));
+    expect(socket.extensions).toBe(credential === "local" ? "" : "permessage-deflate");
     socket.send(JSON.stringify({ type: "hello", protocolVersion: 5 }));
     await waitUntil(() => logger.log.mock.calls.some((call) => call[2]?.event === "connection.opened"));
+    const connection = [...(gateway as any).clients.values()][0];
+    await waitUntil(() => connection.outbound.snapshot().completedFrames === 1); // hello
 
     const prepareBroadcastFrame = vi.spyOn(gateway as any, "prepareBroadcastFrame");
     const sendOutcome = vi.spyOn(gateway as any, "sendOutcome");
     const payload = "x".repeat(512 * 1_024);
+    const expected: string[] = [];
     for (let sequence = 1; sequence <= 6; sequence += 1) {
+      // A small frame behind each large one must not overtake it while the
+      // large frame is still being compressed.
       gateway.broadcast("test.large", { sequence, payload });
+      gateway.broadcast("test.small", { sequence });
+      expected.push(`test.large:${sequence}`, `test.small:${sequence}`);
     }
-    await waitUntil(() => sequences.length === 6);
-    expect(sequences).toEqual([1, 2, 3, 4, 5, 6]);
-    expect(prepareBroadcastFrame).toHaveBeenCalledTimes(6);
+    const queuedBytes = prepareBroadcastFrame.mock.results
+      .reduce((sum, result) => sum + (result.value as { outputBytes: number }).outputBytes, 0);
+    expect(connection.outbound.snapshot()).toMatchObject({ acceptedFrames: 13, completedFrames: 1, byteHighWater: queuedBytes });
+    await waitUntil(() => sequences.length === 12);
+    expect(sequences).toEqual(expected);
+    expect(prepareBroadcastFrame).toHaveBeenCalledTimes(12);
     const broadcastFrames = sendOutcome.mock.calls
-      .filter(([, value]) => (value as { topic?: string })?.topic === "test.large")
+      .filter(([, value]) => (value as { topic?: string })?.topic?.startsWith("test."))
       .map(([, , prepared]) => prepared);
-    expect(broadcastFrames).toHaveLength(6);
+    expect(broadcastFrames).toHaveLength(12);
     expect(broadcastFrames).toEqual(prepareBroadcastFrame.mock.results.map((result) => result.value));
+    await waitUntil(() => connection.outbound.snapshot().completedFrames === 13);
+    expect(connection.outbound.snapshot()).toMatchObject({ queuedFrames: 0, queuedBytes: 0, writeActive: false, byteHighWater: queuedBytes });
+    expect(connection.lastWriteProgressAt).not.toBeNull();
     expect(socket.readyState).toBe(WebSocket.OPEN);
     expect(logger.log.mock.calls.some((call) => call[2]?.event === "connection.outbound-capacity")).toBe(false);
     socket.close(1000);
@@ -839,7 +858,7 @@ describe("WebSocket connection and outbound capacity", () => {
     await bounded(waitUntil(() => replacement.frames.some((frame) => frame.id === "usable" && frame.ok)), "replacement request");
   });
 
-  it("admits same-turn ordered bursts, rejects connection overflow, and closes byte-oversized output", async () => {
+  it.each(["local", "paired"] as const)("admits same-turn ordered bursts, rejects connection overflow, and closes byte-oversized output for a %s client", async (credential) => {
     const root = await mkdtemp(join(tmpdir(), "tron-server-capacity-"));
     let gateway: GatewayServer | undefined;
     cleanups.push(async () => {
@@ -874,15 +893,17 @@ describe("WebSocket connection and outbound capacity", () => {
     });
     await gateway.listen();
 
-    const first = new WebSocket(`ws://127.0.0.1:${port}/v1/socket`, { headers: { authorization: `Bearer ${token}` } });
+    const [firstToken, otherToken] = credential === "local" ? [token, paired.token] : [paired.token, token];
+    const first = new WebSocket(`ws://127.0.0.1:${port}/v1/socket`, { headers: { authorization: `Bearer ${firstToken}` } });
     const frames: any[] = [];
     first.on("message", (raw) => frames.push(JSON.parse(raw.toString())));
     await new Promise<void>((resolve) => first.once("open", () => resolve()));
+    expect(first.extensions).toBe(credential === "local" ? "" : "permessage-deflate");
     first.send(JSON.stringify({ type: "hello", protocolVersion: 5 }));
     await waitUntil(() => frames.some((frame) => frame.type === "hello"));
 
     // Global capacity never displaces another identity's live connection.
-    const rejected = new WebSocket(`ws://127.0.0.1:${port}/v1/socket`, { headers: { authorization: `Bearer ${paired.token}` } });
+    const rejected = new WebSocket(`ws://127.0.0.1:${port}/v1/socket`, { headers: { authorization: `Bearer ${otherToken}` } });
     const rejectedStatus = await new Promise<number>((resolve, reject) => {
       rejected.once("unexpected-response", (_request, response) => {
         response.resume();

@@ -4,7 +4,7 @@ import type { Duplex } from "node:stream";
 import { finished, pipeline } from "node:stream/promises";
 import { abortableRead } from "../util/abortable-read.js";
 import { randomUUID } from "node:crypto";
-import { WebSocketServer, WebSocket } from "ws";
+import { WebSocketServer, WebSocket, type PerMessageDeflateOptions } from "ws";
 import { GatewayError, publicError } from "../errors.js";
 import type { JsonValue } from "../protocol/types.js";
 import type { DeviceIdentity, DeviceStore } from "../security/device-store.js";
@@ -27,6 +27,21 @@ export const MAXIMUM_REKEYED_SESSION_IDS = 64;
 export const MAXIMUM_UNANSWERED_HEARTBEATS = GATEWAY_CONNECTION_POLICY.missedHeartbeatLimit;
 /** Application-defined close code for a socket replaced by its own identity. */
 export const SUPERSEDED_CLOSE_CODE = 4000;
+
+/**
+ * permessage-deflate for paired devices, which reach the Gateway over a radio.
+ * Local-credential clients (Mac app, CLI) stay uncompressed. Measurements and
+ * bounds: packages/gateway/docs/connection-resilience.md#frame-compression.
+ * Context takeover and window bits stay at ws defaults on purpose: setting
+ * serverNoContextTakeover or a numeric window option makes ws answer a legal
+ * offer (including URLSession's parameterless one) with HTTP 400.
+ */
+export const PAIRED_PER_MESSAGE_DEFLATE: PerMessageDeflateOptions = {
+  zlibDeflateOptions: { level: 6, memLevel: 8 },
+  // ws's zlib limiter is process-global and shared by inflate and deflate;
+  // two slots leave the rest of libuv's four-thread pool to file I/O.
+  concurrencyLimit: 2,
+};
 
 function diagnosticRequestID(value: string): string {
   return value.replace(/[^A-Za-z0-9._:-]/gu, "_").slice(0, 160);
@@ -502,7 +517,10 @@ async function readBoundedBody(request: IncomingMessage, maximum: number): Promi
 
 export class GatewayServer {
   private readonly server: HTTPServer;
-  private readonly sockets: WebSocketServer;
+  // ws negotiates extensions per server instance; the upgrade handler picks
+  // one by the authenticated credential kind.
+  private readonly localSockets: WebSocketServer;
+  private readonly pairedSockets: WebSocketServer;
   private readonly clients = new Map<string, Connection>();
   private readonly httpSockets = new Set<Duplex>();
   private readonly httpConnectionsByAddress = new Map<string, number>();
@@ -577,7 +595,11 @@ export class GatewayServer {
         else this.httpConnectionsByAddress.set(address, count - 1);
       });
     });
-    this.sockets = new WebSocketServer({ noServer: true, maxPayload: options.maxFrameBytes, perMessageDeflate: false });
+    // maxPayload bounds each inbound message after inflation as well as on the wire.
+    this.localSockets = new WebSocketServer({ noServer: true, maxPayload: options.maxFrameBytes, perMessageDeflate: false });
+    this.pairedSockets = new WebSocketServer({
+      noServer: true, maxPayload: options.maxFrameBytes, perMessageDeflate: PAIRED_PER_MESSAGE_DEFLATE,
+    });
     this.server.on("upgrade", (request, socket, head) => void this.handleUpgrade(request, socket, head));
     this.heartbeat = setInterval(() => {
       const heartbeatAt = performance.now();
@@ -1215,8 +1237,9 @@ export class GatewayServer {
           this.options.logger.log("warning", `Superseding client ${client.id} with a newer connection from the same identity (lastInboundAgeMs=${progressAge(client.lastInboundAt, supersededAt)} identityConnections=${identityConnections.length} maximumPerIdentity=${maximumPerIdentity})`, { event: "connection.superseded", source: "transport" });
           this.closeFailedConnection(client, SUPERSEDED_CLOSE_CODE, "superseded by a newer connection");
         }
-        this.sockets.handleUpgrade(request, socket, head, (webSocket) => {
-          this.admit(webSocket, identity, authenticated.kind === "local");
+        const isLocal = authenticated.kind === "local";
+        (isLocal ? this.localSockets : this.pairedSockets).handleUpgrade(request, socket, head, (webSocket) => {
+          this.admit(webSocket, identity, isLocal);
         });
         return true;
       }, readLifetime.signal);
@@ -1338,7 +1361,7 @@ export class GatewayServer {
       // app's local probes reconnect constantly, so they are debug detail.
       this.options.logger.log(
         connection.isLocal ? "debug" : "info",
-        `Client ${connection.id} connection opened (${connection.isLocal ? "local" : "paired"}, ${connection.presentationOnly ? "mobile" : "local"} role) after ${Math.max(0, Math.round(performance.now() - connection.admittedAt))}ms`,
+        `Client ${connection.id} connection opened (${connection.isLocal ? "local" : "paired"}, ${connection.presentationOnly ? "mobile" : "local"} role, compression=${connection.socket.extensions || "none"}) after ${Math.max(0, Math.round(performance.now() - connection.admittedAt))}ms`,
         { event: "connection.opened", source: "transport", connectionId: connection.id },
       );
       clearTimeout(connection.helloTimer);
@@ -2064,6 +2087,7 @@ export class GatewayServer {
     }, HTTP_SHUTDOWN_GRACE_MS);
     forceHttpClose.unref();
     await httpClosedPromise;
-    this.sockets.close();
+    this.localSockets.close();
+    this.pairedSockets.close();
   }
 }
