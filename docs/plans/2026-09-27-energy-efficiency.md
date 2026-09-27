@@ -2,7 +2,7 @@
 
 - **Started:** 2026-09-27
 - **Status:** Active (approved in chat by the user on 2026-09-27)
-- **Last updated:** 2026-09-27, P-1 and P-4 done
+- **Last updated:** 2026-09-27, T3-TRANSCRIPT design
 - **Goal:** Tron for iPhone does measurably less CPU, disk, timer and radio work per minute of real use, proven by a reliable profiler that every agent can run, with no change to what the user sees or does.
 
 ## Goal and constraints
@@ -374,6 +374,50 @@ time.
 - Prove the iOS app negotiates and decodes it: a hosted or E2E run of the real
   `GatewaySocketTransport` against a compressing server, including a frame
   just under the 1 MiB ceiling and one over it.
+
+### T3-TRANSCRIPT — Transcript append snapshots (design, reviewed before code)
+
+Why after T3-DEFLATE: compression already cut snapshot radio bytes by about
+80%, but the phone still decodes, admits and re-projects a full transcript page
+(up to 512 items, 600 KB inside an 800 KB snapshot) about twice per tool call
+(`tool-loop`: 19 snapshots, 10.7 MiB decoded in 15 s, main thread 60% busy).
+Implement only if P-3 attribution shows snapshot decode, admission or
+re-projection is a material share of that time.
+
+- **Negotiation.** The phone's `hello` adds an additive capability list with
+  `session-snapshot-append.v1`; the Gateway records it per connection. Old
+  phones, the Mac app and the CLI never declare it and receive today's frames
+  byte for byte.
+- **Item revisions.** Every projected transcript item gains an additive `rev`:
+  a short digest of that item's serialized projection. Decoders ignore unknown
+  keys today (verify for every item decoder), so old clients are unaffected.
+- **Gateway.** `publishSnapshot` still builds today's full snapshot. When the
+  previous published page has the same runtime generation and the new page is
+  exactly that page with `k` leading items dropped and `m` items appended —
+  every retained item's `rev` equal, `start` and `total` consistent — it also
+  builds an append variant: every non-transcript field, plus `baseStart`,
+  `baseTotal`, `baseTailId`, a digest over the base page's item revisions,
+  `drop: k` and the `m` new items. Anything else, including any in-place
+  projection change, publishes only the full form.
+- **Per-connection choice.** The transport sends the append variant only to
+  connections that declared the capability, and never as the first snapshot
+  after that connection's `session.open` or `session.sync` for the session
+  (a per-connection flag cleared by the next full snapshot), so a client whose
+  base came from an authoritative read cannot enter a mismatch loop.
+  Synchronization barriers retain the variant chosen for that connection.
+- **Phone.** `SessionPresentationStore` applies an append only if its
+  authoritative tail matches `baseStart`, `baseTotal`, `baseTailId` and the
+  revision digest it computes from the revisions it holds; it then builds the
+  complete snapshot and admits it through today's full-snapshot path unchanged.
+  Any mismatch requests today's authoritative resynchronization and never
+  guesses. Nothing else in the reducer changes.
+- **Proof.** Gateway tests for every exact-or-full decision (append, slide,
+  branch switch, compaction, in-place projection change, runtime restart,
+  capability absent, first snapshot after open/sync, barrier replay). A phone
+  test for every accept/reject path. A differential run replaying the P-2
+  `tool-loop` timeline shows the phone's installed transcripts identical with
+  and without appends. The real-Gateway E2E, the parity gate, and `tool-loop`
+  on both profilers show the saved decode and bytes.
 
 ## Handoff log
 
