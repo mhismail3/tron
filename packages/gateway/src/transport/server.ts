@@ -405,6 +405,9 @@ interface Connection {
   revokeCloseScheduled: boolean;
   admittedAt: number;
   lastInboundAt: number | null;
+  // Messages and client pings only. A pong answers the Gateway's own ping, so
+  // it never proves that the client will speak again without being asked.
+  lastClientInitiatedInboundAt: number | null;
   // Successful ordered application-frame callbacks, not send start or pong traffic.
   lastWriteProgressAt: number | null;
   helloTimer: NodeJS.Timeout;
@@ -595,7 +598,7 @@ export class GatewayServer {
       }
       for (const connection of this.clients.values()) {
         if (connection.closeInitiated || connection.socket.readyState !== WebSocket.OPEN) continue;
-        // Retire only after three complete ping intervals received no response.
+        // Retire only after three complete heartbeat intervals received no frame.
         // One delayed timer or transiently starved callback cannot destroy a
         // healthy epoch; the fourth tick observes and retires the three misses.
         if (shouldTerminateHeartbeat(connection.unansweredHeartbeats)) {
@@ -608,8 +611,17 @@ export class GatewayServer {
           connection.socket.terminate();
           continue;
         }
+        // Every tick counts, so a dead client is retired on the same tick
+        // whether or not it was pinged. A client whose own frames arrived
+        // within the last interval is already proving liveness (the phone pings
+        // every 10 s); pinging it would only add a wakeup on both ends. Silent
+        // and pong-only clients are still pinged on every tick.
         connection.unansweredHeartbeats += 1;
-        connection.socket.ping();
+        const clientInitiatedAt = connection.lastClientInitiatedInboundAt;
+        if (clientInitiatedAt === null
+          || heartbeatAt - clientInitiatedAt >= GATEWAY_CONNECTION_POLICY.heartbeatIntervalMs) {
+          connection.socket.ping();
+        }
       }
     }, GATEWAY_CONNECTION_POLICY.heartbeatIntervalMs);
     this.heartbeat.unref();
@@ -1275,6 +1287,7 @@ export class GatewayServer {
       revokeCloseScheduled: false,
       admittedAt: performance.now(),
       lastInboundAt: null,
+      lastClientInitiatedInboundAt: null,
       lastWriteProgressAt: null,
       helloTimer: setTimeout(() => this.closeFailedConnection(connection, 1008, "hello required"), GATEWAY_CONNECTION_POLICY.helloDeadlineMs),
     };
@@ -1282,11 +1295,13 @@ export class GatewayServer {
     socket.on("message", (data, binary) => {
       connection.unansweredHeartbeats = 0;
       connection.lastInboundAt = performance.now();
+      connection.lastClientInitiatedInboundAt = connection.lastInboundAt;
       void this.onMessage(connection, binary ? data : data.toString());
     });
     socket.on("ping", () => {
       connection.unansweredHeartbeats = 0;
       connection.lastInboundAt = performance.now();
+      connection.lastClientInitiatedInboundAt = connection.lastInboundAt;
     });
     socket.on("pong", () => {
       connection.unansweredHeartbeats = 0;

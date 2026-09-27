@@ -1786,8 +1786,8 @@ bootstrap configuration and are omitted from chat; later canonical changes are
 shown as compact notification pills. Structured result data expands recursively, with raw
 JSON only as the arbitrary-data fallback. Gateway connection state is driven by
 the current authenticated socket, ignores stale cancellation from replaced
-receivers, and uses gateway WebSocket heartbeats to keep Tailscale/iOS idle paths
-alive. Canonical settings determine the default model; catalog order is never a
+receivers, and its ten-second foreground WebSocket pings keep Tailscale/iOS idle
+paths alive; the Gateway pings only a client that has gone quiet. Canonical settings determine the default model; catalog order is never a
 default-selection policy. Dashboard Settings explicitly exposes only global configuration; project scope,
 trust, and project package actions appear only when Settings is opened from a
 project session. Manage Session begins with an emerald usage card and a purple model card matching Settings' Agent group.

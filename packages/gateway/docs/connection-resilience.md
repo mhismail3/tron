@@ -19,6 +19,22 @@ owner of accepted commands; mobile reconnect never replays a prompt blindly.
   recently active sockets (close code 4000, `connection.superseded`) instead of
   locking the device out with 503. Other identities are never displaced;
   global capacity still rejects them. Closing sockets are not live capacity.
+- **Heartbeat:** every 25-second tick counts one miss for each open socket,
+  and any inbound frame (message, client ping or pong) resets the count; the
+  tick that finds three misses terminates the socket
+  (`connection.heartbeat-timeout`). A dead client is therefore retired on the
+  fourth tick after its last frame, whatever was sent to it. The Gateway sends
+  its own ping on a tick only when the client initiated nothing (no message or
+  client ping) during the preceding interval. A foreground phone pings every
+  10 seconds, so it is never pinged by the Gateway; silent and pong-only clients
+  are pinged on every tick, because a pong answers the Gateway's ping and never
+  suppresses the next one. The only difference from pinging every tick is the
+  transition from active to quiet: the first tick after a client's last own frame
+  may skip its ping, so its first ping can come one tick later and that pong must
+  return within about 50 seconds instead of 75 before the fourth tick. Real mobile
+  clients enforce an 8-second pong deadline on their own pings, and pong-only
+  clients are unaffected. `server-heartbeat.integration.test.ts` pins each case
+  against real sockets on a fake heartbeat clock.
 - **Projection:** the wire ceiling remains 1 MiB, with a shared 32,768 JSON-value
   node ceiling for local and mobile clients. Transcript pages reserve 24,000
   nodes and snapshots 30,000; dense detail is compacted without editing canonical
