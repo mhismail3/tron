@@ -1,0 +1,198 @@
+# Energy efficiency
+
+- **Started:** 2026-09-27
+- **Status:** Active (approved in chat by the user on 2026-09-27)
+- **Last updated:** 2026-09-27, plan created
+- **Goal:** Tron for iPhone does measurably less CPU, disk, timer and radio work per minute of real use, proven by a reliable profiler that every agent can run, with no change to what the user sees or does.
+
+## Goal and constraints
+
+The user asked for every performance and battery improvement from the
+2026-09-27 audit (tiers 1–3) that leaves the UI and UX untouched, and for a
+robust, agent-callable profiler first, so every change and every future
+bottleneck is judged by data.
+
+What must not change, overriding any agent's judgment:
+
+- **UI and UX.** Screens, copy, layout, animation curves and timing, scroll
+  position and continuity, chat identity, composer and keyboard behavior,
+  accessibility labels and VoiceOver output, and any timing a user can feel
+  (launch, open, send, streaming cadence, reconnect, dead-socket detection).
+  A change that alters a pixel, a frame sequence or a label value at the same
+  instant is out of scope. When in doubt, the change does not ship and the doubt
+  goes in a handoff entry for the user.
+- **Correctness and resilience.** Canonical truth, ordering, idempotency,
+  bounds, cancellation, recovery and every `AGENTS.md` architecture invariant.
+  Performance work may only make these stronger.
+- **Wire contracts.** Old iPhone builds and old Gateways keep working unchanged.
+  Protocol savings are additive and negotiated per connection; a Gateway sends
+  today's payload to any client that did not ask for the new form, and falls
+  back to today's full payload whenever it cannot prove the compact form is
+  exact. The phone fails closed to its existing authoritative resynchronization.
+  Mac-first rollout still holds.
+- **Coordination.** Do not change the client ping interval, pong deadline,
+  reconnect or retry policy; the
+  [phone reconnect tuning plan](2026-09-24-phone-reconnect-tuning.md) owns those.
+  Transcript container work belongs to the
+  [chat transcript stability plan](2026-09-26-chat-transcript-stability.md);
+  this plan only reduces work inside today's container and must pass its CT-12
+  visual and CT-14 motion parity gates. Rebase over the
+  [iOS module split](2026-09-23-ios-module-split.md) if MS-3 starts.
+- **Operational safety.** Never rebuild, restart or update the running Gateway;
+  Gateway changes take effect only when the user does. Profiling runs an
+  isolated fixture Gateway, never the user's. Agents never install on a
+  physical device and never erase app or Keychain data.
+
+## Context
+
+Findings of the 2026-09-27 read-only audit (six review lanes plus the
+integrator's own verification). Line numbers are from that date.
+
+Already good, keep: no background execution or silent pushes; continuous
+animations are gated by surface, scene, viewport and Reduce Motion and capped
+at 30 fps; no `CADisableMinimumFrameDurationOnPhone`; transcript projection is
+off the main thread; hosted fixtures compile out of shipping builds.
+
+Measured nothing yet. The existing opt-in baseline in
+`packages/ios-app/Tests/UI/ChatPerformanceBaselineTests.swift` runs only under
+the `DevicePerformance` scheme, whose build is unoptimized, and its documented
+simulator command in `packages/ios-app/docs/performance-baseline.md` cannot
+enable it (the `Tron Development` test action does not map
+`TRON_PERFORMANCE_BASELINE`), so there is no trustworthy agent-runnable
+measurement today.
+
+Highest-cost mechanisms found:
+
+- Gateway `emitProgress` in `packages/gateway/src/sessions/runtime-slot.ts`
+  sends two frames per 150 ms window (leading edge fires again right after each
+  trailing flush), each carrying the whole reply so far (≤ 24 KB).
+- Every canonical append republishes a full `session.snapshot` (transcript page
+  up to 600 KB inside ≤ 800 KB), about twice per tool call.
+- `SnapshotCache` is rewritten after every `session.summary` and after mounted
+  snapshot events that cannot change it (five checkpoint calls in
+  `packages/ios-app/Sources/State/SessionPresentationStore.swift`).
+- `ComposerDraftStore.save` re-reads and SHA-256s every stored draft attachment
+  twice per 200 ms typing pause.
+- `discreteInsertedIDs` in
+  `packages/ios-app/Sources/UI/Chat/ChatTranscriptPresentationStore.swift` is
+  O(n²) on the main thread; `ChatStreamingInlineText` in
+  `packages/ios-app/Sources/UI/Chat/StreamingTextReveal.swift` splits settled
+  paragraphs into words and rebuilds whole blocks 18–30 times a second while
+  revealing.
+- Idle timers: one unaligned 1 Hz clock per dashboard row, 10 Hz tool timers
+  after the label drops to whole seconds, unaligned 10 s pings per socket, a
+  15 s lease RPC and the Gateway's 25 s ping; every HTTP request builds its own
+  `URLSession`, so live view opens a new TCP connection 4–5 times a second.
+- `session.bashProgress` (per stdout chunk, unthrottled) and `session.heartbeat`
+  have no consumer anywhere.
+
+## Plan rules
+
+- **Measure, then keep.** Every T task records the relevant profiler scenario
+  before and after on the same host state with the profiler's `compare`, plus
+  its focused tests. Keep a change only if correctness passes and it improves
+  its primary metric beyond the report's noise bound, or it is a pure
+  simplification with no regression; record the numbers in the handoff.
+- **Prove no UI change.** Any task that touches views, text, timelines or
+  transcript projection runs the CT-12 visual parity and CT-14 motion parity
+  hosted gates and the owning focused suites. Pure-function replacements get an
+  equivalence check against the old implementation over generated inputs.
+- **Worktrees and simulators.** Each task runs in its own worktree under
+  `~/Workspace/tron-perf-<id>` on branch `perf/<id>`, with its own test
+  simulator (`TRON_IOS_TEST_DEVICE_NAME="Tron iOS Tests Perf <ID>"` and a
+  matching `TRON_IOS_TEST_STATE_DIR`). Profiling comparisons that decide a keep
+  are run by the integrator on a quiet host, serialized through the profiler's
+  lease.
+- **Excluded as product decisions** (need the user's explicit choice, not part
+  of this plan): stopping the composer orb in its recently-finished state, Low
+  Power Mode motion reduction, slower offline-Mac retries, a longer ping
+  interval, closing other Macs' sockets inside a chat, batching timestamp-only
+  summaries (visible label lag), and receipt-poll backoff (confirmation timing).
+
+## Tasks
+
+| ID | Status | Scope | Depends on | Owner |
+| --- | --- | --- | --- | --- |
+| P-1 | Ready | iOS scenario profiler: `scripts/tron-profile ios`, optimized profiling build, in-process energy metrics, deterministic scenarios, control self-test, JSON reports and `compare` (details below) | none | |
+| P-2 | Ready | Gateway wire-traffic profiler: `scripts/tron-profile gateway`, isolated fixture Gateway with a faux model, recording client, per-topic frame and byte report (details below) | none | |
+| P-3 | Needs scoping | Attribution: `--trace` for iOS scenarios (xctrace Time Profiler, SwiftUI, Points of Interest; exported top-symbol summary) and an attach-only `device` mode for a user-launched LocalDevice app | P-1 | |
+| P-4 | Needs scoping | Baseline: run every P-1 and P-2 scenario on `main`, record the numbers and host state in this plan's Context | P-1, P-2 | |
+| T1-GW | Needs scoping | Gateway: re-arm the streaming throttle; delete `session.bashProgress` and `session.heartbeat`; skip the heartbeat ping while a client proved liveness within the interval, keeping today's detection bound | P-4 | |
+| T1-CACHE | Needs scoping | `SnapshotCache`: drop checkpoints that cannot change it, coalesce summary checkpoints and checkpoint on background, drop the save-path double admission pass | P-4 | |
+| T1-DRAFTS | Needs scoping | `ComposerDraftStore`: in-memory logical clock, size accounting without re-hashing, manifest-only writes when attachments are unchanged; no observable mutation for unchanged text | P-4 | |
+| T1-TEXT | Needs scoping | `discreteInsertedIDs` to O(n) with an equivalence check; `ChatStreamingInlineText` keeps settled text whole (preserving the streaming-flip reveal state) and caches the revealed prefix | P-4 | |
+| T1-CLOCKS | Needs scoping | Timeline schedules that fire when a label can change: dashboard rows, tool elapsed timers (sub-minute cadence preserved), static inbox formatter | P-4 | |
+| T1-NET | Needs scoping | One shared ping grid for every socket (no interval ever longer than today), lease renewal on that grid at no longer than today's interval, one shared `URLSession` for idempotent GETs with per-task delegates | P-4 | |
+| T2-CHATVIEW | Needs scoping | ChatView observes the snapshot and the installed transcript in separate child scopes; response state computed with the installed transcript | T1-TEXT | |
+| T2-DASH | Needs scoping | Dashboard root stops re-evaluating on every summary; parsed ordering instants; cheaper per-row path helpers; filter preferences saved only on change | T1-CLOCKS | |
+| T2-THINK | Needs scoping | Thinking trace measures its visible text instead of a hidden full copy | T1-TEXT | |
+| T2-TEXTPREP | Needs scoping | Text preparation reuses history rows on the isolated streaming path and memoizes closed Markdown blocks | T1-TEXT | |
+| T2-SMALL | Needs scoping | AppLog debug encode and restore ordering, diagnostics sanitized once, debounced extension drafts flushed on close and background, direct thumbnail images, push token writes only on change | P-4 | |
+| T3-DEFLATE | Needs scoping | Probe whether the iPhone's WebSocket offers `permessage-deflate`; if it does, enable it for offering clients above a size threshold | P-2 | |
+| T3-TRANSCRIPT | Needs scoping | Transcript append deltas for `session.snapshot`, negotiated per connection, exact-or-full on the Gateway, fail-closed resync on the phone | T3-DEFLATE | |
+| T3-STREAM | Needs scoping | Streaming text append deltas for `session.progress`, same rules, unless T3-DEFLATE already removes the cost | T3-DEFLATE | |
+| T3-TOOLPROG | Needs scoping | Tool progress omits a `partialResult` the phone can reconstruct exactly, same rules | T3-DEFLATE | |
+| T3-CATALOG | Needs scoping | Conditional `session.list` on foreground: an unchanged catalog generation keeps the retained rows | P-4 | |
+| V-1 | Needs scoping | Close-out: full Gateway and iOS suites, parity gates, profiler comparison against P-4, owning docs, user device check | all | |
+
+## Task details
+
+### P-1 — iOS scenario profiler
+
+The profiler is the evidence source for this plan and for future bottlenecks,
+so it must be boring to run and hard to misread.
+
+- **Front door:** new `tron-profile` in `scripts/`, with `ios`, `compare` and
+  `status` subcommands (P-2 adds `gateway`), `--help`, stable exit codes, and
+  bounded processes through `scripts/ios-test-process.py`. It reuses the owned
+  simulator, lease lock and build-identity stamping of `scripts/tron-ios-test`
+  (same environment overrides), so it never collides with test runs.
+- **Build:** measurements come from an optimized build. Make the existing
+  `DevicePerformance` configuration optimized (Swift `-O`, testability kept for
+  hosted tests, `HOSTED_TEST` kept) rather than adding a configuration or
+  scheme, and make the `Tron Device Performance` test action runnable on the
+  owned simulator. Fix the baseline enablement so the documented command works.
+  Update `packages/ios-app/docs/performance-baseline.md`,
+  `packages/ios-app/docs/development.md` and the tron-ios skill routing table.
+- **Metrics (in-process `XCTMetric`s, reported to the xcresult):** instructions
+  and cycles retired, process CPU time, main-thread CPU time, CPU energy,
+  interrupt and platform-idle wakeups, disk bytes written and read, logical
+  writes, peak memory footprint, plus scenario counters (frames and bytes the
+  scripted transport delivered). Instructions are the primary CPU metric
+  because they are the least sensitive to host contention.
+- **Scenarios** use production owners (`AppModel`, stores, mounted SwiftUI
+  views) with scripted Gateway transports at realistic cadence, deterministic
+  seeds and a fixed window: idle dashboard, idle chat, streaming reply (with
+  thinking), tool loop with snapshots, composer typing with draft attachments,
+  and a multi-session summary storm. Reuse `SessionScenarioBuilder` and the
+  real burst fixture where they fit.
+- **Report:** one JSON report per run (schema-versioned; git revision, dirty
+  state, worktree, Xcode, runtime, host load, booted simulator count, power
+  source and thermal state) plus a short Markdown summary, under a stable
+  directory outside the repository with a `latest` link. Each metric carries
+  unit, direction, samples, median and spread. `compare` reports per-metric
+  deltas against the noise bound and exits nonzero on a regression beyond it.
+- **Self-test:** a control scenario and its known-bad variant (a fixed extra
+  workload that exists only in hosted builds) must show the expected delta, so
+  a broken measurement path fails loudly instead of reporting zeros.
+- **Docs:** usage in `packages/ios-app/docs/development.md` and the
+  [tron-performance skill](../../.agents/skills/tron-performance/SKILL.md) as
+  the default way for agents to measure; observability rows if new signals are
+  added.
+
+### P-2 — Gateway wire-traffic profiler
+
+- `scripts/tron-profile gateway --scenario <name>` builds the Gateway, starts
+  an isolated fixture Gateway in a temporary home (the pattern in
+  `scripts/ios-gateway-e2e-test`: faux provider, fixed tokens per second, no
+  user state), connects recording WebSocket clients (one subscribed mobile
+  client, one dashboard-only client) and runs a scripted session.
+- Scenarios: streaming reply with thinking, tool loop with a large prior
+  transcript, idle connection for a fixed window, dashboard observer while
+  another session runs.
+- Report (same schema and `compare` as P-1): frames and bytes per topic per
+  client, per-second rates, largest frame, pings and pongs each way, and
+  optional Node CPU profile. Always stops and removes the fixture Gateway,
+  including on failure and timeout.
+
+## Handoff log
