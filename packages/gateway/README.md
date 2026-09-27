@@ -954,9 +954,11 @@ of aggregate phase, narrow foreground phase, active-subagent presence, pending-u
 dashboard immediately without broadcasting full transcripts or changing the structural list revision. User-scoped catalog admission compares only non-delegated structural identities, so a concurrent child-session write cannot make an unchanged dashboard fail `session.list`; complete whole-tree header evidence still quarantines duplicate IDs, including a user ID claimed by a delegated file. Catalog folder enumeration uses bounded concurrency of 16 while retaining canonical-folder and inode checks, all traversal/materialization budgets, and ten-way metadata reads. Results are path-ordered so filesystem enumeration order cannot change discovery output. All-sessions/admin reads retain exact whole-catalog stability checks. The Gateway-owned catalog metadata index is an acceleration only: unchanged and append-only rows are reconciled with the same inode, header, newline, and tail-boundary checks using bounded parallel filesystem work; any failed admission falls back to canonical materialization rather than weakening authority. Catalog `messageCount` counts visible conversation rows, excluding Pi 0.87 `system` transcript deltas that carry provider context but are not chat rows. Index version 3 invalidates the disposable version-2 catalog cache and rebuilds counts from canonical JSONL on demand; no canonical session migration is needed. Clients subscribe
 to `session.snapshot`, progress, tool, queue, and extension events only for chats
 they actually open. Streaming progress republishes the cumulative live message, so
-updates are coalesced to one frame per short window (the first update stays
-immediate) and each live message is bounded to 24,000 exact encoded bytes, including
-inside reconnect snapshots. Under pressure, tool arguments yield first to response
+updates are throttled to at most one frame, carrying the newest message, per
+150 ms window while they keep arriving (the first update after a quiet window
+stays immediate, and a snapshot publishes any pending frame ahead of itself),
+and each live message is bounded to 24,000 exact encoded bytes, including inside
+reconnect snapshots. Under pressure, tool arguments yield first to response
 text and invocation identity through the existing `{ truncated: true, preview? }`
 JSON representation. Only remaining content pressure trims the live tail; an
 oversized write argument alone must never replace useful response text with an

@@ -2226,20 +2226,29 @@ export class RuntimeSlot {
   private emitProgress(message: AgentMessage): void {
     this.pendingProgressMessage = message;
     if (this.progressFlushTimer !== undefined) return;
-    this.progressFlushTimer = setTimeout(() => {
-      this.progressFlushTimer = undefined;
-      this.flushPendingProgress();
-    }, STREAMING_PROGRESS_FLUSH_MS);
-    this.progressFlushTimer.unref();
+    this.armProgressFlushTimer();
     this.flushPendingProgress();
   }
 
-  private flushPendingProgress(): void {
+  /** Throttle, not debounce: the first update after a quiet window flushes
+   * immediately, then at most one frame per window carries the newest message.
+   * A window that sent re-arms, so a continuous stream never re-fires the
+   * leading edge right after a trailing flush; only an empty window ends it. */
+  private armProgressFlushTimer(): void {
+    this.progressFlushTimer = setTimeout(() => {
+      this.progressFlushTimer = undefined;
+      if (this.flushPendingProgress()) this.armProgressFlushTimer();
+    }, STREAMING_PROGRESS_FLUSH_MS);
+    this.progressFlushTimer.unref();
+  }
+
+  /** Returns whether a `session.progress` frame was sent. */
+  private flushPendingProgress(): boolean {
     const message = this.pendingProgressMessage;
     this.pendingProgressMessage = undefined;
-    if (!message || message.role !== "assistant") return;
+    if (!message || message.role !== "assistant") return false;
     this.captureStreamIdentity(message);
-    if (!this.streamPresentationId || !this.streamStartedAt) return;
+    if (!this.streamPresentationId || !this.streamStartedAt) return false;
     const projected = projectMessage(
       "streaming",
       this.streamAnchorId ?? null,
@@ -2256,6 +2265,7 @@ export class RuntimeSlot {
     this.emit("session.progress", safeJson({
       message: projected === undefined ? undefined : boundStreamingProgressItem(projected),
     }));
+    return true;
   }
 
   /** Publish the assistant declaration at message_end before any subsequent

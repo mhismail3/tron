@@ -6587,14 +6587,18 @@ export default function (pi) {
       return runtime;
     };
     faux.setResponses([fauxAssistantMessage(text)]);
-    const events: Array<{ topic: string; payload: { eventSequence?: number; data?: any } }> = [];
+    const events: Array<{ topic: string; at: number; payload: { eventSequence?: number; data?: any } }> = [];
     const registry = new RuntimeRegistry({
       agentDir,
       tronHome: join(root, "tron"),
       idleRuntimeMs: 60_000,
       modelRuntimeFactory: createModels,
       trust: new TrustService(agentDir),
-      broadcast: (_sessionId, topic, payload) => events.push({ topic, payload: payload as { eventSequence?: number; data?: any } }),
+      broadcast: (_sessionId, topic, payload) => events.push({
+        topic,
+        at: nodePerformance.now(),
+        payload: payload as { eventSequence?: number; data?: any },
+      }),
       sessionSummaryChanged: () => {},
       sessionListChanged: () => {},
     });
@@ -6611,7 +6615,30 @@ export default function (pi) {
 
     const progress = events.filter((event) => event.topic === "session.progress");
     expect(progress.length).toBeGreaterThanOrEqual(2);
-    expect(progress.length).toBeLessThanOrEqual(40);
+
+    // Throttle cadence: while updates keep arriving, at most one frame per
+    // 150 ms window. A frame published immediately before a snapshot is that
+    // state transition's ordering flush, and the last frame is message_end's
+    // finalized declaration; neither is paced. The window starts when the
+    // timer is armed, just before the leading frame's projection, so a slow
+    // projection shortens the measured gap; a leading edge re-firing right
+    // after each trailing flush would instead land within a few milliseconds.
+    const cadence = progress.filter((event, index) => {
+      if (index === progress.length - 1) return false;
+      return events[events.indexOf(event) + 1]?.topic !== "session.snapshot";
+    });
+    expect(cadence.length).toBeGreaterThanOrEqual(5);
+    for (let index = 1; index < cadence.length; index += 1) {
+      expect(cadence[index]!.at - cadence[index - 1]!.at).toBeGreaterThanOrEqual(100);
+    }
+    // A paced frame always carries the newest cumulative text, so frames never
+    // regress to an older message.
+    const progressTextLengths = progress.map((event) => (event.payload.data?.message?.content ?? [])
+      .filter((part: any) => part.type === "text")
+      .reduce((length: number, part: any) => length + part.text.length, 0));
+    for (let index = 1; index < progressTextLengths.length; index += 1) {
+      expect(progressTextLengths[index]).toBeGreaterThanOrEqual(progressTextLengths[index - 1]!);
+    }
 
     // Coalescing must never reorder or gap the sequenced event stream.
     const sequenced = events.filter((event) => typeof event.payload.eventSequence === "number");
