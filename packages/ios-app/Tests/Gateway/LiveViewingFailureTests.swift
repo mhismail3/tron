@@ -77,6 +77,35 @@ struct LiveViewingFailureTests {
         }
     }
 
+    @Test func framePollingRidesOneKeepAliveConnectionAndCloseUsesItsOwn() async throws {
+        try await withTestWatchdog {
+            let server = try await LoopbackHTTPServer.start { request in
+                request.method == "GET"
+                    ? .init(status: 204, headers: [("X-Tron-Live-State", "unchanged")])
+                    : .init(status: 204)
+            }
+            defer { server.stop() }
+            var admission = URLRequest(url: server.url("/v1/sessions/session/live-views/view"))
+            admission.httpMethod = "POST"
+            admission.setValue("Bearer fixture", forHTTPHeaderField: "Authorization")
+            let lease = try GatewayClient.LiveLease(wire: .init(leaseId: Self.leaseID,
+                descriptor: .init(schema: "tron.native-live-view.v1", viewId: "view", generation: "generation", title: "Fixture", fallbackText: "Not an error message")),
+                request: admission, transport: .noRedirects)
+            for _ in 0..<5 {
+                guard case .unchanged = try await lease.frame(after: 7) else {
+                    Issue.record("Expected an unchanged frame")
+                    break
+                }
+            }
+            await lease.close()
+            let requests = server.recordedRequests()
+            #expect(requests.map(\.method) == Array(repeating: "GET", count: 5) + ["DELETE"])
+            #expect(requests.prefix(5).allSatisfy { $0.connection == 1 && $0.headers["x-tron-live-after"] == "7" })
+            #expect(requests.allSatisfy { $0.headers["authorization"] == "Bearer fixture" && $0.headers["x-tron-live-lease"] == Self.leaseID })
+            #expect(requests.last?.connection == 2)
+        }
+    }
+
     private static let leaseID = "11111111-1111-4111-8111-111111111111"
     private static func lease(_ probe: LiveFailureTransportProbe) throws -> GatewayClient.LiveLease {
         var request = URLRequest(url: URL(string: "https://first.invalid/v1/sessions/session/live-views/view")!)

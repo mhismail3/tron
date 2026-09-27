@@ -20,13 +20,30 @@ struct BoundedHTTPFileTransport: Sendable {
     static let urlSession = urlSession(configuration: .ephemeral)
 
     static func urlSession(configuration: URLSessionConfiguration) -> BoundedHTTPFileTransport {
-        BoundedHTTPFileTransport { request, maximumBytes in
+        let sessions = BoundedHTTPFileSessions(configuration: configuration)
+        return BoundedHTTPFileTransport { request, maximumBytes in
             try await BoundedURLSessionFileLoader.load(
                 request,
                 maximumBytes: maximumBytes,
-                configuration: configuration
+                sessions: sessions
             )
         }
+    }
+}
+
+/// The sessions one bounded file transport configuration runs on (see
+/// `BoundedHTTPReadSession`).
+struct BoundedHTTPFileSessions: Sendable {
+    let configuration: URLSessionConfiguration
+    let readSession: URLSession
+
+    /// Fresh sessions made from one configuration object share its cookie
+    /// storage and cache, and a configuration copy keeps those same storage
+    /// objects, so the shared read session sees exactly what a fresh one
+    /// would. Downloads are never answered from the cache.
+    init(configuration: URLSessionConfiguration) {
+        self.configuration = configuration
+        readSession = URLSession(configuration: BoundedHTTPReadSession.configured(configuration))
     }
 }
 
@@ -176,9 +193,12 @@ struct BoundedHTTPFileAdmission {
 final class BoundedURLSessionFileLoader: NSObject, URLSessionDownloadDelegate, @unchecked Sendable {
     private let lock = NSLock()
     private let admission: BoundedHTTPFileAdmission
-    private let configuration: URLSessionConfiguration
+    private let sessions: BoundedHTTPFileSessions
     private var continuation: CheckedContinuation<BoundedHTTPDownloadedFile, Error>?
     private var session: URLSession?
+    /// Whether `session` is a fresh session this request owns rather than the
+    /// shared read session.
+    private var ownsSession = false
     private var task: URLSessionDownloadTask?
     private var stagedURL: URL?
     private var remainingResumeAttempts = 2
@@ -186,25 +206,25 @@ final class BoundedURLSessionFileLoader: NSObject, URLSessionDownloadDelegate, @
 
     private init(
         maximumBytes: Int,
-        configuration: URLSessionConfiguration,
+        sessions: BoundedHTTPFileSessions,
         stagedURL: URL
     ) {
         admission = BoundedHTTPFileAdmission(maximumBytes: maximumBytes)
-        self.configuration = configuration
+        self.sessions = sessions
         self.stagedURL = stagedURL
     }
 
     static func load(
         _ request: URLRequest,
         maximumBytes: Int,
-        configuration: URLSessionConfiguration
+        sessions: BoundedHTTPFileSessions
     ) async throws -> BoundedHTTPDownloadedFile {
         let stagedURL = try BoundedHTTPFileStaging.shared.reserveDestination(
             incomingBytes: Int64(maximumBytes)
         )
         let loader = BoundedURLSessionFileLoader(
             maximumBytes: maximumBytes,
-            configuration: configuration,
+            sessions: sessions,
             stagedURL: stagedURL
         )
         return try await withTaskCancellationHandler {
@@ -229,16 +249,21 @@ final class BoundedURLSessionFileLoader: NSObject, URLSessionDownloadDelegate, @
         self.continuation = continuation
         lock.unlock()
 
-        let session = URLSession(configuration: configuration, delegate: self, delegateQueue: nil)
+        let ownsSession = !BoundedHTTPReadSession.admits(request)
+        let session = ownsSession
+            ? URLSession(configuration: sessions.configuration, delegate: self, delegateQueue: nil)
+            : sessions.readSession
         let task = session.downloadTask(with: request)
+        if !ownsSession { task.delegate = self }
 
         lock.lock()
         guard terminalResult == nil else {
             lock.unlock()
-            session.invalidateAndCancel()
+            if ownsSession { session.invalidateAndCancel() } else { task.cancel() }
             return
         }
         self.session = session
+        self.ownsSession = ownsSession
         self.task = task
         lock.unlock()
         task.resume()
@@ -332,6 +357,7 @@ final class BoundedURLSessionFileLoader: NSObject, URLSessionDownloadDelegate, @
         }
         remainingResumeAttempts -= 1
         let resumedTask = session.downloadTask(withResumeData: resumeData)
+        if !ownsSession { resumedTask.delegate = self }
         task = resumedTask
         lock.unlock()
         resumedTask.resume()
@@ -349,14 +375,21 @@ final class BoundedURLSessionFileLoader: NSObject, URLSessionDownloadDelegate, @
         self.continuation = nil
         let session = self.session
         self.session = nil
-        task = nil
+        let ownsSession = self.ownsSession
+        let task = self.task
+        self.task = nil
         let stagedURL = self.stagedURL
         if case .failure = result {
             self.stagedURL = nil
         }
         lock.unlock()
 
-        session?.invalidateAndCancel()
+        if ownsSession {
+            session?.invalidateAndCancel()
+        } else if case .failure = result {
+            // Retire only this download; the shared session continues.
+            task?.cancel()
+        }
         if case .failure = result, let stagedURL {
             BoundedHTTPFileStaging.shared.discard(stagedURL)
         }

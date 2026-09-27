@@ -40,6 +40,44 @@ struct BoundedHTTPFileTransportTests {
         await #expect(throws: CancellationError.self) { try await pending.value }
     }
 
+    @Test("downloads reuse one connection, keep per-request ceilings and cancel in isolation")
+    func sharedDownloadSession() async throws {
+        try await withTestWatchdog {
+            let gate = LoopbackResponseGate()
+            let server = try await LoopbackHTTPServer.start { request in
+                switch request.path {
+                case "/fifth": return .init(body: Data("fifth".utf8))
+                case "/held-a", "/held-b":
+                    await gate.wait()
+                    return .init(body: Data("four".utf8))
+                default: return .init(body: Data("four".utf8))
+                }
+            }
+            defer { server.stop() }
+            let transport = BoundedHTTPFileTransport.urlSession
+            for _ in 0..<2 {
+                let file = try await transport.download(for: URLRequest(url: server.url("/four")), maximumBytes: 4)
+                #expect(try Data(contentsOf: file.url) == Data("four".utf8))
+                #expect(file.byteCount == 4)
+                BoundedHTTPFileStaging.shared.discard(file.url)
+            }
+            #expect(server.recordedRequests().map(\.connection) == [1, 1])
+            await #expect(throws: URLError.self) {
+                _ = try await transport.download(for: URLRequest(url: server.url("/fifth")), maximumBytes: 4)
+            }
+
+            let cancelled = Task { try await transport.download(for: URLRequest(url: server.url("/held-a")), maximumBytes: 4) }
+            let survivor = Task { try await transport.download(for: URLRequest(url: server.url("/held-b")), maximumBytes: 4) }
+            try await server.waitUntilRequests(count: 5)
+            cancelled.cancel()
+            await #expect(throws: CancellationError.self) { _ = try await cancelled.value }
+            await gate.release()
+            let file = try await survivor.value
+            defer { BoundedHTTPFileStaging.shared.discard(file.url) }
+            #expect(try Data(contentsOf: file.url) == Data("four".utf8))
+        }
+    }
+
     @Test("staging is aggregate bounded, active-safe, and explicitly retired")
     func stagingLifecycle() throws {
         let root = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString)

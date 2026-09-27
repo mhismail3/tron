@@ -73,25 +73,72 @@ struct BoundedHTTPBodyAccumulator {
     }
 }
 
+/// Routes bounded requests between one long-lived shared session and a fresh
+/// session per request. Idempotent bodiless reads share a session so their
+/// keep-alive connections are reused (live-view frame polling would otherwise
+/// open a TCP connection per frame); per-task delegates keep each request's
+/// bounds, redirect policy and cancellation. Every other request keeps a fresh
+/// session per request: a request that is unsafe to replay must not depend on
+/// how CFNetwork recovers a reused connection the server already closed, which
+/// can surface as `networkConnectionLost`.
+enum BoundedHTTPReadSession {
+    static func admits(_ request: URLRequest, uploadFileURL: URL? = nil) -> Bool {
+        guard uploadFileURL == nil, request.httpBody == nil, request.httpBodyStream == nil else { return false }
+        return request.httpMethod == "GET" || request.httpMethod == "HEAD"
+    }
+
+    /// A shared session with the request queueing behavior of a fresh session
+    /// per request. CFNetwork otherwise queues requests beyond a small
+    /// per-host connection count; this is its widest working value (larger
+    /// values stop requests from starting).
+    static func configured(_ configuration: URLSessionConfiguration) -> URLSessionConfiguration {
+        let shared = configuration.copy() as! URLSessionConfiguration
+        shared.httpMaximumConnectionsPerHost = Int(Int32.max)
+        return shared
+    }
+}
+
+/// The sessions one bounded data transport configuration runs on.
+struct BoundedHTTPDataSessions: Sendable {
+    let freshConfiguration: @Sendable () -> URLSessionConfiguration
+    let readSession: URLSession
+
+    /// `configuration` returns a new configuration per call, so each fresh
+    /// session has private cache, cookie and credential storage.
+    init(configuration: @escaping @Sendable () -> URLSessionConfiguration) {
+        freshConfiguration = configuration
+        let read = BoundedHTTPReadSession.configured(configuration())
+        // A fresh session per request never carried a cached response, cookie
+        // or credential into a later request; the shared session keeps none.
+        read.urlCache = nil
+        read.httpCookieStorage = nil
+        read.urlCredentialStorage = nil
+        readSession = URLSession(configuration: read)
+    }
+
+    static let ephemeral = BoundedHTTPDataSessions { .ephemeral }
+}
+
 final class BoundedURLSessionDataLoader: NSObject, URLSessionDataDelegate, @unchecked Sendable {
     private let lock = NSLock()
     private var accumulator: BoundedHTTPBodyAccumulator
     private var continuation: CheckedContinuation<(Data, HTTPURLResponse), Error>?
     private var response: HTTPURLResponse?
-    private var session: URLSession?
+    /// The fresh session a non-read request owns; nil on the shared read session.
+    private var ownedSession: URLSession?
     private var task: URLSessionDataTask?
     private var cancellationRequested = false
     private var terminalResult: Result<(Data, HTTPURLResponse), Error>?
-    private let configuration: URLSessionConfiguration
+    private let sessions: BoundedHTTPDataSessions
     private let allowsRedirects: Bool
 
     private init(
         maximumBytes: Int,
-        configuration: URLSessionConfiguration,
+        sessions: BoundedHTTPDataSessions,
         allowsRedirects: Bool
     ) {
         accumulator = BoundedHTTPBodyAccumulator(maximumBytes: maximumBytes)
-        self.configuration = configuration
+        self.sessions = sessions
         self.allowsRedirects = allowsRedirects
     }
 
@@ -99,12 +146,12 @@ final class BoundedURLSessionDataLoader: NSObject, URLSessionDataDelegate, @unch
         _ request: URLRequest,
         uploadFileURL: URL? = nil,
         maximumBytes: Int,
-        configuration: URLSessionConfiguration = .ephemeral,
+        sessions: BoundedHTTPDataSessions = .ephemeral,
         allowsRedirects: Bool = true
     ) async throws -> (Data, HTTPURLResponse) {
         let loader = BoundedURLSessionDataLoader(
             maximumBytes: maximumBytes,
-            configuration: configuration,
+            sessions: sessions,
             allowsRedirects: allowsRedirects
         )
         return try await withTaskCancellationHandler {
@@ -130,20 +177,29 @@ final class BoundedURLSessionDataLoader: NSObject, URLSessionDataDelegate, @unch
         self.continuation = continuation
         lock.unlock()
 
-        let session = URLSession(configuration: configuration, delegate: self, delegateQueue: nil)
-        let task: URLSessionDataTask = if let uploadFileURL {
-            session.uploadTask(with: request, fromFile: uploadFileURL)
+        let task: URLSessionDataTask
+        let ownedSession: URLSession?
+        if BoundedHTTPReadSession.admits(request, uploadFileURL: uploadFileURL) {
+            task = sessions.readSession.dataTask(with: request)
+            task.delegate = self
+            ownedSession = nil
         } else {
-            session.dataTask(with: request)
+            let session = URLSession(configuration: sessions.freshConfiguration(), delegate: self, delegateQueue: nil)
+            task = if let uploadFileURL {
+                session.uploadTask(with: request, fromFile: uploadFileURL)
+            } else {
+                session.dataTask(with: request)
+            }
+            ownedSession = session
         }
 
         lock.lock()
         guard terminalResult == nil else {
             lock.unlock()
-            session.invalidateAndCancel()
+            if let ownedSession { ownedSession.invalidateAndCancel() } else { task.cancel() }
             return
         }
-        self.session = session
+        self.ownedSession = ownedSession
         self.task = task
         lock.unlock()
         task.resume()
@@ -250,12 +306,19 @@ final class BoundedURLSessionDataLoader: NSObject, URLSessionDataDelegate, @unch
         terminalResult = result
         let continuation = self.continuation
         self.continuation = nil
-        let session = self.session
-        self.session = nil
-        task = nil
+        let ownedSession = self.ownedSession
+        self.ownedSession = nil
+        let task = self.task
+        self.task = nil
         lock.unlock()
 
-        session?.invalidateAndCancel()
+        if let ownedSession {
+            ownedSession.invalidateAndCancel()
+        } else if case .failure = result {
+            // Retire only this request; the shared session and its other
+            // requests continue.
+            task?.cancel()
+        }
         continuation?.resume(with: result)
     }
 }

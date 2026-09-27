@@ -51,18 +51,209 @@ struct BoundedHTTPDataTransportTests {
     }
 
     private func assertLoaderRejects(_ protocolClass: AnyClass) async throws {
-        let configuration = URLSessionConfiguration.ephemeral
-        configuration.protocolClasses = [protocolClass]
-        let request = URLRequest(url: URL(string: "https://gateway.test/bounded")!)
-        do {
-            _ = try await BoundedURLSessionDataLoader.load(
-                request,
-                maximumBytes: 4,
-                configuration: configuration
-            )
-            Issue.record("Oversized response unexpectedly completed")
-        } catch let error as URLError {
-            #expect(error.code == .dataLengthExceedsMaximum)
+        let sessions = BoundedHTTPDataSessions {
+            let configuration = URLSessionConfiguration.ephemeral
+            configuration.protocolClasses = [protocolClass]
+            return configuration
+        }
+        // A read runs on the shared session, a write on a fresh one; both keep the ceiling.
+        for method in ["GET", "POST"] {
+            var request = URLRequest(url: URL(string: "https://gateway.test/bounded")!)
+            request.httpMethod = method
+            do {
+                _ = try await BoundedURLSessionDataLoader.load(
+                    request,
+                    maximumBytes: 4,
+                    sessions: sessions
+                )
+                Issue.record("Oversized \(method) response unexpectedly completed")
+            } catch let error as URLError {
+                #expect(error.code == .dataLengthExceedsMaximum)
+            }
+        }
+    }
+
+    // The production transports below run over real loopback TCP so the
+    // shared read session's connection reuse and isolation are observable.
+
+    @Test("reads reuse one keep-alive connection while writes keep a fresh connection each")
+    func readsReuseConnectionWritesDoNot() async throws {
+        try await withTestWatchdog {
+            let server = try await LoopbackHTTPServer.start { _ in .init(body: Data("ok".utf8)) }
+            defer { server.stop() }
+            for _ in 0..<3 {
+                let (data, response) = try await BoundedHTTPDataTransport.noRedirects.data(
+                    for: URLRequest(url: server.url("/frame")),
+                    maximumBytes: 2
+                )
+                #expect(data == Data("ok".utf8))
+                #expect(response.statusCode == 200)
+            }
+            var admission = URLRequest(url: server.url("/lease"))
+            admission.httpMethod = "POST"
+            admission.httpBody = Data("{}".utf8)
+            var close = URLRequest(url: server.url("/lease"))
+            close.httpMethod = "DELETE"
+            for request in [admission, close] {
+                _ = try await BoundedHTTPDataTransport.noRedirects.data(for: request, maximumBytes: 2)
+            }
+            let requests = server.recordedRequests()
+            #expect(requests.map(\.method) == ["GET", "GET", "GET", "POST", "DELETE"])
+            #expect(requests.map(\.connection) == [1, 1, 1, 2, 3])
+            #expect(requests[3].body == Data("{}".utf8))
+        }
+    }
+
+    @Test("declared and streamed byte ceilings stay per request on the shared read session")
+    func sharedReadsKeepPerRequestCeilings() async throws {
+        try await withTestWatchdog {
+            let server = try await LoopbackHTTPServer.start { request in
+                switch request.path {
+                case "/declared": .init(body: Data("fifth".utf8))
+                case "/streamed": .init(body: Data("fifth".utf8), chunked: true)
+                default: .init(body: Data("four".utf8))
+                }
+            }
+            defer { server.stop() }
+            for path in ["/declared", "/streamed"] {
+                do {
+                    _ = try await BoundedHTTPDataTransport.urlSession.data(for: URLRequest(url: server.url(path)), maximumBytes: 4)
+                    Issue.record("Oversized \(path) response unexpectedly completed")
+                } catch let error as URLError {
+                    #expect(error.code == .dataLengthExceedsMaximum)
+                }
+            }
+            let (data, _) = try await BoundedHTTPDataTransport.urlSession.data(for: URLRequest(url: server.url("/exact")), maximumBytes: 4)
+            #expect(data == Data("four".utf8))
+        }
+    }
+
+    @Test("redirect policy stays per request on the shared read session")
+    func sharedReadsKeepPerRequestRedirectPolicy() async throws {
+        try await withTestWatchdog {
+            let server = try await LoopbackHTTPServer.start { request in
+                request.path == "/moved"
+                    ? .init(status: 302, headers: [("Location", "/target")])
+                    : .init(body: Data("target".utf8))
+            }
+            defer { server.stop() }
+            let moved = URLRequest(url: server.url("/moved"))
+            for _ in 0..<2 {
+                let (_, refused) = try await BoundedHTTPDataTransport.noRedirects.data(for: moved, maximumBytes: 64)
+                #expect(refused.statusCode == 302)
+                #expect(refused.url == moved.url)
+                let (data, followed) = try await BoundedHTTPDataTransport.urlSession.data(for: moved, maximumBytes: 64)
+                #expect(followed.statusCode == 200)
+                #expect(followed.url == server.url("/target"))
+                #expect(data == Data("target".utf8))
+            }
+        }
+    }
+
+    @Test("cancelling one shared read leaves concurrent and later reads running")
+    func sharedReadCancellationIsIsolated() async throws {
+        try await withTestWatchdog {
+            let gate = LoopbackResponseGate()
+            let server = try await LoopbackHTTPServer.start { request in
+                if request.path.hasPrefix("/held") { await gate.wait() }
+                return .init(body: Data("ok".utf8))
+            }
+            defer { server.stop() }
+            let cancelled = Task {
+                try await BoundedHTTPDataTransport.noRedirects.data(for: URLRequest(url: server.url("/held-a")), maximumBytes: 2)
+            }
+            let survivor = Task {
+                try await BoundedHTTPDataTransport.noRedirects.data(for: URLRequest(url: server.url("/held-b")), maximumBytes: 2)
+            }
+            try await server.waitUntilRequests(count: 2)
+            cancelled.cancel()
+            await #expect(throws: CancellationError.self) { _ = try await cancelled.value }
+            await gate.release()
+            #expect(try await survivor.value.0 == Data("ok".utf8))
+            let (later, _) = try await BoundedHTTPDataTransport.noRedirects.data(for: URLRequest(url: server.url("/later")), maximumBytes: 2)
+            #expect(later == Data("ok".utf8))
+        }
+    }
+
+    @Test("concurrent shared reads start at once like fresh per-request sessions")
+    func sharedReadsAreNotQueuedPerHost() async throws {
+        try await withTestWatchdog {
+            let gate = LoopbackResponseGate()
+            let server = try await LoopbackHTTPServer.start { _ in
+                await gate.wait()
+                return .init(body: Data("ok".utf8))
+            }
+            defer { server.stop() }
+            let reads = (0..<12).map { index in
+                Task {
+                    try await BoundedHTTPDataTransport.urlSession.data(for: URLRequest(url: server.url("/blob/\(index)")), maximumBytes: 2)
+                }
+            }
+            // CFNetwork's default per-host limit would hold all but a few here.
+            try await server.waitUntilRequests(count: reads.count)
+            await gate.release()
+            for read in reads { #expect(try await read.value.0 == Data("ok".utf8)) }
+            #expect(server.connectionCount() == reads.count)
+        }
+    }
+
+    @Test("shared reads carry no cached response or cookie into a later request")
+    func sharedReadsKeepNoCacheOrCookies() async throws {
+        try await withTestWatchdog {
+            let server = try await LoopbackHTTPServer.start { _ in
+                .init(
+                    headers: [
+                        ("Cache-Control", "private, immutable, max-age=31536000"),
+                        ("ETag", "\"blob\""),
+                        ("Set-Cookie", "lease=fixture"),
+                    ],
+                    body: Data("blob".utf8)
+                )
+            }
+            defer { server.stop() }
+            for _ in 0..<2 {
+                let (data, _) = try await BoundedHTTPDataTransport.urlSession.data(for: URLRequest(url: server.url("/blob")), maximumBytes: 4)
+                #expect(data == Data("blob".utf8))
+            }
+            let requests = server.recordedRequests()
+            #expect(requests.count == 2)
+            #expect(requests.allSatisfy { $0.headers["cookie"] == nil && $0.headers["if-none-match"] == nil })
+        }
+    }
+
+    @Test("a keep-alive connection the server retired does not fail the next read")
+    func retiredKeepAliveConnectionIsRetriedForReads() async throws {
+        try await withTestWatchdog {
+            // Every connection answers once, then closes as its next request arrives.
+            let server = try await LoopbackHTTPServer.start { request in
+                request.sequenceOnConnection > 1 ? .init(closesWithoutResponse: true) : .init(body: Data("ok".utf8))
+            }
+            defer { server.stop() }
+            for _ in 0..<3 {
+                let (data, _) = try await BoundedHTTPDataTransport.noRedirects.data(for: URLRequest(url: server.url("/frame")), maximumBytes: 2)
+                #expect(data == Data("ok".utf8))
+            }
+        }
+    }
+
+    @Test("a dropped connection fails reads and writes with the same transport error")
+    func droppedConnectionErrorsMatchAcrossSessions() async throws {
+        try await withTestWatchdog {
+            let server = try await LoopbackHTTPServer.start { _ in .init(closesWithoutResponse: true) }
+            defer { server.stop() }
+            var codes: [URLError.Code] = []
+            for method in ["GET", "DELETE"] {
+                var request = URLRequest(url: server.url("/frame"))
+                request.httpMethod = method
+                do {
+                    _ = try await BoundedHTTPDataTransport.noRedirects.data(for: request, maximumBytes: 2)
+                    Issue.record("\(method) unexpectedly completed")
+                } catch let error as URLError {
+                    codes.append(error.code)
+                }
+            }
+            #expect(codes == [.networkConnectionLost, .networkConnectionLost])
+            #expect(GatewayClient.LiveError.classify(URLError(codes[0])) == .connectionInterrupted)
         }
     }
 
@@ -516,3 +707,21 @@ private final class OversizedContentLengthURLProtocol: BoundedResponseURLProtoco
 }
 
 private final class OversizedChunkURLProtocol: BoundedResponseURLProtocol {}
+
+/// Holds loopback responses until the test releases them.
+actor LoopbackResponseGate {
+    private var released = false
+    private var waiters: [CheckedContinuation<Void, Never>] = []
+
+    func wait() async {
+        if released { return }
+        await withCheckedContinuation { waiters.append($0) }
+    }
+
+    func release() {
+        released = true
+        let pending = waiters
+        waiters.removeAll()
+        for waiter in pending { waiter.resume() }
+    }
+}

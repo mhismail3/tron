@@ -1631,7 +1631,7 @@ Focused presentation policy tests separately pin stable export-row identity and
 single-row progress ownership. The hosted Pi-boundary test does not duplicate
 either owner.
 `SessionExportArtifactStoreTests` owns archive-specific item/aggregate/count/reservation/age/protection policy through real staged-file reservation/adoption, including unique protected paths, cancellation, active-artifact retention, and outside-file preservation. Fixture helpers create only synthetic staged bytes; they do not implement another export ingress. In particular, the versioned download-admission case crosses the media-sized legacy ceiling rather than merely asserting policy constants. Meanwhile,
-`BoundedHTTPFileTransportTests` owns reservation-backed, resumable file transfer and exact byte ceilings. Gateway integration fixtures cross the legacy
+`BoundedHTTPFileTransportTests` owns reservation-backed, resumable file transfer and exact byte ceilings. With `BoundedHTTPDataTransportTests` and `LiveViewingFailureTests` it drives the production transports against the loopback `LoopbackHTTPServer` test fixture to prove connection reuse for reads, a fresh connection per write, per-request ceilings, redirect policy and cancellation on the shared read session, unqueued concurrent reads, no cache or cookie carry-over, retry of a retired keep-alive connection, and identical dropped-connection errors. Gateway integration fixtures cross the legacy
 25 MiB boundary and exercise running-session JSONL/HTML cuts without placing those bytes in iOS test memory.
 
 `InAppNoticeCenterTests` await actual timer registration and observable notice-count
