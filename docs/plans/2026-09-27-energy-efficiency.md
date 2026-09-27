@@ -2,7 +2,7 @@
 
 - **Started:** 2026-09-27
 - **Status:** Active (approved in chat by the user on 2026-09-27)
-- **Last updated:** 2026-09-27, T1-CACHE and T1-DRAFTS done
+- **Last updated:** 2026-09-27, P-3 done; attribution tasks added
 - **Goal:** Tron for iPhone does measurably less CPU, disk, timer and radio work per minute of real use, proven by a reliable profiler that every agent can run, with no change to what the user sees or does.
 
 ## Goal and constraints
@@ -149,8 +149,9 @@ two-frames-per-window cadence the same scenario measured 60.9 G instructions and
 | --- | --- | --- | --- | --- |
 | P-1 | Done | iOS scenario profiler (new `tron-profile` in `scripts/`, `ios` subcommand), optimized profiling build, in-process energy metrics, deterministic scenarios, control self-test, JSON reports (details below) | none | energy-efficiency supervisor, worker lane p1, 2026-09-27 |
 | P-2 | Done | Gateway wire-traffic profiler (`gateway` subcommand), isolated fixture Gateway with a faux model, recording client, per-topic frame and byte report (details below) | none | energy-efficiency supervisor, worker lane p2, 2026-09-27 |
-| P-3 | Claimed | Attribution: `--trace` for iOS scenarios (xctrace Time Profiler, SwiftUI, Points of Interest; exported top-symbol summary) and an attach-only `device` mode for a user-launched LocalDevice app | P-1 | energy-efficiency supervisor, worker lane p3, 2026-09-27 |
+| P-3 | Done | Attribution: `--trace` for iOS scenarios (xctrace Time Profiler, SwiftUI, Points of Interest; exported top-symbol summary) and an attach-only `device` mode for a user-launched LocalDevice app | P-1 | energy-efficiency supervisor, worker lane p3, 2026-09-27 |
 | P-4 | Done | Baseline: run every P-1 and P-2 scenario on `main`, record the numbers and host state in this plan's Context | P-1, P-2 | energy-efficiency supervisor, 2026-09-27 |
+| P-5 | Blocked | Simulator-device Instruments (SwiftUI view-body counts, app signposts) never starts from agent sessions on this Mac ("Device disconnected while trying to set tap configuration", also on a fresh iOS 27 simulator); the user checks from their own Terminal, and `device --attach` capture is verified on a user-launched app | P-3 | |
 | T1-GW | Done | Gateway: re-arm the streaming throttle; delete `session.bashProgress` and `session.heartbeat`; skip the heartbeat ping while a client proved liveness within the interval, keeping today's detection bound | none (keep decision: P-1, P-2) | energy-efficiency supervisor, worker lane t1-gw, 2026-09-27 |
 | T1-CACHE | Done | `SnapshotCache`: drop checkpoints that cannot change it, coalesce summary checkpoints and checkpoint on background, drop the save-path double admission pass | none (keep decision: P-1, P-2) | energy-efficiency supervisor, worker lane t1-persist, 2026-09-27 |
 | T1-DRAFTS | Done | `ComposerDraftStore`: in-memory logical clock, size accounting without re-hashing, manifest-only writes when attachments are unchanged; no observable mutation for unchanged text | none (keep decision: P-1, P-2) | energy-efficiency supervisor, worker lane t1-persist, 2026-09-27 |
@@ -158,7 +159,10 @@ two-frames-per-window cadence the same scenario measured 60.9 G instructions and
 | T1-CLOCKS | Claimed | Timeline schedules that fire when a label can change: dashboard rows, tool elapsed timers (sub-minute cadence preserved), static inbox formatter | none (keep decision: P-1, P-2) | energy-efficiency supervisor, worker lane t1-clocks, 2026-09-27 |
 | T1-NET | Claimed | One shared ping grid for every socket (no interval ever longer than today), lease renewal on that grid at no longer than today's interval, one shared `URLSession` for idempotent GETs with per-task delegates | none (keep decision: P-1, P-2) | energy-efficiency supervisor, worker lane t1-net, 2026-09-27 |
 | T3-DEFLATE | Done | Negotiate `permessage-deflate` for paired (non-loopback) clients that offer it; confirm the offer from the iOS simulator app, keep inbound size bounds on decompressed bytes, and keep outbound queue accounting and backpressure exact | none (keep decision: P-2) | energy-efficiency supervisor, worker lane t3-deflate, 2026-09-27 |
-| T2-CHATVIEW | Needs scoping | ChatView observes the snapshot and the installed transcript in separate child scopes; response state computed with the installed transcript | T1-TEXT | |
+| T2-FONTS | Ready | Stop rebuilding fonts on view updates: `TronFontLoader.createUIFont` and `UIFont(descriptor:size:)` take 5–8% of main-thread time in every traced scenario; cache the created fonts by exact descriptor and size with identical output (Dynamic Type and settings changes still invalidate) | none (keep decision: P-1) | |
+| T2-COLORS | Ready | Stop re-parsing theme colors per body (`Color(lightHex:darkHex:)`, `UIColor(hex:)` in the idle-dashboard trace): resolve each theme color once with identical light/dark and settings behavior | none (keep decision: P-1) | |
+| T2-PULSE | Ready | Cut the per-frame main-thread cost of `TronPulseLoadingIndicator` (11% of idle-dashboard main-thread time) without changing a rendered frame, cadence or gating | none (keep decision: P-1) | |
+| T2-CHATVIEW | Needs scoping | Transcript install cost from the traces: `ChatPhysicalTranscriptReplacementHost.body` with `renderedContent`/`replacementContent` (21% of tool-loop main-thread time), whole-transcript equality (`InstalledChatTranscript ==`, `ChatTranscriptItems ==`, 7.5% of streaming) and render-item copies (memmove 8–10%); ChatView observes the snapshot and the installed transcript in separate scopes | T1-TEXT | |
 | T2-DASH | Needs scoping | Dashboard root stops re-evaluating on every summary; parsed ordering instants; cheaper per-row path helpers; filter preferences saved only on change | T1-CLOCKS | |
 | T2-THINK | Needs scoping | Thinking trace measures its visible text instead of a hidden full copy | T1-TEXT | |
 | T2-TEXTPREP | Needs scoping | Text preparation reuses history rows on the isolated streaming path and memoizes closed Markdown blocks | T1-TEXT | |
@@ -588,4 +592,28 @@ re-projection is a material share of that time.
   them; a payload tampered in place with its size and nanosecond timestamps
   restored is no longer rewritten by typing saves and is instead discarded at
   the next load (corrupt bytes are still never restored).
+
+### P-3 · Done · 2026-09-27 · energy-efficiency supervisor (worker lane p3)
+
+- Result: `scripts/tron-profile ios --scenario X --trace time-profiler` records
+  a host-wide Time Profiler capture filtered to the simulator test host, maps
+  the scenario's measured windows onto it through a bounded file handshake,
+  and writes `attribution.json`/`.md` (top self and total symbols for all
+  threads and the main thread, an app-code ranking, per-thread CPU, resolved
+  and unresolved time per binary). Traced reports are marked and refused by
+  `compare`. Traced runs take a host-wide lock and wait, bounded, for another
+  session's Instruments; a held kperf lock fails with a precise message.
+  `scripts/tron-profile device --attach` captures an already running app on an
+  explicitly named physical device and refuses simulators, this Mac, and
+  missing or offline devices.
+- Evidence: the traced self-test attributes the CPU control's own function
+  within the windows with no samples outside them; test-binary frames resolved
+  completely; attribution of streaming-reply, tool-loop and idle-dashboard
+  produced the T2-FONTS, T2-COLORS, T2-PULSE and T2-CHATVIEW rows.
+- Deviations: `swiftui` and `points-of-interest` need simulator-device
+  recording, which never starts from agent sessions on this Mac (P-5); device
+  capture is unverified. The worker wrote the attribution parser tests after
+  the code (only the traced-compare refusal has a negative control) and once
+  ran a pattern-based `pkill` on DTServiceHub processes early on; it believes it
+  matched only its own. Later kills were by confirmed pid.
 
