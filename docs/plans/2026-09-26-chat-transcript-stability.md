@@ -210,6 +210,68 @@ reports exact frames itself. No other shared code changes.
 4. Opening, scrolling and streaming with 512 heavy rows cost no more than
    CT-10's baseline.
 
+### CT-22 round 2 — height-bounded exact tail (design)
+
+Principle: exact where the reader can see, lazy everywhere else. The cost must
+scale with what is on screen, not with the row count. Round 1 (variant B above)
+proved the structure removes the blank; its cost and misalignment came from a
+row-count window (48 heavy rows is about 60,000 pt of eager layout, while today
+mounts three or four rows) and from today's alignment code not recognising
+eager rows.
+
+1. **The window is measured in points.** Let `V` be the tallest content viewport
+   the transcript can have (keyboard hidden). The window is the smallest suffix
+   of the newest rows whose measured height reaches `T = 2V` (the viewport plus
+   one viewport of prefetch margin). It shrinks only when it exceeds `T + V`,
+   and then drops whole rows from its top until it is back at or above `T`. A
+   single 1,300 pt row can be the whole window; forty one-line rows can too. With
+   heavy rows that is two to four eager rows, close to what today mounts.
+2. **Heights come from the existing row frame publication**
+   (`ChatSemanticFrameObservation`), not a new channel. Eager rows are always
+   measured. A row with no measurement counts as unknown, and the window never
+   shrinks past an unknown row.
+3. **One owner.** The boundary is scroll presentation state, so the coordinator
+   owns it: it already owns pinned and detached state, the viewport, the drag
+   phase and the row frames. The decision is one pure function of those inputs;
+   the view only renders the split. There is no view-local window state.
+4. **A row changes stack only when nobody can see it.** Boundary moves happen
+   only while the transcript follows the bottom, with no drag or deceleration in
+   progress, and only for rows whose frames lie wholly above the viewport top by
+   at least the prefetch margin. Otherwise the move is deferred and re-evaluated
+   on the next geometry change; there are no timers. While a reader is detached
+   the boundary is frozen, except that newly arrived rows join the window at its
+   end as always. The hysteresis band keeps a decision from reversing itself, so
+   a geometry pass cannot cycle.
+5. **Opening.** The opening cover already hides frames until the transcript is
+   ready. The first pass seeds the window with a few newest rows; after it, the
+   measured eager rows and the lazy rows realised in the viewport give the
+   heights for one correction to the band, and readiness waits for that
+   correction. Seed size is chosen by measurement.
+6. **Fix the evidence, not the symptoms.** Where round 1 misaligned (resting
+   bottom 40 pt off, a long opening 2,083 pt off, tail materialization evidence
+   that stopped firing), the cause is that today's alignment code expects lazy
+   rows. The fix makes that code's evidence correct for eager rows. It adds no
+   eager-only repair. Compensations that become dead are listed for CT-19 and
+   are not deleted in the prototype.
+7. **Row state.** A row that changes stack remounts and loses view-local
+   `@State`. Every user-visible piece of row state (expansion, selection, loaded
+   media, caches) must be store-owned or shown to be harmless when a row
+   remounts off screen.
+
+Acceptance, measured on one lane against today's path:
+
+- zero blank boundaries in both CT-2 shapes and a new short-row shape (many
+  one-line messages with keyboard cycles), three runs each;
+- first ready frame no more than 1.15× today at 150, 300 and 512 rows (median of
+  three), streaming frame-interval median no worse, worst send frame no more
+  than 1.2×, scroll step no more than 0.3 ms worse, memory no more than 5% higher;
+- parity gate 7/7, scroll harness 54/54, per-boundary tail continuity no worse;
+- no row changes stack on screen and no entrance replays, for tall and short
+  rows.
+
+Stop rule: if the opening stays above 1.3× today, or parity or the harness can
+pass only through eager-only repairs, stop and report.
+
 ## Handoff log
 
 ### CT-2 · Done · 2026-09-26 · chat scroll investigation session
