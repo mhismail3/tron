@@ -37,6 +37,11 @@ const GENERIC_MESSAGE = "Tron has an update. Open Tron to view it.";
 const RETRY_DELAYS_MS = [5_000, 20_000, 60_000, 180_000] as const;
 const ACTIVE_OUTCOMES = new Set(["pending", "retryable"]);
 const SESSION_ROUTE_ID = /^[A-Za-z0-9_:-]{1,160}$/u;
+// Trailing coalescing window for `notification.inbox.changed`. A burst of
+// admission, delivery settlement, and read mutations publishes the final state
+// once instead of one broadcast per committed write.
+const INBOX_CHANGED_DEBOUNCE_MS = 250;
+const INBOX_CURSOR = /^(-?\d{1,16})\.([A-Za-z0-9_-]{8,160})$/u;
 
 export type NotificationAdmissionStatus = "queued" | "suppressed" | "rate_limited" | "unavailable";
 export interface NotificationStatus {
@@ -68,6 +73,26 @@ export interface NotificationInboxPage {
   unreadCount: number;
   nextCursor?: string;
 }
+/** The coalesced `notification.inbox.changed` payload: the committed state the
+ * client can compare against its cache and project onto the bell immediately. */
+export type NotificationInboxChanged = { revision: string; unreadCount: number };
+export type NotificationInboxFilter = "all" | "unread";
+/** One keyset position in the canonical inbox order: newest `createdAt` first,
+ * then ascending id. */
+interface InboxOrderKey { createdAt: number; id: string }
+
+function inboxOrder(createdAt: string, id: string): InboxOrderKey { return { createdAt: Date.parse(createdAt), id }; }
+function compareInboxOrder(left: InboxOrderKey, right: InboxOrderKey): number {
+  if (left.createdAt !== right.createdAt) return right.createdAt - left.createdAt;
+  return left.id.localeCompare(right.id);
+}
+function inboxCursor(key: InboxOrderKey): string { return `${key.createdAt}.${key.id}`; }
+function parseInboxCursor(value: string): InboxOrderKey {
+  const match = INBOX_CURSOR.exec(value);
+  if (!match) throw new GatewayError("invalid_request", "Notification inbox cursor is invalid");
+  return { createdAt: Number(match[1]), id: match[2]! };
+}
+function entryOrder(entry: NotificationInboxEntry): InboxOrderKey { return inboxOrder(entry.createdAt, entry.id); }
 
 function iso(ms: number): string { return new Date(ms).toISOString(); }
 function isID(value: string): boolean { return /^[A-Za-z0-9_-]{8,160}$/u.test(value); }
@@ -86,6 +111,24 @@ function boundedRoute(route: { sessionId: string; machineId: string } | undefine
   }
   return route;
 }
+/** Bounded inbox retention over the admission-ordered (oldest-first) rows: read
+ * rows are evicted before any unread row, so an unread alert is never dropped
+ * while a read row still occupies the bound. */
+function retainInboxRows(inbox: NotificationInboxEntry[]): NotificationInboxEntry[] {
+  if (inbox.length <= MAXIMUM_NOTIFICATION_INBOX_ENTRIES) return inbox;
+  const excess = inbox.length - MAXIMUM_NOTIFICATION_INBOX_ENTRIES;
+  const evicted = new Set<string>();
+  for (const entry of inbox) {
+    if (evicted.size >= excess) break;
+    if (entry.readAt !== undefined) evicted.add(entry.id);
+  }
+  for (const entry of inbox) {
+    if (evicted.size >= excess) break;
+    if (entry.readAt === undefined) evicted.add(entry.id);
+  }
+  return inbox.filter((entry) => !evicted.has(entry.id));
+}
+
 function prune(document: NotificationDocument, now: number): NotificationDocument {
   const expired = new Set(document.pending.filter((intent) => Date.parse(intent.expiresAt) <= now).map((intent) => intent.dedupeKey));
   for (const receipt of document.receipts) if (expired.has(receipt.dedupeKey) && receipt.result === "queued") receipt.result = "expired";
@@ -97,7 +140,7 @@ function prune(document: NotificationDocument, now: number): NotificationDocumen
   }
   document.receipts = document.receipts.filter((receipt) => Date.parse(receipt.expiresAt) > now).slice(-512);
   document.pending = document.pending.filter((intent) => Date.parse(intent.expiresAt) > now).slice(-MAXIMUM_PENDING_INTENTS);
-  document.inbox = document.inbox.slice(-MAXIMUM_NOTIFICATION_INBOX_ENTRIES);
+  document.inbox = retainInboxRows(document.inbox);
   // Revocation authority must be retained until the relay acknowledges it.
   document.revocations = document.revocations.slice(-MAXIMUM_REVOCATIONS);
   return document;
@@ -108,10 +151,16 @@ function receiptFor(input: {
   return { dedupeKey: input.dedupeKey, sessionKey: input.sessionKey, grantIds: input.grantIds, createdAt: iso(input.now), expiresAt: iso(input.now + RECEIPT_TTL_MS), result: input.result };
 }
 
+/** Revision over every projected inbox field, so a session rekey that moves
+ * rows between identities is as visible to clients as a read or outcome change. */
 function inboxRevision(entries: NotificationInboxEntry[]): string {
   return createHash("sha256")
-    .update(entries.map((entry) => `${entry.id}\0${entry.updatedAt}\0${entry.readAt ?? "unread"}\0${entry.outcome}`).join("\n"))
+    .update(entries.map((entry) => `${entry.id}\0${entry.updatedAt}\0${entry.readAt ?? "unread"}\0${entry.outcome}\0${entry.sessionId}`).join("\n"))
     .digest("hex").slice(0, 32);
+}
+
+function inboxState(entries: NotificationInboxEntry[]): NotificationInboxChanged {
+  return { revision: inboxRevision(entries), unreadCount: entries.filter((entry) => entry.readAt === undefined).length };
 }
 
 function inboxItem(entry: NotificationInboxEntry): NotificationInboxItem {
@@ -153,6 +202,8 @@ function retainRevocationAuthority(document: NotificationDocument, now: number):
 export class NotificationService {
   private timer: NodeJS.Timeout | undefined;
   private draining = false;
+  private inboxChangedTimer: NodeJS.Timeout | undefined;
+  private pendingInboxChanged: NotificationInboxChanged | undefined;
   private readonly pendingInboxReadIds = new Set<string>();
   private inboxReadFlush: Promise<void> | undefined;
   constructor(
@@ -160,7 +211,7 @@ export class NotificationService {
     private readonly relay: PushRelayClient,
     private readonly now: () => number = Date.now,
     private readonly rateLimits: NotificationRateLimits = DEFAULT_NOTIFICATION_RATE_LIMITS,
-    private readonly inboxChanged: () => void = () => {},
+    private readonly inboxChanged: (payload: NotificationInboxChanged) => void = () => {},
     private readonly inboxReadFailed: () => void = () => {},
   ) {}
 
@@ -173,10 +224,28 @@ export class NotificationService {
     void this.drain();
   }
 
-  dispose(): void { if (this.timer) clearInterval(this.timer); this.timer = undefined; }
+  dispose(): void {
+    if (this.timer) clearInterval(this.timer);
+    this.timer = undefined;
+    if (this.inboxChangedTimer) clearTimeout(this.inboxChangedTimer);
+    this.inboxChangedTimer = undefined;
+    this.pendingInboxChanged = undefined;
+  }
 
-  private publishInboxChanged(): void {
-    try { this.inboxChanged(); } catch { /* invalidation delivery never owns canonical admission */ }
+  /** Publish one trailing `notification.inbox.changed` for a burst of committed
+   * inbox mutations. The payload is that of the newest committed state. */
+  private publishInboxChanged(document: NotificationDocument): void {
+    this.pendingInboxChanged = inboxState(document.inbox);
+    if (this.inboxChangedTimer) return;
+    this.inboxChangedTimer = setTimeout(() => {
+      this.inboxChangedTimer = undefined;
+      const payload = this.pendingInboxChanged;
+      this.pendingInboxChanged = undefined;
+      if (!payload) return;
+      try { this.inboxChanged(payload); } catch { /* invalidation delivery never owns canonical admission */ }
+    }, INBOX_CHANGED_DEBOUNCE_MS);
+    // Invalidation must never hold the process (or a test) open on its own.
+    this.inboxChangedTimer.unref();
   }
 
   async upsertGrant(input: {
@@ -248,36 +317,37 @@ export class NotificationService {
     let removed = false;
     let inboxDidChange = false;
     const now = this.now();
-    await this.store.update((document) => {
-      prune(document, now);
-      const grants = document.grants.filter((grant) => grant.deviceId === deviceId);
+    const document = await this.store.update((current) => {
+      prune(current, now);
+      const grants = current.grants.filter((grant) => grant.deviceId === deviceId);
       removed = grants.length > 0;
-      document.grants = document.grants.filter((grant) => grant.deviceId !== deviceId);
-      for (const intent of document.pending) {
+      if (!removed) return undefined;
+      current.grants = current.grants.filter((grant) => grant.deviceId !== deviceId);
+      for (const intent of current.pending) {
         intent.targets = intent.targets.filter((target) => !grants.some((grant) => grant.grantId === target.grantId));
         if (intent.targets.length > 0) continue;
-        const receipt = document.receipts.find((candidate) => candidate.dedupeKey === intent.dedupeKey);
+        const receipt = current.receipts.find((candidate) => candidate.dedupeKey === intent.dedupeKey);
         if (receipt?.result === "queued") receipt.result = "failed";
-        const inbox = document.inbox.find((entry) => entry.dedupeKey === intent.dedupeKey);
+        const inbox = current.inbox.find((entry) => entry.dedupeKey === intent.dedupeKey);
         if (inbox?.outcome === "queued") {
           inbox.outcome = "failed";
           inbox.updatedAt = iso(now);
           inboxDidChange = true;
         }
       }
-      document.pending = document.pending.filter((intent) => intent.targets.length > 0);
+      current.pending = current.pending.filter((intent) => intent.targets.length > 0);
       for (const grant of grants) {
-        document.revocations = document.revocations.filter((item) => item.grantId !== grant.grantId);
-        document.revocations.push({
+        current.revocations = current.revocations.filter((item) => item.grantId !== grant.grantId);
+        current.revocations.push({
           grantId: grant.grantId,
           secret: grant.secret,
           requestId: notificationHash(`revoke\0${grant.grantId}`),
           createdAt: iso(now), attempts: 0, nextAttemptAt: iso(now),
         });
       }
-      return document;
+      return current;
     });
-    if (inboxDidChange) this.publishInboxChanged();
+    if (inboxDidChange) this.publishInboxChanged(document);
     if (removed) void this.drain();
     return removed;
   }
@@ -302,40 +372,38 @@ export class NotificationService {
     };
   }
 
-  async inbox(cursor?: string, limit = 50): Promise<NotificationInboxPage> {
+  /** One newest-first page. `cursor` is an opaque keyset position, so a page
+   * request never fails because the inbox changed between pages. */
+  async inbox(input: { filter?: NotificationInboxFilter; cursor?: string; limit?: number } = {}): Promise<NotificationInboxPage> {
     const now = this.now();
-    let expiredChanged = false;
+    const cursor = input.cursor === undefined ? undefined : parseInboxCursor(input.cursor);
+    const filter = input.filter ?? "all";
+    const requested = input.limit ?? 50;
+    const limit = Number.isFinite(requested) ? Math.min(50, Math.max(1, Math.floor(requested))) : 50;
+    let expiryChanged = false;
     const document = await this.store.update((current) => {
-      const before = current.inbox.filter((entry) => entry.outcome === "queued").length;
+      const queuedBefore = current.inbox.filter((entry) => entry.outcome === "queued").length;
       prune(current, now);
-      expiredChanged = current.inbox.filter((entry) => entry.outcome === "queued").length !== before;
-      return current;
+      // Expiry is the only terminal transition prune applies to an inbox row,
+      // and retention only drops rows, so a queued-count drop is exactly an
+      // inbox-row change. Listing is otherwise a read: without one it must not
+      // rewrite the credential document.
+      expiryChanged = current.inbox.filter((entry) => entry.outcome === "queued").length !== queuedBefore;
+      return expiryChanged ? current : undefined;
     });
-    if (expiredChanged) this.publishInboxChanged();
-    const entries = [...document.inbox].sort((left, right) => {
-      const delta = Date.parse(right.createdAt) - Date.parse(left.createdAt);
-      return delta || left.id.localeCompare(right.id);
-    });
-    const revision = inboxRevision(entries);
-    let offset = 0;
-    if (cursor !== undefined) {
-      const [cursorRevision, rawOffset] = cursor.split(":");
-      if (cursorRevision !== revision || !/^\d+$/u.test(rawOffset ?? "")) {
-        throw new GatewayError("conflict", "Notification inbox changed during pagination", true);
-      }
-      offset = Number(rawOffset);
-      if (!Number.isSafeInteger(offset) || offset < 0 || offset > entries.length) {
-        throw new GatewayError("invalid_request", "Notification inbox cursor is invalid");
-      }
-    }
-    const boundedLimit = Math.min(50, Math.max(1, Math.floor(limit)));
-    const selected = entries.slice(offset, offset + boundedLimit);
-    const nextOffset = offset + selected.length;
+    if (expiryChanged) this.publishInboxChanged(document);
+    const entries = [...document.inbox]
+      .sort((left, right) => compareInboxOrder(entryOrder(left), entryOrder(right)))
+      .filter((entry) => filter !== "unread" || entry.readAt === undefined)
+      .filter((entry) => cursor === undefined || compareInboxOrder(entryOrder(entry), cursor) > 0);
+    const selected = entries.slice(0, limit);
+    const last = selected.at(-1);
     return {
       notifications: selected.map(inboxItem),
-      revision,
-      unreadCount: entries.filter((entry) => entry.readAt === undefined).length,
-      ...(nextOffset < entries.length ? { nextCursor: `${revision}:${nextOffset}` } : {}),
+      // The revision covers the whole inbox state; unreadCount is every unread
+      // row, not only the filtered or paged subset.
+      ...inboxState(document.inbox),
+      ...(last !== undefined && entries.length > limit ? { nextCursor: inboxCursor(entryOrder(last)) } : {}),
     };
   }
 
@@ -348,39 +416,63 @@ export class NotificationService {
     const now = this.now();
     let changed = false;
     let resolvedId: string | undefined;
-    await this.store.update((document) => {
-      prune(document, now);
-      const entry = document.inbox.find((candidate) => input.id !== undefined
+    const document = await this.store.update((current) => {
+      prune(current, now);
+      const entry = current.inbox.find((candidate) => input.id !== undefined
         ? candidate.id === input.id
         : candidate.requestIds.includes(input.requestId!));
-      if (!entry) throw new GatewayError("not_found", "Notification was not found");
+      // A row evicted by the inbox bound is already gone, so reading it is an
+      // idempotent no-op rather than an error.
+      if (!entry) return undefined;
       resolvedId = entry.id;
-      if (entry.readAt === undefined) {
-        entry.readAt = iso(now);
-        entry.updatedAt = iso(now);
-        changed = true;
-      }
-      return document;
+      if (entry.readAt !== undefined) return undefined;
+      entry.readAt = iso(now);
+      entry.updatedAt = iso(now);
+      changed = true;
+      return current;
     });
-    if (changed) this.publishInboxChanged();
+    if (changed) this.publishInboxChanged(document);
     return { changed, ...(resolvedId ? { id: resolvedId } : {}) };
   }
 
-  async markAllInboxRead(): Promise<{ changed: number }> {
+  /** Marks only unread rows at or older than the caller's exact `through` cut
+   * key, so rows the user has not seen stay unread. */
+  async markAllInboxRead(input: { through: string }): Promise<{ changed: number }> {
+    const cut = parseInboxCursor(input.through);
     const now = this.now();
     let changed = 0;
-    await this.store.update((document) => {
-      prune(document, now);
-      for (const entry of document.inbox) {
+    const document = await this.store.update((current) => {
+      prune(current, now);
+      for (const entry of current.inbox) {
         if (entry.readAt !== undefined) continue;
+        if (compareInboxOrder(entryOrder(entry), cut) < 0) continue;
         entry.readAt = iso(now);
         entry.updatedAt = iso(now);
         changed += 1;
       }
-      return document;
+      return changed > 0 ? current : undefined;
     });
-    if (changed > 0) this.publishInboxChanged();
+    if (changed > 0) this.publishInboxChanged(document);
     return { changed };
+  }
+
+  /** Move inbox rows onto a rekeyed canonical session identity. Row ids are
+   * stable across a rekey, so captured pending reads need no rewriting. */
+  async rekeySession(previousId: string, nextId: string): Promise<boolean> {
+    if (!SESSION_ROUTE_ID.test(previousId) || !SESSION_ROUTE_ID.test(nextId)) {
+      throw new GatewayError("invalid_request", "Notification session identity is malformed");
+    }
+    let matched = false;
+    const document = await this.store.update((current) => {
+      for (const entry of current.inbox) {
+        if (entry.sessionId !== previousId) continue;
+        entry.sessionId = nextId;
+        matched = true;
+      }
+      return matched ? current : undefined;
+    });
+    if (matched) this.publishInboxChanged(document);
+    return matched;
   }
 
   /** Capture one canonical cut; retries must never broaden it to later alerts. */
@@ -405,8 +497,8 @@ export class NotificationService {
   private async persistInboxReads(sessionId?: string): Promise<void> {
     const ids = new Set<string>();
     let changed = false;
-    await this.store.update((document) => {
-      const unread = document.inbox.filter((entry) => entry.readAt === undefined);
+    const document = await this.store.update((current) => {
+      const unread = current.inbox.filter((entry) => entry.readAt === undefined);
       const retained = new Set(unread.map((entry) => entry.id));
       // Capture and mutation share the admission/settlement mutex. Only IDs
       // survive a failed write, bounded by the canonical inbox's 512 rows.
@@ -420,12 +512,12 @@ export class NotificationService {
         entry.updatedAt = iso(Math.max(now, Date.parse(entry.updatedAt)));
         changed = true;
       }
-      return changed ? document : undefined;
+      return changed ? current : undefined;
     });
     // Only a committed transaction retires the captured intent. It outlives
     // navigation/socket loss; retries never select later rows for that session.
     for (const id of ids) this.pendingInboxReadIds.delete(id);
-    if (changed) this.publishInboxChanged();
+    if (changed) this.publishInboxChanged(document);
   }
 
   async suppressAutomatic(input: {
@@ -439,19 +531,19 @@ export class NotificationService {
     const now = this.now();
     const dedupeKey = notificationHash(`${input.kind}\0${input.sessionId}\0${input.sourceId}`);
     const sessionKey = notificationHash(`session\0${input.sessionId}`);
-    await this.store.update((document) => {
-      prune(document, now);
-      if (document.receipts.some((receipt) => receipt.dedupeKey === dedupeKey)
-        || document.pending.some((intent) => intent.dedupeKey === dedupeKey)) return document;
-      document.receipts.push(receiptFor({
+    await this.store.update((current) => {
+      prune(current, now);
+      if (current.receipts.some((receipt) => receipt.dedupeKey === dedupeKey)
+        || current.pending.some((intent) => intent.dedupeKey === dedupeKey)) return undefined;
+      current.receipts.push(receiptFor({
         dedupeKey,
         sessionKey,
         grantIds: [],
         now,
         result: "suppressed",
       }));
-      document.receipts = document.receipts.slice(-MAXIMUM_NOTIFICATION_RECEIPTS);
-      return document;
+      current.receipts = current.receipts.slice(-MAXIMUM_NOTIFICATION_RECEIPTS);
+      return current;
     });
     return "suppressed";
   }
@@ -465,6 +557,8 @@ export class NotificationService {
     route?: { sessionId: string; machineId: string };
     /** Internal admission fence for semantic ask notifications. */
     requireAskPolicy?: boolean;
+    /** The user is watching this exact session, so its row starts read. */
+    readOnAdmission?: boolean;
   }): Promise<NotificationAdmissionStatus> {
     const message = boundedText(input.message, 512, "message");
     const title = input.title === undefined ? undefined : boundedText(input.title, 256, "title");
@@ -474,28 +568,28 @@ export class NotificationService {
     const dedupeKey = notificationHash(`${input.kind}\0${input.sessionId}\0${input.sourceId}`);
     const sessionKey = notificationHash(`session\0${input.sessionId}`);
     let result: NotificationAdmissionStatus = "queued";
-    await this.store.update((document) => {
-      retainRevocationAuthority(prune(document, now), now);
+    const document = await this.store.update((current) => {
+      retainRevocationAuthority(prune(current, now), now);
       // The outer policy read is only an early suppression optimization. The
       // admission transaction must recheck the canonical policy immediately
       // before appending an intent, otherwise a concurrent disable can still
       // deliver an ask notification.
-      if (input.requireAskPolicy && input.kind === "ask" && !document.policy.notifyWhenAskPresented) {
+      if (input.requireAskPolicy && input.kind === "ask" && !current.policy.notifyWhenAskPresented) {
         result = "suppressed";
-        return document;
+        return undefined;
       }
-      if (document.receipts.some((receipt) => receipt.dedupeKey === dedupeKey) || document.pending.some((intent) => intent.dedupeKey === dedupeKey)) {
+      if (current.receipts.some((receipt) => receipt.dedupeKey === dedupeKey) || current.pending.some((intent) => intent.dedupeKey === dedupeKey)) {
         result = "suppressed";
-        return document;
+        return undefined;
       }
-      const grants = document.grants.filter((grant) => grant.active && grant.relayOrigin === this.relay.relayOrigin);
+      const grants = current.grants.filter((grant) => grant.active && grant.relayOrigin === this.relay.relayOrigin);
       if (!this.relay.available || grants.length === 0) {
         result = "unavailable";
-        return document;
+        return undefined;
       }
       const day = now - 24 * 60 * 60_000;
       const hour = now - 60 * 60_000;
-      const recent = document.receipts.filter((receipt) => Date.parse(receipt.createdAt) > day);
+      const recent = current.receipts.filter((receipt) => Date.parse(receipt.createdAt) > day);
       // Rejected and presentation-suppressed receipts never consume delivery
       // quota or extend a lockout window.
       const admitted = recent.filter((receipt) => receipt.result !== "rate_limited" && receipt.result !== "suppressed");
@@ -504,11 +598,11 @@ export class NotificationService {
       if (admitted.length >= this.rateLimits.dailyIntents
         || admitted.filter((receipt) => receipt.sessionKey === sessionKey
           && Date.parse(receipt.createdAt) > hour).length >= this.rateLimits.sessionHourlyIntents
-        || targetLimited || document.pending.length >= MAXIMUM_PENDING_INTENTS) {
+        || targetLimited || current.pending.length >= MAXIMUM_PENDING_INTENTS) {
         // Rejection is returned synchronously but is not persisted: a rejected
         // attempt owns no delivery and must not displace durable quota authority.
         result = "rate_limited";
-        return document;
+        return undefined;
       }
       const intentId = randomUUID();
       const targets = grants.map((grant) => {
@@ -522,12 +616,12 @@ export class NotificationService {
           attempts: 0, nextAttemptAt: iso(now), outcome: "pending" as const,
         };
       });
-      document.pending.push({
+      current.pending.push({
         id: intentId, dedupeKey, sessionKey, kind: input.kind, createdAt: iso(now), expiresAt: iso(now + INTENT_TTL_MS), targets,
       });
-      document.receipts.push(receiptFor({ dedupeKey, sessionKey, grantIds: grants.map((grant) => grant.grantId), now, result: "queued" }));
+      current.receipts.push(receiptFor({ dedupeKey, sessionKey, grantIds: grants.map((grant) => grant.grantId), now, result: "queued" }));
       const inboxExposesModelText = input.kind !== "explicit" || grants.every((grant) => grant.previewsEnabled);
-      document.inbox.push({
+      current.inbox.push({
         id: intentId,
         dedupeKey,
         requestIds: targets.map((target) => target.requestId),
@@ -539,12 +633,15 @@ export class NotificationService {
         sessionId: input.sessionId,
         ...(route ? { machineId: route.machineId } : {}),
         outcome: "queued",
+        // An alert produced while the user is already reading that chat is
+        // still delivered, but it must not light the bell afterwards.
+        ...(input.readOnAdmission === true ? { readAt: iso(now) } : {}),
       });
-      document.inbox = document.inbox.slice(-MAXIMUM_NOTIFICATION_INBOX_ENTRIES);
-      return document;
+      current.inbox = retainInboxRows(current.inbox);
+      return current;
     });
     if (result === "queued") {
-      this.publishInboxChanged();
+      this.publishInboxChanged(document);
       void this.drain();
     }
     return result;
@@ -627,11 +724,11 @@ export class NotificationService {
     if (outcome === "invalid_grant") outcome = "invalid_token";
     const now = this.now();
     let inboxDidChange = false;
-    await this.store.update((document) => {
-      prune(document, now);
-      const intent = document.pending.find((candidate) => candidate.id === intentId);
+    const document = await this.store.update((current) => {
+      prune(current, now);
+      const intent = current.pending.find((candidate) => candidate.id === intentId);
       const target = intent?.targets.find((candidate) => candidate.grantId === grantId);
-      if (!intent || !target || !ACTIVE_OUTCOMES.has(target.outcome)) return document;
+      if (!intent || !target || !ACTIVE_OUTCOMES.has(target.outcome)) return undefined;
       target.attempts += 1;
       if (outcome === "retryable" && target.attempts < RETRY_DELAYS_MS.length && Date.parse(intent.expiresAt) > now) {
         target.outcome = "retryable";
@@ -640,25 +737,25 @@ export class NotificationService {
         target.outcome = outcome === "retryable" ? "permanent_failure" : outcome;
       }
       if (outcome === "invalid_token") {
-        const grant = document.grants.find((candidate) => candidate.grantId === grantId);
+        const grant = current.grants.find((candidate) => candidate.grantId === grantId);
         if (grant) { grant.active = false; grant.disabledReason = "invalid_token"; grant.updatedAt = iso(now); }
       }
       if (intent.targets.every((candidate) => !ACTIVE_OUTCOMES.has(candidate.outcome))) {
-        const receipt = document.receipts.find((candidate) => candidate.dedupeKey === intent.dedupeKey);
+        const receipt = current.receipts.find((candidate) => candidate.dedupeKey === intent.dedupeKey);
         const finalOutcome: NotificationInboxOutcome = intent.targets.some((candidate) => candidate.outcome === "accepted_by_apns") ? "accepted_by_apns"
           : intent.targets.some((candidate) => candidate.outcome === "ambiguous") ? "ambiguous" : "failed";
         if (receipt) receipt.result = finalOutcome;
-        const inbox = document.inbox.find((entry) => entry.dedupeKey === intent.dedupeKey);
+        const inbox = current.inbox.find((entry) => entry.dedupeKey === intent.dedupeKey);
         if (inbox && inbox.outcome !== finalOutcome) {
           inbox.outcome = finalOutcome;
           inbox.updatedAt = iso(now);
           inboxDidChange = true;
         }
-        document.pending = document.pending.filter((candidate) => candidate.id !== intent.id);
+        current.pending = current.pending.filter((candidate) => candidate.id !== intent.id);
       }
-      return document;
+      return current;
     });
-    if (inboxDidChange) this.publishInboxChanged();
+    if (inboxDidChange) this.publishInboxChanged(document);
   }
 
   private async drainRevocations(): Promise<void> {
@@ -669,7 +766,7 @@ export class NotificationService {
       try { revoked = await this.relay.revoke(item.grantId, item.secret, item.requestId) === "revoked"; } catch { /* retained */ }
       await this.store.update((current) => {
         const candidate = current.revocations.find((entry) => entry.grantId === item.grantId);
-        if (!candidate) return current;
+        if (!candidate) return undefined;
         if (revoked) current.revocations = current.revocations.filter((entry) => entry.grantId !== item.grantId);
         else {
           candidate.attempts = Math.min(32, candidate.attempts + 1);

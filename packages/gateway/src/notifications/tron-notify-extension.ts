@@ -10,6 +10,8 @@ export interface TronNotificationEnqueue {
     message: string;
     title?: string;
     route?: { sessionId: string; machineId: string };
+    /** The user is already looking at this session's chat. */
+    readOnAdmission?: boolean;
   }): Promise<NotificationAdmissionStatus>;
 }
 
@@ -54,6 +56,8 @@ export function createTronNotifyExtension(input: {
   sessionId: () => string;
   sessionTitle: () => string;
   machineId?: string;
+  /** The same token-bound foreground lease RuntimeSlot uses for automatic alerts. */
+  observed: () => boolean;
   enqueue: TronNotificationEnqueue;
 }): ExtensionFactory {
   return (pi) => {
@@ -67,6 +71,9 @@ export function createTronNotifyExtension(input: {
       executionMode: "sequential",
       execute: async (toolCallId, params) => {
         const sessionId = input.sessionId();
+        // Sampled at admission: the model called notify while the user was
+        // reading this chat, so the alert is delivered but starts read.
+        const observed = input.observed();
         const status = await input.enqueue({
           sessionId,
           sourceId: toolCallId,
@@ -74,6 +81,7 @@ export function createTronNotifyExtension(input: {
           title: input.sessionTitle(),
           message: params.message,
           ...(input.machineId ? { route: { sessionId, machineId: input.machineId } } : {}),
+          ...(observed ? { readOnAdmission: true } : {}),
         });
         return {
           content: [{ type: "text", text: status === "queued" ? "Notification queued." : `Notification ${status.replaceAll("_", " ")}.` }],

@@ -139,7 +139,7 @@ const notifications = new NotificationService(
   new PushRelayClient(config.pushServiceOrigin),
   Date.now,
   undefined,
-  () => transport?.broadcast("notification.inbox.changed", {}),
+  (payload) => transport?.broadcast("notification.inbox.changed", payload),
   () => logger.log("warning", "Session notification read state could not be persisted; unread state is retained.", {
     event: "notification.inbox.read_failed", source: "notifications",
   }),

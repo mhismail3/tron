@@ -44,9 +44,14 @@ async function fixture() {
     sessionId: "session_abcdefgh", isUnread: true, outcome: "accepted_by_apns",
   }];
   const notifications = {
-    async inbox(cursor?: string, limit?: number) {
-      calls.push(["inbox", cursor, limit]);
-      return { notifications: inbox, revision: "revision-abcdefgh", unreadCount: inbox.filter((item) => item.isUnread).length };
+    async inbox(input: { filter?: string; cursor?: string; limit?: number }) {
+      calls.push(["inbox", input]);
+      const filtered = input.filter === "unread" ? inbox.filter((item) => item.isUnread) : inbox;
+      return {
+        notifications: filtered.slice(0, input.limit),
+        revision: "revision-abcdefgh",
+        unreadCount: inbox.filter((item) => item.isUnread).length,
+      };
     },
     async markInboxRead(input: { id?: string; requestId?: string }) {
       calls.push(["read", input]);
@@ -54,10 +59,10 @@ async function fixture() {
       if (item) item.isUnread = false;
       return { changed: item !== undefined, ...(item ? { id: item.id } : {}) };
     },
-    async markAllInboxRead() {
+    async markAllInboxRead(input: { through: string }) {
       const changed = inbox.filter((item) => item.isUnread).length;
       inbox.forEach((item) => { item.isUnread = false; });
-      calls.push(["readAll"]);
+      calls.push(["readAll", input.through]);
       return { changed };
     },
     async upsertGrant(input: Record<string, unknown> & { deviceId: string }) {
@@ -125,7 +130,7 @@ describe("Gateway push registration RPC", () => {
 
   it("lists and marks canonical inbox entries through bounded idempotent RPCs", async () => {
     const { service, calls } = await fixture();
-    await expect(service.invoke(client(), "notification.inbox.list", { limit: 25 })).resolves.toMatchObject({
+    await expect(service.invoke(client(), "notification.inbox.list", { limit: 25, filter: "unread" })).resolves.toMatchObject({
       revision: "revision-abcdefgh",
       unreadCount: 1,
       notifications: [expect.objectContaining({ id: "notification_abcdefgh", isUnread: true })],
@@ -133,17 +138,43 @@ describe("Gateway push registration RPC", () => {
     await expect(service.invoke(client(), "notification.inbox.read", {
       commandId: "command_read_01", id: "notification_abcdefgh",
     })).resolves.toEqual({ changed: true, id: "notification_abcdefgh" });
+    const through = `${Date.parse("2026-01-01T00:00:00.000Z")}.notification_abcdefgh`;
     await expect(service.invoke(client(), "notification.inbox.readAll", {
-      commandId: "command_read_all_01",
+      commandId: "command_read_all_01", through,
     })).resolves.toEqual({ changed: 0 });
     expect(calls).toEqual([
-      ["inbox", undefined, 25],
+      ["inbox", { filter: "unread", limit: 25 }],
       ["read", { id: "notification_abcdefgh" }],
-      ["readAll"],
+      ["readAll", through],
     ]);
     await expect(service.invoke(client(), "notification.inbox.read", {
       commandId: "command_read_bad", id: "notification_abcdefgh", requestId: "request_abcdefgh",
     })).rejects.toMatchObject({ code: "invalid_request" });
+  });
+
+  it("rejects unknown inbox list keys and an unknown filter without reaching the owner", async () => {
+    const { service, calls } = await fixture();
+    for (const params of [
+      { filter: "unread", offset: 50 },
+      { filter: "read" },
+      { limit: 51 },
+      { cursor: "" },
+    ]) {
+      await expect(service.invoke(client(), "notification.inbox.list", params)).rejects.toMatchObject({ code: "invalid_request" });
+    }
+    expect(calls).toEqual([]);
+    await expect(service.invoke(client(), "notification.inbox.list", {})).resolves.toMatchObject({ revision: "revision-abcdefgh" });
+    expect(calls).toEqual([["inbox", { limit: 50 }]]);
+  });
+
+  it("requires the read-all cut and rejects any other read-all key", async () => {
+    const { service, calls } = await fixture();
+    await expect(service.invoke(client(), "notification.inbox.readAll", { commandId: "command_read_all_missing" }))
+      .rejects.toMatchObject({ code: "invalid_request" });
+    await expect(service.invoke(client(), "notification.inbox.readAll", {
+      commandId: "command_read_all_keyed", through: "1.notification_abcdefgh", revision: "revision-abcdefgh",
+    })).rejects.toMatchObject({ code: "invalid_request" });
+    expect(calls).toEqual([]);
   });
 
   it("orders upsert then remove for one mobile identity before releasing the lane", async () => {

@@ -1,8 +1,8 @@
-import { chmod, mkdir, mkdtemp, readFile, symlink, writeFile } from "node:fs/promises";
+import { chmod, mkdir, mkdtemp, readFile, stat, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it, vi } from "vitest";
-import { NotificationGrantStore, notificationHash } from "./grant-store.js";
+import { MAXIMUM_NOTIFICATION_INBOX_ENTRIES, NotificationGrantStore, notificationHash, type NotificationInboxEntry } from "./grant-store.js";
 import { NotificationService } from "./notification-service.js";
 import type { PushRelayClient, RelayNotificationOutcome } from "./relay-client.js";
 
@@ -31,7 +31,7 @@ async function fixture(
   outcomes?: RelayNotificationOutcome[],
   now: () => number = Date.now,
   rateLimits?: { dailyIntents: number; sessionHourlyIntents: number; targetDailyIntents: number },
-  inboxChanged: () => void = () => {},
+  inboxChanged: (payload: { revision: string; unreadCount: number }) => void = () => {},
 ) {
   const root = await mkdtemp(join(tmpdir(), "tron-notifications-"));
   const store = new NotificationGrantStore(root);
@@ -40,6 +40,32 @@ async function fixture(
   const service = new NotificationService(store, relay.client, now, rateLimits, inboxChanged);
   return { root, store, service, relay };
 }
+
+/** One canonical inbox row with an explicit position and read state. */
+function seededEntry(
+  index: number,
+  options: { createdAt: string; readAt?: string; sessionId?: string; dedupeKey?: string; outcome?: NotificationInboxEntry["outcome"] } = { createdAt: "2026-01-01T00:00:00.000Z" },
+): NotificationInboxEntry {
+  const ordinal = index.toString().padStart(6, "0");
+  return {
+    id: `notification-${ordinal}`,
+    dedupeKey: options.dedupeKey ?? notificationHash(`seeded-${ordinal}`),
+    requestIds: [`request-${ordinal}`],
+    kind: "explicit",
+    createdAt: options.createdAt,
+    updatedAt: options.createdAt,
+    title: "Alert",
+    message: "An update",
+    sessionId: options.sessionId ?? "session-inbox",
+    outcome: options.outcome ?? "accepted_by_apns",
+    ...(options.readAt === undefined ? {} : { readAt: options.readAt }),
+  };
+}
+
+/** The keyset key a client derives from the newest row it has displayed. */
+function keyOf(item: { createdAt: string; id: string }): string { return `${Date.parse(item.createdAt)}.${item.id}`; }
+
+function ascending(index: number): string { return new Date(Date.parse("2025-12-01T00:00:00.000Z") + index * 1_000).toISOString(); }
 
 describe("NotificationGrantStore and NotificationService", () => {
   it("persists only the bounded grant capability, admits durably, redacts previews, and deduplicates tool calls", async () => {
@@ -143,13 +169,20 @@ describe("NotificationGrantStore and NotificationService", () => {
   });
 
   it("keeps inbox invalidation callbacks outside canonical notification admission", async () => {
-    const { service } = await fixture(undefined, Date.now, undefined, () => { throw new Error("presentation failed"); });
+    let invoked = false;
+    const { service } = await fixture(undefined, Date.now, undefined, () => {
+      invoked = true;
+      throw new Error("presentation failed");
+    });
     await service.upsertGrant(grant);
     await expect(service.enqueue({
       sessionId: "session-callback", sourceId: "source-callback", kind: "agent_finished",
       title: "Finished", message: "The agent finished responding.",
     })).resolves.toBe("queued");
     expect((await service.inbox()).notifications).toHaveLength(1);
+    // A throwing presentation owner is swallowed once the debounced broadcast
+    // runs; it never owns canonical admission either way.
+    await vi.waitFor(() => expect(invoked).toBe(true));
   });
 
   it("pages canonical inbox rows and owns idempotent read state by notification or APNs request identity", async () => {
@@ -174,20 +207,27 @@ describe("NotificationGrantStore and NotificationService", () => {
     await service.drain();
     expect(relay.sent).toHaveLength(3);
     expect((await store.snapshot()).pending).toHaveLength(0);
-    const first = await service.inbox(undefined, 2);
+    const first = await service.inbox({ limit: 2 });
     expect(first.notifications.map((item) => item.title)).toEqual(["Title 2", "Title 1"]);
     expect(first.unreadCount).toBe(3);
     expect(first.nextCursor).toBeDefined();
-    const second = await service.inbox(first.nextCursor, 2);
+    const second = await service.inbox({ cursor: first.nextCursor, limit: 2 });
     expect(second.notifications.map((item) => item.title)).toEqual(["Title 0"]);
+    expect(second.nextCursor).toBeUndefined();
+    const newest = relay.sent.find((item) => item.title === "Title 2")!;
+    const newestRow = (await store.snapshot()).inbox.find((entry) => entry.requestIds.includes(newest.requestId));
+    expect(newestRow?.id).toBe(first.notifications[0]!.id);
 
-    await expect(service.markInboxRead({ requestId: relay.sent[2].requestId })).resolves.toMatchObject({ changed: true });
+    await expect(service.markInboxRead({ requestId: newest.requestId })).resolves.toMatchObject({ changed: true });
     await expect(service.markInboxRead({ id: first.notifications[0]!.id })).resolves.toMatchObject({ changed: false });
     expect((await service.inbox()).unreadCount).toBe(2);
-    await expect(service.inbox(first.nextCursor, 2)).rejects.toMatchObject({ code: "conflict" });
-    await expect(service.markAllInboxRead()).resolves.toEqual({ changed: 2 });
+    // "Title 2" is already read, so only the two rows at or older than the cut
+    // change and the read-all response counts exactly those.
+    await expect(service.markAllInboxRead({ through: keyOf(first.notifications[1]!) })).resolves.toEqual({ changed: 2 });
+    await expect(service.markAllInboxRead({ through: keyOf(first.notifications[1]!) })).resolves.toEqual({ changed: 0 });
     expect((await service.inbox()).unreadCount).toBe(0);
-    expect(changed.mock.calls.length).toBeGreaterThanOrEqual(6);
+    await vi.waitFor(() => expect(changed.mock.calls.at(-1)?.[0]).toMatchObject({ unreadCount: 0 }));
+    expect(changed.mock.calls.at(-1)?.[0].revision).toEqual(expect.any(String));
   });
 
   it("rejects stale relay-origin grants and requires capability rotation", async () => {
@@ -241,7 +281,7 @@ describe("NotificationGrantStore and NotificationService", () => {
     await vi.waitFor(async () => expect((await store.snapshot()).pending[0]?.targets[0]?.outcome).toBe("retryable"));
     await service.removeDevice(grant.deviceId);
     expect((await service.inbox()).notifications[0]).toMatchObject({ outcome: "failed" });
-    expect(changed).toHaveBeenCalled();
+    await vi.waitFor(() => expect(changed.mock.calls.at(-1)?.[0]).toMatchObject({ unreadCount: 1 }));
   });
 
   it("removes local authority first and drains a durable revocation tombstone", async () => {
@@ -529,5 +569,234 @@ describe("NotificationGrantStore and NotificationService", () => {
     await chmod(path, 0o600);
     await writeFile(path, JSON.stringify({ version: 1, policy: { notifyWhenAskPresented: true }, grants: [{ token: "raw" }], pending: [], receipts: [], revocations: [] }));
     await expect(store.snapshot()).rejects.toMatchObject({ code: "conflict" });
+  });
+});
+
+/**
+ * Failure modes these cases own, all observed on live data:
+ * 1. one unread row older than the newest 50 read rows lit the bell but was
+ *    absent from the first page and from a client-side "Unread" filter;
+ * 2. an offset cursor fenced by the whole-inbox revision failed on any change
+ *    and could return or skip rows after reads and arrivals between pages;
+ * 3. read-all had no cut and marked alerts that arrived while the user looked;
+ * 4. listing the inbox rewrote the ~375KB credential document on every call;
+ * 5. retention dropped the oldest unread rows while newer read rows remained;
+ * 6. reading a row already evicted by the bound failed as `not_found`;
+ * 7. an alert admitted while the user watched that chat still lit the bell.
+ */
+describe("canonical inbox keyset paging, retention and reads", () => {
+  it("returns and counts an unread row that sits below a full page of read rows", async () => {
+    const { service, store } = await fixture();
+    await store.update((document) => {
+      document.inbox = [
+        seededEntry(0, { createdAt: ascending(0) }),
+        ...Array.from({ length: 51 }, (_, index) =>
+          seededEntry(index + 1, { createdAt: ascending(index + 1), readAt: "2025-12-02T00:00:00.000Z" })),
+      ];
+      return document;
+    });
+    const page = await service.inbox();
+    expect(page.notifications).toHaveLength(50);
+    expect(page.notifications.some((item) => item.id === "notification-000000")).toBe(false);
+    expect(page.unreadCount).toBe(1);
+    expect(page.nextCursor).toBeDefined();
+
+    const unread = await service.inbox({ filter: "unread" });
+    expect(unread.notifications.map((item) => item.id)).toEqual(["notification-000000"]);
+    expect(unread.notifications[0]?.isUnread).toBe(true);
+    expect(unread.unreadCount).toBe(1);
+    expect(unread.nextCursor).toBeUndefined();
+  });
+
+  it("walks the whole inbox exactly once while rows arrive and rows are read between pages", async () => {
+    const { service, store } = await fixture();
+    const seeded = Array.from({ length: 62 }, (_, index) => seededEntry(index, { createdAt: ascending(index) }));
+    await store.update((document) => {
+      document.inbox = seeded;
+      return document;
+    });
+    const seen: string[] = [];
+    let cursor: string | undefined;
+    for (let page = 0; page < 5; page += 1) {
+      const result = await service.inbox({ ...(cursor === undefined ? {} : { cursor }), limit: 25 });
+      seen.push(...result.notifications.map((item) => item.id));
+      if (result.nextCursor === undefined) break;
+      cursor = result.nextCursor;
+      await store.update((document) => {
+        for (let index = 0; index < 3; index += 1) {
+          document.inbox.push(seededEntry(1000 + page * 10 + index, { createdAt: ascending(1000 + page * 10 + index) }));
+        }
+        for (const entry of document.inbox.slice(0, 5)) entry.readAt = "2025-12-03T00:00:00.000Z";
+        return document;
+      });
+    }
+    const newestFirst = seeded.map((entry) => entry.id).reverse();
+    expect(seen).toEqual(newestFirst);
+    expect(new Set(seen).size).toBe(seeded.length);
+    // Rows admitted after the first page are newer than its cursor, so they are
+    // never replayed into an older page.
+    expect(seen.some((id) => id.startsWith("notification-0010"))).toBe(false);
+  });
+
+  it("reads only unread rows at or older than the read-all cut", async () => {
+    const { service, store } = await fixture();
+    await store.update((document) => {
+      document.inbox = [0, 1, 2].map((index) => seededEntry(index, { createdAt: ascending(index) }));
+      return document;
+    });
+    const newest = (await service.inbox()).notifications[0]!;
+    const middle = (await service.inbox()).notifications[1]!;
+    await expect(service.markAllInboxRead({ through: keyOf(middle) })).resolves.toEqual({ changed: 2 });
+    const page = await service.inbox();
+    expect(page.notifications.map((item) => [item.id, item.isUnread])).toEqual([
+      ["notification-000002", true],
+      ["notification-000001", false],
+      ["notification-000000", false],
+    ]);
+    expect(page.unreadCount).toBe(1);
+
+    await expect(service.markAllInboxRead({ through: keyOf(newest) })).resolves.toEqual({ changed: 1 });
+    expect((await service.inbox()).unreadCount).toBe(0);
+    await expect(service.markAllInboxRead({ through: "notification-000002" })).rejects.toMatchObject({ code: "invalid_request" });
+    expect((await store.snapshot()).inbox.every((entry) => entry.readAt !== undefined)).toBe(true);
+  });
+
+  it("does not rewrite the credential document to list the inbox", async () => {
+    const { service, store, root } = await fixture();
+    await store.update((document) => {
+      document.inbox = [0, 1, 2].map((index) => seededEntry(index, { createdAt: ascending(index) }));
+      return document;
+    });
+    const path = join(root, "gateway", "notifications.json");
+    const before = await stat(path);
+    const bytes = await readFile(path);
+    const first = await service.inbox({ limit: 1 });
+    await service.inbox({ cursor: first.nextCursor, limit: 1 });
+    await service.inbox({ filter: "unread" });
+    const after = await stat(path);
+    expect(after.ino).toBe(before.ino);
+    expect(after.mtimeMs).toBe(before.mtimeMs);
+    expect(await readFile(path)).toEqual(bytes);
+  });
+
+  it("writes the credential document only for a real inbox expiry transition", async () => {
+    const now = Date.parse("2026-01-01T00:00:00.000Z");
+    const { service, store, root } = await fixture(undefined, () => now);
+    const lapsed = "2025-12-31T22:00:00.000Z";
+    const dedupeKey = notificationHash("expired-intent");
+    await store.update((document) => {
+      document.pending.push({
+        id: "intent-abcd1234",
+        dedupeKey,
+        sessionKey: notificationHash("session-expiry"),
+        kind: "explicit",
+        createdAt: lapsed,
+        expiresAt: "2025-12-31T23:30:00.000Z",
+        targets: [{
+          grantId: "grant_abcdefgh", requestId: "request-abcd1234", message: "An update",
+          attempts: 0, nextAttemptAt: lapsed, outcome: "pending",
+        }],
+      });
+      document.inbox = [seededEntry(0, { createdAt: ascending(0), dedupeKey, outcome: "queued" })];
+      return document;
+    });
+    const path = join(root, "gateway", "notifications.json");
+    const before = await stat(path);
+    const page = await service.inbox();
+    expect(page.notifications[0]).toMatchObject({ outcome: "expired" });
+    expect((await stat(path)).ino).not.toBe(before.ino);
+    expect((await store.snapshot()).pending).toEqual([]);
+    // The transition is now durable, so repeated listing is read-only again.
+    const settled = await stat(path);
+    await service.inbox();
+    expect((await stat(path)).ino).toBe(settled.ino);
+  });
+
+  it("evicts the oldest read row before an older unread row and only then unread rows", async () => {
+    const { service, store } = await fixture();
+    await service.upsertGrant(grant);
+    const full = Array.from({ length: MAXIMUM_NOTIFICATION_INBOX_ENTRIES }, (_, index) =>
+      seededEntry(index, { createdAt: ascending(index), ...(index === 0 ? {} : { readAt: "2025-12-02T00:00:00.000Z" }) }));
+    await store.update((document) => {
+      document.inbox = full;
+      return document;
+    });
+    await expect(service.enqueue({
+      sessionId: "session-inbox", sourceId: "source-overflow", kind: "explicit", message: "Overflow",
+    })).resolves.toBe("queued");
+    const retained = (await store.snapshot()).inbox.map((entry) => entry.id);
+    expect(retained).toHaveLength(MAXIMUM_NOTIFICATION_INBOX_ENTRIES);
+    expect(retained).toContain("notification-000000");
+    expect(retained).not.toContain("notification-000001");
+
+    const allUnread = await fixture();
+    await allUnread.service.upsertGrant(grant);
+    await allUnread.store.update((document) => {
+      document.inbox = Array.from({ length: MAXIMUM_NOTIFICATION_INBOX_ENTRIES }, (_, index) =>
+        seededEntry(index, { createdAt: ascending(index) }));
+      return document;
+    });
+    await expect(allUnread.service.enqueue({
+      sessionId: "session-inbox", sourceId: "source-overflow-unread", kind: "explicit", message: "Overflow",
+    })).resolves.toBe("queued");
+    const evicted = (await allUnread.store.snapshot()).inbox.map((entry) => entry.id);
+    expect(evicted).not.toContain("notification-000000");
+    expect(evicted).toContain("notification-000001");
+  });
+
+  it("treats a read of a row that no longer exists as an idempotent no-op", async () => {
+    const { service, store, root } = await fixture();
+    await store.update((document) => {
+      document.inbox = [seededEntry(0, { createdAt: ascending(0) })];
+      return document;
+    });
+    const path = join(root, "gateway", "notifications.json");
+    const before = await stat(path);
+    await expect(service.markInboxRead({ id: "notification-evicted" })).resolves.toEqual({ changed: false });
+    await expect(service.markInboxRead({ requestId: "request-evicted" })).resolves.toEqual({ changed: false });
+    expect((await stat(path)).ino).toBe(before.ino);
+    await expect(service.markInboxRead({ id: "notification-000000" })).resolves.toEqual({ changed: true, id: "notification-000000" });
+    await expect(service.markInboxRead({ id: "notification-000000" })).resolves.toEqual({ changed: false, id: "notification-000000" });
+  });
+
+  it("creates an already-read row for an alert admitted while the user watched that chat", async () => {
+    const { service, relay, store } = await fixture();
+    await service.upsertGrant({ ...grant, previewsEnabled: true });
+    await expect(service.enqueue({
+      sessionId: "session-observed", sourceId: "source-observed", kind: "explicit",
+      message: "Delivered while observed", readOnAdmission: true,
+    })).resolves.toBe("queued");
+    // Delivery is unchanged: only the inbox row starts read.
+    await vi.waitFor(() => expect(relay.sent).toHaveLength(1));
+    expect(relay.sent[0]?.message).toBe("Delivered while observed");
+    const page = await service.inbox();
+    expect(page.notifications[0]).toMatchObject({ message: "Delivered while observed", isUnread: false });
+    expect(page.unreadCount).toBe(0);
+    expect((await store.snapshot()).inbox[0]?.readAt).toBeDefined();
+  });
+
+  it("coalesces a burst of admission, delivery settlement and read into one final broadcast", async () => {
+    vi.useFakeTimers();
+    try {
+      const changed = vi.fn();
+      let clock = Date.parse("2026-01-01T00:00:00.000Z");
+      const { service } = await fixture(["accepted_by_apns"], () => clock++, undefined, changed);
+      await service.upsertGrant(grant);
+      const drains = vi.spyOn(service, "drain");
+      await expect(service.enqueue({
+        sessionId: "session-burst", sourceId: "source-burst", kind: "explicit", message: "Burst",
+      })).resolves.toBe("queued");
+      await Promise.all(drains.mock.results.map((result) => result.value));
+      const item = (await service.inbox()).notifications[0]!;
+      await expect(service.markInboxRead({ id: item.id })).resolves.toMatchObject({ changed: true });
+      // Nothing is broadcast inside the trailing window.
+      expect(changed).not.toHaveBeenCalled();
+      await vi.advanceTimersByTimeAsync(250);
+      expect(changed).toHaveBeenCalledOnce();
+      expect(changed.mock.calls[0]?.[0]).toMatchObject({ unreadCount: 0 });
+      expect(changed.mock.calls[0]?.[0].revision).toEqual(expect.any(String));
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });

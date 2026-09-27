@@ -31,6 +31,7 @@ function tronModuleHost(options: { optionalOwners?: boolean } = {}): TronModuleH
     workspace: { describe: async () => ({}), filesRoot: () => "/tron/workspace/files" } as unknown as TronWorkspace,
     displayArtifacts: {} as DisplayArtifactStore,
     notificationTitle: () => "Session",
+    isSessionPresented: () => false,
     contextPolicy: () => undefined,
     compactionPolicy: () => undefined,
     compactionStopped: () => false,

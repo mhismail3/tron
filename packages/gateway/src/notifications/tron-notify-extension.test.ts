@@ -10,6 +10,7 @@ describe("first-party Tron notifications", () => {
       sessionId: () => "canonical-session",
       sessionTitle: () => "Canonical title",
       machineId: "machine-abcdefgh",
+      observed: () => false,
       enqueue,
     })({ registerTool(value: unknown) { tool = value; }, on } as any);
     expect(on).not.toHaveBeenCalled();
@@ -23,6 +24,27 @@ describe("first-party Tron notifications", () => {
       route: { sessionId: "canonical-session", machineId: "machine-abcdefgh" },
     });
     expect(result.details).toEqual({ status: "queued" });
+  });
+
+  it("marks an alert read at admission when the model notifies from the chat the user is watching", async () => {
+    let tool: any;
+    let observed = true;
+    const enqueue = vi.fn(async () => "queued" as const);
+    await createTronNotifyExtension({
+      sessionId: () => "canonical-session",
+      sessionTitle: () => "Canonical title",
+      observed: () => observed,
+      enqueue,
+    })({ registerTool(value: unknown) { tool = value; } } as any);
+
+    await tool.execute("observed-tool", { message: "Ready" });
+    expect(enqueue).toHaveBeenCalledExactlyOnceWith({
+      sessionId: "canonical-session", sourceId: "observed-tool", kind: "explicit",
+      title: "Canonical title", message: "Ready", readOnAdmission: true,
+    });
+    observed = false;
+    await tool.execute("unobserved-tool", { message: "Ready" });
+    expect(enqueue).toHaveBeenLastCalledWith(expect.not.objectContaining({ readOnAdmission: true }));
   });
 
   it.each<[AgentTerminalOutcome, string]>([

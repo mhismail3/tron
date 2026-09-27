@@ -610,12 +610,17 @@ export class GatewayService {
         return safeJson(await notifications.status(client.isLocal ? undefined : client.identity));
       }
       case "notification.inbox.list": {
-        if (Object.keys(params).some((key) => key !== "cursor" && key !== "limit")) {
-          throw new GatewayError("invalid_request", "Notification inbox list accepts only cursor and limit");
+        if (Object.keys(params).some((key) => key !== "filter" && key !== "cursor" && key !== "limit")) {
+          throw new GatewayError("invalid_request", "Notification inbox list accepts only filter, cursor and limit");
         }
+        const filter = params.filter === undefined ? undefined : oneOf(params.filter, "filter", ["all", "unread"] as const);
         const cursor = params.cursor === undefined ? undefined : string(params.cursor, "cursor", { min: 1, max: 256 });
         const limit = params.limit === undefined ? 50 : integer(params.limit, "limit", 1, 50);
-        return safeJson(await this.requireNotifications().inbox(cursor, limit));
+        return safeJson(await this.requireNotifications().inbox({
+          ...(filter === undefined ? {} : { filter }),
+          ...(cursor === undefined ? {} : { cursor }),
+          limit,
+        }));
       }
       case "notification.inbox.read":
         return this.mutation(client, method, params, async () => {
@@ -635,10 +640,12 @@ export class GatewayService {
         });
       case "notification.inbox.readAll":
         return this.mutation(client, method, params, async () => {
-          if (Object.keys(params).some((key) => key !== "commandId")) {
-            throw new GatewayError("invalid_request", "Notification read-all accepts no parameters beyond commandId");
+          if (Object.keys(params).some((key) => key !== "commandId" && key !== "through")) {
+            throw new GatewayError("invalid_request", "Notification read-all accepts only commandId and through");
           }
-          return safeJson(await this.requireNotifications().markAllInboxRead());
+          return safeJson(await this.requireNotifications().markAllInboxRead({
+            through: string(params.through, "through", { min: 1, max: 256 }),
+          }));
         });
       case "push.registration.upsert":
         if (client.isLocal) throw new GatewayError("auth_required", "Only an authenticated mobile device can register push delivery");

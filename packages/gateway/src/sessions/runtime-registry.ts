@@ -856,6 +856,9 @@ export class RuntimeRegistry {
         if (disposition === "migrate") {
           await this.attention.rekey(previousId, nextId);
           await this.archive.rekey(previousId, nextId);
+          // Inbox rows carry the canonical session identity they belong to, so a
+          // migrated identity takes its alerts with it instead of orphaning them.
+          await this.options.notifications?.rekeySession(previousId, nextId);
         } else if (disposition === "discard") {
           await this.attention.remove(previousId);
           await this.archive.remove(previousId);

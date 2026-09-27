@@ -62,12 +62,28 @@ describe("session notification read cuts", () => {
     expect(saved.slice(70)).toEqual(entries.slice(70));
     expect(saved.map(({ readAt: _, updatedAt: __, ...row }) => row))
       .toEqual(entries.map(({ readAt: _, updatedAt: __, ...row }) => row));
-    expect(changed).toHaveBeenCalledOnce();
+    await vi.waitFor(() => expect(changed.mock.calls.at(-1)?.[0]).toMatchObject({ unreadCount: 10 }));
     const restored = new NotificationService(new NotificationGrantStore(root), { available: false } as PushRelayClient);
     const page = await restored.inbox();
     expect(page.notifications).toHaveLength(50);
     expect(page.unreadCount).toBe(10);
     expect(page.nextCursor).toBeDefined();
+  });
+
+  it("moves a rekeyed session's rows so the replacement identity acknowledges them", async () => {
+    const { service, store } = await fixture([entry(1), entry(2, "session-b")]);
+    await expect(service.rekeySession("session-a", "session-b")).resolves.toBe(true);
+    expect((await service.inbox()).notifications.filter((item) => item.sessionId === "session-b")).toHaveLength(2);
+    // The former identity no longer owns any row, and the replacement takes the
+    // canonical cut over the rows it inherited.
+    await service.markSessionInboxRead("session-a");
+    expect((await store.snapshot()).inbox!.every((row) => row.readAt === undefined)).toBe(true);
+    await service.markSessionInboxRead("session-b");
+    expect((await store.snapshot()).inbox!.every((row) => row.readAt !== undefined)).toBe(true);
+    // A rekey that matches nothing is not a credential-document write.
+    const write = vi.spyOn(durableJson, "durableAtomicWriteJson");
+    await expect(service.rekeySession("session-missing", "session-other")).resolves.toBe(false);
+    expect(write).not.toHaveBeenCalled();
   });
 
   it("does not rewrite credentials or invalidate the inbox for an empty or already-read cut", async () => {
@@ -78,7 +94,7 @@ describe("session notification read cuts", () => {
     expect(changed).not.toHaveBeenCalled();
     await service.markSessionInboxRead("session-a");
     expect(write).toHaveBeenCalledOnce();
-    expect(changed).toHaveBeenCalledOnce();
+    await vi.waitFor(() => expect(changed).toHaveBeenCalledOnce());
     write.mockClear();
     changed.mockClear();
     await service.markSessionInboxRead("session-a");
@@ -99,7 +115,7 @@ describe("session notification read cuts", () => {
     const saved = (await store.snapshot()).inbox!;
     expect(saved[0]!.readAt).toBeDefined();
     expect(saved.slice(1).every((row) => row.readAt === undefined)).toBe(true);
-    expect(changed).toHaveBeenCalledOnce();
+    await vi.waitFor(() => expect(changed).toHaveBeenCalledOnce());
   });
 
   it("linearizes the opening cut with real notification admission, even at equal timestamps", async () => {

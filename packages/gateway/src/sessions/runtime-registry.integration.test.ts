@@ -63,6 +63,7 @@ describe.sequential("RuntimeRegistry with the pinned agent runtime", () => {
     phaseObserver?: (phase: "catalog-warming" | "attention-recovery") => void;
     sessionListChanged?: () => void;
     beforeInitialize?: (sessionFile: string) => Promise<void>;
+    notifications?: NotificationService;
     stageTiming?: (
       stage: string,
       durationMs: number,
@@ -96,6 +97,7 @@ describe.sequential("RuntimeRegistry with the pinned agent runtime", () => {
       broadcast: (_sessionId, topic, payload) => events.push({ topic, payload }),
       sessionSummaryChanged: (summary) => summaries.push(summary),
       sessionListChanged: options.sessionListChanged ?? (() => {}),
+      ...(options.notifications ? { notifications: options.notifications } : {}),
       stageTiming: options.stageTiming,
     });
     registries.push(registry);
@@ -10573,6 +10575,33 @@ export default function (pi) {
     const withoutParent = await registry.acquire(fork.sessionId);
     expect(withoutParent.snapshot().forkBoundary).toBeUndefined();
     expect(withoutParent.snapshot().transcript).toEqual(transcriptBeforeParentRemoval);
+  });
+
+  it("moves notification inbox rows only for a migrated session identity", async () => {
+    const rekeys: Array<[string, string]> = [];
+    const notifications = {
+      rekeySession: async (previousId: string, nextId: string) => {
+        rekeys.push([previousId, nextId]);
+        return true;
+      },
+    } as unknown as NotificationService;
+    const { manager, registry } = await coldFixture("notification-rekey", { notifications });
+    const sessionId = manager.getSessionId();
+    const slot = await registry.acquire(sessionId);
+    // The private hook is the only rekey driver that does not itself need a
+    // provider run; every other path is covered by its own focused case.
+    const hooks = (registry as unknown as { hooks: () => {
+      rekey: (previousId: string, nextId: string, slot: unknown, disposition: string, commit: () => void) => Promise<void>;
+    } }).hooks();
+    let commits = 0;
+    await hooks.rekey(sessionId, "migrated-session", slot, "migrate", () => { commits += 1; });
+    expect(commits).toBe(1);
+    expect(rekeys).toEqual([[sessionId, "migrated-session"]]);
+    // A reset rebind (a fork or a new session) starts a distinct identity: the
+    // previous identity keeps the alerts it produced.
+    await hooks.rekey("migrated-session", "reset-session", slot, "reset", () => { commits += 1; });
+    expect(commits).toBe(2);
+    expect(rekeys).toEqual([[sessionId, "migrated-session"]]);
   });
 
   it("rejects imports when live runtime capacity is full", async () => {

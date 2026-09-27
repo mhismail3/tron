@@ -1424,6 +1424,9 @@ export class RuntimeSlot {
               workspace: this.dependencies.workspace,
               displayArtifacts: this.dependencies.displayArtifacts,
               notificationTitle: () => this.notificationTitle(),
+              // The notify tool samples the same foreground lease automatic
+              // alerts use, at its own admission boundary.
+              isSessionPresented: () => this.dependencies.isSessionPresented(this.id),
               contextPolicy: () => contextPolicy,
               compactionPolicy: () => compactionPolicy,
               // Summary auth can finish after Stop but before compaction_start

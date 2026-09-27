@@ -26,6 +26,8 @@ export interface TronModuleHost {
   workspace: TronWorkspace;
   displayArtifacts: DisplayArtifactStore;
   notificationTitle: () => string;
+  /** Whether the user is currently viewing this session's chat. */
+  isSessionPresented: () => boolean;
   contextPolicy: () => SessionContextWindowPolicy | undefined;
   compactionPolicy: () => CompactionOperationPolicy | undefined;
   compactionStopped: (event: SessionBeforeCompactEvent) => boolean;
@@ -147,6 +149,7 @@ export const TRON_MODULES: readonly TronModule[] = [
       return createTronNotifyExtension({
         sessionId: () => host.sessionId(),
         sessionTitle: () => host.notificationTitle(),
+        observed: () => host.isSessionPresented(),
         ...(host.machineId ? { machineId: host.machineId } : {}),
         enqueue: (input) => notifications.enqueue(input),
       });
