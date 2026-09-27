@@ -88,6 +88,17 @@ class ComparisonVerdicts(ReportFixture):
         # A 10% move inside a wide spread is noise, not a regression.
         self.assertEqual(verdicts["wall.time"]["verdict"], "unchanged")
 
+    def test_single_unit_count_change_is_noise(self) -> None:
+        # A run that sends one extra frame on every iteration has zero spread;
+        # 28 vs 27 frames is 3.7% but must not fail a change.
+        base = self.write("base", samples({"wire.mobile.session.snapshot.frames": ("count", "lower", [27, 27, 27])}))
+        extra = self.write("extra", samples({"wire.mobile.session.snapshot.frames": ("count", "lower", [28, 28, 28])}))
+        result = self.compare(base, extra)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertEqual(json.loads(result.stdout)["metrics"]["wire.mobile.session.snapshot.frames"]["verdict"], "unchanged")
+        more = self.write("more", samples({"wire.mobile.session.snapshot.frames": ("count", "lower", [29, 29, 29])}))
+        self.assertEqual(self.compare(base, more).returncode, 3)
+
     def test_higher_is_better_inverts_the_verdict(self) -> None:
         base = self.write("base", samples({"frames.presented": ("count", "higher", [60, 60, 60, 60, 60])}))
         fewer = self.write("fewer", samples({"frames.presented": ("count", "higher", [40, 40, 40, 40, 40])}))

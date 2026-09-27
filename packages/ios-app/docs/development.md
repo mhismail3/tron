@@ -390,8 +390,9 @@ fronts writes one `tron.profile-report.v1` report (source revision and dirty
 state, host load and power conditions, per-metric unit, direction, samples,
 median and spread) under `~/Library/Developer/Tron/profiles/<tool>/`, and
 `scripts/tron-profile compare BASE CANDIDATE` gives the only regression verdict:
-a delta counts only beyond both a 3% floor and three robust standard deviations,
-and the command exits 3 on a regression. `scripts/tron_profile_report.py` owns
+a delta counts only beyond a 3% floor, three robust standard deviations and, for
+integer-valued metrics such as frame counts, one unit; the command exits 3 on a
+regression. `scripts/tron_profile_report.py` owns
 that schema and policy; `scripts/test-tron-profile.py` covers its failure modes.
 
 Use the same optimized app for the normal-use → capture → fix → repeat loop; do

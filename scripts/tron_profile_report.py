@@ -29,8 +29,9 @@ SCHEMA = "tron.profile-report.v1"
 SAMPLES_SCHEMA = "tron.profile-samples.v1"
 TOOLS = ("ios", "gateway")
 DIRECTIONS = ("lower", "higher")
-# A delta must exceed both a relative floor and three robust standard
-# deviations before it is a verdict; smaller movement is reported as noise.
+# A delta must exceed a relative floor, three robust standard deviations and,
+# for integer-valued metrics, one unit before it is a verdict; smaller movement
+# is reported as noise.
 DEFAULT_FLOOR = 0.03
 SPREAD_MULTIPLIER = 3.0
 MAD_TO_SIGMA = 1.4826
@@ -295,9 +296,13 @@ def compare_metric(base: dict[str, Any], candidate: dict[str, Any], floor: float
     delta = candidate["median"] - base["median"]
     spread = MAD_TO_SIGMA * max(base["mad"], candidate["mad"])
     enough = min(base["count"], candidate["count"]) >= MINIMUM_SAMPLES
+    # Integer-valued metrics (frames, requests, wakeups) cannot move by less
+    # than one unit, so a single-unit difference is never a verdict.
+    integral = all(float(value).is_integer() for value in base["samples"] + candidate["samples"])
     noise = max(
         SPREAD_MULTIPLIER * spread if enough else 0.0,
         floor * abs(base["median"]),
+        1.0 if integral else 0.0,
     )
     relative = (delta / abs(base["median"])) if base["median"] else (math.inf if delta else 0.0)
     worse = delta > 0 if base["better"] == "lower" else delta < 0
