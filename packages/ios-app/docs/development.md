@@ -490,15 +490,58 @@ content estimate, prints one `CT2-METRICS` line per journey and asserts only tha
 the scenario ran. A line reports the sampled display boundaries whose native
 viewport held no mounted transcript row (`blankBoundaries` / `blankAfterSettle`,
 with `longestBlankRun` and the phases that held them), the estimate's own swing
-(`maxEstimateRatio`, with `estimateOpen`/`Min`/`Max`), single-frame
+(`maxEstimateRatio`, the largest published content estimate over the smallest,
+with `estimateOpen`/`Min`/`Max`; it is not a truth ratio, because the harness has
+no independent measurement of the history's realized height), single-frame
 re-derivations of at least 1,000 pt, `tailDisplacements`, the commands by origin,
-and the settled native tail error. Collect repeated runs by invoking the command
-again; each run is named by its run directory.
+and the settled native tail error. `traceCoverage` labels the two bounded buffers
+those counts are read from — the probe's geometry trace keeps its last 240 samples
+and the chat trace ring its last 256 records — so `saturated` on either means
+`reDerivations` or `tailDisplacements` is a lower bound for that journey. Collect
+repeated runs by invoking the command again; each run is named by its run
+directory.
+
+The keyboard-cycles shape acknowledges each send: after every cycle it installs
+the canonical user row a Gateway publishes for that prompt. `ComposerDraftCoordinator`
+holds an admitted submission until an authoritative snapshot carries that row and
+refuses the next prompt meanwhile (`submission_in_progress`), so the first
+baseline materialized one tail for three submissions; with the acknowledgement all
+three materialize, and the fixture asserts it (`materialize:3`).
 
 ```bash
 TRON_IOS_TEST_TIER=ui-validation scripts/tron-ios-test run \
   --only-testing 'TronMobileTests/ChatViewScrollHarnessTests/ct2ManyTallRepliesMetrics()' \
   --only-testing 'TronMobileTests/ChatViewScrollHarnessTests/repeatedKeyboardAndSendCyclesKeepRealizedRowsOnScreen()'
+```
+
+`ChatTranscriptScaleMeasurementTests` is the transcript's cost at scale: 150,
+300 and 512 heavy mixed rows (user prompts with file chips, assistant Markdown
+with code blocks and tables, completed tool runs), the fixture both CT-13 columns
+were measured with and `main`'s CT-10 baseline a candidate container must match
+or beat. Each shape prints one `CT13-METRICS` line for the opening (the product's
+own `firstReadyFrame` interval, the install-to-ready wall clock, the installed
+row count and resident memory before install, before readiness and after
+readiness), one `CT13-PHASE` line per cost phase (`scroll`, `stream`, `send`) with
+display-link frame intervals and the synchronous main-thread duration of each
+scripted step, and one `CT13-BLANK` line for a sampled keyboard cycle. The
+fixture stops the harness's own per-frame hierarchy recorder for the cost phases,
+because that walk costs more the more row markers are mounted and would attribute
+the recorder's work to the container; simulator milliseconds are indicative, not
+device frame times.
+
+`UnitTests.xctestplan` skips all three shapes, but `-only-testing` overrides a
+test plan's skipped tests (measured: a unit-tier `--only-testing
+TronMobileTests/ChatTranscriptScaleMeasurementTests` ran all three for 34.8 s),
+so the suite also refuses to run unless xcodebuild is running the `UIValidation`
+plan, which it records in the test process's own environment
+(`XCODE_TEST_PLAN_NAME`). A unit-tier selector for the suite therefore reports it
+skipped, and `run` exits 65 because the runner requires a non-empty passing run.
+Neither the shell environment nor the scheme's test-action variables can carry
+such a flag: measured on this lane, neither reaches the test process.
+
+```bash
+TRON_IOS_TEST_TIER=ui-validation scripts/tron-ios-test run \
+  --only-testing 'TronMobileTests/ChatTranscriptScaleMeasurementTests'
 ```
 
 `ChatVisualParityTests.recordedReferenceFramesMatchRenderedTranscript` is the
@@ -1233,7 +1276,8 @@ The browser suites retain `originalLeaseOwnsCleanup`,
 in the same target and are skipped only by the default plan. Explicit
 `--only-testing` selectors are preserved by the ordinary runner; use the
 UI-validation tier for cases moved out of default, especially for a selector
-that names a whole suite.
+that names a whole suite. `ChatTranscriptScaleMeasurementTests` is the one
+exception: it refuses to run unless the `UIValidation` plan is the one running.
 
 Use `TRON_IOS_TEST_TIER=ui-validation` with an explicit
 `--only-testing` selector to run hosted or UI tests from `UIValidation`; this
