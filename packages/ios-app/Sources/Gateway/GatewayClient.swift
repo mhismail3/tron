@@ -1616,7 +1616,12 @@ actor GatewayClient {
         epoch.livenessTask = Task { [weak self, clock, socket] in
             while !Task.isCancelled {
                 do {
-                    try await clock.sleep(GatewayConnectionPolicy.clientPingInterval)
+                    // Every socket pings on the clock's shared grid, so the
+                    // focused and dashboard-pool sockets wake the radio
+                    // together. The next tick is at most one interval away.
+                    let now = clock.now()
+                    let tick = clock.gridTick(after: now, every: GatewayConnectionPolicy.clientPingInterval)
+                    try await clock.sleep(now.duration(to: tick))
                     try Task.checkCancellation()
                 } catch { return }
                 let startedAt = clock.now()

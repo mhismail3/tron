@@ -28,15 +28,18 @@ final class ManualClock: Sendable {
     }
 
     private let state: Mutex<State>
+    private let gridOrigin: ContinuousClock.Instant
 
     init(now: ContinuousClock.Instant = ContinuousClock().now) {
         state = Mutex(State(now: now))
+        gridOrigin = now
     }
 
     var clock: MonotonicClock {
         MonotonicClock(
             now: { self.currentInstant() },
-            sleep: { try await self.sleep(for: $0) }
+            sleep: { try await self.sleep(for: $0) },
+            gridOrigin: gridOrigin
         )
     }
 

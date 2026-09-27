@@ -938,7 +938,8 @@ struct PushNotificationCoordinatorTests {
             },
             clock: MonotonicClock(
                 now: { continuous.now },
-                sleep: { duration in await retries.append(duration) }
+                sleep: { duration in await retries.append(duration) },
+                gridOrigin: continuous.now
             )
         )
     }

@@ -2578,6 +2578,73 @@ struct SessionPresentationStoreTests {
         }
     }
 
+    @Test("presentation lease renews on the ping grid and never later than its fixed interval")
+    func presentationLeaseRenewsOnPingGrid() async throws {
+        try await withTestWatchdog { @MainActor in
+            let clock = ManualClock()
+            let socket = ScriptedGatewaySocket()
+            let client = GatewayClient(socketFactory: ScriptedGatewaySocketFactory(socket: socket).factory)
+            let profile = GatewayProfile(id: "gateway", label: "Mac", host: "gateway.test", port: 9_847, machineId: "machine", deviceId: "device")
+            let connecting = Task { try await client.connect(profile: profile, token: "token") }
+            try await socket.waitUntilSent(count: 1)
+            await socket.enqueue(Data(#"{"type":"hello","gatewayVersion":"1.0.0","piVersion":"1.0.0","protocolVersion":5,"minProtocolVersion":5,"machineId":"machine","machineName":"Mac","gatewayChannel":"stable","capabilities":["sessions.v1"]}"#.utf8))
+            _ = try await connecting.value
+
+            let baseline = try SessionScenarioBuilder(seed: 8_931).openingTail(targetEncodedBytes: 4_096)
+            let store = SessionPresentationStore(
+                client: client,
+                performanceSignposts: SystemPerformanceSignposts.shared,
+                clock: clock.clock
+            )
+            let opening = Task { try await store.open(baseline.sessionId) }
+            try await socket.waitUntilSent(count: 2)
+            var request = try JSONDecoder.gateway.decode(JSONValue.self, from: await socket.sentFrames()[1])
+            let openID = try #require(request.objectValue?["id"]?.stringValue)
+            await socket.enqueue(try JSONEncoder.gateway.encode(JSONValue.object([
+                "type": .string("response"), "id": .string(openID), "ok": .bool(true),
+                "result": .object([
+                    "session": try JSONValue.encode(baseline), "syncToken": .string("sync"),
+                    "subscriptionToken": .string("subscription"), "completionRevision": .number(0),
+                ]),
+            ])))
+            try await socket.waitUntilSent(count: 3)
+            request = try JSONDecoder.gateway.decode(JSONValue.self, from: await socket.sentFrames()[2])
+            let syncID = try #require(request.objectValue?["id"]?.stringValue)
+            await socket.enqueue(try JSONEncoder.gateway.encode(JSONValue.object([
+                "type": .string("response"), "id": .string(syncID), "ok": .bool(true),
+                "result": .object(["synchronized": .bool(true)]),
+            ])))
+            _ = try await opening.value
+
+            // Becoming visible three seconds into a ten-second ping-grid period
+            // publishes at once, then renews at the next tick no later than 15 s.
+            clock.advance(by: .seconds(3))
+            let target = try #require(store.mountedTarget)
+            store.setPresentationVisible(target, visible: true)
+            var frameIndex = 3
+            var revisions: [Int] = []
+            for expectedRenewalDelay: Duration in [.seconds(7), .seconds(10)] {
+                let visibility = try await nextRequest("session.presentation.set", socket: socket, startingAt: frameIndex)
+                let params = visibility.request.objectValue?["params"]?.objectValue
+                #expect(params?["visible"] == .bool(true))
+                let revision = try #require(params?["revision"]?.intValue)
+                revisions.append(revision)
+                let visibilityID = try #require(visibility.request.objectValue?["id"]?.stringValue)
+                await socket.enqueue(try JSONEncoder.gateway.encode(JSONValue.object([
+                    "type": .string("response"), "id": .string(visibilityID), "ok": .bool(true),
+                    "result": .object(["visible": .bool(true), "revision": .number(Double(revision))]),
+                ])))
+                try await clock.waitUntilSleeping(count: 1, duration: expectedRenewalDelay)
+                clock.advance(by: expectedRenewalDelay)
+                frameIndex = visibility.index + 1
+            }
+            let renewal = try await nextRequest("session.presentation.set", socket: socket, startingAt: frameIndex)
+            revisions.append(try #require(renewal.request.objectValue?["params"]?.objectValue?["revision"]?.intValue))
+            #expect(revisions == [1, 2, 3])
+            await client.close()
+        }
+    }
+
     @Test("attention acknowledgement retries the exact installed completion revision")
     func attentionReadRetriesExactRevision() async throws {
         try await withTestWatchdog { @MainActor in

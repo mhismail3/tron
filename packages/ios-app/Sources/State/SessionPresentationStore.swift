@@ -145,7 +145,9 @@ extension SessionPresentationStoreDelegate {
 @MainActor
 @Observable
 final class SessionPresentationStore {
-    // Renew at one-third of the Gateway's 45-second presentation lease.
+    // Renew at most one-third of the Gateway's 45-second presentation lease
+    // after the previous renewal, on the socket ping grid (see
+    // `presentationLeaseRenewalDelay`).
     private static let presentationLeaseRenewalInterval: Duration = .seconds(15)
     // A busy open may clear quickly; keep its bounded retry local to this presentation owner.
     private static let busyOpenRetryBaseDelay: Duration = .milliseconds(250)
@@ -2410,12 +2412,22 @@ final class SessionPresentationStore {
                 )
                 self.scheduleObservedAttentionReadIfNeeded()
                 do {
-                    try await self.clock.sleep(Self.presentationLeaseRenewalInterval)
+                    try await self.clock.sleep(Self.presentationLeaseRenewalDelay(clock: self.clock))
                 } catch {
                     return
                 }
             }
         }
+    }
+
+    /// The wait until the latest ping-grid tick no later than one renewal
+    /// interval from now, so the renewal RPC rides a liveness-ping wakeup
+    /// while never renewing later than the fixed interval would.
+    private static func presentationLeaseRenewalDelay(clock: MonotonicClock) -> Duration {
+        let now = clock.now()
+        let grid = GatewayConnectionPolicy.clientPingInterval
+        let tick = clock.gridTick(after: now + (presentationLeaseRenewalInterval - grid), every: grid)
+        return now.duration(to: tick)
     }
 
     private func sendPresentationVisibility(

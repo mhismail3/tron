@@ -1436,6 +1436,73 @@ struct GatewayClientTransportTests {
         }
     }
 
+    @Test("sockets activated at different phases ping at the same shared grid instants")
+    func socketsPingOnOneSharedGrid() async throws {
+        try await withTestWatchdog {
+            let clock = ManualClock()
+            let first = ScriptedGatewaySocket()
+            let second = ScriptedGatewaySocket()
+            let firstClient = GatewayClient(socketFactory: ScriptedGatewaySocketFactory(socket: first).factory, clock: clock.clock)
+            let secondClient = GatewayClient(socketFactory: ScriptedGatewaySocketFactory(socket: second).factory, clock: clock.clock)
+            do {
+                await first.enqueue(helloFrame())
+                _ = try await firstClient.connect(profile: profile, token: "synthetic-token")
+                try await clock.waitUntilSleeping(count: 1, duration: GatewayConnectionPolicy.clientPingInterval)
+                clock.advance(by: .seconds(3))
+                await second.enqueue(helloFrame())
+                _ = try await secondClient.connect(profile: profile, token: "synthetic-token")
+                // Activated three seconds into the period: the first ping waits
+                // for the next shared tick, never longer than one interval.
+                try await clock.waitUntilSleeping(count: 1, duration: .seconds(7))
+                clock.advance(by: .milliseconds(6_999))
+                #expect(await first.pingInvocationCount() == 0)
+                #expect(await second.pingInvocationCount() == 0)
+                clock.advance(by: .milliseconds(1))
+                try await first.waitUntilPingInvoked(count: 1)
+                try await second.waitUntilPingInvoked(count: 1)
+                try await clock.waitUntilSleeping(count: 2, duration: GatewayConnectionPolicy.clientPingInterval)
+                clock.advance(by: GatewayConnectionPolicy.clientPingInterval)
+                try await first.waitUntilPingInvoked(count: 2)
+                try await second.waitUntilPingInvoked(count: 2)
+                await firstClient.close()
+                await secondClient.close()
+            } catch {
+                await firstClient.close()
+                await secondClient.close()
+                throw error
+            }
+        }
+    }
+
+    @Test("a slow pong keeps the next ping on its grid tick")
+    func slowPongKeepsPingGrid() async throws {
+        try await withTestWatchdog {
+            let clock = ManualClock()
+            let socket = ScriptedGatewaySocket(suspendsPing: true)
+            let client = GatewayClient(socketFactory: ScriptedGatewaySocketFactory(socket: socket).factory, clock: clock.clock)
+            do {
+                await socket.enqueue(helloFrame())
+                _ = try await client.connect(profile: profile, token: "synthetic-token")
+                try await clock.waitUntilSleeping(count: 1, duration: GatewayConnectionPolicy.clientPingInterval)
+                clock.advance(by: GatewayConnectionPolicy.clientPingInterval)
+                try await socket.waitUntilPingInvoked(count: 1)
+                try await clock.waitUntilSleeping(count: 1, duration: GatewayConnectionPolicy.clientPongDeadline)
+                clock.advance(by: .seconds(3))
+                await socket.releasePing()
+                // The pong arrived three seconds after the tick; the next ping
+                // still fires exactly one interval after the previous one.
+                try await clock.waitUntilSleeping(count: 1, duration: .seconds(7))
+                clock.advance(by: .seconds(7))
+                try await socket.waitUntilPingInvoked(count: 2)
+                #expect(await client.info?.machineId == "machine")
+                await client.close()
+            } catch {
+                await client.close()
+                throw error
+            }
+        }
+    }
+
     @Test("session list request records bounded RPC outcome with request correlation")
     func sessionListRequestRecordsRPCDiagnostic() async throws {
         try await withTestWatchdog {
