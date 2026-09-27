@@ -63,10 +63,14 @@ jobs:
             scripts/ios-test-process.py \
             scripts/ios-test-simulator.py \
             scripts/patch-ios-gateway-e2e-xctestrun.py \
-            scripts/test-ios-test-infrastructure.py
+            scripts/test-ios-test-infrastructure.py \
+            scripts/tron_profile_report.py \
+            scripts/test-tron-profile.py
       - name: Test iOS runner infrastructure without hardware
         run: |
           python3 scripts/test-ios-test-infrastructure.py
+      - name: Test profiler report and comparison policy
+        run: python3 scripts/test-tron-profile.py
       - run: python3 scripts/check-documentation-policy.py
       - name: Check shell syntax
         run: |
@@ -79,6 +83,7 @@ jobs:
             scripts/personal-info-guard.sh \
             scripts/check-agent-policy.sh \
             scripts/tron \
+            scripts/tron-profile \
             scripts/tron-version \
             scripts/verify-ci-toolchain.sh \
             packages/mac-app/scripts/bundle-gateway.sh \

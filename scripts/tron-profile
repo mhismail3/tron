@@ -1,0 +1,47 @@
+#!/usr/bin/env bash
+# Front door for Tron profiling. Each tool writes one tron.profile-report.v1
+# report; scripts/tron_profile_report.py owns the schema, noise bound, and
+# comparison verdicts so every agent reads measurements the same way.
+
+set -euo pipefail
+
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+REPORT="$ROOT/scripts/tron_profile_report.py"
+
+usage() {
+  cat <<'USAGE'
+Usage: scripts/tron-profile COMMAND [ARGS...]
+
+Commands:
+  ios ...                 Profile a deterministic iOS scenario on the owned simulator.
+  gateway ...             Profile Gateway wire traffic against an isolated fixture Gateway.
+  compare BASE CANDIDATE  Compare two reports (run directories or report.json files).
+                          Options: --floor FRACTION (default 0.03), --json, --allow-mismatch.
+  status                  Show the latest report of each tool.
+  environment             Print the host conditions recorded with every report.
+
+Run 'scripts/tron-profile ios --help' or 'scripts/tron-profile gateway --help' for
+scenario lists and options. Reports live under
+$HOME/Library/Developer/Tron/profiles/<tool>/<run>/ (override with
+TRON_PROFILE_RESULTS_DIR); each tool keeps a 'latest' link.
+
+Exit status: 0 success, 2 invalid usage or input, 3 compare found a regression
+beyond the noise bound; tool commands document their own failure codes.
+USAGE
+}
+
+command="${1:-}"
+(($#)) && shift
+case "$command" in
+  ios|gateway)
+    tool="$ROOT/scripts/tron-profile-$command"
+    [[ -x "$tool" ]] || { echo "error: the $command profiler is not installed in this checkout ($tool)" >&2; exit 2; }
+    exec "$tool" "$@"
+    ;;
+  compare) exec python3 "$REPORT" compare "$@" ;;
+  status) exec python3 "$REPORT" status ;;
+  environment) exec python3 "$REPORT" environment ;;
+  -h|--help|help) usage ;;
+  "") usage >&2; exit 2 ;;
+  *) usage >&2; echo "error: unknown command: $command" >&2; exit 2 ;;
+esac

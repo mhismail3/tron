@@ -385,6 +385,15 @@ launch and a launch from the device itself are not debugger sessions.
 
 ### Profiling a real slowdown
 
+Agent-runnable measurements go through `scripts/tron-profile`. Every tool it
+fronts writes one `tron.profile-report.v1` report (source revision and dirty
+state, host load and power conditions, per-metric unit, direction, samples,
+median and spread) under `~/Library/Developer/Tron/profiles/<tool>/`, and
+`scripts/tron-profile compare BASE CANDIDATE` gives the only regression verdict:
+a delta counts only beyond both a 3% floor and three robust standard deviations,
+and the command exits 3 on a regression. `scripts/tron_profile_report.py` owns
+that schema and policy; `scripts/test-tron-profile.py` covers its failure modes.
+
 Use the same optimized app for the normal-use → capture → fix → repeat loop; do
 not maintain a profiling-only product or copy app state into a shadow bundle.
 The user-owned, physical-device workflow is:
