@@ -624,6 +624,15 @@ def self_test(args: argparse.Namespace, root: Path) -> int:
         check(f"{label}: unsubscribed dashboard receives no session.progress", leaked == 0, f"median {leaked:.0f}")
         total, progress = median(report, "wire.mobile.total.bytes"), median(report, "wire.mobile.session.progress.bytes")
         check(f"{label}: per-topic bytes are within the client total", 0 < progress <= total, f"{progress:.0f} of {total:.0f}")
+        # Without negotiated compression every message byte crosses the socket
+        # plus 2-10 bytes of framing each, so the TCP counter must bracket it.
+        frames, socket_read = median(report, "wire.mobile.total.frames"), median(report, "wire.mobile.socket_bytes_read")
+        negotiated = report["context"]["clients"]["mobile"]["negotiatedExtensions"]
+        if negotiated:
+            check(f"{label}: socket bytes measured under {negotiated}", socket_read > 0, f"{socket_read:.0f} B")
+        else:
+            check(f"{label}: socket bytes equal message bytes plus framing", total < socket_read <= total + 16 * frames + 4096,
+                  f"{socket_read:.0f} B read for {total:.0f} B in {frames:.0f} messages")
     passed = all(item["passed"] for item in checks)
     verdict = {"schema": "tron.profile-gateway-self-test.v1", "passed": passed, "base": str(base), "variant": str(variant),
                "checks": checks}
