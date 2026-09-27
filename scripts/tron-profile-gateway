@@ -300,9 +300,10 @@ class FixtureGateway:
         while time.monotonic() < deadline:
             if self.process.poll() is not None:
                 hint = ""
-                if "different Team IDs" in self.log_path.read_text(errors="replace"):
-                    hint = ("; the node on PATH is a signed runtime that cannot load the Gateway's native modules, "
-                            "so put the repository-pinned Node (.node-version) first on PATH")
+                if "Failed to load native module" in self.log_path.read_text(errors="replace"):
+                    hint = (f"; {shutil.which('node')} could not load the Gateway's native addon (a signed runtime "
+                            "such as a Gateway payload's node rejects it), so put the repository-pinned Node "
+                            "(.node-version) first on PATH")
                 raise ProfileFailure(f"fixture Gateway exited during startup (exit {self.process.returncode}){hint}",
                                      EXIT_FIXTURE, self.log_path)
             if enrollment.is_file() and self.healthy():

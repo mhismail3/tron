@@ -2339,9 +2339,12 @@ the workload. Metrics, one sample per iteration, all lower-is-better:
 - `gateway.cpu.time|instructions|cycles` and `gateway.wakeups.interrupt` of the
   fixture Gateway process from `proc_pid_rusage`; tool subprocesses are excluded.
 
-Wire counts are deterministic for an unchanged Gateway (zero spread in
-practice); Gateway CPU varies with host load and garbage collection, so compare
-CPU only between runs on a quiet host. Reports live under
+Most wire counts repeat exactly, but a few Gateway publications depend on
+timing: prompt admission sometimes sends one extra same-size `session.snapshot`,
+and throttled summaries and tool progress can shift by a frame. A one-frame move
+between runs is therefore not a regression by itself; check `timeline.jsonl`
+or run more iterations. Gateway CPU varies with host load and garbage
+collection, so compare CPU only between runs on a quiet host. Reports live under
 `~/Library/Developer/Tron/profiles/gateway/<run>/` with `timeline.jsonl` (every
 frame and control ping/pong with client, direction, topic, bytes and time),
 `result.json`, the fixture Gateway log, and with `--cpu-profile` a V8
