@@ -2,7 +2,7 @@
 
 - **Started:** 2026-09-27
 - **Status:** Active (approved in chat by the user on 2026-09-27)
-- **Last updated:** 2026-09-27, plan created
+- **Last updated:** 2026-09-27, P-1 and P-2 claimed
 - **Goal:** Tron for iPhone does measurably less CPU, disk, timer and radio work per minute of real use, proven by a reliable profiler that every agent can run, with no change to what the user sees or does.
 
 ## Goal and constraints
@@ -113,8 +113,8 @@ Highest-cost mechanisms found:
 
 | ID | Status | Scope | Depends on | Owner |
 | --- | --- | --- | --- | --- |
-| P-1 | Ready | iOS scenario profiler (new `tron-profile` in `scripts/`, `ios` subcommand), optimized profiling build, in-process energy metrics, deterministic scenarios, control self-test, JSON reports and `compare` (details below) | none | |
-| P-2 | Ready | Gateway wire-traffic profiler (`gateway` subcommand), isolated fixture Gateway with a faux model, recording client, per-topic frame and byte report (details below) | none | |
+| P-1 | Claimed | iOS scenario profiler (new `tron-profile` in `scripts/`, `ios` subcommand), optimized profiling build, in-process energy metrics, deterministic scenarios, control self-test, JSON reports (details below) | none | energy-efficiency supervisor, worker lane p1, 2026-09-27 |
+| P-2 | Claimed | Gateway wire-traffic profiler (`gateway` subcommand), isolated fixture Gateway with a faux model, recording client, per-topic frame and byte report (details below) | none | energy-efficiency supervisor, worker lane p2, 2026-09-27 |
 | P-3 | Needs scoping | Attribution: `--trace` for iOS scenarios (xctrace Time Profiler, SwiftUI, Points of Interest; exported top-symbol summary) and an attach-only `device` mode for a user-launched LocalDevice app | P-1 | |
 | P-4 | Needs scoping | Baseline: run every P-1 and P-2 scenario on `main`, record the numbers and host state in this plan's Context | P-1, P-2 | |
 | T1-GW | Needs scoping | Gateway: re-arm the streaming throttle; delete `session.bashProgress` and `session.heartbeat`; skip the heartbeat ping while a client proved liveness within the interval, keeping today's detection bound | P-4 | |
