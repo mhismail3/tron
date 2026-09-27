@@ -219,8 +219,13 @@ final class ChatScrollCoordinator {
     private var presentation = 0
     private var viewportActivation = 0
     private var sequence = 0
-    private var geometry = ChatTranscriptGeometry.zero
-    private var geometryRevision = 0
+    // Per-frame layout evidence. Geometry and row-frame callbacks read and
+    // write these while SwiftUI lays out the transcript, and no view body
+    // reads them. Observing them only let UIKit's layout observation tracking
+    // count every callback as a layout invalidation of the hosting view, which
+    // it reports as a feedback loop once enough rows publish in one pass.
+    @ObservationIgnored private var geometry = ChatTranscriptGeometry.zero
+    @ObservationIgnored private var geometryRevision = 0
     private var installedPhysicalRowSpine: ChatPhysicalRowSpineIdentity?
     /// Physical collection positions are diagnostic context only. They are
     /// supplied by the same row adapter that renders the installed spine so a
@@ -246,8 +251,8 @@ final class ChatScrollCoordinator {
     }
 
     private var retainedViewportReconciliationState: RetainedViewportReconciliationState = .idle
-    private var semanticFrames: [String: SemanticFrameSample] = [:]
-    private var semanticFrameRevision = 0
+    @ObservationIgnored private var semanticFrames: [String: SemanticFrameSample] = [:]
+    @ObservationIgnored private var semanticFrameRevision = 0
     private var openingTailPhase: OpeningTailPhase = .idle
     /// Extends opening ownership from physical target release through the
     /// validated first ready frame, not through cosmetic animation completion.
@@ -275,16 +280,16 @@ final class ChatScrollCoordinator {
     private var catchUpUnreadBeforeJump = false
     private var layoutRestore: LayoutRestore?
     private var prepend: PrependContext?
-    private(set) var physicalTailEvidence: ChatPhysicalTailEvidence?
-    private var physicalTailEvidenceOffsetY: CGFloat?
-    private var physicalTailEvidenceContentHeight: CGFloat?
-    private var physicalTailRepairAttempts = 0
-    private var physicalTailRepairEvidenceRevision: Int?
+    @ObservationIgnored private(set) var physicalTailEvidence: ChatPhysicalTailEvidence?
+    @ObservationIgnored private var physicalTailEvidenceOffsetY: CGFloat?
+    @ObservationIgnored private var physicalTailEvidenceContentHeight: CGFloat?
+    @ObservationIgnored private var physicalTailRepairAttempts = 0
+    @ObservationIgnored private var physicalTailRepairEvidenceRevision: Int?
     private var physicalTailRepairCommandToken: Int?
-    private var physicalTailRepairIssuedEvidenceRevision: Int?
+    @ObservationIgnored private var physicalTailRepairIssuedEvidenceRevision: Int?
     /// Reveal/layout transitions must publish a new marker frame before drift
     /// repair can inspect it; the lifted opening frame is not repair evidence.
-    private var physicalTailRepairBlockedUntilEvidenceRevision: Int?
+    @ObservationIgnored private var physicalTailRepairBlockedUntilEvidenceRevision: Int?
     @ObservationIgnored private var pastEndRepairTask: Task<Void, Never>?
     /// The installed layout epoch whose one correction is already spent. A fresh
     /// budget comes only from a structural change that can move a lazy content
