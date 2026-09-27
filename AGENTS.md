@@ -114,6 +114,29 @@
 - Never erase iOS application or Keychain data to recover from a build/signing
   mismatch, and do not install on a device another session currently owns.
 
+## Process lifecycle and cleanup
+
+The live Gateway shares this Mac with every agent session. When memory runs
+short, host swapping slows it enough that phone reconnects fail. Clean up every
+process you start.
+
+- Before starting a server, simulator, watcher, emulator or test runner, check
+  whether a suitable one is already running and reuse it. For iOS tests, use the
+  owned simulator from `scripts/tron-ios-test`; do not boot extra devices.
+- Keep track of each long-running process you start: its PID, port or simulator
+  UDID, and how to stop it. Stop it, and shut down any simulator you booted,
+  before your final response unless the user asked to keep it running.
+- Prefer commands that exit when they finish. Avoid watch mode and background
+  processes unless the task needs them.
+- Never run broad kills such as `pkill node` or `xcrun simctl shutdown all`.
+  Stop only processes you started, and ask before stopping anything you are
+  unsure about. The Gateway and its agent children are never yours to stop
+  (rules 8 and 9).
+- If the machine is slow, check swap (`sysctl vm.swapusage`), and each
+  process's age, CPU, memory and parent. Clean up your own leftover processes
+  before starting new ones. Report heavy processes you do not own; do not stop
+  them.
+
 ## Testing policy
 
 - **Never write unit tests after you write code.** A test written to match code
