@@ -2,7 +2,7 @@
 
 - **Started:** 2026-09-23
 - **Status:** Active
-- **Last updated:** 2026-09-26, D1 and D2 decided; MS-2 claimed
+- **Last updated:** 2026-09-27, MS-2 done; the user checks a device install and Profile
 - **Goal:** Give the iOS app compiler-enforced layers, so its structure stays clean, one-directional and easy for agents to work in, and cannot silently regress into cycles.
 
 Follow the [plan protocol](README.md#protocol) to claim tasks and hand off.
@@ -82,7 +82,7 @@ directly, and unit tests reach the app through `@testable import TronMobile`.
 | ID | Status | Scope | Depends on | Owner |
 | --- | --- | --- | --- | --- |
 | MS-1 | Done | Map the dependency graph of Models, Gateway, Support, State and UI/Theme; propose module boundaries with no cycles | none | module-split session, 2026-09-26 |
-| MS-2 | Claimed | First real slice of `TronMobileCore`, an XcodeGen framework target with `SWIFT_PACKAGE_NAME` set so `package` access works: move a few leaf types from Models, Gateway or Support into it (kept, not a throwaway spike); prove all five configurations build, the share extension, `@testable` tests, both test plans and the source-policy scripts; record baseline and after timings. Device install and **Product → Profile** are checked by the user or supervisor | MS-1, D1, D2 | module-split session, 2026-09-26 |
+| MS-2 | Done | First real slice of `TronMobileCore`, an XcodeGen framework target with `SWIFT_PACKAGE_NAME` set so `package` access works: move a few leaf types from Models, Gateway or Support into it (kept, not a throwaway spike); prove all five configurations build, the share extension, `@testable` tests, both test plans and the source-policy scripts; record baseline and after timings. Device install and **Product → Profile** are checked by the user or supervisor | MS-1, D1, D2 | module-split session, 2026-09-26 |
 | MS-3 | Needs scoping | Extract the rest of `Core` into `TronMobileCore` (Models, Gateway, Auth and Support, with the MS-1 moves) and record timings | MS-2 | |
 | MS-4 | Needs scoping | Extract `Notifications`, then `State`, then `UI`, one per task, each with timings, after the simplification program has cleaned up State and Chat (D1); split UI by folder where its boundaries are clean | MS-3, simplification S-IOS-STATE and S-IOS-CHAT work | |
 | MS-5 | Needs scoping | Move the share extension onto `Core` instead of compiling `SharedContent.swift` itself | MS-3 | |
@@ -186,3 +186,28 @@ except `App` and `Auth` sits in one cycle of 12 layers. Examples: Models throws 
   LocalDevice -destination generic/platform=iOS CODE_SIGNING_ALLOWED=NO` with a scratch DerivedData, run cold,
   unchanged and after a one-file edit, for whole-module `-O`, `SWIFT_COMPILATION_MODE=singlefile`, and
   `-Onone` singlefile, reading `SwiftEmitModule` from the result bundle's build log.
+
+### MS-2 · Done · 2026-09-27 · module-split session (deepseek-worker, reviewed by the supervisor)
+
+- Result: the app now has a second module, the `TronMobileCore` framework (sources in `packages/ios-app/Core/`,
+  each file under the layer directory it will keep). It holds the Gateway wire contract: `GatewayProtocolContract`,
+  `GatewayRequestTimeout` and `GatewayConnectionPolicy`, the only Models, Gateway or Support files with no outgoing
+  reference to anything else. App, framework and unit tests share `SWIFT_PACKAGE_NAME = TronIOSApp`, so crossing
+  declarations are `package`, never `public`. The framework has its own bundle identifier and a generated plist
+  without the app-only keys. `scripts/gateway_protocol_contract.py` follows the moved file and now accepts only
+  `package` access.
+- Evidence (verified): all five configurations build (Development simulator, Test, and LocalDevice,
+  DevicePerformance and Release for a generic device without signing); the share extension builds and ships in
+  each; the LocalDevice app contains `Frameworks/TronMobileCore.framework`. On combined `main` the supervisor
+  reran the build and the full suite: 1,719 Swift Testing tests in 139 suites plus 87 XCTest, 0 failures; the
+  source policy and protocol-contract checks pass. Negative control: a `Core` file referencing `AppModel` or
+  `TronTheme` fails to compile.
+- Timings, install path, measured back to back on the old and new tree: cold 116.5 s → 113.3 s, no change
+  2.2 s → 2.1 s, one-file UI/Chat edit 17.0 s → 17.1 s; the app module's `SwiftEmitModule` is unchanged. No
+  slowdown.
+- Deviation: the MS-1 timing script had three bugs (an inverted assertion, a fresh DerivedData per case, and a
+  hard-coded mode name); the worker fixed its copy in `/tmp`, so the recipe in the MS-1 handoff stands.
+- Open (user): a signed device install through **Rebuild and Install Tron** and one **Product → Profile** run,
+  to confirm signing and embedding of the framework on a real device. MS-3 can start before that.
+- For the next agent: `packages/ios-app/scripts/presentation-source-policy.py` scans only `Sources/`, which is
+  correct while `Core` holds no SwiftUI; the module that receives State must extend that scan.
