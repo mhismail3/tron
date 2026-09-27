@@ -142,6 +142,14 @@ keeps today's uncompressed frames.
   gave 7×/1.6× the progress bytes. Level 9 cost 1.5× the CPU for no gain, and
   memLevel 9 or 7 changed bytes by under 0.2%. Without context takeover, the
   progress sequence stayed at 33.8% of its size.
+- **Latency:** at level 6 a fresh 24 KiB progress frame deflates in about
+  0.14 ms and a 600 KB snapshot in about 12.6 ms (levels 1 and 3: about 4.8 and
+  3.2 ms, with 22% and 14% more snapshot bytes). Broadcast to decoded delivery on
+  loopback measured 0.6 ms against 0.4 ms uncompressed for progress and 18.4 ms
+  against 3.0 ms for a snapshot. That is under one display frame, and less than
+  the transmission time the smaller frame saves on any phone link slower than
+  about 250 Mbit/s. The zlib cap of two only delays a third concurrent snapshot
+  compression by one more deflate.
 - **Bounds:** inbound `maxPayload` (the 1 MiB frame ceiling) bounds each
   message after inflation as well as on the wire, and an over-limit message
   closes with 1009 before dispatch. Outbound, the 1 MiB frame ceiling and the
@@ -154,12 +162,19 @@ keeps today's uncompressed frames.
   peer vanishes is reported as `connection.write-error`. Compression lengthens
   that window by the deflate time. Heartbeat pings wait behind an in-progress
   deflate of at most one frame.
-- **Phone:** CFNetwork inflates before delivery. Its `maximumMessageSize` (1 MiB)
-  bounds only compressed wire bytes. A macOS 26 probe received 8 MiB and 256 MiB
-  inflated messages that uncompressed would fail with POSIX 40. The phone's
-  decoded-size check is `GatewayFramePolicy`, after inflation (`frame_too_large`).
-  The Gateway's decoded 1 MiB outbound ceiling is therefore the primary bound
-  on what a phone allocates.
+- **Phone:** CFNetwork inflates before delivery, and its `maximumMessageSize`
+  (1 MiB) applies to compressed wire bytes. A macOS 26 probe received 8 MiB and
+  256 MiB inflated messages; uncompressed, anything over 1 MiB fails the receive
+  with POSIX 40. With `permessage-deflate` the phone's decoded 1 MiB check
+  (`GatewayFramePolicy`) therefore runs after inflation. An over-ceiling frame
+  still retires the epoch as a retryable transport failure, now with reason
+  `frame_too_large`. Correct traffic is unchanged, because the Gateway refuses a
+  decoded frame over 1 MiB on every send path before enqueue and so before
+  compression. `server-compression.integration.test.ts` checks direct responses,
+  `emitToClient`, global and session broadcasts and synchronization-barrier
+  replay. The residual risk is memory use before rejection, and only against a
+  malicious or broken authenticated paired Gateway. Such a Gateway already
+  controls everything the phone displays.
 - **Diagnosis:** `connection.opened` carries `compression=permessage-deflate`
   or `compression=none`. `ws` answers a malformed `Sec-WebSocket-Extensions`
   offer from a paired client with HTTP 400; URLSession never sends one.
@@ -259,7 +274,8 @@ workers, speculative caches, or higher queue limits to conceal them.
   The proxy accepts the app's `permessage-deflate` offer and offers it upstream
   only when the app negotiated it. Its `proxy.bridge-opened` lines and the Gateway's
   `connection.opened` records show what the app negotiated.
-  It exercises delayed hello/open/sync, blackholed traffic, HTTP upgrade statuses,
+  It exercises compressed frames at and one byte over the 1 MiB decoded ceiling,
+  delayed hello/open/sync, blackholed traffic, HTTP upgrade statuses,
   remote-close metadata, and loss of an accepted response followed by durable
   receipt/canonical exactly-once verification. A skipped boundary case fails the
   runner. CI runs this boundary for source changes, not only SDK upgrades.

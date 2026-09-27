@@ -136,6 +136,34 @@ final class RealGatewayPiBoundaryTests: XCTestCase {
             do { _ = try await raw.receive() } catch { }
             platformCloseCode = raw.closeCode.rawValue
         }
+        do {
+            // Decoded-size ceiling. The fixture proxy accepts URLSession's
+            // permessage-deflate offer, as the Gateway does for paired devices,
+            // and CFNetwork's maximumMessageSize bounds only compressed wire
+            // bytes, so GatewayFramePolicy checks the inflated frame. A frame at
+            // the ceiling must decode through the production socket.
+            let socket = GatewaySocketFactory.urlSession.makeConnection(probeRequest)
+            let hello = try JSONEncoder.gateway.encode(["type": JSONValue.string("hello"), "protocolVersion": .number(5)])
+            try await socket.send(hello)
+            _ = try await socket.receive()
+            try await control("inject-frame", port: port, token: proxyToken, bytes: GatewayFramePolicy.maximumInboundBytes)
+            let atCeiling = try await socket.receive()
+            XCTAssertEqual(atCeiling.count, GatewayFramePolicy.maximumInboundBytes)
+            XCTAssertNoThrow(try GatewayFramePolicy.validateInboundBytes(atCeiling))
+            XCTAssertNoThrow(try JSONDecoder.gateway.decode(GatewayEvent.self, from: atCeiling))
+            await socket.close()
+        }
+        do {
+            // One inflated byte over the ceiling retires the client's epoch as a
+            // retryable transport failure, like any other rejected frame. Without
+            // compression CFNetwork itself fails the receive ("disconnected").
+            let oversizedClient = makeClient()
+            _ = try await oversizedClient.connect(profile: profile, token: token)
+            try await control("inject-frame", port: port, token: proxyToken, bytes: GatewayFramePolicy.maximumInboundBytes + 1)
+            let reason = try await waitForDisconnectReason(client: oversizedClient)
+            XCTAssertEqual(reason, "frame_too_large", "The simulator app must negotiate compression and reject the inflated frame")
+            await oversizedClient.close()
+        }
         let remotelyClosedClient = makeClient()
         _ = try await remotelyClosedClient.connect(profile: profile, token: token)
         try await control("close", port: port, token: proxyToken, closeCode: 1013)
@@ -428,7 +456,7 @@ final class RealGatewayPiBoundaryTests: XCTestCase {
         return client
     }
 
-    private func control(_ mode: String, port: Int, token: String, commandID: String? = nil, status: Int? = nil, closeCode: Int? = nil) async throws {
+    private func control(_ mode: String, port: Int, token: String, commandID: String? = nil, status: Int? = nil, closeCode: Int? = nil, bytes: Int? = nil) async throws {
         let url = URL(string: "http://127.0.0.1:\(port)/_fixture/control")!
         var request = URLRequest(url: url, timeoutInterval: 10)
         request.httpMethod = "POST"
@@ -437,10 +465,30 @@ final class RealGatewayPiBoundaryTests: XCTestCase {
         if let commandID { values["commandId"] = .string(commandID) }
         if let status { values["status"] = .number(Double(status)) }
         if let closeCode { values["code"] = .number(Double(closeCode)) }
+        if let bytes { values["bytes"] = .number(Double(bytes)) }
         request.httpBody = try JSONEncoder.gateway.encode(values)
         let (_, response) = try await URLSession.shared.data(for: request)
         guard (response as? HTTPURLResponse)?.statusCode == 200 else {
             throw BoundaryFailure.invalidFixture("Isolated fault control did not acknowledge \(mode)")
+        }
+    }
+
+    private func waitForDisconnectReason(client: GatewayClient) async throws -> String? {
+        let events = client.events
+        return try await withThrowingTaskGroup(of: String?.self) { group in
+            group.addTask {
+                for await delivery in events where delivery.event.topic == "transport.disconnected" {
+                    return delivery.event.payload.objectValue?["reason"]?.stringValue
+                }
+                throw BoundaryFailure.invalidFixture("Missing oversized-frame disconnect")
+            }
+            group.addTask {
+                try await Task.sleep(for: .seconds(5))
+                throw BoundaryFailure.timedOut("Oversized frame did not retire the connection")
+            }
+            let reason = try await group.next() ?? nil
+            group.cancelAll()
+            return reason
         }
     }
 

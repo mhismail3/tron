@@ -19,9 +19,15 @@ import { GatewayServer } from "./server.js";
 //   with a handshake error instead of connecting;
 // - a small compressed inbound frame inflates past maxFrameBytes and is
 //   admitted, because only its wire size was bounded;
-// - the connection-opened record cannot tell compressed and uncompressed apart.
+// - the connection-opened record cannot tell compressed and uncompressed apart;
+// - some send path hands ws (and so zlib) a frame over maxFrameBytes. URLSession
+//   bounds only compressed bytes, so the Gateway's decoded ceiling is what
+//   bounds a phone's allocation.
 
 const MAXIMUM_FRAME_BYTES = 16_384;
+// Highly compressible producer content: deflated it would fit the ceiling many
+// times over, so only a decoded-size check can refuse it.
+const OVERSIZED_CONTENT = "producer-content-".repeat(4 * MAXIMUM_FRAME_BYTES / 16);
 const cleanups: Array<() => Promise<void>> = [];
 afterEach(async () => { await Promise.all(cleanups.splice(0).map((cleanup) => cleanup())); });
 
@@ -50,12 +56,23 @@ async function startGateway() {
   const pairedToken = (await devices.pair((await devices.ensureEnrollment()).code, "Phone")).token;
   const port = await unusedPort();
   const logger = { log: vi.fn() };
-  const invoke = vi.fn(async (_context: unknown, method: string, params: { pad?: string }) =>
-    ({ method, padBytes: params.pad?.length ?? 0 }));
+  const invoke = vi.fn(async (context: any, method: string, params: any) => {
+    if (method === "session.open") {
+      const syncToken = context.beginSynchronization(params.sessionId);
+      context.establishSynchronization(params.sessionId, { runtimeGeneration: "generation", eventSequence: 1 });
+      return { session: { sessionId: params.sessionId }, syncToken, subscriptionToken: syncToken };
+    }
+    if (method === "session.sync") {
+      context.completeSynchronization(params.sessionId, params.syncToken);
+      return { synchronized: true };
+    }
+    if (method === "test.oversized") return { transcript: OVERSIZED_CONTENT };
+    return { method, padBytes: params.pad?.length ?? 0 };
+  });
   const gateway = new GatewayServer({
     host: "127.0.0.1", port, maxFrameBytes: MAXIMUM_FRAME_BYTES, devices, logger: logger as any,
     uploads: {} as any,
-    sessions: { unsubscribeClient: vi.fn() } as any,
+    sessions: { subscribe: vi.fn(), unsubscribe: vi.fn(), unsubscribeClient: vi.fn() } as any,
     auth: { detachClient: vi.fn(), cancelOwner: vi.fn() } as any,
     service: {
       info: () => ({ gatewayVersion: "test", piVersion: "test", protocolVersion: 5, minProtocolVersion: 5, machineId: "machine", machineName: "test", capabilities: [] }),
@@ -174,5 +191,54 @@ describe("WebSocket frame compression", () => {
     expect(await closed).toBe(1009);
     expect(fixture.invoke.mock.calls.map((call) => call[1])).toEqual(["test.echo"]);
     expect(client.frames.some((frame) => frame.id === "over-limit")).toBe(false);
+  });
+});
+
+describe("decoded outbound ceiling on every send path", () => {
+  it.each([
+    ["local uncompressed", "local", false],
+    ["paired compressed", "paired", { clientMaxWindowBits: false }],
+  ] as const)("refuses an over-ceiling payload before ws sees it for a %s client", async (_label, credential, perMessageDeflate) => {
+    const fixture = await startGateway();
+    const client = await fixture.connect(credential === "local" ? fixture.localToken : fixture.pairedToken, perMessageDeflate);
+    expect(client.socket.extensions).toBe(credential === "local" ? "" : "permessage-deflate");
+    const connection = [...(fixture.gateway as any).clients.values()][0];
+    // Every string handed to ws is what zlib would deflate for this socket.
+    const handedToWs: string[] = [];
+    const send = connection.socket.send.bind(connection.socket);
+    vi.spyOn(connection.socket, "send").mockImplementation((data: any, ...rest: any[]) => {
+      handedToWs.push(String(data));
+      return send(data, ...rest);
+    });
+    const request = async (id: string, method: string, params: Record<string, unknown>) => {
+      client.socket.send(JSON.stringify({ type: "request", id, method, params }));
+      await waitUntil(() => client.frames.some((frame) => frame.id === id), id);
+      return client.frames.find((frame) => frame.id === id);
+    };
+    const resyncs = () => client.frames.filter((frame) => frame.topic === "transport.resyncRequired");
+
+    // Direct response.
+    expect(await request("response", "test.oversized", {})).toMatchObject({ ok: false, error: { code: "response_too_large" } });
+    // emitToClient.
+    fixture.gateway.emitToClient(connection.id, "test.direct", { transcript: OVERSIZED_CONTENT });
+    await waitUntil(() => resyncs().length === 1, "direct event fallback");
+    // Global broadcast (one prepared frame shared by every client).
+    fixture.gateway.broadcast("test.global", { transcript: OVERSIZED_CONTENT });
+    await waitUntil(() => resyncs().length === 2, "global broadcast fallback");
+    // Session broadcast buffered by the synchronization barrier, then replayed.
+    const opened = await request("open", "session.open", { sessionId: "session" });
+    fixture.gateway.broadcastSession("session", "session.snapshot", { transcript: OVERSIZED_CONTENT });
+    expect(resyncs()).toHaveLength(2);
+    await request("sync", "session.sync", { sessionId: "session", syncToken: opened.result.syncToken });
+    await waitUntil(() => resyncs().length === 3, "barrier replay fallback");
+    // Session broadcast to a synchronized subscriber.
+    fixture.gateway.broadcastSession("session", "session.snapshot", { transcript: OVERSIZED_CONTENT });
+    await waitUntil(() => resyncs().length === 4, "session broadcast fallback");
+
+    expect(resyncs().map((frame) => frame.sessionId)).toEqual([undefined, undefined, "session", "session"]);
+    expect(client.socket.readyState).toBe(WebSocket.OPEN);
+    expect(handedToWs).toHaveLength(7); // two responses to open/sync plus the five refused payloads
+    expect(Math.max(...handedToWs.map((frame) => Buffer.byteLength(frame)))).toBeLessThanOrEqual(MAXIMUM_FRAME_BYTES);
+    expect(handedToWs.some((frame) => frame.includes("producer-content"))).toBe(false);
   });
 });

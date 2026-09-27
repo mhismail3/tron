@@ -78,6 +78,16 @@ async function startFaultProxy({ targetPort, token, verifyTarget, restartGateway
           answer(response, 200, { mode: "close" });
           return;
         }
+        if (next.mode === "inject-frame") {
+          // Sends one app-bound event of an exact byte size on the newest
+          // bridge, so the app's decoded-size ceiling can be exercised with
+          // (compressed) frames just under and over it.
+          if (!Number.isSafeInteger(next.bytes) || next.bytes < 64 || next.bytes > 2 * maximumBytes) throw new Error("invalid frame size");
+          const bridge = [...bridges].at(-1);
+          if (!bridge?.inject(next.bytes)) throw new Error("no open bridge");
+          answer(response, 200, { mode: next.mode, bytes: next.bytes });
+          return;
+        }
         if (next.mode === "restart-gateway") {
           if (!restartGateway) throw new Error("private Gateway restart is unavailable in this fixture");
           for (const bridge of [...bridges]) bridge.terminate();
@@ -119,7 +129,11 @@ async function startFaultProxy({ targetPort, token, verifyTarget, restartGateway
     if (closing || sockets.size >= 12) { socket.destroy(); return; }
     sockets.add(socket); socket.once("close", () => sockets.delete(socket));
   });
-  const webSockets = new WebSocketServer({ noServer: true, maxPayload: maximumBytes, perMessageDeflate: false, autoPong: false });
+  // The proxy terminates WebSocket on both legs. It accepts the app's
+  // permessage-deflate offer and makes the same bare offer upstream only when
+  // the app negotiated it, so the Gateway's connection.opened record shows
+  // what the real app negotiated. maxPayload bounds inflated messages.
+  const webSockets = new WebSocketServer({ noServer: true, maxPayload: maximumBytes, perMessageDeflate: true, autoPong: false });
   server.on("upgrade", async (request, socket, head) => {
     const retire = () => socket.destroy();
     const deadline = setTimeout(retire, 5_000);
@@ -133,9 +147,11 @@ async function startFaultProxy({ targetPort, token, verifyTarget, restartGateway
     }
     if (closing || request.url !== "/v1/socket" || bridges.size >= 4) { socket.destroy(); return; }
     webSockets.handleUpgrade(request, socket, head, front => {
+      const compressed = front.extensions === "permessage-deflate";
+      console.log(JSON.stringify({ event: "proxy.bridge-opened", appOffer: request.headers["sec-websocket-extensions"] ?? null, appNegotiated: front.extensions || null }));
       const back = new WebSocket(`ws://127.0.0.1:${targetPort}/v1/socket`, {
         headers: request.headers.authorization ? { authorization: request.headers.authorization } : {},
-        maxPayload: maximumBytes, perMessageDeflate: false, autoPong: false,
+        maxPayload: maximumBytes, perMessageDeflate: compressed ? { clientMaxWindowBits: false } : false, autoPong: false,
       });
       const pending = [];
       const heldFrames = [];
@@ -164,6 +180,12 @@ async function startFaultProxy({ targetPort, token, verifyTarget, restartGateway
           front.close(code);
           closeDeadline = setTimeout(terminate, 1_000);
           closeDeadline.unref();
+        },
+        inject(bytes) {
+          if (front.readyState !== WebSocket.OPEN) return false;
+          const empty = JSON.stringify({ type: "event", topic: "fixture.frame", payload: { pad: "" } });
+          front.send(JSON.stringify({ type: "event", topic: "fixture.frame", payload: { pad: "x".repeat(bytes - empty.length) } }), error => { if (error) terminate(); });
+          return true;
         },
         release() {
           holding = false;
