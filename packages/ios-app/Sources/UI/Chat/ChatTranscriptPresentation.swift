@@ -1962,7 +1962,28 @@ struct ChatTranscriptItems: RandomAccessCollection, Hashable, Sendable {
     }
 
     static func == (lhs: Self, rhs: Self) -> Bool {
-        lhs.count == rhs.count && lhs.elementsEqual(rhs)
+        // SwiftUI compares a view's inputs on every update, and an unchanged
+        // row compares one installed commit with itself. Arrays sharing one
+        // buffer are equal in O(1); only a different representation needs the
+        // element walk.
+        if sharesStorage(lhs.canonicalBase, rhs.canonicalBase),
+           sharesStorage(lhs.liveBase, rhs.liveBase),
+           lhs.canonicalOverrides == rhs.canonicalOverrides,
+           lhs.liveOverrides == rhs.liveOverrides {
+            return true
+        }
+        return lhs.count == rhs.count && lhs.elementsEqual(rhs)
+    }
+
+    private static func sharesStorage(
+        _ lhs: [ChatTranscriptRenderItem],
+        _ rhs: [ChatTranscriptRenderItem]
+    ) -> Bool {
+        guard lhs.count == rhs.count else { return false }
+        guard !lhs.isEmpty else { return true }
+        return lhs.withUnsafeBufferPointer { left in
+            rhs.withUnsafeBufferPointer { right in left.baseAddress == right.baseAddress }
+        }
     }
 
     func hash(into hasher: inout Hasher) {
