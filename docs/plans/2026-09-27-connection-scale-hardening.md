@@ -8030,6 +8030,15 @@ wait).
   `dirtyOverflow` path (over 256 changed sessions) leaves stale rows in place
   until the next start; every candidate is re-validated against its canonical cut
   before publication, so those rows under-report rather than misreport.
+- Pre-existing flake seen while validating (not from this branch):
+  `session-catalog.test.ts`'s shared `afterEach` removes each temp root while a
+  previous test's catalog watcher may still be writing, so `rm` fails with
+  `ENOTEMPTY`; the failing test varies. Evidence: the unmodified
+  `hardening/integration` copy of that file failed the same way on the first of
+  three loaded-host runs (2 tests) and passed 29/29 on the next two; this
+  branch's copy failed once and passed on its other runs. Nobody owns the
+  teardown yet; whoever picks it up should dispose each fixture's catalog in
+  `afterEach`.
 - For the next agent: G-9 moves the warm-up and the dirty reindex into its
   scheduler (`SEARCH_SLICE_MS` / `INDEX_WRITE_SLICE_MS` become that scheduler's
   slice); the `posting_bytes` column and `sessionFacts()` are the seams to reuse.
