@@ -2641,6 +2641,17 @@ Read the numbers as one sample per case.
   - **Nit — the blackhole watchdog left out part of the leg.** `driver_
     deadline_seconds` now adds `blackholeSettleMs`, one measured deadline for
     the settle and the relay's own listen/handshake, and the outage.
+- Smoke (short, `--cases bandwidth --iterations 1 --catalog-files 100
+  --catalog-mib 24 --mixed-seconds 30 --bandwidth-seconds 10 --bandwidth-mbps
+  0.5 --no-build`; host at 1-minute load 25): the first attempt found a real
+  problem — with six concurrent page mounts on *running* sessions the Gateway
+  refused the synchronization (`conflict`, "no longer owned by this token")
+  because a running session's token rotates while its prompt streams, and the
+  driver exited. `pageTargets` now prefers idle sessions (cold, then large,
+  running only as a fallback), and the second attempt's syncs succeeded. It
+  still exceeded the driver's sum-of-bounds deadline on this host (opens on
+  `main` take seconds here), so it produced no baseline: the numbers stay owed
+  to the quiet-host run.
 - Evidence: `python3 scripts/test-tron-profile.py MultiDriverImpairment
   ImpairmentCases RelayBackpressure` passes 13 tests. Two new failure modes were
   written first and each has a negative control: a leg that runs one page at a

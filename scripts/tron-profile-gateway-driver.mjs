@@ -1250,7 +1250,13 @@ async function blackholeLeg(config, { mobile, chat, retry }) {
  * so a second mount on it would be refused with a conflict. */
 function pageTargets(config, mountedSessionId) {
   const targets = [];
-  for (const entry of [...(config.running ?? []), ...(config.cold ?? []), ...(config.large ?? [])]) {
+  // Idle sessions first: a *running* session's open waits for its runtime to
+  // reconcile, and its synchronization token is the one that rotates while the
+  // prompt streams, so concurrent page reads on several running sessions are
+  // what the Gateway refuses. Running sessions are the fallback when a run has
+  // no idle ones (the stub tests).
+  const pool = [...(config.cold ?? []), ...(config.large ?? []), ...(config.running ?? [])];
+  for (const entry of pool) {
     const sessionId = entry?.sessionId;
     if (typeof sessionId !== "string" || sessionId === mountedSessionId || targets.includes(sessionId)) continue;
     targets.push(sessionId);
