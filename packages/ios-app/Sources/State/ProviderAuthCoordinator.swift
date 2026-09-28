@@ -349,7 +349,10 @@ final class ProviderAuthCoordinator {
             )
             guard profileGeneration == admittedProfileGeneration,
                   recentModelsLoadGeneration == admittedLoadGeneration else { return }
-            recentModels = RecentModelCatalogPolicy.admit(response.models)
+            let admitted = RecentModelCatalogPolicy.admit(response.models)
+            // Observation notifies on every write; an unchanged list must not
+            // rebuild an open picker mid-presentation.
+            if admitted != recentModels { recentModels = admitted }
         } catch is CancellationError {
         } catch {
         }
@@ -423,6 +426,9 @@ final class ProviderAuthCoordinator {
             guard admits(admission) else { return false }
             try ProviderCatalogPolicy.validate(providers)
             catalogByTarget[target] = ProviderCatalog(providers: providers, models: accumulator.models)
+            // Warm the picker's Recent rail with the catalog so the first open
+            // does not grow the sheet when a late rail arrives.
+            if recentModels.isEmpty { Task { await loadRecentModels() } }
             return true
         } catch {
             guard admits(admission) else { return false }

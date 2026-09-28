@@ -211,12 +211,14 @@ enum ModelCardFacts {
     private static let monthNames = ["Jan", "Feb", "Mar", "Apr", "May", "Jun",
                                      "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"]
 
+    private static let posixLocale = Locale(identifier: "en_US_POSIX")
+
     private static func dollars(_ value: Double) -> String {
         guard value.isFinite, value > 0 else { return "$0" }
         if value < 0.01 { return "<$0.01" }
         let cents = (value * 100).rounded()
         return cents.truncatingRemainder(dividingBy: 100) == 0
             ? "$\(Int(cents / 100))"
-            : String(format: "$%.2f", locale: Locale(identifier: "en_US_POSIX"), cents / 100)
+            : String(format: "$%.2f", locale: posixLocale, cents / 100)
     }
 }

@@ -205,7 +205,6 @@ struct NewSessionSheet: View {
                         selection: modelSelection,
                         models: model.providerCatalog(for: .global)?.models.filter(\.available) ?? []
                     )
-                        .tronTopBlurSurface()
                         .navigationBarTitleDisplayMode(.inline)
                         .toolbar {
                             ToolbarItem(placement: .principal) { TronSheetTitle(title: "Model", accent: .tronPurple) }

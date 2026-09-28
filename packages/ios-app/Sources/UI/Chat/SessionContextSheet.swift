@@ -510,6 +510,9 @@ struct SessionContextSheet: View {
         return SessionModelSummaryCard(
             selection: selection,
             catalog: catalog,
+            // The Gateway rejects model changes during session work.
+            selectionLockedReason: snapshot.phase.isActive
+                ? "The model can change once this session is idle." : nil,
             automaticCompactionEnabled: snapshot.automaticCompactionEnabled
         ) {
             TronThinkingSelectionRow(

@@ -15,6 +15,7 @@ struct TronCardRail<Item, ID: Hashable, Content: View>: View {
     let accent: Color
     let cornerRadius: CGFloat
     let isSelected: (Item) -> Bool
+    let isEnabled: Bool
     let accessibilityLabel: (Item) -> String
     let accessibilityValue: ((Item) -> String)?
     let action: (Item) -> Void
@@ -26,6 +27,7 @@ struct TronCardRail<Item, ID: Hashable, Content: View>: View {
         accent: Color,
         cornerRadius: CGFloat = 12,
         isSelected: @escaping (Item) -> Bool = { _ in false },
+        isEnabled: Bool = true,
         accessibilityLabel: @escaping (Item) -> String,
         accessibilityValue: ((Item) -> String)? = nil,
         action: @escaping (Item) -> Void,
@@ -36,6 +38,7 @@ struct TronCardRail<Item, ID: Hashable, Content: View>: View {
         self.accent = accent
         self.cornerRadius = cornerRadius
         self.isSelected = isSelected
+        self.isEnabled = isEnabled
         self.accessibilityLabel = accessibilityLabel
         self.accessibilityValue = accessibilityValue
         self.action = action
@@ -44,6 +47,8 @@ struct TronCardRail<Item, ID: Hashable, Content: View>: View {
 
     var body: some View {
         ScrollView(.horizontal, showsIndicators: false) {
+            // Eager on purpose: a LazyHStack sizes the rail from the first
+            // cards it builds and clipped a taller card further along.
             HStack(alignment: .top, spacing: 8) {
                 ForEach(items, id: identity) { item in
                     Button { action(item) } label: {
@@ -54,6 +59,7 @@ struct TronCardRail<Item, ID: Hashable, Content: View>: View {
                             .contentShape(RoundedRectangle(cornerRadius: cornerRadius, style: .continuous))
                     }
                     .buttonStyle(.plain)
+                    .disabled(!isEnabled)
                     // Callers resolve the accent from their own theme, so the
                     // card never re-derives a different one from the ambient
                     // settings theme.

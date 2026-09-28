@@ -824,6 +824,31 @@ enum ModelPickerSectioning {
     }
 }
 
+/// Memoizes `ModelPickerSectioning.sections` by its inputs. A reference held
+/// in `@State` so a body evaluation can reuse the last result without writing
+/// observed state.
+@MainActor
+final class ModelPickerSectionsCache {
+    private struct Key: Equatable {
+        let models: [ModelSummary]
+        let recent: [RecentModelRef]
+        let selection: ModelRef?
+        let query: String
+    }
+
+    private var key: Key?
+    private var value: ModelPickerSectioning.Sections?
+
+    func sections(models: [ModelSummary], recent: [RecentModelRef], selection: ModelRef?, query: String) -> ModelPickerSectioning.Sections {
+        let next = Key(models: models, recent: recent, selection: selection, query: query)
+        if let value, key == next { return value }
+        let built = ModelPickerSectioning.sections(models: models, recent: recent, selection: selection, query: query)
+        key = next
+        value = built
+        return built
+    }
+}
+
 /// Picker-local spacing, type, and motion. Section headers share one size so
 /// Recent, Latest, and provider sections read as one hierarchy.
 @MainActor
@@ -845,6 +870,9 @@ enum ModelPickerLayout {
 struct ModelPicker: View {
     @Binding var selection: ModelRef?
     let models: [ModelSummary]
+    /// Non-nil while the owner cannot accept a model change (the Gateway
+    /// rejects it during session work); cards and rows show but do not select.
+    var selectionLockedReason: String? = nil
     @State private var search = ""
     @State private var showingSearch = false
     @State private var closingSearch = false
@@ -855,6 +883,14 @@ struct ModelPicker: View {
     @Environment(AppModel.self) private var model
     @State private var railsHeight: CGFloat = 0
     @State private var scrollTopInset: CGFloat = 0
+    /// Section order and default expansion follow the selection the picker
+    /// opened with, so a pick never reorders or resizes the list under the
+    /// finger. Captured on first appearance.
+    @State private var openingSelection: ModelRef??
+    /// The Recent list first shown, held while open so a Gateway change (a
+    /// message sent in any session) cannot reorder cards under the finger.
+    @State private var heldRecents: [RecentModelRef]?
+    @State private var sectionsCache = ModelPickerSectionsCache()
 
     var body: some View {
         // Sectioning sorts and groups the whole catalog; build it once per body
@@ -862,9 +898,14 @@ struct ModelPicker: View {
         let sections = self.sections
         ScrollView(.vertical, showsIndicators: true) {
             LazyVStack(alignment: .leading, spacing: 8) {
-                if !sections.recent.isEmpty || !sections.latest.isEmpty {
+                if !sections.recent.isEmpty || !sections.latest.isEmpty || selectionLockedReason != nil {
                     // One measured block: the sheet opens exactly this tall.
                     VStack(alignment: .leading, spacing: 8) {
+                        if let selectionLockedReason {
+                            Label(selectionLockedReason, systemImage: "lock.fill")
+                                .font(TronTypography.secondaryDescription)
+                                .foregroundStyle(Color.tronTextSecondary)
+                        }
                         if !sections.recent.isEmpty {
                             sectionTitle("Recent")
                             cardRail(sections.recent)
@@ -896,6 +937,8 @@ struct ModelPicker: View {
             .padding(.horizontal, 16)
             .padding(.top, ModelPickerLayout.contentTopPadding)
             .padding(.bottom, showingSearch ? 72 : 12)
+            // Rails leave and return with the query instead of snapping.
+            .animation(.snappy(duration: 0.18), value: search.isEmpty)
         }
         .safeAreaInset(edge: .bottom, spacing: 0) {
             if showingSearch {
@@ -936,12 +979,23 @@ struct ModelPicker: View {
             }
         }
         .interactiveDismissDisabled(showingSearch)
+        .onAppear {
+            if openingSelection == nil { openingSelection = .some(selection) }
+        }
+        .onChange(of: model.recentModels, initial: true) { _, recents in
+            // Adopt once: a first open before the warm read lands takes the
+            // first non-empty list; later changes wait for the next open.
+            if heldRecents == nil, !recents.isEmpty { heldRecents = recents }
+        }
         .task { await model.refreshRecentModels() }
         .task(id: closingSearch) {
             guard closingSearch else { return }
             try? await Task.sleep(for: .milliseconds(300))
             guard !Task.isCancelled else { return }
+            // Clearing the query with the bar keeps the rails and the bar in
+            // one transition instead of two layout changes.
             withAnimation(.snappy(duration: 0.18)) {
+                search = ""
                 showingSearch = false
                 closingSearch = false
             }
@@ -958,11 +1012,19 @@ struct ModelPicker: View {
             + ModelPickerLayout.railsBottomMargin
     }
 
+    /// The selection that orders sections and picks default expansion.
+    private var anchorSelection: ModelRef? {
+        openingSelection ?? selection
+    }
+
+    /// Rebuilt only when an input changes: the owning sheet re-renders the
+    /// picker for unrelated updates (usage, pending mutations), and sectioning
+    /// sorts the whole catalog.
     private var sections: ModelPickerSectioning.Sections {
-        ModelPickerSectioning.sections(
+        sectionsCache.sections(
             models: models,
-            recent: model.recentModels,
-            selection: selection,
+            recent: heldRecents ?? model.recentModels,
+            selection: anchorSelection,
             query: search
         )
     }
@@ -983,6 +1045,7 @@ struct ModelPicker: View {
             accent: accent,
             cornerRadius: 16,
             isSelected: { $0.ref == selection },
+            isEnabled: selectionLockedReason == nil,
             accessibilityLabel: ModelRailCard.accessibilityLabel,
             accessibilityValue: { $0.ref == selection ? "Selected" : "" },
             action: { select($0.ref) }
@@ -1035,7 +1098,9 @@ struct ModelPicker: View {
     }
 
     private func row(_ model: ModelSummary) -> some View {
-        Button { select(model.ref) } label: {
+        let summary = ModelCardFacts.rowSummary(model)
+        let identity = model.pickerIdentity
+        return Button { select(model.ref) } label: {
             HStack(spacing: 12) {
                 Image(systemName: selection == model.ref ? "checkmark.circle.fill" : "cpu")
                     .foregroundStyle(
@@ -1047,14 +1112,20 @@ struct ModelPicker: View {
                     Text(model.displayName)
                         .font(TronTypography.sans(size: TronTypography.sizeBody, weight: .semibold))
                         .foregroundStyle(Color.tronTextPrimary)
-                    if let summary = ModelCardFacts.rowSummary(model) {
+                    // One line each keeps rows a uniform height, so the lazy
+                    // stack's estimates for unbuilt rows stay right and the
+                    // scroll position does not jump when scrolling back.
+                    if let summary {
                         Text(summary)
                             .font(TronTypography.secondaryDescription)
                             .foregroundStyle(Color.tronTextPrimary)
+                            .lineLimit(1)
                     }
-                    Text(model.pickerIdentity)
+                    Text(identity)
                         .font(TronTypography.secondaryDescription)
                         .foregroundStyle(Color.tronTextSecondary)
+                        .lineLimit(1)
+                        .truncationMode(.middle)
                 }
                 Spacer(minLength: 8)
             }
@@ -1069,7 +1140,8 @@ struct ModelPicker: View {
             cornerRadius: 14,
             tintOpacity: selection == model.ref ? 0.18 : 0.08
         )
-        .accessibilityLabel([model.displayName, ModelCardFacts.rowSummary(model), model.pickerIdentity]
+        .disabled(selectionLockedReason != nil)
+        .accessibilityLabel([model.displayName, summary, identity]
             .compactMap { $0 }.joined(separator: ", "))
         .accessibilityValue(selection == model.ref ? "Selected" : "")
         #if HOSTED_TEST
@@ -1087,7 +1159,7 @@ struct ModelPicker: View {
         return providerExpansion.isExpanded(
             profileID: model.profiles.selected?.id,
             provider: provider,
-            selectedProvider: selection?.provider
+            selectedProvider: anchorSelection?.provider
         )
     }
 
@@ -1096,6 +1168,7 @@ struct ModelPicker: View {
     }
 
     private func select(_ ref: ModelRef) {
+        guard selectionLockedReason == nil else { return }
         selection = ref
     }
 
@@ -1116,7 +1189,6 @@ struct ModelPicker: View {
 
     private func closeSearch() {
         guard ModelPickerSearchPolicy.shouldClose(showingSearch: showingSearch, query: search), !closingSearch else { return }
-        search = ""
         closingSearch = true
     }
 }

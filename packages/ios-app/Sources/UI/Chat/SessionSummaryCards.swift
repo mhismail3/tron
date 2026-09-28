@@ -67,6 +67,8 @@ struct SessionWorkspaceSummaryRow: View {
 struct SessionModelSummaryCard<Controls: View, CompactAction: View>: View {
     @Binding var selection: ModelRef?
     let catalog: [ModelSummary]
+    /// Shown in the picker, which then declines picks the Gateway would reject.
+    var selectionLockedReason: String? = nil
     let automaticCompactionEnabled: Bool?
     @ViewBuilder let controls: () -> Controls
     @ViewBuilder let compactAction: () -> CompactAction
@@ -92,7 +94,11 @@ struct SessionModelSummaryCard<Controls: View, CompactAction: View>: View {
                     accent: .tronPurple,
                     detents: .contentFit
                 ) {
-                    ModelPicker(selection: $selection, models: catalog.filter(\.available))
+                    ModelPicker(
+                        selection: $selection,
+                        models: catalog.filter(\.available),
+                        selectionLockedReason: selectionLockedReason
+                    )
                         .tronNavigationTitle("Models", accent: .tronPurple)
                         .environment(\.tronSettingsSecondaryTextSizeAdjustment, 0)
                         .controlSize(.regular)

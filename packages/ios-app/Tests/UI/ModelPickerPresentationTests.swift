@@ -14,6 +14,8 @@ import XCTest
 /// checks do not establish physical-device visual acceptance.
 @MainActor
 final class ModelPickerPresentationTests: XCTestCase {
+    private var currentAppModel: AppModel?
+
     private static let catalog: [ModelSummary] = [
         summary("anthropic", "claude-opus-5", "Claude Opus 5", releaseDate: "2026-01-01"),
         summary("anthropic", "claude-opus-4-5", "Claude Opus 4.5 (latest)", releaseDate: "2025-11-01"),
@@ -148,6 +150,9 @@ final class ModelPickerPresentationTests: XCTestCase {
             field.text = "gpt"
             field.sendActions(for: .editingChanged)
             try await self.waitForMount("picker.row.openai/gpt-5", probe: probe, in: controller)
+            // Rails and non-matching sections animate out with the query.
+            try await self.waitForUnmount("picker.card.openai/gpt-5", probe: probe, in: controller)
+            try await self.waitForUnmount("picker.provider.anthropic", probe: probe, in: controller)
 
             XCTAssertFalse(probe.contains("picker.card.openai/gpt-5"),
                            "search replaces both rails: \(self.mountedProbeIDs(probe))")
@@ -193,6 +198,75 @@ final class ModelPickerPresentationTests: XCTestCase {
             XCTAssertEqual(controller.view.bounds.height, fit, accuracy: 2,
                            "the sheet did not open at the rails' height")
             self.capture(controller, name: "model-picker-fit-detent")
+        }
+    }
+
+    /// Picking a model from another provider must not reorder sections or flip
+    /// their default expansion under the finger: order and defaults follow the
+    /// selection the picker opened with.
+    func testSelectingAnotherProviderKeepsSectionsInPlace() async throws {
+        resetSharedExpansion()
+        defer { resetSharedExpansion() }
+        let probe = ModelPickerHostedProbe()
+        var selection: ModelRef? = ModelRef(provider: "anthropic", id: "claude-opus-5")
+        try await withPicker(
+            selection: Binding(get: { selection }, set: { selection = $0 }),
+            probe: probe,
+            models: Self.undatedCatalog,
+            recents: Self.recents
+        ) { controller in
+            try await self.waitForMount("picker.row.anthropic/claude-opus-5", probe: probe, in: controller)
+            XCTAssertTrue(probe.activate("picker.card.openai/gpt-5"))
+            try await Task.sleep(for: .milliseconds(450))
+            XCTAssertEqual(selection, ModelRef(provider: "openai", id: "gpt-5"))
+            XCTAssertTrue(probe.contains("picker.row.anthropic/claude-opus-5"),
+                          "the opening provider collapsed after picking another provider's model")
+            XCTAssertFalse(probe.contains("picker.row.openai/gpt-5"),
+                           "an untouched provider expanded after a pick")
+        }
+    }
+
+    /// A Recent rail that reorders or gains cards while open moves cards under
+    /// the finger; the picker holds the list it first showed.
+    func testRecentRailHoldsWhileOpen() async throws {
+        resetSharedExpansion()
+        defer { resetSharedExpansion() }
+        let probe = ModelPickerHostedProbe()
+        var selection: ModelRef? = ModelRef(provider: "anthropic", id: "claude-opus-5")
+        try await withPicker(
+            selection: Binding(get: { selection }, set: { selection = $0 }),
+            probe: probe,
+            models: Self.undatedCatalog,
+            recents: Self.recents
+        ) { controller in
+            try await self.waitForMount("picker.card.anthropic/claude-haiku-4-6", probe: probe, in: controller)
+            let model = try XCTUnwrap(self.currentAppModel)
+            model.installHostedRecentModels([
+                RecentModelRef(provider: "openai", id: "gpt-5-mini", lastUsedAt: "2026-03-01T00:00:00Z"),
+            ])
+            try await self.settle()
+            XCTAssertFalse(probe.contains("picker.card.openai/gpt-5-mini"),
+                           "a recent-list change rebuilt the open rail")
+            XCTAssertTrue(probe.contains("picker.card.anthropic/claude-haiku-4-6"))
+        }
+    }
+
+    /// The Gateway rejects model changes while a session works; the picker
+    /// must not accept a pick it cannot keep.
+    func testLockedPickerIgnoresSelection() async throws {
+        resetSharedExpansion()
+        defer { resetSharedExpansion() }
+        let probe = ModelPickerHostedProbe()
+        var selection: ModelRef? = ModelRef(provider: "anthropic", id: "claude-opus-5")
+        try await withPicker(
+            selection: Binding(get: { selection }, set: { selection = $0 }),
+            probe: probe,
+            selectionLockedReason: "Model changes are available when the session is idle."
+        ) { _ in
+            try await self.settle()
+            _ = probe.activate("picker.card.openai/gpt-5")
+            try await self.settle()
+            XCTAssertEqual(selection, ModelRef(provider: "anthropic", id: "claude-opus-5"))
         }
     }
 
@@ -247,6 +321,7 @@ final class ModelPickerPresentationTests: XCTestCase {
         models: [ModelSummary] = ModelPickerPresentationTests.catalog,
         recents: [RecentModelRef] = ModelPickerPresentationTests.recents,
         detents: Set<PresentationDetent>? = [.large],
+        selectionLockedReason: String? = nil,
         inspect: (UIViewController) async throws -> Void
     ) async throws {
         let suiteName = "model-picker-presentation.\(UUID().uuidString)"
@@ -263,8 +338,17 @@ final class ModelPickerPresentationTests: XCTestCase {
         )
         model.installHostedRecentModels(recents)
         XCTAssertNil(model.profiles.selected, "the fixture device is unpaired, so the preference key is the unpaired one")
+        currentAppModel = model
+        defer { currentAppModel = nil }
+        // The app owns selection as SwiftUI state, so a pick re-renders the
+        // picker; a plain captured variable would hide selection-driven layout.
         let content = NavigationStack {
-            ModelPicker(selection: selection, models: models)
+            ModelPickerSelectionOwner(
+                initial: selection.wrappedValue,
+                sink: { selection.wrappedValue = $0 },
+                models: models,
+                selectionLockedReason: selectionLockedReason
+            )
         }
         .tronNavigationTitle("Models", accent: .tronPurple)
         .environment(model)
@@ -397,6 +481,25 @@ final class ModelPickerPresentationTests: XCTestCase {
 }
 
 @MainActor
+private struct ModelPickerSelectionOwner: View {
+    @State private var selection: ModelRef?
+    let sink: (ModelRef?) -> Void
+    let models: [ModelSummary]
+    let selectionLockedReason: String?
+
+    init(initial: ModelRef?, sink: @escaping (ModelRef?) -> Void, models: [ModelSummary], selectionLockedReason: String?) {
+        _selection = State(initialValue: initial)
+        self.sink = sink
+        self.models = models
+        self.selectionLockedReason = selectionLockedReason
+    }
+
+    var body: some View {
+        ModelPicker(selection: $selection, models: models, selectionLockedReason: selectionLockedReason)
+            .onChange(of: selection) { _, value in sink(value) }
+    }
+}
+
 private struct ModelPickerSheetFixture<Content: View>: View {
     let content: Content
     /// nil applies the production content-fit policy.

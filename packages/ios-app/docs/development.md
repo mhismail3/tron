@@ -267,7 +267,17 @@ edge is expected glass behavior rather than a layout overlap. Each `ModelRailCar
 card (138-point minimum height; Dynamic Type grows it) showing provider, model name, context
 window, input/output price per million tokens from the Gateway's optional `cost`, and the release
 month ("Sep 2026"); an absent fact is omitted, never shown as zero or as a placeholder date
-(`ModelCardFactsTests`). Recent, Latest, and provider headers share one 16-point header size. Manage Session and New
+(`ModelCardFactsTests`). Recent, Latest, and provider headers share one 16-point header size. Section order and default expansion follow the selection the picker
+opened with, and the Recent list first shown is held while it stays open, so a pick or a Gateway
+recency change never reorders or resizes the list under the finger
+(`testSelectingAnotherProviderKeepsSectionsInPlace`, `testRecentRailHoldsWhileOpen`). The
+Recent list warms with each catalog load, and an unchanged read is not written, so an open picker
+does not rebuild mid-presentation. `ModelPickerSectionsCache` memoizes sectioning by its inputs
+because the owning sheet re-renders the picker for unrelated updates. Provider rows keep their
+facts and identity lines to one line each (identity truncates in the middle) so the lazy stack's
+height estimates stay exact. Manage Session passes a lock reason while the session is active,
+because the Gateway rejects model changes then; the picker shows it and declines picks
+(`testLockedPickerIgnoresSelection`). Search opens and closes in one animated transition. Manage Session and New
 Session open the picker at a content-fit detent (`tronContentFitDetents`): the picker publishes
 `TronSheetFitHeightKey`, the visible height of its toolbar plus both rails, built only from
 scroll-invariant measurements, and the sheet root subtracts the device's fixed bottom inset
