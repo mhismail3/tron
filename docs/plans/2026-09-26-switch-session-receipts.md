@@ -2,7 +2,7 @@
 
 - **Started:** 2026-09-26
 - **Status:** Active
-- **Last updated:** 2026-09-27, approved
+- **Last updated:** 2026-09-27, S-1 claimed
 - **Goal:** A session reached through an extension's `ctx.switchSession` opens and projects normally, and the switching command's invocation receipts belong to exactly one session.
 
 ## Goal and constraints
@@ -41,7 +41,7 @@ Measured 2026-09-26:
 
 | ID | Status | Scope | Depends on | Owner |
 | --- | --- | --- | --- | --- |
-| S-1 | Needs scoping | Options for receipt ownership across a `preserve` rebind: stamp continuations with the origin session, settle the invocation before the switch, or re-key receipts. Present them to the user | none | |
+| S-1 | Claimed | Options for receipt ownership across a `preserve` rebind: stamp continuations with the origin session, settle the invocation before the switch, or re-key receipts. Present them to the user | none | session 01a0e513, 2026-09-27 |
 | S-2 | Needs scoping | Implement the chosen option and publish a snapshot on the identity change, with a real `switchSession` end-to-end test that opens the target | S-1 | |
 
 ## Handoff log
