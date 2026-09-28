@@ -11,24 +11,37 @@ struct ModelRailCard: View {
 
     static let width: CGFloat = 138
     /// A minimum, so larger Dynamic Type grows the card instead of clipping it.
-    /// Sized so both rails fit a medium-detent Manage Session sheet.
+    /// The picker's opening sheet height follows the measured rails, not this.
     static let minimumHeight: CGFloat = 138
-    private static let checkmarkSize: CGFloat = 16
+    private static let checkmarkSize: CGFloat = 14
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            Text(model.displayProviderName)
-                .font(TronTypography.sans(size: TronTypography.sizeCaption, weight: .semibold))
-                .foregroundStyle(Color.tronTextSecondary)
-                .lineLimit(1)
-                // Room for the overlaid checkmark, reserved in both states.
-                .padding(.trailing, Self.checkmarkSize + 4)
+            // The checkmark slot has a fixed size in both states, so selecting
+            // a card changes no layout (`ModelRailCardLayoutTests`). It is
+            // centred on the provider line, clear of the model name below.
+            HStack(alignment: .center, spacing: 4) {
+                Text(model.displayProviderName)
+                    .font(TronTypography.sans(size: TronTypography.sizeCaption, weight: .semibold))
+                    .foregroundStyle(Color.tronTextSecondary)
+                    .lineLimit(1)
+                Spacer(minLength: 0)
+                Color.clear
+                    .frame(width: Self.checkmarkSize, height: Self.checkmarkSize)
+                    .overlay {
+                        if let selectionAccent {
+                            Image(systemName: "checkmark.circle.fill")
+                                .font(.system(size: Self.checkmarkSize, weight: .semibold))
+                                .foregroundStyle(selectionAccent)
+                        }
+                    }
+            }
             Text(model.displayName)
                 .font(TronTypography.sans(size: TronTypography.sizeBodyLG, weight: .semibold))
                 .foregroundStyle(Color.tronTextPrimary)
                 .lineLimit(3)
                 .fixedSize(horizontal: false, vertical: true)
-                .padding(.top, 3)
+                .padding(.top, 5)
             Spacer(minLength: 6)
             VStack(alignment: .leading, spacing: 3) {
                 if let context = ModelCardFacts.contextLabel(model.contextWindow) {
@@ -55,16 +68,7 @@ struct ModelRailCard: View {
         .padding(.vertical, 8)
         .frame(width: Self.width, alignment: .topLeading)
         .frame(minHeight: Self.minimumHeight, alignment: .topLeading)
-        // An overlay never participates in layout, so selecting a card cannot
-        // move its name or facts (`ModelRailCardLayoutTests`).
-        .overlay(alignment: .topTrailing) {
-            if let selectionAccent {
-                Image(systemName: "checkmark.circle.fill")
-                    .font(.system(size: Self.checkmarkSize, weight: .semibold))
-                    .foregroundStyle(selectionAccent)
-                    .padding([.top, .trailing], 8)
-            }
-        }
+
     }
 
     private func fact(value: String, caption: String) -> some View {

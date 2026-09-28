@@ -830,6 +830,10 @@ enum ModelPickerSectioning {
 enum ModelPickerLayout {
     static let headerFont = TronTypography.sans(size: TronTypography.sizeTitle, weight: .semibold)
     static let sectionGap: CGFloat = 10
+    static let contentTopPadding: CGFloat = 12
+    /// Below the Latest rail at the opening detent: clears the card shadows and
+    /// the sheet's rounded bottom corners, and stays short of the next header.
+    static let railsBottomMargin: CGFloat = 14
     /// Rows drop in from their header and fade out quickly on collapse, so a
     /// leaving row is gone before the content below slides over it.
     static let rowTransition = AnyTransition.asymmetric(
@@ -849,6 +853,8 @@ struct ModelPicker: View {
     @State private var providerExpansion = ModelProviderExpansionStore.shared
     @Environment(\.tronSettingsVisualTheme) private var settingsTheme
     @Environment(AppModel.self) private var model
+    @State private var railsHeight: CGFloat = 0
+    @State private var scrollTopInset: CGFloat = 0
 
     var body: some View {
         // Sectioning sorts and groups the whole catalog; build it once per body
@@ -856,14 +862,20 @@ struct ModelPicker: View {
         let sections = self.sections
         ScrollView(.vertical, showsIndicators: true) {
             LazyVStack(alignment: .leading, spacing: 8) {
-                if !sections.recent.isEmpty {
-                    sectionTitle("Recent")
-                    cardRail(sections.recent)
-                }
-                if !sections.latest.isEmpty {
-                    sectionTitle("Latest")
-                        .padding(.top, sections.recent.isEmpty ? 0 : ModelPickerLayout.sectionGap)
-                    cardRail(sections.latest)
+                if !sections.recent.isEmpty || !sections.latest.isEmpty {
+                    // One measured block: the sheet opens exactly this tall.
+                    VStack(alignment: .leading, spacing: 8) {
+                        if !sections.recent.isEmpty {
+                            sectionTitle("Recent")
+                            cardRail(sections.recent)
+                        }
+                        if !sections.latest.isEmpty {
+                            sectionTitle("Latest")
+                                .padding(.top, sections.recent.isEmpty ? 0 : ModelPickerLayout.sectionGap)
+                            cardRail(sections.latest)
+                        }
+                    }
+                    .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { railsHeight = $0 }
                 }
                 // Header and rows are separate lazy children, so a long expanded
                 // provider builds only the rows on screen and its neighbours
@@ -882,7 +894,7 @@ struct ModelPicker: View {
                 }
             }
             .padding(.horizontal, 16)
-            .padding(.top, 12)
+            .padding(.top, ModelPickerLayout.contentTopPadding)
             .padding(.bottom, showingSearch ? 72 : 12)
         }
         .safeAreaInset(edge: .bottom, spacing: 0) {
@@ -902,6 +914,11 @@ struct ModelPicker: View {
             }
         }
         .scrollDismissesKeyboard(.interactively)
+        // Scroll-invariant: the bar inset, not the current offset.
+        .onScrollGeometryChange(for: CGFloat.self) { $0.contentInsets.top } action: { _, inset in
+            scrollTopInset = inset
+        }
+        .preference(key: TronSheetFitHeightKey.self, value: fitHeight)
         .tronScrollEdgeChrome()
         .toolbar {
             ToolbarItem(placement: .topBarLeading) {
@@ -929,6 +946,16 @@ struct ModelPicker: View {
                 closingSearch = false
             }
         }
+    }
+
+    /// Visible sheet height, from its top edge, that shows the toolbar and both
+    /// rails and stops before the first provider header. The scroll view spans
+    /// the sheet from its top edge (content scrolls under the toolbar), so the
+    /// bar inset locates the content. Built only from scroll-invariant inputs.
+    private var fitHeight: CGFloat? {
+        guard railsHeight > 0, scrollTopInset > 0, !showingSearch else { return nil }
+        return scrollTopInset + ModelPickerLayout.contentTopPadding + railsHeight
+            + ModelPickerLayout.railsBottomMargin
     }
 
     private var sections: ModelPickerSectioning.Sections {

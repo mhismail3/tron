@@ -264,12 +264,18 @@ as a collapsible section. Both rails are the shared `TronCardRail`, so a rail an
 one styling owner. Picker cards use the same interactive tinted Liquid Glass as the New Session
 chips; glass lenses content just past its edge, so a faint echo of the rail title at a card's top
 edge is expected glass behavior rather than a layout overlap. Each `ModelRailCard` is a portrait
-card (138-point minimum height, sized so both rails fit Manage Session's medium detent, which
-`testMediumDetentCapturesBothRails` captures; Dynamic Type still grows it) showing provider, model name, context
+card (138-point minimum height; Dynamic Type grows it) showing provider, model name, context
 window, input/output price per million tokens from the Gateway's optional `cost`, and the release
 month ("Sep 2026"); an absent fact is omitted, never shown as zero or as a placeholder date
-(`ModelCardFactsTests`). Recent, Latest, and provider headers share one 16-point header size. The selected checkmark is an overlay outside
-the card's layout, so selecting a card moves nothing else (`ModelRailCardLayoutTests` compares
+(`ModelCardFactsTests`). Recent, Latest, and provider headers share one 16-point header size. Manage Session and New
+Session open the picker at a content-fit detent (`tronContentFitDetents`): the picker publishes
+`TronSheetFitHeightKey`, the visible height of its toolbar plus both rails, built only from
+scroll-invariant measurements, and the sheet root subtracts the device's fixed bottom inset
+because a custom detent excludes it. The sheet's own inset changes while it floats in, and
+publishing from it produced heights the settled sheet ignored. It can expand to large.
+`testOpeningDetentFitsBothRails` proves the sheet opens at the published height through the
+NavigationStack and retains the capture. The selected checkmark sits in a fixed-size
+slot centred on the provider line, so selecting a card moves nothing else (`ModelRailCardLayoutTests` compares
 rendered pixels). The whole card, including its empty
 space, is the tap target: the rail gives each plain button label the card's content shape.
 Recent order and membership belong to the Gateway's bounded recent-model history read through

@@ -221,7 +221,7 @@ struct NewSessionSheet: View {
                 }
                 .tronTopBlur(.sheet)
                 .tronSettingsVisualTheme(accent: .tronPurple)
-                .presentationDetents([.medium, .large])
+                .tronContentFitDetents()
                 .presentationDragIndicator(.hidden)
             }
             .task(id: PresentationActivityTaskID(

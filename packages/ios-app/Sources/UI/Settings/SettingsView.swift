@@ -196,6 +196,22 @@ struct SettingsView: View {
     }
 }
 
+enum TronSheetDetentPolicy {
+    case fixed(Set<PresentationDetent>)
+    case contentFit
+}
+
+private struct TronSheetDetentPolicyModifier: ViewModifier {
+    let policy: TronSheetDetentPolicy
+
+    func body(content: Content) -> some View {
+        switch policy {
+        case .fixed(let detents): content.presentationDetents(detents)
+        case .contentFit: content.tronContentFitDetents()
+        }
+    }
+}
+
 struct TronProgressiveSheetLink<Label: View, Destination: View>: View {
     let accessibilityLabel: String
     let identity: String
@@ -204,9 +220,9 @@ struct TronProgressiveSheetLink<Label: View, Destination: View>: View {
     let destination: () -> Destination
     let label: Label
     let accent: Color?
-    /// Settings destinations open full height; a picker launched from a
-    /// medium-detent sheet (Manage Session) passes `[.medium, .large]`.
-    let detents: Set<PresentationDetent>
+    /// Settings destinations open full height; a destination that publishes
+    /// `TronSheetFitHeightKey` (the model picker) passes `.contentFit`.
+    let detents: TronSheetDetentPolicy
     @State private var isPresented = false
     @Environment(\.tronSettingsVisualTheme) private var inheritedTheme
 
@@ -214,7 +230,7 @@ struct TronProgressiveSheetLink<Label: View, Destination: View>: View {
         accessibilityLabel: String,
         identity: String? = nil,
         accent: Color? = nil,
-        detents: Set<PresentationDetent> = [.large],
+        detents: TronSheetDetentPolicy = .fixed([.large]),
         @ViewBuilder destination: @escaping () -> Destination,
         @ViewBuilder label: () -> Label
     ) {
@@ -250,7 +266,7 @@ struct TronProgressiveSheetLink<Label: View, Destination: View>: View {
                 .tronTopBlur(.sheet)
                 .tronPresentation()
                 .tronSettingsLayout()
-                .presentationDetents(detents)
+                .modifier(TronSheetDetentPolicyModifier(policy: detents))
                 .presentationDragIndicator(.hidden)
             }
     }

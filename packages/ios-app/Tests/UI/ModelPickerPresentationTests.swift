@@ -169,9 +169,12 @@ final class ModelPickerPresentationTests: XCTestCase {
         }
     }
 
-    /// Manage Session opens the picker at medium. Retained capture for checking
-    /// that both rails fit that detent; mounting alone cannot prove visibility.
-    func testMediumDetentCapturesBothRails() async throws {
+    /// Manage Session and New Session open the picker at a content-fit detent:
+    /// exactly the toolbar and both rails, stopping before the first provider
+    /// header. The picker measures inside a NavigationStack and the detent is
+    /// applied outside it, so the sheet must actually open at the published
+    /// height. The retained capture is the visual check.
+    func testOpeningDetentFitsBothRails() async throws {
         resetSharedExpansion()
         defer { resetSharedExpansion() }
         let probe = ModelPickerHostedProbe()
@@ -180,11 +183,16 @@ final class ModelPickerPresentationTests: XCTestCase {
             selection: Binding(get: { selection }, set: { selection = $0 }),
             probe: probe,
             scheme: .dark,
-            detents: [.medium]
+            detents: nil
         ) { controller in
             XCTAssertTrue(probe.contains("picker.card.openai/gpt-5"))
-            try await Task.sleep(for: .milliseconds(300))
-            self.capture(controller, name: "model-picker-medium-detent")
+            try await Task.sleep(for: .milliseconds(500))
+            let fit = try XCTUnwrap(ModelPickerSheetFixture<EmptyView>.publishedFitHeight,
+                                    "the picker never published a fit height")
+            // The published value is the visible sheet height the rails need.
+            XCTAssertEqual(controller.view.bounds.height, fit, accuracy: 2,
+                           "the sheet did not open at the rails' height")
+            self.capture(controller, name: "model-picker-fit-detent")
         }
     }
 
@@ -238,7 +246,7 @@ final class ModelPickerPresentationTests: XCTestCase {
         scheme: ColorScheme = .light,
         models: [ModelSummary] = ModelPickerPresentationTests.catalog,
         recents: [RecentModelRef] = ModelPickerPresentationTests.recents,
-        detents: Set<PresentationDetent> = [.large],
+        detents: Set<PresentationDetent>? = [.large],
         inspect: (UIViewController) async throws -> Void
     ) async throws {
         let suiteName = "model-picker-presentation.\(UUID().uuidString)"
@@ -279,7 +287,7 @@ final class ModelPickerPresentationTests: XCTestCase {
 
     private func withSheet<Sheet: View>(
         _ sheet: Sheet,
-        detents: Set<PresentationDetent>,
+        detents: Set<PresentationDetent>?,
         inspect: (UIViewController) async throws -> Void
     ) async throws {
         let scene = try XCTUnwrap(UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }.first)
@@ -391,12 +399,30 @@ final class ModelPickerPresentationTests: XCTestCase {
 @MainActor
 private struct ModelPickerSheetFixture<Content: View>: View {
     let content: Content
-    var detents: Set<PresentationDetent> = [.large]
+    /// nil applies the production content-fit policy.
+    var detents: Set<PresentationDetent>? = [.large]
     @State private var presented = true
+    /// Latest height the picker published through the real preference path.
+    nonisolated(unsafe) static var publishedFitHeight: CGFloat? {
+        get { FitHeightRecord.value }
+        set { FitHeightRecord.value = newValue }
+    }
 
     var body: some View {
         Color.tronBackground.sheet(isPresented: $presented) {
-            content.presentationDetents(detents)
+            if let detents {
+                content.presentationDetents(detents)
+            } else {
+                content
+                    .onPreferenceChange(TronSheetFitHeightKey.self) { value in
+                        if let value { FitHeightRecord.value = value.rounded() }
+                    }
+                    .tronContentFitDetents()
+            }
         }
     }
+}
+
+private enum FitHeightRecord {
+    nonisolated(unsafe) static var value: CGFloat?
 }

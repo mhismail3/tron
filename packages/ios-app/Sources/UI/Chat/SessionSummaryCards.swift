@@ -90,7 +90,7 @@ struct SessionModelSummaryCard<Controls: View, CompactAction: View>: View {
                 TronProgressiveSheetLink(
                     accessibilityLabel: "Switch Model",
                     accent: .tronPurple,
-                    detents: [.medium, .large]
+                    detents: .contentFit
                 ) {
                     ModelPicker(selection: $selection, models: catalog.filter(\.available))
                         .tronNavigationTitle("Models", accent: .tronPurple)
