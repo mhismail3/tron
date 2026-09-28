@@ -8585,7 +8585,12 @@ wait).
     `GatewayDiagnosticsServiceTests` + `ChatInteractionTraceTests` 49/49 twice
     (`20260928T212300Z-run.CNDzIZ`, `20260928T212334Z-run.6281OA`), 11.074 s and
     10.997 s total, with `byteEnvelopeReservesTheChatTrace` at 0.072 s and
-    0.073 s (it was 8.646-10.297 s in every retained bundle).
+    0.073 s (it was 8.646-10.297 s in every retained bundle). The same four
+    suites pass twice on the merged branch at this commit on lane CT22
+    (`20260928T213843Z-run.aIjlev`, `20260928T213916Z-run.CdUiY8`: 49/49, 10.961 s
+    and 11.102 s, byte-envelope 0.080 s and 0.074 s); the default lane was held
+    by another worktree's run, so the paired-on-default-lane re-run is the only
+    one not repeated after the merge.
   - Flake context: the same pair passed on the shared default lane before the
     fix (`20260928T211803Z-run.AA7EP2`, 21/21, byte-envelope 8.646 s), and on
     lane CT22 (21/21 and 83/83). All six c-1 "signal kill" failures fall between
@@ -8599,12 +8604,6 @@ wait).
     a re-run (the first attempt read 257/258 from one unrelated flake),
     `npx tsc --noEmit -p .` clean.
 - What is left (the next agent, not this one):
-  0. The post-merge iOS re-run is owed: the default-lane lease was held by
-     another worktree's build from 21:47 UTC, so the two green runs above are on
-     the pre-merge revision plus this fix. `hardening/integration` does not touch
-     `IOSClientDiagnostics.swift`, `GatewayLogExportTests` or
-     `GatewayConnectionEpisodeRecorderTests`, and the merge only added the
-     gateway gate to this branch.
   1. The recorder suite's `blockedMainActorIsMeasuredAndReported` is now the
      process's only multi-second test (10 s of `Thread.sleep` wall clock, T-2's
      `mainStallTestBlock` twice). Unlike the fixed export it does not grow with
