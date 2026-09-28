@@ -691,8 +691,12 @@ struct DashboardStateOwnerTests {
             #expect(factory.requests.count == 5)
             try await Task.sleep(for: .milliseconds(20))
 
-            // A path return resumes the parked escalated wait at once, without
-            // advancing the clock through it.
+            // The network goes away and comes back. The unsatisfied hint parks
+            // the escalated wait; the return hint is a real path change, so it
+            // starts the next attempt at once, without advancing the clock
+            // through it.
+            try await clock.waitUntilSleeping(count: 1)
+            pool.notePathHint(profileID: profile.id, satisfied: false)
             pool.notePathHint(profileID: profile.id, satisfied: true)
             try await Self.waitUntil { factory.requests.count == 6 }
             try await Task.sleep(for: .milliseconds(20))
@@ -703,6 +707,125 @@ struct DashboardStateOwnerTests {
             await pool.waitForRetirement()
             pool.reconcile(profiles: [profile], selectedProfileID: nil, token: { _ in "token" })
             try await Self.waitUntil { factory.requests.count == 7 }
+
+            pool.retire()
+            await pool.waitForRetirement()
+        }
+    }
+
+    @MainActor
+    @Test("a lost network parks a pool retry and the path return resumes it")
+    func lostNetworkParksPoolRetryUntilPathReturns() async throws {
+        try await withTestWatchdog(timeout: .seconds(20)) { @MainActor in
+            let profile = GatewayProfile(
+                id: "remote", label: "Remote", host: "remote.test", port: 9_847,
+                machineId: "remote-runtime", machineGroupID: "remote-machine", deviceId: "device"
+            )
+            let sockets = (0..<4).map { _ in ScriptedGatewaySocket() }
+            let factory = ScriptedGatewaySocketFactory(sockets: sockets)
+            let clock = ManualClock()
+            let (log, cleanup) = Self.makeAppLog()
+            defer { cleanup() }
+            let pool = DashboardGatewayConnectionPool(
+                clientFactory: { GatewayClient(socketFactory: factory.factory, clock: clock.clock) },
+                clock: clock.clock,
+                appLog: log
+            )
+            await sockets[0].failNextSend(GatewayFailure(
+                code: "timeout", message: "synthetic transport-open failure", retryable: true, details: nil
+            ))
+            pool.reconcile(profiles: [profile], selectedProfileID: nil, token: { _ in "token" })
+            _ = try await Self.waitForRecords(log, event: "gateway.attempt", count: 1)
+
+            // Attempt 2 is in flight — its transport opened and its hello was
+            // sent, so the entry holds no wait to cancel — when the network goes
+            // away. Nothing cancels the retry attempt 2 is about to schedule.
+            _ = try await Self.secondsUntilRequest(2, clock: clock, factory: factory, limit: 40)
+            try await sockets[1].waitUntilSent(count: 1)
+            pool.notePathHint(profileID: profile.id, satisfied: false)
+
+            // Attempt 2 ends on the handshake deadline, and its wait runs out
+            // while the network is still gone.
+            var ticks = 0
+            while await Self.recordCount(log, event: "gateway.attempt") < 2, ticks < 40 {
+                clock.advance(by: .seconds(1))
+                ticks += 1
+                for _ in 0..<8 { await Task.yield() }
+                try await Task.sleep(for: .milliseconds(1))
+            }
+            #expect(ticks < 40, "attempt 2 never finished")
+            for _ in 0..<10 {
+                clock.advance(by: .seconds(1))
+                for _ in 0..<8 { await Task.yield() }
+                try await Task.sleep(for: .milliseconds(1))
+            }
+            #expect(factory.requests.count == 2, "no attempt may start with the path gone")
+
+            // The parked entry is named as such: the watchdog must not read a
+            // returned loop's task as recovery still progressing.
+            for _ in 0..<30 {
+                clock.advance(by: GatewayConnectionEpisodeRecorder.watchdogInterval)
+                for _ in 0..<8 { await Task.yield() }
+                try await Task.sleep(for: .milliseconds(1))
+            }
+            let stalls = try await Self.waitForRecords(log, event: "reconnect.stalled", count: 1)
+            #expect(stalls.count == 1, "the parked entry must be named once")
+            #expect(
+                stalls.first?.message.contains("guard=pathUnsatisfied") == true,
+                "stalls: \(stalls.map(\.message))"
+            )
+
+            // A real path return retries at once, without advancing the clock.
+            pool.notePathHint(profileID: profile.id, satisfied: true)
+            try await Self.waitUntil { factory.requests.count == 3 }
+
+            pool.retire()
+            await pool.waitForRetirement()
+        }
+    }
+
+    @MainActor
+    @Test("a repeated satisfied path notice does not cut a pool profile's escalated backoff")
+    func satisfiedPathNoticeDoesNotCutPoolBackoff() async throws {
+        try await withTestWatchdog(timeout: .seconds(20)) { @MainActor in
+            let profile = GatewayProfile(
+                id: "remote", label: "Remote", host: "remote.test", port: 9_847,
+                machineId: "remote-runtime", machineGroupID: "remote-machine", deviceId: "device"
+            )
+            let sockets = (0..<8).map { _ in ScriptedGatewaySocket() }
+            let factory = ScriptedGatewaySocketFactory(sockets: sockets)
+            let clock = ManualClock()
+            let pool = DashboardGatewayConnectionPool(
+                clientFactory: { GatewayClient(socketFactory: factory.factory, clock: clock.clock) },
+                clock: clock.clock
+            )
+            for socket in sockets {
+                await socket.failNextSend(GatewayFailure(
+                    code: "timeout", message: "synthetic transport-open failure", retryable: true, details: nil
+                ))
+            }
+            pool.reconcile(profiles: [profile], selectedProfileID: nil, token: { _ in "token" })
+            _ = try await Self.secondsUntilRequest(1, clock: clock, factory: factory, limit: 40)
+            for attempt in 1...4 {
+                _ = try await Self.secondsUntilRequest(
+                    attempt + 1, clock: clock, factory: factory, limit: 320
+                )
+            }
+            #expect(factory.requests.count == 5)
+            try await Task.sleep(for: .milliseconds(20))
+            try await clock.waitUntilSleeping(count: 1)
+
+            // A scene activation, and every network-monitor update while the
+            // path is available, arrives as a satisfied notice on an unchanged
+            // path. The escalated wait it did not change must stand: pumping the
+            // clock through the next ten seconds may not produce an attempt.
+            pool.notePathHint(profileID: profile.id, satisfied: true)
+            for _ in 0..<10 {
+                clock.advance(by: .seconds(1))
+                for _ in 0..<8 { await Task.yield() }
+                try await Task.sleep(for: .milliseconds(1))
+            }
+            #expect(factory.requests.count == 5, "the backoff was cut short")
 
             pool.retire()
             await pool.waitForRetirement()
@@ -739,8 +862,10 @@ struct DashboardStateOwnerTests {
             pool.reconcile(profiles: [profile], selectedProfileID: nil, token: { _ in "token" })
             try await sockets[0].waitUntilSent(count: 2)
 
-            // The admitted connection drops, and the port stays closed.
-            await sockets[0].enqueue(Data(#"{"type":"event","topic":"transport.disconnected","payload":{"reason":"disconnected"}}"#.utf8))
+            // The admitted connection drops — the client's own receive failure
+            // creates the disconnect event, as a real transport loss does — and
+            // the port stays closed.
+            await sockets[0].failPendingReceivers(URLError(.networkConnectionLost))
             try await Self.waitUntil { pool.state(for: profile.id) == .reconnecting }
             #expect(factory.requests.count == 1)
 
@@ -932,8 +1057,11 @@ struct DashboardStateOwnerTests {
     }
 
     @MainActor
-    @Test("retiring the pool ends an open pool episode as a background retirement")
-    func retiringPoolEndsOpenEpisode() async throws {
+    @Test(
+        "retiring the pool names why the open episode ended",
+        arguments: [(GatewayEpisodeEnd.background, "endedBy=background"), (.stopped, "endedBy=stopped")]
+    )
+    func retiringPoolNamesItsEndedBy(endedBy: GatewayEpisodeEnd, expected: String) async throws {
         try await withTestWatchdog(timeout: .seconds(20)) { @MainActor in
             let profile = GatewayProfile(
                 id: "remote", label: "Remote", host: "remote.test", port: 9_847,
@@ -955,14 +1083,15 @@ struct DashboardStateOwnerTests {
             pool.reconcile(profiles: [profile], selectedProfileID: nil, token: { _ in "token" })
             _ = try await Self.waitForRecords(log, event: "gateway.attempt", count: 1)
 
-            // Scene retirement parks every pool entry, so the episode it was
-            // explaining ends here rather than spanning the suspension.
-            pool.retire()
+            // Scene retirement parks every pool entry while a projection
+            // retirement (a profile switch, removal, pairing or teardown) stops
+            // it; the episode it was explaining ends for that reason.
+            pool.retire(endedBy: endedBy)
             await pool.waitForRetirement()
             let episodes = try await Self.waitForRecords(log, event: "connection.episode", count: 1)
             #expect(episodes[0].profileID == profile.id)
-            #expect(episodes[0].outcome == "background")
-            #expect(episodes[0].message.contains("endedBy=background"))
+            #expect(episodes[0].outcome == endedBy.rawValue)
+            #expect(episodes[0].message.contains(expected))
             #expect(episodes[0].message.contains("attempts=1"))
             #expect(episodes[0].message.contains("causes=timeout"))
         }

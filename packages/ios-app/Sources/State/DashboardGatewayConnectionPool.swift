@@ -173,12 +173,17 @@ final class DashboardGatewayConnectionPool {
         }
     }
 
-    /// Scene retirement: every entry ends and the pool holds nothing until the
-    /// next `reconcile`, which starts fresh entries and connects at once. That
-    /// is why a real foreground cycle needs no backoff acceleration here.
-    func retire() {
+    /// Retires every entry: the pool holds nothing until the next `reconcile`,
+    /// which starts fresh entries and connects at once. That is why a real
+    /// foreground cycle needs no backoff acceleration here.
+    ///
+    /// `endedBy` names who ended the open episodes. The scene suspension that
+    /// parks every pool entry is a `background` retirement; the projection
+    /// retirements of a profile switch, removal, pairing and teardown `stopped`
+    /// them, exactly as a `stop` for a removed profile does.
+    func retire(endedBy: GatewayEpisodeEnd = .background) {
         generation &+= 1
-        for profileID in Array(entries.keys) { stop(profileID: profileID, endedBy: .background) }
+        for profileID in Array(entries.keys) { stop(profileID: profileID, endedBy: endedBy) }
     }
 
     func waitForRetirement() async {
@@ -646,8 +651,15 @@ final class DashboardGatewayConnectionPool {
 
     /// Path hints are advisory per profile. A satisfied return hint can revive
     /// a parked secondary entry even when its previous callback was missed.
+    ///
+    /// Only a real path change — unsatisfied to satisfied — ends a wait early.
+    /// `AppModel.lifecycleNotePathHint` forwards every monitor update while the
+    /// network is available and every scene activation, so reading any
+    /// satisfied notice as a change would cut a five-minute pool backoff short
+    /// on a scene resume and make the cap a lie.
     func notePathHint(profileID: String, satisfied: Bool) {
         guard var entry = entries[profileID] else { return }
+        let pathChanged = entry.networkPathSatisfied != satisfied
         entry.networkPathSatisfied = satisfied
         entries[profileID] = entry
         guard !nonRetryableProfiles.contains(profileID), entry.connectionID == nil,
@@ -662,9 +674,12 @@ final class DashboardGatewayConnectionPool {
             return
         }
         if entry.reconnectTask != nil, entry.reconnectWaiting {
-            entry.reconnectSchedule.accelerate()
+            if pathChanged { entry.reconnectSchedule.accelerate() }
             return
         }
+        // No loop holds this entry: it was stopped or parked while the path was
+        // gone (or before it was ever up), so a satisfied hint restarts it at
+        // once rather than waiting for a wait that does not exist.
         scheduleReconnect(profileID: profileID, generation: entry.generation, immediate: true)
     }
 
@@ -703,12 +718,16 @@ final class DashboardGatewayConnectionPool {
         let task = Task { @MainActor [weak self, clock] in
             // Whatever ends this loop — success, a state mismatch that returns
             // early, a path park or cancellation — a later drop must not read a
-            // dead loop's marker as an attempt in flight. The identity check
-            // keeps a replaced loop from clearing its successor's marker.
+            // dead loop's marker as an attempt in flight, and `scheduleReconnect`
+            // must not read a dead loop as a pending task and refuse to start
+            // its successor. The identity check keeps a replaced loop from
+            // clearing or erasing what its successor owns.
             defer {
                 if let self, self.entries[profileID]?.reconnectLoopID == loopID {
                     self.entries[profileID]?.reconnectLoopID = nil
                     self.entries[profileID]?.attemptInFlightLoopID = nil
+                    self.entries[profileID]?.reconnectTask = nil
+                    self.entries[profileID]?.reconnectWaiting = false
                 }
             }
             var shouldWait = !immediate
@@ -731,11 +750,15 @@ final class DashboardGatewayConnectionPool {
                     delayStartedAt = clock.now()
                     let delayCompleted = await waitingEntry.reconnectSchedule.afterFailure()
                     guard !Task.isCancelled else { return }
-                    guard delayCompleted || self.entries[profileID]?.networkPathSatisfied == true else {
-                        self.entries[profileID]?.reconnectTask = nil
-                        return
-                    }
+                    // The wait ended while the path was gone: park the entry. Its
+                    // backoff is over, so a path return has to find no task here
+                    // and start the next attempt itself.
+                    guard delayCompleted || self.entries[profileID]?.networkPathSatisfied == true else { return }
                 }
+                // A path that went away mid-wait parks the entry here instead of
+                // leaving `reconnectTask` behind: a wait that no longer exists
+                // cannot be woken by the return hint, and a task still in this
+                // slot is what stopped `scheduleReconnect` from starting one.
                 guard !Task.isCancelled, self.isCurrent(profileID: profileID, client: waitingEntry.client, generation: generation),
                       self.entries[profileID]?.networkPathSatisfied == true else { return }
                 self.entries[profileID]?.reconnectWaiting = false
@@ -874,13 +897,16 @@ final class DashboardGatewayConnectionPool {
 
     /// Why no attempt is in flight or scheduled, for the stall watchdog. `nil`
     /// means recovery is progressing: an attempt is running or the loop is
-    /// waiting in its bounded backoff. `reconnectTaskBusy` is the loop existing
-    /// but neither attempting nor waiting, which is where this pool could park
-    /// recovery; C-1 owns what a parked loop should do instead.
+    /// waiting in its bounded backoff. Both are read through the loop's own
+    /// identity, because a task a returned loop left in the slot is not
+    /// progress: reading it as progress is how a parked entry went unnamed.
+    /// `reconnectTaskBusy` is the loop existing but neither attempting nor
+    /// waiting, which is where this pool could park recovery; C-1 owns what a
+    /// parked loop should do instead.
     private func stallGuard(profileID: String) -> GatewayReconnectStallGuard? {
         guard let entry = entries[profileID] else { return .other }
         if entry.reconnectLoopID != nil, entry.attemptInFlightLoopID == entry.reconnectLoopID { return nil }
-        if entry.reconnectTask != nil, entry.reconnectWaiting { return nil }
+        if entry.reconnectLoopID != nil, entry.reconnectTask != nil, entry.reconnectWaiting { return nil }
         if !entry.networkPathSatisfied { return .pathUnsatisfied }
         if nonRetryableProfiles.contains(profileID) { return .nonRetryable }
         if entry.reconnectTask != nil { return .reconnectTaskBusy }
