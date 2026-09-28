@@ -1191,6 +1191,7 @@ final class GatewayLifecycleCoordinator {
         diagnostic: GatewayConnectionDiagnostic? = nil
     ) {
         recorder.recordAttempt(GatewayConnectionAttempt(
+            owner: .selected,
             profileID: profiles.selected?.id,
             lifecycleGeneration: phase.generation,
             connectionID: connectionID,

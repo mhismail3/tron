@@ -61,7 +61,7 @@ struct ReconnectDelayPolicy: Sendable {
 @MainActor
 final class GatewayReconnectSchedule {
     private let clock: MonotonicClock
-    private let delayPolicy: ReconnectDelayPolicy
+    private var delayPolicy: ReconnectDelayPolicy
     private var nominalDelay: Double
     private var pending: Task<Void, Never>?
     private var continuation: CheckedContinuation<Bool, Never>?
@@ -95,6 +95,15 @@ final class GatewayReconnectSchedule {
         guard continuation != nil else { return }
         pending?.cancel()
         resume(true)
+    }
+
+    /// Replaces the curve this schedule follows from its next wait on, keeping
+    /// the nominal delay already reached. An owner whose curve depends on how
+    /// far a run of failures has gone (the dashboard pool escalates after a
+    /// few) uses this so the switch neither restarts at the base interval nor
+    /// shortens the wait it is in the middle of growing.
+    func adopt(delayPolicy: ReconnectDelayPolicy) {
+        self.delayPolicy = delayPolicy
     }
 
     func reset() {

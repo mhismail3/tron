@@ -3125,3 +3125,90 @@ events; widen them to name the pool owner in the same change.
   2. The pool's `stop()` ends an episode only when one is open; a profile removed
      while connected writes no episode, which is intended (the connection turned
      out to be fine).
+
+**Review response (C-5 round 1, follow-up commit on this branch).** An
+independent review built the branch, ran the focused suites and probed the pool
+on a manual clock against the integration baseline. It returned
+changes-required: one blocker, one major, three minor findings and one nit, all
+reproduced. The regressions were real and every finding is addressed:
+
+- Blocker (the curve never escalated): `isUnreachable` read
+  `GatewayConnectionFailureClassifier.consecutiveNeverOpened`, which is display
+  state. That counter stops counting as soon as any attempt of the outage opened
+  a transport — `handle("transport.disconnected")` records
+  `failedAttempt(nil, code: "transport")`, and a hello timeout or a 503 sets
+  `episodeOpenedTransport` too — and below the threshold each wait called
+  `reconnectSchedule.reset()`, which pinned the wait at the 2-second base. The
+  review measured `[5, 2, 2, 2, …]` for a secondary Mac that dropped after
+  connecting and `[1, 17, 17, …]` when hello was never answered, where the
+  baseline grew to 15 s. The pool now owns `Entry.consecutiveFailedAttempts`,
+  incremented by every failed attempt and cleared only by a successful one, and
+  `isUnreachable` reads it. Below the threshold the entry follows the standard
+  progression (2 s, ×1.7, 15 s cap, unjittered); at the threshold it keeps the
+  nominal delay it reached and grows by ×4 to `POOL_MAX_RETRY`, so the switch
+  never shortens a wait. `GatewayReconnectSchedule.adopt(delayPolicy:)` is the
+  switch. The three shapes are now tests, each of which fails on the previous
+  commit: `secondaryDropThenClosedPortKeepsBackingOff` (dropped then closed
+  port: waits `[2, 4, 6, 10, 40, 158, 300, 300]`),
+  `handshakeFailuresBackOffWithoutPinning` (socket opens, hello never answered:
+  served waits `[2, 4, 6, 24, 93]` after the 15-second deadline) and
+  `busyUpgradeFailuresBackOffWithoutPinning` (503 answered at the upgrade).
+- Major (`reconcile` skipped a parked backoff): the acceleration loop is
+  deleted. `AppModel.reconcileDashboardConnections()` runs from
+  `lifecycleRefreshAll` and from mounted-session restoration, not only on a
+  foreground activation, so a selected-profile reconnect could have started
+  extra secondary attempts. `enteredBackground()` already calls `retire()`,
+  which removes every entry, so a real foreground cycle reconnects at once;
+  `retire()`'s comment now says so, and
+  `unreachableSecondaryProfileRetriesAtOnce` proves the path with
+  `retire()` + `reconcile` (its path-return leg still goes through
+  `notePathHint`). No `AppModel` change was needed, so no Phone-lifecycle zone
+  was entered.
+- Minor (`gateway.attempt` could not name its owner): `GatewayConnectionAttempt`
+  carries `owner` (`.selected` from the lifecycle coordinator, `.pool` from the
+  pool) and the record writes `owner=…` before `attemptId`; the observability row
+  documents the field and why the profile ID alone cannot carry it.
+- Minor (docs promised the old rule): `connection-resilience.md`,
+  `architecture.md` and `development.md` now describe the corrected curve. The
+  "no-path classification does not change retry timing" sentence is true again
+  rather than deleted: the classifier drives presentation only, while the pool's
+  own attempt count drives the curve.
+- Minor (one main-stall ping per open pool outage): pool recorders are created
+  with a no-op `mainStallPing`, so only the selected profile's recorder reports
+  `app.main-stall`; the `app.main-stall` and `reconnect.stalled` rows say which
+  recorder reports them, their volume, and that a pool outage still reports its
+  own `reconnect.stalled`.
+- Nit (a silent `guard connectionID == identity.id` in the initial connect): a
+  connection that is gone or no longer the client's active one now throws a
+  retryable `replaced` failure, so the attempt is recorded and the entry keeps a
+  reconnect loop instead of parking `.connecting` with nothing scheduled.
+
+Evidence for this round: `scripts/tron-ios-test build` succeeds and
+`scripts/tron-ios-test run` passes 100 tests in four suites
+(`DashboardStateOwnerTests` 56/56, 53 before the three new regression tests,
+`GatewayConnectionEpisodeRecorderTests`, `GatewayReconnectScheduleTests`,
+`AppModelReconnectTests`; `SessionSearchTransportTests` passed in the same run),
+retained as `$HOME/Library/Developer/Tron/ios/test-runs/20260928T141009Z-run.AYeMxS`;
+the same 56/56 was first seen at
+`$HOME/Library/Developer/Tron/ios/test-runs/20260928T140631Z-run.PhjqNw`.
+Negative control, run on this branch: with `isUnreachable` restored to the
+classifier counter and the below-threshold `reset()` restored, the three new
+tests and the rewritten `unreachableSecondaryProfileBacksOff` fail exactly as
+the review's probes predicted (every retry pinned at the base interval, and no
+wait ever reaching `POOL_MAX_RETRY`), while the other 52 tests pass: retained as
+`$HOME/Library/Developer/Tron/ios/test-runs/20260928T140440Z-run.w03pO4`. The
+file was restored byte-for-byte (`shasum -a 256 -c`) before the passing run.
+`python3 scripts/check-documentation-policy.py` and
+`scripts/personal-info-guard.sh` pass.
+
+Deviations added this round: `GatewayReconnectSchedule.adopt(delayPolicy:)` in
+`packages/ios-app/Sources/Support/ReconnectDelayPolicy.swift` (a shared support
+type, outside the pool zone; a policy swap has to keep the nominal delay the
+standard phase reached, and a fresh schedule would restart at the base
+interval), and the `owner` field on `GatewayConnectionAttempt` plus its
+`owner=` detail in `packages/ios-app/Sources/State/GatewayConnectionEpisodeRecorder.swift`
+and the `.selected` argument in `GatewayLifecycleCoordinator.swift` (only the
+recorder can add the field the record needs). Superseded: the C-5 handoff's
+"Kept on purpose" claim that the threshold reads the existing classifier counter
+and that no second counter exists, and its Deviations claim that `reconcile`
+resumes a parked retry.
