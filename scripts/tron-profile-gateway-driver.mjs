@@ -1594,7 +1594,7 @@ async function multi() {
       const restartNames = [...RESTART_MEASURED_CLIENTS,
         ...clients.map((client) => client.name).filter((name) => !RESTART_MEASURED_CLIENTS.includes(name))];
       result.impairment = await impairmentLegs(config, {
-        mobile, chat, dashboard, all: clients,
+        mobile, chat, all: clients,
         retry: (method, operation) => retryingBusy(retries, method, operation),
         clients: restartNames.map((name) => ({ name, client: byName.get(name), ready: ready(byName.get(name)) })),
       });
