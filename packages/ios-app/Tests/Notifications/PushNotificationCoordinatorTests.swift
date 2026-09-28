@@ -343,7 +343,7 @@ struct PushNotificationCoordinatorTests {
             configuration: PushProductConfiguration(origin: URL(string: "https://push.example.test")!)
         )
         let client = GatewayClient()
-        await coordinator.reconcile(profile: profile, connected: false, client: client)
+        await coordinator.reconcile(profile: profile, connected: false, gatewayRuntimeEpoch: nil, client: client)
         #expect(coordinator.readiness == .denied)
         #expect(store.value == nil)
     }
@@ -368,10 +368,10 @@ struct PushNotificationCoordinatorTests {
         defer { Task { await client.close() } }
         let gatewayBaseline = await socket.sentFrames().count
 
-        await coordinator.reconcile(profile: profile, connected: true, client: client)
+        await coordinator.reconcile(profile: profile, connected: true, gatewayRuntimeEpoch: nil, client: client)
         await proof.waitUntilInstallationStarted()
         await authorization.set(.denied)
-        await coordinator.reconcile(profile: profile, connected: true, client: client)
+        await coordinator.reconcile(profile: profile, connected: true, gatewayRuntimeEpoch: nil, client: client)
         await proof.releaseInstallation()
         try await Task.sleep(for: .milliseconds(30))
 
@@ -401,20 +401,20 @@ struct PushNotificationCoordinatorTests {
         let (client, socket) = try await connectedGateway(for: profile)
         defer { Task { await client.close() } }
 
-        await coordinator.reconcile(profile: profile, connected: true, client: client)
+        await coordinator.reconcile(profile: profile, connected: true, gatewayRuntimeEpoch: nil, client: client)
         try await socket.waitUntilSent(count: 2)
         let replacement = GatewayProfile(
             id: "profile-2", label: "Other Mac", host: "other.test", port: 9_847,
             machineId: "machine-2", deviceId: "device-2"
         )
-        await coordinator.reconcile(profile: replacement, connected: false, client: GatewayClient())
+        await coordinator.reconcile(profile: replacement, connected: false, gatewayRuntimeEpoch: nil, client: GatewayClient())
         await challenge.waitUntilStarted()
         try await Task.sleep(for: .milliseconds(30))
 
         #expect(coordinator.readiness == .registering)
         #expect(coordinator.diagnostic == .requestingChallenge)
         #expect(store.value?.grants[profile.id] == grant)
-        await coordinator.reconcile(profile: nil, connected: false, client: GatewayClient())
+        await coordinator.reconcile(profile: nil, connected: false, gatewayRuntimeEpoch: nil, client: GatewayClient())
     }
 
     @MainActor
@@ -436,16 +436,110 @@ struct PushNotificationCoordinatorTests {
         let (client, socket) = try await connectedGateway(for: profile)
         defer { Task { await client.close() } }
 
-        await coordinator.reconcile(profile: profile, connected: true, client: client)
+        await coordinator.reconcile(profile: profile, connected: true, gatewayRuntimeEpoch: nil, client: client)
         try await socket.waitUntilSent(count: 2)
         let provedGrant = try #require(store.value?.grants[profile.id])
-        await coordinator.reconcile(profile: nil, connected: false, client: GatewayClient())
+        await coordinator.reconcile(profile: nil, connected: false, gatewayRuntimeEpoch: nil, client: GatewayClient())
         try await Task.sleep(for: .milliseconds(30))
 
         #expect(coordinator.readiness == .unavailable)
         #expect(coordinator.diagnostic == .idle)
         #expect(store.value?.grants[profile.id] == provedGrant)
         #expect(store.value?.appAttestKeyRejected != true)
+    }
+
+    @MainActor
+    @Test("an acknowledged registration is not re-sent to the same Gateway runtime")
+    func acknowledgedRegistrationSkipsTransfer() async throws {
+        let grant = matchingGrant(profileID: profile.id, token: "01")
+        let store = MemoryPushCredentialStore(initial: PushCredentialDocument(
+            appAttestKeyID: appAttestKey("key"), apnsToken: "01", grants: [profile.id: grant]
+        ))
+        let coordinator = PushNotificationCoordinator(
+            credentials: store,
+            notifications: allowedNotifications,
+            appAttest: supportedAttest,
+            configuration: PushProductConfiguration(origin: URL(string: "https://push.example.test")!)
+        )
+        let (client, socket) = try await connectedGateway(for: profile)
+        defer { Task { await client.close() } }
+
+        let startup = Task {
+            await coordinator.reconcile(profile: profile, connected: true, gatewayRuntimeEpoch: "epoch-one", client: client)
+        }
+        let firstUpsert = try await gatewayRequest(socket, method: "push.registration.upsert", after: 1)
+        await socket.enqueue(registrationStatusResponse(id: firstUpsert))
+        await startup.value
+
+        #expect(coordinator.readiness == .ready)
+        #expect(store.value?.grants[profile.id]?.acknowledgedRuntime == "machine-1:epoch-one")
+
+        // The same Gateway runtime already holds this exact grant, so the
+        // reconnect sends nothing at all.
+        let sentBefore = await socket.sentFrames().count
+        await coordinator.reconcile(profile: profile, connected: true, gatewayRuntimeEpoch: "epoch-one", client: client)
+        #expect(coordinator.readiness == .ready)
+        #expect(coordinator.diagnostic == .complete)
+        #expect(await socket.sentFrames().count == sentBefore)
+
+        // A restarted Gateway runtime owns the credential document again, so
+        // the acknowledgement is not trusted across it.
+        let restart = Task {
+            await coordinator.reconcile(profile: profile, connected: true, gatewayRuntimeEpoch: "epoch-two", client: client)
+        }
+        let secondUpsert = try await gatewayRequest(socket, method: "push.registration.upsert", after: sentBefore)
+        await socket.enqueue(registrationStatusResponse(id: secondUpsert))
+        await restart.value
+        #expect(store.value?.grants[profile.id]?.acknowledgedRuntime == "machine-1:epoch-two")
+    }
+
+    /// Answers every earlier request until one `method` arrives, then returns
+    /// its id. Optional owners are unrelated to the transfer under test.
+    @MainActor
+    private func gatewayRequest(
+        _ socket: ScriptedGatewaySocket,
+        method: String,
+        after start: Int
+    ) async throws -> String {
+        var index = start
+        for _ in 0..<40 {
+            try await socket.waitUntilSent(count: index + 1)
+            let value = try JSONDecoder.gateway.decode(JSONValue.self, from: await socket.sentFrames()[index])
+            index += 1
+            let object = try #require(value.objectValue)
+            guard let id = object["id"]?.stringValue else { continue }
+            if object["method"]?.stringValue == method { return id }
+            await socket.enqueue(gatewaySuccessResponse(id: id, result: .object([:])))
+        }
+        Issue.record("No \(method) request arrived")
+        return "missing"
+    }
+
+    private func gatewaySuccessResponse(id: String, result: JSONValue) -> Data {
+        try! JSONEncoder.gateway.encode(JSONValue.object([
+            "type": .string("response"),
+            "id": .string(id),
+            "ok": .bool(true),
+            "result": result,
+        ]))
+    }
+
+    private func registrationStatusResponse(id: String) -> Data {
+        try! JSONEncoder.gateway.encode(JSONValue.object([
+            "type": .string("response"),
+            "id": .string(id),
+            "ok": .bool(true),
+            "result": .object([
+                "available": .bool(true),
+                "registered": .bool(true),
+                "deviceRegistered": .bool(true),
+                "enabledDeviceCount": .number(1),
+                "pendingCount": .number(0),
+                "notifyWhenAskPresented": .bool(true),
+                "relayOrigin": .string("https://push.example.test"),
+                "requiresGrantRotation": .bool(false),
+            ]),
+        ]))
     }
 
     @MainActor
@@ -468,7 +562,7 @@ struct PushNotificationCoordinatorTests {
         let (client, socket) = try await connectedGateway(for: profile)
         defer { Task { await client.close() } }
 
-        await coordinator.reconcile(profile: profile, connected: true, client: client)
+        await coordinator.reconcile(profile: profile, connected: true, gatewayRuntimeEpoch: nil, client: client)
         try await socket.waitUntilSent(count: 2)
         coordinator.receiveDeviceToken(Data([0x02]))
         await challenge.waitUntilStarted()
@@ -478,7 +572,7 @@ struct PushNotificationCoordinatorTests {
         #expect(coordinator.diagnostic == .requestingChallenge)
         #expect(store.value?.apnsToken == "02")
         #expect(store.value?.grants[profile.id] == grant)
-        await coordinator.reconcile(profile: nil, connected: false, client: GatewayClient())
+        await coordinator.reconcile(profile: nil, connected: false, gatewayRuntimeEpoch: nil, client: GatewayClient())
     }
 
     @MainActor
@@ -530,7 +624,7 @@ struct PushNotificationCoordinatorTests {
             uuid: { UUID(uuidString: "00000000-0000-0000-0000-000000000001")! }
         )
         let client = GatewayClient()
-        await coordinator.reconcile(profile: profile, connected: false, client: client)
+        await coordinator.reconcile(profile: profile, connected: false, gatewayRuntimeEpoch: nil, client: client)
         coordinator.receiveDeviceToken(Data([0x01, 0x02, 0xff]))
 
         for _ in 0..<100 where store.value?.grants[Self.profile.id] == nil {
@@ -593,7 +687,7 @@ struct PushNotificationCoordinatorTests {
         let attest = PushAttestRecorder()
         let coordinator = makeCoordinator(store: store, script: script, attest: attest)
 
-        await coordinator.reconcile(profile: profile, connected: false, client: GatewayClient())
+        await coordinator.reconcile(profile: profile, connected: false, gatewayRuntimeEpoch: nil, client: GatewayClient())
         try await waitUntil { store.value?.grants[profile.id]?.relayOrigin == "https://push.example.test" }
 
         let replacement = try #require(store.value?.grants[profile.id])
@@ -613,7 +707,7 @@ struct PushNotificationCoordinatorTests {
             ))
             let coordinator = makeCoordinator(store: store, script: script, attest: attest)
 
-            await coordinator.reconcile(profile: profile, connected: false, client: GatewayClient())
+            await coordinator.reconcile(profile: profile, connected: false, gatewayRuntimeEpoch: nil, client: GatewayClient())
             try await waitUntil { coordinator.diagnostic == .stoppedInvalidResponse }
 
             #expect(await script.challengeCount == 1)
@@ -676,7 +770,7 @@ struct PushNotificationCoordinatorTests {
         )
         #expect(store.saveCount == 1)
 
-        await coordinator.reconcile(profile: profile, connected: false, client: GatewayClient())
+        await coordinator.reconcile(profile: profile, connected: false, gatewayRuntimeEpoch: nil, client: GatewayClient())
         try await waitUntil { store.value?.grants[Self.profile.id] != nil }
 
         #expect(await attest.generatedCount == 1)
@@ -712,7 +806,7 @@ struct PushNotificationCoordinatorTests {
         )
 
         #expect(store.saveCount == 0)
-        await coordinator.reconcile(profile: profile, connected: false, client: GatewayClient())
+        await coordinator.reconcile(profile: profile, connected: false, gatewayRuntimeEpoch: nil, client: GatewayClient())
         try await waitUntil { coordinator.diagnostic == .stoppedRejected }
 
         #expect(await script.challengeCount == 0)
@@ -741,7 +835,7 @@ struct PushNotificationCoordinatorTests {
         let attest = PushAttestRecorder(generatedKeys: [appAttestKey("replacement-key")])
         let coordinator = makeCoordinator(store: store, script: script, attest: attest)
 
-        await coordinator.reconcile(profile: profile, connected: false, client: GatewayClient())
+        await coordinator.reconcile(profile: profile, connected: false, gatewayRuntimeEpoch: nil, client: GatewayClient())
         try await waitUntil { coordinator.canRetryRejectedRegistration }
         try coordinator.retryRejectedRegistration()
         try await waitForGrant(in: store)
@@ -765,7 +859,7 @@ struct PushNotificationCoordinatorTests {
         let retries = PushRetryRecorder()
         let coordinator = makeCoordinator(store: store, script: script, attest: attest, retries: retries)
 
-        await coordinator.reconcile(profile: profile, connected: false, client: GatewayClient())
+        await coordinator.reconcile(profile: profile, connected: false, gatewayRuntimeEpoch: nil, client: GatewayClient())
         try await waitForGrant(in: store)
 
         #expect(await script.challengeCount == 2)
@@ -791,7 +885,7 @@ struct PushNotificationCoordinatorTests {
         ))
         let coordinator = makeCoordinator(store: store, script: script, attest: attest)
 
-        await coordinator.reconcile(profile: profile, connected: false, client: GatewayClient())
+        await coordinator.reconcile(profile: profile, connected: false, gatewayRuntimeEpoch: nil, client: GatewayClient())
         try await waitForGrant(in: store)
 
         #expect(await script.submittedModes == ["assertion", "attestation"])
@@ -818,7 +912,7 @@ struct PushNotificationCoordinatorTests {
         ))
         let coordinator = makeCoordinator(store: store, script: script, attest: attest)
 
-        await coordinator.reconcile(profile: profile, connected: false, client: GatewayClient())
+        await coordinator.reconcile(profile: profile, connected: false, gatewayRuntimeEpoch: nil, client: GatewayClient())
         try await waitForGrant(in: store)
 
         #expect(await script.submittedModes == ["attestation"])
@@ -837,14 +931,14 @@ struct PushNotificationCoordinatorTests {
         ))
         let coordinator = makeCoordinator(store: store, script: script, attest: attest)
 
-        await coordinator.reconcile(profile: profile, connected: false, client: GatewayClient())
+        await coordinator.reconcile(profile: profile, connected: false, gatewayRuntimeEpoch: nil, client: GatewayClient())
         try await waitUntil { coordinator.diagnostic == .stoppedRejected }
         #expect(await script.submittedModes == ["assertion", "attestation"])
         #expect(await attest.generatedCount == 1)
         #expect(store.value?.appAttestKeyID == appAttestKey("fresh-key"))
         #expect(store.value?.appAttestKeyRejected == true)
 
-        await coordinator.reconcile(profile: profile, connected: false, client: GatewayClient())
+        await coordinator.reconcile(profile: profile, connected: false, gatewayRuntimeEpoch: nil, client: GatewayClient())
         try await Task.sleep(for: .milliseconds(30))
         #expect(await script.submittedModes == ["assertion", "attestation"])
         #expect(await attest.generatedCount == 1)
@@ -861,7 +955,7 @@ struct PushNotificationCoordinatorTests {
         let retries = PushRetryRecorder()
         let coordinator = makeCoordinator(store: store, script: script, attest: attest, retries: retries)
 
-        await coordinator.reconcile(profile: profile, connected: false, client: GatewayClient())
+        await coordinator.reconcile(profile: profile, connected: false, gatewayRuntimeEpoch: nil, client: GatewayClient())
         try await waitUntil { coordinator.diagnostic == .stoppedExhausted }
 
         #expect(await script.challengeCount == 3)
@@ -892,9 +986,9 @@ struct PushNotificationCoordinatorTests {
             configuration: PushProductConfiguration(origin: URL(string: "https://push.example.test")!),
             transport: transport
         )
-        await coordinator.reconcile(profile: profile, connected: false, client: GatewayClient())
+        await coordinator.reconcile(profile: profile, connected: false, gatewayRuntimeEpoch: nil, client: GatewayClient())
         await started.waitUntilStarted()
-        await coordinator.reconcile(profile: nil, connected: false, client: GatewayClient())
+        await coordinator.reconcile(profile: nil, connected: false, gatewayRuntimeEpoch: nil, client: GatewayClient())
         try await Task.sleep(for: .milliseconds(30))
 
         #expect(coordinator.readiness == .unavailable)
@@ -913,7 +1007,7 @@ struct PushNotificationCoordinatorTests {
         let retries = PushRetryRecorder()
         let coordinator = makeCoordinator(store: store, script: script, attest: attest, retries: retries)
 
-        await coordinator.reconcile(profile: profile, connected: false, client: GatewayClient())
+        await coordinator.reconcile(profile: profile, connected: false, gatewayRuntimeEpoch: nil, client: GatewayClient())
         try await waitUntil { coordinator.diagnostic == .stoppedRejected }
         #expect(await retries.values.isEmpty)
         #expect(await script.submittedModes == ["assertion"])

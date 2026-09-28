@@ -908,6 +908,13 @@ export class GatewayService {
           : oneOf(params.archived, "archived", ["exclude", "only"] as const);
         const cursor = optionalString(params.cursor, "cursor", 96);
         const limit = params.limit === undefined ? 100 : integer(params.limit, "limit", 1, 500);
+        // Conditional first page (G-7): a client that already holds this exact
+        // catalog revision revalidates it without a row projection. A cursor
+        // traversal is already bound to the revision its first page admitted,
+        // so only an uncursored request may name one.
+        const clientListRevision = params.listRevision === undefined
+          ? undefined
+          : integer(params.listRevision, "listRevision", 0, Number.MAX_SAFE_INTEGER);
         this.requireObserverAdmission(client);
         if (cursor !== undefined) {
           const page = await this.sessionListPages.nextPage(client.id, scope, cursor, limit, archived);
@@ -921,6 +928,16 @@ export class GatewayService {
           this.dependencies.sessions.pageSource(scope, archived),
           client.signal,
         );
+        if (clientListRevision !== undefined && clientListRevision === source.listRevision) {
+          if (client.isRevoked()) {
+            this.sessionListPages.releaseClient(client.id);
+            throw new GatewayError("unauthenticated", "This device is no longer authorized");
+          }
+          // Structural identity, archive membership and the visible archived
+          // count all move with the catalog revision, so an equal revision
+          // means the client's rows are still exactly this projection.
+          return safeJson({ sessions: [], listRevision: source.listRevision, notModified: true });
+        }
         const page = await this.sessionListPages.firstPage(client.id, scope, source, limit, archived);
         if (client.isRevoked()) {
           this.sessionListPages.releaseClient(client.id);

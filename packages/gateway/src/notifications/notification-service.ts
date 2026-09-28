@@ -260,6 +260,14 @@ export class NotificationService {
     const now = this.now();
     let rotated = false;
     await this.store.update((document) => {
+      // The phone re-sends its registration whenever it reconnects. When the
+      // request describes the grant this document already holds, the answer is
+      // the same status and the write would be byte-identical: return
+      // undefined so neither the grant nor the receipt/revocation overlays are
+      // rewritten (G-10's durable-write audit charged this path two fsyncs per
+      // registration). The retention pass above still runs, so the fingerprint
+      // compared below is also what proves it expired nothing.
+      const before = JSON.stringify(document);
       retainRevocationAuthority(prune(document, now), now);
       if (document.revocations.some((item) => item.grantId === input.grantId)) {
         throw new GatewayError("conflict", "Push grant is awaiting revocation and must rotate before registration");
@@ -267,6 +275,16 @@ export class NotificationService {
       const anotherDevice = document.grants.find((grant) => grant.grantId === input.grantId && grant.deviceId !== input.deviceId);
       if (anotherDevice) throw new GatewayError("conflict", "Push grant is already bound to another device");
       const previous = document.grants.find((grant) => grant.deviceId === input.deviceId);
+      if (previous && previous.grantId === input.grantId
+        && previous.installationId === input.installationId
+        && previous.secret === input.secret
+        && previous.relayOrigin === input.relayOrigin
+        && previous.previewsEnabled === input.previewsEnabled
+        && previous.active && previous.disabledReason === undefined
+        && (input.notifyWhenAskPresented === undefined || document.policy.notifyWhenAskPresented === input.notifyWhenAskPresented)
+        && before === JSON.stringify(document)) {
+        return undefined;
+      }
       if (previous && previous.grantId === input.grantId
         && (previous.relayOrigin !== input.relayOrigin
           || (!previous.active && previous.disabledReason === "invalid_token"))) {

@@ -62,6 +62,13 @@ struct PushGrant: Codable, Equatable, Sendable {
     let tokenHash: String
     var relayOrigin: String? = nil
     var route: PushRoute? = nil
+    /// The Gateway runtime (`machineId` plus its `runtimeEpoch`) that confirmed
+    /// this exact grant. A reconnect re-sends the registration only while the
+    /// stored grant matches the current device token, route and relay origin
+    /// and this identity differs: the Gateway runtime instance is the owner of
+    /// the notification document, so a restart or a different Mac drops the
+    /// acknowledgement instead of trusting it (G-7).
+    var acknowledgedRuntime: String? = nil
 }
 
 struct PushCredentialDocument: Codable, Equatable, Sendable {
@@ -369,6 +376,11 @@ final class PushNotificationCoordinator {
     private struct Context: Sendable {
         let profile: GatewayProfile
         let client: GatewayClient
+        /// `machineId:runtimeEpoch` of the connected Gateway runtime, or nil
+        /// when it advertises no runtime epoch. Without one the phone cannot
+        /// scope an acknowledgement to a Gateway instance, so it always sends
+        /// the registration and lets the Gateway answer the no-op.
+        let runtimeIdentity: String?
     }
 
     private let credentials: any PushCredentialStoring
@@ -446,7 +458,12 @@ final class PushNotificationCoordinator {
         }
     }
 
-    func reconcile(profile: GatewayProfile?, connected: Bool, client: GatewayClient) async {
+    func reconcile(
+        profile: GatewayProfile?,
+        connected: Bool,
+        gatewayRuntimeEpoch: String?,
+        client: GatewayClient
+    ) async {
         admissionGeneration &+= 1
         let reconciliationAdmission = admissionGeneration
         guard let profile else {
@@ -459,7 +476,8 @@ final class PushNotificationCoordinator {
         if context?.profile.id != profile.id {
             invalidateRegistration(admission: false)
         }
-        context = Context(profile: profile, client: client)
+        let runtimeIdentity = gatewayRuntimeEpoch.map { "\(profile.machineId):\($0)" }
+        context = Context(profile: profile, client: client, runtimeIdentity: runtimeIdentity)
         guard !credentialLoadFailed, worker != nil, appAttest.isSupported() else {
             invalidateRegistration(admission: false)
             readiness = .unavailable
@@ -598,6 +616,17 @@ final class PushNotificationCoordinator {
            grant.tokenHash == tokenHash,
            grant.relayOrigin == worker.relayOrigin,
            grant.route == PushRoute.current {
+            // Nothing the Gateway stores can have changed since it acknowledged
+            // this exact grant on this same runtime instance, so a reconnect
+            // has no registration to send. `/v1/push/registration` is the only
+            // other authority, and an epoch change (a Gateway restart, which
+            // owns the credential document) revokes this claim.
+            if let runtimeIdentity = admittedContext.runtimeIdentity,
+               grant.acknowledgedRuntime == runtimeIdentity {
+                readiness = .ready
+                diagnostic = .complete
+                return
+            }
             diagnostic = .transferringGrant
             switch try await transfer(
                 grant,
@@ -877,8 +906,11 @@ final class PushNotificationCoordinator {
             try validateRegistration(generation: generation, profileID: profileID, token: token)
             guard status.relayOrigin == relayOrigin else { return .configurationMismatch }
             if status.requiresGrantRotation == true { return .rotate }
-            return status.available && status.registered && status.deviceRegistered && status.enabledDeviceCount > 0
-                ? .ready : .unavailable
+            guard status.available && status.registered && status.deviceRegistered && status.enabledDeviceCount > 0 else {
+                return .unavailable
+            }
+            try acknowledgeRegistration(grant, profileID: profileID)
+            return .ready
         } catch is CancellationError {
             throw CancellationError()
         } catch {
@@ -888,6 +920,23 @@ final class PushNotificationCoordinator {
             try validateRegistration(generation: generation, profileID: profileID, token: token)
             return .unavailable
         }
+    }
+
+    /// Records that this Gateway runtime confirmed the exact grant the phone
+    /// holds, which is what lets the next reconnect skip the registration. The
+    /// write is local credential state, so a failure is reported like every
+    /// other credential write instead of claiming readiness.
+    private func acknowledgeRegistration(_ grant: PushGrant, profileID: String) throws {
+        guard let runtimeIdentity = context?.runtimeIdentity,
+              var updated = document.grants[profileID],
+              updated.grantID == grant.grantID,
+              updated.acknowledgedRuntime != runtimeIdentity else { return }
+        updated.acknowledgedRuntime = runtimeIdentity
+        var next = document
+        next.grants[profileID] = updated
+        do { try credentials.save(next) }
+        catch { throw PushRegistrationError.persistence }
+        document = next
     }
 
     private func discardGrant(profileID: String) throws {

@@ -473,17 +473,30 @@ enum SessionCatalogLoadBounds {
 
 enum SessionCatalogLoadResult: Sendable {
     case loaded(rows: [SessionSummary], pageCount: Int, revision: Int, archivedCount: Int?)
+    /// The Gateway confirmed the caller's retained revision, so the held rows
+    /// are still exactly its projection. No rows crossed the wire (G-7).
+    case unchanged(revision: Int)
     case revisionMoved(pageCount: Int, revision: Int?)
     case retired
     case invalid(code: String, reason: String, pageCount: Int, revision: Int?)
 }
 
 enum SessionCatalogLoader {
-    private struct Params: Encodable { let cursor: String?; let limit: Int; let scope: String }
+    private struct Params: Encodable {
+        let cursor: String?
+        let limit: Int
+        let scope: String
+        /// Only the first page of a traversal may name the caller's retained
+        /// revision; a cursored page is already bound to its lease's revision.
+        let listRevision: Int?
+    }
     private struct Response: Decodable {
         let sessions: [SessionSummary]
         let nextCursor: String?
         let listRevision: Int
+        /// Present only when the Gateway answered a conditional first page
+        /// without rows.
+        let notModified: Bool?
         /// Present on the first `exclude` page and nowhere else. Archived rows
         /// are not part of this projection, so the count is the only way the
         /// dashboard learns how many sessions are hidden.
@@ -493,6 +506,7 @@ enum SessionCatalogLoader {
     static func load(
         client: GatewayClient,
         scope: String = "user",
+        sinceRevision: Int? = nil,
         admitsPublication: @MainActor () -> Bool
     ) async throws -> SessionCatalogLoadResult {
         for revisionAttempt in 0..<2 {
@@ -513,7 +527,12 @@ enum SessionCatalogLoader {
                 do {
                     response = try await client.request(
                         "session.list",
-                        Params(cursor: cursor, limit: SessionCatalogLoadBounds.pageSize, scope: scope),
+                        Params(
+                            cursor: cursor,
+                            limit: SessionCatalogLoadBounds.pageSize,
+                            scope: scope,
+                            listRevision: cursor == nil ? sinceRevision : nil
+                        ),
                         correlation: SessionListCorrelation.dashboardCatalog
                     )
                 } catch let failure as GatewayFailure
@@ -523,6 +542,16 @@ enum SessionCatalogLoader {
                     break
                 }
                 guard await admitsPublication() else { return .retired }
+                if response.notModified == true {
+                    // Only a first page that named a retained revision can be
+                    // unchanged, and such a client already holds every row.
+                    guard cursor == nil, pageCount == 0, let sinceRevision,
+                          response.listRevision == sinceRevision,
+                          response.sessions.isEmpty, response.nextCursor == nil, response.archivedCount == nil else {
+                        return .invalid(code: "invalid_response", reason: "session-list-not-modified", pageCount: pageCount, revision: response.listRevision)
+                    }
+                    return .unchanged(revision: sinceRevision)
+                }
                 pageCount += 1
                 if let expectedRevision, expectedRevision != response.listRevision {
                     revisionChanged = true
@@ -858,14 +887,29 @@ struct SessionCatalogCoordinator: Equatable {
     private var liveUpdates: [String: SessionSummaryUpdate] = [:]
     private var liveSessionIDs: Set<String> = []
     private var loadGeneration = 0
+    /// The catalog revision this projection was published from, and the
+    /// connection whose traversal admitted it. A conditional list read may
+    /// only claim it while the connection that produced it owns the
+    /// projection: row fields converge through a full page read, and the
+    /// Gateway replays no `session.summary` events to a reconnected client, so
+    /// a newer connection always reads rows (G-7).
+    private(set) var listRevision: Int?
+    private var listRevisionKey: SessionCatalogLoadKey?
 
     mutating func beginLoad(key: SessionCatalogLoadKey? = nil) -> LoadAdmission {
         loadGeneration &+= 1
+        if listRevisionKey != key { dropListRevision() }
         return LoadAdmission(generation: loadGeneration, key: key)
+    }
+
+    private mutating func dropListRevision() {
+        listRevision = nil
+        listRevisionKey = nil
     }
 
     mutating func invalidateLoads() {
         loadGeneration &+= 1
+        dropListRevision()
     }
 
     mutating func markLoadUnavailable() {
@@ -897,6 +941,7 @@ struct SessionCatalogCoordinator: Equatable {
     mutating func publishAuthoritative(
         _ authoritative: [SessionSummary],
         admission: LoadAdmission,
+        revision: Int,
         archivedCount: Int? = nil
     ) -> Bool {
         guard admits(admission, key: admission.key) else { return false }
@@ -910,6 +955,18 @@ struct SessionCatalogCoordinator: Equatable {
         rebuildIndex()
         liveSessionIDs = ids
         self.archivedCount = archivedCount
+        listRevision = revision
+        listRevisionKey = admission.key
+        freshness = .live
+        return true
+    }
+
+    /// Confirms a retained projection as still current for the revision a
+    /// conditional read named. Nothing is republished by contract: the rows,
+    /// the visible archived count and the local overlays are unchanged, so chat
+    /// identity, scroll and selection stay exactly as they are.
+    mutating func confirmUnchanged(admission: LoadAdmission, revision: Int) -> Bool {
+        guard admits(admission, key: admission.key), listRevision == revision else { return false }
         freshness = .live
         return true
     }

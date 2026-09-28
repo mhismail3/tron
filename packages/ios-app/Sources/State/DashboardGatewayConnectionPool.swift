@@ -792,7 +792,10 @@ final class DashboardGatewayConnectionPool {
         let admission = current.catalog.beginLoad(key: key)
         entries[profileID] = current
         do {
-            let loaded = try await SessionCatalogLoader.load(client: seed.client) {
+            let loaded = try await SessionCatalogLoader.load(
+                client: seed.client,
+                sinceRevision: current.catalog.listRevision
+            ) {
                 self.admitsRefresh(
                     profileID: profileID,
                     generation: generation,
@@ -809,11 +812,12 @@ final class DashboardGatewayConnectionPool {
                 return .retained
             }
             switch loaded {
-            case let .loaded(rows, _, _, archivedCount):
+            case let .loaded(rows, _, revision, archivedCount):
                 let sourced = rows.map { $0.withGatewaySource(id: profileID, label: seed.profile.label) }
                 guard admitted.catalog.publishAuthoritative(
                     sourced,
                     admission: admission,
+                    revision: revision,
                     archivedCount: archivedCount
                 ) else { return .retained }
                 admitted.state = .connected
@@ -822,6 +826,13 @@ final class DashboardGatewayConnectionPool {
                 entries[profileID] = admitted
                 publish(profileID: profileID)
                 publishAuthoritativeCatalog(profileID: profileID)
+                return .published
+            case let .unchanged(revision):
+                guard admitted.catalog.confirmUnchanged(admission: admission, revision: revision) else { return .retained }
+                admitted.state = .connected
+                admitted.refreshRetryAttempt = 0
+                admitted.refreshFailedAttempts = 0
+                entries[profileID] = admitted
                 return .published
             case .revisionMoved, .invalid:
                 return .retained

@@ -2207,7 +2207,12 @@ challenge/proof each time. It preserves the APNs token and Keychain document; un
 only an assertion 401 or the exact typed `DCError.Code.invalidKey` may rotate one key
 and admit one fresh attestation. Fresh-attestation rejection, nonretryable 4xx,
 malformed data, persistence failure, and exhaustion stop without churn. Chat and
-Gateway connectivity never wait on registration.
+Gateway connectivity never wait on registration. A transfer the Gateway confirms
+also records `machineId:runtimeEpoch` of that Gateway runtime in the persisted
+grant, so a reconnect on the same runtime sends no registration at all; a Gateway
+restart (a new runtime epoch), a changed token/route/relay origin, a fresh grant,
+or a Gateway that advertises no runtime epoch always re-sends, and the Gateway
+answers an unchanged registration without writing its credential document.
 
 `TronMobileDevelopment.entitlements`, `TronMobileLocalDevice.entitlements`, and
 `TronMobileRelease.entitlements` explicitly carry their APNs and App Attest

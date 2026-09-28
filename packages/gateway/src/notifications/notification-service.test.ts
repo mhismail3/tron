@@ -87,6 +87,24 @@ describe("NotificationGrantStore and NotificationService", () => {
     });
   });
 
+  it("answers an identical registration without rewriting the credential document", async () => {
+    const { root, store, service } = await fixture();
+    await service.upsertGrant({ ...grant, notifyWhenAskPresented: true });
+    const path = join(root, "gateway", "notifications.json");
+    const admitted = await readFile(path, "utf8");
+
+    // The phone re-registers on every reconnect; an identical registration is
+    // neither a grant rewrite nor a receipt/revocation overlay write.
+    const status = await service.upsertGrant({ ...grant, notifyWhenAskPresented: true });
+    expect(status.deviceRegistered).toBe(true);
+    expect(await readFile(path, "utf8")).toBe(admitted);
+
+    // A changed registration is still admitted durably.
+    await service.upsertGrant({ ...grant, previewsEnabled: true, notifyWhenAskPresented: true });
+    expect(await readFile(path, "utf8")).not.toBe(admitted);
+    expect((await store.snapshot()).grants[0]?.previewsEnabled).toBe(true);
+  });
+
   it("uses agent text only for a grant whose user enabled previews", async () => {
     const { service, relay } = await fixture();
     await service.upsertGrant({ ...grant, previewsEnabled: true });

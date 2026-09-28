@@ -237,6 +237,7 @@ struct TronMobileApp: App {
         await pushNotifications.reconcile(
             profile: model.profiles.selected,
             connected: model.connectionState == .connected,
+            gatewayRuntimeEpoch: model.gatewayInfo?.runtimeEpoch,
             client: model.client
         )
         model.pushNotificationReadiness = pushNotifications.readiness

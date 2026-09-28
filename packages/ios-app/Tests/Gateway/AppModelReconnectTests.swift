@@ -155,6 +155,94 @@ struct AppModelReconnectTests {
         }
     }
 
+    @Test("a catalog read revalidates its retained revision and a reconnect reloads rows")
+    func conditionalCatalogReadRevalidatesRetainedRevision() async throws {
+        try await withFixture(
+            sockets: [ScriptedGatewaySocket(), ScriptedGatewaySocket()],
+            clock: ManualClock(), units: SequenceReconnectUnits([0])
+        ) { fixture in
+            let model = fixture.model
+            let first = fixture.sockets[0]
+            let replacement = fixture.sockets[1]
+            let profile = try #require(model.profiles.selected)
+            await first.enqueue(helloFrame())
+            try await model.connectHostedGateway(profile: profile, token: "token")
+
+            // First authoritative read: one row at revision 4, with no
+            // revision named because nothing has been retained yet.
+            let initial = Task { await model.refreshSessions() }
+            let catalog = try await firstCatalogRequest(first, from: 1)
+            #expect(catalog.listRevision == nil)
+            await first.enqueue(successResponse(id: catalog.id, result: .object([
+                "sessions": try JSONValue.encode([startupSummary("loaded")]),
+                "nextCursor": .null,
+                "listRevision": .number(4),
+            ])))
+            #expect(await initial.value == .published)
+            #expect(model.sessions.map(\.id) == ["loaded"])
+
+            // The same connection asks again, naming the revision it holds; the
+            // Gateway confirms it without rows and nothing is republished.
+            let revalidation = Task { await model.refreshSessions() }
+            let second = try await firstCatalogRequest(first, from: 2)
+            #expect(second.listRevision == 4)
+            await first.enqueue(successResponse(id: second.id, result: .object([
+                "sessions": .array([]),
+                "listRevision": .number(4),
+                "notModified": .bool(true),
+            ])))
+            #expect(await revalidation.value == .published)
+            #expect(model.sessions.map(\.id) == ["loaded"])
+
+            // A replacement connection may have missed summary events, so it
+            // never inherits the retained revision.
+            await model.handle(GatewayEvent(type: "event", topic: "system.stopping", sessionId: nil, payload: .object([:])))
+            try await replacement.waitUntilSent(count: 1)
+            await replacement.enqueue(helloFrame(runtimeEpoch: "debug-epoch-2"))
+            let reconnected = try await firstCatalogRequest(replacement, from: 1)
+            #expect(reconnected.listRevision == nil)
+            await replacement.enqueue(successResponse(id: reconnected.id, result: .object([
+                "sessions": try JSONValue.encode([
+                    startupSummary("loaded"),
+                    startupSummary("added-while-away"),
+                ]),
+                "nextCursor": .null,
+                "listRevision": .number(5),
+            ])))
+            for _ in 0..<200 where model.sessions.count != 2 { try await Task.sleep(for: .milliseconds(10)) }
+            #expect(model.sessions.map(\.id) == ["loaded", "added-while-away"])
+            await model.teardown()
+        }
+    }
+
+    /// Answers every non-catalog request until one `session.list` arrives, then
+    /// returns it. Startup reads are independent owners, so the traversal's
+    /// position in the frame stream is the only stable ordering.
+    private func firstCatalogRequest(
+        _ socket: ScriptedGatewaySocket,
+        from start: Int,
+        within attempts: Int = 40
+    ) async throws -> (id: String, listRevision: Int?) {
+        var index = start
+        for _ in 0..<attempts {
+            try await socket.waitUntilSent(count: index + 1)
+            let value = try JSONDecoder.gateway.decode(JSONValue.self, from: await socket.sentFrames()[index])
+            index += 1
+            let object = try #require(value.objectValue)
+            let method = object["method"]?.stringValue
+            let id = object["id"]?.stringValue
+            guard let id else { continue }
+            if method == "session.list" {
+                return (id: id, listRevision: object["params"]?.objectValue?["listRevision"]?.intValue)
+            }
+            // Independent optional owners (providers, settings, devices,
+            // inbox) must not stall the traversal under test.
+            await socket.enqueue(successResponse(id: id, result: .object([:])))
+        }
+        Issue.record("No session.list request arrived")
+        return (id: "missing", listRevision: nil)
+    }
+
     @Test("replacement reconnect restores mounted authority before an optional catalog page responds",
           arguments: [false, true])
     func replacementReadinessDoesNotAwaitCatalog(holdContinuation: Bool) async throws {
