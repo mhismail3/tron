@@ -84,7 +84,11 @@ owner of accepted commands; mobile reconnect never replays a prompt blindly.
   paths rather than duplicating HTTP counters.
 - **Mobile recovery:** while foregrounded with a satisfied network path, one
   reconnect owner retries transient failures indefinitely with a 2-second initial
-  delay, 1.7× progression, a 15-second cap, and 20% jitter. Background and
+  delay, 1.7× progression, a 15-second cap, and 20% jitter. A dashboard pool
+  entry is the exception: it keeps that base interval for its first three
+  consecutive attempts that never opened a transport, then escalates by ×4
+  without jitter to a five-minute cap, so an unreachable secondary profile makes
+  one attempt every five minutes. Background and
   unsatisfied network paths pause attempts; foreground, path return, and explicit
   Retry accelerate one pending delay. Only authentication, authorization, protocol, and identity
   failures stop automatic recovery. Each handshake has the shared 15-second

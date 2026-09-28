@@ -48,10 +48,34 @@ extension DashboardGatewayConnectionPoolDelegate {
 /// profile has an independent connection and failure boundary.
 @MainActor
 final class DashboardGatewayConnectionPool {
+    /// Consecutive attempts at one entry that never opened a transport, after
+    /// which that profile is treated as unreachable: its retries escalate to
+    /// `POOL_MAX_RETRY`, so a Mac that is not there costs a few attempts and
+    /// then one every five minutes. Three rules out a blip.
+    static let POOL_UNREACHABLE_AFTER = 3
+    /// The longest wait between attempts for an unreachable background profile.
+    static let POOL_MAX_RETRY: Duration = .seconds(300)
+    /// A background entry's own reconnect curve: it starts where the standard
+    /// curve starts and grows by 4 to the pool's unaffected cap. It is not
+    /// jittered, so `POOL_MAX_RETRY` is a floor on how often an unreachable
+    /// profile retries rather than a nominal average; the selected profile's
+    /// lifecycle keeps its own jittered curve.
+    private static let unreachableReconnectDelayPolicy = ReconnectDelayPolicy(
+        initialSeconds: ReconnectDelayPolicy.standard.initialSeconds,
+        multiplier: 4,
+        maximumSeconds: Double(POOL_MAX_RETRY.components.seconds),
+        jitterFraction: 0,
+        nextUnitInterval: { 0.5 }
+    )
+
     private struct Entry {
         let profile: GatewayProfile
         let token: String
         let client: GatewayClient
+        /// One connection recorder per entry: attempts and episodes are
+        /// attributable to the profile that made them, and two pool profiles
+        /// write to the one always-on log without mixing timelines.
+        let recorder: GatewayConnectionEpisodeRecorder
         var connectionID: Int?
         var gatewayInfo: GatewayInfo?
         var state: DashboardServerConnectionState
@@ -69,12 +93,19 @@ final class DashboardGatewayConnectionPool {
         var refreshRetryAttempt: Int
         var refreshFailedAttempts: Int
         var connectionFailureClassifier: GatewayConnectionFailureClassifier
+        /// The loop that owns `reconnectTask`, and the loop whose attempt is in
+        /// flight. They are identities, not flags: a retired loop must not
+        /// clear its successor's marker, and the stall watchdog reads them to
+        /// tell a running attempt from a parked loop.
+        var reconnectLoopID: String?
+        var attemptInFlightLoopID: String?
     }
 
     weak var delegate: (any DashboardGatewayConnectionPoolDelegate)?
     private let clientFactory: @MainActor () -> GatewayClient
     private let clock: MonotonicClock
     private let reconnectDelayPolicy: ReconnectDelayPolicy
+    private let appLog: AppLog
     private var entries: [String: Entry] = [:]
     private var generation = 0
     private var retirementTasks: [String: (generation: Int, task: Task<Void, Never>)] = [:]
@@ -83,11 +114,13 @@ final class DashboardGatewayConnectionPool {
     init(
         clientFactory: @escaping @MainActor () -> GatewayClient = { GatewayClient() },
         clock: MonotonicClock = .continuous,
-        reconnectDelayPolicy: ReconnectDelayPolicy = .standard
+        reconnectDelayPolicy: ReconnectDelayPolicy = .standard,
+        appLog: AppLog = .shared
     ) {
         self.clientFactory = clientFactory
         self.clock = clock
         self.reconnectDelayPolicy = reconnectDelayPolicy
+        self.appLog = appLog
     }
 
     func reconcile(
@@ -121,11 +154,20 @@ final class DashboardGatewayConnectionPool {
         for profile in desired where entries[profile.id] == nil {
             start(profile: profile, token: token(profile), generation: generation)
         }
+        // Reconcile is the pool's activation boundary: it runs on every
+        // foreground activation and every profile change. A parked retry is
+        // resumed here rather than waiting out the unreachable backoff, so a
+        // profile that came back is picked up the moment the app is in front of
+        // the user. The curve itself is untouched, so the next wait is still
+        // the escalated one.
+        for profileID in Array(entries.keys) where entries[profileID]?.reconnectWaiting == true {
+            entries[profileID]?.reconnectSchedule.accelerate()
+        }
     }
 
     func retire() {
         generation &+= 1
-        for profileID in Array(entries.keys) { stop(profileID: profileID) }
+        for profileID in Array(entries.keys) { stop(profileID: profileID, endedBy: .background) }
     }
 
     func waitForRetirement() async {
@@ -294,10 +336,19 @@ final class DashboardGatewayConnectionPool {
         guard let token else { return }
         let client = clientFactory()
         let retirementBarrier = retirementTasks[profile.id]?.task
+        let recorder = GatewayConnectionEpisodeRecorder(clock: clock, appLog: appLog)
+        // `self` is unwrapped before the guard is read: folding the lookup into
+        // one optional would turn "recovery is progressing" into `other` and
+        // report a stall whenever an episode is open.
+        recorder.stallGuard = { [weak self] in
+            guard let self else { return nil }
+            return self.stallGuard(profileID: profile.id)
+        }
         entries[profile.id] = Entry(
             profile: profile,
             token: token,
             client: client,
+            recorder: recorder,
             connectionID: nil,
             gatewayInfo: nil,
             state: .connecting,
@@ -305,7 +356,9 @@ final class DashboardGatewayConnectionPool {
             task: nil,
             refreshTask: nil,
             reconnectTask: nil,
-            reconnectSchedule: GatewayReconnectSchedule(clock: clock),
+            reconnectSchedule: GatewayReconnectSchedule(
+                clock: clock, delayPolicy: Self.unreachableReconnectDelayPolicy
+            ),
             reconnectWaiting: false,
             networkPathSatisfied: true,
             generation: generation,
@@ -314,7 +367,9 @@ final class DashboardGatewayConnectionPool {
             refreshRequestGeneration: 0,
             refreshRetryAttempt: 0,
             refreshFailedAttempts: 0,
-            connectionFailureClassifier: GatewayConnectionFailureClassifier()
+            connectionFailureClassifier: GatewayConnectionFailureClassifier(),
+            reconnectLoopID: nil,
+            attemptInFlightLoopID: nil
         )
         publish(profileID: profile.id)
         let task = Task { @MainActor [weak self] in
@@ -325,9 +380,14 @@ final class DashboardGatewayConnectionPool {
             let failurePresentationGeneration = self.entries[profile.id]?.connectionFailureClassifier.beginAttempt()
             let diagnosticSequence = await client.latestDiagnosticSequence()
             guard self.isCurrent(profileID: profile.id, client: client, generation: generation) else { return }
+            let startedAt = self.clock.now()
             do {
-                let info = try await client.connect(profile: profile, token: token)
-                guard Self.admitsIdentity(info, for: profile) else {
+                // The identity carries the hello's Gateway connection id, so the
+                // first attempt of a pool profile is joinable to the Gateway's
+                // own records exactly like its reconnects are.
+                let identity = try await client.connectForLifecycle(profile: profile, token: token)
+                try await client.activateEvents(connectionID: identity.id)
+                guard Self.admitsIdentity(identity.info, for: profile) else {
                     throw GatewayFailure(
                         code: "identity_mismatch",
                         message: "The paired server identity no longer matches this endpoint.",
@@ -336,13 +396,26 @@ final class DashboardGatewayConnectionPool {
                     )
                 }
                 let connectionID = await client.activeConnectionID()
-                guard let connectionID, !Task.isCancelled,
+                guard connectionID == identity.id, !Task.isCancelled,
                       self.isCurrent(profileID: profile.id, client: client, generation: generation) else { return }
                 self.entries[profile.id]?.reconnectSchedule.reset()
                 self.entries[profile.id]?.connectionFailureClassifier.reset()
                 self.entries[profile.id]?.connectionID = connectionID
-                self.entries[profile.id]?.gatewayInfo = info
+                self.entries[profile.id]?.gatewayInfo = identity.info
                 self.entries[profile.id]?.state = .connecting
+                self.recordAttempt(
+                    profileID: profile.id,
+                    generation: generation,
+                    attemptID: "initial",
+                    retry: 0,
+                    startedAt: startedAt,
+                    delayBeforeMs: 0,
+                    diagnostic: nil,
+                    reason: nil,
+                    succeeded: true,
+                    connectionID: connectionID,
+                    gatewayConnectionID: identity.gatewayConnectionID
+                )
                 self.publish(profileID: profile.id)
                 self.scheduleRefresh(
                     profileID: profile.id,
@@ -356,6 +429,12 @@ final class DashboardGatewayConnectionPool {
                 }
                 guard !Task.isCancelled,
                       self.isCurrent(profileID: profile.id, client: client, generation: generation) else { return }
+                // The event stream ended without a disconnect event and is
+                // still a loss: the episode it opens keeps whatever the first
+                // failed attempt adds as its cause.
+                self.entries[profile.id]?.recorder.noteDisconnected(
+                    profileID: profile.id, lifecycleGeneration: generation, foreground: true
+                )
                 self.retireConnectionEpoch(
                     profileID: profile.id,
                     generation: generation,
@@ -365,11 +444,27 @@ final class DashboardGatewayConnectionPool {
             } catch is CancellationError {
                 return
             } catch let failure as GatewayFailure where GatewayRecoveryFailurePolicy.isNonRetryable(failure) {
+                let diagnostic = await client.latestHandshakeDiagnostic(after: diagnosticSequence)
                 await client.close()
                 guard self.isCurrent(profileID: profile.id, client: client, generation: generation) else { return }
                 self.nonRetryableProfiles.insert(profile.id)
                 self.entries[profile.id]?.gatewayInfo = nil
                 self.entries[profile.id]?.state = failure.code == "identity_mismatch" ? .identityMismatch : .offline
+                self.recordAttempt(
+                    profileID: profile.id,
+                    generation: generation,
+                    attemptID: "initial",
+                    retry: 0,
+                    startedAt: startedAt,
+                    delayBeforeMs: 0,
+                    diagnostic: diagnostic,
+                    reason: GatewayDiagnosticFailure.answerCode(failure),
+                    succeeded: false,
+                    connectionID: nil
+                )
+                self.entries[profile.id]?.recorder.endEpisode(
+                    .stopped, profileID: profile.id, lifecycleGeneration: generation
+                )
                 self.publish(profileID: profile.id)
             } catch {
                 guard !Task.isCancelled,
@@ -385,6 +480,18 @@ final class DashboardGatewayConnectionPool {
                 }
                 let failedState = self.entries[profile.id]?.connectionFailureClassifier.noPath
                     .map { DashboardServerConnectionState.noPath($0.interface) } ?? .reconnecting
+                self.recordAttempt(
+                    profileID: profile.id,
+                    generation: generation,
+                    attemptID: "initial",
+                    retry: 0,
+                    startedAt: startedAt,
+                    delayBeforeMs: 0,
+                    diagnostic: diagnostic,
+                    reason: GatewayDiagnosticFailure.code(error),
+                    succeeded: false,
+                    connectionID: nil
+                )
                 self.retireConnectionEpoch(
                     profileID: profile.id,
                     generation: generation,
@@ -396,12 +503,22 @@ final class DashboardGatewayConnectionPool {
         entries[profile.id]?.task = task
     }
 
-    private func stop(profileID: String, close: Bool = true) {
+    private func stop(
+        profileID: String,
+        close: Bool = true,
+        endedBy: GatewayEpisodeEnd = .stopped
+    ) {
         guard let entry = entries.removeValue(forKey: profileID) else { return }
         entry.task?.cancel()
         entry.refreshTask?.cancel()
         entry.reconnectTask?.cancel()
         entry.reconnectSchedule.cancel()
+        // A retired entry ends the episode it was explaining: `stopped` for a
+        // profile switch, removal or explicit retry, `background` for the
+        // scene retirement that parks every pool entry.
+        entry.recorder.endEpisode(
+            endedBy, profileID: profileID, lifecycleGeneration: entry.generation
+        )
         delegate?.dashboardPoolDidUpdate(
             profileID: profileID,
             sessions: entry.catalog.sessions,
@@ -476,9 +593,17 @@ final class DashboardGatewayConnectionPool {
             guard isCurrent(profileID: profileID, client: entry.client, generation: generation),
                   entries[profileID]?.connectionID == delivery.connectionID else { return }
             entries[profileID]?.connectionFailureClassifier.failedAttempt(nil, code: "transport")
+            entries[profileID]?.recorder.noteDisconnected(
+                profileID: profileID, lifecycleGeneration: generation,
+                foreground: true, cause: "transport"
+            )
             retireConnectionEpoch(profileID: profileID, generation: generation, state: .reconnecting)
             scheduleReconnect(profileID: profileID, generation: generation)
         case "system.stopping":
+            entries[profileID]?.recorder.noteDisconnected(
+                profileID: profileID, lifecycleGeneration: generation,
+                foreground: true, cause: "restart"
+            )
             retireConnectionEpoch(profileID: profileID, generation: generation, state: .restarting)
             scheduleReconnect(profileID: profileID, generation: generation, immediate: true)
         default:
@@ -541,12 +666,33 @@ final class DashboardGatewayConnectionPool {
         entries[profileID]?.reconnectWaiting = false
         let loopID = UUID().uuidString
         let clock = self.clock
+        entries[profileID]?.reconnectLoopID = loopID
         let task = Task { @MainActor [weak self, clock] in
+            // Whatever ends this loop — success, a state mismatch that returns
+            // early, a path park or cancellation — a later drop must not read a
+            // dead loop's marker as an attempt in flight. The identity check
+            // keeps a replaced loop from clearing its successor's marker.
+            defer {
+                if let self, self.entries[profileID]?.reconnectLoopID == loopID {
+                    self.entries[profileID]?.reconnectLoopID = nil
+                    self.entries[profileID]?.attemptInFlightLoopID = nil
+                }
+            }
             var shouldWait = !immediate
+            var retry = 0
+            var delayStartedAt = clock.now()
             while !Task.isCancelled {
                 guard let self, let waitingEntry = self.entries[profileID], waitingEntry.generation == generation else { return }
                 if shouldWait {
+                    // The escalated curve only starts at the threshold: below it
+                    // the entry waits the pool's base interval once per failure,
+                    // so a blip is retried promptly and only a profile that keeps
+                    // failing ever reaches `POOL_MAX_RETRY`.
+                    if !self.isUnreachable(profileID: profileID) {
+                        self.entries[profileID]?.reconnectSchedule.reset()
+                    }
                     self.entries[profileID]?.reconnectWaiting = true
+                    delayStartedAt = clock.now()
                     let delayCompleted = await waitingEntry.reconnectSchedule.afterFailure()
                     guard !Task.isCancelled else { return }
                     guard delayCompleted || self.entries[profileID]?.networkPathSatisfied == true else {
@@ -560,6 +706,12 @@ final class DashboardGatewayConnectionPool {
                 guard !Task.isCancelled,
                       let entry = self.entries[profileID],
                       entry.generation == generation else { return }
+                retry += 1
+                let startedAt = clock.now()
+                // The loop is inside one transport attempt until this attempt
+                // ends; the stall watchdog reads this identity to tell a running
+                // attempt from a parked loop.
+                self.entries[profileID]?.attemptInFlightLoopID = loopID
                 let failurePresentationGeneration = self.entries[profileID]?.connectionFailureClassifier.beginAttempt()
                 let diagnosticSequence = await entry.client.latestDiagnosticSequence()
                 guard self.isCurrent(profileID: profileID, client: entry.client, generation: generation) else { return }
@@ -590,6 +742,19 @@ final class DashboardGatewayConnectionPool {
                     let connectionID = identity.id
                     guard self.isCurrent(profileID: profileID, client: entry.client, generation: generation) else { return }
                     self.entries[profileID]?.connectionID = connectionID
+                    self.recordAttempt(
+                        profileID: profileID,
+                        generation: generation,
+                        attemptID: loopID,
+                        retry: retry,
+                        startedAt: startedAt,
+                        delayBeforeMs: diagnosticMilliseconds(delayStartedAt.duration(to: startedAt)),
+                        diagnostic: nil,
+                        reason: nil,
+                        succeeded: true,
+                        connectionID: connectionID,
+                        gatewayConnectionID: identity.gatewayConnectionID
+                    )
                     self.entries[profileID]?.reconnectTask = nil
                     self.scheduleRefresh(profileID: profileID, generation: generation, delay: .zero)
                     return
@@ -598,9 +763,26 @@ final class DashboardGatewayConnectionPool {
                 } catch let failure as GatewayFailure where GatewayRecoveryFailurePolicy.isNonRetryable(failure) {
                     guard !Task.isCancelled,
                           self.isCurrent(profileID: profileID, client: entry.client, generation: generation) else { return }
+                    let diagnostic = await entry.client.latestHandshakeDiagnostic(after: diagnosticSequence)
+                    guard self.isCurrent(profileID: profileID, client: entry.client, generation: generation) else { return }
                     self.nonRetryableProfiles.insert(profileID)
                     self.entries[profileID]?.gatewayInfo = nil
                     self.entries[profileID]?.state = failure.code == "identity_mismatch" ? .identityMismatch : .offline
+                    self.recordAttempt(
+                        profileID: profileID,
+                        generation: generation,
+                        attemptID: loopID,
+                        retry: retry,
+                        startedAt: startedAt,
+                        delayBeforeMs: diagnosticMilliseconds(delayStartedAt.duration(to: startedAt)),
+                        diagnostic: diagnostic,
+                        reason: GatewayDiagnosticFailure.answerCode(failure),
+                        succeeded: false,
+                        connectionID: nil
+                    )
+                    self.entries[profileID]?.recorder.endEpisode(
+                        .stopped, profileID: profileID, lifecycleGeneration: generation
+                    )
                     self.entries[profileID]?.reconnectTask = nil
                     self.publish(profileID: profileID)
                     return
@@ -617,6 +799,19 @@ final class DashboardGatewayConnectionPool {
                             attemptGeneration: failurePresentationGeneration
                         )
                     }
+                    let failureCode = GatewayDiagnosticFailure.code(error)
+                    self.recordAttempt(
+                        profileID: profileID,
+                        generation: generation,
+                        attemptID: loopID,
+                        retry: retry,
+                        startedAt: startedAt,
+                        delayBeforeMs: diagnosticMilliseconds(delayStartedAt.duration(to: startedAt)),
+                        diagnostic: diagnostic,
+                        reason: failureCode,
+                        succeeded: false,
+                        connectionID: nil
+                    )
                     let failedState = self.entries[profileID]?.connectionFailureClassifier.noPath
                         .map { DashboardServerConnectionState.noPath($0.interface) } ?? .reconnecting
                     self.entries[profileID]?.state = failedState
@@ -626,6 +821,72 @@ final class DashboardGatewayConnectionPool {
             }
         }
         entries[profileID]?.reconnectTask = task
+    }
+
+    /// Whether this entry has failed to open a transport
+    /// `POOL_UNREACHABLE_AFTER` times in a row. It reads the same classifier
+    /// counter the dashboard's no-path presentation does, so the profile that
+    /// backs off is the profile the user sees as unreachable.
+    private func isUnreachable(profileID: String) -> Bool {
+        guard let count = entries[profileID]?.connectionFailureClassifier.consecutiveNeverOpened else {
+            return false
+        }
+        return count >= Self.POOL_UNREACHABLE_AFTER
+    }
+
+    /// Why no attempt is in flight or scheduled, for the stall watchdog. `nil`
+    /// means recovery is progressing: an attempt is running or the loop is
+    /// waiting in its bounded backoff. `reconnectTaskBusy` is the loop existing
+    /// but neither attempting nor waiting, which is where this pool could park
+    /// recovery; C-1 owns what a parked loop should do instead.
+    private func stallGuard(profileID: String) -> GatewayReconnectStallGuard? {
+        guard let entry = entries[profileID] else { return .other }
+        if entry.reconnectLoopID != nil, entry.attemptInFlightLoopID == entry.reconnectLoopID { return nil }
+        if entry.reconnectTask != nil, entry.reconnectWaiting { return nil }
+        if !entry.networkPathSatisfied { return .pathUnsatisfied }
+        if nonRetryableProfiles.contains(profileID) { return .nonRetryable }
+        if entry.reconnectTask != nil { return .reconnectTaskBusy }
+        return .other
+    }
+
+    /// One `gateway.attempt` record for an attempt this entry made, plus the
+    /// episode bookkeeping the recorder derives from it. Pool entries exist
+    /// only between a foreground reconcile and the background retirement, so
+    /// every pool attempt is a foreground attempt. `stageReached` is the
+    /// client's own handshake stage when it recorded one; without one the
+    /// attempt never opened a transport, which is what a pool attempt is.
+    private func recordAttempt(
+        profileID: String,
+        generation: Int,
+        attemptID: String,
+        retry: Int,
+        startedAt: ContinuousClock.Instant,
+        delayBeforeMs: Int,
+        diagnostic: GatewayConnectionDiagnostic?,
+        reason: String?,
+        succeeded: Bool,
+        connectionID: Int?,
+        gatewayConnectionID: String? = nil
+    ) {
+        guard let entry = entries[profileID], entry.generation == generation else { return }
+        entry.recorder.recordAttempt(GatewayConnectionAttempt(
+            profileID: profileID,
+            lifecycleGeneration: generation,
+            connectionID: connectionID,
+            attemptID: attemptID,
+            retry: retry,
+            stageReached: succeeded
+                ? "connected"
+                : diagnostic?.stage.rawValue ?? GatewayConnectionDiagnosticStage.transportOpen.rawValue,
+            reason: reason,
+            interfaces: diagnostic?.handshake?.networkInterfaces,
+            pathSatisfied: entry.networkPathSatisfied,
+            foreground: true,
+            delayBeforeMs: delayBeforeMs,
+            startedAt: startedAt,
+            gatewayConnectionID: gatewayConnectionID,
+            succeeded: succeeded
+        ))
     }
 
     private enum RefreshOutcome {
@@ -880,6 +1141,12 @@ final class DashboardGatewayConnectionPool {
                 return .retained
             }
             await seed.client.closeIfCurrent(connectionID: connectionID)
+            // A catalog read that proves the socket dead is a loss like any
+            // other: it opens the episode the following attempts belong to.
+            seed.recorder.noteDisconnected(
+                profileID: profileID, lifecycleGeneration: generation,
+                foreground: true, cause: GatewayDiagnosticFailure.code(error)
+            )
             retireConnectionEpoch(profileID: profileID, generation: generation, state: .reconnecting)
             scheduleReconnect(profileID: profileID, generation: generation)
             return .transportFailure
