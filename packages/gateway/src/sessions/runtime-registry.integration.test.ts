@@ -2136,13 +2136,15 @@ describe.sequential("RuntimeRegistry with the pinned agent runtime", () => {
     await mkdir(forks, { recursive: true });
     const children = Array.from({ length: 3 }, () => SessionManager.forkFrom(parentFile, fixture.cwd, forks));
     children.forEach(child => child.appendMessage(fauxAssistantMessage("child starts")));
-    const internals = fixture.registry as any;
-    const scanner = vi.spyOn(internals, "sessionInfos");
     const parentID = fixture.manager.getSessionId();
+    const walks = catalogWalks();
+    const before = walks.count();
     try {
       expect((await fixture.registry.catalog("user")).sessions.map(row => row.id)).toEqual([parentID]);
-      expect(scanner).toHaveBeenCalledTimes(1);
       children.forEach(child => child.appendMessage(fauxAssistantMessage("parallel child progress")));
+      // The children are external writers; index them, then the user cut must
+      // still resolve the parent and a live-only session without a walk.
+      await settleCatalog(fixture.registry);
       const live = await fixture.registry.create(fixture.cwd);
       const results = await Promise.all([
         fixture.registry.catalog("user"), fixture.registry.catalog("user"), fixture.registry.readSearchCut(parentID),
@@ -2152,11 +2154,13 @@ describe.sequential("RuntimeRegistry with the pinned agent runtime", () => {
         expect(result.sessions).toHaveLength(2);
       }
       expect(results[2]).toMatchObject({ summary: { id: parentID } });
-      expect(scanner).toHaveBeenCalledTimes(1);
+      const settled = walks.count();
       // A partial acceleration must never hide children from administration.
       const all = await fixture.registry.catalog("all");
       expect(all.sessions.map(row => row.id)).toEqual(expect.arrayContaining(children.map(child => child.getSessionId())));
-    } finally { scanner.mockRestore(); }
+      expect(walks.count()).toBe(settled);
+      expect(settled).toBeGreaterThan(before);
+    } finally { walks.restore(); }
   });
 
     it("refreshes user metadata and duplicate quarantine after a scoped cut is warm", async () => {
@@ -2188,17 +2192,23 @@ describe.sequential("RuntimeRegistry with the pinned agent runtime", () => {
     await appendFile(child.getSessionFile()!, '{"type":"message"');
     await copyFile(parentFile, join(forks, "ambiguous.jsonl"));
     const live = await fixture.registry.create(fixture.cwd);
-    const internals = fixture.registry as any;
-    const metadata = vi.spyOn(internals, "sessionInfos").mockImplementation(() => {
-      throw new Error("storage maintenance must not read transcripts");
-    });
+    await settleCatalog(fixture.registry);
+    const walks = catalogWalks();
+    const before = walks.count();
     try {
+      // Membership is the index and the live slots: the maintenance read parses
+      // no transcript and walks nothing.
       const ids = await fixture.registry.sessionIDsForStorageMaintenance();
       expect([...ids].sort()).toEqual([fixture.manager.getSessionId(), child.getSessionId(), live.id].sort());
-      expect(metadata).not.toHaveBeenCalled();
+      expect(walks.count()).toBe(before);
+      // An unprovable neighbour adds no row and removes none, so it neither
+      // blinds the cut nor hides an owner.
       await writeFile(join(dirname(parentFile), "incomplete-header.jsonl"), "{}");
-      await expect(fixture.registry.sessionIDsForStorageMaintenance()).rejects.toMatchObject({ code: "busy", retryable: true });
-    } finally { metadata.mockRestore(); }
+      await settleCatalog(fixture.registry);
+      expect([...(await fixture.registry.sessionIDsForStorageMaintenance())].sort())
+        .toEqual([fixture.manager.getSessionId(), child.getSessionId(), live.id].sort());
+      expect(walks.count()).toBeGreaterThan(before);
+    } finally { walks.restore(); }
   });
 
       it("scans only canonical user metadata for a user catalog and reserves all-scope indexing", async () => {
@@ -2209,25 +2219,21 @@ describe.sequential("RuntimeRegistry with the pinned agent runtime", () => {
     const child = SessionManager.forkFrom(parentFile, fixture.cwd, forksDirectory);
     child.appendMessage(fauxAssistantMessage("delegated body that user catalog must not materialize"));
 
-    const internals = fixture.registry as unknown as {
-      sessionInfos: (scope?: "user" | "all") => Promise<unknown[]>;
-    };
-    const scanner = vi.spyOn(internals, "sessionInfos");
+    await settleCatalog(fixture.registry);
+    const walks = catalogWalks();
+    const before = walks.count();
     try {
+      // A user cut resolves only the non-delegated rows; the all-scope cut
+      // resolves the delegated child too, from the same owner rows.
       const user = await fixture.registry.catalog("user");
       expect(user.sessions.map((session) => session.id)).toEqual([fixture.manager.getSessionId()]);
-      expect(scanner).toHaveBeenCalledWith("user");
-      expect(scanner).toHaveBeenCalledTimes(1);
-
-      // A user cut is deliberately not persisted as the complete sidecar. The
-      // all-scope route still discovers and retains the delegated row.
       const all = await fixture.registry.catalog("all");
       expect(all.sessions.map((session) => session.id)).toEqual(
         expect.arrayContaining([fixture.manager.getSessionId(), child.getSessionId()]),
       );
-      expect(scanner).toHaveBeenLastCalledWith("all");
+      expect(walks.count()).toBe(before);
     } finally {
-      scanner.mockRestore();
+      walks.restore();
     }
   });
 
@@ -2279,6 +2285,8 @@ describe.sequential("RuntimeRegistry with the pinned agent runtime", () => {
     const childLines = (await readFile(childFile, "utf8")).split("\n");
     childLines[0] = JSON.stringify({ ...JSON.parse(childLines[0]!), parentSession: join(fixture.agentDir, "sessions", "not-the-parent.jsonl") });
     await writeFile(childFile, childLines.join("\n"));
+    // Both files above are this test's own writes: index them before reading.
+    await settleCatalog(fixture.registry);
 
     const repairedUser = await fixture.registry.catalog("user");
     expect(repairedUser.sessions.map((session) => session.id)).toContain(fixture.manager.getSessionId());
