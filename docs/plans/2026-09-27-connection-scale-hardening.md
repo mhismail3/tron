@@ -2,7 +2,7 @@
 
 - **Started:** 2026-09-27
 - **Status:** Active (Phase 1 runs on `hardening/integration`; that branch's copy of this plan is authoritative until R-1)
-- **Last updated:** 2026-09-28, G-3 review round 2 addressed: the `unaudiencedSnapshotBuilds` warning and its test are now stated as a tripwire for a lost slot guard or a divergence between the registry's subscription record and the transport's, not for a closing socket
+- **Last updated:** 2026-09-28, G-4 done: the outbound queue drops superseded snapshots, session summaries and per-process activity while they are still unsent (`gateway.resources` gains `outboundCoalescedFrames`/`outboundCoalescedBytes`, `connection.outbound-capacity` names `oldestTopic`/`nextTopic`); the fanout capacity case now asserts that a client receives a subsequence of the broadcast order and still ends on every session's last revision
 - **Goal:** A clean, efficient and predictable Gateway and phone connection: the phone stays connected and loads any session promptly whenever the network path is up, however many sessions run and however large the history grows, and every disconnect or slow operation is attributable to one cause from the logs in one step.
 
 ## Goal and constraints
@@ -554,7 +554,7 @@ rows are in priority order.
 | G-7 | Claimed | Reconnect diet: send only what changed | O-1, O-6a | orchestrator-dispatched deepseek-worker, 2026-09-28 |
 | G-11 | Ready | Event-loop budget: find and bound every synchronous task over 50 ms | O-5, O-6a | |
 | G-9 | Ready | One background-work scheduler that yields to requests; measure the libuv pool size | O-5, G-1b | |
-| G-4 | Claimed | Outbound queue coalescing of superseded snapshots and keyed events | G-3 | orchestrator-dispatched deepseek-worker, 2026-09-28 |
+| G-4 | Done | Outbound queue coalescing of superseded snapshots and keyed events | G-3 | orchestrator-dispatched deepseek-worker, 2026-09-28 (branch `hardening/g-4`); the O-6b bandwidth-stream confirmation is owed to the orchestrator's qualification run |
 | G-5 | Claimed | Byte budget for live runtimes and an explicit heap limit | O-5 | orchestrator-dispatched deepseek-worker, 2026-09-28 |
 | E-3a | Ready | LAN endpoint (D-5), Gateway side: pinned TLS listener bound to the private LAN address | O-1, O-2 | |
 | E-3b | Ready | LAN endpoint: advertise endpoints and pin in pairing and hello | E-3a | |
@@ -5207,6 +5207,135 @@ events; widen them to name the pool owner in the same change.
   keeping: `stateRevision` on an instance is not a liveness heartbeat anywhere in
   the Gateway or iOS (iOS only validates `stateRevision >= 0`), and
   `markRuntimeReady` is MCP-only, so no other owner depends on this write.
+
+### G-4 · Done · 2026-09-28 · orchestrator-dispatched deepseek-worker (branch `hardening/g-4`)
+
+- Result: a connection's outbound queue is bounded by the state still worth
+  sending, not by how long the link took. `OrderedOutboundQueue` now carries a
+  per-frame wire `topic` and, for state a newer frame replaces, a coalescing
+  `key`: `session.snapshot:<sessionId>`, `session.summary:<sessionId>` and
+  `session.processActivity:<sessionId>:<processId>`. A newer frame with a key
+  removes the newest *unsent* frame with that key (releasing its payload and
+  byte reservation at the completed-frame boundary) and takes its own place at
+  the queue's tail, so what a client receives is always a subsequence of what
+  was enqueued and no frame ever overtakes an earlier one. The frame `ws` is
+  already writing is never recalled; frames with no key (progress, tool,
+  extension, removal-only process activity, lifecycle, responses, and the
+  compact `transport.resyncRequired` replacement of an oversized projection) are
+  never dropped. The 8 MiB/4,096-frame backstop is unchanged, and
+  `connection.outbound-capacity` now names `oldestTopic` (the frame the socket
+  was writing or waiting on) and `nextTopic`/`nextBytes` (the frame that did not
+  fit). `gateway.resources` gained `outboundCoalescedFrames`/
+  `outboundCoalescedBytes`, reported where each superseded frame is dropped.
+- Failure modes written before the code (queue level): a superseded frame whose
+  sequence is pending behind a synchronization barrier; a replacement larger
+  than the remaining budget and a replacement larger than the cap; coalescing a
+  frame already being written; interleaved progress and snapshot frames; a frame
+  that supersedes nothing queued (backstop must still fire); two keys that must
+  not merge.
+- Evidence:
+  - `npx vitest run src/transport/server-capacity.integration.test.ts
+    src/transport/sync-protocol.integration.test.ts
+    src/transport/stall-diagnostics.test.ts src/transport/logger.test.ts
+    src/transport/server-compression.integration.test.ts
+    src/transport/server-live-view.integration.test.ts
+    src/transport/server-revocation.integration.test.ts
+    src/transport/server-http-lifecycle.integration.test.ts
+    src/transport/server-connection-memory.integration.test.ts
+    src/transport/session-sync.test.ts` passes **134/134 in 10 files** (12.1 s),
+    including the two named check files at 31 and 4 cases
+    (`~/.tron/workspace/files/hardening/g-4/focused-vitest.txt`).
+  - Real-broadcast evidence with a held socket (the shape O-6b's cap produces):
+    7 × 24 KiB `session.snapshot` broadcasts plus a progress frame against a
+    64 KiB `maximumOutboundBytes` leave `queuedFrames: 3` (`completedFrames: 1`,
+    the in-flight snapshot), no `connection.outbound-capacity` record, the
+    socket still OPEN, and the delivered sequence `[1, 2, 8]` — 5 frames
+    coalesced, `outboundCoalescedFrames: 5`, `outboundCoalescedBytes` exactly
+    5 × the encoded snapshot. Keyed events: newest summary per session
+    (`summaryRevision` 3 for the superseded session), newest activity per
+    process, and the removal-only activity, the progress frame and the
+    first-written summary all delivered; 2 frames coalesced.
+  - The same file proves the backstop still closes a link whose queued state
+    nothing supersedes: three distinct sessions' 24 KiB snapshots against the
+    same 64 KiB cap produce one `connection.outbound-capacity` record with
+    `oldestTopic=session.snapshot nextTopic=session.snapshot nextBytes=…`, a
+    1013 close, `closeInitiated`, and no further admission.
+  - Barrier case (`sync-protocol.integration.test.ts`): with the open response
+    held, three quarantined 24 KiB snapshots and a progress frame flush after
+    the response; the queue holds 4 frames instead of overflowing the 48 KiB
+    cap, `synchronizationBytes` is back to 0, no capacity record is written, and
+    the delivered sequence is `[open response, sync response, progress 5,
+    snapshot 6]` — the superseded quarantined snapshots are gone, nothing
+    overtook a response, and the surviving session frames are in broadcast
+    order.
+  - Negative control (the coalescing keys removed from `outboundFrameKey`, then
+    restored): both new integration cases fail with `queuedFrames: 0` — the
+    queue retired on its backstop, which is the capacity close G-4 prevents
+    (`~/.tron/workspace/files/hardening/g-4/negative-control.txt`).
+  - `npm run build` clean; `python3 scripts/check-documentation-policy.py` and
+    `scripts/personal-info-guard.sh` pass.
+- Changes: the G-4 commit on `hardening/g-4`
+  (`perf(gateway): coalesce superseded outbound frames (G-4)`).
+- "Done when" items: (1) "O-6b's bandwidth-cap case never closes a socket for
+  capacity" — proved at the transport owner with a real Gateway, a real socket
+  and the broadcast paths, where the same bytes close the peer without
+  coalescing and do not with it; the O-6b `bandwidth-stream` qualification run
+  itself is the orchestrator's (its prime phase runs every impairment case at
+  default lengths before the measured iteration, so a smoke run of it does not
+  fit this row's budget). The fixture-level count to compare is
+  `connection.outbound-capacity` per run: expected 0 for the capped mobile
+  connection, and `outboundCoalescedFrames`/`outboundCoalescedBytes` greater than
+  zero in the capped window's `gateway.resources` record. (2) The queue stays
+  bounded and the record names topics — met by the cases above.
+- Kept on purpose: the 8 MiB/4,096-frame backstop, the one-frame-at-a-time
+  writer, the per-broadcast prepared encoding, the barrier quarantine (coalescing
+  never touches quarantined events; it acts only on the queue), the revocation
+  fence and the `whenIdle` close path are unchanged. Frames whose state is a
+  delta rather than whole state are deliberately left out of scope: progress,
+  tool progress, extension activity/presentation, diagnostics, compaction,
+  structure changes and close/error notices can be dropped only if a *sequenced*
+  event is dropped with them, so only the three whole-state topics are keyed.
+  `gateway.resources` reports coalescing as process totals rather than per
+  topic, because the record's per-topic block is the delivered-traffic picture
+  and the superseded state's topic is already named on the capacity record.
+- Deviations:
+  - `OrderedOutboundQueue.enqueue` now takes `OutboundFrame`
+    (`{encoded, bytes, topic, key?}`) instead of a string or `{encoded, bytes}`;
+    the queue's own unit cases were moved to a `queuedFrame()` helper.
+  - The capacity case's variable-length form had to be fixed: the pool is
+    spliced out and re-pushed rather than replaced in place, which is what makes
+    "delivered order is a subsequence of enqueue order" true.
+  - `server-capacity.integration.test.ts`'s fanout case was renamed and its
+    expectation changed: it used to require that every `session.summary`
+    revision reaches every client in global order. G-4 supersedes that
+    expectation (the plan names summaries as keyed coalescing candidates), and
+    the phone's catalog admission is revision-monotonic per session
+    (`DashboardStateOwners.apply` returns `.stale` when
+    `summaryRevision <= current`, so a dropped intermediate revision leaves no
+    stale row). The case now asserts the stronger properties that remain: what a
+    client receives is a subsequence of the broadcast order, each session's
+    revisions never go backwards, every session's last revision (8) is
+    delivered, and the fence response still follows every frame.
+- Tasks added: none — but R-1/R-4 should expect a phone-side consequence and may
+  want a row for it. When a coalesced frame is a *sequenced* session event
+  (a snapshot or process activity) and the client has a mounted chat, the phone
+  sees an `eventSequence` gap (`SessionSnapshotEventAdmission` /
+  `SessionPresentationStore.resyncIfNeeded` require exact-next for snapshots and
+  admitEnvelopes) and re-synchronizes that one session (`session.open` again,
+  the "Live session view is catching up" notice). That is fail-closed and
+  bounded — far cheaper than the 1013 close it replaces — but on a long
+  impairment it is extra requests and a visible catching-up state. A follow-up
+  row could make the phone install a newer snapshot as a rebaseline instead of
+  requesting a resync (the `session.rebaseline` topic already exists for the
+  Gateway's overflow recovery).
+- For the next agent: the `bandwidth-stream` O-6b case is the acceptance run
+  for this row; read `connection.outbound-capacity` counts and
+  `outboundCoalesced*` from the fixture's `gateway.jsonl`. `connection.closed`
+  also carries the queue's `completedFrames`/`acceptedFrames`, so a run where
+  coalescing works shows `acceptedFrames` well above `completedFrames` without a
+  capacity record. The coalescing identity lives in `outboundFrameIdentity` in
+  `packages/gateway/src/transport/server.ts`: a new whole-state topic added
+  later needs one row there, not a second queue feature.
 
 ### Orchestrator · 2026-09-28 · G-3 merged
 
