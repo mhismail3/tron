@@ -2,7 +2,7 @@ import { createPrivateKey, createPublicKey, generateKeyPairSync, randomBytes, si
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { hostname } from "node:os";
 import { join } from "node:path";
-import { createServer, type Server as SecureServer } from "node:https";
+import { createServer, type Server as SecureServer, type ServerOptions as HttpsServerOptions } from "node:https";
 import type { IncomingMessage, ServerResponse } from "node:http";
 import type { Duplex } from "node:stream";
 import { resolveLanAddresses, type LanAddress } from "../config.js";
@@ -59,8 +59,34 @@ export interface LanEndpointConfig {
 
 export interface LanEndpointHandlers {
   readonly onConnection: (socket: Duplex) => void;
+  /** The TLS socket a completed handshake produced. The upgrade handler is
+   * handed that same socket later, so the accept time the listener recorded at
+   * `onConnection` is carried across here. */
+  readonly onSecureConnection: (socket: Duplex) => void;
   readonly onRequest: (request: IncomingMessage, response: ServerResponse) => void;
   readonly onUpgrade: (request: IncomingMessage, socket: Duplex, head: Buffer) => void;
+}
+
+/** The bounds the transport applies to every HTTP listener it owns. The lane
+ * serves the same routes to the same peers out of the same connection budget,
+ * so it takes them from the transport rather than from Node's defaults: Node's
+ * 60 s header and 120 s handshake allowances would let a peer that has not
+ * signed in hold slots the phone's own leg needs. `idleTimeout` is
+ * `server.timeout`, which has no `createServer` option. */
+export interface LanListenerLimits extends
+  Pick<HttpsServerOptions, "headersTimeout" | "requestTimeout" | "connectionsCheckingInterval" | "handshakeTimeout"> {
+  readonly idleTimeout: number;
+}
+
+/** The `createServer` subset of those bounds, so both listeners spell "which
+ * field goes where" once. */
+export function httpListenerOptions(limits: LanListenerLimits): HttpsServerOptions {
+  return {
+    headersTimeout: limits.headersTimeout,
+    requestTimeout: limits.requestTimeout,
+    connectionsCheckingInterval: limits.connectionsCheckingInterval,
+    handshakeTimeout: limits.handshakeTimeout,
+  };
 }
 
 export interface LanEndpointOptions extends LanEndpointConfig, LanEndpointHandlers {
@@ -68,6 +94,8 @@ export interface LanEndpointOptions extends LanEndpointConfig, LanEndpointHandle
   /** The listener's port. The LAN leg serves the same route surface as the main
    * listener, so it uses the same port on the other address. */
   readonly port: number;
+  /** The main listener's HTTP and TLS bounds, which this lane shares. */
+  readonly listenerLimits: LanListenerLimits;
 }
 
 interface LanCredentials {
@@ -105,9 +133,16 @@ function derSet(...items: Buffer[]): Buffer {
 }
 
 function derInteger(bytes: Buffer): Buffer {
-  // X.690: a positive INTEGER whose first byte has the high bit set carries one
-  // leading zero octet, otherwise it would be read as negative.
-  return der(0x02, bytes[0]! & 0x80 ? Buffer.concat([Buffer.from([0]), bytes]) : bytes);
+  // X.690 minimal form: no leading zero octet, and one added only where the
+  // value's first octet has the high bit set and would otherwise read as
+  // negative. OpenSSL refuses a certificate whose serial is not minimal — the
+  // 16 random bytes a serial is drawn from carry a leading zero about one time
+  // in 256 — so a pair that skipped this normalization could keep the Gateway
+  // from starting or disable the lane for good.
+  let first = 0;
+  while (first < bytes.length - 1 && bytes[first] === 0) first += 1;
+  const minimal = bytes.subarray(first);
+  return der(0x02, minimal[0]! & 0x80 ? Buffer.concat([Buffer.from([0]), minimal]) : minimal);
 }
 
 function derOid(dotted: string): Buffer {
@@ -224,10 +259,14 @@ async function loadOrCreateLanCredentials(stateDirectory: string): Promise<LanCr
   if (key !== null || certificate !== null) throw new LanCredentialError("certificate_incomplete");
   await mkdir(stateDirectory, { recursive: true, mode: 0o700 });
   const { privateKey } = generateKeyPairSync("ec", { namedCurve: "prime256v1" });
-  const created: LanCredentials = {
-    key: privateKey.export({ type: "pkcs8", format: "pem" }).toString(),
-    certificate: selfSignedCertificate(privateKey, hostname()),
-  };
+  // A new pair is read back before it is written: a certificate this Gateway
+  // cannot load would otherwise be stored, pinned by a phone, and disable the
+  // lane on every later start. A refused pair writes nothing, so the next
+  // start draws a new one.
+  const created = validateCredentials(
+    privateKey.export({ type: "pkcs8", format: "pem" }).toString(),
+    selfSignedCertificate(privateKey, hostname()),
+  );
   try {
     // `wx` keeps the create-once invariant: a key that appeared between the
     // read above and this write is validated, never replaced.
@@ -247,6 +286,12 @@ export class LanEndpoint {
   private listener: SecureServer | undefined;
   private bound: (LanAddress & { readonly port: number }) | undefined;
   private timer: NodeJS.Timeout | undefined;
+  /** Set by `stop`: a reconcile that is already past its checks closes what it
+   * bound instead of publishing it, and no new interval starts. */
+  private stopped = false;
+  /** The reconcile in flight, so an interval tick joins it rather than starting
+   * a second bind, and `stop` can wait for the one that is running. */
+  private reconcileInFlight: Promise<void> | undefined;
   /** The sockets this listener accepted, so a rebind or a shutdown retires
    * exactly the LAN leg: `server.close()` waits for an upgraded socket forever,
    * because Node stops tracking it as an HTTP connection. */
@@ -273,6 +318,9 @@ export class LanEndpoint {
       return;
     }
     await this.reconcile();
+    // A `stop` that landed while the first pair was loading owns the endpoint
+    // now: an interval started here would outlive it.
+    if (this.stopped) return;
     // Keep reconciling even while disabled for want of a private address: a Mac
     // that starts with Wi-Fi off must expose the LAN leg once it associates.
     this.timer = setInterval(() => void this.reconcile(), this.options.reconcileIntervalMs ?? LAN_ADDRESS_RECONCILE_MS);
@@ -280,15 +328,30 @@ export class LanEndpoint {
   }
 
   /** Stop listening. Sockets this listener accepted keep their own bounded
-   * retirement: a peer that does not leave within the grace is destroyed. */
+   * retirement: a peer that does not leave within the grace is destroyed. A
+   * bind still in flight is joined first, so nothing this endpoint bound is
+   * left listening once this promise settles. */
   async stop(): Promise<void> {
+    this.stopped = true;
     clearInterval(this.timer);
     this.timer = undefined;
+    await this.reconcileInFlight;
     await this.retireListener(false);
   }
 
-  private async reconcile(): Promise<void> {
-    if (!this.credentials) return;
+  /** One reconcile at a time: a tick that arrives while a bind is in flight
+   * joins it, and `stop` waits on the same promise. */
+  private reconcile(): Promise<void> {
+    if (this.reconcileInFlight !== undefined) return this.reconcileInFlight;
+    const running = this.reconcileOnce().finally(() => {
+      if (this.reconcileInFlight === running) this.reconcileInFlight = undefined;
+    });
+    this.reconcileInFlight = running;
+    return running;
+  }
+
+  private async reconcileOnce(): Promise<void> {
+    if (this.stopped || !this.credentials) return;
     const next = (this.options.lanAddresses ?? resolveLanAddresses)()[0];
     if (next !== undefined && this.listener && this.bound?.address === next.address) return;
     // Retire before the new bind: the address this listener served is no longer
@@ -297,11 +360,18 @@ export class LanEndpoint {
     // address may be transient.
     const rebound = this.listener !== undefined;
     await this.retireListener(true);
+    if (this.stopped) return;
     if (next === undefined) {
       this.recordDisabled("no_private_address", "info");
       return;
     }
     const listener = await this.bind(next);
+    if (this.stopped) {
+      // `stop` returned while this bind was still in flight. The listener it
+      // could not see is this pass's own, so this pass closes it.
+      if (listener) await this.closeListener(listener, true);
+      return;
+    }
     if (!listener) {
       this.recordDisabled("bind_failed", "warning");
       return;
@@ -319,16 +389,28 @@ export class LanEndpoint {
 
   private async bind(address: LanAddress): Promise<SecureServer | undefined> {
     const credentials = this.credentials!;
-    const listener = createServer({
-      key: credentials.key,
-      cert: credentials.certificate,
-      minVersion: "TLSv1.2",
-    }, (request, response) => this.options.onRequest(request, response));
+    const limits = this.options.listenerLimits;
+    let listener: SecureServer;
+    try {
+      // The TLS context is part of the bind: a credential the platform refuses
+      // disables this listener rather than reaching `start`, which must never
+      // throw (the Gateway would fail to start with it).
+      listener = createServer({
+        ...httpListenerOptions(limits),
+        key: credentials.key,
+        cert: credentials.certificate,
+        minVersion: "TLSv1.2",
+      }, (request, response) => this.options.onRequest(request, response));
+    } catch {
+      return undefined;
+    }
+    listener.timeout = limits.idleTimeout;
     listener.on("connection", (socket) => {
       this.acceptedSockets.add(socket);
       socket.once("close", () => this.acceptedSockets.delete(socket));
       this.options.onConnection(socket);
     });
+    listener.on("secureConnection", (socket) => this.options.onSecureConnection(socket));
     listener.on("upgrade", (request, socket, head) => this.options.onUpgrade(request, socket, head));
     try {
       await new Promise<void>((resolve, reject) => {
@@ -352,6 +434,10 @@ export class LanEndpoint {
     this.listener = undefined;
     this.bound = undefined;
     if (!listener) return;
+    await this.closeListener(listener, immediately);
+  }
+
+  private async closeListener(listener: SecureServer, immediately: boolean): Promise<void> {
     const closed = new Promise<void>((resolve) => listener.close(() => resolve()));
     listener.closeIdleConnections();
     if (immediately) {

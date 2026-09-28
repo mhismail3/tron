@@ -7990,5 +7990,36 @@ wait).
   `--host` would collide (fail-closed, one `bind_failed` record); the
   qualification scripts that start a fixture Gateway need `--lan-endpoint on`
   before E-3c's race cases can exercise the lane.
-||||||| 3d90561d4
 
+### E-3a · review fixes · 2026-09-28 · orchestrator-dispatched deepseek-worker (branch `hardening/e-3a`)
+
+- Result: an independent review's two majors and three minors are fixed on the
+  same branch (no merge). (1) A certificate serial is now minimal DER
+  (`derInteger` drops a leading zero octet and re-adds one only for the sign), so
+  the ~1 draw in 512 that started with a zero octet no longer produces a
+  certificate OpenSSL refuses — which used to stop the Gateway starting, or
+  disable the lane for good with `certificate_unreadable`; a freshly created pair
+  is also read back through `validateCredentials` before it is written, and the
+  TLS context is created inside `bind`'s try so a refused credential is a
+  disabled record rather than a thrown `start`. (2) Both listeners now take their
+  header, request-idle, connections-checking and TLS handshake bounds from one
+  `HTTP_LISTENER_LIMITS` object in `server.ts`; the lane previously kept Node's
+  60 s header and 120 s handshake defaults, so an unauthenticated peer on the
+  Wi-Fi could hold lane slots that come out of the same 128-connection budget.
+  (3) `stop` sets a `stopped` flag, joins the single in-flight reconcile and
+  closes a listener a late bind produced, so nothing this endpoint bound stays
+  listening after `stop` resolves. (4) The accepted socket's time is carried to
+  the `TLSSocket` on `secureConnection` (matched by peer address and port, since
+  `tls.Server` does not expose the wrapped socket), so `acceptToUpgradeMs` on the
+  lane measures the TLS handshake instead of reading 0. (5) The committed
+  merge-base marker `||||||| 3d90561d4` is deleted from this file.
+- Evidence: `npx tsc --noEmit -p .` clean; `npx vitest run
+  src/transport/lan-endpoint.integration.test.ts` 10/10 (the four new cases fail
+  on the pre-fix code: OpenSSL refuses a drawn serial; the lane's unauthenticated
+  sockets outlive the bound; `acceptToUpgradeMs` is 0; `stop` leaves the listener
+  bound); `src/config.test.ts` and the merge-gate set green below their own rows.
+- Deviations: the lane's bounds are declared by `LanListenerLimits` in
+  `lan-endpoint.ts` and valued by `server.ts`; `LanEndpointHandlers` gained
+  `onSecureConnection`; `selfSignedCertificate`'s serial stays 16 random bytes.
+- Left: the lane bounds case waits out the real 15 s header bound (~16 s), since
+  Node enforces it with its own timers.

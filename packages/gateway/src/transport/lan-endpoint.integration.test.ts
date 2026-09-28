@@ -1,17 +1,18 @@
+import { once } from "node:events";
 import { request as httpsRequest } from "node:https";
 import { request as httpRequest } from "node:http";
-import { createServer as createTcpServer } from "node:net";
+import { createConnection, createServer as createTcpServer } from "node:net";
 import { connect as tlsConnect, type TLSSocket } from "node:tls";
 import type { Duplex } from "node:stream";
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { stat, mkdtemp, readFile, rm, writeFile, mkdir } from "node:fs/promises";
-import { generateKeyPairSync } from "node:crypto";
+import { generateKeyPairSync, X509Certificate } from "node:crypto";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import WebSocket from "ws";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { DeviceStore } from "../security/device-store.js";
-import { GatewayServer } from "./server.js";
+import { GatewayServer, HTTP_HEADERS_TIMEOUT_MS, HTTP_LISTENER_LIMITS } from "./server.js";
 import { LanEndpoint, selfSignedCertificate } from "./lan-endpoint.js";
 import type { LanAddress } from "../config.js";
 import { PROTOCOL_VERSION } from "../version.js";
@@ -35,7 +36,19 @@ import { PROTOCOL_VERSION } from "../version.js";
 // 7. The lane serves the socket route and the authenticated HTTP routes through
 //    the transport's shared admission, refuses `POST /v1/pair`, and answers
 //    `/health` with its status alone.
-// 8. Shutdown retires the lane listener and the sockets it accepted.
+// 8. Shutdown retires the lane listener and the sockets it accepted, including
+//    a listener whose bind was still in flight when `stop` was called.
+// 9. Two admission bounds a peer that has not signed in could otherwise hold a
+//    slot with: the TLS handshake and an unfinished request line. The main
+//    listener closes both within `HTTP_HEADERS_TIMEOUT_MS`; a lane that takes
+//    Node's defaults holds them for 60-120 s out of the same capacity.
+// 10. The serial of a generated certificate must be minimal DER: OpenSSL
+//    refuses one that starts with a zero octet, which is what a serial drawn
+//    from 16 random bytes is about one time in 512. Such a pair would either
+//    stop the Gateway from starting or disable the lane for good.
+// 11. The upgrade record's `acceptToUpgradeMs` must date from the TCP accept on
+//    the lane too, where the upgrade handler is handed the TLS socket rather
+//    than the accepted one.
 
 const cleanups: Array<() => Promise<void>> = [];
 afterEach(async () => {
@@ -174,6 +187,7 @@ async function plainHttp(host: string, port: number, path: string, method = "GET
  * those through the real transport). */
 const RESPONDING_HANDLERS = {
   onConnection: () => {},
+  onSecureConnection: () => {},
   onRequest: (_request: IncomingMessage, response: ServerResponse) => {
     response.writeHead(200, { "content-type": "application/json" });
     response.end("{}");
@@ -196,6 +210,7 @@ async function endpointFixture(prefix: string, addresses: LanAddress[], handlers
   const log = { log: vi.fn() };
   const endpoint = new LanEndpoint({
     enabled: true, stateDirectory, port, logger: log as never,
+    listenerLimits: HTTP_LISTENER_LIMITS,
     lanAddresses: () => [...addresses],
     reconcileIntervalMs: 25,
     ...RESPONDING_HANDLERS,
@@ -270,6 +285,7 @@ describe("LAN endpoint", () => {
     await fixture.endpoint.stop();
     const restarted = new LanEndpoint({
       enabled: true, stateDirectory: fixture.stateDirectory, port: fixture.port, logger: { log: vi.fn() } as never,
+      listenerLimits: HTTP_LISTENER_LIMITS,
       lanAddresses: () => [{ address: "127.0.0.1", family: "IPv4" }],
       ...RESPONDING_HANDLERS,
     });
@@ -279,6 +295,17 @@ describe("LAN endpoint", () => {
     expect(await readFile(keyPath, "utf8")).toBe(key);
     expect(await readFile(certificatePath, "utf8")).toBe(certificate);
     expect((await lanRequest("127.0.0.1", fixture.port, "/health", certificate)).status).toBe(200);
+  });
+
+  it("generates certificates OpenSSL reads back", async () => {
+    // A serial drawn from 16 random bytes is non-minimal DER about one time in
+    // 512 — a zero octet before a byte below 0x80 — and OpenSSL refuses the
+    // certificate that carries it. 4096 draws catch that regression with
+    // 99.97%; what each draw asserts is that the generated pair loads.
+    const { privateKey } = generateKeyPairSync("ec", { namedCurve: "prime256v1" });
+    for (let index = 0; index < 4096; index++) {
+      expect(() => new X509Certificate(selfSignedCertificate(privateKey, "fixture"))).not.toThrow();
+    }
   });
 
   it("refuses a half-present, unreadable or mismatched pair without overwriting it", async () => {
@@ -316,6 +343,7 @@ describe("LAN endpoint", () => {
       const log = { log: vi.fn() };
       const endpoint = new LanEndpoint({
         enabled: true, stateDirectory, port, logger: log as never,
+        listenerLimits: HTTP_LISTENER_LIMITS,
         ...RESPONDING_HANDLERS,
         lanAddresses: () => [{ address: "127.0.0.1", family: "IPv4" }],
       });
@@ -413,6 +441,74 @@ describe("LAN endpoint", () => {
     primary.send(hello);
     const primaryOpened = await waitFor(() => records(fixture.log, "http.upgrade").filter((record) => record.fields.outcome === "opened")[1], "primary upgrade opened");
     expect(primaryOpened.fields.transport).toBe("primary");
+  });
+
+  it("bounds a lane peer at the main listener's handshake and header limits", async () => {
+    const fixture = await gatewayFixture();
+    await waitForRecord(fixture.log, "lan.listener", "state", "bound");
+    // Two ways a peer that has not signed in holds a slot: a handshake that
+    // never completes, and a request line that never ends. The main listener
+    // retires both at `HTTP_HEADERS_TIMEOUT_MS`; a lane left on Node's 60 s
+    // header and 120 s handshake defaults holds them out of the same budget.
+    const bare = createConnection({ host: "::1", port: fixture.port });
+    cleanups.push(async () => { bare.destroy(); });
+    const partial = await openTls("::1", fixture.port);
+    cleanups.push(async () => { partial.destroy(); });
+    // The client has to read to see the 408: a paused TLS socket never surfaces
+    // the server's close at all, so the answer is this case's observable.
+    const answered = new Promise<string>((resolve, reject) => {
+      partial.once("data", (chunk: Buffer) => resolve(chunk.toString("utf8")));
+      partial.once("error", reject);
+    });
+    partial.write("GET /health HTTP/1.1\r\nHost: localhost\r\n");
+    // Node enforces both bounds on its own timers, so this wait is real; the
+    // slack is for a machine that is busy with other sessions.
+    await bounded(Promise.all([once(bare, "close"), answered]),
+      "lane admission bound", HTTP_HEADERS_TIMEOUT_MS + 15_000);
+    expect(await answered).toContain("408");
+  }, 45_000);
+
+  it("dates a lane upgrade from the TCP accept, so the record shows the TLS handshake", async () => {
+    const fixture = await gatewayFixture();
+    await waitForRecord(fixture.log, "lan.listener", "state", "bound");
+    const token = await localToken(fixture.root);
+    // The handshake is spent before the upgrade request is written, the way a
+    // phone's own reconnect spends it: the field is zero only if the accept
+    // time was looked up on the socket the handler was not given.
+    const handed = await openTls("::1", fixture.port);
+    cleanups.push(async () => { handed.destroy(); });
+    await new Promise((resolve) => setTimeout(resolve, 300));
+    const socket = new WebSocket(`wss://[::1]:${fixture.port}/v1/socket`, {
+      headers: { authorization: `Bearer ${token}` },
+      rejectUnauthorized: false,
+      createConnection: () => handed,
+    });
+    cleanups.push(async () => { socket.terminate(); });
+    await bounded(new Promise<void>((resolve, reject) => { socket.once("open", resolve); socket.once("error", reject); }), "handed lane upgrade open");
+    socket.send(JSON.stringify({ type: "hello", protocolVersion: PROTOCOL_VERSION, diagnostics: { clientId: "fixture", attemptId: "accept", epoch: "1" } }));
+    const opened = await waitFor(() => records(fixture.log, "http.upgrade")
+      .find((record) => record.fields.transport === "lan" && record.fields.outcome === "opened"), "lane upgrade opened");
+    expect(Number(opened.fields.acceptToUpgradeMs)).toBeGreaterThanOrEqual(250);
+  });
+
+  it("stops a bind that was still in flight instead of leaving it listening", async () => {
+    const home = await tempRoot("tron-lan-stop-");
+    const port = await unusedPort();
+    const log = { log: vi.fn() };
+    const endpoint = new LanEndpoint({
+      enabled: true, stateDirectory: join(home, "lan-endpoint"), port, logger: log as never,
+      listenerLimits: HTTP_LISTENER_LIMITS,
+      lanAddresses: () => [{ address: "127.0.0.1", family: "IPv4" }],
+      ...RESPONDING_HANDLERS,
+    });
+    // `stop` lands while the first pair is still being read from disk; the bind
+    // that follows it must not outlive the stop, and neither must its interval.
+    const starting = endpoint.start();
+    await endpoint.stop();
+    await starting;
+    expect(await tlsReaches("127.0.0.1", port)).toBe(false);
+    await new Promise((resolve) => setTimeout(resolve, RECONCILE_SETTLE_MS));
+    expect(await tlsReaches("127.0.0.1", port)).toBe(false);
   });
 
   it("binds nothing while the setting is off, and retires the lane and its sockets on shutdown", async () => {

@@ -22,7 +22,7 @@ import { SessionSyncBarrier, type BufferedSessionEncoding, type BufferedSessionE
 import type { BrowserLiveViewRegistry } from "../display/browser-live-view.js";
 import { bytes, RequestSpan, runInRequestSpan, stage, wait } from "./request-span.js";
 import { TailscalePeerPaths, type PeerPathLookup, type PeerPathReader } from "./tailscale-peer.js";
-import { LanEndpoint, type LanEndpointConfig } from "./lan-endpoint.js";
+import { LanEndpoint, httpListenerOptions, type LanEndpointConfig, type LanListenerLimits } from "./lan-endpoint.js";
 import { isTailscaleAddress } from "../config.js";
 
 // Retain only recent former IDs while an active subscription is rekeyed. Older
@@ -111,6 +111,17 @@ export const HTTP_MAXIMUM_REQUESTS = 128;
 export const HTTP_MAXIMUM_REQUESTS_PER_IDENTITY = 16;
 export const HTTP_MAXIMUM_REQUESTS_PER_ADDRESS = 32;
 export const HTTP_MAXIMUM_REQUESTS_PER_CONNECTION = 8;
+// Both listeners this transport owns — the main one and the LAN lane — take
+// their bounds from here: the lane serves the same routes to the same peers out
+// of the same connection budget, so a slower bound there would let a peer that
+// has not signed in hold slots the phone's own leg needs.
+export const HTTP_LISTENER_LIMITS: LanListenerLimits = {
+  headersTimeout: HTTP_HEADERS_TIMEOUT_MS,
+  requestTimeout: HTTP_REQUEST_TIMEOUT_MS,
+  connectionsCheckingInterval: 1_000,
+  handshakeTimeout: HTTP_HEADERS_TIMEOUT_MS,
+  idleTimeout: HTTP_REQUEST_IDLE_TIMEOUT_MS,
+};
 
 export interface HttpTransportLease {
   identify(identity: string): void;
@@ -904,6 +915,14 @@ function acceptedSocketAddress(socket: Duplex): string {
   return typeof address === "string" ? address : "unknown";
 }
 
+/** The source port of an accepted socket, or undefined when the socket is not a
+ * TCP one. It joins a TLS socket to the socket it wrapped: the two report the
+ * same peer, and only one live connection holds an address and port pair. */
+function acceptedSocketPort(socket: Duplex): number | undefined {
+  const port = (socket as { remotePort?: unknown }).remotePort;
+  return typeof port === "number" ? port : undefined;
+}
+
 async function* completeRequestBody(request: IncomingMessage): AsyncGenerator<Buffer> {
   for await (const value of request) {
     yield Buffer.isBuffer(value) ? value : Buffer.from(value);
@@ -1018,12 +1037,11 @@ export class GatewayServer {
       options.maximumHttpRequests,
       options.maximumHttpRequestsPerIdentity,
     );
-    this.server = createServer({
-      headersTimeout: HTTP_HEADERS_TIMEOUT_MS,
-      requestTimeout: HTTP_REQUEST_TIMEOUT_MS,
-      connectionsCheckingInterval: 1_000,
-    }, (request, response) => void this.handleHttp(request, response, this.primaryTransport));
-    this.server.timeout = HTTP_REQUEST_IDLE_TIMEOUT_MS;
+    // Both listeners take their bounds from one object: the lane serves the
+    // same routes to the same peers out of the same connection budget.
+    const listenerLimits = HTTP_LISTENER_LIMITS;
+    this.server = createServer(httpListenerOptions(listenerLimits), (request, response) => void this.handleHttp(request, response, this.primaryTransport));
+    this.server.timeout = listenerLimits.idleTimeout;
     this.server.on("connection", (socket) => this.admitHttpConnection(socket, maximumHttpConnections));
     // The LAN listener shares this transport's admission, capacity, heartbeat,
     // revocation and hello; only its address, its certificate and the routes it
@@ -1033,7 +1051,9 @@ export class GatewayServer {
         ...options.lanEndpoint,
         logger: options.logger,
         port: options.port,
+        listenerLimits,
         onConnection: (socket) => this.admitHttpConnection(socket, maximumHttpConnections),
+        onSecureConnection: (socket) => this.adoptAcceptedSocketTime(socket),
         onRequest: (request, response) => void this.handleHttp(request, response, "lan"),
         onUpgrade: (request, socket, head) => void this.handleUpgrade(request, socket, head, "lan"),
       });
@@ -1125,6 +1145,22 @@ export class GatewayServer {
       if (count === 1) this.httpConnectionsByAddress.delete(address);
       else this.httpConnectionsByAddress.set(address, count - 1);
     });
+  }
+
+  /** Carries the accept time recorded at `connection` to the `TLSSocket` a TLS
+   * listener later hands the upgrade handler: `tls.Server` does not give the
+   * wrapped socket back, and a lookup that misses reports zero elapsed time for
+   * every lane upgrade — exactly the TLS handshake the field exists to show. */
+  private adoptAcceptedSocketTime(socket: Duplex): void {
+    const address = acceptedSocketAddress(socket);
+    const port = acceptedSocketPort(socket);
+    if (port === undefined) return;
+    for (const accepted of this.httpSockets) {
+      if (acceptedSocketPort(accepted) !== port || acceptedSocketAddress(accepted) !== address) continue;
+      const acceptedAt = this.httpSocketAcceptedAt.get(accepted);
+      if (acceptedAt !== undefined) this.httpSocketAcceptedAt.set(socket, acceptedAt);
+      return;
+    }
   }
 
   private async publishResources(): Promise<void> {
