@@ -609,7 +609,7 @@ rows are in priority order.
 | T-2 | Done | `GatewayConnectionEpisodeRecorderTests/blockedMainActorIsMeasuredAndReported` (O-4) was killed once ("Test crashed with signal kill") when run with four other suites on integration, then passed 3/3; find whether the 5 s main-thread block trips a hosted-test watchdog and bound the block so the test cannot be killed while still proving the stall record | O-4 | orchestrator-dispatched deepseek-worker, 2026-09-28; no hosted-test watchdog exists (a 5 + 10 + 20 s block probe passed); the kill came from another worktree's run on the same default-lane simulator (`E816D194…`), not from the block — see the T-2 handoff and T-3; the block is now the named `mainStallTestBlock` (5 s) in both phases |
 | T-3 | Done | Default-lane iOS runs must serialize on `~/.tron/internal/ios-test/lease.lock`, but runs from three worktrees held the one owned simulator (`E816D194…`) at the same time and killed each other's host app (see the T-2 handoff); the lease was bypassed because `--lane NAME` was consumed by the lease holder and not passed to the command it started, so the command leased the named/other lane while provisioning the default lane's simulator (`ios-test-G7*` lanes: lease file, no marker); the lane now travels with the command and a command that inherits a lease for another lane is refused | none | orchestrator-dispatched deepseek-worker, 2026-09-28 |
 | T-4 | Claimed | `GatewayLogExportTests/byteEnvelopeReservesTheChatTrace` is SIGKILLed when it shares a test process with `GatewayConnectionEpisodeRecorderTests` (main-stall test blocks the main thread twice for 4 s); each passes alone (bundles `20260928T203739Z-run.InevV5`, `20260928T201219Z-run.jNGHmH`). Find the killer and make both robust in one process | T-2 | orchestrator-dispatched deepseek-worker, 2026-09-28 |
-| C-7 | Claimed | Dashboard-pool event consumption stops after a failed initial connect (see the C-5 handoff): a successful reconnect brings the socket back but nothing consumes `client.events`, so a background profile stops receiving summaries, `system.stopping` and `transport.disconnected` until its entry is recreated | C-2 | orchestrator-dispatched deepseek-worker, 2026-09-28 |
+| C-7 | Done | Dashboard-pool event consumption stops after a failed initial connect (see the C-5 handoff): a successful reconnect brings the socket back but nothing consumes `client.events`, so a background profile stops receiving summaries, `system.stopping` and `transport.disconnected` until its entry is recreated | C-2 | orchestrator-dispatched deepseek-worker, 2026-09-28 (branch `hardening/c-7`; the connection epoch now owns its event reader) |
 
 ### Phase 2 — Release and one evaluation day
 
@@ -8056,3 +8056,56 @@ wait).
 - Gateway gate after merging `hardening/integration`: the six transport
   integration files 131/131, `runtime-registry.integration.test.ts` 257/257,
   `npx tsc --noEmit -p .` clean.
+
+### C-7 · Done · 2026-09-28 · orchestrator-dispatched deepseek-worker (branch `hardening/c-7`)
+
+- Result: one event reader per pool connection epoch. `Entry.eventTask` reads that
+  epoch's `client.events`; `startEventConsumption` starts one wherever an attempt
+  connects (the initial connect and the reconnect loop's success path), and
+  `retireConnectionEpoch` cancels and clears it with the connection it clears,
+  as `stop()` does. An entry whose first attempt failed had no reader at all —
+  its `start` task ended in the failure branch before the stream — so a
+  successful reconnect left a live socket whose `session.summary`,
+  `system.stopping` and `transport.disconnected` nobody read; an entry whose
+  first attempt succeeded kept one reader across epochs, which could take a
+  successor's deliveries under the identity of the connection it was started
+  for. `packages/ios-app/docs/architecture.md` states the ownership beside the
+  pool's connection paragraph. No new record, so no observability row is owed.
+- Failure modes (one isolated test, `failedInitialConnectReconnectConsumesEvents`):
+  (1) after a failed initial connect nothing consumes the reconnected socket's
+  events; (2) a reader outlives its epoch on the client's shared stream; (3) a
+  retired reader's slot is never cleared, so its successor connection has none.
+- Evidence: `scripts/tron-ios-test build` succeeds;
+  `scripts/tron-ios-test run --lane CT22 --only-testing TronMobileTests/DashboardStateOwnerTests`
+  passes 61 tests in one suite
+  (`$HOME/Library/Developer/Tron/ios/test-runs/20260928T202434Z-run.c7QcxS`; 60
+  before this branch's new test). Negative control with only the reconnect-path
+  reader removed (the pre-fix shape): exactly that one test fails, at its
+  summary leg (`condition timed out`, `DashboardStateOwnerTests.swift:633`), and
+  the other 60 pass (`…/20260928T202818Z-run.qBKuHY`); the source was then
+  restored byte-for-byte (`shasum -a 256 -c`, `837be616…`) to the tree the
+  passing run was built from. The default lane was occupied by another
+  session's run (a sibling checkout holding its own `ios-test-paused` lock) on
+  the default-lane device `E816D194…`, which killed the first attempt's host app
+  (`signal kill before establishing connection`,
+  `…/20260928T202253Z-run.fa56So`); the passing and control runs used the idle
+  `CT22` lane. `python3 scripts/check-documentation-policy.py` and
+  `scripts/personal-info-guard.sh` pass.
+- Merge gate: merged `hardening/integration` (`47630104f`, C-6) before the
+  final commit. On the merged tree: the same iOS suite passes 61/61
+  (`…/20260928T203528Z-run.VHRooM`); the six gateway transport integration files
+  pass 132/132, `runtime-registry.integration.test.ts` passes 257/257 (a first
+  run flaked on a 10 s hook timeout under host load; the test passes alone and
+  the file passes whole on the retry — this branch's gateway tree is identical
+  to `hardening/integration`'s, so no gateway code of this task is involved),
+  and `npx tsc --noEmit -p .` passes.
+- Changes: `fix(ios): consume events for every pool connection epoch (C-7)` and
+  this plan commit.
+- Tasks added: none.
+- Deviations: the initial connect's inline `for await` loop moved into
+  `startEventConsumption` (the same code, its own slot) so that both connect
+  paths own their reader the same way, and `retireConnectionEpoch` retires the
+  reader with the connection it clears. `retry()`, `notePathHint`, the C-5 curve
+  and the stall guard are untouched.
+- For the next agent: C-2 owns what the pool publishes as `state` after a
+  reconnect; the reader no longer affects it.
