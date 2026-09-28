@@ -601,7 +601,7 @@ rows are in priority order.
 | G-1a | Done | Catalog owner and in-memory index fed by Gateway-owned changes | O-3, O-6a | orchestrator-dispatched deepseek-worker, 2026-09-28 |
 | G-1b | Done | Filesystem watcher and background reconciliation for external writers | G-1a | orchestrator-dispatched deepseek-worker, 2026-09-28 (the O-6a confirmation of the Done-when is owed by the orchestrator) |
 | G-1c | Done | Move every catalog reader to the index; delete request-path walks and the full-parse fallback | G-1b | merged `hardening/integration`; `verifiedCut` unified into `reconciledCut`, G-9 keeps the periodic reconcile, `searchIdentities()` reads the index rows. Owning suite 237/237, merge gate 363/363; O-6a p99 is the orchestrator's quiet-host run |
-| G-1d | Claimed | Replace the catalog wording in `connection-resilience.md` with the index contract (D-3) | G-1c | orchestrator-dispatched deepseek-worker, 2026-09-28 |
+| G-1d | Done | Catalog contract in the docs: `connection-resilience.md` and the README's catalog paragraphs now describe the index owner, its three feeds, reconciliation, JSONL authority and rebuild on loss; no doc describes a request-path walk | G-1c | orchestrator-dispatched deepseek-worker, 2026-09-28 (branch `hardening/g-1d`) |
 | G-3 | Done | No audience, no projection: build and serialize snapshots only for subscribers | O-5, O-6a | orchestrator-dispatched deepseek-worker, 2026-09-28 (branch `hardening/g-3`; review round 1 addressed; CPU comparison and O-5's cross-check owed to the orchestrator) |
 | G-3a | Ready | Streaming progress for a session with no subscriber is still projected (`projectMessage` plus `safeJson` of the full message, up to once per 150 ms each); see G-3 handoff and review nit 8 | G-3 | |
 | C-2 | Done | "Connected" follows the transport (D-2); chat restoration shows its own loading state | C-1 | orchestrator-dispatched deepseek-worker, 2026-09-28 |
@@ -9256,3 +9256,36 @@ wait).
   (C-5's file), because the plan's own E-3b "Do" and both docs already say the
   phone replaces the advertisement on every hello; deferring either to E-3c
   would have left the shipped branch contradicting both.
+
+### G-1d · Done · 2026-09-28 · orchestrator-dispatched deepseek-worker (branch `hardening/g-1d`)
+
+- Result: the docs describe the catalog that exists. `connection-resilience.md`
+  replaces the "speculative caches" sentence (keeping "no transcript mirrors" and
+  "no higher queue limits") with the index contract: one owner
+  (`session-catalog.ts`), three feeds (Gateway commit points, the recursive
+  folder watcher, the 30-minute whole-folder reconcile), the durable
+  `catalog-metadata-v2.json` as the owner's own acceleration, JSONL authority and
+  rebuild from canonical files on loss, `catalog_not_ready` for an unprovable
+  row, and target-file-only commit fences. The README's catalog paragraphs
+  (acquisition, `RuntimeRegistry` membership, the cold-open/fence paragraph, the
+  attention paragraph, the session-invariant paragraph and the summary-row
+  paragraph) now say the same thing and no longer describe the deleted
+  request-path walks, `validatedStructuralIndex`/`sharedCatalogStructureEvidence`,
+  `fallbackCatalogAcquisition`, the lightweight fallback, the successor
+  header-walk cut, the user/all acquisition cuts and sidecar, "ten-way metadata
+  reads", or a startup structural evidence cut.
+- Evidence: every stale mechanism name is gone from the two docs —
+  `grep -rn "validatedStructuralIndex\|sharedCatalogStructureEvidence\|fallbackCatalogAcquisition\|lightweight acquisition\|successor cut\|whole-tree header\|whole-catalog header\|acquisition generations\|sidecar generation" packages/gateway/README.md packages/gateway/docs/` returns no match, and every remaining "walk" mention describes the owner's own scan, the profiler's counter, or an explicit "no request walks" statement. `python3 scripts/check-documentation-policy.py` passed (46 authored files); `scripts/personal-info-guard.sh` OK.
+- Changes: `packages/gateway/docs/connection-resilience.md`,
+  `packages/gateway/README.md`, this plan.
+- Kept on purpose: the discovery bounds (50,001 entries, 25,001 directories/8 MiB,
+  25,000 records/8 MiB, 1,024-byte previews, 512-byte header reads, 16-file
+  batches, 64 KiB/candidate, 64 MiB aggregate, 4 MiB acquisition) and the
+  classification/topology rules, because they are the owner's scan, not the
+  request path. `packages/gateway/docs/observability.md` needed no change: its
+  `catalog.reconciled` row already says the reconcile is "the only whole-folder
+  walk left on this side".
+- Deviations: the plan's G-1b wording said reconcile batches are "at most 50
+  files"; the shipped owner batches at `RECONCILE_CONCURRENCY` (16), so the docs
+  state 16.
+- For the next agent: none. Nothing in this row is owed.
