@@ -11,9 +11,11 @@ Phone and Gateway records are joined by the O-1 correlation key (a phone
 `attemptId` are the Gateway's `peerClientId`/`peerAttemptId`), falling back to a
 time window for logs written before protocol 6. An episode uses one join: once
 the key joins any record, a record naming another connection is not this
-episode's evidence, and a connection the Gateway opened during the episode — or
-since the reconnect cycle the episode belongs to began — is the recovery's
-rather than the one the outage lost. A published outage is reported as one
+episode's evidence, and a connection the Gateway opened during the episode is
+the recovery's rather than the one the outage lost — as is a socket the
+handshake just before the loss opened, the previous stretch's own recovery
+socket a flicker earlier, or one the phone's unchanged connection id says never
+dropped. A published outage is reported as one
 episode per scene phase, because the app parks recovery in the background and
 resumes it on the foreground without publishing a new state. An attempt belongs
 to the stretch it began in, and a Tailscale relay window explains an episode
@@ -51,12 +53,24 @@ ATTEMPT_DEADLINE_MS = 20_000.0
 # joins them (protocol-5 exports). The measured reconnect cycle is under a
 # minute; a wider window starts matching a neighbour's socket.
 DEFAULT_JOIN_TOLERANCE_SECONDS = 60
-# The reconnect publishes a burst of label flicks around one recovery, and the
-# socket it opened for the first of them carries every later flicker's refresh
-# work. The burst is one reconnect cycle, the same under-a-minute span the join
-# tolerance is set to, so an episode never inherits a socket from an earlier
-# outage.
-RECOVERY_CYCLE_SECONDS = DEFAULT_JOIN_TOLERANCE_SECONDS
+# A reconnect's handshake takes tens of milliseconds: the measured reconnect
+# sockets opened 36-117 ms before the label flicker that followed them, and the
+# app's own `handshakeMs` was 45 ms. A socket opened this close to the published
+# loss is the handshake that produced it; a socket that had served for seconds
+# first is not, and on the incident export the slow spans that rested on such a
+# socket were the Gateway-slow shape rule 4 exists for.
+RECOVERY_HANDSHAKE_SECONDS = 0.5
+# The reconnect publishes a burst of label flicks around one recovery: the phone
+# publishes `reconnecting` and `connected` again milliseconds apart (the measured
+# gaps are 4-9 ms). A socket the previous stretch's own recovery opened is this
+# stretch's socket too when the two are that close.
+FLICKER_BOUND_SECONDS = 1
+# One connect can be recorded twice: the transport store's stage row and the
+# app-level `operation.gatewayConnect` row are written for the same attempt (the
+# incident export's 13 pairs end within 2 ms and agree on their duration to
+# 2 ms). A real retry's own record lands seconds later.
+ATTEMPT_DUPLICATE_END_SECONDS = 0.05
+ATTEMPT_DUPLICATE_DURATION_MS = 50
 # A relay window is the path being relayed, so it explains an outage only when
 # the window is still the path at the episode's end or came back within the
 # app's own recovery delay. The measured tail (05:01:37..05:01:42 against a
@@ -608,7 +622,7 @@ class Episode:
     join: str = "none"
     cause: str = CAUSE_UNKNOWN
     evidence: List[Dict[str, Any]] = dataclass_field(default_factory=list)
-    recovery_floor: Optional[datetime] = None
+    previous_stretch: Optional[Tuple[datetime, datetime]] = None
 
     @property
     def duration_seconds(self) -> float:
@@ -823,10 +837,39 @@ def app_connect_attempts(records: Iterable[Record]) -> List[Attempt]:
 
 
 def all_attempts(records: Iterable[Record]) -> List[Attempt]:
-    """Every finished attempt an export recorded, for an episode's own count."""
-    attempts = phone_attempts(records) + app_connect_attempts(records)
+    """Every finished attempt an export recorded, once, for an episode's count.
+
+    A build that wrote both the transport store's stage row and the app-level
+    `operation.gatewayConnect` row recorded one connect twice: the incident
+    export's 13 pairs end within 2 ms of each other with durations agreeing to
+    2 ms. An operation row that close to a stage row with a matching duration is
+    that attempt's other name, not a second attempt; the next retry's own record
+    lands seconds later, so nothing real is merged.
+    """
+    stages = phone_attempts(records)
+    operations = [operation for operation in app_connect_attempts(records)
+                  if not duplicate_attempt(operation, stages)]
+    attempts = stages + operations
     attempts.sort(key=lambda attempt: attempt.timestamp)
     return attempts
+
+
+def duplicate_attempt(operation: Attempt, stages: Sequence[Attempt]) -> bool:
+    """Whether a stage row already records this `operation.gatewayConnect`.
+
+    The two shapes share no key, so they are matched by their end and their
+    duration together: an export that writes both puts them milliseconds apart,
+    and a placeholder duration (`none`) is not evidence of a different attempt.
+    """
+    for stage in stages:
+        if abs((operation.timestamp - stage.timestamp).total_seconds()) \
+                > ATTEMPT_DUPLICATE_END_SECONDS:
+            continue
+        if operation.duration_ms is None or stage.duration_ms is None:
+            return True
+        if abs(operation.duration_ms - stage.duration_ms) <= ATTEMPT_DUPLICATE_DURATION_MS:
+            return True
+    return False
 
 
 def attempt_owner(attempt: Attempt, episodes: Sequence[Episode]) -> Optional[Episode]:
@@ -844,6 +887,10 @@ def attempt_owner(attempt: Attempt, episodes: Sequence[Episode]) -> Optional[Epi
     for episode in episodes:
         if episode.start <= issued <= episode.end:
             return episode
+    # A start that falls in no stretch at all falls back to the stretch the
+    # attempt ended in. On the incident export eight attempts use this: the first
+    # episode's own failing connect, and seven connects that began in connected
+    # time just before a published loss.
     for episode in episodes:
         if episode.start <= attempt.timestamp <= episode.end:
             return episode
@@ -893,27 +940,19 @@ def annotate_episode(episode: Episode, phone: Sequence[Record], attempts: Sequen
             episode.gateway_ids.discard(gateway_id)
 
 
-def assign_recovery_floors(episodes: Sequence[Episode]) -> None:
-    """Point each episode at the start of the reconnect cycle it belongs to.
+def link_flicker_stretches(episodes: Sequence[Episode]) -> None:
+    """Point each episode at the stretch that ended immediately before it.
 
     The reconnect publishes a burst of sub-second label flicks around one
-    recovery, and the socket it opened for the first flicker carries every
-    later one's refresh work. That socket is the recovery's, not the connection
-    any later flicker "lost" (the app's retained connection id does not change
-    across such a flicker), so rule 4 must not read its slow span as the
-    Gateway stalling on the connection the loss dropped. The chain reaches back
-    only as far as the measured reconnect cycle, so an episode never inherits a
-    socket from an earlier outage, and the first stretch of a burst keeps no
-    floor of its own: its loss may be real.
+    recovery, and the socket it opened for the first flicker carries the later
+    ones' refresh work. The stretch before this one is what tells whether the
+    two are flicks of one recovery, together with `FLICKER_BOUND_SECONDS`; no
+    wider window is kept, so an episode never inherits a socket from an earlier
+    outage.
     """
-    cycle = timedelta(seconds=RECOVERY_CYCLE_SECONDS)
     for index, episode in enumerate(episodes):
-        floor: Optional[datetime] = None
-        for earlier in reversed(episodes[:index]):
-            if episode.start - earlier.start > cycle:
-                break
-            floor = earlier.start
-        episode.recovery_floor = floor
+        previous = episodes[index - 1] if index else None
+        episode.previous_stretch = None if previous is None else (previous.start, previous.end)
 
 
 def build_episodes(phone: Sequence[Record], gateway: GatewayIndex,
@@ -923,7 +962,7 @@ def build_episodes(phone: Sequence[Record], gateway: GatewayIndex,
     episodes = declared_episodes(phone)
     episodes.extend(derived_episodes(phone, attempts, episodes))
     episodes.sort(key=lambda episode: episode.start)
-    assign_recovery_floors(episodes)
+    link_flicker_stretches(episodes)
     for episode in episodes:
         annotate_episode(episode, phone, attempts, every_attempt, gateway, episodes)
     return episodes
@@ -1262,25 +1301,97 @@ def recovery_connection(episode: Episode, gateway: GatewayIndex,
                         connection_id: Optional[str]) -> bool:
     """Whether this Gateway connection is the recovery's, not the outage's.
 
-    Three shapes name the reconnect's own socket rather than the one whose loss
-    the episode is: a socket opened inside the episode; a socket the Gateway
-    opened after the reconnect cycle the episode belongs to began
-    (`recovery_floor`) — the burst of label flicks the reconnect publishes
-    around one recovery, where the socket it opened for the first flicker
-    carries the refresh work of the later ones; and a socket that had already
-    closed when the episode began (its late completion is abandoned work,
-    which the Gateway logs as `connectionClosed`).
+    Rule 4 asks whether the connection that stalled is the one whose loss the
+    episode published, and four shapes name the reconnect's own socket instead:
+
+    - the Gateway opened it inside the episode, so the loss predates it;
+    - it opened within `RECOVERY_HANDSHAKE_SECONDS` of the published loss: the
+      handshake that just completed produced it, and the label flicker the
+      reconnect publishes re-uses that socket for its own refresh;
+    - the previous stretch's recovery opened it — the socket opened after that
+      stretch began — and that stretch ended within `FLICKER_BOUND_SECONDS` of
+      this one, so both are flicks of one recovery;
+    - the phone's retained connection id is the same on both sides of the loss
+      (`retained_connection_unchanged`): no connection changed, so there is no
+      lost connection for the slow span to be the cause of.
+
+    A connection that had already closed when the episode began is the same
+    case from the other side: its late completion is abandoned work, which the
+    Gateway logs as `connectionClosed`. A connection with no readable
+    `connection.opened` record (a rotated log) is not excluded on a guess.
     """
     if opened_within(episode, gateway, connection_id):
         return True
-    if episode.recovery_floor is not None and any(
-            record.event == "connection.opened" and record.timestamp is not None
-            and episode.recovery_floor <= record.timestamp <= episode.start
-            for record in gateway.connection(connection_id or "")):
+    history = gateway.connection(connection_id or "")
+    loss_at = published_loss_at(episode)
+    opens = [record.timestamp for record in history
+             if record.event == "connection.opened" and record.timestamp is not None]
+    handshake = timedelta(seconds=RECOVERY_HANDSHAKE_SECONDS)
+    if any(loss_at - handshake <= opened <= loss_at for opened in opens):
+        return True
+    previous = episode.previous_stretch
+    if previous is not None \
+            and episode.start - previous[1] <= timedelta(seconds=FLICKER_BOUND_SECONDS) \
+            and any(previous[0] <= opened <= episode.start for opened in opens):
+        return True
+    if retained_connection_unchanged(episode, loss_at):
         return True
     return any(record.event == "connection.closed" and record.timestamp is not None
-               and record.timestamp <= episode.start
-               for record in gateway.connection(connection_id or ""))
+               and record.timestamp <= episode.start for record in history)
+
+
+def published_loss_at(episode: Episode) -> datetime:
+    """The instant the episode's loss was published.
+
+    A label-derived stretch is the stretch of the transition itself, so the
+    instant is its start (`outage_transition`); a declared or attempt-cluster
+    episode has no transition of its own and its start is the bound there is.
+    The handshake rule and the retained connection id both measure from it.
+    """
+    transition = outage_transition(episode)
+    if transition is not None and transition.timestamp is not None:
+        return transition.timestamp
+    return episode.start
+
+
+def phone_connection_id(record: Record) -> Optional[str]:
+    """The connection id the app published on this record, or None.
+
+    A flicker is a published `connection.state-changed` (or the retained
+    client's own `reconnect.connected` row): the id on it is the connection the
+    app says it holds while it publishes the label. An attempt's
+    `gatewayConnectionId` is the O-1 join key and not a statement about which
+    connection the label is on, and an RPC row's numeric `connectionID` is one
+    request's socket, so neither is read here.
+    """
+    if record.event not in ("connection.state-changed", LIFECYCLE_EVENT):
+        return None
+    return record.field("connectionID") or record.field("gatewayConnectionId")
+
+
+def retained_connection_unchanged(episode: Episode, loss_at: datetime) -> bool:
+    """Whether the app named one connection across this episode's loss.
+
+    A flicker that publishes `reconnecting` while the app's own id on that
+    record, and on the record that publishes the recovery, is the same one is a
+    re-published label rather than a connection change: the socket the
+    reconnect's refresh runs on is the one the app still has. Both sides must
+    name one; an export that publishes no connection id is not read as
+    unchanged on a guess.
+    """
+    before: Optional[str] = None
+    after: Optional[str] = None
+    for record in episode.phone_records:
+        if record.timestamp is None:
+            continue
+        value = phone_connection_id(record)
+        if value is None:
+            continue
+        if record.timestamp <= loss_at:
+            before = value
+        elif after is None:
+            after = value
+    return before is not None and before == after
 
 
 def relay_window_explains(episode: Episode, window: Tuple[datetime, datetime, str]) -> bool:
@@ -1435,13 +1546,15 @@ def classify(episode: Episode, gateway: GatewayIndex, tolerance: timedelta,
     # the loss and still been running then: `completion - durationMs < loss <=
     # completion`. A refresh the reconnect issued after the episode ended changes
     # nothing about it, and neither does one issued on the connection the
-    # reconnect opened at its end: on the incident export most `gateway-stall`
-    # episodes rested on the recovering socket's own `session.list`, which the
-    # reconnect had just requested. A delayed heartbeat or a resource warning
-    # counts only inside the episode, never in the pad.
+    # reconnect opened (see `recovery_connection` — the socket it opened in the
+    # handshake before the loss, the previous stretch's own recovery socket, or
+    # one the phone's unchanged connection id says never dropped): on the
+    # incident export most `gateway-stall` episodes rested on the recovering
+    # socket's own `session.list`, which the reconnect had just requested. A
+    # delayed heartbeat or a resource warning counts only inside the episode,
+    # never in the pad.
     if episode.cause == CAUSE_UNKNOWN:
-        loss = outage_transition(episode)
-        loss_at = loss.timestamp if loss is not None and loss.timestamp is not None else episode.start
+        loss_at = published_loss_at(episode)
         stalled: List[Record] = []
         for _mode, record in matches:
             if record.timestamp is None:

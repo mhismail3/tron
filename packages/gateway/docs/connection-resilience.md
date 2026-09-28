@@ -217,10 +217,14 @@ keeps today's uncompressed frames.
    join decides an episode: when the key joins any record, only key-joined
    records and Gateway-wide records (a delayed event loop, host resources)
    count as evidence, so a neighbour connection's slow span is never read as
-   this episode's cause. A connection the Gateway opened during the episode, or
-   after the reconnect cycle the episode belongs to began, is the recovery's,
-   not the one the outage lost, so the refresh work the reconnect runs on it is
-   not this episode's cause or key either. A published outage is reported as one
+   this episode's cause. A connection the Gateway opened during the episode is
+   the recovery's, not the one the outage lost, so it is neither this episode's
+   join key nor its cause; rule 4 also reads a socket that opened within the
+   handshake the reconnect had just completed before the loss, one the previous
+   stretch's own recovery opened a flicker earlier, and a socket the phone's own
+   unchanged connection id says never dropped, as the recovery's for the cause,
+   because the refresh the reconnect runs on any of them is not the Gateway
+   stalling on the connection the loss dropped. A published outage is reported as one
    episode per scene phase: the app parks recovery in the background and resumes
    it on the foreground without publishing a new state, so the foreground
    stretches carry the path, label and gap evidence and only the time really
