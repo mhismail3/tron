@@ -2,7 +2,7 @@
 
 - **Started:** 2026-09-27
 - **Status:** Active (approved in chat by the user on 2026-09-27)
-- **Last updated:** 2026-09-27, P-6 and R-FOLLOW added
+- **Last updated:** 2026-09-28, T1-CLOCKS and T1-NET done; plan pruned by data
 - **Goal:** Tron for iPhone does measurably less CPU, disk, timer and radio work per minute of real use, proven by a reliable profiler that every agent can run, with no change to what the user sees or does.
 
 ## Goal and constraints
@@ -158,21 +158,21 @@ two-frames-per-window cadence the same scenario measured 60.9 G instructions and
 | T1-CACHE | Done | `SnapshotCache`: drop checkpoints that cannot change it, coalesce summary checkpoints and checkpoint on background, drop the save-path double admission pass | none (keep decision: P-1, P-2) | energy-efficiency supervisor, worker lane t1-persist, 2026-09-27 |
 | T1-DRAFTS | Done | `ComposerDraftStore`: in-memory logical clock, size accounting without re-hashing, manifest-only writes when attachments are unchanged; no observable mutation for unchanged text | none (keep decision: P-1, P-2) | energy-efficiency supervisor, worker lane t1-persist, 2026-09-27 |
 | T1-TEXT | Claimed | `discreteInsertedIDs` to O(n) with an equivalence check; `ChatStreamingInlineText` keeps settled text whole (preserving the streaming-flip reveal state) and caches the revealed prefix | none (keep decision: P-1, P-2) | energy-efficiency supervisor, worker lane t1-text, 2026-09-27 |
-| T1-CLOCKS | Claimed | Timeline schedules that fire when a label can change: dashboard rows, tool elapsed timers (sub-minute cadence preserved), static inbox formatter | none (keep decision: P-1, P-2) | energy-efficiency supervisor, worker lane t1-clocks, 2026-09-27 |
-| T1-NET | Claimed | One shared ping grid for every socket (no interval ever longer than today), lease renewal on that grid at no longer than today's interval, one shared `URLSession` for idempotent GETs with per-task delegates | none (keep decision: P-1, P-2) | energy-efficiency supervisor, worker lane t1-net, 2026-09-27 |
+| T1-CLOCKS | Done | Timeline schedules that fire when a label can change: dashboard rows, tool elapsed timers (sub-minute cadence preserved), static inbox formatter | none (keep decision: P-1, P-2) | energy-efficiency supervisor, worker lane t1-clocks, 2026-09-27 |
+| T1-NET | Done | One shared ping grid for every socket (no interval ever longer than today), lease renewal on that grid at no longer than today's interval, one shared `URLSession` for idempotent GETs with per-task delegates | none (keep decision: P-1, P-2) | energy-efficiency supervisor, worker lane t1-net, 2026-09-27 |
 | T3-DEFLATE | Done | Negotiate `permessage-deflate` for paired (non-loopback) clients that offer it; confirm the offer from the iOS simulator app, keep inbound size bounds on decompressed bytes, and keep outbound queue accounting and backpressure exact | none (keep decision: P-2) | energy-efficiency supervisor, worker lane t3-deflate, 2026-09-27 |
 | T2-FONTS | Claimed | Stop rebuilding fonts on view updates: `TronFontLoader.createUIFont` and `UIFont(descriptor:size:)` take 5–8% of main-thread time in every traced scenario; cache the created fonts by exact descriptor and size with identical output (Dynamic Type and settings changes still invalidate) | none (keep decision: P-1) | energy-efficiency supervisor, worker lane t2-theme, 2026-09-27 |
 | T2-COLORS | Claimed | Stop re-parsing theme colors per body (`Color(lightHex:darkHex:)`, `UIColor(hex:)` in the idle-dashboard trace): resolve each theme color once with identical light/dark and settings behavior | none (keep decision: P-1) | energy-efficiency supervisor, worker lane t2-theme, 2026-09-27 |
 | T2-PULSE | Claimed | Cut the per-frame main-thread cost of `TronPulseLoadingIndicator` (11% of idle-dashboard main-thread time) without changing a rendered frame, cadence or gating | none (keep decision: P-1) | energy-efficiency supervisor, worker lane t2-pulse, 2026-09-27 |
 | T2-CHATVIEW | Needs scoping | Transcript install cost from the traces: `ChatPhysicalTranscriptReplacementHost.body` with `renderedContent`/`replacementContent` (21% of tool-loop main-thread time), whole-transcript equality (`InstalledChatTranscript ==`, `ChatTranscriptItems ==`, 7.5% of streaming) and render-item copies (memmove 8–10%); ChatView observes the snapshot and the installed transcript in separate scopes | T1-TEXT | |
-| T2-DASH | Needs scoping | Dashboard root stops re-evaluating on every summary; parsed ordering instants; cheaper per-row path helpers; filter preferences saved only on change | T1-CLOCKS | |
-| T2-THINK | Needs scoping | Thinking trace measures its visible text instead of a hidden full copy | T1-TEXT | |
-| T2-TEXTPREP | Needs scoping | Text preparation reuses history rows on the isolated streaming path and memoizes closed Markdown blocks | T1-TEXT | |
-| T2-SMALL | Needs scoping | AppLog debug encode and restore ordering, diagnostics sanitized once, debounced extension drafts flushed on close and background, direct thumbnail images, push token writes only on change | P-4 | |
+| T2-DASH | Done | Dashboard root stops re-evaluating on every summary; parsed ordering instants; cheaper per-row path helpers; filter preferences saved only on change (narrowed into T2-PULSE, T2-FONTS and T2-COLORS by the traces) | T1-CLOCKS | |
+| T2-THINK | Done | Thinking trace measures its visible text instead of a hidden full copy (dropped: not a traced hotspot) | T1-TEXT | |
+| T2-TEXTPREP | Done | Text preparation reuses history rows on the isolated streaming path and memoizes closed Markdown blocks (dropped: off the main thread and not a traced hotspot) | T1-TEXT | |
+| T2-SMALL | Done | AppLog debug encode and restore ordering, diagnostics sanitized once, debounced extension drafts flushed on close and background, direct thumbnail images, push token writes only on change (dropped: none of these appear in the P-3 traces) | P-4 | |
 | T3-TRANSCRIPT | Needs scoping | Transcript append deltas for `session.snapshot` (deflate cuts its radio bytes but not the phone's decode of up to 800 KB per snapshot), negotiated per connection, exact-or-full on the Gateway, digest-verified with fail-closed resync on the phone | T3-DEFLATE | |
-| T3-STREAM | Needs scoping | Streaming text append deltas for `session.progress`, same rules; only if P-2 shows progress bytes or decode cost still material after T3-DEFLATE | T3-DEFLATE | |
-| T3-TOOLPROG | Needs scoping | Tool progress omits a `partialResult` the phone can reconstruct exactly, same rules; only if still material after T3-DEFLATE | T3-DEFLATE | |
-| T3-CATALOG | Needs scoping | Conditional `session.list` on foreground: an unchanged catalog generation keeps the retained rows | P-4 | |
+| T3-STREAM | Done | Streaming text append deltas for `session.progress`, same rules; only if P-2 shows progress bytes or decode cost still material after T3-DEFLATE (superseded: deflate context takeover sends cumulative frames at about 1.3% of their size) | T3-DEFLATE | |
+| T3-TOOLPROG | Done | Tool progress omits a `partialResult` the phone can reconstruct exactly, same rules; only if still material after T3-DEFLATE (superseded: deflate removes the duplicated text on the wire) | T3-DEFLATE | |
+| T3-CATALOG | Done | Conditional `session.list` on foreground: an unchanged catalog generation keeps the retained rows (dropped: catalog pages are compressed and not a traced hotspot) | P-4 | |
 | R-OPEN | Needs scoping | Investigate whether an unanswered optional older-history page during chat opening fails the opening ("layout did not settle") instead of falling back to the usable tail as `architecture.md` promises; fix the owner if so | none | |
 | V-1 | Needs scoping | Close-out: full Gateway and iOS suites, parity gates, profiler comparison against P-4, owning docs, user device check | all | |
 
@@ -618,4 +618,20 @@ re-projection is a material share of that time.
   the code (only the traced-compare refusal has a negative control) and once
   ran a pattern-based `pkill` on DTServiceHub processes early on; it believes it
   matched only its own. Later kills were by confirmed pid.
+
+### T1-CLOCKS and T1-NET · Done · 2026-09-28 · energy-efficiency supervisor (worker lanes t1-clocks, t1-net)
+
+- Result: dashboard rows and tool timers render only when their text can
+  change (exact instants derived from the formatter; sub-minute tool cadence
+  unchanged); one inbox formatter. Every socket pings on one shared 10 s grid,
+  lease renewals ride it (never later than today), and bodiless GET/HEAD reuse
+  keep-alive connections on a shared session with per-task delegates.
+- Evidence: idle-dashboard instructions 8.26 G → 6.12 G (−26%), summary-storm
+  −4%, no instruction regression in any scenario; T1-NET's effect (aligned
+  multi-socket wakeups, live-view TCP reuse) is outside today's scenarios and is
+  proven by its tests (grid-aligned pings from different phases, loopback
+  connection counts). Parity gate 385/385; full unit tier on the combined
+  branch passed.
+- Pruned by data: T3-STREAM, T3-TOOLPROG, T3-CATALOG, T2-SMALL, T2-THINK,
+  T2-TEXTPREP and T2-DASH (reasons in their rows).
 
