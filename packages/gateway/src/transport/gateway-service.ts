@@ -659,31 +659,37 @@ export class GatewayService {
         // all, so they are answered before the receipt owner opens one. The
         // identity lane spans the check and the admitted mutation, so the
         // device's own registration operations keep their order.
-        return this.withMobileIdentityLane(client.identity, async () => {
-          const allowed = new Set(["commandId", "installationId", "grantId", "secret", "previewsEnabled", "relayOrigin", "notifyWhenAskPresented"]);
-          if (Object.keys(params).some((key) => !allowed.has(key))) throw new GatewayError("invalid_request", "Push registration contains unknown fields");
-          const notifications = this.requireNotifications();
-          // `commandId` stays required here so an unchanged registration is
-          // still addressed by the same command identity a retried request
-          // repeats.
-          void string(params.commandId, "commandId", { min: 8, max: 160 });
-          const input = {
-            deviceId: client.identity,
-            installationId: string(params.installationId, "installationId", { min: 8, max: 160 }),
-            grantId: string(params.grantId, "grantId", { min: 8, max: 160 }),
-            secret: string(params.secret, "secret", { min: 43, max: 171 }),
-            previewsEnabled: params.previewsEnabled === undefined ? false : boolean(params.previewsEnabled, "previewsEnabled"),
-            relayOrigin: string(params.relayOrigin, "relayOrigin", { min: 1, max: 512 }),
-            ...(params.notifyWhenAskPresented === undefined ? {} : { notifyWhenAskPresented: boolean(params.notifyWhenAskPresented, "notifyWhenAskPresented") }),
-          };
+        const allowed = new Set(["commandId", "installationId", "grantId", "secret", "previewsEnabled", "relayOrigin", "notifyWhenAskPresented"]);
+        if (Object.keys(params).some((key) => !allowed.has(key))) throw new GatewayError("invalid_request", "Push registration contains unknown fields");
+        const notifications = this.requireNotifications();
+        // `commandId` stays required here so an unchanged registration is still
+        // addressed by the same command identity a retried request repeats.
+        void string(params.commandId, "commandId", { min: 8, max: 160 });
+        const input = {
+          deviceId: client.identity,
+          installationId: string(params.installationId, "installationId", { min: 8, max: 160 }),
+          grantId: string(params.grantId, "grantId", { min: 8, max: 160 }),
+          secret: string(params.secret, "secret", { min: 43, max: 171 }),
+          previewsEnabled: params.previewsEnabled === undefined ? false : boolean(params.previewsEnabled, "previewsEnabled"),
+          relayOrigin: string(params.relayOrigin, "relayOrigin", { min: 1, max: 512 }),
+          ...(params.notifyWhenAskPresented === undefined ? {} : { notifyWhenAskPresented: boolean(params.notifyWhenAskPresented, "notifyWhenAskPresented") }),
+        };
+        // An identical registration is naturally idempotent and writes nothing,
+        // not even a command receipt, so it is answered before the receipt owner
+        // opens one. The status is read after that decision, so a grant the relay
+        // disabled or a revocation that removed it in between is still visible.
+        if (await notifications.registrationIsCurrent(input)) {
+          return safeJson(await notifications.status(client.identity));
+        }
+        // An admitted registration keeps the existing order: the per-device lane
+        // wraps the operation inside its receipt, so an accepted mutation is
+        // owned by the work registry before it waits for the lane.
+        return this.mutation(client, method, params, () => this.withMobileIdentityLane(client.identity, async () => {
           if (!await this.dependencies.devices.hasDevice(client.identity)) {
             throw new GatewayError("unauthenticated", "The authenticated mobile device is no longer paired");
           }
-          if (await notifications.registrationIsCurrent(input)) {
-            return safeJson(await notifications.status(client.identity));
-          }
-          return this.mutation(client, method, params, async () => safeJson(await notifications.upsertGrant(input)));
-        });
+          return safeJson(await notifications.upsertGrant(input));
+        }));
       case "push.registration.remove":
         if (client.isLocal) throw new GatewayError("auth_required", "Only an authenticated mobile device can remove its push registration");
         return this.mutation(client, method, params, () => this.withMobileIdentityLane(client.identity, async () => {
