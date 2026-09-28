@@ -68,6 +68,23 @@ describe("GatewayLogger", () => {
     expect(restored.unaccountedMs).toBe(12);
   });
 
+  it("persists the stage a cancellation interrupted, bounded like a diagnostic ID", () => {
+    const path = logPath();
+    const logger = new GatewayLogger(path);
+    logger.log("warning", "RPC session.open was cancelled in catalog.walk after 1500ms", {
+      event: "rpc.cancelled", method: "session.open", requestID: "open-1", outcome: "cancelled",
+      stage: "catalog.walk", durationMs: 1_500 });
+    logger.log("warning", "RPC session.open was cancelled", {
+      event: "rpc.cancelled", stage: "x".repeat(200) });
+
+    const [record, longStage] = lines(path) as Array<Record<string, unknown>>;
+    expect(record!.stage).toBe("catalog.walk");
+    expect((longStage!.stage as string)).toHaveLength(64);
+    // The restored persisted tail keeps the field, since it is the same
+    // normalization the writer applied.
+    expect(new GatewayLogger(path).recent(2)[0]!.stage).toBe("catalog.walk");
+  });
+
   it.each([["1", false], ["0", true]])("mirrors persisted records to process streams only when TRON_GATEWAY_SUPERVISED is %s", (supervised, mirrors) => {
     vi.stubEnv("TRON_GATEWAY_SUPERVISED", supervised);
     const path = logPath();
