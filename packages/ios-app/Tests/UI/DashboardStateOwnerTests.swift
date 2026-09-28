@@ -243,6 +243,77 @@ struct DashboardStateOwnerTests {
     }
 
     @MainActor
+    @Test("a refreshed LAN advertisement does not restart a background connection")
+    func lanAdvertisementDoesNotRestartPoolEntry() async throws {
+        try await withTestWatchdog { @MainActor in
+            let selected = GatewayProfile(
+                id: "selected", label: "Selected", host: "selected.test", port: 9_847,
+                machineId: "selected-runtime", machineGroupID: "selected-machine", deviceId: "device"
+            )
+            let remote = GatewayProfile(
+                id: "remote", label: "Remote", host: "remote.test", port: 9_847,
+                machineId: "remote-runtime", machineGroupID: "remote-machine", deviceId: "device"
+            )
+            var advertised = remote
+            advertised.lanEndpoints = [try #require(GatewayLanEndpoint(host: "fd00::4", port: 9_847))]
+            advertised.lanPin = "JEmgCK6cjn6zQe6FLvuOu2GErCFbEldD4cViMU8odVc="
+            let relocated = GatewayProfile(
+                id: advertised.id, label: advertised.label, host: "moved.test", port: advertised.port,
+                machineId: advertised.machineId, machineGroupID: advertised.machineGroupID,
+                deviceId: advertised.deviceId, isEnabled: advertised.isEnabled,
+                lanEndpoints: advertised.lanEndpoints, lanPin: advertised.lanPin
+            )
+
+            let sockets = [ScriptedGatewaySocket(), ScriptedGatewaySocket()]
+            let socketFactory = ScriptedGatewaySocketFactory(sockets: sockets)
+            let pool = DashboardGatewayConnectionPool(clientFactory: {
+                GatewayClient(socketFactory: socketFactory.factory)
+            })
+            await sockets[0].enqueue(Self.remoteHelloFrame())
+            await sockets[1].enqueue(Self.remoteHelloFrame())
+
+            pool.reconcile(
+                profiles: [selected, remote],
+                selectedProfileID: selected.id,
+                token: { $0.id == remote.id ? "token" : nil }
+            )
+            // The hello reply satisfies the handshake and the catalog read that
+            // follows it: the entry is connected and holds no connection of its
+            // own to replace.
+            try await sockets[0].waitUntilSent(count: 2)
+
+            // E-3b replaces the advertisement on every hello of the focused
+            // connection. A background entry dials the saved endpoint, so a
+            // newer advertisement must not cost it a reconnect.
+            pool.reconcile(
+                profiles: [selected, advertised],
+                selectedProfileID: selected.id,
+                token: { $0.id == remote.id ? "token" : nil }
+            )
+            for _ in 0..<20 { await Task.yield() }
+            try await Task.sleep(for: .milliseconds(20))
+            #expect(socketFactory.requests.count == 1)
+            #expect(!(await sockets[0].closed()))
+
+            // What an entry does depend on still restarts it.
+            pool.reconcile(
+                profiles: [selected, relocated],
+                selectedProfileID: selected.id,
+                token: { $0.id == remote.id ? "token" : nil }
+            )
+            try await sockets[1].waitUntilSent(count: 1)
+            #expect(socketFactory.requests.count == 2)
+
+            pool.retire()
+            await pool.waitForRetirement()
+        }
+    }
+
+    private static func remoteHelloFrame() -> Data {
+        Data(#"{"type":"hello","gatewayVersion":"1","piVersion":"1","protocolVersion":6,"minProtocolVersion":6,"machineId":"remote-runtime","machineGroupID":"remote-machine","machineName":"Remote","gatewayChannel":"stable","capabilities":[]}"#.utf8)
+    }
+
+    @MainActor
     @Test("secondary catalog retries past warning threshold without another invalidation")
     func secondaryCatalogRetryConvergesWithoutInvalidation() async throws {
         try await withTestWatchdog { @MainActor in
