@@ -2,6 +2,15 @@
 
 - **Started:** 2026-09-27
 - **Status:** Active (Phase 1 runs on `hardening/integration`; that branch's copy of this plan is authoritative until R-1)
+- **Last updated:** 2026-09-28, G-8b review round 2 addressed: the poller
+  owns one admission cache shared with the explicit user actions, the explicit
+  probe records its outcome, and the runtime fence stamps the bundled manifest
+  too
+- **Last updated:** 2026-09-28, G-8b review round 1 addressed: the poll
+  republishes the fence's uptime, reuses only an admission whose ping identity
+  still matches, realigns the windowed Tailscale ping to the poll alone, and the
+  row returns to Claimed until the app-level cadence measurement runs
+
 - **Last updated:** 2026-09-28, G-7 (final review round addressed: an unchanged catalog answer rebuilds the row projection, a cleared automation marker moves the catalog token)
 
 - **Last updated:** 2026-09-28, G-3 review round 2 addressed: the `unaudiencedSnapshotBuilds` warning and its test are now stated as a tripwire for a lost slot guard or a divergence between the registry's subscription record and the transport's, not for a closing socket
@@ -589,7 +598,7 @@ rows are in priority order.
 | G-8 | Done | Background work audit: delete or bound each unowned or repeating job | O-5 | orchestrator-dispatched deepseek-worker, 2026-09-28 |
 | G-8a | Ready | Discovery lane retries an atomically replaced `status.json` (bounded, like the watcher lane) so a replace is not `extension.artifact-rejected`; see G-8 handoff | G-1c | |
 | G-8d | Ready | Bound the 750 ms ambient artifact discovery pass by change and make its 1,024-entry truncation impossible or visible; see G-8 handoff | G-8a | |
-| G-8b | Claimed | Bound the Mac app status poll's child processes and per-poll payload re-hash (user/security decision in "Decisions still open"); see G-8 handoff | G-8 | orchestrator-dispatched deepseek-worker, 2026-09-28 |
+| G-8b | Claimed | Bound the Mac app status poll's child processes and per-poll payload re-hash (user/security decision in "Decisions still open"); see G-8 handoff | G-8 | orchestrator-dispatched deepseek-worker, 2026-09-28; review round 1 addressed; back to Claimed because the app-level cadence measurement the row asks for is still owed (see handoff) |
 | G-8c | Ready | Bound the session-search warm-up (persisted index vs bounded slices in G-9's scheduler: user decision); see G-8 handoff | G-9 | |
 | E-1 | Done | Document Tailscale flap diagnosis and user-side checks; the evaluation day confirms | O-2, O-7 | orchestrator-dispatched deepseek-worker, 2026-09-28 |
 | T-1 | Ready | Pre-existing test race: registry extension-artifact discovery tests treat an awaited `discoverExtensionArtifacts()` as a barrier; wait for a pass that settles (three tests, one a false green) | G-1a (Registry zone) | |
@@ -7124,6 +7133,158 @@ wait).
   `gateway-stall` episode is the correct reading, not a defect. Episode count
   (121 vs 77) is the tool splitting outages at background blips by design.
   R-4 confirms on the evaluation day's O-1-keyed exports.
+### G-8b · Claimed · 2026-09-28 · orchestrator-dispatched deepseek-worker (branch `hardening/g-8b`)
+
+- Result: the Mac app status poll no longer pays the fail-closed Stable
+  admission or the Tailscale CLI per 30 s cycle. The poll stream reuses one
+  admission while a runtime fence is unchanged — launchd's live pid plus that
+  process's start identity, plus the payload selection stamps
+  (`PayloadSelectionStamp`, promoted out of the native capture peer's private
+  `CaptureSelectionStamp` into `GatewayPayloadStore.swift`, which both the app
+  and the native host target already compile). A changed pid, a changed start
+  identity, a changed `payloads/stable/current.json`, or a changed active
+  manifest re-runs the full probe. Only an admission is reusable: a refusal is
+  re-proved on the next cycle, and a fence that cannot stamp an existing
+  selection pointer or manifest re-probes, so one transient listener/`ps`
+  failure or an update restart landing between the ping and the fence read
+  cannot pin `needsRepair` for the process's lifetime. A reuse also requires the
+  same authenticated ping identity and republishes the fence's own elapsed time,
+  so the menu's uptime keeps moving instead of freezing at the first probe's
+  value. The per-cycle authenticated ping stays: it is the liveness probe that
+  decides Running. Explicit user actions still run the full probe:
+  `singleSnapshot(setup:)` is
+  unchanged for menu presentation, the restart wait and startup, and pairing
+  keeps its own ping/admission pair. The poll's ping closure
+  (`statusPollPingServer`) reuses one live Tailscale resolution for a bounded
+  window (300 s, `TailscaleHostResolution`) and refreshes the owner-only
+  `network.json` cache only when the resolved address changed; a failed ping
+  re-resolves after 30 s and never sooner. `pingServer` itself stays the live
+  `resolveHost` path, so pairing, restart, update, log/feedback capture, the
+  health wait, install and startup resolve live.
+- Failure modes recorded before the tests were written:
+  - poll admission reuse: (1) reuse outlives a new pid or a new start identity;
+    (2) reuse outlives a selection or manifest change; (3) an unreadable fence
+    authorizes reuse; (4) reuse skips the per-cycle ping; (5) reuse outlives the
+    authenticated ping identity it was proved against; (6) a transient refusal
+    is reused; (7) a reuse freezes the displayed uptime.
+  - Tailscale window: (8) the window reuses past its interval; (9) a failed ping
+    never re-resolves, or re-resolves every cycle; (10) an address the disposable
+    cache cannot answer is reused without a probe; (11) a newly resolved address
+    is not persisted, so the menu would present a different host than the poll
+    pings.
+  - explicit recording and poll wiring (review round 2): (12) a failure an
+    explicit check finds is overwritten by the next cycle's reused admission;
+    (13) the poll stream uses the live ping or a fresh probe per cycle.
+- Review round 1 (2026-09-28) addressed: the fence read now carries `ps
+  -o etime=,lstart=` in one spawn and the poll republishes that elapsed time
+  instead of the cached admission's (the menu's uptime no longer freezes and
+  jumps back); a refusal is never reused and the fence returns `nil` when an
+  existing selection pointer or active manifest cannot be stamped; a reuse also
+  requires the same authenticated ping identity; the windowed Tailscale ping
+  moved from `pingServer` onto the poll's own `statusPollPingServer`, which is
+  what the row requires — before it, menu-open and pairing inherited the window;
+  `RuntimeFence.read` is now exercised against a real temporary payload store.
+- Review round 2 (2026-09-28) addressed: one `StableProbeCache` now belongs to
+  the `ServerStatusPoller` instance and is shared by its 30 s stream and its
+  explicit probes; `explicitSnapshot()` always runs the full probe and records
+  the outcome (admission stored, refusal cleared), and `menuWillOpen` and
+  `MenuBarActionHandler.refreshStatus` go through it, so a failure an explicit
+  check finds is no longer overwritten by the next cycle's reused admission.
+  Negative control: with the record step removed, the new poll-cycle test saw the
+  cycle after the explicit refusal report Running from the cache (captured before
+  the fix). The poll stream's own wiring is now driven by a test (one cache per
+  poller, the bounded ping only, one full probe across two cycles), and
+  `RuntimeFence` stamps the bundled manifest unconditionally alongside the active
+  one, so replacing the app bundle moves the fence even when the selection names
+  a version whose payload does not validate and `GatewayPayloadResolver` admits
+  the bundled payload.
+- Evidence:
+  - Suites: `TronMacTests/ServerStatusPollerBoundedAdmissionTests` (10 tests,
+    was `SingleInstance`-free and deterministic),
+    `TronMacTests/StableGatewayObserverTests` (10 tests) and
+    `TronMacTests/TailscaleHostResolutionTests` (5 tests) pass with the three
+    neighbouring suites on the Debug test host. Review round 2 re-ran
+    `build-for-testing` then `test-without-building -only-testing:`
+    `ServerStatusPollerBoundedAdmissionTests`, `StableGatewayObserverTests`,
+    `ServerStatusPollerTests`, `TailscaleHostResolutionTests` and
+    `MenuBarControllerTests` on the tree with `hardening/integration` already
+    merged → `Test run with 34 tests in 5 suites passed`,
+    `TEST EXECUTE SUCCEEDED`. Negative controls were executed, not inferred:
+    with the record step removed the new poll-cycle test saw the cycle after the
+    explicit refusal report `.running` from the cache, and with the bundled
+    stamp frozen the fence test saw the fence stay equal while the bundled
+    manifest was replaced. Review round 1 re-ran:
+    `xcodebuild build-for-testing … -derivedDataPath build/DerivedData` (3m13s,
+    TEST BUILD SUCCEEDED; the first attempt failed on an unwrapped optional and
+    the re-run succeeded) then `test-without-building -only-testing:` the six
+    suites → `Test run with 45 tests in 6 suites passed after 185.851 seconds`,
+    0 failures. The suites map one-to-one onto failure modes 1–11.
+  - Children per 30 s cycle: **5 → 2**, from the code's spawn sites — the
+    app-level confirmation (a running app's `ps` CPU delta per cycle and the
+    unified-log Tailscale attach cadence) is still owed, see below. Measured on
+    this host against the live
+    `com.tron.server` job (read-only) with a harness around the production
+    readers: the new fence read (`launchctl print` + one `ps -o etime=,lstart=`)
+    takes
+    11.6 ms median over 10 reads, while the launchd read, two `ps` display reads
+    and `lsof` the old cycle also ran take 95.9 ms. Child CPU for ten fence
+    reads plus both primitive reads was 0.08 s (≈7 ms per cycle). The Tailscale
+    CLI goes from one spawn per cycle (≈2,880/day at 30 s; ≈2,490/day at the
+    audit's measured 34.7 s cadence) to one per 300 s window (≈288/day). A
+    changed fence costs one extra full probe (6 children) on that cycle only.
+  - Per-cycle CPU removed: one `validateSelection` on the user's real selected
+    payload (588 MB) measured 12.09 s wall / 11.47 s CPU in the same harness;
+    the G-8 audit attributed ≈4.0 s of per-poll CPU to both trees with `sample`
+    on a quieter host. What remains per cycle is two spawns, one ping socket,
+    one launchd read and one small cache read.
+  - Window behaviour executed, not inferred: a harness compiling the production
+    `TailscaleHostResolution` with production wiring prints probe counts
+    1 / 1 / 2 / 2 / 3 across t0, t0+10s, t0+301s, a failed ping at t0+311s and a
+    failed ping at t0+341s, two probes over two cycles when the cache cannot
+    answer, and `resolveLive` preferring live over cache while rejecting
+    loopback.
+  - `python3 scripts/check-documentation-policy.py` and
+    `scripts/personal-info-guard.sh` pass.
+  - Commands and raw numbers retained at
+    `~/.tron/workspace/files/hardening/g-8b-status-poll-bound.md`.
+- Changes: `packages/mac-app/Sources/Server/Health/ServerStatusPoller.swift`
+  (`StableProbe`, `StableProbeCache`, the bounded cycle, the runtime fence
+  closure, and `statusPollPingServer` as the cycle's own ping), new
+  `TailscaleHostResolution.swift`, `RuntimeFence` in
+  `StableGatewayObserver.swift` (non-optional stamps; `read` returns `nil` when
+  an existing selection pointer or manifest cannot be stamped),
+  `LaunchAgentProcessFence`/`readProcessFence` in
+  `LaunchAgentRuntimeReader.swift`, `ProcessFenceRead` in `ServerProcessProbe.swift`
+  (start identity and elapsed time in one `ps` read),
+  `PayloadSelectionStamp` in
+  `GatewayPayloadStore.swift` (replacing the peer's private copy in
+  `NativeCapturePeer.swift`), `EnvironmentSetup.swift` (windowed poll ping,
+  shared `resolveLive`), `packages/mac-app/docs/architecture.md`, the two new
+  test files, `ServerStatusPollerTests.swift` (override seams for the new
+  suites), `StableGatewayObserverTests.swift` (the fence read against a real
+  temporary payload store, and the one-spawn `ps` fence read), and this plan.
+- Kept on purpose: the per-cycle authenticated ping (the liveness probe that
+  decides Running); `singleSnapshot(setup:)` as the unconditional full probe for
+  user actions, so no unowned file changes; the owner-only `network.json` cache
+  as the only place the address lives, with the window holding only the last
+  probe time; `resolveHost`'s live probe for restart, update and command status.
+- Deviations: the stamp lives in `GatewayPayloadStore.swift` rather than a new
+  file because that file is already in both targets, so the shared type needs no
+  `project.yml` change. The 300 s reuse window and the 30 s failed-ping interval
+  are the named constants chosen here; the user approved the reuse and the plan
+  asked for the windows to be named. Building the Debug test host needed a
+  locally staged payload (`bundle-gateway.sh --allow-unconfigured-push
+  --skip-install`); no `npm ci` ran and the shared node_modules install was not
+  touched.
+- For the next agent: the app-level confirmation is still owed and is what
+  keeps this row out of Done — a running debug app's `ps` CPU delta per 30 s
+  cycle and the unified log's Tailscale client-attach cadence, before and after.
+  It needs the app to run, which this session must not do; run it once these
+  fixes are on integration, then set the row Done. `packages/mac-app/build/DerivedData` and the staged
+  payload are in place, so `scripts/tron mac generate` plus
+  `xcodebuild build-for-testing` and `test-without-building` reproduce the
+  focused run cheaply. G-8d remains the other half of the ambient discovery
+  cost.
 
 ### G-1b · Blocked · 2026-09-28 · orchestrator-dispatched deepseek-worker (branch `hardening/g-1b`)
 
