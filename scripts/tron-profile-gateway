@@ -46,6 +46,7 @@ ROOT = Path(__file__).resolve().parent.parent
 GATEWAY = ROOT / "packages/gateway"
 ENTRY = GATEWAY / "dist/index.js"
 DRIVER = ROOT / "scripts/tron-profile-gateway-driver.mjs"
+CONNECTION_CONTRACT = ROOT / "packages/protocol-fixtures/gateway-connection-contract.json"
 EXTENSION = ROOT / "scripts/tron-profile-gateway-extension.ts"
 PROBE = ROOT / "scripts/tron-profile-gateway-probe.mjs"
 REPORT = ROOT / "scripts/tron_profile_report.py"
@@ -117,6 +118,20 @@ SCENARIOS = {
 # bounded tail) runs only when named.
 WIRE_SCENARIOS = ("stream-reply", "tool-loop", "idle", "dashboard-observer")
 
+# The impairment cases the multi-session scenario can run, in run order.
+IMPAIRMENT_CASES = ("blackhole", "bandwidth", "bandwidth-stream", "restart")
+
+
+def connection_settings() -> dict[str, int]:
+    """The phone's wire deadlines, from the contract the phone and the Gateway
+    are both held to. The driver does not keep its own copy of them."""
+    contract = json.loads(CONNECTION_CONTRACT.read_text())
+    return {"pingIntervalMs": contract["clientPingInterval"]["milliseconds"],
+            "pongDeadlineMs": contract["clientPongDeadline"]["milliseconds"],
+            "handshakeDeadlineMs": contract["clientHandshakeDeadline"]["milliseconds"]}
+
+
+CONNECTION = connection_settings()
 # Multi-session qualification workload (plan: connection and scale hardening,
 # O-6a). Each phase (the priming start and every iteration) gets its own
 # running and cold sessions from the generated catalog.
@@ -146,8 +161,64 @@ MULTI = {
     "measuredDeadlineMs": 180_000,
     "runPrompt": "tron-profile tool-loop tools=100000 lines=24 chars=1500 seed=1",
     "coldPrompt": "tron-profile stream-reply chars=600 thinking=200 seed=1",
+    # Impairment cases (plan: connection and scale hardening, O-6b). They run
+    # after the mixed window, on the same fixture and clients.
+    "cases": list(IMPAIRMENT_CASES),
+    # Longer than the Gateway's own 75 s half-open hold (25 s heartbeat x 3), so
+    # the abandoned socket is held past the point the Gateway would retire it by
+    # itself. Nothing the phone sends during the hold reaches the Gateway: the
+    # relay holds attempts unanswered and never forwards them when the path
+    # returns.
+    "blackholeSeconds": 90,
+    # One ping interval plus a margin: the outage starts just after a pong, so
+    # the client's next counted miss is one liveness window into it and
+    # `silence_ms` measures a liveness window rather than the outage's length.
+    "blackholeSettleMs": 11_000,
+    "bandwidthMbps": 2.0,
+    # The bandwidth leg is a fixed duration with `bandwidthInFlight` full bounded
+    # transcript pages in flight at once, each on its own session. One page is
+    # about 39 kB of wire, so even six of them in flight are far under one pong
+    # deadline of this leg's 2 Mbit/s cap (8 s x 250 kB/s = 2 MB of wire). At the
+    # default cap a pong miss and a capacity close are therefore out of reach and
+    # the leg reads as zero whatever the Gateway does; what it reports is the
+    # round trip and the load it offered. The leg that can back the link up is
+    # `bandwidth-stream` (see its cap below).
+    "bandwidthLegSeconds": 90,
+    "bandwidthInFlight": 6,
+    # The second capped case: the mobile holds several mounted chats on running
+    # sessions, which stream superseding snapshots and keyed events. The cap's
+    # arithmetic, from the fourth review's measurement of seven such streams on
+    # this fixture: their transcripts produced 295,621 B/s of decoded state,
+    # which reached the phone as 11,901 B/s of wire (about 25x compression), so
+    # the workload itself puts about 0.095 Mbit/s on the path. A cap above that
+    # lets the workload, not the link, bound the leg (that run's link_use was
+    # 0.32); 0.08 Mbit/s (10,000 B/s) sits below the measured production, so the
+    # relay holds the excess back and the queue grows for the whole leg. This is
+    # the case that can reach what the page leg's 2 Mbit/s cap cannot: a pong
+    # behind a real backlog, and the Gateway's 8 MiB outbound backstop.
+    "bandwidthStreamMbps": 0.08,
+    "bandwidthStreamSeconds": 30,
+    # Seven more running sessions plus the mounted chat: every running session
+    # the phase has, so the streams out-produce the cap.
+    "bandwidthStreamSessions": 7,
+    # Attaching a stream is a full bounded page plus synchronization on a loaded
+    # fixture; the attach phase is not the measurement.
+    "bandwidthStreamAttachDeadlineMs": 120_000,
+    "restartStormSeconds": 5,
+    # The profiler's own restart budget: up to 30 s to stop the old Gateway plus
+    # FixtureGateway.restart's 300 s start deadline, plus the storm.
+    "restartDeadlineMs": 360_000,
 }
 PHONE_REQUEST_DEADLINE_MS = 30_000
+# A bandwidth leg only means something if the cap limited real traffic: the link
+# has to be nearly full (delivered rate against the cap). Without that rule, a
+# cap that was never reached reads as a pass — zero pong misses, no capacity
+# close — however the Gateway behaved.
+MINIMUM_BANDWIDTH_LINK_USE = 0.5
+# The streaming leg is held to a full cap, not a busy one: its cap sits below
+# what the streams produce, so the link must stay full for the leg or the queue
+# never grew and the leg measured the workload instead of the Gateway.
+MINIMUM_BANDWIDTH_STREAM_LINK_USE = 0.9
 # Host guard: a qualification run on a swapping or pressured host measures the
 # host, not the Gateway (plan O-6a).
 HOST_SWAP_LIMIT_BYTES = 4 * 1024 ** 3
@@ -336,6 +407,16 @@ def scrubbed_environment() -> dict[str, str]:
 
 # --- Fixture Gateway ---------------------------------------------------------
 
+# The restart case's budget: a slow host can spend seconds in the old Gateway's
+# shutdown, the new one's startup, and any wait for a killed predecessor's
+# runtime lock to go stale.
+RESTART_START_DEADLINE_SECONDS = 300
+RESTART_LOCK_RETRY_SECONDS = 5
+# agent-runtime-lock.ts: one Gateway owns an agent directory, and a lock a
+# killed process left behind is only reusable once it is stale (60 s).
+RUNTIME_LOCK_CONFLICT = "owns a canonical session directory"
+
+
 class FixtureGateway:
     """One owned fixture: temporary home, faux-model agent dir, Gateway child."""
 
@@ -417,8 +498,8 @@ class FixtureGateway:
                                   text=True, check=False, timeout=10).stdout.strip()
         return observed.startswith("node ") and observed.endswith(f" {ENTRY}")
 
-    def start(self, deadline_seconds: float = 90) -> None:
-        self.port = free_loopback_port()
+    def start(self, deadline_seconds: float = 90, port: int | None = None) -> None:
+        self.port = port if port is not None else free_loopback_port()
         environment = {
             **scrubbed_environment(),
             "HOME": str(self.home),
@@ -474,6 +555,41 @@ class FixtureGateway:
             with urllib.request.urlopen(f"http://127.0.0.1:{self.port}/health", timeout=2) as response:
                 return response.status == 200 and json.loads(response.read()).get("status") == "ok"
         except (urllib.error.URLError, OSError, ValueError):
+            return False
+
+    def restart(self) -> None:
+        """Stop the owned child and start a fresh one on the same port.
+
+        The restart case needs the Gateway to go down and come back while the
+        driver's clients stay connected; keeping the port is what lets them
+        reconnect to the address they already know. The tron home, the agent
+        directory and the paired devices survive, as they do on a user's
+        restart.
+
+        A predecessor that had to be killed cannot release its agent-directory
+        runtime lock until the lock is stale (60 s), and a fresh child started
+        inside that window exits on the ownership conflict. Wait it out inside
+        the same start budget instead of failing the run for the previous
+        owner's cleanup."""
+        port = self.port
+        self.stop()
+        deadline = time.monotonic() + RESTART_START_DEADLINE_SECONDS
+        while True:
+            try:
+                self.start(deadline_seconds=max(30, deadline - time.monotonic()), port=port)
+                return
+            except ProfileFailure:
+                if time.monotonic() > deadline or not self.log_tail_has(RUNTIME_LOCK_CONFLICT):
+                    raise
+                log(f"{port}: the previous Gateway's runtime lock is still held; waiting for it to go stale")
+                time.sleep(RESTART_LOCK_RETRY_SECONDS)
+
+    def log_tail_has(self, text: str, limit: int = 4_000) -> bool:
+        """Whether this fixture's retained log ends with `text`: a startup
+        failure a caller may be able to wait out."""
+        try:
+            return text in self.log_path.read_text(errors="replace")[-limit:]
+        except OSError:
             return False
 
     def stop(self) -> None:
@@ -858,9 +974,72 @@ def percentile(values: list[float], rank: float) -> float:
     return ordered[max(0, min(len(ordered), math.ceil(rank / 100 * len(ordered))) - 1)]
 
 
-def run_multi_driver(fixture: FixtureGateway, run_dir: Path, phase: str, label: str, workload: dict) -> dict:
+def wait_with_restart(driver: subprocess.Popen[bytes], fixture: FixtureGateway, request_path: Path,
+                      done_path: Path, deadline: float, label: str, driver_log: Path) -> int:
+    """Wait for the driver, restarting the fixture when it asks for it.
+
+    The restart case needs the fixture to go down and come back while the
+    driver's clients stay connected. The fixture is this process's child, so the
+    driver asks through a file and this loop answers with the moment the new
+    Gateway was healthy (epoch milliseconds, the clock both processes share)."""
+    limit = time.monotonic() + deadline
+    restarted = False
+    while True:
+        status = driver.poll()
+        if status is not None:
+            return status
+        if time.monotonic() > limit:
+            raise ProfileFailure(f"{label}: driver exceeded its {deadline:.0f} s deadline", EXIT_TIMEOUT, driver_log)
+        if not restarted and request_path.is_file():
+            restarted = True
+            log(f"{label}: restarting the fixture Gateway for the restart case")
+            fixture.restart()
+            done_path.write_text(json.dumps({"restoredAtMs": int(time.time() * 1000),
+                                             "pid": fixture.process.pid}) + "\n")
+        time.sleep(0.2)
+
+
+def driver_deadline_seconds(config: dict, restart_case: bool) -> float:
+    """The per-iteration watchdog for the driver process.
+
+    It is the sum of every phase's own bound, not a target: the mixed window is
+    its fixed length plus its censoring tail, the blackhole is its length plus
+    one recovery deadline, the bandwidth leg is its own bound plus one
+    operation's deadline and the unmounts that follow it, and the restart covers
+    the profiler's stop and start budgets plus the storm. A case that passes its
+    own bound fails inside the driver (or times out here) either way."""
+    seconds = config["mixedSeconds"] + config["tailGraceMs"] / 1000
+    seconds += config["noSubscriberSeconds"] + 60
+    if "blackhole" in config["cases"]:
+        # The settle, the remount that puts the mobile's chat on the shaped path
+        # and the relay's own listen and handshake all come before the outage
+        # clock starts; the recovery budget is one measured deadline.
+        seconds += config["blackholeSettleMs"] / 1000 + config["measuredDeadlineMs"] / 1000 + 60
+        seconds += config["blackholeSeconds"] + config["measuredDeadlineMs"] / 1000
+    if "bandwidth" in config["cases"]:
+        # Each lane may still finish one operation past the leg's deadline, and
+        # every extra chat it mounted is unmounted before the next case (a
+        # visibility request and a close, each on its own deadline).
+        seconds += config["bandwidthLegSeconds"] + config["measuredDeadlineMs"] / 1000
+        seconds += (config["bandwidthInFlight"] + 1) * 2 * PHONE_REQUEST_DEADLINE_MS / 1000
+    if "bandwidth-stream" in config["cases"]:
+        # Every stream is attached before the capped window starts, each on its
+        # own attach deadline; then the leg is its own length and every stream
+        # is unmounted (a visibility request and a close, each on its own
+        # deadline).
+        seconds += (config["bandwidthStreamSessions"] + 1) * config["bandwidthStreamAttachDeadlineMs"] / 1000
+        seconds += config["bandwidthStreamSeconds"] + 60
+        seconds += (config["bandwidthStreamSessions"] + 1) * 2 * PHONE_REQUEST_DEADLINE_MS / 1000
+    if restart_case:
+        seconds += config["restartDeadlineMs"] / 1000 + config["restartStormSeconds"] + 60
+    return seconds
+
+
+def run_multi_driver(fixture: FixtureGateway, run_dir: Path, phase: str, label: str, workload: dict,
+                     restart_case: bool = False) -> dict:
     config = {
-        **MULTI, **workload, "gatewayDir": str(GATEWAY), "orchestrator": str(Path(__file__).resolve()),
+        **MULTI, **workload, "connection": CONNECTION, "gatewayDir": str(GATEWAY),
+        "orchestrator": str(Path(__file__).resolve()),
         "gatewayPid": fixture.process.pid, "port": fixture.port, "tronHome": str(fixture.tron_home),
         "outputDir": str(run_dir), "phase": phase, "label": label, "devicesPath": str(fixture.root / "devices.json"),
         "probeOutput": str(fixture.probe_output),
@@ -868,12 +1047,19 @@ def run_multi_driver(fixture: FixtureGateway, run_dir: Path, phase: str, label: 
     config_path = run_dir / f"driver-config-{label}.json"
     config_path.write_text(json.dumps(config, indent=2) + "\n")
     driver_log = run_dir / f"driver-{label}.log"
-    deadline = 900
+    request_path = run_dir / f"restart-request-{label}.json"
+    done_path = run_dir / f"restart-done-{label}.json"
+    for path in (request_path, done_path):
+        path.unlink(missing_ok=True)
+    deadline = driver_deadline_seconds(config, restart_case)
     with driver_log.open("wb") as handle:
         driver = subprocess.Popen(["node", str(DRIVER), "multi", str(config_path)], env=scrubbed_environment(),
                                   stdout=handle, stderr=subprocess.STDOUT, start_new_session=True)
         try:
-            status = driver.wait(timeout=deadline)
+            if restart_case:
+                status = wait_with_restart(driver, fixture, request_path, done_path, deadline, label, driver_log)
+            else:
+                status = driver.wait(timeout=deadline)
         except subprocess.TimeoutExpired as error:
             raise ProfileFailure(f"{label}: driver exceeded its {deadline} s deadline", EXIT_TIMEOUT, driver_log) from error
         finally:
@@ -910,6 +1096,76 @@ def validate_multi(results: list[dict]) -> tuple[list[str], list[str]]:
         if slow:
             warnings.append(f"{label}: {slow} measured operation(s) exceeded the phone's 30 s request deadline")
     return problems, warnings
+
+
+def validate_impairment(results: list[dict]) -> list[str]:
+    """Every selected impairment case must have run and reported, and a capped
+    case must have exercised the cap it is about.
+
+    The case numbers themselves are the baseline, not a verdict: a run is only
+    rejected when a case measured nothing at all, or when its cap never limited
+    traffic (a leg whose link was idle would report "zero pong misses" and "no
+    close for capacity" however the Gateway behaved). What each cap can reach is
+    documented with the case's constants: at the page leg's 2 Mbit/s defaults
+    neither a pong miss nor a capacity close is reachable, so that leg is held
+    only to the traffic it moved and the load it offered."""
+    problems: list[str] = []
+    for result in results:
+        label = result["label"]
+        legs = result.get("impairment") or {}
+        for name in result.get("cases") or []:
+            leg = legs.get(name)
+            if not leg:
+                problems.append(f"{label}: impairment case {name} did not report")
+                continue
+            if name == "blackhole":
+                if not leg.get("silenceMs"):
+                    problems.append(f"{label}: the blackhole case never silenced the mobile socket")
+                if leg.get("attemptsDuringOutage") is None or leg.get("recoveryReadyMs") is None:
+                    problems.append(f"{label}: the blackhole case reported no recovery to a ready chat")
+            elif name == "bandwidth":
+                if not leg.get("operations") or not leg.get("deliveredBytes"):
+                    problems.append(f"{label}: the bandwidth case moved no data")
+                elif (leg.get("linkUse") or 0) < MINIMUM_BANDWIDTH_LINK_USE:
+                    problems.append(f"{label}: the bandwidth case filled only {(leg.get('linkUse') or 0):.2f} of its "
+                                    "cap, so the cap never limited the traffic and the case proves nothing")
+                if leg.get("maxPingToPongMs") is None:
+                    problems.append(f"{label}: the bandwidth case reported no ping-to-pong round trip")
+            elif name == "bandwidth-stream":
+                if leg.get("streams", 0) < 2 or not leg.get("payloadBytes"):
+                    problems.append(f"{label}: the streaming bandwidth case held "
+                                    f"{leg.get('streams', 0)} streaming chat(s), so it measured no queue")
+                elif (leg.get("linkUse") or 0) < MINIMUM_BANDWIDTH_STREAM_LINK_USE:
+                    problems.append(f"{label}: the streaming bandwidth case filled only "
+                                    f"{(leg.get('linkUse') or 0):.2f} of its cap, so the cap never bounded the "
+                                    "streams and the queue cannot have grown")
+                backlog = leg.get("maxPingToPongMs")
+                uncapped = leg.get("uncappedPingToPongMs")
+                if backlog is None:
+                    problems.append(f"{label}: the streaming bandwidth case reported no ping-to-pong round trip")
+                elif not leg.get("pongDeadlineMisses") and not leg.get("unexpectedCloses"):
+                    if uncapped is None:
+                        problems.append(f"{label}: the streaming bandwidth case reported no uncapped round trip "
+                                        "to compare its own against, so its backlog cannot be judged")
+                    elif backlog <= uncapped:
+                        problems.append(f"{label}: the streaming bandwidth case's longest ping-to-pong round trip "
+                                        f"was {backlog:.0f} ms, no longer than this run's uncapped {uncapped:.0f} ms, "
+                                        "with no pong miss and no close: the streams never backed the link up, so "
+                                        "the case proves nothing")
+            elif name == "restart":
+                measured = leg.get("clients") or []
+                ready = leg.get("clientsAll") or []
+                if len(measured) != 3 or any(entry.get("readyAtMs") is None for entry in measured):
+                    problems.append(f"{label}: the restart case did not reconnect all three measured clients")
+                if not ready or any(entry.get("readyAtMs") is None for entry in ready):
+                    problems.append(f"{label}: the restart case left a connected client down")
+                if leg.get("downtimeMs") is None:
+                    problems.append(f"{label}: the restart case did not report the downtime")
+                if not leg.get("requests"):
+                    problems.append(f"{label}: the restart case made no request in the storm")
+                elif not any(not request["duringDowntime"] for request in leg["requests"]):
+                    problems.append(f"{label}: the restart case recorded no request the new Gateway served")
+    return problems
 
 
 def multi_samples(results: list[dict]) -> tuple[dict, list[str]]:
@@ -959,6 +1215,144 @@ def multi_samples(results: list[dict]) -> tuple[dict, list[str]]:
     return metrics, warnings
 
 
+def log_event_count(log_path: Path, event: str, windows: list[tuple[int, int]] | None = None) -> int:
+    """How many times the fixture logged one event in the retained log.
+
+    With `windows` (epoch-millisecond pairs) only records stamped inside one are
+    counted, so a metric that belongs to one leg is not inflated by the same
+    event from the priming phase or another iteration. The retained log is
+    trimmed to its last mebibytes, so a window that fell off it counts nothing."""
+    total = 0
+    if not log_path.is_file():
+        return total
+    for line in log_path.read_text(errors="replace").splitlines():
+        try:
+            record = json.loads(line)
+        except ValueError:
+            continue
+        if record.get("event") != event:
+            continue
+        if windows is not None:
+            try:
+                at_ms = int(datetime.fromisoformat(record["timestamp"].replace("Z", "+00:00")).timestamp() * 1000)
+            except (KeyError, TypeError, ValueError):
+                continue
+            if not any(start <= at_ms <= end for start, end in windows):
+                continue
+        total += 1
+    return total
+
+
+def impairment_samples(results: list[dict]) -> dict:
+    """Metrics for the impairment cases, one value per iteration.
+
+    A case's numbers are the baseline: they say whether the exit criterion is
+    met (blackhole recovery, zero pong-deadline misses, the restart storm), and
+    the run is only rejected when a case measured nothing (validate_impairment)."""
+    metrics: dict = {}
+
+    def add(metric_id: str, unit: str, values: list[float], description: str, better: str = "lower") -> None:
+        metrics[metric_id] = {"unit": unit, "better": better, "values": values, "description": description}
+
+    def legs(name: str) -> list[dict]:
+        return [result["impairment"][name] for result in results
+                if (result.get("impairment") or {}).get(name)]
+
+    blackhole = legs("blackhole")
+    if blackhole:
+        add("impairment.blackhole.attempts_during_outage", "count",
+            [leg["attemptsDuringOutage"] for leg in blackhole],
+            "reconnect attempts the mobile client made while the path delivered nothing")
+        add("impairment.blackhole.silence_ms", "ms", [leg["silenceMs"] for leg in blackhole],
+            "the mobile's last inbound frame to its abandon of the silent socket")
+        add("impairment.blackhole.recovery_ready_ms", "ms", [leg["recoveryReadyMs"] for leg in blackhole],
+            "path return to ready mounted chat (C-3's target is p95 <= 5 s)")
+        add("impairment.blackhole.attempt_ms_max", "ms",
+            [max(attempt["ms"] for attempt in leg["attempts"]) for leg in blackhole],
+            "longest single reconnect attempt, whether it connected or failed")
+    bandwidth = legs("bandwidth")
+    if bandwidth:
+        add("impairment.bandwidth.link_use", "ratio", [leg["linkUse"] for leg in bandwidth],
+            "delivered wire bytes per second against the cap (near 1: the cap, not the workload, bounded the leg)",
+            better="higher")
+        add("impairment.bandwidth.delivered_bytes_per_second", "B/s",
+            [leg["deliveredBytesPerSecond"] for leg in bandwidth],
+            "wire bytes the capped path carried toward the phone over the leg's wall time", better="higher")
+        add("impairment.bandwidth.sent_bytes_per_second", "B/s",
+            [leg["sentBytes"] / leg["seconds"] for leg in bandwidth],
+            "wire bytes the capped path carried toward the Gateway over the leg's wall time", better="higher")
+        add("impairment.bandwidth.operation_ms_p99", "ms",
+            [percentile(leg["operations"], 99) for leg in bandwidth],
+            "p99 of a full bounded transcript page mounted over the capped path")
+        add("impairment.bandwidth.max_ping_to_pong_ms", "ms", [leg["maxPingToPongMs"] for leg in bandwidth],
+            "the mobile's longest ping-to-pong round trip during the leg: the delay a pong deadline is set "
+            "against (C-4's deadline is 8 s)")
+        add("impairment.bandwidth.max_in_flight", "count", [leg["maxInFlight"] for leg in bandwidth],
+            "the peak number of full transcript pages the workload had in flight at once", better="higher")
+        add("impairment.bandwidth.offered_in_flight_bytes", "B", [leg["offeredInFlightBytes"] for leg in bandwidth],
+            "the decoder's bytes that peak page load asked the Gateway to send (the unit its outbound queue is "
+            "bounded in); the run is rejected below one pong deadline of the cap", better="higher")
+        add("impairment.bandwidth.offered_in_flight_wire_bytes", "B",
+            [leg["offeredInFlightWireBytes"] for leg in bandwidth],
+            "the same load in wire bytes; the cap carries this, so it is what a queued pong waits behind",
+            better="higher")
+        add("impairment.bandwidth.pong_deadline_misses", "count", [leg["pongDeadlineMisses"] for leg in bandwidth],
+            "pong deadlines missed while data flowed (C-4's target is zero)")
+        add("impairment.bandwidth.unexpected_closes", "count", [leg["unexpectedCloses"] for leg in bandwidth],
+            "sockets closed without the client asking (G-4's target is zero for capacity)")
+    streamed = legs("bandwidth-stream")
+    if streamed:
+        add("impairment.bandwidth_stream.link_use", "ratio", [leg["linkUse"] for leg in streamed],
+            "delivered wire bytes per second against the cap; the cap sits below what the streams produce, so "
+            "this is a validity gate (the leg is rejected below 0.9), not how much of the workload it carried",
+            better="higher")
+        add("impairment.bandwidth_stream.delivered_bytes_per_second", "B/s",
+            [leg["deliveredBytesPerSecond"] for leg in streamed],
+            "wire bytes the capped path carried toward the phone (superseding state most of them)",
+            better="higher")
+        add("impairment.bandwidth_stream.payload_bytes_per_second", "B/s",
+            [leg["payloadBytesPerSecond"] for leg in streamed],
+            "decoded bytes the streams produced per second, against the cap's own rate",
+            better="higher")
+        add("impairment.bandwidth_stream.max_ping_to_pong_ms", "ms", [leg["maxPingToPongMs"] for leg in streamed],
+            "the mobile's longest ping-to-pong round trip during the leg (C-4's deadline is 8 s)")
+        add("impairment.bandwidth_stream.streams", "count", [leg["streams"] for leg in streamed],
+            "mounted chats whose transcripts streamed into the capped path", better="higher")
+        add("impairment.bandwidth_stream.pong_deadline_misses", "count",
+            [leg["pongDeadlineMisses"] for leg in streamed],
+            "pong deadlines missed while the streams flowed (C-4's target is zero)")
+        add("impairment.bandwidth_stream.unexpected_closes", "count",
+            [leg["unexpectedCloses"] for leg in streamed],
+            "sockets closed without the client asking (G-4's target is zero for capacity)")
+    restart = legs("restart")
+    if restart:
+        add("impairment.restart.reconnect_ms_max", "ms",
+            [max(entry["reconnectMs"] for entry in leg["clientsAll"]) for leg in restart],
+            "each client's own socket close to that client's ready (G-13's target is 10 s)")
+        add("impairment.restart.downtime_ms", "ms", [leg["downtimeMs"] for leg in restart],
+            "restart requested to the new Gateway answering health, measured by the profiler")
+        add("impairment.restart.failed_attempts", "count",
+            [sum(1 for entry in leg["clientsAll"] for attempt in entry["attempts"] if not attempt.get("connected"))
+             for leg in restart], "connects refused, or requests refused, while the Gateway was down")
+        add("impairment.restart.requests", "count",
+            [sum(1 for request in leg["requests"] if not request["duringDowntime"]) for leg in restart],
+            "storm requests the measured clients made after the new Gateway was healthy, ready sequences "
+            "included", better="higher")
+        add("impairment.restart.downtime_requests", "count",
+            [sum(1 for request in leg["requests"] if request["duringDowntime"]) for leg in restart],
+            "requests that failed on the way down or back up (refused while the Gateway was down, or on the "
+            "socket it closed); they are kept so none is dropped, and they are not the storm")
+        add("impairment.restart.requests_over_1s", "count",
+            [sum(1 for request in leg["requests"] if not request["duringDowntime"] and request["ms"] > 1_000)
+             for leg in restart],
+            "storm requests slower than 1 s (G-13's target is zero)")
+        add("impairment.restart.request_ms_p99", "ms",
+            [percentile([request["ms"] for request in leg["requests"] if not request["duringDowntime"]], 99)
+             for leg in restart],
+            "p99 of a storm request (nearest rank: the maximum below 100 samples)")
+    return metrics
+
+
 def run_multi_session(args: argparse.Namespace, results_dir: Path) -> Path:
     scenario = SCENARIOS["multi-session"]
     run_dir = results_dir / f"{utc_stamp()}-{scenario.name}-{secrets.token_hex(3)}"
@@ -996,11 +1390,17 @@ def run_multi_session(args: argparse.Namespace, results_dir: Path) -> Path:
                 log(f"{scenario.name}: {label} on fixture Gateway pid {fixture.process.pid}")
                 result = run_multi_driver(fixture, run_dir, "iteration", label, {
                     "mixedSeconds": mixed_seconds,
+                    "cases": list(args.cases),
+                    "blackholeSeconds": args.blackhole_seconds,
+                    "bandwidthMbps": args.bandwidth_mbps,
+                    "bandwidthLegSeconds": args.bandwidth_seconds,
+                    "bandwidthStreamMbps": args.bandwidth_stream_mbps,
+                    "bandwidthStreamSeconds": args.bandwidth_stream_seconds,
                     "running": manifest["runPool"][index * running:(index + 1) * running],
                     "cold": manifest["coldPool"][index * cold:(index + 1) * cold],
                     "large": manifest["large"],
                     "appendTargets": manifest["appendTargets"],
-                })
+                }, restart_case="restart" in args.cases)
                 fixture.stop()
                 if index >= warmup:
                     results.append(result)
@@ -1016,9 +1416,11 @@ def run_multi_session(args: argparse.Namespace, results_dir: Path) -> Path:
         if fixture.root.exists():
             raise ProfileFailure(f"fixture home {fixture.root} was not removed", EXIT_FIXTURE, fixture.root)
         problems, warnings = validate_multi(results)
+        problems += validate_impairment(results)
         if problems:
             raise ProfileFailure("measurement rejected: " + "; ".join(problems), EXIT_MEASUREMENT, run_dir)
         metrics, sample_warnings = multi_samples(results)
+        metrics.update(impairment_samples(results))
         run_seconds = time.monotonic() - started
         context = {
             "scenario": scenario.description,
@@ -1028,6 +1430,28 @@ def run_multi_session(args: argparse.Namespace, results_dir: Path) -> Path:
             "recorded_clients": list(scenario.recorded),
             "catalog": catalog,
             "workload": {**{key: value for key, value in MULTI.items() if key != "catalogSeed"}, "mixedSeconds": mixed_seconds},
+            "impairment": {
+                "cases": list(args.cases),
+                "blackhole_seconds": args.blackhole_seconds,
+                "bandwidth_mbps": args.bandwidth_mbps,
+                "bandwidth_seconds": args.bandwidth_seconds,
+                "bandwidth_stream_mbps": args.bandwidth_stream_mbps,
+                "bandwidth_stream_seconds": args.bandwidth_stream_seconds,
+                "per_iteration": [{
+                    "label": result["label"],
+                    "blackhole": (result.get("impairment") or {}).get("blackhole"),
+                    "bandwidth": (result.get("impairment") or {}).get("bandwidth"),
+                    "bandwidth-stream": (result.get("impairment") or {}).get("bandwidth-stream"),
+                    "restart": (result.get("impairment") or {}).get("restart"),
+                } for result in results],
+                # Only the bandwidth legs' own windows: the same record from the priming
+                # phase or another iteration is not this leg's capacity evidence.
+                "gateway_outbound_capacity_records": log_event_count(
+                    evidence / "gateway.jsonl", "connection.outbound-capacity",
+                    [(result["impairment"][name]["startedAtMs"], result["impairment"][name]["endedAtMs"])
+                     for result in results for name in ("bandwidth", "bandwidth-stream")
+                     if (result.get("impairment") or {}).get(name)]),
+            },
             "host": args.host_state,
             "prime": prime,
             "per_iteration": [{
@@ -1119,6 +1543,14 @@ USAGE_EPILOG = """\
 Scenarios (--list for descriptions): stream-reply, tool-loop, idle, dashboard-observer, or all
 of those four; multi-session (the connection and scale qualification run) only by name.
 
+The multi-session run's impairment cases (--cases, default
+blackhole,bandwidth,bandwidth-stream,restart) run after each iteration's mixed window:
+a blackhole of --blackhole-seconds on the mobile path, a --bandwidth-mbps cap on it for
+--bandwidth-seconds with full transcript pages kept in flight, a --bandwidth-stream-mbps
+cap on it for --bandwidth-stream-seconds while several mounted chats stream superseding
+state, and a fixture Gateway restart with every connected client. Each reports its own
+impairment.* metrics; 'none' runs none.
+
 Each scenario run starts a fresh fixture Gateway and writes one report under
 <profile root>/gateway/<UTC>-<scenario>-<id>/ (profile root: $TRON_PROFILE_RESULTS_DIR
 or ~/Library/Developer/Tron/profiles) with summary.md, report.json, samples.json,
@@ -1148,6 +1580,24 @@ def parse(argv: list[str]) -> argparse.Namespace:
                         help=f"multi-session generated JSONL files (default {MULTI['catalogFiles']})")
     parser.add_argument("--catalog-mib", type=int, default=MULTI["catalogMiB"],
                         help=f"multi-session generated catalog size in MiB (default {MULTI['catalogMiB']})")
+    parser.add_argument("--cases", default=None, metavar="LIST",
+                        help="multi-session impairment cases to run, comma separated "
+                             f"(default {','.join(MULTI['cases'])}; 'none' runs none)")
+    parser.add_argument("--blackhole-seconds", type=float, default=MULTI["blackholeSeconds"],
+                        help=f"multi-session blackhole case length (default {MULTI['blackholeSeconds']})")
+    parser.add_argument("--bandwidth-mbps", type=float, default=MULTI["bandwidthMbps"],
+                        help=f"multi-session bandwidth cap (default {MULTI['bandwidthMbps']})")
+    parser.add_argument("--bandwidth-seconds", type=float, default=MULTI["bandwidthLegSeconds"],
+                        help="multi-session bandwidth leg length in seconds "
+                             f"(default {MULTI['bandwidthLegSeconds']}); a shorter leg is a smoke run, "
+                             "not a baseline")
+    parser.add_argument("--bandwidth-stream-mbps", type=float, default=MULTI["bandwidthStreamMbps"],
+                        help="multi-session streaming bandwidth cap (default "
+                             f"{MULTI['bandwidthStreamMbps']}); below what the running sessions produce, which "
+                             "is what makes a queued pong and a capacity close reachable")
+    parser.add_argument("--bandwidth-stream-seconds", type=float, default=MULTI["bandwidthStreamSeconds"],
+                        help="multi-session streaming leg length in seconds "
+                             f"(default {MULTI['bandwidthStreamSeconds']})")
     parser.add_argument("--tokens-per-second", type=float, default=80.0, help="faux model streaming rate (default 80)")
     parser.add_argument("--no-build", action="store_true", help="use the existing packages/gateway/dist build")
     parser.add_argument("--cpu-profile", action="store_true", help="also write a Node CPU profile of the fixture Gateway")
@@ -1174,6 +1624,24 @@ def parse(argv: list[str]) -> argparse.Namespace:
         parser.error("--catalog-files must be between 100 and 20000")
     if not 16 <= args.catalog_mib <= 16_384:
         parser.error("--catalog-mib must be between 16 and 16384")
+    if args.cases is None:
+        args.cases = list(MULTI["cases"])
+    else:
+        requested = [] if args.cases.strip() in ("", "none") else [name.strip() for name in args.cases.split(",") if name.strip()]
+        unknown = [name for name in requested if name not in IMPAIRMENT_CASES]
+        if unknown:
+            parser.error(f"unknown impairment case {unknown[0]!r}; choose from {', '.join(IMPAIRMENT_CASES)} or none")
+        args.cases = [name for name in IMPAIRMENT_CASES if name in requested]
+    if not 5 <= args.blackhole_seconds <= 600:
+        parser.error("--blackhole-seconds must be between 5 and 600")
+    if not 0.5 <= args.bandwidth_mbps <= 1_000:
+        parser.error("--bandwidth-mbps must be between 0.5 and 1000")
+    if not 5 <= args.bandwidth_seconds <= 3_600:
+        parser.error("--bandwidth-seconds must be between 5 and 3600")
+    if not 0.05 <= args.bandwidth_stream_mbps <= 1_000:
+        parser.error("--bandwidth-stream-mbps must be between 0.05 and 1000")
+    if not 5 <= args.bandwidth_stream_seconds <= 3_600:
+        parser.error("--bandwidth-stream-seconds must be between 5 and 3600")
     if not 5 <= args.window_seconds <= 3600:
         parser.error("--window-seconds must be between 5 and 3600")
     if not 1 <= args.tokens_per_second <= 10_000:
