@@ -301,6 +301,17 @@ const EXTENSION_ARTIFACT_DISCOVERY_READ_RETRIES = 3;
 const MAX_EXTENSION_EVENT_TAIL_BYTES = 64 * 1_024;
 const MAX_EXTENSION_EVENT_LINES = 256;
 
+/** How one offer of a `status.json` to a slot ended, for the caller that decides
+ * whether this exact artifact may be recorded as dealt with. `accepted` means
+ * the slot projected a lifecycle from those bytes; `rejected` means no later
+ * offer of the same bytes can decide differently (the artifact's own shape,
+ * run identity, declared directory or timestamps rejected it, or a terminal
+ * latch the identity cannot lift outranks it); `transient` means the slot could
+ * not decide from its current state — a losing read, an unavailable terminal
+ * receipt claim, an I/O error, or an ownership/attribution comparison that a
+ * later pass may resolve — so the same artifact must be offered again. */
+export type ExtensionArtifactDiscoveryOutcome = "accepted" | "rejected" | "transient";
+
 export type SessionAttentionRebindDisposition = "migrate" | "preserve" | "reset" | "discard";
 
 interface CommandReplacement {
@@ -4395,8 +4406,11 @@ export class RuntimeSlot {
   }
 
   /** Called only by the Gateway-scoped bounded artifact discovery owner or by
-   * a watcher attached after this slot proved canonical ownership. */
-  discoverExtensionArtifact(asyncDir: string): Promise<void> {
+   * a watcher attached after this slot proved canonical ownership. The outcome
+   * tells a caller whether it may record this exact artifact as dealt with: an
+   * offer the slot could not decide (`transient`) must leave no record, or a
+   * run known only from a saved session log is never offered again (G-8a). */
+  discoverExtensionArtifact(asyncDir: string): Promise<ExtensionArtifactDiscoveryOutcome> {
     return this.refreshSubagentActivityFromArtifact(asyncDir);
   }
 
@@ -4422,7 +4436,7 @@ export class RuntimeSlot {
   private async refreshSubagentActivityFromArtifact(
     asyncDir: string,
     canonicalFacts?: ReadonlyMap<string, CanonicalExtensionRunFact>,
-  ): Promise<void> {
+  ): Promise<ExtensionArtifactDiscoveryOutcome> {
     let diagnosticOwner: string | undefined;
     let missingToolCallId: string | undefined;
     let claimedReceipt: { activityId: string; owner: GatewayWorkHandle } | undefined;
@@ -4436,14 +4450,14 @@ export class RuntimeSlot {
       missingToolCallId = bound?.[1].toolCallId;
       if (!realAsyncDir) {
         if (bound) this.observeMissingExtensionArtifact(bound[1].toolCallId);
-        return;
+        return "transient";
       }
       diagnosticOwner = this.extensionArtifactOwnerForDirectory(realAsyncDir);
       const rawValue = await this.readExtensionStatusArtifactWithReplacementRetry(realAsyncDir);
       if (rawValue === undefined) {
         if (bound) this.observeMissingExtensionArtifact(bound[1].toolCallId);
         if (diagnosticOwner) this.warnExtensionArtifact("artifact-replacement-in-progress", diagnosticOwner);
-        return;
+        return "transient";
       }
       if (bound) this.extensionArtifactMissingSince.delete(bound[1].toolCallId);
       // Registry discovery is bounded but grants no ownership. Historical
@@ -4452,41 +4466,45 @@ export class RuntimeSlot {
       const admission = inspectExtensionLifecycleArtifact(rawValue, { exactOwnedLegacy: true });
       if (!admission.accepted) {
         if (diagnosticOwner) this.warnExtensionArtifact(admission.reason, diagnosticOwner);
-        return;
+        return "rejected";
       }
       const raw = admission.artifact;
       const runId = raw.runId as string;
-      if (!runId) return;
+      if (!runId) return "rejected";
       // The file's declared directory is advisory. If present, it must agree
-      // with the directory that was actually discovered/read.
+      // with the directory that was actually discovered/read; a declared path
+      // this slot cannot resolve is retried rather than recorded.
       if (typeof raw.asyncDir === "string") {
         const declaredAsyncDir = this.canonicalExtensionArtifactDirectory(raw.asyncDir);
-        if (!declaredAsyncDir || declaredAsyncDir !== realAsyncDir) {
+        if (!declaredAsyncDir) return "transient";
+        if (declaredAsyncDir !== realAsyncDir) {
           if (diagnosticOwner) this.warnExtensionArtifact("ownership-mismatch", diagnosticOwner);
-          return;
+          return "rejected";
         }
       }
       const ownership = this.extensionRunOwnership.get(runId);
       const canonical = (canonicalFacts ?? this.canonicalExtensionRunFacts()).get(runId);
       const historicalArtifact = raw.lifecycleArtifactVersion !== EXTENSION_LIFECYCLE_ARTIFACT_VERSION;
-      if (historicalArtifact && !ownership?.asyncDir && !canonical?.asyncDir) return;
+      if (historicalArtifact && !ownership?.asyncDir && !canonical?.asyncDir) return "transient";
       // A duplicated runId in canonical JSONL has no safe artifact owner.
       if (canonical?.ambiguous) {
         if (diagnosticOwner) this.warnExtensionArtifact("ownership-mismatch", diagnosticOwner);
-        return;
+        return "transient";
       }
+      // An ownership or canonical comparison is decided against state this slot
+      // re-reads every pass, so the same bytes may be admissible later.
       if (ownership?.asyncDir) {
         const ownershipAsyncDir = this.canonicalExtensionArtifactDirectory(ownership.asyncDir);
         if (!ownershipAsyncDir || ownershipAsyncDir !== realAsyncDir) {
           if (diagnosticOwner) this.warnExtensionArtifact("ownership-mismatch", diagnosticOwner);
-          return;
+          return "transient";
         }
       }
       if (canonical?.asyncDir) {
         const canonicalAsyncDir = this.canonicalExtensionArtifactDirectory(canonical.asyncDir);
         if (!canonicalAsyncDir || canonicalAsyncDir !== realAsyncDir) {
           if (diagnosticOwner) this.warnExtensionArtifact("ownership-mismatch", diagnosticOwner);
-          return;
+          return "transient";
         }
       }
       if (canonical?.toolCallId && ownership && ownership.toolCallId !== canonical.toolCallId) {
@@ -4494,7 +4512,7 @@ export class RuntimeSlot {
         // but a real ownership binding must never switch to another call.
         if (!ownership.toolCallId.startsWith("subagent:") || ownership.toolCallId === canonical.toolCallId) {
           if (diagnosticOwner) this.warnExtensionArtifact("ownership-mismatch", diagnosticOwner);
-          return;
+          return "transient";
         }
       }
       const matchingEntries = [...this.extensionActivities.entries()].filter(([, activity]) => activity.runId === runId);
@@ -4502,7 +4520,7 @@ export class RuntimeSlot {
       // malformed or legacy payload has produced duplicate run identities.
       if (!ownership && !canonical?.toolCallId && matchingEntries.length > 1) {
         if (diagnosticOwner) this.warnExtensionArtifact("ownership-mismatch", diagnosticOwner);
-        return;
+        return "transient";
       }
       const boundToolCallId = canonical?.toolCallId ?? ownership?.toolCallId;
       let existingEntry: readonly [string, ExtensionRunActivity | undefined] | undefined = boundToolCallId
@@ -4520,12 +4538,12 @@ export class RuntimeSlot {
       // Artifact files are enrichment only. A current tool execution or a
       // canonical terminal tool result must establish ownership first; cwd,
       // sessionId, and a lone running tool are not attribution evidence.
-      if (!existingEntry?.[1] && !canonical?.toolCallId) return;
+      if (!existingEntry?.[1] && !canonical?.toolCallId) return "transient";
       if (!existingEntry?.[1] && canonical?.toolCallId) {
         existingEntry = [canonical.toolCallId, this.extensionActivities.get(canonical.toolCallId)];
       }
       const toolCallId = existingEntry?.[0];
-      if (!toolCallId) return;
+      if (!toolCallId) return "transient";
       const previous = existingEntry?.[1];
       const normalized = normalizeExtensionArtifact(raw, {
         now: new Date().toISOString(),
@@ -4537,7 +4555,7 @@ export class RuntimeSlot {
       });
       if (!normalized) {
         if (diagnosticOwner) this.warnExtensionArtifact("invalid-timestamp", diagnosticOwner);
-        return;
+        return "rejected";
       }
       const { status: state, startedAt, updatedAt, completedAt, durationMs } = normalized;
       const facts = canonicalFacts ?? this.canonicalExtensionRunFacts();
@@ -4564,7 +4582,8 @@ export class RuntimeSlot {
       const pausedProcessIsQuiescent = hasObservedPausedProcessTerminal(raw, runId);
       // A terminal lifecycle event is authoritative; a late running artifact
       // enriches neither status nor ownership and must not resurrect the pill.
-      if (ownership?.terminal && state === "running") return;
+      // The latch cannot lift for this identity, so the bytes are rejected.
+      if (ownership?.terminal && state === "running") return "rejected";
       const artifactValue = ownership?.terminal
         ? preserveEmbeddedLifecycleMarker(raw, { ...raw, state: previous?.status === "failed" ? "failed" : "completed" })
         : superseded
@@ -4601,11 +4620,13 @@ export class RuntimeSlot {
       // Ambient discovery is another producer of lifecycle candidates. Apply
       // the same Gateway terminal latch and sequence admission as live tool
       // events before replacing an existing row.
-      if (admitExtensionRunActivity(previous, activity) === previous) return;
+      if (admitExtensionRunActivity(previous, activity) === previous) return "rejected";
       const terminalReceiptOwner = activity.status === "running"
         ? undefined
         : this.claimExtensionReceiptOwnership(activityKey);
-      if (activity.status !== "running" && !terminalReceiptOwner) return;
+      // A full Gateway work registry is temporary: the terminal receipt can be
+      // claimed by a later pass, so this artifact is not delivered yet.
+      if (activity.status !== "running" && !terminalReceiptOwner) return "transient";
       if (terminalReceiptOwner) claimedReceipt = { activityId: activityKey, owner: terminalReceiptOwner };
       const ownershipAccepted = this.bindExtensionRunOwnership(runId, {
         toolCallId,
@@ -4617,7 +4638,7 @@ export class RuntimeSlot {
         this.releaseExtensionReceiptOwnership(activityKey, terminalReceiptOwner);
         claimedReceipt = undefined;
         if (diagnosticOwner) this.warnExtensionArtifact("ownership-mismatch", diagnosticOwner);
-        return;
+        return "transient";
       }
       if (existingEntry) this.extensionActivities.delete(existingEntry[0]);
       const syntheticToolCallId = matchingEntries.find(([id]) => id.startsWith("subagent:") && id !== toolCallId)?.[0];
@@ -4636,12 +4657,18 @@ export class RuntimeSlot {
       }
       this.trimExtensionActivities();
       this.publishExtensionActivity(activity);
+      return "accepted";
     } catch (error) {
       if (claimedReceipt) this.releaseExtensionReceiptOwnership(claimedReceipt.activityId, claimedReceipt.owner);
       if (error instanceof OversizedExtensionArtifactError && missingToolCallId) {
         this.observeMissingExtensionArtifact(missingToolCallId);
       }
       if (diagnosticOwner) this.warnExtensionArtifact(extensionArtifactReadFailureReason(error), diagnosticOwner);
+      // An artifact that is too large or belongs to another session keeps that
+      // verdict for these bytes; every other failure is retried by the caller.
+      return error instanceof OversizedExtensionArtifactError || error instanceof ForeignExtensionArtifactSessionError
+        ? "rejected"
+        : "transient";
     }
   }
 

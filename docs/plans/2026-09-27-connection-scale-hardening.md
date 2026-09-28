@@ -9420,6 +9420,17 @@ wait).
   terminal artifact's sidecar refresh rests on the exact-binding lane, as the
   review specified. The `artifact-replacement-in-progress` reason still covers an
   unclassified read error and a `status.json` that has not been written yet.
+- Round 2 (review response): a route is recorded only after the slot decided the
+  artifact. `RuntimeSlot.discoverExtensionArtifact` now reports `accepted`,
+  `rejected` or `transient`, and the pass records only the first two, so an offer
+  a busy work registry, a losing read or any other temporary failure refused is
+  offered again on the next pass instead of being treated as delivered (the run
+  that `claimExtensionReceiptOwnership` refuses once reaches `completed` on the
+  second pass; it never appears on `bc8d23dc0`). Attributed candidates are now
+  filtered before the per-root budget slice, so unattributable directories can no
+  longer consume that budget or be reported as deferred work (`dropped` in
+  `extension.discovery-truncated` now counts only candidates a live slot still
+  had to be offered).
 
 ### G-1d · Done · 2026-09-28 · orchestrator-dispatched deepseek-worker (branch `hardening/g-1d`)
 

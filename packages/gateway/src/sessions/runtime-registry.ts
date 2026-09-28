@@ -555,10 +555,12 @@ export class RuntimeRegistry {
   private artifactDiscoveryStoppedSince = 0;
   private artifactDiscoveryDroppedSince = 0;
   private artifactDiscoveryStopReportedAt = 0;
-  /** The status.json identity each live slot last received for one run
-   * directory. A slot that already received this exact artifact cannot change
-   * its projection by reading it again, and a run it holds an exact binding for
-   * is refreshed by the exact-binding lane every pass. */
+  /** The status.json identity each live slot last dealt with for one run
+   * directory: a slot that accepted this exact artifact has its projection, and
+   * one that rejected it can only reject the same bytes again. Only those two
+   * outcomes are recorded, so an offer that failed temporarily is offered again
+   * on the next pass; a run the slot still holds an exact binding for is
+   * refreshed by the exact-binding lane every pass. */
   private readonly ambientArtifactRoutes = new Map<string, Map<string, { identity: string; pass: number }>>();
   /** Ambient artifact decisions keyed by run directory. The identity is the stat
    * of the same status.json a read would have opened, so an unchanged artifact
@@ -3758,34 +3760,53 @@ export class RuntimeRegistry {
       // already refreshed above and do not outrank it in ambient discovery.
       candidates.sort((left, right) => Number(right.active) - Number(left.active)
         || right.timestamp - left.timestamp || left.asyncDir.localeCompare(right.asyncDir));
-      // Offer only the amount this pass can safely project to live slots; a
-      // candidate cut off here is reported instead of silently lost.
-      const offerable = candidates.slice(0, rootBudget);
-      dropped += candidates.length - offerable.length;
-      for (const candidate of offerable) {
+      // A candidate is pending offerable work only when a live slot can still
+      // attribute the run and has not already dealt with this exact artifact
+      // identity: the exact-binding lane keeps a live run current (G-8d), an
+      // unattributable directory can only be rejected, and a decision already
+      // recorded for these bytes cannot change. Filtering before the per-root
+      // budget slice keeps an unchanged root from spending that budget on
+      // candidates nobody would accept, which used to starve the same
+      // attributed run on every pass.
+      const waiting = new Map<string, RuntimeSlot[]>();
+      for (const candidate of candidates) {
+        const owed: RuntimeSlot[] = [];
         for (const slot of slots) {
           const known = attributed.get(slot.id);
-          // A candidate this slot cannot attribute, or whose exact artifact
-          // identity it already received, cannot change its projection: the
-          // exact-binding lane above keeps a live run current (G-8d).
           if (!known || (!known.has(candidate.runId) && !known.has(candidate.asyncDir))) continue;
-          let routed = this.ambientArtifactRoutes.get(slot.id);
-          if (!routed) {
-            routed = new Map();
-            this.ambientArtifactRoutes.set(slot.id, routed);
-          }
-          const previous = routed.get(candidate.asyncDir);
-          if (previous?.identity === candidate.identity) {
-            previous.pass = pass;
+          const record = this.ambientArtifactRoutes.get(slot.id)?.get(candidate.asyncDir);
+          if (record?.identity === candidate.identity) {
+            // Seen again this pass: keep the decision alive while the root holds it.
+            record.pass = pass;
             continue;
           }
+          owed.push(slot);
+        }
+        if (owed.length > 0) waiting.set(candidate.asyncDir, owed);
+      }
+      const pending = candidates.filter((candidate) => waiting.has(candidate.asyncDir));
+      // Offer only the amount this pass can safely project to live slots; a
+      // pending candidate cut off here is reported instead of silently lost.
+      const offerable = pending.slice(0, rootBudget);
+      dropped += pending.length - offerable.length;
+      for (const candidate of offerable) {
+        for (const slot of waiting.get(candidate.asyncDir)!) {
           if (counts.work >= MAX_EXTENSION_DISCOVERY_WORK) {
             routedOut = true;
             break;
           }
           counts.work += 1;
+          // An offer the slot could not decide leaves no record, so the next
+          // pass offers the same artifact again; only an accepted or
+          // permanently rejected artifact is dealt with (G-8a).
+          const outcome = await slot.discoverExtensionArtifact(candidate.asyncDir);
+          if (outcome === "transient") continue;
+          let routed = this.ambientArtifactRoutes.get(slot.id);
+          if (!routed) {
+            routed = new Map();
+            this.ambientArtifactRoutes.set(slot.id, routed);
+          }
           routed.set(candidate.asyncDir, { identity: candidate.identity, pass });
-          await slot.discoverExtensionArtifact(candidate.asyncDir);
         }
         if (routedOut) break;
       }
