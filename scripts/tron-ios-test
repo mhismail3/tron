@@ -59,8 +59,17 @@ Options:
                         tight test-fix loop; the next command in this lane reuses it and
                         the next sweep releases it once no command holds the lane's lease.
 
-Stable exits: 65 test failure, 66 destination, 70 build failure, 73 busy,
-74 runner failure, 75 process timeout. Signals retain their conventional exits.
+Stable exits: 65 test failure, 66 destination, 70 build failure, 73 busy or
+refused by memory admission, 74 runner failure, 75 process timeout. Signals
+retain their conventional exits.
+
+Before it boots this lane's simulator, provisioning reads the Mac's free memory
+and swap in use and refuses (73) with the status table when free memory is below
+the reserve or swap is at the limit, so a boot never pushes the Mac - and the
+phone's connection through the Gateway - into swap. The defaults are 8 GB free
+and 4 GB of swap; TRON_IOS_TEST_MEMORY_RESERVE_BYTES and
+TRON_IOS_TEST_SWAP_LIMIT_BYTES override them. A Mac (or CI) where these reports
+are unavailable admits the boot with a warning.
 Every command that provisions the simulator first releases orphaned owned lanes;
 lanes a live process holds are never touched. Commands release the simulator they
 use when they end, on success, failure, timeout or signal, unless --keep-booted
@@ -183,6 +192,10 @@ simulator_args=(
   --name "$DEVICE_NAME"
   --worktree "$ROOT"
   --development-state "$DEVELOPMENT_STATE"
+  # The lane root and default lane let every simulator command name the lanes it
+  # sees, which is what the admission refusal and `status --all` print.
+  --discovery-root "$DISCOVERY_ROOT"
+  --default-state-dir "$DEFAULT_STATE_ROOT"
 )
 [[ "$EPHEMERAL" == 1 ]] && simulator_args+=(--ephemeral)
 
@@ -371,7 +384,14 @@ fi
 command -v xcodegen >/dev/null || die "pinned XcodeGen is missing; run scripts/install-ci-tools.sh xcodegen"
 "$ROOT/scripts/verify-ci-toolchain.sh" ios xcodegen
 
-simulator_id="$(python3 "$SIMULATOR" provision "${simulator_args[@]}")" || exit "$EXIT_DESTINATION"
+simulator_id="$(python3 "$SIMULATOR" provision "${simulator_args[@]}")" || {
+  # Memory admission refuses before booting with the runner's own "not now"
+  # exit, which the caller keeps: the Mac's memory state is not a broken
+  # destination. Every other provisioning failure is one.
+  provision_status=$?
+  [[ "$provision_status" == "$EXIT_LOCKED" ]] && exit "$EXIT_LOCKED"
+  exit "$EXIT_DESTINATION"
+}
 [[ "$simulator_id" =~ ^[0-9A-Fa-f-]{36}$ ]] || die "provisioner returned an invalid simulator UDID"
 destination="platform=iOS Simulator,id=$simulator_id"
 

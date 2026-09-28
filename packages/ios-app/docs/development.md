@@ -938,7 +938,8 @@ The simulator
 helper takes no lease, so run one simulator build at a time. Device builds stay
 in the worktree's `packages/ios-app/build`. Exit 65 is
 a product-test failure, 66 a destination failure, 70 a build failure, 73 a busy
-lease, 74 a runner failure, and 75 a process timeout.
+lease or a boot memory admission refused, 74 a runner failure, and 75 a process
+timeout.
 
 ```bash
 scripts/tron-ios-test status
@@ -1002,6 +1003,20 @@ lease is free, so an abandoned lane costs nothing; marker-less state (including
 the default lane's directory, which exists before its first provision) is never
 removed, and a marker written before lanes recorded their last use is kept until
 a command dates it.
+
+How many simulators the Mac runs is decided by its memory, not by a fixed count.
+Before `simctl boot` - never for a lane whose simulator is already booted, which
+is the whole point of `--keep-booted` - provisioning reads `memory_pressure` and
+`sysctl vm.swapusage` and refuses the boot with exit 73 and the simulator table
+(every lane with its state, worktree, lease holder, uptime and disk, every booted
+device no lane owns, and `Simulator.app`) when free memory is below 8 GB or swap
+in use is at 4 GB. `TRON_IOS_TEST_MEMORY_RESERVE_BYTES` and
+`TRON_IOS_TEST_SWAP_LIMIT_BYTES` override those defaults. The refusal is fast -
+no wait, no retry - because the caller decides whether to wait for the Mac to
+free memory; a reserve the Mac has already breached while no owned lane is
+booted says so, so an agent knows the memory is not the test tooling's. A reader
+that is missing, failing or unparsable admits the boot with a warning, because a
+Mac or CI without those reports must still run tests.
 
 ### Test runner safety contract
 

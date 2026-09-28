@@ -30,8 +30,93 @@ UDID_C = "CCCCCCCC-CCCC-CCCC-CCCC-CCCCCCCCCCCC"
 UDID_D = "DDDDDDDD-DDDD-DDDD-DDDD-DDDDDDDDDDDD"
 UDID_E = "EEEEEEEE-EEEE-EEEE-EEEE-EEEEEEEEEEEE"
 
+# The owners read the Mac's memory pressure, its swap and its process table.
+# These synthetic readers stand in for `memory_pressure`, `sysctl` and `ps`, so
+# no fixture depends on this Mac's real memory state or on what it is running;
+# a test writes one report value to steer one decision. The owners take the
+# reader commands from the environment (TRON_IOS_MEMORY_PRESSURE,
+# TRON_IOS_SYSCTL, TRON_IOS_PS), which is how a real Mac supplies them.
+READER_SOURCES = {
+    "memory_pressure": '''import os, sys
+from pathlib import Path
+values = Path(os.environ["FAKE_READER_VALUES"])
+mode = os.environ.get("FAKE_MEMORY_MODE", "")
+if mode == "unavailable":
+    print("memory_pressure: not installed", file=sys.stderr)
+    raise SystemExit(2)
+percent = (values / "free-percent").read_text().strip() if (values / "free-percent").exists() else "90"
+print("System-wide memory free percentage: " + percent + ("" if mode == "garbled" else "%"))
+''',
+    "sysctl": '''import os, sys
+from pathlib import Path
+values = Path(os.environ["FAKE_READER_VALUES"])
+mode = os.environ.get("FAKE_SYSCTL_MODE", "")
+key = sys.argv[-1]
+if mode == "unavailable-swap" and key == "vm.swapusage":
+    print("sysctl: vm.swapusage unavailable", file=sys.stderr)
+    raise SystemExit(2)
+if key == "hw.memsize":
+    print((values / "physical-bytes").read_text().strip() if (values / "physical-bytes").exists() else "38654705664")
+elif key == "vm.swapusage":
+    used = (values / "swap-used-mb").read_text().strip() if (values / "swap-used-mb").exists() else "0"
+    print("total = 16384.00M  used = " + used + "M  free = 0.00M  (encrypted)")
+else:
+    print("unexpected sysctl key: " + key, file=sys.stderr)
+    raise SystemExit(2)
+''',
+    "ps": '''import os, sys
+from pathlib import Path
+if os.environ.get("FAKE_PS_MODE") == "unavailable":
+    print("ps: not installed", file=sys.stderr)
+    raise SystemExit(2)
+values = Path(os.environ["FAKE_READER_VALUES"])
+table = values / "process-table"
+if table.exists():
+    sys.stdout.write(table.read_text())
+''',
+}
 
-class SimulatorFixture(unittest.TestCase):
+
+def device_process(udid: str, elapsed: str = "00:05") -> str:
+    """One ps line for a booted device's own init process."""
+    return (
+        f"65790 {elapsed} launchd_sim /Users/someone/Library/Developer/CoreSimulator/Devices/{udid}"
+        "/data/var/run/launchd_bootstrap.plist\n"
+    )
+
+
+class SyntheticReaders:
+    """Install the injectable readers every owner reads, per fixture."""
+
+    readers: Path
+    reader_values: Path
+
+    def install_readers(self, root: Path) -> None:
+        self.readers = root / "readers"
+        self.readers.mkdir()
+        self.reader_values = root / "reader-values"
+        self.reader_values.mkdir()
+        for name, source in READER_SOURCES.items():
+            path = self.readers / name
+            path.write_text("#!/usr/bin/env python3\n" + source)
+            path.chmod(0o755)
+
+    def reader_environment(self) -> dict[str, str]:
+        return {
+            "TRON_IOS_MEMORY_PRESSURE": str(self.readers / "memory_pressure"),
+            "TRON_IOS_SYSCTL": str(self.readers / "sysctl"),
+            "TRON_IOS_PS": str(self.readers / "ps"),
+            "FAKE_READER_VALUES": str(self.reader_values),
+        }
+
+    def reader_value(self, name: str, value: str) -> None:
+        """One report value for the next invocation through these readers."""
+        (self.reader_values / name).write_text(value)
+
+
+class SimulatorHarness(SyntheticReaders):
+    """A synthetic simctl Mac, shared by the simulator-level fixtures."""
+
     def setUp(self) -> None:
         self.temporary = tempfile.TemporaryDirectory()
         self.root = Path(self.temporary.name)
@@ -39,6 +124,7 @@ class SimulatorFixture(unittest.TestCase):
         self.marker = self.root / "simulator.json"
         self.development = self.root / "development-udid"
         self.fake_xcrun = self.root / "xcrun"
+        self.install_readers(self.root)
         self.fake_xcrun.write_text(
             """#!/usr/bin/env python3
 import json, os, sys
@@ -103,11 +189,20 @@ raise SystemExit(2)
             "--marker", str(self.marker), "--runtime", "26.2",
             "--device-type", "iPhone 17 Pro", "--name", name,
             "--development-state", str(self.development),
+            # The lane root stays inside the fixture, so a lane view can name the
+            # default lane without ever walking a real lane directory.
+            "--discovery-root", str(self.root), "--default-state-dir", str(self.root),
         ]
 
-    def invoke(self, action: str, *, name: str = "Tron iOS Tests", development_on_shutdown: bool = False) -> subprocess.CompletedProcess[str]:
+    def invoke(
+        self, action: str, *, name: str = "Tron iOS Tests", development_on_shutdown: bool = False,
+        readers: dict[str, str] | None = None,
+    ) -> subprocess.CompletedProcess[str]:
         environment = os.environ.copy()
         environment.update({"TRON_IOS_XCRUN": str(self.fake_xcrun), "FAKE_SIMCTL_INVENTORY": str(self.inventory_path)})
+        environment.update(self.reader_environment())
+        if readers is not None:
+            environment.update(readers)
         if development_on_shutdown:
             environment["FAKE_DEVELOPMENT_ON_SHUTDOWN"] = str(self.development)
         return subprocess.run(self.command(action, name=name), env=environment, text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
@@ -126,6 +221,9 @@ raise SystemExit(2)
             "name": name, "udid": udid, "state": state, "isAvailable": True,
             "deviceTypeIdentifier": TYPE_ID,
         }
+
+class SimulatorFixture(SimulatorHarness, unittest.TestCase):
+    """Exercise the simulator owner directly against a synthetic simctl."""
 
     def test_provision_and_delete_preserve_unrelated_simulators(self) -> None:
         _, unrelated = self.device(UDID_A, name="Unrelated Simulator")
@@ -270,7 +368,107 @@ raise SystemExit(2)
             self.assertEqual(json.loads(self.inventory_path.read_text())["devices"][RUNTIME_ID], [device])
 
 
-class RunnerFixture(unittest.TestCase):
+class AdmissionFixture(SimulatorHarness, unittest.TestCase):
+    """SIM-4 memory admission, read before `simctl boot` only.
+
+    Failure modes these cases target, written before the code:
+
+    1. A boot proceeds while free memory is already below the reserve, so the
+       boot's own footprint pushes the Mac deeper into swap.
+    2. A boot proceeds while swap in use is at or above the limit.
+    3. A refusal does not say what is booted, by which lane and worktree, and for
+       how long, so an agent cannot tell what to release.
+    4. An unavailable reader (missing, failing or unparsable) fails the boot
+       instead of warning and admitting it, so a Mac or CI without these reports
+       cannot run tests.
+    5. The check runs for a lane whose simulator is already booted, where nothing
+       is booted and a keep-booted loop must not be refused.
+    6. The reserve breached by processes that are not Tron test simulators is
+       reported as if the test tooling held the Mac's memory.
+    """
+
+    def device_states(self) -> dict[str, str]:
+        document = json.loads(self.inventory_path.read_text())
+        return {
+            device["udid"]: device["state"]
+            for devices in document["devices"].values()
+            for device in devices
+        }
+
+    def test_a_boot_is_refused_when_free_memory_is_below_the_reserve(self) -> None:
+        """Failure modes 1 and 6: the reserve refuses and says whose memory it is."""
+        self.reader_value("free-percent", "5")
+        result = self.invoke("provision")
+        self.assertEqual(result.returncode, 73, result.stderr)
+        self.assertIn("refusing to boot Tron iOS Tests", result.stderr)
+        self.assertIn("free memory 1.8 GB of 36.0 GB is below the 8.0 GB reserve", result.stderr)
+        # No owned lane is booted, so the shortage is not the test tooling's.
+        self.assertIn("no owned lane is booted, so processes other than the iOS test tooling hold", result.stderr)
+        self.assertEqual(set(self.device_states().values()), {"Shutdown"})
+
+    def test_a_boot_is_refused_when_swap_is_at_the_limit(self) -> None:
+        """Failure mode 2: swap in use at or above the limit refuses the boot."""
+        self.reader_value("swap-used-mb", "5000")
+        result = self.invoke("provision")
+        self.assertEqual(result.returncode, 73, result.stderr)
+        self.assertIn("swap in use 4.9 GB is at or above the 4.0 GB limit", result.stderr)
+        self.assertEqual(set(self.device_states().values()), {"Shutdown"})
+
+    def test_the_refusal_names_the_booted_lane_its_worktree_and_uptime(self) -> None:
+        """Failure mode 3: the refusal carries the table a caller can act on."""
+        self.reader_value("free-percent", "5")
+        self.reader_value("process-table", device_process(UDID_A, "01-16:05:07"))
+        lane = self.root / "ios-test-probe"
+        lane.mkdir()
+        marker = self.owned_marker(UDID_A, name="Tron iOS Tests (probe)")
+        marker["worktree"] = "/private/tmp/tron-probe-worktree"
+        (lane / "simulator.json").write_text(json.dumps(marker))
+        _, probe = self.device(UDID_A, name="Tron iOS Tests (probe)", state="Booted")
+        self.write_inventory(devices={RUNTIME_ID: [probe]})
+
+        result = self.invoke("provision")
+        self.assertEqual(result.returncode, 73, result.stderr)
+        self.assertIn("SIMULATOR", result.stderr)
+        self.assertIn("lane probe", result.stderr)
+        self.assertIn("/private/tmp/tron-probe-worktree", result.stderr)
+        self.assertIn("1d 16h", result.stderr)
+        self.assertNotIn("no owned lane is booted", result.stderr)
+        self.assertEqual(self.device_states()[UDID_A], "Booted")
+
+    def test_an_unavailable_reader_admits_the_boot_with_a_warning(self) -> None:
+        """Failure mode 4: a missing, failing or unparsable reader never blocks."""
+        cases = (
+            ("missing memory pressure", {"FAKE_MEMORY_MODE": "unavailable"}, "1", "cannot read the Mac's free memory"),
+            ("unparsable memory pressure", {"FAKE_MEMORY_MODE": "garbled"}, "1", "cannot read the Mac's free memory"),
+            ("failing swap reader", {"FAKE_SYSCTL_MODE": "unavailable-swap"}, "90", "cannot read the Mac's swap in use"),
+        )
+        for label, environment, percent, expected in cases:
+            with self.subTest(reader=label):
+                self.marker.unlink(missing_ok=True)
+                self.write_inventory(devices={RUNTIME_ID: []})
+                self.reader_value("free-percent", percent)
+                result = self.invoke("provision", readers=environment)
+                self.assertEqual(result.returncode, 0, result.stderr)
+                self.assertIn(expected, result.stderr)
+                self.assertIn("admitting the boot without that check", result.stderr)
+                self.assertEqual(self.device_states()[result.stdout.strip()], "Booted")
+
+    def test_an_already_booted_lane_is_reused_without_admission(self) -> None:
+        """Failure mode 5: nothing is booted for a booted lane, so nothing is refused."""
+        self.reader_value("free-percent", "1")
+        self.marker.write_text(json.dumps(self.owned_marker()))
+        _, booted = self.device(UDID_A, state="Booted")
+        self.write_inventory(devices={RUNTIME_ID: [booted]})
+
+        result = self.invoke("provision")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(result.stdout.strip(), UDID_A)
+        self.assertEqual(self.device_states()[UDID_A], "Booted")
+        self.assertNotIn("refusing", result.stderr)
+        self.assertNotIn("warning", result.stderr)
+
+
+class RunnerFixture(SyntheticReaders, unittest.TestCase):
     """Exercise the production runner with only synthetic xcode/simctl tools."""
 
     def setUp(self) -> None:
@@ -278,6 +476,7 @@ class RunnerFixture(unittest.TestCase):
         self.root = Path(self.temporary.name)
         self.bin = self.root / "bin"
         self.bin.mkdir()
+        self.install_readers(self.root)
         self.xcrun = self.bin / "xcrun"
         self.xcrun.write_text("""#!/usr/bin/env python3
 import json, os, sys
@@ -383,8 +582,10 @@ exit 0
         mode: str = "success", xcode_status: int = 0,
         extra_args: list[str] | None = None,
         lane: str | None = None, discovery_root: Path | None = None,
+        readers: dict[str, str] | None = None,
     ) -> subprocess.CompletedProcess[str]:
         environment = os.environ.copy()
+        environment.update(self.reader_environment())
         environment.update({
             "PATH": f"{self.bin}:{environment['PATH']}",
             "TRON_IOS_XCRUN": str(self.xcrun),
@@ -410,6 +611,8 @@ exit 0
             environment.setdefault("TRON_IOS_TEST_DISCOVERY_ROOT", str(self.root))
         if discovery_root is not None:
             environment["TRON_IOS_TEST_DISCOVERY_ROOT"] = str(discovery_root)
+        if readers is not None:
+            environment.update(readers)
         if home is not None:
             # Exercise the runner's own defaults under a synthetic HOME.
             environment.pop("TRON_IOS_TEST_DERIVED_DATA", None)
@@ -592,6 +795,24 @@ exit 0
                 self.assertEqual(result.returncode, expected, result.stderr)
                 self.assertEqual(self.device_entry(self.owned_udid())["state"], "Shutdown")
         self.assertEqual(len(self.simctl_calls("shutdown")), len(outcomes))
+
+    # SIM-4 memory admission at the runner boundary. Failure modes this case
+    # targets, written before the code:
+    #
+    # 1. The refusal's exit code is replaced by the runner's destination code,
+    #    so a caller cannot tell "the Mac is full" from "the destination is
+    #    broken".
+    # 2. Provisioning boots first and admits afterwards, so the simulator this
+    #    command refuses is already holding memory.
+    def test_the_runner_keeps_the_admission_exit_and_boots_nothing(self) -> None:
+        """Failure modes 1 and 2: exit 73 survives, and nothing was booted."""
+        self.reader_value("free-percent", "5")
+        result = self.invoke(extra_args=["--only-testing", "TronMobileTests/StubTests"])
+        self.assertEqual(result.returncode, 73, result.stderr)
+        self.assertIn("refusing to boot Tron iOS Tests", result.stderr)
+        self.assertIn("lane default", result.stderr)
+        self.assertEqual(self.simctl_calls("boot"), [])
+        self.assertEqual(self.device_entry(self.owned_udid())["state"], "Shutdown")
 
     def test_keep_booted_is_reused_by_the_next_run_in_the_lane(self) -> None:
         """SIM-1: --keep-booted serves a test-fix loop and still releases at the end.
@@ -914,7 +1135,7 @@ class LockFixture(unittest.TestCase):
             self.assertEqual(third.returncode, 0)
 
 
-class OwnedLaneFixture(unittest.TestCase):
+class OwnedLaneFixture(SyntheticReaders, unittest.TestCase):
     """Synthetic xcrun/simctl for the owners that release booted simulators.
 
     Failure modes these fixtures make observable, written before the owners:
@@ -985,6 +1206,8 @@ raise SystemExit(2)
         self.state.mkdir(parents=True)
         self.inventory_path.write_text(json.dumps({"devices": {RUNTIME_ID: []}}))
         self.environment = os.environ.copy()
+        self.install_readers(self.root)
+        self.environment.update(self.reader_environment())
         self.environment.update({
             "PATH": f"{self.bin}:{os.environ['PATH']}",
             "TRON_IOS_XCRUN": str(self.xcrun),

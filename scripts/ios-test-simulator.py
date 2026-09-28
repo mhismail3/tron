@@ -1,9 +1,16 @@
 #!/usr/bin/env python3
-"""Own the repository's iOS test simulators: provision, release, sweep, name lanes."""
+"""Own the repository's iOS test resources: simulators, lanes, runs and products.
+
+Provisioning, releasing and sweeping own the simulators a test command uses;
+memory admission refuses a boot the Mac cannot afford before it happens; the
+`simulators` view reports everything that holds memory; and pruning reclaims the
+runs and products finished commands leave behind.
+"""
 
 from __future__ import annotations
 
 import argparse
+import calendar
 import contextlib
 import fcntl
 import hashlib
@@ -16,10 +23,13 @@ import subprocess
 import sys
 import tempfile
 import time
-from typing import Any, Iterator
+from typing import Any, Iterator, NamedTuple
 
 DESTINATION_EXIT = 66
-LANE_BUSY_EXIT = 73
+# The stable "not now" exit: a lane a live process holds, or a Mac too short of
+# memory to boot another simulator. Both mean the caller decides whether to
+# wait; neither is a broken request.
+BUSY_EXIT = 73
 SCHEMA = "tron.ios-test-simulator.v1"
 OWNER = "tron-ios-test"
 # A lane is one state directory holding a marker, a lease and its simulator's
@@ -35,10 +45,52 @@ SWEEP_DEPTH = 2
 # `ios-test-<name>` sibling, which is what a lane's reported name strips.
 LANE_TTL_SECONDS = 7 * 24 * 60 * 60
 LANE_DIRECTORY_PREFIX = "ios-test"
+# A boot is admitted only when the Mac would still have this much free memory
+# and its swap in use stays under the limit. Both are read before `simctl boot`,
+# so the booted simulator's own footprint (about 2 GB) comes out of the reserve.
+# The environment overrides exist for CI and for retuning from the measurements
+# the lifecycle plan records in its handoffs.
+MEMORY_RESERVE_BYTES = 8 * 1024**3
+SWAP_LIMIT_BYTES = 4 * 1024**3
+# The runner's ownership marker, written by `owned_directory` in
+# `scripts/tron-ios-test` before it creates a results or products directory.
+# Deletion outside the tool's own trees is refused without it.
+OWNERSHIP_MARKER_NAME = ".tron-ios-test-owned"
+# The owner of one run directory, written when the runner creates it: the
+# worktree and lane that produced the run, which is what `clean` and `prune`
+# scope and group by.
+RUN_OWNER_NAME = "owner.json"
+# The products stamp `scripts/ios-test-build-identity.py` writes after a
+# successful build; its `worktree` is the path whose existence decides whether
+# those products still have an owner.
+BUILD_IDENTITY_NAME = "build-identity.json"
+# Retention: a run of a worktree is kept while it is one of its newest
+# RUNS_KEPT_PER_WORKTREE runs or younger than RUN_TTL_SECONDS. The runner names
+# a run directory `<UTC timestamp>-<command>.<suffix>`, so a run from before
+# `owner.json` existed can still be dated from its name.
+RUNS_KEPT_PER_WORKTREE = 50
+RUN_TTL_SECONDS = 7 * 24 * 60 * 60
+RUN_NAME_PATTERN = re.compile(r"^(\d{8}T\d{6}Z)-")
+UNKNOWN_WORKTREE = "an unrecorded worktree"
+# `status --all` and the admission refusal print the same table.
+STATUS_COLUMNS = ("SIMULATOR", "STATE", "OWNER", "WORKTREE", "LEASE", "UPTIME", "DISK")
+# A booted simulator's boot time is proven by the device's own init process; the
+# GUI app is the other long-lived holder of the Mac's memory.
+DEVICE_UDID_PATTERN = re.compile(r"/Devices/([0-9A-Fa-f]{8}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{12})/")
+SIMULATOR_APP_PROCESS = "Simulator.app/Contents/MacOS/Simulator"
+ELAPSED_PATTERN = re.compile(r"^(?:(\d+)-)?(?:(\d+):)?(\d+):(\d+)$")
+FREE_PERCENTAGE_PATTERN = re.compile(r"System-wide memory free percentage:\s*([0-9]+(?:\.[0-9]+)?)%")
+SWAP_USED_PATTERN = re.compile(r"\bused\s*=\s*([0-9.]+)\s*([KMGT]?)")
+SIZE_SCALES = {"": 1, "K": 1 << 10, "M": 1 << 20, "G": 1 << 30, "T": 1 << 40}
+READER_TIMEOUT_SECONDS = 10.0
 
 
 class DestinationError(RuntimeError):
     pass
+
+
+class MemoryAdmissionError(RuntimeError):
+    """The Mac is too short of memory to boot another simulator now."""
 
 
 class LaneBusyError(RuntimeError):
@@ -326,11 +378,15 @@ def lane_label(directory: Path, default_state_dir: Path | None = None) -> str:
     """A lane's name: "default" for the default lane, else the directory's own.
 
     `ios-test` is the default lane's directory and `ios-test-<name>` a named
-    lane's, so a lane's name round-trips through the runner's `--lane`.
+    lane's, so a lane's name round-trips through the runner's `--lane`. A caller
+    that cannot name the configured default directory still reads the standard
+    one as the default lane.
     """
     if default_state_dir is not None and same_path(directory, default_state_dir):
         return "default"
     name = directory.name
+    if name == LANE_DIRECTORY_PREFIX:
+        return "default"
     return name[len(LANE_DIRECTORY_PREFIX) + 1:] if name.startswith(LANE_DIRECTORY_PREFIX + "-") else name
 
 
@@ -345,10 +401,155 @@ def human_size(size: int) -> str:
     return f"{size} B"
 
 
+def human_duration(seconds: int) -> str:
+    """How long something has been up, in the units a person reads at a glance."""
+    days, remainder = divmod(max(seconds, 0), 24 * 60 * 60)
+    hours, remainder = divmod(remainder, 60 * 60)
+    minutes = remainder // 60
+    if days:
+        return f"{days}d {hours}h"
+    if hours:
+        return f"{hours}h {minutes}m"
+    return f"{minutes}m"
+
+
+def run_reader(executable: str, arguments: list[str]) -> str | None:
+    """Read one read-only host report, or None when the reader is unavailable.
+
+    A missing, failing, hanging or unparsable reader never fails a boot: the
+    tooling must still run where these reports are not installed (CI), so every
+    caller treats None as "cannot tell" and admits with a warning.
+    """
+    try:
+        completed = subprocess.run(
+            [executable, *arguments],
+            check=False,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            timeout=READER_TIMEOUT_SECONDS,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return None
+    return completed.stdout if completed.returncode == 0 else None
+
+
+def sysctl_reader() -> str:
+    return os.environ.get("TRON_IOS_SYSCTL", "sysctl")
+
+
+def memory_pressure_reader() -> str:
+    return os.environ.get("TRON_IOS_MEMORY_PRESSURE", "memory_pressure")
+
+
+def process_reader() -> str:
+    return os.environ.get("TRON_IOS_PS", "ps")
+
+
+def parse_free_percentage(text: str) -> float | None:
+    match = FREE_PERCENTAGE_PATTERN.search(text)
+    return float(match.group(1)) if match is not None else None
+
+
+def parse_swap_used_bytes(text: str) -> int | None:
+    match = SWAP_USED_PATTERN.search(text)
+    if match is None:
+        return None
+    return int(float(match.group(1)) * SIZE_SCALES[match.group(2)])
+
+
+def parse_elapsed_seconds(text: str) -> int | None:
+    """Seconds from ps's `etime` field, whose shape is [[dd-]hh:]mm:ss."""
+    match = ELAPSED_PATTERN.match(text)
+    if match is None:
+        return None
+    days, hours, minutes, seconds = (int(value) if value else 0 for value in match.groups())
+    return days * 24 * 60 * 60 + hours * 60 * 60 + minutes * 60 + seconds
+
+
+class MemoryState(NamedTuple):
+    """What the Mac's memory reports say; None wherever a reader is unavailable."""
+
+    physical_bytes: int | None
+    free_bytes: int | None
+    swap_used_bytes: int | None
+
+
+def read_memory_state() -> MemoryState:
+    """Read the Mac's physical memory, free memory and swap in use."""
+    physical_text = run_reader(sysctl_reader(), ["-n", "hw.memsize"])
+    physical_bytes: int | None = None
+    if physical_text is not None and physical_text.strip().isdigit():
+        physical_bytes = int(physical_text.strip())
+    free_bytes: int | None = None
+    if physical_bytes is not None:
+        percentage = parse_free_percentage(run_reader(memory_pressure_reader(), []) or "")
+        if percentage is not None:
+            free_bytes = int(physical_bytes * percentage / 100)
+    swap_text = run_reader(sysctl_reader(), ["-n", "vm.swapusage"])
+    swap_used_bytes = parse_swap_used_bytes(swap_text) if swap_text is not None else None
+    return MemoryState(physical_bytes, free_bytes, swap_used_bytes)
+
+
+def process_table() -> list[tuple[int, int, str]] | None:
+    """(pid, seconds running, command) for every process, or None if unreadable."""
+    text = run_reader(process_reader(), ["-axo", "pid=,etime=,command="])
+    if text is None:
+        return None
+    table: list[tuple[int, int, str]] = []
+    for line in text.splitlines():
+        fields = line.split(None, 2)
+        if len(fields) != 3 or not fields[0].isdigit():
+            continue
+        elapsed = parse_elapsed_seconds(fields[1])
+        if elapsed is None:
+            continue
+        table.append((int(fields[0]), elapsed, fields[2]))
+    return table
+
+
+def booted_uptimes(table: list[tuple[int, int, str]] | None) -> dict[str, int]:
+    """Seconds since boot for every simulator the process table proves booted.
+
+    A booted device runs its own init process (`launchd_sim`) from its data
+    directory, and that process starts when the device boots; the longest
+    running match is therefore the boot time.
+    """
+    uptimes: dict[str, int] = {}
+    for _, elapsed, command in table or []:
+        match = DEVICE_UDID_PATTERN.search(command)
+        if match is None:
+            continue
+        uptimes[match.group(1)] = max(uptimes.get(match.group(1), 0), elapsed)
+    return uptimes
+
+
+def simulator_app_uptime(table: list[tuple[int, int, str]] | None) -> int | None:
+    uptimes = [elapsed for _, elapsed, command in table or [] if SIMULATOR_APP_PROCESS in command]
+    return max(uptimes) if uptimes else None
+
+
+def lane_root(arguments: argparse.Namespace) -> tuple[Path, Path] | None:
+    """The lane root and default lane directory, or None when unnamed.
+
+    The runner passes both, so a lane view can see every lane. A caller that
+    only knows its own marker - the profiler, the E2E harness, the lease holder
+    - gets no discovery, because a view that cannot see the Mac's other lanes
+    must never claim they are idle.
+    """
+    if arguments.discovery_root is None or arguments.default_state_dir is None:
+        return None
+    return arguments.discovery_root, arguments.default_state_dir
+
+
 def lane_directories(arguments: argparse.Namespace) -> list[Path]:
     """Every lane: the default lane, then each lane with an ownership marker."""
-    found = [arguments.default_state_dir]
-    found.extend(marker_path.parent for marker_path in marker_paths(arguments.discovery_root))
+    root = lane_root(arguments)
+    if root is None:
+        return [arguments.marker.parent] if arguments.marker is not None else []
+    discovery_root, default_state_dir = root
+    found = [default_state_dir]
+    found.extend(marker_path.parent for marker_path in marker_paths(discovery_root))
     unique: list[Path] = []
     seen: set[str] = set()
     for directory in found:
@@ -362,28 +563,38 @@ def lane_directories(arguments: argparse.Namespace) -> list[Path]:
 LANE_COLUMNS = ("LANE", "WORKTREE", "STATE", "LEASE", "LAST USED", "DISK")
 
 
+def lane_states(arguments: argparse.Namespace) -> list[tuple[str, Path, dict[str, Any] | None]]:
+    """(label, directory, marker) for every lane, default lane first.
+
+    One place decides which lanes exist and which of their markers can be read:
+    an unreadable marker is reported and skipped, never guessed at.
+    """
+    states: list[tuple[str, Path, dict[str, Any] | None]] = []
+    for directory in lane_directories(arguments):
+        try:
+            marker = load_marker(directory / MARKER_NAME)
+        except DestinationError as error:
+            print(f"warning: skipping {directory / MARKER_NAME}: {error}", file=sys.stderr)
+            continue
+        states.append((lane_label(directory, arguments.default_state_dir), directory, marker))
+    return sorted(states, key=lambda state: (state[0] != "default", state[0]))
+
+
 def lane_rows(arguments: argparse.Namespace) -> list[list[str]]:
     """One row per lane, in the column order of LANE_COLUMNS."""
     document = inventory()
     rows: list[list[str]] = []
-    for directory in lane_directories(arguments):
-        marker_path = directory / MARKER_NAME
-        try:
-            marker = load_marker(marker_path)
-        except DestinationError as error:
-            print(f"warning: skipping {marker_path}: {error}", file=sys.stderr)
-            continue
+    for label, directory, marker in lane_states(arguments):
         lease = lease_holder(directory / LEASE_NAME)
-        row = [lane_label(directory, arguments.default_state_dir)]
         if marker is None:
-            rows.append([*row, "-", "not-provisioned", lease, "-", "-"])
+            rows.append([label, "-", "not-provisioned", lease, "-", "-"])
             continue
         device, state = lane_device(document, marker)
         worktree = marker.get("worktree")
         last_used = marker.get("last_used_epoch_seconds")
         size = device.get("dataPathSize") if device is not None else None
         rows.append([
-            *row,
+            label,
             worktree if isinstance(worktree, str) and worktree else "-",
             state,
             lease,
@@ -392,7 +603,7 @@ def lane_rows(arguments: argparse.Namespace) -> list[list[str]]:
             else "-",
             human_size(size) if isinstance(size, int) and not isinstance(size, bool) else "-",
         ])
-    return sorted(rows, key=lambda row: (row[0] != "default", row[0]))
+    return rows
 
 
 def list_lanes(arguments: argparse.Namespace) -> int:
@@ -402,6 +613,163 @@ def list_lanes(arguments: argparse.Namespace) -> int:
     for values in (LANE_COLUMNS, *rows):
         print("  ".join(value.ljust(widths[index]) for index, value in enumerate(values)).rstrip())
     return 0
+
+
+def uptime_cell(uptimes: dict[str, int], udid: str, state: str) -> str:
+    if state != "Booted":
+        return "-"
+    elapsed = uptimes.get(udid)
+    return human_duration(elapsed) if elapsed is not None else "-"
+
+
+def disk_cell(device: dict[str, Any] | None) -> str:
+    size = device.get("dataPathSize") if device is not None else None
+    return human_size(size) if isinstance(size, int) and not isinstance(size, bool) else "-"
+
+
+def simulator_rows(arguments: argparse.Namespace) -> list[list[str]]:
+    """One row per simulator that holds memory, in the STATUS_COLUMNS order.
+
+    Every lane appears, booted or not, so a released lane is visibly released;
+    every booted device no lane owns appears, so memory held outside the test
+    tooling cannot hide; the remembered Development simulator is named as the
+    Development one; and Simulator.app is always listed, because the GUI app
+    outlives the runs that opened it.
+    """
+    document = inventory()
+    table = process_table()
+    if table is None:
+        print("warning: cannot read the process table (ps); simulator uptimes are unknown", file=sys.stderr)
+    uptimes = booted_uptimes(table)
+    try:
+        development = development_udid(arguments)
+    except DestinationError as error:
+        print(f"warning: cannot tell which simulator is the Development one: {error}", file=sys.stderr)
+        development = None
+    rows: list[list[str]] = []
+    claimed: set[str] = set()
+    for label, directory, marker in lane_states(arguments):
+        lease = lease_holder(directory / LEASE_NAME)
+        if marker is None:
+            rows.append(["-", "not-provisioned", f"lane {label}", "-", lease, "-", "-"])
+            continue
+        claimed.add(marker["udid"])
+        device, state = lane_device(document, marker)
+        worktree = marker.get("worktree")
+        rows.append([
+            marker["name"],
+            state,
+            f"lane {label}",
+            worktree if isinstance(worktree, str) and worktree else "-",
+            lease,
+            uptime_cell(uptimes, marker["udid"], state),
+            disk_cell(device),
+        ])
+    if development is not None:
+        claimed.add(development)
+        match = find_device(document, development)
+        if match is None:
+            rows.append(["Development simulator", "missing", "development", "-", "-", "-", "-"])
+        else:
+            device = match[1]
+            state = device.get("state") if isinstance(device.get("state"), str) else "unknown"
+            rows.append([
+                device.get("name") or "Development simulator",
+                state,
+                "development",
+                "-",
+                "-",
+                uptime_cell(uptimes, development, state),
+                disk_cell(device),
+            ])
+    unowned = [
+        device
+        for _, device in all_devices(document)
+        if device.get("state") == "Booted" and device.get("udid") not in claimed
+    ]
+    for device in sorted(unowned, key=lambda entry: str(entry.get("name"))):
+        udid = device.get("udid")
+        rows.append([
+            device.get("name") or "unowned",
+            "Booted",
+            "unowned",
+            "-",
+            "-",
+            uptime_cell(uptimes, udid if isinstance(udid, str) else "", "Booted"),
+            disk_cell(device),
+        ])
+    app_uptime = simulator_app_uptime(table)
+    rows.append([
+        "Simulator.app",
+        "running" if app_uptime is not None else "not running",
+        "-",
+        "-",
+        "-",
+        human_duration(app_uptime) if app_uptime is not None else "-",
+        "-",
+    ])
+    return rows
+
+
+def print_simulators(arguments: argparse.Namespace, stream: Any = None) -> None:
+    """Print every simulator that holds memory: what is booted, whose, how long."""
+    stream = sys.stdout if stream is None else stream
+    rows = simulator_rows(arguments)
+    print(f"Simulators on this Mac (lane root: {arguments.discovery_root}, Development: {arguments.development_state})", file=stream)
+    widths = [max([len(STATUS_COLUMNS[index])] + [len(row[index]) for row in rows]) for index in range(len(STATUS_COLUMNS))]
+    for values in (STATUS_COLUMNS, *rows):
+        print("  ".join(value.ljust(widths[index]) for index, value in enumerate(values)).rstrip(), file=stream)
+
+
+def list_simulators(arguments: argparse.Namespace) -> int:
+    print_simulators(arguments)
+    return 0
+
+
+def booted_lane_labels(arguments: argparse.Namespace) -> list[str] | None:
+    """The lanes whose owned simulator is booted, or None when they are unknown."""
+    if lane_root(arguments) is None:
+        return None
+    document = inventory()
+    labels: list[str] = []
+    for label, _, marker in lane_states(arguments):
+        if marker is not None and lane_device(document, marker)[1] == "Booted":
+            labels.append(label)
+    return labels
+
+
+def admit_boot(arguments: argparse.Namespace) -> None:
+    """Refuse to boot another simulator when the Mac is already short of memory.
+
+    Read before `simctl boot`, and never for a lane that is already booted, so a
+    reuse costs nothing. The refusal is fast - no wait, no retry - and carries
+    the table `status --all` prints, because the caller decides whether to wait
+    for the Mac to free memory. A reader that is unavailable admits the boot
+    with a warning: the tooling must still run where the Mac's reports are not
+    installed.
+    """
+    state = read_memory_state()
+    if state.free_bytes is None:
+        print("warning: cannot read the Mac's free memory (memory_pressure); admitting the boot without that check", file=sys.stderr)
+    if state.swap_used_bytes is None:
+        print("warning: cannot read the Mac's swap in use (sysctl vm.swapusage); admitting the boot without that check", file=sys.stderr)
+    breaches: list[str] = []
+    if state.free_bytes is not None and state.free_bytes < arguments.memory_reserve_bytes:
+        total = f" of {human_size(state.physical_bytes)}" if state.physical_bytes else ""
+        breaches.append(
+            f"free memory {human_size(state.free_bytes)}{total} is below the {human_size(arguments.memory_reserve_bytes)} reserve"
+        )
+    if state.swap_used_bytes is not None and state.swap_used_bytes >= arguments.swap_limit_bytes:
+        breaches.append(
+            f"swap in use {human_size(state.swap_used_bytes)} is at or above the {human_size(arguments.swap_limit_bytes)} limit"
+        )
+    if not breaches:
+        return
+    detail = "; ".join(breaches)
+    booted = booted_lane_labels(arguments)
+    if booted is not None and not booted:
+        detail += "; no owned lane is booted, so processes other than the iOS test tooling hold this Mac's memory"
+    raise MemoryAdmissionError(f"refusing to boot {arguments.name}: {detail}")
 
 
 def shutdown_owned(marker_path: Path, arguments: argparse.Namespace) -> str:
@@ -664,6 +1032,7 @@ def provision(arguments: argparse.Namespace) -> dict[str, Any]:
         marker = stamp_lane_use(arguments, marker)
 
     if device.get("state") != "Booted":
+        admit_boot(arguments)
         simctl("boot", marker["udid"])
     simctl("bootstatus", marker["udid"], "-b")
     document = inventory()
@@ -687,6 +1056,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--discovery-root", type=Path)
     parser.add_argument("--default-state-dir", type=Path)
     parser.add_argument("--lane-dir", type=Path)
+    parser.add_argument("--memory-reserve-bytes", type=int)
+    parser.add_argument("--swap-limit-bytes", type=int)
     parser.add_argument(
         "--shutdown-timeout-seconds",
         type=float,
@@ -700,6 +1071,15 @@ def parse_args() -> argparse.Namespace:
     arguments = parser.parse_args()
     if arguments.shutdown_timeout_seconds <= 0 or arguments.sweep_deadline_seconds <= 0:
         parser.error("deadlines must be positive")
+    try:
+        if arguments.memory_reserve_bytes is None:
+            arguments.memory_reserve_bytes = int(os.environ.get("TRON_IOS_TEST_MEMORY_RESERVE_BYTES", MEMORY_RESERVE_BYTES))
+        if arguments.swap_limit_bytes is None:
+            arguments.swap_limit_bytes = int(os.environ.get("TRON_IOS_TEST_SWAP_LIMIT_BYTES", SWAP_LIMIT_BYTES))
+    except ValueError:
+        parser.error("the memory reserve and swap limit must be whole numbers of bytes")
+    if arguments.memory_reserve_bytes < 0 or arguments.swap_limit_bytes < 0:
+        parser.error("the memory reserve and swap limit must not be negative")
     if arguments.command in ("sweep", "lanes"):
         if arguments.discovery_root is None:
             parser.error(f"{arguments.command} requires --discovery-root")
@@ -777,7 +1157,16 @@ def main() -> int:
         return 0
     except LaneBusyError as error:
         print(f"error: {error}", file=sys.stderr)
-        return LANE_BUSY_EXIT
+        return BUSY_EXIT
+    except MemoryAdmissionError as error:
+        # The caller decides whether to wait for memory, so the refusal is fast
+        # and shows the same picture `status --all` prints.
+        print(f"error: {error}", file=sys.stderr)
+        try:
+            print_simulators(arguments, sys.stderr)
+        except DestinationError as listing_error:
+            print(f"warning: could not list this Mac's simulators: {listing_error}", file=sys.stderr)
+        return BUSY_EXIT
     except DestinationError as error:
         print(f"error: {error}", file=sys.stderr)
         return DESTINATION_EXIT

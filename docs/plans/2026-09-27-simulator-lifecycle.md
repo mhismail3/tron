@@ -2,7 +2,7 @@
 
 - **Started:** 2026-09-27
 - **Status:** Active
-- **Last updated:** 2026-09-28, SIM-3 done; SIM-4 to SIM-9 claimed
+- **Last updated:** 2026-09-28, SIM-4 done; SIM-5 to SIM-9 claimed
 - **Goal:** Agents run as many iOS simulators in parallel as the Mac can afford, and every simulator, process and artifact the test tooling creates is released automatically, including after crashes, so the live Gateway never runs short of memory.
 
 ## Goal and constraints
@@ -74,7 +74,7 @@ Why it accumulates, from the code:
 | SIM-1 | Done | Release on exit: the lease holder shuts down the simulator its command booted when the command ends, on success, failure, timeout or signal; an explicit keep-booted option serves tight test-fix loops and is itself released by the sweep | none | chat scroll session (worker lanes), 2026-09-27 |
 | SIM-2 | Done | Sweep: every Tron test tool invocation first shuts down orphaned owned simulators (booted, lease free); `scripts/tron-ios-test reap` runs it on demand | SIM-1 | chat scroll session (worker lanes), 2026-09-27 |
 | SIM-3 | Done | Named lanes: `--lane NAME` (and `TRON_IOS_TEST_LANE`) names a lane; `lanes` lists every lane with its worktree, state, lease holder, last use and disk size; `lane-remove NAME` deletes its simulator, state and products; the sweep deletes lanes unused for 7 days | SIM-2 | chat scroll session (worker lanes), 2026-09-27 |
-| SIM-4 | Claimed | Memory admission: before booting, read memory pressure and swap; if booting would leave less than a set reserve, fail fast with exit 73 and print what is booted, by which worktree and lane, and for how long | SIM-2 | chat scroll session (worker lanes), 2026-09-27 |
+| SIM-4 | Done | Memory admission: before booting, read memory pressure and swap; if booting would leave less than a set reserve, fail fast with exit 73 and print what is booted, by which worktree and lane, and for how long | SIM-2 | chat scroll session (worker lanes), 2026-09-27 |
 | SIM-5 | Claimed | Scoped clean and pruning: `clean` removes only this worktree's or lane's simulator, products and runs; `prune` keeps the newest results per worktree and deletes products whose worktree no longer exists; the sweep prunes too | SIM-3 | chat scroll session (worker lanes), 2026-09-27 |
 | SIM-6 | Claimed | One view: `scripts/tron-ios-test status --all` lists every booted simulator (owned lanes, the Development simulator, unowned ones), its owner, lease holder and uptime, plus `Simulator.app` | SIM-3 | chat scroll session (worker lanes), 2026-09-27 |
 | SIM-7 | Claimed | Same lifecycle everywhere: `scripts/tron-profile-ios`, `scripts/ios-gateway-e2e-test` and `scripts/tron-ios-simulator` use the lane, release, sweep and admission paths; the Development simulator reports idle uptime and is shut down by its `stop` | SIM-1, SIM-2, SIM-4 | chat scroll session (worker lanes), 2026-09-27 |
@@ -341,3 +341,57 @@ Owning files: `scripts/ios-test-simulator.py`, `scripts/tron-ios-test`.
   `LANE_TTL_SECONDS` with no environment override; tests date markers instead of
   waiting. A lane's device is deleted through its own marker, so an expired or
   renamed lane is skipped rather than guessed at.
+
+### SIM-4 · Done · 2026-09-28 · chat scroll session (worker lanes)
+
+- Result: a boot is admitted on the Mac's memory instead of a fixed count. Right
+  before `simctl boot` - never for a lane whose simulator is already booted -
+  `scripts/ios-test-simulator.py provision` reads `memory_pressure` and
+  `sysctl vm.swapusage` and refuses with exit 73 and the simulator table (every
+  lane with state, worktree, lease holder, uptime and disk, every booted device
+  no lane owns, and `Simulator.app`) when free memory is below 8 GB or swap in
+  use is at 4 GB. Both are configurable
+  (`TRON_IOS_TEST_MEMORY_RESERVE_BYTES`, `TRON_IOS_TEST_SWAP_LIMIT_BYTES`), the
+  refusal is fast and says when no owned lane is booted (so the shortage is not
+  the test tooling's), and an unavailable reader admits the boot with a warning.
+  `scripts/tron-ios-test` keeps 73 instead of mapping it to 66.
+- Evidence: `python3 scripts/test-ios-test-infrastructure.py` - 56 tests, 94.7 s
+  wall (50 tests, 65.5-94.7 s at the SIM-3 commit), with six new SIM-4 cases:
+  `AdmissionFixture` `test_a_boot_is_refused_when_free_memory_is_below_the_reserve`,
+  `test_a_boot_is_refused_when_swap_is_at_the_limit`,
+  `test_the_refusal_names_the_booted_lane_its_worktree_and_uptime`,
+  `test_an_unavailable_reader_admits_the_boot_with_a_warning` (missing, failing
+  and unparsable readers), `test_an_already_booted_lane_is_reused_without_admission`
+  and `RunnerFixture` `test_the_runner_keeps_the_admission_exit_and_boots_nothing`
+  (exit 73 survives the runner, no `simctl boot` in the synthetic log, the
+  created device stays Shutdown). Every fixture now installs synthetic
+  `memory_pressure`, `sysctl` and `ps` readers through
+  `TRON_IOS_MEMORY_PRESSURE`/`TRON_IOS_SYSCTL`/`TRON_IOS_PS`, so no test depends
+  on this Mac's real memory state. No real-machine smoke check was run for this
+  task: the readers were exercised on the real Mac only by reading them
+  (`memory_pressure` reports 72% free, `sysctl -n vm.swapusage` 999.75M used,
+  `ps -axo pid=,etime=,command=`), and nothing was booted, shut down or deleted.
+- Changes: this commit.
+- Kept on purpose: the reserve is checked before the boot, so a booted
+  simulator's own ~2 GB footprint comes out of the reserve rather than being
+  estimated; a lane created but not booted by a refused command keeps its device
+  and marker, so the next command reuses that instead of creating another.
+  `--default-state-dir`/`--discovery-root` are now passed to every simulator
+  command by the runner, and `lane_root` degrades to the caller's own marker-plus
+  booted devices when a caller (the profiler, the E2E harness, the lease holder)
+  names neither, so a view that cannot see the Mac's other lanes never claims
+  they are idle.
+- Deviations: the refusal table is the SIM-6 view (`simulator_rows`), because the
+  plan requires `status --all` to print exactly what admission prints; SIM-6 adds
+  the command, the runner wiring, the docs and its own tests around it. The
+  reader commands are injectable through three environment variables
+  (`TRON_IOS_MEMORY_PRESSURE`, `TRON_IOS_SYSCTL`, `TRON_IOS_PS`) in the same
+  shape as the existing `TRON_IOS_XCRUN`. `LANE_BUSY_EXIT` became `BUSY_EXIT`
+  (same value, documented as the runner's one "not now" exit).
+- For the next agent: SIM-5's `prune`/scoped `clean` belong in this same module,
+  which already owns `remove_lane` and the products of a deleted worktree; SIM-6
+  only has to add `simulators` to the command choices, wire `status --all`, and
+  test the unowned/Development/Simulator.app rows that SIM-4 already renders.
+  Uptime comes from `ps -axo pid=,etime=,command=` (macOS has no `etimes`);
+  macOS `ps` in this Xcode is what proves a device's boot time, so
+  `TRON_IOS_PS` is also what SIM-6's tests must fake.
