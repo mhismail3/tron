@@ -71,10 +71,14 @@ export interface LanEndpointHandlers {
  * serves the same routes to the same peers out of the same connection budget,
  * so it takes them from the transport rather than from Node's defaults: Node's
  * 60 s header and 120 s handshake allowances would let a peer that has not
- * signed in hold slots the phone's own leg needs. `idleTimeout` is
+ * signed in hold slots the phone's own leg needs. Every one is required, so a
+ * listener cannot silently fall back to a Node default. `idleTimeout` is
  * `server.timeout`, which has no `createServer` option. */
-export interface LanListenerLimits extends
-  Pick<HttpsServerOptions, "headersTimeout" | "requestTimeout" | "connectionsCheckingInterval" | "handshakeTimeout"> {
+export interface LanListenerLimits {
+  readonly headersTimeout: number;
+  readonly requestTimeout: number;
+  readonly connectionsCheckingInterval: number;
+  readonly handshakeTimeout: number;
   readonly idleTimeout: number;
 }
 
