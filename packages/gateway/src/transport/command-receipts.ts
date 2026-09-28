@@ -88,6 +88,7 @@ export class CommandReceiptStore {
   private readonly maximumAgeMs: number;
   private reservedCompletionBytes = 0;
   private inventory: CommandReceiptUsage | undefined;
+  private inventoryRebuilds = 0;
   private nextPruneAt = 0;
 
   constructor(
@@ -168,6 +169,11 @@ export class CommandReceiptStore {
       }
     }
     this.inventory = { entries, bytes };
+    // One more rebuild of these totals. A receipt write happens outside the
+    // mutex, so a rebuild can land between a write and its accounting below and
+    // already include the receipt that write published; that accounting then
+    // discards the totals (see `execute`) instead of adding it twice.
+    this.inventoryRebuilds += 1;
     return this.inventory;
   }
 
@@ -263,7 +269,12 @@ export class CommandReceiptStore {
         };
         const pendingBytes = persistedReceiptBytes(pending);
         let reserved = false;
-        const recorded = await this.inventoryMutex.run(async () => {
+        // Admission is accounting only. `inventoryMutex` guards the entry/byte
+        // inventory and the inflight byte reservations; the durable write is a
+        // per-command lane's own slow step and runs outside it. Holding the
+        // process-wide mutex across the fsync serialized every other command's
+        // receipt write behind one command's disk write.
+        const admission = await this.inventoryMutex.run(async () => {
           await mkdir(this.directory, { recursive: true, mode: 0o700 });
           await this.pruneUnlocked(this.maximumAgeMs, this.maximumAgeMs === 0);
           const existing = await this.readReceipt(path);
@@ -291,20 +302,34 @@ export class CommandReceiptStore {
               throw new GatewayError("busy", "Command receipt capacity is full; completed receipts expire, but unresolved outcomes retain replay protection and require operator reconciliation", true);
             }
           }
+          // The reservation covers this receipt's bytes until they are in the
+          // inventory, so a concurrent admission still counts them. It is
+          // released only with the completed receipt, which may be larger.
           this.reservedCompletionBytes += COMMAND_RECEIPT_MAX_BYTES;
           reserved = true;
-          try {
-            await this.writeReceipt(path, pending);
-            this.recordNewReceipt(pendingBytes);
-            lane.preserveReceiptUntilDrain = true;
-          } catch (error) {
-            this.reservedCompletionBytes -= COMMAND_RECEIPT_MAX_BYTES;
-            reserved = false;
-            throw error;
-          }
+          // A duplicate lane keeps its completed receipt until it drains. That
+          // fence belongs to admitting the command, so it is set here rather
+          // than after the write.
+          lane.preserveReceiptUntilDrain = true;
           return { exists: false } as const;
         });
-        if (recorded.exists) return recorded.result;
+        if (admission.exists) return admission.result;
+        // Captured after admission: a rebuild that completes later, while this
+        // write is in flight, may or may not have seen the published receipt.
+        const rebuildsAtAdmission = this.inventoryRebuilds;
+        try {
+          await this.writeReceipt(path, pending);
+        } catch (error) {
+          await this.inventoryMutex.run(async () => {
+            if (reserved) this.reservedCompletionBytes -= COMMAND_RECEIPT_MAX_BYTES;
+            reserved = false;
+          });
+          throw error;
+        }
+        await this.inventoryMutex.run(async () => {
+          if (this.inventoryRebuilds === rebuildsAtAdmission) this.recordNewReceipt(pendingBytes);
+          else this.inventory = undefined;
+        });
 
         let result: JsonValue;
         try {
@@ -338,13 +363,9 @@ export class CommandReceiptStore {
           });
           throw outcomeUnknown("Successful command receipt exceeds its bounded capacity; refresh authoritative state instead of replaying");
         }
+        const rebuildsAtCompletion = this.inventoryRebuilds;
         try {
-          await this.inventoryMutex.run(async () => {
-            await this.writeReceipt(path, completed);
-            this.replaceReceiptBytes(pendingBytes, completedBytes);
-            if (reserved) this.reservedCompletionBytes -= COMMAND_RECEIPT_MAX_BYTES;
-            reserved = false;
-          });
+          await this.writeReceipt(path, completed);
         } catch (error) {
           await this.inventoryMutex.run(async () => {
             if (reserved) this.reservedCompletionBytes -= COMMAND_RECEIPT_MAX_BYTES;
@@ -352,6 +373,17 @@ export class CommandReceiptStore {
           });
           throw error;
         }
+        await this.inventoryMutex.run(async () => {
+          // The exact persisted size replaces the pending estimate in the same
+          // step that releases the reservation that covered it. A rebuild that
+          // landed during the write owns the totals instead: it read the
+          // directory, so the next admission rescans it rather than trusting a
+          // total this step could count twice.
+          if (this.inventoryRebuilds === rebuildsAtCompletion) this.replaceReceiptBytes(pendingBytes, completedBytes);
+          else this.inventory = undefined;
+          if (reserved) this.reservedCompletionBytes -= COMMAND_RECEIPT_MAX_BYTES;
+          reserved = false;
+        });
         return result;
       });
     } finally {

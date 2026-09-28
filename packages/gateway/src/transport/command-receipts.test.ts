@@ -55,6 +55,76 @@ describe("CommandReceiptStore", () => {
     await executions;
   });
 
+  it("does not serialize one command's durable receipt write behind the inventory mutex", async () => {
+    const root = await temporaryRoot("tron-receipts-write-overlap-");
+    let writing = 0;
+    let maximumWriting = 0;
+    let writers = 0;
+    let signalSecondWriter!: () => void;
+    const secondWriter = new Promise<void>((resolve) => { signalSecondWriter = resolve; });
+    const writeReceipt = async (path: string, value: unknown, mode?: number): Promise<void> => {
+      writers += 1;
+      writing += 1;
+      maximumWriting = Math.max(maximumWriting, writing);
+      if (writers === 2) signalSecondWriter();
+      try {
+        // Hold the first command's real durable write open so the second
+        // command's admission must overlap it. The 200 ms ceiling is a liveness
+        // bound on this test, not a timing assumption: with the accounting
+        // mutex held across the fsync the second writer can never arrive, and
+        // the assertion below then fails instead of hanging.
+        if (writers === 1) await Promise.race([secondWriter, new Promise((resolve) => { setTimeout(resolve, 200); })]);
+        await durableAtomicWriteJson(path, value, mode);
+      } finally {
+        writing -= 1;
+      }
+    };
+    const store = new CommandReceiptStore(root, writeReceipt);
+    const operation = async () => ({ accepted: true });
+
+    await expect(Promise.all([
+      store.execute("device", "session.prompt", "overlapping-one", operation),
+      store.execute("device", "session.prompt", "overlapping-two", operation),
+    ])).resolves.toEqual([{ accepted: true }, { accepted: true }]);
+    expect(maximumWriting).toBe(2);
+  });
+
+  it("counts an unrecorded receipt's bytes while its write is in flight", async () => {
+    const root = await temporaryRoot("tron-receipts-write-reservation-");
+    let writers = 0;
+    let signalFirstWriter!: () => void;
+    const firstWriter = new Promise<void>((resolve) => { signalFirstWriter = resolve; });
+    const writeReceipt = async (path: string, value: unknown, mode?: number): Promise<void> => {
+      writers += 1;
+      if (writers === 1) {
+        signalFirstWriter();
+        await new Promise((resolve) => { setTimeout(resolve, 100); });
+      }
+      await durableAtomicWriteJson(path, value, mode);
+    };
+    // Only one command's reserved receipt fits, so the second admission has to
+    // be rejected while the first command's receipt is still unwritten:
+    // releasing the reservation before the inventory carries the bytes would
+    // admit both and put two receipts past the aggregate cap on disk.
+    const store = new CommandReceiptStore(root, writeReceipt, {
+      maximumEntries: 10,
+      maximumAggregateBytes: 1_048_576 + 4 * 1_024 + 1,
+    });
+    const operation = async () => ({ accepted: true });
+
+    const first = store.execute("device", "session.prompt", "reserved-one", operation);
+    await firstWriter;
+    const second = store.execute("device", "session.prompt", "reserved-two", operation);
+    const outcomes = await Promise.allSettled([first, second]);
+
+    expect(outcomes.map((outcome) => outcome.status).sort()).toEqual(["fulfilled", "rejected"]);
+    expect((outcomes.find((outcome) => outcome.status === "rejected") as PromiseRejectedResult).reason)
+      .toMatchObject({ code: "busy", retryable: true });
+    const persisted = (await receiptFiles(root)).map((path) => readFile(path, "utf8"));
+    const bytes = (await Promise.all(persisted)).reduce((total, content) => total + Buffer.byteLength(content), 0);
+    expect(bytes).toBeLessThanOrEqual(1_048_576 + 4 * 1_024 + 1);
+  });
+
   it("serializes duplicates of the same command and returns the recorded response", async () => {
     const root = await temporaryRoot("tron-receipts-");
     const store = new CommandReceiptStore(root);
