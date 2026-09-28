@@ -1379,7 +1379,11 @@ needed), **Checks**, **Docs**, **Done when**, **User action**.
      factor from the data.
   2. Byte budget `LIVE_RUNTIME_BYTE_BUDGET` (initial 1.5 GB) for admission and
      pressure eviction, largest idle runtime first; protected runtimes stay
-     protected. Record `runtime.loaded` and `runtime.evicted` with bytes.
+     protected. Record `runtime.loaded` and `runtime.evicted` with bytes. As
+     implemented, the budget is **eviction pressure only**: an admission it
+     cannot fit is served over budget and named on its `runtime.loaded` record
+     (G-12 owns refusal under the real heap limit), and nothing is retired when
+     retiring could not help — see the G-5 entry below.
   3. Set `--max-old-space-size` explicitly (initial 4,096 MB) with the budget
      below it.
 - **Checks:** `packages/gateway/src/sessions/runtime-registry.integration.test.ts`.
@@ -5560,7 +5564,8 @@ events; widen them to name the pool owner in the same change.
   `automation` | `import` | `oversize` for a load; `bytes` | `idle` | `capacity`
   | `closed` | `disposed` | `deleted` | `shutdown` for an eviction),
   `transcriptBytes` and the `estimatedHeapBytes` the budget charged, as named
-  `counts`, and `overBudget` on an over-budget load.
+  `counts`, and `overBudget` on an over-budget load (the log line carries it in
+  `counts` as `overBudget = 1`).
   `packages/mac-app/scripts/tron-gateway-launcher.c` passes
   `--max-old-space-size=4096` before the entrypoint, so the budget is under an
   explicit limit instead of Node's default.
