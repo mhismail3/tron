@@ -1250,6 +1250,9 @@ private final class StallingRestoreProjection: GatewayLifecycleProjectionDelegat
     private var restoreContinuation: CheckedContinuation<Void, Never>?
 
     /// Arms the stall for the next restoration, never for the initial connect's.
+    /// The arm is one-shot: a later restoration (the reconnect that ends the
+    /// second outage) must settle, or the lifecycle teardown waits on a stall
+    /// nothing releases.
     func stallNextRestore() { stallArmed = true }
 
     func waitUntilRestoring(deadline: Duration) async -> Bool {
@@ -1284,6 +1287,7 @@ private final class StallingRestoreProjection: GatewayLifecycleProjectionDelegat
     ) async -> Bool {
         restoreCount += 1
         guard stallArmed else { return true }
+        stallArmed = false
         restoring = true
         await withCheckedContinuation { restoreContinuation = $0 }
         return true

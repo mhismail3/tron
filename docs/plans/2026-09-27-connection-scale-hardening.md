@@ -2,7 +2,7 @@
 
 - **Started:** 2026-09-27
 - **Status:** Active (Phase 1 runs on `hardening/integration`; that branch's copy of this plan is authoritative until R-1)
-- **Last updated:** 2026-09-28, C-1 blocked on its E2E re-run (the code, tests and docs are committed)
+- **Last updated:** 2026-09-28, C-1 review round addressed and its E2E re-run passed (Done)
 
 - **Last updated:** 2026-09-28, G-3 review round 2 addressed: the `unaudiencedSnapshotBuilds` warning and its test are now stated as a tripwire for a lost slot guard or a divergence between the registry's subscription record and the transport's, not for a closing socket
 
@@ -554,7 +554,7 @@ rows are in priority order.
 | O-6b | Blocked | Impairment in the qualification scenario: blackhole, bandwidth cap, Gateway restart | O-6a | orchestrator-dispatched deepseek-worker, 2026-09-28 (fifth review response) |
 | O-5 | Done | Gateway resource sampler and event-loop histogram | O-3 | orchestrator-dispatched deepseek-worker, 2026-09-28 |
 | O-7 | Done | Incident triage tool: phone export plus Gateway log in, episodes by cause out | O-1, O-2, O-4 | orchestrator-dispatched deepseek-worker, 2026-09-28; review rounds 1-4 addressed (attribution, older-export records and attempts, Tailscale capture, scene splits, recovery-handshake and attempt ownership, relay-window coverage). Blocked because the incident export does not reproduce all four Context causes: cause 4 has no `gateway-stall` episode of its own (its only candidate is a slow span on a socket already closed), the run reads 121 episodes against Context's 77 reconnect episodes, `phone-stall=2` where one wrong-label cause was counted, and `gateway-capacity=0` because the only capacity event predates the export (see the handoff) |
-| C-1 | Blocked | Projection work never blocks or parks reconnect; parked episodes self-resume | O-4, O-6b | orchestrator-dispatched deepseek-worker, 2026-09-28 (the E2E blackhole case runs, but its recovery-timing assertion was too strict and the corrected case has not been re-run: see the handoff) |
+| C-1 | Done | Projection work never blocks or parks reconnect; parked episodes self-resume | O-4, O-6b | orchestrator-dispatched deepseek-worker, 2026-09-28 (review round addressed; E2E re-run passed, run `20260928T193255Z-run.E6rrDl`) |
 | G-1a | Done | Catalog owner and in-memory index fed by Gateway-owned changes | O-3, O-6a | orchestrator-dispatched deepseek-worker, 2026-09-28 |
 | G-1b | Done | Filesystem watcher and background reconciliation for external writers | G-1a | orchestrator-dispatched deepseek-worker, 2026-09-28 (the O-6a confirmation of the Done-when is owed by the orchestrator) |
 | G-1c | Ready | Move every catalog reader to the index; delete request-path walks and the full-parse fallback | G-1b | |
@@ -6886,95 +6886,76 @@ wait).
   integration's `session-catalog.ts` is unchanged from the merge base, so the
   source merge is clean.
 
-### C-1 · Blocked · 2026-09-28 · orchestrator-dispatched deepseek-worker (branch `hardening/c-1`)
+### C-1 · Done · 2026-09-28 · orchestrator-dispatched deepseek-worker (branch `hardening/c-1`)
 
-- Result: the code, tests and docs are written and committed; every focused
-  suite passes. One "Done when" item is only partly evidenced: the new 90 s
-  blackhole E2E case ran once and its outage assertions passed, but its
-  recovery-timing assertion was too strict (the attempt in flight when the path
-  returned still burns its hello deadline), the corrected case compiles but was
-  not re-run before the worktree's E2E budget ran out. The second half of the
-  case - the proof that a socket loss during a stalled mounted restoration
-  starts a new attempt - has therefore never executed.
-- Changes:
+- Result: reconnect runs beneath the projection, parked episodes self-resume and
+  their reason is recorded; the review round is addressed and the E2E case
+  passed with its `phone-connection-records` attachment.
+- Changes (the first commit is the C-1 implementation; the second is the review
+  round):
   - `GatewayLifecycleCoordinator.swift`: a replacement attempt ends at the
     authenticated handshake plus event activation. `beginDeferredProjection`
-    hands mounted restoration, catalog/provider/settings/device refresh and
-    terminal reattachment to one presentation-owned task beneath that socket;
-    `noteDisconnected` and every transition cancel it; the loop no longer awaits
-    projection, so `deferredProjectionTask`/`connect()`/`loadCacheAndConnect`
-    lost their `awaitProjection` parameter (a profile switch and a cold start use
-    the same owner). The reconciliation aggregate is completed by that task, and
-    `connect()`/the loop no longer publish `.reconnecting` between the handshake
-    and restoration.
-  - `PARKED_RETRY_BOUND` (30 s, `parkedRetryBound`): an unsatisfied path hint
-    parks recovery by arming `parkedRetryTask`, which probes the possibly stale
-    hint with one attempt when it fires; a foreground activation probes the same
-    way, and background/transition retires the bound. `reconnectStallGuard`
-    returns nil while a bound is armed, because an attempt is scheduled.
-  - Every early return of `requestReconnect`/`scheduleReconnect` names its
-    refusing guard once (`reconnect.skipped`, deduped per cause);
-    `reconnect.parked`/`reconnect.parked-resume` name a park and its resume.
-  - Tests: `AppModelReconnectTests` lost the two tests whose premise C-1
-    removes (a loop parked in projection named `reconnectTaskBusy`; an
-    unsatisfied path reported as a stall) and gained three: a parked episode is
-    not a stall and its bound resumes it without a callback; a foreground
-    activation resumes a parked episode whose hint is stale (and a background
-    transition does not); a socket drop during a stalled mounted restoration
-    starts the next attempt. The two 60 s path tests now expect the bound to
-    probe after 30 s. Four startup tests wait for the presentation-owned
-    projection instead of assuming `start()` awaited it.
-  - `RealGatewayPiBoundaryTests.exerciseLongBlackholedReconnect`: a 90 s
-    fault-proxy blackhole under a foreground app, asserting at least three
-    attempts, no attempt start more than 35 s after the previous one, zero
-    `reconnect.stalled`, recovery within one attempt of the path's return, and
-    then a second blackhole answered by a new attempt while a stalling
-    restoration still runs. `scripts/ios-gateway-e2e-test` raised its run-phase
-    ceilings (600 s overall, 300 s of silence) because those legs are quiet for
-    minutes.
-  - Docs: the reconnect section of `packages/ios-app/docs/architecture.md`, and
-    observability rows for `reconnect.parked`, `reconnect.parked-resume` and
-    `reconnect.skipped` plus the narrowing of `reconnect.stalled`'s coordinator
-    guards.
+    hands mounted restoration, refresh and terminal reattachment to one
+    presentation-owned task beneath that socket; the socket's loss cancels it
+    and settles the reconciliation aggregate it was reconciling, so a cancelled
+    projection cannot leave `isReconcilingForeground` true. `PARKED_RETRY_BOUND`
+    (30 s) arms `parkedRetryTask` when the last path hint said unsatisfied; a
+    foreground activation probes the same way. Parking is the only owner of the
+    state it publishes, and the non-retryable, unpaired and authorization stops
+    are refused before the unsatisfied-path branch, so a stop the user must clear
+    keeps its Retry surface. Every early return names its refusing guard once
+    (`reconnect.skipped`); `reconnect.parked`/`reconnect.parked-resume` name a
+    park and its resume.
+  - `AppModel.lifecycleRecordDiagnostic` records those three kinds (the
+    production sink dropped them before), and `observability.md` documents them
+    as `gateway.lifecycle` kinds rather than separate events.
+  - Deleted: the superseded post-connect stage/attempt-ID shape
+    (`handshakeRecorded`, `attemptStage`/`attemptID` parameters, the recorder's
+    `isPostConnect` branch, `postConnectStage`/`postConnectAttemptID`) with its
+    test, `BlockedRefreshProjection`, and the now-unused `episodeDate` helper.
+  - Tests: the two connected-export tests wait for the presentation-owned
+    diagnostics readiness; a non-retryable stop is tested against the
+    notification route poll (isolated coordinator test and one through AppModel);
+    park, resume and refusal are tested through the real AppModel into the phone
+    diagnostic log. `StallingRestoreProjection.stallNextRestore()` is one-shot:
+    a sticky arm stalled the reconnect's own restoration, and the lifecycle
+    teardown then waited on it forever (that is what timed out the first E2E
+    re-run after the second-outage assertion had passed).
 - Evidence:
-  - `scripts/tron-ios-test build` succeeds and `scripts/tron-ios-test run
-    --only-testing TronMobileTests/AppModelReconnectTests` passes 39 tests;
-    `AppModelLifecycleTests`, `AppModelCatalogSyncTests`,
-    `SessionPresentationStoreTests`,
-    `GatewayConnectionEpisodeRecorderTests` and
-    `GatewayReconnectScheduleTests` pass 116 more.
-  - `scripts/ios-gateway-e2e-test prepare` then `run` (plain Node 22.22.0,
-    `npm run build` first) ran the case on 2026-09-28 (run
-    `20260928T180828Z-run.PejNjv`): the outage assertions passed (three or more
-    attempts with no gap over 35 s, zero `reconnect.stalled`), then failed
-    `attemptsAfterReturn.first?.outcome == "success"` because the attempt that
-    was in flight when the path returned is recorded after it and still burns
-    its hello deadline. The assertion was corrected to "at most one failure
-    after the return, then a `stageReached=connected` success, and recovery
-    inside 25 s", the stall wait was bounded, and progress breadcrumbs were
-    added; the products were rebuilt but not re-run.
+  - `scripts/tron-ios-test build`; `AppModelReconnectTests` 42/42;
+    `GatewayLogExportTests`, `GatewayConnectionEpisodeRecorderTests`,
+    `SessionPresentationStoreTests`, `AppModelLifecycleTests`,
+    `AppModelCatalogSyncTests` 129/129.
+  - `scripts/ios-gateway-e2e-test prepare/build/run` (plain Node 22.22.0, run
+    `20260928T193255Z-run.E6rrDl`): `testStreamsReconnectsAndSettlesExtensionTools`
+    passed in 174.6 s (summary `result=Passed`). Its `phone-connection-records`
+    attachment (copied to
+    `~/.tron/workspace/files/hardening/c-1-phone-connection-records-20260928T193255Z.txt`,
+    with `c-1-e2e-summary-20260928T193255Z.json`) shows the 90 s outage as eight
+    attempts (`retry=1..8`, `stageReached=hello-receive`, ~5.04 s each, delays
+    0/1946/3981/6204/8557/12401/12904/13737 ms), one `connection.episode`
+    `attempts=8 maxGapBetweenAttemptsMs=18776 endedBy=connected`, recovery on the
+    attempt that followed the path's return, zero `reconnect.stalled`, and the
+    second blackhole answered by attempt `51F65C01` (failure then success) while
+    `StallingRestoreProjection` was still stalling.
 - Deviations:
-  - `becameActive` and the parked bound pass `ignoresPathHint: true` to
-    `requestReconnect`: the plan wants both to resume a parked episode, and the
-    hint is exactly what was holding it. One probe attempt is spent, and a
-    failed probe re-parks with a fresh bound.
-  - The `reconnectStallGuard` cases `pathUnsatisfied` and
-    `reconnectTaskBusy` are now unreachable from the selected profile's
-    coordinator for a park (the pool still uses `pathUnsatisfied`, and the
-    recorder's own test covers both). The enum was left alone because the pool
+  - `becameActive` and the parked bound pass `ignoresPathHint: true`: one probe
+    attempt is spent, and a failed probe re-parks with a fresh bound.
+  - `reconnectStallGuard`'s `pathUnsatisfied`/`reconnectTaskBusy` cases are no
+    longer reachable for a park (the pool still uses `pathUnsatisfied`); the enum
     is C-5's owning file.
-  - The E2E harness's run-phase ceilings were raised in
-    `scripts/ios-gateway-e2e-test`, which is the case's home per the task's
-    Checks.
+  - `beginRestarting` (pre-existing) still publishes `.restarting` and then
+    `.reconnecting` from its 90 s watchdog before `requestReconnect` can refuse
+    on a non-retryable stop, which leaves the same "no Retry" state the review's
+    third finding described. It is not reachable from the reviewed path (it needs
+    a `system.stopping` event while recovery is stopped) and was left out of this
+    task's scope: propose it as a follow-up row.
+  - The E2E harness's run-phase ceilings remain raised
+    (`scripts/ios-gateway-e2e-test`: 600 s overall, 300 s of silence).
 - What is left (the next agent, not this one):
-  1. Re-run `scripts/ios-gateway-e2e-test run` on the built products and paste
-     the `phone-connection-records` attachment from the result bundle
-     (`xcrun xcresulttool export attachments`): it must show the 90 s cadence,
-     zero `reconnect.stalled`, one-attempt recovery, and a `gateway.attempt`
-     written while `StallingRestoreProjection` was still stalling. Then set
-     C-1 to Done.
+  1. Optional follow-up: whichever owner takes the `.restarting` watchdog should
+     make it refuse a non-retryable stop instead of publishing a recovery state.
   2. Do not run the harness's install step through a symlinked
-     `packages/gateway/node_modules`: the 2026-09-28 `run` that reported the C-1
-     numbers went through the shared symlink and its `npm ci` emptied the shared
-     install for every parallel worker. Clone the shared pristine copy into
-     `packages/gateway/node_modules` instead of symlinking it.
+     `packages/gateway/node_modules`: its `npm ci` empties the shared install. The
+     lane is shared with `scripts/tron-ios-test`, so a `run` waits for whichever
+     process holds the lease.
