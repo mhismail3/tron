@@ -547,7 +547,7 @@ rows are in priority order.
 | E-3c | Ready | LAN endpoint, phone side: pin validation, staggered race, seamless fallback | E-3b, C-3 | |
 | E-3d | Ready | LAN endpoint on by default in the release once E-3c's E2E cases pass; the setting is the kill switch | E-3c | |
 | G-13 | Ready | Restart and reconnect storm: startup budget and a qualification case | G-1c, O-6b | |
-| G-8 | Claimed | Background work audit: delete or bound each unowned or repeating job | O-5 | orchestrator-dispatched deepseek-worker, 2026-09-28 |
+| G-8 | Done | Background work audit: delete or bound each unowned or repeating job | O-5 | orchestrator-dispatched deepseek-worker, 2026-09-28 |
 | E-1 | Ready | Document Tailscale flap diagnosis and user-side checks; the evaluation day confirms | O-2, O-7 | |
 
 ### Phase 2 — Release and one evaluation day
@@ -2552,3 +2552,121 @@ a latency percentile.
   the `gateway.resources-failed` "already reported" flag is shared by a skipped
   tick and a thrown error, so an in-flight sample that later throws is not
   logged.
+
+### G-8 · Done · 2026-09-28 · worker session (branch `hardening/g-8`)
+
+- Result: background work audit. Every item in the row's "Do" list has a cause
+  read from the code and measured from the live Gateway log
+  (`~/.tron/logs/gateway.jsonl`) and the unified log, both read only. Three
+  items become new rows (G-8a, G-8b, G-8c); one is already bounded and needs no
+  change. No running Gateway, app, state or process was touched.
+- Evidence:
+  - **`extension.artifact-rejected`: 1,074 records** from 2026-09-24T12:35 to
+    2026-09-28T12:24, 61 in the worst hour (2026-09-28T07), 27% of every record
+    in the log. Cause: `RuntimeRegistry.discoverExtensionArtifacts` runs every
+    750 ms (`runtime-registry.ts:597`) and refreshes each slot's exact owned
+    artifact directory first; when a bound owner's `status.json` is absent,
+    `RuntimeSlot.readExtensionStatusArtifact` returns undefined (and a
+    non-specific read error maps to the same reason through
+    `extensionArtifactReadFailureReason`), so
+    `refreshSubagentActivityFromArtifact` warns
+    `artifact-replacement-in-progress`. `warnExtensionArtifact` dedups 60 s per
+    (opaque owner, reason), so an owner whose artifact never appears warns once
+    a minute for as long as its binding lives — 2 to 6 owners per minute in the
+    busy hours, which is the "five owners" in Context. Every one of those
+    owners is a live binding of that window, each re-warned every 60 s;
+    "replacement" is not retried by five owners, it is re-reported for five
+    bindings. `observeMissingExtensionArtifact`'s 30 s grace marks the activity
+    `unknown` and stops its watcher, but the discovery lane never consults
+    `extensionArtifactMissingSince`, so the warning never quiets. 359 bytes per
+    record ≈ 30 KB/day of the 1 MB/day budget from this one recurring warning.
+  - **Tailscale CLI every ~37 s: the Mac app's menu-bar status poll.**
+    `log show` over `nesessionmanager` client attaches: 15 samples from
+    05:26:05.957 to 05:35:23.317, deltas 29.1–36.3 s (mean 34.7 s; 12 of 15
+    between 33.7 and 35.8 s). A 45 s `ps -axo pid,ppid,comm` sample caught the
+    child: `41014 71837 (Tailscale)`, parent 71837 =
+    `/Applications/Tron.app/Contents/MacOS/Tron`; `sample 71837` for 40 s shows
+    the app inside `Subprocess.run(executable:arguments:policy:)`
+    (`Subprocess.swift:27`). Code: `EnvironmentSetup.makeLive`'s `pingServer`
+    resolves the host through `resolveTailscaleHost` → `TailscaleProbe.probe()`
+    → `Subprocess.run` of
+    `/Applications/Tailscale.app/Contents/MacOS/Tailscale status --peers=false --json`,
+    and `MenuBarController.install` runs `ServerStatusPoller` (interval 30 s),
+    which calls `setup.pingServer` on every cycle. One CLI spawn per poll
+    (30 s + ~4.7 s of poll work). `log show` shows each spawn makes Tailscale
+    re-add its network-extension configuration ("Clearing/Adding C4C66EAF-… to
+    the loaded configurations", "Adding a connection for client
+    Tailscale[pid]") — about 2,500 spawns a day.
+  - **Mac app local probe connections: the same poll.** `ServerPing.ping` opens
+    an authenticated WebSocket to `/v1/socket`, sends `system::ping` and closes
+    it about 2 ms later. The 2026-09-24 08:57–10:59 window has 159 local
+    admissions (114 in one hour; episodes admit → handshake → close 1001 in
+    2–3 ms at 33.7–34.3 s intervals). Those records come from the older payload:
+    the current transport logs local opens at debug level (`server.ts:1455`,
+    `isLocal ? "debug" : "info"`), so today's log has no local
+    `connection.opened` records and the poll's cost is invisible to it. With
+    O-2's records on top, one cycle writes `http.upgrade` + `connection.opened`
+    + `connection.closed` for a client that asks one `system::ping`: 2,880
+    cycles/day × the measured 394 + 514 bytes ≈ 2.6 MB/day, over the logging
+    contract's budget by the poll alone (estimate: record sizes measured, one
+    upgrade per cycle assumed).
+  - **Session search: `session-search.warm` 21 records, 111,866–273,680 ms**
+    (mean ≈ 160 s), one per Gateway start, against 26 `gateway.started` records
+    in the same log. `SessionSearchService.rebuild()` walks
+    `sessions.catalog("user")` and `loadDocument()` parses every canonical
+    session in full (225 sessions, 2.8 GB); `indexSemanticCorpus()` then loads
+    every document again and embeds every entry. The lexical rebuild has no time
+    or byte bound; the semantic pass is already bounded by `MAX_SEMANTIC_*`.
+  - **Knowledge: already bounded, no change.** Per start, `knowledge-storage`
+    8–11 ms and `knowledge-observation-recovery` 13–522 ms (25 of each).
+    `knowledge-observation-admission-rejected` fired 5 times in 4 days, each
+    `dropped=1, queued=0`, one accounting fact per overflow event;
+    `KnowledgeObservationQueue.enqueue` already bounds entries, retained source
+    bytes and queued settlements. Nothing recurs.
+  - Other recurring jobs inspected, each interval-bounded and owned: server
+    heartbeat and resource sampler (`server.ts:642`, `:690`), slot activity
+    heartbeat 10 s (`runtime-slot.ts:5299`), idle eviction 60 s
+    (`runtime-registry.ts:595`), enrollment 60 s (`gateway-main.ts:583`),
+    notification drain 2 s (`notification-service.ts:222`), storage maintenance
+    10 min (`gateway-main.ts:655`), browser live-view expiry 1 s
+    (`browser-live-view.ts:256`). One `storage.maintenance-failed` record and no
+    recurrence. The artifact discovery pass is the only job that recurs
+    uninvited.
+- Changes: this file only (row status and this handoff). No code change: two of
+  the three findings that need code sit in `runtime-slot.ts` /
+  `runtime-registry.ts`, which this task may not touch, and the Mac app poll
+  needs a bounded-cadence decision.
+- **Tasks added** (orchestrator adds them to the table):
+  - **G-8a — Bound `extension.artifact-rejected`.** Depends on G-1c. Owning
+    files `packages/gateway/src/sessions/runtime-slot.ts`,
+    `packages/gateway/src/sessions/runtime-registry.ts`. Warn once per missing
+    episode: keep the 60 s dedup for a genuine replacement, but stop warning an
+    owner whose missing window has passed
+    `EXTENSION_ARTIFACT_MISSING_GRACE_MS` or whose activity is already `unknown`
+    (the discovery lane must consult `extensionArtifactMissingSince`). Check:
+    extend the artifact-warning assertions in
+    `runtime-registry.integration.test.ts` (which already assert no warning for
+    an owner that recovers) with an owner that stays missing past the grace and
+    assert one warning, not one a minute.
+  - **G-8b — Bound the Mac app status poll.** Depends on O-2 for the record
+    volume it removes. Owning files
+    `packages/mac-app/Sources/Server/Health/`,
+    `packages/mac-app/Sources/App/EnvironmentSetup.swift`. One 30 s poll
+    re-proves the transport host with a Tailscale CLI query (~2,500 spawns/day,
+    each one a network-extension reload) and re-authenticates over a fresh
+    WebSocket (~2,880 sockets/day, ≈ 2.6 MB/day of Gateway records after O-2).
+    Bound both: reuse a resolved Tailscale address for a named window (explicit
+    user actions keep the live probe), and do not re-authenticate over a new
+    socket while the previous observation is still fresh. If the window changes
+    what the menu bar reports, decide it with the user. Evidence to keep: the
+    unified-log spawn cadence and the connection-record volume before and after.
+  - **G-8c — Bound the session-search warm-up.** Depends on G-1c (same catalog
+    full parse, another owner). Owning file
+    `packages/gateway/src/sessions/session-search-service.ts`. Warm the lexical
+    index from G-1's index and change feed in bounded slices instead of
+    `loadDocument()` per catalog session (225 sessions, 111–274 s measured);
+    keep the semantic pass as it is. Done when a start warms the index without a
+    full-corpus parse and the search coverage digest is unchanged.
+- For the next agent: R-4's O-5 records should show G-8a and G-8c gone. G-8b is
+  a Mac app change and cannot be seen in Gateway records alone — check it with
+  the unified log's Tailscale client-attach cadence (about one per poll today).
