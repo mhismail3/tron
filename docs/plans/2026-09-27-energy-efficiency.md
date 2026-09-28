@@ -2,7 +2,7 @@
 
 - **Started:** 2026-09-27
 - **Status:** Active (approved in chat by the user on 2026-09-27)
-- **Last updated:** 2026-09-28, R-REVEAL, R-TOKENIZER, R-FOLLOW, R-OPEN and T-GW-DUPSNAP claimed
+- **Last updated:** 2026-09-28, streaming reveal regression and follow-up fixes merged
 - **Goal:** Tron for iPhone does measurably less CPU, disk, timer and radio work per minute of real use, proven by a reliable profiler that every agent can run, with no change to what the user sees or does.
 
 ## Goal and constraints
@@ -151,12 +151,12 @@ two-frames-per-window cadence the same scenario measured 60.9 G instructions and
 | P-2 | Done | Gateway wire-traffic profiler (`gateway` subcommand), isolated fixture Gateway with a faux model, recording client, per-topic frame and byte report (details below) | none | energy-efficiency supervisor, worker lane p2, 2026-09-27 |
 | P-3 | Done | Attribution: `--trace` for iOS scenarios (xctrace Time Profiler, SwiftUI, Points of Interest; exported top-symbol summary) and an attach-only `device` mode for a user-launched LocalDevice app | P-1 | energy-efficiency supervisor, worker lane p3, 2026-09-27 |
 | P-4 | Done | Baseline: run every P-1 and P-2 scenario on `main`, record the numbers and host state in this plan's Context | P-1, P-2 | energy-efficiency supervisor, 2026-09-27 |
-| R-REVEAL | Claimed | Regression reported by the user: streaming text no longer fades in continuously. The reveal loop's speed depended on frame arrivals (each frame restarted it with an immediate word), so T1-GW's halved frame count left it behind and its >18-word catch-up now shows backlogs without a fade (simulated: 0% → 22% of words at 25 words/s). Pace reveals by elapsed time, adaptively draining the backlog within about one frame window, keep catch-up only for real stalls, and guard continuity with a hosted test | none | energy-efficiency supervisor, worker lane reveal, 2026-09-28 |
-| R-TOKENIZER | Claimed | Approved by the user: `ChatStreamingInlineText.tokens` repeats the last word when text ends in whitespace (`"Hello world "` renders `"Hello world world "`) | none | energy-efficiency supervisor, worker lane reveal, 2026-09-28 |
-| T-GW-DUPSNAP | Claimed | The Gateway sometimes sends an extra identical-size `session.snapshot` (and summary) at prompt admission (P-2 timeline); remove the redundant publication if no state changed | none | energy-efficiency supervisor, worker lane gw-dupsnap, 2026-09-28 |
+| R-REVEAL | Done | Regression reported by the user: streaming text no longer fades in continuously. The reveal loop's speed depended on frame arrivals (each frame restarted it with an immediate word), so T1-GW's halved frame count left it behind and its >18-word catch-up now shows backlogs without a fade (simulated: 0% → 22% of words at 25 words/s). Pace reveals by elapsed time, adaptively draining the backlog within about one frame window, keep catch-up only for real stalls, and guard continuity with a hosted test | none | energy-efficiency supervisor, worker lane reveal, 2026-09-28 |
+| R-TOKENIZER | Done | Approved by the user: `ChatStreamingInlineText.tokens` repeats the last word when text ends in whitespace (`"Hello world "` renders `"Hello world world "`) | none | energy-efficiency supervisor, worker lane reveal, 2026-09-28 |
+| T-GW-DUPSNAP | Done | The Gateway sometimes sends an extra identical-size `session.snapshot` (and summary) at prompt admission (P-2 timeline); remove the redundant publication if no state changed (identical rebroadcasts removed; a revision-only admission extra remains by decision) | none | energy-efficiency supervisor, worker lane gw-dupsnap, 2026-09-28 |
 | P-5 | Blocked | Simulator-device Instruments (SwiftUI view-body counts, app signposts) never starts from agent sessions on this Mac ("Device disconnected while trying to set tap configuration", also on a fresh iOS 27 simulator); the user checks from their own Terminal, and `device --attach` capture is verified on a user-launched app | P-3 | |
-| P-6 | Blocked | Every scenario gains a post-window render check with bounded retries (branch `perf/p6`, unmerged, checks not yet run for every scenario); streaming-reply cannot be made single-mode while R-FOLLOW's bug stands — it now fails with evidence instead of mixing modes | P-1, R-FOLLOW | energy-efficiency supervisor, worker lane p6, 2026-09-28 |
-| R-FOLLOW | Claimed | Real chat bug, found by P-6: when a prompt and its streaming reply enter together, the physical-tail repair is applied but SwiftUI lands about 1,760 pt above the tail ("Geometry action is cycling between duplicate values"), both attempts exhaust (`chat.lease.repair-exhausted`) and the target-free rebase never returns, so the pinned chat stops following in about 70% of hosted windows; opening a running session mid-reply also fails readiness. Belongs with the chat transcript stability plan; evidence under `~/Library/Developer/Tron/profiles/ios/` | none | energy-efficiency supervisor, worker lane follow, 2026-09-28 |
+| P-6 | Done | Every scenario gains a post-window render check with bounded retries (branch `perf/p6`, unmerged, checks not yet run for every scenario); streaming-reply cannot be made single-mode while R-FOLLOW's bug stands — it now fails with evidence instead of mixing modes (render checks and bounded remeasurement merged; streaming-reply follows in every window after R-FOLLOW) | P-1, R-FOLLOW | energy-efficiency supervisor, worker lane p6, 2026-09-28 |
+| R-FOLLOW | Done | Real chat bug, found by P-6: when a prompt and its streaming reply enter together, the physical-tail repair is applied but SwiftUI lands about 1,760 pt above the tail ("Geometry action is cycling between duplicate values"), both attempts exhaust (`chat.lease.repair-exhausted`) and the target-free rebase never returns, so the pinned chat stops following in about 70% of hosted windows; opening a running session mid-reply also fails readiness. Belongs with the chat transcript stability plan; evidence under `~/Library/Developer/Tron/profiles/ios/` (the stranding is fixed; the misplaced repair itself and the unreproduced mid-reply opening failure remain with the chat transcript stability plan) | none | energy-efficiency supervisor, worker lane follow, 2026-09-28 |
 | T1-GW | Done | Gateway: re-arm the streaming throttle; delete `session.bashProgress` and `session.heartbeat`; skip the heartbeat ping while a client proved liveness within the interval, keeping today's detection bound | none (keep decision: P-1, P-2) | energy-efficiency supervisor, worker lane t1-gw, 2026-09-27 |
 | T1-CACHE | Done | `SnapshotCache`: drop checkpoints that cannot change it, coalesce summary checkpoints and checkpoint on background, drop the save-path double admission pass | none (keep decision: P-1, P-2) | energy-efficiency supervisor, worker lane t1-persist, 2026-09-27 |
 | T1-DRAFTS | Done | `ComposerDraftStore`: in-memory logical clock, size accounting without re-hashing, manifest-only writes when attachments are unchanged; no observable mutation for unchanged text | none (keep decision: P-1, P-2) | energy-efficiency supervisor, worker lane t1-persist, 2026-09-27 |
@@ -176,7 +176,7 @@ two-frames-per-window cadence the same scenario measured 60.9 G instructions and
 | T3-STREAM | Done | Streaming text append deltas for `session.progress`, same rules; only if P-2 shows progress bytes or decode cost still material after T3-DEFLATE (superseded: deflate context takeover sends cumulative frames at about 1.3% of their size) | T3-DEFLATE | |
 | T3-TOOLPROG | Done | Tool progress omits a `partialResult` the phone can reconstruct exactly, same rules; only if still material after T3-DEFLATE (superseded: deflate removes the duplicated text on the wire) | T3-DEFLATE | |
 | T3-CATALOG | Done | Conditional `session.list` on foreground: an unchanged catalog generation keeps the retained rows (dropped: catalog pages are compressed and not a traced hotspot) | P-4 | |
-| R-OPEN | Claimed | Investigate whether an unanswered optional older-history page during chat opening fails the opening ("layout did not settle") instead of falling back to the usable tail as `architecture.md` promises; fix the owner if so | none | energy-efficiency supervisor, worker lane follow, 2026-09-28 |
+| R-OPEN | Done | Investigate whether an unanswered optional older-history page during chat opening fails the opening ("layout did not settle") instead of falling back to the usable tail as `architecture.md` promises; fix the owner if so | none | energy-efficiency supervisor, worker lane follow, 2026-09-28 |
 | V-1 | Needs scoping | Close-out: full Gateway and iOS suites, parity gates, profiler comparison against P-4, owning docs, user device check | all | |
 
 ## Task details
@@ -657,4 +657,34 @@ re-projection is a material share of that time.
   is a labeled `continue`).
 - Next: R-FOLLOW (with the chat transcript stability plan), then P-6, then
   T2-CHATVIEW (21% of tool-loop main-thread time in the transcript host).
+
+### R-REVEAL, R-TOKENIZER, R-FOLLOW, R-OPEN, T-GW-DUPSNAP, P-6 · Done · 2026-09-28 · energy-efficiency supervisor (lanes reveal, follow, gw-dupsnap, p6)
+
+- R-REVEAL: `ChatStreamingTextRevealPolicy.admission` paces word starts by
+  elapsed time: each pending word starts within 180 ms of arriving, spacing
+  clamped to 8–55 ms (exactly 55 ms at a backlog of three or fewer, fade
+  unchanged), and the no-fade catch-up fires only on a real stall (more than
+  125 words or one second waiting). On the real view at 40 words/s and 150 ms
+  frames the largest jump between samples fell from 24.7 words to 4.7, with a
+  fading word in every sample (`StreamingTextRevealContinuityTests`, which fails
+  on the old code); the pacing tests fail on the old frame-driven rule.
+- R-TOKENIZER: text ending in whitespace no longer repeats its last word.
+- R-FOLLOW: a pinned chat whose tail repair lands far above the tail now
+  rebases once to the native bottom instead of stranding; the profiler's
+  streaming-reply followed in 6 of 6 windows under load, including one that
+  hit the misplaced repair. R-OPEN: the optional older-history page during
+  opening has its own 5 s bound, so it falls back to the usable tail instead
+  of failing the opening.
+- T-GW-DUPSNAP: `publishSnapshot` cancels a pending coalesced snapshot, so the
+  Gateway never rebroadcasts an identical snapshot (stream-reply snapshot bytes
+  −22%, tool-loop 27 snapshots in every iteration).
+- P-6: every iOS scenario checks after its window that its workload rendered
+  and remeasures a diverged window up to three times, failing with evidence
+  otherwise.
+- Gates on the combined branch: 1,761 unit tests passed, CT-12/CT-14 parity
+  passed, real-Gateway E2E passed, Gateway session and transport suites
+  963/964 (the load-sensitive logger rotation timeout again; passes alone).
+- Remaining: the misplaced repair itself (SwiftUI lands about 1,760 pt above
+  the tail when a prompt and its reply enter together) and a mid-reply opening
+  failure that did not reproduce belong to the chat transcript stability plan.
 
