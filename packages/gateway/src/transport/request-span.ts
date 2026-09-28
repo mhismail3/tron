@@ -104,6 +104,17 @@ export class RequestSpan {
   }
 
   /**
+   * Names the stage this request is in for `currentStage()` without measuring
+   * it, and returns the call that ends it. Work that already measures itself
+   * uses this: a second entry for the same interval would count the request's
+   * covered time twice. Always call the returned closure.
+   */
+  enterStage(name: string): () => void {
+    const measurement = this.beginMeasurement(name);
+    return () => this.closeMeasurement(measurement);
+  }
+
+  /**
    * The name of the innermost stage or wait still open, for the cancellation
    * record: a peer that abandons a request needs to know what it interrupted.
    * Concurrent stages are ordered by when they started, so the answer is the

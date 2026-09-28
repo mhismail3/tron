@@ -2328,10 +2328,14 @@ export class GatewayServer {
         // last waiter left behind is not an unhandled rejection: nobody will
         // read it, and the abort that ends the shared work states why.
         void attempt.catch(() => {});
-        result = await runInRequestSpan(
-          requestSpan,
-          () => wait("session.open.attempt", () => abortableRead(requestController.signal, () => attempt)),
-        );
+        // Named for the cancellation record; the attempt's own stages are what
+        // measure it, and a second entry for the same interval would double it.
+        const leaveAttemptStage = requestSpan.enterStage("session.open.attempt");
+        try {
+          result = await abortableRead(requestController.signal, () => attempt);
+        } finally {
+          leaveAttemptStage();
+        }
         attemptSucceeded = true;
       }
       if (requestController.signal.aborted) return;
