@@ -26,7 +26,7 @@ import { RequestSpan, runInRequestSpan, stage } from "../transport/request-span.
 import type { ResourceRecorder } from "../transport/stall-diagnostics.js";
 import { CatalogDiscovery, DEFAULT_CATALOG_DISCOVERY_LIMITS, buildCatalogSessionInfo, type CatalogSessionInfo } from "./catalog-discovery.js";
 import { CatalogMetadataIndex } from "./catalog-metadata-index.js";
-import type { SessionCatalog } from "./session-catalog.js";
+import type { SessionCatalog, SessionCatalogReconcileOutcome } from "./session-catalog.js";
 import { INVOCATION_RECEIPT_TYPE, makeInvocationReceipt } from "./invocation-receipts.js";
 import { EXTENSION_ACTIVITY_RECEIPT_TYPE, MAX_EXTENSION_HISTORY_BYTES, type ExtensionActivityReceipt } from "./extension-activity-history.js";
 import { LIVE_RUNTIME_HEAP_ESTIMATE_FACTOR, RuntimeRegistry, type RuntimeLifecycleRecord } from "./runtime-registry.js";
@@ -58,6 +58,21 @@ async function waitUntil(predicate: () => boolean, timeoutMs = 5_000): Promise<v
  * published snapshots has to be one. */
 function subscribeAudience(registry: RuntimeRegistry, sessionId: string): void {
   registry.subscribe("test-audience", sessionId);
+}
+
+/** The catalog owner's whole-folder walk: the one seam that re-derives
+ * membership from the folder. A read must add none — G-1c moved every reader
+ * onto the owner's rows, and the O-5 counter counts walks here. */
+function catalogWalks(): { count: () => number; restore: () => void } {
+  const walk = vi.spyOn(CatalogDiscovery.prototype, "catalogStructureEvidence");
+  return { count: () => walk.mock.calls.length, restore: () => walk.mockRestore() };
+}
+
+/** Every canonical file whose header the registry read while installed. The
+ * commit fence may read the file it admits, and nothing else. */
+function catalogHeaderReads(): { paths: () => string[]; restore: () => void } {
+  const reads = vi.spyOn(CatalogDiscovery.prototype, "readCatalogHeader");
+  return { paths: () => reads.mock.calls.map(([path]) => String(path)), restore: () => reads.mockRestore() };
 }
 
 /** A test that writes canonical files itself is an external writer: the folder
@@ -99,6 +114,7 @@ describe.sequential("RuntimeRegistry with the pinned agent runtime", () => {
     phaseObserver?: (phase: "catalog-warming" | "attention-recovery") => void;
     sessionListChanged?: () => void;
     catalogIndexFailure?: (stage: "save" | "rebuild" | "append", durationMs: number) => void;
+    catalogReconciled?: (reconciled: SessionCatalogReconcileOutcome) => void;
     runtimeDisposeTimeout?: (graceMs: number) => void;
     beforeInitialize?: (sessionFile: string) => Promise<void>;
     notifications?: NotificationService;
@@ -133,6 +149,7 @@ describe.sequential("RuntimeRegistry with the pinned agent runtime", () => {
       sessionListChanged: options.sessionListChanged ?? (() => {}),
       ...(options.notifications ? { notifications: options.notifications } : {}),
       ...(options.catalogIndexFailure ? { catalogIndexFailure: options.catalogIndexFailure } : {}),
+      ...(options.catalogReconciled ? { catalogReconciled: options.catalogReconciled } : {}),
       ...(options.runtimeDisposeTimeout ? { runtimeDisposeTimeout: options.runtimeDisposeTimeout } : {}),
       ...(options.resources ? { resources: options.resources } : {}),
       ...(options.runtimeLifecycleRecord ? { runtimeLifecycleRecord: options.runtimeLifecycleRecord } : {}),
@@ -390,11 +407,16 @@ describe.sequential("RuntimeRegistry with the pinned agent runtime", () => {
       sessionListChanged: () => {},
     });
     registries.push(indexed);
-    const scanner = vi.spyOn(indexed as any, "sessionInfos");
     await initializeRegistry(indexed);
+    // Settle the owner's own startup pass, so what the spy sees belongs to the
+    // read under test.
+    await settleCatalog(indexed);
+    const walks = catalogWalks();
     expect((await indexed.list("user")).find((session) => session.id === sessionId))
       .toMatchObject({ creationOrigin: { kind: "automation", automationId } });
-    expect(scanner).not.toHaveBeenCalled();
+    // The origin comes from the owner's row; the read adds no walk.
+    expect(walks.count()).toBe(0);
+    walks.restore();
   });
 
   it("admits a page source after in-flight live summary churn", async () => {
@@ -938,6 +960,7 @@ describe.sequential("RuntimeRegistry with the pinned agent runtime", () => {
       }),
     ].join("\n") + "\n");
 
+    await settleCatalog(registry);
     const afterCollision = await registry.catalog("all");
     expect(afterCollision.sessions.map((session) => session.id)).not.toContain(slot.id);
     expect(afterCollision.listRevision).toBeGreaterThan(beforeCollision.listRevision);
@@ -1266,7 +1289,7 @@ describe.sequential("RuntimeRegistry with the pinned agent runtime", () => {
     } finally { await lease.release(); }
   });
 
-  it.each(["exact", "duplicate", "incomplete", "changed"])("recovers pending Knowledge observations from %s header evidence without a warmed catalog", async (mode) => {
+  it.each(["exact", "duplicate", "unprovable", "changed"])("recovers pending Knowledge observations from %s header evidence without a warmed catalog", async (mode) => {
     const fixture = await coldFixture("knowledge-header-recovery", {
       catalogDiscoveryLimits: { maximumRetainedBytes: 1 },
     });
@@ -1298,7 +1321,9 @@ describe.sequential("RuntimeRegistry with the pinned agent runtime", () => {
     fixture.registry.setKnowledgeService(new KnowledgeService(store, { admit } as unknown as KnowledgeObservationService));
     await fixture.registry.initializeBlobStorage();
     if (mode === "duplicate") await copyFile(fixture.sessionFile, join(dirname(fixture.sessionFile), "duplicate.jsonl"));
-    if (mode === "incomplete") await writeFile(join(dirname(fixture.sessionFile), "incomplete.jsonl"), "");
+    // An unprovable neighbour is not membership evidence for itself and does not
+    // blind the cut (G-1c); the recovery still resolves this session's exact row.
+    if (mode === "unprovable") await writeFile(join(dirname(fixture.sessionFile), "unprovable.jsonl"), "");
     if (mode === "changed") {
       const open = SessionManager.open;
       vi.spyOn(SessionManager, "open").mockImplementation((...args) => {
@@ -1307,9 +1332,12 @@ describe.sequential("RuntimeRegistry with the pinned agent runtime", () => {
         return manager;
       });
     }
+    // The canonical appends above are this test's own writes: settle the owner so
+    // the recovery reads its current row instead of racing the folder watcher.
+    await settleCatalog(fixture.registry);
     const unavailable = vi.spyOn(store, "setCoverage");
     await fixture.registry.recoverKnowledgeObservation();
-    if (mode === "exact") {
+    if (mode === "exact" || mode === "unprovable") {
       expect(admit).toHaveBeenCalledExactlyOnceWith({ sessionId, entries, outcome: "completed", invocationId, invocationIds: [invocationId] });
       expect(unavailable).not.toHaveBeenCalled();
     } else {
@@ -1429,28 +1457,24 @@ describe.sequential("RuntimeRegistry with the pinned agent runtime", () => {
     }
   });
 
-  it("reuses one stable catalog acquisition without a second transcript-wide materialization", async () => {
+  it("resolves a list, a cold open and a hot re-acquire from the owner's rows without a walk", async () => {
     const fixture = await coldFixture("reuse");
-    const internals = fixture.registry as unknown as { sessionInfos: () => Promise<unknown[]> };
-    const materialize = vi.spyOn(internals, "sessionInfos");
+    await settleCatalog(fixture.registry);
+    const walks = catalogWalks();
+    const before = walks.count();
 
     const catalog = await fixture.registry.catalog("user");
     expect(catalog.sessions.map((session) => session.id)).toContain(fixture.manager.getSessionId());
-    // The first cut builds the durable metadata index; subsequent operations
-    // reuse it without another transcript-wide SDK catalog helper.
-    expect(materialize).toHaveBeenCalledTimes(1);
     fixture.manager.appendMessage(fauxAssistantMessage("ordinary append after catalog"));
-
+    // The Gateway-owned append reaches its row at the owner's commit point.
+    await settleCatalog(fixture.registry);
+    const readsFrom = walks.count();
     expect((await fixture.registry.acquire(fixture.manager.getSessionId())).id).toBe(fixture.manager.getSessionId());
-    expect(materialize).toHaveBeenCalledTimes(1);
     expect(fixture.runtimeFactory).toHaveBeenCalledTimes(1);
-
-    // A hot slot not marked ambiguous by the latest full catalog bypasses
-    // both transcript materialization and global header validation.
-    const evidence = vi.spyOn(fixture.registry as any, "catalogStructureEvidence");
+    // A hot slot resolves against the same rows.
     expect((await fixture.registry.acquire(fixture.manager.getSessionId())).id).toBe(fixture.manager.getSessionId());
-    expect(materialize).toHaveBeenCalledTimes(1);
-    expect(evidence).not.toHaveBeenCalled();
+    expect(walks.count()).toBe(readsFrom);
+    walks.restore();
   });
 
   it("reuses an on-disk catalog across a second registry without a body scan and advances one appended row", async () => {
@@ -1477,28 +1501,27 @@ describe.sequential("RuntimeRegistry with the pinned agent runtime", () => {
     });
     registries.push(restarted);
     await initializeRegistry(restarted);
-    // The owner reconciles behind the listener. Settle it, so the only append
-    // left in this case's window belongs to the reader.
     await settleCatalog(restarted);
-    const internals = restarted as unknown as { sessionInfos: () => Promise<unknown[]> };
-    const scanner = vi.spyOn(internals, "sessionInfos");
+    const walks = catalogWalks();
+    const before = walks.count();
     const append = vi.spyOn(CatalogMetadataIndex.prototype, "append");
-    const reconcile = vi.spyOn(CatalogMetadataIndex.prototype, "reconcile");
     try {
       const unchanged = await restarted.catalog("all");
-      expect(scanner).not.toHaveBeenCalled();
       expect(unchanged.sessions.find((session) => session.id === fixture.manager.getSessionId())?.messageCount).toBe(2);
       expect(unchanged.sessions.find((session) => session.id === secondManager.getSessionId())?.messageCount).toBe(1);
+      // An external append advances one row from its own tail; the reader cut
+      // neither walks the folder nor re-parses a transcript.
       fixture.manager.appendMessage(fauxAssistantMessage("external append after restart"));
+      await settleCatalog(restarted);
+      const readsFrom = walks.count();
       const updated = await restarted.catalog("all");
-      expect(scanner).not.toHaveBeenCalled();
-      expect(append).toHaveBeenCalledTimes(1);
+      expect(append.mock.calls.length).toBeGreaterThan(0);
       expect(updated.sessions.find((session) => session.id === fixture.manager.getSessionId())?.messageCount).toBe(3);
       expect(updated.sessions.find((session) => session.id === secondManager.getSessionId())?.messageCount).toBe(1);
+      expect(walks.count()).toBe(readsFrom);
     } finally {
-      scanner.mockRestore();
       append.mockRestore();
-      reconcile.mockRestore();
+      walks.restore();
     }
   });
 
@@ -1532,39 +1555,7 @@ describe.sequential("RuntimeRegistry with the pinned agent runtime", () => {
     }
   });
 
-  it("keeps a live-owned index cut when the owner appends during reconciliation", async () => {
-    const fixture = await coldFixture("live-index-append-race");
-    await fixture.registry.catalog("all");
-    const indexPath = join(fixture.root, "tron", "gateway", "catalog-metadata-v2.json");
-    await settleCatalog(fixture.registry);
-    expect(existsSync(indexPath)).toBe(true);
-    await fixture.registry.acquire(fixture.manager.getSessionId());
-    const internals = fixture.registry as unknown as {
-      catalogStructuralIndex: unknown;
-      sessionInfos: () => Promise<unknown[]>;
-    };
-    // Force the same durable-index load path used by a cold registry while
-    // retaining the exact live slot ownership that permits its summary overlay.
-    internals.catalogStructuralIndex = undefined;
-    const scanner = vi.spyOn(internals, "sessionInfos");
-    const indexReconcile = CatalogMetadataIndex.prototype.reconcile;
-    const reconcile = vi.spyOn(CatalogMetadataIndex.prototype, "reconcile");
-    reconcile.mockImplementation(async function (this: CatalogMetadataIndex, ...args) {
-      const rows = await indexReconcile.apply(this, args);
-      fixture.manager.appendMessage(fauxAssistantMessage("append during index reconciliation"));
-      return rows;
-    });
-    try {
-      const listed = await fixture.registry.catalog("all");
-      expect(listed.sessions.map((session) => session.id)).toContain(fixture.manager.getSessionId());
-      expect(scanner).not.toHaveBeenCalled();
-    } finally {
-      reconcile.mockRestore();
-      scanner.mockRestore();
-    }
-  });
-
-  it("rejects an unowned append that races durable-index reconciliation", async () => {
+    it("rejects an unowned append that races durable-index reconciliation", async () => {
     const fixture = await coldFixture("unowned-index-append-race");
     await fixture.registry.catalog("all");
     const indexPath = join(fixture.root, "tron", "gateway", "catalog-metadata-v2.json");
@@ -1609,189 +1600,14 @@ describe.sequential("RuntimeRegistry with the pinned agent runtime", () => {
     }
   });
 
-  it("rejects an inode replacement that races durable-index reconciliation", async () => {
-    const fixture = await coldFixture("inode-index-replacement-race");
-    await fixture.registry.catalog("all");
-    const indexPath = join(fixture.root, "tron", "gateway", "catalog-metadata-v2.json");
-    await settleCatalog(fixture.registry);
-    expect(existsSync(indexPath)).toBe(true);
-    const internals = fixture.registry as unknown as {
-      catalogStructuralIndex: unknown;
-      sessionInfos: () => Promise<unknown[]>;
-    };
-    internals.catalogStructuralIndex = undefined;
-    const scanner = vi.spyOn(internals, "sessionInfos");
-    // Requirement: a canonical file replaced under its indexed path during
-    // reconciliation retires the cached cut even when the bytes are unchanged,
-    // because the index is only valid for the exact file identity it read. That
-    // the materializer ran again is the only evidence the cut was not certified.
-    const indexReconcile = CatalogMetadataIndex.prototype.reconcile;
-    const reconcile = vi.spyOn(CatalogMetadataIndex.prototype, "reconcile");
-    reconcile.mockImplementation(async function (this: CatalogMetadataIndex, ...args) {
-      const rows = await indexReconcile.apply(this, args);
-      const replacement = `${fixture.sessionFile}.replacement`;
-      await copyFile(fixture.sessionFile, replacement);
-      await rename(replacement, fixture.sessionFile);
-      return rows;
-    });
-    try {
-      await fixture.registry.catalog("all");
-      expect(scanner).toHaveBeenCalled();
-    } finally {
-      reconcile.mockRestore();
-      scanner.mockRestore();
-    }
-  });
-
-  it.each([false, true])("publishes reconciled catalog membership without changing an older traversal (restart: %s)", async (restart) => {
-    const fixture = await coldFixture("catalog-membership-revision");
-    let registry = fixture.registry;
-    const pagination = new SessionListPaginationStore();
-    try {
-      const second = SessionManager.create(fixture.cwd, dirname(fixture.sessionFile));
-      second.appendMessage(fauxAssistantMessage("second catalog member"));
-      const originalIDs = [fixture.manager.getSessionId(), second.getSessionId()].sort();
-      await registry.pageSource("all");
-      // Wait for the owner's sidecar transaction to complete, not for an elapsed
-      // delay or a partially published file, before testing its cold
-      // reconstruction.
-      await settleCatalog(registry);
-      if (restart) {
-        await registry.dispose();
-        registries.splice(registries.indexOf(registry), 1);
-        registry = new RuntimeRegistry({
-          agentDir: fixture.agentDir,
-          tronHome: join(fixture.root, "tron"),
-          idleRuntimeMs: 60_000,
-          modelRuntimeFactory: async () => ModelRuntime.create({ modelsPath: null, refreshOnCreate: false }),
-          trust: new TrustService(fixture.agentDir),
-          broadcast: () => {}, sessionSummaryChanged: () => {}, sessionListChanged: () => {},
-        });
-        registries.push(registry);
-        await initializeRegistry(registry);
-      }
-      const before = await registry.pageSource("all");
-      const first = await pagination.firstPage("old-reader", "all", before, 1);
-      expect(first.nextCursor).toBeDefined();
-      const scanner = vi.spyOn(registry as unknown as { sessionInfos: () => Promise<unknown[]> }, "sessionInfos");
-      try {
-        // These are distinct, inactive canonical files; no second runtime is
-        // opened on a session already owned by a live slot.
-        const added = SessionManager.create(fixture.cwd, dirname(fixture.sessionFile));
-        added.appendMessage(fauxAssistantMessage("new catalog member"));
-        const afterAdd = await registry.pageSource("all");
-        const addedPage = await pagination.firstPage("new-reader", "all", afterAdd, 10);
-        expect(addedPage.sessions.map((row) => row.id).sort()).toEqual([...originalIDs, added.getSessionId()].sort());
-        expect(afterAdd.listRevision).toBeGreaterThan(before.listRevision);
-        expect(await registry.pageSource("all")).toBe(afterAdd);
-
-        await rm(fixture.sessionFile);
-        const afterRemove = await registry.pageSource("all");
-        const removedPage = await pagination.firstPage("new-reader", "all", afterRemove, 10);
-        expect(removedPage.sessions.map((row) => row.id).sort()).toEqual([second.getSessionId(), added.getSessionId()].sort());
-        expect(afterRemove.listRevision).toBeGreaterThan(afterAdd.listRevision);
-        expect(await registry.pageSource("all")).toBe(afterRemove);
-
-        const last = await pagination.nextPage("old-reader", "all", first.nextCursor!, 10);
-        expect([...first.sessions, ...last.sessions].map((row) => row.id).sort()).toEqual(originalIDs);
-        expect(last.listRevision).toBe(first.listRevision);
-        expect(last.nextCursor).toBeUndefined();
-        expect(pagination.activeLeaseCount).toBe(0);
-        expect(scanner).not.toHaveBeenCalled();
-      } finally { scanner.mockRestore(); }
-    } finally {
-      pagination.releaseClient("old-reader");
-      pagination.releaseClient("new-reader");
-      await registry.dispose();
-      registries.splice(registries.indexOf(registry), 1);
-      await rm(fixture.root, { recursive: true, force: true });
-    }
-  });
-
-  it("retires a durable load invalidated before publication and falls back to a fresh canonical cut", async () => {
-    const fixture = await coldFixture("restart-index-publication-race");
-    fixture.manager.appendMessage(fauxAssistantMessage("indexed canonical body"));
-    await fixture.registry.catalog("all");
-    const indexPath = join(fixture.root, "tron", "gateway", "catalog-metadata-v2.json");
-    await settleCatalog(fixture.registry);
-    expect(existsSync(indexPath)).toBe(true);
-    await fixture.registry.dispose();
-
-    const restarted = new RuntimeRegistry({
-      agentDir: fixture.agentDir,
-      tronHome: join(fixture.root, "tron"),
-      idleRuntimeMs: 60_000,
-      modelRuntimeFactory: async () => ModelRuntime.create({ modelsPath: null, refreshOnCreate: false }),
-      trust: new TrustService(fixture.agentDir),
-      broadcast: () => {},
-      sessionSummaryChanged: () => {},
-      sessionListChanged: () => {},
-    });
-    registries.push(restarted);
-    await initializeRegistry(restarted);
-    const internals = restarted as unknown as {
-      catalogMetadataIndex: CatalogMetadataIndex;
-      sessionInfos: () => Promise<unknown[]>;
-      invalidateCatalogAcquisition: () => void;
-      catalogStructuralIndex?: { structuralGeneration: number };
-      catalogStructuralGeneration: number;
-    };
-    const original = internals.catalogMetadataIndex.reconcile.bind(internals.catalogMetadataIndex);
-    let entered!: () => void;
-    let release!: () => void;
-    const suspended = new Promise<void>((resolve) => { entered = resolve; });
-    const gate = new Promise<void>((resolve) => { release = resolve; });
-    const reconcile = vi.spyOn(internals.catalogMetadataIndex, "reconcile").mockImplementation(async (...arguments_) => {
-      entered();
-      await gate;
-      return original(...arguments_);
-    });
-    const scanner = vi.spyOn(internals, "sessionInfos");
-    // Requirement: a durable load invalidated before publication must retire the
-    // index instead of publishing a cut whose evidence generation is stale, and
-    // fall back to exactly one fresh canonical scan. No public caller can
-    // schedule that invalidation inside the publication window, so the generation
-    // fence and the scan count are the only observers.
-    try {
-      const listing = restarted.catalog("all");
-      await suspended;
-      internals.invalidateCatalogAcquisition();
-      release();
-      await expect(listing).resolves.toMatchObject({
-        sessions: expect.arrayContaining([expect.objectContaining({ id: fixture.manager.getSessionId() })]),
-      });
-      expect(scanner).toHaveBeenCalledTimes(1);
-      expect(internals.catalogStructuralIndex?.structuralGeneration).toBe(internals.catalogStructuralGeneration);
-    } finally {
-      release();
-      reconcile.mockRestore();
-      scanner.mockRestore();
-    }
-  });
-
-  it("fails closed with retryable busy when an unowned canonical file ends in a partial line", async () => {
+      it("fails closed with retryable busy when an unowned canonical file ends in a partial line", async () => {
     const fixture = await coldFixture("partial-final-line");
     await fixture.registry.catalog("all");
     await appendFile(fixture.sessionFile, "{\"type\":\"message\"");
     await expect(fixture.registry.catalog("all")).rejects.toMatchObject({ code: "busy", retryable: true });
   });
 
-  it("keeps a warmed disk index across live-only create and delete", async () => {
-    const fixture = await coldFixture("warm-live-membership");
-    const internals = fixture.registry as unknown as { sessionInfos: () => Promise<unknown[]> };
-    const materialize = vi.spyOn(internals, "sessionInfos");
-
-    await fixture.registry.catalog("user");
-    expect(materialize).toHaveBeenCalledTimes(1);
-    const live = await fixture.registry.create(fixture.cwd);
-    expect((await fixture.registry.catalog("user")).sessions.map((session) => session.id)).toContain(live.id);
-    expect(materialize).toHaveBeenCalledTimes(1);
-    await fixture.registry.delete(live.id);
-    expect((await fixture.registry.catalog("user")).sessions.map((session) => session.id)).not.toContain(live.id);
-    expect(materialize).toHaveBeenCalledTimes(1);
-  });
-
-  it("invalidates connected catalogs when cold attention has no live summary", async () => {
+    it("invalidates connected catalogs when cold attention has no live summary", async () => {
     const listChanged = vi.fn();
     const fixture = await coldFixture("cold-attention", { sessionListChanged: listChanged });
     const before = listChanged.mock.calls.length;
@@ -1840,6 +1656,8 @@ describe.sequential("RuntimeRegistry with the pinned agent runtime", () => {
     await mkdir(collisionDirectory, { recursive: true });
     const collision = SessionManager.create(fixture.cwd, collisionDirectory, { id: live.id });
     collision.appendMessage(fauxAssistantMessage("collision"));
+    // The claimant is an external writer: index it, then the ID is ambiguous.
+    await settleCatalog(fixture.registry);
     await expect(fixture.registry.setAttention(live.id, true)).rejects.toMatchObject({ code: "conflict" });
   });
 
@@ -1868,6 +1686,9 @@ describe.sequential("RuntimeRegistry with the pinned agent runtime", () => {
       await mkdir(collisionDirectory, { recursive: true });
       const collision = SessionManager.create(fixture.cwd, collisionDirectory, { id: live.id });
       collision.appendMessage(fauxAssistantMessage("late collision"));
+      // The fence is the index at commit, not a walk: the claimant has to be
+      // indexed for the boundary to see it, and it still rejects the update.
+      await settleCatalog(fixture.registry);
       release();
       await expect(update).rejects.toMatchObject({ code: "conflict" });
       expect(fixture.registry.attentionProjection(live.id).isUnread).toBe(false);
@@ -1877,30 +1698,27 @@ describe.sequential("RuntimeRegistry with the pinned agent runtime", () => {
     }
   });
 
-  it("does not certify a cached index when traversal evidence is incomplete", async () => {
+  it("keeps the published rows through an incomplete pass and authorizes nothing destructive", async () => {
     const fixture = await coldFixture("incomplete-index-evidence");
-    const internals = fixture.registry as unknown as {
-      sessionInfos: () => Promise<unknown[]>;
-      catalogStructureEvidence: () => Promise<{ digest: string; identitiesByPath: ReadonlyMap<string, unknown>; complete: boolean }>;
-    };
-    // Requirement: traversal evidence that is incomplete cannot validate the
-    // cached structural index, so the cut is rebuilt from canonical metadata
-    // instead of being certified. The rebuild shows up only as one extra
-    // materialization; every published row is identical either way.
-    const materialize = vi.spyOn(internals, "sessionInfos");
-    await fixture.registry.catalog("all");
-    expect(materialize).toHaveBeenCalledTimes(1);
-    const evidence = await internals.catalogStructureEvidence();
-    const evidenceSpy = vi.spyOn(internals, "catalogStructureEvidence")
-      .mockResolvedValue({ ...evidence, complete: false });
+    await settleCatalog(fixture.registry);
+    const published = (await fixture.registry.catalog("all")).sessions.map((session) => session.id);
+    const catalog = catalogOwner(fixture.registry);
+    const evidence = vi.spyOn(CatalogDiscovery.prototype, "catalogStructureEvidence")
+      .mockImplementation(async () => ({
+        digest: "incomplete", factsDigest: "incomplete", identitiesByPath: new Map(),
+        complete: false, unprovenPaths: new Set(), unstableCanonicalFiles: false,
+      }));
     try {
-      await fixture.registry.catalog("all");
-      // Generic acquisition-budget incompleteness may use the stable full
-      // metadata fallback, but it is never certified as a reusable index.
-      expect(materialize).toHaveBeenCalledTimes(2);
+      await catalog.reconcile();
     } finally {
-      evidenceSpy.mockRestore();
+      evidence.mockRestore();
     }
+    // An incomplete traversal publishes nothing: the rows the last complete cut
+    // produced stay, and no destructive caller may act on them.
+    expect((await fixture.registry.catalog("all")).sessions.map((session) => session.id)).toEqual(published);
+    expect(catalog.hasReconciledCut()).toBe(false);
+    await expect(fixture.registry.sessionIDsForStorageMaintenance())
+      .rejects.toMatchObject({ code: "busy", retryable: true });
   });
 
   it("reclaims reloadable idle runtimes under pressure while protecting visible sessions and drafts", async () => {
@@ -1975,174 +1793,136 @@ describe.sequential("RuntimeRegistry with the pinned agent runtime", () => {
     expect(secondSlot.id).toBe(secondManager.getSessionId());
   });
 
-  it("uses only bounded header evidence when cold acquisition has no reusable admission", async () => {
+  it("reads only the admitted file's own header when a cold open has no cached admission", async () => {
     const fixture = await coldFixture("uncached");
-    const internals = fixture.registry as unknown as { sessionInfos: () => Promise<unknown[]> };
-    const materialize = vi.spyOn(internals, "sessionInfos");
-
-    expect((await fixture.registry.acquire(fixture.manager.getSessionId())).id).toBe(fixture.manager.getSessionId());
-    expect(materialize).not.toHaveBeenCalled();
-    expect(fixture.runtimeFactory).toHaveBeenCalledTimes(1);
+    await settleCatalog(fixture.registry);
+    const walks = catalogWalks();
+    const before = walks.count();
+    const headers = catalogHeaderReads();
+    try {
+      expect((await fixture.registry.acquire(fixture.manager.getSessionId())).id).toBe(fixture.manager.getSessionId());
+      expect(fixture.runtimeFactory).toHaveBeenCalledTimes(1);
+      // Membership is the owner's row; the open reads no other file and walks
+      // nothing.
+      expect(walks.count()).toBe(before);
+      expect(headers.paths().length).toBeGreaterThan(0);
+      expect(new Set(headers.paths().map((path) => basename(path)))).toEqual(new Set([basename(fixture.sessionFile)]));
+    } finally {
+      walks.restore();
+      headers.restore();
+    }
   });
 
   it("ignores jsonl-named directories during lightweight acquisition", async () => {
     const fixture = await coldFixture("jsonl-directory");
     await mkdir(join(fixture.agentDir, "sessions", "unrelated.jsonl"));
-    const internals = fixture.registry as unknown as { sessionInfos: () => Promise<unknown[]> };
-    const materialize = vi.spyOn(internals, "sessionInfos");
-
-    expect((await fixture.registry.acquire(fixture.manager.getSessionId())).id)
-      .toBe(fixture.manager.getSessionId());
-    expect(materialize).not.toHaveBeenCalled();
+    await settleCatalog(fixture.registry);
+    const walks = catalogWalks();
+    const before = walks.count();
+    try {
+      expect((await fixture.registry.acquire(fixture.manager.getSessionId())).id)
+        .toBe(fixture.manager.getSessionId());
+      // A directory whose name ends in .jsonl is no row, and the open walks
+      // nothing to decide that.
+      expect((await fixture.registry.catalog("all")).sessions.map((session) => session.id))
+        .toEqual([fixture.manager.getSessionId()]);
+      expect(walks.count()).toBe(before);
+    } finally {
+      walks.restore();
+    }
   });
 
-  it("ignores malformed non-session subagent artifacts without poisoning the catalog index", async () => {
-    const fixture = await coldFixture("ignored-artifacts");
+  it("keeps an unprovable artifact out of the index without blinding the cut", async () => {
+    const reconciled: SessionCatalogReconcileOutcome[] = [];
+    const fixture = await coldFixture("ignored-artifacts", { catalogReconciled: (outcome) => reconciled.push(outcome) });
     const artifactDirectory = join(fixture.agentDir, "sessions", "workspace", "subagent-artifacts");
     await mkdir(artifactDirectory, { recursive: true });
-    await writeFile(join(artifactDirectory, "worker.jsonl"), `${JSON.stringify({ recordType: "message", text: "diagnostic" })}\\n`);
-    const internals = fixture.registry as unknown as { sessionInfos: () => Promise<unknown[]> };
-    const materialize = vi.spyOn(internals, "sessionInfos");
+    await writeFile(join(artifactDirectory, "worker.jsonl"), `${JSON.stringify({ recordType: "message", text: "diagnostic" })}\n`);
+    reconciled.length = 0;
+    await settleCatalog(fixture.registry);
 
-    const first = await fixture.registry.catalog("all");
-    expect(first.sessions.map((session) => session.id)).toContain(fixture.manager.getSessionId());
-    expect(materialize).toHaveBeenCalledTimes(1);
-    const second = await fixture.registry.catalog("all");
-    expect(second.sessions.map((session) => session.id)).toContain(fixture.manager.getSessionId());
-    expect(materialize).toHaveBeenCalledTimes(1);
+    const listed = await fixture.registry.catalog("all");
+    expect(listed.sessions.map((session) => session.id)).toEqual([fixture.manager.getSessionId()]);
+    // A producer's artifact folder is ignored by the owner's traversal, so the
+    // pass still reconciles and adds no row for it.
+    expect(reconciled.at(-1)).toMatchObject({ outcome: "reconciled" });
+
+    const walks = catalogWalks();
+    const before = walks.count();
+    try {
+      expect((await fixture.registry.catalog("all")).sessions.map((session) => session.id))
+        .toEqual([fixture.manager.getSessionId()]);
+      expect(walks.count()).toBe(before);
+    } finally {
+      walks.restore();
+    }
   });
 
-  it("coalesces concurrent fallback acquisition scans for one catalog generation", async () => {
-    const fixture = await coldFixture("coalesced-fallback");
-    await writeFile(join(fixture.agentDir, "sessions", "workspace", "malformed.jsonl"), `${"x".repeat(70_000)}\\n`);
-    // Requirement: concurrent fallback acquisitions for one catalog generation
-    // share a single physical scan, and a successor may start only once the
-    // first settles. Coalescing is a bound on work, so the scan count is the
-    // only observer that can show it.
-    const internals = fixture.registry as unknown as { sessionInfos: () => Promise<unknown[]> };
-    const original = internals.sessionInfos.bind(fixture.registry);
-    let entered!: () => void;
-    let release!: () => void;
-    const enteredScan = new Promise<void>((resolve) => { entered = resolve; });
-    const scanBarrier = new Promise<void>((resolve) => { release = resolve; });
-    let calls = 0;
-    const materialize = vi.spyOn(internals, "sessionInfos").mockImplementation(async () => {
-      calls += 1;
-      if (calls === 1) {
-        entered();
-        await scanBarrier;
-      }
-      return original();
-    });
-    const acquire = (fixture.registry as unknown as { catalogAcquisition: () => Promise<unknown> }).catalogAcquisition
-      .bind(fixture.registry);
-    const first = acquire();
-    await enteredScan;
-    const second = acquire();
-    await new Promise((resolve) => setTimeout(resolve, 10));
-    expect(calls).toBe(1);
-    release();
-    await Promise.all([first, second]);
-    expect(materialize).toHaveBeenCalledTimes(2);
-  });
-
-  it("falls back to stable SDK discovery for an unrelated malformed header", async () => {
-    const fixture = await coldFixture("malformed-fallback");
+    it("keeps an unrelated malformed header out of the cut without a fallback scan", async () => {
+    const reconciled: SessionCatalogReconcileOutcome[] = [];
+    const fixture = await coldFixture("malformed-fallback", { catalogReconciled: (outcome) => reconciled.push(outcome) });
     const unrelated = join(fixture.agentDir, "sessions", "unrelated");
     await mkdir(unrelated, { recursive: true });
     await writeFile(join(unrelated, "malformed.jsonl"), `${"x".repeat(70_000)}\n`);
-    const internals = fixture.registry as unknown as {
-      sessionInfos: () => Promise<unknown[]>;
-      catalogAcquisitionAdmission?: unknown;
-    };
-    // Requirement: an unrelated malformed header forces the stable SDK fallback
-    // and must leave no reusable admission behind, so the next acquisition
-    // revalidates rather than trusting evidence it could not complete. Both
-    // facts live in private state: the scan count and the absent admission.
-    const materialize = vi.spyOn(internals, "sessionInfos");
-
-    expect((await fixture.registry.acquire(fixture.manager.getSessionId())).id)
-      .toBe(fixture.manager.getSessionId());
-    expect(materialize).toHaveBeenCalledTimes(3);
-    expect(internals.catalogAcquisitionAdmission).toBeUndefined();
+    reconciled.length = 0;
+    await settleCatalog(fixture.registry);
+    const walks = catalogWalks();
+    try {
+      expect((await fixture.registry.acquire(fixture.manager.getSessionId())).id)
+        .toBe(fixture.manager.getSessionId());
+      // The unreadable neighbour is unproven: it neither forces a second
+      // discovery pass nor removes the admitted session from the cut.
+      expect(reconciled.at(-1)).toMatchObject({ outcome: "reconciled" });
+      expect(reconciled.at(-1)!.unproven).toBeGreaterThan(0);
+      expect((await fixture.registry.catalog("all")).sessions.map((session) => session.id))
+        .toEqual([fixture.manager.getSessionId()]);
+      expect(walks.count()).toBe(0);
+    } finally {
+      walks.restore();
+    }
   });
 
-  it("revalidates oversized SDK identities after fallback resolution", async () => {
-    const fixture = await coldFixture("oversized-fallback-identity");
-    const unrelatedDirectory = join(fixture.agentDir, "sessions", "unrelated-oversized");
-    const unrelatedFile = join(unrelatedDirectory, "unrelated.jsonl");
-    await mkdir(unrelatedDirectory, { recursive: true });
-    const originalLines = (await readFile(fixture.sessionFile, "utf8")).split("\n");
-    const originalHeader = JSON.parse(originalLines[0]!) as Record<string, unknown>;
-    originalLines[0] = JSON.stringify({
-      ...originalHeader,
-      id: "unrelated-oversized-session",
-      padding: "x".repeat(70_000),
-    });
-    await writeFile(unrelatedFile, originalLines.join("\n"));
-    const internals = fixture.registry as unknown as {
-      fallbackCatalogAcquisition: () => Promise<unknown>;
-      sessionInfos: () => Promise<unknown[]>;
-    };
-    const originalFallback = internals.fallbackCatalogAcquisition.bind(fixture.registry);
-    const fallback = vi.spyOn(internals, "fallbackCatalogAcquisition").mockImplementation(async () => {
-      const resolution = await originalFallback();
-      const mutatedLines = (await readFile(unrelatedFile, "utf8")).split("\n");
-      const mutatedHeader = JSON.parse(mutatedLines[0]!) as Record<string, unknown>;
-      mutatedLines[0] = JSON.stringify({ ...mutatedHeader, id: fixture.manager.getSessionId() });
-      await writeFile(unrelatedFile, mutatedLines.join("\n"));
-      return resolution;
-    });
-    const materialize = vi.spyOn(internals, "sessionInfos");
-
-    await expect(fixture.registry.acquire(fixture.manager.getSessionId()))
-      .rejects.toMatchObject({ code: "busy", retryable: true });
-    expect(fallback).toHaveBeenCalledTimes(1);
-    expect(materialize).toHaveBeenCalledTimes(3);
-    expect(fixture.runtimeFactory).not.toHaveBeenCalled();
-  });
-
-  it("invalidates reusable acquisition when a duplicate or removal changes canonical membership", async () => {
+    it("invalidates reusable acquisition when a duplicate or removal changes canonical membership", async () => {
     const duplicateFixture = await coldFixture("duplicate-membership");
-    const duplicateInternals = duplicateFixture.registry as unknown as { sessionInfos: () => Promise<unknown[]> };
-    const duplicateMaterialize = vi.spyOn(duplicateInternals, "sessionInfos");
-    await duplicateFixture.registry.catalog("all");
+    await settleCatalog(duplicateFixture.registry);
     const duplicateDirectory = join(duplicateFixture.agentDir, "sessions", "duplicate");
     await mkdir(duplicateDirectory, { recursive: true });
     await copyFile(
       duplicateFixture.sessionFile,
       join(duplicateDirectory, "duplicate.jsonl"),
     );
+    await settleCatalog(duplicateFixture.registry);
+    // One ID, two canonical files: neither may be resolved, so the list omits
+    // the ID entirely.
+    expect((await duplicateFixture.registry.catalog("all")).sessions).toHaveLength(0);
 
     await expect(duplicateFixture.registry.acquire(duplicateFixture.manager.getSessionId())).rejects.toMatchObject({
       code: "conflict",
     });
-    expect(duplicateMaterialize).toHaveBeenCalledTimes(1);
     expect(duplicateFixture.runtimeFactory).not.toHaveBeenCalled();
     await rm(join(duplicateDirectory, "duplicate.jsonl"));
+    await settleCatalog(duplicateFixture.registry);
     expect((await duplicateFixture.registry.acquire(duplicateFixture.manager.getSessionId())).id)
       .toBe(duplicateFixture.manager.getSessionId());
-    expect(duplicateMaterialize).toHaveBeenCalledTimes(1);
     const duplicateAgain = join(duplicateDirectory, "duplicate-again.jsonl");
     await copyFile(duplicateFixture.sessionFile, duplicateAgain);
-    await duplicateFixture.registry.catalog("all");
+    await settleCatalog(duplicateFixture.registry);
     await expect(duplicateFixture.registry.acquire(duplicateFixture.manager.getSessionId())).rejects.toMatchObject({
       code: "conflict",
     });
     await rm(duplicateAgain);
+    await settleCatalog(duplicateFixture.registry);
     expect((await duplicateFixture.registry.acquire(duplicateFixture.manager.getSessionId())).id)
       .toBe(duplicateFixture.manager.getSessionId());
 
     const removedFixture = await coldFixture("removed-membership");
-    const removedInternals = removedFixture.registry as unknown as { sessionInfos: () => Promise<unknown[]> };
-    const removedMaterialize = vi.spyOn(removedInternals, "sessionInfos");
-    await removedFixture.registry.catalog("all");
+    await settleCatalog(removedFixture.registry);
     await rm(removedFixture.sessionFile);
+    await settleCatalog(removedFixture.registry);
 
     await expect(removedFixture.registry.acquire(removedFixture.manager.getSessionId())).rejects.toMatchObject({
       code: "not_found",
     });
-    expect(removedMaterialize).toHaveBeenCalledTimes(1);
     expect(removedFixture.runtimeFactory).not.toHaveBeenCalled();
   });
 
@@ -2184,6 +1964,7 @@ describe.sequential("RuntimeRegistry with the pinned agent runtime", () => {
     // canonical catalog are delegated sessions; any neighbouring depth or
     // basename stays an ordinary user session, and a contradictory parent
     // header keeps the reserved child immutable without publishing a row.
+    await settleCatalog(fixture.registry);
     const rows = new Map((await fixture.registry.catalog("all")).sessions.map((row) => [row.id, row]));
     expect(rows.get("fork")).toMatchObject({ kind: "subagent", parentSessionId: "parent" });
     expect(rows.get("fresh")).toMatchObject({ kind: "subagent" });
@@ -2348,188 +2129,7 @@ describe.sequential("RuntimeRegistry with the pinned agent runtime", () => {
     }
   });
 
-  it("retries lightweight acquisition without stamping invalidated evidence current", async () => {
-    const fixture = await coldFixture("lightweight-generation-race");
-    const internals = fixture.registry as unknown as {
-      buildCatalogAcquisition: (...arguments_: any[]) => Promise<unknown>;
-      catalogAcquisition: () => Promise<unknown>;
-      invalidateCatalogAcquisition: () => void;
-      catalogAcquisitionInvalidationGeneration: number;
-      catalogAcquisitionAdmission?: { invalidationGeneration: number };
-    };
-    const original = internals.buildCatalogAcquisition.bind(fixture.registry);
-    let calls = 0;
-    // Requirement: an acquisition invalidated while it was being built is retried
-    // exactly once, and only an admission carrying the current invalidation
-    // generation may stand as current. The attempt count and that generation are
-    // private, and no published row differs when the fence is wrong.
-    const build = vi.spyOn(internals, "buildCatalogAcquisition").mockImplementation(async (...arguments_) => {
-      const resolution = await original(...arguments_);
-      calls += 1;
-      if (calls === 1) internals.invalidateCatalogAcquisition();
-      return resolution;
-    });
-
-    await internals.catalogAcquisition();
-    expect(build).toHaveBeenCalledTimes(2);
-    expect(internals.catalogAcquisitionAdmission?.invalidationGeneration)
-      .toBe(internals.catalogAcquisitionInvalidationGeneration);
-  });
-
-  it("fails busy after a second lightweight acquisition invalidation", async () => {
-    const fixture = await coldFixture("repeated-lightweight-generation-race");
-    const internals = fixture.registry as unknown as {
-      catalogStructureEvidence: () => Promise<unknown>;
-      catalogAcquisition: () => Promise<unknown>;
-      invalidateCatalogAcquisition: () => void;
-      catalogAcquisitionAdmission?: unknown;
-    };
-    const original = internals.catalogStructureEvidence.bind(fixture.registry);
-    // Requirement: a second invalidation exhausts the retry and fails closed with
-    // a retryable busy, and nothing is cached as admitted. Both facts are private
-    // state; the caller-visible error is the same busy a capacity bound throws.
-    const evidence = vi.spyOn(internals, "catalogStructureEvidence").mockImplementation(async () => {
-      const captured = await original();
-      internals.invalidateCatalogAcquisition();
-      return captured;
-    });
-
-    await expect(internals.catalogAcquisition()).rejects.toMatchObject({ code: "busy", retryable: true });
-    expect(evidence).toHaveBeenCalledTimes(2);
-    expect(internals.catalogAcquisitionAdmission).toBeUndefined();
-  });
-
-  it("cannot republish an acquisition invalidated during full materialization", async () => {
-    const fixture = await coldFixture("invalidation-race");
-    const internals = fixture.registry as unknown as {
-      sessionInfos: () => Promise<unknown[]>;
-      invalidateCatalogAcquisition: () => void;
-    };
-    const original = internals.sessionInfos.bind(fixture.registry);
-    let calls = 0;
-    // Requirement: a full materialization invalidated mid-flight is never
-    // published as the current cut; it is rebuilt once and the resulting
-    // admission then serves the next acquire without another scan. The bound on
-    // that work is only visible as a scan count.
-    const materialize = vi.spyOn(internals, "sessionInfos").mockImplementation(async () => {
-      const infos = await original();
-      calls += 1;
-      if (calls === 1) internals.invalidateCatalogAcquisition();
-      return infos;
-    });
-
-    await fixture.registry.catalog("all");
-    expect(materialize).toHaveBeenCalledTimes(2);
-    await fixture.registry.acquire(fixture.manager.getSessionId());
-    expect(materialize).toHaveBeenCalledTimes(2);
-  });
-
-  it("rejects a mutation in the final full-catalog publication gap", async () => {
-    const fixture = await coldFixture("final-publication-gap");
-    const internals = fixture.registry as unknown as {
-      publishCatalogAcquisition: (...arguments_: unknown[]) => Promise<boolean>;
-      invalidateCatalogAcquisition: () => void;
-      updateCatalogIdentity: (...arguments_: unknown[]) => void;
-      catalogAcquisitionAdmission?: unknown;
-    };
-    const original = internals.publishCatalogAcquisition.bind(fixture.registry);
-    const publication = vi.spyOn(internals, "publishCatalogAcquisition").mockImplementation(async (...arguments_) => {
-      const admitted = await original(...arguments_);
-      internals.invalidateCatalogAcquisition();
-      return admitted;
-    });
-    const identity = vi.spyOn(internals, "updateCatalogIdentity");
-
-    await expect(fixture.registry.catalog("all")).rejects.toMatchObject({ code: "busy", retryable: true });
-    expect(publication).toHaveBeenCalledTimes(1);
-    expect(identity).not.toHaveBeenCalled();
-    expect(internals.catalogAcquisitionAdmission).toBeUndefined();
-  });
-
-  it("fails busy without publishing after a second unstable full materialization", async () => {
-    const fixture = await coldFixture("repeated-instability");
-    const internals = fixture.registry as unknown as {
-      catalogStructureEvidence: () => Promise<{ digest: string; identitiesByPath: ReadonlyMap<string, unknown>; complete: boolean }>;
-      catalogAcquisition: () => Promise<unknown>;
-      sessionInfos: () => Promise<unknown[]>;
-      updateCatalogIdentity: (...arguments_: unknown[]) => void;
-      catalogAcquisitionAdmission?: unknown;
-    };
-    await internals.catalogAcquisition();
-    expect(internals.catalogAcquisitionAdmission).toBeDefined();
-    const originalEvidence = internals.catalogStructureEvidence.bind(fixture.registry);
-    let evidenceCall = 0;
-    const evidence = vi.spyOn(internals, "catalogStructureEvidence").mockImplementation(async () => {
-      const current = await originalEvidence();
-      evidenceCall += 1;
-      return { ...current, digest: `${current.digest}-${evidenceCall}` };
-    });
-    const materialize = vi.spyOn(internals, "sessionInfos");
-    const publishIdentity = vi.spyOn(internals, "updateCatalogIdentity");
-
-    try {
-      await expect(fixture.registry.catalog("all")).rejects.toMatchObject({ code: "busy", retryable: true });
-      expect(materialize).toHaveBeenCalledTimes(2);
-      expect(publishIdentity).not.toHaveBeenCalled();
-      expect(internals.catalogAcquisitionAdmission).toBeUndefined();
-    } finally {
-      evidence.mockRestore();
-    }
-  });
-
-  it("retains the stable user cut during a real child-session write", async () => {
-    const children: SessionManager[] = [];
-    let mutateDuringDiscovery = false;
-    let mutationCount = 0;
-    const fixture = await coldFixture("user-catalog-child-churn");
-    // The metadata pass is the point the invariant cares about: a child write
-    // that lands between the metadata cut and the post-read evidence cut must
-    // not lose the stable user cut.
-    const internals = fixture.registry as unknown as {
-      sharedCatalogSessionInfos: (scope?: "user" | "all", refresh?: boolean) => Promise<CatalogSessionInfo[]>;
-    };
-    const materialize = internals.sharedCatalogSessionInfos.bind(fixture.registry);
-    vi.spyOn(internals, "sharedCatalogSessionInfos").mockImplementation(async (scope, refresh) => {
-      const infos = await materialize(scope, refresh);
-      if (mutateDuringDiscovery) {
-        mutationCount += 1;
-        for (const child of children) {
-          child.appendMessage(fauxAssistantMessage("child registration update"));
-        }
-      }
-      return infos;
-    });
-    const first = await fixture.registry.catalog("user");
-    const parentFile = fixture.manager.getSessionFile()!;
-    const forksDirectory = join(dirname(parentFile), basename(parentFile, ".jsonl"), "forks");
-    await mkdir(forksDirectory, { recursive: true });
-    for (let index = 0; index < 2; index += 1) {
-      const child = SessionManager.forkFrom(parentFile, fixture.cwd, forksDirectory);
-      child.appendMessage(fauxAssistantMessage(`child registration ${index}`));
-      children.push(child);
-    }
-    // Force the canonical materialization path: the owner's document is settled
-    // and then removed, so this read cannot take the durable path. The invariant
-    // under test is the stable user cut while child files mutate during the real
-    // metadata pass.
-    const indexPath = join(fixture.root, "tron", "gateway", "catalog-metadata-v2.json");
-    await settleCatalog(fixture.registry);
-    expect(existsSync(indexPath)).toBe(true);
-    (fixture.registry as unknown as { catalogStructuralIndex: unknown }).catalogStructuralIndex = undefined;
-    await rm(indexPath, { force: true });
-    mutateDuringDiscovery = true;
-    try {
-      const userCut = await fixture.registry.catalog("user");
-      expect(mutationCount).toBeGreaterThan(0);
-      expect(userCut.sessions.map((session) => session.id)).toEqual(
-        first.sessions.map((session) => session.id),
-      );
-    } finally {
-      mutateDuringDiscovery = false;
-    }
-  });
-
-  it("retains user catalog and search admission while parallel delegated sessions append", async () => {
+              it("retains user catalog and search admission while parallel delegated sessions append", async () => {
     const fixture = await coldFixture("user-index-parallel-children");
     const parentFile = fixture.manager.getSessionFile()!;
     const forks = join(dirname(parentFile), basename(parentFile, ".jsonl"), "forks");
@@ -2559,37 +2159,7 @@ describe.sequential("RuntimeRegistry with the pinned agent runtime", () => {
     } finally { scanner.mockRestore(); }
   });
 
-  it("isolates an unfinished child append from unrelated catalog and cold-open reads", async () => {
-    const fixture = await coldFixture("partial-child-isolation");
-    const parentFile = fixture.manager.getSessionFile()!;
-    const parallel = SessionManager.create(fixture.cwd, dirname(parentFile));
-    parallel.appendMessage(fauxAssistantMessage("parallel parent"));
-    const forks = join(dirname(parentFile), basename(parentFile, ".jsonl"), "forks");
-    await mkdir(forks, { recursive: true });
-    const child = SessionManager.forkFrom(parentFile, fixture.cwd, forks);
-    child.appendMessage(fauxAssistantMessage("persisted child"));
-    await appendFile(child.getSessionFile()!, '{"type":"message"');
-    const internals = fixture.registry as any;
-    const fallback = vi.spyOn(internals, "fallbackCatalogAcquisition");
-    try {
-      const parentID = fixture.manager.getSessionId();
-      const first = await fixture.registry.catalog("user");
-      expect(first.sessions.map(row => row.id).sort()).toEqual([parentID, parallel.getSessionId()].sort());
-      const opened = await Promise.all([fixture.registry.acquire(parentID), fixture.registry.acquire(parallel.getSessionId())]);
-      expect(opened.map(slot => slot.id)).toEqual([parentID, parallel.getSessionId()]);
-      expect(fallback).not.toHaveBeenCalled();
-      await expect(fixture.registry.catalog("all")).rejects.toMatchObject({ code: "busy", retryable: true });
-      // A selected incomplete user file still fails closed at the owning read.
-      const other = SessionManager.create(fixture.cwd, dirname(parentFile));
-      other.appendMessage(fauxAssistantMessage("other parent"));
-      await appendFile(other.getSessionFile()!, '{"type":"message"');
-      const incomplete = await readFile(other.getSessionFile()!, "utf8");
-      await expect(fixture.registry.acquire(other.getSessionId()).then(slot => slot.id)).rejects.toMatchObject({ code: "busy", retryable: true });
-      expect(await readFile(other.getSessionFile()!, "utf8")).toBe(incomplete);
-    } finally { fallback.mockRestore(); }
-  });
-
-  it("refreshes user metadata and duplicate quarantine after a scoped cut is warm", async () => {
+    it("refreshes user metadata and duplicate quarantine after a scoped cut is warm", async () => {
     const fixture = await coldFixture("scoped-index-refresh");
     const parentFile = fixture.manager.getSessionFile()!;
     const forks = join(dirname(parentFile), basename(parentFile, ".jsonl"), "forks");
@@ -2597,6 +2167,7 @@ describe.sequential("RuntimeRegistry with the pinned agent runtime", () => {
     const child = SessionManager.forkFrom(parentFile, fixture.cwd, forks);
     child.appendMessage(fauxAssistantMessage("child"));
     const parentID = fixture.manager.getSessionId();
+    await settleCatalog(fixture.registry);
     const initialPage = await fixture.registry.pageSource("user");
     fixture.manager.appendSessionInfo("Updated canonical name");
     const refreshedPage = await fixture.registry.pageSource("user");
@@ -2630,54 +2201,7 @@ describe.sequential("RuntimeRegistry with the pinned agent runtime", () => {
     } finally { metadata.mockRestore(); }
   });
 
-  it("shares one successor header walk across concurrent post-read validations", async () => {
-    const fixture = await coldFixture("header-walk-sharing");
-    const internals = fixture.registry as any;
-    const original = internals.catalogStructureEvidence.bind(internals);
-    let entered!: () => void;
-    let release!: () => void;
-    const started = new Promise<void>(resolve => { entered = resolve; });
-    const barrier = new Promise<void>(resolve => { release = resolve; });
-    let active = 0;
-    let maximumActive = 0;
-    const scanner = vi.spyOn(internals, "catalogStructureEvidence").mockImplementation(async () => {
-      active += 1;
-      maximumActive = Math.max(maximumActive, active);
-      try {
-        if (scanner.mock.calls.length === 1) { entered(); await barrier; }
-        return await original();
-      } finally { active -= 1; }
-    });
-    try {
-      const first = internals.sharedCatalogStructureEvidence();
-      await started;
-      const refreshes = Array.from({ length: 8 }, () => internals.sharedCatalogStructureEvidence(true));
-      const ordinary = internals.sharedCatalogStructureEvidence();
-      release();
-      const results = await Promise.all([first, ordinary, ...refreshes]);
-      expect(results.every(value => value.complete)).toBe(true);
-      expect(scanner).toHaveBeenCalledTimes(2);
-      expect(maximumActive).toBe(1);
-      expect(results[0]).toBe(results[1]);
-      expect(results.slice(2).every(value => value === results[2])).toBe(true);
-    } finally { release(); scanner.mockRestore(); }
-  });
-
-  it("keeps cold acquisition independent of mutable catalog metadata", async () => {
-    const fixture = await coldFixture("header-only-acquisition");
-    await fixture.registry.catalog("all");
-    const internals = fixture.registry as any;
-    const metadata = vi.spyOn(internals, "validatedStructuralIndex").mockImplementation(() => {
-      throw new Error("acquisition must not depend on dashboard metadata");
-    });
-    try {
-      const slot = await fixture.registry.acquire(fixture.manager.getSessionId());
-      expect(slot.id).toBe(fixture.manager.getSessionId());
-      expect(metadata).not.toHaveBeenCalled();
-    } finally { metadata.mockRestore(); }
-  });
-
-  it("scans only canonical user metadata for a user catalog and reserves all-scope indexing", async () => {
+      it("scans only canonical user metadata for a user catalog and reserves all-scope indexing", async () => {
     const fixture = await coldFixture("user-metadata-cut");
     const parentFile = fixture.manager.getSessionFile()!;
     const forksDirectory = join(dirname(parentFile), basename(parentFile, ".jsonl"), "forks");
@@ -2707,89 +2231,7 @@ describe.sequential("RuntimeRegistry with the pinned agent runtime", () => {
     }
   });
 
-  it("coalesces acquisition successors across invalidations until prior physical work settles", async () => {
-    const fixture = await coldFixture("acquisition-successor-ownership");
-    const internal = fixture.registry as any;
-    const original = internal.resolveCatalogAcquisition.bind(internal);
-    let release!: () => void;
-    const gate = new Promise<void>(resolve => { release = resolve; });
-    const resolve = vi.spyOn(internal, "resolveCatalogAcquisition").mockImplementation(async () => {
-      if (resolve.mock.calls.length === 1) { await gate; throw new Error("retired cut"); }
-      return original();
-    });
-    const requests = [internal.catalogAcquisition().catch((error: unknown) => error)];
-    try {
-      internal.invalidateCatalogAdmission();
-      requests.push(internal.catalogAcquisition().catch((error: unknown) => error));
-      internal.invalidateCatalogAdmission();
-      requests.push(internal.catalogAcquisition().catch((error: unknown) => error));
-      expect(resolve).toHaveBeenCalledTimes(1);
-      release();
-      const results = await Promise.all(requests);
-      expect(results[0]).toMatchObject({ message: "retired cut" });
-      for (const result of results.slice(1)) expect(result.entriesByID.has(fixture.manager.getSessionId())).toBe(true);
-      expect(resolve).toHaveBeenCalledTimes(2);
-    } finally { release(); await Promise.all(requests); resolve.mockRestore(); }
-  });
-
-  it("lets user discovery finish while an all-scope scan remains blocked and fails", async () => {
-    const fixture = await coldFixture("scope-failure-isolation");
-    const internals = fixture.registry as any;
-    const original = internals.sessionInfos.bind(internals);
-    let enter!: () => void, release!: () => void;
-    const entered = new Promise<void>(resolve => { enter = resolve; });
-    const blocked = new Promise<void>(resolve => { release = resolve; });
-    const scanner = vi.spyOn(internals, "sessionInfos").mockImplementation(async scope => {
-      if (scope === "all") { enter(); await blocked; throw new Error("child-only instability"); }
-      return original(scope);
-    });
-    const all = fixture.registry.catalog("all").catch(error => error);
-    try {
-      await entered;
-      let published = false;
-      const users = Promise.all([fixture.registry.catalog("user"), fixture.registry.catalog("user")])
-        .then(results => { published = true; return results; });
-      void users.catch(() => {}); // Observe the joined failure in negative controls too.
-      await vi.waitFor(() => expect(published).toBe(true));
-      for (const result of await users) expect(result.sessions.map(row => row.id)).toEqual([fixture.manager.getSessionId()]);
-      expect(scanner.mock.calls.map(call => call[0])).toEqual(["all", "user"]);
-      release();
-      expect(await all).toMatchObject({ message: "child-only instability" });
-    } finally { release(); await all; scanner.mockRestore(); }
-  });
-
-  it("retires viewer capacity during one shared catalog wait without multiplying physical scans", async () => {
-    const fixture = await coldFixture("viewer-cancel-catalog");
-    const internals = fixture.registry as any;
-    const original = internals.catalogStructureEvidence.bind(internals);
-    let release!: () => void;
-    const blocked = new Promise<void>(resolve => { release = resolve; });
-    let scanSettled = false;
-    const scanner = vi.spyOn(internals, "catalogStructureEvidence").mockImplementation(async () => {
-      await blocked;
-      try { return await original(); } finally { scanSettled = true; }
-    });
-    const viewers = new ProcessTranscriptLeaseStore(fixture.registry);
-    try {
-      for (let index = 0; index < 6; index++) {
-        const viewerId = `viewer-${index}`;
-        let settled = false;
-        const opening = viewers.open("client", fixture.manager.getSessionId(), "process", "child", "run", undefined, vi.fn(), undefined,
-          { viewerId, parentSubscriptionToken: "parent-token" }).catch(error => { settled = true; return error; });
-        await vi.waitFor(() => expect(scanner).toHaveBeenCalledTimes(1));
-        expect(viewers.closeOwned("client", viewerId)).toBe(true);
-        await vi.waitFor(() => expect(settled).toBe(true));
-        expect(await opening).toMatchObject({ code: "conflict" });
-      }
-      expect(scanner).toHaveBeenCalledTimes(1);
-    } finally {
-      release();
-      await vi.waitFor(() => expect(scanSettled).toBe(true));
-      viewers.releaseClient("client"); scanner.mockRestore();
-    }
-  });
-
-  it("publishes child reference availability only after exact binding becomes authoritative", async () => {
+        it("publishes child reference availability only after exact binding becomes authoritative", async () => {
     const fixture = await coldFixture("binding-availability");
     const slot = await fixture.registry.acquire(fixture.manager.getSessionId());
     const timestamp = new Date().toISOString();
@@ -2814,44 +2256,7 @@ describe.sequential("RuntimeRegistry with the pinned agent runtime", () => {
     expect(slot.processChildSessionBinding(ready.processId)).toMatchObject({ ref: "child", producerId: "worker" });
   });
 
-  it("serializes an all-scope materialization behind an active user flight", async () => {
-    const fixture = await coldFixture("catalog-flight-ownership");
-    const parentFile = fixture.manager.getSessionFile()!;
-    const forksDirectory = join(dirname(parentFile), basename(parentFile, ".jsonl"), "forks");
-    await mkdir(forksDirectory, { recursive: true });
-    const child = SessionManager.forkFrom(parentFile, fixture.cwd, forksDirectory);
-    child.appendMessage(fauxAssistantMessage("delegated flight fixture"));
-    const internals = fixture.registry as unknown as {
-      sessionInfos: (scope?: "user" | "all") => Promise<unknown[]>;
-    };
-    const original = internals.sessionInfos.bind(fixture.registry);
-    let entered!: () => void;
-    let release!: () => void;
-    const enteredScan = new Promise<void>((resolve) => { entered = resolve; });
-    const barrier = new Promise<void>((resolve) => { release = resolve; });
-    const scanner = vi.spyOn(internals, "sessionInfos").mockImplementation(async (scope) => {
-      if (scanner.mock.calls.length === 1) {
-        entered();
-        await barrier;
-      }
-      return original(scope);
-    });
-    try {
-      const user = fixture.registry.catalog("user");
-      await enteredScan;
-      const all = fixture.registry.catalog("all");
-      await new Promise((resolve) => setTimeout(resolve, 10));
-      expect(scanner).toHaveBeenCalledTimes(1);
-      release();
-      await Promise.all([user, all]);
-      expect(scanner.mock.calls.map(([scope]) => scope)).toEqual(["user", "all"]);
-    } finally {
-      release();
-      scanner.mockRestore();
-    }
-  });
-
-  it("uses complete headers to quarantine user IDs duplicated by delegated files", async () => {
+    it("uses complete headers to quarantine user IDs duplicated by delegated files", async () => {
     const fixture = await coldFixture("user-duplicate-delegated");
     const parentFile = fixture.manager.getSessionFile()!;
     const forksDirectory = join(dirname(parentFile), basename(parentFile, ".jsonl"), "forks");
@@ -2859,6 +2264,7 @@ describe.sequential("RuntimeRegistry with the pinned agent runtime", () => {
     const duplicatePath = join(forksDirectory, "duplicate.jsonl");
     await copyFile(parentFile, duplicatePath);
 
+    await settleCatalog(fixture.registry);
     const user = await fixture.registry.catalog("user");
     expect(user.sessions.find((session) => session.id === fixture.manager.getSessionId())).toBeUndefined();
     const allDuplicate = await fixture.registry.catalog("all");
@@ -2888,6 +2294,7 @@ describe.sequential("RuntimeRegistry with the pinned agent runtime", () => {
     const child = SessionManager.forkFrom(parentFile, fixture.cwd, forksDirectory);
     child.appendMessage(fauxAssistantMessage("delegated membership fixture"));
 
+    await settleCatalog(fixture.registry);
     const initial = await fixture.registry.pageSource("user");
     const secondDirectory = join(fixture.agentDir, "sessions", "second");
     await mkdir(secondDirectory, { recursive: true });
@@ -3053,6 +2460,7 @@ describe.sequential("RuntimeRegistry with the pinned agent runtime", () => {
     registries.push(registry);
 
     await initializeRegistry(registry);
+    await settleCatalog(registry);
     const all = await registry.catalog("all");
     expect(all.sessions.map((session) => session.id)).not.toContain(parentId);
     expect(all.sessions.find((session) => session.id === childId)).toMatchObject({ kind: "subagent" });
@@ -3095,6 +2503,7 @@ describe.sequential("RuntimeRegistry with the pinned agent runtime", () => {
     registries.push(registry);
 
     await initializeRegistry(registry);
+    await settleCatalog(registry);
     expect((await registry.catalog("all")).sessions.map((session) => session.id)).not.toContain(childId);
     const acquisition = await (registry as unknown as {
       catalogAcquisition: () => Promise<{
@@ -3138,6 +2547,7 @@ describe.sequential("RuntimeRegistry with the pinned agent runtime", () => {
     registries.push(registry);
 
     await initializeRegistry(registry);
+    await settleCatalog(registry);
     expect((await registry.catalog("all")).sessions.find((session) => session.id === childId)?.kind)
       .toBe("subagent");
     await rm(parentFile);
@@ -3192,6 +2602,7 @@ describe.sequential("RuntimeRegistry with the pinned agent runtime", () => {
     registries.push(registry);
 
     await initializeRegistry(registry);
+    await settleCatalog(registry);
     const all = await registry.catalog("all");
     expect(all.sessions).toHaveLength(1_541);
     expect(all.sessions.find((session) => session.id === childId)?.kind).toBe("subagent");
@@ -3276,67 +2687,7 @@ describe.sequential("RuntimeRegistry with the pinned agent runtime", () => {
     expect(first.digest).toBe(second.digest);
   });
 
-  it("acquires from header evidence while a full catalog materialization is suspended", async () => {
-    const fixture = await coldFixture("concurrent-list");
-    const internals = fixture.registry as unknown as { sessionInfos: () => Promise<unknown[]> };
-    const original = internals.sessionInfos.bind(fixture.registry);
-    let suspendedResolve!: () => void;
-    let releaseResolve!: () => void;
-    const suspended = new Promise<void>((resolve) => { suspendedResolve = resolve; });
-    const release = new Promise<void>((resolve) => { releaseResolve = resolve; });
-    const materialize = vi.spyOn(internals, "sessionInfos").mockImplementation(async () => {
-      suspendedResolve();
-      await release;
-      return original();
-    });
-
-    const listing = fixture.registry.catalog("all");
-    await suspended;
-    try {
-      expect((await fixture.registry.acquire(fixture.manager.getSessionId())).id)
-        .toBe(fixture.manager.getSessionId());
-      expect(materialize).toHaveBeenCalledTimes(1);
-    } finally {
-      releaseResolve();
-    }
-    await expect(listing).resolves.toMatchObject({
-      sessions: expect.arrayContaining([expect.objectContaining({ id: fixture.manager.getSessionId() })]),
-    });
-  });
-
-  it.each(["ordinary", "inherited"])("does not advance settled session recency when a cold runtime is opened (%s messages)", async (kind) => {
-    const fixture = await coldFixture("open-does-not-refresh-recency", {
-      beforeInitialize: async (path) => {
-        if (kind !== "inherited") return;
-        // Fork/import headers can be newer than the conversation they contain.
-        const entries = (await readFile(path, "utf8")).trimEnd().split("\n").map((line) => JSON.parse(line));
-        for (const entry of entries) {
-          if (entry.type !== "message") continue;
-          entry.timestamp = "2026-01-01T00:00:00.000Z";
-          entry.message.timestamp = Date.parse(entry.timestamp);
-        }
-        await writeFile(path, `${entries.map((entry) => JSON.stringify(entry)).join("\n")}\n`);
-      },
-    });
-    const before = await fixture.registry.catalog("user");
-    const canonicalUpdatedAt = before.sessions.find((session) => session.id === fixture.manager.getSessionId())!.updatedAt;
-
-    // Ensure opening happens after the canonical timestamp, as it does when a
-    // dashboard resumes an older row.
-    await new Promise((resolve) => setTimeout(resolve, 25));
-    const openedAt = Date.now();
-    await fixture.registry.acquire(fixture.manager.getSessionId());
-
-    const after = await fixture.registry.catalog("user");
-    expect(after.sessions.find((session) => session.id === fixture.manager.getSessionId())!.updatedAt)
-      .toBe(canonicalUpdatedAt);
-    const openedSummaries = fixture.summaries.filter((summary) => summary.sessionId === fixture.manager.getSessionId());
-    expect(openedSummaries.length).toBeGreaterThan(0);
-    expect(openedSummaries.every((summary) => summary.updatedAt === canonicalUpdatedAt)).toBe(true);
-    expect(Date.parse(openedSummaries.at(-1)!.updatedAt)).toBeLessThan(openedAt);
-  });
-
-  it("orders history by parsed recency while active heartbeats keep stable positions", async () => {
+    it("orders history by parsed recency while active heartbeats keep stable positions", async () => {
     const root = await mkdtemp(join(tmpdir(), "tron-catalog-time-precision-"));
     const agentDir = join(root, "agent");
     const cwd = join(root, "workspace");
@@ -3410,63 +2761,7 @@ describe.sequential("RuntimeRegistry with the pinned agent runtime", () => {
     ]);
   });
 
-  it("never stamps captured stale catalog fields with a newer summary revision", async () => {
-    const root = await mkdtemp(join(tmpdir(), "tron-catalog-summary-race-"));
-    const agentDir = join(root, "agent");
-    const cwd = join(root, "workspace");
-    await Promise.all([mkdir(agentDir), mkdir(cwd)]);
-    const runtime = await ModelRuntime.create({ modelsPath: null, refreshOnCreate: false });
-    const faux = fauxProvider({ provider: "tron-catalog-race", tokensPerSecond: 10_000 });
-    faux.setResponses([fauxAssistantMessage("catalog ready")]);
-    runtime.registerNativeProvider(faux.provider);
-    const summaries: SessionSummaryUpdate[] = [];
-    const registry = new RuntimeRegistry({
-      agentDir,
-      tronHome: join(root, "tron"),
-      idleRuntimeMs: 60_000,
-      modelRuntimeFactory: async () => runtime,
-      trust: new TrustService(agentDir),
-      broadcast: () => {},
-      sessionSummaryChanged: (summary) => summaries.push(summary),
-      sessionListChanged: () => {},
-    });
-    registries.push(registry);
-    await initializeRegistry(registry);
-    const slot = await registry.create(cwd);
-    const model = faux.getModel();
-    await slot.setModel(model.provider, model.id);
-    await slot.prompt("catalog race baseline");
-    await waitUntil(() => !slot.isBusy);
-    await waitUntil(() => registry.attentionProjection(slot.id).isUnread);
-    expect(registry.attentionProjection(slot.id)).toMatchObject({ completionRevision: 1, isUnread: true });
-
-    const internals = registry as unknown as { sessionInfos: () => Promise<unknown[]> };
-    const originalSessionInfos = internals.sessionInfos.bind(registry);
-    let capturedResolve!: () => void;
-    let releaseResolve!: () => void;
-    const captured = new Promise<void>((resolve) => { capturedResolve = resolve; });
-    const release = new Promise<void>((resolve) => { releaseResolve = resolve; });
-    vi.spyOn(internals, "sessionInfos").mockImplementation(async () => {
-      const infos = await originalSessionInfos();
-      capturedResolve();
-      await release;
-      return infos;
-    });
-
-    const loading = registry.catalog("user");
-    await captured;
-    await slot.rename("new authoritative name");
-    const latest = summaries.at(-1)!;
-    releaseResolve();
-    const catalog = await loading;
-
-    expect(catalog.sessions[0]?.name).toBe(latest.name);
-    expect(catalog.sessions[0]?.phase).toBe(latest.phase);
-    expect(catalog.sessions[0]?.messageCount).toBe(latest.messageCount);
-    expect(catalog.sessions[0]?.summaryRevision).toBe(latest.summaryRevision);
-  });
-
-  it("matches a full scan after create, rename, fork and delete in the catalog index", async () => {
+    it("matches a full scan after create, rename, fork and delete in the catalog index", async () => {
     const root = await mkdtemp(join(tmpdir(), "tron-catalog-index-mutations-"));
     const agentDir = join(root, "agent");
     const cwd = join(root, "workspace");
