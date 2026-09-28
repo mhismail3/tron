@@ -535,8 +535,12 @@ evidence). Frames Instruments could not symbolicate appear as
 missing symbols are visible. The optimized products keep their symbol tables,
 so app and test frames resolve by name; heavy inlining attributes inlined work
 to its caller. Exports are streamed row by row (a host-wide export of a loaded
-Mac is large); `scripts/test-tron-profile-attribution.py` covers the export
-parsing failure modes.
+Mac is large) and each repeated value is kept once, so the parser's memory
+grows with distinct values, not with references (1.7 GB for a 342 MB
+host-wide trace with 1 M samples). `xcrun xctrace export` itself needs several
+GB for such a trace, which is one more reason to keep traced runs short;
+`scripts/test-tron-profile-attribution.py` covers the export parsing failure
+modes.
 
 A traced report is marked (`context.trace` and a warning): Instruments
 overhead distorts every resource metric in it, and `compare` refuses it.

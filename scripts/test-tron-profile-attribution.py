@@ -22,6 +22,10 @@ could still point an agent at the wrong owner without any simulator:
 8. The self-test accepts a traced control run whose known workload function is
    not among the top self-time symbols, or whose windows are misplaced so the
    workload shows up outside them.
+9. Parsing retains memory per reference instead of per definition: every
+   `<frame ref>` inside a retained backtrace stays its own element, so a
+   host-wide export (15 M frame references on a loaded Mac) takes the profiler
+   past 5 GB.
 """
 
 from __future__ import annotations
@@ -31,6 +35,7 @@ import importlib.util
 from pathlib import Path
 import sys
 import tempfile
+import tracemalloc
 import unittest
 from unittest import mock
 
@@ -171,6 +176,30 @@ class ExportParsing(unittest.TestCase):
                 '<thread-state>Running</thread-state><weight>1</weight><tagged-backtrace ref="97"/></row>'])), None, None)
         with self.assertRaises(attribution.AttributionError):
             list(attribution.iter_rows("<trace-toc/>"))
+
+    def test_retained_memory_does_not_grow_with_references(self) -> None:
+        # 2,000 distinct stacks, each 1 new leaf over the same 199 shared
+        # frames: 398,000 frame references to 2,199 frame definitions.
+        samples = Samples()
+        shared = [(f"caller{depth}()", "UIKitCore") for depth in range(199)]
+        rows = [samples.row(time, MAIN, [(f"leaf{time}()", "TronMobile"), *shared]) for time in range(2_000)]
+        with tempfile.TemporaryDirectory() as directory:
+            export = Path(directory) / "time-profile.xml"
+            export.write_text(result("time-profile", TIME_PROFILE_COLUMNS, rows))
+            del rows
+            tracemalloc.start()
+            try:
+                summary = attribution.summarize_time_profile(attribution.iter_rows(export), None, 42)
+                _, peak = tracemalloc.get_traced_memory()
+            finally:
+                tracemalloc.stop()
+        # Kept per reference, the references alone take ~120 MB here.
+        self.assertLess(peak, 24 * 1024 * 1024)
+        self.assertEqual(summary["samples"], 2_000)
+        # Every shared frame, reached only through references, is in every sample.
+        total = summary["all_threads"]["total"]
+        self.assertEqual(len(total), attribution.TOP_SYMBOLS)
+        self.assertTrue(all(row["symbol"].startswith("caller") and row["share"] == 1.0 for row in total))
 
     def test_recursion_counts_once_toward_total_time(self) -> None:
         samples = Samples()

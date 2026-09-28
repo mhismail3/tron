@@ -14,7 +14,7 @@ symbolicate are named as unresolved addresses per image, never dropped.
 
 Exports are streamed: a host-wide Time Profiler export of a loaded Mac runs to
 gigabytes, so rows are read one at a time and only values defined once (and
-referenced later) are retained.
+referenced later) are retained, each once, however often later rows repeat it.
 """
 
 from __future__ import annotations
@@ -74,30 +74,20 @@ class AttributionError(Exception):
 # ------------------------------------------------------------------ export ---
 
 class Table:
-    """One exported xctrace table: column mnemonics and a shared id map.
+    """One exported xctrace table: column mnemonics by position.
 
-    xctrace writes each distinct value once with an `id` and later repeats it
-    as `<element ref="id"/>`, possibly many rows later; `cell()` returns the
-    defining element so callers never see a bare reference. A `<sentinel/>`
-    cell (no value) reads as None.
+    Rows reach callers with every reference already replaced by its defining
+    element (`iter_rows`). A `<sentinel/>` cell (no value) reads as None.
     """
 
-    def __init__(self, schema: str, columns: list[str], elements: dict[str, ElementTree.Element]) -> None:
+    def __init__(self, schema: str, columns: list[str]) -> None:
         self.schema = schema
         self.columns = columns
-        self._elements = elements
         self._index = {name: position for position, name in enumerate(columns)}
 
-    def resolve(self, element: ElementTree.Element | None) -> ElementTree.Element | None:
-        if element is None:
-            return None
-        reference = element.get("ref")
-        if reference is not None:
-            resolved = self._elements.get(reference)
-            if resolved is None:
-                raise AttributionError(f"{self.schema}: reference to undefined element id {reference}")
-            element = resolved
-        return None if element.tag == "sentinel" else element
+    @staticmethod
+    def resolve(element: ElementTree.Element | None) -> ElementTree.Element | None:
+        return None if element is None or element.tag == "sentinel" else element
 
     def cell(self, row: list[ElementTree.Element], column: str) -> ElementTree.Element | None:
         position = self._index.get(column)
@@ -115,9 +105,13 @@ Rows = Iterable[tuple[Table, list[ElementTree.Element]]]
 def iter_rows(source: bytes | str | Path) -> Iterator[tuple[Table, list[ElementTree.Element]]]:
     """Stream `(table, row cells)` from `xctrace export --xpath` output.
 
-    `source` is the XML itself (bytes/str) or a path to it. Each row is
-    detached once consumed; elements carrying an `id` stay in the shared map
-    because later rows may reference them.
+    `source` is the XML itself (bytes/str) or a path to it. xctrace writes each
+    distinct value once with an `id` and repeats it as `<element ref="id"/>`,
+    possibly many rows later, so elements carrying an `id` stay in a map. When
+    an element ends, each reference among its children is replaced by the
+    shared definition: memory then grows with distinct values, not with
+    references (a host-wide export repeats frames ~15 M times, which kept per
+    reference took the profiler past 5 GB). Each row is detached once consumed.
     """
     stream = Path(source).open("rb") if isinstance(source, Path) else io.BytesIO(
         source.encode() if isinstance(source, str) else source)
@@ -135,12 +129,20 @@ def iter_rows(source: bytes | str | Path) -> Iterator[tuple[Table, list[ElementT
                 elif element.tag == "node":
                     node, table = element, None
                 continue
+            for position, child in enumerate(element):
+                reference = child.get("ref")
+                if reference is not None:
+                    definition = elements.get(reference)
+                    if definition is None:
+                        raise AttributionError(f"{table.schema if table else 'export'}: reference to undefined "
+                                               f"element id {reference}")
+                    element[position] = definition
             identifier = element.get("id")
             if identifier is not None:
                 elements[identifier] = element
             if element.tag == "schema" and node is not None:
                 columns = [column.findtext("mnemonic") or "" for column in element.findall("col")]
-                table = Table(element.get("name") or "", columns, elements)
+                table = Table(element.get("name") or "", columns)
             elif element.tag == "row":
                 if table is None:
                     raise AttributionError("xctrace export row precedes its <schema>; the export format changed")
