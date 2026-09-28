@@ -2,7 +2,7 @@
 
 - **Started:** 2026-09-27
 - **Status:** Active (approved in chat by the user on 2026-09-27)
-- **Last updated:** 2026-09-28, T3-TRANSCRIPT dropped by data; P-6 claimed
+- **Last updated:** 2026-09-28, pause point: T1-TEXT, T2-FONTS, T2-COLORS merged
 - **Goal:** Tron for iPhone does measurably less CPU, disk, timer and radio work per minute of real use, proven by a reliable profiler that every agent can run, with no change to what the user sees or does.
 
 ## Goal and constraints
@@ -152,18 +152,18 @@ two-frames-per-window cadence the same scenario measured 60.9 G instructions and
 | P-3 | Done | Attribution: `--trace` for iOS scenarios (xctrace Time Profiler, SwiftUI, Points of Interest; exported top-symbol summary) and an attach-only `device` mode for a user-launched LocalDevice app | P-1 | energy-efficiency supervisor, worker lane p3, 2026-09-27 |
 | P-4 | Done | Baseline: run every P-1 and P-2 scenario on `main`, record the numbers and host state in this plan's Context | P-1, P-2 | energy-efficiency supervisor, 2026-09-27 |
 | P-5 | Blocked | Simulator-device Instruments (SwiftUI view-body counts, app signposts) never starts from agent sessions on this Mac ("Device disconnected while trying to set tap configuration", also on a fresh iOS 27 simulator); the user checks from their own Terminal, and `device --attach` capture is verified on a user-launched app | P-3 | |
-| P-6 | Claimed | Make every iOS scenario's workload deterministic: an iteration whose workload did not actually render (for example streaming-reply's pinned tail not followed, `chat.lease.repair-exhausted`) is detected, retried within a bound and otherwise fails the run; the mode is exposed as a scenario counter so `compare` never mixes modes | P-1 | energy-efficiency supervisor, worker lane p6, 2026-09-28 |
-| R-FOLLOW | Needs scoping | In about half of streaming-reply iterations on `main` the pinned chat does not follow the live stream (lease repair exhausted, reply off screen); determine whether this is a hosted-window artifact or a real following bug, and route a real bug to the chat transcript stability plan | none | |
+| P-6 | Blocked | Every scenario gains a post-window render check with bounded retries (branch `perf/p6`, unmerged, checks not yet run for every scenario); streaming-reply cannot be made single-mode while R-FOLLOW's bug stands — it now fails with evidence instead of mixing modes | P-1, R-FOLLOW | energy-efficiency supervisor, worker lane p6, 2026-09-28 |
+| R-FOLLOW | Ready | Real chat bug, found by P-6: when a prompt and its streaming reply enter together, the physical-tail repair is applied but SwiftUI lands about 1,760 pt above the tail ("Geometry action is cycling between duplicate values"), both attempts exhaust (`chat.lease.repair-exhausted`) and the target-free rebase never returns, so the pinned chat stops following in about 70% of hosted windows; opening a running session mid-reply also fails readiness. Belongs with the chat transcript stability plan; evidence under `~/Library/Developer/Tron/profiles/ios/` | none | |
 | T1-GW | Done | Gateway: re-arm the streaming throttle; delete `session.bashProgress` and `session.heartbeat`; skip the heartbeat ping while a client proved liveness within the interval, keeping today's detection bound | none (keep decision: P-1, P-2) | energy-efficiency supervisor, worker lane t1-gw, 2026-09-27 |
 | T1-CACHE | Done | `SnapshotCache`: drop checkpoints that cannot change it, coalesce summary checkpoints and checkpoint on background, drop the save-path double admission pass | none (keep decision: P-1, P-2) | energy-efficiency supervisor, worker lane t1-persist, 2026-09-27 |
 | T1-DRAFTS | Done | `ComposerDraftStore`: in-memory logical clock, size accounting without re-hashing, manifest-only writes when attachments are unchanged; no observable mutation for unchanged text | none (keep decision: P-1, P-2) | energy-efficiency supervisor, worker lane t1-persist, 2026-09-27 |
-| T1-TEXT | Claimed | `discreteInsertedIDs` to O(n) with an equivalence check; `ChatStreamingInlineText` keeps settled text whole (preserving the streaming-flip reveal state) and caches the revealed prefix | none (keep decision: P-1, P-2) | energy-efficiency supervisor, worker lane t1-text, 2026-09-27 |
+| T1-TEXT | Done | `discreteInsertedIDs` to O(n) with an equivalence check; `ChatStreamingInlineText` keeps settled text whole (preserving the streaming-flip reveal state) and caches the revealed prefix | none (keep decision: P-1, P-2) | energy-efficiency supervisor, worker lane t1-text, 2026-09-27 |
 | T1-CLOCKS | Done | Timeline schedules that fire when a label can change: dashboard rows, tool elapsed timers (sub-minute cadence preserved), static inbox formatter | none (keep decision: P-1, P-2) | energy-efficiency supervisor, worker lane t1-clocks, 2026-09-27 |
 | T1-NET | Done | One shared ping grid for every socket (no interval ever longer than today), lease renewal on that grid at no longer than today's interval, one shared `URLSession` for idempotent GETs with per-task delegates | none (keep decision: P-1, P-2) | energy-efficiency supervisor, worker lane t1-net, 2026-09-27 |
 | T3-DEFLATE | Done | Negotiate `permessage-deflate` for paired (non-loopback) clients that offer it; confirm the offer from the iOS simulator app, keep inbound size bounds on decompressed bytes, and keep outbound queue accounting and backpressure exact | none (keep decision: P-2) | energy-efficiency supervisor, worker lane t3-deflate, 2026-09-27 |
-| T2-FONTS | Claimed | Stop rebuilding fonts on view updates: `TronFontLoader.createUIFont` and `UIFont(descriptor:size:)` take 5–8% of main-thread time in every traced scenario; cache the created fonts by exact descriptor and size with identical output (Dynamic Type and settings changes still invalidate) | none (keep decision: P-1) | energy-efficiency supervisor, worker lane t2-theme, 2026-09-27 |
-| T2-COLORS | Claimed | Stop re-parsing theme colors per body (`Color(lightHex:darkHex:)`, `UIColor(hex:)` in the idle-dashboard trace): resolve each theme color once with identical light/dark and settings behavior | none (keep decision: P-1) | energy-efficiency supervisor, worker lane t2-theme, 2026-09-27 |
-| T2-PULSE | Claimed | Cut the per-frame main-thread cost of `TronPulseLoadingIndicator` (11% of idle-dashboard main-thread time) without changing a rendered frame, cadence or gating | none (keep decision: P-1) | energy-efficiency supervisor, worker lane t2-pulse, 2026-09-27 |
+| T2-FONTS | Done | Stop rebuilding fonts on view updates: `TronFontLoader.createUIFont` and `UIFont(descriptor:size:)` take 5–8% of main-thread time in every traced scenario; cache the created fonts by exact descriptor and size with identical output (Dynamic Type and settings changes still invalidate) | none (keep decision: P-1) | energy-efficiency supervisor, worker lane t2-theme, 2026-09-27 |
+| T2-COLORS | Done | Stop re-parsing theme colors per body (`Color(lightHex:darkHex:)`, `UIColor(hex:)` in the idle-dashboard trace): resolve each theme color once with identical light/dark and settings behavior | none (keep decision: P-1) | energy-efficiency supervisor, worker lane t2-theme, 2026-09-27 |
+| T2-PULSE | Done | Cut the per-frame main-thread cost of `TronPulseLoadingIndicator` (11% of idle-dashboard main-thread time) without changing a rendered frame, cadence or gating (not shipped: every restructuring that cut its cost stopped the redraw; T2-COLORS removed its hex re-parse instead; a liveness guard now protects all animated indicators) | none (keep decision: P-1) | energy-efficiency supervisor, worker lane t2-pulse, 2026-09-28 |
 | T2-CHATVIEW | Needs scoping | Transcript install cost from the traces: `ChatPhysicalTranscriptReplacementHost.body` with `renderedContent`/`replacementContent` (21% of tool-loop main-thread time), whole-transcript equality (`InstalledChatTranscript ==`, `ChatTranscriptItems ==`, 7.5% of streaming) and render-item copies (memmove 8–10%); ChatView observes the snapshot and the installed transcript in separate scopes | T1-TEXT | |
 | T2-DASH | Done | Dashboard root stops re-evaluating on every summary; parsed ordering instants; cheaper per-row path helpers; filter preferences saved only on change (narrowed into T2-PULSE, T2-FONTS and T2-COLORS by the traces) | T1-CLOCKS | |
 | T2-THINK | Done | Thinking trace measures its visible text instead of a hidden full copy (dropped: not a traced hotspot) | T1-TEXT | |
@@ -634,4 +634,24 @@ re-projection is a material share of that time.
   branch passed.
 - Pruned by data: T3-STREAM, T3-TOOLPROG, T3-CATALOG, T2-SMALL, T2-THINK,
   T2-TEXTPREP and T2-DASH (reasons in their rows).
+
+### Pause point · 2026-09-28 · energy-efficiency supervisor (lanes t1-text, t2-theme, t2-pulse, p6)
+
+- Merged: T1-TEXT (linear entrance classification; revealed-prefix text
+  rendering), T2-COLORS (hex parsed once per theme color, static pill
+  palette), T2-FONTS (fonts cached by every shaping input) and a liveness guard
+  (`ContinuousIndicatorLivenessTests`) proving every animated indicator keeps
+  drawing while its gates are open and holds still when closed.
+- Evidence: T2 instructions −32.6% idle-dashboard, −15.7% tool-loop, −11.5%
+  streaming-reply (followed-tail iterations), 0 regressions; T1-TEXT −5% on
+  streaming iterations that render the reply, −4.3% tool-loop. The liveness
+  guard failed a known frozen variant (1 of 8 frames) and passes on the merged
+  code. Combined gates: full unit tier 1,753 passed, CT-12/CT-14 parity passed,
+  real-Gateway E2E passed.
+- Not shipped: T2-PULSE (see its row). The known duplicate-trailing-word
+  tokenizer bug in `ChatStreamingInlineText` is unchanged by design and needs
+  the user's decision (`"Hello world "` renders `"Hello world world "`; the fix
+  is a labeled `continue`).
+- Next: R-FOLLOW (with the chat transcript stability plan), then P-6, then
+  T2-CHATVIEW (21% of tool-loop main-thread time in the transcript host).
 
