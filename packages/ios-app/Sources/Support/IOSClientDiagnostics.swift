@@ -357,7 +357,7 @@ struct IOSClientDiagnosticBuffer: Sendable {
             }
             var bodyEnd = runEnd + 3
             while bodyEnd < units.count, !isURLDelimiterUnit(units[bodyEnd]) { bodyEnd += 1 }
-            guard let match = pattern.firstMatch(in: value, range: NSRange(location: start, length: bodyEnd - start)),
+            guard let match = pattern.firstMatch(in: value, options: .anchored, range: NSRange(location: start, length: bodyEnd - start)),
                   match.range.length > 0 else {
                 index = runEnd + 1
                 continue
@@ -382,8 +382,9 @@ struct IOSClientDiagnosticBuffer: Sendable {
     }
 
     /// The `\s`, `"`, `'`, `<` and `>` of the pattern's body class. A scalar
-    /// this treats as body that the pattern calls whitespace only shortens the
-    /// window, and the pattern still decides the match.
+    /// this treats as body that the pattern calls whitespace (a non-ASCII space)
+    /// can widen the window, so the match is anchored at the run's start and the
+    /// pattern still decides it without an unanchored rescan.
     private static func isURLDelimiterUnit(_ unit: UInt16) -> Bool {
         switch unit {
         case 0x09, 0x0A, 0x0B, 0x0C, 0x0D, 0x20, 0x22, 0x27, 0x3C, 0x3E: true
