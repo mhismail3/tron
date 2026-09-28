@@ -2,6 +2,9 @@
 
 - **Started:** 2026-09-27
 - **Status:** Active (Phase 1 runs on `hardening/integration`; that branch's copy of this plan is authoritative until R-1)
+- **Last updated:** 2026-09-28, E-3a done: the pinned LAN listener binds a
+  private address, rebinds or disables when that address changes, shares the
+  transport's admission and refuses pairing (see the handoff)
 - **Last updated:** 2026-09-28, G-8b review round 2 addressed: the poller
   owns one admission cache shared with the explicit user actions, the explicit
   probe records its outcome, and the runtime fence stamps the bundled manifest
@@ -590,7 +593,7 @@ rows are in priority order.
 | G-9 | Claimed | One background-work scheduler that yields to requests; measure the libuv pool size | O-5, G-1b | orchestrator-dispatched deepseek-worker, 2026-09-28 |
 | G-4 | Done | Outbound queue coalescing of superseded snapshots (one covering `session.rebaseline`) and summary revisions by key | G-3 | orchestrator-dispatched deepseek-worker, 2026-09-28 (branch `hardening/g-4`; review round 1 addressed: a superseded sequence is covered by the `session.rebaseline` that replaces it; round 2: only state the snapshot fully re-states and only its own runtime generation, a one-shot frame is a fence; round 3 after merging `hardening/integration`: the replacement path's client is asserted on the authority it installs, covered `session.snapshot`/`session.rebaseline` alike, and the round's fixtures speak protocol 6); the O-6b bandwidth-stream before/after numbers are owed to the orchestrator's quiet-host runs |
 | G-5 | Done | Byte budget for live runtimes and an explicit heap limit | O-5 | orchestrator-dispatched deepseek-worker, 2026-09-28 |
-| E-3a | Claimed | LAN endpoint (D-5), Gateway side: pinned TLS listener bound to the private LAN address | O-1, O-2 | orchestrator-dispatched deepseek-worker, 2026-09-28 |
+| E-3a | Done | LAN endpoint (D-5), Gateway side: pinned TLS listener bound to the private LAN address | O-1, O-2 | orchestrator-dispatched deepseek-worker, 2026-09-28 |
 | E-3b | Ready | LAN endpoint: advertise endpoints and pin in pairing and hello | E-3a | |
 | E-3c | Ready | LAN endpoint, phone side: pin validation, staggered race, seamless fallback | E-3b, C-3 | |
 | E-3d | Ready | LAN endpoint on by default in the release once E-3c's E2E cases pass; the setting is the kill switch | E-3c | |
@@ -7849,3 +7852,51 @@ wait).
   `lease.lock` means a named-lane command ran in the default lane; treat it as
   evidence of a lane/lease mismatch, and check `TRON_IOS_TEST_LEASE_LOCK` when a
   command is refused (74) with "inherited iOS test lease covers".
+
+### E-3a · Done · 2026-09-28 · orchestrator-dispatched deepseek-worker (branch `hardening/e-3a`)
+
+- Result: the Gateway can serve a second, TLS-only listener on the Mac's private
+  LAN address, off unless `--lan-endpoint on` / `TRON_GATEWAY_LAN_ENDPOINT=on`
+  (default false; E-3d flips it). New `src/transport/lan-endpoint.ts` owns the
+  listener: it binds only an RFC 1918 or IPv6 ULA address the host has (never a
+  wildcard, link-local or Tailscale's fd7a:115c:a1e0::/48, which is inside the
+  ULA range), on the main listener's port, rebinds when the preferred address
+  changes, and disables itself when none is left. The key and self-signed
+  certificate live at `~/.tron/gateway/lan-endpoint/` (0600 in a 0700
+  directory), are created once on first use, and a half-present, unreadable or
+  mismatched pair disables the endpoint without overwriting it (a paired phone
+  pins the public key). `config.ts` resolves the private addresses
+  (`isPrivateLanAddress`, `resolveLanAddresses`) and the setting; `server.ts`
+  wires only: the LAN server's socket/request/upgrade events enter the existing
+  `admitHttpConnection`, `handleHttp` and `handleUpgrade`, so admission,
+  capacity, heartbeat, revocation and hello are the same code. The lane serves
+  the socket route and the authenticated routes only: `POST /v1/pair` answers
+  404 there, and `/health` on the lane answers `{ status }` alone. Every
+  `http.upgrade` record now carries `transport` (`lan` / `tailscale` /
+  `primary`), and each bind, rebind or disable writes one `lan.listener` record
+  with `state`, `family` and `port` — family and port, never the address.
+- Evidence: `npx tsc --noEmit -p .` clean. `npx vitest run
+  src/transport/lan-endpoint.integration.test.ts` 6/6 (real TCP/TLS/WebSocket
+  sockets; the fixture's LAN address is loopback, since that is the only
+  address a test may bind, and the cert chain is verified against the file):
+  create-once 0600 pair reused across a restart; three bad-pair cases each
+  disabled and untouched; first-of-two addresses bound, rebound to the second
+  with the old address's socket retired, then one disable record for the empty
+  list; one `bind_failed` record for an unbindable address; the Gateway's lane
+  bound on `::1` at the main listener's port serving a `wss` hello whose
+  `http.upgrade` says `transport=lan` (vs `primary` on the plain listener),
+  minimal lane `/health`, 401 on an authenticated route without a credential and
+  404 for lane pairing; setting off binds nothing; shutdown retires the lane's
+  sockets. `npx vitest run src/config.test.ts` 28/28 (predicate, ordering,
+  setting parse).
+- Deviations: `transport` is a new `LogMetadata` field in
+  `src/transport/logger.ts`, so the lane's legs are attributable in
+  `http.upgrade` without changing that record's message shape; `lan.listener`
+  keeps its detail (`state`/`family`/`port`) in the message as the bounded
+  diagnostic records do. Both have rows in `packages/gateway/docs/observability.md`.
+- For the next agent (E-3b/E-3c/E-3d): the bound endpoint is `LanEndpoint`'s
+  state (`bound` + `port`, address) — a public accessor is not added yet
+  because nothing reads it; the lane's own port is the main listener's, so a
+  wildcard `--host` would collide (fail-closed, `bind_failed`); the qualification
+  scripts that start a fixture Gateway need `--lan-endpoint on` before E-3c's
+  race cases can exercise the lane.
