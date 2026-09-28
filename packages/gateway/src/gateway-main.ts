@@ -232,7 +232,13 @@ const sessions = new RuntimeRegistry({
       source: "sessions",
       sessionId: record.sessionId,
       reason: record.reason,
-      counts: { transcriptBytes: record.transcriptBytes, estimatedHeapBytes: record.estimatedHeapBytes },
+      counts: {
+        transcriptBytes: record.transcriptBytes,
+        estimatedHeapBytes: record.estimatedHeapBytes,
+        // The budget is pressure rather than a gate, so a load it could not fit
+        // is served and flagged here instead.
+        ...(record.overBudget === true ? { overBudget: 1 } : {}),
+      },
     }),
   compactionDiagnostic: (diagnostic) => logger.log(
     diagnostic.outcome === "failure" ? "error" : "info",

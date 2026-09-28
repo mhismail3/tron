@@ -11234,77 +11234,109 @@ export default function (pi) {
     expect(live.map((entry) => entry.sessionId).sort()).toEqual([opened.id, smallSlot.id].sort());
   });
 
-  // Failure mode: two opens at once both find room only one of them has. The
-  // byte pass reads its inventory before the admission mutex; a runtime that
-  // publishes in that window has already dropped its reservation and is missing
-  // from the pass's sum, so the mutex has to add its charge back or the second
-  // open is admitted over budget.
-  it("charges an opening session the runtime published after its byte pass", async () => {
-    const fixture = await coldFixture("byte-budget-publish-race");
-    const racing = SessionManager.create(fixture.cwd, dirname(fixture.sessionFile));
-    racing.appendMessage(fauxAssistantMessage("r".repeat(24 * mebibyte)));
-    const opening = SessionManager.create(fixture.cwd, dirname(fixture.sessionFile));
-    opening.appendMessage(fauxAssistantMessage("opening transcript"));
+  // Failure mode: two opens of the same session at once charge that session
+  // twice — once as the start already reserved for it and again as the opening
+  // charge — so the pass retires idle runtimes for room the first open had
+  // already taken, and the second open then only waits for it. The second pass is
+  // held until the first open has reserved and resumed once it has read its
+  // inventory, which is the window that double charge lived in.
+  it("does not retire idle runtimes for a second open of the session the byte budget already charged", async () => {
+    const fixture = await coldFixture("byte-budget-same-session");
+    const idle = SessionManager.create(fixture.cwd, dirname(fixture.sessionFile));
+    idle.appendMessage(fauxAssistantMessage("idle transcript"));
+    const target = SessionManager.create(fixture.cwd, dirname(fixture.sessionFile));
+    target.appendMessage(fauxAssistantMessage("target transcript"));
     await settleCatalog(fixture.registry);
     await fixture.registry.catalog("all");
-    // The opening session's own transcript is 500 MiB, which is 1,500 MiB of
-    // estimated heap: under the 1,536 MiB budget, so only the racing runtime's
-    // 72 MiB charge can push the admission over. It is refused before its
-    // transcript is ever opened, so this size need not be parseable.
-    await growTranscript(opening.getSessionFile()!, 500 * mebibyte);
+    const idleSlot = await fixture.registry.acquire(idle.getSessionId());
+    // 470 MiB is 1,410 MiB of estimated heap and the 30 MiB target is 90 MiB, so
+    // the two fit together (1,500 MiB of the 1,536 MiB budget); charging the
+    // target's reservation and its opening charge (1,590 MiB) is what would
+    // retire the idle runtime.
+    await growTranscript(idleSlot.sessionFile!, 470 * mebibyte);
+    await growTranscript(target.getSessionFile()!, 30 * mebibyte);
 
     const inventory = fixture.registry.resourceInventory.bind(fixture.registry);
-    let raced = false;
+    let targetReserved = () => {};
+    const reserved = new Promise<void>((resolve) => { targetReserved = resolve; });
+    let resumeOpen = () => {};
+    const openResumed = new Promise<void>((resolve) => { resumeOpen = resolve; });
+    const realCreate = RuntimeSlot.create.bind(RuntimeSlot);
+    vi.spyOn(RuntimeSlot, "create").mockImplementation(async (...args) => {
+      // This is the first open, past its reservation and before its publication,
+      // so the reservation stays held across the second open's byte pass.
+      targetReserved();
+      await openResumed;
+      return await realCreate(...args);
+    });
+    let passes = 0;
     vi.spyOn(fixture.registry, "resourceInventory").mockImplementation(async () => {
-      if (raced) return await inventory();
-      raced = true;
-      // The pass takes its snapshot before the racing runtime exists...
+      passes += 1;
+      const waitsForTheFirstOpen = passes > 1;
+      if (waitsForTheFirstOpen) await reserved;
       const snapshot = await inventory();
-      // ...and that runtime publishes before this pass reaches the mutex, which
-      // drops its reservation.
-      await fixture.registry.acquire(racing.getSessionId());
+      if (waitsForTheFirstOpen) resumeOpen();
       return snapshot;
     });
 
-    await expect(fixture.registry.acquire(opening.getSessionId())).rejects.toMatchObject({
-      code: "busy",
-      message: "Gateway live runtime memory budget is full; close or wait for an idle session",
-    });
+    const first = fixture.registry.acquire(target.getSessionId());
+    const second = fixture.registry.acquire(target.getSessionId());
+    const [firstSlot, secondSlot] = await Promise.all([first, second]);
+    expect(secondSlot).toBe(firstSlot);
+    expect(idleSlot.isDisposed).toBe(false);
   });
 
-  // Failure mode: an opening session is admitted although no idle runtime can be
-  // retired for it, so loaded sessions push the heap toward the limit; the
-  // refusal must be the same retryable `busy` the runtime count uses, and it
-  // must not publish a runtime.
-  it("refuses an opening session whose bytes cannot fit beside a protected runtime", async () => {
+  // Failure mode: an opening session whose bytes fit nowhere is refused on the
+  // budget, so a loaded session it cannot reclaim makes every later open of a
+  // non-empty transcript unopenable. The byte budget is eviction pressure, not a
+  // gate: the admission is served, its load record names the over-budget state,
+  // and the idle runtime that could not make it fit is not retired for nothing.
+  it("admits an opening session the byte budget cannot fit and names the over-budget load", async () => {
     const lifecycle = runtimeLifecycleRecords();
-    const fixture = await coldFixture("byte-budget-refusal", { runtimeLifecycleRecord: lifecycle.record });
-    const protectedSession = SessionManager.create(fixture.cwd, dirname(fixture.sessionFile));
-    protectedSession.appendMessage(fauxAssistantMessage("protected transcript"));
+    const fixture = await coldFixture("byte-budget-over-budget", { runtimeLifecycleRecord: lifecycle.record });
+    const firstProtected = SessionManager.create(fixture.cwd, dirname(fixture.sessionFile));
+    firstProtected.appendMessage(fauxAssistantMessage("first protected transcript"));
+    const secondProtected = SessionManager.create(fixture.cwd, dirname(fixture.sessionFile));
+    secondProtected.appendMessage(fauxAssistantMessage("second protected transcript"));
+    const idle = SessionManager.create(fixture.cwd, dirname(fixture.sessionFile));
+    idle.appendMessage(fauxAssistantMessage("idle transcript"));
     const waiting = SessionManager.create(fixture.cwd, dirname(fixture.sessionFile));
     waiting.appendMessage(fauxAssistantMessage("waiting transcript"));
     await settleCatalog(fixture.registry);
     await fixture.registry.catalog("all");
-    const protectedSlot = await fixture.registry.acquire(protectedSession.getSessionId());
-    fixture.registry.subscribe("phone", protectedSlot.id);
-    // 400 + 200 MiB of transcript is 1,800 MiB of estimated heap, over the
-    // 1,536 MiB budget, and the subscribed runtime may not be retired.
-    await growTranscript(protectedSlot.sessionFile!, 400 * mebibyte);
-    await growTranscript(waiting.getSessionFile()!, 200 * mebibyte);
+    const firstSlot = await fixture.registry.acquire(firstProtected.getSessionId());
+    const secondSlot = await fixture.registry.acquire(secondProtected.getSessionId());
+    fixture.registry.subscribe("phone", firstSlot.id);
+    fixture.registry.subscribe("phone", secondSlot.id);
+    const idleSlot = await fixture.registry.acquire(idle.getSessionId());
+    // 300 + 250 MiB of protected transcript is 1,650 MiB of estimated heap: over
+    // the 1,536 MiB budget with nothing else loaded, so no retirement can bring
+    // this admission under it. The 15 MiB idle runtime is the only retireable
+    // candidate and is smaller than that excess, so the pass retires nothing and
+    // serves the (tiny) waiting session over budget.
+    await growTranscript(firstSlot.sessionFile!, 300 * mebibyte);
+    await growTranscript(secondSlot.sessionFile!, 250 * mebibyte);
+    await growTranscript(idleSlot.sessionFile!, 5 * mebibyte);
     const loadedBefore = lifecycle.records.filter((record) => record.event === "runtime.loaded").length;
 
-    await expect(fixture.registry.acquire(waiting.getSessionId())).rejects.toMatchObject({
-      code: "busy",
-      retryable: true,
+    const opened = await fixture.registry.acquire(waiting.getSessionId());
+    expect(opened.id).toBe(waiting.getSessionId());
+    expect(firstSlot.isDisposed).toBe(false);
+    expect(secondSlot.isDisposed).toBe(false);
+    expect(idleSlot.isDisposed).toBe(false);
+    const loaded = lifecycle.records.filter((record) => record.event === "runtime.loaded");
+    expect(loaded).toHaveLength(loadedBefore + 1);
+    expect(loaded.at(-1)).toMatchObject({
+      sessionId: waiting.getSessionId(),
+      reason: "open",
+      overBudget: true,
     });
-    expect(protectedSlot.isDisposed).toBe(false);
-    expect(lifecycle.records.filter((record) => record.event === "runtime.loaded")).toHaveLength(loadedBefore);
+    expect(loaded.at(-1)!.transcriptBytes).toBeGreaterThan(0);
   });
 
-  // A session that has not written a transcript yet is charged nothing, so it
-  // cannot raise the live estimate; refusing it would take the new chat away
-  // without lowering the heap. The protected set here is over the budget on its
-  // own, so this is the worst case for that decision.
+  // The byte budget charges a session that has not written a transcript yet
+  // nothing, and creating one is not gated by it: the protected set here is over
+  // the budget on its own, so this is the worst case for that decision.
   it("admits a session with no transcript yet beside a protected set already over the budget", async () => {
     const fixture = await coldFixture("byte-budget-zero-charge");
     const protectedSession = SessionManager.create(fixture.cwd, dirname(fixture.sessionFile));
@@ -11321,11 +11353,11 @@ export default function (pi) {
     expect((await fixture.registry.resourceInventory()).map((entry) => entry.sessionId)).toContain(created.id);
   });
 
-  // Failure mode: a session larger than the whole budget makes the byte pass
-  // retire every idle runtime and can then never open, pure collateral damage
-  // with no retry that can succeed. 600 MiB is 1,800 MiB of estimated heap, over
-  // the 1,536 MiB budget on its own, so the pass must retire nothing for it and
-  // the refusal must not be the budget's.
+  // Failure mode: a session larger than the whole budget retires every idle
+  // runtime and can then never open, pure collateral damage with no retry that
+  // can succeed. 600 MiB is 1,800 MiB of estimated heap, over the 1,536 MiB
+  // budget on its own, so the pass must retire nothing for it; the refusal below
+  // is the append fence, not the budget.
   it("does not retire another session for a runtime larger than the whole byte budget", async () => {
     const fixture = await coldFixture("byte-budget-oversize");
     const idle = SessionManager.create(fixture.cwd, dirname(fixture.sessionFile));
@@ -11349,7 +11381,8 @@ export default function (pi) {
 
   // Failure mode: the transitions are counted but never named, so an incident
   // cannot tell which session's runtime was loaded or evicted, what the byte
-  // budget charged it, or why it went away.
+  // budget charged it, or why it went away. The eviction names the bytes the pass
+  // itself measured, not the charge the load published with.
   it("records runtime.loaded and runtime.evicted with the reason and the bytes the budget charged", async () => {
     const lifecycle = runtimeLifecycleRecords();
     const fixture = await coldFixture("runtime-lifecycle-records", { runtimeLifecycleRecord: lifecycle.record });
@@ -11358,6 +11391,9 @@ export default function (pi) {
     await settleCatalog(fixture.registry);
     await fixture.registry.catalog("all");
     const idleSlot = await fixture.registry.acquire(idle.getSessionId());
+    // The runtime grows from a few KB to 800 MiB (2,400 MiB of estimated heap)
+    // after it was published, so an eviction record that carried the load's charge
+    // would name a few KB.
     await growTranscript(idleSlot.sessionFile!, 800 * mebibyte);
 
     const loaded = lifecycle.records.find((record) => record.event === "runtime.loaded");
@@ -11368,8 +11404,26 @@ export default function (pi) {
     await fixture.registry.acquire(fixture.manager.getSessionId());
     const evicted = lifecycle.records.find((record) => record.event === "runtime.evicted");
     expect(evicted).toMatchObject({ sessionId: idleSlot.id, reason: "bytes" });
-    expect(evicted!.transcriptBytes).toBeGreaterThan(0);
-    expect(evicted!.estimatedHeapBytes).toBe(evicted!.transcriptBytes * LIVE_RUNTIME_HEAP_ESTIMATE_FACTOR);
+    expect(evicted!.transcriptBytes).toBe(800 * mebibyte);
+    expect(evicted!.estimatedHeapBytes).toBe(800 * mebibyte * LIVE_RUNTIME_HEAP_ESTIMATE_FACTOR);
+  });
+
+  // Failure mode: a slot disposed outside the registry is recorded as the
+  // extension-requested close this path never observed, so the reason points at
+  // the wrong owner and hides that the disposal happened earlier.
+  it("records a slot disposed outside the registry as disposed, not closed", async () => {
+    const lifecycle = runtimeLifecycleRecords();
+    const fixture = await coldFixture("runtime-eviction-disposed", { runtimeLifecycleRecord: lifecycle.record });
+    const sessionId = fixture.manager.getSessionId();
+    const disposed = await fixture.registry.acquire(sessionId);
+    await disposed.dispose();
+
+    const reacquired = await fixture.registry.acquire(sessionId);
+    expect(reacquired.isDisposed).toBe(false);
+    expect(lifecycle.records.find((record) => record.event === "runtime.evicted")).toMatchObject({
+      sessionId,
+      reason: "disposed",
+    });
   });
 
   // The transport owns subscription lifetime: it subscribes a client before
