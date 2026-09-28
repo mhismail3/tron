@@ -1,4 +1,5 @@
 import { createServer } from "node:http";
+import { connect, createServer as createTcpServer, type AddressInfo, type Socket } from "node:net";
 import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -7,6 +8,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { DeviceStore } from "../security/device-store.js";
 import { GATEWAY_CONNECTION_POLICY } from "./connection-policy.js";
 import { GatewayServer } from "./server.js";
+import type { PeerPathLookup, PeerPathReader } from "./tailscale-peer.js";
 
 // Failure modes this file exists to catch (real sockets, fake heartbeat clock):
 // 1. Skipping pings delays dead-client retirement past today's fourth tick.
@@ -17,6 +19,15 @@ import { GatewayServer } from "./server.js";
 // 4. A client that goes quiet is never pinged again and is retired while alive.
 // 5. The retirement record cannot be joined to the phone's own records because
 //    it lacks the connection ID or the peer's hello correlation key.
+// 6. Inbound silence is reported every tick instead of once per episode, or is
+//    reported for a phone that pings every ten seconds.
+// 7. A silence episode that ends before the Tailscale read settles loses its
+//    resume record or its duration, or reports the resume before the silence.
+// 8. A blackholed path (no bytes in either direction, socket still open) is not
+//    visible as silence plus a resume in the Gateway log alone.
+
+/** Tests never run the host's Tailscale CLI: the path is injected everywhere. */
+const NO_TAILSCALE_PATH: PeerPathReader = { lookup: async (): Promise<PeerPathLookup> => ({ peerPath: "unknown", peerRelay: "" }) };
 
 const INTERVAL_MS = GATEWAY_CONNECTION_POLICY.heartbeatIntervalMs;
 const TICK_SECONDS = INTERVAL_MS / 1_000;
@@ -61,6 +72,64 @@ interface ClientScript {
   pingsAt?: (second: number) => boolean;
 }
 
+interface HarnessOptions {
+  /** The Tailscale path reader the transport uses; never the host's CLI. */
+  peerPathReader?: PeerPathReader;
+  /** Virtual seconds between which the client's path carries no bytes. */
+  blackhole?: { from: number; to: number };
+  /** Runs at the end of each virtual second, after that second's client ping. */
+  afterSecond?: (second: number) => void;
+}
+
+interface HoldProxy {
+  port: number;
+  holding(): boolean;
+  setHolding(value: boolean): void;
+  close(): Promise<void>;
+}
+
+/** A path blackhole for the client's socket. Bytes are held and released in
+ * order instead of dropped: dropping part of a WebSocket frame would
+ * desynchronize the stream both ends share, while holding them looks exactly
+ * like a Tailscale blackhole — nothing arrives in either direction and the
+ * socket stays open. */
+async function holdProxy(upstreamPort: number): Promise<HoldProxy> {
+  let holding = false;
+  const held: Array<() => void> = [];
+  const sockets = new Set<Socket>();
+  const server = createTcpServer((client) => {
+    const upstream = connect({ host: "127.0.0.1", port: upstreamPort });
+    sockets.add(client).add(upstream);
+    client.on("error", () => upstream.destroy());
+    upstream.on("error", () => client.destroy());
+    client.on("close", () => upstream.destroy());
+    upstream.on("close", () => client.destroy());
+    const forward = (to: Socket) => (chunk: Buffer): void => {
+      if (!holding) {
+        to.write(chunk);
+        return;
+      }
+      const copy = Buffer.from(chunk);
+      held.push(() => to.write(copy));
+    };
+    client.on("data", forward(upstream));
+    upstream.on("data", forward(client));
+  });
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+  return {
+    port: (server.address() as AddressInfo).port,
+    holding: () => holding,
+    setHolding(value) {
+      holding = value;
+      if (!value) for (const flush of held.splice(0)) flush();
+    },
+    close: () => new Promise<void>((resolve) => {
+      for (const socket of sockets) socket.destroy();
+      server.close(() => resolve());
+    }),
+  };
+}
+
 interface TickObservation {
   tick: number;
   serverPings: number;
@@ -70,7 +139,7 @@ interface TickObservation {
 /** Runs one client against a real Gateway socket for `ticks` heartbeat ticks
  * on a virtual clock that drives both the heartbeat interval and
  * `performance.now()`, and reports what the client observed after each tick. */
-async function observeHeartbeats(script: ClientScript, ticks: number): Promise<TickObservation[]> {
+async function observeHeartbeats(script: ClientScript, ticks: number, options: HarnessOptions = {}): Promise<TickObservation[]> {
   let now = 1_000_000;
   vi.spyOn(performance, "now").mockImplementation(() => now);
   vi.useFakeTimers({ toFake: ["setInterval", "clearInterval"] });
@@ -93,9 +162,12 @@ async function observeHeartbeats(script: ClientScript, ticks: number): Promise<T
       invoke: vi.fn(),
     } as never,
     logger: logger as never,
+    peerPathReader: options.peerPathReader ?? NO_TAILSCALE_PATH,
   });
   await gateway.listen();
-  const socket = new WebSocket(`ws://127.0.0.1:${port}/v1/socket`, {
+  const proxy = options.blackhole === undefined ? undefined : await holdProxy(port);
+  if (proxy) cleanups.push(() => proxy.close());
+  const socket = new WebSocket(`ws://127.0.0.1:${proxy?.port ?? port}/v1/socket`, {
     headers: { authorization: `Bearer ${token}` },
     autoPong: script.autoPong,
   });
@@ -126,12 +198,17 @@ async function observeHeartbeats(script: ClientScript, ticks: number): Promise<T
   for (let second = 1; second <= ticks * TICK_SECONDS; second += 1) {
     now = start + second * 1_000;
     await vi.advanceTimersByTimeAsync(1_000);
+    if (proxy !== undefined && options.blackhole !== undefined) {
+      if (second === options.blackhole.from) proxy.setHolding(true);
+      if (second === options.blackhole.to) proxy.setHolding(false);
+    }
+    const blackholed = proxy?.holding() === true;
     if (second % TICK_SECONDS === 0) {
       const tick = second / TICK_SECONDS;
       // Everything the client sends in reply to this tick arrives one round
       // trip after it, never on the tick's own instant.
       now += ROUND_TRIP_MS;
-      if (!closed) {
+      if (!closed && !blackholed) {
         // An ordered application frame after the tick proves the client has
         // received any ping that tick wrote to the same socket, or the close.
         const sequence = tick;
@@ -142,7 +219,7 @@ async function observeHeartbeats(script: ClientScript, ticks: number): Promise<T
       // Let the Gateway observe an automatic pong before the next tick, as a
       // live peer's pong would arrive well within one interval.
       const pingedThisTick = serverPings > (observations.at(-2)?.serverPings ?? 0);
-      if (!closed && script.autoPong && pingedThisTick) {
+      if (!closed && !blackholed && script.autoPong && pingedThisTick) {
         await realWait(() => connection()?.unansweredHeartbeats === 0, `tick ${tick} pong`);
       }
     }
@@ -152,6 +229,7 @@ async function observeHeartbeats(script: ClientScript, ticks: number): Promise<T
       // The Gateway handles the ping in the same callback that answers it.
       await realWait(() => clientPongs === expected || closed, `second ${second} client ping`);
     }
+    options.afterSecond?.(second);
   }
   return observations;
 }
@@ -167,11 +245,27 @@ function closedAtTick(observations: TickObservation[]): number | undefined {
   return observations.find((observation) => observation.closed)?.tick;
 }
 
+interface LoggedRecord {
+  index: number;
+  level: string;
+  message: string;
+  fields: Record<string, unknown>;
+}
+
+/** The run's log calls for one event, in the order the Gateway wrote them. */
+function loggedRecords(event: string): LoggedRecord[] {
+  const calls = gatewayLog?.mock.calls ?? [];
+  return calls.flatMap((call, index) => call[2]?.event === event
+    ? [{ index, level: call[0] as string, message: call[1] as string, fields: call[2] as Record<string, unknown> }]
+    : []);
+}
+
 describe("Gateway heartbeat pings", () => {
   it("never pings or retires a phone that pings every ten seconds", async () => {
     const observations = await observeHeartbeats({ autoPong: true, pingsAt: (second) => second % 10 === 3 }, 8);
     expect(pingedTicks(observations)).toEqual([]);
     expect(closedAtTick(observations)).toBeUndefined();
+    expect(loggedRecords("connection.inbound-silent")).toEqual([]);
   });
 
   it("pings a pong-only client on every tick and never retires it", async () => {
@@ -212,5 +306,78 @@ describe("Gateway heartbeat pings", () => {
     }, 8);
     expect(pingedTicks(observations)).toEqual([4, 5, 6, 7, 8]);
     expect(closedAtTick(observations)).toBeUndefined();
+  });
+
+  it("records one silence episode with its peer path and a resume with its duration", async () => {
+    // The phone pings every ten seconds up to second 53, goes quiet, speaks at
+    // 80 and at 95; the last tick sees only 5 s of silence, so one episode.
+    let release!: () => void;
+    const peerPathSettled = new Promise<void>((resolve) => { release = resolve; });
+    const lookup = vi.fn(async (): Promise<PeerPathLookup> => {
+      await peerPathSettled;
+      return { peerPath: "relay", peerRelay: "sfo" };
+    });
+    const observations = await observeHeartbeats({
+      autoPong: false,
+      pingsAt: (second) => (second <= 53 && second % 10 === 3) || second === 80 || second === 95,
+    }, 4, {
+      peerPathReader: { lookup },
+      // The socket speaks again before the Tailscale read settles.
+      afterSecond: (second) => { if (second === 80) release(); },
+    });
+    const silent = loggedRecords("connection.inbound-silent");
+    const resumed = loggedRecords("connection.inbound-resumed");
+    expect(lookup).toHaveBeenCalledTimes(1);
+    expect(silent).toHaveLength(1);
+    expect(silent[0]!.level).toBe("warning");
+    expect(silent[0]!.message).toContain("22000ms");
+    expect(silent[0]!.fields).toMatchObject({
+      peerClientId: "client-heartbeat", peerAttemptId: "initial", peerEpoch: "1",
+      peerPath: "relay", peerRelay: "sfo",
+    });
+    expect(resumed).toHaveLength(1);
+    expect(resumed[0]!.level).toBe("info");
+    expect(resumed[0]!.message).toContain("27000ms");
+    expect(resumed[0]!.fields).toMatchObject({
+      connectionId: silent[0]!.fields.connectionId, peerClientId: "client-heartbeat", silentMs: 27_000,
+    });
+    // A silence that ends before the Tailscale read settles is still reported
+    // as silence first and resume second.
+    expect(silent[0]!.index).toBeLessThan(resumed[0]!.index);
+    expect(closedAtTick(observations)).toBeUndefined();
+  });
+
+  it("shows a blackholed path as silence and a resume, from the Gateway log alone", async () => {
+    // The path carries nothing between seconds 40 and 72, while the socket
+    // stays open: tick 2 lands inside it, and the phone speaks again at 80.
+    const lookup = vi.fn(async (): Promise<PeerPathLookup> => ({ peerPath: "relay", peerRelay: "sfo" }));
+    const observations = await observeHeartbeats({
+      autoPong: false,
+      pingsAt: (second) => (second <= 33 && second % 10 === 3) || second === 80 || second === 95,
+    }, 4, { peerPathReader: { lookup }, blackhole: { from: 40, to: 72 } });
+    const silent = loggedRecords("connection.inbound-silent");
+    const resumed = loggedRecords("connection.inbound-resumed");
+    expect(silent).toHaveLength(1);
+    expect(silent[0]!.level).toBe("warning");
+    expect(silent[0]!.message).toContain("17000ms");
+    expect(silent[0]!.fields).toMatchObject({ peerPath: "relay", peerRelay: "sfo" });
+    expect(resumed).toHaveLength(1);
+    expect(resumed[0]!.fields).toMatchObject({ silentMs: 47_000 });
+    expect(silent[0]!.index).toBeLessThan(resumed[0]!.index);
+    expect(closedAtTick(observations)).toBeUndefined();
+  });
+
+  it("writes one http.upgrade per upgrade with its phase durations and the peer key", async () => {
+    await observeHeartbeats({ autoPong: true }, 2);
+    const upgrades = loggedRecords("http.upgrade");
+    expect(upgrades).toHaveLength(1);
+    expect(upgrades[0]!.level).toBe("debug");
+    expect(upgrades[0]!.fields).toMatchObject({
+      outcome: "opened", phaseReached: "hello",
+      peerClientId: "client-heartbeat", peerAttemptId: "initial", peerEpoch: "1",
+    });
+    for (const field of ["acceptToUpgradeMs", "authMs", "handshakeMs", "helloMs"]) {
+      expect(typeof upgrades[0]!.fields[field]).toBe("number");
+    }
   });
 });

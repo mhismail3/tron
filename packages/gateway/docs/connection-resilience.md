@@ -33,8 +33,12 @@ owner of accepted commands; mobile reconnect never replays a prompt blindly.
   may skip its ping, so its first ping can come one tick later and that pong must
   return within about 50 seconds instead of 75 before the fourth tick. Real mobile
   clients enforce an 8-second pong deadline on their own pings, and pong-only
-  clients are unaffected. `server-heartbeat.integration.test.ts` pins each case
-  against real sockets on a fake heartbeat clock.
+  clients are unaffected. A socket with no inbound frame for 12 seconds logs one
+  `connection.inbound-silent` (warning) with the peer's Tailscale path, and its
+  next inbound frame logs `connection.inbound-resumed` (info) with `silentMs`.
+  Both are read from the Gateway log alone and neither changes what the tick does.
+  `server-heartbeat.integration.test.ts` pins each case against real sockets on a
+  fake heartbeat clock.
 - **Projection:** the wire ceiling remains 1 MiB, with a shared 32,768 JSON-value
   node ceiling for local and mobile clients. Transcript pages reserve 24,000
   nodes and snapshots 30,000; dense detail is compacted without editing canonical
@@ -186,8 +190,11 @@ keeps today's uncompressed frames.
    Retained/offline records are not a live Gateway health check. If the initial
    fault predates the represented range, it is missing evidence.
 2. Compare the same UTC interval with `<tronHome>/logs/gateway.jsonl` and its
-   bounded `.1` rotation. Match mobile hello successes with server admissions;
-   client-side and server-side connection IDs are different namespaces.
+   bounded `.1` rotation. Join the two sides by the O-1 key: a phone record's
+   `gatewayConnectionId` is the Gateway record's `connectionId`, and its
+   `clientId`/`attemptId`/`epoch` are the Gateway's `peerClientId`,
+   `peerAttemptId` and `peerEpoch`. Only logs from before the correlation key
+   shipped (protocol 5) have to be matched by time window instead.
 3. Use existing local Mac status/health observations to distinguish a responsive
    Gateway from an unreachable mobile path. An OS network path of `satisfied`
    proves neither Tailscale tunnel health nor reachability of the selected Mac.
@@ -208,6 +215,10 @@ keeps today's uncompressed frames.
 | `connection.outbound-capacity` | Actual server queue count/byte pressure. Inspect high-water marks, `wsBufferedBytes`, next-frame bytes and process memory. |
 | `connection.capacity` / `http.request-capacity` / `http.connection-capacity` | Inspect the named global, identity, address or connection bound and retiring owners; one physical socket is not one request. |
 | `connection.superseded` | The same identity reconnected while at its socket cap. Its logged `lastInboundAgeMs` shows how stale the replaced socket was; repeated supersession of fresh sockets suggests a client owning more concurrent sockets than the cap. |
+| `http.upgrade` with `outcome=abandoned` | The peer reached this Mac and opened the socket, then vanished before hello (`phaseReached=handshake`; `helloMs` is how long it kept the phase open). A large `authMs` means the credential wait was slow, a large `acceptToUpgradeMs` means the request waited behind other HTTP work — neither is a path fault. |
+| `http.upgrade` with `outcome=rejected` | The Gateway refused the upgrade. `phaseReached=request` means before credentials (path, readiness or HTTP admission), `auth` means the credential, the readiness recheck or connection capacity, `hello` means a hello arrived and was invalid or a protocol mismatch. The bound-specific record beside it (`http.request-capacity`, `http.authentication-timeout`, `connection.capacity`, `connection.rejected`) names which bound refused it. |
+| `http.upgrade` with `outcome=opened` and `authMs` or `helloMs` near or over `UPGRADE_SLOW_WARNING_MS` (1,000 ms) | The connection needed a second or more to become usable. `authMs` is the credential read (device-store mutex), `helloMs` the Gateway's own handling of the hello frame. Check `gateway.event-loop-delay` and `gateway.resources` around the same instant; the peer's hello key joins this record to its phone records. |
+| `connection.inbound-silent` | The socket stayed open but received no frame for at least 12 s. `peerPath=relay` or `offline` points at the Tailscale path; `direct` with a silent socket points at the phone or its process; `unknown` means there is no Tailscale answer for that address (loopback/LAN, no CLI, or a status timeout) and says nothing about the path. The paired `connection.inbound-resumed` gives the episode's `silentMs`. |
 | `http.authentication-timeout` | A pending upgrade exceeded its authentication deadline. The callback is fenced and its cancellable credential wait is retired. |
 | `closeCode` / `httpStatusCode` / `platformCode` | Separate facts, never interchangeable numbers. HTTP 401/403 stop automatic admission; 503 is retryable capacity/unavailability. URLSession may report 1005/1006 rather than expose the peer's exact close frame; that absence must remain explicit. |
 | `connection.projection-rejected` | A producer violated the projection contract. Narrow/reproduce that producer instead of reconnecting the whole service indefinitely. |

@@ -11,6 +11,13 @@ import { AsyncMutex } from "../util/async-mutex.js";
 import { BlobStore } from "../sessions/blob-store.js";
 import { GatewayServer, HTTP_MAXIMUM_CONNECTIONS_PER_ADDRESS, HTTP_MAXIMUM_REQUESTS_PER_CONNECTION, HTTP_REQUEST_IDLE_TIMEOUT_MS, HTTP_REQUEST_TIMEOUT_MS, HTTP_HEADERS_TIMEOUT_MS } from "./server.js";
 
+// Failure modes this file exists to catch (real sockets, real HTTP boundary):
+// 1. An upgrade that opens the write buffer and is deleted before hello
+//    leaves no record of how far into the Gateway it got.
+// 2. A refused upgrade is only visible in its own bound-specific record, so
+//    the phase it was refused at is lost.
+// 3. The upgrade record cannot be joined to the peer's records.
+
 const cleanups: Array<() => Promise<void>> = [];
 afterEach(async () => {
   const failures: unknown[] = [];
@@ -41,12 +48,15 @@ async function fixture(maximumHttpRequests = 128) {
   const port = (probe.address() as { port: number }).port;
   await new Promise<void>(resolve => probe.close(() => resolve()));
   const acquireBlob = vi.fn();
+  const logger = { log: vi.fn() };
   const gateway = new GatewayServer({
     host: "127.0.0.1", port, maxFrameBytes: 16_384, maximumHttpRequests,
     devices, uploads: {} as any, sessions: { acquireBlob, unsubscribeClient: vi.fn() } as any,
     auth: { detachClient: vi.fn() } as any,
     service: { info: () => ({ protocolVersion: 5 }), releaseClient: vi.fn() } as any,
-    logger: { log: vi.fn() } as any,
+    logger: logger as any,
+    // Never the host's Tailscale CLI: only silence records read the path.
+    peerPathReader: { lookup: async () => ({ peerPath: "unknown" as const, peerRelay: "" }) },
   });
   const serverSockets: Socket[] = [];
   // Observe the actual transport terminal boundary, not a scheduling delay or
@@ -59,7 +69,7 @@ async function fixture(maximumHttpRequests = 128) {
     finally { await rm(root, { recursive: true, force: true }); }
   });
   await gateway.listen();
-  return { root, gateway, devices, port, serverSockets, clientSockets, acquireBlob };
+  return { root, gateway, devices, port, serverSockets, clientSockets, acquireBlob, logger };
 }
 async function health(port: number): Promise<number> {
   return bounded(new Promise((resolve, reject) => {
@@ -86,7 +96,68 @@ function capture(socket: Socket, responses = 1): Promise<string> {
   }), "raw HTTP response");
 }
 
+interface LoggedRecord {
+  level: string;
+  message: string;
+  fields: Record<string, unknown>;
+}
+
+/** Waits for one event record, which is written once its owning phase ends. */
+async function loggedRecord(f: Awaited<ReturnType<typeof fixture>>, event: string): Promise<LoggedRecord> {
+  const deadline = Date.now() + 3_000;
+  while (Date.now() < deadline) {
+    const call = f.logger.log.mock.calls.find((candidate) => candidate[2]?.event === event);
+    if (call) return { level: call[0] as string, message: call[1] as string, fields: call[2] as Record<string, unknown> };
+    await new Promise((resolve) => setTimeout(resolve, 5));
+  }
+  throw new Error(`${event} was not logged`);
+}
+
 describe("HTTP pending-work ownership", () => {
+  it("records an upgrade that opened and was then abandoned before hello", async () => {
+    const f = await fixture();
+    vi.spyOn(f.devices, "authenticateAndAdmit").mockImplementation(async (_token, admit) => admit({ kind: "local" }));
+    const peer = new WebSocket(`ws://127.0.0.1:${f.port}/v1/socket`, { headers: { authorization: "Bearer fixture" } });
+    peer.on("error", () => {});
+    await bounded(once(peer, "open"), "upgrade open");
+    const closed = once(f.serverSockets[0]!, "close");
+    peer.terminate();
+    await bounded(closed, "abandoned upgrade close");
+    const record = await loggedRecord(f, "http.upgrade");
+    expect(record.level).toBe("warning");
+    expect(record.fields).toMatchObject({ outcome: "abandoned", phaseReached: "handshake" });
+    // No hello arrived, so there is no peer key; helloMs is the time the
+    // attempt spent waiting in that phase before the socket went away.
+    expect(record.fields).not.toHaveProperty("peerClientId");
+    expect(typeof record.fields.helloMs).toBe("number");
+    expect(typeof record.fields.authMs).toBe("number");
+  });
+
+  it("records a refusal at the authentication phase and keeps its bound-specific record", async () => {
+    const f = await fixture();
+    const peer = new WebSocket(`ws://127.0.0.1:${f.port}/v1/socket`, { headers: { authorization: "Bearer fixture" } });
+    peer.on("error", () => {});
+    const record = await loggedRecord(f, "http.upgrade");
+    expect(record.level).toBe("warning");
+    expect(record.fields).toMatchObject({ outcome: "rejected", phaseReached: "auth" });
+    expect(f.logger.log.mock.calls.some((call) => call[2]?.event === "connection.rejected")).toBe(true);
+  });
+
+  it("records a hello that arrived but was refused as rejected at the hello phase", async () => {
+    const f = await fixture();
+    vi.spyOn(f.devices, "authenticateAndAdmit").mockImplementation(async (_token, admit) => admit({ kind: "local" }));
+    const peer = new WebSocket(`ws://127.0.0.1:${f.port}/v1/socket`, { headers: { authorization: "Bearer fixture" } });
+    peer.on("error", () => {});
+    await bounded(once(peer, "open"), "upgrade open");
+    peer.send(JSON.stringify({ type: "hello", protocolVersion: 99 }));
+    const record = await loggedRecord(f, "http.upgrade");
+    expect(record.level).toBe("warning");
+    expect(record.fields).toMatchObject({ outcome: "rejected", phaseReached: "hello" });
+    // The frame was refused before it could name the peer.
+    expect(record.fields).not.toHaveProperty("peerClientId");
+    expect(typeof record.fields.helloMs).toBe("number");
+  });
+
   it("keeps complete-body, header and inactivity bounds distinct", async () => {
     const f = await fixture();
     const server = (f.gateway as unknown as { server: Server }).server;

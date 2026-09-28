@@ -5,6 +5,7 @@ import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { redact } from "../transport/logger.js";
+import { TAILSCALE_CLI_CANDIDATES } from "../transport/tailscale-peer.js";
 import { resolveTronHome } from "../tron-home.js";
 
 /**
@@ -37,8 +38,6 @@ const HEALTH_TIMEOUT_MS = 3_000;
 /** `/usr/bin/log` explicitly: a shell's `log` builtin shadows the command. */
 const LOG_TOOL = "/usr/bin/log";
 const PROCESS_LIST_TOOL = "/bin/ps";
-/** The documented Tailscale install, then a CLI-only install on `PATH`. */
-const TAILSCALE_CLI_CANDIDATES = ["/Applications/Tailscale.app/Contents/MacOS/Tailscale", "tailscale"] as const;
 /** The macsys network extension owns Tailscale's endpoint decisions. */
 const TAILSCALE_EXTENSION_PROCESS = "io.tailscale.ipn.macsys.network-extension";
 /** Path-change evidence: magicsock lines name the endpoint a peer now uses. */

@@ -2,7 +2,7 @@
 
 - **Started:** 2026-09-27
 - **Status:** Active (Phase 1 runs on `hardening/integration`; that branch's copy of this plan is authoritative until R-1)
-- **Last updated:** 2026-09-28, O-6a blocked on a quiet-host repeat (second review response landed)
+- **Last updated:** 2026-09-28, O-2 Done (upgrade phases, inbound silence with the peer's Tailscale path)
 - **Goal:** A clean, efficient and predictable Gateway and phone connection: the phone stays connected and loads any session promptly whenever the network path is up, however many sessions run and however large the history grows, and every disconnect or slow operation is attributable to one cause from the logs in one step.
 
 ## Goal and constraints
@@ -517,7 +517,7 @@ rows are in priority order.
 | E-2 | Blocked | Bound the iOS profiler's memory or hand the row to the simulator-lifecycle plan | none | orchestrator-dispatched worker, 2026-09-28 |
 | E-2b | Done | Record `time-profiler` with `xctrace record --attach <pid>` if a real traced run proves it samples the simulator app; re-measure export and parser peaks (see E-2 handoff) | E-2 | orchestrator-dispatched deepseek-worker, 2026-09-28 |
 | E-2c | Ready | Bound the `time-profiler` export under 2 GB for `--scenario all` (see E-2b handoff: simulator-device recording, or a size refusal plus shorter windows) | E-2b | |
-| O-2 | Claimed | Gateway transport records: upgrade phases, inbound silence with Tailscale peer path | O-1 | orchestrator-dispatched deepseek-worker, 2026-09-28 |
+| O-2 | Done | Gateway transport records: upgrade phases, inbound silence with Tailscale peer path | O-1 | orchestrator-dispatched deepseek-worker, 2026-09-28 |
 | O-3 | Done | Request span: one `rpc.completed` per slow RPC with every stage, wait and count | O-1 | orchestrator-dispatched deepseek-worker, 2026-09-28 |
 | O-4 | Claimed | Phone connection records that survive an export, stall watchdog, exact scene records | O-1 | orchestrator-dispatched deepseek-worker, 2026-09-28 |
 | O-6b | Claimed | Impairment in the qualification scenario: blackhole, bandwidth cap, Gateway restart | O-6a | orchestrator-dispatched deepseek-worker, 2026-09-28 |
@@ -1738,6 +1738,107 @@ a latency percentile.
   `gatewayConnectionId` (phone). The profiler driver
   (`scripts/tron-profile-gateway-driver.mjs`, Profiler zone) does not send the
   key yet.
+
+### O-2 · Done · 2026-09-28 · orchestrator-dispatched worker (branch `hardening/o-2`)
+
+- Result: the Gateway transport writes the three records it lacked.
+  - `http.upgrade`, one per WebSocket upgrade: `outcome`
+    (`opened`/`abandoned`/`rejected`), `phaseReached`
+    (`request`/`auth`/`handshake`/`hello`), the four phase durations
+    `acceptToUpgradeMs`, `authMs`, `handshakeMs`, `helloMs`, and the O-1 peer key
+    once hello named it. Debug when it opens at hello within
+    `UPGRADE_SLOW_WARNING_MS` (1,000 ms); warning when abandoned, rejected or
+    slower.
+  - `connection.inbound-silent` (warning), one per silence episode, when a
+    heartbeat tick finds no inbound frame for `INBOUND_SILENCE_WARNING_MS`
+    (12,000 ms), carrying `peerPath` (`direct`/`relay`/`offline`/`unknown`) and
+    `peerRelay`.
+  - `connection.inbound-resumed` (info) on the next inbound frame, with
+    `silentMs`.
+- The Tailscale read is a new bounded `TailscalePeerPaths`
+  (`packages/gateway/src/transport/tailscale-peer.ts`): the existing CLI
+  candidates, a 2 s timeout, one read in flight, the result reused for 10 s,
+  joined to the socket's remote address (IPv4-mapped IPv6 normalised). It never
+  rejects, never delays a heartbeat, and `admin/diagnose.ts` now imports the
+  shared candidate list instead of spelling its own.
+- O-1's leftover review finding is closed: `connection-resilience.md` no longer
+  says client-side and server-side connection IDs are different namespaces to be
+  matched by time. "Collect evidence before recovery" now joins by the O-1 key
+  (`gatewayConnectionId` ↔ `connectionId`; `clientId`/`attemptId`/`epoch` ↔
+  `peerClientId`/`peerAttemptId`/`peerEpoch`), with a time window only for
+  pre-protocol-6 logs. The "Interpret the diagnostics" table gained rows for
+  `http.upgrade` (abandoned, rejected, slow open), `connection.inbound-silent`
+  and `connection.inbound-resumed`. The heartbeat bullet and the README's
+  transport paragraph state the two silence records and the 12 s threshold.
+- Failure modes written before the tests, one case each: peer abandons at each
+  phase; Tailscale CLI missing, slow or failing; many sockets silent at once
+  (one shared capture); silence ends during the capture; remote address not in
+  Tailscale status (loopback/LAN); a phone that pings every 10 s must never be
+  reported silent; a failed read must not spawn a process per socket; a
+  blackholed path must be visible from the Gateway log alone.
+- Evidence:
+  - `npm run build` is clean (`~/.tron/workspace/files/hardening/o-2/build.txt`).
+  - `npx vitest run src/transport/tailscale-peer.test.ts src/transport/logger.test.ts
+    src/transport/server-heartbeat.integration.test.ts src/transport/server-http-lifecycle.integration.test.ts
+    src/transport/server-capacity.integration.test.ts src/transport/server-http-admission.integration.test.ts
+    src/transport/server-revocation.integration.test.ts src/transport/sync-protocol.integration.test.ts
+    src/transport/server-startup.integration.test.ts src/transport/request-span.integration.test.ts
+    src/admin/diagnose.test.ts` passes 95/95 in 11 files
+    (`~/.tron/workspace/files/hardening/o-2/focused-vitest.txt`). New cases: 8 in
+    `tailscale-peer.test.ts` (direct, relay, offline, mapped address,
+    loopback/LAN unknown, missing/slow/malformed CLI, candidate fall-through,
+    shared and reused read, reused failure), 3 in
+    `server-heartbeat.integration.test.ts`, 3 in
+    `server-http-lifecycle.integration.test.ts` (abandoned before hello, refused
+    at the authentication phase, refused at the hello phase).
+  - Eight more neighboring suites (blob, compression, live-view,
+    terminal-delete, upload, session-archive, rpc-idle-admission,
+    stall-diagnostics) pass 92/92.
+  - Blackhole (the Done-when's evidence, fault proxy against a fixture Gateway):
+    in `server-heartbeat.integration.test.ts` a hold proxy carries the client's
+    socket between virtual seconds 40 and 72 while the socket stays open; the
+    Gateway log alone shows exactly one `connection.inbound-silent` (warning,
+    `peerPath=relay`, `peerRelay=sfo`, message `has sent nothing for 17000ms`)
+    and one `connection.inbound-resumed` (info, `silentMs: 47000`), in that
+    order, with the socket never closed. A second case gates the path read until
+    after the socket speaks again: `silentMs` is exactly 27,000 ms and the
+    silence record still precedes the resume record.
+- Changes: `feat(gateway): record upgrade phases and inbound silence (O-2)`.
+- Tasks added: none.
+- Kept on purpose: the bound-specific records (`http.request-capacity`,
+  `connection.rejected`, `connection.capacity`, `http.authentication-timeout`)
+  stay, because they name which bound refused an upgrade and the phase record
+  does not; `http.upgrade` for the Mac app's constant local probes is debug, like
+  `connection.opened`, so it stays in the memory-only buffer; the unreported
+  trace is finished in `disconnect`, not in `closeFailedConnection`, so a socket
+  that never got past hello is `abandoned` whichever side ended it.
+- Deviations:
+  - The record fields needed the writer's shape: `logger.ts` gained
+    `phaseReached`, the four duration fields, `peerPath`, `peerRelay` and
+    `silentMs`, plus one `durationField` helper that the existing `durationMs`
+    and `unaccountedMs` lines now share. `Connection` gained `remoteAddress`
+    (the Tailscale join; never logged) and the upgrade trace, both handed to
+    `admit` by `handleUpgrade`.
+  - `helloMs` on an abandoned upgrade is the time the attempt spent in the hello
+    phase before the socket went away (0 only when the handshake never
+    completed), not a completed round trip.
+  - The blackhole proxy holds bytes instead of dropping them: dropping part of a
+    WebSocket frame would desynchronize the stream both ends share, while the
+    path still carries nothing in either direction while holding.
+  - `GatewayServer` gained a `peerPathReader` option so no test can reach the
+    host's Tailscale CLI.
+  - `logger.test.ts`'s 40 MB rotation case (a 15 s timeout) flaked twice on this
+    host while the parallel hardening workers loaded it (load average 16-24):
+    16.6 s on this branch, 14.8 s on an untouched worktree of the same commit's
+    parent, 7.8 s and 2.8 s when the host was quieter. No group of changes here
+    touches that path; treat it as a host-load flake, not a regression.
+- For the next agent: **O-6b's blackhole case is still owed a confirmation in
+  the qualification scenario** (O-6b is in progress in a sibling worktree and
+  its blackhole case is not merged); the evidence above is the equivalent
+  fault-proxy blackhole against a fixture Gateway. O-7 can join on the peer key
+  and use `peerPath`/`silentMs`; E-1's Tailscale flap guidance can cite the
+  silent/resume pair. `http.upgrade` carries no `connectionId`: the peer key is
+  the join for an opened upgrade, while `connection.opened` owns `connectionId`.
 
 ### E-2 · Blocked · 2026-09-28 · orchestrator-dispatched worker
 

@@ -48,6 +48,18 @@ export interface LogRecord {
   stages?: string;
   /** The part of `durationMs` no named stage accounted for. */
   unaccountedMs?: number;
+  /** How far an upgrade got: `request`, `auth`, `handshake` or `hello`. */
+  phaseReached?: string;
+  /** Upgrade phase durations, in the order they run (`http.upgrade`). */
+  acceptToUpgradeMs?: number;
+  authMs?: number;
+  handshakeMs?: number;
+  helloMs?: number;
+  /** The peer's Tailscale path at an inbound-silence episode (`connection.inbound-silent`). */
+  peerPath?: string;
+  peerRelay?: string;
+  /** How long the socket had been silent when it spoke again. */
+  silentMs?: number;
   error?: LogError;
 }
 
@@ -71,8 +83,23 @@ export interface LogMetadata {
   stages?: string;
   /** The part of `durationMs` the stage breakdown did not cover. */
   unaccountedMs?: number;
+  phaseReached?: string;
+  acceptToUpgradeMs?: number;
+  authMs?: number;
+  handshakeMs?: number;
+  helloMs?: number;
+  peerPath?: string;
+  peerRelay?: string;
+  silentMs?: number;
   /** Any thrown value; the writer bounds and redacts it. */
   error?: unknown;
+}
+
+/** One duration field: finite, non-negative, rounded, never NaN in a record. */
+function durationField(value: unknown): number | undefined {
+  return typeof value === "number" && Number.isFinite(value)
+    ? Math.max(0, Math.min(Number.MAX_SAFE_INTEGER, Math.round(value)))
+    : undefined;
 }
 
 export interface LoggerIdentity {
@@ -176,6 +203,13 @@ function normalizedFields(value: LogMetadata & { error?: unknown }, errorIsDescr
   const error = value.error === undefined
     ? undefined
     : errorIsDescribed ? boundedError(value.error) : describeError(value.error);
+  const durationMs = durationField(value.durationMs);
+  const unaccountedMs = durationField(value.unaccountedMs);
+  const acceptToUpgradeMs = durationField(value.acceptToUpgradeMs);
+  const authMs = durationField(value.authMs);
+  const handshakeMs = durationField(value.handshakeMs);
+  const helloMs = durationField(value.helloMs);
+  const silentMs = durationField(value.silentMs);
   return {
     ...(typeof value.event === "string" ? { event: boundedMessage(value.event).slice(0, MAX_FIELD_CHARS) } : {}),
     ...(typeof value.source === "string" ? { source: boundedMessage(value.source).slice(0, 64) } : {}),
@@ -191,13 +225,17 @@ function normalizedFields(value: LogMetadata & { error?: unknown }, errorIsDescr
     ...(typeof value.outcome === "string" ? { outcome: boundedMessage(value.outcome).slice(0, 64) } : {}),
     ...(typeof value.reason === "string" ? { reason: boundedDiagnosticID(value.reason).slice(0, 64) } : {}),
     ...(typeof value.code === "string" ? { code: boundedMessage(value.code).slice(0, 64) } : {}),
-    ...(typeof value.durationMs === "number" && Number.isFinite(value.durationMs)
-      ? { durationMs: Math.max(0, Math.min(Number.MAX_SAFE_INTEGER, Math.round(value.durationMs))) }
-      : {}),
+    ...(durationMs !== undefined ? { durationMs } : {}),
     ...(typeof value.stages === "string" ? { stages: boundedStages(value.stages) } : {}),
-    ...(typeof value.unaccountedMs === "number" && Number.isFinite(value.unaccountedMs)
-      ? { unaccountedMs: Math.max(0, Math.min(Number.MAX_SAFE_INTEGER, Math.round(value.unaccountedMs))) }
-      : {}),
+    ...(unaccountedMs !== undefined ? { unaccountedMs } : {}),
+    ...(typeof value.phaseReached === "string" ? { phaseReached: boundedDiagnosticID(value.phaseReached).slice(0, 32) } : {}),
+    ...(acceptToUpgradeMs !== undefined ? { acceptToUpgradeMs } : {}),
+    ...(authMs !== undefined ? { authMs } : {}),
+    ...(handshakeMs !== undefined ? { handshakeMs } : {}),
+    ...(helloMs !== undefined ? { helloMs } : {}),
+    ...(typeof value.peerPath === "string" ? { peerPath: boundedDiagnosticID(value.peerPath).slice(0, 32) } : {}),
+    ...(typeof value.peerRelay === "string" ? { peerRelay: boundedDiagnosticID(value.peerRelay).slice(0, 32) } : {}),
+    ...(silentMs !== undefined ? { silentMs } : {}),
     ...(error ? { error } : {}),
   };
 }
