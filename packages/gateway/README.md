@@ -528,6 +528,32 @@ catalog are owned by [`docs/observability.md`](docs/observability.md).
   `gateway.shutdown-step` names and times every awaited shutdown operation so a
   forced exit can be attributed to its owner.
 
+### Background work
+
+One owner decides when recurring background work may run: `backgroundWork` in
+`src/background-work.ts`, started by `gateway-main.ts` after the listener is
+serving. Registered jobs take turns **one slice at a time**; between slices the
+scheduler yields with `setImmediate`, so the next slice runs in the loop's check
+phase after the poll phase's timers and I/O. A due slice waits while a
+request is in flight (`activeRequestSpans()` in `src/transport/request-span.ts`)
+or while the loop's delay p99 is at or above `BACKGROUND_PAUSE_P99_MS` (50 ms),
+re-checking every `BACKGROUND_PAUSE_RECHECK_MS` (100 ms). A rejecting slice is
+reported and never stops the scheduler or the jobs registered after it.
+`background.slice` (debug, warning on failure) and `background.backlog`
+(warning once per starved spell past `BACKGROUND_BACKLOG_WARNING_MS`, 5 minutes)
+are the records; [`docs/observability.md`](docs/observability.md) owns their
+fields.
+
+The jobs are the session catalog's periodic reconcile
+(`CATALOG_RECONCILE_INTERVAL_MS`, registered by `session-catalog.ts` itself),
+command-receipt pruning, and the attachment/display-artifact maintenance pass.
+Each owner keeps its own bounds; the scheduler only decides *when* a slice may
+start. Nothing in a request path prunes, walks or reconciles: an admission may
+still force one exact pass at its own capacity boundary (receipts), which is
+correctness rather than maintenance. `register({ name, intervalMs, slice })`
+returns the function that unregisters the job, and that call is the seam any
+other recurring owner moves its work under.
+
 ### Diagnostic bundle
 
 `scripts/tron diagnose [--since <count><s|m|h|d>] [--out <path>]` writes one
@@ -783,7 +809,8 @@ removes uncommitted staging and releases its reservation. An authenticated clien
 an unclaimed upload when its local chip or presentation is retired; claimed prompt attachments reject that
 operation. Remaining unclaimed uploads expire after 24 hours. Prompt attachment IDs are unique, and one
 prompt cannot materialize more than the per-prompt byte ceiling. Startup performs the one physical inventory,
-legacy migration, integrity/ownership reconciliation, and orphan-object sweep. The ten-minute pass then removes
+legacy migration, integrity/ownership reconciliation, and orphan-object sweep. The ten-minute pass, which the
+background-work scheduler runs as one slice, then removes
 stale bodies, expires indexed unclaimed files, retries pending cleanup, and removes claimed logical references
 only when the canonical session catalog proves their owner no longer exists; it does not rescan every retained
 metadata file. A later process start can always rebuild the disposable index from physical metadata.
@@ -965,7 +992,10 @@ identity/envelope overhead before decode and persistence. The store admits at mo
 completion before a mutation executes; full capacity returns retryable `busy`.
 Admission keeps an in-process usage total, reconciled from disk when a prune
 removed evidence rather than once per receipt write, so sustained revisioned
-activity is not quadratic in the receipt count;
+activity is not quadratic in the receipt count; the age-based prune is the
+background-work scheduler's job (`COMMAND_RECEIPT_PRUNE_INTERVAL_MS`, one
+minute), and admission only forces one exact pass at the capacity boundary
+before it refuses;
 owned interrupted atomic-write temporaries are scavenged, but only when the
 command that named them no longer holds a lane, so a receipt write in flight
 never loses its temporary, and arbitrary files are not treated as receipt

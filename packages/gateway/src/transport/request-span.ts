@@ -15,10 +15,24 @@ import { AsyncLocalStorage } from "node:async_hooks";
  * it spent. Two stages that genuinely overlap do add up to more than that, and
  * `unaccountedMs` then reads its floor of zero rather than a negative number.
  */
+/** Requests this process has admitted and not yet answered. One live span is one
+ * request the transport is serving, so background work can yield to it; span
+ * construction and `breakdown` are the request's own boundaries
+ * (`transport/server.ts` admits, the response or its failure closes). */
+let activeSpans = 0;
+
+export function activeRequestSpans(): number {
+  return activeSpans;
+}
+
 export class RequestSpan {
   private readonly entries = new Map<string, SpanEntry>();
   private sequence = 0;
   private finished = false;
+
+  constructor() {
+    activeSpans += 1;
+  }
 
   /**
    * Measures `operation` as one named stage. Returns what the operation
@@ -116,7 +130,10 @@ export class RequestSpan {
    * ignored so a published breakdown cannot move.
    */
   breakdown(requestMs: number): RequestSpanBreakdown | undefined {
-    this.finished = true;
+    if (!this.finished) {
+      this.finished = true;
+      activeSpans -= 1;
+    }
     const recorded = [...this.entries.values()].filter(worthNaming)
       .sort((left, right) => right.ms - left.ms || left.order - right.order);
     if (recorded.length === 0) return undefined;

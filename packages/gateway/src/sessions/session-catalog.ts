@@ -1,6 +1,7 @@
 import { watch } from "node:fs";
 import { lstat, readdir, realpath } from "node:fs/promises";
 import { basename, dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
+import { backgroundWork, type BackgroundWorkRegistration } from "../background-work.js";
 import { isIgnoredCatalogDirectory } from "./catalog-discovery.js";
 import type {
   CatalogMetadataIndex,
@@ -208,6 +209,9 @@ export interface SessionCatalogOptions {
   /** How soon an unwatchable root is retried, and the backstop cadence. */
   watchRetryMs?: number;
   reconcileIntervalMs?: number;
+  /** Where the periodic reconcile pass registers as one background slice. The
+   * process-wide `backgroundWork` scheduler by default; a test drives its own. */
+  backgroundWork?: BackgroundWorkRegistration;
   /** One call per reconcile, for the catalog juncture's `catalog.reconciled`. */
   onReconciled?: (reconciled: SessionCatalogReconcileOutcome) => void;
   /** One row the folder watcher changed for one file, for `catalog.changed`. */
@@ -264,6 +268,8 @@ export class SessionCatalog {
   private readonly watchCatalog: (request: SessionCatalogWatchRequest) => SessionCatalogWatchHandle;
   private readonly watchRetryMs: number;
   private readonly reconcileIntervalMs: number;
+  private readonly backgroundWork: BackgroundWorkRegistration;
+  private unregisterReconcile: (() => void) | undefined;
   private watcher: SessionCatalogWatchHandle | undefined;
   private watchedRoot: string | undefined;
   private readonly eventTimers = new Map<string, NodeJS.Timeout>();
@@ -276,7 +282,6 @@ export class SessionCatalog {
   private unnamedEventWindowStartedAt: number | undefined;
   private watchRetryTimer: NodeJS.Timeout | undefined;
   private watchOutageClearTimer: NodeJS.Timeout | undefined;
-  private reconcileTimer: NodeJS.Timeout | undefined;
   /** One record per outage rather than per retry: while the watcher is down,
    * every attempt fails for the same reason. Cleared once a replacement has
    * survived one retry interval, so an outage of its own gets its own record. */
@@ -305,6 +310,7 @@ export class SessionCatalog {
     this.watchCatalog = options.watchCatalog ?? watchCatalogFolder;
     this.watchRetryMs = options.watchRetryMs ?? CATALOG_WATCH_RETRY_MS;
     this.reconcileIntervalMs = options.reconcileIntervalMs ?? CATALOG_RECONCILE_INTERVAL_MS;
+    this.backgroundWork = options.backgroundWork ?? backgroundWork;
     this.now = options.now ?? Date.now;
   }
 
@@ -678,16 +684,22 @@ export class SessionCatalog {
     this.watchRetryTimer.unref();
   }
 
+  /** The periodic pass is one of the scheduler's jobs, not a timer of its own:
+   * the scheduler runs it one slice at a time and pauses it while a request is in
+   * flight or the loop is behind. */
   private scheduleReconcileInterval(): void {
     if (this.closed || this.reconcileIntervalMs <= 0) return;
-    this.reconcileTimer = setInterval(() => {
-      // The retry is belt and braces beside `scheduleWatchRetry`: the pass is
-      // the one place that always runs, so an unwatched root cannot stay
-      // unwatched for the life of the process.
-      void this.ensureWatching();
-      void this.reconcile();
-    }, this.reconcileIntervalMs);
-    this.reconcileTimer.unref();
+    this.unregisterReconcile = this.backgroundWork.register({
+      name: "catalog.reconcile",
+      intervalMs: this.reconcileIntervalMs,
+      slice: async () => {
+        // The retry is belt and braces beside `scheduleWatchRetry`: the pass is
+        // the one place that always runs, so an unwatched root cannot stay
+        // unwatched for the life of the process.
+        this.ensureWatching();
+        await this.reconcile();
+      },
+    });
   }
 
   private stopWatching(): void {
@@ -710,10 +722,8 @@ export class SessionCatalog {
       clearTimeout(this.watchOutageClearTimer);
       this.watchOutageClearTimer = undefined;
     }
-    if (this.reconcileTimer) {
-      clearInterval(this.reconcileTimer);
-      this.reconcileTimer = undefined;
-    }
+    this.unregisterReconcile?.();
+    this.unregisterReconcile = undefined;
   }
 
   private async reconcileIndex(): Promise<void> {
