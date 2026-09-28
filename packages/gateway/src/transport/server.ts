@@ -220,6 +220,11 @@ export interface SessionOpenFlight {
   attempt?: Promise<JsonValue>;
   /** Requests still waiting for this attempt's answer. */
   waiters: number;
+  /** Set once a response carrying this attempt's result reached the client. */
+  answered?: boolean;
+  /** Releases the synchronization this attempt installed, registered by the
+   * request that owns its barrier while another request may still deliver it. */
+  releaseAbandoned?: () => void;
 }
 
 /** One admitted request, the owner of its abort signal and its span. */
@@ -2355,6 +2360,7 @@ export class GatewayServer {
         }
       }
       const responseSentIntact = runInRequestSpan(requestSpan, () => this.send(connection, { type: "response", id: frame.id, ok: true, result }));
+      if (responseSentIntact && sessionOpenFlight !== undefined) sessionOpenFlight.answered = true;
       responseAttempted = true;
       if (responseSentIntact) rpcOutcome = "success";
       if (responseSentIntact && connection.revoked && connection.revokeResponseRequestId === frame.id) {
@@ -2485,17 +2491,13 @@ export class GatewayServer {
       }
     } finally {
       const otherOpenWaiters = (sessionOpenFlight?.waiters ?? 1) > 1;
-      if (sessionOpenFlight !== undefined) {
-        // Rekey retains an old duplicate-open alias, but both spellings point at
-        // the same flight; releasing the flight releases every alias with it.
-        this.releaseSessionOpenFlight(connection, sessionOpenFlight);
-      }
       // An open keeps the synchronization it installed only when an answer for
-      // it is out (this request's own, or a shared attempt another request still
-      // waits for). Everything else - a failure, a cancellation, an undelivered
-      // response - releases the barrier and its subscription here, so an
-      // abandoned open cannot block the retry that follows it (`C-6`).
-      if (!(attemptSucceeded && (rpcOutcome === "success" || otherOpenWaiters))) {
+      // it is out: this request's own delivered response, or a shared attempt a
+      // waiting retry may still deliver. Everything else - a failure, a
+      // cancellation, an undelivered response - releases the barrier and its
+      // subscription here, so an abandoned open cannot block the retry that
+      // follows it (`C-6`).
+      const releaseOwnSynchronizations = (): void => {
         const ownerRequestIDs = new Set([
           requestId,
           ...synchronizationCompletions.map((completion) => completion.requestId),
@@ -2505,6 +2507,18 @@ export class GatewayServer {
             revokeSynchronization(sessionId, synchronization);
           });
         }
+      };
+      if (!(attemptSucceeded && (rpcOutcome === "success" || otherOpenWaiters))) {
+        releaseOwnSynchronizations();
+      } else if (otherOpenWaiters && sessionOpenFlight !== undefined) {
+        // The waiting retry owns the delivery now; if it leaves before it
+        // answers, the barrier still has to go.
+        sessionOpenFlight.releaseAbandoned = releaseOwnSynchronizations;
+      }
+      if (sessionOpenFlight !== undefined) {
+        // Rekey retains an old duplicate-open alias, but both spellings point at
+        // the same flight; releasing the flight releases every alias with it.
+        this.releaseSessionOpenFlight(connection, sessionOpenFlight);
       }
       connection.inFlight.delete(frame.id);
       connection.requestControllers.delete(frame.id);
@@ -2568,6 +2582,9 @@ export class GatewayServer {
       ));
       if (inFlightRpc.controller.signal.aborted) return;
       if (runInRequestSpan(requestSpan, () => this.send(connection, { type: "response", id: requestId, ok: true, result }))) {
+        // A retry delivered the shared attempt's answer, so the barrier it
+        // installed is now the client's to acknowledge.
+        flight.answered = true;
         rpcOutcome = "success";
       }
     } catch (error) {
@@ -2623,6 +2640,10 @@ export class GatewayServer {
     for (const [sessionId, pending] of connection.pendingSessionOpens) {
       if (pending === flight) connection.pendingSessionOpens.delete(sessionId);
     }
+    // Nobody waits for this attempt's answer and no response carried it: what
+    // it installed is unreachable ownership, released by the request that owns
+    // the barrier.
+    if (!flight.answered) flight.releaseAbandoned?.();
   }
 
   /** One record per finished request: `rpc.completed` with its breakdown, or the

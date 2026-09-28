@@ -942,6 +942,19 @@ never rejects the hello for one. It stamps the kept values as `peerClientId`,
 diagnostic only: a peer that omits them still connects.
 
 Requests use `{type,id,method,params}` and receive `{type,id,ok,result|error}`.
+A client that stops waiting for a disposable read sends `{type:"cancel",id}` and
+receives no answer: the Gateway abandons that request's work and records
+`rpc.cancelled` with the stage it interrupted. Cancellation applies only to
+reads whose result nothing consumes — `session.open` before its subscription
+commits, catalog and transcript pages, workspace, search, knowledge and
+model/provider reads. An accepted mutation or admitted prompt is never
+cancelled: its owner settles it durably whatever the client does with its wait.
+A second `session.open` for the same connection and session joins the attempt
+already in flight and receives its exact result instead of a `conflict`; the
+shared attempt is abandoned only when its last waiting request leaves, and a
+genuinely overlapping open that is not a join is still rejected. A cancel for a
+request that was already answered, already cancelled, or never admitted changes
+nothing.
 Mutations require `params.commandId`; receipts deduplicate completed commands.
 After an uncertain disconnect, clients reconnect and poll `command.status`, reuse
 a completed result, retry only a confirmed-missing command with the same ID, and

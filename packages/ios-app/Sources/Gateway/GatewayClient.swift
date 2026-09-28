@@ -1849,6 +1849,7 @@ actor GatewayClient {
         let error: Error = request.transmission.mayHaveBeenSent
             ? Self.possiblySentFailure(message: "The Mac did not answer after the request may have been sent.")
             : GatewayFailure(code: "timeout", message: "The request expired before it was sent.", retryable: true, details: nil)
+        cancelDisposableRead(request, socket: epoch.socket)
         fail(id: id, epochID: epochID, error: error)
     }
 
@@ -1858,7 +1859,39 @@ actor GatewayClient {
         let error: Error = request.transmission.mayHaveBeenSent
             ? Self.possiblySentFailure(message: "The cancelled request may have reached the Mac.")
             : CancellationError()
+        cancelDisposableRead(request, socket: epoch.socket)
         fail(id: id, epochID: epochID, error: error, forcedOutcome: .cancelled)
+    }
+
+    /// Tell the Gateway this call stopped waiting for a disposable read, so it
+    /// stops computing an answer nobody consumes (`C-6`). A request that never
+    /// left this client has nothing to cancel, and an accepted mutation or
+    /// admitted prompt is never cancelled: its owner must settle it durably.
+    /// The frame is fire-and-forget because the caller already failed locally;
+    /// a socket that cannot carry it is the socket's own failure to report.
+    private func cancelDisposableRead(_ request: PendingRequest, socket: any GatewaySocketConnection) {
+        guard GatewayDisposableReadPolicy.admits(request.method),
+              request.transmission.mayHaveBeenSent,
+              let data = try? JSONEncoder.gateway.encode(GatewayCancelFrame(id: request.requestID))
+        else { return }
+        let duration = diagnosticMilliseconds(request.startedAt.duration(to: clock.now()))
+        if let appLog {
+            Task {
+                await appLog.recordRPC(
+                    event: "rpc.cancelled",
+                    method: request.method,
+                    requestID: request.requestID,
+                    outcome: "cancelled",
+                    code: nil,
+                    durationMilliseconds: duration,
+                    profileID: request.profileID,
+                    connectionID: request.connectionID
+                )
+            }
+        }
+        Task { [socket] in
+            try? await socket.send(data)
+        }
     }
 
     private func fail(
