@@ -580,6 +580,7 @@ rows are in priority order.
 | G-8c | Needs scoping | Bound the session-search warm-up (persisted index vs bounded slices in G-9's scheduler: user decision); see G-8 handoff | G-9 | |
 | E-1 | Ready | Document Tailscale flap diagnosis and user-side checks; the evaluation day confirms | O-2, O-7 | |
 | T-1 | Ready | Pre-existing test race: registry extension-artifact discovery tests treat an awaited `discoverExtensionArtifacts()` as a barrier; wait for a pass that settles (three tests, one a false green) | G-1a (Registry zone) | |
+| T-2 | Ready | `GatewayConnectionEpisodeRecorderTests/blockedMainActorIsMeasuredAndReported` (O-4) was killed once ("Test crashed with signal kill") when run with four other suites on integration, then passed 3/3; find whether the 5 s main-thread block trips a hosted-test watchdog and bound the block so the test cannot be killed while still proving the stall record | O-4 | |
 | C-7 | Ready | Dashboard-pool event consumption stops after a failed initial connect (see the C-5 handoff): a successful reconnect brings the socket back but nothing consumes `client.events`, so a background profile stops receiving summaries, `system.stopping` and `transport.disconnected` until its entry is recreated | C-2 | |
 
 ### Phase 2 — Release and one evaluation day
