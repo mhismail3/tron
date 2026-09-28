@@ -822,6 +822,21 @@ class ReviewRoundTwoTests(TriageFixture):
         self.assertIn("published state stayed reconnecting",
                       self.causes_text(report["episodes"][2]))
 
+    def test_an_outage_that_opens_in_the_background_is_still_phone_background(self):
+        # The phase of a stretch is the app's state when it began: an outage
+        # published while the app is backgrounded is parked (`phone-background`)
+        # until the app returns to the foreground.
+        phone = self.write("phone.jsonl", [
+            app_record("2026-09-28T02:00:00.000Z", "app.backgrounded", "outcome=success"),
+            state_change("2026-09-28T02:00:05.000Z", "connected", "reconnecting"),
+            app_record("2026-09-28T02:00:30.000Z", "app.foregrounded", "outcome=success"),
+            state_change("2026-09-28T02:00:40.000Z", "reconnecting", "connected"),
+        ])
+        report = self.run_tool(phone)
+        self.assertEqual([item["cause"] for item in report["episodes"]],
+                         ["phone-background", "unknown"], report["episodes"])
+        self.assertEqual(report["episodes"][0]["end"], "2026-09-28T02:00:30.000Z")
+
     def test_the_socket_the_reconnect_opened_is_not_the_cause(self):
         # 2026-09-27 23:59:39: a 76 ms reconnect. The socket it opened 38 ms in
         # began a 4,276 ms `session.list` 6 ms before the episode ended.

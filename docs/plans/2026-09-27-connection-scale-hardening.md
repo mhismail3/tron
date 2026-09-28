@@ -4419,7 +4419,7 @@ events; widen them to name the pool owner in the same change.
   Inputs are opened
   read-only; the only write is the `--out` report.
 - Evidence:
-  - `python3 scripts/test-tron-triage.py` passes 41/41 (33 fixture tests plus 8
+  - `python3 scripts/test-tron-triage.py` passes 42/42 (33 fixture tests plus 9
     `ReviewRoundTwoTests` cases) in about 4 s under both Homebrew Python 3.14 and
     `/usr/bin/python3` 3.9. Each round-2 case has a negative control: reverting
     one mechanism fails exactly that case (see "Review round 2" below). Each
@@ -4586,7 +4586,7 @@ events; widen them to name the pool owner in the same change.
      gone; the doc line about an `unknown` foreground silent gap now holds,
      because those gaps are reported as `unknown` episodes.
 
-  Negative controls (revert one mechanism, one test fails): a scene transition
+  Negative controls (revert one mechanism, the named test fails): a scene transition
   ending the window instead of splitting it fails
   `test_a_background_blip_does_not_hide_the_silent_gap_after_it` and
   `test_a_blip_does_not_stop_the_live_socket_from_being_the_cause`; a
