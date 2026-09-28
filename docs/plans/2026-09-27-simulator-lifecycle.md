@@ -900,7 +900,9 @@ Owning files: `scripts/ios-test-simulator.py`, `scripts/tron-ios-test`.
   carries `--lane NAME`, and a command whose inherited lease is not its own
   lane's lock is refused 74), `scripts/ios-test-lock.py` (exports
   `TRON_IOS_TEST_LEASE_LOCK` beside the existing `TRON_IOS_TEST_LEASE_FD`),
-  `scripts/test-ios-test-infrastructure.py` (two `RunnerFixture` cases).
+  `scripts/test-ios-test-infrastructure.py` (three `RunnerFixture` cases; the
+  third, added after review round 1, pins that the guard compares the lease files
+  with `-ef` rather than path spellings).
 - Why: `--lane NAME` was consumed while selecting the lane and not passed to the
   re-executed command, so a named-lane command leased that lane and used the
   default lane's simulator; runs therefore stopped serializing on one simulator

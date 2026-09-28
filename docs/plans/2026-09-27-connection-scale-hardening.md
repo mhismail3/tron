@@ -7360,6 +7360,13 @@ wait).
   existing lease descriptor) is not this lane's own lock, so a descendant that
   inherits `TRON_IOS_TEST_LOCK_HELD=1` can no longer run on another lane's
   simulator. `packages/ios-app/docs/development.md` says both.
+- Follow-up after review round 1 (same branch, second commit): the guard compared
+  the two lock paths as strings, and the locker tidies `--lock` through
+  `pathlib`, so a state directory spelled with a trailing slash, `//` or `./`
+  (the common macOS `$TMPDIR` shape) was refused 74 for every leased command. It
+  now compares the files with `-ef`. The regression case
+  `RunnerFixture.test_a_state_directory_spelled_differently_is_still_this_lanes_lease`
+  covers all three spellings and fails 3/3 against the string comparison.
 - Evidence: pre-fix reproduction (2026-09-28 11:47 local, while a default-lane
   `build` held `~/.tron/internal/ios-test/lease.lock`, pid 84994):
   `scripts/tron-ios-test run --lane CT22 --only-testing …` leased
@@ -7377,11 +7384,13 @@ wait).
   afterwards. Logs: `~/.tron/workspace/files/hardening/t-3-evidence/`.
 - Evidence: `python3 scripts/test-ios-test-infrastructure.py
   RunnerFixture.test_a_lane_named_on_the_command_line_is_the_lane_that_provisions
-  RunnerFixture.test_an_inherited_lease_that_covers_another_lane_is_refused` —
-  2/2 pass; both fail without their fix (with the lane not forwarded, the guard
-  refuses 74 naming both locks; the whole file's run is recorded below). The
-  existing `RunnerFixture` cases are the guard's positive control: every normal
-  `run` there goes through the holder and now proves its inherited lease.
+  RunnerFixture.test_an_inherited_lease_that_covers_another_lane_is_refused
+  RunnerFixture.test_a_state_directory_spelled_differently_is_still_this_lanes_lease`
+  — 3/3 pass; each fails without its fix (with the lane not forwarded, the guard
+  refuses 74 naming both locks; the string comparison refuses all three
+  spellings). The existing `RunnerFixture` cases are the guard's positive
+  control: every normal `run` there goes through the holder and now proves its
+  inherited lease. Whole file after the follow-up: 89 tests, 179 s, OK.
 - Tasks added: none.
 - Deviations: the guard is a new env contract (`TRON_IOS_TEST_LEASE_LOCK`); it
   was added because the row named `TRON_IOS_TEST_LOCK_HELD` inheritance as a
@@ -7394,6 +7403,10 @@ wait).
   the mechanism above is proven for pair 2 and sufficient for the class; the
   guard now refuses that run whether the lane was lost by argument or by
   inheritance.
+- Note for future reproductions: the first pre-fix reproduction above ran on the
+  shared default-lane simulator while another session's `build` held that lease,
+  so it moved the default marker's mtime. Use `RunnerFixture` or a throwaway
+  named lane instead.
 - For the next agent: a `~/.tron/internal/ios-test-NAME` directory holding only
   `lease.lock` means a named-lane command ran in the default lane; treat it as
   evidence of a lane/lease mismatch, and check `TRON_IOS_TEST_LEASE_LOCK` when a

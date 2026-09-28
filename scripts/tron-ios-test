@@ -428,8 +428,11 @@ if [[ "${TRON_IOS_TEST_LOCK_HELD:-0}" != 1 ]]; then
 else
   # A descendant of a leased command inherits the lease's own name. One that
   # names another lane would use that lane's simulator while holding no lease on
-  # it, so refuse rather than run unleased.
-  [[ "${TRON_IOS_TEST_LEASE_LOCK:-}" == "$LOCK" ]] \
+  # it, so refuse rather than run unleased. The lease's lock file exists by now,
+  # so compare the files rather than the spellings: the same path reaches this
+  # command with or without a trailing slash, `./` or `//`, and every leased
+  # command would be refused on a spelling difference alone.
+  [[ -n "${TRON_IOS_TEST_LEASE_LOCK:-}" && "$TRON_IOS_TEST_LEASE_LOCK" -ef "$LOCK" ]] \
     || die "this command names lane $LANE_LABEL, whose lease is $LOCK, but the inherited iOS test lease covers ${TRON_IOS_TEST_LEASE_LOCK:-no lane}; refusing to run on a lane this process does not hold"
 fi
 

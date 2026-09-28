@@ -1250,6 +1250,13 @@ exit 0
     # 2. A descendant of a leased command that names another lane runs on that
     #    lane's simulator while holding no lease on it, because it inherits the
     #    holder's `TRON_IOS_TEST_LOCK_HELD` and skips the locker entirely.
+    # 3. The holder's command compares its own lane path against the lease's
+    #    spelling instead of the file both name, so a state directory written
+    #    with a trailing slash, `//` or `./` is refused even though it is this
+    #    lane's own lease.
+    #
+    # Failure mode 3 was added after the review of the first attempt, which
+    # compared strings and refused every such spelling.
     def test_a_lane_named_on_the_command_line_is_the_lane_that_provisions(self) -> None:
         """Failure mode 1: the holder's command keeps the lane it was given."""
         owner = ["--only-testing", "TronMobileTests/StubTests"]
@@ -1270,6 +1277,28 @@ exit 0
         self.assertTrue((lane / "lease.lock").exists())
         self.assertFalse(default_state.exists())
         self.assertFalse((self.state / "lease.lock").exists())
+
+    def test_a_state_directory_spelled_differently_is_still_this_lanes_lease(self) -> None:
+        """Failure mode 3: the guard compares files, not the spellings of paths."""
+        # The locker tidies `--lock` through pathlib, so the child's own
+        # `$STATE_ROOT/lease.lock` reaches it with a trailing slash, `//` or
+        # `./` intact. Every leased command (build, run, checkpoint, prepare,
+        # diagnose, clean) would be refused if the guard compared strings.
+        # `$TMPDIR` on macOS ends in `/`, so this is the common spelling.
+        spellings = [
+            f"{self.state}/",
+            f"{self.state.parent}//{self.state.name}",
+            f"{self.state.parent}/./{self.state.name}",
+        ]
+        for spelling in spellings:
+            with self.subTest(spelling=spelling):
+                result = self.invoke(
+                    extra_args=["--only-testing", "TronMobileTests/StubTests"],
+                    override={"TRON_IOS_TEST_STATE_DIR": spelling},
+                )
+                self.assertEqual(result.returncode, 0, result.stderr)
+                self.assertTrue((self.state / "simulator.json").exists())
+                self.device_entry(self.owned_udid())
 
     def test_an_inherited_lease_that_covers_another_lane_is_refused(self) -> None:
         """Failure mode 2: a command never runs on a lane its lease does not hold."""
