@@ -2,7 +2,7 @@
 
 - **Started:** 2026-09-27
 - **Status:** Active (Phase 1 runs on `hardening/integration`; that branch's copy of this plan is authoritative until R-1)
-- **Last updated:** 2026-09-28, O-6b Blocked (impairment cases run and report after the second review; the full-length baseline is the orchestrator's quiet-host run)
+- **Last updated:** 2026-09-28, O-6b Blocked (impairment cases measure recovery after the third review; the full-length baseline is the orchestrator's quiet-host run)
 - **Goal:** A clean, efficient and predictable Gateway and phone connection: the phone stays connected and loads any session promptly whenever the network path is up, however many sessions run and however large the history grows, and every disconnect or slow operation is attributable to one cause from the logs in one step.
 
 ## Goal and constraints
@@ -520,7 +520,7 @@ rows are in priority order.
 | O-2 | Ready | Gateway transport records: upgrade phases, inbound silence with Tailscale peer path | O-1 | |
 | O-3 | Done | Request span: one `rpc.completed` per slow RPC with every stage, wait and count | O-1 | orchestrator-dispatched deepseek-worker, 2026-09-28 |
 | O-4 | Claimed | Phone connection records that survive an export, stall watchdog, exact scene records | O-1 | orchestrator-dispatched deepseek-worker, 2026-09-28 |
-| O-6b | Blocked | Impairment in the qualification scenario: blackhole, bandwidth cap, Gateway restart | O-6a | orchestrator-dispatched deepseek-worker, 2026-09-28 (second review response) |
+| O-6b | Blocked | Impairment in the qualification scenario: blackhole, bandwidth cap, Gateway restart | O-6a | orchestrator-dispatched deepseek-worker, 2026-09-28 (third review response) |
 | O-5 | Claimed | Gateway resource sampler and event-loop histogram | O-3 | orchestrator-dispatched deepseek-worker, 2026-09-28 |
 | O-7 | Ready | Incident triage tool: phone export plus Gateway log in, episodes by cause out | O-1, O-2, O-4 | |
 | C-1 | Ready | Projection work never blocks or parks reconnect; parked episodes self-resume | O-4, O-6b | |
