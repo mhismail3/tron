@@ -848,3 +848,48 @@ Owning files: `scripts/ios-test-simulator.py`, `scripts/tron-ios-test`.
 - Validation: `npm run build`; `npx vitest run src/transport` (39 files, 299
   tests) passes.
 - Deviations: none.
+
+### SIM-8 · 2026-09-27 · chat scroll session (worker lane, branch `sim-8-gateway-memory`) · Review fixes
+
+- Finding (P2-7a): a host probe that loses its 1 s race is discarded, so the
+  cached sample could stay at a pre-squeeze healthy value indefinitely while the
+  docs claimed it was "at most one 25 s tick old".
+- Fix (a): every `connection.opened`/`connection.closed`/`gateway.event-loop-delay`
+  host field list now ends with `hostSampleAgeMs`, the age of the cache the other
+  fields came from (`0` for a probe taken for that record). `StallSampler`
+  timestamps the cache it publishes (`HostSample`), and
+  `packages/gateway/docs/connection-resilience.md` plus
+  `packages/gateway/docs/observability.md` no longer claim the tick bounds
+  staleness: the age does. Tests: `stall-diagnostics.test.ts` "reports the age
+  of a cached sample that a lost probe race left in place" (probe loses its race
+  through the real 1 s bound, cached sample then reports a 60 s age) and
+  `server-connection-memory.integration.test.ts` "states the sample's age, the
+  swap total and the kernel's memory level" (a record still holding the squeeze
+  sample reports a positive age).
+- Finding (P2-7b): the interpret table sent operators to `swapUsedBytes` "near
+  the host's swap total" while no field carried the total.
+- Fix (b): `swapTotalBytes` is parsed from the same `vm.swapusage` read and
+  logged in both record kinds. Test: the same two cases assert
+  `swapTotalBytes=`.
+- Finding (P2-7c): `hostFreeBytes` is `os.freemem`, which on macOS counts free
+  pages only and is small on a healthy Mac, so it misread as pressure.
+- Fix (c): one `sysctl -n` now carries all three names
+  (`vm.swapusage kern.memorystatus_vm_pressure_level kern.memorystatus_level`),
+  so `hostMemoryAvailablePercent` (the kernel's percentage of memory available,
+  the number `memory_pressure` prints) costs no extra subprocess; an unknown name
+  no longer blanks the whole sample, and each parsed value is validated against
+  its own domain instead of its line position. `memoryPressure` is kept, and the
+  new "Reading the host memory fields" section in `connection-resilience.md`
+  says how to read each field and which one answers whether the host was
+  squeezed. Tests: "parses one sysctl probe into the swap total and used bytes,
+  pressure and the kernel's memory level", "reads every kernel fact with one
+  sysctl invocation" (one call, level included) and the record case above.
+- Validation: `npm run build`; `npx vitest run src/transport/stall-diagnostics.test.ts
+  src/transport/server-connection-memory.integration.test.ts` (12 tests) and
+  `npx vitest run src/transport` (39 files, 303 tests) pass. The seven new or
+  updated cases were confirmed to fail before the fix. A real probe on this Mac
+  reported `swapUsedBytes=1039925248 swapTotalBytes=2147483648
+  memoryPressure=normal hostMemoryAvailablePercent=51`, matching `sysctl`
+  directly; no live Gateway was touched.
+- Deviations: none. No live Gateway restart, rebuild, install or device action
+  was performed; no probe was pointed at a real simulator or Gateway.

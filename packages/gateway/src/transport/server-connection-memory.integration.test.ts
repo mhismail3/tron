@@ -19,20 +19,28 @@ import { StallSampler, type HostMemory } from "./stall-diagnostics.js";
 //    reports the numbers captured before the squeeze.
 // 4. The Mac app's constant local-probe records gain host facts, multiplying
 //    them per probe instead of per phone connection.
+// 5. A record read hours after the sample was taken has no age, so a cache that
+//    a lost probe race left frozen reads as the host state at the drop; and the
+//    fields the interpret table compares against (the swap total, the kernel's
+//    memory level) are not in the line at all.
 
 /** The 2026-09-27 incident: swap nearly exhausted while phones reconnected. */
 const DURING_SQUEEZE: HostMemory = {
   freeBytes: 1_240_000_000,
   totalBytes: 36_000_000_000,
   swapUsedBytes: 19_800_000_000,
+  swapTotalBytes: 20_480_000_000,
   pressure: "critical",
+  memoryAvailablePercent: 4,
 };
 /** The same Mac after the idle simulators were shut down. */
 const AFTER_CLEANUP: HostMemory = {
   freeBytes: 30_400_000_000,
   totalBytes: 36_000_000_000,
   swapUsedBytes: 1_700_000_000,
+  swapTotalBytes: 2_048_000_000,
   pressure: "normal",
+  memoryAvailablePercent: 62,
 };
 
 const cleanups: Array<() => Promise<void>> = [];
@@ -196,6 +204,33 @@ describe("host memory in connection records", () => {
     expect(opened[1]).toContain(`memoryPressure=${AFTER_CLEANUP.pressure}`);
     after.close();
     await waitUntil(() => harness.records("connection.closed").length === 2, "close after cleanup");
+  });
+
+  // Failure mode 5: a record can carry pre-squeeze numbers, because the sample
+  // is only refreshed on a heartbeat and a probe that loses its 1 s race is
+  // discarded. Without the sample's age, and without the swap total and the
+  // kernel's memory level the interpret table reads, the drop still cannot be
+  // judged from the line.
+  it("states the sample's age, the swap total and the kernel's memory level", async () => {
+    const harness = await startGateway();
+    const during = await harness.connect(harness.pairedToken);
+    during.close();
+    await waitUntil(() => harness.records("connection.closed").length === 1, "close during the squeeze");
+
+    // The Mac is no longer squeezed and no tick has run, so the record below
+    // still holds the squeeze sample and only its age says so.
+    harness.sample(AFTER_CLEANUP);
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    const after = await harness.connect(harness.pairedToken);
+    const opened = harness.records("connection.opened").at(-1)!;
+    expect(opened[1]).toContain(`swapUsedBytes=${DURING_SQUEEZE.swapUsedBytes}`);
+    expect(opened[1]).toContain(`swapTotalBytes=${DURING_SQUEEZE.swapTotalBytes}`);
+    expect(opened[1]).toContain(`memoryPressure=${DURING_SQUEEZE.pressure}`);
+    expect(opened[1]).toContain(`hostMemoryAvailablePercent=${DURING_SQUEEZE.memoryAvailablePercent}`);
+    const ageMs = Number(/hostSampleAgeMs=(\d+)/u.exec(opened[1])?.[1]);
+    expect(ageMs).toBeGreaterThanOrEqual(20);
+    after.close();
+    await waitUntil(() => harness.records("connection.closed").length === 2, "second close record");
   });
 
   // Failure mode 4: the Mac app's local probes reconnect constantly; host facts

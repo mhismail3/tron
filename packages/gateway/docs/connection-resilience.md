@@ -201,7 +201,7 @@ keeps today's uncompressed frames.
 | --- | --- |
 | `stage=transport-open` (`transportOpened=false`) timeout | The WebSocket never opened: the phone's path did not reach the Mac (endpoint, network or Tailscale path). `waitedForConnectivity=true` means URLSession itself waited for a path; `interfaces=` lists the phone's current path interfaces (`other` is typically the Tailscale tunnel). Not evidence about the Gateway. |
 | `stage=hello-receive` timeout with `transportOpened=true` | The socket opened (`transportOpenMs`) but the Mac did not answer hello within the deadline. Check the Gateway log for a matching `connection.opened` and for `gateway.event-loop-delay` around that time. |
-| `connection.closed` or `connection.opened` carrying `swapUsedBytes` near the host's swap total, or `memoryPressure=warn`/`critical` | The host was paging when the phone's socket ended or was re-established. These facts come from the same heartbeat-refreshed sample as `gateway.event-loop-delay`'s, so they are at most one 25 s tick old; the drop itself can still be the path or the client, so this is evidence about the Mac, not attribution. |
+| `connection.closed` or `connection.opened` carrying `swapUsedBytes` near `swapTotalBytes`, or `memoryPressure=warn`/`critical` | The host was paging when the phone's socket ended or was re-established. These facts come from the same heartbeat-refreshed sample as `gateway.event-loop-delay`'s, and `hostSampleAgeMs` says how old that sample was when the record was written: a probe that loses its 1 s race is discarded, so the age — not the 25 s tick — bounds the staleness. Read the fields as described under the table; the drop itself can still be the path or the client, so this is evidence about the Mac, not attribution. |
 | `stage=hello-send` timeout with `transportOpened=true` | The socket opened but the hello write did not complete; suspect a stalled path after opening. |
 | `ping_timeout` with zero event-queue admission/high-water | The local event reducer did not overflow that epoch. Investigate transport/path or an unobserved process stall. |
 | Fast successful `session.open`, no `session.sync`, then client close / `decode_limit` | The client rejected response structure before sync. Compare `frameBytes`, `decodeLimit`, `decodeActual`, `decodeMaximum` and sanitized `decodePath`; a sub-megabyte response can still exceed the node ceiling. This is not proof of path loss. |
@@ -212,12 +212,36 @@ keeps today's uncompressed frames.
 | `http.authentication-timeout` | A pending upgrade exceeded its authentication deadline. The callback is fenced and its cancellable credential wait is retired. |
 | `closeCode` / `httpStatusCode` / `platformCode` | Separate facts, never interchangeable numbers. HTTP 401/403 stop automatic admission; 503 is retryable capacity/unavailability. URLSession may report 1005/1006 rather than expose the peer's exact close frame; that absence must remain explicit. |
 | `connection.projection-rejected` | A producer violated the projection contract. Narrow/reproduce that producer instead of reconnecting the whole service indefinitely. |
-| `gateway.event-loop-delay` | A sampled heartbeat timer was delayed by at least one second (`durationMs`). Counts, queued bytes, RSS, heap and external-memory bytes help separate queue pressure from wider process work. Over exactly the delayed heartbeat interval it also carries `gcCount`, `gcPauseMs`, `gcMaxPauseMs` and `eventLoopUtilization`, plus host `hostFreeBytes`, `swapUsedBytes` and `memoryPressure` (sampled once per record, bounded to 1 s, `host=unavailable` otherwise). GC pause time close to the delay points at garbage collection; utilization near 1 with little GC points at the Gateway's own synchronous work; low utilization with heavy swap or `memoryPressure=warn`/`critical` points at the host not running the process. These are observations, not attribution. |
+| `gateway.event-loop-delay` | A sampled heartbeat timer was delayed by at least one second (`durationMs`). Counts, queued bytes, RSS, heap and external-memory bytes help separate queue pressure from wider process work. Over exactly the delayed heartbeat interval it also carries `gcCount`, `gcPauseMs`, `gcMaxPauseMs` and `eventLoopUtilization`, plus host `hostFreeBytes`, `hostTotalBytes`, `swapUsedBytes`, `swapTotalBytes`, `memoryPressure`, `hostMemoryAvailablePercent` and `hostSampleAgeMs` (sampled once per record, bounded to 1 s, `host=unavailable` otherwise). GC pause time close to the delay points at garbage collection; utilization near 1 with little GC points at the Gateway's own synchronous work; low utilization with heavy swap or a low `hostMemoryAvailablePercent` points at the host not running the process. These are observations, not attribution. |
 | `gateway.restart-drain.waiting` / `gateway.restart-drain.stalled` | Inspect blocker session, category, method (for `rpc-mutation`), state and age; the stalled path has requested bounded shutdown, not durable success. |
 
 Memory measurements and timer drift are observations, not attribution. The
 25-second heartbeat sampler cannot prove absence of every shorter event-loop
 stall. A current low-RSS process likewise does not describe its historical peak.
+
+### Reading the host memory fields
+
+- `hostMemoryAvailablePercent` (`kern.memorystatus_level`) is the percentage of
+  memory the kernel still considers available: the same number `memory_pressure`
+  prints, so a value an operator recognizes from that tool reads the same here.
+  This is the field that answers "was the Mac short of memory?", read together
+  with the other fields below rather than against a fixed threshold.
+- `memoryPressure` (`kern.memorystatus_vm_pressure_level`) is the kernel's own
+  normal/warn/critical verdict. It can lag a sudden squeeze; read it next to the
+  percentage instead of as a substitute for it.
+- `swapUsedBytes` against `swapTotalBytes` is what "paging hard" means: used at
+  or near the total is a host that is out of headroom, while a small used value
+  on a large total is ordinary long-run macOS behavior.
+- `hostFreeBytes`/`hostTotalBytes` are Node's `os.freemem`/`os.totalmem`. On
+  macOS `os.freemem` counts free pages only, so a healthy, busy Mac normally
+  reports a small `hostFreeBytes`; that number alone is not pressure, which is
+  why this list carries the kernel's percentage as well.
+- `hostSampleAgeMs` is the age of the cached sample when the record was written
+  (0 when the record's own probe supplied it). The transport probes the host at
+  startup and once per 25 s heartbeat, but a probe that exceeds its 1 s bound is
+  discarded and the previous sample stays, so the age — not the tick — bounds
+  how stale these numbers can be. Judge a drop or a reconnect with that age in
+  view, because a small `swapUsedBytes` can simply be an old sample.
 
 ## Regression expectations and remaining limits
 
