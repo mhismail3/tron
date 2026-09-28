@@ -43,6 +43,13 @@ struct GatewayFailure: Codable, Error, Hashable, Sendable, LocalizedError {
     /// `session.open.failure` reports `gatewayCode` only from a stamped failure.
     var answeredByGateway: Bool? = nil
 
+    /// Phone-local provenance, so it is not a wire key: a response frame cannot
+    /// stamp or clear it, and an encoded failure never carries it. The client is
+    /// the only writer (see `stampedAsGatewayAnswer`).
+    private enum CodingKeys: String, CodingKey {
+        case code, message, retryable, details
+    }
+
     var errorDescription: String? { message }
 
     /// The same failure stamped as the Gateway's own answer.

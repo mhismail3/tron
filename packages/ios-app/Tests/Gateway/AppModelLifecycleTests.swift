@@ -437,6 +437,33 @@ struct AppModelLifecycleTests {
         }
     }
 
+    @Test("a launch phase sampled after the scene already moved cannot suppress its next record")
+    func launchSeedDoesNotOverwriteAnObservedTransition() async throws {
+        let logURL = FileManager.default.temporaryDirectory
+            .appending(path: "scene-launch-seed-\(UUID().uuidString).jsonl")
+        defer {
+            try? FileManager.default.removeItem(at: logURL)
+            try? FileManager.default.removeItem(at: logURL.appendingPathExtension("1"))
+        }
+        let appLog = AppLog(fileURL: logURL)
+        try await withFixture(socketCount: 1, appLog: appLog) { fixture in
+            // The scene moved before the launch task reached its seed: SwiftUI
+            // delivered `.active` while startup was still sampling the launch
+            // phase. The stale sample must not become the recorded phase, or the
+            // resignation that follows is read as "no transition". The seed is
+            // read before `start()`'s first await, so the socket request proves
+            // it ran while the scene was already active.
+            fixture.model.becameActive()
+            let start = Task { await fixture.model.start(scenePhase: .inactive) }
+            defer { start.cancel() }
+            try await fixture.sockets[0].waitUntilSent(count: 1)
+            fixture.model.becameInactive()
+
+            let records = try await waitForSceneRecords(in: appLog, count: 1)
+            #expect(records.map(\.event) == ["scene.resign-active"])
+        }
+    }
+
     private func waitForSceneRecords(in log: AppLog, count: Int) async throws -> [AppLogRecord] {
         for _ in 0..<600 {
             let values = await log.snapshot().filter { $0.event.hasPrefix("scene.") }

@@ -2030,9 +2030,13 @@ final class SessionPresentationStore {
         var result = PerformanceResult.failure
         var metrics = PerformanceMetrics.none
         defer { performanceSignposts.end(interval, result: result, metrics: metrics) }
-        // This attempt owns the answer: a code kept from the attempt that asked
-        // for a retry must not be read as the one that ended the open.
-        openingFailureGatewayCodes[sessionID] = nil
+        // This presentation attempt owns the answer: a code kept from the
+        // attempt that asked for a retry must not be read as the one that ended
+        // the open. A reconnect attempt is not an opening and never reports a
+        // `gatewayCode`, so it neither stores nor clears one.
+        if case .presentation = lease.intent {
+            openingFailureGatewayCodes[sessionID] = nil
+        }
         let attemptConnectionGeneration = connectionGeneration
         var provisionalToken: String?
         do {

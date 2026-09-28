@@ -726,6 +726,42 @@ struct AppModelReconnectTests {
         }
     }
 
+    @Test("a workspace retry revives a parked retry without waiting out its backoff")
+    func transientTransportRetryRevivesParkedRetry() async throws {
+        let clock = ManualClock()
+        let sockets = [ScriptedGatewaySocket(), ScriptedGatewaySocket()]
+        let logURL = FileManager.default.temporaryDirectory
+            .appending(path: "transient-parked-\(UUID().uuidString).jsonl")
+        defer {
+            try? FileManager.default.removeItem(at: logURL)
+            try? FileManager.default.removeItem(at: logURL.appendingPathExtension("1"))
+        }
+        let appLog = AppLog(fileURL: logURL)
+        try await withFixture(
+            sockets: sockets, clock: clock, units: SequenceReconnectUnits([0]), appLog: appLog
+        ) { fixture in
+            let start = Task { await fixture.model.start() }
+            defer { start.cancel() }
+            try await failHandshake(sockets[0])
+            try await clock.waitUntilSleeping(count: 1)
+            await start.value
+            #expect(fixture.model.connectionState == .reconnecting)
+            #expect(fixture.socketFactory.requests.count == 1)
+
+            // A parked route is exactly what the browser's transient-error
+            // retry exists for: the read failed, the scene did not move, and the
+            // lifecycle owns a route waiting out its backoff. The retry must
+            // connect now, without advancing the clock and without recording a
+            // scene transition.
+            fixture.model.recoverTransientTransportFailure()
+            try await sockets[1].waitUntilSent(count: 1)
+            #expect(fixture.socketFactory.requests.count == 2)
+            #expect(clock.activeSleeperCount() == 0)
+            #expect(clock.recordedSleeps() == [.seconds(1.6)])
+            #expect(await appLog.snapshot().filter { $0.event.hasPrefix("scene.") }.isEmpty)
+        }
+    }
+
     @Test("ordinary short successful foreground visits do not become an artificial outage")
     func healthyForegroundVisitsDoNotExhaustRecovery() async throws {
         let suiteName = "GatewayHealthyForegroundTests.\(UUID().uuidString)"
