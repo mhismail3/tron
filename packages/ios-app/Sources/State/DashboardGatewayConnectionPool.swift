@@ -95,6 +95,11 @@ final class DashboardGatewayConnectionPool {
         var task: Task<Void, Never>?
         var refreshTask: Task<Void, Never>?
         var reconnectTask: Task<Void, Never>?
+        /// The reader of this entry's live connection events. The client's event
+        /// stream is client-lifetime, so the reader is owned by the connection
+        /// epoch it serves and is retired with it; an entry whose attempts have
+        /// not connected yet has none.
+        var eventTask: Task<Void, Never>?
         let reconnectSchedule: GatewayReconnectSchedule
         var reconnectWaiting: Bool
         var networkPathSatisfied: Bool
@@ -378,6 +383,7 @@ final class DashboardGatewayConnectionPool {
             task: nil,
             refreshTask: nil,
             reconnectTask: nil,
+            eventTask: nil,
             reconnectSchedule: GatewayReconnectSchedule(
                 clock: clock, delayPolicy: Self.reconnectDelayPolicy
             ),
@@ -459,25 +465,15 @@ final class DashboardGatewayConnectionPool {
                     generation: generation,
                     delay: .zero
                 )
-                for await delivery in client.events {
-                    guard !Task.isCancelled,
-                          self.isCurrent(profileID: profile.id, client: client, generation: generation) else { return }
-                    await self.handle(delivery, profileID: profile.id, generation: generation)
-                }
-                guard !Task.isCancelled,
-                      self.isCurrent(profileID: profile.id, client: client, generation: generation) else { return }
-                // The event stream ended without a disconnect event and is
-                // still a loss: the episode it opens keeps whatever the first
-                // failed attempt adds as its cause.
-                self.entries[profile.id]?.recorder.noteDisconnected(
-                    profileID: profile.id, lifecycleGeneration: generation, foreground: true
-                )
-                self.retireConnectionEpoch(
+                // The connection is live: somebody has to read its events. The
+                // admitted connection is the identity the guard above pinned to
+                // the client's own active one.
+                self.startEventConsumption(
                     profileID: profile.id,
                     generation: generation,
-                    state: .reconnecting
+                    client: client,
+                    connectionID: identity.id
                 )
-                self.scheduleReconnect(profileID: profile.id, generation: generation)
             } catch is CancellationError {
                 return
             } catch let failure as GatewayFailure where GatewayRecoveryFailurePolicy.isNonRetryable(failure) {
@@ -550,6 +546,7 @@ final class DashboardGatewayConnectionPool {
         entry.task?.cancel()
         entry.refreshTask?.cancel()
         entry.reconnectTask?.cancel()
+        entry.eventTask?.cancel()
         entry.reconnectSchedule.cancel()
         // A retired entry ends the episode it was explaining: `stopped` for a
         // profile switch, removal or explicit retry, `background` for the
@@ -584,6 +581,49 @@ final class DashboardGatewayConnectionPool {
     private func isCurrent(profileID: String, client: GatewayClient, generation: Int) -> Bool {
         guard let entry = entries[profileID] else { return false }
         return entry.client === client && entry.generation == generation
+    }
+
+    /// Starts this entry's reader for one live connection's events. The client's
+    /// event stream is client-lifetime, so the reader is owned by the connection
+    /// epoch it serves: `retireConnectionEpoch` cancels it with that epoch, and a
+    /// connection that connects starts its own. That is what makes every live
+    /// socket consumed exactly once — including a reconnect after an initial
+    /// connect that failed, whose `start` task ended in its failure branch and
+    /// therefore never reached the stream.
+    private func startEventConsumption(
+        profileID: String,
+        generation: Int,
+        client: GatewayClient,
+        connectionID: Int
+    ) {
+        guard let entry = entries[profileID],
+              entry.generation == generation,
+              entry.client === client,
+              entry.connectionID == connectionID else { return }
+        guard entries[profileID]?.eventTask == nil else { return }
+        let task = Task { @MainActor [weak self] in
+            guard let self else { return }
+            for await delivery in client.events {
+                guard !Task.isCancelled,
+                      self.isCurrent(profileID: profileID, client: client, generation: generation) else { return }
+                await self.handle(delivery, profileID: profileID, generation: generation)
+            }
+            guard !Task.isCancelled,
+                  self.isCurrent(profileID: profileID, client: client, generation: generation) else { return }
+            // The event stream ended without a disconnect event and is still a
+            // loss: the episode it opens keeps whatever the first failed attempt
+            // adds as its cause.
+            self.entries[profileID]?.recorder.noteDisconnected(
+                profileID: profileID, lifecycleGeneration: generation, foreground: true
+            )
+            self.retireConnectionEpoch(
+                profileID: profileID,
+                generation: generation,
+                state: .reconnecting
+            )
+            self.scheduleReconnect(profileID: profileID, generation: generation)
+        }
+        entries[profileID]?.eventTask = task
     }
 
     private func handle(
@@ -817,6 +857,17 @@ final class DashboardGatewayConnectionPool {
                     )
                     self.entries[profileID]?.reconnectTask = nil
                     self.scheduleRefresh(profileID: profileID, generation: generation, delay: .zero)
+                    // A reconnect that connected owes its live socket the same
+                    // event reader an initial connect gets. Without it the
+                    // socket delivers summaries and control events nobody
+                    // reads, which is how an entry whose first attempt failed
+                    // went silent until it was recreated.
+                    self.startEventConsumption(
+                        profileID: profileID,
+                        generation: generation,
+                        client: entry.client,
+                        connectionID: connectionID
+                    )
                     return
                 } catch is CancellationError {
                     return
@@ -1266,6 +1317,11 @@ final class DashboardGatewayConnectionPool {
         entry.refreshRequestGeneration &+= 1
         entry.refreshRetryAttempt = 0
         entry.refreshFailedAttempts = 0
+        // The epoch's event reader ends with the epoch. A reader left waiting on
+        // the client's shared stream would keep its place in the hub's waiter
+        // queue and could take (and drop) a successor connection's deliveries.
+        entry.eventTask?.cancel()
+        entry.eventTask = nil
         entry.connectionID = nil
         entry.state = state
         entry.catalog.markDisconnected()
