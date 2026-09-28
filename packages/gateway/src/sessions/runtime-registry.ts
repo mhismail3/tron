@@ -1279,9 +1279,8 @@ export class RuntimeRegistry {
       && !this.ambiguousSessionIds.has(sessionId)) {
       return { generation: this.catalogAcquisitionInvalidationGeneration, persistedSlot };
     }
-    const acquisition = await stage("attention.resolve", () => this.catalogAcquisition());
+    const { acquisition, entry } = await stage("attention.resolve", () => this.catalogMembership(sessionId));
     this.requireUnambiguousSessionId(sessionId, acquisition.ambiguousIDs);
-    const entry = acquisition.entriesByID.get(sessionId);
     if (entry) return { generation: this.catalogAcquisitionInvalidationGeneration, entry };
     // Empty sessions are visible before their first canonical append. Their
     // exact runtime owner is a valid attention target until it is persisted or
@@ -1603,6 +1602,26 @@ export class RuntimeRegistry {
     this.requireCatalogCut();
   }
 
+  /** Membership for one named session. A Gateway-owned change reaches the index
+   * at its commit point (G-1a) but asynchronously, so a read that lands between
+   * a slot's close and its row must wait for that change rather than answer
+   * that the session does not exist: a session must never become unopenable
+   * because its runtime closed. */
+  private async catalogMembership(sessionId: string): Promise<{
+    acquisition: CatalogAcquisitionResolution;
+    entry: CatalogAcquisitionEntry | undefined;
+  }> {
+    const acquisition = await this.catalogAcquisition();
+    const entry = acquisition.entriesByID.get(sessionId);
+    if (entry) return { acquisition, entry };
+    await this.sessionCatalog.awaitQueuedChanges();
+    if (this.sessionCatalog.rows().some((row) => row.id === sessionId)) {
+      const refreshed = await this.catalogAcquisition();
+      return { acquisition: refreshed, entry: refreshed.entriesByID.get(sessionId) };
+    }
+    return { acquisition, entry };
+  }
+
   /** An ID that may name a canonical file the owner could not prove is not a
    * missing session: reporting absence would tell a client that a session's
    * records and artifacts are gone when the file is still there. A pass that
@@ -1638,18 +1657,16 @@ export class RuntimeRegistry {
   }
 
   async workspaceForSession(sessionId: string): Promise<string> {
-    const acquisition = await this.catalogAcquisition();
+    const { acquisition, entry } = await this.catalogMembership(sessionId);
     this.requireUnambiguousSessionId(sessionId, acquisition.ambiguousIDs);
-    const entry = acquisition.entriesByID.get(sessionId);
     if (!entry) throw new GatewayError("not_found", "Tron session was not found");
     return (await this.options.trust.requireResolved(entry.canonicalCwd)).cwd;
   }
 
   async requirePersistedUserSession(sessionId: string): Promise<void> {
     await this.awaitAutomationCatalogCut();
-    const acquisition = await this.catalogAcquisition();
+    const { acquisition, entry } = await this.catalogMembership(sessionId);
     this.requireUnambiguousSessionId(sessionId, acquisition.ambiguousIDs);
-    const entry = acquisition.entriesByID.get(sessionId);
     if (!entry) throw this.unprovenSessionRefusal(sessionId)
       ?? new GatewayError("not_found", "Automation target session was not found");
     if (entry.structuralSubagent) {
@@ -1678,9 +1695,8 @@ export class RuntimeRegistry {
     // The scheduler's recovery runs at startup: wait for the owner's first pass
     // rather than deciding an automation's outcome on an unready catalog.
     await this.awaitAutomationCatalogCut();
-    const acquisition = await this.catalogAcquisition();
+    const { acquisition, entry } = await this.catalogMembership(sessionId);
     this.requireUnambiguousSessionId(sessionId, acquisition.ambiguousIDs);
-    const entry = acquisition.entriesByID.get(sessionId);
     if (!entry || entry.structuralSubagent) return {};
     let manager: SessionManager;
     try { manager = SessionManager.open(entry.path, this.sessionDirectoryFor(entry.canonicalCwd)); }
@@ -2780,12 +2796,11 @@ export class RuntimeRegistry {
     const alreadyStarting = this.pendingSlotStarts.get(sessionId);
     if (alreadyStarting) return alreadyStarting;
     const existing = this.slots.get(sessionId);
-    const acquisition = await stage(
+    const { acquisition, entry } = await stage(
       "session.open.catalog",
-      () => this.catalogAcquisition(),
+      () => this.catalogMembership(sessionId),
     );
     this.requireUnambiguousSessionId(sessionId, acquisition.ambiguousIDs);
-    const entry = acquisition.entriesByID.get(sessionId);
     if (existing && !existing.isDisposed) {
       if (entry?.structuralSubagent) {
         throw new GatewayError("conflict", "Subagent sessions are informational and remain owned by their originating runtime");
@@ -3071,9 +3086,8 @@ export class RuntimeRegistry {
       // Archive state is written for an admitted canonical session, so it needs
       // the same index membership delete uses rather than a mutable
       // presentation projection.
-      const acquisition = await this.catalogAcquisition();
+      const { acquisition, entry } = await this.catalogMembership(sessionId);
       this.requireUnambiguousSessionId(sessionId, acquisition.ambiguousIDs);
-      const entry = acquisition.entriesByID.get(sessionId);
       const slot = this.slots.get(sessionId);
       if (!entry && (!slot || slot.persistedSessionFile !== undefined)) {
         throw new GatewayError("not_found", "Tron session was not found");
@@ -3162,9 +3176,8 @@ export class RuntimeRegistry {
         // presentation projection. The index is that membership, and
         // removeCanonicalCatalogFile re-proves this exact file's path and inode
         // at the commit.
-        const acquisition = await this.catalogAcquisition();
+        const { acquisition, entry } = await this.catalogMembership(sessionId);
         this.requireUnambiguousSessionId(sessionId, acquisition.ambiguousIDs);
-        const entry = acquisition.entriesByID.get(sessionId);
         const slot = this.slots.get(sessionId);
         if (!entry && (!slot || slot.persistedSessionFile !== undefined)) {
           throw this.unprovenSessionRefusal(sessionId)

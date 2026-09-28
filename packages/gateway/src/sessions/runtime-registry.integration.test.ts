@@ -9977,6 +9977,55 @@ export default function (pi) {
     expect(workspace).toHaveBeenCalledTimes(1);
   });
 
+  // G-1c/review minor 2: the close commit point queues the row, so a reopen can
+  // land between a slot leaving `slots` and its row reaching the index. The row
+  // build is held open here to make that window deterministic: membership must
+  // wait for the queued change instead of answering not_found, because a session
+  // must never become unopenable because its runtime closed.
+  it("reopens a session whose runtime closed before its index row landed", async () => {
+    const fixture = await coldFixture("close-before-row");
+    // Every row build is held open, so the persisted session below has no index
+    // row at the moment its slot closes. That makes the window the intermittent
+    // merge-gate failure landed in deterministic.
+    const build = CatalogMetadataIndex.prototype.entryFromSummary;
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => { release = resolve; });
+    const held = vi.spyOn(CatalogMetadataIndex.prototype, "entryFromSummary").mockImplementation(async function (
+      this: CatalogMetadataIndex,
+      ...arguments_: Parameters<CatalogMetadataIndex["entryFromSummary"]>
+    ) {
+      await gate;
+      return build.apply(this, arguments_);
+    });
+    try {
+      const created = await fixture.registry.create(fixture.cwd);
+      const manager = (created as unknown as { sessionManager: SessionManager }).sessionManager;
+      manager.appendMessage(fauxAssistantMessage("persisted before extension close"));
+      const persisted = (created as unknown as { session: () => void });
+      // `publishSnapshot` is what a real close path observes as the persisted
+      // commit; the row it queues cannot land while the build is held.
+      created.publishSnapshot();
+      await waitUntil(() => created.persistedSessionFile !== undefined);
+      await waitUntil(() => (fixture.registry as unknown as { latestSummaries: Map<string, unknown> }).latestSummaries.has(created.id));
+      expect(catalogOwner(fixture.registry).rows().some((row) => row.id === created.id)).toBe(false);
+
+      (created as unknown as { requestExtensionShutdown: () => void }).requestExtensionShutdown();
+      await waitUntil(() => created.isDisposed
+        && !(fixture.registry as unknown as { slots: Map<string, unknown> }).slots.has(created.id));
+      // The reopen lands in that window: it must wait for the queued row rather
+      // than report the session as gone.
+      const reopening = fixture.registry.acquire(created.id);
+      await new Promise((resolve) => setTimeout(resolve, 25));
+      release();
+      const reopened = await reopening;
+      expect(reopened.id).toBe(created.id);
+      expect(JSON.stringify(reopened.snapshot().transcript)).toContain("persisted before extension close");
+    } finally {
+      release();
+      held.mockRestore();
+    }
+  });
+
   it("scopes extension shutdown to the owning runtime slot", async () => {
     const root = await mkdtemp(join(tmpdir(), "tron-extension-scoped-shutdown-"));
     const agentDir = join(root, "agent");

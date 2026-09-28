@@ -362,6 +362,15 @@ export class SessionCatalog {
     return this.reconciledCut;
   }
 
+  /** Apply the row work this owner has already queued and resolve. The
+   * Gateway's own changes reach the index asynchronously at their commit point
+   * (a slot's close, persist, rename or delete), so a reader that finds no row
+   * for a named session waits for that change to land instead of answering from
+   * a cut that predates it. Nothing queued settles immediately. */
+  awaitQueuedChanges(): Promise<void> {
+    return this.lane;
+  }
+
   /** Session IDs a pass could read a header for but could not publish a row or
    * keep one for. A caller that would report such an ID as absent must refuse
    * retryably instead. */
