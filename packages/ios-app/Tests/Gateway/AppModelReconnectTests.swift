@@ -780,6 +780,95 @@ struct AppModelReconnectTests {
         }
     }
 
+    @Test("a park and its resume reach the phone's persisted diagnostic log")
+    func parkedRecoveryReachesTheDiagnosticLog() async throws {
+        let clock = ManualClock()
+        let sockets = (0..<3).map { _ in ScriptedGatewaySocket() }
+        try await withFixture(sockets: sockets, clock: clock, units: SequenceReconnectUnits([0])) { fixture in
+            let start = Task { await fixture.model.start() }
+            try await failHandshake(sockets[0])
+            try await clock.waitUntilSleeping(count: 1)
+            await start.value
+            fixture.model.lifecycleNotePathHint(satisfied: false)
+            try await clock.waitUntilSleeping(
+                count: 1, duration: GatewayLifecycleCoordinator.parkedRetryBound
+            )
+            let parked = await fixture.model.loadGatewayLogsResult(limit: 200, includeRemote: false)
+            #expect(parked.records.contains {
+                $0.record.event == "gateway.lifecycle"
+                    && $0.record.message.contains("kind=reconnect.parked")
+                    && $0.record.message.contains("reason=pathUnsatisfied")
+            })
+
+            // The bound probes the stale hint without a callback, and that probe
+            // is its own cause on the timeline.
+            await sockets[1].enqueue(helloFrame())
+            clock.advance(by: GatewayLifecycleCoordinator.parkedRetryBound)
+            try await sockets[1].waitUntilSent(count: 1)
+            let resumed = await fixture.model.loadGatewayLogsResult(limit: 200, includeRemote: false)
+            #expect(resumed.records.contains {
+                $0.record.event == "gateway.lifecycle"
+                    && $0.record.message.contains("kind=reconnect.parked-resume")
+            })
+        }
+    }
+
+    @Test("a refused reconnect from the notification route poll reaches the phone log")
+    func refusedReconnectFromRoutePollReachesTheLog() async throws {
+        let clock = ManualClock()
+        let sockets = (0..<3).map { _ in ScriptedGatewaySocket() }
+        try await withFixture(sockets: sockets, clock: clock, units: SequenceReconnectUnits([0, 0])) { fixture in
+            let start = Task { await fixture.model.start() }
+            await sockets[0].enqueue(helloFrame())
+            try await sockets[0].waitUntilSent(count: 1)
+            while fixture.model.connectionState != .connected {
+                try Task.checkCancellation()
+                await Task.yield()
+            }
+            await start.value
+
+            // The live socket drops and its replacement is refused for good, so
+            // recovery is stopped and `.offline` is what offers the user Retry.
+            await sockets[1].failNextSend(GatewayFailure(
+                code: "forbidden", message: "This device is no longer allowed.",
+                retryable: false, details: nil
+            ))
+            await sockets[0].failPendingReceivers(URLError(.networkConnectionLost))
+            try await sockets[0].waitUntilClosed()
+            for _ in 0..<600 {
+                if case .offline = fixture.model.connectionState { break }
+                try? await Task.sleep(for: .milliseconds(2))
+            }
+            guard case .offline = fixture.model.connectionState else {
+                Issue.record("the stopped replacement left \(fixture.model.connectionState)")
+                return
+            }
+
+            // Opening a notification waits for the route by asking for recovery
+            // every 100 ms. The stop must refuse that by name instead of
+            // publishing a recovery state that no user action can leave.
+            let route = Task {
+                try await fixture.model.navigationRoute(for: PushNotificationTap(
+                    sessionID: "session-from-push", machineID: "machine"
+                ))
+            }
+            for _ in 0..<60 { await Task.yield() }
+            route.cancel()
+            _ = try? await route.value
+            guard case .offline = fixture.model.connectionState else {
+                Issue.record("the route poll replaced the stop with \(fixture.model.connectionState)")
+                return
+            }
+
+            let records = await fixture.model.loadGatewayLogsResult(limit: 200, includeRemote: false)
+            #expect(records.records.contains {
+                $0.record.event == "gateway.lifecycle"
+                    && $0.record.message.contains("kind=reconnect.skipped")
+                    && $0.record.message.contains("reason=nonRetryable")
+            })
+        }
+    }
+
     @Test("path loss on an active socket pauses replacement until the path returns")
     func pathLossDuringActiveConnectionPausesReplacement() async throws {
         let clock = ManualClock()
@@ -842,6 +931,75 @@ struct AppModelReconnectTests {
                 await Task.yield()
             }
             #expect(fixture.socketFactory.requests.count == 2)
+        }
+    }
+
+    @Test("a non-retryable stop keeps its Retry surface while the route poll asks again")
+    func nonRetryableStopSurvivesTheRoutePoll() async throws {
+        let clock = ManualClock()
+        let logURL = FileManager.default.temporaryDirectory
+            .appending(path: "reconnect-stopped-poll-\(UUID().uuidString).jsonl")
+        defer {
+            try? FileManager.default.removeItem(at: logURL)
+            try? FileManager.default.removeItem(at: logURL.appendingPathExtension("1"))
+        }
+        let appLog = AppLog(fileURL: logURL)
+        let projection = NoopGatewayLifecycleProjection()
+        try await withRecordedCoordinator(
+            sockets: (0..<3).map { _ in ScriptedGatewaySocket() },
+            clock: clock, watchdogClock: clock.clock, appLog: appLog, projection: projection
+        ) { coordinator, client, sockets in
+            await sockets[0].enqueue(helloFrame())
+            await coordinator.start()
+            #expect(coordinator.connectionState == .connected)
+            await coordinator.noteDisconnected(connectionID: await client.activeConnectionID())
+            // The replacement attempt is refused for good: recovery stops and
+            // `.offline` is the status that offers the user Retry.
+            await sockets[1].failNextSend(GatewayFailure(
+                code: "forbidden", message: "This device is no longer allowed.",
+                retryable: false, details: nil
+            ))
+            coordinator.requestReconnect(immediate: true)
+            _ = try await waitForRecords(in: appLog, event: "gateway.attempt", count: 2)
+            guard case .offline = coordinator.connectionState else {
+                Issue.record("the failed replacement left \(coordinator.connectionState)")
+                return
+            }
+            await projection.waitForAggregateCompletion(count: 1)
+
+            // The route the notification needs is gone, and the readiness poll
+            // asks for recovery every 100 ms. None of those requests may turn a
+            // stop into a recovery state nothing can leave.
+            coordinator.notePathHint(satisfied: false)
+            let admission = try #require(coordinator.generationAdmission)
+            let poll = Task {
+                await coordinator.waitForRouteConnection(
+                    profileID: "gateway", until: clock.clock.now() + .seconds(5),
+                    admission: admission
+                )
+            }
+            for _ in 0..<40 { await Task.yield() }
+            poll.cancel()
+            #expect(await poll.value == nil)
+            guard case .offline = coordinator.connectionState else {
+                Issue.record("the route poll replaced the stop with \(coordinator.connectionState)")
+                return
+            }
+            #expect(
+                projection.diagnostics.contains {
+                    $0.hasPrefix("reconnect.skipped ") && $0.contains("reason=nonRetryable")
+                }
+            )
+            #expect(!projection.diagnostics.contains { $0.hasPrefix("reconnect.parked ") })
+
+            // Explicit Retry is still the way out, and it still works.
+            await sockets[2].enqueue(helloFrame())
+            coordinator.retryReconnect()
+            try await sockets[2].waitUntilSent(count: 1)
+            while coordinator.connectionState != .connected {
+                try Task.checkCancellation()
+                await Task.yield()
+            }
         }
     }
 
@@ -1788,9 +1946,10 @@ struct AppModelReconnectTests {
             coordinator.requestReconnect(immediate: true)
             try await sockets[2].waitUntilSent(count: 1)
             #expect(coordinator.connectionState == .reconnecting)
-            // Only the initial connect's own projection settled; the stalled one
-            // never published a result over the replacement.
-            #expect(projection.aggregateCompletions == [true])
+            // The stalled projection never published a result over the
+            // replacement: its own admission settled as cancelled, so nothing
+            // stays marked as reconciling.
+            #expect(projection.aggregateCompletions == [true, false])
             // Let the parked restoration unwind before the fixture ends.
             projection.releaseRestore()
         }
@@ -2130,49 +2289,6 @@ private final class BlockedRestoreProjection: GatewayLifecycleProjectionDelegate
         await withCheckedContinuation { restoreContinuation = $0 }
         return true
     }
-    func lifecycleReattachTerminals(admission: GatewayLifecycleCoordinator.Admission) async {}
-    func lifecycleReconcileForeground(admission: GatewayLifecycleCoordinator.Admission) async throws {}
-    func lifecycleRetireProjection(final: Bool) async {}
-    func lifecycleSurface(_ error: Error) {}
-}
-
-/// A projection owner whose authoritative refresh never returns until the test
-/// releases it: the shape of a reconnect loop parked in projection work. The
-/// initial connect's own refresh completes, so the test begins from a connected
-/// lifecycle; the replacement's refresh is the one that parks.
-@MainActor
-private final class BlockedRefreshProjection: GatewayLifecycleProjectionDelegate {
-    private var refreshStartedContinuation: CheckedContinuation<Void, Never>?
-    private var refreshContinuation: CheckedContinuation<Void, Never>?
-    private var refreshCount = 0
-    private var parked = false
-
-    func waitUntilRefreshStarted() async {
-        if parked { return }
-        await withCheckedContinuation { refreshStartedContinuation = $0 }
-    }
-
-    func releaseRefresh() {
-        refreshContinuation?.resume()
-        refreshContinuation = nil
-    }
-
-    func lifecycleLoadCache(profileID: String, admission: GatewayLifecycleCoordinator.Admission) async {}
-    func lifecycleInvalidateSessionConnectionOwnership() {}
-    func lifecycleBeginReconciliationAggregate(admission: GatewayLifecycleCoordinator.Admission) {}
-    func lifecycleCompleteReconciliationAggregate(
-        admission: GatewayLifecycleCoordinator.Admission,
-        succeeded: Bool
-    ) {}
-    func lifecycleRefreshAll(admission: GatewayLifecycleCoordinator.Admission) async {
-        refreshCount += 1
-        guard refreshCount > 1 else { return }
-        parked = true
-        refreshStartedContinuation?.resume()
-        refreshStartedContinuation = nil
-        await withCheckedContinuation { refreshContinuation = $0 }
-    }
-    func lifecycleRestoreMountedPresentation(admission: GatewayLifecycleCoordinator.Admission) async -> Bool { true }
     func lifecycleReattachTerminals(admission: GatewayLifecycleCoordinator.Admission) async {}
     func lifecycleReconcileForeground(admission: GatewayLifecycleCoordinator.Admission) async throws {}
     func lifecycleRetireProjection(final: Bool) async {}

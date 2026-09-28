@@ -62,14 +62,6 @@ final class GatewayConnectionEpisodeRecorder {
     /// stalled. It exceeds the 15 s transport-open deadline plus one backoff
     /// interval, so a healthy retry never trips it.
     static let reconnectStallBound = Duration.seconds(20)
-    /// One attempt can fail twice in one iteration: the handshake succeeds and
-    /// the established connection then drops while projection runs. That second
-    /// failure is recorded against the attempt it belongs to, with this stage
-    /// and this attempt-ID suffix, so one attempt can never be read as two.
-    static let postConnectStage = "postConnect"
-    static func postConnectAttemptID(_ attemptID: String) -> String {
-        "\(attemptID)#postConnect"
-    }
     /// A main actor that cannot answer a ping within this bound is stalled.
     static let mainStallBound = Duration.seconds(2)
     /// Both watchdogs tick on this grid; the logging contract forbids samplers
@@ -99,9 +91,8 @@ final class GatewayConnectionEpisodeRecorder {
         let profileID: String?
         let lifecycleGeneration: Int
         var attempts = 0
-        /// When recovery last made progress: the episode's open, every attempt
-        /// start, and the drop instant of a post-connect failure. The stall bound
-        /// measures from here.
+        /// When recovery last made progress: the episode's open and every
+        /// attempt start. The stall bound measures from here.
         var lastProgressAt: ContinuousClock.Instant
         /// When the current holding guard began holding, or nil while recovery
         /// is progressing.
@@ -176,23 +167,14 @@ final class GatewayConnectionEpisodeRecorder {
             ].joined(separator: " ")
         )
         guard attempt.succeeded else {
-            // A post-connect failure is the connection the handshake just
-            // established dropping under projection: a second failure of the
-            // attempt that already ended the previous episode, not a new
-            // attempt. Its episode therefore starts at the drop, and it never
-            // joins the `attempts` count of the episode it belongs to.
-            let isPostConnect = attempt.stageReached == Self.postConnectStage
-            let failedAt = isPostConnect ? clock.now() : attempt.startedAt
             if episode == nil {
                 openEpisode(
                     profileID: attempt.profileID,
                     lifecycleGeneration: attempt.lifecycleGeneration,
-                    at: isPostConnect ? nil : attempt.startedAt
+                    at: attempt.startedAt
                 )
             }
-            noteAttemptProgress(
-                at: failedAt, reason: attempt.reason, countsAsAttempt: !isPostConnect
-            )
+            noteAttemptProgress(at: attempt.startedAt, reason: attempt.reason)
             return
         }
         guard episode != nil else { return }
@@ -258,11 +240,10 @@ final class GatewayConnectionEpisodeRecorder {
 
     private func noteAttemptProgress(
         at startedAt: ContinuousClock.Instant,
-        reason: String?,
-        countsAsAttempt: Bool = true
+        reason: String?
     ) {
         guard var current = episode else { return }
-        if countsAsAttempt { current.attempts += 1 }
+        current.attempts += 1
         current.maximumGapMs = max(
             current.maximumGapMs,
             diagnosticMilliseconds(current.lastProgressAt.duration(to: startedAt))
