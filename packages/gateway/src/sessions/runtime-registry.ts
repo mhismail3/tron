@@ -1818,7 +1818,7 @@ export class RuntimeRegistry {
     const projectionGeneration = this.catalogProjectionGeneration;
     // The archive filter and its committed revision are part of the generation:
     // one pagination lease can never mix archive states or serve a stale filter.
-    const generation = `${materialized.listRevision}:${projectionGeneration}:${scope}:${archived}:${this.archive.revision}`;
+    const generation = `${materialized.listRevision}:${materialized.factsDigest}:${projectionGeneration}:${scope}:${archived}:${this.archive.revision}`;
     const existing = this.catalogPageSources.get(generation)?.deref();
     if (existing) return existing;
     const seeds = this.buildCatalogPageSeeds(materialized.infos, scope, materialized.ambiguousIDs);
@@ -1946,7 +1946,11 @@ export class RuntimeRegistry {
     const materialized = await this.sharedCatalogMaterialization(scope);
     const projectionGeneration = this.catalogProjectionGeneration;
     const seeds = this.buildCatalogPageSeeds(materialized.infos, scope, materialized.ambiguousIDs);
-    const source = this.createCatalogPageSource(`${materialized.listRevision}:${projectionGeneration}:${scope}`, materialized.listRevision, seeds);
+    const source = this.createCatalogPageSource(
+      `${materialized.listRevision}:${materialized.factsDigest}:${projectionGeneration}:${scope}`,
+      materialized.listRevision,
+      seeds,
+    );
     return {
       infos: materialized.infos,
       sessions: await source.page(0, seeds.length),
@@ -1984,6 +1988,12 @@ export class RuntimeRegistry {
     infos: CatalogSessionInfo[];
     ambiguousIDs: ReadonlySet<string>;
     listRevision: number;
+    /** The index-owned facts of every row in this cut. A row field can change
+     * without moving `listRevision` (a name, a count, a size), and a cached page
+     * source that kept serving the previous facts would hand a revalidating
+     * client a stale row. The digest is therefore part of the page-source
+     * generation, the way the plan's projection token requires. */
+    factsDigest: string;
   }> {
     // The owner's own cut is the membership authority. A read that lands before
     // the owner has published one joins that cut instead of walking itself, and
@@ -1993,7 +2003,19 @@ export class RuntimeRegistry {
     // Publishing this cut's identity is what moves listRevision when the
     // membership the index holds changed.
     this.updateCatalogIdentity(cut.allInfos, cut.ambiguousIDs, scope);
-    return { infos: cut.infos, ambiguousIDs: cut.ambiguousIDs, listRevision: this.revision };
+    const facts = createHash("sha256");
+    for (const info of cut.allInfos) {
+      facts.update(info.id).update("\0").update(info.path).update("\0")
+        .update(info.name ?? "").update("\0").update(info.firstMessage).update("\0")
+        .update(String(info.messageCount)).update("\0").update(info.modified.toISOString()).update("\0")
+        .update(info.fileIdentity ?? "").update("\n");
+    }
+    return {
+      infos: cut.infos,
+      ambiguousIDs: cut.ambiguousIDs,
+      listRevision: this.revision,
+      factsDigest: facts.digest("base64url"),
+    };
   }
 
   private catalogIdentityFingerprint(infos: readonly CatalogSessionInfo[]): string {
