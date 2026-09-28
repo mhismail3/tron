@@ -449,6 +449,7 @@ struct AppModelPerformanceSignpostTests {
                     "sessions": .array([]),
                     "nextCursor": .null,
                     "listRevision": .number(1),
+                    "projectionToken": .string("epoch-1:1"),
                 ])
                 case "provider.list": result = .object(["providers": .array([])])
                 case "model.list": result = .object(["models": .array([]), "nextCursor": .null])
@@ -521,6 +522,7 @@ struct AppModelPerformanceSignpostTests {
                     ])]),
                     "nextCursor": .null,
                     "listRevision": .number(1),
+                    "projectionToken": .string("epoch-1:1"),
                 ])
             ))
             #expect(await convergence.value == .published)
@@ -587,6 +589,7 @@ struct AppModelPerformanceSignpostTests {
                     ])]),
                     "nextCursor": .null,
                     "listRevision": .number(2),
+                    "projectionToken": .string("epoch-1:2"),
                 ])
             ))
             #expect(await convergence.value == .published)
@@ -1455,7 +1458,7 @@ struct AppModelPerformanceSignpostTests {
     }
 
     private func helloFrame() -> Data {
-        Data(#"{"type":"hello","gatewayVersion":"1.0.0","piVersion":"1.0.0","protocolVersion":5,"minProtocolVersion":5,"machineId":"machine","machineName":"Mac","gatewayChannel":"stable","capabilities":["sessions.v1"]}"#.utf8)
+        Data(#"{"type":"hello","gatewayVersion":"1.0.0","piVersion":"1.0.0","protocolVersion":6,"minProtocolVersion":6,"machineId":"machine","machineName":"Mac","gatewayChannel":"stable","capabilities":["sessions.v1"]}"#.utf8)
     }
 
     private func successResponse(id: String, result: JSONValue) -> Data {

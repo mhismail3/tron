@@ -95,7 +95,7 @@ struct SessionPresentationStoreTests {
             let socket = ScriptedGatewaySocket()
             let client = GatewayClient(socketFactory: ScriptedGatewaySocketFactory(socket: socket).factory)
             let profile = GatewayProfile(id: "gateway", label: "Mac", host: "gateway.test", port: 9847, machineId: "machine", deviceId: "device")
-            await socket.enqueue(Data(#"{"type":"hello","gatewayVersion":"1","piVersion":"1","protocolVersion":5,"minProtocolVersion":5,"machineId":"machine","machineName":"Mac","gatewayChannel":"stable","capabilities":["sessions.v1"]}"#.utf8))
+            await socket.enqueue(Data(#"{"type":"hello","gatewayVersion":"1","piVersion":"1","protocolVersion":6,"minProtocolVersion":6,"machineId":"machine","machineName":"Mac","gatewayChannel":"stable","capabilities":["sessions.v1"]}"#.utf8))
             _ = try await client.connect(profile: profile, token: "token")
             do {
                 let recorder = RecordingPerformanceSignposts()
@@ -231,7 +231,7 @@ struct SessionPresentationStoreTests {
         let socket = ScriptedGatewaySocket()
         let client = GatewayClient(socketFactory: ScriptedGatewaySocketFactory(socket: socket).factory)
         let profile = GatewayProfile(id: "history", label: "History", host: "gateway.test", port: 9847, machineId: "machine", deviceId: "device")
-        await socket.enqueue(Data(#"{"type":"hello","gatewayVersion":"1","piVersion":"1","protocolVersion":5,"minProtocolVersion":5,"machineId":"machine","machineName":"Mac","gatewayChannel":"stable","capabilities":["sessions.v1"]}"#.utf8))
+        await socket.enqueue(Data(#"{"type":"hello","gatewayVersion":"1","piVersion":"1","protocolVersion":6,"minProtocolVersion":6,"machineId":"machine","machineName":"Mac","gatewayChannel":"stable","capabilities":["sessions.v1"]}"#.utf8))
         _ = try await client.connect(profile: profile, token: "token")
         defer { Task { await client.close() } }
         let builder = SessionScenarioBuilder(seed: 8_901)
@@ -1355,7 +1355,7 @@ struct SessionPresentationStoreTests {
             )
             let connecting = Task { try await client.connect(profile: profile, token: "token") }
             try await socket.waitUntilSent(count: 1)
-            await socket.enqueue(Data(#"{"type":"hello","gatewayVersion":"1.0.0","piVersion":"1.0.0","protocolVersion":5,"minProtocolVersion":5,"machineId":"machine","machineName":"Mac","gatewayChannel":"stable","capabilities":["sessions.v1"]}"#.utf8))
+            await socket.enqueue(Data(#"{"type":"hello","gatewayVersion":"1.0.0","piVersion":"1.0.0","protocolVersion":6,"minProtocolVersion":6,"machineId":"machine","machineName":"Mac","gatewayChannel":"stable","capabilities":["sessions.v1"]}"#.utf8))
             _ = try await connecting.value
 
             let staleSnapshot = try SessionScenarioBuilder(seed: 8_812).openingTail(targetEncodedBytes: 4_096)
@@ -1746,7 +1746,7 @@ struct SessionPresentationStoreTests {
             )
             let connecting = Task { try await client.connect(profile: profile, token: "token") }
             try await socket.waitUntilSent(count: 1)
-            await socket.enqueue(Data(#"{"type":"hello","gatewayVersion":"1.0.0","piVersion":"1.0.0","protocolVersion":5,"minProtocolVersion":5,"machineId":"machine","machineName":"Mac","gatewayChannel":"stable","capabilities":["sessions.v1"]}"#.utf8))
+            await socket.enqueue(Data(#"{"type":"hello","gatewayVersion":"1.0.0","piVersion":"1.0.0","protocolVersion":6,"minProtocolVersion":6,"machineId":"machine","machineName":"Mac","gatewayChannel":"stable","capabilities":["sessions.v1"]}"#.utf8))
             _ = try await connecting.value
 
             let snapshot = try SessionScenarioBuilder(seed: 86).openingTail(targetEncodedBytes: 4_096)
@@ -1802,7 +1802,7 @@ struct SessionPresentationStoreTests {
             )
             let connecting = Task { try await client.connect(profile: profile, token: "token") }
             try await socket.waitUntilSent(count: 1)
-            await socket.enqueue(Data(#"{"type":"hello","gatewayVersion":"1.0.0","piVersion":"1.0.0","protocolVersion":5,"minProtocolVersion":5,"machineId":"machine","machineName":"Mac","gatewayChannel":"stable","capabilities":["sessions.v1"]}"#.utf8))
+            await socket.enqueue(Data(#"{"type":"hello","gatewayVersion":"1.0.0","piVersion":"1.0.0","protocolVersion":6,"minProtocolVersion":6,"machineId":"machine","machineName":"Mac","gatewayChannel":"stable","capabilities":["sessions.v1"]}"#.utf8))
             _ = try await connecting.value
 
             let snapshot = try SessionScenarioBuilder(seed: 87).openingTail(targetEncodedBytes: 4_096)
@@ -1860,7 +1860,7 @@ struct SessionPresentationStoreTests {
             )
             let connecting = Task { try await client.connect(profile: profile, token: "token") }
             try await socket.waitUntilSent(count: 1)
-            await socket.enqueue(Data(#"{"type":"hello","gatewayVersion":"1.0.0","piVersion":"1.0.0","protocolVersion":5,"minProtocolVersion":5,"machineId":"machine","machineName":"Mac","gatewayChannel":"stable","capabilities":["sessions.v1"]}"#.utf8))
+            await socket.enqueue(Data(#"{"type":"hello","gatewayVersion":"1.0.0","piVersion":"1.0.0","protocolVersion":6,"minProtocolVersion":6,"machineId":"machine","machineName":"Mac","gatewayChannel":"stable","capabilities":["sessions.v1"]}"#.utf8))
             _ = try await connecting.value
 
             let snapshot = try SessionScenarioBuilder(seed: 84).openingTail(targetEncodedBytes: 4_096)
@@ -1979,7 +1979,7 @@ struct SessionPresentationStoreTests {
             )
             let connecting = Task { try await client.connect(profile: profile, token: "token") }
             try await socket.waitUntilSent(count: 1)
-            await socket.enqueue(Data(#"{"type":"hello","gatewayVersion":"1.0.0","piVersion":"1.0.0","protocolVersion":5,"minProtocolVersion":5,"machineId":"machine","machineName":"Mac","gatewayChannel":"stable","capabilities":["sessions.v1","skill-prompt.v1"]}"#.utf8))
+            await socket.enqueue(Data(#"{"type":"hello","gatewayVersion":"1.0.0","piVersion":"1.0.0","protocolVersion":6,"minProtocolVersion":6,"machineId":"machine","machineName":"Mac","gatewayChannel":"stable","capabilities":["sessions.v1","skill-prompt.v1"]}"#.utf8))
             _ = try await connecting.value
 
             let snapshot = try SessionScenarioBuilder(seed: 842).openingTail(targetEncodedBytes: 4_096)
@@ -2042,7 +2042,7 @@ struct SessionPresentationStoreTests {
             )
             let connecting = Task { try await client.connect(profile: profile, token: "token") }
             try await socket.waitUntilSent(count: 1)
-            await socket.enqueue(Data(#"{"type":"hello","gatewayVersion":"1.0.0","piVersion":"1.0.0","protocolVersion":5,"minProtocolVersion":5,"machineId":"machine","machineName":"Mac","gatewayChannel":"stable","capabilities":["sessions.v1"]}"#.utf8))
+            await socket.enqueue(Data(#"{"type":"hello","gatewayVersion":"1.0.0","piVersion":"1.0.0","protocolVersion":6,"minProtocolVersion":6,"machineId":"machine","machineName":"Mac","gatewayChannel":"stable","capabilities":["sessions.v1"]}"#.utf8))
             _ = try await connecting.value
 
             let snapshot = try SessionScenarioBuilder(seed: 841).openingTail(targetEncodedBytes: 4_096)
@@ -2104,7 +2104,7 @@ struct SessionPresentationStoreTests {
             )
             let connecting = Task { try await client.connect(profile: profile, token: "token") }
             try await socket.waitUntilSent(count: 1)
-            await socket.enqueue(Data(#"{"type":"hello","gatewayVersion":"1.0.0","piVersion":"1.0.0","protocolVersion":5,"minProtocolVersion":5,"machineId":"machine","machineName":"Mac","gatewayChannel":"stable","capabilities":["sessions.v1"]}"#.utf8))
+            await socket.enqueue(Data(#"{"type":"hello","gatewayVersion":"1.0.0","piVersion":"1.0.0","protocolVersion":6,"minProtocolVersion":6,"machineId":"machine","machineName":"Mac","gatewayChannel":"stable","capabilities":["sessions.v1"]}"#.utf8))
             _ = try await connecting.value
 
             let oldSnapshot = try SessionScenarioBuilder(seed: 87).openingTail(targetEncodedBytes: 4_096)
@@ -2179,7 +2179,7 @@ struct SessionPresentationStoreTests {
             let profile = GatewayProfile(id: "gateway", label: "Mac", host: "gateway.test", port: 9_847, machineId: "machine", deviceId: "device")
             let connecting = Task { try await client.connect(profile: profile, token: "token") }
             try await socket.waitUntilSent(count: 1)
-            await socket.enqueue(Data(#"{"type":"hello","gatewayVersion":"1","piVersion":"1","protocolVersion":5,"minProtocolVersion":5,"machineId":"machine","machineName":"Mac","gatewayChannel":"stable","capabilities":["sessions.v1"]}"#.utf8))
+            await socket.enqueue(Data(#"{"type":"hello","gatewayVersion":"1","piVersion":"1","protocolVersion":6,"minProtocolVersion":6,"machineId":"machine","machineName":"Mac","gatewayChannel":"stable","capabilities":["sessions.v1"]}"#.utf8))
             _ = try await connecting.value
 
             let oldSnapshot = try SessionScenarioBuilder(seed: 88_101).openingTail(targetEncodedBytes: 4_096)
@@ -2261,7 +2261,7 @@ struct SessionPresentationStoreTests {
             )
             let connecting = Task { try await client.connect(profile: profile, token: "token") }
             try await socket.waitUntilSent(count: 1)
-            await socket.enqueue(Data(#"{"type":"hello","gatewayVersion":"1.0.0","piVersion":"1.0.0","protocolVersion":5,"minProtocolVersion":5,"machineId":"machine","machineName":"Mac","gatewayChannel":"stable","capabilities":["sessions.v1"]}"#.utf8))
+            await socket.enqueue(Data(#"{"type":"hello","gatewayVersion":"1.0.0","piVersion":"1.0.0","protocolVersion":6,"minProtocolVersion":6,"machineId":"machine","machineName":"Mac","gatewayChannel":"stable","capabilities":["sessions.v1"]}"#.utf8))
             _ = try await connecting.value
 
             var baseline = try SessionScenarioBuilder(seed: 8_905).openingTail(targetEncodedBytes: 4_096)
@@ -2349,7 +2349,7 @@ struct SessionPresentationStoreTests {
             let profile = GatewayProfile(id: "gateway", label: "Mac", host: "gateway.test", port: 9_847, machineId: "machine", deviceId: "device")
             let connecting = Task { try await client.connect(profile: profile, token: "token") }
             try await socket.waitUntilSent(count: 1)
-            await socket.enqueue(Data(#"{"type":"hello","gatewayVersion":"1.0.0","piVersion":"1.0.0","protocolVersion":5,"minProtocolVersion":5,"machineId":"machine","machineName":"Mac","gatewayChannel":"stable","capabilities":["sessions.v1"]}"#.utf8))
+            await socket.enqueue(Data(#"{"type":"hello","gatewayVersion":"1.0.0","piVersion":"1.0.0","protocolVersion":6,"minProtocolVersion":6,"machineId":"machine","machineName":"Mac","gatewayChannel":"stable","capabilities":["sessions.v1"]}"#.utf8))
             _ = try await connecting.value
 
             var baseline = try SessionScenarioBuilder(seed: 8_906).openingTail(targetEncodedBytes: 4_096)
@@ -2417,7 +2417,7 @@ struct SessionPresentationStoreTests {
             )
             let connecting = Task { try await client.connect(profile: profile, token: "token") }
             try await socket.waitUntilSent(count: 1)
-            await socket.enqueue(Data(#"{"type":"hello","gatewayVersion":"1.0.0","piVersion":"1.0.0","protocolVersion":5,"minProtocolVersion":5,"machineId":"machine","machineName":"Mac","gatewayChannel":"stable","capabilities":["sessions.v1"]}"#.utf8))
+            await socket.enqueue(Data(#"{"type":"hello","gatewayVersion":"1.0.0","piVersion":"1.0.0","protocolVersion":6,"minProtocolVersion":6,"machineId":"machine","machineName":"Mac","gatewayChannel":"stable","capabilities":["sessions.v1"]}"#.utf8))
             _ = try await connecting.value
 
             var baseline = try SessionScenarioBuilder(seed: 8_907).openingTail(targetEncodedBytes: 4_096)
@@ -2499,7 +2499,7 @@ struct SessionPresentationStoreTests {
             let profile = GatewayProfile(id: "gateway", label: "Mac", host: "gateway.test", port: 9_847, machineId: "machine", deviceId: "device")
             let connecting = Task { try await client.connect(profile: profile, token: "token") }
             try await socket.waitUntilSent(count: 1)
-            await socket.enqueue(Data(#"{"type":"hello","gatewayVersion":"1.0.0","piVersion":"1.0.0","protocolVersion":5,"minProtocolVersion":5,"machineId":"machine","machineName":"Mac","gatewayChannel":"stable","capabilities":["sessions.v1"]}"#.utf8))
+            await socket.enqueue(Data(#"{"type":"hello","gatewayVersion":"1.0.0","piVersion":"1.0.0","protocolVersion":6,"minProtocolVersion":6,"machineId":"machine","machineName":"Mac","gatewayChannel":"stable","capabilities":["sessions.v1"]}"#.utf8))
             _ = try await connecting.value
 
             let baseline = try SessionScenarioBuilder(seed: 8_929).openingTail(targetEncodedBytes: 4_096)
@@ -2589,7 +2589,7 @@ struct SessionPresentationStoreTests {
             let profile = GatewayProfile(id: "gateway", label: "Mac", host: "gateway.test", port: 9_847, machineId: "machine", deviceId: "device")
             let connecting = Task { try await client.connect(profile: profile, token: "token") }
             try await socket.waitUntilSent(count: 1)
-            await socket.enqueue(Data(#"{"type":"hello","gatewayVersion":"1.0.0","piVersion":"1.0.0","protocolVersion":5,"minProtocolVersion":5,"machineId":"machine","machineName":"Mac","gatewayChannel":"stable","capabilities":["sessions.v1"]}"#.utf8))
+            await socket.enqueue(Data(#"{"type":"hello","gatewayVersion":"1.0.0","piVersion":"1.0.0","protocolVersion":6,"minProtocolVersion":6,"machineId":"machine","machineName":"Mac","gatewayChannel":"stable","capabilities":["sessions.v1"]}"#.utf8))
             _ = try await connecting.value
 
             let baseline = try SessionScenarioBuilder(seed: 8_931).openingTail(targetEncodedBytes: 4_096)
@@ -2655,7 +2655,7 @@ struct SessionPresentationStoreTests {
             let profile = GatewayProfile(id: "gateway", label: "Mac", host: "gateway.test", port: 9_847, machineId: "machine", deviceId: "device")
             let connecting = Task { try await client.connect(profile: profile, token: "token") }
             try await socket.waitUntilSent(count: 1)
-            await socket.enqueue(Data(#"{"type":"hello","gatewayVersion":"1.0.0","piVersion":"1.0.0","protocolVersion":5,"minProtocolVersion":5,"machineId":"machine","machineName":"Mac","gatewayChannel":"stable","capabilities":["sessions.v1"]}"#.utf8))
+            await socket.enqueue(Data(#"{"type":"hello","gatewayVersion":"1.0.0","piVersion":"1.0.0","protocolVersion":6,"minProtocolVersion":6,"machineId":"machine","machineName":"Mac","gatewayChannel":"stable","capabilities":["sessions.v1"]}"#.utf8))
             _ = try await connecting.value
 
             let baseline = try SessionScenarioBuilder(seed: 8_930).openingTail(targetEncodedBytes: 4_096)
@@ -2705,7 +2705,7 @@ struct SessionPresentationStoreTests {
             )
             let connecting = Task { try await client.connect(profile: profile, token: "token") }
             try await socket.waitUntilSent(count: 1)
-            await socket.enqueue(Data(#"{"type":"hello","gatewayVersion":"1.0.0","piVersion":"1.0.0","protocolVersion":5,"minProtocolVersion":5,"machineId":"machine","machineName":"Mac","gatewayChannel":"stable","capabilities":["sessions.v1"]}"#.utf8))
+            await socket.enqueue(Data(#"{"type":"hello","gatewayVersion":"1.0.0","piVersion":"1.0.0","protocolVersion":6,"minProtocolVersion":6,"machineId":"machine","machineName":"Mac","gatewayChannel":"stable","capabilities":["sessions.v1"]}"#.utf8))
             _ = try await connecting.value
 
             var baseline = try SessionScenarioBuilder(seed: 8_907).openingTail(targetEncodedBytes: 4_096)
@@ -2798,7 +2798,7 @@ struct SessionPresentationStoreTests {
             )
             let connecting = Task { try await client.connect(profile: profile, token: "token") }
             try await socket.waitUntilSent(count: 1)
-            await socket.enqueue(Data(#"{"type":"hello","gatewayVersion":"1.0.0","piVersion":"1.0.0","protocolVersion":5,"minProtocolVersion":5,"machineId":"machine","machineName":"Mac","gatewayChannel":"stable","capabilities":["sessions.v1"]}"#.utf8))
+            await socket.enqueue(Data(#"{"type":"hello","gatewayVersion":"1.0.0","piVersion":"1.0.0","protocolVersion":6,"minProtocolVersion":6,"machineId":"machine","machineName":"Mac","gatewayChannel":"stable","capabilities":["sessions.v1"]}"#.utf8))
             _ = try await connecting.value
 
             let baseline = try SessionScenarioBuilder(seed: 8_909).openingTail(targetEncodedBytes: 4_096)
@@ -2850,7 +2850,7 @@ struct SessionPresentationStoreTests {
             )
             let connecting = Task { try await model.connectHostedGateway(profile: profile, token: "token") }
             try await socket.waitUntilSent(count: 1)
-            await socket.enqueue(Data(#"{"type":"hello","gatewayVersion":"1.0.0","piVersion":"1.0.0","protocolVersion":5,"minProtocolVersion":5,"machineId":"machine","machineName":"Mac","gatewayChannel":"stable","capabilities":["sessions.v1"]}"#.utf8))
+            await socket.enqueue(Data(#"{"type":"hello","gatewayVersion":"1.0.0","piVersion":"1.0.0","protocolVersion":6,"minProtocolVersion":6,"machineId":"machine","machineName":"Mac","gatewayChannel":"stable","capabilities":["sessions.v1"]}"#.utf8))
             _ = try await connecting.value
 
             let opening = Task { try await model.openSessionPresentation("terminal-malformed") }
@@ -2905,7 +2905,7 @@ struct SessionPresentationStoreTests {
             let profile = GatewayProfile(id: "gateway", label: "Mac", host: "gateway.test", port: 9_847, machineId: "machine", deviceId: "device")
             let connecting = Task { try await client.connect(profile: profile, token: "token") }
             try await socket.waitUntilSent(count: 1)
-            await socket.enqueue(Data(#"{"type":"hello","gatewayVersion":"1.0.0","piVersion":"1.0.0","protocolVersion":5,"minProtocolVersion":5,"machineId":"machine","machineName":"Mac","gatewayChannel":"stable","capabilities":["sessions.v1"]}"#.utf8))
+            await socket.enqueue(Data(#"{"type":"hello","gatewayVersion":"1.0.0","piVersion":"1.0.0","protocolVersion":6,"minProtocolVersion":6,"machineId":"machine","machineName":"Mac","gatewayChannel":"stable","capabilities":["sessions.v1"]}"#.utf8))
             _ = try await connecting.value
 
             var baseline = try SessionScenarioBuilder(seed: 8_908).openingTail(targetEncodedBytes: 4_096)
@@ -2981,7 +2981,7 @@ struct SessionPresentationStoreTests {
             )
             let connecting = Task { try await model.connectHostedGateway(profile: profile, token: "token") }
             try await socket.waitUntilSent(count: 1)
-            await socket.enqueue(Data(#"{"type":"hello","gatewayVersion":"1.0.0","piVersion":"1.0.0","protocolVersion":5,"minProtocolVersion":5,"machineId":"machine","machineName":"Mac","gatewayChannel":"stable","capabilities":["sessions.v1"]}"#.utf8))
+            await socket.enqueue(Data(#"{"type":"hello","gatewayVersion":"1.0.0","piVersion":"1.0.0","protocolVersion":6,"minProtocolVersion":6,"machineId":"machine","machineName":"Mac","gatewayChannel":"stable","capabilities":["sessions.v1"]}"#.utf8))
             _ = try await connecting.value
 
             var snapshot = try SessionScenarioBuilder(seed: 90).openingTail(targetEncodedBytes: 4_096)
@@ -3060,7 +3060,7 @@ struct SessionPresentationStoreTests {
             let model = AppModel(client: client, cache: SnapshotCache(root: FileManager.default.temporaryDirectory.appending(path: UUID().uuidString)))
             let connecting = Task { try await model.connectHostedGateway(profile: profile, token: "token") }
             try await socket.waitUntilSent(count: 1)
-            await socket.enqueue(Data(#"{"type":"hello","gatewayVersion":"1.0.0","piVersion":"1.0.0","protocolVersion":5,"minProtocolVersion":5,"machineId":"machine","machineName":"Mac","gatewayChannel":"stable","capabilities":["sessions.v1"]}"#.utf8))
+            await socket.enqueue(Data(#"{"type":"hello","gatewayVersion":"1.0.0","piVersion":"1.0.0","protocolVersion":6,"minProtocolVersion":6,"machineId":"machine","machineName":"Mac","gatewayChannel":"stable","capabilities":["sessions.v1"]}"#.utf8))
             _ = try await connecting.value
             var snapshot = try SessionScenarioBuilder(seed: 8_909).openingTail(targetEncodedBytes: 4_096)
             snapshot.extensionPresentation.hostEpoch = "debounce-host"
@@ -3158,7 +3158,7 @@ struct SessionPresentationStoreTests {
             )
             let connecting = Task { try await client.connect(profile: profile, token: "token") }
             try await socket.waitUntilSent(count: 1)
-            await socket.enqueue(Data(#"{"type":"hello","gatewayVersion":"1.0.0","piVersion":"1.0.0","protocolVersion":5,"minProtocolVersion":5,"machineId":"machine","machineName":"Mac","gatewayChannel":"stable","capabilities":["sessions.v1"]}"#.utf8))
+            await socket.enqueue(Data(#"{"type":"hello","gatewayVersion":"1.0.0","piVersion":"1.0.0","protocolVersion":6,"minProtocolVersion":6,"machineId":"machine","machineName":"Mac","gatewayChannel":"stable","capabilities":["sessions.v1"]}"#.utf8))
             _ = try await connecting.value
 
             var snapshot = try SessionScenarioBuilder(seed: 86).openingTail(targetEncodedBytes: 4_096)
@@ -3321,7 +3321,7 @@ struct SessionPresentationStoreTests {
             )
             let connecting = Task { try await client.connect(profile: profile, token: "token") }
             try await socket.waitUntilSent(count: 1)
-            await socket.enqueue(Data(#"{"type":"hello","gatewayVersion":"1.0.0","piVersion":"1.0.0","protocolVersion":5,"minProtocolVersion":5,"machineId":"machine","machineName":"Mac","gatewayChannel":"stable","capabilities":["sessions.v1"]}"#.utf8))
+            await socket.enqueue(Data(#"{"type":"hello","gatewayVersion":"1.0.0","piVersion":"1.0.0","protocolVersion":6,"minProtocolVersion":6,"machineId":"machine","machineName":"Mac","gatewayChannel":"stable","capabilities":["sessions.v1"]}"#.utf8))
             _ = try await connecting.value
 
             var snapshot = try SessionScenarioBuilder(seed: 8_602).openingTail(targetEncodedBytes: 4_096)

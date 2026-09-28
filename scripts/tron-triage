@@ -1,0 +1,16 @@
+#!/usr/bin/env bash
+# Front door for incident triage. One command turns an incident's phone
+# exports and Gateway log into episodes by cause, joining phone and Gateway
+# records by the O-1 correlation key and falling back to a time window for
+# logs written before protocol 6. Inputs are read only; nothing is sent
+# anywhere. scripts/tron_triage.py owns the rules and the report schema.
+
+set -euo pipefail
+
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+
+if [[ "${1:-}" == "-h" || "${1:-}" == "--help" ]]; then
+  exec python3 "$ROOT/scripts/tron_triage.py" --help
+fi
+
+exec python3 "$ROOT/scripts/tron_triage.py" "$@"

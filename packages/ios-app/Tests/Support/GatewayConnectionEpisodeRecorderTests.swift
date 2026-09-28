@@ -91,6 +91,7 @@ struct GatewayConnectionEpisodeRecorderTests {
         let attempts = try await waitForRecords(log, event: "gateway.attempt", count: 2)
         #expect(attempts.map(\.outcome) == ["failure", "success"])
         #expect(attempts[0].message.contains("attemptId=loop-9"))
+        #expect(attempts[0].message.contains("owner=selected"))
         #expect(attempts[0].message.contains("retry=1"))
         #expect(attempts[0].message.contains("stageReached=transport-open"))
         #expect(attempts[0].message.contains("reason=timeout"))
@@ -285,9 +286,11 @@ struct GatewayConnectionEpisodeRecorderTests {
         succeeded: Bool,
         startedAt: ContinuousClock.Instant,
         connectionID: Int? = nil,
-        gatewayConnectionID: String? = nil
+        gatewayConnectionID: String? = nil,
+        owner: GatewayConnectionAttemptOwner = .selected
     ) -> GatewayConnectionAttempt {
         GatewayConnectionAttempt(
+            owner: owner,
             profileID: profileID,
             lifecycleGeneration: lifecycleGeneration,
             connectionID: connectionID,

@@ -783,7 +783,8 @@ class Profiler:
             try:
                 windows, discarded = attribution.load_windows(recorder.handshake / "windows.jsonl", iterations, skip=1)
                 traced = attribution.attribute(recorder.output, trace, recorder.pid, windows,
-                                               discarded_epoch=discarded)
+                                               discarded_epoch=discarded,
+                                               host_wide=attribution.records_all_processes(trace))
             except attribution.AttributionError as error:
                 raise ProfileError(f"{scenario}: attribution failed: {error}; trace kept at {recorder.output}") from error
             attribution_paths = attribution.write(traced, run_dir)

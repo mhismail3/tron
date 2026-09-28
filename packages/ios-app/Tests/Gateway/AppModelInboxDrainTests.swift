@@ -32,7 +32,7 @@ struct AppModelInboxDrainTests {
             let changed = AsyncStream<Void>.makeStream(bufferingPolicy: .bufferingNewest(1))
             defer { changed.continuation.finish() }
             do {
-                await socket.enqueue(Data(#"{"type":"hello","gatewayVersion":"1.0.0","piVersion":"1.0.0","protocolVersion":5,"minProtocolVersion":5,"machineId":"machine","machineName":"Fixture","gatewayChannel":"stable","capabilities":["sessions.v1"]}"#.utf8))
+                await socket.enqueue(Data(#"{"type":"hello","gatewayVersion":"1.0.0","piVersion":"1.0.0","protocolVersion":6,"minProtocolVersion":6,"machineId":"machine","machineName":"Fixture","gatewayChannel":"stable","capabilities":["sessions.v1"]}"#.utf8))
                 try await model.connectHostedGateway(profile: profile, token: "synthetic-token")
                 withObservationTracking { _ = model.noticeCenter.notices } onChange: { changed.continuation.yield(()) }
                 await socket.enqueue(Data(#"{"type":"event","topic":"notification.inbox.changed","payload":{}}"#.utf8))
@@ -77,7 +77,7 @@ struct AppModelInboxDrainTests {
                 let requestID = try #require(catalogRequest["id"]?.stringValue)
                 await socket.enqueue(try JSONEncoder.gateway.encode(JSONValue.object([
                     "type": .string("response"), "id": .string(requestID), "ok": .bool(true),
-                    "result": .object(["sessions": .array([]), "listRevision": .number(1)])
+                    "result": .object(["sessions": .array([]), "listRevision": .number(1), "projectionToken": .string("epoch-1:1")])
                 ])))
                 var completion = foregroundFinished.stream.makeAsyncIterator()
                 guard let result = await completion.next() else { throw CancellationError() }
@@ -88,7 +88,7 @@ struct AppModelInboxDrainTests {
 
                 model.notificationInbox.cancelRefreshes()
                 await flight?.value
-                await replacement.enqueue(Data(#"{"type":"hello","gatewayVersion":"1.0.0","piVersion":"1.0.0","protocolVersion":5,"minProtocolVersion":5,"machineId":"machine","machineName":"Fixture","gatewayChannel":"stable","capabilities":["sessions.v1"]}"#.utf8))
+                await replacement.enqueue(Data(#"{"type":"hello","gatewayVersion":"1.0.0","piVersion":"1.0.0","protocolVersion":6,"minProtocolVersion":6,"machineId":"machine","machineName":"Fixture","gatewayChannel":"stable","capabilities":["sessions.v1"]}"#.utf8))
                 try await model.connectHostedGateway(profile: profile, token: "synthetic-token")
                 let replacementID = try #require(await client.activeConnectionID())
                 #expect(replacementID != connectionID)
@@ -135,7 +135,7 @@ struct AppModelInboxDrainTests {
                 let replacementRequestID = try #require(replacementCatalog?["id"]?.stringValue)
                 await replacement.enqueue(try JSONEncoder.gateway.encode(JSONValue.object([
                     "type": .string("response"), "id": .string(replacementRequestID), "ok": .bool(true),
-                    "result": .object(["sessions": .array([]), "listRevision": .number(2)])
+                    "result": .object(["sessions": .array([]), "listRevision": .number(2), "projectionToken": .string("epoch-1:2")])
                 ])))
                 #expect(model.notificationInbox.isLoading)
                 await model.teardown()

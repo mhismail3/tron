@@ -64,7 +64,14 @@ function subscribeAudience(registry: RuntimeRegistry, sessionId: string): void {
  * its own cut rather than from a reader's materialization. Settling it is what
  * makes the document current, without waiting out the persist debounce. */
 async function settleCatalog(registry: RuntimeRegistry): Promise<void> {
-  await (registry as unknown as { sessionCatalog: { settled: () => Promise<void> } }).sessionCatalog.settled();
+  await catalogOwner(registry).settled();
+}
+
+/** The registry's catalog owner, the object under test for the index's rows.
+ * G-1c switches the read paths onto it; until then no RPC publishes a row, so a
+ * test that asserts one reads the owner itself. */
+function catalogOwner(registry: RuntimeRegistry): SessionCatalog {
+  return (registry as unknown as { sessionCatalog: SessionCatalog }).sessionCatalog;
 }
 
 describe.sequential("RuntimeRegistry with the pinned agent runtime", () => {
@@ -11414,8 +11421,7 @@ export default function (pi) {
     // Settle the catalog owner before the request: its own background reconcile
     // must not interleave and be misattributed as request-path work, and then
     // every walk in the request's window can be asserted, not just one.
-    await (fixture.registry as unknown as { sessionCatalog: { settled: () => Promise<void> } })
-      .sessionCatalog.settled();
+    await settleCatalog(fixture.registry);
     const backgroundWalks = recorded.recordCatalogWalk.mock.calls.length;
 
     await runInRequestSpan(new RequestSpan(), () => fixture.registry.delete(fixture.manager.getSessionId()));
@@ -11429,5 +11435,37 @@ export default function (pi) {
     const evidenceSeam = fixture.registry as unknown as { catalogStructureEvidence: () => Promise<unknown> };
     await evidenceSeam.catalogStructureEvidence();
     expect(recorded.recordCatalogWalk).toHaveBeenLastCalledWith(expect.any(Number), expect.any(Number), false);
+  });
+
+  // G-1b: a writer the Gateway does not own (a subagent child, a copied file)
+  // reaches its catalog row through the folder watcher, so external writers add
+  // no request-path walks to the criterion this file measures above.
+  it("publishes an external append to a catalog row without a walk", async () => {
+    const recorded = resourceRecorder();
+    const fixture = await coldFixture("external-append", { resources: recorded });
+    const catalog = catalogOwner(fixture.registry);
+    await catalog.settled();
+
+    const child = join(await realpath(join(fixture.agentDir, "sessions")),
+      "workspace", "parent", "producer", "run-1", "session.jsonl");
+    await mkdir(dirname(child), { recursive: true });
+    await writeFile(child, `${JSON.stringify({
+      type: "session", version: 3, id: "id-child", timestamp: "2026-09-27T00:00:00.000Z", cwd: fixture.cwd,
+    })}\n`);
+    await waitUntil(() => catalog.row(child)?.id === "id-child");
+    expect(catalog.row(child)?.delegated).toBe(true);
+
+    const walksBeforeAppend = recorded.recordCatalogWalk.mock.calls.length;
+    const appendedAt = Date.now();
+    await appendFile(child, `${JSON.stringify({
+      type: "message", id: "m1", timestamp: Date.parse("2026-09-27T00:00:01.000Z"), message: { role: "user", content: "external" },
+    })}\n`);
+    await waitUntil(() => catalog.row(child)?.messageCount === 1, 3_000);
+
+    // The watcher's own hint, not a walk: the row is current within a second of
+    // the append and the sampler saw no catalog structure walk at all.
+    expect(Date.now() - appendedAt).toBeLessThanOrEqual(1_000);
+    expect(catalog.row(child)?.size).toBe((await fsPromises.stat(child)).size);
+    expect(recorded.recordCatalogWalk.mock.calls.length).toBe(walksBeforeAppend);
   });
 });

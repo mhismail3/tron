@@ -2,7 +2,28 @@
 
 - **Started:** 2026-09-27
 - **Status:** Active (Phase 1 runs on `hardening/integration`; that branch's copy of this plan is authoritative until R-1)
+- **Last updated:** 2026-09-28, G-7 (final review round addressed: an unchanged catalog answer rebuilds the row projection, a cleared automation marker moves the catalog token)
+
 - **Last updated:** 2026-09-28, G-3 review round 2 addressed: the `unaudiencedSnapshotBuilds` warning and its test are now stated as a tripwire for a lost slot guard or a divergence between the registry's subscription record and the transport's, not for a closing socket
+
+- **Last updated:** 2026-09-28, C-4 (second review round addressed)
+
+- **Last updated:** 2026-09-28, O-7 review round 4 addressed; O-7 Blocked until the Context causes reproduce on the real incident export
+
+- **Last updated:** 2026-09-28, O-6a blocked on a quiet-host repeat (second review response landed)
+
+- **Last updated:** 2026-09-28, O-4 (review round 4 addressed)
+
+- **Last updated:** 2026-09-28, O-2 review response (silence requires expected
+  liveness, upgrade refusals collapse into one record)
+
+- **Last updated:** 2026-09-28, G-10 second review round (receipt totals kept across a rebuild, connection-owner row added)
+
+- **Last updated:** 2026-09-28, G-8 background work audit: third review round corrected the re-admission fence, the socket promise and the discovery-open ceiling
+
+- **Last updated:** 2026-09-28, G-1b catalog watcher (review round 2: spurious whole-folder passes, true `catalog.changed` bound, O-6a evidence)
+
+- **Last updated:** 2026-09-28, E-2c blocked and review-addressed: the profiler refuses a host-wide `time-profiler` trace whose export is projected over its 2 GiB budget and names the trace's size, so no traced scenario's export is projected above 2 GiB; a device capture is not held to that ratio, the shorter-window half and a passing `--scenario all` run remain
 - **Goal:** A clean, efficient and predictable Gateway and phone connection: the phone stays connected and loads any session promptly whenever the network path is up, however many sessions run and however large the history grows, and every disconnect or slow operation is attributable to one cause from the logs in one step.
 
 ## Goal and constraints
@@ -526,32 +547,32 @@ rows are in priority order.
 | P-0 | Done | Fold the phone reconnect tuning plan into this plan (D-1) and close it through history; done on `main` at activation | none | |
 | O-1 | Done | Correlation key across phone and Gateway on every connection record | none | orchestrator-dispatched worker, 2026-09-28 |
 | O-6a | Blocked | Multi-session qualification scenario with a generated catalog; record the `main` baseline | none | orchestrator-dispatched worker, 2026-09-28 (second review response) |
-| E-2 | Blocked | Bound the iOS profiler's memory or hand the row to the simulator-lifecycle plan | none | orchestrator-dispatched worker, 2026-09-28 |
+| E-2 | Done | Bound the iOS profiler's memory or hand the row to the simulator-lifecycle plan | none | orchestrator-dispatched worker, 2026-09-28 |
 | E-2b | Done | Record `time-profiler` with `xctrace record --attach <pid>` if a real traced run proves it samples the simulator app; re-measure export and parser peaks (see E-2 handoff) | E-2 | orchestrator-dispatched deepseek-worker, 2026-09-28 |
-| E-2c | Claimed | Bound the `time-profiler` export under 2 GB for `--scenario all` (see E-2b handoff: simulator-device recording, or a size refusal plus shorter windows) | E-2b | orchestrator-dispatched deepseek-worker, 2026-09-28 |
+| E-2c | Done | Bound the `time-profiler` export under 2 GB for `--scenario all` (see E-2b handoff: simulator-device recording, or a size refusal plus shorter windows) | E-2b | orchestrator-dispatched deepseek-worker, 2026-09-28; the export of a host-wide recording is now refused above its budget (measured on real traces), the shorter-window half and a passing `--scenario all` run remain (see handoff) |
 | O-2 | Done | Gateway transport records: upgrade phases, inbound silence with Tailscale peer path | O-1 | orchestrator-dispatched deepseek-worker, 2026-09-28 |
 | O-3 | Done | Request span: one `rpc.completed` per slow RPC with every stage, wait and count | O-1 | orchestrator-dispatched deepseek-worker, 2026-09-28 |
 | O-4 | Done | Phone connection records that survive an export, stall watchdog, exact scene records | O-1 | orchestrator-dispatched deepseek-worker, 2026-09-28; review rounds 1–4 addressed; focused suites and the iOS Gateway E2E blackhole runs pass |
 | O-6b | Blocked | Impairment in the qualification scenario: blackhole, bandwidth cap, Gateway restart | O-6a | orchestrator-dispatched deepseek-worker, 2026-09-28 (fifth review response) |
 | O-5 | Done | Gateway resource sampler and event-loop histogram | O-3 | orchestrator-dispatched deepseek-worker, 2026-09-28 |
-| O-7 | Claimed | Incident triage tool: phone export plus Gateway log in, episodes by cause out | O-1, O-2, O-4 | orchestrator-dispatched deepseek-worker, 2026-09-28 |
-| C-1 | Ready | Projection work never blocks or parks reconnect; parked episodes self-resume | O-4, O-6b | |
+| O-7 | Done | Incident triage tool: phone export plus Gateway log in, episodes by cause out | O-1, O-2, O-4 | orchestrator-dispatched deepseek-worker, 2026-09-28; review rounds 1-4 addressed (attribution, older-export records and attempts, Tailscale capture, scene splits, recovery-handshake and attempt ownership, relay-window coverage). Blocked because the incident export does not reproduce all four Context causes: cause 4 has no `gateway-stall` episode of its own (its only candidate is a slow span on a socket already closed), the run reads 121 episodes against Context's 77 reconnect episodes, `phone-stall=2` where one wrong-label cause was counted, and `gateway-capacity=0` because the only capacity event predates the export (see the handoff) |
+| C-1 | Claimed | Projection work never blocks or parks reconnect; parked episodes self-resume | O-4, O-6b | orchestrator-dispatched deepseek-worker, 2026-09-28 |
 | G-1a | Done | Catalog owner and in-memory index fed by Gateway-owned changes | O-3, O-6a | orchestrator-dispatched deepseek-worker, 2026-09-28 |
-| G-1b | Claimed | Filesystem watcher and background reconciliation for external writers | G-1a | orchestrator-dispatched deepseek-worker, 2026-09-28 |
+| G-1b | Done | Filesystem watcher and background reconciliation for external writers | G-1a | orchestrator-dispatched deepseek-worker, 2026-09-28 (the O-6a confirmation of the Done-when is owed by the orchestrator) |
 | G-1c | Ready | Move every catalog reader to the index; delete request-path walks and the full-parse fallback | G-1b | |
 | G-1d | Ready | Replace the catalog wording in `connection-resilience.md` with the index contract (D-3) | G-1c | |
 | G-3 | Done | No audience, no projection: build and serialize snapshots only for subscribers | O-5, O-6a | orchestrator-dispatched deepseek-worker, 2026-09-28 (branch `hardening/g-3`; review round 1 addressed; CPU comparison and O-5's cross-check owed to the orchestrator) |
 | G-3a | Ready | Streaming progress for a session with no subscriber is still projected (`projectMessage` plus `safeJson` of the full message, up to once per 150 ms each); see G-3 handoff and review nit 8 | G-3 | |
 | C-2 | Ready | "Connected" follows the transport (D-2); chat restoration shows its own loading state | C-1 | |
-| C-5 | Claimed | Back off an unreachable non-selected Gateway profile; record pool attempts and episodes | O-4 | orchestrator-dispatched deepseek-worker, 2026-09-28 |
+| C-5 | Done | Back off an unreachable non-selected Gateway profile; record pool attempts and episodes | O-4 | orchestrator-dispatched deepseek-worker, 2026-09-28 |
 | G-10 | Done | Durable-write audit: no process-wide serialization of fsyncs, no fsync on reads | O-5 | orchestrator-dispatched deepseek-worker, 2026-09-28 |
 | G-10a | Done | Connection owner: a read (e.g. knowledge.raindrop.read) must not fsync — skip an unchanged provider observation in ConnectionOwner.recordProviderObservation, preserving stateRevision/updatedAt semantics | G-10 | orchestrator-dispatched deepseek-worker, 2026-09-28 |
 | C-3 | Ready | Faster retry (D-4): about 5 s transport-open deadline, immediate retry on path change | C-1 | |
-| C-4 | Claimed | Truer liveness (D-4): any inbound frame proves liveness | O-4 | orchestrator-dispatched deepseek-worker, 2026-09-28 |
+| C-4 | Done | Truer liveness (D-4): any inbound frame proves liveness | O-4 | orchestrator-dispatched deepseek-worker, 2026-09-28 |
 | C-6 | Ready | Cancel frame for disposable reads; a retried `session.open` joins the in-flight one | O-3 | |
 | G-12 | Ready | Server-side deadlines, concurrency caps and heap-pressure shedding with typed retry hints | O-3, O-5 | |
 | G-2 | Ready | Cold open in bounded time from the index and a single-file fence | G-1c | |
-| G-7 | Claimed | Reconnect diet: send only what changed | O-1, O-6a | orchestrator-dispatched deepseek-worker, 2026-09-28 |
+| G-7 | Done | Reconnect diet: send only what changed | O-1, O-6a | orchestrator-dispatched deepseek-worker, 2026-09-28; both review rounds addressed, R-1/R-4 own the real-reconnect measurement |
 | G-11 | Ready | Event-loop budget: find and bound every synchronous task over 50 ms | O-5, O-6a | |
 | G-9 | Ready | One background-work scheduler that yields to requests; measure the libuv pool size | O-5, G-1b | |
 | G-4 | Claimed | Outbound queue coalescing of superseded snapshots and keyed events | G-3 | orchestrator-dispatched deepseek-worker, 2026-09-28 |
@@ -564,10 +585,12 @@ rows are in priority order.
 | G-8 | Done | Background work audit: delete or bound each unowned or repeating job | O-5 | orchestrator-dispatched deepseek-worker, 2026-09-28 |
 | G-8a | Ready | Discovery lane retries an atomically replaced `status.json` (bounded, like the watcher lane) so a replace is not `extension.artifact-rejected`; see G-8 handoff | G-1c | |
 | G-8d | Ready | Bound the 750 ms ambient artifact discovery pass by change and make its 1,024-entry truncation impossible or visible; see G-8 handoff | G-8a | |
-| G-8b | Needs scoping | Bound the Mac app status poll's child processes and per-poll payload re-hash (user/security decision in "Decisions still open"); see G-8 handoff | G-8 | |
-| G-8c | Needs scoping | Bound the session-search warm-up (persisted index vs bounded slices in G-9's scheduler: user decision); see G-8 handoff | G-9 | |
-| E-1 | Ready | Document Tailscale flap diagnosis and user-side checks; the evaluation day confirms | O-2, O-7 | |
+| G-8b | Claimed | Bound the Mac app status poll's child processes and per-poll payload re-hash (user/security decision in "Decisions still open"); see G-8 handoff | G-8 | orchestrator-dispatched deepseek-worker, 2026-09-28 |
+| G-8c | Ready | Bound the session-search warm-up (persisted index vs bounded slices in G-9's scheduler: user decision); see G-8 handoff | G-9 | |
+| E-1 | Claimed | Document Tailscale flap diagnosis and user-side checks; the evaluation day confirms | O-2, O-7 | orchestrator-dispatched deepseek-worker, 2026-09-28 |
 | T-1 | Ready | Pre-existing test race: registry extension-artifact discovery tests treat an awaited `discoverExtensionArtifacts()` as a barrier; wait for a pass that settles (three tests, one a false green) | G-1a (Registry zone) | |
+| T-2 | Claimed | `GatewayConnectionEpisodeRecorderTests/blockedMainActorIsMeasuredAndReported` (O-4) was killed once ("Test crashed with signal kill") when run with four other suites on integration, then passed 3/3; find whether the 5 s main-thread block trips a hosted-test watchdog and bound the block so the test cannot be killed while still proving the stall record | O-4 | orchestrator-dispatched deepseek-worker, 2026-09-28 |
+| C-7 | Ready | Dashboard-pool event consumption stops after a failed initial connect (see the C-5 handoff): a successful reconnect brings the socket back but nothing consumes `client.events`, so a background profile stops receiving summaries, `system.stopping` and `transport.disconnected` until its entry is recreated | C-2 | |
 
 ### Phase 2 — Release and one evaluation day
 
@@ -994,10 +1017,16 @@ needed), **Checks**, **Docs**, **Done when**, **User action**.
   `packages/gateway/src/transport/connection-policy.ts` (parity only).
 - **Do:**
   1. Track the last inbound frame time (messages, pongs, any data).
-  2. On each ping tick, send a ping only if nothing arrived for the ping
-     interval; declare the link dead only when that ping's pong misses its
-     deadline.
-  3. Dead-link detection stays within 18 s of the last inbound frame.
+  2. Send the ping on every tick of the shared ten-second wakeup grid T1-NET
+     fixed, and declare the link dead only when that ping's pong misses its
+     deadline and no inbound frame of any kind arrived after the ping was sent
+     (orchestrator deviation from this plan's first draft, "send a ping only if
+     nothing arrived": the grid is a user-approved energy decision C-4 must not
+     reverse, and D-4's queued-pong case is covered by the post-ping frame test
+     alone).
+  3. Dead-link detection stays within 18 s of the last inbound frame: the tick
+     is never later than one interval after it and the deadline is 8 s after the
+     tick.
 - **Failure modes to write first:** large frame in flight when a ping is due;
   data then total silence; pongs but no data; clock suspension across
   background.
@@ -1092,7 +1121,8 @@ needed), **Checks**, **Docs**, **Done when**, **User action**.
 - **Checks:** G-1a's `session-catalog.test.ts` (in
   `packages/gateway/src/sessions/`), extended with a temporary directory.
 - **Done when:** in O-6a, child-file appends reach the index within 1 s without
-  any request-path walk.
+  any request-path walk. (The in-memory half is covered by this row's cases; the
+  O-6a confirmation is owed by the orchestrator, which owns the probe.)
 - **User action:** none; ships in the release (R-2).
 
 ### G-1c — Readers use the index; delete the walks
@@ -1278,7 +1308,9 @@ needed), **Checks**, **Docs**, **Done when**, **User action**.
 - **Checks:** `packages/ios-app/Tests/Gateway/AppModelReconnectTests.swift`,
   `packages/gateway/src/transport/session-archive.integration.test.ts` for list
   behaviour.
-- **Done when:** requests and bytes per reconnect meet the recorded target.
+- **Done when:** requests and bytes per reconnect meet the recorded target
+  (the target list and the delivered request set are fixed by this task's
+  checks; R-1 and R-4 own the real-reconnect request/byte measurement).
 - **User action:** none; ships in the release (R-2).
 
 ### G-11 — Event-loop budget
@@ -2280,6 +2312,125 @@ Read the numbers as one sample per case.
   retained evidence folder renamed the Python `simattach.sh` to `simattach.py`,
   added the host positive-control probe (`e2b-probe.py`), and describes
   `verdict.py`.
+
+### E-2c · Blocked · 2026-09-28 · orchestrator-dispatched deepseek-worker
+
+- Result: the refusal half is implemented on this branch. `scripts/tron_profile_attribution.py`
+  refuses a host-wide `time-profiler` trace whose `xcrun xctrace export` cannot
+  stay inside a 2 GiB budget (`EXPORT_PEAK_BUDGET_BYTES`), names the trace's own
+  size and its projected tree peak, and starts no export; `attribution.json` and
+  `attribution.md` carry the trace's bytes, projected peak and budget. Only
+  host-wide recordings are checked: `attribute()` takes `host_wide`, which
+  `scripts/tron-profile-ios` sets from the template's recording target and
+  `scripts/tron-profile-device` passes false, because a capture of one attached
+  process has no measured export-to-trace-size ratio. The default scenario
+  windows were **not** shortened: measured on real default traces, the recorded
+  span — not the window length — is what the budget binds, so shortening the
+  defaults would degrade every untraced report to serve the traced path. The row
+  stays Blocked because "under 2 GB for `--scenario all`" is not demonstrated as
+  a passing run: the retained product-scenario traces were recorded with
+  `--iterations 3` and project 5.5-6.6 GiB, and at the inferred cost of one
+  warm-up plus one measured window `--iterations 1` still projects 2.8-3.3 GiB
+  and is refused, so a passing traced product run needs a window short enough to
+  change what the scenario measures. A real `--scenario all` traced run also needs the lane's
+  DevicePerformance build plus ten scenarios, which did not fit this task's
+  budget on a host at load average 15-40 with the lane leased elsewhere.
+  Simulator-device recording was not re-probed: E-2b established it never starts
+  (180 s without returning, then the recorder's 300 s abort).
+- Evidence:
+  - Accepted (real trace, real CLI):
+    `python3 scripts/tron_profile_attribution.py <75.3 MiB control-cpu
+    --iterations 5 trace> --template time-profiler --pid 33246 --windows
+    .../windows.jsonl` exits 0 in 44 s; tree-RSS peak 1,308 MiB (xctrace child
+    1,277 MiB) measured with `files/hardening/e-2/peak.py`; `attribution.json`
+    holds `export {traceBytes 78,976,785, projectedPeakBytes 1,579,535,700,
+    budgetBytes 2,147,483,648}` with 233 measured samples over 5 windows;
+    artifacts `~/.tron/workspace/files/hardening/e-2c/control-cpu-accepted-attribution.{json,md}`.
+  - Refused (real trace): the same CLI on E-2's 338.7 MiB idle-dashboard trace
+    exits 2 in 0.3 s with a 6 MiB peak (no export started): "refusing to export
+    idle-dashboard.trace: the trace is 339 MiB and its xctrace export is
+    projected at 6.6 GiB, over the 2.0 GiB budget (20 bytes of tree peak per
+    trace byte measured on host-wide recordings); record a shorter trace (a
+    smaller --window-seconds or --iterations) on a quieter host".
+  - Scoping (real trace): the 131.7 MiB streaming-reply trace is refused as
+    host-wide (exit 2) and exported with the CLI's `--device-capture` (exit 0,
+    98 s, tree peak 2,434 MiB) into a document with no `export` block; that
+    2.38 GiB measured peak also confirms the refusal of that trace was right.
+  - Calibration (whole-tree peak per trace byte, host-wide Time Profiler, all
+    from `peak.py`): 55.5 MiB -> 998 MiB (18.0), four runs of 75.3 MiB ->
+    1,308-1,370 MiB (17.4-18.2), 131.7 MiB -> 2,434 MiB (18.5), 338.7 MiB ->
+    4,637 MiB (13.7). The constant 20 rounds the worst up with ~8% headroom; the
+    parser's own peak never overlapped the export's, so the tree is what the
+    budget has to cover. (E-2's and E-2b's handoffs label the last trace 342 MB
+    and the first 57 MB; these are the same traces in MiB.)
+  - Why a refusal is the only bound (each tested here):
+    `--xpath '.../table[@schema="time-profile"]/row[position()<5]'` returned 0
+    rows and still peaked at 1,231 MiB, so the export child builds the whole
+    table whatever `--xpath` selects; `ulimit -v` and `ulimit -d` are rejected
+    by the shell and `resource.setrlimit(RLIMIT_AS)` fails on macOS, so the
+    child cannot be capped either.
+  - What sizes the trace (toc duration + the run's `windows.jsonl`), all
+    `--iterations 3` except control-cpu (5): idle-dashboard 4x30 s -> 131.0 s /
+    338.7 MiB (2.59 MiB/s); streaming-reply 4x12 s -> 106.8 s / 302.8 MiB
+    (2.83); tool-loop 4x15 s -> 80.6 s / 282.9 MiB (3.51); control-cpu 6x2 s ->
+    13.6 s / 55.5 MiB (4.09). Host-wide rate 2.6-4.4 MiB/s (a fresh 15 s
+    host-wide recording was 62.8 MiB at 3.8 MiB/s,
+    `~/.tron/workspace/files/hardening/e-2c/host-trace-rate.json`). The budget
+    admits a 102 MiB trace, i.e. a 25-40 s recorded span; `--iterations 1`
+    records the discarded warm-up window as well, so the default windows do not
+    fit even then (inferred from those traces' spans: 2.8-3.3 GiB projected),
+    while the 2 s control windows do (55.5 MiB measured).
+  - `python3 scripts/test-tron-profile-attribution.py` 12/12 (failure mode 10:
+    the budget boundary refuses one byte over and accepts at it, no export is
+    started on a refused trace, the refusal names the trace's size, and a
+    device capture over the budget still exports without an `export` block);
+    `python3 scripts/test-tron-profile-ios.py` 7/7.
+- Changes: `fix(ios): refuse a time-profiler export that cannot fit the profiler's memory budget (E-2c)`
+  — `scripts/tron_profile_attribution.py`, `scripts/tron-profile-ios`,
+  `scripts/tron-profile-device`, `scripts/test-tron-profile-attribution.py`,
+  `packages/ios-app/docs/development.md` and this plan; the review response
+  below adds `fix(ios): scope the profiler export budget to host-wide recordings (E-2c)`
+  over the same files.
+- Tasks added: none.
+- Kept on purpose: `--all-processes` recording, `attribution.TEMPLATES`, the
+  default scenario windows and `--iterations` default 5 (see Result); the
+  owning doc's "keep traced runs short (1-3)" advice is replaced by the budget
+  the refusal enforces.
+- Deviations: no simulator run and no new trace recorded. The measurements use
+  real existing traces and the real CLI, the same route E-2 used; the recorded
+  rate is from a fresh host-wide recording taken for this task. The device
+  capture's exemption was measured on a real trace through the CLI's
+  `--device-capture`, not through `tron-profile device`, which needs a phone.
+- For the next agent: to close the row, run `scripts/tron-profile ios
+  --no-build --scenario all --trace time-profiler --iterations 1` on a quiet
+  host after the lane's build, expecting the six product scenarios to be
+  refused at their default windows (a refusal keeps the trace and costs only
+  that scenario's simulator time) and the four 2 s control scenarios to fit.
+  Then decide whether a traced product window short enough to fit
+  (`--window-seconds <n>`, so warm-up plus one window plus setup stay under a
+  ~25-40 s recorded span) is still a measurement worth taking, or whether the
+  row's goal moves to a simulator-device recording that samples the app alone;
+  the measurements say the recorded span, not the window, is the budget's
+  driver.
+- Review response (the follow-up commit on this branch): the sizing evidence is
+  relabeled as `--iterations 3` (four window lines, warm-up included) and the
+  "`--iterations 1` fits" claim is replaced by the inferred warm-up-inclusive
+  numbers (finding 1); the doc's example command is now the fitting control
+  self-test, its "1-3" advice is replaced by the budget it is bounded by, and
+  the refusal's remedy names `--window-seconds`/`--iterations` instead of
+  `--iterations 1`; the check is scoped to host-wide recordings through
+  `attribute(..., host_wide=)`, with `tron-profile device` exempt, the CLI given
+  `--device-capture` for a re-summarized device trace, and the device section of
+  the owning doc saying so (finding 2, measured on a real trace); the constant is
+  20 on the measured whole-tree peak with the comment's wording corrected and its
+  bound stated as observed (finding 3); the header line says "no traced
+  scenario's export is projected above 2 GiB" (finding 4); the test keeps the
+  refusal-before-export, the boundary and the size in the message and drops the
+  constant-and-remedy literals, with the device exemption added (finding 5); the
+  message, docs, handoff and evidence README use MiB/GiB only (finding 6); the
+  post-recording timing is stated where a user decides `--iterations` and
+  `--window-seconds` (finding 7); and this handoff's `Changes` line names the
+  files both commits touch (finding 8).
 
 ### O-3 · Done · 2026-09-28 · worker session (branch `hardening/o-3`)
 
@@ -4459,6 +4610,284 @@ events; widen them to name the pool owner in the same change.
   on ambient opens that excludes routed re-opens and assumes the pass keeps the
   750 ms cadence (finding 5, nit); the retained artifact's figure matches.
 
+### G-7 · Done · 2026-09-28 · orchestrator-dispatched deepseek-worker (branch `hardening/g-7`)
+
+- Final review round (1 major, 2 minors, 3 nits) fixed; three of the four nits
+  are comments or a documented one-time request. `hardening/integration` was
+  merged in first and both behaviours kept where it conflicted with C-5.
+- **Finding 1 (major) — an unchanged answer left the phone's snapshot stale.**
+  `confirmUnchanged` makes the projection live again, but the reconnect's own
+  revision advance happens before the answer lands, so the dashboard snapshot
+  the view holds was taken while the projection was retired: every non-idle row
+  read "resuming" and a waiting-for-user row lost its badge until its next
+  summary, and an expanded archived container kept the server unavailable.
+  Both `.unchanged` branches now do what a page read does when the answer
+  revives a retired projection: `AppModel` runs `installSelectedDashboardCatalog()`
+  and advances `archiveProjectionRevision`; the pool republishes the profile's
+  state and its authoritative catalog. Neither touches the rows. Covered by
+  `AppModelReconnectTests` "a reconnect whose catalog read is unchanged still
+  rebuilds the dashboard's row projection" (row waiting for the user, both
+  revisions, rows retained) and `DashboardStateOwnerTests` "a secondary
+  reconnect answered unchanged republishes its catalog authority" (the retained
+  token is named, and state plus authority come back for the replacement epoch).
+- **Finding 2 (minor) — a cleared automation marker did not move the token.**
+  `clearAutomationMarker` (the user's acknowledge-recovery action) and
+  `reconcileStoredAutomationMarkers` dropped the session from the recovered-marker
+  set without moving `catalogProjectionGeneration`, and a cold row reads its
+  `phase` from that set alone, so the row went `interrupted`→`idle` with an equal
+  token: every reconnect then answered `notModified` and the phone kept showing
+  `interrupted`. Both now go through `noteRecoveredMarkerCleared`, which advances
+  the generation and calls `sessionListChanged()` — the shape the cold-attention
+  path already used. Covered by `session-archive.integration.test.ts` "moves the
+  projection token when an acknowledged recovery clears a cold row's marker"
+  (marker restored by a real restart, phase read before and after, token moved,
+  `listChanged` observed).
+- **Finding 3 (minor) — merge readiness.** `hardening/integration` merged;
+  conflicts in this plan, `scripts/test-tron-profile.py` and
+  `scripts/tron-profile-gateway-driver.mjs` resolved as the union (both
+  behaviours). The v6 re-sweep found the two leftover `hello` fixtures the review
+  named in `DashboardStateOwnerTests.swift` (lines 855 and 1010) and both
+  `test-tron-profile.py` sites; nothing else in the merged tree still speaks v5.
+  `AppModel.swift` and `DashboardGatewayConnectionPool.swift` auto-merged and keep
+  C-5's pool work and this task's `.unchanged` branch.
+- **Nit 4 — false comments.** Both comments claimed the identity lane spanned the
+  identical-registration check. It does not: the check is read-only, runs outside
+  `withMobileIdentityLane`, and is therefore not ordered with that device's lane
+  operations, so an identical upsert racing a remove or revoke is answered from
+  the snapshot the check read. Both comments now say that, and the duplicated
+  block in `gateway-service.ts` is gone.
+- **Nit 5 — the one-time re-send.** The acknowledgement records the revision the
+  handshake advertised before the transfer, so a transfer that itself wrote the
+  grant (first registration or rotation) is re-sent once by the next reconcile.
+  Recorded in the target list
+  (`~/.tron/workspace/files/hardening/g-7-reconnect-request-inventory.md`) and in
+  `packages/ios-app/docs/development.md` instead of changing the upsert answer
+  shape.
+- **Nit 6 — a failed acknowledgement save blocked the removal.**
+  `removeRegistration` returned before sending `push.registration.remove` when
+  persisting the cleared acknowledgement failed, so a user who turned
+  notifications off could stay registered. The in-memory document still drops the
+  acknowledgement (a claim this phone could not persist is not trusted), the
+  failure is still reported as `pending`/`stoppedPersistence`, and the removal is
+  sent. Covered by `PushNotificationCoordinatorTests` "a failed acknowledgement
+  save still tells the Gateway to remove the grant".
+- Evidence: `npm run build` clean; `npx vitest run` passes on
+  `session-archive.integration.test.ts` (41/41, including the new case),
+  `notification-service.test.ts`, `gateway-notification-rpc.test.ts`,
+  `gateway-restart.test.ts` (62), `session-list-pagination.test.ts` (12) and
+  `automation-executor.test.ts` (8); `python3 scripts/test-gateway-protocol-contract.py`
+  passes 3/3 and `python3 scripts/test-tron-profile.py` passes 45/45 after the
+  merge. `scripts/tron-ios-test build --lane G7F` succeeded and `scripts/tron-ios-test run`
+  passes for `AppModelReconnectTests`, `PushNotificationCoordinatorTests` and
+  `DashboardStateOwnerTests` (130 tests).
+- Negative controls: with `noteRecoveredMarkerCleared` reverted to a bare
+  `interrupted.delete`, the new session-archive case fails on the first
+  `listChanged` assertion and would then answer `notModified`; with the
+  `AppModel` `.unchanged` side effects removed, the reconnect case fails on the
+  archive revision and the row's activity; with the pool's `.unchanged`
+  republication removed, the pool case times out waiting for the replacement
+  epoch's authority.
+- Changes: one merge commit for `hardening/integration` that also lands this
+  review round, branch `hardening/g-7` (the merge is kept whole because the
+  conflict resolutions and the fixes sit in the same files).
+
+### G-7 · Done · 2026-09-28 · orchestrator-dispatched deepseek-worker (branch `hardening/g-7`)
+
+- Review response: the review round after the first handoff entry below found a
+  blocker and two major gaps. This entry records what the fixes actually are;
+  the claims below about a connection-scoped revision, the no-op answer's shape
+  and the kept command receipt are superseded by it.
+- **Finding 1 (blocker) — the conditional answer covered only structural
+  membership.** `session.list` now takes and returns a projection token:
+  `RuntimeRegistry` publishes `projectionToken` = the Gateway runtime epoch plus
+  the page-source generation (structural `listRevision`, `catalogProjectionGeneration`,
+  scope, archive filter, archive revision), the pagination store carries it on
+  every page, and an uncursored read that names the current token is answered
+  `notModified` with no rows. The case the review reproduced — another client
+  marks a cold row unread, which moves only `catalogProjectionGeneration`, then a
+  conditional read returned `notModified` with no rows while the plain read
+  showed `isUnread: true` — is now a case in
+  `session-archive.integration.test.ts`: "answers an unchanged projection token
+  without rows and re-reads after the projection moves". Its artifact records
+  `firstRevision: 0`/`afterAttentionRevision: 0` with
+  `token: <epoch>:0:0:...` and `attentionToken: <epoch>:0:1:...`, plus a restart
+  whose token carries a new epoch. The same fix covers the phone's
+  malformed-summary and metadata re-check recovery paths, which re-read through
+  this conditional path.
+- **Finding 2 (major) — the push acknowledgement could not see a runtime grant
+  disable.** The Gateway now advertises `pushRegistrationRevision` in `hello`
+  and `system.info`: a digest over the grants it stores (identity, installation,
+  activity, disabled reason, relay origin) plus the relay origin they are valid
+  for, refreshed on every notification-document write and stable across a
+  restart that changed nothing. The phone stores it as
+  `PushGrant.acknowledgedRegistrationRevision` and skips the registration only
+  while it and `machineId:runtimeEpoch` both still match, so a relay rejection
+  that disabled the grant (`notification-service.ts` `recordOutcome`) makes the
+  next reconcile re-send and act on `requiresGrantRotation`. Tested at both
+  layers: `notification-service.test.ts` "advertises a changed registration
+  revision when the relay disables a grant" (the revision moves, the grant is no
+  longer current, the re-send answers `requiresGrantRotation: true`) and
+  `PushNotificationCoordinatorTests` "an acknowledged registration is not re-sent
+  while the Gateway's grant revision is unchanged" (unchanged revision sends
+  nothing; a moved revision re-sends and discards the disabled grant; a changed
+  runtime identity re-sends).
+- **Finding 3 (major) — the plan row's Done-when and the connection-scoped
+  revision.** Decided with the supervisor: the token is runtime-scoped, so the
+  phone keeps it across a reconnect and a replacement connection revalidates the
+  rows it holds instead of reloading them ("reconnect resumes; it does not
+  reload"). A profile switch still drops it (`invalidateLoads()`), pinned by
+  `DashboardStateOwnerTests` "a retained projection token survives a reconnect
+  and drops on a profile switch". The real-reconnect request and byte
+  measurement is R-1's and R-4's, recorded in the row's Done-when.
+- **Finding 4 (minor) — a lost removal answer.** `removeRegistration` clears and
+  persists the acknowledgement before sending `push.registration.remove`, so a
+  user who re-allows notifications re-registers instead of trusting an
+  acknowledgement for a grant the Gateway may already have removed
+  (`PushNotificationCoordinatorTests` "a lost removal response leaves no
+  acknowledgement that a removed grant is current").
+- **Finding 5 (minor) — the identical registration's command receipt.** Per the
+  supervisor, G-7's Do item 2 is literal: an identical registration is answered
+  before the receipt owner opens one, so it writes neither a receipt nor the
+  document. An unchanged registration is naturally idempotent, so a retried
+  request repeating the same `commandId` gets the same stored status;
+  `gateway-notification-rpc.test.ts` "answers an identical registration without
+  opening a command receipt" spies the receipt owner and asserts it is never
+  entered. An admitted registration keeps its previous order — the per-device
+  lane wraps the operation inside its receipt, so an accepted mutation is owned
+  by the work registry before it waits for the lane (`gateway-restart.test.ts`
+  "owns mobile mutations before they wait in the per-device lane"). G-7a was
+  removed: it only held this decision.
+- **Finding 6 (nit) — a late transfer completion.** `transfer` now takes the
+  runtime identity and revision from the admitted context and passes them to
+  `acknowledgeRegistration`, so a completion that lands after a reconnect
+  records the runtime that answered rather than whatever is current.
+- **Finding 7 (nit) — the version bump's search-and-replace mangled history.**
+  The two "additive field ... leave protocol version 6 unchanged" sentences now
+  say the additive field required no protocol version change, and the v5 update
+  helper claim names what actually rejects a strictly v6 candidate (a payload
+  manifest validated against the version the helper speaks, and the
+  protocol-range probe).
+- **Finding 8 (nit):** the diff outside the listed owning files is unchanged from
+  the first entry's justification (the catalog loader's owners, plus the release
+  rule that the protocol bump touches every fixture pinning the version).
+- Evidence: `npm run build` clean; `npx vitest run` passes on six focused files:
+  `session-archive.integration.test.ts`, `session-list-pagination.test.ts` and
+  `server-revocation.integration.test.ts` (66 tests) and
+  `notification-service.test.ts`, `gateway-notification-rpc.test.ts` and
+  `gateway-restart.test.ts` (60 tests); the session-archive report at
+  `packages/gateway/test-results/session-archive.integration.json` carries the
+  new case's evidence. `scripts/tron-ios-test build --lane G7R2` succeeded and
+  `scripts/tron-ios-test run --lane G7R2` for `AppModelReconnectTests`,
+  `PushNotificationCoordinatorTests`, `DashboardStateOwnerTests` and
+  `AppModelCatalogSyncTests` passes 151/151.
+- Changes: `f8574146d` and `d38f0ec71` (Gateway), `ce4c3fb12` (phone), plus the
+  docs and this entry, branch `hardening/g-7`.
+
+### G-7 · Done · 2026-09-28 · orchestrator-dispatched deepseek-worker (branch `hardening/g-7`)
+
+- (Superseded in part by the review-response entry above: the token is
+  runtime-scoped rather than connection-scoped, the no-op registration answer
+  carries the advertised revision, and an identical registration skips its
+  command receipt. The findings and their fixes are recorded there.)
+- Result: a reconnect sends the push registration only when the registration
+  changed for this Gateway runtime, and revalidates its session catalog instead
+  of reloading rows whenever the connection's own traversal already published
+  the Gateway's current `listRevision`. The Gateway answers both no-ops without
+  a durable write. Protocol bumped to 6 (this is the first Phase 1 task to change
+  a message shape: `session.list` gained the optional `listRevision` parameter
+  and the `notModified` response).
+- Rolled-up request inventory and the recorded target list (Do item 1):
+  `~/.tron/workspace/files/hardening/g-7-reconnect-request-inventory.md`. The
+  2026-09-27 phone export is not in the repository, so R-4 owns the real-export
+  comparison; the inventory is a code audit of every connect-time owner plus the
+  O-6a mobile client's method surface. Target per reconnect: **1** first
+  `session.list` page (0 rows when the same connection revalidates), **0**
+  `push.registration.upsert` on the same Gateway runtime, **2**
+  `notification.inbox.list` (one per filter), **1** each of `provider.list`,
+  `model.list`, `settings.get`, `device.list` per (target, connection), **0–1**
+  `system.info`, and one `session.open`/`session.sync`/`session.commands` trio
+  only when a chat is mounted.
+- Do item 2 (push registration): the phone persists
+  `PushGrant.acknowledgedRuntime` = `machineId:runtimeEpoch` of the Gateway
+  runtime that confirmed the exact grant, and `registerCurrent` returns ready
+  without a request while the stored grant still matches the APNs token hash,
+  route and relay origin and that identity is unchanged. A Gateway restart, a
+  changed token/route/origin, a rotated grant, or a Gateway that advertises no
+  `runtimeEpoch` always re-sends. The Gateway's `NotificationService.upsertGrant`
+  now returns `undefined` from `NotificationGrantStore.update` (no credential
+  document rewrite at all: grants, delivery receipts and revocation tombstones
+  are untouched) when the request describes the stored grant and the retention
+  pass changed nothing.
+- Do item 4 (conditional `session.list`): an uncursored read may name
+  `listRevision`. An equal revision is answered
+  `{sessions: [], listRevision, notModified: true}` with no row projection,
+  because the registry revision owns structural identity, archive membership
+  (`archiveChanged` advances it) and the visible archived count. A cursored page
+  is always bound to its lease's revision, and any other revision receives rows.
+  The phone revalidates a retained revision only on the connection whose
+  traversal admitted it: `SessionCatalogCoordinator.beginLoad` drops the revision
+  when the load key changes, and any local membership change
+  (`invalidateLoads`) drops it too. That is deliberate, not a shortfall: the
+  Gateway broadcasts `session.summary` and never replays it, so a replacement
+  connection's row fields converge only through a page read.
+- Do item 3 (one owner each for `model.list`/`provider.list` per connection):
+  already structurally satisfied, no code change. `AppModel.scheduleMountedOptionalReads`
+  is the connect/foreground optional-read owner and is guarded by
+  `mountedOptionalRefreshLifecycleGeneration`/`ConnectionID`, so the second
+  caller (`lifecycleRestoreMountedPresentation`) cannot re-read in the same
+  connection; a mounted chat open reads the session-scoped target, which is a
+  different projection, and Settings/Onboarding keep the explicit user action.
+  Verified by inspection; no new test asserts the count (the existing reconnect
+  test asserts the request *set*).
+- Evidence:
+  - `--no-build`-free focused Gateway runs on Homebrew Node: `npm run build`
+    clean; `npx vitest run src/transport/session-archive.integration.test.ts`
+    passes **40/40** (11.7 s) including the new
+    "answers an unchanged catalog revision without rows and re-reads after
+    membership moves"; `npx vitest run src/notifications/notification-service.test.ts`
+    passes **37/37** (3.5 s) including "answers an identical registration
+    without rewriting the credential document". Both write their usual
+    `test-results/*.json` artifacts.
+  - `scripts/tron-ios-test build` succeeded, then
+    `scripts/tron-ios-test run --only-testing TronMobileTests/AppModelReconnectTests`
+    passed **37 tests in 1 suite** (0.27 s; run
+    `~/Library/Developer/Tron/ios/test-runs/20260928T144407Z-run.cP95vO`),
+    including the new "a catalog read revalidates its retained revision and a
+    reconnect reloads rows".
+  - Negative controls (the test fails with the production change reverted, so it
+    targets a real bug rather than reasserting the code): with
+    `notification-service.ts` stashed the new registration test fails on the
+    byte-identical document assertion; with `gateway-service.ts` stashed the new
+    list test fails on the missing `notModified` answer.
+  - `python3 scripts/test-gateway-protocol-contract.py` passes 3/3 after the
+    bump. Its artifact fixtures now derive the expected version from
+    `config/GatewayProtocol.json` instead of a literal, so the next bump cannot
+    leave them asserting a stale contract.
+- Changes: `fd14c2712` (reconnect diet + protocol bump in the same series;
+  bump commit `c16e4b279`), branch `hardening/g-7`.
+- Tasks added: G-7a (removed by the review response above, which decided it).
+- Kept on purpose: the command receipt (idempotency evidence) on a no-op
+  `push.registration.upsert`. The plan's "no receipt write" is read as the
+  notification service's own durable state — the credential document and its
+  receipt/revocation overlays — because `transport/command-receipts.ts` is not a
+  G-7 owning file and the architecture invariant requires a bounded idempotency
+  receipt for every mutation. The review response above replaced this reading:
+  the plan's wording is literal and an identical registration now skips its
+  receipt too.
+- Deviations (superseded by the review response above): the push registration
+  no-op answer kept the existing `NotificationStatus` shape and the retained
+  value was connection-scoped. The message-shape change that owns the version
+  bump is the `session.list` conditional read, and the no-op answer does add the
+  advertised revision to `hello`/`system.info` (not to the status shape).
+- For the next agent: R-4 compares the recorded target list with a real
+  evaluation-day reconnect and should also measure the bytes (the `session.list`
+  page is the largest single item, so the `notModified` answer is the byte win).
+  The archived-session container (`AppModel.loadArchivedSessions`, `archived:
+  "only"`) still reads rows unconditionally; it is a small follow-up if R-4 shows
+  it matters. `SessionCatalogCoordinator.confirmUnchanged` requires the retained
+  revision to match, so a `notModified` answer for a revision the client did not
+  retain is rejected as `invalid_response` instead of being trusted.
+
 ### G-3 · Claimed · 2026-09-28 · orchestrator-dispatched deepseek-worker (branch `hardening/g-3`)
 
 - Result: a session snapshot is now built, serialized and broadcast only when
@@ -5359,3 +5788,1375 @@ events; widen them to name the pool owner in the same change.
   comparison against the `main` baseline is owed by the orchestrator with the
   quiet-host O-6a runs (same as O-3's accounting check and O-5's 5%
   cross-check).
+
+### C-4 · Done · 2026-09-28 · orchestrator-dispatched deepseek-worker (branch `hardening/c-4`)
+
+- Result: a probe whose pong is queued behind inbound data no longer retires the
+  epoch. Liveness pings stay on the one shared ten-second wakeup grid T1-NET
+  fixed, and a `pong_timeout` retires the epoch only when no inbound frame of any
+  kind arrived after that ping was sent. The test runs inside `livenessFailed`
+  before its first await, so a frame delivered while the deadline settles cannot
+  be split from the verdict; only `pong_timeout` is excused, an excused probe
+  re-arms the wait on the next grid tick, and a genuine send failure still retires
+  the epoch. Dead-link detection stays within 18 s of the last inbound frame: no
+  tick is later than one interval after it and the deadline is 8 s after the tick.
+  Only a fully delivered frame counts, so a frame whose last byte arrives past
+  that deadline (about 1 MiB below 1 Mbit/s) leaves a busy link with no proof at
+  all.
+- Evidence: `GatewayClientTransportTests` passes, 52 test functions and 0
+  failures, on the branch rebased onto `hardening/integration`
+  (`scripts/tron-ios-test run --only-testing TronMobileTests/GatewayClientTransportTests`,
+  result bundle `~/Library/Developer/Tron/ios/test-runs/20260928T145512Z-run.MQ7T8b`)
+  and over three consecutive runs of the same changed files before the rebase
+  (`…143958Z-run.57fiey`, `…144021Z-run.B8c5Wt`, `…144034Z-run.3gKjfH`). Each run
+  reports "52 tests in 1 suite" while the result summary counts 53 passing cases,
+  because `connectFailureRecordsTransportOpening` runs two argument cases. Three new
+  manual-clock cases: a pong queued behind a large inbound frame does not retire
+  the link and the wait returns to the next grid tick
+  (`inboundDataAnswersQueuedPong`); silence after data retires the link inside the
+  18 s bound (`silenceAfterDataRetiresWithinBound`); a late clock wake probes once
+  and returns to the grid (`lateClockWakeProbesOnce`). The T1-NET cases the draft
+  had replaced are restored unchanged (`socketsPingOnOneSharedGrid`,
+  `slowPongKeepsPingGrid`, `inboundTrafficDoesNotSuppressLivenessProbe`). Adjacent
+  owner suites pass: `AppModelReconnectTests`, `AppModelLifecycleTests`,
+  `AppModelTerminalLifecycleTests`, `SessionMutationServiceTests`,
+  `GatewayUpdateControlPlaneTests`, `GatewayDiagnosticsServiceTests` — 111 tests,
+  0 failures on the rebased branch (`20260928T145557Z-run.PYErZK`, and the same
+  set before the rebase as `20260928T144054Z-run.xEFEGC`);
+  `SettingsTrustCoordinatorTests`,
+  `SessionImportCoordinatorTests`, `CustomModelConfigurationCoordinatorTests`,
+  `PackageConfigurationCoordinatorTests`, `ProviderAuthCoordinatorTests` — 97
+  tests, 0 failures (`20260928T144534Z-run.2AKmot`). The Gateway needs no change
+  and its owner suites are green on the branch rebased onto
+  `hardening/integration`: `npx vitest run src/transport/connection-policy.test.ts
+  src/transport/server-heartbeat.integration.test.ts` — 2 files, 11 tests passed,
+  O-2's inbound-silence cases included. `python3
+  scripts/check-documentation-policy.py` and `scripts/personal-info-guard.sh`
+  pass.
+- **Real-harness confirmation, draft code.** `scripts/ios-gateway-e2e-test all`
+  passed (1 test, 0 failures, 0 skipped, 55.3 s; result bundle
+  `$TMPDIR/tron-ios-gateway-e2e-501/results/20260928T134641Z-run.qqg0Cq/FocusedE2E.xcresult`,
+  phone records attachment `phone-connection-records`) against a private fixture
+  Gateway through the fault proxy while the draft still probed on a quiet window:
+  exactly one `connection.episode` cause chain, `causes=pong_timeout,transport`,
+  for the blackhole leg (resolved `endedBy=connected` 6.9 s after the loss) and no
+  other `pong_timeout` in the run. The final probe schedule is `main`'s grid plus
+  the post-ping frame test, which only removes retirements, so that leg's path is
+  unchanged; the run itself was not repeated on the final form because the shared
+  simulator lease never came free before this handoff. Treat the leg as draft
+  evidence until the O-6b confirmation below covers the final form.
+- **O-6b confirmation is owed to the orchestrator.** O-6b's bandwidth-cap case is
+  still in a sibling worktree, so this branch proves the "zero pong-deadline
+  misses while data flows" claim with the manual-clock cases above. That run must
+  use a cap low enough that one frame takes longer than one ping interval to
+  arrive (the default 2 Mbit/s cap is too fast), and it must also show zero
+  `connection.heartbeat-timeout` over a streaming window longer than 75 s: the
+  55 s real-harness run cannot cover that window. That 75 s check is the uplink
+  proof, not a claim that the Gateway pings a quiet phone: the phone's own grid
+  pings have to reach the Gateway on the uplink for the Gateway's three-miss
+  heartbeat to spare the socket. The plan's original "a receive-only phone is
+  pinged on every tick" premise ended with the 2026-09-28 orchestrator decision
+  that C-4 keeps T1-NET's shared grid and pings from the phone, and
+  `connection-resilience.md` states the current behavior: a foreground phone
+  pings every 10 seconds, so the Gateway never pings it.
+- The excuse path leaves its own evidence for that run: an excused probe writes a
+  debug-level `liveness` record with `outcome=excused` in the phone's connection
+  ring (`packages/gateway/docs/observability.md`, `gateway.connection`), so a run
+  that shows zero `pong_timeout` retirements can still show the cap delayed a
+  pong and the link stayed up.
+- Changes: one commit on `hardening/c-4` on top of `hardening/integration`. The
+  four commits the review saw (`2a6335059..fb67f3a3f`) were collapsed: two of them
+  implemented the superseded quiet-window design, so keeping them would have left
+  a design the branch does not ship in its own history. The reviewed revision is
+  kept as the local tag `c4-review-work` for comparison.
+- Tasks added: none as a row; the O-6b confirmation stays with the orchestrator.
+- Kept on purpose: `withTimeout`'s `onTimeout` hook stays for the handshake
+  deadline, and the liveness probe does not pass it because its verdict has to
+  wait for the deadline to pass in silence — the loop asks the epoch owner whether
+  the wait continues instead. `MonotonicClock.gridOrigin` and `gridTick` stay for
+  every socket's liveness ping and for presentation-lease renewal.
+  `notePong` and the receive path keep `lastInboundAt` as the single liveness
+  clock; no new epoch state was added.
+- Deviations: C-4 does not suppress a ping when a frame arrived during the
+  interval, which the plan's C-4 "Do" item 2 originally asked for. The
+  orchestrator decided on 2026-09-28 that T1-NET's shared ten-second grid is a
+  user-approved energy decision C-4 must not reverse and that D-4 is met by the
+  post-ping frame test alone: the ping stays on the grid, a frame answers the
+  probe, and detection still lands within 18 s of the last inbound frame. The
+  "Do" text records the same deviation.
+
+### C-4 · Done · 2026-09-28 · orchestrator-dispatched deepseek-worker (review round 1 addressed)
+
+- The review's verdict was changes-required, with one blocker, two major and
+  several smaller findings. Its two design-level findings were decided by the
+  orchestrator; the rest are fixed in the entry above.
+  - **Blocker (Gateway inbound silence) and major (T1-NET reversal), decided
+    2026-09-28: do not reverse T1-NET.** The draft moved the liveness probe onto a
+    quiet window measured from the last inbound frame, which would have made O-2's
+    merged `connection.inbound-silent` plus `connection.inbound-resumed` fire
+    about twice per 25 s tick on a healthy streaming phone: the phone pings every
+    ten seconds only because of the shared grid, so a phone that only receives
+    would have looked silent. Liveness pings therefore stay on the grid, the phone
+    keeps pinging on its own, O-2's own-ping trigger stays valid, no edit lands in
+    `packages/gateway/src/transport/server.ts`, and no energy traces are needed
+    because the wakeup schedule did not change from `main`.
+    `MonotonicClock.gridTick`/`gridOrigin` and the lease-renewal alignment stay as
+    they were. D-4 is met by the post-ping frame test alone.
+  - **Major (C-4 was marked Done without the O-6b evidence):** the row stays Done
+    as O-2's does, with the owed run recorded in the entry above. That run now
+    also has to use a cap low enough that one frame takes longer than one ping
+    interval, and to show zero `connection.heartbeat-timeout` over a streaming
+    window longer than 75 s.
+  - **Minor (docs claimed more than the code guarantees):**
+    `connection-resilience.md`, `architecture.md` and `development.md` now say that
+    only a fully delivered frame is proof and name the slow-frame bound (about
+    1 MiB below 1 Mbit/s).
+  - **Minor (a receive-only phone depends on the Gateway heartbeat):** the premise
+    no longer holds, because the phone pings on the grid again. The part that
+    survives — a pong returns on the downlink behind the Gateway's own queued data
+    — is now stated in `connection-resilience.md`, and the 75 s streaming window
+    moved into the O-6b confirmation above.
+  - **Nit (check and retirement in two actor calls):** done. The "arrived since
+    the probe" test now runs inside `livenessFailed` before its first await and
+    applies only to `pong_timeout`; a probe it excuses keeps the wait running on
+    the grid instead of ending its task.
+  - **Nit (handoff contradicted itself):** the two numbers describe one run, not
+    two — `connectFailureRecordsTransportOpening` runs two argument cases, so the
+    test line says 52 tests while the result summary counts 53 passing cases. The
+    entry above says so and cites one bundle per run.
+  - **Nit ("a phone whose link carries inbound data sends no frame of its own"):**
+    reverted with the rest of that paragraph; the doc says again that a foreground
+    phone pings every ten seconds.
+  - The draft's own handoff called one 5 s watchdog expiry in
+    `inboundDataAnswersQueuedPong` a non-reproducing flake. It was a real defect in
+    the draft's tests, not host noise: the manual clock was advanced to the probe's
+    deadline before the probe had registered its deadline sleep, so the deadline
+    landed eight seconds later than the test expected. The new cases gate on that
+    registration before moving the clock; the breadcrumb is in the test comments.
+- Evidence: the runs in the entry above, including the Gateway owner suites on the
+  rebased branch, which prove O-2's inbound-silence behavior needs no edit.
+- Findings rejected: none; only the premise of the receive-only-phone finding no
+  longer applies.
+
+### C-4 · Done · 2026-09-28 · orchestrator-dispatched deepseek-worker (review round 2 addressed, verdict approve)
+
+- The second review found no blockers and no majors: five minor findings and one
+  nit. All are fixed, with a negative control per behaviour fix.
+  - **Minor (the handoff stated the superseded design as current fact).** The
+    "Why a quiet phone is still safe" paragraph is deleted. The O-6b confirmation
+    keeps the zero `connection.heartbeat-timeout` check over a window longer than
+    75 s but justifies it as the uplink proof: the phone's own grid pings have to
+    reach the Gateway on the uplink for the three-miss heartbeat to spare the
+    socket. The entry records that the plan's "a receive-only phone is pinged on
+    every tick" premise ended with the orchestrator's 2026-09-28 decision.
+  - **Minor (`architecture.md` overstated when the socket is closed).** The
+    "deadline and cancellation retirement close the captured socket" sentence is
+    limited to the handshake. The liveness deadline instead waits for its
+    cancelled ping, which `GatewayPingCompletion.cancel` settles on its own
+    whatever CFNetwork does; the liveness `withTimeout` call site now carries
+    that reason as a comment.
+  - **Minor (the excuse path left the O-6b run no evidence).** An excused probe
+    now writes a debug-level `liveness` record with `outcome=excused`
+    (`reason=pingTimeout`, `durationMs=8000`) before returning the wait to the
+    grid. The level keeps the record in the process-local connection ring and out
+    of the incident store, so the bandwidth-cap run can show that a cap delayed a
+    pong while the link stayed up, not only that nothing retired. The
+    `gateway.connection` row in `packages/gateway/docs/observability.md` records
+    the outcome, and the "phone liveness" section of
+    `packages/gateway/docs/connection-resilience.md`, `architecture.md` and
+    `development.md` name the record beside "successful pings are not logged";
+    `inboundDataAnswersQueuedPong` and the late-wake case assert it.
+  - **Minor (the first final-form real-harness run failed unexplained) and minor
+    (O-6b still owed):** no source change; both stay with the orchestrator, as the
+    review asked. The signal from the finding above is what that run asserts on.
+  - **Nit (two stated behaviours were unprotected).** `lateClockWakeProbesOnce`
+    now wakes the probe 50 s late with a frame queued behind that probe, so the
+    late wait exercises the excuse path and pre-C-4 code fails it. The new
+    `pingFailureAfterInboundDataStillRetires` proves that only `pong_timeout` is
+    excused: a `disconnected` ping failure after inbound data still retires the
+    epoch. `ScriptedGatewaySocket.releasePing(throwing:)` fails a suspended probe
+    at a chosen instant, which is what makes that case reachable.
+- Evidence, all on the branch:
+  - `scripts/tron-ios-test run --only-testing TronMobileTests/GatewayClientTransportTests`
+    — 53 tests in 1 suite, 0 failures on the final form: `20260928T154414Z-run.qfjQTZ`,
+    `20260928T155433Z-run.QcVUWH` after the negative controls were reverted, then
+    two more on the committed revision, `20260928T160033Z-run.13mFm5` and
+    `20260928T160105Z-run.wNHx7v`.
+  - Adjacent owner suites `GatewayLogExportTests`, `GatewayDiagnosticsServiceTests`,
+    `AppModelReconnectTests`, `GatewayProtocolContractTests` — 91 tests in 4
+    suites, 0 failures, `20260928T155617Z-run.fRFIvl`.
+  - `npx vitest run src/transport/connection-policy.test.ts
+    src/transport/server-heartbeat.integration.test.ts` — 2 files, 11 tests
+    passed. `python3 scripts/check-documentation-policy.py` and
+    `scripts/personal-info-guard.sh` pass.
+- Negative controls (source reverted, tests kept; each bundle names the exact
+  failing assertion):
+  - The excuse branch removed (pre-C-4 behavior) makes
+    `inboundDataAnswersQueuedPong`, `silenceAfterDataRetiresWithinBound` and the
+    late-wake case fail with the 5 s watchdog (`20260928T154644Z-run.4SCqPO`).
+  - Only the excused record removed, the excuse kept, fails
+    `inboundDataAnswersQueuedPong` on `liveness.count == 1` and the late-wake case
+    on the same count (`20260928T154832Z-run.iI73YT`, 6 issues in 2 tests).
+  - Only the `failure.code == "pong_timeout"` test dropped makes
+    `pingFailureAfterInboundDataStillRetires` fail with the watchdog: an excusable
+    shape that must still retire (`20260928T155245Z-run.4qliCk`).
+- Findings rejected: none.
+
+### C-5 · Done · 2026-09-28 · worker session (branch `hardening/c-5`)
+
+- Result: a background profile the pool cannot reach backs off to one attempt
+  every five minutes instead of retrying on the 15-second curve forever, and the
+  pool now records its own attempts and episodes with O-4's recorder (one
+  recorder per entry, the same one the selected profile's lifecycle uses). The
+  user sees the existing **No path to this Mac** presentation for a profile that
+  never opens a transport; no new state was added.
+- Evidence:
+  - `scripts/tron-ios-test build` succeeds; `scripts/tron-ios-test run
+    --only-testing TronMobileTests/DashboardStateOwnerTests` passes 53/53 in
+    about 12 s, retained as
+    `$HOME/Library/Developer/Tron/ios/test-runs/20260928T133032Z-run.bsekbk`, and
+    `…/20260928T133058Z-run.X9c4bw` passes 19/19 for `SessionSearchTransportTests`,
+    `SessionSearchCoordinatorTests` and `GatewayConnectionEpisodeRecorderTests`
+    (the pool's other owners).
+  - The done-when case, on the pool's injected manual clock:
+    `unreachableSecondaryProfileBacksOff` drives a profile whose every attempt
+    gets a socket whose hello write fails, and measures the wait before each
+    attempt: `[1, 2, 2, 8, 32, 128, 300, 300, 300]` seconds. The first three
+    consecutive never-opened attempts retry at the 2-second base interval, every
+    later wait is strictly longer than the one before it, and from the cap each
+    attempt is 300 s (`POOL_MAX_RETRY`) apart — nine attempts over about twenty
+    simulated minutes, where the previous 15-second curve made about seventy.
+    The same test asserts the profile's published states include the
+    **No path to this Mac** label.
+  - `unreachableSecondaryProfileRetriesAtOnce` parks an escalated entry and shows
+    a foreground `reconcile` (the pool's activation boundary, which AppModel
+    calls from `becameActive`) and a satisfied path hint each start the next
+    attempt without the clock advancing.
+  - The recorder evidence, with an injected `AppLog`:
+    `poolAttemptsAndEpisodesAreRecorded` requires `gateway.attempt` records
+    `profile=remote attemptId=initial stageReached=transport-open reason=timeout
+    foreground=true`, then `stageReached=connected delayBeforeMs=3000
+    gatewayConnectionId=5bf6a9a2-0000-4000-8000-0000000000c5`, and exactly one
+    `connection.episode attempts=2 causes=timeout endedBy=connected
+    foregroundMs=3000 maxGapBetweenAttemptsMs=3000`.
+    `retiringPoolNamesItsEndedBy` requires `endedBy=background attempts=1
+    causes=timeout` at scene retirement and `endedBy=stopped` at a projection
+    retirement (one test, two cases). `parkedPoolEntryNamesItsStallGuard`
+    requires one `reconnect.stalled` with `guard=pathUnsatisfied`.
+  - `python3 scripts/check-documentation-policy.py` and
+    `scripts/personal-info-guard.sh` pass.
+- Changes: `feat(ios): back off unreachable pool profiles and record their
+  attempts (C-5)` and this plan commit.
+- Tasks added: C-7 (below).
+- Kept on purpose:
+  - "Show the profile as unreachable" reuses the existing `.noPath`
+    presentation: `packages/ios-app/docs/architecture.md` and
+    `development.md` define Offline as "recovery is stopped", which this profile
+    is not, and the plan's "What must not change" allows no new visible state.
+    The unreachable threshold reads the entry's existing
+    `GatewayConnectionFailureClassifier.consecutiveNeverOpened` counter, so the
+    profile that backs off is the profile the dashboard already labels no-path
+    and no second counter exists.
+  - The pool's curve is not jittered (`jitterFraction: 0`): the cap has to be a
+    floor on spacing for "at most one attempt per 5 minutes" to hold, and pool
+    profiles are few. The selected profile's lifecycle keeps its 80–120% jitter.
+  - `retire(endedBy:)` takes the reason from its caller: the scene suspension
+    that parks every entry passes `.background`, and the projection retirement of
+    a profile switch, removal, pairing or teardown pass `.stopped`; profile
+    removals and explicit Retry end them as `.stopped` through `stop`.
+- Deviations: the initial connect now uses `connectForLifecycle` +
+  `activateEvents` (the pair the lifecycle already uses) instead of `connect`,
+  so the first attempt's record carries the hello's `gatewayConnectionId`.
+  `reconcile` additionally resumes a parked retry, which is how "retry at once on
+  foreground" reaches a pool entry without adding a call site in AppModel
+  (Phone lifecycle zone). `secondaryReconnectHasNoAttemptBudget` was rewritten
+  to pump the clock through the new curve; it now fails each of its first eleven
+  sockets by write so its attempts are driven by the same helper.
+- For the next agent:
+  1. C-7: after a *failed initial connect*, the `start` task's
+     `for await delivery in client.events` loop has already exited, and the
+     reconnect loop only re-establishes the socket. A successful reconnect
+     therefore brings a live socket that consumes no events, so that pool entry
+     stops seeing `session.summary`, `system.stopping` and
+     `transport.disconnected` until it is recreated. This is pre-existing (not
+     introduced by C-5) and it is why the drop-and-record leg of
+     `poolAttemptsAndEpisodesAreRecorded` was replaced by
+     `retiringPoolNamesItsEndedBy`: the pool's `noteDisconnected` calls in
+     `handle("transport.disconnected")` and in the catalog-lease failure path
+     are correct but cannot be exercised from a pool whose first connect failed.
+  2. The pool's `stop()` ends an episode only when one is open; a profile removed
+     while connected writes no episode, which is intended (the connection turned
+     out to be fine).
+
+**Review response (C-5 round 1, follow-up commit on this branch).** An
+independent review built the branch, ran the focused suites and probed the pool
+on a manual clock against the integration baseline. It returned
+changes-required: one blocker, one major, three minor findings and one nit, all
+reproduced. The regressions were real and every finding is addressed:
+
+- Blocker (the curve never escalated): `isUnreachable` read
+  `GatewayConnectionFailureClassifier.consecutiveNeverOpened`, which is display
+  state. That counter stops counting as soon as any attempt of the outage opened
+  a transport — `handle("transport.disconnected")` records
+  `failedAttempt(nil, code: "transport")`, and a hello timeout or a 503 sets
+  `episodeOpenedTransport` too — and below the threshold each wait called
+  `reconnectSchedule.reset()`, which pinned the wait at the 2-second base. The
+  review measured `[5, 2, 2, 2, …]` for a secondary Mac that dropped after
+  connecting and `[1, 17, 17, …]` when hello was never answered, where the
+  baseline grew to 15 s. The pool now owns `Entry.consecutiveFailedAttempts`,
+  incremented by every failed attempt and cleared only by a successful one, and
+  `isUnreachable` reads it. Below the threshold the entry follows the standard
+  progression (2 s, ×1.7, 15 s cap, unjittered); at the threshold it keeps the
+  nominal delay it reached and grows by ×4 to `POOL_MAX_RETRY`, so the switch
+  never shortens a wait. `GatewayReconnectSchedule.adopt(delayPolicy:)` is the
+  switch. The three shapes are now tests, each of which fails on the previous
+  commit: `secondaryDropThenClosedPortKeepsBackingOff` (dropped then closed
+  port: waits `[2, 4, 6, 10, 40, 158, 300, 300]`),
+  `handshakeFailuresBackOffWithoutPinning` (socket opens, hello never answered:
+  served waits `[2, 4, 6, 24, 93]` after the 15-second deadline) and
+  `busyUpgradeFailuresBackOffWithoutPinning` (503 answered at the upgrade).
+- Major (`reconcile` skipped a parked backoff): the acceleration loop is
+  deleted. `AppModel.reconcileDashboardConnections()` runs from
+  `lifecycleRefreshAll` and from mounted-session restoration, not only on a
+  foreground activation, so a selected-profile reconnect could have started
+  extra secondary attempts. `enteredBackground()` already calls `retire()`,
+  which removes every entry, so a real foreground cycle reconnects at once;
+  `retire()`'s comment now says so, and
+  `unreachableSecondaryProfileRetriesAtOnce` proves the path with
+  `retire()` + `reconcile` (its path-return leg still goes through
+  `notePathHint`). No `AppModel` change was needed, so no Phone-lifecycle zone
+  was entered.
+- Minor (`gateway.attempt` could not name its owner): `GatewayConnectionAttempt`
+  carries `owner` (`.selected` from the lifecycle coordinator, `.pool` from the
+  pool) and the record writes `owner=…` before `attemptId`; the observability row
+  documents the field and why the profile ID alone cannot carry it.
+- Minor (docs promised the old rule): `connection-resilience.md`,
+  `architecture.md` and `development.md` now describe the corrected curve. The
+  "no-path classification does not change retry timing" sentence is true again
+  rather than deleted: the classifier drives presentation only, while the pool's
+  own attempt count drives the curve.
+- Minor (one main-stall ping per open pool outage): pool recorders are created
+  with a no-op `mainStallPing`, so only the selected profile's recorder reports
+  `app.main-stall`; the `app.main-stall` and `reconnect.stalled` rows say which
+  recorder reports them, their volume, and that a pool outage still reports its
+  own `reconnect.stalled`.
+- Nit (a silent `guard connectionID == identity.id` in the initial connect): a
+  connection that is gone or no longer the client's active one now throws a
+  retryable `replaced` failure, so the attempt is recorded and the entry keeps a
+  reconnect loop instead of parking `.connecting` with nothing scheduled.
+
+Evidence for this round: `scripts/tron-ios-test build` succeeds and
+`scripts/tron-ios-test run` passes 100 tests in four suites
+(`DashboardStateOwnerTests` 56/56, 53 before the three new regression tests,
+`GatewayConnectionEpisodeRecorderTests`, `GatewayReconnectScheduleTests`,
+`AppModelReconnectTests`; `SessionSearchTransportTests` passed in the same run),
+retained as `$HOME/Library/Developer/Tron/ios/test-runs/20260928T141009Z-run.AYeMxS`;
+the same 56/56 was first seen at
+`$HOME/Library/Developer/Tron/ios/test-runs/20260928T140631Z-run.PhjqNw`.
+Negative control, run on this branch: with `isUnreachable` restored to the
+classifier counter and the below-threshold `reset()` restored, the three new
+tests and the rewritten `unreachableSecondaryProfileBacksOff` fail exactly as
+the review's probes predicted (every retry pinned at the base interval, and no
+wait ever reaching `POOL_MAX_RETRY`), while the other 52 tests pass: retained as
+`$HOME/Library/Developer/Tron/ios/test-runs/20260928T140440Z-run.w03pO4`. The
+file was restored byte-for-byte (`shasum -a 256 -c`) before the passing run.
+`python3 scripts/check-documentation-policy.py` and
+`scripts/personal-info-guard.sh` pass.
+
+Deviations added this round: `GatewayReconnectSchedule.adopt(delayPolicy:)` in
+`packages/ios-app/Sources/Support/ReconnectDelayPolicy.swift` (a shared support
+type, outside the pool zone; a policy swap has to keep the nominal delay the
+standard phase reached, and a fresh schedule would restart at the base
+interval), and the `owner` field on `GatewayConnectionAttempt` plus its
+`owner=` detail in `packages/ios-app/Sources/State/GatewayConnectionEpisodeRecorder.swift`
+and the `.selected` argument in `GatewayLifecycleCoordinator.swift` (only the
+recorder can add the field the record needs). Superseded: the C-5 handoff's
+"Kept on purpose" claim that the threshold reads the existing classifier counter
+and that no second counter exists, and its Deviations claim that `reconcile`
+resumes a parked retry.
+
+**Review response (C-5 round 2, follow-up commit on this branch).** A second
+independent review built the branch, ran the four focused suites (100 tests) and
+probed the pool on a manual clock; it returned changes-required with one major
+finding, three minor findings and two nits. Every one is addressed:
+
+- Major (a network lost during an attempt left the entry parked for ever):
+  an attempt that failed while the path was gone still waited out its backoff,
+  and the check at the end of that wait returned without clearing
+  `reconnectTask`/`reconnectWaiting`. The return hint then woke a wait that no
+  longer existed, `scheduleReconnect` refused to start because a task still
+  appeared to exist, and the entry stayed **Reconnecting** with no attempts and
+  no `reconnect.stalled` until a scene cycle — worse in C-5 because each stuck
+  window is now up to five minutes. The loop's `defer` is now the single owner of
+  that handover: a loop that ends while its own `reconnectLoopID` is still the
+  entry's marker clears `reconnectTask` and `reconnectWaiting` with its markers,
+  so no exit path can leave a dead task behind, and `stallGuard` reads the
+  waiting case through `reconnectLoopID` too, so a dead task can never read as
+  progress. The review's probe became a regression test first:
+  `lostNetworkParksPoolRetryUntilPathReturns` loses the path while attempt 2 is in
+  flight (there is no wait to cancel at that moment, which is how the park
+  happens), lets that attempt's wait run out with the path still gone, requires
+  no third request and one `reconnect.stalled guard=pathUnsatisfied`, then
+  requires a real path return to retry at once. Negative control: with the
+  `defer` handover and the `reconnectLoopID` condition reverted to the reviewed
+  state, that test fails exactly as the review's probe did (`stalls=0`, no
+  attempt after the return, timeout) and
+  `satisfiedPathNoticeDoesNotCutPoolBackoff` fails with `requests.count → 6`;
+  56 of the 58 pool tests pass in the same run.
+- Minor (any "network available" notice cut the five-minute wait short): a
+  satisfied hint now ends a wait only when the entry's own last known path was
+  unsatisfied — a real unsatisfied-to-satisfied change. The last
+  `scheduleReconnect` (an entry no loop holds, i.e. stopped or parked) still
+  restarts at once, which is what "retry at once on path change" and a foreground
+  reconcile need. A repeated notice — every scene activation, every monitor
+  update on an unchanged path — leaves the wait alone, so the cap is a floor and
+  the volume estimate holds. `connection-resilience.md` says so. New
+  `satisfiedPathNoticeDoesNotCutPoolBackoff` pins it, and
+  `unreachableSecondaryProfileRetriesAtOnce` now parks the escalated wait with an
+  unsatisfied hint and resumes it with the return hint instead of proving the leg
+  with a notice that changed nothing.
+- Minor (a profile switch was recorded as backgrounding): `retire(endedBy:)`
+  takes the reason — `background` by default for the scene suspension, `.stopped`
+  from `AppModel.lifecycleRetireProjection`, which runs on a profile switch,
+  `forget`, pairing and teardown. `retiringPoolNamesItsEndedBy` is the old
+  `retiringPoolEndsOpenEpisode` parameterized over both reasons, so both
+  `endedBy=background` and `endedBy=stopped` are asserted; the old API could not
+  express the second case at all. See Deviations for the zone this touches.
+- Minor (the escalated outage's label): confirmed as the review allows — reusing
+  the existing **No path to this Mac** state for never-opened outages is enough
+  and no label was added for an escalated outage. The plan's "What must not
+  change" names D-2 and D-5 as the only intended visible changes, `noPath` is
+  already the presentation for an outage whose `transport-open` record never
+  opened a transport, and an escalated outage that did open one (a drop, a hello
+  timeout, a 503) keeps **Reconnecting**, which is what
+  `connection-resilience.md` promises. Any change to that label is D-2/C-2's
+  decision, not a new C-5 state.
+- Nit (a test did not simulate production): `secondaryDropThenClosedPortKeepsBackingOff`
+  now drops the admitted socket with
+  `sockets[0].failPendingReceivers(URLError(.networkConnectionLost))` — the
+  client's own receive failure, which creates the `transport.disconnected` event —
+  instead of a server-sent frame. Its retry curve is unchanged.
+- Nit (one main-thread hop per second per open pool outage): the
+  `reconnect.stalled` row and the volume paragraph in
+  `packages/gateway/docs/observability.md` now state that a pool entry's recorder
+  asks the main actor for its stall guard once per second while its outage is
+  open (its main-stall ping is the no-op) — about 86k hops a day for one
+  unreachable profile, in CPU time and no bytes beyond the retry records.
+
+Evidence for this round: `scripts/tron-ios-test build` succeeds and
+`scripts/tron-ios-test run` passes 102 tests in four suites
+(`DashboardStateOwnerTests` 58/58, `GatewayConnectionEpisodeRecorderTests`,
+`GatewayReconnectScheduleTests`, `AppModelReconnectTests`), retained as
+`$HOME/Library/Developer/Tron/ios/test-runs/20260928T155517Z-run.xS3QHC` and
+re-run on the committed tree as
+`$HOME/Library/Developer/Tron/ios/test-runs/20260928T155919Z-run.sM7lTA`; the
+neighbourhood of the `lifecycleRetireProjection` call site this round changes
+passes 31 tests in `AppModelLifecycleTests`, `AppModelPairingAttemptTests` and
+`GatewayProfileStoreTests`
+(`$HOME/Library/Developer/Tron/ios/test-runs/20260928T155734Z-run.DVqBbb`).
+Negative control, run on this branch with the three behaviour fixes reverted to
+the reviewed state: the two new regression tests fail and the other 56 pool tests
+pass (5 issues in 2 tests), retained as
+`$HOME/Library/Developer/Tron/ios/test-runs/20260928T154506Z-run.QS22mb`; the two
+source files were restored byte-for-byte (`shasum -a 256 -c`) before the passing
+run. `python3 scripts/check-documentation-policy.py` and
+`scripts/personal-info-guard.sh` pass.
+
+Deviations added this round: `packages/ios-app/Sources/State/AppModel.swift` is
+the Phone lifecycle zone and C-5's zone is the pool; the fix for the mislabelled
+episodes needs the reason at the pool's call site, so this branch also changes
+one call in `lifecycleRetireProjection` to pass `.stopped`. No task held that
+zone when this landed (O-4 Done; C-1, C-2, C-3, G-7 and E-3c Ready), so no
+parallel writer was disturbed; if a Phone-lifecycle task lands first, the merge
+keeps this line. Superseded: the C-5 handoff's "Kept on purpose" claim that
+`retire()` is the pool's background boundary, and the round-1 note's claim that
+`unreachableSecondaryProfileRetriesAtOnce`'s path-return leg goes through a
+satisfied hint alone (that notice is now the finding-2 case that must not cut a
+wait).
+
+### Decisions · 2026-09-28 · user (relayed by the orchestrator)
+
+- G-8b: approved. The Mac app status poll may stop re-hashing an unchanged,
+  already-admitted Gateway payload on every poll, and may skip the `lsof` and
+  `ps` display reads between polls. The fail-closed payload checks run when the
+  selection stamp or the process fence (live launchd pid plus start identity)
+  changes, and on explicit user actions.
+- G-8c: approved. Session search keeps a persisted index keyed by
+  `fileIdentity` (new durable state with one owner, rebuildable from canonical
+  JSONL), so a start warms it without a full-corpus parse.
+- Rows G-8b and G-8c move from Needs scoping to Ready.
+
+### O-7 · Blocked · 2026-09-28 · orchestrator-dispatched deepseek-worker (branch `hardening/o-7`)
+
+- Blocked on: the Context causes reproduce only partly on the real incident
+  export. The first pass marked this Done on a synthetic export; review round 1
+  ran the tool on the ten real device exports in
+  `~/.tron/logs/device-exports/`; review round 2 ran it on the incident's own
+  export and found that the tool **misclassified** it. The incident export is
+  `~/Library/CloudStorage/SynologyDrive-SynologyDrive/tron-diagnostics-3.jsonl`
+  (22:50:04–05:49:39 UTC, 1,000 records, readable; of the two files there only
+  `tron-diagnostics.jsonl` is still a `dataless` placeholder). None of the ten
+  `device-exports` files covers the Context period: the latest starts 05:58:47.
+  Round 3 corrected the last two misreports (the reconnect's own refresh read
+  as a Gateway stall, and a silent gap taking the blip's attempt) and the
+  relay-window over-reach; round 4 replaced round 3's 60-second recovery cycle
+  with the reconnect handshake itself (the socket's own open against the
+  published loss, the flicker bound between two stretches, and the connection
+  id the app published), which the four causes read the same through; the four
+  causes now read as the table below says, where cause 4 has no episode of its
+  own on this export. The row stays Blocked because the tool still reports 121
+  episodes for 77 Context reconnect episodes with `phone-stall=2`, and because
+  the correlation key is untested against real O-1 data. Round 4's measured
+  finding was that the round-3 cycle was time proximity, not the handshake: it
+  read the two 20:23:09 flickers correctly only because an unrelated outage
+  happened 57 s earlier, and it would have missed a genuine stall on a socket
+  that had served for seconds (the incident export's 04:20:48 case is one).
+
+- Result: `scripts/tron-triage` (front door) and `scripts/tron_triage.py` read
+  one or more phone exports and the Gateway log with its rotations, join the two
+  sides by the O-1 key (a time window when the logs predate protocol 6), and
+  print one row per outage with its cause and the records behind it. `--json`
+  prints the `tron.triage-report.v1` report and `--out PATH` writes it.
+  `--tailscale-window` captures the Tailscale network-extension log with
+  `log show` over the export's range as extra path evidence, and
+  `--tailscale-peer NODEKEY` bounds that read to the phone's Magicsock peer.
+  Inputs are opened
+  read-only; the only write is the `--out` report.
+- Evidence:
+  - `python3 scripts/test-tron-triage.py` passes 51/51 (13 cause, join,
+    Tailscale and input-contract cases plus 10 `ReviewRegressionTests`, 9
+    `ReviewRoundTwoTests`, 2 `ReviewRoundThreeTests` and 6
+    `ReviewRoundFourTests` cases) in about 8 s
+    under both Homebrew Python 3.14 and `/usr/bin/python3` 3.9. Each review case
+    has a negative control: reverting one mechanism fails exactly that case (see
+    the rounds below), and round 4 pinned the five clauses of the recovery rule
+    one test each. Each test runs the real front door against sanitized
+    fixtures that reproduce one cause from Context, and the combined run keeps
+    its report at `TRON_TRIAGE_TEST_REPORT`
+    (default `$TMPDIR/tron-triage-report.json` plus a `.txt` of the table).
+  - **"Done when", first pass (superseded): a synthetic export**. The handoff
+    reported running the tool against the live Gateway log (read-only) plus a
+    hand-written `synthetic-phone-export.jsonl`. That run proved the plumbing,
+    not the rules: the episode times and the causes were typed into the fixture,
+    so reproducing Context with it was circular. The ten real exports were on
+    local disk the whole time (`~/.tron/logs/device-exports/`), and review round
+    1 used them instead.
+  - **"Done when", review round 2: the real incident export.**
+    `scripts/tron-triage ~/Library/CloudStorage/SynologyDrive-SynologyDrive/tron-diagnostics-3.jsonl --gateway-logs ~/.tron/logs`
+    (read-only, 1,000 phone records, ~10,950 Gateway records) reports 121
+    episodes — `unknown=91, phone-background=23, path=5, phone-stall=2,
+    gateway-stall=0, gateway-capacity=0` after review round 3 (round 2 read
+    `unknown=90, phone-background=23, gateway-stall=3, path=3`). Adding
+    `--tailscale-window --tailscale-peer NODEKEY` (the real `/usr/bin/log show`,
+    181 path lines for that peer) moves 9 more episodes to `path`:
+    `unknown=82, path=14, phone-background=23, phone-stall=2, gateway-stall=0`.
+    The capture is bounded by what the unified log still holds, so the line and
+    window counts drift between runs: the report now records the relay windows
+    themselves, and the run of 2026-09-28T16:26Z is kept at
+    `~/.tron/workspace/files/hardening/o-7-incident-export-tailscale.json`
+    (plain run: `o-7-incident-export.json`) for regeneration without the log.
+    The four Context causes against the tool's output:
+
+    | Context cause | The tool on the incident export |
+    | --- | --- |
+    | 1 — path flaps, one relay window each (01:27, 01:35, 02:40, 03:24, 03:53, 04:56, 05:38 …) | With `--tailscale-window --tailscale-peer`: 14 `path` episodes, each naming the relay window that covers it (`02:39:52`, `03:24:21`, `03:52:15`, `04:55:27`, `05:00:56`, `05:37:18`, `05:45:21`, `05:48:59`) or the phone's own `transport-open` timeout that never reached the Mac. The Context-named episodes still inside the log's retention are `path`; the 01:27–01:36 windows have aged out of the unified log, which is why this round's path count is lower than round 2's 22. Without the flag 5 episodes are `path`, all from the phone's own `transport-open` timeouts at 05:43+ (round 4's re-run with the flag reads 12, the capture having aged 35 lines further) |
+    | 2 — "Reconnecting" over a live socket 04:05:25–04:11:46 | Two `phone-stall` episodes cover the span: `04:05:25.843–04:10:44.428` and `04:10:48.871–04:11:44.466`, evidence `published state stayed reconnecting … while the Gateway answered session.list on de22b6dd-3d5e-4f5f-949f-fdf55d0f187b in 4513ms` (the socket is named since round 3; it opened 04:05:25.813). Inside the span the report also shows the 4.4 s stretch the app really spent backgrounded (`phone-background`) and the last 1.9 s before the 04:11:46 app restart |
+    | 3 — silent gaps 03:24:45–03:30:30 and 04:56:31–04:58:46 | Both are episodes with those spans: `03:24:45.005–03:30:30.618` (345.6 s, attempts 0) and `04:56:31.269–04:58:46.887` (135.6 s, attempts 0), each with the "no attempt recorded (gap of 345s/135s)" line. Their cause is `unknown` with and without the Tailscale capture: the relay windows that overlap them closed 248 s and 111 s before they ended, so they are listed as context and not as the cause |
+    | 4 — the Gateway is slow under load | **No `gateway-stall` episode on this export after round 3.** Round 2's 3 were all the reconnect's own refresh: each was a sub-20 ms label flicker whose "slow span" was the `session.list` the reconnect had just issued on the socket it opened 36–117 ms *before* the loss, with the phone's retained `connectionID` (38, 62, 81) unchanged across the flicker — no connection was lost. Rule 4 now reads the reconnect's own socket from the handshake itself (`recovery_connection`: opened inside the episode, opened within `RECOVERY_HANDSHAKE_SECONDS` of the loss, opened after the previous stretch began when that stretch ended within `FLICKER_BOUND_SECONDS`, or named by the phone's unchanged connection id on both sides of the flicker), and all 9 RPC-based `gateway-stall` episodes across the eleven real exports became `unknown`; the only `gateway-stall` left anywhere is the genuine 18 s `gateway.event-loop-delay` at 09-26 04:33:45 in one device export. Round 4 checked the 12 episodes where a slow span straddled the loss across the eleven exports: 7 rest on a socket that opened 36–117 ms before the loss (the handshake), and 5 on a socket that had already closed before the loss (abandoned work). None of them now depends on an unrelated outage starting within a minute. The Gateway's measured slowness still appears as the 1443 ms `gateway.event-loop-delay` at 04:07:00.678 inside the 04:05 `phone-stall` episode, the 52.4 s `connectionClosed` `session.open` at 04:11:55, and the phone's own 15 s transport-open timeouts after 05:43 |
+
+    The tool is not yet Done on this export: 121 episodes against Context's 77
+    reconnect episodes (the phone publishes more state flicks than Context
+    counted), `phone-stall=2` where C-2 expects one cause per wrong label,
+    `gateway-stall=0` where Context's cause 4 has no episode of its own any
+    more (round 2's three were the reconnect's own refresh, and the export's
+    only other candidate at 04:20:48 is a slow span on a socket that had
+    already closed), and `gateway-capacity=0` because the only capacity event in Context
+    (22:20:37) predates the export's first record (22:50:02) — that one is not a
+    failure to reproduce.
+  - **"Done when", review round 1: the ten device exports** (kept, they still
+    run — the numbers below are round 3's). Over the ten exports (197 episodes,
+    joined `window=197` because these builds predate O-1 and carry no
+    `gatewayConnectionId`): `unknown=173, phone-background=11, path=7,
+    phone-stall=5, gateway-stall=1, gateway-capacity=0`. The single
+    `gateway-stall` is the genuine event-loop delay of 09-26 04:33:45; round 2
+    read 7, of which 6 were the reconnect's own refresh (round 3, finding 1),
+    and read `unknown=166, path=8`. Round 1 read the same ten as `183 episodes:
+    unknown=107, gateway-stall=59, phone-background=9, path=8, phone-stall=0`;
+    each round's attribution fixes moved the difference. The 09-28 export is
+    still 24 episodes (`unknown=20, phone-background=3, phone-stall=1`) and
+    still overlaps the incident day's 05:58 abnormal close, so it is not the
+    "Done when" run.
+  - **Round 4 re-ran both real runs after the handshake rule replaced the
+    cycle.** The incident export reads exactly as round 3 recorded it above
+    (`121 episodes`, `unknown=91, phone-background=23, path=5, phone-stall=2,
+    gateway-stall=0`), and the ten device exports still total 197 episodes with
+    `unknown=173, phone-background=11, path=7, phone-stall=5, gateway-stall=1`
+    — the one `gateway-stall` is still the genuine 18 s event-loop delay of
+    09-26 04:33:45. With `--tailscale-window` the same export now reads
+    `121 episodes, path=12, unknown=84, phone-background=23, phone-stall=2,
+    gateway-stall=0`: the capture holds 146 path lines against round 3's 181,
+    because the unified log has aged further, which is the drift the retained
+    round-3 report exists to stop. That report is deliberately not overwritten.
+  - `scripts/tron-triage …2026-09-28T07-37-42-420Z.jsonl --gateway-logs
+    ~/.tron/logs --tailscale-window --tailscale-peer NODEKEY` ran the real
+    `/usr/bin/log show` (`captured: true`, 12 path lines for that peer) without
+    touching the input. The first pass's "`captured: true`, 0 path lines" was
+    the bug: the compact timestamp had no UTC offset and every line was
+    dropped (finding 4). The real node key is not committed: the tool's help,
+    its comments, the fixtures and this handoff use the placeholder
+    `fakeNodeKey` (review round 2, finding 7).
+  - `python3 scripts/check-documentation-policy.py` (46 authored files) and
+    `scripts/personal-info-guard.sh` pass.
+- Changes: eleven commits on `hardening/o-7`: `feat(triage): add the incident
+  triage tool (O-7)`, `docs(triage): name the triage command first, close label
+  windows at scene and episode boundaries (O-7)`,
+  `feat(triage): pair the inbound-silence evidence with its resume record (O-7)`,
+  `docs(triage): give the capture and evidence bounds their reasons (O-7)`,
+  `fix(triage): attribute a cause only to the episode's own connection (O-7)`,
+  `fix(triage): split an outage at the scene boundary and keep the loss's own
+  evidence (O-7)`, plus round 3's three (recovery cycle, attempt ownership,
+  relay-window coverage) and round 4's
+  `fix(triage): read the recovery socket from the handshake, not a 60 s window
+  (O-7)`.
+- **Review round 1 (changes-required → addressed).** The review's blockers and
+  majors, and what each one changed:
+  1. *Blocker — rule 4 took any slow span in the padded window as the cause.*
+     Rule 4 now requires a slow span's own issue-to-completion interval
+     (`completion - durationMs … completion`) to overlap `[start, end]`, an
+     event-loop delay to fall inside the episode rather than the +30 s pad, and
+     an episode to use one join: when the key joins any record, a record naming
+     another connection is not this episode's evidence (Gateway-wide records
+     still count). On the 09-28 export this moved 12/12 `gateway-stall` to
+     4, with the rest `unknown`/`phone-background`.
+  2. *Blocker — the row was Done although "Done when" was not met, and the
+     handoff claimed the incident exports were unavailable.* They are on local
+     disk (`~/.tron/logs/device-exports/`, ten files). The synthetic-export run
+     is marked superseded, the real-export result is recorded above, and the
+     row is Blocked.
+  3. *Major — older exports' records were not recognised.* `scene_phase` now
+     reads `app.backgrounded`/`app.foregrounded`, `scene.*` and the retained
+     client's `gateway.lifecycle kind=scene.*`, so both the background window
+     closer and `phone-background` fire (3 episodes on the 09-28 export).
+     `label_over_live_socket` gained a time-window fallback for exports with no
+     `gatewayConnectionId`, and the dead `reconnect.connected` branch became
+     `gateway_id_of` recognising the retained client's `kind=reconnect.connected`.
+     `is_covered` also stopped merging two label windows that merely sit within
+     the 5 s pad, which had been swallowing the background-parked episode.
+  4. *Major — `--tailscale-window` produced no evidence.* The compact timestamp
+     is parsed as local time, the real Magicsock forms are matched (`via=derp`
+     relay, `now using <addr>` direct), `--tailscale-peer NODEKEY` filters to
+     the phone's peer, and the tests use a fixture `log` executable with real
+     sanitized lines instead of a `runner` hook in production code.
+  5. *Major — the path rule ignored an attempt's profile.* `attempt_belongs`
+     keeps an episode's declared profile (or client), so the settings pool's
+     transport-open timeout no longer makes a main-profile episode `path`.
+  6. *Major — the wrong-label rule over-reached.* `socket_answered` requires the
+     request to have been issued at/after the label and completed inside the
+     episode, and the label must be this episode's own transition, so a request
+     issued before the loss is not proof the socket was live.
+  7. *Minor — attempt counting.* `phone_attempts` prefers the O-4
+     `gateway.attempt` record, dedupes the transport store's rows by
+     `(clientID, sequence)` (the loop's `attemptId` is shared by every retry),
+     and `attempt_reached_mac` requires the arrival before the attempt's own end
+     rather than anywhere in the pad.
+  8. *Minor — the phone-only export fixture invented a `connectionId`.* The test
+     uses the real `AppLogRecord` shape (null `connectionID`) and asserts
+     `joinedBy=window`.
+  9. *Minor — test-only `runner` parameters.* Removed; the Tailscale tests drive
+     a fixture executable through `TAILSCALE_LOG_TOOL`.
+  10. *Nits.* The doc's `.1` rotation is now `.1`–`.7`;
+     `unjoinedConnectionRecords` is renamed `connectionRecordsOutsideEpisodes`
+     (the count is records outside every episode); `offline(_:)` no longer
+     splits a label window.
+- **Review round 2 (changes-required → addressed).** This round ran the tool on
+  the incident's own export for the first time, which changed the rules:
+  1. *Blocker — a background blip closed the window, so the Context causes came
+     out `phone-background` and the silent gaps vanished.* `label_windows`
+     became `outage_segments`: a scene transition splits a published outage
+     instead of ending it, the window reopens on the foreground while the state
+     is still an outage, a stretch that contains no time is dropped, and
+     `background_parked` reads the stretch's own phase, so only the time really
+     spent in the background is `phone-background`. A stretch knows its
+     `outage_boundary`, so a stretch after a blip still judges its label against
+     the socket that was live when the outage was published. On the incident
+     export this produced the 04:05:25–04:11:46 `phone-stall` pair and both
+     measured silent gaps.
+  2. *Blocker — `gateway-stall` was still the reconnect's own refresh.* Rule 4
+     now needs the work to have been running when the loss happened
+     (`completion - durationMs < loss <= completion`) on a connection that is
+     not the recovery's: a socket the Gateway opened inside the episode, or one
+     already closed before it, is the reconnect's. `annotate_episode` also stops
+     taking the recovery socket as the episode's key. 26 `gateway-stall`
+     episodes became 3, each a sub-20 ms label flicker with a span that
+     straddled its own loss. (Round 3 found those 3 were still the reconnect's
+     own refresh, on a socket opened just before the flicker rather than inside
+     it; see that round below.)
+  3. *Major — the export's attempt records were ignored.* `operation.gatewayConnect`
+     (the pre-O-4 app-level attempt) is read as an attempt: end timestamp plus
+     `durationMs`, counted in `attempts` and printed as context. It names no
+     profile or stage, so it is never the path clause's evidence and never
+     opens a derived outage — on the incident export 122 consecutive failures
+     while the main connection was up would otherwise become one giant episode.
+     Episodes that really have no attempt now say so; the 02:40 episode reports 2.
+  4. *Major — this handoff's blocker reason and next steps were wrong.* Fixed in
+     the entry above: the incident export path, the `gateway-capacity=0`
+     explanation (the only capacity event predates the export), the softened
+     round-1 claim, and the hand-back to a worker instead of R-4.
+  5. *Minor — `--tolerance-seconds` did nothing above 30 s.* The evidence read
+     and the time-window join now share one margin, `max(pad, tolerance)`, and
+     the report prints it as `evidenceMarginSeconds`.
+  6. *Minor — a `gateway.resources` warning in the pad counted as the cause.*
+     It now has to fall inside the episode, like an event-loop delay (rule 5's
+     capacity records too).
+  7. *Minor — the user's real Tailscale node key was committed.* The help text,
+     the regex comments, the fixtures and this handoff use `fakeNodeKey`.
+  8. *Minor — CI never ran the triage tests.* The orchestrator approved adding
+     `scripts/test-tron-triage.py` to `.github/workflows/ci.yml`: the python
+     syntax list and a `python3 scripts/test-tron-triage.py` step. The suite is
+     self-contained (temp-dir fixtures, no network, no local export) and takes
+     about 4 s. **Deviation:** `.github/workflows/ci.yml` is outside O-7's
+     owning files; it was added on explicit instruction.
+  9. *Nits.* The plan's stale "O-7 incident triage tool Done" header line is
+     gone; the doc line about an `unknown` foreground silent gap now holds,
+     because those gaps are reported as `unknown` episodes.
+
+  Negative controls (revert one mechanism, the named test fails): a scene transition
+  ending the window instead of splitting it fails
+  `test_a_background_blip_does_not_hide_the_silent_gap_after_it` and
+  `test_a_blip_does_not_stop_the_live_socket_from_being_the_cause`; a
+  `background_parked` that ignores the stretch phase fails the same two; the
+  round-1 rule-4 span test fails
+  `test_the_socket_the_reconnect_opened_is_not_the_cause` and
+  `test_a_slow_span_that_began_after_the_loss_is_not_the_cause`; the recovery
+  key fails `test_the_episodes_key_is_the_connection_it_lost`; ignoring
+  `operation.gatewayConnect` fails
+  `test_an_app_connect_operation_counts_as_the_episodes_attempt`; a fixed
+  30 s pad fails `test_the_tolerance_widens_how_far_evidence_reaches`; and an
+  unbounded resource warning fails
+  `test_a_resource_warning_in_the_pad_is_not_the_cause`. Review round 3's six
+  controls (each verified by reverting exactly that mechanism and re-running the
+  named case): start-time attempt ownership fails
+  `test_a_background_blip_does_not_hide_the_silent_gap_after_it`; the
+  relay-window coverage bound fails
+  `test_a_relay_window_that_closed_before_the_episode_ended_is_context`; the old
+  invented attempt fields fail
+  `test_an_app_connect_operation_counts_as_the_episodes_attempt`; an evidence
+  line without the answering socket fails
+  `test_a_blip_does_not_stop_the_live_socket_from_being_the_cause`; and dropping
+  `relayWindows` from the report fails
+  `test_relay_window_classifies_a_path_episode`. Round 4 replaced the
+  recovery-cycle floor, so its control is gone with it; round 4's own controls
+  (each verified the same way) pin the five clauses of the new recovery rule and
+  the attempt dedupe: dropping the opened-inside clause fails
+  `test_a_socket_the_declared_episode_opened_before_its_loss_is_the_recoverys`;
+  dropping the handshake bound fails
+  `test_the_first_flickers_recovery_socket_is_not_the_second_flickers_cause`
+  (rewritten without the unrelated outage the old rule depended on); dropping
+  the flicker bound fails
+  `test_a_socket_the_previous_stretch_opened_is_the_recoverys`; dropping the
+  unchanged-retained-id clause fails
+  `test_a_flicker_on_the_apps_own_unchanged_connection_is_not_a_stall`; dropping
+  the closed-before clause fails
+  `test_a_slow_span_on_a_socket_closed_before_the_loss_is_abandoned_work`; and
+  counting the operation row beside a matching stage row fails
+  `test_a_stage_row_and_its_connect_operation_are_one_attempt`. Against the
+  round-3 module the rewritten round-3 case and three of the round-4 cases fail
+  (both 20:23:09 flickers `gateway-stall`, the stall-after-recovery `unknown`,
+  and the one connect counted as 3 attempts).
+- **Review round 3 (changes-required → addressed).** Round 3 re-ran the tool on
+  the incident export and on all ten device exports. Findings and what each one
+  changed:
+  1. *Blocker — `gateway-stall` was still the reconnect's own refresh.* Rule 4
+     excluded only a socket opened *inside* the episode, so it missed the socket
+     the previous stretch's reconnect had opened milliseconds earlier: all 3
+     incident episodes and 9/9 RPC-based `gateway-stall` episodes across the
+     eleven real exports rested on the `session.list` the reconnect had just
+     issued on a socket opened 36–117 ms before the loss, with the phone's
+     retained `connectionID` unchanged across the flicker (38, 62, 81). A
+     socket the Gateway opened since the reconnect cycle began is now the
+     recovery's (`Episode.recovery_floor`, `RECOVERY_CYCLE_SECONDS`;
+     `recovery_connection` — round 4 replaced this rule with the handshake
+     itself, see that round below). Every one of the 9 became `unknown`; the only
+     `gateway-stall` left is the genuine 18 s event-loop delay of 09-26
+     04:33:45. The handoff's cause-4 row and its "0/3 rest on the recovering
+     socket" claim are corrected above.
+  2. *Major — the 03:24:45 silent gap reported `attempts=1`.* The export's
+     `operation.gatewayConnect` at 03:24:45.020 (`durationMs=6237`) began 6.2 s
+     earlier, in the blip, and ended 15 ms after the app returned to the
+     foreground; the fallback counted attempts by end time with 5 s of slack and
+     so hid the gap statement. Attempts are now assigned by the stretch they
+     began in (`Attempt.start()`, `attempt_owner`), with the end-time fallback
+     for an attempt whose start falls in no stretch (the first episode's own
+     failing connect, and seven connects that began in connected time just
+     before a published loss). Both measured gaps report `attempts=0` with
+     their gap line, and the blip owns the 03:24:45.020 record. The real record
+     is back in the blip fixture.
+  3. *Major — `--tailscale-window` turned silent gaps into `path`.* Any overlap
+     with a relay window made the whole episode `path`, so the 03:24:45 gap
+     (window closed 03:26:22, gap ended 03:30:30), the 04:56:31 gap (window
+     closed 04:56:55) and the 01:36 hour-long gap were all reported as path
+     faults although the path was back and no attempt was recorded.
+     `relay_window_explains` now requires the loss to fall inside the window and
+     the episode to end inside it or within the app's own recovery delay
+     (`RELAY_WINDOW_SLACK_SECONDS`) of its close; a window that only overlaps is
+     reported as context with the reason it does not cover the episode. Both
+     gaps are `unknown` with their window as context, and the Context cause-1
+     episodes are still `path`.
+  4. *Minor — the cause-1 evidence could not be regenerated.* The report now
+     writes the relay windows (`inputs.tailscaleWindow.relayWindows`), and the
+     run of 2026-09-28T16:26Z is kept at
+     `~/.tron/workspace/files/hardening/o-7-incident-export-tailscale.json`
+     (`o-7-incident-export.json` for the plain run). The handoff no longer
+     claims "the same Context windows": the unified log has since dropped the
+     01:27–01:36 windows, and this round's path count (14) is lower than round
+     2's 22 for that reason.
+  5. *Minor — the `phone-stall` evidence named socket `unknown`.*
+     `label_over_live_socket` now returns the connection and the request that
+     answered, and the evidence reads `answered session.list on
+     de22b6dd-3d5e-4f5f-949f-fdf55d0f187b in 4513ms`.
+  6. *Nit — the `operation.gatewayConnect` context line invented fields.* It
+     printed `stageReached=unknown reason=none foreground=None` for a record
+     that carries none of them (`Attempt.context_detail` now prints only the
+     fields the record has).
+  7. *Nit — the plan header's stacked "Last updated" line.* No new line is
+     added; this round amends the existing O-7 line, and the merge with
+     `hardening/integration` still collapses it with the rest.
+- **Review round 4 (changes-required → addressed).** Round 4 re-ran the tool on
+  the incident export and on the ten device exports, and found that round 3's
+  fix was coincidence plus a new false negative:
+  1. *Blocker — the recovery socket was keyed to any episode within 60 s.* The
+     round-3 rule started a "recovery cycle" at any other episode that began
+     within a minute and ignored every socket opened since. It read the two
+     20:23:09 flickers correctly only because an unrelated outage happened 57 s
+     earlier (moving that outage to 61 s before turned both back into
+     `gateway-stall`), and it would have missed a genuine stall on a socket
+     that had served for seconds (a socket opening 1.9 s after an earlier outage
+     and serving 38 s before a real loss came out `unknown`). The rule is now
+     the handshake that produced the socket rather than time proximity:
+     `recovery_connection` reads a socket as the recovery's when the Gateway
+     opened it inside the episode, when it opened within
+     `RECOVERY_HANDSHAKE_SECONDS` (0.5 s; the measured cases are 36–117 ms) of
+     the published loss, when it opened after the previous stretch began and
+     that stretch ended within `FLICKER_BOUND_SECONDS` (1 s; the measured gaps
+     are 4–9 ms), or when the phone's own connection id on both sides of the
+     flicker is unchanged (`retained_connection_unchanged`).
+     `Episode.recovery_floor`, `link_flicker_stretches`' 60 s cycle and
+     `RECOVERY_CYCLE_SECONDS` are gone; both real exports read exactly as they
+     did in round 3 (the incident export `gateway-stall=0`, the ten device
+     exports `gateway-stall=1`, the genuine event-loop delay). The `:1059`
+     fixture is rewritten without the 20:22:12 outage it used to depend on.
+  2. *Minor — one attempt was counted twice.* `all_attempts` added the
+     `operation.gatewayConnect` rows to the stage rows without deduplicating,
+     so an export that writes both shapes for one connect counted it twice (13
+     pairs on the incident export; episode 115 read `attempts=2` for one
+     connect, 119 read 16 for 9). An operation row whose end is within
+     `ATTEMPT_DUPLICATE_END_SECONDS` (50 ms) of a stage row with a matching
+     duration is now that attempt's other name, and an operation row with no
+     such neighbour still counts.
+  3. *Minor — the end-time fallback was described wrongly.* The docstring and
+     the round-3 entry said it applies "only [to] an attempt that began before
+     every episode"; it applies to any attempt whose start falls in no stretch
+     (8 on the incident export, 7 of them outside the first episode). Both now
+     say that.
+  4. *Nit — the doc overstated the join-key exclusion.* `annotate_episode`
+     drops a join key only for a socket opened inside the episode; the
+     `connection-resilience.md` sentence that lumped the cycle-opened socket in
+     with it is rewritten with the rule above.
+- Failure modes written before the code (one test each): a relay-path outage
+  attributed to the phone because the Gateway's silent-socket record was not
+  joined; a transport-open timeout read as a Gateway stall, and a live main
+  connection or the retry that followed read as that attempt's arrival;
+  "reconnecting" over a live socket reported as `unknown` or as a real loss;
+  a silent gap with no attempt dropped or attributed to the path; a
+  background-parked episode attributed to the path; a slow span and a capacity
+  refusal reported as `unknown`; a protocol-5 export reported as unjoined
+  instead of joined by window; a phone-only artifact reporting zero Gateway
+  records; a run that writes to an input; an unreadable line crashing the run.
+  Two more came out of building the incident run: an outage that ended in the
+  background swallowing every later outage into one window (fixed: a scene
+  entering the background and a `connection.episode` record both close a
+  label window), and a neighbouring episode swallowed by the 60 s join
+  tolerance (fixed: episode coverage uses a 5 s pad, the join tolerance only
+  joins). Review round 1 added one written failure mode per finding — a slow
+  span that ended after the episode, another connection's slow span in a
+  key-joined episode, the app's real scene records, the settings pool's
+  second-profile attempt, a request issued before the loss, and one attempt
+  recorded by both phone shapes — as `ReviewRegressionTests`. Review round 2
+  added one per finding, built from the incident export's own record
+  sequences, as `ReviewRoundTwoTests` (each with its negative control; see
+  that round below). Review round 3 added the two flicker shapes — the socket
+  the previous stretch's reconnect opened, and the second flicker sharing the
+  first flicker's recovery socket — as `ReviewRoundThreeTests`, put the real
+  03:24:45.020 record back into the blip case, and added the relay-window
+  cases to `TailscaleWindowTests`; the attempt-context and phone-stall evidence
+  assertions joined the cases they belong to. Review round 4 rewrote that
+  flicker case without the unrelated outage and added `ReviewRoundFourTests`:
+  a genuine stall on a socket that served 38 s after an earlier recovery, a
+  flicker whose own published connection id never changed, two stretches of one
+  burst 4 ms apart, a declared episode whose loss was published on the socket
+  its own recovery opened, and one connect the stage row and the
+  `operation.gatewayConnect` row both recorded.
+- Tasks added: none.
+- Kept on purpose:
+  - The report's cause is the plan's rule order, not a vote: `path` first, so a
+    transport-open timeout wins over a background or Gateway cause unless the
+    episode is parked in the background. A backgrounded phone parks recovery,
+    and its own timeouts are `reason=background`; the path clause is skipped
+    there, which is the only place the rules as written would have called a
+    designed suspension a path fault.
+  - `unknown` is a real outcome and is reported with the gap statement, not
+    silently reclassified: a zero-attempt foreground gap with no overlapping
+    slow span stays `unknown` with the gap line in its evidence. The first
+    pass's live-log run classified the two measured silent gaps `gateway-stall`
+    only because a slow `session.list` completed inside the +30 s pad; the span
+    overlap bound in review round 1 removed that, which is the point of the
+    bound. After round 2 the two measured gaps are `unknown` (or `path` when
+    the Tailscale capture covers the loss) episodes with the gap line, which is
+    what the doc says an operator should read there.
+  - A published outage is one episode per scene phase, and a phase that
+    contains no time is dropped: on the incident export that turns 80 windows
+    into 121 episodes, because the phone publishes a burst of 5-300 ms label
+    flicks around every real loss. The `unknown` count is dominated by them.
+  - The 60 s join tolerance is the documented fallback for protocol-5 logs and
+    is a flag; key joins always win and the report says which join each episode
+    used.
+  - A phone-only artifact is still triaged: when no log directory exists the
+    export's own embedded Gateway rows are used and the report says
+    `source: "export-projection"`.
+- Deviations:
+  - The rule order in the task text was read to mean `path` first, with the
+    transport-open clause limited to a foreground (not background-parked)
+    episode; see "Kept on purpose" for why, and the test that pins it.
+  - The transport-open clause needs the Gateway record's peer key to decide
+    whether an accept was this attempt's: a Gateway record whose key contradicts
+    the attempt, or that has no key at all while the attempt has one, is not
+    this attempt's arrival. Against an O-1 Gateway log this is exact; against a
+    protocol-5 Gateway log it deliberately treats "no evidence this attempt
+    arrived" as the path's fault, which is what the phone's own transport-open
+    failure says.
+  - `--tailscale-window` reads the extension log as text and is a heuristic
+    (a relay line opens a window, a direct line closes it) that is reported as
+    evidence, not as proof; the authoritative path signal is O-2's `peerPath`.
+    `--tailscale-peer` bounds it to one Magicsock node key, because the
+    extension serves every tailnet peer.
+  - `attempt_belongs` filters by the episode's declared profile (or client). A
+    label-window episode the phone publishes through `connection.state-changed`
+    declares neither, so its attempts are not filtered; on the real exports the
+    transport store's rows carry no profile either, so the filter is a no-op
+    there and exact for O-4 exports.
+  - The task named `new tron-triage in scripts/` as an owning file: the command's
+    only other entry point, `scripts/tron`, was left unchanged, so the command is
+    `scripts/tron-triage` (like `scripts/tron-profile`).
+- For the next agent (a worker on O-7, then the orchestrator):
+  1. **The incident export is
+     `~/Library/CloudStorage/SynologyDrive-SynologyDrive/tron-diagnostics-3.jsonl`**
+     (22:50:04–05:49:39 UTC, 1,000 records, md5 unchanged since the incident).
+     It is the only export that covers the Context period: the ten files in
+     `~/.tron/logs/device-exports/` start after it (the latest at 05:58:47).
+     Run both with and without `--tailscale-window --tailscale-peer NODEKEY`
+     (the node key is the user's; pass it on the command line, do not commit
+     it; the unfiltered run read the same 181 lines here because the extension
+     log held one peer). Round 3 got the four Context causes out of it as the
+     table above says — cause 4 has no episode of its own any more, because its
+     three flickers were the reconnect's own refresh — and round 4 kept that
+     outcome with the handshake-based rule, so it no longer depends on an
+     unrelated episode starting within a minute. The row stays Blocked: 121
+     episodes against Context's 77 reconnect episodes,
+     `phone-stall=2` against one cause per wrong label, and
+     `gateway-capacity=0` because the only capacity event in Context
+     (22:20:37) predates the export. A second reviewer should judge whether the
+     episode split (one per scene phase) is the right reporting unit or whether
+     a burst of sub-second label flicks should merge into one outage.
+  2. Round 1's rule-order question is settled for now: a zero-attempt
+     foreground gap with a Gateway slow span that merely overlaps it is
+     `unknown`; `gateway-stall` needs the span to have been running when the
+     loss happened, on a connection that is not the recovery's. C-1 and O-4's
+     `reconnect.stalled` should turn these gaps into `phone-stall` before the
+     release; decide it there rather than widening the pad. A flicker the app
+     re-publishes on the connection it already has (the retained
+     `connectionID` unchanged) is reported `unknown` for the same reason: the
+     tool records the loss the export published, and nothing was lost.
+  3. The correlation key is still untested against real O-1 data: every export
+     on this machine predates it (`gatewayConnectionId` absent). R-4 measures
+     the "at least 95% of episodes attributed to one cause" exit criterion on
+     the evaluation day's export, which is the first O-1 export.
+
+### Orchestrator · 2026-09-28 · O-7 accepted
+
+- Result: O-7 merged and set Done after five review rounds. On the real
+  7-hour export it attributes the path outages to `path` (with
+  `--tailscale-window`), the 04:05–04:11 label over a live socket to
+  `phone-stall`, and both silent gaps as zero-attempt episodes; a
+  `gateway-stall` episode requires Gateway work in flight at the loss on a
+  socket other than the recovery's. Context cause 4 (slow Gateway) shows up in
+  the old export as slow spans, not as a disconnect episode of its own, so no
+  `gateway-stall` episode is the correct reading, not a defect. Episode count
+  (121 vs 77) is the tool splitting outages at background blips by design.
+  R-4 confirms on the evaluation day's O-1-keyed exports.
+
+### G-1b · Blocked · 2026-09-28 · orchestrator-dispatched deepseek-worker (branch `hardening/g-1b`)
+
+- Result: the catalog owner now watches its folder and reconciles as its
+  backstop. `SessionCatalog.start()` starts a recursive `fs.watch` (FSEvents on
+  macOS) on the canonical sessions root plus a `CATALOG_RECONCILE_INTERVAL_MS`
+  (30-minute) pass; a path event is a hint, debounced
+  `CATALOG_EVENT_DEBOUNCE_MS` (250 ms), that re-reads one file's durable tail and
+  publishes one row through the same lane every Gateway-owned change uses. A
+  watcher that was observing and stopped is replaced and the folder's own cut is
+  re-read; a root that cannot be watched yet is retried
+  (`CATALOG_WATCH_RETRY_MS`, 5 s) while the index keeps serving the rows it has.
+  The row's Done-when is met in memory (the integration case below); the O-6a
+  confirmation of it is owed by the orchestrator, which has the probe and the
+  request-path walk counts.
+- Evidence, mechanism (real watcher, real catalog, real Gateway wiring):
+  - `npx vitest run src/sessions/runtime-registry.integration.test.ts -t
+    "publishes an external append"` **1 passed, 616 ms**: against a live
+    `RuntimeRegistry` (the code path the fixture Gateway runs), a child
+    transcript created and then appended to by a writer the Gateway does not own
+    reaches its catalog row (`delegated`, then `messageCount` 1 and the file's
+    exact size) in ≤ 1 s, and the O-5 sampler's `recordCatalogWalk` recorded no
+    catalog structure walk in that window.
+  - `npx vitest run src/sessions/session-catalog.test.ts` **19 passed / 19 in
+    6.5 s**, twice; `session-catalog.test.ts` + `catalog-metadata-index.test.ts`
+    + `catalog-discovery.test.ts` **40 passed / 40 in 6.7 s**. The case "advances
+    a row for an external append within a second without walking the catalog"
+    runs the production watcher with the interval backstop disabled
+    (`reconcileIntervalMs: 0`), so only the watcher can publish the append.
+  - `src/sessions/runtime-registry.integration.test.ts` full file **248 tests: 1
+    failed** — the known load flake "keeps a large streamed write visible
+    through snapshot recovery and canonical handoff" (5081 ms against its 5 s
+    `waitUntil`; passes alone in 4.65 s, and alone on the pre-G-1b code in
+    4.67 s, so its ~0.3 s margin is the cause, not this change). `-t "catalog"`
+    35/35, `-t "index"` 8/8. `npx tsc --noEmit -p .` clean;
+    `python3 scripts/check-documentation-policy.py` and
+    `scripts/personal-info-guard.sh` pass.
+- Blocked on the O-6a half of "Done when" ("in O-6a, child-file appends reach
+  the index within 1 s without any request-path walk"). Three bounded
+  `scripts/tron-profile gateway --scenario multi-session --iterations 1
+  --catalog-files 200 --catalog-mib 32 --no-build` runs were made (2 × 30 s and
+  1 × 120 s mixed windows; last run
+  `20260928T144239Z-multi-session-fcce82`, `finished in 3.3 min`, no
+  "uncommitted tracked changes" warning). Review round 1 established that those
+  runs were made on the wrong tree and that their method cannot measure the bound
+  at all, so they are kept here only as history: the run's own `report.json`
+  source block names the `hardening/integration` worktree path, branch
+  `hardening/integration`, revision `b18919961`, whose
+  `src/sessions/session-catalog.ts` and 07:13 `dist` contain no
+  `watchCatalogFolder` (`grep -c` = 0 in both). The measured fixture Gateway
+  therefore had no watcher, and a frozen durable document was that tree's
+  expected behaviour. The "one `catalog.reconciled` per two starts" reading was
+  wrong for the same reason: the priming Gateway stopped 3.5 s after it started,
+  before its reconcile finished, and the single `200 added` in 8274 ms belongs to
+  the second, measured start. The sampler read only the durable document, which
+  is written at most every `CATALOG_PERSIST_MAX_WAIT_MS` (60 s), so no run of
+  that shape can show a 1 s bound. The "unexplained persist-cadence signal" and
+  the proposed T-2 row that rested on it are withdrawn, and the corrected
+  procedure is recorded in the round-1 entry below; no T-2 row was added.
+- Changes: `packages/gateway/src/sessions/session-catalog.ts` (the watcher, the
+  cadences, `catalog.changed` / `catalog.watcher-reset` reports);
+  `packages/gateway/src/sessions/catalog-discovery.ts` (exports
+  `isIgnoredCatalogDirectory` so the watcher and the walk apply one path rule);
+  `packages/gateway/src/sessions/runtime-registry.ts` (two option
+  pass-throughs in the `SessionCatalog` construction and the startup comment
+  only — the minimal call site G-3's parallel work can rebase over);
+  `packages/gateway/src/gateway-main.ts` (the two records);
+  `packages/gateway/docs/observability.md` (`catalog.reconciled`'s "when" and
+  rows for the two new events);
+  `packages/gateway/src/sessions/session-catalog.test.ts`;
+  `packages/gateway/src/sessions/runtime-registry.integration.test.ts` (one
+  case).
+- Failure modes written before the watcher (numbered 9-16 in the test file): an
+  event the platform never delivered (the next interval pass publishes the row);
+  a file replaced with a new inode at the same path (identity and counts come
+  from the replacement, not the old tail); a child transcript before its parent
+  (one delegated row, and the parent does not double it); the root moved or
+  unavailable (one outage record, last-good rows served, watched once it exists);
+  a burst of events (one debounced read per path, no walk, no read left armed);
+  a watcher that stopped (one `catalog.watcher-reset`, a replacement watcher, a
+  whole-folder reconcile); an event the platform could not name (the index is
+  re-derived once); an event for a path discovery ignores or a file that is not a
+  transcript (no row, no read). Review round 1 added modes 17-22, listed with its
+  findings in the entry below.
+- Kept on purpose: the read phase's batch bound is the index's existing one
+  (`CatalogMetadataIndex.reconcile` reads `RECONCILE_CONCURRENCY` = 16 candidates
+  per awaited batch, ≤ the plan's 50, covered by G-1a's "reads reconciled files
+  in one bounded batch at a time"), so this row adds the cadence that drives it
+  rather than a second batching layer over the same reads; G-9 moves the pass
+  into the scheduler. `catalog.reconciled` keeps its existing shape and owner.
+- Deviations: the watcher backend is an injectable option (`watchCatalog`,
+  defaulting to the recursive `fs.watch`) because several failure modes cannot be
+  forced on a real FSEvents stream (a dropped event, a start failure, a watcher
+  that stops, a burst of events, an unnamed event); every case the real backend
+  can produce uses the production watcher. An overflow is not a separate reset
+  reason: `fs.watch` does not surface FSEvents' must-scan flag, so a dropped
+  event is the interval's job (`catalog.reconciled`'s counts are the signal) and
+  an unnamed event re-reads the whole folder once. The reconciler was not
+  changed, so the durable document keeps its one writer.
+- For the next agent: G-1c switches `list`, `pageSource`, acquisition, attention,
+  automation targets and storage maintenance onto `SessionCatalog.rows()`; the
+  watcher already keeps those rows current for external writers, so the request
+  path's walks can be deleted without a new feed. G-9 owns moving the interval
+  pass and the watcher restart into the scheduler. Note for the orchestrator's
+  own runs: `--no-build` requires `npm run build` in `packages/gateway` first.
+
+### G-1b · Blocked (review round 1) · 2026-09-28 · orchestrator-dispatched deepseek-worker
+
+- Result: an independent reviewer found the O-6a evidence had been gathered on
+  the integration tree, which contains no watcher, plus four real gaps that only
+  the production FSEvents backend shows. Every finding was addressed; none was
+  rejected. The wrong diagnosis and the row proposed from it are withdrawn, the
+  watcher now covers folder events and deletions, and its restarts are spaced
+  instead of immediate. The row stays **Blocked**: the two O-6a runs now made on
+  this build are recorded below, and the in-memory half of the measurement is
+  still owed because the observer it needs is not usable in this scenario.
+- Finding 1 (blocker, reproduced): the O-6a run
+  `20260928T144239Z-multi-session-fcce82` ran against
+  the `hardening/integration` worktree at `b18919961`, where
+  `src/sessions/session-catalog.ts` and its 07:13 `dist` have no
+  `watchCatalogFolder` (0 matches in both), so no watcher existed and the frozen
+  durable document proved nothing; the priming Gateway stopped 3.5 s after it
+  started, before its reconcile finished. The "unexplained persist-cadence
+  signal" narrative and the proposed T-2 row are deleted from the entry above,
+  which now records the real cause and the method's own limit (a durable document
+  capped at `CATALOG_PERSIST_MAX_WAIT_MS` = 60 s cannot show a 1 s bound). The
+  corrected procedure is in the Blocked note above; the re-run itself is owed,
+  and the attempts made here are recorded below.
+- Finding 2 (major): a non-transcript event path was dropped, so a folder moved
+  into the root and a folder renamed inside it were invisible for up to 30
+  minutes, and the root's own move produced no record and no reconcile at all.
+  `watchEvent` now resolves such a path against the folder: a directory has its
+  own `.jsonl` files re-read (debounced per path, with one whole-folder pass when
+  a folder holds more than `CATALOG_EVENT_DIRECTORY_LIMIT` = 64 transcripts,
+  which also bounds the per-path map), an absent path debounces one whole-folder
+  cut, an existing non-transcript file stays a no-row event, and the root's own
+  name with the root gone is the watcher's outage rather than a cut — no cut of a
+  missing folder is membership evidence. The folder's own name *with the folder
+  there* is ignored instead: macOS reports it once when the watch attaches, and
+  treating it as a reason to re-read the whole folder cost one spurious
+  full-folder pass per attach (the first version of this fix did exactly that,
+  and the real-backend case below caught it). A real-trace probe confirmed that macOS
+  reports the root's own rename as `change "sessions"`, that a folder moved in
+  reports only `rename <folder>`, and that inner events stop until the root is
+  back. New real-backend cases: "publishes a folder moved into the root and the
+  folder an in-root move renamed" and "keeps its rows while the root itself is
+  away, and a later cut republishes them" (modes 17 and 18); the second asserts
+  that a pass over the folder that is not there publishes nothing and that the
+  rows survive an append the watcher could not see.
+- Finding 2b (major, found by the tests this round added): absence evidence had
+  to be gated on the folder still being there. A root that is moved away takes
+  every path inside it with it, so (a) the finding 3 rule would have dropped the
+  rows one event at a time for a folder that is merely elsewhere, and (b) the
+  periodic pass (and the startup pass) would have published a "complete" cut of
+  zero candidates and emptied the durable document. `SessionCatalog` now has one
+  `catalogRootIsDirectory()` check used by all three: `refreshPath` refuses
+  absence evidence without it, `reconcileIndex` reports `incomplete` and
+  publishes nothing, and the watcher's root event is an outage. Cases: "keeps its
+  rows while the root itself is away, and a later cut republishes them" (real
+  backend; mode 18) and "records one outage for the root's own event when the
+  folder is gone" (mode 22, the injectable backend, because the platform cannot
+  be made to deliver that event on demand).
+- Finding 3 (major): rows came only from commit-point hooks, so the watcher
+  published files the Gateway had not committed and nothing removed them when the
+  Gateway rolled them back (`rm(importedPath)` after a failed import,
+  `removeUncommittedForkArtifacts`). `refreshPath` now treats `lstat` ENOENT on
+  the exact path as removal: the row is dropped and the document rewritten. Other
+  errors still keep the row, so this deliberately extends G-1a's rule: an absent
+  exact path *is* membership evidence, while an unreadable path is not. Case:
+  "drops the row for a canonical file deleted outside the Gateway" (mode 19),
+  which also asserts the durable document lost the row, and "keeps a row for a
+  path it can see but cannot read" for the other half of the rule.
+- Finding 4 (minor): the `catalog-index.failure` false alarm falls out of
+  finding 3 — an absent path is not read at all, so `append` and `summaryFor` are
+  never called for a file that is gone. Mode 19 asserts both spies were not
+  called.
+- Finding 5 (minor): the per-path debounce had no ceiling, so a path written
+  more often than the quiet spell was re-armed forever. It is capped by
+  `CATALOG_EVENT_MAX_WAIT_MS` (1 s) the way persistence is, so a continuously
+  appended transcript is re-read about once a second. Case: "re-reads a path whose
+  events never stop arriving" (mode 20).
+- Finding 6 (minor): `ensureWatching` re-checks `this.watcher` after the
+  `catalogRoot()` await (two concurrent callers could each attach a watcher and
+  double every event); `onReset` is bound to its own handle, so a reset from an
+  already-replaced watcher cannot stop its successor; a stop schedules the
+  replacement on the retry cadence instead of attaching in place; and
+  `watchOutageReported` is cleared only once a replacement has survived one retry
+  interval, so a watcher that dies at every attach produces one record and a
+  bounded restart rate. Case: "spaces the restart of a watcher that dies right
+  after every attach" (mode 21); the error case now asserts the replacement is not
+  immediate.
+- Finding 7 (minor): the reset message and the observability row claimed every
+  reset is followed by a whole-folder reconcile, which was false for
+  `unavailable`. The owner now reconciles once when a replacement attaches after
+  a reported outage, on top of the one reconcile the first stop of an outage
+  makes over a readable folder, so the gap the outage opened is read even when
+  the attach is what restored the folder. The message and the doc row say that.
+- Finding 8 (minor): `catalog.changed` fired on every single-row publish,
+  including every Gateway-owned persist, into the shared 4,000-record / 2 MB debug
+  buffer. It is now the watcher's change stream only — a Gateway-owned change is
+  attributable to the commit that made it — with `outcome` extended by `removed`
+  for the finding 3 deletion, and the doc row states the scope and the bound (up
+  to about four records per path a second, one per quiet spell, with the ceiling
+  only bounding how long a read waits when events never stop). That also
+  makes it the in-memory signal the O-6a re-run needs. The `catalog.changed` case
+  now asserts a Gateway-owned `refresh()` reports nothing and that a watcher
+  deletion reports `removed`.
+- Finding 9 (minor): the burst case emitted one event per path, so coalescing was
+  never exercised. "coalesces a burst of events into one read per path" now sends
+  40 events for each of 25 paths (1,000 events) and asserts exactly one
+  `summaryFor` per path, no `scan`, and no duplicate IDs (mode 13).
+- Finding 10 (nit): the assertions on a private timer map are gone — the burst
+  case counts reads through the source instead — and the integration case reads
+  the catalog owner through a documented `catalogOwner()` helper beside
+  `settleCatalog()`. No public reader exists before G-1c, and the index's rows
+  *are* the observable effect that case asserts.
+- Finding 11 (nit): the plan header carried six `Last updated` lines; it is one
+  line again.
+- Changes in this round: `packages/gateway/src/sessions/session-catalog.ts` (the
+  folder-event path, the deletion rule, the per-path ceiling, the watcher
+  lifecycle and the watcher-only change stream);
+  `packages/gateway/src/sessions/session-catalog.test.ts` (modes 17-21, the
+  rewritten burst and ignore cases, the `catalog.changed` case);
+  `packages/gateway/src/sessions/runtime-registry.integration.test.ts` (the
+  `catalogOwner()` helper); `packages/gateway/src/gateway-main.ts` and
+  `packages/gateway/docs/observability.md` (message and rows).
+- Checks: `npx vitest run src/sessions/session-catalog.test.ts` **26 passed / 26
+  in 9.4 s and again in 11.1 s** (was 19); `npx vitest run
+  src/sessions/runtime-registry.integration.test.ts -t "catalog"` **36 passed**;
+  `-t "publishes an external append"` **1 passed**;
+  `src/sessions/catalog-metadata-index.test.ts` +
+  `src/sessions/catalog-discovery.test.ts` **21 passed**; `npx tsc --noEmit -p .`
+  clean. The real-backend cases run the production watcher; the injectable
+  backend is used only for events FSEvents cannot be made to produce (modes 9,
+  13-16, 21, 22).
+- Residual risk for the orchestrator: none known for the watcher itself. The
+  pre-existing hazard a missing root used to create for the startup and periodic
+  passes (a "complete" cut of zero candidates emptying the durable document) is
+  closed by finding 2b's guard, which is why an outage now needs no special case
+  to stay safe. `catalog.reconciled` reports such a pass as `incomplete`, so an
+  operator sees it.
+- O-6a on this build (new evidence, three attempts): the build here is
+  `33b25f3ab` in this worktree (`npm run build`, `dist` carries the watcher), and
+  the runs' own `report.json` source blocks say so (`"worktree"` = this
+  worktree, `"dirty": false`), with the fixture's `driver-config` naming this
+  worktree's `packages/gateway` — the attribution problem finding 1 found is
+  gone.
+  - `20260928T152251Z-multi-session-0efe51` and
+    `20260928T152602Z-multi-session-5c6047` (`--catalog-files 200 --catalog-mib
+    32 --mixed-seconds 60`, `finished in 2.2 min` and `1.8 min`, exit 0): the
+    watcher build runs the scenario at scale. The second run's fixture log holds
+    exactly one `catalog.reconciled` (200 added, 1648 ms, at startup), no
+    `catalog.watcher-reset` and no `catalog-index.failure`, so no outage and no
+    failed index read occurred across ~90 s of continuous external appends. Its
+    probe counted `no_subscriber.catalog.walks` 15 and `catalog.walks` 49 for the
+    mixed window: those are the pre-G-1c request path's own walks (the criterion
+    G-1c's Done-when measures), not walks the appends caused — the append-caused
+    count is 0, which the integration case asserts directly.
+  - Two further attempts (`20260928T152836Z-multi-session-9e118c` and
+    `20260928T153500Z-multi-session-3afd47`) tried to read the in-memory
+    `catalog.changed` stream with an observer that pairs like the phone and polls
+    `system.logs.export`. Neither produced a sample: both runs failed at the
+    scenario driver, and their `fixture/gateway.jsonl` error mix is catalog churn
+    in name only:
+
+    | `rpc.error` | `9e118c` | `3afd47` |
+    |---|---|---|
+    | `session.sync` conflict, "Session synchronization is no longer owned by this token" | 244 | 242 |
+    | `session.presentation.set` conflict | 11 | 10 |
+    | `session.open` conflict | 2 | 2 |
+    | `session.open` busy / `catalog_changed` | 1 | 0 |
+
+    Both drivers died on that `session.sync` conflict
+    (`driver-iteration-1.log`), for one client ID that matches every record. The
+    two runs without the observer, on the same build
+    (`0efe51`, `5c6047`), logged **0** `rpc.error`. So the extra paired mobile
+    client is what took session synchronization ownership away from the driver;
+    `catalog_changed` churn is 1 record out of 258 and 0 out of 254, and is not
+    what failed either run. The observer's own connection was also the one that
+    sent nothing (16.5 s in `9e118c`, 27.7 s in `3afd47`) and was closed at
+    outbound-queue capacity in both: a sixth mobile-role connection that never
+    pings and exports ~1 MB of diagnostics every 15 s.
+  - What the owed re-run needs instead: the in-memory signal has to come from the
+    fixture process itself. `scripts/tron-profile-gateway-probe.mjs` is already
+    preloaded there and already counts catalog walks in-process; the natural
+    instrument is one more counter it can read without any extra connection
+    (a row-publish tally or the newest `catalog.changed` timestamps), recorded
+    with the appender's write times. Until that exists the row stays on the
+    orchestrator's owed confirmation, and the durable-document sampler from the
+    earlier entry stays retired: it cannot show a 1 s bound.
+- Not addressed, deliberately: `watchRetryMs` remains a plain `setTimeout`; G-9
+  owns moving the watcher restart into the scheduler, and the retry is now the
+  only restart path, so a failing watcher restarts at most once per interval.
+
+### G-1b · Done (review round 2) · 2026-09-28 · orchestrator-dispatched deepseek-worker
+
+- Result: the one major was a real production cost and is fixed, with a
+  production-FSEvents failing-first case and its negative control; both minors
+  and the two documentation/evidence corrections are in. The row is **Done** on
+  the orchestrator's decision — the O-6a confirmation of the Done-when is owed by
+  the orchestrator, which owns the probe file.
+- Finding 1 (major): an absent non-transcript path no longer reconciles the whole
+  folder. `resolveAbsentEvent` re-reads only the indexed rows at or under the
+  path (`indexedBeneath`) through the same per-path debounce and does nothing
+  when no row matches, so an atomic write's temporary name, a scratch file and
+  the Gateway's own quarantine rename cost no walk; `transcriptsBeneath` walks by
+  hand instead of `readdir({recursive: true})`, skipping the ignored folders and
+  stopping at `CATALOG_EVENT_DIRECTORY_LIMIT`; `debounceUnnamedEvent` is capped
+  by `CATALOG_EVENT_MAX_WAIT_MS` like the per-path debounce.
+  - Failing-first, production FSEvents backend: "costs no whole-folder pass for a
+    non-transcript name that is gone" (tmp rename, scratch create/delete,
+    quarantine rename and removal) and "drops the rows under a folder removed
+    with its transcripts, without a whole-folder pass" (`rm -rf` of a run
+    folder). Negative control: with `8a52a73b2`'s `session-catalog.ts` and these
+    tests, the first sees **2** `scan` calls and the second **1**, both green
+    with the fix. Modes 22-23 added to the test file's list.
+  - "re-derives the whole index once a second for unnameable events that never
+    stop" (mode 23) is the ceiling's failing-first case: with the old
+    `debounceUnnamedEvent` the 5 s `waitFor` times out (the quiet spell is
+    re-armed every 100 ms), and it passes with the ceiling.
+- Finding 2 (minor): the `catalog.changed` bound is corrected in all three
+  places — the doc row, the cadence comment and the round-1 entry above — to the
+  real one: up to about four records per path a second, one per quiet spell,
+  with `CATALOG_EVENT_MAX_WAIT_MS` bounding only how long a read waits when
+  events never stop. No throttle was added: the true rate is now stated rather
+  than capped by a second mechanism over the same reads.
+- Finding 3 (minor): the round-1 entry's failed-run evidence was replaced with
+  the measured mix (244/242 `session.sync` conflicts, 11/10 presentation, 2/2
+  open, 1/0 busy `catalog_changed`), the driver logs that died on the `sync`
+  conflict, the two no-observer runs' **0** `rpc.error`, and the observer
+  connection's own silent/capacity closes. The stale "complete and merge-ready"
+  line in the base entry is replaced.
+- Finding 4 (Done-status blocker, no code change): `npm run build` and `npx tsc
+  --noEmit -p .` are clean at HEAD; the in-memory append-to-row bound stays
+  covered by the integration case and the interval-disabled watcher case. The
+  O-6a probe (`scripts/tron-profile-gateway-probe.mjs`) is outside this row's
+  owning files, so the orchestrator owes that confirmation.
+- Finding 5 (nit): the dead "Bounded batches" loop and its descriptor comment in
+  the burst case are deleted; the 25 writes are one `Promise.all`.
+- Durable-document persist cadence (evaluated, **no G-1e row**): a watcher row
+  reaches the durable document at most every `CATALOG_PERSIST_DEBOUNCE_MS` (5 s)
+  and at latest `CATALOG_PERSIST_MAX_WAIT_MS` (60 s) after it changes, but the
+  canonical JSONL stays authoritative and every startup reconciles against the
+  folder's own cut (`reconcileIndex` re-derives each candidate; `persistNow`
+  skips an unchanged generation), so a stale document is repaired, not lost. That
+  makes the cadence a property of the acceleration document, not a defect — the
+  only reader that suffered from it was the retired durable-document sampler.
+- Checks: `npx vitest run src/sessions/session-catalog.test.ts` **28 passed /
+  28 in 10.9 s** (was 26); `session-catalog.test.ts` +
+  `catalog-metadata-index.test.ts` + `catalog-discovery.test.ts` **50 passed /
+  50**; `npx vitest run src/sessions/runtime-registry.integration.test.ts -t
+  "catalog"` **36 passed**; `npx tsc --noEmit -p .` clean; `npm run build`
+  clean in 38 s. Negative controls run as above and then reverted.
+- For the orchestrator: `npm run build` has now been run in this worktree, so its
+  `dist` carries the watcher's current source for an O-6a run. Merging `hardening/integration` into this branch
+  conflicts only in this plan file (integration has newer rows/entries);
+  integration's `session-catalog.ts` is unchanged from the merge base, so the
+  source merge is clean.
+
+### Orchestrator · 2026-09-28 · E-2 and E-2c closed
+
+- Result: the iOS profiler can no longer take 10 GB: the parser is bounded
+  (E-2), host `--attach` cannot sample simulator processes (E-2b), and a
+  host-wide time-profiler trace whose export would exceed 2 GiB is refused
+  before export with its size and the remedy (E-2c). A traced product scenario
+  must use a short `--window-seconds` to fit; that is the accepted cost. E-2
+  and E-2c set to Done.

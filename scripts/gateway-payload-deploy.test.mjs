@@ -383,7 +383,7 @@ test("tailscale host selection and restart handshake are bounded and determinist
     "100.64.0.999", "100.64.0.1.example", "100.63.255.255", "100.128.0.1", "100.64.0.1%en0",
     "fd7a:115c:a1e0:garbage::1", "fd7a:115c:a1e1::1", "fd7a:115c:a1e0::1%utun0",
   ]) assert.equal(isTailscaleAddress(malformed), false, malformed);
-  assert.equal(protocolHandshakeCompatible({ type: "hello", protocolVersion: 5, minProtocolVersion: 5 }), true);
+  assert.equal(protocolHandshakeCompatible({ type: "hello", protocolVersion: 6, minProtocolVersion: 6 }), true);
   assert.equal(protocolHandshakeCompatible({ type: "hello", protocolVersion: 2, minProtocolVersion: 2 }), false);
   assert.equal(protocolHandshakeCompatible({ type: "hello", protocolVersion: 4 }), false);
 });
@@ -468,7 +468,7 @@ test("payload fingerprints include safe internal node_modules symlinks", async (
     const sourceFingerprint = await payloadFingerprint(versionRoot);
     await writeFile(join(versionRoot, "manifest.json"), `${JSON.stringify({
       schema: 1, kind: "tron-gateway-payload", channel: "dev", version: "source",
-      gatewayVersion: "1", protocolVersion: "5", minProtocolVersion: "5", nodeVersion: "22", sourceRevision: "0123456789abcdef0123456789abcdef01234567", runtimeEpoch: "01234567-89ab-cdef-0123-456789abcdef",
+      gatewayVersion: "1", protocolVersion: "6", minProtocolVersion: "6", nodeVersion: "22", sourceRevision: "0123456789abcdef0123456789abcdef01234567", runtimeEpoch: "01234567-89ab-cdef-0123-456789abcdef",
       payloadFingerprint: sourceFingerprint, dependencyTreeCoverage: "app/** and runtime/** regular files",
     })}\n`);
 
@@ -530,7 +530,7 @@ test("source build failure leaves active selection and deployment state unchange
     await chmod(join(versionRoot, "runtime", "node-x64"), 0o755);
     await addRuntimeNodeAliases(versionRoot);
     const fingerprint = await payloadFingerprint(versionRoot);
-    const manifest = { schema: 1, kind: "tron-gateway-payload", channel: "stable", version: "active", gatewayVersion: "1", protocolVersion: "5", minProtocolVersion: "5", nodeVersion: "22", sourceRevision: "0123456789abcdef0123456789abcdef01234567", runtimeEpoch: "01234567-89ab-cdef-0123-456789abcdef", payloadFingerprint: fingerprint, dependencyTreeCoverage: "app/** and runtime/** regular files" };
+    const manifest = { schema: 1, kind: "tron-gateway-payload", channel: "stable", version: "active", gatewayVersion: "1", protocolVersion: "6", minProtocolVersion: "6", nodeVersion: "22", sourceRevision: "0123456789abcdef0123456789abcdef01234567", runtimeEpoch: "01234567-89ab-cdef-0123-456789abcdef", payloadFingerprint: fingerprint, dependencyTreeCoverage: "app/** and runtime/** regular files" };
     await writeFile(join(versionRoot, "manifest.json"), `${JSON.stringify(manifest)}\n`);
     await mkdir(store.channelRoot, { recursive: true });
     await writeFile(store.current, `${JSON.stringify(selection("active", fingerprint))}\n`);
@@ -673,7 +673,7 @@ async function makeSourceBuildFixture(root) {
   await chmod(join(versionRoot, "runtime", "node-x64"), 0o755);
   await addRuntimeNodeAliases(versionRoot);
   const fingerprint = await payloadFingerprint(versionRoot);
-  const activeManifest = { schema: 1, kind: "tron-gateway-payload", channel: "stable", version: "active", gatewayVersion: "1", protocolVersion: "5", minProtocolVersion: "5", nodeVersion: "22", sourceRevision: "0123456789abcdef0123456789abcdef01234567", runtimeEpoch: "01234567-89ab-cdef-0123-456789abcdef", payloadFingerprint: fingerprint, dependencyTreeCoverage: "app/** and runtime/** regular files" };
+  const activeManifest = { schema: 1, kind: "tron-gateway-payload", channel: "stable", version: "active", gatewayVersion: "1", protocolVersion: "6", minProtocolVersion: "6", nodeVersion: "22", sourceRevision: "0123456789abcdef0123456789abcdef01234567", runtimeEpoch: "01234567-89ab-cdef-0123-456789abcdef", payloadFingerprint: fingerprint, dependencyTreeCoverage: "app/** and runtime/** regular files" };
   await writeFile(join(versionRoot, "manifest.json"), `${JSON.stringify(activeManifest)}\n`);
   await mkdir(store.channelRoot, { recursive: true });
   await writeFile(store.current, `${JSON.stringify(selection("active", fingerprint))}\n`);
@@ -809,7 +809,7 @@ async function makePreflightFixture(root) {
   await mkdir(join(payload, "app", "node_modules", "node-pty", "prebuilds", `darwin-${process.arch}`), { recursive: true });
   await mkdir(join(payload, "runtime"), { recursive: true });
   await writeFile(join(payload, "app", "dist", "index.js"), "x".repeat(1_024));
-  await writeFile(join(payload, "app", "dist", "version.js"), "export const PROTOCOL_VERSION = 5; export const MIN_PROTOCOL_VERSION = 5;\n");
+  await writeFile(join(payload, "app", "dist", "version.js"), "export const PROTOCOL_VERSION = 6; export const MIN_PROTOCOL_VERSION = 6;\n");
   await writeFile(join(payload, "app", "package.json"), "{}\n");
   await writeFile(join(payload, "app", "package-lock.json"), "{}\n");
   await writeFile(join(payload, "app", "PushService.xcconfig"), "TRON_PUSH_SERVICE_ORIGIN = https:/$()/push.example.test\n");
@@ -824,7 +824,7 @@ async function makePreflightFixture(root) {
   const fingerprint = await payloadFingerprint(payload);
   await writeFile(join(payload, "manifest.json"), JSON.stringify({
     schema: 1, kind: "tron-gateway-payload", channel: "stable", version: "preflight",
-    gatewayVersion: "1", protocolVersion: "5", minProtocolVersion: "5", nodeVersion: "22",
+    gatewayVersion: "1", protocolVersion: "6", minProtocolVersion: "6", nodeVersion: "22",
     sourceRevision: "0123456789abcdef0123456789abcdef01234567", runtimeEpoch: "01234567-89ab-cdef-0123-456789abcdef",
     payloadFingerprint: fingerprint, dependencyTreeCoverage: "app/** and runtime/** regular files",
   }));
@@ -855,8 +855,8 @@ test("promotion recovery admits a launcher-rejected external selection as bundle
     assert.deepEqual(recovery.manifest, bundledManifest);
     await requireBundledPayload(store, bundledManifest, [bundled]);
 
-    externalManifest.protocolVersion = "5";
-    externalManifest.minProtocolVersion = "5";
+    externalManifest.protocolVersion = "6";
+    externalManifest.minProtocolVersion = "6";
     await writeFile(externalManifestPath, JSON.stringify(externalManifest));
     const admissible = await resolveRecoveryPayload(store, staleSelection, [bundled]);
     assert.equal(admissible.usesBundledFallback, false);
@@ -1072,7 +1072,7 @@ test("preflight imports candidate protocol values and rejects incompatible range
   try {
     const payload = await makePreflightFixture(root);
     const run = async (_tool, args) => args[0] === "-e"
-      ? { code: 0, output: JSON.stringify({ protocolVersion: 5, minProtocolVersion: 5 }) }
+      ? { code: 0, output: JSON.stringify({ protocolVersion: 6, minProtocolVersion: 6 }) }
       : args[0] === "--version"
         ? { code: 0, output: `Version: ${PINNED_XCODEGEN_VERSION}\n` }
         : { code: 0, output: "" };
@@ -1087,7 +1087,7 @@ test("preflight imports candidate protocol values and rejects incompatible range
     );
     await assert.rejects(
       preflightPayload(payload, async (_tool, args) => args[0] === "-e"
-        ? { code: 0, output: JSON.stringify({ protocolVersion: 5, minProtocolVersion: 5 }) }
+        ? { code: 0, output: JSON.stringify({ protocolVersion: 6, minProtocolVersion: 6 }) }
         : args[0] === "--version"
           ? { code: 0, output: "Version: 0.0.0\n" }
           : { code: 0, output: "" }),
@@ -1505,7 +1505,7 @@ test("duplicate promotion of the exact selected live candidate is verified and i
     await mkdir(store.channelRoot, { recursive: true });
     const manifest = {
       schema: 1, kind: "tron-gateway-payload", channel: "stable", version: "candidate",
-      gatewayVersion: "1.2.3", protocolVersion: "5", minProtocolVersion: "5", sourceRevision: "tested-revision", runtimeEpoch: "candidate-epoch",
+      gatewayVersion: "1.2.3", protocolVersion: "6", minProtocolVersion: "6", sourceRevision: "tested-revision", runtimeEpoch: "candidate-epoch",
       payloadFingerprint: "b".repeat(64),
     };
     const current = selection(manifest.version, manifest.payloadFingerprint);

@@ -71,7 +71,8 @@ jobs:
             scripts/test-tron-profile-ios.py \
             scripts/tron_profile_attribution.py \
             scripts/tron-profile-device \
-            scripts/test-tron-profile-attribution.py
+            scripts/test-tron-profile-attribution.py \
+            scripts/test-tron-triage.py
       - name: Check profiler JavaScript and TypeScript syntax
         run: |
           node --check scripts/tron-profile-gateway-driver.mjs
@@ -85,6 +86,8 @@ jobs:
           python3 scripts/test-tron-profile.py
           python3 scripts/test-tron-profile-ios.py
           python3 scripts/test-tron-profile-attribution.py
+      - name: Test the incident triage tool
+        run: python3 scripts/test-tron-triage.py
       - run: python3 scripts/check-documentation-policy.py
       - name: Check shell syntax
         run: |

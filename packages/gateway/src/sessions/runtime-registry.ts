@@ -88,8 +88,10 @@ import {
   SessionCatalog,
   SUBAGENT_RUN_DIRECTORY,
   delegatedSessionParentPath,
+  type SessionCatalogChange,
   type SessionCatalogReconcileOutcome,
   type SessionCatalogSource,
+  type SessionCatalogWatcherReset,
 } from "./session-catalog.js";
 import { resolveForkBoundaryAnchor, type ForkBoundaryAnchor } from "./fork-boundary.js";
 import type { KnowledgeService } from "../knowledge/knowledge-service.js";
@@ -378,6 +380,14 @@ interface CatalogPageSeed {
 
 interface CatalogPageSource {
   readonly generation: string;
+  /** Conditional-read token for this exact projection. It covers the whole
+   * projection, not just structural membership: the page-source generation
+   * plus this Gateway runtime's epoch. Every row field that can change without
+   * moving `listRevision` (a live summary, a cold row's attention projection,
+   * archive state) moves the projection generation inside the token, and the
+   * epoch fences a restart whose revisions begin again at zero. A client may
+   * therefore revalidate a retained token on a replacement connection (G-7). */
+  readonly projectionToken: string;
   readonly listRevision: number;
   readonly count: number;
   readonly compactByteEstimate: number;
@@ -589,6 +599,12 @@ export class RuntimeRegistry {
       /** One catalog reconcile, with the files it covered and the rows it
        * changed. An incomplete or failed pass is reported instead of silent. */
       catalogReconciled?: (reconciled: SessionCatalogReconcileOutcome) => void;
+      /** One catalog row the folder watcher changed for one file: a change no
+       * request or commit explains. */
+      catalogChanged?: (change: SessionCatalogChange) => void;
+      /** The folder watcher stopped observing the catalog folder, so the index
+       * is re-derived from the folder's own cut once a watcher is attached. */
+      catalogWatcherReset?: (reset: SessionCatalogWatcherReset) => void;
       /** A runtime whose extension shutdown overran its disposal grace and was
        * forced. Outside any request span. */
       runtimeDisposeTimeout?: (graceMs: number) => void;
@@ -628,6 +644,8 @@ export class RuntimeRegistry {
       index: this.catalogMetadataIndex,
       source: this.sessionCatalogSource(),
       ...(options.catalogReconciled ? { onReconciled: options.catalogReconciled } : {}),
+      ...(options.catalogChanged ? { onChanged: options.catalogChanged } : {}),
+      ...(options.catalogWatcherReset ? { onWatcherReset: options.catalogWatcherReset } : {}),
     });
     this.workRegistry = options.workRegistry ?? new GatewayWorkRegistry();
     this.drainId = `idle-${createHash("sha256").update(this.workRegistry.runtimeEpoch).digest("hex").slice(0, 16)}`;
@@ -684,8 +702,9 @@ export class RuntimeRegistry {
     await this.attention.initialize();
     await this.archive.initialize();
     await this.recentModels.initialize();
-    // The catalog owner loads its durable rows and reconciles once behind the
-    // listener: G-1b replaces that cadence with the folder watcher.
+    // The catalog owner loads its durable rows, reconciles once, and watches
+    // the folder for external writers; the periodic pass is the backstop for
+    // any event the watcher could not see (G-9 moves both into the scheduler).
     this.sessionCatalog.start();
     const markerEvidence = await this.markers.evidence();
     // Recovery can open and parse large session files. Do not hold listener
@@ -1697,7 +1716,7 @@ export class RuntimeRegistry {
   async clearAutomationMarker(sessionId: string, operationId: string): Promise<void> {
     if (!operationId.startsWith("automation:")) throw new Error("Only automation markers may be cleared through this boundary");
     await this.markers.clear(sessionId, operationId);
-    if ((await this.markers.evidenceFor(sessionId)).length === 0) this.interrupted.delete(sessionId);
+    if ((await this.markers.evidenceFor(sessionId)).length === 0) this.noteRecoveredMarkerCleared(sessionId);
   }
 
   async reconcileStoredAutomationMarkers(
@@ -1712,8 +1731,19 @@ export class RuntimeRegistry {
           await this.markers.clear(sessionId, marker.operationId);
         }
       }
-      if ((await this.markers.evidenceFor(sessionId)).length === 0) this.interrupted.delete(sessionId);
+      if ((await this.markers.evidenceFor(sessionId)).length === 0) this.noteRecoveredMarkerCleared(sessionId);
     }
+  }
+
+  /** A recovered marker is a catalog overlay in one place only: a row with no
+   * live summary and no slot reads its `phase` from this set. Removing it moves
+   * that row from `interrupted` to `idle`, which is a projection change like
+   * any other, so the token has to move or a connected owner naming the old one
+   * would keep showing `interrupted` (G-7). */
+  private noteRecoveredMarkerCleared(sessionId: string): void {
+    if (!this.interrupted.delete(sessionId)) return;
+    this.catalogProjectionGeneration += 1;
+    this.options.sessionListChanged();
   }
 
   private async catalogStructureEvidence(): Promise<CatalogStructureEvidence> {
@@ -2731,7 +2761,9 @@ export class RuntimeRegistry {
       // summary/attention revision fields. String payloads are counted above.
       + 160, 0);
     return Object.freeze({
-      generation, listRevision, count: seeds.length, compactByteEstimate,
+      generation,
+      projectionToken: `${this.workRegistry.runtimeEpoch}:${generation}`,
+      listRevision, count: seeds.length, compactByteEstimate,
       ...(archivedCount === undefined ? {} : { archivedCount }),
       page: async (offset: number, limit: number) => seeds.slice(offset, offset + limit).map((seed) => ({
         id: seed.id,
