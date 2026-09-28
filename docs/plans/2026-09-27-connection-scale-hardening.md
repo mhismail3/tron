@@ -438,7 +438,7 @@ Critical junctures:
 | Every RPC | Gateway transport | `rpc.completed` with `stages` | O-3 |
 | Catalog change, reconcile, watcher | Catalog owner | `catalog.changed` (debug), `catalog.reconciled`, `catalog.watcher-reset` | G-1 |
 | Snapshot build and broadcast | Slot / transport | per-topic counters in `gateway.resources` | O-5 |
-| Runtime load and eviction | Registry | `runtime.loaded`, `runtime.evicted` | O-5, G-5 |
+| Runtime load and eviction | Registry | `runtime.loaded`, `runtime.evicted` | G-5 |
 | Background work | Scheduler | `background.slice` (debug), `background.backlog` | G-9 |
 | Durable writes | Each store | counters in `gateway.resources` | G-10 |
 | Load shedding | Transport / registry | `gateway.shed` | G-12 |
@@ -521,7 +521,7 @@ rows are in priority order.
 | O-3 | Done | Request span: one `rpc.completed` per slow RPC with every stage, wait and count | O-1 | orchestrator-dispatched deepseek-worker, 2026-09-28 |
 | O-4 | Claimed | Phone connection records that survive an export, stall watchdog, exact scene records | O-1 | orchestrator-dispatched deepseek-worker, 2026-09-28 |
 | O-6b | Ready | Impairment in the qualification scenario: blackhole, bandwidth cap, Gateway restart | O-6a | |
-| O-5 | Review | Gateway resource sampler and event-loop histogram | O-3 | orchestrator-dispatched deepseek-worker, 2026-09-28 |
+| O-5 | Done | Gateway resource sampler and event-loop histogram | O-3 | orchestrator-dispatched deepseek-worker, 2026-09-28 |
 | O-7 | Ready | Incident triage tool: phone export plus Gateway log in, episodes by cause out | O-1, O-2, O-4 | |
 | C-1 | Ready | Projection work never blocks or parks reconnect; parked episodes self-resume | O-4, O-6b | |
 | G-1a | Ready | Catalog owner and in-memory index fed by Gateway-owned changes | O-3, O-6a | |
@@ -2051,15 +2051,18 @@ the day cannot measure a synthetic case).
   live runtimes with their canonical transcript bytes and subscriber counts,
   `runtimesLoaded`/`runtimesEvicted`, snapshot builds and how many had no
   audience, frames/bytes/subscribers per topic, catalog walks with files and
-  time, completed fsyncs with their time, and outbound bytes. Owners report their
+  time (and `requestPathCatalogWalks`, the part a request waited on), completed
+  fsyncs with their time, the sample's own `windowMs`, and outbound bytes.
+  Owners report their
   own work through the narrow `ResourceRecorder` (`recordSnapshotBuild`,
   `recordTopicFrame`, `recordCatalogWalk`, `recordOutboundBytes`,
   `recordRuntimeLoaded`, `recordRuntimeEvicted`); nothing is discovered by
   scanning. Levels: debug for a quiet minute; info when a window's value moves to
   another named step (event-loop p99 in `EVENT_LOOP_P99_INFO_STEP_MS` = 20 ms
-  bands, heap used in `HEAP_SHARE_INFO_STEP` = 10% bands of the limit, RSS moved
-  `RSS_INFO_STEP_SHARE` = 10% from the minute before; the steps are compared with
-  the previous window) or when a runtime loaded or was evicted in it; warning
+  bands and max in `EVENT_LOOP_MAX_INFO_STEP_MS` = 250 ms bands, heap used in
+  `HEAP_USED_INFO_STEP_BYTES` = 256 MiB bands, RSS moved `RSS_INFO_STEP_SHARE` =
+  10% from the last window written at info or above; the bands are compared with
+  the previous window) or when a runtime was published or evicted in it; warning
   past `HEAP_WARNING_SHARE` (0.70 of the V8 heap limit) or
   `EVENT_LOOP_P99_WARNING_MS` (100 ms). Counters are drained, bounded to eight
   named topics and eight named runtimes with `+N` for the rest, and every
@@ -2092,7 +2095,9 @@ the day cannot measure a synthetic case).
     `src/sessions/runtime-registry.integration.test.ts` passes 243/243 in 57 s.
     `npm run build` is clean.
   - Volume: the quiet minute is debug and stays in the 2 MB memory-only buffer
-    (about 1,440 records, roughly 0.5 MB a day, none on disk). A named step that
+    (about 1,440 records, roughly 0.5 MB a day, none on disk; the buffer is shared
+    with every other debug record and is not kept for a day, as the observability
+    doc now says). A named step that
     moved (info) or a crossed threshold (warning) reaches `gateway.jsonl`, so a
     normal day is a small number of records rather than 1,440. The worst case —
     every minute crossing a step — is 1,440 records × 0.5 KB, about 0.7 MB, which
@@ -2102,7 +2107,10 @@ the day cannot measure a synthetic case).
     new rows and the measured-volume paragraph.
 - Changes: the O-5 commits on `hardening/o-5`.
 - "Done when" (the 5% cross-check against O-6a's report): **owed to the
-  orchestrator**, not run here; the row is `Review` until it runs. O-6a's
+  orchestrator**, not run here, and it is a condition of the exit criteria rather
+  than of this row: the orchestrator set the row to `Done` on 2026-09-28 once
+  every review finding was fixed, with the cross-check still owed after the
+  quiet-host O-6a run ("Done when" is answered, not deferred). O-6a's
   scenario is committed on `hardening/o-6a` (6be09c4ba) but that worktree carries
   uncommitted edits to `scripts/tron-profile-gateway`,
   `scripts/tron-profile-gateway-driver.mjs` and `scripts/test-tron-profile.py`,
@@ -2148,9 +2156,11 @@ the day cannot measure a synthetic case).
     registry needs it before the transport exists).
   - The registry gained `resourceInventory()` (one `stat` per live runtime a
     minute, from `slot.sessionFile`) and `publishRuntime()`, which counts a
-    runtime load where the live slot is published; the slot gained
+    runtime load and tells the slot it was published; the slot gained
     `sessionAudience` (the subscriber set lives in the registry) and counts an
-    eviction in `disposeRuntime()`, the one place a slot stops existing. A build
+    eviction in `disposeRuntime()`, the one place a slot stops existing, but only
+    after `markPublished()` — a start retired before publication was never live.
+    A build
     with a pending synchronization barrier but no subscriber yet counts as
     unaudienced; the exact recipient count is also in the per-topic counters
     (`session.snapshot:frames/bytes/subscribers`), which the no-audience work
@@ -2158,7 +2168,9 @@ the day cannot measure a synthetic case).
   - Catalog walks are counted inside `catalogStructureEvidence()` in
     `runtime-registry.ts`, the one method every walk goes through, including the
     request-path callers (`removeIndexedCatalogFile`, attention admission) that
-    the shared `catalog.walk` stage never saw.
+    the shared `catalog.walk` stage never saw. The request-path part is counted
+    apart (`requestPathCatalogWalks`) from the ambient span there, because those
+    callers sit outside `catalog.walk`.
   - `resources.unaudienced-work` was removed after review. The task's Do list
     asks for that warning for snapshots built without an audience *after* the
     no-audience work lands; firing it at warning level before then wrote an
@@ -2179,10 +2191,9 @@ the day cannot measure a synthetic case).
   has no logger seam today, so the transitions are counted where they happen
   (`recordRuntimeLoaded` at publication, `recordRuntimeEvicted` at disposal) and
   reported as `runtimesLoaded`/`runtimesEvicted` with per-runtime bytes in the
-  minute's record instead. **Owed to the orchestrator:** confirm the two named
-  records belong to G-5, which already owns registry eviction and the live-runtime
-  byte budget; if they are wanted in Phase 1 earlier, that is a new row, not a
-  silent O-5 extension.
+  minute's record instead. **Settled by the orchestrator on 2026-09-28:** the two
+  named records belong to G-5, whose Do item 2 already asks for them with bytes;
+  O-5 keeps only the counters, and the Logging-contract row now names G-5.
 - Withdrawn: none.
 - For the next agent: the no-audience row reads `gateway.resources` for its
   before/after numbers, and its recipient count is the `session.snapshot` topic
@@ -2206,3 +2217,41 @@ the day cannot measure a synthetic case).
   of the code and the docs; `durableRemove`'s wrapper and the synchronous
   `existsSync` in `resourceInventory()` are gone. The row is `Review` because its
   "Done when" cross-check still needs O-6a.
+- Second review round (2026-09-28, independent reviewer): 2 major, 5 minor
+  findings and 3 nits, all fixed; no finding is rejected. The real-histogram test
+  no longer asserts wall-clock bounds on a shared, paging host (idle p50 under
+  half the sampling period instead of p99 under 5 ms, a 150 ms block at or above
+  120 ms with no tight upper bound, and the next window under half the stalled
+  max); it passed 20/20 consecutive runs with swap in use, where the old bounds
+  failed about one run in eight. The day's records can now answer the two checks
+  they could not: the RSS step is anchored to the last window written at info or
+  above, so slow growth still promotes (0.02% a minute over 1,000 minutes
+  promotes twice, covered by a new test), and event-loop max moves in
+  `EVENT_LOOP_MAX_INFO_STEP_MS` = 250 ms bands, so a minute with a 240 ms turn is
+  saved even at a low p99. The heap step is absolute bytes
+  (`HEAP_USED_INFO_STEP_BYTES` = 256 MiB) instead of a share of a multi-gigabyte
+  limit, and the observability row plus its volume paragraph no longer imply the
+  debug buffer keeps a day. A tick that finds the previous sample still in flight
+  logs one `gateway.resources-failed` (`reason=previous sample still running`)
+  instead of dropping the minute silently, every record carries its own
+  `windowMs`, and the wiring test now asserts that skipped window instead of
+  feeding its own snapshot counts. Evictions are counted only for published
+  slots (`RuntimeSlot.markPublished()` called from `publishRuntime`), so a start
+  retired before publication cannot make `runtimesEvicted` exceed loads; a
+  registry test builds an unpublished slot through the production creation seam
+  and proves its disposal is not counted. Request-path catalog walks are counted
+  apart (`requestPathCatalogWalks`) at the one walk seam, using the ambient
+  `currentRequestSpan()`, so the request-path criterion is readable from the
+  record; a registry test proves a walk inside a request span reports `true` and
+  one outside reports `false`. The fused JSDoc blocks are split back onto
+  `resourceInventory()` and `publishRuntime()`, and `durableAtomicWriteJson`'s
+  forwarding wrapper is inlined. Orchestrator decisions recorded here: the named
+  `runtime.loaded` / `runtime.evicted` records belong to G-5 (the Logging-contract
+  row now names G-5 alone) and O-5 keeps only the counters; the row is `Done`, and
+  the 5% cross-check against O-6a is owed by the orchestrator after the quiet-host
+  O-6a run.
+- Cross-check owed by the orchestrator (not O-5 work): after a quiet-host O-6a
+  run on `hardening/integration`, read the fixture Gateway's last
+  `gateway.resources` records and compare `outboundBytes` with the driver's summed
+  inbound bytes, and `rssBytes`/`heapUsedBytes` with the report's Gateway RSS,
+  within 5% (method and its exclusions are in the "Done when" entry above).
