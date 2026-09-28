@@ -55,6 +55,7 @@
 
 - **Last updated:** 2026-09-28, E-2c blocked and review-addressed: the profiler refuses a host-wide `time-profiler` trace whose export is projected over its 2 GiB budget and names the trace's size, so no traced scenario's export is projected above 2 GiB; a device capture is not held to that ratio, the shorter-window half and a passing `--scenario all` run remain
 
+- **Last updated:** 2026-09-28, T-4 done: the killer is XCTest's per-test execution-time allowance (the runner's own restart, not another worktree's run), and the test it lands on was the process's heaviest because the URL redaction in `IOSClientDiagnosticBuffer.redactedMessage` was super-quadratic in a run of scheme characters (the export test 8.646-10.297 s -> 0.072 s, 0 redaction differences over 20,247 inputs)
 - **Last updated:** 2026-09-28, T-2 review round 1 addressed: the kill is another worktree's run on the same default-lane simulator, and T-3 tracks the lease that did not serialize them
 
 - **Last updated:** 2026-09-28, G-4 done: the outbound queue drops a superseded session summary revision and supersedes the session state a newer snapshot re-states with the one `session.rebaseline` that covers it, fencing one-shot frames a snapshot cannot restore (`gateway.resources` gains `outboundCoalescedFrames`/`outboundCoalescedBytes`, `connection.outbound-capacity` names `oldestTopic`/`nextTopic`); a phone-side `SessionPresentationStore` case feeds the coalesced frame sequence and proves it installs without a resynchronization
@@ -625,7 +626,7 @@ rows are in priority order.
 | T-1 | Ready | Pre-existing test race: registry extension-artifact discovery tests treat an awaited `discoverExtensionArtifacts()` as a barrier; wait for a pass that settles (three tests, one a false green) | G-1a (Registry zone) | |
 | T-2 | Done | `GatewayConnectionEpisodeRecorderTests/blockedMainActorIsMeasuredAndReported` (O-4) was killed once ("Test crashed with signal kill") when run with four other suites on integration, then passed 3/3; find whether the 5 s main-thread block trips a hosted-test watchdog and bound the block so the test cannot be killed while still proving the stall record | O-4 | orchestrator-dispatched deepseek-worker, 2026-09-28; no hosted-test watchdog exists (a 5 + 10 + 20 s block probe passed); the kill came from another worktree's run on the same default-lane simulator (`E816D194…`), not from the block — see the T-2 handoff and T-3; the block is now the named `mainStallTestBlock` (5 s) in both phases |
 | T-3 | Done | Default-lane iOS runs must serialize on `~/.tron/internal/ios-test/lease.lock`, but runs from three worktrees held the one owned simulator (`E816D194…`) at the same time and killed each other's host app (see the T-2 handoff); the lease was bypassed because `--lane NAME` was consumed by the lease holder and not passed to the command it started, so the command leased the named/other lane while provisioning the default lane's simulator (`ios-test-G7*` lanes: lease file, no marker); the lane now travels with the command and a command that inherits a lease for another lane is refused | none | orchestrator-dispatched deepseek-worker, 2026-09-28 |
-| T-4 | Claimed | `GatewayLogExportTests/byteEnvelopeReservesTheChatTrace` is SIGKILLed when it shares a test process with `GatewayConnectionEpisodeRecorderTests` (main-stall test blocks the main thread twice for 4 s); each passes alone (bundles `20260928T203739Z-run.InevV5`, `20260928T201219Z-run.jNGHmH`). Find the killer and make both robust in one process | T-2 | orchestrator-dispatched deepseek-worker, 2026-09-28 |
+| T-4 | Done | `GatewayLogExportTests/byteEnvelopeReservesTheChatTrace` is SIGKILLed when it shares a test process with `GatewayConnectionEpisodeRecorderTests` (main-stall test blocks the main thread twice for 4 s); each passes alone (bundles `20260928T203739Z-run.InevV5`, `20260928T201219Z-run.jNGHmH`). Find the killer and make both robust in one process | T-2 | orchestrator-dispatched deepseek-worker, 2026-09-28; the killer is XCTest's per-test execution-time allowance (XCTestCore reports `Restarting after unexpected exit, crash, or test timeout`) SIGKILLing the app (`Test crashed with signal kill`), and the test it lands on is the process's CPU-heaviest because `IOSClientDiagnosticBuffer.redactedMessage` matched URLs super-quadratically (3 ms at 512 characters, 654 ms at 4,096; the export test 8.646-10.297 s -> 0.072 s); see the T-4 handoff |
 | C-7 | Done | Dashboard-pool event consumption stops after a failed initial connect (see the C-5 handoff): a successful reconnect brings the socket back but nothing consumes `client.events`, so a background profile stops receiving summaries, `system.stopping` and `transport.disconnected` until its entry is recreated | C-2 | orchestrator-dispatched deepseek-worker, 2026-09-28 (branch `hardening/c-7`; the connection epoch now owns its event reader) |
 
 ### Phase 2 — Release and one evaluation day
@@ -8526,3 +8527,88 @@ wait).
   service seam with a stubbed registry, not yet end-to-end with a real registry
   and a real navigation. The budget check's stall claim has no timing assertion:
   at test-sized indexes the commit's fsync floor exceeds the whole-index scan.
+
+### T-4 · Done · 2026-09-28 · orchestrator-dispatched deepseek-worker (branch `hardening/t-4`)
+
+- Result: the killer is the test runner itself, not another worktree's run.
+  - No overlap: `20260928T203739Z-run.InevV5` (recorder + log export, crashed)
+    and `20260928T203326Z-run.VIQPj2` (five suites, crashed) had no other run
+    open on the simulator in either direction — checked against every
+    `summary.json` start/finish in `~/Library/Developer/Tron/ios/test-runs`
+    (2,380 runs). T-2's contention finding applies to
+    `20260928T160853Z-run.0UFrCv`, not to this pair.
+  - The simulator log for the crash window shows the host ending the test host
+    0.02 s after xcodebuild began a new test session:
+    `SpringBoard: Request received from CoreSimulatorBr.96766 to terminate
+    application com.tron.mobile.testhost: "Termination requested by simulator
+    host"` → `Executing termination request … Force Quit (0xFBFBFBFB)` → the app
+    is SIGKILLed, and XCTestCore reports `Test crashed with signal kill.` plus
+    `Restarting after unexpected exit, crash, or test timeout`.
+  - XCTestCore owns that restart string and the per-test allowance that causes
+    it (`Test Case '%@' exceeded execution time allowance of %@`,
+    `XCTestConfiguration.activeTestConfiguration.testTimeoutsEnabled`,
+    `com.apple.dt.xctest.timeoutQueue`). The kill lands ~30 s into whichever test
+    is running; here that is always `byteEnvelopeReservesTheChatTrace`, the
+    process's CPU-heaviest test, at 29.4/29.5/30.6 s of test time in the three
+    runs measured against their xcresult durations.
+  - That test spent 8.6-10.3 s in `GatewayLogExport.jsonLines`, and all of it in
+    one pattern: `IOSClientDiagnosticBuffer.redactedMessage`'s
+    `[A-Za-z][A-Za-z0-9+.-]*://[^\s"'<>]+` retries the greedy scheme run from
+    every start position, so one unbroken run of scheme characters costs
+    super-quadratic time before it can fail on a missing `://` — measured on the
+    host 3.257 ms at 512 characters, 18.4 at 1,024, 63.4 at 2,048, 653.7 at
+    4,096, once per field per row. Diagnostics carry exactly such runs (a base64
+    token, a hash, a parameter value), so this is a production cost, not a test
+    artifact: `AppModel.exportDiagnostics` redacts up to 1,000 rows on the main
+    actor.
+- Changes: `packages/ios-app/Sources/Support/IOSClientDiagnostics.swift` only.
+  `redactURLs` walks the scheme runs and offers the pattern only the windows a
+  match can start in (first letter of a run followed by `://` and a non-empty
+  body); the pattern still decides the match, so the three other patterns, the
+  redaction semantics and the byte bounds are unchanged.
+- Failure modes this isolated change covers (written before the code):
+  1. cost grows with the square of a long unbroken token/hash/base64 message;
+  2. a window anchored at the wrong start or end drops, shortens or duplicates a
+     redaction;
+  3. a whitespace or delimiter class divergence from the pattern changes what is
+     redacted;
+  4. a second URL later in one token is skipped by the match cursor.
+- Evidence:
+  - Equivalence: a standalone port of both forms over 20,247 inputs (44
+    hand-written shapes plus 20,200 random strings from an alphabet of scheme
+    characters, `://`, delimiters, quotes, angle brackets, `\v`, a combining
+    mark and non-ASCII) → 0 differences. Cost, same host under load and quiet:
+    1 KiB letter run 73.709 → 0.212 ms and 8.977 → 0.024 ms, 800-byte trace row
+    1.390 → 0.220 ms and 0.164 → 0.030 ms, 4 KiB letter run 1183.902 → 0.665 ms
+    and 130.893 → 0.088 ms.
+  - iOS: `GatewayLogExportTests` + `GatewayConnectionEpisodeRecorderTests` +
+    `GatewayDiagnosticsServiceTests` + `ChatInteractionTraceTests` 49/49 twice
+    (`20260928T212300Z-run.CNDzIZ`, `20260928T212334Z-run.6281OA`), 11.074 s and
+    10.997 s total, with `byteEnvelopeReservesTheChatTrace` at 0.072 s and
+    0.073 s (it was 8.646-10.297 s in every retained bundle).
+  - Flake context: the same pair passed on the shared default lane before the
+    fix (`20260928T211803Z-run.AA7EP2`, 21/21, byte-envelope 8.646 s), and on
+    lane CT22 (21/21 and 83/83). All six c-1 "signal kill" failures fall between
+    20:10 and 20:37 UTC, the hour when several worktrees were building and
+    running at once: three were this pair alone and three a five-suite set that
+    contains it. That is the contention that stretched a 9 s CPU-bound test past
+    the allowance; the fix removes the CPU-bound half of the exposure (the
+    remaining multi-second test is wall-clock `Thread.sleep`).
+  - Gateway gate after merging `hardening/integration`: the six transport
+    integration files 132/132, `runtime-registry.integration.test.ts` 258/258 on
+    a re-run (the first attempt read 257/258 from one unrelated flake),
+    `npx tsc --noEmit -p .` clean.
+- What is left (the next agent, not this one):
+  0. The post-merge iOS re-run is owed: the default-lane lease was held by
+     another worktree's build from 21:47 UTC, so the two green runs above are on
+     the pre-merge revision plus this fix. `hardening/integration` does not touch
+     `IOSClientDiagnostics.swift`, `GatewayLogExportTests` or
+     `GatewayConnectionEpisodeRecorderTests`, and the merge only added the
+     gateway gate to this branch.
+  1. The recorder suite's `blockedMainActorIsMeasuredAndReported` is now the
+     process's only multi-second test (10 s of `Thread.sleep` wall clock, T-2's
+     `mainStallTestBlock` twice). Unlike the fixed export it does not grow with
+     host load, so no allowance change is owed.
+  2. Any other diagnostics-shaped surface that redacts long field values should
+     use `redactURLs` rather than the bare pattern; `IOSClientDiagnosticBuffer`
+     is the only caller today.
