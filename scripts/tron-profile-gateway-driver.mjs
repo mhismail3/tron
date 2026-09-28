@@ -1546,6 +1546,10 @@ async function restartLeg(config, clients, retryMethod, measuredNames) {
   return {
     requestedAtMs, restoredAtMs: restored.restoredAtMs, restoredPid: restored.pid,
     downtimeMs: restored.restoredAtMs - requestedAtMs,
+    // The restart's start, read by the profiler from the fixture's log: the new
+    // Gateway's own process start to listening, and the clients' socket close to
+    // that listening; null when the log held no complete start.
+    startup: restored.startup ?? null,
     clients: measured, clientsAll: results, requests,
   };
 }
@@ -1623,10 +1627,18 @@ async function multi() {
       writeFileSync(config.devicesPath, JSON.stringify(tokens), { mode: 0o600 });
       const dashboard = await connect("dashboard", tokens.dashboard);
       result.gateway = { version: dashboard.info.gatewayVersion, protocolVersion: dashboard.info.protocolVersion };
-      // The phone's dashboard list (user scope) builds the durable index.
-      const started = now();
-      const listed = await dashboard.request("session.list", { limit: 500, scope: "user" }, measured);
-      result.list = { ms: now() - started, rows: listed?.sessions?.length ?? null };
+      // The phone's dashboard list (user scope) builds the durable index. A
+      // fresh fixture answers it with a retryable `busy` until the catalog
+      // owner has published its first cut, so this first read retries like the
+      // phone does; `ms` is the attempt that succeeded.
+      const primeRetries = {};
+      let started = now();
+      const listed = await retryingBusy(primeRetries, "session.list", async () => {
+        started = now();
+        return await dashboard.request("session.list", { limit: 500, scope: "user" }, measured);
+      });
+      result.list = { ms: now() - started, rows: listed?.sessions?.length ?? null,
+        busyRetries: primeRetries["session.list"] ?? 0 };
       writeFileSync(resultPath, `${JSON.stringify(result, null, 2)}\n`);
       return;
     }

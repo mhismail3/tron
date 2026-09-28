@@ -3,7 +3,14 @@
 - **Started:** 2026-09-27
 - **Status:** Active (Phase 1 runs on `hardening/integration`; that branch's copy of this plan is authoritative until R-1)
 - **Last updated:** 2026-09-28, G-12 review round 1 addressed: a shared cold start no longer carries one requester's signal (the queued load is dropped only when its last waiter leaves), the heap pass measures progress from its own accounting, and the deadline table is limited to the reads the plan names (see the handoff)
+- **Last updated:** 2026-09-28, G-8a/G-8d/T-1 Done: an unchanged extension artifact costs one `stat` and no read, the ambient pass stays bound and reports a stop, and both read lanes retry a replace before warning (see the handoff)
+- **Last updated:** 2026-09-28, G-2 Done: a 100–200 MiB cold `session.open` is the parse (45–56%, `session.open.manager`) plus the SDK runtime create (22–28%) and the bounded snapshot projection (19–24%) — the three named candidates (registry mutex, idle eviction, fork-boundary reads) are 3–13 ms (`session.open.catalog`) or absent; the whole-branch receipt index maps the snapshot projection allocated for nothing are gone (≈19 ms per snapshot at 100 k entries, measured) and the O-6a prime now retries the fresh fixture's `catalog_not_ready` (see the handoff)
 - **Last updated:** 2026-09-28, G-11 Done: the Slot's publish-time full-transcript summary walk is now an incremental fold (largest run 86.9 ms → 4.8 ms); the dominant remaining stretches are session-search (G-8c) and catalog/registry (G-1c), both in flight, and the combined O-6a max/p99 is re-measured after they merge (see the handoff)
+
+- **Last updated:** 2026-09-28, G-13 review response 1: the row is Blocked, not
+  Done — no run has met the restart criterion — the startup budget's stated
+  reason is corrected and the case is judged on the clients' own close →
+  listening span, read from the Gateway's own record (see the handoff)
 
 - **Last updated:** 2026-09-28, E-3b done: pairing and hello advertise the
   lane's bound endpoint and pin (base64 SHA-256 of the certificate's public key
@@ -602,7 +609,7 @@ rows are in priority order.
 | G-1a | Done | Catalog owner and in-memory index fed by Gateway-owned changes | O-3, O-6a | orchestrator-dispatched deepseek-worker, 2026-09-28 |
 | G-1b | Done | Filesystem watcher and background reconciliation for external writers | G-1a | orchestrator-dispatched deepseek-worker, 2026-09-28 (the O-6a confirmation of the Done-when is owed by the orchestrator) |
 | G-1c | Done | Move every catalog reader to the index; delete request-path walks and the full-parse fallback | G-1b | merged `hardening/integration`; `verifiedCut` unified into `reconciledCut`, G-9 keeps the periodic reconcile, `searchIdentities()` reads the index rows. Owning suite 237/237, merge gate 363/363; O-6a p99 is the orchestrator's quiet-host run |
-| G-1d | Claimed | Replace the catalog wording in `connection-resilience.md` with the index contract (D-3) | G-1c | orchestrator-dispatched deepseek-worker, 2026-09-28 |
+| G-1d | Done | Catalog contract in the docs: `connection-resilience.md` and the README's catalog paragraphs now describe the index owner, its three feeds, reconciliation, JSONL authority and rebuild on loss; no doc describes a request-path walk | G-1c | orchestrator-dispatched deepseek-worker, 2026-09-28 (branch `hardening/g-1d`) |
 | G-3 | Done | No audience, no projection: build and serialize snapshots only for subscribers | O-5, O-6a | orchestrator-dispatched deepseek-worker, 2026-09-28 (branch `hardening/g-3`; review round 1 addressed; CPU comparison and O-5's cross-check owed to the orchestrator) |
 | G-3a | Ready | Streaming progress for a session with no subscriber is still projected (`projectMessage` plus `safeJson` of the full message, up to once per 150 ms each); see G-3 handoff and review nit 8 | G-3 | |
 | C-2 | Done | "Connected" follows the transport (D-2); chat restoration shows its own loading state | C-1 | orchestrator-dispatched deepseek-worker, 2026-09-28 |
@@ -613,7 +620,7 @@ rows are in priority order.
 | C-4 | Done | Truer liveness (D-4): any inbound frame proves liveness | O-4 | orchestrator-dispatched deepseek-worker, 2026-09-28 |
 | C-6 | Done | Cancel frame for disposable reads; a retried `session.open` joins the in-flight one | O-3 | orchestrator-dispatched deepseek-worker, 2026-09-28 (the O-6a slow-open confirmation and the qualification run are the orchestrator's) |
 | G-12 | Done | Server-side deadlines, concurrency caps and heap-pressure shedding with typed retry hints | O-3, O-5 | orchestrator-dispatched deepseek-worker, 2026-09-28 (branch `hardening/g-12`; review round 1 addressed; the O-6a heap-limit-lowered run is the orchestrator's) |
-| G-2 | Claimed | Cold open in bounded time from the index and a single-file fence | G-1c | orchestrator-dispatched deepseek-worker, 2026-09-28 |
+| G-2 | Done | Cold open in bounded time from the index and a single-file fence | G-1c | orchestrator-dispatched deepseek-worker, 2026-09-28 (see handoff: 100–200 MiB cold opens hold at 951 ms max on a load-56 host and 494 ms on a load-10 one; the parse is 45–56% of a slow open; the quiet-host multi-iteration p99 confirmation is the orchestrator's) |
 | G-7 | Done | Reconnect diet: send only what changed | O-1, O-6a | orchestrator-dispatched deepseek-worker, 2026-09-28; both review rounds addressed, R-1/R-4 own the real-reconnect measurement |
 | G-11 | Done | Event-loop budget: find and bound every synchronous task over 50 ms | O-5, O-6a | orchestrator-dispatched deepseek-worker, 2026-09-28 (branch `hardening/g-11`): the Slot's publish-time full-transcript summary walk is now an incremental fold (largest CPU-profile run 86.9 ms → 4.8 ms); the dominant remaining stretches belong to in-flight G-8c (session-search) and G-1c (catalog/registry), so the combined O-6a max/p99 is re-measured by the orchestrator after they merge — see the handoff |
 | G-9 | Done | One background-work scheduler that yields to requests; measure the libuv pool size | O-5, G-1b | orchestrator-dispatched deepseek-worker, 2026-09-28 (the libuv pool comparison and the O-6a latency confirmation are owed by the orchestrator's quiet-host run; the background `node_modules` clone in this worktree is private) |
@@ -623,14 +630,14 @@ rows are in priority order.
 | E-3b | Done | LAN endpoint: advertise endpoints and pin in pairing and hello | E-3a | orchestrator-dispatched deepseek-worker, 2026-09-28 |
 | E-3c | Ready | LAN endpoint, phone side: pin validation, staggered race, seamless fallback | E-3b, C-3 | |
 | E-3d | Ready | LAN endpoint on by default in the release once E-3c's E2E cases pass; the setting is the kill switch | E-3c | |
-| G-13 | Claimed | Restart and reconnect storm: startup budget and a qualification case | G-1c, O-6b | orchestrator-dispatched deepseek-worker, 2026-09-28 |
+| G-13 | Blocked | Restart and reconnect storm: startup budget and a qualification case | G-1c, O-6b | orchestrator-dispatched deepseek-worker, 2026-09-28 (branch `hardening/g-13`): `gateway.startup-budget` (5 s, with the slowest step) and `impairment.restart.startup_ms`/`.close_to_listening_ms`, read from the new process's own record; the case reports G-13's criterion with its numbers. Blocked, not Done: the criterion is a "Done when" and no run has met it — the measured misses are host-bound plus two named causes (the old process's 2 s `work-settle` grace and the storm upgrades serialized by `DeviceStore`'s credential mutex), which need rows of their own or a quiet-host R-1 run; see the handoff |
 | G-8 | Done | Background work audit: delete or bound each unowned or repeating job | O-5 | orchestrator-dispatched deepseek-worker, 2026-09-28 |
-| G-8a | Claimed | Discovery lane retries an atomically replaced `status.json` (bounded, like the watcher lane) so a replace is not `extension.artifact-rejected`; see G-8 handoff | G-1c | orchestrator-dispatched deepseek-worker, 2026-09-28 |
-| G-8d | Claimed | Bound the 750 ms ambient artifact discovery pass by change and make its 1,024-entry truncation impossible or visible; see G-8 handoff | G-8a | orchestrator-dispatched deepseek-worker, 2026-09-28 |
+| G-8a | Done | Discovery lane retries an atomically replaced `status.json` (bounded, like the watcher lane) so a replace is not `extension.artifact-rejected`; see G-8 handoff | G-1c | orchestrator-dispatched deepseek-worker, 2026-09-28 (branch `hardening/g-8a`; the atomic-replace check fails 4/4 before the fix and passes; the watcher lane's pending debounce also owns the retry now) |
+| G-8d | Done | Bound the 750 ms ambient artifact discovery pass by change and make its 1,024-entry truncation impossible or visible; see G-8 handoff | G-8a | orchestrator-dispatched deepseek-worker, 2026-09-28 (same branch: an unchanged `status.json` costs one stat and no read, every entry is examined within a bounded number of passes, and a pass that still stops reports `extension.discovery-truncated`) |
 | G-8b | Done | Bound the Mac app status poll's child processes and per-poll payload re-hash (user/security decision in "Decisions still open"); see G-8 handoff | G-8 | orchestrator-dispatched deepseek-worker, 2026-09-28; review round 1 addressed; back to Claimed because the app-level cadence measurement the row asks for is still owed (see handoff) |
 | G-8c | Done | Persisted session-search index keyed by the catalog's verified file facts, so a start re-reads only what changed; the semantic pass and the index's own writes are time/slice bounded (see handoff) | G-9, G-1c | orchestrator-dispatched deepseek-worker, 2026-09-28; review round 1 addressed |
 | E-1 | Done | Document Tailscale flap diagnosis and user-side checks; the evaluation day confirms | O-2, O-7 | orchestrator-dispatched deepseek-worker, 2026-09-28 |
-| T-1 | Claimed | Pre-existing test race: registry extension-artifact discovery tests treat an awaited `discoverExtensionArtifacts()` as a barrier; wait for a pass that settles (three tests, one a false green) | G-1a (Registry zone) | orchestrator-dispatched deepseek-worker, 2026-09-28 |
+| T-1 | Done | Pre-existing test race: registry extension-artifact discovery tests treat an awaited `discoverExtensionArtifacts()` as a barrier; wait for a pass that settles (three tests, one a false green) | G-1a (Registry zone) | orchestrator-dispatched deepseek-worker, 2026-09-28 (the helper now waits out an in-flight pass and awaits one it starts; G-1c fixed the oversized-header sites and this branch fixes the two in "rejects foreign producer session headers…") |
 | T-2 | Done | `GatewayConnectionEpisodeRecorderTests/blockedMainActorIsMeasuredAndReported` (O-4) was killed once ("Test crashed with signal kill") when run with four other suites on integration, then passed 3/3; find whether the 5 s main-thread block trips a hosted-test watchdog and bound the block so the test cannot be killed while still proving the stall record | O-4 | orchestrator-dispatched deepseek-worker, 2026-09-28; no hosted-test watchdog exists (a 5 + 10 + 20 s block probe passed); the kill came from another worktree's run on the same default-lane simulator (`E816D194…`), not from the block — see the T-2 handoff and T-3; the block is now the named `mainStallTestBlock` (5 s) in both phases |
 | T-3 | Done | Default-lane iOS runs must serialize on `~/.tron/internal/ios-test/lease.lock`, but runs from three worktrees held the one owned simulator (`E816D194…`) at the same time and killed each other's host app (see the T-2 handoff); the lease was bypassed because `--lane NAME` was consumed by the lease holder and not passed to the command it started, so the command leased the named/other lane while provisioning the default lane's simulator (`ios-test-G7*` lanes: lease file, no marker); the lane now travels with the command and a command that inherits a lease for another lane is refused | none | orchestrator-dispatched deepseek-worker, 2026-09-28 |
 | T-4 | Done | `GatewayLogExportTests/byteEnvelopeReservesTheChatTrace` is SIGKILLed when it shares a test process with `GatewayConnectionEpisodeRecorderTests` (main-stall test blocks the main thread twice for 4 s); each passes alone (bundles `20260928T203739Z-run.InevV5`, `20260928T201219Z-run.jNGHmH`). Find the killer and make both robust in one process | T-2 | orchestrator-dispatched deepseek-worker, 2026-09-28; the killer is XCTest's per-test execution-time allowance (XCTestCore reports `Restarting after unexpected exit, crash, or test timeout`) SIGKILLing the app (`Test crashed with signal kill`), and the test it lands on is the process's CPU-heaviest because `IOSClientDiagnosticBuffer.redactedMessage` matched URLs super-quadratically (3 ms at 512 characters, 654 ms at 4,096; the export test 8.646-10.297 s -> 0.072 s); see the T-4 handoff |
@@ -9164,6 +9171,219 @@ wait).
   covered only by the route-change cases above; no profile-switch test holds the
   notice timer pending.
 
+### G-2 · Done · 2026-09-28 · orchestrator-dispatched deepseek-worker (branch `hardening/g-2`)
+
+- Result: measured what fills a cold `session.open` from the O-3 spans and
+  removed the one whole-branch cost the snapshot projection still carried. For
+  a 200 MB session the open is the JSONL parse (45–56%,
+  `session.open.manager`), the SDK runtime create (22–28%,
+  `session.open.runtime`) and the bounded snapshot projection (19–24%,
+  `snapshot.build`); the three candidates G-2 named — registry mutex, idle
+  eviction, fork-boundary parent reads — are not the cost (`session.open.catalog`
+  3–13 ms from the index, no lane wait, no parent read for a top-level session).
+- Parse share (reported separately, as the task asks): the pinned SDK's
+  `loadEntriesFromFile`/`parseSessionEntryLine` runs inside
+  `session.open.manager` and is 45–56% of every slow open measured
+  (3,936/8,034; 2,496/5,492; 3,985/8,034; 2,677/4,782 ms). It is not
+  Gateway-owned and is not reducible without an SDK change; the target is met
+  with it in place.
+- Evidence for "Done when" (cold p99 ≤ 1.5 s for sessions up to 200 MB):
+  - `scripts/tron-profile gateway --scenario multi-session --no-build
+    --iterations 1 --cases none --catalog-files 100 --catalog-mib 2048
+    --mixed-seconds 40` — this catalog's five large sessions are
+    104,876,508 / 131,076,142 / 157,297,276 / 183,508,419 / 209,721,307 B
+    (`catalog.json` `largeBytes`), so the largest is exactly 200 MiB.
+    `latency.session_open_cold_large` (largest first, seconds×1000):
+    **951 / 857 / 671 / 483 / 412 ms** at 1-minute load **56**
+    (`20260928T215040Z-multi-session-1b30cf`), and **494 / 446 / 366 / 369 /
+    266 ms** at load **10** (`20260928T221024Z-multi-session-957a94`). Both
+    runs hold the target with margin; the between-run difference is the host
+    load and is not claimed as this change. Warm opens ≤ 1,025 ms in the loaded
+    run (35 ms in the quiet one), `session.list` ≤ 751 ms / ≤ 13 ms.
+  - Copy of report, catalog, per-iteration samples, prime result and the
+    extracted O-3 `session.open` spans for those runs:
+    `~/.tron/workspace/files/hardening/g-2/`.
+  - O-3 span source for the composition split: a third smoke at
+    `--catalog-mib 3072` (150–300 MiB files) whose opens cross the 1,000 ms
+    `rpc.completed` warning threshold, so the fixture log carries the stage
+    breakdown (`20260928T220150Z-multi-session-e8c752`, run at load 22):
+    `session.open.manager` 45–56%, `session.open.runtime` 22–28%,
+    `snapshot.build` 19–24%, `session.open.catalog` 3–13 ms,
+    `response.encode` ≤ 19 ms, `attention.reconcile` 2–58 ms.
+  - The change itself, measured on the removed work: on a 100,000-entry branch
+    with no delivery or invocation receipt — the shape of the qualification
+    catalog, where a snapshot projection still built three whole-branch index
+    maps per build — `contextDeliveryMetadataByEntry` falls **12.4 → 0.42 ms**
+    and `invocationReceipts` **6.7 → 0.4 ms** (median of 5, one-off script
+    `~/.tron/workspace/files/hardening/g-2/g2-alloc-measure.mjs`, Node 25.9.0; ≈19 ms of synchronous whole-branch
+    work per snapshot gone, the removable part of G-11's 62 ms
+    `projectTranscriptPage` stretch).
+  - Merge gate after merging `hardening/integration` at `5ccc7a009`:
+    `session-archive` + `server-capacity` + `sync-protocol` +
+    `stall-diagnostics` + `server-heartbeat` + `server-http-lifecycle`
+    integration/unit files **132/132**, `runtime-registry.integration.test.ts`
+    **237/237**, `npx vitest run src/sessions/projection.test.ts
+    src/sessions/invocation-receipts.test.ts` **85/85**,
+    `npx tsc --noEmit -p .` clean, `npm run build` clean,
+    `python3 scripts/check-documentation-policy.py` and
+    `scripts/personal-info-guard.sh` pass. Re-run after merging E-3b at
+    `c70ccb4df` (final merge `ec1c3f8f5`): the same six files plus
+    `lan-endpoint.integration.test.ts` **144/144**, and
+    `runtime-registry` + `projection` + `invocation-receipts` **322/322**;
+    `tsc --noEmit` clean. After the validation-once half landed, all ten files
+    together are **466/466**. E-3b does not touch the measured cold-open path, so
+    the smoke numbers above stay as measured.
+  - Negative control for the new case: reverting the single-validation
+    refactor in `projectableTranscriptEntries` (back to parsing the receipt once
+    for the refusal and again for use) leaves it green, and deleting the refusal
+    makes `refuses a malformed invocation receipt while projecting a branch`
+    fail.
+- Changes: commit on `hardening/g-2`: `projection.ts` (validate each invocation
+  receipt once per entry instead of twice), `context-delivery-receipts.ts` and
+  `invocation-receipts.ts` (skip building the whole-branch index maps when the
+  branch holds no receipt of that type), `projection.test.ts` (the missing
+  malformed-receipt refusal case), this plan.
+- Tasks added: none. **Deviation the orchestrator should record under O-6a:**
+  on `hardening/integration` the multi-session prime failed on the first
+  attempt — a fresh fixture answers the prime's `session.list` with a retryable
+  `busy` (`catalog_not_ready`) until the catalog owner publishes its first cut,
+  and the driver did not retry it (24 such records, run
+  `20260928T214631Z-multi-session-00d238` exited 1 at prime). `G-1c` made that
+  refusal deliberate, so the prime now retries it like every other read the
+  driver times (`scripts/tron-profile-gateway-driver.mjs`, the Profiler zone);
+  without it no O-6a smoke can run on a generated catalog whose first cut takes
+  longer than pairing.
+- Kept on purpose: the parse (the SDK's, above); `session.open.runtime`'s agent
+  runtime create (the SDK's `createAgentSessionRuntime`/extension binding, G-11
+  measured its module compile as not Gateway-owned); `projectTranscriptPage`'s
+  remaining O(branch) classification walk (it produces `total`, the page
+  boundaries and each row's invocation/delivery semantics, so it is not
+  removable by slicing); `attention.reconcile` on the open path (≤58 ms).
+- Deviations: the smoke catalog is 100 files, not 3,000: the large-session sizes
+  scale with `--catalog-mib`, so a 100–200 MiB large session is only reachable at
+  the 2,048 MiB reference total. A cold open reads the index for membership and
+  one header, so the file count does not enter its cost. The driver retry above
+  is outside G-2's owning files and is here only because the evidence needs it.
+- For the next agent: the O-6a quiet-host repeat should run
+  `--catalog-files 100 --catalog-mib 2048 --iterations 3` and read
+  `latency.session_open_cold_large.p99`; on a host above load 20 a 200 MiB open
+  moves by seconds, so compare runs at similar load only.
+
+### G-13 · Blocked · 2026-09-28 · orchestrator-dispatched deepseek-worker (branch `hardening/g-13`)
+
+- Result: the Gateway names its startup budget and the restart case reads and
+  judges it, with G-13's criterion reported beside the numbers.
+  - **Budget.** `gateway.startup-budget` is recorded the moment the Gateway
+    serves: process start to listening against `STARTUP_LISTEN_BUDGET_MS`
+    (5 s; `packages/gateway/src/lifecycle/startup-budget.ts`), info inside the
+    budget and warning past it, with the step that owns most of the time. The
+    constant is set from the measured `gateway.startup-step` records (about 1 s
+    quiet, 4.0–4.6 s on the qualification catalog under load), and the reason is
+    the phone's own retry schedule: its clients retry about 2 s and again about
+    5.4 s after their socket closes, so a slower start costs a whole backoff step.
+  - **Case.** `FixtureGateway.restart` reads the new process's own
+    `gateway.startup-step` records from the offset the restart began at and the
+    profiler reports `impairment.restart.startup_ms`; the driver carries the
+    budget into the leg. `restart_criterion_warnings` states a missed criterion
+    with its numbers — slowest reconnect over 10 s, a served storm request over
+    1 s, a start over budget, or no budget read at all — and deliberately does not
+    reject the run: a busy host slows the start itself, and `validate_impairment`
+    already owns what a case proved it measured.
+- Evidence (short runs, 200-file/32 MiB catalog, `--cases restart --no-build`;
+  this host at 1-minute load 26–50, so the host is the storm's dominant cost):
+  - Before (integration + G-1c/G-1b/G-9), report
+    `20260928T214555Z-multi-session-b3c70e`: downtime 7,168 ms, slowest reconnect
+    **15,187 ms**, 1 storm request over 1 s, p99 1,160 ms. The new process's own
+    records: `modules` 4,460 ms of a 4,605 ms start; the old process's shutdown
+    2,165 ms of which `work-settle` was 1,999 ms (the 2 s cleanup grace expiring
+    with 8 owned operations outstanding).
+  - After, report `20260928T220215Z-multi-session-941b6c`: `startup_ms` 6,257
+    (steps named: `modules` 5,529 ms), slowest reconnect 13,215 ms, **0 storm
+    requests over 1 s** (p99 849 ms). Its warnings state exactly both misses. The
+    reconnect misses on this host because the start is host-bound — 5.5 s of the
+    6.3 s is the module graph under load, against 0.38 s on the user's quiet
+    machine — so the clients' third attempt (about 5.7 s) meets a Gateway that is
+    still importing and pays the 5.8 s backoff. The same run's own records show
+    the contrast: its priming starts were 1,235 ms and 1,029 ms (info, budget
+    met), the restart 6,258 ms (warning) during the host's load spike, and the
+    production record is in that run's `fixture/gateway.jsonl`. Quiet-host
+    confirmation is the orchestrator's, like the rest of the plan's measured rows.
+  - Checks: `npx vitest run src/lifecycle/startup-budget.test.ts` 4/4;
+    `python3 scripts/test-tron-profile.py ImpairmentCases MultiSessionSamples`
+    12/12; `python3 scripts/test-tron-profile.py
+    MultiDriverImpairment.test_the_restart_case_reports_the_new_startups_budget`
+    1/1; build and `tsc --noEmit` clean.
+- Changes: `packages/gateway/src/lifecycle/startup-budget.ts` (+ test),
+  `packages/gateway/src/gateway-main.ts`,
+  `packages/gateway/docs/observability.md`, `scripts/tron-profile-gateway`,
+  `scripts/tron-profile-gateway-driver.mjs`, `scripts/test-tron-profile.py`.
+- Deviations: the case reports the criterion rather than failing the run, so one
+  host's slowness cannot reject the whole qualification (the run only rejects a
+  case that measured nothing). The reconnect target is not demonstrated here.
+- Proposed rows for the orchestrator (not touched by this task):
+  1. A restart with running sessions pays the old process's whole 2 s
+     `work-settle` cleanup grace before it exits, so the new process starts 2 s
+     later (measured 1,999 ms of a 2,165 ms shutdown, 8 owned operations). A
+     shorter restart-mode grace is a shutdown-semantics decision, not a startup
+     budget one.
+  2. Each storm reconnect spends 0.7–1.2 s in the upgrade's `auth` stage on this
+     host (six upgrades serialized by `DeviceStore`'s credential mutex, one
+     devices-file read each), which is what the driver's ready sequence waits on
+     after `connectUntilReady` succeeds.
+- Left: the quiet-host run of the full qualification, and R-1's exit-criterion
+  row for the restart.
+
+#### G-13 review response 1 (changes-required) — 2026-09-28
+
+- Status corrected: the entry above claimed Done, but the task's "Done when"
+  (every client reconnecting within 10 s, no request over 1 s) was not met by
+  its own after run (slowest reconnects 13.2, 12.2, 12.0, 11.8 and 13.1 s), and
+  the change measures and reports the restart rather than moving it. G-13 is
+  **Blocked** until the two causes above have rows or a quiet-host R-1 run
+  meets the criterion; nothing here claims the criterion.
+- The startup budget no longer claims to bound the clients' wait. The
+  Gateway's `gateway.startup-budget` record is this process's own start
+  (unchanged constant, 5 s, corrected reason: the clients count from their own
+  socket's close, before the predecessor is down). The profiler now judges the
+  span they do wait: the predecessor's `gateway.stopped` start (timestamp less
+  `durationMs`) to the new `gateway.listening`, budget
+  `RESTART_CLOSE_TO_LISTENING_BUDGET_MS` (4 s; the third retry comes 5.4 s after
+  the close, as early as 4.3 s with its ±20% jitter). The before run above shows
+  why the old check could not see that: its 4,605 ms start (logged "budget met")
+  came with a 15,187 ms slowest reconnect. The rewritten fixture case asserts the
+  clients' span (7,120 ms of close → listening beside a 5,660 ms start).
+- The profiler reads the Gateway's own `gateway.startup-budget` record instead
+  of re-summing rounded step records, so the budget constant has one owner; the
+  reader walks the log's segments newest-first, so a 5 MB rotation inside the
+  restart neither loses the record nor splits it. `fixture.startup` is read
+  directly (no test-only `getattr`).
+- Docs: `gateway.startup-budget` in `packages/gateway/README.md` and the new
+  `impairment.restart.close_to_listening_ms` in its impairment list, plus that
+  the restart criterion is reported rather than enforced; the
+  `packages/gateway/docs/observability.md` row's reason corrected.
+- End-to-end (this host, 1-minute load 25.3, so still not the quiet run the
+  row wants): `scripts/tron-profile gateway --scenario multi-session --cases
+  restart --iterations 1 --catalog-files 200 --catalog-mib 32 --no-build`, run
+  `.../profiles/gateway/20260928T223130Z-multi-session-f3a999`. The reader took
+  the real record (`startup_ms` 4,598, the record's own `budgetMs` 5,000,
+  `modules` 4,011 ms) and the report carries
+  `impairment.restart.close_to_listening_ms` 6,987 against `reconnect_ms_max`
+  12,911 and one request over 1 s. The Gateway logged that start as "budget
+  met" — the reviewed warning would have stayed silent on exactly this storm;
+  the case now says: "the new Gateway was listening 6987 ms after the clients'
+  sockets closed, over its 4000 ms budget ... (its own process start was
+  4598 ms of the 5000 ms it records; slowest step modules at 4011 ms)".
+- Evidence: `python3 scripts/test-tron-profile.py ImpairmentCases
+  MultiSessionSamples
+  MultiDriverImpairment.test_the_restart_case_counts_the_storm_from_the_restore
+  MultiDriverImpairment.test_the_restart_case_reports_the_new_startups_budget
+  MultiDriverImpairment.test_a_capped_legs_close_keeps_every_other_leg_and_the_restart`
+  15/15 (44 s); the two rewritten profiler cases fail against the reviewed
+  revision (stash check) and pass after; the merge gate on this branch with
+  `hardening/integration` merged (132 + 241 tests) and `tsc --noEmit` clean.
+- Deviations: no code change aims at the two causes above, so the criterion is
+  still not demonstrated; the quiet-host run remains the orchestrator's.
+
 ### E-3b · Done · 2026-09-28 · orchestrator-dispatched deepseek-worker (branch `hardening/e-3b`)
 
 - Result: a paired phone learns the LAN lane on the two channels it already
@@ -9397,3 +9617,111 @@ wait).
   bound, not as a proven defect.
 - Remaining: the plan's "Done when" (O-6a with the heap limit lowered) stays the
   orchestrator's qualification run.
+
+### G-8a · G-8d · T-1 · Done · 2026-09-28 · orchestrator-dispatched deepseek-worker (branch `hardening/g-8a`)
+
+- Result: the 750 ms ambient discovery pass reads a run's `status.json` only when
+  the identity of that file changed, and offers a candidate to a slot only when
+  that slot can attribute the run — a canonical JSONL fact, an ownership binding
+  or a projected activity (`RuntimeSlot.extensionAmbientArtifactAttribution`) — so
+  an unchanged artifact a slot already received costs one `stat` and no routed
+  `open`/read/parse. A pass that still stops at a budget reports
+  `extension.discovery-truncated` with its counts (`dropped` included) when the
+  stop starts, when it begins dropping candidates the per-root budget cut, and
+  otherwise at most hourly; the fact and routing caches age out after four unseen
+  passes even when a pass stops early, so the 4,096-entry cap no longer fixes the
+  same cached decisions forever. Both lanes that read an artifact still retry a
+  read that lost an atomic replace before reporting it, and the registry test
+  helper runs a pass it starts itself instead of awaiting a call that can be a
+  silent no-op.
+- Evidence:
+  - G-8d change gate: `npx vitest run src/sessions/runtime-registry.integration.test.ts
+    -t "does not reopen an unchanged ambient artifact"` — a production-shaped root
+    (2,498 run directories, 556 finished `status.json`, one live slot) routes only
+    the artifacts that slot can attribute, the next unchanged pass routes only the
+    live exact binding, and a changed finished artifact is offered again. Reads per
+    steady-state pass: **556 → 0** for artifacts no live slot can attribute (the
+    review measured 556 on this branch and 233 on `hardening/integration`).
+  - G-8d bound and report: `-t "examines every ambient artifact within a bounded
+    number of passes"` — pass 1 `{entries 1_025, statusReads 1_024, work 0,
+    dropped 0}`, pass 2 `{entries 1_100, statusReads 76, work 0, dropped 76}`: the
+    walk reaches the whole root, reads only the entries it had not, and counts the
+    candidates its routing budget cut; a third unchanged pass records nothing
+    further, and no artifact is routed.
+  - G-8a check (the row's negative control): `-t "retries a status.json read that
+    raced an atomic replacement"` atomically replaces `status.json` across real
+    discovery passes bounded by wall clock. On the pre-fix source it fails **4/4**
+    runs with the `artifact-replacement-in-progress` warning; after the fix it
+    passes with the running projection intact.
+  - Owning suite `npx vitest run src/sessions/runtime-registry.integration.test.ts`,
+    merge gate `npx vitest run src/transport/session-archive.integration.test.ts
+    src/transport/server-capacity.integration.test.ts
+    src/transport/sync-protocol.integration.test.ts
+    src/transport/stall-diagnostics.test.ts
+    src/transport/server-heartbeat.integration.test.ts
+    src/transport/server-http-lifecycle.integration.test.ts`, `npx tsc --noEmit -p .`,
+    `python3 scripts/check-documentation-policy.py` and
+    `scripts/personal-info-guard.sh` — see the commit for the recorded results.
+- Changes: `packages/gateway/src/sessions/runtime-registry.ts` (identity-gated
+  ambient read, per-slot artifact-identity routing gate, `dropped` count, aged
+  fact/route caches, start-and-hourly truncation report), `runtime-slot.ts`
+  (`extensionAmbientArtifactAttribution`, bounded discovery-lane retry, watcher-lane
+  retry when a debounce already owns the read), `gateway-main.ts` (the record),
+  `packages/gateway/docs/observability.md`, and the registry integration tests.
+- Deviations: the row named only the discovery lane; the required atomic-replace
+  check shows the watcher lane was the source of the warnings under a replace
+  storm, because a pending `fs.watch` debounce made its retry unreachable. The
+  ambient lane now needs the slot to attribute the run, and the
+  `reconciles an exact-owned active artifact` fixture appended its canonical tool
+  result to the fixture manager, which the live slot never reads; the fixture now
+  appends to the slot's own session manager, as every other canonical-fact fixture
+  here does.
+- Residual: a candidate a slot can attribute but cannot yet project is offered
+  every pass until its artifact changes (bounded by that session's own runs); a
+  terminal artifact's sidecar refresh rests on the exact-binding lane, as the
+  review specified. The `artifact-replacement-in-progress` reason still covers an
+  unclassified read error and a `status.json` that has not been written yet.
+- Round 2 (review response): a route is recorded only after the slot decided the
+  artifact. `RuntimeSlot.discoverExtensionArtifact` now reports `accepted`,
+  `rejected` or `transient`, and the pass records only the first two, so an offer
+  a busy work registry, a losing read or any other temporary failure refused is
+  offered again on the next pass instead of being treated as delivered (the run
+  that `claimExtensionReceiptOwnership` refuses once reaches `completed` on the
+  second pass; it never appears on `bc8d23dc0`). Attributed candidates are now
+  filtered before the per-root budget slice, so unattributable directories can no
+  longer consume that budget or be reported as deferred work (`dropped` in
+  `extension.discovery-truncated` now counts only candidates a live slot still
+  had to be offered).
+
+### G-1d · Done · 2026-09-28 · orchestrator-dispatched deepseek-worker (branch `hardening/g-1d`)
+
+- Result: the docs describe the catalog that exists. `connection-resilience.md`
+  replaces the "speculative caches" sentence (keeping "no transcript mirrors" and
+  "no higher queue limits") with the index contract: one owner
+  (`session-catalog.ts`), three feeds (Gateway commit points, the recursive
+  folder watcher, the 30-minute whole-folder reconcile), the durable
+  `catalog-metadata-v2.json` as the owner's own acceleration, JSONL authority and
+  rebuild from canonical files on loss, `catalog_not_ready` for an unprovable
+  row, and target-file-only commit fences. The README's catalog paragraphs
+  (acquisition, `RuntimeRegistry` membership, the cold-open/fence paragraph, the
+  attention paragraph, the session-invariant paragraph and the summary-row
+  paragraph) now say the same thing and no longer describe the deleted
+  request-path walks, `validatedStructuralIndex`/`sharedCatalogStructureEvidence`,
+  `fallbackCatalogAcquisition`, the lightweight fallback, the successor
+  header-walk cut, the user/all acquisition cuts and sidecar, "ten-way metadata
+  reads", or a startup structural evidence cut.
+- Evidence: every stale mechanism name is gone from the two docs —
+  `grep -rn "validatedStructuralIndex\|sharedCatalogStructureEvidence\|fallbackCatalogAcquisition\|lightweight acquisition\|successor cut\|whole-tree header\|whole-catalog header\|acquisition generations\|sidecar generation" packages/gateway/README.md packages/gateway/docs/` returns no match, and every remaining "walk" mention describes the owner's own scan, the profiler's counter, or an explicit "no request walks" statement. `python3 scripts/check-documentation-policy.py` passed (46 authored files); `scripts/personal-info-guard.sh` OK.
+- Changes: `packages/gateway/docs/connection-resilience.md`,
+  `packages/gateway/README.md`, this plan.
+- Kept on purpose: the discovery bounds (50,001 entries, 25,001 directories/8 MiB,
+  25,000 records/8 MiB, 1,024-byte previews, 512-byte header reads, 16-file
+  batches, 64 KiB/candidate, 64 MiB aggregate, 4 MiB acquisition) and the
+  classification/topology rules, because they are the owner's scan, not the
+  request path. `packages/gateway/docs/observability.md` needed no change: its
+  `catalog.reconciled` row already says the reconcile is "the only whole-folder
+  walk left on this side".
+- Deviations: the plan's G-1b wording said reconcile batches are "at most 50
+  files"; the shipped owner batches at `RECONCILE_CONCURRENCY` (16), so the docs
+  state 16.
+- For the next agent: none. Nothing in this row is owed.

@@ -491,8 +491,40 @@ do not bound provider-owned browser process creation. Session recovery claims th
 existing bounded quarantine synchronously and runs only its network wait in an
 owned task; optional auth-completion refreshes do not block global intake. Input
 cost and provider process creation still require a documented workload envelope,
-not a blanket scalability claim. Do not introduce transcript mirrors,
-workers, speculative caches, or higher queue limits to conceal them.
+not a blanket scalability claim. Do not introduce transcript mirrors, workers,
+or higher queue limits to conceal them; the cost belongs to the owner that has
+it, not to a cache in front of it.
+
+The session catalog is one owner, not a cache. `session-catalog.ts` holds one
+in-memory row per canonical session file and is the request path's only
+membership source: `session.list`, a cold open, attention resolution, automation
+admission, workspace lookup and storage maintenance all read its rows, so no
+request walks the session folder. The owner keeps each row current from three
+feeds. The Gateway's own commit points (create, persist, summary change, rename,
+rekey, fork, delete) apply the row at the same boundary that commits the change.
+A recursive `fs.watch` on the sessions root treats each event as a hint and
+re-reads that path once per `CATALOG_EVENT_DEBOUNCE_MS` (250 ms) quiet spell,
+capped at `CATALOG_EVENT_MAX_WAIT_MS` (1 s) so a writer that never goes quiet
+still reaches its row. A whole-folder reconcile every
+`CATALOG_RECONCILE_INTERVAL_MS` (30 minutes) is the backstop for what the
+watcher cannot see — a dropped event, a watcher that had stopped, a root that
+moved back — and runs in bounded batches that yield to the background-work
+scheduler between them, so it never holds the loop while a request waits. A
+watcher error or a folder it cannot watch records `catalog.watcher-reset`,
+restarts the watcher and reconciles once; reads keep serving the last good cut.
+
+JSONL stays authoritative. The durable `gateway/catalog-metadata-v2.json`
+document is the owner's own acceleration and holds only identity/summary
+metadata, file identity, size/mtime/EOF and a tail-boundary hash; only the owner
+writes it, debounced, and a read never does. A missing, corrupt or foreign-root
+document leaves the index to rebuild every row from canonical files. A pass that
+cannot prove a file publishes the rows it could prove, keeps the previous row for
+the file it could not, and refuses retryably (`catalog_not_ready`) rather than
+answering membership from a cut that might be wrong; a read that lands before the
+first cut is retryable `busy` for the same reason. Membership fences at a commit
+check the target file's own identity and header, never the tree. The request path
+therefore does no work proportional to catalog size, and a change-driven index —
+not a speculative cache — is what makes that true.
 
 ## Isolated qualification
 

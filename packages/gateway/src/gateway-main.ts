@@ -33,6 +33,7 @@ import { PushRelayClient } from "./notifications/relay-client.js";
 import { NotificationService } from "./notifications/notification-service.js";
 import { handledSignalExitCode, SUPERVISOR_RELAUNCH_EXIT_CODE } from "./lifecycle/supervisor-exit-policy.js";
 import { shutdownStep } from "./lifecycle/shutdown-step.js";
+import { STARTUP_LISTEN_BUDGET_MS, startupBudget, type StartupStepTiming } from "./lifecycle/startup-budget.js";
 import { configureAgentBinEnvironment, configureSupervisedNodeCommandEnvironment } from "./runtime/node-command-environment.js";
 import { AutomationStore } from "./automations/automation-store.js";
 import { AutomationScheduler } from "./automations/automation-scheduler.js";
@@ -124,9 +125,12 @@ const logger = new GatewayLogger(join(config.tronHome, "logs", "gateway.jsonl"),
  * `durationMs` is launchd and the launcher.
  */
 let startupCheckpointAt = 0;
+const startupSteps: StartupStepTiming[] = [];
 function startupCheckpoint(step: string, at = performance.now()): void {
-  logger.log("info", `Gateway startup step ${step} took ${Math.round(at - startupCheckpointAt)} ms`, {
-    event: "gateway.startup-step", source: "lifecycle", step, durationMs: at - startupCheckpointAt,
+  const durationMs = at - startupCheckpointAt;
+  startupSteps.push({ step, durationMs });
+  logger.log("info", `Gateway startup step ${step} took ${Math.round(durationMs)} ms`, {
+    event: "gateway.startup-step", source: "lifecycle", step, durationMs,
   });
   startupCheckpointAt = at;
 }
@@ -274,6 +278,11 @@ const sessions = new RuntimeRegistry({
     "warning",
     `Extension lifecycle artifact rejected (${reason}; owner ${owner})`,
     { event: "extension.artifact-rejected", source: "sessions" },
+  ),
+  artifactDiscoveryTruncated: ({ entries, statusReads, work, dropped }) => logger.log(
+    "warning",
+    `Extension artifact discovery stopped early after ${entries} root entries, ${statusReads} artifact reads, ${work} routed reads and ${dropped} candidates its routing budget cut`,
+    { event: "extension.discovery-truncated", source: "sessions", counts: { entries, statusReads, work, dropped } },
   ),
   // Both of these are handled background failures outside any request span, so
   // they keep their own warning record.
@@ -686,6 +695,22 @@ await transport.listen(async () => {
   await sessions.recoverKnowledgeObservation();
   startupCheckpoint("knowledge-observation-recovery");
 });
+// G-13's startup budget: this process's own start, process start to serving.
+// The restart case reads this record (its durationMs, counts.budgetMs and
+// slowest step) from the fixture's Gateway log, so the start is attributable
+// from either side; it judges the criterion on its own close → listening span,
+// which also covers this process's predecessor's shutdown.
+{
+  const budget = startupBudget(performance.now(), startupSteps);
+  logger.log(
+    budget.withinBudget ? "info" : "warning",
+    `Gateway startup budget ${budget.withinBudget ? "met" : "missed"}: listening after ${Math.round(budget.listeningMs)} ms of ${STARTUP_LISTEN_BUDGET_MS} ms (slowest step ${budget.slowestStep} at ${budget.slowestStepMs} ms)`,
+    {
+      event: "gateway.startup-budget", source: "lifecycle", durationMs: budget.listeningMs, step: budget.slowestStep,
+      counts: { budgetMs: STARTUP_LISTEN_BUDGET_MS, stepMs: budget.slowestStepMs, overBudgetMs: budget.overBudgetMs },
+    },
+  );
+}
 // Serving already; these records account for post-listen recovery work.
 await sessions.recoverCanonicalAttention();
 startupCheckpoint("attention-recovery");
