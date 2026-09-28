@@ -2,7 +2,7 @@
 
 - **Started:** 2026-09-27
 - **Status:** Active (Phase 1 runs on `hardening/integration`; that branch's copy of this plan is authoritative until R-1)
-- **Last updated:** 2026-09-28, O-6a done
+- **Last updated:** 2026-09-28, O-6a blocked on a quiet-host repeat
 - **Goal:** A clean, efficient and predictable Gateway and phone connection: the phone stays connected and loads any session promptly whenever the network path is up, however many sessions run and however large the history grows, and every disconnect or slow operation is attributable to one cause from the logs in one step.
 
 ## Goal and constraints
@@ -513,7 +513,7 @@ rows are in priority order.
 | --- | --- | --- | --- | --- |
 | P-0 | Done | Fold the phone reconnect tuning plan into this plan (D-1) and close it through history; done on `main` at activation | none | |
 | O-1 | Claimed | Correlation key across phone and Gateway on every connection record | none | orchestrator-dispatched worker, 2026-09-28 |
-| O-6a | Done | Multi-session qualification scenario with a generated catalog; record the `main` baseline | none | orchestrator-dispatched worker, 2026-09-28 |
+| O-6a | Blocked | Multi-session qualification scenario with a generated catalog; record the `main` baseline | none | orchestrator-dispatched worker, 2026-09-28 |
 | E-2 | Claimed | Bound the iOS profiler's memory or hand the row to the simulator-lifecycle plan | none | orchestrator-dispatched worker, 2026-09-28 |
 | O-2 | Ready | Gateway transport records: upgrade phases, inbound silence with Tailscale peer path | O-1 | |
 | O-3 | Ready | Request span: one `rpc.completed` per slow RPC with every stage, wait and count | O-1 | |
@@ -1652,7 +1652,7 @@ the day cannot measure a synthetic case).
 - Evidence: `python3 scripts/check-documentation-policy.py` passes.
 - Changes: `plan(connection-scale-hardening): P-0 fold in phone reconnect tuning`.
 
-### O-6a · Done · 2026-09-28 · orchestrator-dispatched worker
+### O-6a · Blocked · 2026-09-28 · orchestrator-dispatched worker
 
 - Result: `scripts/tron-profile gateway --scenario multi-session` generates a
   seeded 3,000-file/2 GiB catalog in the fixture's private agent directory,
@@ -1675,8 +1675,15 @@ the day cannot measure a synthetic case).
   positive control on the real Gateway: every measured window counted walks
   (37 per mixed window, 6 per no-subscriber window; the dashboard's
   `session.list` walks). Full runs: `20260928T083106Z-multi-session-491859`
-  (19.9 min, exit 0, catalog digest `b1f20a87…` from seed 2027); a second
-  consecutive run for the noise check is recorded in the next entry. After
+  (19.9 min, exit 0, catalog digest `b1f20a87…` from seed 2027) and the
+  consecutive `20260928T085100Z-multi-session-2406dc` (13.2 min, exit 0, same
+  digest). `scripts/tron-profile compare` of the two: every Findings metric
+  (list, warm and large open, prompt admission and reconnect p99; event-loop
+  p99 and max; CPU percent with and without subscriber; heap and RSS peaks;
+  walks) is `unchanged` within the noise bound except cold `session.open`
+  p99 (140 s to 29 s); 26 other verdicts are window totals (CPU time, wire
+  frames and bytes) that moved because run A's windows overran longer
+  (219 s against 150 s median). After
   every run, success or interruption (an interrupted run was also observed
   live), no `tron-profile-gateway-*` directory remained in the temporary
   directory. Reports live under `~/Library/Developer/Tron/profiles/gateway/`.
@@ -1702,6 +1709,12 @@ the day cannot measure a synthetic case).
   15-minute bound; it should fall to about 13 once lists and opens are fast.
   `catalog.walks` counts every walk (probe), not only request-path ones.
   "Snapshots built without an audience" is not measured by this scenario.
+- Blocked on: "two consecutive runs on a quiet host agree within the report's
+  noise bound". The host was at load 20–55 throughout, and totals depend on
+  how long in-flight operations overrun a window. To unblock: bound the
+  overrun (or report totals per second), then repeat two runs when the host
+  is quiet and confirm `compare` reports no verdicts; the Findings column may
+  then be refreshed from them.
 - For the next agent: the probe (event-loop delay, heap, RSS, walks) is a
   stand-in; once O-3 spans and the O-5 sampler report the same numbers,
   delete or reduce `scripts/tron-profile-gateway-probe.mjs` and read request
