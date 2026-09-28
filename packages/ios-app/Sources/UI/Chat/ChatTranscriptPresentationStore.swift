@@ -58,6 +58,25 @@ struct ChatTranscriptProjectionTag: Hashable, Sendable {
         }
     }
 
+    /// Value semantics over one immutable `LayoutIdentity`: equality and
+    /// hashing are exactly the wrapped value's, so the tag's synthesized
+    /// conformances are unchanged.
+    private final class LayoutIdentityStorage: Hashable, Sendable {
+        let value: LayoutIdentity
+
+        init(_ value: LayoutIdentity) {
+            self.value = value
+        }
+
+        static func == (lhs: LayoutIdentityStorage, rhs: LayoutIdentityStorage) -> Bool {
+            lhs.value == rhs.value
+        }
+
+        func hash(into hasher: inout Hasher) {
+            value.hash(into: &hasher)
+        }
+    }
+
     struct HandoffIdentity: Hashable, Sendable {
         struct Attachment: Hashable, Sendable {
             let id: String
@@ -163,7 +182,12 @@ struct ChatTranscriptProjectionTag: Hashable, Sendable {
     /// The exact Gateway capability fact captured by this immutable source.
     /// A missing Gateway defaults to false for callers and tests.
     let queueManagementCapability: Bool
-    let layoutIdentity: LayoutIdentity
+    /// Every transcript row carries its installation tag into several view
+    /// values, and SwiftUI copies those values repeatedly per body update. The
+    /// inline layout facts (including a whole streaming item) would make each
+    /// copy about a kilobyte, so they live in one immutable shared box.
+    private let layoutIdentityStorage: LayoutIdentityStorage
+    var layoutIdentity: LayoutIdentity { layoutIdentityStorage.value }
     var handoffIdentity: HandoffIdentity
     let hiddenThinkingLabel: String?
     /// Foreground reconciliation installs the authoritative aggregate without
@@ -204,11 +228,11 @@ struct ChatTranscriptProjectionTag: Hashable, Sendable {
         self.queueManagementCapability = queueManagementCapability
         let projectedHiddenThinkingLabel = (authoritySnapshot ?? snapshot)
             .extensionPresentation.semanticState.hiddenThinkingLabel
-        layoutIdentity = LayoutIdentity(
+        layoutIdentityStorage = LayoutIdentityStorage(LayoutIdentity(
             snapshot: snapshot,
             hiddenThinkingLabel: projectedHiddenThinkingLabel,
             queueManagementCapability: queueManagementCapability
-        )
+        ))
         self.handoffIdentity = handoffIdentity ?? HandoffIdentity(
             commit: handoff,
             queuePresentationIDByOperationID: queuePresentationIDByOperationID
