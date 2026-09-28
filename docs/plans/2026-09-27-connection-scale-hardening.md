@@ -2,7 +2,7 @@
 
 - **Started:** 2026-09-27
 - **Status:** Active (Phase 1 runs on `hardening/integration`; that branch's copy of this plan is authoritative until R-1)
-- **Last updated:** 2026-09-28, G-10 durable-write audit done (read-triggered catalog persist residual named)
+- **Last updated:** 2026-09-28, G-10 review fixes (in-flight receipt temporary, missing fsync rows)
 - **Goal:** A clean, efficient and predictable Gateway and phone connection: the phone stays connected and loads any session promptly whenever the network path is up, however many sessions run and however large the history grows, and every disconnect or slow operation is attributable to one cause from the logs in one step.
 
 ## Goal and constraints
@@ -2565,22 +2565,29 @@ a latency percentile.
   rebuild of the inventory from the directory, the store counts its rebuilds:
   an accounting step whose write overlapped a rebuild discards the totals
   instead of adding to them, so a receipt is never counted twice and the next
-  admission rescans the directory. One fsync is still started by a
-  disposable read; it belongs to the catalog owner and is named as this row's
-  residual (below).
+  admission rescans the directory. Two fsyncs are still started by reads; the
+  catalog one belongs to the catalog owner and the connection-admission one to
+  the connection owner, and both are named as this row's residuals (below).
 - Failure modes written before the tests: (1) a receipt's fsync holds the
   process-wide inventory mutex, so a second command's durable write cannot start
   until the first finishes; (2) the byte reservation is released before the
   inventory carries the receipt, so a concurrent admission under-counts and the
   aggregate byte cap is exceeded on disk; (3) a receipt written but never
   accounted, or accounted without being written, drifts the inventory from disk;
-  (4) a disposable read waits on an fsync.
+  (4) a disposable read waits on an fsync; (5) a prune meets a temporary file of
+  a receipt write that is still in flight and removes it, so the publication
+  fails with ENOENT after the operation already ran and the receipt stays
+  pending forever. Failure mode (5) was found by the independent review, not
+  written before the code; its case and fix arrived in the review response.
 - The fsync list (Do item 1). Every fsync in the Gateway goes through
   `syncDurably` in `packages/gateway/src/util/durable-json.ts`; the only
-  `.sync()` call anywhere under `packages/gateway/src` is inside it, so this
-  inventory is exhaustive. `durableAtomicWriteJson` synchronizes twice (the
-  document, then its directory entry after the rename); `durableRemove`
-  synchronizes the directory once, and only when it removed a file.
+  `.sync()` call anywhere under `packages/gateway/src` is inside it, so no
+  durable write bypasses the counters. `durableAtomicWriteJson` synchronizes
+  twice (the document, then its directory entry after the rename);
+  `durableRemove` synchronizes the directory once, and only when it removed a
+  file. The table was incomplete when it was first written; the review response
+  added the connection owner, the iOS device install documents and the startup
+  configuration rows below.
 
   | Interactive path | fsyncs | When | Where |
   | --- | --- | --- | --- |
@@ -2598,6 +2605,9 @@ a latency percentile.
   | recent-model recency (`RecentModelStore.record`) | 2 | fire-and-forget on a run start; a run never waits for it | `packages/gateway/src/providers/recent-models.ts` |
   | enrollment invitation refresh (60 s timer) | 2, or 1 when only the expired invitation is removed | when the 10-minute pairing code had expired | `packages/gateway/src/security/device-store.ts` (timer in `gateway-main.ts`) |
   | workspace first initialization | 3 | once, at startup; not on a request path | `packages/gateway/src/workspace/tron-workspace.ts` |
+  | connection owner state (`ConnectionOwner.execute`, `markRuntimeReady`, `recordProviderObservation`) | 2 | per accepted connection command; per runtime admission that becomes ready; and on every provider admission observation, including the one a `knowledge.raindrop.read` awaits | `packages/gateway/src/integrations/connection-owner.ts` |
+  | iOS device install status and config documents | 2 per document | per `device.install.config`, `device.install.target.bind` and `device.install` mutation, plus the install helper's own running and terminal status writes | `packages/gateway/src/admin/ios-device-install-service.ts` |
+  | Gateway identity configuration | 2 | once at startup; a stored legacy `defaultWorkspace` field is normalized once | `packages/gateway/src/config.ts` |
 
   Rate and latency, measured on the 30 s multi-session smoke run below: one
   `gateway.resources` window reports `durableWrites=100`, `durableWriteMs=1740`
@@ -2607,22 +2617,40 @@ a latency percentile.
   contributor at 6 fsyncs (4 for the receipt pair, 2 for the run marker), which
   is the serialization Do item 2 removes; the idempotent registration and the
   fire-and-forget recency write are each one durable write per interaction.
-- The one read-triggered fsync, kept with its owner: `session.list` and the
-  pre-subscription part of `session.open` reach
-  `RuntimeRegistry.sharedCatalogMaterialization` →
-  `materializeCatalogSnapshot` → `void persistDurableCatalogIndex(...)`
-  (`packages/gateway/src/sessions/runtime-registry.ts`), which rewrites the
-  8 MiB `catalog-metadata-v2.json` through `CatalogMetadataIndex.save` — 2
-  fsyncs per exact catalog generation. No read waits on it, but a read starts
-  durable work. It is not fixed here: those files are the Catalog zone held by
-  G-1a, whose Do item 4 debounces that persist (`CATALOG_PERSIST_DEBOUNCE_MS`,
-  5 s) and requires "never per read", and G-1c deletes the request-path
-  materialization. **Orchestrator decision 2026-09-28:** record it as G-10's
-  residual and mark the row Done rather than edit G-1a's files; the removal is
-  added to G-1c's Do list explicitly. Every other fsync in the list is a
-  mutation, or a step a mutation owns, and no disposable read waits on one:
-  `CommandReceiptStore.status` reads a receipt with `readJson` only and has no
-  write path.
+- Read-triggered fsyncs, each kept with its owner (two, after the review
+  response):
+  - Catalog index: `session.list` and the
+    pre-subscription part of `session.open` reach
+    `RuntimeRegistry.sharedCatalogMaterialization` →
+    `materializeCatalogSnapshot` → `void persistDurableCatalogIndex(...)`
+    (`packages/gateway/src/sessions/runtime-registry.ts`), which rewrites the
+    8 MiB `catalog-metadata-v2.json` through `CatalogMetadataIndex.save` — 2
+    fsyncs per exact catalog generation. No read waits on it, but a read starts
+    durable work. It is not fixed here: those files are the Catalog zone held by
+    G-1a, whose Do item 4 debounces that persist (`CATALOG_PERSIST_DEBOUNCE_MS`,
+    5 s) and requires "never per read", and G-1c deletes the request-path
+    materialization. **Orchestrator decision 2026-09-28:** record it as G-10's
+    residual and mark the row Done rather than edit G-1a's files; the removal is
+    added to G-1c's Do list explicitly.
+  - Connection admission observation, added in the review response: the table
+    above did not list it. `knowledge.raindrop.read` calls
+    `KnowledgeConnectorService.readRaindrop`, whose `observe` closure awaits
+    `ConnectionOwner.recordProviderObservation` (`observe` in
+    `packages/gateway/src/knowledge/connectors.ts`, the owner in
+    `packages/gateway/src/integrations/connection-owner.ts`) on every read
+    attempt, which rewrites the connection state document and bumps `updatedAt`
+    and `stateRevision` even when the observation is unchanged — 2 awaited
+    fsyncs on the read. It is left as G-10's second residual: skipping an
+    unchanged observation changes the revision semantics of the state document,
+    whose only authority is the connection owner and which is not a G-10 owning
+    file. **Review decision 2026-09-28:** the residual is the accepted option for
+    this row; the fix — return without saving when the four projected fields are
+    unchanged, with a case in
+    `packages/gateway/src/integrations/connection-owner.test.ts` — is proposed as
+    a new row.
+- Every other fsync in the list is a mutation, or a step a mutation owns, and no
+  disposable read waits on one: `CommandReceiptStore.status` reads a receipt
+  with `readJson` only and has no write path.
 - Evidence:
   - `npx vitest run src/transport/command-receipts.test.ts` passes 22/22 in 1.9 s,
     including the two new cases. The new cases are discriminating: with
@@ -2633,7 +2661,7 @@ a latency percentile.
     its write is in flight" fail (both commands admitted, the byte cap exceeded).
     The file's existing corrupt, empty, oversized, interrupted-write and
     exact-byte-boundary cases are the crash-safety checks and stay green in the
-    same 22.
+    same 22. The review response grew the file to 24 cases (see below).
   - `npx vitest run src/transport/rpc-idle-admission.integration.test.ts
     src/transport/session-archive.integration.test.ts
     src/transport/gateway-service-transcript.test.ts` passes 57/57 (16.5 s), and
@@ -2661,15 +2689,18 @@ a latency percentile.
   temporary store, not by a full-size O-6a run — the orchestrator allowed this
   because the host is busy (the smoke run above is the same-scenario rate
   evidence). Item 2 (no read path in the fsync list): met for every site inside
-  G-10's owning files; the single read-triggered writer is the catalog index
-  named above, with its removal owned by G-1a/G-1c.
+  G-10's owning files; two read-triggered writers remain, the catalog index and
+  the connection admission observation named above, with their removals owned by
+  G-1a/G-1c and by the proposed connection-owner row.
 - Tasks added: none. G-1c's Do list gains the persist removal (orchestrator).
 - Kept on purpose: `push.registration.upsert` still rewrites its grant document
   on every registration (2 fsyncs). It is an acknowledged mutation, so it stays
   durable before its response; removing the repeated traffic is G-7's reconnect
   diet, not a durability change. `prune` stays inside `inventoryMutex` (it owns
   the entry and byte totals) and fsyncs nothing: it removes expired receipts
-  and interrupted temporary files with `rm`. The definitive-rejection path still
+  and interrupted temporary files with `rm`, but never a temporary whose command
+  still holds a lane, because that file is a publication in flight. The
+  definitive-rejection path still
   removes the pending receipt without a directory fsync, because a rejected
   command leaves no durable evidence to preserve.
 - Deviations:
@@ -2685,8 +2716,81 @@ a latency percentile.
 - For the next agent: R-1 should read `durableWrites`/`durableWriteMs` from the
   fixture's `gateway.jsonl` for the release-candidate numbers — the counters are
   process-global and include the catalog index's read-triggered persist until
-  G-1a/G-1c land. A window whose level stays debug is memory-only, so the
+  G-1a/G-1c land, and the connection admission observation's until the proposed
+  row lands. A window whose level stays debug is memory-only, so the
   full-size run reports fewer resource windows than it has minutes. The
   `request-span.integration.test.ts` open-timing assertion above is host-load
   sensitive and is worth re-checking on a quiet host rather than at the same
   time as another large integration file.
+
+### G-10 · Done · 2026-09-28 · orchestrator-dispatched deepseek-worker, review response (branch `hardening/g-10`)
+
+- Result: one blocker and three minor findings closed, one nit closed, on the
+  same branch as the audit. A receipt prune no longer removes the temporary of a
+  receipt write that is still in flight: `pruneUnlocked` scavenges an owned
+  temporary only when no lane holds its command key, and a lane exists from
+  admission until every user of that command drains. The rebuild counter's
+  pending-write window is now covered, the concurrency case is a liveness
+  assertion instead of a 200 ms race, the fsync table gained the rows the review
+  found missing, and the admission-time `preserveReceiptUntilDrain` flag moved
+  back to after the pending write, so a failed write leaves no fence behind.
+- Blocker closed: `pruneUnlocked` ran under `inventoryMutex` while receipt
+  writes no longer did, so it could `rm` the `<key>.json.<pid>.<hex12>.tmp` of a
+  write in flight; that write's `rename` then failed with ENOENT after
+  `operation()` had already run, and the receipt stayed pending forever (an
+  operator reconciliation fence for an applied mutation). The reproduction the
+  review described is now the case "does not scavenge a temporary receipt whose
+  command is still writing": the real `durableAtomicWriteJson` with only the
+  completed `rename` held, a `prune()` in that window, and assertions that the
+  command fulfils, that its receipt is `completed`, and that one file remains.
+  With the lane check removed the case fails exactly as the review saw it:
+  `ENOENT … rename '<key>.json.<pid>.<hex>.tmp' -> '<key>.json'`.
+- Counter coverage: "does not double-count a receipt rebuilt from disk during
+  its pending write" holds a pending receipt's publication, forces a rebuild in
+  another admission's rescan (`prune(0)` over a backdated seed), and then asserts
+  the exact-boundary admission is admitted, not busy: with the pending
+  rebuild guard removed the store reports three entries for two receipts and
+  rejects the third command with a false `busy`.
+- Reconciled with review nit 5: `lane.preserveReceiptUntilDrain` is set after
+  the pending receipt write succeeds rather than at admission. Pending receipts
+  are never pruned by age and an admission that finds an existing receipt
+  returns or throws before reaching the flag, so the earlier placement only had
+  the effect of leaving the flag set on a lane whose pending write failed.
+- Failure mode (5) in the list above and the three missing fsync rows are from
+  this round, as is the connection-owner residual and its proposed row.
+- Evidence:
+  - `npx vitest run src/transport/command-receipts.test.ts` passes 24/24
+    (0.9–1.2 s) four times in a row. Negative controls: remove the lane check →
+    only the new temporary case fails; remove the pending-rebuild guard → only
+    the new double-count case fails; put the receipt writes back under
+    `inventoryMutex` → "does not serialize…" fails by per-test timeout (15 s)
+    instead of hanging.
+  - `npx vitest run src/transport/rpc-idle-admission.integration.test.ts` passed
+    2/2 in five consecutive runs, plus 2/2 once with `--no-cache`. Its first,
+    cold run in this worktree failed one of the two cases; that failure was not
+    reproducible and its assertion was not captured, so it is recorded rather
+    than diagnosed. The review saw 2/2 on this file against the previous commit
+    of this branch, and this round changes no admission, queue or session path.
+  - `npx tsc --noEmit -p .` is clean. `python3 scripts/check-documentation-policy.py`
+    and `scripts/personal-info-guard.sh` pass.
+- Changes: the review-response commit on `hardening/g-10`.
+- Tasks added: none on this branch. Proposed (orchestrator decision): a new row
+  in Phase 1 for the connection owner — in
+  `packages/gateway/src/integrations/connection-owner.ts`,
+  `recordProviderObservation` returns without saving when the four projected
+  fields are unchanged, so a `knowledge.raindrop.read` starts no fsync; case in
+  `packages/gateway/src/integrations/connection-owner.test.ts`.
+- Kept on purpose: the completed-write window of the rebuild counter still has
+  no admission-level case. Its only unguarded effect is a byte over-count of
+  `completed - pending` for one receipt: the rebuilding admission needs the held
+  command's `COMMAND_RECEIPT_MAX_BYTES` reservation to be counted, so any
+  capacity that admits that sequence sits above the window where the extra bytes
+  could flip an admission decision. The pending-write window is where the
+  counter is observable (entries double-counted → false `busy`), and that case
+  is present.
+- Deviations: the review's finding-2 suggestion "the fix for finding 1 can share
+  this setup" is implemented as a separate case, because finding 1's held write
+  must hold *before* the `rename` (temporary on disk) while finding 2's must hold
+  *after* it (receipt published, so a rescan can count it).
+- For the next agent: the residual from the previous entry stands; the
+  `request-span.integration.test.ts` host-load note above still applies.

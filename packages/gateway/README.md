@@ -963,8 +963,10 @@ identity/envelope overhead before decode and persistence. The store admits at mo
 completion before a mutation executes; full capacity returns retryable `busy`.
 Admission keeps an in-process usage total and periodically reconciles it from
 disk, so sustained revisioned activity is not quadratic in the receipt count;
-owned interrupted atomic-write temporaries are scavenged but arbitrary files are
-not treated as receipt evidence.
+owned interrupted atomic-write temporaries are scavenged, but only when the
+command that named them no longer holds a lane, so a receipt write in flight
+never loses its temporary, and arbitrary files are not treated as receipt
+evidence.
 Only expired, valid completed receipts are reclaimed; revisioned editor updates use
 a ten-minute receipt window because newer revisions supersede them. Pending,
 malformed, oversized, or identity-mismatched evidence remains outcome-unknown, is

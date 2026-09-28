@@ -1,4 +1,4 @@
-import { mkdir, mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, open, readFile, readdir, rename, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -19,6 +19,21 @@ async function temporaryRoot(prefix: string): Promise<string> {
 afterEach(async () => {
   await Promise.all(temporaryRoots.splice(0).map((root) => rm(root, { recursive: true, force: true })));
 });
+
+/** Writes one valid completed receipt into a fresh root and backdates it, so an
+ * explicit `prune(0)` reclaims it. A prune that changes the directory discards
+ * the cached totals, which is how a concurrent admission comes to rescan the
+ * inventory. The seeder store is separate so its capacity and lanes never
+ * affect the case that uses the seed. */
+async function seededBackdatedReceipt(root: string, commandId: string): Promise<void> {
+  const seeder = new CommandReceiptStore(root);
+  await seeder.execute("seed", "session.prompt", commandId, async () => ({ accepted: true }));
+  const [path] = await receiptFiles(root);
+  if (!path) throw new Error("seed receipt was not written");
+  const receipt = JSON.parse(await readFile(path, "utf8"));
+  receipt.createdAt = new Date(Date.now() - 60_000).toISOString();
+  await writeFile(path, JSON.stringify(receipt));
+}
 
 async function receiptFiles(root: string): Promise<string[]> {
   const directory = join(root, "gateway", "command-receipts");
@@ -69,11 +84,11 @@ describe("CommandReceiptStore", () => {
       if (writers === 2) signalSecondWriter();
       try {
         // Hold the first command's real durable write open so the second
-        // command's admission must overlap it. The 200 ms ceiling is a liveness
-        // bound on this test, not a timing assumption: with the accounting
-        // mutex held across the fsync the second writer can never arrive, and
-        // the assertion below then fails instead of hanging.
-        if (writers === 1) await Promise.race([secondWriter, new Promise((resolve) => { setTimeout(resolve, 200); })]);
+        // command's admission must overlap it. Waiting on `secondWriter` with
+        // no ceiling keeps this a liveness assertion: with the accounting
+        // mutex held across the fsync the second writer never starts and the
+        // case fails on the suite's per-test timeout instead of on host load.
+        if (writers === 1) await secondWriter;
         await durableAtomicWriteJson(path, value, mode);
       } finally {
         writing -= 1;
@@ -123,6 +138,103 @@ describe("CommandReceiptStore", () => {
     const persisted = (await receiptFiles(root)).map((path) => readFile(path, "utf8"));
     const bytes = (await Promise.all(persisted)).reduce((total, content) => total + Buffer.byteLength(content), 0);
     expect(bytes).toBeLessThanOrEqual(1_048_576 + 4 * 1_024 + 1);
+  });
+
+  it("does not scavenge a temporary receipt whose command is still writing", async () => {
+    const root = await temporaryRoot("tron-receipts-inflight-temporary-");
+    let signalHeld!: () => void;
+    const held = new Promise<void>((resolve) => { signalHeld = resolve; });
+    let release!: () => void;
+    const released = new Promise<void>((resolve) => { release = resolve; });
+    const writeReceipt = async (path: string, value: unknown, mode?: number): Promise<void> => {
+      // The real durable write, with only the completed receipt's publication
+      // held open, so its temporary exists on disk while the prune below runs.
+      if ((value as { status: string }).status !== "completed") {
+        await durableAtomicWriteJson(path, value, mode);
+        return;
+      }
+      await durableAtomicWriteJson(path, value, mode, {
+        mkdir,
+        open,
+        rm,
+        rename: async (from: string, to: string) => {
+          signalHeld();
+          await released;
+          await rename(from, to);
+        },
+      });
+    };
+    const store = new CommandReceiptStore(root, writeReceipt);
+    const operation = vi.fn(async () => ({ accepted: true }));
+
+    const command = store.execute("device", "session.prompt", "in-flight-write", operation);
+    await held;
+    // Receipt writes run outside `inventoryMutex`, so a prune in another
+    // command's admission can meet this write's temporary. Removing it fails
+    // the rename with ENOENT after the operation already ran, and the receipt
+    // stays pending forever.
+    await store.prune();
+    release();
+
+    await expect(command).resolves.toEqual({ accepted: true });
+    expect(operation).toHaveBeenCalledTimes(1);
+    await expect(store.status("device", "session.prompt", "in-flight-write"))
+      .resolves.toEqual({ status: "completed", result: { accepted: true } });
+    expect(await receiptFiles(root)).toHaveLength(1);
+  });
+
+  it("does not double-count a receipt rebuilt from disk during its pending write", async () => {
+    const root = await temporaryRoot("tron-receipts-pending-rebuild-");
+    await seededBackdatedReceipt(root, "backdated-seed");
+    let signalPublished!: () => void;
+    const published = new Promise<void>((resolve) => { signalPublished = resolve; });
+    let release!: () => void;
+    const released = new Promise<void>((resolve) => { release = resolve; });
+    let signalSecondAdmitted!: () => void;
+    const secondAdmitted = new Promise<void>((resolve) => { signalSecondAdmitted = resolve; });
+    const commandIdOf = (value: unknown): string | undefined => (value as { commandId?: string }).commandId;
+    const statusOf = (value: unknown): string => (value as { status: string }).status;
+    const writeReceipt = async (path: string, value: unknown, mode?: number): Promise<void> => {
+      if (commandIdOf(value) === "pending-rebuild-first" && statusOf(value) === "pending") {
+        // Publish the pending receipt, then hold before reporting success so
+        // the second admission's rescan counts this receipt on disk.
+        await durableAtomicWriteJson(path, value, mode, {
+          mkdir,
+          open,
+          rm,
+          rename: async (from: string, to: string) => {
+            await rename(from, to);
+            signalPublished();
+            await released;
+          },
+        });
+        return;
+      }
+      if (commandIdOf(value) === "pending-rebuild-second" && statusOf(value) === "pending") {
+        // This write starts only after that admission finished its rescan.
+        signalSecondAdmitted();
+      }
+      await durableAtomicWriteJson(path, value, mode);
+    };
+    // Room for one receipt beyond the two that finish here: a store that adds
+    // the rescanned receipt a second time reports three and rejects the third
+    // command with a false `busy`.
+    const store = new CommandReceiptStore(root, writeReceipt, { maximumEntries: 3 });
+    const operation = vi.fn(async () => ({ accepted: true }));
+
+    const first = store.execute("device", "session.prompt", "pending-rebuild-first", operation);
+    await published;
+    await store.prune(0);
+    const second = store.execute("device", "session.prompt", "pending-rebuild-second", operation);
+    await secondAdmitted;
+    release();
+    await expect(Promise.all([first, second])).resolves.toEqual([{ accepted: true }, { accepted: true }]);
+
+    expect(await receiptFiles(root)).toHaveLength(2);
+    const third = vi.fn(async () => ({ accepted: true }));
+    await expect(store.execute("device", "session.prompt", "pending-rebuild-third", third))
+      .resolves.toEqual({ accepted: true });
+    expect(third).toHaveBeenCalledTimes(1);
   });
 
   it("serializes duplicates of the same command and returns the recorded response", async () => {

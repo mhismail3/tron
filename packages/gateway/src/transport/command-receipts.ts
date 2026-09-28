@@ -208,6 +208,15 @@ export class CommandReceiptStore {
     for (const name of names) {
       const path = join(this.directory, name);
       if (isOwnedTemporaryReceiptName(name)) {
+        // A lane is registered before its command writes and removed only after
+        // every user of that command finishes, so it is present for both the
+        // pending and the completed write. A temporary whose lane still exists
+        // is a publication in flight: removing it would fail that write with
+        // ENOENT after its operation already ran. Only crash leftovers, whose
+        // lane is gone, are scavenged. The first 43 characters are the command
+        // key both receipt name patterns are built from
+        // (`isOwnedTemporaryReceiptName`).
+        if (this.lanes.has(name.slice(0, 43))) continue;
         await rm(path, { force: true });
         changed = true;
         continue;
@@ -307,10 +316,6 @@ export class CommandReceiptStore {
           // released only with the completed receipt, which may be larger.
           this.reservedCompletionBytes += COMMAND_RECEIPT_MAX_BYTES;
           reserved = true;
-          // A duplicate lane keeps its completed receipt until it drains. That
-          // fence belongs to admitting the command, so it is set here rather
-          // than after the write.
-          lane.preserveReceiptUntilDrain = true;
           return { exists: false } as const;
         });
         if (admission.exists) return admission.result;
@@ -326,6 +331,12 @@ export class CommandReceiptStore {
           });
           throw error;
         }
+        // A duplicate lane keeps its completed receipt until every duplicate
+        // drains, so a concurrent prune cannot delete the fence the next
+        // duplicate is about to read. Pending receipts are never pruned by age,
+        // so the fence only has to exist once this command has a receipt to
+        // preserve.
+        lane.preserveReceiptUntilDrain = true;
         await this.inventoryMutex.run(async () => {
           if (this.inventoryRebuilds === rebuildsAtAdmission) this.recordNewReceipt(pendingBytes);
           else this.inventory = undefined;
