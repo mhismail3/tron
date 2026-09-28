@@ -15,7 +15,11 @@ const COMMAND_RECEIPT_MAX_BYTES = 1_048_576 + 4 * 1_024;
 const COMMAND_RECEIPT_MAX_ENTRIES = 32_768;
 const COMMAND_RECEIPT_MAX_AGGREGATE_BYTES = 64 * 1_048_576;
 const COMMAND_RECEIPT_MAX_AGE_MS = 24 * 60 * 60_000;
-const COMMAND_RECEIPT_PRUNE_INTERVAL_MS = 60_000;
+// The cadence `gateway-main.ts` registers this store's prune with the
+// background-work scheduler on. Admission no longer prunes on its own: a
+// request path never walks the receipt directory. The capacity boundary below
+// still forces one exact pass before it rejects a command.
+export const COMMAND_RECEIPT_PRUNE_INTERVAL_MS = 60_000;
 // Editor changes are superseded by their revisioned successors. Retain their
 // idempotency response long enough to cover reconnect/retry, but not for the
 // full command window: sustained typing otherwise exhausts shared capacity.
@@ -96,7 +100,6 @@ export class CommandReceiptStore {
   private readonly maximumAgeMs: number;
   private reservedCompletionBytes = 0;
   private inventory: CommandReceiptUsage | undefined;
-  private nextPruneAt = 0;
 
   constructor(
     tronHome: string,
@@ -214,10 +217,11 @@ export class CommandReceiptStore {
     this.inventory.bytes -= bytes;
   }
 
-  private async pruneUnlocked(maxAgeMs: number, force = false): Promise<void> {
+  /** Receipt files in one directory, read to prove which are expired. Only the
+   * scheduler's job and the capacity boundary call this, so every call is one
+   * exact pass; there is no cheaper earlier exit. */
+  private async pruneUnlocked(maxAgeMs: number): Promise<void> {
     const now = Date.now();
-    if (!force && now < this.nextPruneAt) return;
-    this.nextPruneAt = now + COMMAND_RECEIPT_PRUNE_INTERVAL_MS;
     let names: string[];
     try { names = await readdir(this.directory); }
     catch (error) {
@@ -309,7 +313,6 @@ export class CommandReceiptStore {
         // receipt write behind one command's disk write.
         const admission = await this.inventoryMutex.run(async () => {
           await mkdir(this.directory, { recursive: true, mode: 0o700 });
-          await this.pruneUnlocked(this.maximumAgeMs, this.maximumAgeMs === 0);
           const existing = await this.readReceipt(path);
           if (existing) {
             if (existing.identityHash !== identityHash || existing.method !== method || existing.commandId !== commandId) {
@@ -324,7 +327,7 @@ export class CommandReceiptStore {
             // A capacity boundary is also an admission boundary: force one
             // exact cleanup pass before rejecting, so a just-expired
             // high-frequency receipt cannot unnecessarily block the command.
-            await this.pruneUnlocked(this.maximumAgeMs, true);
+            await this.pruneUnlocked(this.maximumAgeMs);
             usage = await this.inventoryUsage();
             if (usage.entries >= this.maximumEntries
               || usage.bytes + this.reservedCompletionBytes + COMMAND_RECEIPT_MAX_BYTES > this.maximumAggregateBytes) {
@@ -441,7 +444,7 @@ export class CommandReceiptStore {
 
   async prune(maxAgeMs = this.maximumAgeMs): Promise<void> {
     await this.inventoryMutex.run(async () => {
-      await this.pruneUnlocked(maxAgeMs, true);
+      await this.pruneUnlocked(maxAgeMs);
     });
   }
 }

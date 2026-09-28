@@ -15,6 +15,7 @@ import {
 import { tmpdir } from "node:os";
 import { basename, dirname, join, relative } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { BackgroundWorkScheduler } from "../background-work.js";
 import {
   CatalogDiscovery,
   DEFAULT_CATALOG_DISCOVERY_LIMITS,
@@ -99,8 +100,16 @@ import {
 //     runs once a second instead of the quiet spell being re-armed forever.
 
 const roots: string[] = [];
+/** The scheduler each fixture's catalog registers its periodic reconcile with,
+ * so a stopped test leaves no armed wake behind. */
+const schedulers: BackgroundWorkScheduler[] = [];
+const catalogs: SessionCatalog[] = [];
 
 afterEach(async () => {
+  // Dispose before removing the root: an owner whose slice or persist write is
+  // still in flight would otherwise write into a directory being removed.
+  for (const catalog of catalogs.splice(0)) await catalog.dispose();
+  for (const scheduler of schedulers.splice(0)) scheduler.stop();
   await Promise.all(roots.splice(0).map((root) => rm(root, { recursive: true, force: true })));
 });
 
@@ -187,9 +196,15 @@ async function fixture(extra: Partial<SessionCatalogOptions> = {}) {
       return { ...summaryFor(info), parsedSize: after.size };
     },
   };
+  // G-9: the periodic reconcile is one of the scheduler's jobs. A test drives a
+  // real scheduler with the loop and in-flight signals it wants to read.
+  const scheduler = new BackgroundWorkScheduler();
+  scheduler.start({ requestsInFlight: () => false, eventLoopP99Ms: () => 0 });
+  schedulers.push(scheduler);
   const catalog = new SessionCatalog({
-    catalogRoot: () => sessions, index, source, persistDebounceMs: 5, ...extra,
+    catalogRoot: () => sessions, index, source, persistDebounceMs: 5, backgroundWork: scheduler, ...extra,
   });
+  catalogs.push(catalog);
   return {
     root,
     // macOS temp roots are reached through a symlink; the walk canonicalizes it,

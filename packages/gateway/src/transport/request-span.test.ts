@@ -1,5 +1,15 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { bytes, count, currentRequestSpan, RequestSpan, runInRequestSpan, stage, wait } from "./request-span.js";
+import {
+  bytes,
+  count,
+  currentRequestSpan,
+  offLoop,
+  RequestSpan,
+  requestsCompetingForLoop,
+  runInRequestSpan,
+  stage,
+  wait,
+} from "./request-span.js";
 
 /**
  * Isolated checks for the request span's own accounting. Failure modes written
@@ -20,6 +30,9 @@ import { bytes, count, currentRequestSpan, RequestSpan, runInRequestSpan, stage,
  *    nesting reads a stack shared by the whole span instead of each stage's own
  *    async context: the later-started stage is charged the earlier one's time
  *    and the earlier one loses it.
+ * 9. A request that waits away from the loop (a shell command, a compaction, a
+ *    model) still counts as competing for it, so background work pauses for a
+ *    loop that is idle; a parked request that ends or nests stays counted.
  */
 
 /** The span reads the clock twice per measurement; pin it so a loaded host
@@ -259,7 +272,41 @@ describe("request span", () => {
     const value = stage("unowned.stage", () => "value");
     expect(value).toBe("value");
     await expect(wait("unowned.mutex", () => Promise.resolve())).resolves.toBeUndefined();
+    await expect(offLoop(() => Promise.resolve("unowned"))).resolves.toBe("unowned");
     expect(count("unowned.count", 1)).toBeUndefined();
     expect(bytes("unowned.bytes", 1)).toBeUndefined();
+  });
+
+  it("stops competing for the loop while an operation waits away from it", async () => {
+    expect(requestsCompetingForLoop()).toBe(false);
+    const span = new RequestSpan();
+    const held = gate();
+    const parked = runInRequestSpan(span, async () => {
+      // Nested wraps park once, and the outermost decides when the request is
+      // back on the loop.
+      await offLoop(() => offLoop(() => held.promise));
+      expect(requestsCompetingForLoop()).toBe(true);
+    });
+    await Promise.resolve();
+    expect(requestsCompetingForLoop()).toBe(false);
+
+    held.release();
+    await parked;
+    expect(requestsCompetingForLoop()).toBe(true);
+    span.breakdown(0);
+    expect(requestsCompetingForLoop()).toBe(false);
+
+    // A request that ends while parked stops competing with it, and the
+    // operation that later resumes cannot count it out twice.
+    const endedWhileParked = new RequestSpan();
+    const stillHeld = gate();
+    const unfinished = runInRequestSpan(endedWhileParked, () => offLoop(() => stillHeld.promise));
+    await Promise.resolve();
+    expect(requestsCompetingForLoop()).toBe(false);
+    endedWhileParked.breakdown(0);
+    expect(requestsCompetingForLoop()).toBe(false);
+    stillHeld.release();
+    await unfinished;
+    expect(requestsCompetingForLoop()).toBe(false);
   });
 });

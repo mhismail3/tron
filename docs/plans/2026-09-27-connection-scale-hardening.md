@@ -33,6 +33,8 @@
 
 - **Last updated:** 2026-09-28, G-10 second review round (receipt totals kept across a rebuild, connection-owner row added)
 
+- **Last updated:** 2026-09-28, G-9 background-work scheduler: catalog reconciliation, receipt pruning and attachment/display maintenance now share one scheduler that yields to requests, a reconcile pass yields to the pause between bounded batches, and only requests on the loop pause it; the libuv pool measurement was host-limited and the launcher is unchanged
+
 - **Last updated:** 2026-09-28, G-8 background work audit: third review round corrected the re-admission fence, the socket promise and the discovery-open ceiling
 
 - **Last updated:** 2026-09-28, G-1b catalog watcher (review round 2: spurious whole-folder passes, true `catalog.changed` bound, O-6a evidence)
@@ -592,7 +594,7 @@ rows are in priority order.
 | G-2 | Ready | Cold open in bounded time from the index and a single-file fence | G-1c | |
 | G-7 | Done | Reconnect diet: send only what changed | O-1, O-6a | orchestrator-dispatched deepseek-worker, 2026-09-28; both review rounds addressed, R-1/R-4 own the real-reconnect measurement |
 | G-11 | Done | Event-loop budget: find and bound every synchronous task over 50 ms | O-5, O-6a | orchestrator-dispatched deepseek-worker, 2026-09-28 (branch `hardening/g-11`): the Slot's publish-time full-transcript summary walk is now an incremental fold (largest CPU-profile run 86.9 ms → 4.8 ms); the dominant remaining stretches belong to in-flight G-8c (session-search) and G-1c (catalog/registry), so the combined O-6a max/p99 is re-measured by the orchestrator after they merge — see the handoff |
-| G-9 | Claimed | One background-work scheduler that yields to requests; measure the libuv pool size | O-5, G-1b | orchestrator-dispatched deepseek-worker, 2026-09-28 |
+| G-9 | Done | One background-work scheduler that yields to requests; measure the libuv pool size | O-5, G-1b | orchestrator-dispatched deepseek-worker, 2026-09-28 (the libuv pool comparison and the O-6a latency confirmation are owed by the orchestrator's quiet-host run; the background `node_modules` clone in this worktree is private) |
 | G-4 | Done | Outbound queue coalescing of superseded snapshots (one covering `session.rebaseline`) and summary revisions by key | G-3 | orchestrator-dispatched deepseek-worker, 2026-09-28 (branch `hardening/g-4`; review round 1 addressed: a superseded sequence is covered by the `session.rebaseline` that replaces it; round 2: only state the snapshot fully re-states and only its own runtime generation, a one-shot frame is a fence; round 3 after merging `hardening/integration`: the replacement path's client is asserted on the authority it installs, covered `session.snapshot`/`session.rebaseline` alike, and the round's fixtures speak protocol 6); the O-6b bandwidth-stream before/after numbers are owed to the orchestrator's quiet-host runs |
 | G-5 | Done | Byte budget for live runtimes and an explicit heap limit | O-5 | orchestrator-dispatched deepseek-worker, 2026-09-28 |
 | E-3a | Claimed | LAN endpoint (D-5), Gateway side: pinned TLS listener bound to the private LAN address | O-1, O-2 | orchestrator-dispatched deepseek-worker, 2026-09-28 |
@@ -7942,6 +7944,113 @@ wait).
   run; this branch proves the mechanism it depends on (no duplicate-open failure,
   no request-path work after the last waiter cancels) in the integration case
   above.
+
+### G-9 · Done · 2026-09-28 · worker session (branch `hardening/g-9`)
+
+- Result: one `BackgroundWorkScheduler` (`packages/gateway/src/background-work.ts`)
+  runs registered jobs one slice at a time, yields with `setImmediate` between
+  slices, and starts nothing while a request is in flight or the loop's delay p99
+  is at or above `BACKGROUND_PAUSE_P99_MS` (50 ms), re-checking every
+  `BACKGROUND_PAUSE_RECHECK_MS` (100 ms). A rejecting slice is reported
+  (`background.slice` at warning) and never stops the scheduler or the jobs after
+  it. Moved under it: the session catalog's periodic reconcile (it registered
+  itself through `SessionCatalogOptions.backgroundWork`, defaulting to the
+  process-wide `backgroundWork` instance, so `runtime-registry.ts` was not
+  touched), command-receipt pruning, and the attachment/display-artifact
+  maintenance pass. Admission no longer prunes the receipt directory: only the
+  capacity boundary still forces one exact pass before it refuses. `gateway-main.ts`
+  starts the scheduler and owns both records; `requestsCompetingForLoop()`
+  (`transport/request-span.ts`) is the in-flight-request signal, and it counts
+  only requests that are on the loop: a receipt-backed mutation parks its own
+  span (`offLoop`) for the length of its operation.
+- Evidence:
+  - `npx vitest run src/background-work.test.ts` — 7/7 (the failure-mode list is
+    in the file header: a slice while a request is in flight, a slice at the p99
+    bound, two slices at once/no yield, a rejecting slice starving later jobs,
+    one `background.backlog` per starved spell rather than per re-check, and
+    `stop()` leaving a wake armed). Each case asserts the exact counts it
+    forbids: 0 slices against 1, an armed immediate against none, one backlog
+    record against two.
+  - `npx vitest run src/sessions/session-catalog.test.ts` — 29/29 (the periodic
+    pass now arrives from the scheduler: "repairs an event the platform never
+    delivered at the next interval pass"), `src/transport/command-receipts.test.ts`
+    — 27/27, `src/transport/request-span.test.ts` +
+    `src/transport/request-span.integration.test.ts` — 22/22.
+  - Merge gate on this branch merged with `hardening/integration` at `47630104f`:
+    the six-file transport set — 132/132; `src/sessions/runtime-registry.integration.test.ts`
+    — 257/257; `npx tsc --noEmit -p .` clean.
+  - Scheduler driven in a real Gateway (short O-6a smoke, `UV_THREADPOOL_SIZE=4`,
+    `scripts/tron-profile gateway --scenario multi-session --no-build --iterations
+    1 --catalog-files 300 --catalog-mib 200 --mixed-seconds 30 --cases none`):
+    the fixture Gateway logged `catalog.reconciled` (300 files in 38.0 s) and ran
+    to completion in 2.6 min. Report:
+    `~/Library/Developer/Tron/profiles/gateway/20260928T202515Z-multi-session-16b386/report.json`.
+    That one record is the **startup** pass, not a scheduler slice: the 30-minute
+    job cannot fire in a 2.6-minute run, and `background.slice` is debug (memory
+    only), so the fixture log holds no `background.*` record at all. The smoke
+    shows the pass runs in a real Gateway; it does not show a slice.
+- Not met, deliberately:
+  - **The libuv pool measurement (Do 3).** The smoke ran on a host at 1-minute
+    load 179 on 18 CPUs; the report's own warning is "host busy: 1-minute load
+    179.0 on 18 CPUs", with `session.list` p99 16.4 s, `session.open` cold p99
+    31.2 s, event-loop delay p99 403 ms and max 1,247 ms over a 30 s window —
+    two to three orders of magnitude above the exit criteria, so a 4-vs-8-vs-16
+    comparison would measure the host, not the pool. `UV_THREADPOOL_SIZE` is
+    unchanged in `packages/mac-app/scripts/tron-gateway-launcher.c`, because a
+    value set from that run would be an unmeasured change.
+  - **Session-search indexing.** Step 2 also names it; it is not in this change.
+    It is G-8c's task (the plan gives it the scheduler registration seam).
+  - **The "Done when" (O-6a latency targets hold while reconciliation runs).**
+    O-6a is Blocked on a quiet host, so no valid run exists; this branch proves
+    the mechanism (the schedule, the pause conditions, the records, the moved
+    jobs, and a reconcile that yields to the pause between bounded batches) and
+    the smoke above proves the pass runs in a real Gateway. The confirmation is
+    owed by the orchestrator, which owns the probe, together with the pool
+    comparison (4/8/16 on one quiet host, comparing `latency.session_list.p99`,
+    `latency.prompt_admission.p99` and `gateway.event_loop.delay_p99`).
+- Deviations: the in-flight-request signal is the live `RequestSpan` count in
+  `packages/gateway/src/transport/request-span.ts` rather than a counter in
+  `transport/server.ts`: one span is exactly one admitted request (constructed at
+  admission, finished in the same `finally` that writes `rpc.completed` or
+  `rpc.cancelled`), and the transport zone is held by E-3a. The catalog's startup,
+  watcher-event and watcher-replacement passes are not registered slices: they run
+  the owner's own pass, whose every bounded batch yields to the scheduler's pause
+  (the durable-row batches of `CatalogMetadataIndex.reconcile` and one file per
+  batch in the rebuild path), so they are paced like a slice but produce no
+  `background.slice` record. The catalog takes the
+  scheduler as an injectable option defaulting to the process-wide instance, so
+  `runtime-registry.ts` needed no change while G-1c held it. Jobs are registered
+  by name; a second registration of one name replaces the first, and the replaced
+  owner's unregister no longer deletes the replacement.
+- For the next agent: G-8c registers session-search indexing through
+  `backgroundWork.register({ name, intervalMs, slice })` (returned function
+  unregisters); a slice with more than one bounded batch awaits
+  `backgroundWork.yieldToLoop()` between batches. The scheduler starts after the
+  listener is serving, so a job registered before that runs from its first due
+  time. `background.slice` is debug (memory only) and `background.backlog`
+  warning, each carrying the job in `step`; both have rows in
+  `packages/gateway/docs/observability.md` and the contract is in
+  `packages/gateway/README.md` ("Background work"). Nothing is running: the
+  profile fixture Gateway exited and the retained evidence stays under the run
+  directory above.
+- Review fixes (second round, same branch): the pause no longer counts a request
+  that is waiting away from the loop (a receipt-backed mutation parks its span in
+  `GatewayService.mutation`), which stops one `session.bash` or `session.compact`
+  from pausing background work indefinitely; a reconcile pass yields to the same
+  pause between bounded batches; a replaced job's unregister no longer deletes the
+  replacement; both background records carry the job in `step`; and startup skips
+  `backgroundWork.start()` when a signal already set `stopping`. Merge gate on
+  this branch merged with `hardening/integration` at `81ea9c8d4`: the six-file
+  transport set 132/132, `npx tsc --noEmit -p .` clean, and
+  `src/sessions/runtime-registry.integration.test.ts` 256/257 — the one failure
+  ("keeps a large streamed write visible through snapshot recovery and canonical
+  handoff", 5 s `isBusy` wait) reproduces on this branch with all six source files
+  reverted to the reviewed commit, so it is the host (1-minute load 32-53 on 18
+  CPUs), not these changes; the case passes alone in 4.2 s. Evidence: the new
+  `src/transport/request-span.integration.test.ts` case fails when the parking is
+  removed (assertion `requestsCompetingForLoop() === false` while a held
+  `session.rename` waits); `src/background-work.test.ts` 9/9 and
+  `src/transport/request-span.test.ts` 10/10.
 
 ### C-1 · Done · 2026-09-28 · orchestrator-dispatched deepseek-worker (branch `hardening/c-1`)
 

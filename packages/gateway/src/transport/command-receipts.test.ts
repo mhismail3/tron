@@ -190,8 +190,8 @@ describe("CommandReceiptStore", () => {
 
     const command = store.execute("device", "session.prompt", "in-flight-write", operation);
     await held;
-    // Receipt writes run outside `inventoryMutex`, so a prune in another
-    // command's admission can meet this write's temporary. Removing it fails
+    // Receipt writes run outside `inventoryMutex`, so a maintenance prune (the
+    // scheduler's job, G-9) can meet this write's temporary. Removing it fails
     // the rename with ENOENT after the operation already ran, and the receipt
     // stays pending forever.
     await store.prune();
@@ -352,10 +352,9 @@ describe("CommandReceiptStore", () => {
     const store = new CommandReceiptStore(root, writeReceipt);
     const operation = async () => ({ accepted: true });
 
-    // Warm the cache. The first admission also runs the interval prune, so the
-    // crash leftover below is planted after it and then survives every
-    // admission until the explicit prune, because those return early until the
-    // interval passes.
+    // Warm the cache. Admission never prunes (G-9: the maintenance pass does),
+    // so the crash leftover below is planted after the warm-up and survives
+    // until the explicit prune.
     await store.execute("device", "session.prompt", "overlap-warm", operation);
     // A crash leftover whose command key holds no lane. Removing it is the one
     // change that discards the cached totals.
@@ -399,7 +398,17 @@ describe("CommandReceiptStore", () => {
 
   it("does not prune a completed receipt while its duplicate lane is active", async () => {
     const root = await temporaryRoot("tron-receipts-active-lane-");
-    const store = new CommandReceiptStore(root, durableAtomicWriteJson, { maximumAgeMs: 0 });
+    let store!: CommandReceiptStore;
+    const writeReceipt = async (path: string, value: unknown, mode?: number): Promise<void> => {
+      await durableAtomicWriteJson(path, value, mode);
+      if ((value as { status: string }).status !== "completed") return;
+      // G-9: an age-0 pass runs as the scheduler's maintenance prune, and this
+      // one meets the completed receipt while the duplicate's lane is still
+      // open. Removing it here would make the queued duplicate run the command
+      // a second time instead of reading the receipt it is queued for.
+      await store.prune(0);
+    };
+    store = new CommandReceiptStore(root, writeReceipt, { maximumAgeMs: 0 });
     let releaseOperation: (() => void) | undefined;
     let signalStarted: (() => void) | undefined;
     const started = new Promise<void>((resolve) => { signalStarted = resolve; });
@@ -421,6 +430,9 @@ describe("CommandReceiptStore", () => {
     ]);
     expect(operation).toHaveBeenCalledTimes(1);
 
+    // Every lane has drained, so the same pass now expires the receipt and a
+    // later duplicate runs the command again.
+    await store.prune(0);
     await expect(store.execute(
       "device",
       "session.prompt",
@@ -576,8 +588,13 @@ describe("CommandReceiptStore", () => {
       maximumAggregateBytes: 2 * 1_048_576,
     });
 
+    // G-9: admission no longer walks the receipt directory, so the leftover
+    // survives the first command. The capacity boundary still runs one exact
+    // pass before it refuses, and that pass is what reclaims it.
     await expect(store.execute("device", "session.prompt", "first-command", async () => ({ accepted: true })))
       .resolves.toEqual({ accepted: true });
+    await expect(store.execute("device", "session.prompt", "second-command", async () => ({ accepted: true })))
+      .rejects.toMatchObject({ code: "busy", retryable: true });
     expect(await receiptFiles(root)).toHaveLength(1);
   });
 
