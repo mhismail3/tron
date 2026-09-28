@@ -483,8 +483,10 @@ it("attaches stall evidence to a delayed-heartbeat record", async () => {
 });
 
 /** The least a connection has to be for `broadcastSession` to deliver a frame
- * and for shutdown to retire it. */
-function subscribedClient(sessionId: string | undefined) {
+ * and for shutdown to retire it. Its queue reports the bytes it accepts the way
+ * `OrderedOutboundQueue` does, which is where the sampler's outbound bytes are
+ * recorded. */
+function subscribedClient(sessionId: string | undefined, accepted: (bytes: number) => void = () => {}) {
   return {
     id: "client-1",
     ready: true,
@@ -499,7 +501,7 @@ function subscribedClient(sessionId: string | undefined) {
     pendingSessionOpens: new Map(),
     rekeyedSessionIds: new Map(),
     subscriptionTokens: new Map(sessionId === undefined ? [] : [[sessionId, "subscription-token"]]),
-    outbound: { enqueue: () => true },
+    outbound: { enqueue: (frame: { bytes: number }) => { accepted(frame.bytes); return true; } },
   };
 }
 
@@ -538,7 +540,7 @@ it("records the resource window through the transport's timer", async () => {
     eventLoopDelay: () => ({ p50Ms: 1, p99Ms: 2, maxMs: 3 }),
   });
   const gateway = resourceServer(log, sampler);
-  const client = subscribedClient("session-1");
+  const client = subscribedClient("session-1", (bytes) => sampler.recordOutboundBytes(bytes));
   (gateway as unknown as { clients: Map<string, unknown> }).clients.set("client-1", client);
   // One snapshot build for a subscriber. A frame for a session with nobody
   // subscribed to it is never prepared and is covered by "warns when a snapshot

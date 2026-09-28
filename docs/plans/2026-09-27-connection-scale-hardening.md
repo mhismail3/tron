@@ -2,7 +2,7 @@
 
 - **Started:** 2026-09-27
 - **Status:** Active (Phase 1 runs on `hardening/integration`; that branch's copy of this plan is authoritative until R-1)
-- **Last updated:** 2026-09-28, G-4 done: the outbound queue drops a superseded session summary revision and supersedes a session's unsent sequenced frames with the one `session.rebaseline` that covers them (`gateway.resources` gains `outboundCoalescedFrames`/`outboundCoalescedBytes`, `connection.outbound-capacity` names `oldestTopic`/`nextTopic`); a phone-side `SessionPresentationStore` case feeds the coalesced frame sequence and proves it installs without a resynchronization
+- **Last updated:** 2026-09-28, G-4 done: the outbound queue drops a superseded session summary revision and supersedes the session state a newer snapshot re-states with the one `session.rebaseline` that covers it, fencing one-shot frames a snapshot cannot restore (`gateway.resources` gains `outboundCoalescedFrames`/`outboundCoalescedBytes`, `connection.outbound-capacity` names `oldestTopic`/`nextTopic`); a phone-side `SessionPresentationStore` case feeds the coalesced frame sequence and proves it installs without a resynchronization
 - **Goal:** A clean, efficient and predictable Gateway and phone connection: the phone stays connected and loads any session promptly whenever the network path is up, however many sessions run and however large the history grows, and every disconnect or slow operation is attributable to one cause from the logs in one step.
 
 ## Goal and constraints
@@ -554,7 +554,7 @@ rows are in priority order.
 | G-7 | Claimed | Reconnect diet: send only what changed | O-1, O-6a | orchestrator-dispatched deepseek-worker, 2026-09-28 |
 | G-11 | Ready | Event-loop budget: find and bound every synchronous task over 50 ms | O-5, O-6a | |
 | G-9 | Ready | One background-work scheduler that yields to requests; measure the libuv pool size | O-5, G-1b | |
-| G-4 | Done | Outbound queue coalescing of superseded snapshots (one covering `session.rebaseline`) and summary revisions by key | G-3 | orchestrator-dispatched deepseek-worker, 2026-09-28 (branch `hardening/g-4`; review round 1 addressed: a superseded sequence is covered by the `session.rebaseline` that replaces it); the O-6b bandwidth-stream before/after numbers are owed to the orchestrator's quiet-host runs |
+| G-4 | Done | Outbound queue coalescing of superseded snapshots (one covering `session.rebaseline`) and summary revisions by key | G-3 | orchestrator-dispatched deepseek-worker, 2026-09-28 (branch `hardening/g-4`; review round 1 addressed: a superseded sequence is covered by the `session.rebaseline` that replaces it; round 2: only state the snapshot fully re-states and only its own runtime generation, a one-shot frame is a fence); the O-6b bandwidth-stream before/after numbers are owed to the orchestrator's quiet-host runs |
 | G-5 | Claimed | Byte budget for live runtimes and an explicit heap limit | O-5 | orchestrator-dispatched deepseek-worker, 2026-09-28 |
 | E-3a | Ready | LAN endpoint (D-5), Gateway side: pinned TLS listener bound to the private LAN address | O-1, O-2 | |
 | E-3b | Ready | LAN endpoint: advertise endpoints and pin in pairing and hello | E-3a | |
@@ -1323,10 +1323,14 @@ needed), **Checks**, **Docs**, **Done when**, **User action**.
 - **Owning files:** `packages/gateway/src/transport/server.ts`
   (`OrderedOutboundQueue`, send paths).
 - **Do:** per connection, a newer `session.summary` replaces the unsent summary
-  of its session, and a newer `session.snapshot` supersedes every unsent
-  sequenced frame of its session up to its own `eventSequence`, sent as the
-  `session.rebaseline` that covers them and carries the connection's installed
-  `subscriptionToken`; a superseded sequence is never left uncovered. Order
+  of its session, and a newer `session.snapshot` supersedes the unsent sequenced
+  state of its own runtime generation that its own state fully re-states, up to
+  its own `eventSequence`, sent as the `session.rebaseline` that covers them and
+  carries the connection's installed `subscriptionToken`; a superseded sequence
+  is never left uncovered, and a sequenced frame whose effect installing a
+  snapshot does not perform (a failure receipt, a revision bump, an editor
+  directive), or one of another runtime generation, is a fence the queue never
+  drops across. Order
   relative to other events and synchronization barriers is preserved and the
   frame `ws` is already writing is never recalled. The 8 MiB cap stays as the
   backstop; `connection.outbound-capacity` names the topics of the oldest and
@@ -5325,6 +5329,33 @@ events; widen them to name the pool owner in the same change.
     its backstop, which is the capacity close G-4 prevents.
   - `npm run build` clean; `python3 scripts/check-documentation-policy.py` and
     `scripts/personal-info-guard.sh` pass.
+- Review round 2 (construction: `changes-required`) addressed:
+  - Blocker — the rebaseline dropped every unsent sequenced frame of its session,
+    including frames whose effect no snapshot installation performs: the phone's
+    `session.operationFailed` receipt (`ComposerDraftCoordinator.failOperation`
+    restores the draft and retires the submission), `session.extensionError`,
+    the `session.closed` notice, the `session.resourcesChanged`/
+    `structureChanged`/`contextChanged` revision bumps that reload commands, and
+    extension editor directives. The queue now supersedes only topics a snapshot
+    restates (`SNAPSHOT_STATED_TOPICS` in `server.ts`) and only the run of that
+    session's frames after the newest fence: dropping stops at the first frame
+    whose effect installing a snapshot does not perform, and that frame and
+    everything behind it are delivered in order.
+  - Minor — the sequence comparison ignored `runtimeGeneration`, so a
+    generation-2 snapshot could drop generation-1 frames and leave a gap the
+    phone resynchronizes over. Frame identity now carries
+    `runtimeGeneration` (read from the payload) and only frames of the
+    snapshot's own generation are superseded; frames of another generation are
+    fences.
+  - Minor — `recordOutboundBytes` counted the original snapshot's bytes, not the
+    `session.rebaseline` the queue queued. `OrderedOutboundQueue` now reports the
+    bytes it accepts (new `accepted` callback), so accepted minus coalesced is
+    exactly what reached the socket; the per-connection rebaseline encode is
+    stated in `packages/gateway/README.md` (only the connection's installed
+    `subscriptionToken` differs).
+  - Nit — the observability row, the `outboundCoalesced*` doc comment and the
+    `gateway.resources` row no longer say "same key" (supersession is by session
+    and sequence).
 - Changes: `perf(gateway): coalesce superseded outbound frames (G-4)` and its
   review-round commits on `hardening/g-4`.
 - "Done when" items: (1) "O-6b's bandwidth-cap case never closes a socket for
@@ -5341,14 +5372,17 @@ events; widen them to name the pool owner in the same change.
   never touches quarantined events; it acts only on the queue), the revocation
   fence and the `whenIdle` close path, and the Gateway's own overflow
   `session.rebaseline` (which carries no `payload.eventSequence` and is therefore
-  never superseded). Frames whose state is a delta rather than whole state
-  (progress, tool progress, extension activity/presentation, diagnostics,
-  compaction, structure changes, close/error notices) are dropped only by a
-  newer snapshot that covers their sequence, which is what makes the dropped
-  delta reconstructible.
+  never superseded). Frames of the session state a snapshot re-states (progress,
+  tool progress, process/extension activity, compaction, an earlier rebaseline)
+  are dropped only by a newer snapshot of the same runtime generation that covers
+  their sequence; one-shot frames (failure receipts, resource/structure/context
+  revision bumps, extension editor directives, close/error notices) are fences,
+  and the queue keeps them and everything behind them in order, which is what
+  makes a dropped delta reconstructible and a dropped effect impossible.
 - Deviations:
   - `OrderedOutboundQueue.enqueue` takes `OutboundFrame`
-    (`{encoded, bytes, topic, key?, sessionId?, sequence?, rebaseline?}`); the
+    (`{encoded, bytes, topic, key?, sessionId?, sequence?, runtimeGeneration?,
+    rebaseline?}`); the
     queue's unit cases use `queuedFrame()`/`sequencedFrame()` helpers.
   - `outboundFrameIdentity(connection, value, prepared, maximumBytes)` needs the
     connection for the installed `subscriptionToken` and re-encodes the survivor
@@ -5356,6 +5390,10 @@ events; widen them to name the pool owner in the same change.
     rebaseline's bytes are measured where they are serialized. The per-topic
     `gateway.resources` block still attributes the frame to the topic that
     published it, not to the wire topic of the superseded survivor.
+  - `OrderedOutboundQueue` gained an `accepted(bytes)` callback, so the
+    `outboundBytes` counter is recorded where the queue accepts a frame instead
+    of in `sendOutcome`; the value is the bytes actually queued, which for a
+    coalescing replacement is the rebaseline's own.
   - `server-capacity.integration.test.ts`'s fanout case was renamed and its
     expectation changed: it used to require that every `session.summary`
     revision reaches every client in global order. G-4 supersedes that
@@ -5375,8 +5413,10 @@ events; widen them to name the pool owner in the same change.
   `outboundCoalesced*` from the fixture's `gateway.jsonl`. The coalescing
   identity lives in `outboundFrameIdentity` in
   `packages/gateway/src/transport/server.ts`: a new whole-state topic added
-  later needs one row there, not a second queue feature, and anything sequenced
-  is superseded only through a replacement that covers it.
+  later needs one row in `SNAPSHOT_STATED_TOPICS`, not a second queue feature,
+  and anything sequenced is superseded only through a replacement that covers
+  it. A new sequenced topic whose effect installing a snapshot does not perform
+  needs no change: the queue fences it by default.
 
 ### Orchestrator · 2026-09-28 · G-3 merged
 

@@ -10,13 +10,18 @@ owner of accepted commands; mobile reconnect never replays a prompt blindly.
   including the active write. Exactly one frame enters `ws` at a time. Completion
   releases both its payload reference and byte reservation. A newer session
   summary replaces the unsent summary of that session, and a newer session
-  snapshot supersedes every unsent sequenced frame of its session up to its own
-  `eventSequence`, so a slow link carries current state rather than every
-  superseded revision of it. A superseded sequence is never left uncovered: the
-  surviving snapshot is sent as the `session.rebaseline` carrying the whole
-  snapshot and the connection's installed `subscriptionToken`, which the phone
-  installs as fresh authority instead of resynchronizing, and a snapshot for a
-  session this connection holds no token for supersedes nothing. The frame
+  snapshot supersedes the unsent sequenced state of its own runtime generation
+  that it fully re-states, up to its own `eventSequence`, so a slow link carries
+  current state rather than every superseded revision of it. A superseded
+  sequence is never left uncovered: the surviving snapshot is sent as the
+  `session.rebaseline` carrying the whole snapshot and the connection's
+  installed `subscriptionToken`, which the phone installs as fresh authority
+  instead of resynchronizing, and a snapshot for a session this connection holds
+  no token for supersedes nothing. State is dropped only where that replacement
+  restores it: a sequenced frame whose effect no snapshot installation performs
+  (a failure receipt, a resource/structure/context revision bump, an editor
+  directive) is a fence, and it and every frame behind it are delivered in
+  order, as are frames of another runtime generation. The frame
   already entering `ws` is never recalled, what a client receives stays in
   enqueue order, and a dropped frame is not counted as outstanding. A peer
   exceeding either limit loses request/subscription admission immediately; a

@@ -635,6 +635,106 @@ struct SessionPresentationStoreTests {
         #expect(gapped.authoritativeSnapshot(for: baseline.sessionId) == inFlight)
     }
 
+    @Test("a coalesced rebaseline still carries the one-shot receipt its snapshot cannot restore")
+    func coalescedRebaselineKeepsOneShotReceipts() async throws {
+        let builder = SessionScenarioBuilder(seed: 9_142)
+        let entries = builder.pagedMixedSession(totalEntries: 14).page(before: 14, count: 14)
+        var baseline = try builder.openingTail(targetEncodedBytes: 4_096)
+        baseline.transcript = Array(entries[0..<4])
+        baseline.transcriptStart = 0
+        baseline.transcriptTotal = 4
+        var inFlight = baseline
+        inFlight.eventSequence += 1
+        inFlight.revision += 1
+        inFlight.transcript = Array(entries[0..<6])
+        inFlight.transcriptTotal = 6
+        var survivor = inFlight
+        survivor.eventSequence += 6
+        survivor.revision += 6
+        survivor.transcript = entries
+        survivor.transcriptTotal = 14
+
+        // The failure receipt that restores the composer's draft and retires a
+        // failed submission. Installing any snapshot does none of that, so the
+        // Gateway's queue keeps it and everything behind it in order.
+        let receipt = GatewayEvent(
+            type: "event",
+            topic: "session.operationFailed",
+            sessionId: baseline.sessionId,
+            payload: .object([
+                "runtimeGeneration": .string(baseline.runtimeGeneration),
+                "eventSequence": .number(Double(inFlight.eventSequence + 1)),
+                "revision": .number(Double(inFlight.revision + 1)),
+                "data": .object([
+                    "message": .string("the submission failed"),
+                    "operationId": .string("operation-1"),
+                ]),
+            ])
+        )
+        let rebaseline = GatewayEvent(
+            type: "event",
+            topic: "session.rebaseline",
+            sessionId: baseline.sessionId,
+            payload: .object([
+                "reason": .string("superseded snapshot"),
+                "subscriptionToken": .string("token"),
+                "snapshot": try JSONValue.encode(survivor),
+            ])
+        )
+
+        // What the queue emits for that mixed run: the snapshot `ws` was
+        // already writing, the receipt the snapshot cannot stand in for, then
+        // the rebaseline that covers the sequences behind the receipt.
+        let coalesced = SessionPresentationStore(
+            client: GatewayClient(),
+            performanceSignposts: SystemPerformanceSignposts.shared
+        )
+        let probe = NoticeScopeProbe()
+        coalesced.delegate = probe
+        coalesced.installHostedSubscription(snapshot: baseline, token: "token")
+        await coalesced.admit(GatewayEvent(
+            type: "event",
+            topic: "session.snapshot",
+            sessionId: baseline.sessionId,
+            payload: try JSONValue.encode(inFlight)
+        ))
+        await coalesced.admit(receipt)
+        await coalesced.admit(rebaseline)
+
+        // The receipt did its own work, and the rebaseline still installs as
+        // fresh authority over the sequences it covers.
+        #expect(probe.failedOperations == ["operation-1"])
+        #expect(coalesced.authoritativeSnapshot(for: baseline.sessionId) == survivor)
+
+        // The same state delivered one frame at a time leaves the same
+        // authority and the same visible transcript.
+        let sequential = SessionPresentationStore(
+            client: GatewayClient(),
+            performanceSignposts: SystemPerformanceSignposts.shared
+        )
+        sequential.installHostedSubscription(snapshot: baseline, token: "token")
+        await sequential.admit(GatewayEvent(
+            type: "event",
+            topic: "session.snapshot",
+            sessionId: baseline.sessionId,
+            payload: try JSONValue.encode(inFlight)
+        ))
+        await sequential.admit(receipt)
+        for eventSequence in (inFlight.eventSequence + 2)...survivor.eventSequence {
+            var step = survivor
+            step.eventSequence = eventSequence
+            await sequential.admit(GatewayEvent(
+                type: "event",
+                topic: "session.snapshot",
+                sessionId: baseline.sessionId,
+                payload: try JSONValue.encode(step)
+            ))
+        }
+        #expect(sequential.authoritativeSnapshot(for: baseline.sessionId) == survivor)
+        #expect(coalesced.visibleTranscript.map(\.id) == sequential.visibleTranscript.map(\.id))
+        #expect(coalesced.mountedTranscriptCoverage == sequential.mountedTranscriptCoverage)
+    }
+
     @Test("captured Gateway burst retires its epoch and preserves mounted prompt continuity")
     func capturedGatewayBurstRecoversMountedPresentation() async throws {
         let capture = try GatewayRealBurstFixture.load()
@@ -3624,6 +3724,14 @@ private final class NoticeScopeProbe: SessionPresentationStoreDelegate {
     var postedScopes: [InAppNoticeScope] = []
     var postedRoles: [InAppNoticeCenter.Role] = []
     var retiredScopes: [InAppNoticeScope] = []
+    var failedOperations: [String] = []
+
+    func sessionPresentationStoreDidFailOperation(
+        operationID: String,
+        target: SessionPresentationIdentity
+    ) {
+        failedOperations.append(operationID)
+    }
 
     func sessionPresentationStoreDidRequestCatalogRefresh() {}
     func sessionPresentationStoreDidPublishEditorRequest(

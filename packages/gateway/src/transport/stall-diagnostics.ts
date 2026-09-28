@@ -253,8 +253,8 @@ export interface ResourceSample {
   durableWrites: number;
   durableWriteMs: number;
   outboundBytes: number;
-  /** Frames a newer frame with the same key replaced before they were written,
-   * and the bytes they would have cost: the state G-4 kept off a slow link. */
+  /** Frames a newer frame's own state superseded before they were written, and
+   * the bytes they would have cost: the state G-4 kept off a slow link. */
   outboundCoalescedFrames: number;
   outboundCoalescedBytes: number;
 }
