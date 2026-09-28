@@ -1093,6 +1093,10 @@ needed), **Checks**, **Docs**, **Done when**, **User action**.
      `attentionEntryStillAdmitted` and `attentionLiveOnlyStillAdmitted`, the
      cold-open final validation walk, and discovery budgets that exist only for
      those walks, with their tests.
+  4. Delete the read-triggered durable write: today `materializeCatalogSnapshot`
+     starts `persistDurableCatalogIndex` (two fsyncs of the index) from
+     `session.list` and `session.open`; after G-1c no read path appears in
+     G-10's fsync list.
 - **Failure modes to write first:** reader races a rekey; target file replaced
   between index read and commit; index still reconciling at startup (reads
   served from the loaded durable index, marked stale in the span).
