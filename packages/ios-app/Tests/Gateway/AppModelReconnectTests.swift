@@ -85,6 +85,9 @@ struct AppModelReconnectTests {
             #expect(coordinator.hasResolvedLaunchState)
             #expect(factory.requests.count == 1)
             #expect(projection.cacheLoads == 1)
+            // Startup returns at transport readiness; the presentation owner it
+            // handed its projection to runs beneath that socket.
+            await projection.waitForRefresh(count: 1)
             #expect(projection.refreshCount == 1)
             #expect(projection.failures.isEmpty)
         }
@@ -96,6 +99,7 @@ struct AppModelReconnectTests {
             projection.setRestoreResult(false)
             await coordinator.start()
             #expect(coordinator.connectionState == .connected)
+            await projection.waitForAggregateCompletion(count: 1)
             #expect(projection.aggregateCompletions == [false])
             #expect(factory.requests.count == 1)
         }
@@ -533,6 +537,7 @@ struct AppModelReconnectTests {
                 #expect(coordinator.hasResolvedLaunchState)
                 #expect(factory.requests.count == 1)
                 #expect(factory.requests.first?.value(forHTTPHeaderField: "Authorization") == "Bearer token-for-gateway")
+                await projection.waitForRefresh(count: 1)
                 #expect(projection.refreshCount == 1)
             } catch {
                 await gate.release()
@@ -755,10 +760,16 @@ struct AppModelReconnectTests {
             try await clock.waitUntilSleeping(count: 1)
             await start.value
             fixture.model.lifecycleNotePathHint(satisfied: false)
-            clock.advance(by: .seconds(60))
+            try await clock.waitUntilSleeping(
+                count: 1, duration: GatewayLifecycleCoordinator.parkedRetryBound
+            )
+            // The hint pauses the loop: nothing attempts before the parked bound.
+            clock.advance(by: GatewayLifecycleCoordinator.parkedRetryBound - .seconds(5))
+            for _ in 0..<20 { await Task.yield() }
             #expect(fixture.socketFactory.requests.count == 1)
-
-            fixture.model.lifecycleNotePathHint(satisfied: true)
+            // The bound probes the stale hint instead of leaving the phone quiet,
+            // and that probe consumes the failed attempt.
+            clock.advance(by: .seconds(10))
             try await sockets[1].waitUntilSent(count: 1)
             #expect(fixture.socketFactory.requests.count == 2)
             await sockets[1].enqueue(helloFrame())
@@ -786,7 +797,11 @@ struct AppModelReconnectTests {
             fixture.model.lifecycleNotePathHint(satisfied: false)
             await sockets[0].failPendingReceivers(URLError(.networkConnectionLost))
             try await sockets[0].waitUntilClosed()
-            clock.advance(by: .seconds(60))
+            try await clock.waitUntilSleeping(
+                count: 1, duration: GatewayLifecycleCoordinator.parkedRetryBound
+            )
+            clock.advance(by: GatewayLifecycleCoordinator.parkedRetryBound - .seconds(5))
+            for _ in 0..<20 { await Task.yield() }
             #expect(fixture.socketFactory.requests.count == 1)
 
             fixture.model.lifecycleNotePathHint(satisfied: true)
@@ -1631,47 +1646,153 @@ struct AppModelReconnectTests {
         }
     }
 
-    @Test("a stalled episode names the guard that is holding recovery")
-    func unsatisfiedPathIsNamedAsTheGuard() async throws {
+    @Test("a parked episode is not a stall and its bound resumes it without a callback")
+    func parkedEpisodeResumesAtItsBound() async throws {
         let clock = ManualClock()
         let watchdog = ManualClock()
         let logURL = FileManager.default.temporaryDirectory
-            .appending(path: "reconnect-guard-\(UUID().uuidString).jsonl")
+            .appending(path: "reconnect-parked-bound-\(UUID().uuidString).jsonl")
         defer {
             try? FileManager.default.removeItem(at: logURL)
             try? FileManager.default.removeItem(at: logURL.appendingPathExtension("1"))
         }
         let appLog = AppLog(fileURL: logURL)
+        let projection = NoopGatewayLifecycleProjection()
         try await withRecordedCoordinator(
             sockets: (0..<2).map { _ in ScriptedGatewaySocket() },
-            clock: clock, watchdogClock: watchdog.clock, appLog: appLog
+            clock: clock, watchdogClock: watchdog.clock, appLog: appLog, projection: projection
         ) { coordinator, client, sockets in
             await sockets[0].enqueue(helloFrame())
             await coordinator.start()
             #expect(coordinator.connectionState == .connected)
             await coordinator.noteDisconnected(connectionID: await client.activeConnectionID())
             coordinator.requestReconnect()
-            // The route goes away: recovery is parked with no attempt in flight
-            // or scheduled, so the guard must name the path, not `other`.
+            // The route goes away before its first attempt: recovery is parked
+            // with nothing in flight or scheduled, and the parked bound is what
+            // will resume it without a callback.
             coordinator.notePathHint(satisfied: false)
-            // A tick that records when the guard began holding, then the bound
-            // passing on the lifecycle clock, then the tick that reports it.
-            // Each tick is awaited before the clock moves, so neither check can
-            // see the wrong side of the bound.
+            try await clock.waitUntilSleeping(
+                count: 1, duration: GatewayLifecycleCoordinator.parkedRetryBound
+            )
+            #expect(
+                projection.diagnostics.contains {
+                    $0.hasPrefix("reconnect.parked ") && $0.contains("reason=pathUnsatisfied")
+                }
+            )
+            // 20 s of bound time pass with the episode open: a parked episode has
+            // its resume scheduled, so it is never reported as a stall.
+            for _ in 0..<4 {
+                clock.advance(by: .seconds(5))
+                try await watchdog.waitUntilSleeping(
+                    count: 1, duration: GatewayConnectionEpisodeRecorder.watchdogInterval
+                )
+                watchdog.advance(by: GatewayConnectionEpisodeRecorder.watchdogInterval)
+            }
             try await watchdog.waitUntilSleeping(
                 count: 1, duration: GatewayConnectionEpisodeRecorder.watchdogInterval
             )
-            watchdog.advance(by: GatewayConnectionEpisodeRecorder.watchdogInterval)
-            try await watchdog.waitUntilSleeping(
-                count: 1, duration: GatewayConnectionEpisodeRecorder.watchdogInterval
+            #expect(await recordCount(in: appLog, event: "reconnect.stalled") == 0)
+
+            // The path callback never arrives; the bound still resumes recovery.
+            await sockets[1].enqueue(helloFrame())
+            clock.advance(by: GatewayLifecycleCoordinator.parkedRetryBound)
+            try await sockets[1].waitUntilSent(count: 1)
+            #expect(
+                projection.diagnostics.contains {
+                    $0.hasPrefix("reconnect.parked-resume ") && $0.contains("reason=pathUnsatisfied")
+                }
             )
-            clock.advance(by: .seconds(21))
-            watchdog.advance(by: GatewayConnectionEpisodeRecorder.watchdogInterval)
-            let stalls = try await waitForRecords(in: appLog, event: "reconnect.stalled", count: 1)
-            #expect(stalls.count == 1)
-            #expect(stalls.first?.message.contains("guard=pathUnsatisfied") == true)
-            #expect(stalls.first?.message.contains("foreground=true") == true)
-            #expect(stalls.first?.outcome == "stalled")
+            while coordinator.connectionState != .connected {
+                try Task.checkCancellation()
+                await Task.yield()
+            }
+        }
+    }
+
+    @Test("a foreground activation resumes a parked episode whose path hint is stale")
+    func foregroundResumesParkedEpisode() async throws {
+        let clock = ManualClock()
+        let logURL = FileManager.default.temporaryDirectory
+            .appending(path: "reconnect-parked-foreground-\(UUID().uuidString).jsonl")
+        defer {
+            try? FileManager.default.removeItem(at: logURL)
+            try? FileManager.default.removeItem(at: logURL.appendingPathExtension("1"))
+        }
+        let appLog = AppLog(fileURL: logURL)
+        let projection = NoopGatewayLifecycleProjection()
+        try await withRecordedCoordinator(
+            sockets: (0..<2).map { _ in ScriptedGatewaySocket() },
+            clock: clock, watchdogClock: clock.clock, appLog: appLog, projection: projection
+        ) { coordinator, client, sockets in
+            await sockets[0].enqueue(helloFrame())
+            await coordinator.start()
+            await coordinator.noteDisconnected(connectionID: await client.activeConnectionID())
+            coordinator.requestReconnect()
+            coordinator.notePathHint(satisfied: false)
+            try await clock.waitUntilSleeping(
+                count: 1, duration: GatewayLifecycleCoordinator.parkedRetryBound
+            )
+            #expect(projection.diagnostics.contains { $0.hasPrefix("reconnect.parked ") })
+
+            // Background parks recovery: the bound must not fire a socket for a
+            // suspended app, so 60 s of bound time start nothing.
+            coordinator.enteredBackground()
+            clock.advance(by: .seconds(60))
+            for _ in 0..<20 { await Task.yield() }
+            #expect(await sockets[1].closeInvocationCount() == 0)
+
+            // Foreground resumes the parked episode with one probe attempt even
+            // though the last path hint still says unsatisfied.
+            await sockets[1].enqueue(helloFrame())
+            await coordinator.becameActive()?.value
+            try await sockets[1].waitUntilSent(count: 1)
+            while coordinator.connectionState != .connected {
+                try Task.checkCancellation()
+                await Task.yield()
+            }
+            #expect(await recordCount(in: appLog, event: "reconnect.stalled") == 0)
+        }
+    }
+
+    @Test("a socket drop during a slow mounted restoration starts the next attempt")
+    func slowRestorationDoesNotParkRecovery() async throws {
+        let clock = ManualClock()
+        let logURL = FileManager.default.temporaryDirectory
+            .appending(path: "reconnect-slow-restore-\(UUID().uuidString).jsonl")
+        defer {
+            try? FileManager.default.removeItem(at: logURL)
+            try? FileManager.default.removeItem(at: logURL.appendingPathExtension("1"))
+        }
+        let appLog = AppLog(fileURL: logURL)
+        let projection = BlockedRestoreProjection()
+        try await withRecordedCoordinator(
+            sockets: (0..<3).map { _ in ScriptedGatewaySocket() },
+            clock: clock, watchdogClock: clock.clock, appLog: appLog, projection: projection
+        ) { coordinator, client, sockets in
+            await sockets[0].enqueue(helloFrame())
+            await coordinator.start()
+            #expect(coordinator.connectionState == .connected)
+            await projection.waitForAggregateCompletion(count: 1)
+            #expect(projection.aggregateCompletions == [true])
+
+            // The replacement's handshake succeeds and its mounted restoration
+            // never returns: the recorded shape of a loop parked in projection.
+            await sockets[1].enqueue(helloFrame())
+            coordinator.requestReconnect(immediate: true)
+            try await projection.waitUntilRestoreStarted()
+
+            // The socket the handshake established now drops while restoration is
+            // still running. The loop already ended at that handshake, so the
+            // next attempt starts at once instead of waiting restoration out.
+            await coordinator.noteDisconnected(connectionID: await client.activeConnectionID())
+            coordinator.requestReconnect(immediate: true)
+            try await sockets[2].waitUntilSent(count: 1)
+            #expect(coordinator.connectionState == .reconnecting)
+            // Only the initial connect's own projection settled; the stalled one
+            // never published a result over the replacement.
+            #expect(projection.aggregateCompletions == [true])
+            // Let the parked restoration unwind before the fixture ends.
+            projection.releaseRestore()
         }
     }
 
@@ -1717,54 +1838,6 @@ struct AppModelReconnectTests {
         }
         await coordinator.teardown()
         await client.close()
-    }
-
-    @Test("a loop parked in projection is named as reconnectTaskBusy when the socket drops")
-    func projectionParkedLoopIsNamedAsBusy() async throws {
-        let clock = ManualClock()
-        let watchdog = ManualClock()
-        let logURL = FileManager.default.temporaryDirectory
-            .appending(path: "reconnect-parked-\(UUID().uuidString).jsonl")
-        defer {
-            try? FileManager.default.removeItem(at: logURL)
-            try? FileManager.default.removeItem(at: logURL.appendingPathExtension("1"))
-        }
-        let appLog = AppLog(fileURL: logURL)
-        let projection = BlockedRefreshProjection()
-        try await withRecordedCoordinator(
-            sockets: (0..<2).map { _ in ScriptedGatewaySocket() },
-            clock: clock, watchdogClock: watchdog.clock, appLog: appLog, projection: projection
-        ) { coordinator, client, sockets in
-            await sockets[0].enqueue(helloFrame())
-            await coordinator.start()
-            #expect(coordinator.connectionState == .connected)
-
-            // The replacement's handshake succeeds and its projection refresh
-            // never returns, which is how a reconnect loop parks in projection.
-            await sockets[1].enqueue(helloFrame())
-            coordinator.requestReconnect(immediate: true)
-            try await projection.waitUntilRefreshStarted()
-            // The socket the handshake established now drops. No attempt is in
-            // flight, so the episode must name the loop that is holding
-            // recovery instead of reading its handshake as progress forever.
-            await coordinator.noteDisconnected(connectionID: await client.activeConnectionID())
-
-            try await watchdog.waitUntilSleeping(
-                count: 1, duration: GatewayConnectionEpisodeRecorder.watchdogInterval
-            )
-            watchdog.advance(by: GatewayConnectionEpisodeRecorder.watchdogInterval)
-            try await watchdog.waitUntilSleeping(
-                count: 1, duration: GatewayConnectionEpisodeRecorder.watchdogInterval
-            )
-            clock.advance(by: .seconds(21))
-            watchdog.advance(by: GatewayConnectionEpisodeRecorder.watchdogInterval)
-            let stalls = try await waitForRecords(in: appLog, event: "reconnect.stalled", count: 1)
-            #expect(stalls.count == 1)
-            #expect(stalls.first?.message.contains("guard=reconnectTaskBusy") == true)
-            // Let the parked loop unwind before the fixture tears the lifecycle
-            // down.
-            projection.releaseRefresh()
-        }
     }
 
     private func recordCount(in log: AppLog, event: String) async -> Int {
@@ -1899,6 +1972,8 @@ private final class NoopGatewayLifecycleProjection: GatewayLifecycleProjectionDe
     private(set) var cacheLoads = 0
     private var restoreResult = true
     private(set) var refreshCount = 0
+    private var refreshWaiters: [(count: Int, continuation: CheckedContinuation<Void, Never>)] = []
+    private(set) var diagnostics: [String] = []
     private(set) var failures: [String] = []
     private let cacheGate: TestReadGate?
 
@@ -1919,7 +1994,21 @@ private final class NoopGatewayLifecycleProjection: GatewayLifecycleProjectionDe
         aggregateWaiters.removeAll { aggregateCompletions.count >= $0.count }
         for waiter in ready { waiter.continuation.resume() }
     }
-    func lifecycleRefreshAll(admission: GatewayLifecycleCoordinator.Admission) async { refreshCount += 1 }
+    func lifecycleRecordDiagnostic(event: String, message: String) {
+        diagnostics.append("\(event) \(message)")
+    }
+    func lifecycleRefreshAll(admission: GatewayLifecycleCoordinator.Admission) async {
+        refreshCount += 1
+        let ready = refreshWaiters.filter { refreshCount >= $0.count }
+        refreshWaiters.removeAll { refreshCount >= $0.count }
+        for waiter in ready { waiter.continuation.resume() }
+    }
+    func waitForRefresh(count: Int) async {
+        if refreshCount >= count { return }
+        await withCheckedContinuation { continuation in
+            refreshWaiters.append((count: count, continuation: continuation))
+        }
+    }
     func waitForAggregateCompletion(count: Int) async {
         if aggregateCompletions.count >= count { return }
         await withCheckedContinuation { continuation in
@@ -1983,6 +2072,63 @@ private final class FailFirstMountedRestoreProjection: GatewayLifecycleProjectio
     ) async -> Bool {
         restoreCount += 1
         return restoreCount > 1
+    }
+    func lifecycleReattachTerminals(admission: GatewayLifecycleCoordinator.Admission) async {}
+    func lifecycleReconcileForeground(admission: GatewayLifecycleCoordinator.Admission) async throws {}
+    func lifecycleRetireProjection(final: Bool) async {}
+    func lifecycleSurface(_ error: Error) {}
+}
+
+/// A presentation owner whose mounted restoration never returns until the test
+/// releases it: the shape of slow projection work on an otherwise connected
+/// socket. The initial connect's own restoration completes, so the test begins
+/// from a connected lifecycle; the replacement's restoration is the one that
+/// stalls.
+@MainActor
+private final class BlockedRestoreProjection: GatewayLifecycleProjectionDelegate {
+    private(set) var aggregateCompletions: [Bool] = []
+    private var restoreStartedContinuation: CheckedContinuation<Void, Never>?
+    private var restoreContinuation: CheckedContinuation<Void, Never>?
+    private var restoreCount = 0
+    private var parked = false
+
+    func waitUntilRestoreStarted() async {
+        if parked { return }
+        await withCheckedContinuation { restoreStartedContinuation = $0 }
+    }
+
+    func waitForAggregateCompletion(count: Int) async {
+        for _ in 0..<600 {
+            if aggregateCompletions.count >= count { return }
+            try? await Task.sleep(for: .milliseconds(5))
+        }
+    }
+
+    func releaseRestore() {
+        restoreContinuation?.resume()
+        restoreContinuation = nil
+    }
+
+    func lifecycleLoadCache(profileID: String, admission: GatewayLifecycleCoordinator.Admission) async {}
+    func lifecycleInvalidateSessionConnectionOwnership() {}
+    func lifecycleBeginReconciliationAggregate(admission: GatewayLifecycleCoordinator.Admission) {}
+    func lifecycleCompleteReconciliationAggregate(
+        admission: GatewayLifecycleCoordinator.Admission,
+        succeeded: Bool
+    ) {
+        aggregateCompletions.append(succeeded)
+    }
+    func lifecycleRefreshAll(admission: GatewayLifecycleCoordinator.Admission) async {}
+    func lifecycleRestoreMountedPresentation(
+        admission: GatewayLifecycleCoordinator.Admission
+    ) async -> Bool {
+        restoreCount += 1
+        guard restoreCount > 1 else { return true }
+        parked = true
+        restoreStartedContinuation?.resume()
+        restoreStartedContinuation = nil
+        await withCheckedContinuation { restoreContinuation = $0 }
+        return true
     }
     func lifecycleReattachTerminals(admission: GatewayLifecycleCoordinator.Admission) async {}
     func lifecycleReconcileForeground(admission: GatewayLifecycleCoordinator.Admission) async throws {}
