@@ -400,11 +400,6 @@ export interface RuntimeSlotDependencies {
    * view of an audience at build time. */
   sessionAudience: (sessionId: string) => number;
   resources?: ResourceRecorder;
-  /** One published runtime that stopped existing, with the canonical transcript
-   * bytes it held; the registry turns this into the `runtime.evicted` record
-   * with the heap its byte budget charged, because only the registry knows the
-   * estimate factor and the budget. */
-  runtimeEvicted?: (sessionId: string, transcriptBytes: number) => void;
   machineId?: string;
   notifications?: NotificationService;
   extensionArtifactWarning?: (warning: { reason: ExtensionArtifactRejectionReason; owner: string }) => void;
@@ -8297,7 +8292,6 @@ export class RuntimeSlot {
   }
 
   private async disposeRuntime(): Promise<void> {
-    const canonicalSessionFile = this.sessionFile;
     this.dependencies.browserLiveViews?.retireSession(this.id);
     this.unregisterExtensionExpiry();
     this.unregisterProcessExpiry();
@@ -8370,15 +8364,7 @@ export class RuntimeSlot {
     // the resource sample counts the eviction where it happens and can see a
     // load and an eviction inside one window. A slot the registry never
     // published was never live, so its retirement is not an eviction.
-    if (this.published) {
-      this.dependencies.resources?.recordRuntimeEvicted();
-      this.dependencies.runtimeEvicted?.(
-        this.id,
-        canonicalSessionFile === undefined
-          ? 0
-          : await stat(canonicalSessionFile).then((metadata) => metadata.size).catch(() => 0),
-      );
-    }
+    if (this.published) this.dependencies.resources?.recordRuntimeEvicted();
     this.publishStateChange();
   }
 
