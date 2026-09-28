@@ -106,6 +106,8 @@ breaks context-menu previews.
 | CT-21 | Ready | Unit plan skip list: `UnitTests.xctestplan`'s `skippedTests` is not honored for Swift Testing tests, so any Swift Testing entry in it runs in every unit run. Find those entries, move each to `UIValidationTier` or a real fix, and delete the list entries that do nothing | CT-10 | |
 | CT-15 | Done | Container design: a written design, reviewed before code, for the `UICollectionView` container hosting the unchanged SwiftUI row views through `UIHostingConfiguration`: exact self-sizing and a per-row height cache keyed by row identity and width; bottom anchoring owned by the layout (content offset preserved from the bottom across inserts, size changes and keyboard insets); the current `ChatScrollCoordinator` contract mapped item by item to the container (pinned and detached modes, catch-up, prepend anchoring, opening position, unread tracking); how a row's animated height change (entrance growth, streaming growth, queued-card shrink) drives the cell height in the same frame; row identity and entrance leases; keyboard and composer inset ownership; accessibility, context menus and scroll-edge chrome. Lists every coordinator mechanism the container retires | CT-4| chat scroll investigation session, 2026-09-27 |
 | CT-20 | Done | Spike on a throwaway branch: settle CT-15's four unverified assumptions with a minimal container hosting the real row views, judged by the CT-12 and CT-14 gates and CT-10's numbers. Starts after the user approves CT-15 | CT-15, CT-14, CT-10| chat scroll investigation session, 2026-09-27 |
+| CT-24 | Claimed | Field-shape fixtures: the two 2026-09-28 device incidents as hosted journeys, (a) foreground resync that installs new rows under tall newest replies, (b) a send in a transcript whose newest replies are very tall, followed by several assistant rows; with an orientation-independent blank oracle (window coordinates), and proof that today's path goes blank in both | none | chat scroll session, 2026-09-28 |
+| CT-23 | Claimed | Origin-anchored transcript spike: the transcript's scroll view is flipped so its content origin is the visual bottom, rows are counter-flipped and ordered newest first; judged by every yardstick plus the risk probes in Task details | CT-24 | chat scroll session, 2026-09-28 |
 | CT-22 | Claimed | Exact tail prototype (keep the SwiftUI `ScrollView`, rows and animations): measure two ways of making the pinned bottom exact on a throwaway branch. (a) Previously measured rows keep their last measured height when they leave the viewport. (b) The newest rows render in an eager stack below a `LazyVStack` of older history, so the bottom and everything near it are measured, never estimated; the boundary moves in coarse steps so rows rarely change parent. Judged by the CT-2 fixtures, the parity gate, the harness and CT-10's scale numbers | CT-20 | chat scroll investigation session, 2026-09-27 |
 | CT-16 | Needs scoping | Build the container beside today's `LazyVStack` transcript behind a single development switch; no row, composer or animation code changes. Split into rows by CT-15 | CT-15, CT-20 | |
 | CT-17 | Needs scoping | Qualification: with the switch on, the CT-12 and CT-14 gates pass against the `main` reference, the CT-2 fixtures and a 512-row blank fixture read zero blank boundaries, every `ChatViewScrollHarnessTests` visible invariant holds, and frame cost, opening time and memory at 150, 300 and 512 heavy rows are no worse than CT-10's baseline | CT-16, CT-14, CT-10 | |
@@ -209,6 +211,74 @@ reports exact frames itself. No other shared code changes.
    `UICollectionView` inside the SwiftUI `NavigationStack`.
 4. Opening, scrolling and streaming with 512 heavy rows cost no more than
    CT-10's baseline.
+
+### CT-23 — origin-anchored transcript (design, 2026-09-28)
+
+Why the bottom is unreliable today. Apple's WWDC26 session 321 ("Dive into
+lazy stacks and scrolling with SwiftUI") states the mechanism: a lazy stack
+lays out from its start, estimates every unloaded subview from the average of
+those it has placed, and corrects the estimated space as it learns; the content
+offset at the stack's start is exact, while its end, its total height and any
+absolute offset are estimates. The session advises against depending on the
+absolute content size or offset. Today's transcript anchors the newest message
+at the stack's end, so the pinned bottom is computed from estimates; with tall
+newest replies the device measured 5x (resync) and 17x (send) overestimates,
+and the coordinator's compensations (tail materialization, physical-tail
+repair, past-end net, opening-tail settlement, prepend restoration) chase them
+after the fact and correctly stand down when the reader touches the screen.
+
+The design. Put the newest message at the stack's start. The transcript
+`ScrollView` is flipped vertically, each row is flipped back, and rows are
+ordered newest first. The pinned bottom is then the content origin, which the
+lazy stack lays out exactly and which does not depend on any estimate; history
+the stack has not loaded lies beyond the viewport, where estimates only size the
+scroll range. This is the established structure for chat: Telegram rotates its
+`ListView` and every item, Exyte Chat rotates a `UITableView` so offset 0 is the
+newest message, Stream's SwiftUI SDK (v5, 2026) flips a `ScrollView` and
+`LazyVStack`, and React Native's inverted `FlatList` does the same.
+
+What it makes structural rather than compensated:
+
+- pinned follow, streaming growth and entrances: the newest row sits at the
+  origin, so growth pushes history away from the anchor and the anchor never
+  moves;
+- opening: the first frame is already at the bottom, with no positioning pass;
+- older history: it appends at the far end, so a prepend moves nothing on
+  screen;
+- detached reading: the reader's rows are exact once placed, the live
+  projection stays frozen while detached (existing behaviour), and scroll
+  position anchoring uses a visible row, never an estimate.
+
+What it costs, each validated before production:
+
+1. Safe areas and the keyboard: insets apply before the flip, so the composer
+   and keyboard inset and the navigation inset must be applied as swapped
+   content margins, and must track the keyboard's animation frame for frame.
+2. Context menus: the row's UIKit context-menu interaction and its preview must
+   be upright and lift in place.
+3. Scroll edges: the soft scroll edge effect, `TronTopBlurOverlay` and the
+   navigation chrome must look as today.
+4. Accessibility: VoiceOver reading order and three-finger scroll direction
+   must match today (published flipped lists get the scroll direction wrong);
+   the status-bar tap must scroll to the oldest loaded history as today.
+5. Motion: entrance rise and fade, streaming growth, tool chips, queued-card
+   cross-fade and shrink, composer collapse and the opening reveal unchanged.
+6. Interaction: text selection, links, sheets, interactive keyboard dismissal,
+   rubber band at both ends.
+7. Performance: at least the CT-10 baseline.
+
+What it deletes at cutover (CT-19): the compensations listed above and the
+CT-22 tail band, which exist only because the anchor was estimated.
+
+Monitoring that stays: the interaction trace, plus an invariant monitor in the
+product that records an anomaly with full state whenever a pinned transcript
+shows no row at the visual bottom for more than two display frames, so a future
+regression is named in the next device export.
+
+Acceptance: 0 blank boundaries in every CT-2 shape and both CT-24 field shapes,
+three runs each; the CT-12 parity gate 7/7; CT-14 motion evidence unchanged;
+CT-10 numbers equal or better; each risk above passed by a hosted probe or,
+where only a device can show it, on the CT-7 device checklist.
 
 ### CT-22 round 2 — height-bounded exact tail (design)
 
@@ -697,3 +767,15 @@ pass only through eager-only repairs, stop and report.
   - An eager band as a sibling below the history `LazyVStack` makes the history re-size several times per frame (about 10 layout passes per frame against 3), independent of band size or moves. With every row eager the passes return to normal, so the cause is the lazy history beside a growing eager sibling. The band as the lazy stack's last child keeps passes normal, opens faster than today (185-211 ms against 263-360 ms) and had 0 blank boundaries in every CT-2 run (keyboard cycles today: 80-120/340); unlike the sibling it is not exact by construction, since a lazy child's placement is SwiftUI's.
   - Every realized row host re-evaluated its body on every projection install (about 5,400 host bodies during 30 streaming tokens), because the host takes closures. A `ChatPhysicalRowBoundary` keyed by every non-observed row input cuts that to about 90; with it the band streams at 16.7 ms median and 33 ms p95. The key must include `admitsNativeCallbacks` (read by each row's geometry callback); with it the parity gate passed 7/7 twice. Not yet on `main`.
 - Next: profile the row boundary on `main` with `scripts/tron-profile ios`, and decide the band with the user.
+
+### CT-22 superseded pending CT-23 · 2026-09-28 · chat scroll session
+
+- Result: two device incidents on 2026-09-28 (resync after subagent replies;
+  a send) went blank with lazy-stack overestimates of about 5x and 17x, larger
+  than any fixture. External research (Apple's WWDC26 session 321, Telegram,
+  Exyte Chat, Stream's SwiftUI SDK) points to anchoring the newest message at
+  the lazy stack's exact start instead of its estimated end; CT-23 tests that.
+  CT-22 stays claimed on its branch until CT-23 settles which design ships.
+- Evidence: device exports `e563c2ed3a251fa673b340c9d18146e7-2026-09-28T22-49-38-443Z`
+  and `…T22-51-14-263Z`.
+- Tasks added: CT-23, CT-24.
