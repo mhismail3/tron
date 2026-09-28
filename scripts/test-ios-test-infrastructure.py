@@ -21,6 +21,9 @@ IDENTITY = ROOT / "scripts/ios-test-build-identity.py"
 RUNNER = ROOT / "scripts/tron-ios-test"
 RUNTIME_ID = "com.apple.CoreSimulator.SimRuntime.iOS-26-2"
 TYPE_ID = "com.apple.CoreSimulator.SimDeviceType.iPhone-17-Pro"
+# The runner fixture's synthetic Mac pins its own runtime/device type.
+RUNNER_RUNTIME_ID = "com.apple.CoreSimulator.SimRuntime.iOS-26-5"
+RUNNER_TYPE_ID = "com.apple.CoreSimulator.SimDeviceType.iPhone-17-Pro"
 UDID_A = "AAAAAAAA-AAAA-AAAA-AAAA-AAAAAAAAAAAA"
 
 
@@ -276,6 +279,10 @@ class RunnerFixture(unittest.TestCase):
 import json, os, sys
 from pathlib import Path
 args = sys.argv[1:]
+if args[:1] == ['simctl']:
+    log = os.environ.get('FAKE_SIMCTL_LOG')
+    if log:
+        with open(log, 'a', encoding='utf-8') as handle: handle.write(' '.join(args[1:]) + '\\n')
 inventory_path = Path(os.environ['FAKE_SIMULATOR_INVENTORY'])
 doc = json.loads(inventory_path.read_text()) if inventory_path.exists() else {'devices': {}}
 if args[:2] == ['simctl', 'list'] and args[2:] == ['--json']:
@@ -304,12 +311,13 @@ if args[:2] == ['xcresulttool', 'get']:
 print('unexpected xcrun arguments', args, file=sys.stderr); raise SystemExit(2)
 """)
         self.xcrun.chmod(0o755)
-        self.simulator_inventory = self.root / "simulator.json"
+        self.simulator_inventory = self.root / "simulator-inventory.json"
         self.simulator_inventory.write_text(json.dumps({
-            "runtimes": [{"identifier": "com.apple.CoreSimulator.SimRuntime.iOS-26-5", "version": "26.5", "platform": "iOS", "buildversion": "23C54", "isAvailable": True}],
-            "devicetypes": [{"identifier": "com.apple.CoreSimulator.SimDeviceType.iPhone-17-Pro", "name": "iPhone 17 Pro", "isAvailable": True}],
-            "devices": {"com.apple.CoreSimulator.SimRuntime.iOS-26-5": []},
+            "runtimes": [{"identifier": RUNNER_RUNTIME_ID, "version": "26.5", "platform": "iOS", "buildversion": "23C54", "isAvailable": True}],
+            "devicetypes": [{"identifier": RUNNER_TYPE_ID, "name": "iPhone 17 Pro", "isAvailable": True}],
+            "devices": {RUNNER_RUNTIME_ID: []},
         }))
+        self.simctl_log = self.root / "simctl.log"
         xcodebuild = self.bin / "xcodebuild"
         xcodebuild.write_text("""#!/usr/bin/env bash
 set -euo pipefail
@@ -369,12 +377,14 @@ exit 0
         self, *, command: str = "run", home: Path | None = None,
         summary: str = '{"passedTests":1,"failedTests":0,"skippedTests":0,"totalTestCount":1}',
         mode: str = "success", xcode_status: int = 0,
+        extra_args: list[str] | None = None,
     ) -> subprocess.CompletedProcess[str]:
         environment = os.environ.copy()
         environment.update({
             "PATH": f"{self.bin}:{environment['PATH']}",
             "TRON_IOS_XCRUN": str(self.xcrun),
             "FAKE_SIMULATOR_INVENTORY": str(self.simulator_inventory),
+            "FAKE_SIMCTL_LOG": str(self.simctl_log),
             "TRON_IOS_SIMULATOR_STATE_DIR": str(self.root / "development-state"),
             "TRON_IOS_TEST_STATE_DIR": str(self.state),
             "TRON_IOS_TEST_DERIVED_DATA": str(self.derived),
@@ -392,7 +402,28 @@ exit 0
             environment.pop("TRON_IOS_TEST_DERIVED_DATA", None)
             environment.pop("TRON_IOS_TEST_RESULTS_DIR", None)
             environment["HOME"] = str(home)
-        return subprocess.run([str(RUNNER), command], env=environment, text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        return subprocess.run(
+            [str(RUNNER), command, *(extra_args or [])],
+            env=environment, text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+        )
+
+    def device_entry(self, udid: str) -> dict[str, object]:
+        document = json.loads(self.simulator_inventory.read_text())
+        for devices in document["devices"].values():
+            for device in devices:
+                if device["udid"] == udid:
+                    return device
+        raise AssertionError(f"no such simulator in the synthetic inventory: {udid}")
+
+    def owned_udid(self) -> str:
+        return json.loads((self.state / "simulator.json").read_text())["udid"]
+
+    def simctl_calls(self, command: str) -> list[str]:
+        try:
+            lines = self.simctl_log.read_text().splitlines()
+        except FileNotFoundError:
+            return []
+        return [line for line in lines if line.split(" ", 1)[0] == command]
 
     def latest_metadata(self) -> dict[str, object]:
         return json.loads(((self.results / "latest").resolve() / "metadata.json").read_text())
@@ -496,6 +527,46 @@ exit 0
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertFalse(self.derived.exists())
         self.assertTrue(sibling.exists())
+
+    def test_run_releases_the_owned_simulator_when_the_command_ends(self) -> None:
+        """SIM-1: a run leaves no owned simulator booted, whatever its outcome.
+
+        Failure modes: a passing run, a run whose tests fail, and a run killed by
+        its own process deadline could each leave the booted simulator behind.
+        """
+        owner = ["--only-testing", "TronMobileTests/StubTests"]
+        outcomes = (
+            ("success", {}, 0),
+            ("test failure", {"xcode_status": 7}, 65),
+            ("process timeout", {"mode": "timeout"}, 75),
+        )
+        for label, options, expected in outcomes:
+            with self.subTest(outcome=label):
+                result = self.invoke(extra_args=owner, **options)
+                self.assertEqual(result.returncode, expected, result.stderr)
+                self.assertEqual(self.device_entry(self.owned_udid())["state"], "Shutdown")
+        self.assertEqual(len(self.simctl_calls("shutdown")), len(outcomes))
+
+    def test_keep_booted_is_reused_by_the_next_run_in_the_lane(self) -> None:
+        """SIM-1: --keep-booted serves a test-fix loop and still releases at the end.
+
+        Failure modes: a keep-booted lease could release the simulator it was
+        asked to keep; a later run in the lane could boot a second simulator
+        instead of reusing it; and a release could be skipped afterwards.
+        """
+        owner = ["--only-testing", "TronMobileTests/StubTests"]
+        first = self.invoke(extra_args=["--keep-booted", *owner])
+        self.assertEqual(first.returncode, 0, first.stderr)
+        udid = self.owned_udid()
+        self.assertEqual(self.device_entry(udid)["state"], "Booted")
+        self.assertEqual(len(self.simctl_calls("create")), 1)
+
+        second = self.invoke(extra_args=owner)
+        self.assertEqual(second.returncode, 0, second.stderr)
+        self.assertEqual(self.owned_udid(), udid)
+        self.assertEqual(len(self.simctl_calls("create")), 1)
+        self.assertEqual(len(self.simctl_calls("boot")), 1)
+        self.assertEqual(self.device_entry(udid)["state"], "Shutdown")
 
 
 class BuildIdentityFixture(unittest.TestCase):
@@ -696,6 +767,240 @@ class LockFixture(unittest.TestCase):
                 sys.executable, "-c", "pass",
             ])
             self.assertEqual(third.returncode, 0)
+
+
+class OwnedLaneFixture(unittest.TestCase):
+    """Synthetic xcrun/simctl for the owner that releases booted simulators.
+
+    Failure modes these fixtures make observable, written before the owners:
+
+    1. A command that ends (success, failure, deadline or signal) leaves the
+       simulator it booted running.
+    2. A release that hangs or fails holds the lease, or replaces the command's
+       own exit status with its own.
+    3. A keep-booted lane is released anyway, or is kept without the lease
+       recording the intent and what it found.
+    """
+
+    def setUp(self) -> None:
+        self.temporary = tempfile.TemporaryDirectory()
+        self.root = Path(self.temporary.name)
+        self.bin = self.root / "bin"
+        self.bin.mkdir()
+        self.xcrun = self.bin / "xcrun"
+        self.xcrun.write_text("""#!/usr/bin/env python3
+import json, os, sys, time
+from pathlib import Path
+
+inventory_path = Path(os.environ['FAKE_SIMCTL_INVENTORY'])
+arguments = sys.argv[1:]
+assert arguments[0] == 'simctl', arguments
+arguments = arguments[1:]
+log = os.environ.get('FAKE_SIMCTL_LOG')
+if log:
+    with open(log, 'a', encoding='utf-8') as handle: handle.write(' '.join(arguments) + '\\n')
+if arguments == ['list', '--json']:
+    print(json.dumps(json.loads(inventory_path.read_text()))); raise SystemExit(0)
+command = arguments[0] if arguments else ''
+udid = arguments[1] if len(arguments) > 1 else ''
+if command in ('boot', 'shutdown'):
+    if command == 'shutdown':
+        delay = float(os.environ.get('FAKE_SHUTDOWN_DELAY_SECONDS') or 0)
+        if delay:
+            started = os.environ.get('FAKE_SHUTDOWN_STARTED')
+            if started: Path(started).write_text(udid + '\\n')
+            time.sleep(delay)
+    document = json.loads(inventory_path.read_text())
+    found = [device for devices in document['devices'].values() for device in devices if device['udid'] == udid]
+    if not found:
+        print('no such simulator: ' + udid, file=sys.stderr); raise SystemExit(2)
+    for device in found:
+        device['state'] = 'Booted' if command == 'boot' else 'Shutdown'
+    inventory_path.write_text(json.dumps(document)); raise SystemExit(0)
+print('unexpected simctl arguments: ' + repr(arguments), file=sys.stderr)
+raise SystemExit(2)
+""")
+        self.xcrun.chmod(0o755)
+        self.inventory_path = self.root / "inventory.json"
+        self.log_path = self.root / "simctl.log"
+        self.development_marker = self.root / "development/ios-simulator-udid"
+        self.discovery_root = self.root / "lanes"
+        self.state = self.discovery_root / "ios-test"
+        self.state.mkdir(parents=True)
+        self.inventory_path.write_text(json.dumps({"devices": {RUNTIME_ID: []}}))
+        self.environment = os.environ.copy()
+        self.environment.update({
+            "PATH": f"{self.bin}:{os.environ['PATH']}",
+            "TRON_IOS_XCRUN": str(self.xcrun),
+            "FAKE_SIMCTL_INVENTORY": str(self.inventory_path),
+            "FAKE_SIMCTL_LOG": str(self.log_path),
+            "TRON_IOS_TEST_STATE_DIR": str(self.state),
+            "TRON_IOS_TEST_DISCOVERY_ROOT": str(self.discovery_root),
+            "TRON_IOS_SIMULATOR_STATE_DIR": str(self.development_marker.parent),
+            "TRON_IOS_TEST_SHUTDOWN_TIMEOUT_SECONDS": "2",
+            "TRON_IOS_TEST_SWEEP_DEADLINE_SECONDS": "30",
+        })
+    def tearDown(self) -> None:
+        self.temporary.cleanup()
+
+    def close_pipes(self, process: subprocess.Popen[str]) -> None:
+        for pipe in (process.stdout, process.stderr):
+            if pipe is not None:
+                pipe.close()
+
+    def inventory(self) -> dict[str, object]:
+        return json.loads(self.inventory_path.read_text())
+
+    def device_entry(self, udid: str) -> dict[str, object]:
+        for devices in self.inventory()["devices"].values():
+            for device in devices:
+                if device["udid"] == udid:
+                    return device
+        raise AssertionError(f"no such simulator in the synthetic inventory: {udid}")
+
+    def update_device(self, udid: str, **fields: object) -> None:
+        document = self.inventory()
+        for devices in document["devices"].values():
+            for device in devices:
+                if device["udid"] == udid:
+                    device.update(fields)
+        self.inventory_path.write_text(json.dumps(document))
+
+    def owned_lane(self, name: str = "ios-test", udid: str = UDID_A) -> Path:
+        """One lane: its ownership marker, and its booted device in the inventory."""
+        lane = self.discovery_root / name
+        lane.mkdir(parents=True, exist_ok=True)
+        (lane / "simulator.json").write_text(json.dumps({
+            "schema": "tron.ios-test-simulator.v1", "owner": "tron-ios-test", "udid": udid,
+            "name": "Tron iOS Tests", "runtime_identifier": RUNTIME_ID, "runtime_version": "26.2",
+            "runtime_build": "23C54", "device_type_identifier": TYPE_ID,
+            "device_type_name": "iPhone 17 Pro", "ephemeral": False,
+        }))
+        document = self.inventory()
+        for devices in document["devices"].values():
+            devices[:] = [device for device in devices if device["udid"] != udid]
+        document["devices"][RUNTIME_ID].append({
+            "name": "Tron iOS Tests", "udid": udid, "state": "Booted", "isAvailable": True,
+            "deviceTypeIdentifier": TYPE_ID,
+        })
+        self.inventory_path.write_text(json.dumps(document))
+        return lane
+
+    def wait_for(self, path: Path, timeout: float = 10) -> None:
+        deadline = time.time() + timeout
+        while time.time() < deadline:
+            if path.exists() and path.read_text().strip():
+                return
+            time.sleep(0.05)
+        self.fail(f"timed out waiting for {path}")
+
+    def shutdown_targets(self) -> list[str]:
+        try:
+            lines = self.log_path.read_text().splitlines()
+        except FileNotFoundError:
+            return []
+        return [line.split(" ", 1)[1] for line in lines if line.startswith("shutdown ")]
+
+
+class ReleaseFixture(OwnedLaneFixture):
+    """SIM-1: the lease holder releases the lane's simulator when it ends."""
+
+    def locker_arguments(self, *command: str, marker: Path | None = None, keep_booted: bool = False) -> list[str]:
+        marker = marker if marker is not None else self.state / "simulator.json"
+        arguments = [
+            sys.executable, str(LOCK), "--lock", str(marker.parent / "lease.lock"),
+            "--marker", str(marker), "--development-state", str(self.development_marker),
+        ]
+        if keep_booted:
+            arguments.append("--keep-booted")
+        return [*arguments, "--", *command]
+
+    def run_locker(self, *command: str, marker: Path | None = None, keep_booted: bool = False) -> subprocess.CompletedProcess[str]:
+        return subprocess.run(
+            self.locker_arguments(*command, marker=marker, keep_booted=keep_booted),
+            env=self.environment, text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=60,
+        )
+
+    def test_a_finished_command_releases_the_simulator_it_used(self) -> None:
+        """Failure mode 1: success, failure and deadline all leave nothing booted."""
+        for status in (0, 7, 75):
+            with self.subTest(status=status):
+                self.owned_lane("ios-test", UDID_A)
+                completed = self.run_locker(sys.executable, "-c", f"raise SystemExit({status})")
+                self.assertEqual(completed.returncode, status, completed.stderr)
+                self.assertEqual(completed.stderr, "")
+                self.assertEqual(self.device_entry(UDID_A)["state"], "Shutdown")
+                self.assertEqual(self.shutdown_targets(), [UDID_A])
+                self.log_path.unlink()
+
+    def test_a_signalled_holder_still_releases_the_simulator(self) -> None:
+        """Failure mode 1: SIGINT, SIGTERM and SIGHUP release the simulator."""
+        for signum in (signal.SIGINT, signal.SIGTERM, signal.SIGHUP):
+            with self.subTest(signal=signum):
+                lane = self.owned_lane("ios-test", UDID_A)
+                holder = subprocess.Popen(
+                    self.locker_arguments(sys.executable, "-c", "import time; time.sleep(30)"),
+                    env=self.environment, text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                )
+                self.wait_for(lane / "lease.lock")
+                holder.send_signal(signum)
+                _, stderr = holder.communicate(timeout=30)
+                self.close_pipes(holder)
+                self.assertEqual(holder.returncode, 128 + signum, stderr)
+                self.assertEqual(self.device_entry(UDID_A)["state"], "Shutdown")
+
+    def test_keep_booted_is_recorded_and_released_by_the_next_command(self) -> None:
+        """Failure mode 3: the intent is recorded, then the next command releases."""
+        lane = self.owned_lane("ios-test", UDID_A)
+        self.update_device(UDID_A, state="Shutdown")
+        boot_and_copy = (
+            "import os, shutil, subprocess, sys;"
+            " subprocess.check_call([os.environ['TRON_IOS_XCRUN'], 'simctl', 'boot', sys.argv[3]]);"
+            " shutil.copyfile(sys.argv[1], sys.argv[2])"
+        )
+        first_metadata = self.root / "first-lease.json"
+        first = self.run_locker(
+            sys.executable, "-c", boot_and_copy,
+            str(lane / "lease.lock"), str(first_metadata), UDID_A,
+            keep_booted=True,
+        )
+        self.assertEqual(first.returncode, 0, first.stderr)
+        recorded = json.loads(first_metadata.read_text())["simulator"]
+        self.assertEqual(recorded["keep_booted"], True)
+        self.assertEqual(recorded["booted_when_leased"], False)
+        self.assertEqual(recorded["marker"], str(lane / "simulator.json"))
+        self.assertEqual(self.device_entry(UDID_A)["state"], "Booted")
+
+        second_metadata = self.root / "second-lease.json"
+        second = self.run_locker(
+            sys.executable, "-c", "import shutil, sys; shutil.copyfile(sys.argv[1], sys.argv[2])",
+            str(lane / "lease.lock"), str(second_metadata),
+        )
+        self.assertEqual(second.returncode, 0, second.stderr)
+        reused = json.loads(second_metadata.read_text())["simulator"]
+        self.assertEqual(reused["keep_booted"], False)
+        self.assertEqual(reused["booted_when_leased"], True)
+        self.assertEqual(self.device_entry(UDID_A)["state"], "Shutdown")
+
+    def test_a_hung_release_is_bounded_and_keeps_the_command_status(self) -> None:
+        """Failure mode 2: a hung shutdown warns, ends bounded, keeps the status."""
+        self.owned_lane("ios-test", UDID_A)
+        self.environment.update({"FAKE_SHUTDOWN_DELAY_SECONDS": "30", "TRON_IOS_TEST_SHUTDOWN_TIMEOUT_SECONDS": "1"})
+        started = time.monotonic()
+        completed = self.run_locker(sys.executable, "-c", "raise SystemExit(65)")
+        self.assertLess(time.monotonic() - started, 20)
+        self.assertEqual(completed.returncode, 65, completed.stderr)
+        self.assertIn("could not release the iOS test simulator", completed.stderr)
+        self.assertEqual(self.device_entry(UDID_A)["state"], "Booted")
+
+    def test_a_simulator_already_shut_down_is_a_quiet_success(self) -> None:
+        """Failure mode 2: releasing is idempotent, so nothing is reported."""
+        self.owned_lane("ios-test", UDID_A)
+        self.update_device(UDID_A, state="Shutdown")
+        completed = self.run_locker(sys.executable, "-c", "pass")
+        self.assertEqual(completed.returncode, 0, completed.stderr)
+        self.assertEqual(completed.stderr, "")
+        self.assertEqual(self.shutdown_targets(), [])
 
 
 if __name__ == "__main__":

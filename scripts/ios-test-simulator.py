@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Provision and validate one exact repository-owned iOS test simulator."""
+"""Own the repository's iOS test simulators: provision, validate, release."""
 
 from __future__ import annotations
 
@@ -23,15 +23,19 @@ class DestinationError(RuntimeError):
     pass
 
 
-def simctl(*arguments: str, capture: bool = True) -> str:
+def simctl(*arguments: str, capture: bool = True, timeout: float | None = None) -> str:
     command = [os.environ.get("TRON_IOS_XCRUN", "xcrun"), "simctl", *arguments]
-    completed = subprocess.run(
-        command,
-        check=False,
-        stdout=subprocess.PIPE if capture else None,
-        stderr=subprocess.PIPE if capture else None,
-        text=True,
-    )
+    try:
+        completed = subprocess.run(
+            command,
+            check=False,
+            stdout=subprocess.PIPE if capture else None,
+            stderr=subprocess.PIPE if capture else None,
+            text=True,
+            timeout=timeout,
+        )
+    except subprocess.TimeoutExpired as error:
+        raise DestinationError(f"{' '.join(command)}: timed out after {timeout:g}s") from error
     if completed.returncode != 0:
         detail = (completed.stderr or completed.stdout or "simctl failed").strip()
         raise DestinationError(f"{' '.join(command)}: {detail}")
@@ -204,6 +208,47 @@ def delete_owned(marker_path: Path, arguments: argparse.Namespace) -> None:
     marker_path.unlink(missing_ok=True)
 
 
+def lane_state(marker_path: Path) -> str:
+    """The lane's simulator state: a simctl state, "missing" or "not-provisioned".
+
+    Read-only and independent of the pinned toolchain, so the lease holder can
+    record what it found without provisioning anything.
+    """
+    marker = load_marker(marker_path)
+    if marker is None:
+        return "not-provisioned"
+    current = find_device(inventory(), marker["udid"])
+    if current is None:
+        return "missing"
+    state = current[1].get("state")
+    return state if isinstance(state, str) and state else "unknown"
+
+
+def shutdown_owned(marker_path: Path, arguments: argparse.Namespace) -> str:
+    """Shut down the booted simulator one ownership marker names, bounded.
+
+    Returns "shutdown", or why there was nothing to do: "already-shutdown",
+    "missing" (the marker outlived its device) or "not-provisioned".
+    """
+    marker = load_marker(marker_path)
+    if marker is None:
+        return "not-provisioned"
+    document = inventory()
+    if not owned_identity_matches(document, marker):
+        raise DestinationError("refusing to release a simulator whose current identity does not match its ownership marker")
+    if marker["udid"] == development_udid(arguments):
+        # The remembered Development simulator owns the paired app container and
+        # is released only by the owner that started it.
+        raise DestinationError("refusing to release the remembered Development simulator")
+    current = find_device(document, marker["udid"])
+    if current is None:
+        return "missing"
+    if current[1].get("state") != "Booted":
+        return "already-shutdown"
+    simctl("shutdown", marker["udid"], timeout=arguments.shutdown_timeout_seconds)
+    return "shutdown"
+
+
 def provision(arguments: argparse.Namespace) -> dict[str, Any]:
     document = inventory()
     runtime = exact_runtime(document, arguments.runtime)
@@ -274,19 +319,47 @@ def provision(arguments: argparse.Namespace) -> dict[str, Any]:
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("command", choices=("provision", "validate", "status", "delete"))
-    parser.add_argument("--marker", required=True, type=Path)
-    parser.add_argument("--runtime", required=True)
-    parser.add_argument("--device-type", required=True)
-    parser.add_argument("--name", required=True)
+    parser.add_argument("command", choices=("provision", "validate", "status", "delete", "state", "shutdown"))
+    parser.add_argument("--marker", type=Path)
+    parser.add_argument("--runtime")
+    parser.add_argument("--device-type")
+    parser.add_argument("--name")
     parser.add_argument("--development-state", required=True, type=Path)
     parser.add_argument("--ephemeral", action="store_true")
-    return parser.parse_args()
+    parser.add_argument(
+        "--shutdown-timeout-seconds",
+        type=float,
+        default=float(os.environ.get("TRON_IOS_TEST_SHUTDOWN_TIMEOUT_SECONDS", "60")),
+    )
+    arguments = parser.parse_args()
+    if arguments.shutdown_timeout_seconds <= 0:
+        parser.error("deadlines must be positive")
+    if arguments.marker is None:
+        parser.error(f"{arguments.command} requires --marker")
+    # Only state and shutdown read everything they need from the marker alone.
+    if arguments.command not in ("state", "shutdown") and not (arguments.runtime and arguments.device_type and arguments.name):
+        parser.error(f"{arguments.command} requires --runtime, --device-type and --name")
+    return arguments
+
+
+SHUTDOWN_OUTCOME = {
+    "shutdown": "shut down",
+    "already-shutdown": "already shut down",
+    "missing": "owned simulator no longer exists",
+    "not-provisioned": "not provisioned",
+}
 
 
 def main() -> int:
     arguments = parse_args()
     try:
+        if arguments.command == "state":
+            print(lane_state(arguments.marker))
+            return 0
+        if arguments.command == "shutdown":
+            outcome = shutdown_owned(arguments.marker, arguments)
+            print(f"{SHUTDOWN_OUTCOME[outcome]}: {arguments.marker}")
+            return 0
         if arguments.command == "delete":
             delete_owned(arguments.marker, arguments)
             return 0

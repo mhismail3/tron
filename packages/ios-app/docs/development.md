@@ -940,7 +940,24 @@ scripts/tron-ios-test diagnose --only-testing TronMobileTests/<Suite>
 scripts/tron-ios-test clean
 ```
 
+### Simulator lifecycle
+
+A booted simulator costs about 2 GB of physical footprint until it is shut down,
+so the tooling, not agent discipline, owns release. The lease holder shuts the
+lane's simulator down when its command ends - on success, failure, process
+timeout, SIGINT, SIGTERM or SIGHUP - and reports a shutdown it could not finish
+without replacing the command's own exit status. `--keep-booted` is the one
+exception, for tight test-fix loops: it records the intent in the lease metadata
+(`simulator.keep_booted`, next to `simulator.booted_when_leased`, which records
+whether the command found the simulator already booted) and leaves the
+simulator up, so the next command in that lane reuses it.
+
 ### Test runner safety contract
+
+- Simulator lifetime is released, not remembered. Only the device named by an
+ownership marker is ever shut down, and the remembered Development simulator
+(`scripts/tron-ios-simulator`) and every unmarked simulator are never shut down
+or deleted by the runner.
 
 - Provisioning resolves the exact pinned runtime and device type, proves the
   repository ownership marker, and passes only

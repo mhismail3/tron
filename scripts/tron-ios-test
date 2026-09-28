@@ -31,7 +31,7 @@ EXIT_BUILD_FAILURE=70
 
 usage() {
   cat <<'USAGE'
-Usage: scripts/tron-ios-test COMMAND [--only-testing OWNER ...]
+Usage: scripts/tron-ios-test COMMAND [--keep-booted] [--only-testing OWNER ...]
 
 Commands:
   checkpoint, prepare  Provision, generate, build, and run the complete unit target.
@@ -45,15 +45,20 @@ Selectors:
   --only-testing OWNER  Repeat without shell-generated command fragments, for example:
                         --only-testing TronMobileTests/SnapshotCacheTests
 
+Options:
+  --keep-booted         Keep this lane's simulator booted when the command ends, for a
+                        tight test-fix loop; a later command releases it.
+
 Stable exits: 65 test failure, 66 destination, 70 build failure, 73 busy,
 74 runner failure, 75 process timeout. Signals retain their conventional exits.
-Routine runs are serial, use an exact owned simulator UDID, disable verbose test
-diagnostics, and preserve unique complete logs plus xcresults under
-$HOME/Library/Developer/Tron/ios/test-runs by default. Test products are built
-per worktree under $HOME/Library/Developer/Tron/ios/test-derived-data and stamped
-with the worktree and source state that produced them; run refuses products
-stamped for another worktree or another source state. diagnose never runs
-automatically.
+Commands release the simulator they use when they end, on success, failure,
+timeout or signal, unless --keep-booted was given. Routine runs are serial, use
+an exact owned simulator UDID, disable verbose test diagnostics, and preserve
+unique complete logs plus xcresults under $HOME/Library/Developer/Tron/ios/test-runs
+by default. Test products are built per worktree under
+$HOME/Library/Developer/Tron/ios/test-derived-data and stamped with the worktree
+and source state that produced them; run refuses products stamped for another
+worktree or another source state. diagnose never runs automatically.
 USAGE
 }
 
@@ -98,6 +103,7 @@ case "$command" in
 esac
 
 selectors=()
+keep_booted=0
 while (($#)); do
   case "$1" in
     --only-testing)
@@ -111,9 +117,20 @@ while (($#)); do
       selectors+=("-only-testing:${1#--only-testing:}")
       shift
       ;;
+    --keep-booted)
+      keep_booted=1
+      shift
+      ;;
     *) die "unsupported argument: $1" ;;
   esac
 done
+
+case "$command" in
+  checkpoint|prepare|build|run|diagnose) ;;
+  *)
+    ((keep_booted)) && die "--keep-booted applies to commands that provision the simulator"
+    ;;
+esac
 
 case "$command" in
   checkpoint|prepare|run|diagnose)
@@ -147,7 +164,11 @@ fi
 mkdir -p "$STATE_ROOT"
 chmod 700 "$STATE_ROOT"
 if [[ "${TRON_IOS_TEST_LOCK_HELD:-0}" != 1 ]]; then
-  exec python3 "$LOCKER" --lock "$LOCK" -- "$0" "$command" "${selectors[@]/#-only-testing:/--only-testing:}"
+  # The holder releases this lane's simulator when the command ends, so no
+  # simulator outlives the command that booted it.
+  locker_arguments=(--lock "$LOCK" --marker "$MARKER" --development-state "$DEVELOPMENT_STATE")
+  ((keep_booted)) && locker_arguments+=(--keep-booted)
+  exec python3 "$LOCKER" "${locker_arguments[@]}" -- "$0" "$command" "${selectors[@]/#-only-testing:/--only-testing:}"
 fi
 
 validate_owned_directory_path() {

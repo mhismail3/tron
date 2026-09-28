@@ -2,7 +2,7 @@
 
 - **Started:** 2026-09-27
 - **Status:** Active
-- **Last updated:** 2026-09-27, approved; SIM-1 to SIM-9 claimed
+- **Last updated:** 2026-09-28, SIM-1 done; SIM-2 to SIM-9 claimed
 - **Goal:** Agents run as many iOS simulators in parallel as the Mac can afford, and every simulator, process and artifact the test tooling creates is released automatically, including after crashes, so the live Gateway never runs short of memory.
 
 ## Goal and constraints
@@ -71,7 +71,7 @@ Why it accumulates, from the code:
 
 | ID | Status | Scope | Depends on | Owner |
 | --- | --- | --- | --- | --- |
-| SIM-1 | Claimed | Release on exit: the lease holder shuts down the simulator its command booted when the command ends, on success, failure, timeout or signal; an explicit keep-booted option serves tight test-fix loops and is itself released by the sweep | none | chat scroll session (worker lanes), 2026-09-27 |
+| SIM-1 | Done | Release on exit: the lease holder shuts down the simulator its command booted when the command ends, on success, failure, timeout or signal; an explicit keep-booted option serves tight test-fix loops and is itself released by the sweep | none | chat scroll session (worker lanes), 2026-09-27 |
 | SIM-2 | Claimed | Sweep: every Tron test tool invocation first shuts down orphaned owned simulators (booted, lease free); `scripts/tron-ios-test reap` runs it on demand | SIM-1 | chat scroll session (worker lanes), 2026-09-27 |
 | SIM-3 | Claimed | Named lanes: `--lane NAME` (and `TRON_IOS_TEST_LANE`) names a lane; `lanes` lists every lane with its worktree, state, lease holder, last use and disk size; `lane-remove NAME` deletes its simulator, state and products; the sweep deletes lanes unused for 7 days | SIM-2 | chat scroll session (worker lanes), 2026-09-27 |
 | SIM-4 | Claimed | Memory admission: before booting, read memory pressure and swap; if booting would leave less than a set reserve, fail fast with exit 73 and print what is booted, by which worktree and lane, and for how long | SIM-2 | chat scroll session (worker lanes), 2026-09-27 |
@@ -181,3 +181,43 @@ Owning files: `scripts/ios-test-simulator.py`, `scripts/tron-ios-test`.
   are claimed together because one supervised lane implements them in order on
   one branch (`sim-lifecycle`), and SIM-8 runs in parallel on its own branch
   (`sim-8-gateway-memory`). SIM-10 split out of SIM-3 (see its row).
+
+### SIM-1 · Done · 2026-09-28 · chat scroll session (worker lanes)
+
+- Result: the lease holder owns the lane's simulator for the whole command and
+  releases it when the command ends - on success, on failure, on the runner's
+  own process timeout (75) and on SIGINT/SIGTERM/SIGHUP - unless the command
+  asked for `--keep-booted`, which it records in the lease metadata
+  (`simulator.keep_booted` with `simulator.booted_when_leased`).
+  `scripts/tron-ios-test run` therefore leaves no owned simulator booted.
+- Evidence: `python3 scripts/test-ios-test-infrastructure.py` — 32 tests, 69 s
+  wall (25 tests, 122 s before this change; the seven SIM-1 cases and the two
+  new runner cases run against the synthetic xcrun only). Real-machine check
+  with every state/discovery root in a fresh `/tmp` lane and only a device this
+  task created: `provision` (create+boot) 22.7-122.3 s depending on host load
+  and runtime warmth; booting an already-created lane device after a release
+  5.2 s; provisioning an already-booted lane (the `--keep-booted` reuse path)
+  2.5 s; `--keep-booted` left the device Booted and the lease idle metadata
+  truncated; the same lock run without `--keep-booted` left it Shutdown. The
+  probe device was deleted; `xcrun simctl list --json` before/after the probe
+  is identical and the Mac's only other booted device (a live session's
+  `Tron iOS Test`) was never touched. Measured cost of release-on-exit per run:
+  about 5 s of boot for an existing lane, plus a one-off 100 s create when the
+  lane is new.
+- Changes: this commit.
+- Kept on purpose: `scripts/tron-profile-ios` and `scripts/ios-gateway-e2e-test`
+  still call `scripts/ios-test-lock.py` without `--marker`, so they keep today's
+  behaviour (their lease ends, their simulator stays booted) until SIM-7 wires
+  the release and sweep into them; `scripts/ios-test-lock.py` therefore takes the
+  release marker as an option rather than a requirement.
+- Deviations: signal handlers now cover taking the lease and starting the
+  command, not only waiting for it, and a signal that arrives while the command
+  is starting is forwarded as soon as the child exists. Without that, a signal
+  delivered in the (pre-existing) startup window killed the holder, orphaned its
+  command and left the simulator booted - the synthetic signal cases hit it
+  about one run in four. A command that never started releases nothing.
+- For the next agent: SIM-2 adds the sweep that reclaims what a `--keep-booted`
+  or killed holder leaves; `scripts/ios-test-simulator.py state` and `shutdown`
+  are the marker-scoped primitives it builds on. The `TRON_IOS_TEST_DEVICE_NAME`/
+  `TRON_IOS_TEST_STATE_DIR` lanes on the real Mac (`ios-test-CT22`) are still
+  used by the energy-efficiency session (SIM-10).
