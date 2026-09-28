@@ -122,7 +122,7 @@ for relative in ("TestPlans/UnitTests.xctestplan", "TestPlans/UIValidation.xctes
 expected_actions = {
     "Tron Development": ("Development", "Test", False),
     "Tron Device": ("LocalDevice", "Test", True),
-    "Tron UI Validation": ("Development", "Development", False),
+    "Tron UI Validation": ("Test", "Test", False),
     "Tron Device Performance": ("DevicePerformance", "DevicePerformance", False),
 }
 paths = {path.stem: path for path in schemes.glob("*.xcscheme")}

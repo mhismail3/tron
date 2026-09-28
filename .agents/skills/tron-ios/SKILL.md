@@ -17,7 +17,7 @@ distributed Beta product.
 | Device performance tests | Tron Device Performance | DevicePerformance | hosted test, production-sandbox |
 | Scenario profiling (agents) | `scripts/tron-profile ios` (Tron Device Performance) | DevicePerformance | optimized hosted test on the owned test simulator, shared lease |
 | Manual release archive | Tron Release | Release | production; archive/analyze/profile only |
-| UI validation | Tron UI Validation | Development / Test action | Development app, Test UI host |
+| UI validation | Tron UI Validation | Test (run and test actions) | `HOSTED_TEST` app, Test UI host |
 
 `LocalDevice` is the optimized normal-use configuration: Swift `-O` whole-module
 compilation, normal Clang optimization, testability disabled, and
