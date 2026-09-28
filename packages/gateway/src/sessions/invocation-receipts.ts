@@ -194,6 +194,10 @@ export function parseInvocationReceipt(value: unknown): InvocationReceiptData | 
  * allowing an extension to rewrite a terminal fact.
  */
 export function invocationReceipts(entries: readonly SessionEntry[], sessionId?: string): InvocationReceiptData[] {
+  // A branch with no invocation receipt has nothing to fold, and a snapshot
+  // projection runs this over the whole branch on every build: skip indexing
+  // every entry for a record set that stays empty (G-2).
+  if (!entries.some((entry) => entry.type === "custom" && entry.customType === INVOCATION_RECEIPT_TYPE)) return [];
   const records = new Map<string, InvocationReceiptData>();
   const entriesById = new Map(entries.map(entry => [entry.id, entry]));
   for (const entry of entries) {
