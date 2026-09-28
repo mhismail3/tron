@@ -2,6 +2,15 @@
 
 - **Started:** 2026-09-27
 - **Status:** Active (Phase 1 runs on `hardening/integration`; that branch's copy of this plan is authoritative until R-1)
+- **Last updated:** 2026-09-28, G-8c review round 1 addressed: the search index
+  is persisted and keyed by the catalog owner's verified file facts (fileIdentity,
+  size, mtime), a start parses only what the catalog proves changed, and the write
+  path is sliced - the session's old rows are deleted in bounded batches that
+  yield, the byte total reads the persisted per-row posting total, only a cut read
+  from the file is stamped as file-verified, and writers share one lane (see
+  handoff). A 3,000-passage replacement over a 6,000-passage index holds the loop
+  ~0.3 s against G-11's 565-821 ms insert and 491 ms delete, and a summary
+  publication's invalidation is 0.1 ms
 - **Last updated:** 2026-09-28, G-8b review round 2 addressed: the poller
   owns one admission cache shared with the explicit user actions, the explicit
   probe records its outcome, and the runtime fence stamps the bundled manifest
@@ -8158,3 +8167,32 @@ wait).
   slice); the `posting_bytes` column and `sessionFacts()` are the seams to reuse.
   A start after real use should show `counts.parsedSessions` far below the corpus
   size in `session-search.warm`.
+
+- Review round 1 (2026-09-28) addressed:
+  - major 1: a replace deletes the session's old rows in bounded batches
+    (`INDEX_DELETE_BATCH_ROWS` = 25 passages per statement) and yields between
+    them, and the pre-flight byte total reads `sum(sessions.posting_bytes)`
+    instead of summing every posting; the warm-up's stale-row removals are
+    sliced too. `session-search-stall.test.ts` now replaces an existing session
+    in a populated index - the shape a dirty refresh always has: a 3,000-passage
+    replacement over a 6,000-passage index took 3.1-6.6 s of work in 170-194
+    event-loop ticks with a longest held stretch of ~0.3-0.6 s (host scheduling
+    floor subtracted), against ~1.0 s for the whole-session cascade delete it
+    replaced (491 ms in G-11). Report: `$TMPDIR/tron-search-stall-report.json`.
+  - major 2: only a `readSearchCut` cut read from the canonical file may carry
+    the catalog's facts; a slot-backed cut (`runtimeGeneration`) leaves the row
+    unstamped so the next start re-derives it, pinned in
+    `session-search-service.test.ts`.
+  - minor 3: `replace()` and `remove()` share one private write lane, so an
+    overlapping writer queues instead of joining or failing a transaction,
+    pinned in `session-search-index.test.ts`.
+  - minor 4: the persisted stamp carries a derivation version beside the table
+    shape, with bump notes on `terms()`, `trigrams()`, `extractSearchText` and
+    the branch digest (the stamp value changed, so existing rows are discarded
+    once).
+  - minor 5: the schema stamp is written only after `recreate()` has created the
+    tables, so the constructor can no longer mark an old-shaped file current.
+- Open: an open session's tree navigation followed by a restart is proven at the
+  service seam with a stubbed registry, not yet end-to-end with a real registry
+  and a real navigation. The budget check's stall claim has no timing assertion:
+  at test-sized indexes the commit's fsync floor exceeds the whole-index scan.
