@@ -7443,3 +7443,58 @@ wait).
   reports `incomplete`) because an absent root proves no removal and the existing
   G-1a case pins that. `catalog_not_ready` is the new reason for a read before
   the first cut.
+
+### G-1c · Claimed · 2026-09-28 · orchestrator-dispatched deepseek-worker, review round 3 (branch `hardening/g-1c`)
+
+- Result: review-2's blockers stay fixed; the owning suite is 213/232 (review
+  time: 192/257 with 65 failures; 21 obsolete cases deleted since).
+  `session-archive.integration.test.ts` 41/41 and `catalog-discovery.test.ts` +
+  `session-catalog.test.ts` 31/31. Row stays Claimed: 18 cases remain.
+- Landed (`371306fb7`, `89c62abc2`, `1f5ce404d`): test seams `catalogWalks()`
+  (the owner's one whole-folder walk) and `catalogHeaderReads()`; a read now
+  asserts it adds no walk and reads only the file it admits. Rewritten to the new
+  contract: list/cold-open/hot-re-acquire, restart index, unprovable artifact,
+  unrelated malformed header, incomplete-pass contract, duplicate/removal
+  membership, the Knowledge recovery matrix (`incomplete` mode becomes decision
+  1's unprovable neighbour), parallel delegated appends, artifact ownership,
+  user-vs-all scope, duplicate quarantine beside a contradictory child.
+- Deleted 21 cases whose subject no longer exists (one line each, same commit):
+  durable-index materialization and publication gaps (retires a durable load,
+  cannot republish, rejects a mutation in the final publication gap, fails busy
+  after a second unstable materialization, never stamps captured stale fields,
+  keeps cold acquisition independent of mutable metadata, acquires from header
+  evidence while materialization is suspended, serializes an all-scope
+  materialization, lets user discovery finish while all-scope is blocked, retires
+  viewer capacity during one shared wait); fallback SDK acquisition and its
+  retries (coalesces concurrent fallback scans, revalidates oversized SDK
+  identities, retries lightweight acquisition, fails busy after a second
+  lightweight invalidation, coalesces acquisition successors); shared
+  request-path walks and caches (shares one successor header walk, keeps a
+  live-owned index cut during reconciliation, rejects an inode replacement that
+  races durable-index reconciliation, keeps a warmed disk index, retains the
+  stable user cut, isolates an unfinished child append).
+- Remaining 18: reader-capacity family (`bounds recursive catalog directories`,
+  `bounds discovered session count and bytes`, `caps canonical session path
+  normalization concurrency`, `bounds validation reads and retained acquisition
+  evidence`, `reserves a deterministic aggregate header-read budget`,
+  `initializes storage without requiring catalog presentation metadata`) → assert
+  the owner's `catalogReconciled` outcome plus a retryable `catalog_not_ready`
+  read; commit-fence races (`rejects identity, cwd, or duplicate mutation` — its
+  duplicate arm writes the claimant inside the race; `does not follow a session
+  path replaced by a symlink during delete`; `revalidates parent creation,
+  duplicate identity, and topology changes in the delete gap`; `fails closed when
+  multiple canonical files claim one session ID`) → drive at the new fence;
+  unstable-file rule (`rejects an unowned append that races durable-index
+  reconciliation`, `fails closed with retryable busy when an unowned canonical
+  file ends in a partial line`) → decision 1 answers with the last provable row,
+  not `busy`; and the live-only/identity group (`projects empty live sessions
+  until deletion, persistence, eviction, or restart`, `advances user catalog
+  identity when canonical membership changes beside delegated rows`, `refreshes
+  user metadata and duplicate quarantine after a scoped cut is warm`, `reclaims
+  reloadable idle runtimes under pressure`, `bounds cold catalog previews`
+  (fixture Buffer/string fault), `discovers oversized active lifecycle headers`).
+- Evidence: `npx tsc --noEmit -p .` clean; `npm run build` clean; registry suite
+  213/232 (`/tmp/g1c-r13.json`).
+- Still owed: the O-5 zero-request-path-walk evidence, the O-6a smoke and the
+  `session.list` p99 (orchestrator's quiet-host run); G-1d's doc wording.
+
