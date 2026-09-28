@@ -994,8 +994,10 @@ demand, taking no lease of its own; exit 66 means a release failed.
 
 A signal to a command's lease holder reaches the whole command tree and the
 release waits for it: the holder starts the command in its own process group,
-forwards SIGINT, SIGTERM and SIGHUP to that group, and only shuts the lane's
-simulator down once no process of the tree is left. The command's own lease
+forwards SIGINT, SIGTERM and SIGHUP to that group, and shuts the lane's
+simulator down once no process of the tree is left, or after 30 s with a
+warning naming the survivors. xcodebuild runs in the bounded process runner's
+own session and is stopped by that runner, not by the group signal. The command's own lease
 lives in that tree too, so a holder killed outright leaves a lane whose lease is
 still held - the sweep skips it while the command runs and reclaims the orphan
 once it ends - instead of releasing the simulator under a live test.
@@ -1041,7 +1043,7 @@ owns, and `Simulator.app`) when free memory is below 8 GB.
 `TRON_IOS_TEST_MEMORY_RESERVE_BYTES` overrides that default. Swap in use is
 reported in that table beside the free memory and never refuses a boot: it
 drains slowly, so a reading at a limit would refuse boots persistently. The
-refusal is fast - no wait, no retry - because the caller decides whether to wait
+memory refusal is fast - no wait, no retry - because the caller decides whether to wait
 for the Mac to free memory; a reserve the Mac has already breached while no
 owned lane is booted says so, so an agent knows the memory is not the test
 tooling's. A reader that is missing, failing or unparsable admits the boot with
@@ -1052,7 +1054,8 @@ lane root, held from the memory read until `bootstatus` returns: two starts
 cannot each read memory the other boot has not taken yet. A boot that cannot
 take that lock in `--admission-wait-seconds` (300 by default,
 `TRON_IOS_TEST_ADMISSION_WAIT_SECONDS`) is refused with the same exit 73 and
-table, rather than waiting behind a wedged boot.
+table. The boot and `bootstatus` are each bounded to 180 s, so a wedged boot
+fails its own command and releases the lock instead of blocking every lane.
 
 An agent runs `scripts/tron-ios-test status --all` before its final response, and
 a refused admission prints the same table: its own line names the lane root, the

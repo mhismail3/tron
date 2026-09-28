@@ -802,3 +802,21 @@ Owning files: `scripts/ios-test-simulator.py`, `scripts/tron-ios-test`.
   the detached child's `/dev/fd` has neither the lease nor a stale number, the
   caller still holds the lease while it runs, and `$!` is the child's pid. No
   Gateway, simulator or device state outside the synthetic fixtures was touched.
+
+### Review fixes, second pass · 2026-09-28 · chat scroll session (supervisor)
+
+- Result: the re-review's follow-ups on `sim-lifecycle`. N1: a lease holder is
+  disproved only by a later process start (one-sided), because bash and the
+  profiler become the holder by exec and keep their fork time. N2: `simctl boot`
+  and `bootstatus` are bounded to 180 s, so a wedged boot fails its own command
+  and releases the machine-wide admission lock. N3: the admission lock is
+  `.ios-test-admission.lock`, outside the lane namespace (lane names cannot start
+  with a dot). N4: `development.md`, the iOS skill and the profiler comment state
+  the 30 s release bound and that xcodebuild is stopped by the process runner.
+- Evidence: `python3 scripts/test-ios-test-infrastructure.py` 86 tests pass
+  (about 214 s); `scripts/test-tron-profile-ios.py` passes; a lane named
+  `.ios-test-admission.lock` is refused.
+- Kept on purpose: N5 (the test launcher checks environment roots, not
+  command-line roots or which `simctl` resolves) and N6 (no automated test of the
+  E2E `detach` helper) stay as notes; every fixture sets its roots and
+  `TRON_IOS_XCRUN` inside its temporary directory today.

@@ -37,7 +37,7 @@ UDID_D = "DDDDDDDD-DDDD-DDDD-DDDD-DDDDDDDDDDDD"
 UDID_E = "EEEEEEEE-EEEE-EEEE-EEEE-EEEEEEEEEEEE"
 UDID_F = "FFFFFFFF-FFFF-FFFF-FFFF-FFFFFFFFFFFF"
 # One admission lock for the whole Mac: every lane's boot serializes on it.
-ADMISSION_LOCK = "ios-test-admission.lock"
+ADMISSION_LOCK = ".ios-test-admission.lock"
 
 # The owners read the Mac's memory pressure, its swap and its process table.
 # These synthetic readers stand in for `memory_pressure`, `sysctl` and `ps`, so

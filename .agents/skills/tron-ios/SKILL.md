@@ -118,8 +118,9 @@ reclaim simulators yourself.
 - Every command that provisions a lane's simulator releases it when the command
   ends - success, failure, timeout, SIGINT, SIGTERM or SIGHUP - unless
   `--keep-booted` asks to reuse it for a tight test-fix loop. A signal reaches
-  the whole command tree and the release waits for it, so nothing of a stopped
-  test is left running under a released simulator. A lane a live
+  the whole command tree and the release waits up to 30 s for it (then warns
+  and releases), so a stopped test is not left running under a released
+  simulator. A lane a live
   process leases is never disturbed, by the tooling or by an agent.
 - Every command that provisions a lane's simulator first sweeps: orphaned owned
   lanes (booted with no live lease) are shut down, and lanes unused for 7 days

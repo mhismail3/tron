@@ -61,7 +61,9 @@ HOLDER_START_TOLERANCE_SECONDS = 5.0
 # One admission lock for this Mac: every lane's boot is serialized on it, and it
 # is held from the memory read until `simctl bootstatus` returns, so two starts
 # cannot each read memory the other has not taken yet.
-ADMISSION_LOCK_NAME = "ios-test-admission.lock"
+# The leading dot keeps the lock outside the lane namespace: a lane is
+# `ios-test-NAME` and a lane name cannot start with a dot.
+ADMISSION_LOCK_NAME = ".ios-test-admission.lock"
 # The runner's ownership marker, written by `owned_directory` in
 # `scripts/tron-ios-test` before it creates a results or products directory.
 # Deletion outside the tool's own trees is refused without it.
@@ -94,6 +96,9 @@ FREE_PERCENTAGE_PATTERN = re.compile(r"System-wide memory free percentage:\s*([0
 SWAP_USED_PATTERN = re.compile(r"\bused\s*=\s*([0-9.]+)\s*([KMGT]?)")
 SIZE_SCALES = {"": 1, "K": 1 << 10, "M": 1 << 20, "G": 1 << 30, "T": 1 << 40}
 READER_TIMEOUT_SECONDS = 10.0
+# A boot and its `bootstatus` run under the machine-wide admission lock, so a
+# wedged boot must fail its own command instead of blocking every lane's boots.
+BOOT_TIMEOUT_SECONDS = 180.0
 
 
 class DestinationError(RuntimeError):
@@ -381,7 +386,11 @@ def holder_is_live(metadata: dict[str, Any], table: list[tuple[int, int, str]] |
     elapsed = next((seconds for holder, seconds, _ in table or [] if holder == pid), None)
     if elapsed is None:
         return True
-    return abs((time.time() - elapsed) - float(started_at)) <= HOLDER_START_TOLERANCE_SECONDS
+    # One-sided: a recycled pid always started after the holder recorded its
+    # start, while the recorded holder may have started earlier than it wrote
+    # that second (bash or the profiler becomes the holder by exec, keeping its
+    # fork time), so only a later start disproves it.
+    return (time.time() - elapsed) <= float(started_at) + HOLDER_START_TOLERANCE_SECONDS
 
 
 def lease_holder(
@@ -1370,10 +1379,10 @@ def provision(arguments: argparse.Namespace) -> dict[str, Any]:
         # boots instead of each admitting memory the other has taken.
         with admission_hold(arguments):
             admit_boot(arguments)
-            simctl("boot", marker["udid"])
-            simctl("bootstatus", marker["udid"], "-b")
+            simctl("boot", marker["udid"], timeout=BOOT_TIMEOUT_SECONDS)
+            simctl("bootstatus", marker["udid"], "-b", timeout=BOOT_TIMEOUT_SECONDS)
     else:
-        simctl("bootstatus", marker["udid"], "-b")
+        simctl("bootstatus", marker["udid"], "-b", timeout=BOOT_TIMEOUT_SECONDS)
     document = inventory()
     device = validate_marker(document, marker, runtime, device_type, dev_udid)
     return {**marker, "state": device.get("state"), "udid_sha256": hashlib.sha256(marker["udid"].encode()).hexdigest()}

@@ -310,8 +310,9 @@ def bounded(log: Path, evidence: Path, overall: float, no_output: float, artifac
     child = subprocess.Popen(
         process, env={**os.environ, "NSUnbufferedIO": "YES", **(environment or {})}, stdout=subprocess.DEVNULL
     )
-    # The lease holder forwards SIGTERM/SIGHUP only to this process; relay it
-    # to the bounded runner, which stops its xcodebuild process group.
+    # The lease holder signals this command's whole process group, but
+    # xcodebuild runs in the bounded runner's own session; relay the signal to
+    # the runner, which stops that session.
     def forward(signum: int, _frame: object) -> None:
         if child.poll() is None:
             child.send_signal(signum)
