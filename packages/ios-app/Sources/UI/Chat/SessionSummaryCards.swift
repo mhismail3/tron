@@ -87,7 +87,11 @@ struct SessionModelSummaryCard<Controls: View, CompactAction: View>: View {
                 }
                 .fixedSize(horizontal: false, vertical: true)
                 if !dynamicTypeSize.isAccessibilitySize { Spacer(minLength: 0) }
-                TronProgressiveSheetLink(accessibilityLabel: "Switch Model", accent: .tronPurple) {
+                TronProgressiveSheetLink(
+                    accessibilityLabel: "Switch Model",
+                    accent: .tronPurple,
+                    detents: [.medium, .large]
+                ) {
                     ModelPicker(selection: $selection, models: catalog.filter(\.available))
                         .tronNavigationTitle("Models", accent: .tronPurple)
                         .environment(\.tronSettingsSecondaryTextSizeAdjustment, 0)

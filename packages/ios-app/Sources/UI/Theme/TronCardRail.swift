@@ -48,6 +48,10 @@ struct TronCardRail<Item, ID: Hashable, Content: View>: View {
                 ForEach(items, id: identity) { item in
                     Button { action(item) } label: {
                         content(item)
+                            // A plain button hit-tests only its label's drawn
+                            // content; the whole card, including empty space,
+                            // must select.
+                            .contentShape(RoundedRectangle(cornerRadius: cornerRadius, style: .continuous))
                     }
                     .buttonStyle(.plain)
                     // Callers resolve the accent from their own theme, so the

@@ -204,6 +204,9 @@ struct TronProgressiveSheetLink<Label: View, Destination: View>: View {
     let destination: () -> Destination
     let label: Label
     let accent: Color?
+    /// Settings destinations open full height; a picker launched from a
+    /// medium-detent sheet (Manage Session) passes `[.medium, .large]`.
+    let detents: Set<PresentationDetent>
     @State private var isPresented = false
     @Environment(\.tronSettingsVisualTheme) private var inheritedTheme
 
@@ -211,12 +214,14 @@ struct TronProgressiveSheetLink<Label: View, Destination: View>: View {
         accessibilityLabel: String,
         identity: String? = nil,
         accent: Color? = nil,
+        detents: Set<PresentationDetent> = [.large],
         @ViewBuilder destination: @escaping () -> Destination,
         @ViewBuilder label: () -> Label
     ) {
         self.accessibilityLabel = accessibilityLabel
         self.identity = identity ?? "settings.\(accessibilityLabel)"
         self.accent = accent
+        self.detents = detents
         self.destination = destination
         self.label = label()
     }
@@ -245,6 +250,7 @@ struct TronProgressiveSheetLink<Label: View, Destination: View>: View {
                 .tronTopBlur(.sheet)
                 .tronPresentation()
                 .tronSettingsLayout()
+                .presentationDetents(detents)
                 .presentationDragIndicator(.hidden)
             }
     }

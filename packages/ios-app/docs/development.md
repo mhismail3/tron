@@ -267,7 +267,8 @@ edge is expected glass behavior rather than a layout overlap. Each `ModelRailCar
 card (168-point minimum height, so Dynamic Type grows it) showing provider, model name, context
 window, input/output price per million tokens from the Gateway's optional `cost`, and the release
 month ("Sep 2026"); an absent fact is omitted, never shown as zero or as a placeholder date
-(`ModelCardFactsTests`). Recent, Latest, and provider headers share one 16-point header size.
+(`ModelCardFactsTests`). Recent, Latest, and provider headers share one 16-point header size. The whole card, including its empty
+space, is the tap target: the rail gives each plain button label the card's content shape.
 Recent order and membership belong to the Gateway's bounded recent-model history read through
 `model.recent` and refreshed by the `models.recentChanged` event; a ref that has left the
 available catalog is dropped rather than displayed. Latest orders the available catalog by the

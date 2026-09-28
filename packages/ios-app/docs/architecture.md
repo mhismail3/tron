@@ -1861,7 +1861,7 @@ model card's final row. The leading native toolbar group contains only Rename Se
 Terminal icons, mirroring the dashboard's grouped actions, while Done stays trailing.
 Rename keeps the dashboard's clearable native text-entry alert and trimmed nonempty admission.
 The model action opens the progressive searchable `ModelPicker` with purple title, controls,
-and cards. Its sheet title is **Models**, also used by the picker within Settings → Agent Defaults → Model Defaults;
+and cards, starting at medium like the other Manage Session child sheets and expandable to large. Its sheet title is **Models**, also used by the picker within Settings → Agent Defaults → Model Defaults;
 the parent settings destination retains its existing name. The picker organizes one catalog read
 into device-preference presentation only: a Recent rail projected from the Gateway's bounded
 recent-model history, a Latest rail ordered by the Gateway's optional release date, and one
