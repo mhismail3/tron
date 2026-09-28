@@ -104,7 +104,9 @@ more than a day.
 (a local probe's upgrade that opens at hello within 1,000 ms) is `debug`, so it
 stays in the 4,000-record / 2 MB memory-only buffer instead of `gateway.jsonl`.
 `connection.inbound-silent` and `connection.inbound-resumed` come in pairs, one
-per silence episode; a day with no path outage adds neither.
+per silence episode the socket survives; a silence that ends in the socket's
+close leaves only its `connection.inbound-silent`. A day with no path outage
+adds neither.
 
 `gateway.resources` is the one periodic record. Its quiet minute is `debug` and
 is written only to the 4,000-record / 2 MB memory-only debug buffer, which is

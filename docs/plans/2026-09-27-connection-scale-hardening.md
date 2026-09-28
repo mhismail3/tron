@@ -587,7 +587,7 @@ rows are in priority order.
 | G-8d | Ready | Bound the 750 ms ambient artifact discovery pass by change and make its 1,024-entry truncation impossible or visible; see G-8 handoff | G-8a | |
 | G-8b | Claimed | Bound the Mac app status poll's child processes and per-poll payload re-hash (user/security decision in "Decisions still open"); see G-8 handoff | G-8 | orchestrator-dispatched deepseek-worker, 2026-09-28 |
 | G-8c | Ready | Bound the session-search warm-up (persisted index vs bounded slices in G-9's scheduler: user decision); see G-8 handoff | G-9 | |
-| E-1 | Claimed | Document Tailscale flap diagnosis and user-side checks; the evaluation day confirms | O-2, O-7 | orchestrator-dispatched deepseek-worker, 2026-09-28 |
+| E-1 | Done | Document Tailscale flap diagnosis and user-side checks; the evaluation day confirms | O-2, O-7 | orchestrator-dispatched deepseek-worker, 2026-09-28 |
 | T-1 | Ready | Pre-existing test race: registry extension-artifact discovery tests treat an awaited `discoverExtensionArtifacts()` as a barrier; wait for a pass that settles (three tests, one a false green) | G-1a (Registry zone) | |
 | T-2 | Claimed | `GatewayConnectionEpisodeRecorderTests/blockedMainActorIsMeasuredAndReported` (O-4) was killed once ("Test crashed with signal kill") when run with four other suites on integration, then passed 3/3; find whether the 5 s main-thread block trips a hosted-test watchdog and bound the block so the test cannot be killed while still proving the stall record | O-4 | orchestrator-dispatched deepseek-worker, 2026-09-28 |
 | C-7 | Ready | Dashboard-pool event consumption stops after a failed initial connect (see the C-5 handoff): a successful reconnect brings the socket back but nothing consumes `client.events`, so a background profile stops receiving summaries, `system.stopping` and `transport.disconnected` until its entry is recreated | C-2 | |
@@ -7211,3 +7211,66 @@ wait).
   before export with its size and the remedy (E-2c). A traced product scenario
   must use a short `--window-seconds` to fit; that is the accepted cost. E-2
   and E-2c set to Done.
+
+### E-1 · Done · 2026-09-28 · orchestrator-dispatched deepseek-worker (branch `hardening/e-1`)
+
+- Result: `packages/gateway/docs/connection-resilience.md` gains a "Tailscale
+  flaps" section: the Gateway records a flap leaves (`connection.inbound-silent`
+  at `peerPath=relay`/`offline` with `peerRelay`, paired with
+  `connection.inbound-resumed` and its `silentMs` when the socket survives the
+  flap and unpaired when it does not, joined by the O-1 key), the
+  triage tool's reading (`scripts/tron-triage` reports the `path` cause from the
+  Gateway's silent record, from an attempt's `transport-open` timeout that never
+  reached the Mac, or — with `--tailscale-window --tailscale-peer NODEKEY` for
+  logs predating those records — from the covering relay window, while a window
+  that closed before the outage ended stays `[context]`), the incident's worked
+  example, and the user-side checks (iPhone Tailscale app and settings, Wi-Fi
+  private address, router client steering). Docs only: no code, record or test
+  changed, so no observability row is owed.
+- Evidence: `python3 scripts/test-tron-triage.py` passes 51/51 in 4.8 s
+  (`TRON_TRIAGE_TEST_REPORT`); the run and its table are retained at
+  `~/.tron/workspace/files/hardening/e-1/e1-triage-report.json{,.txt}`; the cases
+  behind the documented shapes are `test_relay_silence_joined_by_key_is_the_path`
+  (Gateway `peerPath=relay` evidence, `silentMs=68000`),
+  `test_relay_window_classifies_a_path_episode` (`relay path window` cause
+  evidence) and `test_a_relay_window_that_closed_before_the_episode_ended_is_context`
+  (the "does not cover this episode" context wording). The worked example's
+  numbers are Context's measurements and O-7's real incident-export run (14
+  `path` episodes with the capture against 5 without; both silent gaps `unknown`
+  with their windows named as context). `scripts/tron-triage` also run read-only
+  against `~/.tron/logs/device-exports/…2026-09-28T07-37-42-420Z.jsonl` (kept,
+  device id elided, at
+  `~/.tron/workspace/files/hardening/e-1/device-export-tailscale-run.txt`): 24
+  episodes, `path=0`, and with `--tailscale-window` the header reads `captured,
+  12 path line(s)` with no window covering an episode — the context behavior the
+  section describes. `python3 scripts/check-documentation-policy.py` (46 authored
+  files) and `scripts/personal-info-guard.sh` pass.
+- Changes: `docs(gateway): document Tailscale flap diagnosis (E-1)`;
+  `docs(gateway): correct Tailscale flap timing (E-1 review round 1)`.
+- Tasks added: none.
+- Kept on purpose: the existing `connection.inbound-silent` row in the
+  diagnostics table keeps its shape and gains the pointer to the new section
+  (round 1 changed only its closing "repeated …" clause); the records
+  themselves, their observability row and the triage tool are O-2's and O-7's
+  and were not re-documented.
+- Deviations: none.
+- For the next agent: R-4 counts the evaluation day's flaps with
+  `scripts/tron-triage … --tailscale-window --tailscale-peer NODEKEY` (the
+  section says what to read); E-3 is what removes the effect at home.
+- Review round 1 (changes required; all findings addressed in the follow-up
+  commit): the flap section now states the phone drops the socket within about
+  18 s of the path going quiet and the Gateway only after three missed 25 s
+  heartbeats, names the disconnecting shape (unpaired
+  `connection.inbound-silent`, then the phone's close as `connection.closed` or
+  the Gateway's `connection.heartbeat-timeout` at ~75–100 s, with the phone's
+  liveness `ping_timeout`), gives the silent record's 12–37 s detection window,
+  says "repeated silences at `peerPath=relay`/`offline`" in the diagnostics row,
+  and replaces the stale-app→`relay` claim with the disabled-extension symptom
+  (`transport-open` timeouts, no Gateway `http.upgrade`). Minor: deleted the
+  paired-record claim from `observability.md`'s budget paragraph (a silence that
+  ends in the socket's close leaves only its silent record) and dropped the
+  "keeps its wording" line above. Checks re-run: `test-tron-triage.py` 51/51
+  (14.2 s), `check-documentation-policy.py` (46 files), `personal-info-guard.sh`
+  — pass. The disconnecting shape is read from the code and the contract
+  constants (phone liveness retirement, the 25 s heartbeat tick and the close
+  path), not reproduced: O-2's blackhole test uses a client that never gives up.
