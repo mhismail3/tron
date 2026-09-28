@@ -29,6 +29,7 @@ UDID_B = "BBBBBBBB-BBBB-BBBB-BBBB-BBBBBBBBBBBB"
 UDID_C = "CCCCCCCC-CCCC-CCCC-CCCC-CCCCCCCCCCCC"
 UDID_D = "DDDDDDDD-DDDD-DDDD-DDDD-DDDDDDDDDDDD"
 UDID_E = "EEEEEEEE-EEEE-EEEE-EEEE-EEEEEEEEEEEE"
+UDID_F = "FFFFFFFF-FFFF-FFFF-FFFF-FFFFFFFFFFFF"
 
 # The owners read the Mac's memory pressure, its swap and its process table.
 # These synthetic readers stand in for `memory_pressure`, `sysctl` and `ps`, so
@@ -1204,6 +1205,8 @@ raise SystemExit(2)
         self.discovery_root = self.root / "lanes"
         self.state = self.discovery_root / "ios-test"
         self.state.mkdir(parents=True)
+        self.home = self.root / "home"
+        self.home.mkdir()
         self.inventory_path.write_text(json.dumps({"devices": {RUNTIME_ID: []}}))
         self.environment = os.environ.copy()
         self.install_readers(self.root)
@@ -1218,6 +1221,11 @@ raise SystemExit(2)
             "TRON_IOS_SIMULATOR_STATE_DIR": str(self.development_marker.parent),
             "TRON_IOS_TEST_SHUTDOWN_TIMEOUT_SECONDS": "2",
             "TRON_IOS_TEST_SWEEP_DEADLINE_SECONDS": "30",
+            # The runner derives the shared results and products roots from HOME,
+            # and every sweep prunes them. Without this HOME each `reap` here
+            # would prune the Mac's real test roots; instead every root these
+            # fixtures touch is a directory the temporary fixture owns.
+            "HOME": str(self.home),
         })
         self.holders: list[subprocess.Popen[str]] = []
 
@@ -1603,14 +1611,6 @@ class LaneHarness(OwnedLaneFixture):
     7. A holder killed with SIGKILL leaves stale lease metadata that reads as a
        live holder and hides the lane from the list and from expiry.
     """
-
-    def setUp(self) -> None:
-        super().setUp()
-        # Every path a lane command derives from HOME stays inside the fixture,
-        # so no lane command can reach the real build root or default lane.
-        self.home = self.root / "home"
-        self.home.mkdir()
-        self.environment["HOME"] = str(self.home)
 
     def runner(self, *arguments: str, environment: dict[str, str] | None = None) -> subprocess.CompletedProcess[str]:
         return subprocess.run(
@@ -2003,6 +2003,140 @@ class ReclaimFixture(LaneHarness, unittest.TestCase):
         again = self.reap()
         self.assertEqual(again.returncode, 0, again.stderr)
         self.assertNotIn("removed result run", again.stdout)
+
+
+class StatusFixture(LaneHarness, unittest.TestCase):
+    """SIM-6 `status --all`: one view of everything that holds the Mac's memory.
+
+    Failure modes these cases target, written before the code:
+
+    1. A booted simulator is missing from the view, or one appears twice, so an
+       agent cannot see what holds memory before its final response.
+    2. The view cannot tell an owned lane from the Development simulator from an
+       unowned simulator, or hides which process holds a lane's lease.
+    3. Uptime is wrong, invented, or missing although the process table proves it,
+       so "for how long" cannot be answered.
+    4. Simulator.app is not listed (the 2026-09-27 incident's 4.5-day process), or
+       its row claims an uptime while it is not running.
+    5. The view mutates state - taking a lease, booting, shutting down or removing
+       anything - so looking at the Mac changes it.
+    """
+
+    def add_device(self, udid: str, *, name: str, state: str = "Booted", disk_bytes: int | None = None) -> None:
+        """An unowned device: in the inventory, with no Tron ownership marker."""
+        document = self.inventory()
+        device: dict[str, object] = {
+            "name": name, "udid": udid, "state": state, "isAvailable": True,
+            "deviceTypeIdentifier": TYPE_ID,
+        }
+        if disk_bytes is not None:
+            device["dataPathSize"] = disk_bytes
+        document["devices"][RUNTIME_ID].append(device)
+        self.inventory_path.write_text(json.dumps(document))
+
+    def development_is(self, udid: str) -> None:
+        self.development_marker.parent.mkdir(parents=True, exist_ok=True)
+        self.development_marker.write_text(udid + "\n")
+
+    def status_all(self, *, environment: dict[str, str] | None = None) -> subprocess.CompletedProcess[str]:
+        return self.runner("status", "--all", environment=environment)
+
+    def status_row(self, output: str, marker: str) -> str:
+        """The one table row that contains `marker`, for example one owner."""
+        matches = [line for line in output.splitlines() if marker in line]
+        self.assertEqual(len(matches), 1, f"expected exactly one row containing {marker!r}:\n{output}")
+        return matches[0]
+
+    def test_status_all_lists_every_booted_simulator_once(self) -> None:
+        """Failure modes 1 and 2: every booted device appears, labelled by owner."""
+        self.owned_lane(
+            "ios-test", UDID_A, worktree="/private/tmp/tron-lane-default", disk_bytes=3 << 30,
+        )
+        alpha = self.owned_lane(
+            "ios-test-alpha", UDID_B, worktree="/private/tmp/tron-lane-alpha",
+            device_name="Tron iOS Tests (alpha)",
+        )
+        self.update_device(UDID_B, state="Shutdown")
+        holder = self.hold_lease(alpha, command="run")
+        self.owned_lane("ios-test-missing", UDID_C, present=False, device_name="Tron iOS Tests (missing)")
+        self.development_is(UDID_D)
+        self.add_device(UDID_D, name="iPhone 17 Pro")
+        self.add_device(UDID_E, name="Another Persons Simulator")
+        self.add_device(UDID_F, name="Idle Unowned Simulator", state="Shutdown")
+
+        result = self.status_all()
+        self.assertEqual(result.returncode, 0, result.stderr)
+        default = self.status_row(result.stdout, "lane default")
+        self.assertIn("Tron iOS Tests", default)
+        self.assertIn("Booted", default)
+        self.assertIn("/private/tmp/tron-lane-default", default)
+        self.assertIn("3.0 GB", default)
+        self.assertIn("pid ", self.status_row(result.stdout, "lane alpha"))
+        self.assertIn(f"pid {holder.pid} (run)", self.status_row(result.stdout, "lane alpha"))
+        self.assertIn("Shutdown", self.status_row(result.stdout, "lane alpha"))
+        self.assertIn("missing", self.status_row(result.stdout, "lane missing"))
+        self.assertIn("/private/tmp/tron-lane-alpha", self.status_row(result.stdout, "lane alpha"))
+        self.assertIn("iPhone 17 Pro", self.status_row(result.stdout, "development "))
+        self.assertIn("Another Persons Simulator", self.status_row(result.stdout, "unowned"))
+        # A simulator that holds no memory is not cluttering the view.
+        self.assertNotIn("Idle Unowned Simulator", result.stdout)
+
+    def test_status_all_takes_uptime_from_the_process_table(self) -> None:
+        """Failure mode 3: a booted device's uptime is its boot process's age."""
+        self.owned_lane("ios-test", UDID_A)
+        self.owned_lane("ios-test-alpha", UDID_B, device_name="Tron iOS Tests (alpha)")
+        self.update_device(UDID_B, state="Shutdown")
+        self.reader_value("process-table", device_process(UDID_A, "01-16:05:07") + "not a ps line\n")
+
+        result = self.status_all()
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("1d 16h", self.status_row(result.stdout, "lane default"))
+        self.assertNotIn("1d 16h", self.status_row(result.stdout, "lane alpha"))
+
+        unreadable = self.status_all(environment={**self.environment, "FAKE_PS_MODE": "unavailable"})
+        self.assertEqual(unreadable.returncode, 0, unreadable.stderr)
+        self.assertIn("cannot read the process table", unreadable.stderr)
+        row = self.status_row(unreadable.stdout, "lane default")
+        self.assertIn("Booted", row)
+        self.assertNotIn("1d 16h", row)
+
+    def test_status_all_always_shows_simulator_app(self) -> None:
+        """Failure mode 4: the GUI app is listed, never with an invented uptime."""
+        self.owned_lane("ios-test", UDID_A)
+        self.reader_value(
+            "process-table",
+            device_process(UDID_A) + "2282 01-04:49:13 /Applications/Xcode.app/Contents/Developer"
+            "/Applications/Simulator.app/Contents/MacOS/Simulator\n",
+        )
+        running = self.status_all()
+        self.assertEqual(running.returncode, 0, running.stderr)
+        running_row = self.status_row(running.stdout, "Simulator.app")
+        self.assertNotIn("not running", running_row)
+        self.assertIn("1d 4h", running_row)
+
+        self.reader_value("process-table", "")
+        idle = self.status_all()
+        self.assertEqual(idle.returncode, 0, idle.stderr)
+        idle_row = self.status_row(idle.stdout, "Simulator.app")
+        self.assertIn("not running", idle_row)
+        self.assertNotIn("1d 4h", idle_row)
+
+    def test_status_all_changes_nothing(self) -> None:
+        """Failure mode 5: looking at the Mac never takes, boots, shuts or removes."""
+        self.owned_lane("ios-test", UDID_A, last_used=time.time() - 8 * 24 * 3600)
+        before_lanes = sorted(path.name for path in self.discovery_root.iterdir())
+        before_inventory = self.inventory_path.read_text()
+
+        result = self.status_all()
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(sorted(path.name for path in self.discovery_root.iterdir()), before_lanes)
+        self.assertEqual(self.inventory_path.read_text(), before_inventory)
+        self.assertFalse((self.state / "lease.lock").exists())
+        mutations = [
+            line for line in self.log_path.read_text().splitlines()
+            if line.split()[:1] and line.split()[0] in ("boot", "shutdown", "delete", "erase", "create", "bootstatus")
+        ]
+        self.assertEqual(mutations, [])
 
 
 if __name__ == "__main__":

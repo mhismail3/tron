@@ -39,6 +39,10 @@ Commands:
   run                  Run reusable products; defaults to the complete unit target.
   diagnose             Explicit verbose-diagnostics run with a larger finite deadline.
   status               Report toolchain, lane, owned simulator, lease, products, and latest result.
+  status --all         List every simulator that holds this Mac's memory: every lane with
+                       its state, worktree, lease holder, uptime and disk size, every booted
+                       simulator no lane owns, the Development simulator, and Simulator.app.
+                       Read-only, and the same table a refused boot prints.
   lanes                List every lane with its worktree, state, lease holder, last use and
                        disk size. Read-only: it takes no lease and removes nothing.
   lane-remove NAME     Delete one lane's simulator and state, and the test products of the
@@ -60,6 +64,7 @@ Selectors:
                         --only-testing TronMobileTests/SnapshotCacheTests
 
 Options:
+  --all                 With `status`, list every simulator on this Mac (see above).
   --lane NAME           Use a named lane: the state directory <lane root>/ios-test-NAME and the
                         device "Tron iOS Tests (NAME)". The default lane is the shared
                         $HOME/.tron/internal/ios-test. TRON_IOS_TEST_LANE is the environment
@@ -238,6 +243,7 @@ esac
 
 selectors=()
 keep_booted=0
+all_simulators=0
 lane_target=""
 while (($#)); do
   case "$1" in
@@ -254,6 +260,10 @@ while (($#)); do
       ;;
     --keep-booted)
       keep_booted=1
+      shift
+      ;;
+    --all)
+      all_simulators=1
       shift
       ;;
     -*)
@@ -275,6 +285,10 @@ case "$command" in
     ;;
 esac
 
+if ((all_simulators)) && [[ "$command" != status ]]; then
+  die "--all applies to status"
+fi
+
 if [[ "$command" == lane-remove ]]; then
   [[ -n "$lane_target" ]] || die "lane-remove requires a lane name"
   validate_lane_name "$lane_target"
@@ -289,6 +303,15 @@ case "$command" in
 esac
 
 if [[ "$command" == status ]]; then
+  if ((all_simulators)); then
+    # One picture of what holds the Mac's memory: every lane (booted or not),
+    # every booted simulator no lane owns, the Development simulator and
+    # Simulator.app. Read-only, exactly as the refusal from admission prints it.
+    python3 "$SIMULATOR" simulators \
+      --discovery-root "$DISCOVERY_ROOT" --default-state-dir "$DEFAULT_STATE_ROOT" \
+      --development-state "$DEVELOPMENT_STATE" || exit "$EXIT_DESTINATION"
+    exit 0
+  fi
   echo "Canonical Xcode: $TRON_CI_XCODE_VERSION"
   echo "Canonical iOS runtime: $TRON_CI_IOS_RUNTIME_VERSION"
   echo "Canonical device type: $TRON_CI_IOS_SIMULATOR_NAME"
@@ -422,7 +445,7 @@ simulator_id="$(python3 "$SIMULATOR" provision "${simulator_args[@]}")" || {
   # exit, which the caller keeps: the Mac's memory state is not a broken
   # destination. Every other provisioning failure is one.
   provision_status=$?
-  [[ "$provision_status" == "$EXIT_LOCKED" ]] && exit "$EXIT_LOCKED"
+  if [[ "$provision_status" == "$EXIT_LOCKED" ]]; then exit "$EXIT_LOCKED"; fi
   exit "$EXIT_DESTINATION"
 }
 [[ "$simulator_id" =~ ^[0-9A-Fa-f-]{36}$ ]] || die "provisioner returned an invalid simulator UDID"

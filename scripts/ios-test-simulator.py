@@ -1008,7 +1008,8 @@ def run_attribution(run: Path) -> tuple[str | None, str, float]:
         metadata = load_json(run / RUN_METADATA_NAME)
         source = metadata.get("source") if metadata is not None else None
         worktree = source.get("worktree") if isinstance(source, dict) else None
-        lane = "default"
+        if lane is None:
+            lane = "default"
     return (
         worktree if isinstance(worktree, str) and worktree else None,
         lane if isinstance(lane, str) and lane else "default",
@@ -1228,7 +1229,7 @@ def parse_args() -> argparse.Namespace:
         "command",
         choices=(
             "provision", "validate", "status", "delete", "state", "shutdown", "sweep", "lanes", "lane-remove",
-            "prune", "clean-runs",
+            "simulators", "prune", "clean-runs",
         ),
     )
     parser.add_argument("--marker", type=Path)
@@ -1268,13 +1269,13 @@ def parse_args() -> argparse.Namespace:
         parser.error("the memory reserve and swap limit must be whole numbers of bytes")
     if arguments.memory_reserve_bytes < 0 or arguments.swap_limit_bytes < 0:
         parser.error("the memory reserve and swap limit must not be negative")
-    if arguments.command in ("sweep", "lanes"):
+    if arguments.command in ("sweep", "lanes", "simulators"):
         if arguments.discovery_root is None:
             parser.error(f"{arguments.command} requires --discovery-root")
         if arguments.marker is not None:
             parser.error(f"{arguments.command} does not take --marker")
-        if arguments.command == "lanes" and arguments.default_state_dir is None:
-            parser.error("lanes requires --default-state-dir")
+        if arguments.command in ("lanes", "simulators") and arguments.default_state_dir is None:
+            parser.error(f"{arguments.command} requires --default-state-dir")
         return arguments
     if arguments.command == "lane-remove":
         for required in ("lane_dir", "discovery_root", "default_state_dir"):
@@ -1319,6 +1320,8 @@ def main() -> int:
             return sweep(arguments)
         if arguments.command == "lanes":
             return list_lanes(arguments)
+        if arguments.command == "simulators":
+            return list_simulators(arguments)
         if arguments.command == "lane-remove":
             return remove_lane_command(arguments)
         if arguments.command == "prune":

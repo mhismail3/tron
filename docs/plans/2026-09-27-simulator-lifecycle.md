@@ -2,7 +2,7 @@
 
 - **Started:** 2026-09-27
 - **Status:** Active
-- **Last updated:** 2026-09-28, SIM-5 done; SIM-6 to SIM-9 claimed
+- **Last updated:** 2026-09-28, SIM-6 done; SIM-7 to SIM-9 claimed
 - **Goal:** Agents run as many iOS simulators in parallel as the Mac can afford, and every simulator, process and artifact the test tooling creates is released automatically, including after crashes, so the live Gateway never runs short of memory.
 
 ## Goal and constraints
@@ -76,7 +76,7 @@ Why it accumulates, from the code:
 | SIM-3 | Done | Named lanes: `--lane NAME` (and `TRON_IOS_TEST_LANE`) names a lane; `lanes` lists every lane with its worktree, state, lease holder, last use and disk size; `lane-remove NAME` deletes its simulator, state and products; the sweep deletes lanes unused for 7 days | SIM-2 | chat scroll session (worker lanes), 2026-09-27 |
 | SIM-4 | Done | Memory admission: before booting, read memory pressure and swap; if booting would leave less than a set reserve, fail fast with exit 73 and print what is booted, by which worktree and lane, and for how long | SIM-2 | chat scroll session (worker lanes), 2026-09-27 |
 | SIM-5 | Done | Scoped clean and pruning: `clean` removes only this worktree's or lane's simulator, products and runs; `prune` keeps the newest results per worktree and deletes products whose worktree no longer exists; the sweep prunes too | SIM-3 | chat scroll session (worker lanes), 2026-09-27 |
-| SIM-6 | Claimed | One view: `scripts/tron-ios-test status --all` lists every booted simulator (owned lanes, the Development simulator, unowned ones), its owner, lease holder and uptime, plus `Simulator.app` | SIM-3 | chat scroll session (worker lanes), 2026-09-27 |
+| SIM-6 | Done | One view: `scripts/tron-ios-test status --all` lists every booted simulator (owned lanes, the Development simulator, unowned ones), its owner, lease holder and uptime, plus `Simulator.app` | SIM-3 | chat scroll session (worker lanes), 2026-09-27 |
 | SIM-7 | Claimed | Same lifecycle everywhere: `scripts/tron-profile-ios`, `scripts/ios-gateway-e2e-test` and `scripts/tron-ios-simulator` use the lane, release, sweep and admission paths; the Development simulator reports idle uptime and is shut down by its `stop` | SIM-1, SIM-2, SIM-4 | chat scroll session (worker lanes), 2026-09-27 |
 | SIM-8 | Claimed | Diagnosable disconnects: the Gateway records the Mac's memory pressure and swap in its diagnostics when phone connections drop and reconnect, with a row in `packages/gateway/docs/observability.md` and a test | none | chat scroll session (worker lanes), 2026-09-27 |
 | SIM-9 | Claimed | Docs and guidance: `packages/ios-app/docs/development.md`, `.agents/skills/tron-ios/SKILL.md`, `.agents/skills/tron-workspace-housekeeping/SKILL.md` and `AGENTS.md` describe lanes, release, sweep and admission, and replace the manual cleanup steps the tooling now owns | SIM-1 to SIM-7 | chat scroll session (worker lanes), 2026-09-27 |
@@ -425,9 +425,11 @@ Owning files: `scripts/ios-test-simulator.py`, `scripts/tron-ios-test`.
   `test_clean_refuses_a_results_root_without_the_ownership_marker` and
   `test_the_sweep_prunes_so_reap_reclaims_memory_and_disk`.
   `python3 scripts/test-tron-profile-ios.py` - 7 tests, 0.05 s. No real-machine
-  check: every case runs against the synthetic simctl and a HOME the fixture
-  owns, so nothing under `~/Library/Developer/Tron/ios` or `~/.tron/internal` was
-  read, pruned or removed.
+  check: every case runs against the synthetic simctl with the lane root, results
+  root and products root inside the fixture's temporary directory. Correction
+  (found and fixed under SIM-6, recorded there): at this commit the sweep-level
+  fixtures still inherited the Mac's real HOME, so their `reap` passed the real
+  `~/Library/Developer/Tron/ios` roots to a sweep that now prunes.
 - Changes: this commit.
 - Kept on purpose: `lane-remove` still keeps a live worktree's products (they are
   shared by that worktree's lanes) and reclaims them only once its recorded
@@ -451,3 +453,76 @@ Owning files: `scripts/ios-test-simulator.py`, `scripts/tron-ios-test`.
   products are pruned by the sweep before provisioning, so a `run` still holds
   its lane's lease while another worktree's old runs are reclaimed; nothing in
   these paths takes a second lease.
+
+### SIM-6 · Done · 2026-09-28 · chat scroll session (worker lanes)
+
+- Result: `scripts/tron-ios-test status --all` prints one view of everything that
+  holds the Mac's memory: every lane with its state, worktree, lease holder,
+  uptime and disk size, every booted simulator no lane owns, the remembered
+  Development simulator (named `development`, and `missing` when its device is
+  gone), and `Simulator.app` whether or not it is running. It is read-only (no
+  lease, no boot, no removal), and it is the exact table the admission refusal
+  from SIM-4 prints, because both call the module's `simulator_rows`. Uptime is
+  the age of each booted device's own boot process (`launchd_sim` for that UDID,
+  `Simulator.app/Contents/MacOS/Simulator` for the GUI app), read through the
+  injectable `TRON_IOS_PS`; `human_duration` renders it as `3d 4h`/`16h 5m`/`42m`.
+- Evidence: `python3 scripts/test-ios-test-infrastructure.py` - 66 tests green,
+  344.9 s wall at this commit and 557.1 s in the re-run after the HOME isolation
+  fix below, both with the host compiling another session's worktree at the same
+  time (62 tests, 92.8 s at the SIM-5 commit; the four new SIM-6 cases alone run
+  in 1.7 s), with four new SIM-6 cases in
+  `StatusFixture`: `test_status_all_lists_every_booted_simulator_once`
+  (booted default lane with worktree and disk, a shutdown lane with a live lease
+  holder named, a lane whose device is missing, the Development device, an
+  unowned booted device, a shutdown unowned device that must not appear),
+  `test_status_all_takes_uptime_from_the_process_table` (`1d 16h` from the boot
+  process, nothing for a shutdown lane, an unreadable `ps` warns and leaves the
+  cell empty rather than inventing), `test_status_all_always_shows_simulator_app`
+  (`running` with its uptime, then `not running` with none) and
+  `test_status_all_changes_nothing` (lane directory listing and inventory
+  unchanged, no lease file created for a lane idle for 8 days, and no boot,
+  shutdown, delete, erase, create or bootstatus call in the synthetic simctl
+  log). Visual check of the rendered table through the synthetic simctl with a
+  temp lane root (`/tmp/tron-status-probe`, deleted afterwards; no real
+  simulator was read): six rows, lanes first (default, alpha, beta), then
+  development, unowned, `Simulator.app`.
+- Changes: this commit.
+- Kept on purpose: `status --all` prints only the table, so it composes with the
+  runner's other output; the plain `status` output is unchanged. Lanes are listed
+  whether booted or not (a released lane must be visibly released), while unowned
+  devices appear only while booted (a shutdown unowned device holds nothing).
+  `--all` is rejected for every other command (74) so a mistyped `lanes --all`
+  cannot look like it worked.
+- Risks and deviation: this commit also isolates HOME in `OwnedLaneFixture`.
+  Between the SIM-5 commit and this one the sweep-level fixtures
+  (`ReleaseFixture`, `SweepFixture`) inherited this Mac's real HOME, so their
+  `reap` invocations passed the real `~/Library/Developer/Tron/ios/test-runs` and
+  `test-derived-data` to the sweep, which prunes. Nothing in the real results
+  root could be removed (every one of its 1,834 entries is dated 2026-09-25 to
+  2026-09-28, inside the 7-day window, and `latest` is the only entry without a
+  date), and every marker-owned products directory there names a worktree that
+  still exists (four live, one still building without a stamp). The context's
+  eight dead worktrees (8.8 GB) are no longer under the products root and this
+  handoff cannot prove whether an earlier session's `lane-remove` or these test
+  runs reclaimed them; the roots' mtimes are explained by another session
+  creating `tron-fit-2914e2163cc4` and two new runs, and the run count only grew
+  (1832 to 1834). All of it is regenerable test output inside the tool's own
+  roots - no simulator, lane, lease, product of a live worktree or source data
+  was affected - and no fixture can reach those roots again, which is why the
+  fix is here rather than in a note.
+- Deviations: this commit also carries two review nits in the SIM-4/SIM-5 code -
+  the runner's admission exit is a plain `if` instead of an `&&` list, and a run
+  whose `owner.json` is unreadable keeps the lane it records instead of being
+  forced to the default lane. The renderer (`simulator_rows`/`print_simulators`) landed in SIM-4
+  because the admission refusal had to print exactly this table; SIM-6 added the
+  `simulators` command, the runner's `status --all`, the docs and the four cases
+  above. Uptime for the Development simulator and unowned devices comes from the
+  same process table rather than from a remembered timestamp, so it needs no
+  cooperation from those owners.
+- For the next agent: SIM-7 wires the profiler, the E2E harness and
+  `scripts/tron-ios-simulator` into these paths - they should pass
+  `--discovery-root`/`--default-state-dir` (and `--lane`) so their lanes are
+  named and their runs attributed, and their omission today only means their
+  refusal tables see their own lane plus booted devices. SIM-9 documents
+  `status --all` in the skill; `packages/ios-app/docs/development.md` already has
+  the runner section.
