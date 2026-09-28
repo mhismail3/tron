@@ -7982,15 +7982,18 @@ wait).
     with explicit `partial` coverage; the index insert yields every
     `INDEX_WRITE_SLICE_MS` (20 ms).
   - Before/after event-loop stretch, `npx vitest run
-    src/sessions/session-search-stall.test.ts` (report default
-    `$TMPDIR/tron-search-stall-report.json`, kept at
+    src/sessions/session-search-stall.test.ts` passes 2/2 with its report at
+    `$TMPDIR/tron-search-stall-report.json` (kept at
     `~/.tron/workspace/files/hardening/g-8c-search-stall.json`): a 3,000-passage
-    document's insert holds the loop **41.6 ms** (G-11's profile: 565–821 ms per
-    document) and a summary publication's invalidation **0.07 ms** versus the
-    inline `SessionSearchIndex.remove` it used to run, measured at 619 ms on the
-    same fixture (G-11: 491 ms). The insert's remaining stretch is the two global
-    posting-byte aggregates (~49 ms); the per-session byte query became a row
-    read (`posting_bytes`).
+    document's insert takes 2,371 ms of work in 57 slices, longest held stretch
+    **41.8 ms** — G-11's profile measured **565–821 ms** held by one document's
+    insert — and a summary publication's invalidation holds the loop **0.13 ms**
+    against **2,666 ms** for the inline `SessionSearchIndex.remove` the old
+    invalidator ran (G-11: 491 ms). The case asserts the ratio (stretch × 5 <
+    whole insert; invalidation × 10 < inline remove), because absolute
+    milliseconds move with host load. The insert's remaining stretch is the two
+    global posting-byte aggregates; the per-session byte query became a row read
+    (`posting_bytes`).
   - `npx tsc --noEmit -p .` clean; `npm run build` clean;
     `python3 scripts/check-documentation-policy.py` and
     `scripts/personal-info-guard.sh` pass.

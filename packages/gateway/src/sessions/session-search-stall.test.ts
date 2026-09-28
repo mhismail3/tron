@@ -58,11 +58,13 @@ describe("session search index event-loop bounds", () => {
     expect(index.stats().passagesIndexed).toBe(3_000);
     index.close();
 
-    measurements.insert = { passages: 3_000, insertMs, insertStretchMs };
-    // The whole document takes measurable work, but the loop is handed back
-    // between slices, so its size no longer sets the longest held stretch.
+    measurements.insert = { passages: 3_000, insertMs, insertStretchMs, slices: insertMs / Math.max(insertStretchMs, 1) };
+    // The document's whole insert takes far more work than any one held
+    // stretch: the loop is handed back between slices, so its size no longer
+    // sets the longest held stretch. The ratio is the load-independent form of
+    // that claim (an unsliced insert has a stretch equal to its whole insert).
     expect(insertMs).toBeGreaterThan(40);
-    expect(insertStretchMs).toBeLessThan(150);
+    expect(insertStretchMs * 5).toBeLessThan(insertMs);
   });
 
   it("keeps a summary publication's invalidation off the event loop", async () => {
@@ -84,8 +86,11 @@ describe("session search index event-loop bounds", () => {
     const invalidationStretchMs = await measureStretch(() => invalidate!("session-1"));
     await service.close();
 
-    measurements.invalidate = { inlineRemoveStretchMs, invalidationStretchMs };
-    expect(inlineRemoveStretchMs).toBeGreaterThan(0);
-    expect(invalidationStretchMs, `invalidation ${invalidationStretchMs}ms vs inline remove ${inlineRemoveStretchMs}ms`).toBeLessThan(20);
+    measurements.invalidate = { inlineRemoveStretchMs, invalidationStretchMs, ratio: inlineRemoveStretchMs / Math.max(invalidationStretchMs, 1) };
+    // The invalidation is now in-memory bookkeeping, so it is an order of
+    // magnitude cheaper than the posting delete it replaced. The ratio is the
+    // load-independent form of that claim.
+    expect(inlineRemoveStretchMs).toBeGreaterThan(50);
+    expect(invalidationStretchMs * 10).toBeLessThan(inlineRemoveStretchMs);
   });
 });
