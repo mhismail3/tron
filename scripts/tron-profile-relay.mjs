@@ -25,7 +25,7 @@ export class RelayDirection {
     this.source = source;
     this.sink = sink;
     this.clock = clock;
-    // (bytesForwarded, millisecondsAddedByTheCap) for every forwarded chunk.
+    // Called with the bytes of every forwarded chunk.
     this.onBytes = onBytes;
     this.bitsPerSecond = 0;
     this.readyAt = 0;
@@ -54,15 +54,12 @@ export class RelayDirection {
   forward(chunk) {
     const accepted = this.sink.write(chunk);
     const nowMs = this.clock();
-    let metered = 0;
     if (this.bitsPerSecond > 0) {
-      const at = Math.max(this.readyAt, nowMs);
-      this.readyAt = at + (chunk.length * 8000) / this.bitsPerSecond;
-      metered = this.readyAt - at;
+      this.readyAt = Math.max(this.readyAt, nowMs) + (chunk.length * 8000) / this.bitsPerSecond;
     } else {
       this.readyAt = nowMs;
     }
-    this.onBytes(chunk.length, metered);
+    this.onBytes(chunk.length);
     if (!accepted) this.sinkBlocked = true;
     if (this.sinkBlocked || this.readyAt > nowMs) this.waitForReady();
   }
@@ -119,9 +116,13 @@ export class RelayDirection {
  * answering them: an established socket goes silent in both directions (the
  * Gateway sees silence, not a close) and an attempt made during the outage
  * hangs until the phone's own handshake deadline gives up. Held connections are
- * deliberately never forwarded when the path returns: a real path that was gone
- * for that long would have had the attempt abandoned, and the phone retries on
- * a fresh socket.
+ * deliberately never forwarded when the path returns. That is a pessimistic
+ * model, not the phone's behaviour: an attempt still inside its handshake
+ * deadline has not been abandoned, and real TCP would retransmit and connect
+ * within a second or two of the path returning. The model is kept because it
+ * measures the worst case the case is about (the recovery of an attempt that
+ * has to time out first), and it inflates the blackhole's recovery baseline by
+ * the rest of that attempt's deadline.
  */
 export class PathRelay {
   constructor(gatewayPort, clock) {
@@ -132,9 +133,6 @@ export class PathRelay {
     this.bitsPerSecond = 0;
     this.upBytes = 0;
     this.downBytes = 0;
-    // Every link's cap delay, for the whole relay's life (links that closed
-    // under the cap still count).
-    this.meteredMs = 0;
     this.links = new Set();
     this.heldSockets = new Set();
     this.halfOpenUpstreams = new Set();
@@ -184,10 +182,8 @@ export class PathRelay {
     const gateway = connectTcp({ host: "127.0.0.1", port: this.gatewayPort });
     const link = { phone, gateway };
     const startForwarding = () => {
-      link.toGateway = new RelayDirection(phone, gateway, this.clock,
-        (bytes, metered) => { this.upBytes += bytes; this.meteredMs += metered; });
-      link.toPhone = new RelayDirection(gateway, phone, this.clock,
-        (bytes, metered) => { this.downBytes += bytes; this.meteredMs += metered; });
+      link.toGateway = new RelayDirection(phone, gateway, this.clock, (bytes) => { this.upBytes += bytes; });
+      link.toPhone = new RelayDirection(gateway, phone, this.clock, (bytes) => { this.downBytes += bytes; });
       link.toGateway.cap(this.bitsPerSecond);
       link.toPhone.cap(this.bitsPerSecond);
       if (this.blackholed) { link.toGateway.hold(); link.toPhone.hold(); }

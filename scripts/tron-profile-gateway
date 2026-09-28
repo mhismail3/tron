@@ -175,13 +175,15 @@ MULTI = {
     # `silence_ms` measures a liveness window rather than the outage's length.
     "blackholeSettleMs": 11_000,
     "bandwidthMbps": 2.0,
-    # The bandwidth leg is a fixed duration, several ping intervals long, with
-    # the link kept loaded: shorter than a liveness window it could not lose a
-    # pong whatever the cap did, and it has to fill the Gateway's socket buffers
-    # before its capacity policy is exercised. The leg ends on this deadline
-    # (one operation may still finish past it, bounded by the per-operation
-    # deadline).
+    # The bandwidth leg is a fixed duration with `bandwidthInFlight` full bounded
+    # transcript pages in flight at once, each on its own session. One page is
+    # about 39 kB of wire: a serial leg can never queue more than one page ahead
+    # of a pong, so "zero pong misses, no close for capacity" would be true by
+    # construction however the Gateway behaved. `MINIMUM_BANDWIDTH_OFFERED_
+    # FACTOR` below holds the leg to the load that makes the verdict mean
+    # something.
     "bandwidthLegSeconds": 90,
+    "bandwidthInFlight": 6,
     "restartStormSeconds": 5,
     # The profiler's own restart budget: up to 30 s to stop the old Gateway plus
     # FixtureGateway.restart's 300 s start deadline, plus the storm.
@@ -189,11 +191,18 @@ MULTI = {
 }
 PHONE_REQUEST_DEADLINE_MS = 30_000
 # A bandwidth leg only means something if the cap limited real traffic: the link
-# has to be nearly full (delivered rate against the cap) and the meter has to
-# have held bytes back for a large part of the leg. Without this, "zero pong
-# misses" and "no close for capacity" are true by construction.
+# has to be nearly full (delivered rate against the cap) and the workload has to
+# offer more in flight than the cap can carry inside one pong deadline. Without
+# the second rule, "zero pong misses" and "no close for capacity" are true by
+# construction: a serial leg has one page in flight, which is a fraction of a
+# second of the link.
 MINIMUM_BANDWIDTH_LINK_USE = 0.5
-MINIMUM_BANDWIDTH_METERED_FRACTION = 0.5
+# Offered load against `pong deadline x cap`, in the decoder's bytes — the unit
+# the Gateway's own outbound queue (8 MiB backstop, G-4's coalescing) is bounded
+# in. Note that those bytes compress on the wire (about 25-30x for this
+# fixture's generated transcripts), so this is not the same number as the bytes
+# that queue on the link; `offered_in_flight_wire_bytes` is reported beside it.
+MINIMUM_BANDWIDTH_OFFERED_FACTOR = 1.0
 # Host guard: a qualification run on a swapping or pressured host measures the
 # host, not the Gateway (plan O-6a).
 HOST_SWAP_LIMIT_BYTES = 4 * 1024 ** 3
@@ -986,8 +995,13 @@ def driver_deadline_seconds(config: dict, restart_case: bool) -> float:
     seconds = config["mixedSeconds"] + config["tailGraceMs"] / 1000
     seconds += config["noSubscriberSeconds"] + 60
     if "blackhole" in config["cases"]:
+        # The settle, the remount that puts the mobile's chat on the shaped path
+        # and the relay's own listen and handshake all come before the outage
+        # clock starts; the recovery budget is one measured deadline.
+        seconds += config["blackholeSettleMs"] / 1000 + config["measuredDeadlineMs"] / 1000 + 60
         seconds += config["blackholeSeconds"] + config["measuredDeadlineMs"] / 1000
     if "bandwidth" in config["cases"]:
+        # Each lane may still finish one operation past the leg's deadline.
         seconds += config["bandwidthLegSeconds"] + config["measuredDeadlineMs"] / 1000
     if restart_case:
         seconds += config["restartDeadlineMs"] / 1000 + config["restartStormSeconds"] + 60
@@ -1063,9 +1077,9 @@ def validate_impairment(results: list[dict]) -> list[str]:
 
     The case numbers themselves are the baseline, not a verdict: a run is only
     rejected when a case measured nothing at all, or when its cap never limited
-    traffic (a leg shorter or lighter than one liveness window would report
-    "zero pong misses" and "no close for capacity" however the Gateway
-    behaved)."""
+    traffic (a leg whose link was idle, or which offered less in flight than the
+    cap can carry inside one pong deadline, would report "zero pong misses" and
+    "no close for capacity" however the Gateway behaved)."""
     problems: list[str] = []
     for result in results:
         label = result["label"]
@@ -1082,14 +1096,22 @@ def validate_impairment(results: list[dict]) -> list[str]:
                     problems.append(f"{label}: the blackhole case reported no recovery to a ready chat")
             elif name == "bandwidth":
                 if not leg.get("operations") or not leg.get("deliveredBytes"):
-                    problems.append(f"{label}: the bandwidth case moved no metered data")
+                    problems.append(f"{label}: the bandwidth case moved no data")
                 elif leg.get("linkUse", 0) < MINIMUM_BANDWIDTH_LINK_USE:
                     problems.append(f"{label}: the bandwidth case filled only {leg['linkUse']:.2f} of its cap, "
                                     "so the cap never limited the traffic and the case proves nothing")
-                if leg.get("meteredMs") is not None and leg.get("seconds") and \
-                        leg["meteredMs"] < MINIMUM_BANDWIDTH_METERED_FRACTION * leg["seconds"] * 1000:
-                    problems.append(f"{label}: the bandwidth case's cap delayed {leg['meteredMs']:.0f} ms over "
-                                    f"{leg['seconds']:.0f} s, so it never held the link back")
+                offered = leg.get("offeredInFlightBytes")
+                required = (MINIMUM_BANDWIDTH_OFFERED_FACTOR * CONNECTION["pongDeadlineMs"] / 1000
+                            * leg.get("capBitsPerSecond", 0) / 8)
+                if offered is None:
+                    problems.append(f"{label}: the bandwidth case reported no offered in-flight load")
+                elif offered < required:
+                    problems.append(f"{label}: the bandwidth case offered {offered:.0f} B in flight, less than one "
+                                    f"pong deadline of its {leg.get('capBitsPerSecond', 0) / 1e6:.2f} Mbit/s cap "
+                                    f"({required:.0f} B), so a queued pong could never be late and the case "
+                                    "proves nothing")
+                if leg.get("maxPingToPongMs") is None:
+                    problems.append(f"{label}: the bandwidth case reported no ping-to-pong round trip")
             elif name == "restart":
                 measured = leg.get("clients") or []
                 ready = leg.get("clientsAll") or []
@@ -1101,6 +1123,8 @@ def validate_impairment(results: list[dict]) -> list[str]:
                     problems.append(f"{label}: the restart case did not report the downtime")
                 if not leg.get("requests"):
                     problems.append(f"{label}: the restart case made no request in the storm")
+                elif not any(not request["duringDowntime"] for request in leg["requests"]):
+                    problems.append(f"{label}: the restart case made no request after the new Gateway was healthy")
     return problems
 
 
@@ -1220,13 +1244,22 @@ def impairment_samples(results: list[dict]) -> dict:
         add("impairment.bandwidth.operation_ms_p99", "ms",
             [percentile(leg["operations"], 99) for leg in bandwidth],
             "p99 of a full bounded transcript page mounted over the capped path")
+        add("impairment.bandwidth.max_ping_to_pong_ms", "ms", [leg["maxPingToPongMs"] for leg in bandwidth],
+            "the mobile's longest ping-to-pong round trip during the leg: the delay a pong deadline is set "
+            "against (C-4's deadline is 8 s)")
+        add("impairment.bandwidth.max_in_flight", "count", [leg["maxInFlight"] for leg in bandwidth],
+            "the peak number of full transcript pages the workload had in flight at once", better="higher")
+        add("impairment.bandwidth.offered_in_flight_bytes", "B", [leg["offeredInFlightBytes"] for leg in bandwidth],
+            "the decoder's bytes that peak page load asked the Gateway to send (the unit its outbound queue is "
+            "bounded in); the run is rejected below one pong deadline of the cap", better="higher")
+        add("impairment.bandwidth.offered_in_flight_wire_bytes", "B",
+            [leg["offeredInFlightWireBytes"] for leg in bandwidth],
+            "the same load in wire bytes; the cap carries this, so it is what a queued pong waits behind",
+            better="higher")
         add("impairment.bandwidth.pong_deadline_misses", "count", [leg["pongDeadlineMisses"] for leg in bandwidth],
             "pong deadlines missed while data flowed (C-4's target is zero)")
         add("impairment.bandwidth.unexpected_closes", "count", [leg["unexpectedCloses"] for leg in bandwidth],
             "sockets closed without the client asking (G-4's target is zero for capacity)")
-        add("impairment.bandwidth.metered_ms", "ms", [leg["meteredMs"] for leg in bandwidth],
-            "total delay the cap added to bytes it forwarded (the cap's work, not a quality target)",
-            better="higher")
     restart = legs("restart")
     if restart:
         add("impairment.restart.reconnect_ms_max", "ms",
@@ -1237,14 +1270,20 @@ def impairment_samples(results: list[dict]) -> dict:
         add("impairment.restart.failed_attempts", "count",
             [sum(1 for entry in leg["clientsAll"] for attempt in entry["attempts"] if not attempt.get("connected"))
              for leg in restart], "connects refused, or requests refused, while the Gateway was down")
-        add("impairment.restart.requests", "count", [len(leg["requests"]) for leg in restart],
-            "requests the measured clients made from the restart on, ready sequences included",
-            better="higher")
+        add("impairment.restart.requests", "count",
+            [sum(1 for request in leg["requests"] if not request["duringDowntime"]) for leg in restart],
+            "storm requests the measured clients made after the new Gateway was healthy, ready sequences "
+            "included", better="higher")
+        add("impairment.restart.downtime_requests", "count",
+            [sum(1 for request in leg["requests"] if request["duringDowntime"]) for leg in restart],
+            "requests that started while the new Gateway was not yet healthy (kept so none is dropped)")
         add("impairment.restart.requests_over_1s", "count",
-            [sum(1 for request in leg["requests"] if request["ms"] > 1_000) for leg in restart],
-            "requests slower than 1 s during the storm (G-13's target is zero)")
+            [sum(1 for request in leg["requests"] if not request["duringDowntime"] and request["ms"] > 1_000)
+             for leg in restart],
+            "storm requests slower than 1 s (G-13's target is zero)")
         add("impairment.restart.request_ms_p99", "ms",
-            [percentile([request["ms"] for request in leg["requests"]], 99) for leg in restart],
+            [percentile([request["ms"] for request in leg["requests"] if not request["duringDowntime"]], 99)
+             for leg in restart],
             "p99 of a storm request (nearest rank: the maximum below 100 samples)")
     return metrics
 

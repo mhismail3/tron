@@ -2,7 +2,7 @@
 
 - **Started:** 2026-09-27
 - **Status:** Active (Phase 1 runs on `hardening/integration`; that branch's copy of this plan is authoritative until R-1)
-- **Last updated:** 2026-09-28, O-6b Blocked (impairment cases measure recovery after the third review; the full-length baseline is the orchestrator's quiet-host run)
+- **Last updated:** 2026-09-28, O-6b Blocked (impairment cases measure recovery after the fourth review; the full-length baseline is the orchestrator's quiet-host run)
 - **Goal:** A clean, efficient and predictable Gateway and phone connection: the phone stays connected and loads any session promptly whenever the network path is up, however many sessions run and however large the history grows, and every disconnect or slow operation is attributable to one cause from the logs in one step.
 
 ## Goal and constraints
@@ -520,7 +520,7 @@ rows are in priority order.
 | O-2 | Ready | Gateway transport records: upgrade phases, inbound silence with Tailscale peer path | O-1 | |
 | O-3 | Done | Request span: one `rpc.completed` per slow RPC with every stage, wait and count | O-1 | orchestrator-dispatched deepseek-worker, 2026-09-28 |
 | O-4 | Claimed | Phone connection records that survive an export, stall watchdog, exact scene records | O-1 | orchestrator-dispatched deepseek-worker, 2026-09-28 |
-| O-6b | Blocked | Impairment in the qualification scenario: blackhole, bandwidth cap, Gateway restart | O-6a | orchestrator-dispatched deepseek-worker, 2026-09-28 (third review response) |
+| O-6b | Blocked | Impairment in the qualification scenario: blackhole, bandwidth cap, Gateway restart | O-6a | orchestrator-dispatched deepseek-worker, 2026-09-28 (fourth review response) |
 | O-5 | Claimed | Gateway resource sampler and event-loop histogram | O-3 | orchestrator-dispatched deepseek-worker, 2026-09-28 |
 | O-7 | Ready | Incident triage tool: phone export plus Gateway log in, episodes by cause out | O-1, O-2, O-4 | |
 | C-1 | Ready | Projection work never blocks or parks reconnect; parked episodes self-resume | O-4, O-6b | |
@@ -1601,7 +1601,7 @@ a latency percentile.
 | snapshots built without an audience | | | |
 | Gateway CPU, 8 running, no subscriber | 57% of one core | | n/a |
 | Gateway heap peak (% of limit) / RSS peak | 1.98 GiB (49%) / 2.00 GiB | | |
-| reconnect after path return p95 | 15.8 s in a 20 s blackhole run: one 15 s attempt was in flight when the path returned plus the phone's 2 s backoff after it; C-3's target is not met by `main` | | |
+| reconnect after path return p95 | 15.8 s in a 20 s blackhole run: one 15 s attempt was in flight when the path returned plus the phone's 2 s backoff after it. Pessimistic by construction: the relay never forwards an attempt that is still inside its handshake deadline when the path returns, so 13.8 s of that figure is the model's, not the phone's (a real TCP path would retransmit and connect in a second or two); the conservative baseline is kept deliberately. C-3's target is not met by `main` either way | | |
 | Gateway restart with all clients | the profiler replaced the Gateway in 5.6 s (busy host); every one of the six clients reconnected from its own socket's close, the slowest 12.5 s; 14 refused connects; 20 requests from the restart on, 2 of them over 1 s | | n/a |
 | requests / bytes per reconnect | | | |
 | episodes by cause (triage) | n/a | n/a | |
@@ -1628,25 +1628,48 @@ Read the numbers as one sample per case.
   the path's return to a ready mounted chat was 15.8 s: the rest of that
   in-flight attempt plus the phone's 2 s backoff. This is the number C-3 has to
   move. The earlier 18.0 s silence was the leg's own clock, not a pong miss.
-- Bandwidth cap (2 Mbit/s = 250,000 B/s): the capped path carried 6.20 MB at
-  205,062 B/s toward the phone and 927 B/s toward the Gateway over 30.0 s of
-  back-to-back full transcript pages in 139 operations — `link_use` 0.82 of the
-  cap, 24.9 s of metering delay, longest operation 444 ms, no pong deadline
-  missed and no socket closed by the Gateway. The earlier 2.0–3.1 s, 139–174 kB
-  runs carried 23–28% of the cap and could not have lost a pong whatever the
-  Gateway did; `validate_impairment` now rejects that shape (under half the cap
-  filled, or under half the leg in metering delay).
+- Bandwidth cap (2 Mbit/s = 250,000 B/s): the numbers above are from the
+  serialized leg (one page in flight, 39 kB of wire each, ping-to-pong
+  105–171 ms against an 8 s deadline): the link was busy, but one page can never
+  put more than one page ahead of a queued pong, and the Gateway's queue never
+  held more than one frame (no `connection.outbound-capacity` record), so "zero
+  pong misses, no close for capacity" was true by construction. The leg now
+  keeps `bandwidthInFlight` (default 6) pages in flight at once, each on its own
+  session, and reports the peak (`.max_in_flight`), the load it asked the
+  Gateway to send (`.offered_in_flight_bytes`, `.offered_in_flight_wire_bytes`)
+  and the mobile's longest ping-to-pong round trip (`.max_ping_to_pong_ms`).
+  `validate_impairment` rejects a leg that offered less than one pong deadline of
+  its cap in flight, and the metering rule is gone (the meter's "delay" was the
+  bytes the cap carried, which is `link_use` again). **Numbers for the new leg
+  shape are owed** with the rest of the baseline.
+  What the new shape still cannot do at the default 2 Mbit/s is produce a pong
+  miss: the queue's bytes compress about 25–30× on the wire here, so 8 s ×
+  250 kB/s = 2 MB of *wire* backlog would need ~50 MB of queued pages, above the
+  Gateway's own 8 MiB per-connection backstop. The round trip and any capacity
+  close are what this cap can show; a pong miss needs a slower cap (~0.3 Mbit/s
+  or below), which is a deliberate change to this case's default for the
+  orchestrator to decide, and `main` has no `connection.outbound-capacity`
+  record inside the leg's window
+  (`impairment.gateway_outbound_capacity_records: 0`).
 - Restart (every connected client live): the profiler's stop, start and health
   check took 5.6 s; all six clients retried from the moment their own socket
   closed (14 refused connects in total) and every one was ready, the slowest
   12.5 s. The storm now spans the restart: 20 requests from the measured
   clients, the first 862 ms after the new Gateway answered health — the mobile's
   1.5 s remount, a request the earlier window left out — of which 2 took over
-  1 s. That is the number G-13 has to move.
+  1 s. That is the number G-13 has to move. Requests that started before the
+  health stamp (the new Gateway serves them inside the profiler's health check)
+  are kept and counted separately as `impairment.restart.downtime_requests`
+  instead of being dropped.
 - `main` has no `connection.outbound-capacity` records inside the bandwidth
   leg's window (`impairment.gateway_outbound_capacity_records: 0`), so G-4 has
-  no capacity evidence yet either way; the capped path now really does fill the
-  Gateway's buffers, so a run after G-4 says whether one appears.
+  no capacity evidence yet either way. The previous claim that the capped path
+  "really does fill the Gateway's buffers" was not supported: at 2 Mbit/s the
+  8 MiB per-connection queue backstop is reached only if a burst offers more
+  than 8 MiB of pages at once, and the leg must stay under it to be passable
+  after G-4. G-4's capacity evidence needs a leg whose queued frames are
+  superseded state (one session streaming faster than the cap), not concurrent
+  distinct pages; that case is owed.
 
 ## Handoff log
 
@@ -2428,7 +2451,7 @@ Read the numbers as one sample per case.
   downtime's failed attempts, or waits forever for the profiler's answer; an
   unexpected close after an impairment leg going uncounted; a case that reports
   nothing being read as a pass.
-- Evidence: `python3 scripts/test-tron-profile.py` passes 39 tests, six of them
+- Evidence: `python3 scripts/test-tron-profile.py` passes 37 tests, six of them
   new or reworked for these cases (blackhole attempts and recovery including the
   rest of an in-flight attempt; the cap metering the path without losing the
   socket; the restart reconnecting every client through the profiler's own
@@ -2534,9 +2557,13 @@ Read the numbers as one sample per case.
     The driver's result file is written before the run is judged, so a run
     rejected for an unexpected close still carries its impairment legs.
 - Deliberately not forwarded: a connection the relay held during the blackhole
-  is never forwarded when the path returns. That is the phone's behaviour — it
-  abandoned the attempt at its handshake deadline and retries on a fresh socket
-  — and it is stated in `scripts/tron-profile-relay.mjs`.
+  is never forwarded when the path returns. This is a **pessimistic model, not
+  the phone's behaviour**: an attempt still inside its handshake deadline has
+  not been abandoned, and real TCP would retransmit and connect within a second
+  or two of the path returning. It is kept because it measures the worst case
+  the case is about (an attempt that has to time out first), and it inflates the
+  blackhole's recovery figure by the rest of that attempt's deadline — 13.8 s of
+  the 15.8 s recorded here. `scripts/tron-profile-relay.mjs` states this.
 - Owed to C-3 and C-4: this case models the phone from the contract fixture and
   a driver copy of `ReconnectDelayPolicy`, so both tasks must update the driver
   with the new handshake deadline, the pong-deadline change and a hook for the
@@ -2554,3 +2581,83 @@ Read the numbers as one sample per case.
 - Blocked on: unchanged — "the baseline for each case is in Findings", plus the
   full-length default run (`--bandwidth-seconds` 90, `--blackhole-seconds` 90)
   on a quiet host.
+
+### O-6b · Blocked · 2026-09-28 · orchestrator-dispatched deepseek-worker (fourth review response)
+
+- Result: the fourth review's 1 major, 4 minor and 3 nits are addressed; the row
+  stays Blocked only on the orchestrator's full-length quiet-host run.
+  - **Major — the bandwidth leg could not show what C-4 and G-4 exist to fix.**
+    It mounted one page at a time, so at most one page (39 kB of wire, about
+    1.2 MB decoded) could ever sit ahead of a queued pong. It now keeps
+    `bandwidthInFlight` (default 6) full bounded transcript pages in flight at
+    once, each on its own session (the Gateway admits one `session.open` per
+    session per connection, so the pages cannot share one), and reports
+    `.max_in_flight`, the load the peak asked the Gateway to send
+    (`.offered_in_flight_bytes` in the decoder's bytes — the unit the Gateway's
+    8 MiB outbound queue is bounded in — and `.offered_in_flight_wire_bytes`)
+    and the mobile's longest ping-to-pong round trip (`.max_ping_to_pong_ms`).
+    `validate_impairment` rejects a leg that offered less than one pong deadline
+    of its cap in flight. Rejected as the reviewer's "the buffers fill" claim:
+    the docs, comments and Findings said the leg "really does fill the Gateway's
+    buffers" and now say what the numbers support. Recorded limit, not hidden:
+    at the default 2 Mbit/s a pong *miss* is unreachable — the queue's bytes
+    compress about 25–30x here, so 2 MB of wire backlog needs ~50 MB of queued
+    pages, above the 8 MiB backstop — so this cap shows the round trip and any
+    capacity close; a miss needs a slower cap (~0.3 Mbit/s), which changes a
+    plan-stated default and is left to the orchestrator (see For the next
+    agent).
+  - **Minor — the `meteredMs` rule repeated `link_use`.** The rule is gone and
+    `meteredMs` is deleted from the relay with it: `RelayDirection.forward` adds
+    `chunk.length * 8000 / bps` for every chunk, so the meter's ms was the bytes
+    the cap carried, which is `link_use` again, and the chunk that sets
+    `readyAt` is written immediately — it was never "delay the cap added".
+    `link_use` and the new offered-load rule are what hold the leg.
+  - **Minor — the relay's never-forwarding reason was wrong.** It is now stated
+    as a deliberate pessimistic model, not the phone's behaviour, in
+    `scripts/tron-profile-relay.mjs`, the README bullet and the Findings row for
+    the blackhole recovery (13.8 s of the 15.8 s is the model's).
+  - **Minor — restart requests started before the health stamp were dropped.**
+    The filter is gone: every request a measured client made is kept, with
+    `duringDowntime` marking the ones that started before `restoredAtMs` (the
+    new Gateway already served them inside the profiler's health check) and
+    `sinceRestoreMs` negative for those. `impairment.restart.requests`,
+    `.requests_over_1s` and `.request_ms_p99` count the storm; the new
+    `.downtime_requests` counts the others.
+  - **Minor — the driver kept its own copy of the contract values.** The three
+    literals are gone: the driver reads
+    `packages/protocol-fixtures/gateway-connection-contract.json` itself (so a
+    hand-run driver and a qualification run agree), and `config.connection`,
+    which the profiler fills from the same file, is only the stub tests'
+    override.
+  - **Nit — an assertion that could not fail.** `all(sinceRestoreMs >= 0)`
+    asserted what the filter guaranteed. It is replaced by
+    `duringDowntime == (sinceRestoreMs < 0)` for every request, and by a new
+    test that makes the profiler's health stamp late (the harness's stand-in
+    fixture delays its answer) and requires the requests the new Gateway served
+    in that gap to be present with a negative offset. Verified: with the old
+    filter restored the new test fails and `leg["requests"]` is empty.
+  - **Nit — the second-review entry's test count.** 39 → 37; 39 belongs to the
+    third entry.
+  - **Nit — the blackhole watchdog left out part of the leg.** `driver_
+    deadline_seconds` now adds `blackholeSettleMs`, one measured deadline for
+    the settle and the relay's own listen/handshake, and the outage.
+- Evidence: `python3 scripts/test-tron-profile.py MultiDriverImpairment
+  ImpairmentCases RelayBackpressure` passes 13 tests. Two new failure modes were
+  written first and each has a negative control: a leg that runs one page at a
+  time (`maxInFlight >= 2` fails with the lanes forced serial — 1, verified) and
+  a run that drops the requests served before the health stamp (fails with the
+  old filter restored — `requests` came back empty, verified). The
+  offered-load rule has its own unit case (`offeredInFlightBytes` below one pong
+  deadline of the cap rejects the run). Numbers for the new leg shape are owed
+  with the baseline.
+- Blocked on: unchanged — "the baseline for each case is in Findings", plus the
+  full-length default run (`--bandwidth-seconds` 90, `--blackhole-seconds` 90)
+  on a quiet host.
+- For the next agent (orchestrator decision needed): at the default 2 Mbit/s cap
+  this fixture cannot make a pong miss happen (compression ~25–30x against the
+  Gateway's 8 MiB per-connection queue backstop — see Findings), so C-4's
+  zero-miss target is not discriminating at that cap, and G-4's capacity close
+  needs a leg whose queued frames are superseded state rather than distinct
+  pages. Both need a case-default change (cap ~0.3 Mbit/s on the mobile's path)
+  or a second case; neither is taken here because the plan states the 2 Mbit/s
+  default.

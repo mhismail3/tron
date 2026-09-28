@@ -34,7 +34,7 @@ import { appendFile } from "node:fs/promises";
 import { PathRelay } from "./tron-profile-relay.mjs";
 import { createRequire } from "node:module";
 import { dirname, join, relative, resolve } from "node:path";
-import { pathToFileURL } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 
 const PRESENTATION_LEASE_RENEWAL_MS = 15_000;
 const REQUEST_TIMEOUT_MS = 30_000;
@@ -52,15 +52,19 @@ if (!["seed", "run", "catalog", "multi"].includes(command) || !configPath) {
   process.exit(2);
 }
 const config = JSON.parse(readFileSync(configPath, "utf8"));
-// The phone's wire deadlines, from packages/protocol-fixtures/
-// gateway-connection-contract.json (the profiler passes them as `connection`).
-// The fallbacks only cover a driver invoked by hand: a qualification run always
-// carries the contract's own values, so this file holds no second copy that
-// C-3/C-4 would have to find.
+// The phone's wire deadlines are read from packages/protocol-fixtures/
+// gateway-connection-contract.json itself: this file holds no copy of them, so
+// C-3/C-4 cannot leave a stale literal here. A driver invoked by hand reads the
+// same file; there is no fallback to drift.
+const CONNECTION_CONTRACT = JSON.parse(readFileSync(join(dirname(fileURLToPath(import.meta.url)),
+  "..", "packages", "protocol-fixtures", "gateway-connection-contract.json"), "utf8"));
 const CONNECTION = {
-  pingIntervalMs: 10_000,
-  pongDeadlineMs: 8_000,
-  handshakeDeadlineMs: 15_000,
+  pingIntervalMs: CONNECTION_CONTRACT.clientPingInterval.milliseconds,
+  pongDeadlineMs: CONNECTION_CONTRACT.clientPongDeadline.milliseconds,
+  handshakeDeadlineMs: CONNECTION_CONTRACT.clientHandshakeDeadline.milliseconds,
+  // `config.connection` is the same three values the profiler read from the
+  // contract; the profiler's stub tests override them to drive a leg in
+  // seconds. It is never a second source of the contract's numbers.
   ...(config.connection ?? {}),
 };
 const gatewayRequire = createRequire(join(config.gatewayDir, "package.json"));
@@ -432,6 +436,17 @@ class RecordingClient {
     // capacity rather than only the frames inside a window.
     this.pongDeadlineMisses = 0;
     this.unexpectedCloses = 0;
+    // The mobile's own liveness measurement: the time from sending a ping to
+    // receiving its pong, and the decoded payload it received. The bandwidth
+    // leg reads both: the round trip is what a pong deadline is set against,
+    // and the payload says how much the workload asked the Gateway to send.
+    this.pingSentAt = null;
+    this.pongRoundTripMsMax = 0;
+    this.pongsCounted = 0;
+    // The page one `session.open` hands back, for the bandwidth leg's offered
+    // load: attributed to the method, never to whatever else the connection
+    // streams at the same time.
+    this.openResponseBytes = 0;
     // Set when this client's path is a shaped loopback relay instead of a
     // direct connection (the impairment legs).
     this.relay = null;
@@ -452,6 +467,7 @@ class RecordingClient {
     // (a deliberate abandon included) must not keep muting its closes.
     this.closing = false;
     this.awaitingPong = null;
+    this.pingSentAt = null;
     // One deadline for the whole handshake (contract `clientHandshakeDeadline`):
     // the phone bounds open plus hello together, not each on its own.
     const handshakeDeadlineAt = now() + CONNECTION.handshakeDeadlineMs;
@@ -480,6 +496,11 @@ class RecordingClient {
       this.timeline.write({ t: now(), client: this.name, label: this.label, dir: "out", topic: "control:pong", bytes: data.length });
     });
     socket.on("pong", (data) => {
+      if (this.pingSentAt !== null) {
+        this.pongRoundTripMsMax = Math.max(this.pongRoundTripMsMax, now() - this.pingSentAt);
+        this.pongsCounted += 1;
+      }
+      this.pingSentAt = null;
       this.awaitingPong = null;
       this.note("in", "control:pong", data.length);
     });
@@ -529,6 +550,7 @@ class RecordingClient {
       if (this.window) this.window.pongDeadlineMisses += 1;
     }
     this.awaitingPong = now();
+    this.pingSentAt = now();
     if (this.socket.readyState === 1) this.socket.ping();
     if (this.window) this.window.pingsSent += 1;
     this.timeline.write({ t: now(), client: this.name, label: this.label, dir: "out", topic: "control:ping", bytes: 0 });
@@ -577,6 +599,7 @@ class RecordingClient {
       // Runtime failure detail is the evidence for a rejected workload.
       process.stderr.write(`${this.name} ${this.label} ${topic}: ${JSON.stringify(frame.payload).slice(0, 2_000)}\n`);
     }
+    if (topic === "response:session.open") this.openResponseBytes += bytes;
     if (frame.type === "hello" && this.helloWaiter) {
       const resolveHello = this.helloWaiter;
       this.helloWaiter = null;
@@ -634,6 +657,7 @@ class RecordingClient {
     }
     this.closing = false;
     this.awaitingPong = null;
+    this.pingSentAt = null;
     this.tcp = null;
     await this.connect();
     if (this.retired) await this.disconnect();
@@ -680,6 +704,7 @@ class RecordingClient {
     const socket = this.socket;
     this.socket = null;
     this.awaitingPong = null;
+    this.pingSentAt = null;
     this.helloWaiter = null;
     this.helloReject = null;
     if (socket && socket.readyState !== 3) socket.terminate();
@@ -1070,11 +1095,13 @@ async function measuredWindow(label, connected, recorded, body, options = {}) {
 //     backoff; the leg times the recovery to a ready mounted chat from the
 //     moment the path returned, whatever attempt was in flight then.
 //   bandwidth: the mobile's path is capped at `bandwidthMbps` for
-//     `bandwidthLegSeconds`, with the link kept loaded by full bounded
-//     transcript pages mounted back to back, so the cap (not the workload) is
-//     what bounds the leg and the Gateway's socket buffers really fill.
-//     Liveness and socket capacity are observed (a pong queued behind data, no
-//     close for capacity) and the leg reports its own link use.
+//     `bandwidthLegSeconds`, with `bandwidthInFlight` full bounded transcript
+//     pages in flight at once on their own sessions, so the cap (not the
+//     workload) bounds the leg and the Gateway's outbound queue holds many
+//     pages rather than one. Liveness and socket capacity are observed (a pong
+//     queued behind data, no close for capacity) and the leg reports its own
+//     link use, the peak page load it offered and the mobile's longest
+//     ping-to-pong round trip.
 //   restart: the profiler stops and restarts the fixture Gateway on the same
 //     port while these clients are connected. The driver asks for the restart
 //     (the fixture is the profiler's process), each client retries from the
@@ -1218,48 +1245,92 @@ async function blackholeLeg(config, { mobile, chat, retry }) {
   return leg;
 }
 
+/** The sessions the bandwidth leg mounts concurrently. Its own chat's session
+ * is excluded: the Gateway admits one session.open per session per connection,
+ * so a second mount on it would be refused with a conflict. */
+function pageTargets(config, mountedSessionId) {
+  const targets = [];
+  for (const entry of [...(config.running ?? []), ...(config.cold ?? []), ...(config.large ?? [])]) {
+    const sessionId = entry?.sessionId;
+    if (typeof sessionId !== "string" || sessionId === mountedSessionId || targets.includes(sessionId)) continue;
+    targets.push(sessionId);
+  }
+  return targets;
+}
+
 async function bandwidthLeg(config, { mobile, chat, retry }) {
   const relay = await relayFor(config, mobile);
   const missesBefore = mobile.pongDeadlineMisses;
   const closesBefore = mobile.unexpectedCloses;
   const upBefore = relay.upBytes;
   const downBefore = relay.downBytes;
-  const meteredBefore = relay.meteredMs;
+  const openBytesBefore = mobile.openResponseBytes;
+  const pongsBefore = mobile.pongsCounted;
   const capBitsPerSecond = Math.round(config.bandwidthMbps * 1_000_000);
   const startedAtMs = Date.now();
   relay.cap(capBitsPerSecond);
   const startedAt = now();
   const operations = [];
   let closedEarly = false;
-  // A fixed duration, several ping intervals long, with the link kept loaded:
-  // the cap has to delay real traffic for a liveness window and beyond before
-  // it can lose a pong or fill the Gateway's socket buffers, and a leg that
-  // stopped after a few operations would report neither as a pass.
+  let stopped = false;
+  let failure = null;
+  let inFlight = 0;
+  let maxInFlight = 0;
+  // A fixed duration, several ping intervals long, with the link kept loaded.
   const legEnd = startedAt + config.bandwidthLegSeconds * 1000;
-  while (now() < legEnd) {
-    const operationStart = now();
+  // Several pages are in flight at once, each mounted on its own session (the
+  // Gateway admits one session.open per session per connection), so the
+  // Gateway's outbound queue holds many pages rather than one. A single page is
+  // about 39 kB of wire, and one page in flight can only ever put one page
+  // ahead of a queued pong: that is what made "zero pong misses, no close for
+  // capacity" true by construction however the Gateway behaved. The leg reports
+  // the peak it held and the load that peak asked the Gateway to send, so it
+  // can be checked against `pong deadline x cap`.
+  const extras = pageTargets(config, chat.sessionId).slice(0, Math.max(1, config.bandwidthInFlight))
+    .map((sessionId) => new MountedChat(mobile, sessionId));
+  const lanes = extras.length > 0 ? extras : [chat];
+  const runLane = async (laneChat) => {
     try {
-      await retry("mount", () => chat.remount(config.measuredDeadlineMs));
-    } catch (error) {
-      // A socket the Gateway closed under the cap is this case's own finding
-      // (counted as an unexpected close), not a failure of the profile: the leg
-      // ends with the operations it measured and the metric that says why. A
-      // socket that is gone without being counted is a measurement bug, and is
-      // reported as one.
-      if (mobile.socket?.readyState !== 1 && !mobile.closedUnexpectedly) {
-        fail(`${mobile.name} socket died under the cap without being counted: ${messageOf(error)}`);
+      while (!stopped && now() < legEnd) {
+        const operationStart = now();
+        inFlight += 1;
+        maxInFlight = Math.max(maxInFlight, inFlight);
+        try {
+          await retry("mount", () => laneChat.remount(config.measuredDeadlineMs));
+        } catch (error) {
+          // A socket the Gateway closed under the cap is this case's own finding
+          // (counted as an unexpected close), not a failure of the profile: the leg
+          // ends with the operations it measured and the metric that says why. A
+          // socket that is gone without being counted is a measurement bug, and is
+          // reported as one.
+          if (mobile.socket?.readyState !== 1 && !mobile.closedUnexpectedly) {
+            throw new Error(`${mobile.name} socket died under the cap without being counted: ${messageOf(error)}`);
+          }
+          if (mobile.closedUnexpectedly) { closedEarly = true; stopped = true; return; }
+          throw error;
+        } finally {
+          inFlight -= 1;
+        }
+        operations.push(now() - operationStart);
       }
-      if (mobile.closedUnexpectedly) { closedEarly = true; break; }
-      throw error;
+    } catch (error) {
+      // Every lane stops at the first failure; the leg reports that failure
+      // after the lanes have unwound, so no lane keeps mounting past it.
+      stopped = true;
+      failure ??= error;
     }
-    operations.push(now() - operationStart);
-  }
+  };
+  await Promise.all(lanes.map((laneChat) => runLane(laneChat)));
   const seconds = (now() - startedAt) / 1000;
   const deliveredBytes = relay.downBytes - downBefore;
+  const pageBytes = mobile.openResponseBytes - openBytesBefore;
   // Stop metering. The next chunk is forwarded without waiting: the path is not
   // shaped any more.
-  const meteredMs = relay.meteredMs - meteredBefore;
   relay.cap(0);
+  for (const extra of extras) await extra.close().catch(() => {});
+  if (failure !== null) throw failure;
+  const meanPageWireBytes = operations.length > 0 ? deliveredBytes / operations.length : 0;
+  const meanPageDecodedBytes = operations.length > 0 ? pageBytes / operations.length : 0;
   return {
     capBitsPerSecond, seconds, operations, closedEarly, startedAtMs, endedAtMs: Date.now(),
     deliveredBytes, deliveredBytesPerSecond: deliveredBytes / seconds,
@@ -1267,7 +1338,14 @@ async function bandwidthLeg(config, { mobile, chat, retry }) {
     // Delivered wire bytes over what the cap allows: near 0 the cap shaped
     // nothing, near 1 the link was full for the whole leg.
     linkUse: (deliveredBytes / seconds) / (capBitsPerSecond / 8),
-    meteredMs,
+    // The peak page load the workload had outstanding, in the decoder's bytes
+    // (which is what the Gateway's own outbound queue counts) and in wire bytes.
+    maxInFlight,
+    offeredInFlightBytes: maxInFlight * meanPageDecodedBytes,
+    offeredInFlightWireBytes: maxInFlight * meanPageWireBytes,
+    // The mobile's own ping-to-pong round trip, the delay a pong deadline is
+    // set against. Null when no pong came back inside the leg.
+    maxPingToPongMs: mobile.pongsCounted > pongsBefore ? mobile.pongRoundTripMsMax : null,
     pongDeadlineMisses: mobile.pongDeadlineMisses - missesBefore,
     unexpectedCloses: mobile.unexpectedCloses - closesBefore,
   };
@@ -1323,16 +1401,20 @@ async function restartLeg(config, clients, retryMethod, measuredNames) {
     ready, waitForJson(donePath, config.restartDeadlineMs, "the profiler's Gateway restart"),
   ]);
   const measured = results.filter((entry) => measuredNames.includes(entry.name));
-  // A request that started before the new Gateway was healthy is part of the
-  // downtime, not the storm; `sinceRestoreMs` is how it lines up with the
-  // restart the case is about.
+  // Every request a measured client made is kept. The profiler stamps
+  // `restoredAtMs` only after the new Gateway answered health, some seconds
+  // after it already served requests, so dropping the earlier ones would drop
+  // the first and most contended requests of the storm and record nothing of
+  // them. A request that started before the restore carries a negative
+  // `sinceRestoreMs` and `duringDowntime`, which is what it is: an outage
+  // request, not a storm one.
   const requests = [];
   for (const { name, client } of clients) {
     if (!measuredNames.includes(name)) continue;
     for (const entry of client.requestTally ?? []) {
-      if (entry.ms === undefined || entry.startedAtMs < restored.restoredAtMs) continue;
+      if (entry.ms === undefined) continue;
       requests.push({ client: name, ms: entry.ms, sinceRestoreMs: entry.startedAtMs - restored.restoredAtMs,
-        failed: entry.failed ?? null });
+        duringDowntime: entry.startedAtMs < restored.restoredAtMs, failed: entry.failed ?? null });
     }
     client.requestTally = null;
   }

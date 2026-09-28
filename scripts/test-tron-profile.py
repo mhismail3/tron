@@ -676,12 +676,16 @@ class StubGatewayHarness:
         if stub.stdout is not None:
             stub.stdout.close()
 
-    def restart_fixture(self, port: int, gap_seconds: float = 1.0, **extra: object) -> object:
+    def restart_fixture(self, port: int, gap_seconds: float = 1.0, health_delay_seconds: float = 0.0,
+                        **extra: object) -> object:
         """The profiler's side of the restart handshake as `wait_with_restart`
         uses it: an owned child and a restart that replaces the stub Gateway on
         the same port after a real gap, so the clients meet a refused connect
         while it is down. The replacement carries the same stub configuration,
-        so a behaviour the test asked for survives the restart."""
+        so a behaviour the test asked for survives the restart. `health_delay_
+        seconds` stands in for the profiler's own health check: the new Gateway
+        already serves requests while the answer (and so `restoredAtMs`) is
+        still seconds away."""
         harness = self
 
         class RestartFixture:
@@ -692,6 +696,7 @@ class StubGatewayHarness:
                 harness.stop_stub(harness.stubs[-1])
                 time.sleep(gap_seconds)
                 self.process = harness.start_stub(None, port=port, **extra)
+                time.sleep(health_delay_seconds)
 
         return RestartFixture()
 
@@ -733,7 +738,8 @@ class StubGatewayHarness:
         return driver.returncode, output, round(time.monotonic() - started, 1)
 
     def run_impairment(self, cases: list[str], overrides: dict, restart_stub: bool = False,
-                       stub_config: dict | None = None, timeout: float = 180) -> tuple[int, str, dict]:
+                       stub_config: dict | None = None, health_delay_seconds: float = 0.0,
+                       timeout: float = 180) -> tuple[int, str, dict]:
         """One iteration at a short boundary, running only the given impairment
         cases. With `restart_stub` the profiler's own `wait_with_restart` plays
         the restart handshake against a stand-in for its fixture Gateway: it
@@ -753,9 +759,9 @@ class StubGatewayHarness:
         driver = subprocess.Popen([NODE, str(DRIVER), "multi", str(config_path)], stdout=subprocess.PIPE,
                                   stderr=subprocess.STDOUT, text=True, env=self.driver_environment())
         if restart_stub:
-            status = self.profiler.wait_with_restart(driver, self.restart_fixture(port, **(stub_config or {})),
-                                                    request_path, done_path, timeout, "impaired",
-                                                    run_dir / "driver-impaired.log")
+            status = self.profiler.wait_with_restart(
+                driver, self.restart_fixture(port, health_delay_seconds=health_delay_seconds, **(stub_config or {})),
+                request_path, done_path, timeout, "impaired", run_dir / "driver-impaired.log")
         else:
             try:
                 status = driver.wait(timeout=timeout)
@@ -866,17 +872,29 @@ class MultiDriverImpairment(StubGatewayHarness, unittest.TestCase):
                         "the socket is abandoned one liveness window after the last inbound frame")
 
     def test_the_bandwidth_cap_meters_the_path_without_losing_the_socket(self) -> None:
+        # Three sessions, so the leg has three page mounts in flight at once:
+        # one at a time it can put at most one page ahead of a queued pong, and
+        # "zero pong misses" would then say nothing about the cap.
         status, output, result = self.run_impairment(["bandwidth"], {
-            "bandwidthMbps": 0.05, "bandwidthLegSeconds": 5,
+            "bandwidthMbps": 0.2, "bandwidthLegSeconds": 5, "bandwidthInFlight": 3,
+            "running": [{"sessionId": "stub-run-1"}, {"sessionId": "stub-run-2"}, {"sessionId": "stub-run-3"}],
+            # Frequent pings with room for a pong despite the cap, so the leg's
+            # round-trip metric has samples and the deadline is not the test.
+            "connection": {"pingIntervalMs": 300, "pongDeadlineMs": 2_000, "handshakeDeadlineMs": 8_000},
         })
         self.assertEqual(status, 0, output)
         leg = result["impairment"]["bandwidth"]
         self.assertGreaterEqual(leg["seconds"], 5, "the leg ran its full duration, not a fixed count of operations")
-        self.assertGreater(leg["meteredMs"], 0, "the meter delayed nothing, so the cap was not applied")
         self.assertGreater(leg["deliveredBytes"], 0, "the capped path carried nothing")
         self.assertLessEqual(leg["deliveredBytesPerSecond"], leg["capBitsPerSecond"] / 8 * 1.5,
                              "the meter delivered more than the cap allows")
         self.assertLessEqual(leg["linkUse"], 1.5, "link use is the delivered rate over the cap")
+        self.assertGreaterEqual(leg["maxInFlight"], 2,
+                                "the leg ran one page at a time: a queued pong could never be late")
+        self.assertGreater(leg["offeredInFlightBytes"], 0, "the leg reported no offered load")
+        self.assertIsNotNone(leg["maxPingToPongMs"], "the mobile's ping-to-pong round trip was not reported")
+        self.assertLess(leg["maxPingToPongMs"], 1_000,
+                        "a pong was late on a path whose pages are a few hundred bytes")
         self.assertEqual(leg["pongDeadlineMisses"], 0, "a capped path that carries data must not lose a pong")
         self.assertEqual(leg["unexpectedCloses"], 0, "the Gateway closed a socket on the capped path")
 
@@ -904,11 +922,32 @@ class MultiDriverImpairment(StubGatewayHarness, unittest.TestCase):
                                     if not attempt.get("connected")), 1,
                                 "no client tried while the Gateway was down")
         self.assertGreater(leg["downtimeMs"], 0, "the downtime was not reported")
-        self.assertGreaterEqual(len(leg["requests"]), 3, "the storm measured no request")
-        self.assertTrue(all(request["sinceRestoreMs"] >= 0 for request in leg["requests"]),
-                        "a storm request was stamped before the new Gateway was healthy")
-        self.assertTrue(any(request["ms"] > 1_000 for request in leg["requests"]),
-                        f"the slow request made while the clients came back is missing: {leg['requests']}")
+        storm = [request for request in leg["requests"] if not request["duringDowntime"]]
+        self.assertGreaterEqual(len(storm), 3, "the storm measured no request")
+        self.assertTrue(all(request["duringDowntime"] == (request["sinceRestoreMs"] < 0)
+                            for request in leg["requests"]),
+                        "a request's window must follow its own start, not the filter")
+        self.assertTrue(any(request["ms"] > 1_000 for request in storm),
+                        f"the slow request made while the clients came back is missing: {storm}")
+
+    def test_a_request_served_before_the_health_stamp_is_kept(self) -> None:
+        # The profiler stamps `restoredAtMs` only after the new Gateway answered
+        # health: polling, `ps` and writing the answer take seconds, and the new
+        # Gateway serves requests in that gap. Dropping the requests that
+        # started inside it drops the first, most contended ones and reports
+        # nothing of them.
+        status, output, result = self.run_impairment(["restart"], {
+            "restartStormSeconds": 2, "restartDeadlineMs": 30_000,
+            "connection": dict(self.FAST_CONNECTION, handshakeDeadlineMs=2_000),
+        }, restart_stub=True, health_delay_seconds=4.0)
+        self.assertEqual(status, 0, output)
+        leg = result["impairment"]["restart"]
+        during = [request for request in leg["requests"] if request["duringDowntime"]]
+        self.assertTrue(during, f"the requests the new Gateway served before the health stamp are gone: "
+                                 f"{leg['requests']}")
+        self.assertTrue(any(request["sinceRestoreMs"] < 0 for request in during),
+                        "a kept request must carry the negative offset that places it before the stamp")
+        self.assertTrue(all(request["ms"] is not None for request in leg["requests"]))
 
     def test_an_unexpected_close_after_a_blackhole_is_not_excused(self) -> None:
         # The stub closes the mobile's socket on its fourth open: the mount that
@@ -1060,19 +1099,28 @@ class ImpairmentCases(unittest.TestCase):
     def test_a_bandwidth_case_that_never_filled_the_cap_rejects_the_run(self) -> None:
         # A leg whose cap delayed nothing reads as a pass — zero pong misses,
         # no capacity close — however the Gateway behaved, because the link was
-        # never loaded. It must reject the run instead.
+        # never loaded, and a leg that offered less in flight than one pong
+        # deadline of the cap can never put a pong behind more than a fraction
+        # of a second of data. Both must reject the run.
         def bandwidth(**overrides) -> dict:
             leg = {"capBitsPerSecond": 2_000_000, "seconds": 90.0, "operations": [4_200.0],
                    "deliveredBytes": 22_000_000, "deliveredBytesPerSecond": 244_000, "sentBytes": 4_000,
-                   "linkUse": 0.98, "meteredMs": 170_000.0, "pongDeadlineMisses": 0, "unexpectedCloses": 0}
+                   "linkUse": 0.98, "maxInFlight": 6, "offeredInFlightBytes": 7_200_000,
+                   "offeredInFlightWireBytes": 234_000, "maxPingToPongMs": 5_100.0,
+                   "pongDeadlineMisses": 0, "unexpectedCloses": 0}
             leg.update(overrides)
             return {"label": "iteration-1", "cases": ["bandwidth"], "impairment": {"bandwidth": leg}}
 
         self.assertEqual(self.profiler.validate_impairment([bandwidth()]), [])
         unfilled = self.profiler.validate_impairment([bandwidth(linkUse=0.2)])
         self.assertEqual(len(unfilled), 1, unfilled)
-        unshaped = self.profiler.validate_impairment([bandwidth(meteredMs=1_000.0)])
-        self.assertEqual(len(unshaped), 1, unshaped)
+        # One pong deadline of the cap: 8 s x 250 kB/s = 2 MB in the decoder's
+        # bytes, which is the unit the Gateway's own outbound queue counts.
+        underfilled = self.profiler.validate_impairment([bandwidth(offeredInFlightBytes=900_000)])
+        self.assertEqual(len(underfilled), 1, underfilled)
+        self.assertIn("less than one pong deadline", underfilled[0])
+        silent = self.profiler.validate_impairment([bandwidth(maxPingToPongMs=None)])
+        self.assertEqual(len(silent), 1, silent)
 
     def test_a_restart_that_leaves_a_client_down_rejects_the_run(self) -> None:
         def restart(**overrides) -> dict:
@@ -1081,7 +1129,7 @@ class ImpairmentCases(unittest.TestCase):
                                for name in ("mobile", "dashboard", "driver")],
                    "clientsAll": [{"name": name, "readyAtMs": 11, "reconnectMs": 1_400, "attempts": []}
                                   for name in ("mobile", "dashboard", "driver")],
-                   "requests": [{"client": "mobile", "ms": 200}]}
+                   "requests": [{"client": "mobile", "ms": 200, "duringDowntime": False}]}
             leg.update(overrides)
             return {"label": "iteration-1", "cases": ["restart"], "impairment": {"restart": leg}}
 
@@ -1143,7 +1191,9 @@ class ImpairmentCases(unittest.TestCase):
                               "attempts": [{"ms": 1_000, "connected": True}, attempt]},
                 "bandwidth": {"capBitsPerSecond": 2_000_000, "deliveredBytesPerSecond": 41_000,
                               "linkUse": 0.94, "sentBytes": 41_000, "seconds": 1.0, "operations": [4_200],
-                              "pongDeadlineMisses": 0, "unexpectedCloses": 0, "meteredMs": 3_900},
+                              "maxInFlight": 6, "offeredInFlightBytes": 7_200_000,
+                              "offeredInFlightWireBytes": 234_000, "maxPingToPongMs": 700.0,
+                              "pongDeadlineMisses": 0, "unexpectedCloses": 0},
                 "restart": {"downtimeMs": downtime, "restoredAtMs": 1,
                             "clients": [{"name": "mobile", "reconnectMs": reconnect,
                                          "attempts": [{"ms": 30, "failed": "ECONNREFUSED"}, {"ms": 400, "connected": True}]}],
@@ -1156,11 +1206,13 @@ class ImpairmentCases(unittest.TestCase):
             }}
 
         first = result("iteration-1", attempt={"ms": 90, "connected": True}, reconnect=1_400, downtime=3_900,
-                       storm=[{"client": "mobile", "ms": 200, "sinceRestoreMs": 10},
-                              {"client": "dashboard", "ms": 1_500, "sinceRestoreMs": 20},
-                              {"client": "driver", "ms": 1_000, "sinceRestoreMs": 30}])
+                       storm=[{"client": "mobile", "ms": 200, "sinceRestoreMs": 10, "duringDowntime": False},
+                              {"client": "dashboard", "ms": 1_500, "sinceRestoreMs": 20, "duringDowntime": False},
+                              {"client": "driver", "ms": 1_000, "sinceRestoreMs": 30, "duringDowntime": False},
+                              {"client": "mobile", "ms": 5_000, "sinceRestoreMs": -4_000,
+                               "duringDowntime": True}])
         second = result("iteration-2", attempt={"ms": 15_000, "failed": "hello"}, reconnect=2_600, downtime=4_100,
-                        storm=[{"client": "mobile", "ms": 1_001, "sinceRestoreMs": 40}])
+                        storm=[{"client": "mobile", "ms": 1_001, "sinceRestoreMs": 40, "duringDowntime": False}])
         metrics = self.profiler.impairment_samples([first, second])
         self.assertEqual(metrics["impairment.blackhole.attempt_ms_max"]["values"], [1_000, 15_000],
                          "the longest attempt is the longest, whether it failed or not")
@@ -1168,11 +1220,21 @@ class ImpairmentCases(unittest.TestCase):
         self.assertEqual(metrics["impairment.restart.downtime_ms"]["values"], [3_900, 4_100])
         self.assertEqual(metrics["impairment.bandwidth.link_use"]["values"], [0.94, 0.94])
         for metric_id in ("impairment.bandwidth.link_use", "impairment.bandwidth.delivered_bytes_per_second",
-                          "impairment.bandwidth.sent_bytes_per_second", "impairment.restart.requests"):
+                          "impairment.bandwidth.sent_bytes_per_second", "impairment.restart.requests",
+                          "impairment.bandwidth.offered_in_flight_bytes",
+                          "impairment.bandwidth.max_in_flight"):
             self.assertEqual(metrics[metric_id]["better"], "higher",
                              f"{metric_id} is a volume metric: more is not a regression")
         self.assertEqual(metrics["impairment.restart.requests_over_1s"]["values"], [1, 1],
-                         "a request takes over 1 s only when it is strictly slower")
+                         "a storm request takes over 1 s only when it is strictly slower; a downtime request "
+                         "is not a storm request")
+        self.assertEqual(metrics["impairment.restart.requests"]["values"], [3, 1],
+                         "a request that started before the new Gateway was healthy is the downtime's, "
+                         "not the storm's, and is still reported")
+        self.assertEqual(metrics["impairment.restart.downtime_requests"]["values"], [1, 0])
+        self.assertEqual(metrics["impairment.bandwidth.max_ping_to_pong_ms"]["values"], [700.0, 700.0])
+        self.assertEqual(metrics["impairment.bandwidth.offered_in_flight_bytes"]["values"], [7_200_000, 7_200_000])
+        self.assertEqual(metrics["impairment.bandwidth.max_in_flight"]["values"], [6, 6])
         self.assertEqual(metrics["impairment.restart.failed_attempts"]["values"], [6, 6],
                          "one refused connect per client is counted; a connected attempt is not")
         self.assertEqual(metrics["impairment.bandwidth.unexpected_closes"]["values"], [0, 0])
