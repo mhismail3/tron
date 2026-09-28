@@ -161,50 +161,114 @@ struct GatewayConnectionEpisodeRecorderTests {
         #expect(await recordCount(log, event: "connection.episode") == 1)
     }
 
-    @Test("a blocked main actor is reported once it answers, and only in the foreground")
-    func mainStallIsMeasuredAndGated() async throws {
+    @Test("a synchronously blocked main actor is reported with the block it served")
+    func blockedMainActorIsMeasuredAndReported() async throws {
+        let (log, cleanup) = makeAppLog()
+        defer { cleanup() }
+        // The production ping and the production clocks: the watchdog measures a
+        // real hop to the main actor. A watchdog that inherited the recorder's
+        // main-actor isolation would queue its own wake-up behind the block and
+        // report microseconds, or nothing at all.
+        let recorder = GatewayConnectionEpisodeRecorder(
+            clock: .continuous, appLog: log, watchdogClock: .continuous
+        )
+        recorder.stallGuard = { .other }
+        recorder.noteDisconnected(profileID: "gateway", lifecycleGeneration: 1, foreground: true)
+
+        // The block starts inside the same main-actor stretch that opened the
+        // episode, so the ticks that fire while it is held are served by it. The
+        // tick grid can consume one interval of the block and the detached loop's
+        // first wake-up a further one; everything else in the record is the block
+        // itself, which a stalled main actor could not have produced.
+        let blockedFrom = ContinuousClock().now
+        blockMainThread(for: .seconds(5))
+        let blockedMs = diagnosticMilliseconds(blockedFrom.duration(to: ContinuousClock().now))
+        let intervalMs = diagnosticMilliseconds(GatewayConnectionEpisodeRecorder.watchdogInterval)
+        let boundMs = diagnosticMilliseconds(GatewayConnectionEpisodeRecorder.mainStallBound)
+
+        let stalls = try await waitForRecords(log, event: "app.main-stall", count: 1)
+        #expect(stalls.count == 1)
+        #expect((stalls[0].durationMs ?? 0) >= boundMs)
+        #expect((stalls[0].durationMs ?? 0) >= blockedMs - 2 * intervalMs)
+        #expect(stalls[0].message.contains("boundMs=2000"))
+        #expect(stalls[0].message.contains("foreground=true"))
+        #expect(stalls[0].level == "warning")
+        #expect(stalls[0].outcome == "failure")
+
+        // An episode that ends stops the watchdog: the same block is not recorded
+        // again under a lifecycle that no longer owns it.
+        recorder.endEpisode(.background, profileID: "gateway", lifecycleGeneration: 1)
+        await Task.yield()
+        blockMainThread(for: .seconds(2.5))
+        #expect(await recordCount(log, event: "app.main-stall") == 1)
+    }
+
+    @Test("a dropped connection after a handshake is dated at the drop, not as a second attempt")
+    func postConnectFailureDoesNotReworkTheConnectedEpisode() async throws {
         let clock = ManualClock()
         let (log, cleanup) = makeAppLog()
         defer { cleanup() }
-        let gate = MainStallGate()
         let recorder = GatewayConnectionEpisodeRecorder(
-            clock: clock.clock, appLog: log, watchdogClock: clock.clock, mainStallPing: { await gate.ping() }
+            clock: clock.clock, appLog: log, watchdogClock: clock.clock, mainStallPing: {}
         )
         recorder.stallGuard = { .other }
 
+        // One failed attempt, then the attempt whose handshake succeeds.
         recorder.recordAttempt(attempt(
-            profileID: "gateway", lifecycleGeneration: 1, attemptID: "loop-1", retry: 1,
+            profileID: "gateway", lifecycleGeneration: 1, attemptID: "loop-3", retry: 1,
             stageReached: "transport-open", reason: "timeout", succeeded: false,
             startedAt: clock.clock.now()
         ))
-        let monitor = Task {
-            // Both watchdogs ride one task on this clock: the tick measures the
-            // main-stall ping and then checks the holding guard.
-            try await clock.waitUntilSleeping(
-                count: 1, duration: GatewayConnectionEpisodeRecorder.watchdogInterval
-            )
-            clock.advance(by: GatewayConnectionEpisodeRecorder.watchdogInterval)
-            await gate.waitUntilCalled()
-            clock.advance(by: GatewayConnectionEpisodeRecorder.mainStallBound)
-            gate.release()
-        }
-        let stalls = try await waitForRecords(log, event: "app.main-stall", count: 1)
-        try await monitor.value
-        #expect(stalls.count == 1)
-        #expect(stalls[0].durationMs == 2000)
-        #expect(stalls[0].message.contains("boundMs=2000"))
-        #expect(stalls[0].message.contains("foreground=true"))
+        clock.advance(by: .seconds(4))
+        let connectingAttemptStart = clock.clock.now()
+        recorder.recordAttempt(attempt(
+            profileID: "gateway", lifecycleGeneration: 1, attemptID: "loop-3", retry: 2,
+            stageReached: "connected", reason: nil, succeeded: true,
+            startedAt: connectingAttemptStart, connectionID: 21
+        ))
+        // Projection runs for 6 s on the connection that handshake established,
+        // and then that same connection drops.
+        clock.advance(by: .seconds(6))
+        recorder.recordAttempt(attempt(
+            profileID: "gateway", lifecycleGeneration: 1, attemptID: "loop-3#postConnect", retry: 2,
+            stageReached: GatewayConnectionEpisodeRecorder.postConnectStage,
+            reason: "disconnected", succeeded: false, startedAt: connectingAttemptStart
+        ))
+        clock.advance(by: .seconds(2))
+        recorder.recordAttempt(attempt(
+            profileID: "gateway", lifecycleGeneration: 1, attemptID: "loop-3", retry: 3,
+            stageReached: "connected", reason: nil, succeeded: true,
+            startedAt: clock.clock.now(), connectionID: 22
+        ))
 
-        // An episode that ends at background stops the monitor: a later block is
-        // not recorded.
-        recorder.endEpisode(.background, profileID: "gateway", lifecycleGeneration: 1)
-        gate.release()
-        await Task.yield()
-        clock.advance(by: .seconds(60))
-        clock.advance(by: .seconds(60))
-        await Task.yield()
-        #expect(clock.activeSleeperCount() == 0)
-        #expect(await recordCount(log, event: "app.main-stall") == 1)
+        let attempts = try await waitForRecords(log, event: "gateway.attempt", count: 4)
+        #expect(attempts.map(\.outcome) == ["failure", "success", "failure", "success"])
+        #expect(attempts[2].message.contains("attemptId=loop-3#postConnect"))
+        #expect(attempts[2].message.contains("stageReached=postConnect"))
+        let episodes = try await waitForRecords(log, event: "connection.episode", count: 2)
+        #expect(episodes.map(\.outcome) == ["connected", "connected"])
+        // The first episode is the outage the two attempts resolved.
+        #expect(episodes[0].message.contains("attempts=2"))
+        #expect(episodes[0].message.contains("foregroundMs=4000"))
+        // The post-connect failure is the same attempt's established connection
+        // dropping, not a further attempt: the episode it opens is dated at the
+        // drop (no 6 s of the episode that just ended is counted again) and it
+        // counts only the attempt that followed.
+        let resolved = episodes[1]
+        #expect(resolved.message.contains("attempts=1"))
+        #expect(resolved.message.contains("causes=disconnected"))
+        #expect(resolved.message.contains("foregroundMs=2000"))
+        let firstEndedAt = try #require(episodeDate("endedAt", in: episodes[0]))
+        let secondStartedAt = try #require(episodeDate("startedAt", in: resolved))
+        #expect(secondStartedAt >= firstEndedAt)
+    }
+
+    /// Parses one `connection.episode` wall-clock field, so an assertion compares
+    /// instants rather than the ISO text.
+    private func episodeDate(_ key: String, in record: AppLogRecord) -> Date? {
+        guard let range = record.message.range(of: "\(key)=") else { return nil }
+        let value = record.message[range.upperBound...].prefix { !$0.isWhitespace }
+        return GatewayTimestamp.parse(String(value))
     }
 
     private func attempt(
@@ -264,46 +328,11 @@ struct GatewayConnectionEpisodeRecorderTests {
     }
 }
 
-/// A main-actor ping a test can hold: the recorder measures the block between
-/// the ping and its release.
-private final class MainStallGate: Sendable {
-    private struct State {
-        var called = false
-        var waiters: [CheckedContinuation<Void, Never>] = []
-        var release: CheckedContinuation<Void, Never>?
-    }
-
-    private let state = Mutex(State())
-
-    func ping() async {
-        await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
-            let waiters = state.withLock { state -> [CheckedContinuation<Void, Never>] in
-                state.called = true
-                state.release = continuation
-                let waiters = state.waiters
-                state.waiters = []
-                return waiters
-            }
-            for waiter in waiters { waiter.resume() }
-        }
-    }
-
-    func waitUntilCalled() async {
-        await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
-            let already = state.withLock { state -> Bool in
-                guard !state.called else { return true }
-                state.waiters.append(continuation)
-                return false
-            }
-            if already { continuation.resume() }
-        }
-    }
-
-    func release() {
-        let release = state.withLock { state -> CheckedContinuation<Void, Never>? in
-            defer { state.release = nil }
-            return state.release
-        }
-        release?.resume()
-    }
+/// Blocks the calling thread synchronously — the main thread, in a `@MainActor`
+/// test. That is what a blocked main actor is: no suspension point for the
+/// runtime to drain its queue at. `Thread.sleep` is unavailable from an async
+/// context, so the block lives in this synchronous helper.
+private func blockMainThread(for duration: Duration) {
+    Thread.sleep(forTimeInterval: Double(duration.components.seconds)
+        + Double(duration.components.attoseconds) / 1e18)
 }

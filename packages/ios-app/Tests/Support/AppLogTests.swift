@@ -118,6 +118,29 @@ struct AppLogTests {
         #expect(records[1].level == "error")
     }
 
+    @Test("a short interval the scene retired is signed backgrounded, never as its owner's failure")
+    func backgroundedShortIntervalIsNotAFailure() async throws {
+        let (log, _, directory) = try temporaryLog()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let signposts = AppLogSignposts(base: RecordingPerformanceSignposts(), log: log)
+
+        // The scene goes to the background while the operation is younger than the
+        // record threshold, and the operation then unwinds as a failure because
+        // the scene retired it. That failure is the background's, not the
+        // operation's, so it must not read as an error-level failure.
+        let retired = signposts.begin(.chatProjection)
+        signposts.endOpenIntervalsAtBackground()
+        try await Task.sleep(for: .milliseconds(400))
+        signposts.end(retired, result: .failure, metrics: .none)
+
+        let records = await signedOperationRecords(in: log, count: 1)
+        #expect(records.count == 1)
+        #expect(records.first?.event == "operation.chatProjection")
+        #expect(records.first?.outcome == "backgrounded")
+        #expect(records.first?.level == "warning")
+        #expect((records.first?.durationMs ?? 0) >= 250)
+    }
+
     private func signedOperationRecords(in log: AppLog, count: Int) async -> [AppLogRecord] {
         for _ in 0..<600 {
             let values = await log.snapshot().filter { $0.event.hasPrefix("operation.") }

@@ -356,12 +356,153 @@ final class RealGatewayPiBoundaryTests: XCTestCase {
             port: port,
             proxyToken: proxyToken
         )
-        let attachment = XCTAttachment(string: blackholeRecords.map { record in
+        let foregroundRecords = try await Self.exerciseForegroundBlackholedReconnect(
+            profile: profile,
+            token: token,
+            port: port,
+            proxyToken: proxyToken
+        )
+        let attachment = XCTAttachment(string: (blackholeRecords + foregroundRecords).map { record in
             "\(record.timestamp) \(record.level) \(record.event) durationMs=\(record.durationMs ?? -1) outcome=\(record.outcome ?? "-") \(record.message)"
         }.joined(separator: "\n"))
         attachment.name = "phone-connection-records"
         attachment.lifetime = .keepAlways
         add(attachment)
+    }
+
+    /// The O-6b shape: the socket is already live in the foreground, the route is
+    /// blackholed under it, and the phone itself sees the loss through its
+    /// liveness probe. The episode is therefore opened at the loss, before the
+    /// first recovery attempt, which is the silent gap this leg exists to
+    /// measure. The app stays foregrounded throughout: no scene transition opens
+    /// or ends anything.
+    @MainActor
+    private static func exerciseForegroundBlackholedReconnect(
+        profile: GatewayProfile,
+        token: String,
+        port: Int,
+        proxyToken: String
+    ) async throws -> [AppLogRecord] {
+        let memoryTokens = MemoryGatewayTokenStore()
+        let profiles = GatewayProfileStore(metadata: MemoryProfileMetadataStore(), tokens: memoryTokens)
+        try profiles.save(profile, token: token)
+        let logURL = FileManager.default.temporaryDirectory
+            .appending(path: "o-4-foreground-blackhole-\(UUID().uuidString).jsonl")
+        defer {
+            try? FileManager.default.removeItem(at: logURL)
+            try? FileManager.default.removeItem(at: logURL.appendingPathExtension("1"))
+        }
+        let appLog = AppLog(fileURL: logURL)
+        let client = GatewayClient()
+        let lifecycle = GatewayLifecycleCoordinator(
+            client: client,
+            profiles: profiles,
+            clock: .continuous,
+            reconnectDelayPolicy: .standard,
+            uuidSource: .random,
+            pairer: GatewayPairer(),
+            pairingCommit: { _, _ in },
+            profileTokenLookup: { try? memoryTokens.read(profileID: $0.id) },
+            appLog: appLog
+        )
+        do {
+            lifecycle.notePathHint(satisfied: true)
+            await lifecycle.start()
+            guard lifecycle.connectionState == .connected else {
+                throw BoundaryFailure.invalidFixture("The lifecycle did not connect before the foreground blackhole")
+            }
+            guard try await Self.waitForAttemptCount(1, in: appLog, deadline: .seconds(15)) else {
+                throw BoundaryFailure.invalidFixture("The initial attempt was not recorded")
+            }
+            let attemptsBeforeBlackhole = await Self.recordCount(in: appLog, event: "gateway.attempt")
+
+            // The phone's own projection of a transport loss, as AppModel does in
+            // production: the loss opens the episode and asks for one immediate
+            // attempt. The client's liveness probe is what detects a blackholed
+            // socket, because the proxy fabricates no pong.
+            let lossSeen = LossInstant()
+            let observer = Task {
+                for await delivery in client.events where delivery.event.topic == "transport.disconnected" {
+                    await lossSeen.record()
+                    await lifecycle.noteDisconnected(
+                        connectionID: delivery.connectionID,
+                        reason: delivery.event.payload.objectValue?["reason"]?.stringValue ?? "disconnected"
+                    )
+                    lifecycle.requestReconnect(immediate: true)
+                }
+            }
+            defer { observer.cancel() }
+
+            try await Self.control("blackhole", port: port, token: proxyToken)
+            guard try await Self.waitForAttemptCount(
+                attemptsBeforeBlackhole + 1, in: appLog, deadline: .seconds(60)
+            ) else {
+                throw BoundaryFailure.timedOut("The phone did not see the foreground loss and attempt recovery")
+            }
+            try await Self.control("pass", port: port, token: proxyToken)
+            guard let admission = lifecycle.generationAdmission,
+                  await lifecycle.waitForConnected(
+                    until: ContinuousClock().now + .seconds(60),
+                    admission: admission
+                  ) else {
+                throw BoundaryFailure.timedOut("The lifecycle did not reconnect after the foreground blackhole")
+            }
+            let records = try await Self.waitForEpisode(
+                in: appLog, deadline: ContinuousClock().now + .seconds(20)
+            )
+            let attempts = Array(
+                records.filter { $0.event == "gateway.attempt" }
+                    .dropFirst(attemptsBeforeBlackhole)
+            )
+            let resolved = records.filter {
+                $0.event == "connection.episode" && $0.message.contains("endedBy=connected")
+            }
+            XCTAssertEqual(resolved.count, 1, "One foreground outage resolves in one episode record")
+            XCTAssertGreaterThanOrEqual(attempts.count, 2, "Every attempt of the outage must be on the timeline")
+            XCTAssertEqual(attempts.filter { $0.outcome == "success" }.count, 1)
+            let episode = try XCTUnwrap(resolved.first)
+            XCTAssertTrue(episode.message.contains("attempts=\(attempts.count)"))
+            // The loss the phone saw opens the episode, so its start is at or
+            // after that loss and before the first attempt of the outage. An
+            // episode dated by the failed attempt would not satisfy both.
+            let observedLoss = await lossSeen.instant
+            let lossAt = try XCTUnwrap(observedLoss, "The phone must record the loss it saw")
+            let startedAt = try XCTUnwrap(
+                Self.episodeDate("startedAt", in: episode.message),
+                "The episode must report its start"
+            )
+            XCTAssertGreaterThanOrEqual(startedAt, lossAt.addingTimeInterval(-1))
+            let firstAttemptAt = try XCTUnwrap(GatewayTimestamp.parse(attempts[0].timestamp))
+            XCTAssertLessThanOrEqual(startedAt, firstAttemptAt)
+            let outage = records
+            await lifecycle.teardown()
+            await client.close()
+            return outage
+        } catch {
+            await lifecycle.teardown()
+            await client.close()
+            throw error
+        }
+    }
+
+    /// The wall-clock instant of one `connection.episode` field, parsed so the
+    /// assertion compares instants rather than ISO text.
+    private static func episodeDate(_ key: String, in message: String) -> Date? {
+        guard let range = message.range(of: "\(key)=") else { return nil }
+        let value = message[range.upperBound...].prefix { !$0.isWhitespace }
+        return GatewayTimestamp.parse(String(value))
+    }
+
+    /// The instant the phone observed a transport loss, for the assertion that
+    /// the episode is dated at that loss.
+    private actor LossInstant {
+        private var value: Date?
+
+        var instant: Date? { value }
+
+        func record() {
+            if value == nil { value = Date() }
+        }
     }
 
     /// A fault-proxy blackhole with the app foregrounded, then a restore. The
@@ -463,14 +604,17 @@ final class RealGatewayPiBoundaryTests: XCTestCase {
                 "The episode must report its largest gap"
             )
             XCTAssertGreaterThanOrEqual(maximumGapMs, longestBlackholedAttemptMs)
-            return records
+            // Bind the records before teardown: a live client with a standard
+            // reconnect loop must not be left inside the test process.
+            let outage = records
+            await lifecycle.teardown()
+            await client.close()
+            return outage
         } catch {
             await lifecycle.teardown()
             await client.close()
             throw error
         }
-        await lifecycle.teardown()
-        await client.close()
     }
 
     private static func recordCount(in appLog: AppLog, event: String) async -> Int {

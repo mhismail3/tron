@@ -224,9 +224,14 @@ final class AppLogSignposts: PerformanceSignposting, @unchecked Sendable {
     private let log: AppLog
     private let lock = NSLock()
     private var openIntervals: [Int: OpenInterval] = [:]
-    /// Intervals this wrapper already signed at background; their owner's later
-    /// `end` closes only the OS signpost, not a second record.
+    /// Intervals that were still open when the scene went to background. Their
+    /// owner's later `end` no longer decides the outcome — the scene's
+    /// background does — so a background-cancelled `.failure` is never recorded
+    /// as a failure at error level.
     private var backgroundedIntervals: Set<Int> = []
+    /// Those already written at background, because they had passed the
+    /// threshold then. Their owner's later `end` writes nothing more.
+    private var signedAtBackgroundIntervals: Set<Int> = []
     private var nextIntervalID = 1
 
     init(base: any PerformanceSignposting, log: AppLog) {
@@ -248,30 +253,39 @@ final class AppLogSignposts: PerformanceSignposting, @unchecked Sendable {
 
     func end(_ interval: PerformanceInterval, result: PerformanceResult, metrics: PerformanceMetrics) {
         base.end(interval, result: result, metrics: metrics)
-        let alreadySignedAtBackground = takeTracked(interval)
-        guard let started = interval.measuredStart, !alreadySignedAtBackground else { return }
+        let disposition = takeTracked(interval)
+        guard let started = interval.measuredStart, disposition != .signedAtBackground else { return }
         let duration = diagnosticMilliseconds(started.duration(to: ContinuousClock().now))
         guard duration >= AppLog.slowOperationThresholdMilliseconds else { return }
+        // An interval the scene retired is signed `backgrounded` whenever its end
+        // passes the threshold: the failure its owner reports is the background
+        // cancellation, not the operation.
+        let outcome = disposition == .backgrounded ? "backgrounded"
+            : (result == .success ? "success" : "failure")
         Task {
             await log.recordCausal(name: "operation.\(interval.operation)",
-                outcome: result == .success ? "success" : "failure", durationMilliseconds: duration,
-                count: metrics.itemCount, level: result == .failure ? "error" : "warning")
+                outcome: outcome, durationMilliseconds: duration,
+                count: metrics.itemCount,
+                level: result == .failure && disposition != .backgrounded ? "error" : "warning")
         }
     }
 
     func endOpenIntervalsAtBackground() {
         let now = ContinuousClock().now
         let signed = lock.withLock { () -> [OpenInterval] in
+            // Every interval open now belongs to the background, whatever its age:
+            // its owner will unwind it because the scene retired, and that unwind
+            // must not be recorded as the operation's own failure.
+            backgroundedIntervals.formUnion(openIntervals.keys)
             var signed: [OpenInterval] = []
+            var signedIDs: [Int] = []
             for (id, interval) in openIntervals {
-                let duration = diagnosticMilliseconds(interval.startedAt.duration(to: now))
-                guard duration >= AppLog.slowOperationThresholdMilliseconds else { continue }
-                // Only an interval signed here is suppressed when its owner later
-                // ends it. A shorter one keeps running and writes its own single
-                // record past the threshold instead of writing nothing at all.
-                backgroundedIntervals.insert(id)
+                guard diagnosticMilliseconds(interval.startedAt.duration(to: now))
+                    >= AppLog.slowOperationThresholdMilliseconds else { continue }
                 signed.append(interval)
+                signedIDs.append(id)
             }
+            signedAtBackgroundIntervals.formUnion(signedIDs)
             openIntervals.removeAll()
             return signed
         }
@@ -285,11 +299,21 @@ final class AppLogSignposts: PerformanceSignposting, @unchecked Sendable {
         }
     }
 
-    private func takeTracked(_ interval: PerformanceInterval) -> Bool {
-        guard let id = interval.trackedID else { return false }
+    /// What the owner's `end` means for one tracked interval: its own result, a
+    /// scene retirement it survived to the threshold, or a record already written
+    /// at background.
+    private enum IntervalDisposition {
+        case owner
+        case backgrounded
+        case signedAtBackground
+    }
+
+    private func takeTracked(_ interval: PerformanceInterval) -> IntervalDisposition {
+        guard let id = interval.trackedID else { return .owner }
         return lock.withLock {
             openIntervals.removeValue(forKey: id)
-            return backgroundedIntervals.remove(id) != nil
+            guard backgroundedIntervals.remove(id) != nil else { return .owner }
+            return signedAtBackgroundIntervals.remove(id) != nil ? .signedAtBackground : .backgrounded
         }
     }
 }

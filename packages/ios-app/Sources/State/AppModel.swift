@@ -1116,6 +1116,14 @@ final class AppModel {
         }
     }
 
+    /// A workspace read that failed because the transport was unavailable asks
+    /// recovery for one immediate attempt on the selected profile. The scene did
+    /// not move, so this is not a scene activation: it writes no scene record and
+    /// mints no navigation activation.
+    func recoverTransientTransportFailure() {
+        lifecycle.requestReconnect(immediate: true, replaceExisting: true)
+    }
+
     func sessionPresentationGeneration(for sessionID: String) -> Int? {
         sessionPresentation.presentationGeneration(for: sessionID)
     }
@@ -1671,6 +1679,13 @@ final class AppModel {
     }
 
     func start(scenePhase: AppScenePhase = .active) async {
+        // The launch phase is the scene's real starting point: a cold launch into
+        // the background must not later report `from=active`, and a backgrounded
+        // launch must not be labelled a foreground transition. Seed it before
+        // the first await, so a scene change during startup cannot be overwritten
+        // by the phase the launch sampled, and only while the scene has not
+        // moved yet.
+        seedLaunchScenePhase(scenePhase)
         await client.installAppLog(appLog)
         let appVersion = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "unknown"
         let build = Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? "unknown"
@@ -1680,10 +1695,6 @@ final class AppModel {
         )
         sceneAllowsCatalogRefresh = scenePhase.isActive
         pushNavigationActivationReady = scenePhase.isActive
-        // The launch phase is the scene's real starting point: a cold launch into
-        // the background must not later report `from=active`, and a backgrounded
-        // launch must not be labelled a foreground transition.
-        recordedSceneTransition = scenePhase
         await lifecycle.start()
         didStart = true
         if sceneAllowsCatalogRefresh {
@@ -1702,13 +1713,13 @@ final class AppModel {
     }
 
     @discardableResult
-    func becameActive(recordsSceneTransition: Bool = true) -> Task<Void, Never>? {
+    func becameActive() -> Task<Void, Never>? {
         sceneAllowsCatalogRefresh = true
         pushNavigationActivationReady = false
         pushNavigationActivationGeneration &+= 1
         let activationGeneration = pushNavigationActivationGeneration
         noticeCenter.setBackgrounded(false)
-        if recordsSceneTransition { recordSceneTransition(to: .active) }
+        recordSceneTransition(to: .active)
         let requiresRetirementBarrier = lifecycle.routeActivationRequiresRetirementBarrier
         let lifecycleTask = lifecycle.becameActive()
         return Task { @MainActor [weak self] in
@@ -1739,6 +1750,11 @@ final class AppModel {
     }
 
     @ObservationIgnored private var recordedSceneTransition: AppScenePhase = .active
+    /// Whether `recordedSceneTransition` came from a real transition. The launch
+    /// seed may only fill in the scene's starting point while nothing has moved:
+    /// a transition that arrived during startup is newer than the phase the
+    /// launch sampled, and overwriting it would suppress the next record.
+    @ObservationIgnored private var hasRecordedSceneTransition = false
     /// Scene records are chained so their order in the log is the order the
     /// scene moved, not the order three tasks happened to reach the log actor.
     @ObservationIgnored private var sceneRecordTask: Task<Void, Never>?
@@ -1749,10 +1765,19 @@ final class AppModel {
     /// `app.backgrounded` is why exports showed a background immediately before
     /// a resume. The scene timestamp travels with the record because the log's
     /// own write time can trail the transition.
+    /// Seeds the scene's starting point from the phase the launch observed,
+    /// writing no record: the launch phase is where the scene starts, not a
+    /// transition. A transition that already happened wins over the seed.
+    private func seedLaunchScenePhase(_ phase: AppScenePhase) {
+        guard !hasRecordedSceneTransition else { return }
+        recordedSceneTransition = phase
+    }
+
     private func recordSceneTransition(to transition: AppScenePhase, flush: Bool = false) {
         guard transition != recordedSceneTransition else { return }
         let previous = recordedSceneTransition
         recordedSceneTransition = transition
+        hasRecordedSceneTransition = true
         let event = switch (previous, transition) {
         case (_, .active): "scene.active"
         case (_, .background): "scene.background"
@@ -3487,11 +3512,15 @@ final class AppModel {
         } catch is CancellationError {
             throw CancellationError()
         } catch {
+            // The presentation owner rewords a typed open failure as its own
+            // `sync_failed`, so this record carries both: the phone-side wording
+            // in `code`, and `gatewayCode` for what the Gateway itself answered
+            // (`conflict`, `busy`, …) when it answered at all.
             await appLog.recordCausal(
                 name: "session.open.failure", outcome: "failure",
                 profileID: profileID, connectionID: admission.connectionID,
                 lifecycleGeneration: admission.generation, level: "warning",
-                details: "code=\(GatewayDiagnosticFailure.answerCode(error))"
+                details: "code=\(GatewayDiagnosticFailure.answerCode(error)) gatewayCode=\(sessionPresentation.openingFailureGatewayCode(sessionID: id) ?? "none")"
             )
             throw error
         }

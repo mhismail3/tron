@@ -256,10 +256,9 @@ struct WorkspaceBrowser: View {
         await loadOwner.load(
             navigation: navigation,
             operation: { try await model.loadWorkspace(path: path) },
-            // A transient connection error is not a scene activation; asking
-            // the lifecycle to retry must not write a scene record for a scene
-            // that did not move.
-            onTransientError: { model.becameActive(recordsSceneTransition: false) }
+            // A transient connection error is not a scene activation: ask the
+            // transport owner for an attempt, not for a scene transition.
+            onTransientError: { model.recoverTransientTransportFailure() }
         )
     }
 
@@ -271,10 +270,10 @@ struct WorkspaceBrowser: View {
             await loadOwner.createFolder(
                 operation: { try await model.createFolder(parent: parent, name: name) },
                 onSuccess: { cancelFolder() },
-                // A transient connection error is not a scene activation; asking
-            // the lifecycle to retry must not write a scene record for a scene
-            // that did not move.
-            onTransientError: { model.becameActive(recordsSceneTransition: false) }
+                // A transient connection error is not a scene activation: ask
+                // the transport owner for an attempt, not for a scene
+                // transition.
+                onTransientError: { model.recoverTransientTransportFailure() }
             )
         }
     }

@@ -1336,7 +1336,7 @@ struct AppModelReconnectTests {
         let clock = ManualClock()
         let watchdog = ManualClock()
         let logURL = FileManager.default.temporaryDirectory
-            .appending(path: "reconnect-guard-\\(UUID().uuidString).jsonl")
+            .appending(path: "reconnect-guard-\(UUID().uuidString).jsonl")
         defer {
             try? FileManager.default.removeItem(at: logURL)
             try? FileManager.default.removeItem(at: logURL.appendingPathExtension("1"))
@@ -1383,11 +1383,12 @@ struct AppModelReconnectTests {
         clock: ManualClock,
         watchdogClock: MonotonicClock,
         appLog: AppLog,
+        projection: GatewayLifecycleProjectionDelegate = NoopGatewayLifecycleProjection(),
         operation: @escaping @MainActor @Sendable (
             GatewayLifecycleCoordinator, GatewayClient, [ScriptedGatewaySocket]
         ) async throws -> Void
     ) async throws {
-        let suiteName = "GatewayConnectionRecordTests.\\(UUID().uuidString)"
+        let suiteName = "GatewayConnectionRecordTests.\(UUID().uuidString)"
         let defaults = UserDefaults(suiteName: suiteName)!
         defer { defaults.removePersistentDomain(forName: suiteName) }
         let profile = GatewayProfile(
@@ -1404,7 +1405,7 @@ struct AppModelReconnectTests {
             pairingCommit: { _, _ in }, profileTokenLookup: { _ in "token" },
             appLog: appLog, watchdogClock: watchdogClock
         )
-        coordinator.delegate = NoopGatewayLifecycleProjection()
+        coordinator.delegate = projection
         do {
             try await withTestWatchdog {
                 try await operation(coordinator, client, sockets)
@@ -1416,6 +1417,54 @@ struct AppModelReconnectTests {
         }
         await coordinator.teardown()
         await client.close()
+    }
+
+    @Test("a loop parked in projection is named as reconnectTaskBusy when the socket drops")
+    func projectionParkedLoopIsNamedAsBusy() async throws {
+        let clock = ManualClock()
+        let watchdog = ManualClock()
+        let logURL = FileManager.default.temporaryDirectory
+            .appending(path: "reconnect-parked-\(UUID().uuidString).jsonl")
+        defer {
+            try? FileManager.default.removeItem(at: logURL)
+            try? FileManager.default.removeItem(at: logURL.appendingPathExtension("1"))
+        }
+        let appLog = AppLog(fileURL: logURL)
+        let projection = BlockedRefreshProjection()
+        try await withRecordedCoordinator(
+            sockets: (0..<2).map { _ in ScriptedGatewaySocket() },
+            clock: clock, watchdogClock: watchdog.clock, appLog: appLog, projection: projection
+        ) { coordinator, client, sockets in
+            await sockets[0].enqueue(helloFrame())
+            await coordinator.start()
+            #expect(coordinator.connectionState == .connected)
+
+            // The replacement's handshake succeeds and its projection refresh
+            // never returns, which is how a reconnect loop parks in projection.
+            await sockets[1].enqueue(helloFrame())
+            coordinator.requestReconnect(immediate: true)
+            try await projection.waitUntilRefreshStarted()
+            // The socket the handshake established now drops. No attempt is in
+            // flight, so the episode must name the loop that is holding
+            // recovery instead of reading its handshake as progress forever.
+            await coordinator.noteDisconnected(connectionID: await client.activeConnectionID())
+
+            try await watchdog.waitUntilSleeping(
+                count: 1, duration: GatewayConnectionEpisodeRecorder.watchdogInterval
+            )
+            watchdog.advance(by: GatewayConnectionEpisodeRecorder.watchdogInterval)
+            try await watchdog.waitUntilSleeping(
+                count: 1, duration: GatewayConnectionEpisodeRecorder.watchdogInterval
+            )
+            clock.advance(by: .seconds(21))
+            watchdog.advance(by: GatewayConnectionEpisodeRecorder.watchdogInterval)
+            let stalls = try await waitForRecords(in: appLog, event: "reconnect.stalled", count: 1)
+            #expect(stalls.count == 1)
+            #expect(stalls.first?.message.contains("guard=reconnectTaskBusy") == true)
+            // Let the parked loop unwind before the fixture tears the lifecycle
+            // down.
+            projection.releaseRefresh()
+        }
     }
 
     private func recordCount(in log: AppLog, event: String) async -> Int {
@@ -1635,6 +1684,49 @@ private final class FailFirstMountedRestoreProjection: GatewayLifecycleProjectio
         restoreCount += 1
         return restoreCount > 1
     }
+    func lifecycleReattachTerminals(admission: GatewayLifecycleCoordinator.Admission) async {}
+    func lifecycleReconcileForeground(admission: GatewayLifecycleCoordinator.Admission) async throws {}
+    func lifecycleRetireProjection(final: Bool) async {}
+    func lifecycleSurface(_ error: Error) {}
+}
+
+/// A projection owner whose authoritative refresh never returns until the test
+/// releases it: the shape of a reconnect loop parked in projection work. The
+/// initial connect's own refresh completes, so the test begins from a connected
+/// lifecycle; the replacement's refresh is the one that parks.
+@MainActor
+private final class BlockedRefreshProjection: GatewayLifecycleProjectionDelegate {
+    private var refreshStartedContinuation: CheckedContinuation<Void, Never>?
+    private var refreshContinuation: CheckedContinuation<Void, Never>?
+    private var refreshCount = 0
+    private var parked = false
+
+    func waitUntilRefreshStarted() async {
+        if parked { return }
+        await withCheckedContinuation { refreshStartedContinuation = $0 }
+    }
+
+    func releaseRefresh() {
+        refreshContinuation?.resume()
+        refreshContinuation = nil
+    }
+
+    func lifecycleLoadCache(profileID: String, admission: GatewayLifecycleCoordinator.Admission) async {}
+    func lifecycleInvalidateSessionConnectionOwnership() {}
+    func lifecycleBeginReconciliationAggregate(admission: GatewayLifecycleCoordinator.Admission) {}
+    func lifecycleCompleteReconciliationAggregate(
+        admission: GatewayLifecycleCoordinator.Admission,
+        succeeded: Bool
+    ) {}
+    func lifecycleRefreshAll(admission: GatewayLifecycleCoordinator.Admission) async {
+        refreshCount += 1
+        guard refreshCount > 1 else { return }
+        parked = true
+        refreshStartedContinuation?.resume()
+        refreshStartedContinuation = nil
+        await withCheckedContinuation { refreshContinuation = $0 }
+    }
+    func lifecycleRestoreMountedPresentation(admission: GatewayLifecycleCoordinator.Admission) async -> Bool { true }
     func lifecycleReattachTerminals(admission: GatewayLifecycleCoordinator.Admission) async {}
     func lifecycleReconcileForeground(admission: GatewayLifecycleCoordinator.Admission) async throws {}
     func lifecycleRetireProjection(final: Bool) async {}

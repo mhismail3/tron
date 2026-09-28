@@ -484,12 +484,15 @@ final class GatewayLifecycleCoordinator {
         // Every admitted loss opens the episode, whether or not it counts as a
         // transport failure: a Gateway restart is a loss too, and the gap from it
         // to the first reconnect has to be measurable. A restart whose first
-        // reconnect succeeds would otherwise leave no episode at all.
+        // reconnect succeeds would otherwise leave no episode at all. The
+        // episode carries the loss's own code as its cause, so a disconnect
+        // whose first reconnect succeeds still names what ended the connection
+        // instead of reporting `causes=none`.
         recorder.noteDisconnected(
             profileID: profiles.selected?.id,
             lifecycleGeneration: phase.generation,
             foreground: !sceneIsBackgrounded,
-            cause: countsAsTransportFailure ? nil : "restart"
+            cause: countsAsTransportFailure ? code : "restart"
         )
         if countsAsTransportFailure {
             connectionFailureClassifier.failedAttempt(nil, code: code)
@@ -1200,6 +1203,15 @@ final class GatewayLifecycleCoordinator {
             message: "immediate=\(immediate) attempt=\(attemptGeneration) lifecycle=\(lifecycleGeneration) loop=\(loopID) scheduledDelayMs=\(diagnosticMilliseconds(initialDelay)) cause=\(restartRequested ? "restart" : "connection-unavailable")"
         )
         reconnectTask = Task { [weak self] in
+            // Whatever ends this loop — success, a state mismatch that returns
+            // early, a path park or cancellation — a later drop must not read a
+            // dead loop's marker as an attempt in flight. The identity check
+            // keeps a replaced loop from clearing its successor's marker.
+            defer {
+                if let self, self.reconnectAttemptInFlightLoop == loopID {
+                    self.reconnectAttemptInFlightLoop = nil
+                }
+            }
             var retry = 0
             var delayStartedAt = scheduledAt
             do {
@@ -1311,6 +1323,12 @@ final class GatewayLifecycleCoordinator {
                             connectionID: connection.id
                         )
                         handshakeRecorded = true
+                        // The transport attempt ended at the handshake. From
+                        // here the loop is projection, not an attempt in
+                        // flight: if the socket drops now, naming
+                        // `reconnectTaskBusy` is the whole point of the guard
+                        // (C-1 fixes what a parked loop should do instead).
+                        self.reconnectAttemptInFlightLoop = nil
                         reconciliationAggregateAdmission = admission
                         self.delegate?.lifecycleBeginReconciliationAggregate(admission: admission)
                         self.delegate?.lifecycleInvalidateSessionConnectionOwnership()

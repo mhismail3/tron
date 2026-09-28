@@ -165,15 +165,22 @@ final class GatewayConnectionEpisodeRecorder {
             ].joined(separator: " ")
         )
         guard attempt.succeeded else {
+            // A post-connect failure is the connection the handshake just
+            // established dropping under projection: a second failure of the
+            // attempt that already ended the previous episode, not a new
+            // attempt. Its episode therefore starts at the drop, and it never
+            // joins the `attempts` count of the episode it belongs to.
+            let isPostConnect = attempt.stageReached == Self.postConnectStage
+            let failedAt = isPostConnect ? clock.now() : attempt.startedAt
             if episode == nil {
                 openEpisode(
                     profileID: attempt.profileID,
                     lifecycleGeneration: attempt.lifecycleGeneration,
-                    at: attempt.startedAt
+                    at: isPostConnect ? nil : attempt.startedAt
                 )
             }
             noteAttemptProgress(
-                at: attempt.startedAt, reason: attempt.reason
+                at: failedAt, reason: attempt.reason, countsAsAttempt: !isPostConnect
             )
             return
         }
@@ -240,10 +247,11 @@ final class GatewayConnectionEpisodeRecorder {
 
     private func noteAttemptProgress(
         at startedAt: ContinuousClock.Instant,
-        reason: String?
+        reason: String?,
+        countsAsAttempt: Bool = true
     ) {
         guard var current = episode else { return }
-        current.attempts += 1
+        if countsAsAttempt { current.attempts += 1 }
         current.maximumGapMs = max(
             current.maximumGapMs,
             diagnosticMilliseconds(current.lastProgressAt.duration(to: startedAt))
@@ -262,28 +270,60 @@ final class GatewayConnectionEpisodeRecorder {
     /// one grid serves both and one cancellation stops both. The task keeps the
     /// recorder weakly, so a recorder freed with an episode still open leaves
     /// nothing ticking.
+    ///
+    /// The task is detached on purpose, and the loop runs in a `nonisolated`
+    /// function reached through a closure with no main-actor access at all. A
+    /// task created from this `@MainActor` owner otherwise inherits main-actor
+    /// isolation — closure isolation is inferred from what the body touches, and
+    /// travels with the closure even when it is typed `@Sendable` — so the
+    /// watchdog's own wake-up would queue behind the very block the ping exists
+    /// to measure: it would only start timing after the block ended and report
+    /// microseconds. Off the main actor, it keeps ticking while the main actor is
+    /// blocked and hops to it only for the guard check (and, through the default
+    /// ping, to be delayed).
     private func startWatchdogs(profileID: String?, lifecycleGeneration: Int) {
         stopWatchdogs()
         let tickClock = watchdogClock
         let ping = mainStallPing
+        let interval = Self.watchdogInterval
         let boundMilliseconds = diagnosticMilliseconds(Self.mainStallBound)
         let report = mainStallReport(
             profileID: profileID, lifecycleGeneration: lifecycleGeneration,
             boundMilliseconds: boundMilliseconds
         )
-        watchdogTask = Task { [weak self] in
-            while !Task.isCancelled {
-                do { try await tickClock.sleep(Self.watchdogInterval) } catch { return }
-                guard !Task.isCancelled else { return }
-                // The owner is gone; there is nothing left to report for.
-                guard let self else { return }
-                let pingStartedAt = tickClock.now()
-                await ping()
-                guard !Task.isCancelled else { return }
-                let blockedMs = diagnosticMilliseconds(pingStartedAt.duration(to: tickClock.now()))
-                if blockedMs >= boundMilliseconds { report(blockedMs) }
-                await self.checkStall()
-            }
+        // The owner is re-acquired weakly on every tick, so a recorder freed with
+        // an episode still open leaves nothing ticking.
+        let owner: @Sendable () -> GatewayConnectionEpisodeRecorder? = { [weak self] in self }
+        let loop: @Sendable () async -> Void = {
+            await Self.runWatchdogs(
+                owner: owner, tickClock: tickClock, ping: ping, interval: interval,
+                boundMilliseconds: boundMilliseconds, report: report
+            )
+        }
+        watchdogTask = Task.detached(operation: loop)
+    }
+
+    /// The shared 1 s grid, off the main actor: it measures the main-stall ping
+    /// across its hop, then asks the owner which guard is holding recovery.
+    nonisolated private static func runWatchdogs(
+        owner: @escaping @Sendable () -> GatewayConnectionEpisodeRecorder?,
+        tickClock: MonotonicClock,
+        ping: @escaping @Sendable () async -> Void,
+        interval: Duration,
+        boundMilliseconds: Int,
+        report: @escaping @Sendable (Int) -> Void
+    ) async {
+        while !Task.isCancelled {
+            do { try await tickClock.sleep(interval) } catch { return }
+            guard !Task.isCancelled else { return }
+            // The owner is gone; there is nothing left to report for.
+            guard let recorder = owner() else { return }
+            let pingStartedAt = tickClock.now()
+            await ping()
+            guard !Task.isCancelled else { return }
+            let blockedMs = diagnosticMilliseconds(pingStartedAt.duration(to: tickClock.now()))
+            if blockedMs >= boundMilliseconds { report(blockedMs) }
+            await recorder.checkStall()
         }
     }
 

@@ -1071,12 +1071,14 @@ struct AppModelPerformanceSignpostTests {
             // The Gateway answered with `conflict`. The presentation store owns
             // the wording of an open failure and rewords a typed open/sync
             // failure as its own `sync_failed` before this record, so what this
-            // call site owns is that the failure's own code is reported: before
-            // this change these read `code=transport`, which looks like a
-            // network fault that never reached the Gateway.
+            // call site owns is that both are reported: the phone-side wording in
+            // `code` (before this change these read `code=transport`, which looks
+            // like a network fault that never reached the Gateway) and
+            // `gatewayCode` for what the Gateway itself answered.
             let records = await operationRecords(in: appLog, event: "session.open.failure")
             #expect(records.count == 1)
             #expect(records.first?.message.contains("code=sync_failed") == true)
+            #expect(records.first?.message.contains("gatewayCode=conflict") == true)
             #expect(records.first?.message.contains("code=transport") == false)
             #expect(records.first?.level == "warning")
             #expect(thrown.contains("sync_failed"))
