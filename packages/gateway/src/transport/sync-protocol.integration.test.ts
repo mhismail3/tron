@@ -788,7 +788,7 @@ describe("outbound queue coalescing across a synchronization barrier", () => {
 });
 
 describe("disposable read cancellation", () => {
-  it("joins a retried open, stops the shared work with its last waiter, and answers neither", async () => {
+  it("joins a retried open, revokes only an unclaimed barrier, and never cancels an owner", async () => {
     const root = await mkdtemp(join(tmpdir(), "tron-sync-cancel-"));
     const devices = new DeviceStore(root, "machine");
     await devices.initialize();
@@ -804,7 +804,10 @@ describe("disposable read cancellation", () => {
     // until its signal aborts, so the test can cancel it while it runs.
     const openStarts: string[] = [];
     const aborts: string[] = [];
+    const promptStarts: string[] = [];
     let releaseOpen: (() => void) | undefined;
+    let releasePrompt: (() => void) | undefined;
+    let releaseGatedSync: (() => void) | undefined;
     const records: Array<{ level: string; message: string; metadata: Record<string, unknown> }> = [];
     const service = {
       info: () => ({ gatewayVersion: "test", piVersion: "test", protocolVersion: 6, minProtocolVersion: 6, machineId: "machine", machineName: "test", capabilities: [] }),
@@ -812,13 +815,32 @@ describe("disposable read cancellation", () => {
       releaseClient: vi.fn(),
       releaseSessionProcessTranscripts: vi.fn(),
       invoke: async (context: any, method: string, params: any) => {
-        if (method !== "session.open") throw new Error(`unexpected method ${method}`);
         const sessionId = params.sessionId as string;
+        if (method === "session.sync") {
+          // A synchronization acknowledgement is the owner's, not a read: the
+          // fixture can hold one open to prove a cancel does not end it.
+          if (params.syncToken === "gated") {
+            await new Promise<void>((resolve) => { releaseGatedSync = resolve; });
+            return { synchronized: true };
+          }
+          context.completeSynchronization(sessionId, params.syncToken);
+          return { synchronized: true };
+        }
+        if (method === "session.prompt") {
+          promptStarts.push(sessionId);
+          await new Promise<void>((resolve) => { releasePrompt = resolve; });
+          return { queued: true };
+        }
+        if (method !== "session.open") throw new Error(`unexpected method ${method}`);
         const syncToken = context.beginSynchronization(sessionId);
         openStarts.push(sessionId);
+        // Only an abort while the attempt still computes is the shared work
+        // being abandoned: releasing a finished flight also aborts its signal.
+        let settled = false;
         await new Promise<void>((resolve, reject) => {
-          releaseOpen = resolve;
+          releaseOpen = () => { settled = true; resolve(); };
           context.signal?.addEventListener("abort", () => {
+            if (settled) return;
             aborts.push(sessionId);
             reject(context.signal.reason);
           }, { once: true });
@@ -854,6 +876,9 @@ describe("disposable read cancellation", () => {
     socket.send(JSON.stringify({ type: "hello", protocolVersion: 6 }));
     while (!frames.some((frame) => frame.type === "hello")) await new Promise((resolve) => setTimeout(resolve, 1));
 
+    const connection = [...(gateway as unknown as {
+      clients: Map<string, { synchronizations: Map<string, unknown> }>;
+    }).clients.values()][0]!;
     const tick = async (): Promise<void> => { await new Promise((resolve) => setTimeout(resolve, 1)); };
     const waitFor = async (predicate: () => boolean, what: string): Promise<void> => {
       const deadline = Date.now() + 5_000;
@@ -862,17 +887,21 @@ describe("disposable read cancellation", () => {
         await tick();
       }
     };
+    const answered = (id: string): any => frames.find((frame) => frame.id === id);
     const open = (id: string, sessionId: string): void => {
       socket.send(JSON.stringify({ type: "request", id, method: "session.open", params: { sessionId } }));
+    };
+    const sync = (id: string, syncToken: string): void => {
+      socket.send(JSON.stringify({ type: "request", id, method: "session.sync", params: { sessionId: "slow", syncToken } }));
     };
     const cancel = (id: string): void => { socket.send(JSON.stringify({ type: "cancel", id })); };
     const cancelled = () => records.filter((record) => record.metadata.event === "rpc.cancelled");
     // Frames on one socket are admitted in order, so a later frame's answer
-    // proves every frame before it was already admitted. The probe is a method
-    // this fixture refuses, which always answers.
+    // proves every frame before it was already admitted. The probe is a
+    // synchronization with a token this fixture refuses, which always answers.
     const awaitAdmitted = async (id: string): Promise<void> => {
-      socket.send(JSON.stringify({ type: "request", id, method: "session.sync", params: { sessionId: "slow", syncToken: "not-a-token" } }));
-      while (!frames.some((frame) => frame.id === id)) await tick();
+      sync(id, "not-a-token");
+      while (!answered(id)) await tick();
     };
 
     open("open-1", "slow");
@@ -881,41 +910,109 @@ describe("disposable read cancellation", () => {
     open("open-2", "slow");
     await awaitAdmitted("join-fence");
     expect(openStarts).toEqual(["slow"]);
+    expect(answered("open-2")).toBeUndefined();
 
-    // Cancelling the first open leaves the retry's answer alone: the shared
-    // attempt is still running for the request that still waits for it.
+    // A cancel for the first open leaves the retry's answer alone: the shared
+    // attempt keeps running for the request that still waits for it, and the
+    // synchronization it installed stays for the retry to deliver.
     cancel("open-1");
     await waitFor(() => cancelled().length === 1, "the first cancellation record");
-    expect(frames.some((frame) => frame.id === "open-1")).toBe(false);
+    expect(answered("open-1")).toBeUndefined();
     expect(aborts).toEqual([]);
     expect(cancelled()[0]!.metadata).toMatchObject({ method: "session.open", requestID: "open-1", stage: "session.open.attempt" });
 
+    releaseOpen?.();
+    await waitFor(() => answered("open-2") !== undefined, "the joined retry's answer");
+    expect(answered("open-2").ok).toBe(true);
+    expect(answered("open-2").result.subscriptionToken).toBeTruthy();
+    // The retry owns the barrier its answer installed: it can synchronize.
+    sync("sync-1", answered("open-2").result.subscriptionToken);
+    await waitFor(() => answered("sync-1") !== undefined, "the retry's synchronization");
+    expect(answered("sync-1").ok).toBe(true);
+
     // Cancelling the last waiter stops the shared work: nothing computes an
     // answer nobody waits for, and the cancelled request is never answered.
-    cancel("open-2");
+    open("open-3", "slow");
+    await waitFor(() => openStarts.length === 2, "the second attempt");
+    open("open-4", "slow");
+    await awaitAdmitted("join-fence-2");
+    expect(openStarts).toHaveLength(2);
+    cancel("open-3");
+    await waitFor(() => cancelled().length === 2, "the third cancellation record");
+    expect(aborts).toEqual([]);
+    cancel("open-4");
     await waitFor(() => aborts.length === 1, "the shared attempt to abort");
-    await waitFor(() => cancelled().length === 2, "the second cancellation record");
-    expect(frames.some((frame) => frame.id === "open-2")).toBe(false);
-    expect(cancelled()[1]!.metadata).toMatchObject({ method: "session.open", requestID: "open-2", stage: "session.open.join" });
+    await waitFor(() => cancelled().length === 3, "the last cancellation record");
+    expect(answered("open-3")).toBeUndefined();
+    expect(answered("open-4")).toBeUndefined();
+    expect(cancelled()[2]!.metadata).toMatchObject({ method: "session.open", requestID: "open-4", stage: "session.open.join" });
 
-    // A cancel for an id this connection never admitted, and a cancel after a
-    // response was already sent, both change nothing.
+    // A cancel for an id this connection never admitted changes nothing.
     cancel("never-admitted");
     await tick();
-    expect(cancelled()).toHaveLength(2);
+    expect(cancelled()).toHaveLength(3);
 
-    // The abandoned attempt released its runtime ownership, so the next open
-    // starts fresh work and synchronizes normally.
-    open("open-3", "slow");
-    await waitFor(() => openStarts.length === 2, "a fresh open after the cancellations");
-    releaseOpen?.();
-    await waitFor(() => frames.some((frame) => frame.id === "open-3"), "the fresh open's response");
-    const fresh = frames.find((frame) => frame.id === "open-3");
-    expect(fresh.ok).toBe(true);
-    expect(fresh.result.subscriptionToken).toBeTruthy();
-    cancel("open-3");
+    // An accepted prompt and a synchronization acknowledgement are their
+    // owners', not disposable reads: a cancel for either changes nothing, and
+    // both are still answered.
+    socket.send(JSON.stringify({ type: "request", id: "prompt-1", method: "session.prompt", params: { sessionId: "slow" } }));
+    await waitFor(() => promptStarts.length === 1, "the admitted prompt");
+    cancel("prompt-1");
     await tick();
-    expect(cancelled()).toHaveLength(2);
+    expect(cancelled()).toHaveLength(3);
+    releasePrompt?.();
+    await waitFor(() => answered("prompt-1") !== undefined, "the prompt's answer");
+    expect(answered("prompt-1").ok).toBe(true);
+    sync("sync-gated", "gated");
+    await waitFor(() => releaseGatedSync !== undefined, "the admitted synchronization");
+    cancel("sync-gated");
+    await tick();
+    expect(cancelled()).toHaveLength(3);
+    releaseGatedSync?.();
+    await waitFor(() => answered("sync-gated") !== undefined, "the synchronization's answer");
+    expect(answered("sync-gated").ok).toBe(true);
+
+    // A cancel that crosses an answered open revokes the barrier that response
+    // delivered, so the retry in that window is not a duplicate.
+    open("open-5", "slow");
+    await waitFor(() => openStarts.length === 3, "an answered open");
+    releaseOpen?.();
+    await waitFor(() => answered("open-5") !== undefined, "the answered open's response");
+    expect(answered("open-5").ok).toBe(true);
+    expect(connection.synchronizations.has("slow")).toBe(true);
+    cancel("open-5");
+    await waitFor(() => !connection.synchronizations.has("slow"), "the abandoned barrier to be revoked");
+    open("open-6", "slow");
+    await waitFor(() => openStarts.length === 4, "the retry after the revocation");
+    releaseOpen?.();
+    await waitFor(() => answered("open-6") !== undefined, "the retry's answer");
+    expect(answered("open-6").ok).toBe(true);
+    sync("sync-2", answered("open-6").result.subscriptionToken);
+    await waitFor(() => answered("sync-2") !== undefined, "the retry's synchronization");
+    expect(answered("sync-2").ok).toBe(true);
+    expect(cancelled()).toHaveLength(3);
+
+    // Two delivered answers carry the barrier's token, so a cancel for only one
+    // of them leaves it: the phone may still accept the other. Once both are
+    // abandoned the barrier goes, and the next open is not a duplicate.
+    open("open-7", "slow");
+    await waitFor(() => openStarts.length === 5, "the joined attempt");
+    open("open-8", "slow");
+    await awaitAdmitted("join-fence-3");
+    expect(openStarts).toHaveLength(5);
+    releaseOpen?.();
+    await waitFor(() => answered("open-7") !== undefined && answered("open-8") !== undefined, "both joined answers");
+    expect(answered("open-7").result.subscriptionToken).toBe(answered("open-8").result.subscriptionToken);
+    cancel("open-7");
+    await tick();
+    expect(connection.synchronizations.has("slow")).toBe(true);
+    cancel("open-8");
+    await waitFor(() => !connection.synchronizations.has("slow"), "the barrier revoked with its last delivered response");
+    open("open-9", "slow");
+    await waitFor(() => openStarts.length === 6, "the retry after both cancellations");
+    releaseOpen?.();
+    await waitFor(() => answered("open-9") !== undefined, "the last retry's answer");
+    expect(answered("open-9").ok).toBe(true);
     socket.close();
   });
 });

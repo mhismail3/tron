@@ -57,6 +57,25 @@ function rpcFailureLevel(error: unknown): "warning" | "error" {
 
 /** Per-RPC completions under this bound are debug detail; slower ones warn. */
 const SLOW_RPC_WARNING_MS = 1_000;
+/**
+ * The only methods a `cancel` frame may end (`C-6`). A disposable read computes
+ * an answer nothing consumes once its client stops waiting for it; an accepted
+ * mutation, an admitted prompt and `session.sync` all have an owner that must
+ * settle them whatever the client does with its wait, so a cancel for any other
+ * method is ignored. Mirrors the phone's disposable read policy, and the
+ * protocol section of the Gateway README lists exactly this set.
+ */
+const DISPOSABLE_READ_METHODS: ReadonlySet<string> = new Set([
+  "session.open",
+  "session.list",
+  "session.transcript",
+  "session.history.list",
+  "session.history.entry",
+  "session.search",
+  "model.list",
+  "provider.list",
+  "provider.usage",
+]);
 /** An upgrade that reaches hello within this bound is debug detail; every
  * abandoned or rejected upgrade, and any slower one, warns. */
 const UPGRADE_SLOW_WARNING_MS = 1_000;
@@ -202,6 +221,10 @@ export interface ActiveSessionSynchronization {
   subscriptionToken: string;
   /** Updated if its canonical session forks while acknowledgement is pending. */
   sessionId: string;
+  /** Request IDs whose delivered response carried this barrier's token. A
+   * cancel for a `session.open` that was already answered revokes the barrier
+   * only once no other delivered response still carries it (`C-6`). */
+  deliveredRequests: Set<string>;
 }
 
 /**
@@ -1189,6 +1212,66 @@ export class GatewayServer {
     }
   }
 
+  /** Resolve a session ID through this connection's rekey aliases. */
+  private resolveSessionId(connection: Connection, sessionId: string): string {
+    const seen = new Set<string>();
+    let current = sessionId;
+    while (!seen.has(current)) {
+      seen.add(current);
+      const replacement = connection.rekeyedSessionIds.get(current);
+      if (replacement === undefined) return current;
+      current = replacement;
+    }
+    return sessionId;
+  }
+
+  /** Drop this connection's rekey aliases that name the given session. */
+  private clearRekeyedSessionIds(connection: Connection, sessionId: string): void {
+    for (const [former, current] of connection.rekeyedSessionIds) {
+      if (former === sessionId || current === sessionId) connection.rekeyedSessionIds.delete(former);
+    }
+  }
+
+  /** Revoke one installed subscription with its pending barrier and every
+   * connection-local projection of that session. */
+  private revokeInstalledSubscription(connection: Connection, sessionId: string, token: string): boolean {
+    sessionId = this.resolveSessionId(connection, sessionId);
+    // The installed token is the ownership proof. The synchronization map is
+    // only a pending barrier and may already have been removed after a
+    // compact resync fallback was enqueued.
+    if (connection.subscriptionTokens.get(sessionId) !== token) return false;
+    const synchronization = connection.synchronizations.get(sessionId);
+    if (synchronization) {
+      clearTimeout(synchronization.timeout);
+      synchronization.barrier.abort(synchronization.requestId);
+      connection.synchronizations.delete(sessionId);
+    }
+    connection.subscriptionTokens.delete(sessionId);
+    this.clearRekeyedSessionIds(connection, sessionId);
+    releaseSessionTerminals(
+      connection.terminals,
+      sessionId,
+      (terminalId, ownerSessionId) => this.options.service.terminalBelongsToSession(terminalId, ownerSessionId),
+    );
+    this.options.sessions.unsubscribe(connection.id, sessionId);
+    this.options.service.releaseSessionProcessTranscripts?.(sessionId, connection.id, token);
+    return true;
+  }
+
+  /** Revoke one pending synchronization, if this connection still owns it. A
+   * later session.open may have replaced this request's owner; in that case
+   * only the current token may revoke the runtime subscription. */
+  private revokeSynchronization(
+    connection: Connection,
+    sessionId: string,
+    synchronization: ActiveSessionSynchronization,
+  ): boolean {
+    sessionId = this.resolveSessionId(connection, sessionId);
+    if (connection.synchronizations.get(sessionId) !== synchronization
+        || connection.subscriptionTokens.get(sessionId) !== synchronization.subscriptionToken) return false;
+    return this.revokeInstalledSubscription(connection, sessionId, synchronization.subscriptionToken);
+  }
+
   broadcastSession(sessionId: string, topic: string, payload: JsonValue): void {
     // No audience, no work: a frame nobody can receive is not prepared at all
     // (encoded, measured, fitted to a compression context), so a state change
@@ -2066,53 +2149,10 @@ export class GatewayServer {
     const synchronizationOwners: SynchronizationOwner[] = [];
     const synchronizationCompletions: SynchronizationCompletion[] = [];
     let responseAttempted = false;
-    const resolveSessionId = (sessionId: string): string => {
-      const seen = new Set<string>();
-      let current = sessionId;
-      while (!seen.has(current)) {
-        seen.add(current);
-        const replacement = connection.rekeyedSessionIds.get(current);
-        if (replacement === undefined) return current;
-        current = replacement;
-      }
-      return sessionId;
-    };
-    const clearRekeyedSessionIds = (sessionId: string): void => {
-      for (const [former, current] of connection.rekeyedSessionIds) {
-        if (former === sessionId || current === sessionId) connection.rekeyedSessionIds.delete(former);
-      }
-    };
-    const revokeInstalledSubscription = (sessionId: string, token: string): boolean => {
-      sessionId = resolveSessionId(sessionId);
-      // The installed token is the ownership proof. The synchronization map is
-      // only a pending barrier and may already have been removed after a
-      // compact resync fallback was enqueued.
-      if (connection.subscriptionTokens.get(sessionId) !== token) return false;
-      const synchronization = connection.synchronizations.get(sessionId);
-      if (synchronization) {
-        clearTimeout(synchronization.timeout);
-        synchronization.barrier.abort(synchronization.requestId);
-        connection.synchronizations.delete(sessionId);
-      }
-      connection.subscriptionTokens.delete(sessionId);
-      clearRekeyedSessionIds(sessionId);
-      releaseSessionTerminals(
-        connection.terminals,
-        sessionId,
-        (terminalId, ownerSessionId) => this.options.service.terminalBelongsToSession(terminalId, ownerSessionId),
-      );
-      this.options.sessions.unsubscribe(connection.id, sessionId);
-      this.options.service.releaseSessionProcessTranscripts?.(sessionId, connection.id, token);
-      return true;
-    };
-    const revokeSynchronization = (sessionId: string, synchronization: ActiveSessionSynchronization): boolean => {
-      sessionId = resolveSessionId(sessionId);
-      // A later session.open may have replaced this request's owner. In that
-      // case, only the current token may revoke the runtime subscription.
-      if (connection.synchronizations.get(sessionId) !== synchronization
-          || connection.subscriptionTokens.get(sessionId) !== synchronization.subscriptionToken) return false;
-      return revokeInstalledSubscription(sessionId, synchronization.subscriptionToken);
-    };
+    const resolveSessionId = (sessionId: string): string => this.resolveSessionId(connection, sessionId);
+    const clearRekeyedSessionIds = (sessionId: string): void => this.clearRekeyedSessionIds(connection, sessionId);
+    const revokeInstalledSubscription = (sessionId: string, token: string): boolean => this.revokeInstalledSubscription(connection, sessionId, token);
+    const revokeSynchronization = (sessionId: string, synchronization: ActiveSessionSynchronization): boolean => this.revokeSynchronization(connection, sessionId, synchronization);
     const revokeSubscription = (sessionId: string, token: string): boolean => {
       sessionId = resolveSessionId(sessionId);
       const synchronization = connection.synchronizations.get(sessionId);
@@ -2218,7 +2258,7 @@ export class GatewayServer {
             });
           }, this.options.synchronizationTimeoutMs ?? 30_000);
           timeout.unref();
-          installed = { barrier, timeout, requestId, subscriptionToken: syncToken, sessionId };
+          installed = { barrier, timeout, requestId, subscriptionToken: syncToken, sessionId, deliveredRequests: new Set() };
           connection.synchronizations.set(sessionId, installed);
           synchronizationOwners.push({
             sessionId,
@@ -2364,7 +2404,10 @@ export class GatewayServer {
         }
       }
       const responseSentIntact = runInRequestSpan(requestSpan, () => this.send(connection, { type: "response", id: frame.id, ok: true, result }));
-      if (responseSentIntact && sessionOpenFlight !== undefined) sessionOpenFlight.answered = true;
+      if (responseSentIntact && sessionOpenFlight !== undefined) {
+        sessionOpenFlight.answered = true;
+        this.markSessionOpenDelivered(connection, requestId, requestId);
+      }
       responseAttempted = true;
       if (responseSentIntact) rpcOutcome = "success";
       if (responseSentIntact && connection.revoked && connection.revokeResponseRequestId === frame.id) {
@@ -2512,12 +2555,14 @@ export class GatewayServer {
           });
         }
       };
-      if (!(attemptSucceeded && (rpcOutcome === "success" || otherOpenWaiters))) {
-        releaseOwnSynchronizations();
-      } else if (otherOpenWaiters && sessionOpenFlight !== undefined) {
-        // The waiting retry owns the delivery now; if it leaves before it
-        // answers, the barrier still has to go.
+      if (otherOpenWaiters && sessionOpenFlight !== undefined) {
+        // A waiting retry still needs whatever this attempt installed - including
+        // a barrier this request created before it was cancelled. The retry owns
+        // the delivery now, so the barrier is released only if it leaves without
+        // answering (`C-6`).
         sessionOpenFlight.releaseAbandoned = releaseOwnSynchronizations;
+      } else if (!(attemptSucceeded && rpcOutcome === "success")) {
+        releaseOwnSynchronizations();
       }
       if (sessionOpenFlight !== undefined) {
         // Rekey retains an old duplicate-open alias, but both spellings point at
@@ -2589,6 +2634,7 @@ export class GatewayServer {
         // A retry delivered the shared attempt's answer, so the barrier it
         // installed is now the client's to acknowledge.
         flight.answered = true;
+        this.markSessionOpenDelivered(connection, flight.requestId, requestId);
         rpcOutcome = "success";
       }
     } catch (error) {
@@ -2623,16 +2669,52 @@ export class GatewayServer {
   }
 
   /**
-   * Record the `cancel` frame of a request this connection still owns: its work
-   * stops, and the record names the stage it was in. A cancel naming a request
-   * that was already answered, already cancelled, or never admitted changes
-   * nothing: there is no work left to stop and no answer left to withhold.
+   * Record the `cancel` frame of a request this connection still owns: work only
+   * a disposable read does stops, and the record names the stage it was in. A
+   * cancel for an accepted mutation, an admitted prompt or a `session.sync` is
+   * ignored: their owners settle them durably whatever the client does with its
+   * wait (`C-6`).
    */
   private cancelInflightRequest(connection: Connection, requestId: string): void {
     const inFlight = connection.requestControllers.get(requestId);
-    if (!inFlight || inFlight.cancelledStage !== undefined) return;
+    if (inFlight === undefined) {
+      this.revokeAbandonedOpen(connection, requestId);
+      return;
+    }
+    if (!DISPOSABLE_READ_METHODS.has(inFlight.method)) return;
+    if (inFlight.cancelledStage !== undefined) return;
     inFlight.cancelledStage = inFlight.span.currentStage() ?? "admitted";
     inFlight.controller.abort(new GatewayError("cancelled", "The client cancelled this request", true));
+  }
+
+  /**
+   * A cancel can cross a `session.open` answer still in transit on a slow link:
+   * the phone stopped waiting, but the Gateway already delivered the response and
+   * its barrier is still pending, so a retry in that window would fail as a
+   * duplicate. Revoke the barrier the abandoned open delivered - unless another
+   * delivered response carries the same token (a joined retry the phone may
+   * still accept), which is what `deliveredRequests` records (`C-6`).
+   */
+  private revokeAbandonedOpen(connection: Connection, requestId: string): void {
+    for (const [sessionId, synchronization] of connection.synchronizations) {
+      // Removing the delivered request both detects it and consumes it: the
+      // barrier belongs to the client only while one of its delivered responses
+      // is unaccounted for.
+      if (!synchronization.deliveredRequests.delete(requestId)) continue;
+      if (synchronization.deliveredRequests.size > 0) return;
+      this.revokeSynchronization(connection, sessionId, synchronization);
+      return;
+    }
+  }
+
+  /** Record that a delivered response carried this session's synchronization
+   * token, so a later cancel can revoke the barrier only when no other delivered
+   * response still carries it. The owner request installed the barrier; the
+   * delivering request may be the retry that joined it. */
+  private markSessionOpenDelivered(connection: Connection, ownerRequestId: string, deliveredRequestId: string): void {
+    for (const synchronization of connection.synchronizations.values()) {
+      if (synchronization.requestId === ownerRequestId) synchronization.deliveredRequests.add(deliveredRequestId);
+    }
   }
 
   /** Release one waiter of a shared session-open attempt. The last one leaving
