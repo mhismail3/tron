@@ -54,8 +54,9 @@ if (!["seed", "run", "catalog", "multi"].includes(command) || !configPath) {
 const config = JSON.parse(readFileSync(configPath, "utf8"));
 // The phone's wire deadlines, from packages/protocol-fixtures/
 // gateway-connection-contract.json (the profiler passes them as `connection`).
-// They are not re-stated here: a driver copy would drift from the contract the
-// phone and the Gateway are held to, and C-3/C-4 change the contract.
+// The fallbacks only cover a driver invoked by hand: a qualification run always
+// carries the contract's own values, so this file holds no second copy that
+// C-3/C-4 would have to find.
 const CONNECTION = {
   pingIntervalMs: 10_000,
   pongDeadlineMs: 8_000,
