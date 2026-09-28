@@ -28,6 +28,7 @@ UDID_A = "AAAAAAAA-AAAA-AAAA-AAAA-AAAAAAAAAAAA"
 UDID_B = "BBBBBBBB-BBBB-BBBB-BBBB-BBBBBBBBBBBB"
 UDID_C = "CCCCCCCC-CCCC-CCCC-CCCC-CCCCCCCCCCCC"
 UDID_D = "DDDDDDDD-DDDD-DDDD-DDDD-DDDDDDDDDDDD"
+UDID_E = "EEEEEEEE-EEEE-EEEE-EEEE-EEEEEEEEEEEE"
 
 
 class SimulatorFixture(unittest.TestCase):
@@ -381,6 +382,7 @@ exit 0
         summary: str = '{"passedTests":1,"failedTests":0,"skippedTests":0,"totalTestCount":1}',
         mode: str = "success", xcode_status: int = 0,
         extra_args: list[str] | None = None,
+        lane: str | None = None, discovery_root: Path | None = None,
     ) -> subprocess.CompletedProcess[str]:
         environment = os.environ.copy()
         environment.update({
@@ -400,6 +402,14 @@ exit 0
             "FAKE_RUNNER_MODE": mode,
             "FAKE_XCODE_STATUS": str(xcode_status),
         })
+        if lane is not None:
+            # A named lane replaces the pre-lane state-directory override and
+            # lives under the lane root, never the real default lane.
+            environment.pop("TRON_IOS_TEST_STATE_DIR", None)
+            environment["TRON_IOS_TEST_LANE"] = lane
+            environment.setdefault("TRON_IOS_TEST_DISCOVERY_ROOT", str(self.root))
+        if discovery_root is not None:
+            environment["TRON_IOS_TEST_DISCOVERY_ROOT"] = str(discovery_root)
         if home is not None:
             # Exercise the runner's own defaults under a synthetic HOME.
             environment.pop("TRON_IOS_TEST_DERIVED_DATA", None)
@@ -428,23 +438,38 @@ exit 0
             return []
         return [line for line in lines if line.split(" ", 1)[0] == command]
 
-    def write_orphan_lane(self, udid: str, *, name: str = "Tron iOS Tests", directory: str = "orphan-lane") -> Path:
-        """A booted owned simulator in another lane, with no process holding it."""
+    def write_lane(
+        self, directory: str, udid: str, *, name: str = "Tron iOS Tests", state: str = "Booted",
+        worktree: str | None = None, last_used: float | None = None, disk_bytes: int | None = None,
+    ) -> Path:
+        """One lane under the runner's root: ownership marker plus its device."""
         lane = self.root / directory
         lane.mkdir(parents=True, exist_ok=True)
-        (lane / "simulator.json").write_text(json.dumps({
+        marker: dict[str, object] = {
             "schema": "tron.ios-test-simulator.v1", "owner": "tron-ios-test", "udid": udid,
             "name": name, "runtime_identifier": RUNNER_RUNTIME_ID, "runtime_version": "26.5",
             "runtime_build": "23C54", "device_type_identifier": RUNNER_TYPE_ID,
             "device_type_name": "iPhone 17 Pro", "ephemeral": False,
-        }))
-        document = json.loads(self.simulator_inventory.read_text())
-        document["devices"][RUNNER_RUNTIME_ID].append({
-            "name": name, "udid": udid, "state": "Booted", "isAvailable": True,
+        }
+        if worktree is not None:
+            marker["worktree"] = worktree
+        if last_used is not None:
+            marker["last_used_epoch_seconds"] = int(last_used)
+        (lane / "simulator.json").write_text(json.dumps(marker))
+        device: dict[str, object] = {
+            "name": name, "udid": udid, "state": state, "isAvailable": True,
             "deviceTypeIdentifier": RUNNER_TYPE_ID,
-        })
+        }
+        if disk_bytes is not None:
+            device["dataPathSize"] = disk_bytes
+        document = json.loads(self.simulator_inventory.read_text())
+        document["devices"][RUNNER_RUNTIME_ID].append(device)
         self.simulator_inventory.write_text(json.dumps(document))
         return lane
+
+    def write_orphan_lane(self, udid: str, *, name: str = "Tron iOS Tests", directory: str = "orphan-lane") -> Path:
+        """A booted owned simulator in another lane, with no process holding it."""
+        return self.write_lane(directory, udid, name=name)
 
     def latest_metadata(self) -> dict[str, object]:
         return json.loads(((self.results / "latest").resolve() / "metadata.json").read_text())
@@ -611,6 +636,82 @@ exit 0
         self.assertEqual(self.device_entry("CCCCCCCC-CCCC-CCCC-CCCC-CCCCCCCCCCCC")["state"], "Booted")
         self.assertEqual(self.device_entry(self.owned_udid())["state"], "Shutdown")
         self.assertTrue(orphan.exists())
+
+    # SIM-3 named lanes (runner level). Failure modes these two cases target,
+    # written before the code:
+    #
+    # 1. Two lanes share a state directory, lease or device name, so a second
+    #    lane adopts or collides with the first lane's simulator.
+    # 2. The lane marker does not record the worktree that created the lane or
+    #    the time it was last used, so a lane cannot be attributed or dated.
+    # 3. `lane-remove` deletes the products of a worktree that still exists, or
+    #    leaves the products of a worktree that no longer exists behind.
+    def test_a_named_lane_provisions_its_own_simulator_and_records_its_use(self) -> None:
+        """Failure modes 1 and 2: a separate lane, with its use recorded."""
+        # The default lane's device name belongs to an unmarked simulator: a
+        # named lane must neither collide with it nor adopt it.
+        document = json.loads(self.simulator_inventory.read_text())
+        document["devices"][RUNNER_RUNTIME_ID].append({
+            "name": "Tron iOS Tests", "udid": UDID_D, "state": "Shutdown",
+            "isAvailable": True, "deviceTypeIdentifier": RUNNER_TYPE_ID,
+        })
+        self.simulator_inventory.write_text(json.dumps(document))
+
+        started = time.time()
+        owner = ["--only-testing", "TronMobileTests/StubTests"]
+        result = self.invoke(lane="alpha", extra_args=owner)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        lane = self.root / "ios-test-alpha"
+        marker = json.loads((lane / "simulator.json").read_text())
+        self.assertEqual(marker["worktree"], str(ROOT))
+        self.assertGreaterEqual(marker["last_used_epoch_seconds"], int(started))
+        self.assertLessEqual(marker["last_used_epoch_seconds"], int(time.time()) + 1)
+        self.assertEqual(marker["name"], "Tron iOS Tests (alpha)")
+        self.assertEqual(self.device_entry(marker["udid"])["name"], "Tron iOS Tests (alpha)")
+        self.assertEqual(self.device_entry(marker["udid"])["state"], "Shutdown")
+        self.assertEqual(self.device_entry(UDID_D)["state"], "Shutdown")
+        self.assertTrue((lane / "lease.lock").exists())
+        self.assertFalse((self.state / "simulator.json").exists())
+        self.assertFalse((self.state / "lease.lock").exists())
+        self.assertFalse((self.root / "ios-test").exists())
+
+        second = self.invoke(lane="alpha", extra_args=owner)
+        self.assertEqual(second.returncode, 0, second.stderr)
+        self.assertEqual(len(self.simctl_calls("create")), 1)
+        self.assertEqual(json.loads((lane / "simulator.json").read_text())["udid"], marker["udid"])
+
+    def test_lane_remove_keeps_a_live_worktrees_products_and_reclaims_a_deleted_worktrees(self) -> None:
+        """Failure mode 3: products follow the recorded worktree's existence."""
+        home = self.root / "lane-home"
+        products_root = home / "Library/Developer/Tron/ios/test-derived-data"
+        live = self.root / "live-worktree"
+        live.mkdir()
+        gone = self.root / "gone-worktree"
+        directories: dict[str, Path] = {}
+        for worktree in (live, gone):
+            key = subprocess.run(
+                [sys.executable, str(IDENTITY), "worktree-key", "--worktree", str(worktree)],
+                check=True, text=True, stdout=subprocess.PIPE,
+            ).stdout.strip()
+            directory = products_root / key
+            (directory / "Build/Products").mkdir(parents=True)
+            (directory / ".tron-ios-test-owned").write_text("tron.ios-test-owned.v1\n")
+            directories[str(worktree)] = directory
+        self.write_lane("ios-test-live", UDID_A, name="Tron iOS Tests (live)", worktree=str(live))
+        self.write_lane("ios-test-gone", UDID_B, name="Tron iOS Tests (gone)", worktree=str(gone))
+
+        kept = self.invoke(command="lane-remove", extra_args=["live"], home=home, discovery_root=self.root)
+        self.assertEqual(kept.returncode, 0, kept.stderr)
+        self.assertTrue(directories[str(live)].exists())
+        self.assertIn(str(directories[str(live)]), kept.stdout)
+        self.assertIn(str(live), kept.stdout)
+        self.assertFalse((self.root / "ios-test-live").exists())
+
+        reclaimed = self.invoke(command="lane-remove", extra_args=["gone"], home=home, discovery_root=self.root)
+        self.assertEqual(reclaimed.returncode, 0, reclaimed.stderr)
+        self.assertFalse(directories[str(gone)].exists())
+        self.assertIn(str(gone), reclaimed.stdout)
+        self.assertFalse((self.root / "ios-test-gone").exists())
 
 
 class BuildIdentityFixture(unittest.TestCase):
@@ -867,6 +968,11 @@ if command in ('boot', 'shutdown'):
     for device in found:
         device['state'] = 'Booted' if command == 'boot' else 'Shutdown'
     inventory_path.write_text(json.dumps(document)); raise SystemExit(0)
+if command == 'delete':
+    document = json.loads(inventory_path.read_text())
+    for devices in document['devices'].values():
+        devices[:] = [device for device in devices if device['udid'] != udid]
+    inventory_path.write_text(json.dumps(document)); raise SystemExit(0)
 print('unexpected simctl arguments: ' + repr(arguments), file=sys.stderr)
 raise SystemExit(2)
 """)
@@ -922,24 +1028,36 @@ raise SystemExit(2)
                     device.update(fields)
         self.inventory_path.write_text(json.dumps(document))
 
-    def owned_lane(self, name: str = "ios-test", udid: str = UDID_A, *, present: bool = True) -> Path:
+    def owned_lane(
+        self, name: str = "ios-test", udid: str = UDID_A, *, present: bool = True,
+        worktree: str | None = None, last_used: float | None = None, disk_bytes: int | None = None,
+        device_name: str = "Tron iOS Tests",
+    ) -> Path:
         """One lane: its ownership marker, and its booted device in the inventory."""
         lane = self.discovery_root / name
         lane.mkdir(parents=True, exist_ok=True)
-        (lane / "simulator.json").write_text(json.dumps({
+        marker: dict[str, object] = {
             "schema": "tron.ios-test-simulator.v1", "owner": "tron-ios-test", "udid": udid,
-            "name": "Tron iOS Tests", "runtime_identifier": RUNTIME_ID, "runtime_version": "26.2",
+            "name": device_name, "runtime_identifier": RUNTIME_ID, "runtime_version": "26.2",
             "runtime_build": "23C54", "device_type_identifier": TYPE_ID,
             "device_type_name": "iPhone 17 Pro", "ephemeral": False,
-        }))
+        }
+        if worktree is not None:
+            marker["worktree"] = worktree
+        if last_used is not None:
+            marker["last_used_epoch_seconds"] = int(last_used)
+        (lane / "simulator.json").write_text(json.dumps(marker))
         if present:
+            device: dict[str, object] = {
+                "name": device_name, "udid": udid, "state": "Booted", "isAvailable": True,
+                "deviceTypeIdentifier": TYPE_ID,
+            }
+            if disk_bytes is not None:
+                device["dataPathSize"] = disk_bytes
             document = self.inventory()
             for devices in document["devices"].values():
-                devices[:] = [device for device in devices if device["udid"] != udid]
-            document["devices"][RUNTIME_ID].append({
-                "name": "Tron iOS Tests", "udid": udid, "state": "Booted", "isAvailable": True,
-                "deviceTypeIdentifier": TYPE_ID,
-            })
+                devices[:] = [entry for entry in devices if entry["udid"] != udid]
+            document["devices"][RUNTIME_ID].append(device)
             self.inventory_path.write_text(json.dumps(document))
         return lane
 
@@ -951,8 +1069,12 @@ raise SystemExit(2)
             time.sleep(0.05)
         self.fail(f"timed out waiting for {path}")
 
-    def hold_lease(self, lane: Path) -> subprocess.Popen[str]:
-        """A live process holding a lane's lease, as a running command does."""
+    def hold_lease(self, lane: Path, *, command: str | None = None) -> subprocess.Popen[str]:
+        """A live process holding a lane's lease, as a running command does.
+
+        With `command` it also records the lease metadata a real holder writes,
+        so a caller can tell a live holder from stale metadata.
+        """
         holder = subprocess.Popen(
             [
                 sys.executable, "-c",
@@ -965,7 +1087,16 @@ raise SystemExit(2)
         self.holders.append(holder)
         assert holder.stdout is not None
         self.assertEqual(holder.stdout.readline().strip(), "held")
+        if command is not None:
+            (lane / "lease.lock").write_text(json.dumps({
+                "schema": "tron.ios-test-lock.v1", "pid": holder.pid,
+                "started_at_epoch_seconds": int(time.time()), "command": command,
+                "lock_path": str(lane / "lease.lock"), "uid": os.getuid(),
+            }))
         return holder
+
+    def present(self, udid: str) -> bool:
+        return any(device["udid"] == udid for devices in self.inventory()["devices"].values() for device in devices)
 
     def shutdown_targets(self) -> list[str]:
         try:
@@ -1228,6 +1359,237 @@ class SweepFixture(OwnedLaneFixture):
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(self.shutdown_targets(), [UDID_A])
         self.assertEqual(self.device_entry(UDID_A)["state"], "Shutdown")
+
+
+class LaneFixture(OwnedLaneFixture):
+    """SIM-3: `--lane`, `lanes`, `lane-remove` and lane expiry.
+
+    Failure modes these cases target, written before the code:
+
+    1. A lane name is not validated, so a lane (or `lane-remove`) escapes the
+       lane root and state outside it is removed.
+    2. The pre-lane overrides and `--lane` disagree and one is silently ignored.
+    3. Two lanes share a state directory, device name or lease, so unrelated
+       agents serialize on one simulator and one lane's removal touches another.
+    4. `lanes` mutates state (creates a lease, removes an expired lane) or fails
+       busy, or it hides the worktree, state, lease holder, last use or size.
+    5. `lane-remove` removes a lane a live process holds or state with no
+       ownership marker.
+    6. The sweep expires a lane that is fresh, undated or held, or removes
+       marker-less state, or leaves a lane unused past the TTL in place.
+    7. A holder killed with SIGKILL leaves stale lease metadata that reads as a
+       live holder and hides the lane from the list and from expiry.
+    """
+
+    def setUp(self) -> None:
+        super().setUp()
+        # Every path a lane command derives from HOME stays inside the fixture,
+        # so no lane command can reach the real build root or default lane.
+        self.home = self.root / "home"
+        self.home.mkdir()
+        self.environment["HOME"] = str(self.home)
+
+    def runner(self, *arguments: str, environment: dict[str, str] | None = None) -> subprocess.CompletedProcess[str]:
+        return subprocess.run(
+            [str(RUNNER), *arguments], env=environment or self.environment,
+            text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=60,
+        )
+
+    def row(self, output: str, lane: str) -> str:
+        """The `lanes` row for one lane, with trailing padding removed."""
+        for line in output.splitlines():
+            if line.split()[:1] == [lane]:
+                return line
+        raise AssertionError(f"no {lane!r} row in:\n{output}")
+
+    def test_lanes_lists_worktree_state_holder_last_use_and_disk(self) -> None:
+        """Failure mode 4: every lane row reports its whole ownership state."""
+        last_used = time.time() - 3600
+        lane = self.owned_lane(
+            "ios-test-alpha", UDID_A, worktree="/private/tmp/tron-alpha-worktree",
+            last_used=last_used, disk_bytes=4_000_000_000,
+        )
+        self.owned_lane("ios-test-missing", UDID_B, present=False, last_used=time.time())
+        holder = self.hold_lease(lane, command="run")
+
+        result = self.runner("lanes")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn(str(self.discovery_root), result.stdout)
+        alpha = self.row(result.stdout, "alpha")
+        self.assertIn("/private/tmp/tron-alpha-worktree", alpha)
+        self.assertIn("Booted", alpha)
+        self.assertIn(f"pid {holder.pid} (run)", alpha)
+        self.assertIn(time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(last_used)), alpha)
+        self.assertIn("3.7 GB", alpha)
+        missing = self.row(result.stdout, "missing")
+        self.assertIn("missing", missing)
+        self.assertIn("idle", missing)
+        default = self.row(result.stdout, "default")
+        self.assertIn("not-provisioned", default)
+
+    def test_lanes_is_read_only_and_never_takes_a_held_lease(self) -> None:
+        """Failure mode 4: listing changes nothing, even with a holder present."""
+        held_lane = self.owned_lane("ios-test-held", UDID_A)
+        holder = self.hold_lease(held_lane, command="run")
+        stale = self.owned_lane("ios-test-stale", UDID_B, last_used=time.time() - 8 * 24 * 3600)
+        before = sorted(path.name for path in self.discovery_root.iterdir())
+
+        result = self.runner("lanes")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn(f"pid {holder.pid} (run)", self.row(result.stdout, "held"))
+        self.assertIsNone(holder.poll())
+        self.assertEqual(self.device_entry(UDID_A)["state"], "Booted")
+        self.assertEqual(self.device_entry(UDID_B)["state"], "Booted")
+        self.assertTrue(stale.exists())
+        self.assertTrue((stale / "simulator.json").exists())
+        self.assertEqual(sorted(path.name for path in self.discovery_root.iterdir()), before)
+        self.assertFalse((self.state / "lease.lock").exists())
+        self.assertFalse((stale / "lease.lock").exists())
+
+    def test_a_named_lane_refuses_the_pre_lane_overrides_and_bad_names(self) -> None:
+        """Failure modes 1 and 2: ambiguity and escapes fail instead of guessing."""
+        environment = {**self.environment, "TRON_IOS_TEST_LANE": "alpha"}
+        with_state = self.runner("lanes", environment=environment)
+        self.assertEqual(with_state.returncode, 74, with_state.stderr)
+        self.assertIn("TRON_IOS_TEST_STATE_DIR", with_state.stderr)
+
+        environment.pop("TRON_IOS_TEST_STATE_DIR")
+        environment["TRON_IOS_TEST_DEVICE_NAME"] = "Tron iOS Other"
+        with_device = self.runner("lanes", environment=environment)
+        self.assertEqual(with_device.returncode, 74, with_device.stderr)
+        self.assertIn("TRON_IOS_TEST_DEVICE_NAME", with_device.stderr)
+
+        environment.pop("TRON_IOS_TEST_DEVICE_NAME")
+        conflicting = self.runner("lanes", "--lane", "beta", environment=environment)
+        self.assertEqual(conflicting.returncode, 74, conflicting.stderr)
+        self.assertIn("TRON_IOS_TEST_LANE", conflicting.stderr)
+        agreed = self.runner("lanes", "--lane", "alpha", environment=environment)
+        self.assertEqual(agreed.returncode, 0, agreed.stderr)
+
+        for name in ("../escape", "a/b", ".", "-x"):
+            with self.subTest(lane=name):
+                environment["TRON_IOS_TEST_LANE"] = name
+                invalid = self.runner("lanes", environment=environment)
+                self.assertEqual(invalid.returncode, 74, invalid.stderr)
+                self.assertIn("lane name", invalid.stderr)
+        environment.pop("TRON_IOS_TEST_LANE")
+        target = self.runner("lane-remove", "../escape")
+        self.assertEqual(target.returncode, 74, target.stderr)
+        self.assertIn("lane name", target.stderr)
+        self.assertEqual(sorted(path.name for path in self.discovery_root.iterdir()), ["ios-test"])
+
+    def test_lane_removal_refuses_a_directory_outside_the_lane_root(self) -> None:
+        """Failure mode 1: a marker cannot make a lane command remove anything else."""
+        outside = self.root / "outside-lane"
+        outside.mkdir()
+        marker = json.loads((self.owned_lane("ios-test-alpha", UDID_A) / "simulator.json").read_text())
+        marker["udid"] = UDID_B
+        (outside / "simulator.json").write_text(json.dumps(marker))
+
+        result = subprocess.run(
+            [
+                sys.executable, str(SIMULATOR), "lane-remove",
+                "--lane-dir", str(outside), "--discovery-root", str(self.discovery_root),
+                "--default-state-dir", str(self.state),
+                "--development-state", str(self.development_marker),
+            ],
+            env=self.environment, text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+        )
+        self.assertEqual(result.returncode, 66, result.stderr)
+        self.assertIn("outside the lane root", result.stderr)
+        self.assertTrue((outside / "simulator.json").exists())
+
+    def test_lane_remove_refuses_a_held_lane_and_keeps_its_device_and_state(self) -> None:
+        """Failure mode 5: a live owner's lane is never removed."""
+        lane = self.owned_lane("ios-test-alpha", UDID_A)
+        holder = self.hold_lease(lane, command="run")
+
+        result = self.runner("lane-remove", "alpha")
+        self.assertEqual(result.returncode, 73, result.stderr)
+        self.assertIn("alpha", result.stderr)
+        self.assertIn(f"pid {holder.pid} (run)", result.stderr)
+        self.assertTrue((lane / "simulator.json").exists())
+        self.assertEqual(self.device_entry(UDID_A)["state"], "Booted")
+
+    def test_lane_remove_deletes_a_marker_owned_lane_and_keeps_marker_less_state(self) -> None:
+        """Failure mode 5: only proven ownership is removed, and only once."""
+        lane = self.owned_lane("ios-test-alpha", UDID_A)
+        result = self.runner("lane-remove", "alpha")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("removed lane alpha", result.stdout)
+        self.assertFalse(lane.exists())
+        self.assertFalse(self.present(UDID_A))
+
+        again = self.runner("lane-remove", "alpha")
+        self.assertEqual(again.returncode, 0, again.stderr)
+        self.assertIn("no such lane", again.stdout)
+
+        marker_less = self.runner("lane-remove", "default")
+        self.assertEqual(marker_less.returncode, 66, marker_less.stderr)
+        self.assertIn("ownership marker", marker_less.stderr)
+        self.assertTrue(self.state.exists())
+
+    def test_the_sweep_expires_lanes_unused_for_longer_than_the_ttl(self) -> None:
+        """Failure mode 6: only a datable, unheld, unused lane is removed."""
+        old = time.time() - 8 * 24 * 3600
+        expired = self.owned_lane("ios-test-old", UDID_A, worktree=str(self.root / "gone-worktree"), last_used=old)
+        fresh = self.owned_lane("ios-test-fresh", UDID_B, last_used=time.time() - 60)
+        undated = self.owned_lane("ios-test-undated", UDID_C)
+        held = self.owned_lane("ios-test-held", UDID_D, last_used=old)
+        self.hold_lease(held)
+        dead = self.owned_lane("ios-test-dead", UDID_E, present=False, last_used=old)
+        marker_less = self.discovery_root / "ios-test-nomarker"
+        marker_less.mkdir()
+        (marker_less / "lease.lock").write_text("")
+
+        result = self.reap()
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("removed lane old", result.stdout)
+        self.assertFalse(expired.exists())
+        self.assertFalse(dead.exists())
+        self.assertFalse(self.present(UDID_A))
+        self.assertFalse(self.present(UDID_E))
+        self.assertTrue(fresh.exists())
+        self.assertTrue(undated.exists())
+        self.assertTrue(held.exists())
+        self.assertTrue(marker_less.exists())
+        self.assertTrue(self.state.exists())
+        self.assertFalse((self.state / "simulator.json").exists())
+        # The sweep still releases orphans; a held lane is never touched.
+        self.assertEqual(self.device_entry(UDID_B)["state"], "Shutdown")
+        self.assertEqual(self.device_entry(UDID_C)["state"], "Shutdown")
+        self.assertEqual(self.device_entry(UDID_D)["state"], "Booted")
+
+        again = self.reap()
+        self.assertEqual(again.returncode, 0, again.stderr)
+        self.assertNotIn("removed lane", again.stdout)
+
+    def test_a_lane_whose_holder_was_killed_is_listed_idle_and_expires(self) -> None:
+        """Failure mode 7: stale lease metadata never reads as a live holder."""
+        lane = self.owned_lane("ios-test-killed", UDID_A, last_used=time.time() - 8 * 24 * 3600)
+        holder = subprocess.Popen(
+            [
+                sys.executable, str(LOCK), "--lock", str(lane / "lease.lock"),
+                "--marker", str(lane / "simulator.json"),
+                "--development-state", str(self.development_marker),
+                "--", sys.executable, "-c", "import time; time.sleep(3)",
+            ],
+            env=self.environment, text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+        )
+        self.wait_for(lane / "lease.lock")
+        holder.kill()
+        holder.wait(timeout=10)
+        self.close_pipes(holder)
+        self.assertIn("pid", (lane / "lease.lock").read_text())
+
+        listed = self.runner("lanes")
+        self.assertEqual(listed.returncode, 0, listed.stderr)
+        self.assertIn("idle", self.row(listed.stdout, "killed"))
+
+        result = self.reap()
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertFalse(lane.exists())
+        self.assertFalse(self.present(UDID_A))
 
 
 if __name__ == "__main__":

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Own the repository's iOS test simulators: provision, validate, release, sweep."""
+"""Own the repository's iOS test simulators: provision, release, sweep, name lanes."""
 
 from __future__ import annotations
 
@@ -11,6 +11,7 @@ import json
 import os
 from pathlib import Path
 import re
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -18,6 +19,7 @@ import time
 from typing import Any, Iterator
 
 DESTINATION_EXIT = 66
+LANE_BUSY_EXIT = 73
 SCHEMA = "tron.ios-test-simulator.v1"
 OWNER = "tron-ios-test"
 # A lane is one state directory holding a marker, a lease and its simulator's
@@ -28,10 +30,19 @@ LEASE_NAME = "lease.lock"
 # Lanes live in the default state directory and in the directories beside or
 # inside it; the sweep scans no deeper, so it never walks a simulator's own tree.
 SWEEP_DEPTH = 2
+# A lane that no command has used for this long is reclaimed by the sweep. The
+# default lane's directory is `ios-test` and a named lane's is its
+# `ios-test-<name>` sibling, which is what a lane's reported name strips.
+LANE_TTL_SECONDS = 7 * 24 * 60 * 60
+LANE_DIRECTORY_PREFIX = "ios-test"
 
 
 class DestinationError(RuntimeError):
     pass
+
+
+class LaneBusyError(RuntimeError):
+    """A lane whose lease a live process holds must not be changed."""
 
 
 def simctl(*arguments: str, capture: bool = True, timeout: float | None = None) -> str:
@@ -254,6 +265,50 @@ def lease_hold(path: Path) -> Iterator[bool]:
             fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
 
 
+def lease_description(text: str) -> str:
+    """Describe the holder recorded in a lease file's metadata."""
+    try:
+        value = json.loads(text)
+    except json.JSONDecodeError:
+        return "held"
+    if not isinstance(value, dict):
+        return "held"
+    identifier = value.get("pid")
+    command = value.get("command")
+    if isinstance(identifier, int) and not isinstance(identifier, bool) and isinstance(command, str) and command:
+        return f"pid {identifier} ({command})"
+    return f"pid {identifier}" if isinstance(identifier, int) and not isinstance(identifier, bool) else "held"
+
+
+def lease_holder(path: Path) -> str:
+    """Describe the live process holding a lane's lease, or "idle".
+
+    Read-only on purpose: listing lanes must not create the lease file it is
+    reading, or a lane with no simulator would look provisioned.
+    """
+    try:
+        descriptor = os.open(path, os.O_RDONLY)
+    except FileNotFoundError:
+        return "idle"
+    except OSError as error:
+        raise DestinationError(f"lane lease is unreadable: {path}: {error}") from error
+    with os.fdopen(descriptor, "r", encoding="utf-8") as handle:
+        try:
+            fcntl.flock(handle.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError:
+            return lease_description(handle.read())
+    return "idle"
+
+
+def lane_device(document: dict[str, Any], marker: dict[str, Any]) -> tuple[dict[str, Any] | None, str]:
+    """The lane's device entry and its simctl state, or None and "missing"."""
+    current = find_device(document, marker["udid"])
+    if current is None:
+        return None, "missing"
+    state = current[1].get("state")
+    return current[1], state if isinstance(state, str) and state else "unknown"
+
+
 def lane_state(marker_path: Path) -> str:
     """The lane's simulator state: a simctl state, "missing" or "not-provisioned".
 
@@ -263,11 +318,90 @@ def lane_state(marker_path: Path) -> str:
     marker = load_marker(marker_path)
     if marker is None:
         return "not-provisioned"
-    current = find_device(inventory(), marker["udid"])
-    if current is None:
-        return "missing"
-    state = current[1].get("state")
-    return state if isinstance(state, str) and state else "unknown"
+    _, state = lane_device(inventory(), marker)
+    return state
+
+
+def lane_label(directory: Path, default_state_dir: Path | None = None) -> str:
+    """A lane's name: "default" for the default lane, else the directory's own.
+
+    `ios-test` is the default lane's directory and `ios-test-<name>` a named
+    lane's, so a lane's name round-trips through the runner's `--lane`.
+    """
+    if default_state_dir is not None and same_path(directory, default_state_dir):
+        return "default"
+    name = directory.name
+    return name[len(LANE_DIRECTORY_PREFIX) + 1:] if name.startswith(LANE_DIRECTORY_PREFIX + "-") else name
+
+
+def same_path(first: Path, second: Path) -> bool:
+    return os.path.realpath(first) == os.path.realpath(second)
+
+
+def human_size(size: int) -> str:
+    for unit, scale in (("GB", 1 << 30), ("MB", 1 << 20), ("KB", 1 << 10)):
+        if size >= scale:
+            return f"{size / scale:.1f} {unit}"
+    return f"{size} B"
+
+
+def lane_directories(arguments: argparse.Namespace) -> list[Path]:
+    """Every lane: the default lane, then each lane with an ownership marker."""
+    found = [arguments.default_state_dir]
+    found.extend(marker_path.parent for marker_path in marker_paths(arguments.discovery_root))
+    unique: list[Path] = []
+    seen: set[str] = set()
+    for directory in found:
+        key = os.path.realpath(directory)
+        if key not in seen:
+            seen.add(key)
+            unique.append(directory)
+    return unique
+
+
+LANE_COLUMNS = ("LANE", "WORKTREE", "STATE", "LEASE", "LAST USED", "DISK")
+
+
+def lane_rows(arguments: argparse.Namespace) -> list[list[str]]:
+    """One row per lane, in the column order of LANE_COLUMNS."""
+    document = inventory()
+    rows: list[list[str]] = []
+    for directory in lane_directories(arguments):
+        marker_path = directory / MARKER_NAME
+        try:
+            marker = load_marker(marker_path)
+        except DestinationError as error:
+            print(f"warning: skipping {marker_path}: {error}", file=sys.stderr)
+            continue
+        lease = lease_holder(directory / LEASE_NAME)
+        row = [lane_label(directory, arguments.default_state_dir)]
+        if marker is None:
+            rows.append([*row, "-", "not-provisioned", lease, "-", "-"])
+            continue
+        device, state = lane_device(document, marker)
+        worktree = marker.get("worktree")
+        last_used = marker.get("last_used_epoch_seconds")
+        size = device.get("dataPathSize") if device is not None else None
+        rows.append([
+            *row,
+            worktree if isinstance(worktree, str) and worktree else "-",
+            state,
+            lease,
+            time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(last_used))
+            if isinstance(last_used, (int, float)) and not isinstance(last_used, bool)
+            else "-",
+            human_size(size) if isinstance(size, int) and not isinstance(size, bool) else "-",
+        ])
+    return sorted(rows, key=lambda row: (row[0] != "default", row[0]))
+
+
+def list_lanes(arguments: argparse.Namespace) -> int:
+    rows = lane_rows(arguments)
+    print(f"Lanes under {arguments.discovery_root} (default lane: {arguments.default_state_dir})")
+    widths = [max([len(LANE_COLUMNS[index])] + [len(row[index]) for row in rows]) for index in range(len(LANE_COLUMNS))]
+    for values in (LANE_COLUMNS, *rows):
+        print("  ".join(value.ljust(widths[index]) for index, value in enumerate(values)).rstrip())
+    return 0
 
 
 def shutdown_owned(marker_path: Path, arguments: argparse.Namespace) -> str:
@@ -345,7 +479,7 @@ def sweep_lane(arguments: argparse.Namespace, marker_path: Path) -> str:
 
 
 def sweep(arguments: argparse.Namespace) -> int:
-    """Release every orphaned lane under the discovery root. Idempotent."""
+    """Reclaim every orphaned and expired lane under the discovery root. Idempotent."""
     markers = marker_paths(arguments.discovery_root)
     deadline = time.monotonic() + arguments.sweep_deadline_seconds
     failures = 0
@@ -356,9 +490,115 @@ def sweep(arguments: argparse.Namespace) -> int:
                 file=sys.stderr,
             )
             break
+        if expire_lane(arguments, marker_path) == "failed":
+            failures += 1
         if sweep_lane(arguments, marker_path) == "failed":
             failures += 1
     return DESTINATION_EXIT if failures else 0
+
+
+def expiry_of(marker_path: Path, now: float) -> str:
+    """Why a lane is or is not due for removal.
+
+    "no-marker" means there is nothing that proves this directory is ours:
+    marker-less state is never removed, and the default lane's directory exists
+    as soon as any command creates it, before it has a simulator. "undated"
+    means a marker written before lanes recorded their last use; it is kept
+    until a command uses the lane and dates it.
+    """
+    marker = load_marker(marker_path)
+    if marker is None:
+        return "no-marker"
+    last_used = marker.get("last_used_epoch_seconds")
+    if not isinstance(last_used, (int, float)) or isinstance(last_used, bool):
+        return "undated"
+    return "expired" if now - last_used > LANE_TTL_SECONDS else "fresh"
+
+
+def remove_lane(directory: Path, arguments: argparse.Namespace) -> None:
+    """Delete one lane's simulator and its state directory.
+
+    The ownership marker is the proof, and the directory must be a lane the
+    runner would have created - inside the lane root, or the default lane's own
+    configured directory - so nothing but a lane can be removed here.
+    """
+    root = os.path.realpath(arguments.discovery_root)
+    default = os.path.realpath(arguments.default_state_dir) if arguments.default_state_dir else None
+    resolved = os.path.realpath(directory)
+    protected = (root, os.path.realpath("/"), os.path.realpath(Path.home()))
+    if directory.is_symlink() or resolved in protected or not (Path(root) in Path(resolved).parents or resolved == default):
+        raise DestinationError(f"refusing to remove a lane directory outside the lane root: {directory}")
+    marker_path = directory / MARKER_NAME
+    if load_marker(marker_path) is None:
+        raise DestinationError(f"refusing to remove lane state with no ownership marker: {directory}")
+    delete_owned(marker_path, arguments)
+    shutil.rmtree(directory)
+
+
+def expire_lane(arguments: argparse.Namespace, marker_path: Path) -> str:
+    """Remove a lane unused for longer than the TTL.
+
+    Returns "expired", or why not: "fresh", "undated", "no-marker", "busy" (a
+    live process holds the lease), "skipped" (an unreadable marker or an
+    unsafe directory) or "failed".
+    """
+    try:
+        outcome = expiry_of(marker_path, time.time())
+    except DestinationError as error:
+        print(f"warning: skipping {marker_path}: {error}", file=sys.stderr)
+        return "skipped"
+    if outcome != "expired":
+        return outcome
+    with lease_hold(marker_path.parent / LEASE_NAME) as held:
+        if not held:
+            return "busy"
+        # Under the lease the lane cannot start a command that would refresh it,
+        # so this second reading decides.
+        try:
+            outcome = expiry_of(marker_path, time.time())
+            if outcome != "expired":
+                return outcome
+            remove_lane(marker_path.parent, arguments)
+        except DestinationError as error:
+            print(f"warning: could not remove lane {marker_path.parent}: {error}", file=sys.stderr)
+            return "failed"
+    print(f"removed lane {lane_label(marker_path.parent)} ({marker_path.parent})")
+    return "expired"
+
+
+def remove_lane_command(arguments: argparse.Namespace) -> int:
+    """Delete one named lane, refusing while a live process holds it."""
+    directory = arguments.lane_dir
+    marker_path = directory / MARKER_NAME
+    marker = load_marker(marker_path)
+    if marker is None:
+        if not directory.exists():
+            print(f"no such lane: {directory}")
+            return 0
+        raise DestinationError(f"refusing to remove lane state with no ownership marker: {directory}")
+    with lease_hold(directory / LEASE_NAME) as held:
+        if not held:
+            label = lane_label(directory, arguments.default_state_dir)
+            raise LaneBusyError(f"lane {label} is leased ({lease_holder(directory / LEASE_NAME)})")
+        remove_lane(directory, arguments)
+    print(f"removed lane {lane_label(directory, arguments.default_state_dir)} ({directory})")
+    return 0
+
+
+def stamp_lane_use(arguments: argparse.Namespace, marker: dict[str, Any]) -> dict[str, Any]:
+    """Record the lane's creating worktree and this use in the lane's marker.
+
+    `worktree` is written once, when the lane's simulator is created: a later
+    `lane-remove` uses it to decide whether the lane's products belong to a
+    worktree that still exists. `last_used_epoch_seconds` is refreshed by every
+    use and is what the sweep dates a lane by.
+    """
+    updated = dict(marker)
+    if arguments.worktree is not None and "worktree" not in updated:
+        updated["worktree"] = os.path.realpath(arguments.worktree)
+    updated["last_used_epoch_seconds"] = int(time.time())
+    atomic_write(arguments.marker, updated)
+    return updated
 
 
 def provision(arguments: argparse.Namespace) -> dict[str, Any]:
@@ -417,9 +657,11 @@ def provision(arguments: argparse.Namespace) -> dict[str, Any]:
             "device_type_name": device_type["name"],
             "ephemeral": arguments.ephemeral,
         }
-        atomic_write(arguments.marker, marker)
+        marker = stamp_lane_use(arguments, marker)
         document = inventory()
         device = validate_marker(document, marker, runtime, device_type, dev_udid)
+    else:
+        marker = stamp_lane_use(arguments, marker)
 
     if device.get("state") != "Booted":
         simctl("boot", marker["udid"])
@@ -431,14 +673,20 @@ def provision(arguments: argparse.Namespace) -> dict[str, Any]:
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("command", choices=("provision", "validate", "status", "delete", "state", "shutdown", "sweep"))
+    parser.add_argument(
+        "command",
+        choices=("provision", "validate", "status", "delete", "state", "shutdown", "sweep", "lanes", "lane-remove"),
+    )
     parser.add_argument("--marker", type=Path)
     parser.add_argument("--runtime")
     parser.add_argument("--device-type")
     parser.add_argument("--name")
+    parser.add_argument("--worktree", type=Path)
     parser.add_argument("--development-state", required=True, type=Path)
     parser.add_argument("--ephemeral", action="store_true")
     parser.add_argument("--discovery-root", type=Path)
+    parser.add_argument("--default-state-dir", type=Path)
+    parser.add_argument("--lane-dir", type=Path)
     parser.add_argument(
         "--shutdown-timeout-seconds",
         type=float,
@@ -452,11 +700,20 @@ def parse_args() -> argparse.Namespace:
     arguments = parser.parse_args()
     if arguments.shutdown_timeout_seconds <= 0 or arguments.sweep_deadline_seconds <= 0:
         parser.error("deadlines must be positive")
-    if arguments.command == "sweep":
+    if arguments.command in ("sweep", "lanes"):
         if arguments.discovery_root is None:
-            parser.error("sweep requires --discovery-root")
+            parser.error(f"{arguments.command} requires --discovery-root")
         if arguments.marker is not None:
-            parser.error("sweep does not take --marker")
+            parser.error(f"{arguments.command} does not take --marker")
+        if arguments.command == "lanes" and arguments.default_state_dir is None:
+            parser.error("lanes requires --default-state-dir")
+        return arguments
+    if arguments.command == "lane-remove":
+        for required in ("lane_dir", "discovery_root", "default_state_dir"):
+            if getattr(arguments, required) is None:
+                parser.error(f"lane-remove requires --{required.replace('_', '-')}")
+        if arguments.marker is not None:
+            parser.error("lane-remove does not take --marker")
         return arguments
     if arguments.marker is None:
         parser.error(f"{arguments.command} requires --marker")
@@ -479,6 +736,10 @@ def main() -> int:
     try:
         if arguments.command == "sweep":
             return sweep(arguments)
+        if arguments.command == "lanes":
+            return list_lanes(arguments)
+        if arguments.command == "lane-remove":
+            return remove_lane_command(arguments)
         if arguments.command == "state":
             print(lane_state(arguments.marker))
             return 0
@@ -514,6 +775,9 @@ def main() -> int:
         else:
             print(details["udid"])
         return 0
+    except LaneBusyError as error:
+        print(f"error: {error}", file=sys.stderr)
+        return LANE_BUSY_EXIT
     except DestinationError as error:
         print(f"error: {error}", file=sys.stderr)
         return DESTINATION_EXIT

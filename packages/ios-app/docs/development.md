@@ -440,7 +440,9 @@ never share the simulator at once. It releases no simulator of its own: a
 profile run leaves its lane's simulator booted, and the next
 `scripts/tron-ios-test` command or `scripts/tron-ios-test reap` in any lane
 releases that lane once nothing holds its lease (see
-[simulator lifecycle](#simulator-lifecycle)). It builds the optimized `DevicePerformance`
+[simulator lifecycle](#simulator-lifecycle)). The lane's marker is dated by that
+run like any other lane's, so a profiler lane no command has used for 7 days is
+reclaimed by the same sweep. It builds the optimized `DevicePerformance`
 configuration with the `Tron Device Performance` scheme into
 `~/Library/Developer/Tron/ios/profile-derived-data/<worktree-key>`, stamped with
 the worktree's source identity; `--no-build` reuses those products only when the
@@ -927,8 +929,8 @@ building worktree, its HEAD revision and a fingerprint of its dirty-tree content
 (`scripts/ios-test-build-identity.py`), and `run` re-proves that stamp, exiting
 74 with both identities named when they differ. `clean` removes this worktree's
 products (about 1 GB) and the retained runs; a products directory left behind by
-a deleted worktree is removable by hand, because it carries the runner's
-ownership marker. `TRON_IOS_TEST_DERIVED_DATA` still overrides the products
+a deleted worktree is removable by hand or by `lane-remove` of the lane that
+created it, because it carries the runner's ownership marker. `TRON_IOS_TEST_DERIVED_DATA` still overrides the products
 directory, and an override inside the worktree must stay under a git-ignored
 path, because the stamp covers the worktree's non-ignored content. Any edit
 after a build, documentation included, therefore needs a rebuild before `run`.
@@ -940,6 +942,8 @@ lease, 74 a runner failure, and 75 a process timeout.
 
 ```bash
 scripts/tron-ios-test status
+scripts/tron-ios-test lanes
+scripts/tron-ios-test lane-remove <name>
 scripts/tron-ios-test diagnose --only-testing TronMobileTests/<Suite>
 scripts/tron-ios-test reap
 scripts/tron-ios-test clean
@@ -971,11 +975,40 @@ and a lane whose shutdown fails is reported and retried by the next sweep, never
 left holding the lease. `scripts/tron-ios-test reap` runs the same sweep on
 demand, taking no lease of its own; exit 66 means a release failed.
 
+A lane is one state directory and one device name, so two agents never boot,
+lease or release each other's simulator. `--lane NAME` (or `TRON_IOS_TEST_LANE`)
+names a lane: the state directory `<lane root>/ios-test-NAME` beside the default
+lane's `<lane root>/ios-test`, and the device `Tron iOS Tests (NAME)`. The lane
+root is `$HOME/.tron/internal`, overridable with
+`TRON_IOS_TEST_DISCOVERY_ROOT`. A named lane refuses `TRON_IOS_TEST_STATE_DIR`
+and `TRON_IOS_TEST_DEVICE_NAME` rather than guess which spelling was meant;
+those two overrides keep naming the default lane until SIM-10 of
+[the simulator lifecycle plan](../../../docs/plans/2026-09-27-simulator-lifecycle.md)
+removes them, and they are what CI (`scripts/ios-ci-test.sh`) and the profiler
+still use. Lanes serialize against each other, so run one lane per worktree at a
+time: every lane of one worktree still executes that worktree's single products
+directory.
+
+Each lane's marker records the worktree that created its simulator and the time
+a command last used it. `scripts/tron-ios-test lanes` lists every lane with its
+worktree, device state, lease holder, last use and simulator disk size; it is
+read-only, taking no lease and removing nothing. `scripts/tron-ios-test
+lane-remove NAME` deletes one lane's simulator and state, and the test products
+of the worktree that created the lane once that worktree no longer exists - a
+live worktree's products are shared with its other lanes and are kept. It
+refuses a lane a live process holds (73) and state with no ownership marker
+(66). The sweep also deletes any lane no command has used for 7 days once its
+lease is free, so an abandoned lane costs nothing; marker-less state (including
+the default lane's directory, which exists before its first provision) is never
+removed, and a marker written before lanes recorded their last use is kept until
+a command dates it.
+
 ### Test runner safety contract
 
 - Simulator lifetime is released, not remembered. Only the device named by an
-ownership marker is ever shut down, each lane's lease is taken (without
-waiting) for the whole shutdown, and lanes a live process holds are skipped.
+ownership marker is ever shut down or deleted (a lane no command has used for 7
+days is reclaimed), each lane's lease is taken (without waiting) for the whole
+shutdown or removal, and lanes a live process holds are skipped.
 The remembered Development simulator (`scripts/tron-ios-simulator`) and every
 unmarked simulator are never shut down or deleted by the runner.
 

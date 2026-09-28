@@ -2,7 +2,7 @@
 
 - **Started:** 2026-09-27
 - **Status:** Active
-- **Last updated:** 2026-09-28, SIM-1 and SIM-2 done; SIM-3 to SIM-9 claimed
+- **Last updated:** 2026-09-28, SIM-3 done; SIM-4 to SIM-9 claimed
 - **Goal:** Agents run as many iOS simulators in parallel as the Mac can afford, and every simulator, process and artifact the test tooling creates is released automatically, including after crashes, so the live Gateway never runs short of memory.
 
 ## Goal and constraints
@@ -73,7 +73,7 @@ Why it accumulates, from the code:
 | --- | --- | --- | --- | --- |
 | SIM-1 | Done | Release on exit: the lease holder shuts down the simulator its command booted when the command ends, on success, failure, timeout or signal; an explicit keep-booted option serves tight test-fix loops and is itself released by the sweep | none | chat scroll session (worker lanes), 2026-09-27 |
 | SIM-2 | Done | Sweep: every Tron test tool invocation first shuts down orphaned owned simulators (booted, lease free); `scripts/tron-ios-test reap` runs it on demand | SIM-1 | chat scroll session (worker lanes), 2026-09-27 |
-| SIM-3 | Claimed | Named lanes: `--lane NAME` (and `TRON_IOS_TEST_LANE`) names a lane; `lanes` lists every lane with its worktree, state, lease holder, last use and disk size; `lane-remove NAME` deletes its simulator, state and products; the sweep deletes lanes unused for 7 days | SIM-2 | chat scroll session (worker lanes), 2026-09-27 |
+| SIM-3 | Done | Named lanes: `--lane NAME` (and `TRON_IOS_TEST_LANE`) names a lane; `lanes` lists every lane with its worktree, state, lease holder, last use and disk size; `lane-remove NAME` deletes its simulator, state and products; the sweep deletes lanes unused for 7 days | SIM-2 | chat scroll session (worker lanes), 2026-09-27 |
 | SIM-4 | Claimed | Memory admission: before booting, read memory pressure and swap; if booting would leave less than a set reserve, fail fast with exit 73 and print what is booted, by which worktree and lane, and for how long | SIM-2 | chat scroll session (worker lanes), 2026-09-27 |
 | SIM-5 | Claimed | Scoped clean and pruning: `clean` removes only this worktree's or lane's simulator, products and runs; `prune` keeps the newest results per worktree and deletes products whose worktree no longer exists; the sweep prunes too | SIM-3 | chat scroll session (worker lanes), 2026-09-27 |
 | SIM-6 | Claimed | One view: `scripts/tron-ios-test status --all` lists every booted simulator (owned lanes, the Development simulator, unowned ones), its owner, lease holder and uptime, plus `Simulator.app` | SIM-3 | chat scroll session (worker lanes), 2026-09-27 |
@@ -264,3 +264,80 @@ Owning files: `scripts/ios-test-simulator.py`, `scripts/tron-ios-test`.
   `marker_paths` is the one place that decides discovery depth. On the real Mac
   the pre-existing `ios-test-CT22` lane (energy-efficiency) is already
   discovered as a sibling and will be released as soon as it is orphaned.
+
+### SIM-3 · Done · 2026-09-28 · chat scroll session (worker lanes)
+
+- Result: a lane is one state directory and one device name. `--lane NAME` (or
+  `TRON_IOS_TEST_LANE`) selects `<lane root>/ios-test-NAME` holding the device
+  `Tron iOS Tests (NAME)`; the default lane keeps today's directory and name.
+  Every lane's marker now records the worktree that created its simulator and
+  the time a command last used it. `scripts/tron-ios-test lanes` lists every
+  lane - worktree, device state, lease holder, last use and simulator disk size
+  - and is read-only. `scripts/tron-ios-test lane-remove NAME` deletes one
+  lane's simulator and state plus the products of a worktree that no longer
+  exists, refusing a lane a live process holds (73) and state with no ownership
+  marker (66). The sweep every provisioning command and `reap` already runs now
+  also deletes lanes no command has used for 7 days.
+- Evidence: `python3 scripts/test-ios-test-infrastructure.py` - 50 tests,
+  65.5-94.7 s wall over four full runs (40 tests, 86-113 s at the SIM-2 commit),
+  with ten new SIM-3 cases: `LaneFixture`
+  `test_lanes_lists_worktree_state_holder_last_use_and_disk`,
+  `test_lanes_is_read_only_and_never_takes_a_held_lease`,
+  `test_a_named_lane_refuses_the_pre_lane_overrides_and_bad_names`,
+  `test_lane_removal_refuses_a_directory_outside_the_lane_root`,
+  `test_lane_remove_refuses_a_held_lane_and_keeps_its_device_and_state`,
+  `test_lane_remove_deletes_a_marker_owned_lane_and_keeps_marker_less_state`,
+  `test_the_sweep_expires_lanes_unused_for_longer_than_the_ttl`,
+  `test_a_lane_whose_holder_was_killed_is_listed_idle_and_expires`, and
+  `RunnerFixture`
+  `test_a_named_lane_provisions_its_own_simulator_and_records_its_use` and
+  `test_lane_remove_keeps_a_live_worktrees_products_and_reclaims_a_deleted_worktrees`;
+  `python3 scripts/test-tron-profile-ios.py` - 7 tests, 0.05 s. Real-machine
+  check with the discovery root, state directory and Development marker inside
+  one fresh `/tmp` directory and only a device this task created: `provision`
+  (create+boot) 29 s and its marker recorded `worktree` plus
+  `last_used_epoch_seconds`; `scripts/tron-ios-test lanes` printed the row
+  `default /private/tmp/tron-sim Booted idle 2026-09-28T05:23:56Z 1.4 GB`;
+  `scripts/tron-ios-test lane-remove default` removed the device and the state
+  directory, kept the live worktree's products with the message naming them, and
+  a second removal printed `no such lane` and exited 0; `xcrun simctl list
+  --json` afterwards showed the probe device gone, the pre-existing booted
+  `Tron iOS Tests` untouched, and only another session's own concurrent create
+  (`Tron iOS Tests Perf CHATVIEW`) as new. The probe directory was deleted.
+- Changes: this commit.
+- Kept on purpose: `clean` still removes this worktree's simulator, products and
+  results (SIM-5 scopes it) while `lane-remove` is the lane-scoped command;
+  `lanes` never sweeps; a lane name maps to `ios-test-<name>` and the device
+  `Tron iOS Tests (<name>)`, which is what the pre-existing sibling lane
+  directories already look like. `TRON_IOS_TEST_STATE_DIR` and
+  `TRON_IOS_TEST_DEVICE_NAME` keep working for the default lane (`--lane default`
+  is the explicit way to say so), so CI and the profiler are unaffected until
+  SIM-7 and SIM-10.
+- Deviations: `lane-remove` keeps the products of a worktree that still exists
+  instead of deleting them, because products are per worktree and shared by
+  every lane of that worktree - deleting them would break the other lanes and
+  the running worktree - so it reclaims products only once the recorded worktree
+  is gone. A named lane *refuses* the two pre-lane overrides rather than letting
+  one spelling silently win. "Never the default lane's marker-less state" is
+  implemented as "the sweep is driven by ownership markers", so a lane directory
+  with no marker is never removed (the default lane's exists before its first
+  provision), while a *dated* marker is expired even in the default lane - the
+  idle `Tron iOS Tests` device was this incident's own offender and is the disk
+  this plan wants back. Expiry runs inside the existing sweep rather than as a
+  new command, so it happens on every provisioning command and on `reap`, and a
+  marker written before lanes recorded a last use (for example the
+  energy-efficiency lane) is never expired until a command dates it.
+- Risks: two lanes of one worktree still share that worktree's single products
+  directory (only the simulator and lease are per lane), so concurrent lanes
+  belong to different worktrees until SIM-5 scopes products; SIM-4's admission is
+  also what will bound how many lanes a Mac takes on at once.
+- For the next agent: `lane_rows`/`list_lanes` in `scripts/ios-test-simulator.py`
+  is the one lane table - SIM-4 refusal output and SIM-6 `status --all` should
+  print it rather than a second projection. SIM-5 belongs in the same sweep
+  loop: `expire_lane` already takes the lease and knows the recorded worktree,
+  and `clean` needs the same lane-scoped directory rules. SIM-7 should pass
+  `--worktree` to `provision` from the profiler and the E2E harness so their
+  lanes are attributed as well as dated. The 7-day TTL is the module constant
+  `LANE_TTL_SECONDS` with no environment override; tests date markers instead of
+  waiting. A lane's device is deleted through its own marker, so an expired or
+  renamed lane is skipped rather than guessed at.
