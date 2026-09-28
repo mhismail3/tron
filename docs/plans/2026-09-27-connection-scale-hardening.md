@@ -2,7 +2,7 @@
 
 - **Started:** 2026-09-27
 - **Status:** Active (Phase 1 runs on `hardening/integration`; that branch's copy of this plan is authoritative until R-1)
-- **Last updated:** 2026-09-28, activated
+- **Last updated:** 2026-09-28, O-4
 - **Goal:** A clean, efficient and predictable Gateway and phone connection: the phone stays connected and loads any session promptly whenever the network path is up, however many sessions run and however large the history grows, and every disconnect or slow operation is attributable to one cause from the logs in one step.
 
 ## Goal and constraints
@@ -518,7 +518,7 @@ rows are in priority order.
 | E-2b | Claimed | Record `time-profiler` with `xctrace record --attach <pid>` if a real traced run proves it samples the simulator app; re-measure export and parser peaks (see E-2 handoff) | E-2 | orchestrator-dispatched deepseek-worker, 2026-09-28 |
 | O-2 | Ready | Gateway transport records: upgrade phases, inbound silence with Tailscale peer path | O-1 | |
 | O-3 | Claimed | Request span: one `rpc.completed` per slow RPC with every stage, wait and count | O-1 | orchestrator-dispatched deepseek-worker, 2026-09-28 |
-| O-4 | Claimed | Phone connection records that survive an export, stall watchdog, exact scene records | O-1 | orchestrator-dispatched deepseek-worker, 2026-09-28 |
+| O-4 | Blocked | Phone connection records that survive an export, stall watchdog, exact scene records | O-1 | orchestrator-dispatched deepseek-worker, 2026-09-28 |
 | O-6b | Ready | Impairment in the qualification scenario: blackhole, bandwidth cap, Gateway restart | O-6a | |
 | O-5 | Ready | Gateway resource sampler and event-loop histogram | O-3 | |
 | O-7 | Ready | Incident triage tool: phone export plus Gateway log in, episodes by cause out | O-1, O-2, O-4 | |
@@ -1783,3 +1783,105 @@ the day cannot measure a synthetic case).
   the module docstring says every id-carrying value is kept once (finding 3); and
   `Table.resolve` became `Table.value`, since it only drops absent or
   `<sentinel/>` cells now (finding 4).
+
+### O-4 · Blocked · 2026-09-28 · orchestrator-dispatched deepseek-worker (branch `hardening/o-4`)
+
+- Result: the code, tests and docs are written and committed, but no check was
+  run: the shared owned iOS test simulator was leased for the whole session by
+  the E-2b worker (`--scenario control`), so `scripts/tron-ios-test build`
+  exited 73 (busy) on every attempt and nothing here is compiled, let alone
+  verified. Marked Blocked, not Done, because both "Done when" items are
+  unproven — no pass counts and no export artifact exist.
+- Evidence: `python3 scripts/check-documentation-policy.py` passes (46 authored
+  files) and `scripts/personal-info-guard.sh` passes; both were run before the
+  commit. No test command could run: `scripts/tron-ios-test build` and `status`
+  report the lease held by pid 66874 (the E-2b worker's
+  `scripts/tron-profile-ios --scenario control` run) for 25+ minutes, and the
+  environment rules forbid booting another simulator or bypassing the lease.
+  Nothing is claimed about behavior.
+- Changes: `feat(ios): phone connection records, stall watchdogs and exact scene
+  records (O-4)` on `hardening/o-4`.
+- Failure modes written before the code (in the header of the new recorder test
+  file): the stall watchdog ticks while backgrounded; an episode record spans a
+  background transition; two profiles attempting at once mix attempts or
+  episodes; a blocked main actor is never recorded or is recorded again after the
+  episode ended; an attempt record loses an export field.
+- What the change does, file by file:
+  - New `GatewayConnectionEpisodeRecorder.swift` in
+    `packages/ios-app/Sources/State/`: one `gateway.attempt` per finished
+    attempt (`profile`, `attemptId`, `retry`, `stageReached`, `reason`,
+    `interfaces`, `pathSatisfied`, `delayBeforeMs`, `foreground`,
+    `gatewayConnectionId`, plus `durationMs`/`outcome`), one
+    `connection.episode` when the outage ends (`startedAt`, `endedAt`,
+    `attempts`, `causes`, `foregroundMs`, `maxGapBetweenAttemptsMs`, `endedBy` =
+    `connected`/`background`/`stopped`), the `reconnect.stalled` watchdog
+    (`RECONNECT_STALL_BOUND` = `reconnectStallBound`, 20 s, naming
+    `pathUnsatisfied`, `connectionAdmissionTask`, `committedConnectionTask`,
+    `reconnectTaskBusy`, `nonRetryable` or `other`), and `app.main-stall`
+    (`MAIN_STALL_BOUND` = `mainStallBound`, 2 s, measured by a 1 s ping from off
+    the main actor). Records from one episode are chained through one task so an
+    attempt is always written before its episode. Recording only; it schedules
+    nothing.
+  - `GatewayLifecycleCoordinator.swift` feeds it: attempt records for the
+    initial connect and every reconnect-loop attempt, `noteDisconnected` opens
+    an episode at the loss, `enteredBackground` ends it (`background`),
+    unauthenticated/non-retryable failures and `beginTransition` end it
+    (`stopped`), and `reconnectStallGuard` answers which guard is holding.
+    The two `scene.foreground`/`scene.background` delegate diagnostics are
+    removed: scene transitions now have one owner.
+  - `AppModel.swift`: the scene owner records `scene.resign-active`,
+    `scene.foreground`, `scene.background` and `scene.active`, once each, with
+    the transition's own timestamp (`sceneAt`); `operation.*` intervals still
+    open at background are signed `outcome=backgrounded`; and
+    `session.open.failure` now reports the Gateway's own code.
+  - `PerformanceSignposts.swift`/`AppLog.swift`: `PerformanceResult.backgrounded`
+    and `endOpenIntervalsAtBackground()` on `PerformanceSignposting` (a default
+    no-op keeps other recorders unchanged).
+  - `GatewayClientDiagnostics.swift`: `GatewayDiagnosticFailure.answerCode`,
+    which keeps a typed Gateway code (`conflict`, `busy`, `forbidden`) instead of
+    collapsing it to `transport`.
+- Diagnosis of the reported artifact (Do item 5): SwiftUI delivers `.inactive`
+  on the way *into* the foreground as well as on the way out, and AppModel
+  recorded `.inactive` as `app.backgrounded`; the resume then wrote
+  `app.foregrounded` at `.active`, so an export showed a background immediately
+  before a resume (the write was also asynchronous, so its log timestamp could
+  trail the transition). The fix records the four real transitions once, at the
+  moment they happen, with the scene's own timestamp; at a resume the pair is
+  now `scene.foreground` then `scene.active`.
+- Deviations:
+  - `gateway.attempt` records only the lifecycle owner's attempts. The task's
+    field list says the `profile` is "selected or pool", but
+    `DashboardGatewayConnectionPool.swift` is the C-5 zone and not an owning
+    file, so pool attempts are not recorded; the observability row says so. If
+    the pool's attempts matter, that is a new row.
+  - The watchdogs tick on a separate injected `watchdogClock`
+    (`packages/ios-app/Sources/State/GatewayConnectionEpisodeRecorder.swift`),
+    which the coordinator passes as `.continuous`, while every bound is measured
+    on the lifecycle clock. A watchdog tick on the manual test clock would be a
+    sleeper in every existing reconnect test's `ManualClock`, which several of
+    them count exactly (`recordedSleeps()`, `activeSleeperCount()`).
+  - Cancelled attempts (scene retirement or a profile switch cancels the task)
+    are not recorded as attempts: they reached no stage and their episode
+    already ends with `endedBy=background`/`stopped`.
+  - `GatewayReconnectSchedule` was left unchanged; `reconnectCanBeAccelerated`
+    already means "waiting in a delay", which is what the guard needs.
+- For the next agent (this is the whole remaining work):
+  1. Wait for the simulator lease, then run `scripts/tron-ios-test build` and
+     `scripts/tron-ios-test run --only-testing TronMobileTests/GatewayConnectionEpisodeRecorderTests`,
+     `--only-testing TronMobileTests/AppModelReconnectTests`,
+     `--only-testing TronMobileTests/AppModelLifecycleTests` and
+     `--only-testing TronMobileTests/RealGatewayPiBoundaryTests`. Expect to fix
+     compile errors: this branch has never been compiled.
+  2. The E2E blackhole evidence for Do item "Done when" is already written as
+     `exerciseBlackholedReconnect` in
+     `packages/ios-app/Tests/Gateway/RealGatewayPiBoundaryTests.swift`: it
+     blackholes the fixture proxy, backgrounds and foregrounds the lifecycle,
+     restores the path, then asserts one `gateway.attempt` per attempt, exactly
+     one `connection.episode` with `endedBy=connected`, and attaches every record
+     as `phone-connection-records`. Run `scripts/ios-gateway-e2e-test all` and
+     keep the attachment.
+  3. If the recorder tests pass but the coordinator-level expectations move
+     (for example an extra `gateway.attempt` for a cold start), check
+     `attemptStage` in `GatewayLifecycleCoordinator.swift` first: it derives the
+     stage from the client's handshake diagnostic when the failure path already
+     has one.
