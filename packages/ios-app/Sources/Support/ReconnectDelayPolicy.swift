@@ -103,10 +103,7 @@ final class GatewayReconnectSchedule {
     /// failures had grown to. Repeated failures on an unchanged path keep the
     /// capped, jittered curve `accelerate()` leaves alone.
     func restartForPathChange() {
-        if continuation != nil {
-            pending?.cancel()
-            resume(true)
-        }
+        accelerate()
         nominalDelay = delayPolicy.initialSeconds
     }
 
