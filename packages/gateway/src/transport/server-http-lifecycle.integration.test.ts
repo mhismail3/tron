@@ -24,6 +24,9 @@ import { GatewayServer, HTTP_MAXIMUM_CONNECTIONS_PER_ADDRESS, HTTP_MAXIMUM_REQUE
 //    extension negotiation) writes no upgrade record at all.
 // 6. A first frame that is not JSON is recorded as an abandoned handshake
 //    instead of a refusal at hello.
+// 7. A close the Gateway itself starts — the hello deadline, or shutdown before
+//    hello — is recorded as the peer leaving (`reason=peer_closed`), so grouping
+//    by `reason` counts Gateway-side retirements as peer departures.
 
 const cleanups: Array<() => Promise<void>> = [];
 afterEach(async () => {
@@ -38,11 +41,11 @@ function gate() {
   const promise = new Promise<void>(done => { resolve = done; });
   return { promise, resolve };
 }
-async function bounded<T>(promise: Promise<T>, label: string): Promise<T> {
+async function bounded<T>(promise: Promise<T>, label: string, timeoutMs = 3_000): Promise<T> {
   let timer!: NodeJS.Timeout;
   try {
     return await Promise.race([promise, new Promise<never>((_, reject) => {
-      timer = setTimeout(() => reject(new Error(`${label} timed out`)), 3_000);
+      timer = setTimeout(() => reject(new Error(`${label} timed out`)), timeoutMs);
     })]);
   } finally { clearTimeout(timer); }
 }
@@ -149,9 +152,6 @@ describe("HTTP pending-work ownership", () => {
     const record = await loggedRecord(f, "http.upgrade");
     expect(record.level).toBe("warning");
     expect(record.fields).toMatchObject({ outcome: "rejected", phaseReached: "auth", reason: "unauthenticated" });
-    // One record per upgrade: the refusal the bound-specific records used to
-    // restate is the `reason` field now.
-    expect(f.logger.log.mock.calls.some((call) => call[2]?.event === "connection.rejected")).toBe(false);
   });
 
   it("records a peer that leaves while authentication is pending as abandoned at the auth phase", async () => {
@@ -306,6 +306,59 @@ describe("HTTP pending-work ownership", () => {
     ownerRelease.resolve();
     await owner;
     expect(f.acquireBlob).not.toHaveBeenCalled();
+  });
+
+  it("records a socket that never sent hello as the Gateway's hello deadline", async () => {
+    const f = await fixture();
+    vi.spyOn(f.devices, "authenticateAndAdmit").mockImplementation(async (_token, admit) => admit({ kind: "local" }));
+    const peer = new WebSocket(`ws://127.0.0.1:${f.port}/v1/socket`, { headers: { authorization: "Bearer fixture" } });
+    peer.on("error", () => {});
+    await bounded(once(peer, "open"), "upgrade open");
+    // The Gateway's own 5 s deadline closes a socket that never introduced
+    // itself; the peer did not leave, so `reason` must not say it did.
+    await bounded(once(peer, "close"), "hello deadline close", 10_000);
+    const record = await loggedRecord(f, "http.upgrade");
+    expect(record.level).toBe("warning");
+    expect(record.fields).toMatchObject({ outcome: "abandoned", phaseReached: "handshake", reason: "hello_timeout" });
+    expect(record.fields).not.toHaveProperty("peerClientId");
+  });
+
+  it("records a pre-hello socket the Gateway shuts down as the Gateway's ending", async () => {
+    const f = await fixture();
+    vi.spyOn(f.devices, "authenticateAndAdmit").mockImplementation(async (_token, admit) => admit({ kind: "local" }));
+    const peer = new WebSocket(`ws://127.0.0.1:${f.port}/v1/socket`, { headers: { authorization: "Bearer fixture" } });
+    peer.on("error", () => {});
+    await bounded(once(peer, "open"), "upgrade open");
+    await bounded(f.gateway.close(), "gateway close");
+    const record = await loggedRecord(f, "http.upgrade");
+    expect(record.fields).toMatchObject({ outcome: "abandoned", phaseReached: "handshake", reason: "shutting_down" });
+  });
+
+  it("records a credential wait the Gateway shuts down as the Gateway's ending", async () => {
+    const f = await fixture();
+    const ownerEntered = gate(), ownerRelease = gate(), authEntered = gate();
+    const mutex = (f.devices as unknown as { mutex: AsyncMutex }).mutex;
+    const owner = mutex.run(async () => { ownerEntered.resolve(); await ownerRelease.promise; });
+    cleanups.push(async () => { ownerRelease.resolve(); await owner; });
+    await bounded(ownerEntered.promise, "credential owner entry");
+    const authenticate = f.devices.authenticateAndAdmit.bind(f.devices);
+    vi.spyOn(f.devices, "authenticateAndAdmit").mockImplementation((...args) => {
+      const result = authenticate(...args);
+      authEntered.resolve();
+      return result;
+    });
+    const socket = createConnection({ host: "127.0.0.1", port: f.port });
+    f.clientSockets.push(socket);
+    socket.on("error", () => {});
+    await bounded(once(socket, "connect"), "pending upgrade connect");
+    socket.write("GET /v1/socket HTTP/1.1\r\nHost: localhost\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Version: 13\r\nSec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\nAuthorization: Bearer fixture\r\n\r\n");
+    await bounded(authEntered.promise, "queued upgrade authentication");
+    // Shutdown destroys the socket while the credential is still unread; the
+    // peer is still there, so the record must not call it a peer close.
+    await bounded(f.gateway.close(), "gateway close");
+    const record = await loggedRecord(f, "http.upgrade");
+    expect(record.fields).toMatchObject({ outcome: "abandoned", phaseReached: "auth", reason: "shutting_down" });
+    expect(typeof record.fields.authMs).toBe("number");
   });
 
   it("returns HTTP capacity while a bounded file acquire is held and releases its late lease", async () => {

@@ -21,7 +21,9 @@ import type { PeerPathLookup, PeerPathReader } from "./tailscale-peer.js";
 //    it lacks the connection ID or the peer's hello correlation key.
 // 6. Inbound silence is reported every tick instead of once per episode, is
 //    reported for a phone that pings every ten seconds, or is reported at all
-//    for a healthy client that only answers the Gateway's own pings.
+//    for a healthy client that only answers the Gateway's own pings — including
+//    when a skipped ping (the client spoke mid-interval) is miscounted as an
+//    unanswered one.
 // 7. A silence episode that ends before the Tailscale read settles loses its
 //    resume record or its duration, or reports the resume before the silence.
 // 8. A blackholed path (no bytes in either direction, socket still open) is not
@@ -78,6 +80,8 @@ interface HarnessOptions {
   peerPathReader?: PeerPathReader;
   /** Virtual seconds between which the client's path carries no bytes. */
   blackhole?: { from: number; to: number };
+  /** Virtual seconds at which the client sends one application frame. */
+  messagesAt?: (second: number) => boolean;
   /** Runs at the end of each virtual second, after that second's client ping. */
   afterSecond?: (second: number) => void;
 }
@@ -192,7 +196,7 @@ async function observeHeartbeats(script: ClientScript, ticks: number, options: H
   // The hello is client-initiated inbound at virtual second 0.
   socket.send(JSON.stringify({ type: "hello", protocolVersion: 5, diagnostics: PEER_DIAGNOSTICS }));
   await realWait(() => logger.log.mock.calls.some((call) => call[2]?.event === "connection.opened"), "hello");
-  const connection = () => [...(gateway as unknown as { clients: Map<string, { unansweredHeartbeats: number }> }).clients.values()][0];
+  const connection = () => [...(gateway as unknown as { clients: Map<string, { unansweredHeartbeats: number; lastClientInitiatedInboundAt: number | null }> }).clients.values()][0];
 
   const observations: TickObservation[] = [];
   const start = now;
@@ -229,6 +233,13 @@ async function observeHeartbeats(script: ClientScript, ticks: number, options: H
       socket.ping();
       // The Gateway handles the ping in the same callback that answers it.
       await realWait(() => clientPongs === expected || closed, `second ${second} client ping`);
+    }
+    if (!closed && options.messagesAt?.(second) === true) {
+      const before = connection()?.lastClientInitiatedInboundAt ?? null;
+      // An application frame, not a ping: it makes the next tick skip its ping
+      // without arming the client's own-ping liveness signal.
+      socket.send(JSON.stringify({ type: "probe" }));
+      await realWait(() => (connection()?.lastClientInitiatedInboundAt ?? null) !== before, `second ${second} client message`);
     }
     options.afterSecond?.(second);
   }
@@ -276,6 +287,23 @@ describe("Gateway heartbeat pings", () => {
     const lookup = vi.fn(async (): Promise<PeerPathLookup> => ({ peerPath: "unknown", peerRelay: "" }));
     const observations = await observeHeartbeats({ autoPong: true }, 8, { peerPathReader: { lookup } });
     expect(pingedTicks(observations)).toEqual([1, 2, 3, 4, 5, 6, 7, 8]);
+    expect(closedAtTick(observations)).toBeUndefined();
+    expect(loggedRecords("connection.inbound-silent")).toEqual([]);
+    expect(loggedRecords("connection.inbound-resumed")).toEqual([]);
+    expect(lookup).not.toHaveBeenCalled();
+  });
+
+  it("never reports a pong-only client silent when its own frame lands mid-interval", async () => {
+    // Hello at second 0, one application frame at second 7, then pong-only. The
+    // tick at 25 s skips its ping (18 s of client-initiated quiet) but the tick
+    // at 50 s finds no unanswered ping, so nothing was ever asked and nothing
+    // is reported: the tick counts a miss for bookkeeping, not for silence.
+    const lookup = vi.fn(async (): Promise<PeerPathLookup> => ({ peerPath: "unknown", peerRelay: "" }));
+    const observations = await observeHeartbeats({ autoPong: true }, 8, {
+      peerPathReader: { lookup },
+      messagesAt: (second) => second === 7,
+    });
+    expect(pingedTicks(observations)).toEqual([2, 3, 4, 5, 6, 7, 8]);
     expect(closedAtTick(observations)).toBeUndefined();
     expect(loggedRecords("connection.inbound-silent")).toEqual([]);
     expect(loggedRecords("connection.inbound-resumed")).toEqual([]);
@@ -372,6 +400,30 @@ describe("Gateway heartbeat pings", () => {
     expect(resumed).toHaveLength(1);
     expect(resumed[0]!.fields).toMatchObject({ silentMs: 47_000 });
     expect(silent[0]!.index).toBeLessThan(resumed[0]!.index);
+    expect(closedAtTick(observations)).toBeUndefined();
+  });
+
+  it("shows a blackholed pong-only path once its ping goes unanswered", async () => {
+    // The path carries nothing between seconds 20 and 60, so the tick at 25 s
+    // pings into it and the tick at 50 s reports that unanswered ping; the
+    // pongs released at 60 s end the episode without closing the socket. A
+    // client that only answers pings is therefore still detected when its path
+    // is genuinely down.
+    const lookup = vi.fn(async (): Promise<PeerPathLookup> => ({ peerPath: "relay", peerRelay: "sfo" }));
+    const observations = await observeHeartbeats({ autoPong: true }, 4, {
+      peerPathReader: { lookup },
+      blackhole: { from: 20, to: 60 },
+    });
+    const silent = loggedRecords("connection.inbound-silent");
+    const resumed = loggedRecords("connection.inbound-resumed");
+    expect(silent).toHaveLength(1);
+    expect(silent[0]!.level).toBe("warning");
+    expect(silent[0]!.message).toContain("50000ms");
+    expect(silent[0]!.fields).toMatchObject({ peerPath: "relay", peerRelay: "sfo" });
+    expect(resumed).toHaveLength(1);
+    expect(resumed[0]!.fields.silentMs).toBeGreaterThanOrEqual(50_000);
+    expect(silent[0]!.index).toBeLessThan(resumed[0]!.index);
+    expect(lookup).toHaveBeenCalledTimes(1);
     expect(closedAtTick(observations)).toBeUndefined();
   });
 

@@ -142,7 +142,7 @@ function isTailscaleAddress(address: string): boolean {
 
 function runStatus(tool: string, args: readonly string[], timeoutMs: number): Promise<TailscaleStatusResult> {
   return new Promise((resolve) => {
-    execFile(tool, [...args], { timeout: timeoutMs, maxBuffer: MAXIMUM_STATUS_BYTES, encoding: "utf8" }, (error, stdout) => {
+    execFile(tool, [...args], { timeout: timeoutMs, killSignal: "SIGKILL", maxBuffer: MAXIMUM_STATUS_BYTES, encoding: "utf8" }, (error, stdout) => {
       if (!error) {
         resolve({ code: 0, timedOut: false, output: stdout });
         return;
@@ -177,12 +177,13 @@ export class TailscalePeerPaths implements PeerPathReader {
   }
 
   /** One read per reuse window and one read in flight. The read is bounded by
-   * one wall-clock timer, not by `execFile` settling: a child that ignores
-   * SIGTERM, or a grandchild holding the pipe open, never fires the callback,
-   * and a read that never settles would keep `inFlight` set and suppress every
-   * later silence record for the life of the process. A failed read is cached
-   * like a successful one, so a missing CLI cannot spawn a process per silent
-   * socket. */
+   * one wall-clock timer, not by `execFile` settling: a killed child whose
+   * grandchild holds the pipe open never fires the callback, and a read that
+   * never settles would keep `inFlight` set and suppress every later silence
+   * record for the life of the process. `execFile` also ends the child with
+   * SIGKILL at its own timeout, so one ignored SIGTERM cannot leave a process
+   * running per reuse window. A failed read is cached like a successful one, so
+   * a missing CLI cannot spawn a process per silent socket. */
   private status(): Promise<readonly TailscalePeer[]> {
     const cached = this.cached;
     if (cached !== undefined && this.now() - cached.at < TAILSCALE_RESULT_REUSE_MS) return Promise.resolve(cached.peers);

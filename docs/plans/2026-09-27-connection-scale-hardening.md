@@ -1760,8 +1760,9 @@ a latency percentile.
   (`packages/gateway/src/transport/tailscale-peer.ts`): the existing CLI
   candidates, a 2 s timeout, one read in flight, the result reused for 10 s,
   joined to the socket's remote address (IPv4-mapped IPv6 normalised). It never
-  rejects, never delays a heartbeat, and `admin/diagnose.ts` now imports the
-  shared candidate list instead of spelling its own.
+  rejects, never delays a heartbeat, and `admin/diagnose.ts` now imports
+  `readTailscaleStatus` and `classifyPeer` from it instead of keeping its own
+  candidate loop, parse and path expression.
 - O-1's leftover review finding is closed: `connection-resilience.md` no longer
   says client-side and server-side connection IDs are different namespaces to be
   matched by time. "Collect evidence before recovery" now joins by the O-1 key
@@ -1810,15 +1811,20 @@ a latency percentile.
     order, with the socket never closed. A second case gates the path read until
     after the socket speaks again: `silentMs` is exactly 27,000 ms and the
     silence record still precedes the resume record.
-- Changes: `feat(gateway): record upgrade phases and inbound silence (O-2)`, then
-  `fix(gateway): close the O-2 review findings` (see the review response below).
+- Changes: `feat(gateway): record upgrade phases and inbound silence (O-2)`,
+  `fix(gateway): close the O-2 review findings`, then the second reviewer's
+  round (see the two review responses below).
 - Tasks added: none.
 - Kept on purpose: `http.upgrade` for the Mac app's constant local probes is
   debug, like `connection.opened`, so it stays in the memory-only buffer; the
   unreported trace is finished in `disconnect`, not in `closeFailedConnection`,
-  so a socket that never got past hello is `abandoned` whichever side ended it.
+  so a socket that never got past hello is `abandoned` whichever side ended it,
+  and the second reviewer's round named the Gateway-side endings in `reason`
+  (`hello_timeout`, `shutting_down`) rather than splitting that outcome.
   Readiness and shutdown refusals are `info` on `http.upgrade` (they are
-  expected and clients retry), so a startup retry storm adds no warnings.
+  expected and clients retry), so a startup retry storm adds no warnings; the
+  shutdown destruction of a socket that never reached hello keeps the default
+  warning level, where it already was.
 - Reviewer's round (changes-required, 2026-09-28) and this response:
   - **Blocker, fixed — a pong-only client was reported silent on every tick.**
     A client that only answers the Gateway's pings is idle between them and its
@@ -1826,11 +1832,13 @@ a latency percentile.
     wrote a false `connection.inbound-silent` per tick and ran the Tailscale CLI
     on a 25 s timer. `observeInboundSilence` now opens an episode only when
     liveness was expected: a server ping is unanswered
-    (`unansweredHeartbeats > 0`), or the client pings on its own
-    (`lastClientPingAt`, set by the socket's `ping` handler) and has been quiet
-    for the threshold. The pong-only heartbeat case now asserts no silence and
-    no resume record and that the injected path reader is never called; a
-    temporary revert of the guard reproduced 8 false records in that case.
+    (`unansweredHeartbeats > 0` in this round; the second review showed that
+    count includes ticks that skipped the ping — see below), or the client pings
+    on its own (`lastClientPingAt`, set by the socket's `ping` handler) and has
+    been quiet for the threshold. The pong-only heartbeat case now asserts no
+    silence and no resume record and that the injected path reader is never
+    called; a temporary revert of the guard reproduced 8 false records in that
+    case.
   - **Major, fixed — a peer that left during authentication looked like a
     request-phase refusal.** The aborted credential read now records its cause
     (`retirePendingUpgrade("peer" | "timeout")`), and the `catch` writes
@@ -1887,6 +1895,58 @@ a latency percentile.
   refused WebSocket handshake, non-JSON first frame, offline peer in the bundle);
   the eight neighboring suites still pass 92/92;
   `check-documentation-policy.py` and `personal-info-guard.sh` pass.
+- Second reviewer's round (changes-required, 2026-09-28, against commit
+  `bbde19b8f`) and this response:
+  - **Major, fixed — a skipped ping was counted as an unanswered one.** The
+    round-1 guard tested `unansweredHeartbeats > 0`, but that counter counts
+    ticks: a tick that skips its ping (the client spoke within the last
+    interval) still increments it. A pong-only client whose own frame landed
+    mid-interval carried a miss into the next tick and was reported silent, once
+    per such episode, which also falsified the "a day with no path outage adds
+    neither" pair claim. `Connection.pingOutstandingSince` now records the tick
+    whose `socket.ping()` really went out and `noteInbound` clears it, so an
+    episode needs a ping the Gateway actually sent. `server-heartbeat.
+    integration.test.ts` gained the reviewer's shape (hello at second 0, one
+    application frame at second 7, pong-only after): no silence record, no
+    resume record, no path read, and the documented one-tick ping transition
+    (`pingedTicks` `[2..8]`). Reverting the guard to the miss count reproduces
+    one `connection.inbound-silent` "has sent nothing for 43000ms" and its
+    resume.
+  - **Minor, fixed — the resilience rows for the upgrade records were wrong.**
+    `authentication_timeout` is `rejected/auth`, not `abandoned/auth`: the
+    `outcome=abandoned` + `phaseReached=auth` row now covers `peer_closed` and
+    `shutting_down` only, the `reason=authentication_timeout` row says the
+    Gateway refused it, and the `outcome=rejected` row lists
+    `authentication_timeout` (auth) and `unreadable_request` (request).
+  - **Minor, fixed — closes the Gateway started were recorded as
+    `peer_closed`.** The hello deadline writes `abandoned/handshake/
+    hello_timeout` before it closes the socket; shutdown writes
+    `abandoned/handshake/shutting_down` for a socket that never sent hello and
+    `abandoned/auth/shutting_down` for a credential wait it destroys (registered
+    per upgrade, ended at the shutdown destroy). `hello_timeout` joined the
+    `UpgradeEnding` union, the observability `reason` list and both resilience
+    rows; `server-http-lifecycle.integration.test.ts` gained one case for the
+    deadline and one per shutdown path, and reverting the three call sites
+    reproduces `peer_closed` in each.
+  - **Nit, fixed — `observability.md` no longer lists deleted records** in the
+    `http.upgrade` why column and says which side each cause names; the
+    `connection.rejected` literal assertion was deleted from
+    `server-http-lifecycle.integration.test.ts` (the `reason` field covers it).
+  - **Nit, fixed — the status read kills a child that ignores SIGTERM.**
+    `execFile` now gets `killSignal: "SIGKILL"`, so one ignored SIGTERM cannot
+    leave a process per 10 s reuse window behind the shared reader.
+  - **Rejected: none.** Every review item was addressed.
+- Second-round evidence: `npm run build` clean; `npx tsc --noEmit -p .` clean;
+  the same 11-file focused set passes **105/105** (five new cases: the
+  mid-interval pong-only client, the blackholed pong-only path once its ping
+  goes unanswered, the hello deadline, shutdown before hello, shutdown during
+  authentication). The reviewer's own repros now pass against
+  the rebuilt dist: `pong-after-message.mjs` prints no silence, no resume and 0
+  path lookups, and `hello-deadline.mjs` prints
+  `abandoned/handshake/hello_timeout`. Outputs, the focused run and the
+  negative controls (guard reverted: one false `has sent nothing for 43000ms`;
+  endings reverted: `peer_closed` in all three cases) are retained in the
+  internal workspace under `files/hardening/o-2-round2/`.
 - Deviations:
   - The record fields needed the writer's shape: `logger.ts` gained
     `phaseReached`, the four duration fields, `peerPath`, `peerRelay` and
@@ -1909,7 +1969,11 @@ a latency percentile.
     host while the parallel hardening workers loaded it (load average 16-24):
     16.6 s on this branch, 14.8 s on an untouched worktree of the same commit's
     parent, 7.8 s and 2.8 s when the host was quieter. No group of changes here
-    touches that path; treat it as a host-load flake, not a regression.
+    touches that path; treat it as a host-load flake, not a regression. The
+    second round saw the same kind of flake in
+    `request-span.integration.test.ts` (a wall-clock assertion, "expected 99 to
+    be greater than 100", at load average 27): it passes in isolation and in the
+    next run of the whole focused set.
 - For the next agent: the fixture-proxy blackhole above is the evidence the
   **orchestrator accepted** for O-2's "Done when"; the confirmation in O-6b's
   qualification blackhole run is the orchestrator's, at the baseline/R-1 runs,

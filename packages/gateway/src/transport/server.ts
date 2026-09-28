@@ -436,8 +436,8 @@ interface UpgradeEnding {
   reason:
     | "request_capacity" | "unexpected_path" | "warming_up" | "shutting_down"
     | "connection_capacity" | "unauthenticated" | "unreadable_request" | "peer_closed"
-    | "authentication_timeout" | "handshake_refused" | "hello_required" | "protocol_mismatch"
-    | "invalid_frame" | "hello";
+    | "authentication_timeout" | "handshake_refused" | "hello_timeout" | "hello_required"
+    | "protocol_mismatch" | "invalid_frame" | "hello";
   /** The O-1 peer key, once hello named it. */
   peer?: PeerDiagnostics;
   /** Overrides the level rule for an ending the Gateway expects and clients
@@ -487,6 +487,11 @@ interface Connection {
   /** The open inbound-silence episode, if the socket is silent now. */
   silence?: SilenceEpisode | undefined;
   unansweredHeartbeats: number;
+  // When the Gateway's own last ping went out, cleared by any inbound frame.
+  // `unansweredHeartbeats` counts ticks, including ticks that skipped the ping
+  // for a client that had just spoken, so only this field says a ping is
+  // actually outstanding.
+  pingOutstandingSince: number | null;
   ready: boolean;
   presentationOnly: boolean;
   terminals: Set<string>;
@@ -616,6 +621,9 @@ export class GatewayServer {
   private readonly pairedSockets: WebSocketServer;
   private readonly clients = new Map<string, Connection>();
   private readonly httpSockets = new Set<Duplex>();
+  /** Pending WebSocket upgrades, ended by shutdown with the Gateway as the
+   * cause: a socket the Gateway destroys is not a peer departure. */
+  private readonly pendingUpgrades = new Set<() => void>();
   private readonly httpConnectionsByAddress = new Map<string, number>();
   /** The TCP accept instant per HTTP socket, so an upgrade record can say how
    * long the request waited before Node dispatched it. */
@@ -756,6 +764,7 @@ export class GatewayServer {
         const clientInitiatedAt = connection.lastClientInitiatedInboundAt;
         if (clientInitiatedAt === null
           || heartbeatAt - clientInitiatedAt >= GATEWAY_CONNECTION_POLICY.heartbeatIntervalMs) {
+          connection.pingOutstandingSince = heartbeatAt;
           connection.socket.ping();
         }
       }
@@ -1334,6 +1343,13 @@ export class GatewayServer {
     // record can say which one did: a peer that leaves is abandoned, an expired
     // authentication deadline is a refusal.
     let retireCause: "peer" | "timeout" | null = null;
+    // Shutdown destroys this socket too. Registered so the record names the
+    // Gateway as the cause instead of reporting the peer as leaving.
+    const endPendingUpgradeAtShutdown = (): void => {
+      trace.authMs ??= performance.now() - trace.startedAt;
+      this.finishUpgrade(trace, "abandoned", "auth", "Gateway shutdown during authentication", { reason: "shutting_down" });
+    };
+    this.pendingUpgrades.add(endPendingUpgradeAtShutdown);
     const retirePendingUpgrade = (cause: "peer" | "timeout"): void => {
       retireCause ??= cause;
       readLifetime.abort();
@@ -1346,6 +1362,7 @@ export class GatewayServer {
     const authenticationDeadline = setTimeout(() => retirePendingUpgrade("timeout"), HTTP_REQUEST_IDLE_TIMEOUT_MS);
     authenticationDeadline.unref();
     const releasePendingUpgrade = (): void => {
+      this.pendingUpgrades.delete(endPendingUpgradeAtShutdown);
       clearTimeout(authenticationDeadline);
       socket.off("end", retireForPeer);
       socket.off("error", retireForPeer);
@@ -1560,7 +1577,13 @@ export class GatewayServer {
       lastClientInitiatedInboundAt: null,
       lastClientPingAt: null,
       lastWriteProgressAt: null,
-      helloTimer: setTimeout(() => this.closeFailedConnection(connection, 1008, "hello required"), GATEWAY_CONNECTION_POLICY.helloDeadlineMs),
+      pingOutstandingSince: null,
+      helloTimer: setTimeout(() => {
+        // The Gateway's own deadline ended this attempt, so the record must not
+        // name the peer as the cause.
+        this.finishUpgrade(connection.upgrade, "abandoned", "handshake", "hello deadline", { reason: "hello_timeout" });
+        this.closeFailedConnection(connection, 1008, "hello required");
+      }, GATEWAY_CONNECTION_POLICY.helloDeadlineMs),
     };
     this.clients.set(connection.id, connection);
     upgrade.connectionId = connection.id;
@@ -2300,6 +2323,7 @@ export class GatewayServer {
   private noteInbound(connection: Connection, clientInitiated: boolean): void {
     const inboundAt = performance.now();
     connection.unansweredHeartbeats = 0;
+    connection.pingOutstandingSince = null;
     connection.lastInboundAt = inboundAt;
     if (clientInitiated) connection.lastClientInitiatedInboundAt = inboundAt;
     const episode = connection.silence;
@@ -2318,11 +2342,12 @@ export class GatewayServer {
     const startedAt = connection.lastInboundAt ?? connection.admittedAt;
     if (heartbeatAt - startedAt < INBOUND_SILENCE_WARNING_MS) return;
     // A client that only answers the Gateway's pings is idle between them, not
-    // cut off: its silence says nothing until a ping goes unanswered. A client
-    // that pings on its own (the phone, every ten seconds) proves liveness
-    // without being asked, so silence past the threshold is the path going
-    // quiet. Without this, a pong-only client reports silence on every tick.
-    const pingUnanswered = connection.unansweredHeartbeats > 0;
+    // cut off: its silence says nothing until a ping the Gateway actually sent
+    // goes unanswered. A client that pings on its own (the phone, every ten
+    // seconds) proves liveness without being asked, so silence past the
+    // threshold is the path going quiet. Without this, a pong-only client
+    // reports silence on every tick.
+    const pingUnanswered = connection.pingOutstandingSince !== null;
     const clientPingsOnItsOwn = connection.lastClientPingAt !== null;
     if (!pingUnanswered && !clientPingsOnItsOwn) return;
     const episode: SilenceEpisode = {
@@ -2385,6 +2410,11 @@ export class GatewayServer {
     this.stallSampler.dispose();
     this.resourceSampler.dispose();
     for (const client of this.clients.values()) {
+      // The Gateway ends this socket, not its peer: a socket that never said
+      // hello must not be recorded as a peer departure when the process stops.
+      if (!client.ready) {
+        this.finishUpgrade(client.upgrade, "abandoned", "handshake", "Gateway shutdown before hello", { reason: "shutting_down" });
+      }
       const stoppingAccepted = this.send(client, { type: "event", topic: "system.stopping", payload: {} });
       this.retireConnectionWork(client);
       if (!stoppingAccepted) {
@@ -2421,6 +2451,9 @@ export class GatewayServer {
       });
     });
     forceHttpClose = setTimeout(() => {
+      // The Gateway stops these pending upgrades too, at whatever phase they
+      // reached; each record is written before its socket is destroyed.
+      for (const endPendingUpgrade of this.pendingUpgrades) endPendingUpgrade();
       for (const socket of this.httpSockets) socket.destroy();
       if (httpClosed) clearTimeout(forceHttpClose);
     }, HTTP_SHUTDOWN_GRACE_MS);
