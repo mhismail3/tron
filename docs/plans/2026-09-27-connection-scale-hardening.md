@@ -16,6 +16,10 @@
 
 - **Last updated:** 2026-09-28, G-7 (final review round addressed: an unchanged catalog answer rebuilds the row projection, a cleared automation marker moves the catalog token)
 
+- **Last updated:** 2026-09-28, C-1 final review round (a failed probe re-parks; a park cannot take over an in-flight connect or pairing)
+
+- **Last updated:** 2026-09-28, C-1 review round addressed and its E2E re-run passed (Done)
+
 - **Last updated:** 2026-09-28, G-3 review round 2 addressed: the `unaudiencedSnapshotBuilds` warning and its test are now stated as a tripwire for a lost slot guard or a divergence between the registry's subscription record and the transport's, not for a closing socket
 
 - **Last updated:** 2026-09-28, C-4 (second review round addressed)
@@ -572,14 +576,14 @@ rows are in priority order.
 | O-6b | Blocked | Impairment in the qualification scenario: blackhole, bandwidth cap, Gateway restart | O-6a | orchestrator-dispatched deepseek-worker, 2026-09-28 (fifth review response) |
 | O-5 | Done | Gateway resource sampler and event-loop histogram | O-3 | orchestrator-dispatched deepseek-worker, 2026-09-28 |
 | O-7 | Done | Incident triage tool: phone export plus Gateway log in, episodes by cause out | O-1, O-2, O-4 | orchestrator-dispatched deepseek-worker, 2026-09-28; review rounds 1-4 addressed (attribution, older-export records and attempts, Tailscale capture, scene splits, recovery-handshake and attempt ownership, relay-window coverage). Blocked because the incident export does not reproduce all four Context causes: cause 4 has no `gateway-stall` episode of its own (its only candidate is a slow span on a socket already closed), the run reads 121 episodes against Context's 77 reconnect episodes, `phone-stall=2` where one wrong-label cause was counted, and `gateway-capacity=0` because the only capacity event predates the export (see the handoff) |
-| C-1 | Claimed | Projection work never blocks or parks reconnect; parked episodes self-resume | O-4, O-6b | orchestrator-dispatched deepseek-worker, 2026-09-28 |
+| C-1 | Done | Projection work never blocks or parks reconnect; parked episodes self-resume | O-4, O-6b | orchestrator-dispatched deepseek-worker, 2026-09-28 (review round addressed; E2E re-run passed, run `20260928T193255Z-run.E6rrDl`) |
 | G-1a | Done | Catalog owner and in-memory index fed by Gateway-owned changes | O-3, O-6a | orchestrator-dispatched deepseek-worker, 2026-09-28 |
 | G-1b | Done | Filesystem watcher and background reconciliation for external writers | G-1a | orchestrator-dispatched deepseek-worker, 2026-09-28 (the O-6a confirmation of the Done-when is owed by the orchestrator) |
 | G-1c | Claimed | Move every catalog reader to the index; delete request-path walks and the full-parse fallback | G-1b | orchestrator-dispatched deepseek-worker, 2026-09-28 |
 | G-1d | Ready | Replace the catalog wording in `connection-resilience.md` with the index contract (D-3) | G-1c | |
 | G-3 | Done | No audience, no projection: build and serialize snapshots only for subscribers | O-5, O-6a | orchestrator-dispatched deepseek-worker, 2026-09-28 (branch `hardening/g-3`; review round 1 addressed; CPU comparison and O-5's cross-check owed to the orchestrator) |
 | G-3a | Ready | Streaming progress for a session with no subscriber is still projected (`projectMessage` plus `safeJson` of the full message, up to once per 150 ms each); see G-3 handoff and review nit 8 | G-3 | |
-| C-2 | Ready | "Connected" follows the transport (D-2); chat restoration shows its own loading state | C-1 | |
+| C-2 | Claimed | "Connected" follows the transport (D-2); chat restoration shows its own loading state | C-1 | orchestrator-dispatched deepseek-worker, 2026-09-28 |
 | C-5 | Done | Back off an unreachable non-selected Gateway profile; record pool attempts and episodes | O-4 | orchestrator-dispatched deepseek-worker, 2026-09-28 |
 | G-10 | Done | Durable-write audit: no process-wide serialization of fsyncs, no fsync on reads | O-5 | orchestrator-dispatched deepseek-worker, 2026-09-28 |
 | G-10a | Done | Connection owner: a read (e.g. knowledge.raindrop.read) must not fsync — skip an unchanged provider observation in ConnectionOwner.recordProviderObservation, preserving stateRevision/updatedAt semantics | G-10 | orchestrator-dispatched deepseek-worker, 2026-09-28 |
@@ -607,6 +611,7 @@ rows are in priority order.
 | T-1 | Ready | Pre-existing test race: registry extension-artifact discovery tests treat an awaited `discoverExtensionArtifacts()` as a barrier; wait for a pass that settles (three tests, one a false green) | G-1a (Registry zone) | |
 | T-2 | Done | `GatewayConnectionEpisodeRecorderTests/blockedMainActorIsMeasuredAndReported` (O-4) was killed once ("Test crashed with signal kill") when run with four other suites on integration, then passed 3/3; find whether the 5 s main-thread block trips a hosted-test watchdog and bound the block so the test cannot be killed while still proving the stall record | O-4 | orchestrator-dispatched deepseek-worker, 2026-09-28; no hosted-test watchdog exists (a 5 + 10 + 20 s block probe passed); the kill came from another worktree's run on the same default-lane simulator (`E816D194…`), not from the block — see the T-2 handoff and T-3; the block is now the named `mainStallTestBlock` (5 s) in both phases |
 | T-3 | Done | Default-lane iOS runs must serialize on `~/.tron/internal/ios-test/lease.lock`, but runs from three worktrees held the one owned simulator (`E816D194…`) at the same time and killed each other's host app (see the T-2 handoff); the lease was bypassed because `--lane NAME` was consumed by the lease holder and not passed to the command it started, so the command leased the named/other lane while provisioning the default lane's simulator (`ios-test-G7*` lanes: lease file, no marker); the lane now travels with the command and a command that inherits a lease for another lane is refused | none | orchestrator-dispatched deepseek-worker, 2026-09-28 |
+| T-4 | Claimed | `GatewayLogExportTests/byteEnvelopeReservesTheChatTrace` is SIGKILLed when it shares a test process with `GatewayConnectionEpisodeRecorderTests` (main-stall test blocks the main thread twice for 4 s); each passes alone (bundles `20260928T203739Z-run.InevV5`, `20260928T201219Z-run.jNGHmH`). Find the killer and make both robust in one process | T-2 | orchestrator-dispatched deepseek-worker, 2026-09-28 |
 | C-7 | Claimed | Dashboard-pool event consumption stops after a failed initial connect (see the C-5 handoff): a successful reconnect brings the socket back but nothing consumes `client.events`, so a background profile stops receiving summaries, `system.stopping` and `transport.disconnected` until its entry is recreated | C-2 | orchestrator-dispatched deepseek-worker, 2026-09-28 |
 
 ### Phase 2 — Release and one evaluation day
@@ -8023,3 +8028,118 @@ wait).
   `onSecureConnection`; `selfSignedCertificate`'s serial stays 16 random bytes.
 - Left: the lane bounds case waits out the real 15 s header bound (~16 s), since
   Node enforces it with its own timers.
+
+### C-1 · Done · 2026-09-28 · orchestrator-dispatched deepseek-worker (branch `hardening/c-1`)
+
+- Result: reconnect runs beneath the projection, parked episodes self-resume and
+  their reason is recorded; the review round is addressed and the E2E case
+  passed with its `phone-connection-records` attachment.
+- Changes (the first commit is the C-1 implementation; the second is the review
+  round):
+  - `GatewayLifecycleCoordinator.swift`: a replacement attempt ends at the
+    authenticated handshake plus event activation. `beginDeferredProjection`
+    hands mounted restoration, refresh and terminal reattachment to one
+    presentation-owned task beneath that socket; the socket's loss cancels it
+    and settles the reconciliation aggregate it was reconciling, so a cancelled
+    projection cannot leave `isReconcilingForeground` true. `PARKED_RETRY_BOUND`
+    (30 s) arms `parkedRetryTask` when the last path hint said unsatisfied; a
+    foreground activation probes the same way. Parking is the only owner of the
+    state it publishes, and the non-retryable, unpaired and authorization stops
+    are refused before the unsatisfied-path branch, so a stop the user must clear
+    keeps its Retry surface. Every early return names its refusing guard once
+    (`reconnect.skipped`); `reconnect.parked`/`reconnect.parked-resume` name a
+    park and its resume.
+  - `AppModel.lifecycleRecordDiagnostic` records those three kinds (the
+    production sink dropped them before), and `observability.md` documents them
+    as `gateway.lifecycle` kinds rather than separate events.
+  - Deleted: the superseded post-connect stage/attempt-ID shape
+    (`handshakeRecorded`, `attemptStage`/`attemptID` parameters, the recorder's
+    `isPostConnect` branch, `postConnectStage`/`postConnectAttemptID`) with its
+    test, `BlockedRefreshProjection`, and the now-unused `episodeDate` helper.
+  - Tests: the two connected-export tests wait for the presentation-owned
+    diagnostics readiness; a non-retryable stop is tested against the
+    notification route poll (isolated coordinator test and one through AppModel);
+    park, resume and refusal are tested through the real AppModel into the phone
+    diagnostic log. `StallingRestoreProjection.stallNextRestore()` is one-shot:
+    a sticky arm stalled the reconnect's own restoration, and the lifecycle
+    teardown then waited on it forever (that is what timed out the first E2E
+    re-run after the second-outage assertion had passed).
+- Evidence:
+  - `scripts/tron-ios-test build`; `AppModelReconnectTests` 42/42;
+    `GatewayLogExportTests`, `GatewayConnectionEpisodeRecorderTests`,
+    `SessionPresentationStoreTests`, `AppModelLifecycleTests`,
+    `AppModelCatalogSyncTests` 129/129.
+  - `scripts/ios-gateway-e2e-test prepare/build/run` (plain Node 22.22.0, run
+    `20260928T193255Z-run.E6rrDl`): `testStreamsReconnectsAndSettlesExtensionTools`
+    passed in 174.6 s (summary `result=Passed`). Its `phone-connection-records`
+    attachment (copied to
+    `~/.tron/workspace/files/hardening/c-1-phone-connection-records-20260928T193255Z.txt`,
+    with `c-1-e2e-summary-20260928T193255Z.json`) shows the 90 s outage as eight
+    attempts (`retry=1..8`, `stageReached=hello-receive`, ~5.04 s each, delays
+    0/1946/3981/6204/8557/12401/12904/13737 ms), one `connection.episode`
+    `attempts=8 maxGapBetweenAttemptsMs=18776 endedBy=connected`, recovery on the
+    attempt that followed the path's return, zero `reconnect.stalled`, and the
+    second blackhole answered by attempt `51F65C01` (failure then success) while
+    `StallingRestoreProjection` was still stalling.
+- Deviations:
+  - `becameActive` and the parked bound pass `ignoresPathHint: true`: one probe
+    attempt is spent, and a failed probe re-parks with a fresh bound.
+  - `reconnectStallGuard`'s `pathUnsatisfied`/`reconnectTaskBusy` cases are no
+    longer reachable for a park (the pool still uses `pathUnsatisfied`); the enum
+    is C-5's owning file.
+  - Two of the plan's five failure modes have no new C-1 test: "background during
+    an in-flight attempt" is covered by
+    `AppModelReconnectTests.backgroundBeforeFirstHelloResumesSelectedProfile`
+    (the scene backgrounds while the startup attempt's hello is in flight, its
+    late cache completion is fenced and foreground resumes once), and the single
+    `enteredBackground` cancellation owner means a reconnect-loop attempt adds no
+    new path; "two profiles" belongs to the dashboard pool's owner (C-5,
+    `DashboardStateOwnerTests`) because C-1's reconnect admits only the selected
+    profile.
+  - `beginRestarting` (pre-existing) still publishes `.restarting` and then
+    `.reconnecting` from its 90 s watchdog before `requestReconnect` can refuse
+    on a non-retryable stop, which leaves the same "no Retry" state the review's
+    third finding described. It is not reachable from the reviewed path (it needs
+    a `system.stopping` event while recovery is stopped) and was left out of this
+    task's scope: propose it as a follow-up row.
+  - The E2E harness's run-phase ceilings remain raised
+    (`scripts/ios-gateway-e2e-test`: 600 s overall, 300 s of silence).
+- What is left (the next agent, not this one):
+  1. Optional follow-up: whichever owner takes the `.restarting` watchdog should
+     make it refuse a non-retryable stop instead of publishing a recovery state.
+  2. Do not run the harness's install step through a symlinked
+     `packages/gateway/node_modules`: its `npm ci` empties the shared install. The
+     lane is shared with `scripts/tron-ios-test`, so a `run` waits for whichever
+     process holds the lease.
+
+### C-1 · 2026-09-28 · final review round (same lane)
+
+- Both findings fixed in one commit on top of the integration merge:
+  - The reconnect loop's retryable-failure path parks when the last hint still
+    reads unsatisfied, so the bound's (or a foreground's) failed probe re-parks
+    with a fresh bound instead of ending the episode silently.
+  - `parkRecovery` refuses while `connectionAdmissionTask`, `committedConnectionTask`
+    or `pairingAttempt` is in flight; each of those owners calls the new
+    `parkUnsatisfiedPathWhenIdle` when it releases the attempt, so the refusal
+    cannot become a silent gap of its own (pairing included, which the review's
+    prescribed guard alone would have missed).
+- Evidence: `AppModelReconnectTests` 45/45 (3 new: bound probe fails -> second
+  park, fresh bound, second attempt, zero `reconnect.stalled` over 20 s;
+  foreground probe fails -> same; a path hint cannot park over the initial
+  connect, state stays `.connecting` and no bound is armed), `AppModelPairingAttemptTests`
+  8/8 (1 new: a path hint cannot park over the pairing that owns the connect),
+  `AppModelLifecycleTests` 9/9, `GatewayConnectionEpisodeRecorderTests` 4/4,
+  `GatewayLogExportTests` 17/17 alone.
+  - Not C-1: `GatewayLogExportTests`' `byteEnvelopeReservesTheChatTrace` is
+    killed (SIGKILL, no assertion) whenever it shares a process with
+    `GatewayConnectionEpisodeRecorderTests`, whose main-stall test blocks the
+    main thread for two 4 s phases (T-2). Each suite passes alone, and it also
+    fails in that pair with every new C-1 test disabled, so the coordinator fix
+    is not the trigger; the pair passed before this merge. Retained bundles:
+    `~/Library/Developer/Tron/ios/test-runs/20260928T203739Z-run.InevV5` (crash)
+    and `20260928T201219Z-run.jNGHmH` (log export alone, green).
+- Negative controls: reverting each hunk failed its own tests (probe tests; the
+  two path-hint tests) and passed the other's, then the fix was restored.
+- Gateway gate after merging `hardening/integration`: the six transport
+  integration files 131/131, `runtime-registry.integration.test.ts` 257/257,
+  `npx tsc --noEmit -p .` clean.
