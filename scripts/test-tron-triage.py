@@ -23,6 +23,12 @@ per cause in the hardening plan's Context plus the joins and the input contract:
 9. A run that writes to one of its inputs.
 10. An unreadable line counted as a record, or the run refusing to finish.
 
+`ReviewRegressionTests` covers the shapes a review of the first pass found:
+a slow span that ended after the episode, another connection's slow span in a
+key-joined episode, the app's real scene records, the settings pool's
+second-profile attempt, a request issued before the loss, and one attempt
+recorded by both phone shapes.
+
 The fixtures are small, sanitized records with the real shapes: phone rows are
 `AppLogRecord` JSON with details in the message, and Gateway rows are
 `gateway.jsonl` records with typed fields. The report of the full run is kept
@@ -35,6 +41,7 @@ from __future__ import annotations
 import json
 import os
 from pathlib import Path
+import shlex
 import subprocess
 import sys
 import tempfile
@@ -68,6 +75,12 @@ def app_record(timestamp, event, message, level="info", outcome=None, duration_m
     if lifecycle_generation is not None:
         record["lifecycleGeneration"] = lifecycle_generation
     return record
+
+
+def local_compact(instant):
+    """A `log show --style compact` timestamp for a UTC instant, in local time."""
+    parsed = tron_triage.parse_timestamp(instant)
+    return parsed.astimezone().strftime("%Y-%m-%d %H:%M:%S.%f")
 
 
 def gateway_record(timestamp, event, level, message, **fields):
@@ -134,6 +147,18 @@ class TriageFixture(unittest.TestCase):
         completed = subprocess.run(arguments, capture_output=True, text=True, timeout=120)
         self.assertEqual(completed.returncode, 0, completed.stderr)
         return json.loads(completed.stdout) if json_output else completed.stdout
+
+    def log_show(self, text, returncode=0):
+        """A fixture `log` executable, so no test hook lives in the tool."""
+        path = self.root / "fake-log"
+        path.write_text("#!/bin/sh\n"
+                        f"printf '%s' {shlex.quote(text)}\n"
+                        f"exit {returncode}\n", encoding="utf-8")
+        path.chmod(0o755)
+        previous = tron_triage.TAILSCALE_LOG_TOOL
+        tron_triage.TAILSCALE_LOG_TOOL = str(path)
+        self.addCleanup(setattr, tron_triage, "TAILSCALE_LOG_TOOL", previous)
+        return path
 
     def only_episode(self, report):
         self.assertEqual(report["summary"]["episodes"], 1, report["episodes"])
@@ -415,15 +440,19 @@ class JoinTests(TriageFixture):
                     gateway_connection_id="gw-6"),
             episode("2026-09-28T08:00:00.000Z", "2026-09-28T08:00:20.000Z", 2, "transport",
                     "connected"),
+            # The phone-app export writes the Mac's rows as `AppLogRecord` with
+            # `connectionID` null, so its own Gateway rows carry no key and only
+            # the time window can join them.
             dict(gateway_record("2026-09-28T08:00:10.000Z", "connection.opened", "info",
-                                "Client gw-6 connection opened after 9ms", connectionId="gw-6"),
-                 process="gateway"),
+                                "Client gw-6 connection opened after 9ms"),
+                 process="gateway", profileID=None, connectionID=None,
+                 lifecycleGeneration=None),
         ])
         report = self.run_tool(export, extra=["--no-gateway-logs"])
         self.assertEqual(report["inputs"]["gatewayLogs"]["source"], "export-projection")
         self.assertEqual(report["inputs"]["gatewayLogs"]["records"], 1)
         self.assertEqual(report["inputs"]["phoneExports"][0]["capture"]["appBuild"], "1+2")
-        self.assertEqual(report["episodes"][0]["joinedBy"], "key")
+        self.assertEqual(report["episodes"][0]["joinedBy"], "window")
 
 
 class InputContractTests(TriageFixture):
@@ -474,43 +503,49 @@ class InputContractTests(TriageFixture):
 
 
 class TailscaleWindowTests(TriageFixture):
-    """The extension log is the only path evidence a pre-O-2 Gateway log leaves."""
+    """The extension log is the only path evidence a pre-O-2 Gateway log leaves.
 
-    def test_relay_lines_become_a_relay_window(self):
-        stdout = (
+    The lines are the real Magicsock forms, printed in the compact style whose
+    timestamps carry no UTC offset.
+    """
+
+    def magicsock_lines(self, relay_at, direct_at, peer="6wPGm"):
+        return (
             "Timestamp               Ty Process[PID:TID]\n"
-            "2026-09-27 22:10:00.123456+0200 Info  "
-            "io.tailscale.ipn.macsys.network-extension: magicsock: home is now relay derp-sfo\n"
-            "2026-09-27 22:20:00.123456+0200 Info  "
-            "io.tailscale.ipn.macsys.network-extension: magicsock: direct path to peer iphone193\n"
+            f"{local_compact(relay_at)} Df io.tailscale.ipn.macsys.network-extension[3443:48f6] "
+            f"magicsock: new contact: peer=[{peer}] usec=399978702823 cached=false via=derp\n"
+            f"{local_compact(direct_at)} Df io.tailscale.ipn.macsys.network-extension[3443:4954] "
+            f"magicsock: disco: node [{peer}] d:8767 now using 192.0.2.23:41641 mtu=1360 tx=abc\n"
         )
 
-        def runner(arguments, timeout):
-            self.assertIn("--start", arguments)
-            return subprocess.CompletedProcess(arguments, 0, stdout, "")
-
+    def test_relay_lines_become_a_relay_window(self):
+        self.log_show(self.magicsock_lines("2026-09-27T22:10:00.000Z", "2026-09-27T22:20:00.000Z"))
         start = tron_triage.parse_timestamp("2026-09-27T20:00:00.000Z")
-        capture = tron_triage.capture_tailscale_window(
-            start, start.replace(hour=23), runner)
-        self.assertTrue(capture.captured)
+        capture = tron_triage.capture_tailscale_window(start, start.replace(hour=23))
+        self.assertTrue(capture.captured, capture.reason)
         windows = capture.relay_windows()
-        self.assertEqual(len(windows), 1)
+        self.assertEqual(len(windows), 1, capture.lines)
         self.assertEqual(windows[0][2], "relay")
         self.assertLess(windows[0][0], windows[0][1])
+        self.assertEqual(
+            windows[0][0], tron_triage.parse_timestamp("2026-09-27T22:10:00.000Z"))
+
+    def test_a_peer_filter_keeps_another_peers_relay_out(self):
+        text = self.magicsock_lines("2026-09-27T22:10:00.000Z", "2026-09-27T22:20:00.000Z",
+                                    peer="other")
+        self.log_show(text)
+        start = tron_triage.parse_timestamp("2026-09-27T20:00:00.000Z")
+        capture = tron_triage.capture_tailscale_window(start, start.replace(hour=23), "6wPGm")
+        self.assertTrue(capture.captured, capture.reason)
+        self.assertEqual(capture.lines, [])
 
     def test_relay_window_classifies_a_path_episode(self):
         phone = self.write("phone.jsonl", [
             state_change("2026-09-28T10:00:00.000Z", "connected", "reconnecting"),
             state_change("2026-09-28T10:01:30.000Z", "reconnecting", "connected"),
         ])
-        stdout = (
-            "2026-09-28 11:59:00.000000+0200 Info  "
-            "io.tailscale.ipn.macsys.network-extension: magicsock: home is now relay derp-sfo\n"
-            "2026-09-28 12:05:00.000000+0200 Info  "
-            "io.tailscale.ipn.macsys.network-extension: magicsock: direct path to peer\n"
-        )
-        runner = lambda arguments, timeout: subprocess.CompletedProcess(arguments, 0, stdout, "")
-        report = tron_triage.triage_reports([phone], None, 60, True, runner=runner)
+        self.log_show(self.magicsock_lines("2026-09-28T09:59:00.000Z", "2026-09-28T10:05:00.000Z"))
+        report = tron_triage.triage_reports([phone], None, 60, True)
         self.assertEqual(report["inputs"]["tailscaleWindow"]["captured"], True)
         self.assertEqual(report["episodes"][0]["cause"], "path")
         self.assertIn("relay path window", " ".join(
@@ -521,13 +556,162 @@ class TailscaleWindowTests(TriageFixture):
             state_change("2026-09-28T10:00:00.000Z", "connected", "reconnecting"),
             state_change("2026-09-28T10:01:30.000Z", "reconnecting", "connected"),
         ])
-
-        def runner(arguments, timeout):
-            raise subprocess.TimeoutExpired(arguments, timeout)
-
-        report = tron_triage.triage_reports([phone], None, 60, True, runner=runner)
+        self.log_show("", returncode=3)
+        report = tron_triage.triage_reports([phone], None, 60, True)
         self.assertEqual(report["inputs"]["tailscaleWindow"]["captured"], False)
         self.assertEqual(report["episodes"][0]["cause"], "unknown")
+
+
+class ReviewRegressionTests(TriageFixture):
+    """The failure modes an independent review found on the branch.
+
+    Each one is a shape the real device exports and the real `log show`
+    produce, not the fixture shape the first pass invented.
+    """
+
+    def test_a_slow_span_that_ended_after_the_episode_is_not_its_cause(self):
+        # The 2026-09-28 export: a 0.2 s reconnect right after the app
+        # foregrounds, whose own refresh RPCs complete seconds later. The
+        # Gateway answering a later request does not explain the reconnect.
+        phone = self.write("phone.jsonl", [
+            app_record("2026-09-28T06:35:59.422Z", "app.foregrounded", "outcome=success"),
+            state_change("2026-09-28T06:35:59.436Z", "connected", "reconnecting"),
+            state_change("2026-09-28T06:35:59.604Z", "reconnecting", "connected"),
+        ])
+        self.gateway([
+            gateway_record("2026-09-28T06:36:03.966Z", "rpc.completed", "warning",
+                           "RPC session.list for client 16e59486 completed in 4200ms (success)",
+                           method="session.list", connectionId="16e59486", outcome="success",
+                           durationMs=4200),
+        ])
+        found = self.only_episode(self.run_tool(phone))
+        self.assertEqual(found["cause"], "unknown", found["evidence"])
+
+    def test_another_connections_slow_span_is_not_this_episodes_cause(self):
+        phone = self.write("phone.jsonl", [
+            attempt("2026-09-28T11:00:00.000Z", 36, "success", "connected", "none",
+                    gateway_connection_id="gw-A"),
+            state_change("2026-09-28T11:00:10.000Z", "connected", "reconnecting"),
+            state_change("2026-09-28T11:00:11.000Z", "reconnecting", "connected"),
+        ])
+        self.gateway([
+            gateway_record("2026-09-28T11:00:00.000Z", "connection.opened", "info",
+                           "Client gw-A connection opened after 9ms", connectionId="gw-A",
+                           peerClientId="cA", peerAttemptId="initial"),
+            gateway_record("2026-09-28T11:00:21.000Z", "rpc.completed", "warning",
+                           "RPC session.list for client mac-1 completed in 3000ms (success)",
+                           method="session.list", connectionId="mac-1", outcome="success",
+                           durationMs=3000),
+        ])
+        found = self.only_episode(self.run_tool(phone))
+        self.assertEqual(found["joinedBy"], "key")
+        self.assertNotEqual(found["cause"], "gateway-stall", found["evidence"])
+
+    def test_app_scene_records_are_recognised(self):
+        phone = self.write("phone.jsonl", [
+            app_record("2026-09-28T07:21:02.478Z", "app.backgrounded", "outcome=success"),
+            app_record("2026-09-28T07:21:02.705Z", "app.foregrounded", "outcome=success"),
+            state_change("2026-09-28T07:21:02.714Z", "connected", "reconnecting"),
+            state_change("2026-09-28T07:21:02.799Z", "reconnecting", "connected"),
+            state_change("2026-09-28T07:21:02.804Z", "connected", "reconnecting"),
+            app_record("2026-09-28T07:24:10.754Z", "app.backgrounded", "outcome=success"),
+            state_change("2026-09-28T07:24:12.401Z", "unpaired", "connecting"),
+            state_change("2026-09-28T07:24:12.568Z", "connecting", "connected"),
+        ])
+        report = self.run_tool(phone)
+        causes = [episode["cause"] for episode in report["episodes"]]
+        self.assertEqual(len(causes), 2, report["episodes"])
+        self.assertEqual(causes[0], "unknown")
+        self.assertEqual(causes[1], "phone-background", report["episodes"])
+
+    def test_retained_client_scene_kind_parks_the_episode(self):
+        phone = self.write("phone.jsonl", [
+            state_change("2026-09-28T09:00:01.000Z", "connected", "reconnecting"),
+            app_record("2026-09-28T09:00:30.000Z", "gateway.lifecycle",
+                       "kind=scene.background clientID=cX scene=background"),
+        ])
+        found = self.only_episode(self.run_tool(phone))
+        self.assertEqual(found["cause"], "phone-background", found["evidence"])
+
+    def test_another_profiles_failed_attempt_is_not_this_episodes_path(self):
+        phone = self.write("phone.jsonl", [
+            attempt("2026-09-28T12:00:01.000Z", 15000, "failure", "transport-open", "timeout",
+                    attempt_id="pool-loop", profile_id="pool-secondary"),
+            episode("2026-09-28T12:00:00.000Z", "2026-09-28T12:00:20.000Z", 1, "transport",
+                    "connected", profile_id="mobile-prod"),
+        ])
+        found = self.only_episode(self.run_tool(phone))
+        self.assertEqual(found["profile"], "mobile-prod")
+        self.assertNotEqual(found["cause"], "path", found["evidence"])
+
+    def test_the_episodes_own_failed_attempt_is_still_the_path(self):
+        phone = self.write("phone.jsonl", [
+            attempt("2026-09-28T12:30:01.000Z", 15000, "failure", "transport-open", "timeout",
+                    attempt_id="own-loop", profile_id="mobile-prod"),
+            episode("2026-09-28T12:30:00.000Z", "2026-09-28T12:30:20.000Z", 1, "transport",
+                    "connected", profile_id="mobile-prod"),
+        ])
+        found = self.only_episode(self.run_tool(phone))
+        self.assertEqual(found["cause"], "path", found["evidence"])
+
+    def test_a_request_issued_before_the_loss_is_not_a_wrong_label(self):
+        phone = self.write("phone.jsonl", [
+            attempt("2026-09-28T13:00:00.000Z", 38, "success", "connected", "none",
+                    gateway_connection_id="gw-L"),
+            state_change("2026-09-28T13:00:15.000Z", "connected", "reconnecting"),
+            state_change("2026-09-28T13:00:20.000Z", "reconnecting", "connected"),
+        ])
+        self.gateway([
+            gateway_record("2026-09-28T13:00:00.000Z", "connection.opened", "info",
+                           "Client gw-L connection opened after 9ms", connectionId="gw-L"),
+            gateway_record("2026-09-28T13:00:20.000Z", "rpc.completed", "debug",
+                           "RPC session.list for client gw-L completed in 20000ms (success)",
+                           method="session.list", connectionId="gw-L", outcome="success",
+                           durationMs=20000),
+        ])
+        found = self.only_episode(self.run_tool(phone))
+        self.assertNotEqual(found["cause"], "phone-stall", found["evidence"])
+
+    def test_one_attempt_is_counted_once_when_both_shapes_are_written(self):
+        rows = []
+        for index, loop in enumerate(("loop-1", "loop-1", "loop-2", "loop-2")):
+            rows.append(attempt(f"2026-09-28T15:00:{index:02d}.000Z", 15000, "failure",
+                                "transport-open", "timeout", attempt_id=loop,
+                                profile_id="mobile-prod"))
+            rows.append(app_record(
+                f"2026-09-28T15:00:{index:02d}.000Z", "gateway.connection",
+                f"stage=transport-open outcome=failure sequence={index} clientID=c1 "
+                f"attemptID={loop} durationMs=15000 recordKind=connection reason=timeout",
+                level="warning", outcome="failure", duration_ms=15000))
+        phone = self.write("phone.jsonl", rows)
+        records, _ = tron_triage.read_jsonl(phone)
+        self.assertEqual(len(tron_triage.phone_attempts(records)), 4)
+
+    def test_retries_sharing_a_loop_id_survive_without_attempt_records(self):
+        rows = [app_record(f"2026-09-28T15:30:{index:02d}.000Z", "gateway.connection",
+                           f"stage=transport-open outcome=failure sequence={index} clientID=c1 "
+                           f"attemptID=loop-1 durationMs=15000 recordKind=connection reason=timeout",
+                           level="warning", outcome="failure", duration_ms=15000)
+                for index in range(3)]
+        phone = self.write("phone.jsonl", rows)
+        records, _ = tron_triage.read_jsonl(phone)
+        self.assertEqual(len(tron_triage.phone_attempts(records)), 3)
+
+    def test_a_retry_accept_past_the_deadline_is_not_this_attempts_arrival(self):
+        phone = self.write("phone.jsonl", [
+            app_record("2026-09-28T14:00:15.000Z", "gateway.attempt",
+                       "outcome=failure stageReached=transport-open reason=timeout durationMs=15000",
+                       level="warning", outcome="failure", duration_ms=15000),
+        ])
+        self.gateway([
+            gateway_record("2026-09-28T14:00:16.000Z", "connection.opened", "info",
+                           "Client gw-R connection opened after 9ms", connectionId="gw-R"),
+        ])
+        records, _ = tron_triage.read_jsonl(phone)
+        attempts = tron_triage.phone_attempts(records)
+        gateway = tron_triage.GatewayIndex(records=tron_triage.load_gateway_logs(self.logs).records)
+        self.assertFalse(tron_triage.attempt_reached_mac(
+            attempts[0], gateway.window(*attempts[0].span())))
 
 
 class LiveEvidenceTests(TriageFixture):

@@ -9,11 +9,13 @@ never rewritten, and nothing is sent anywhere.
 Phone and Gateway records are joined by the O-1 correlation key (a phone
 `gatewayConnectionId` is a Gateway `connectionId`, and its `clientId`/
 `attemptId` are the Gateway's `peerClientId`/`peerAttemptId`), falling back to a
-time window for logs written before protocol 6. Every episode is classified by
-the first matching rule in `classify`, in the order the hardening plan fixes:
-`path`, `phone-background`, `phone-stall`, `gateway-stall`, `gateway-capacity`,
-`unknown`. Each classification carries the records it used, so an operator
-checks the attribution instead of trusting it.
+time window for logs written before protocol 6. An episode uses one join: once
+the key joins any record, a record naming another connection is not this
+episode's evidence. Every episode is classified by the first matching rule in
+`classify`, in the order the hardening plan fixes: `path`, `phone-background`,
+`phone-stall`, `gateway-stall`, `gateway-capacity`, `unknown`. Each
+classification carries the records it used, so an operator checks the
+attribution instead of trusting it.
 """
 
 from __future__ import annotations
@@ -27,7 +29,7 @@ from pathlib import Path
 import re
 import subprocess
 import sys
-from typing import Any, Callable, Dict, Iterable, List, Optional, Sequence, Set, Tuple
+from typing import Any, Dict, Iterable, List, Optional, Sequence, Set, Tuple
 
 SCHEMA = "tron.triage-report.v1"
 EXIT_OK = 0
@@ -78,11 +80,19 @@ CAPACITY_UPGRADE_REASONS = ("request_capacity", "connection_capacity")
 # overlap; a pair this close is one outage, not two. The join tolerance is
 # deliberately not used here: it is wide enough to swallow a neighbour episode.
 EPISODE_MERGE_PAD_SECONDS = 5
-# A phone connection state that means the app is not connected.
-OUTAGE_STATES = ("reconnecting", "restarting")
-# The scene records that say which side of the foreground boundary the app is
-# on; the last one before an episode's end is the app's state there.
-SCENE_EVENTS = ("scene.background", "scene.foreground", "scene.active")
+# Phone connection states that mean the app is not connected. `offline(_:)`
+# serialises its reason, so a state is matched by name, not by equality. An
+# outage that briefly reports `offline` is still one outage and must not be
+# split in two by a window closer.
+OUTAGE_STATES = ("reconnecting", "restarting", "offline")
+# The app's own scene callbacks, its scene-phase transitions, and the retained
+# client log's copy of the same transition. The last record inside an episode
+# says which side of the foreground boundary the app was on there.
+SCENE_BACKGROUND = "background"
+LIFECYCLE_EVENT = "gateway.lifecycle"
+LIFECYCLE_KIND_FIELD = "kind"
+SCENE_KIND_PREFIX = "scene."
+RECONNECT_CONNECTED_KIND = "reconnect.connected"
 
 CAUSE_PATH = "path"
 CAUSE_BACKGROUND = "phone-background"
@@ -98,10 +108,18 @@ ISO_TIMESTAMP = re.compile(
     r"^(\d{4})-(\d{2})-(\d{2})[T ](\d{2}):(\d{2}):(\d{2})(?:\.(\d{1,9}))?"
     r"(Z|[+-]\d{2}:?\d{2})?$"
 )
-LOG_SHOW_TIMESTAMP = re.compile(r"^(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}[.,]\d+[+-]\d{4})")
-TAILSCALE_RELAY_LINE = re.compile(r"relay|derp", re.IGNORECASE)
-TAILSCALE_DIRECT_LINE = re.compile(r"\bdirect\b|directpath", re.IGNORECASE)
+# `log show --style compact` prints a bare local timestamp with no UTC offset;
+# the default style appends one. Both are accepted, and a missing offset means
+# the line is local time (see `parse_log_show_timestamp`).
+LOG_SHOW_TIMESTAMP = re.compile(r"^(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}[.,]\d+)(Z|[+-]\d{4})?")
+# The two real Magicsock path forms: `new contact: peer=[6wPGm] … via=derp`
+# (relay) and `disco: node [6wPGm] d:… now using 192.0.2.23:41641` (direct).
+TAILSCALE_RELAY_LINE = re.compile(r"via=derp\b|\bderp\b|\brelay\b", re.IGNORECASE)
+TAILSCALE_DIRECT_LINE = re.compile(r"now using\b|\bdirect\b", re.IGNORECASE)
 TAILSCALE_OFFLINE_LINE = re.compile(r"offline|no route|unreachable", re.IGNORECASE)
+# Magicsock names the peer as a short node key in brackets (`node [6wPGm]`,
+# `peer=[6wPGm]`); the log's own `[pid:tid]` carries a colon and never matches.
+TAILSCALE_PEER_KEY = re.compile(r"(?:peer|node)[=\s]*\[([A-Za-z0-9+/=]{4,})\]")
 
 
 class TriageError(Exception):
@@ -144,6 +162,34 @@ def format_timestamp(value: Optional[datetime]) -> Optional[str]:
 def format_local(value: datetime) -> str:
     """`log show --start`/`--end` read local time, not UTC."""
     return value.astimezone().strftime("%Y-%m-%d %H:%M:%S")
+
+
+def parse_log_show_timestamp(text: str, offset: Optional[str] = None) -> Optional[datetime]:
+    """One UTC instant from a `log show` line's timestamp.
+
+    `--style compact` prints local time with no offset, so an absent offset is
+    read as local; the default style appends one and it is honoured.
+    """
+    normalized = text.replace(",", ".").replace(" ", "T")
+    if offset:
+        return parse_timestamp(normalized + offset)
+    try:
+        naive = datetime.fromisoformat(normalized)
+    except ValueError:
+        return None
+    # `astimezone` on a naive value presumes the system timezone.
+    return naive.astimezone(timezone.utc)
+
+
+def is_outage_state(state: str) -> bool:
+    """Whether a published connection state is an outage.
+
+    `offline(_:)` serialises its reason (`String(describing:)`), so the state
+    matches on its name rather than on equality.
+    """
+    if not state:
+        return False
+    return any(state == name or state.startswith(f"{name}(") for name in OUTAGE_STATES)
 
 
 def message_fields(message: str) -> Dict[str, str]:
@@ -218,6 +264,48 @@ def record_from_object(value: Any, source_path: str, line: int) -> Optional[Reco
         path=source_path,
         line=line,
     )
+
+
+def scene_phase(record: Record) -> Optional[str]:
+    """The scene phase a phone record moves to, or None when it is not one.
+
+    The app writes its own callbacks (`app.backgrounded`/`app.foregrounded`)
+    and scene transitions (`scene.*`); the retained client log repeats the
+    transition as `gateway.lifecycle kind=scene.*`. All three shapes mean the
+    same thing to an episode.
+    """
+    if record.event in ("app.backgrounded", "scene.background"):
+        return SCENE_BACKGROUND
+    if record.event in ("app.foregrounded", "scene.foreground"):
+        return "foreground"
+    if record.event == "scene.active":
+        return "active"
+    if record.event == "scene.resign-active":
+        return "resign-active"
+    if record.event == LIFECYCLE_EVENT:
+        kind = record.field(LIFECYCLE_KIND_FIELD) or ""
+        if kind.startswith(SCENE_KIND_PREFIX):
+            return kind[len(SCENE_KIND_PREFIX):] or None
+    return None
+
+
+def gateway_id_of(record: Record) -> Optional[str]:
+    """The Gateway `connectionId` a phone record names, or None.
+
+    An O-1 record carries `gatewayConnectionId` directly (the O-4 attempt and
+    the retained client's connection rows). The retained client log's
+    `kind=reconnect.connected` instead names the phone's own `connectionID`;
+    it only ever becomes a key join when it happens to equal the Gateway id,
+    and a mismatch is dropped by `annotate_episode` because no Gateway record
+    carries it.
+    """
+    value = record.field("gatewayConnectionId")
+    if value:
+        return value
+    if record.event == LIFECYCLE_EVENT \
+            and record.field(LIFECYCLE_KIND_FIELD) == RECONNECT_CONNECTED_KIND:
+        return record.field("connectionID")
+    return None
 
 
 def read_jsonl(path: Path) -> Tuple[List[Record], int]:
@@ -356,12 +444,46 @@ class Attempt:
                 self.timestamp + timedelta(seconds=2))
 
 
+def attempt_belongs(episode: "Episode", attempt: Attempt) -> bool:
+    """Whether this attempt is the episode's own, not another profile's.
+
+    The settings dashboard runs a second profile beside the main one, and its
+    transport-open timeouts land in the same window. An episode that names its
+    profile (the O-4 `connection.episode` record) or its client only counts
+    attempts that agree with it, so the pool's dead path never becomes the main
+    episode's path fault. An older record carries neither, so the attempt is
+    kept rather than silently dropped.
+    """
+    profile = episode.profile
+    client = episode.client_id
+    if profile is not None and attempt.profile is not None:
+        return attempt.profile == profile
+    if client is not None and attempt.client_id is not None:
+        return attempt.client_id == client
+    return True
+
+
 def phone_attempts(records: Iterable[Record]) -> List[Attempt]:
+    """One entry per finished attempt, preferring the O-4 record.
+
+    `gateway.attempt` is written once per attempt, so when an export carries it
+    it is the attempt list and the transport store's `gateway.connection` stage
+    rows are not counted again. Older exports carry only the stage rows; those
+    deduplicate by `(clientID, sequence)`. Neither client shape identifies an
+    attempt by its `attemptId`: that is the reconnect loop's id (`loopID`),
+    shared by every retry in the loop, so a key containing it merges real
+    retries.
+    """
+    attempt_records = [record for record in records
+                       if record.event == "gateway.attempt" and record.timestamp is not None]
+    if not attempt_records:
+        attempt_records = [record for record in records
+                           if record.event == "gateway.connection"
+                           and record.timestamp is not None
+                           and record.field("stage") in ATTEMPT_STAGES]
     attempts: List[Attempt] = []
-    seen_stages: Set[Tuple[str, str, str]] = set()
-    for record in records:
-        if record.timestamp is None:
-            continue
+    seen_stages: Set[Tuple[str, str]] = set()
+    for record in attempt_records:
         if record.event == "gateway.attempt":
             attempts.append(Attempt(
                 timestamp=record.timestamp, record=record,
@@ -375,24 +497,23 @@ def phone_attempts(records: Iterable[Record]) -> List[Attempt]:
                 profile=record.field("profile") or record.field("profileID"),
                 duration_ms=record.number("durationMs"),
             ))
-        elif record.event == "gateway.connection" and record.field("stage") in ATTEMPT_STAGES:
-            key = (record.field("clientID", "") or "", record.field("attemptID", "") or "",
-                   record.field("stage", "") or "")
-            if key in seen_stages:
-                continue
-            seen_stages.add(key)
-            attempts.append(Attempt(
-                timestamp=record.timestamp, record=record,
-                stage=record.field("stage", "") or "",
-                outcome=record.field("outcome", "") or "",
-                reason=record.field("reason", "") or "",
-                gateway_connection_id=record.field("gatewayConnectionId"),
-                client_id=record.field("clientID"),
-                attempt_id=record.field("attemptID"),
-                foreground=None,
-                profile=record.field("profileID") or record.field("profile"),
-                duration_ms=record.number("durationMs"),
-            ))
+            continue
+        key = (record.field("clientID", "") or "", record.field("sequence", "") or "")
+        if key in seen_stages:
+            continue
+        seen_stages.add(key)
+        attempts.append(Attempt(
+            timestamp=record.timestamp, record=record,
+            stage=record.field("stage", "") or "",
+            outcome=record.field("outcome", "") or "",
+            reason=record.field("reason", "") or "",
+            gateway_connection_id=record.field("gatewayConnectionId"),
+            client_id=record.field("clientID"),
+            attempt_id=record.field("attemptID"),
+            foreground=None,
+            profile=record.field("profileID") or record.field("profile"),
+            duration_ms=record.number("durationMs"),
+        ))
     attempts.sort(key=lambda attempt: attempt.timestamp)
     return attempts
 
@@ -406,6 +527,7 @@ class Episode:
     attempts: int = 0
     ended_by: Optional[str] = None
     profile: Optional[str] = None
+    client_id: Optional[str] = None
     derived: bool = False
     declared_causes: List[str] = dataclass_field(default_factory=list)
     boundary: Optional[Record] = None
@@ -442,6 +564,7 @@ def declared_episodes(records: Iterable[Record]) -> List[Episode]:
             attempts=int(record.number("attempts") or 0),
             ended_by=record.field("endedBy") or record.field("outcome"),
             profile=record.field("profile") or record.field("profileID"),
+            client_id=record.field("clientID") or record.field("clientId"),
             declared_causes=[value for value in causes if value and value != "none"],
             boundary=record,
         ))
@@ -476,12 +599,12 @@ def label_windows(records: Sequence[Record]) -> List[Tuple[Record, datetime, dat
         last = record.timestamp if last is None else max(last, record.timestamp)
         if record.event == "connection.state-changed":
             state = record.field("new") or record.field("outcome") or ""
-            if state in OUTAGE_STATES:
+            if is_outage_state(state):
                 if opened is None:
                     opened = (record, record.timestamp)
             else:
                 close(record.timestamp)
-        elif record.event == "scene.background":
+        elif scene_phase(record) == SCENE_BACKGROUND:
             close(record.timestamp)
         elif record.event == "connection.episode":
             close(record.timestamp)
@@ -504,8 +627,14 @@ def derived_episodes(records: Sequence[Record], attempts: Sequence[Attempt],
     merge_pad = timedelta(seconds=EPISODE_MERGE_PAD_SECONDS)
 
     def is_covered(start: datetime, end: datetime) -> bool:
-        return any(overlaps(start, end, episode.start, episode.end, merge_pad)
-                   for episode in list(covered) + derived)
+        # A declared episode's own boundary can trail the loss by a few seconds,
+        # so the pad absorbs it. A second label window is a second outage by
+        # construction — the first was closed by a state change or a scene
+        # transition — and only real overlap merges it.
+        if any(overlaps(start, end, episode.start, episode.end, merge_pad)
+               for episode in covered):
+            return True
+        return any(overlaps(start, end, episode.start, episode.end) for episode in derived)
 
     for opener, start, end in label_windows(records):
         if is_covered(start, end):
@@ -555,13 +684,9 @@ def annotate_episode(episode: Episode, phone: Sequence[Record], attempts: Sequen
     for record in episode.phone_records:
         # Every phone record that names the Gateway connection, or the pair the
         # Gateway stamps as peerClientId/peerAttemptId, is a join key.
-        gateway_id = record.field("gatewayConnectionId")
+        gateway_id = gateway_id_of(record)
         if gateway_id:
             episode.gateway_ids.add(gateway_id)
-        if record.event == "reconnect.connected":
-            gateway_id = record.field("connectionId")
-            if gateway_id:
-                episode.gateway_ids.add(gateway_id)
         client_id = record.field("clientId") or record.field("clientID")
         attempt_id = record.field("attemptId") or record.field("attemptID")
         if client_id and attempt_id:
@@ -612,6 +737,7 @@ def evidence_entry(source: str, record: Record, role: str, detail: str = "") -> 
 class TailscaleCapture:
     captured: bool
     reason: str
+    peer: Optional[str] = None
     window: Optional[Tuple[datetime, datetime]] = None
     lines: List[Tuple[datetime, str]] = dataclass_field(default_factory=list)
 
@@ -620,8 +746,9 @@ class TailscaleCapture:
 
         The extension log is the only Tailscale evidence a pre-O-2 Gateway log
         leaves behind, and its path lines are message text, so this read is
-        deliberately conservative: a relay line opens a window and a direct line
-        closes it. It is evidence, never proof.
+        deliberately conservative: a relay line opens a window and a direct
+        line closes it. The relay test runs first because a relay endpoint can
+        also print `now using DERP(sea)`. It is evidence, never proof.
         """
         windows: List[Tuple[datetime, datetime, str]] = []
         opened_at: Optional[datetime] = None
@@ -630,23 +757,31 @@ class TailscaleCapture:
             if TAILSCALE_OFFLINE_LINE.search(text):
                 if opened_at is None:
                     opened_at, kind = timestamp, "offline"
+            elif TAILSCALE_RELAY_LINE.search(text):
+                if opened_at is None:
+                    opened_at, kind = timestamp, "relay"
             elif TAILSCALE_DIRECT_LINE.search(text):
                 if opened_at is not None:
                     windows.append((opened_at, timestamp, kind))
                     opened_at, kind = None, ""
-            elif TAILSCALE_RELAY_LINE.search(text):
-                if opened_at is None:
-                    opened_at, kind = timestamp, "relay"
         if opened_at is not None and self.lines:
             windows.append((opened_at, self.lines[-1][0], kind))
         return windows
 
 
-def capture_tailscale_window(
-    start: datetime, end: datetime,
-    runner: Optional[Callable[..., subprocess.CompletedProcess]] = None,
-) -> TailscaleCapture:
-    """Read the Tailscale network-extension log for one UTC range."""
+def tailscale_peer_key(line: str) -> Optional[str]:
+    """The peer node key a Magicsock line names, without its brackets."""
+    match = TAILSCALE_PEER_KEY.search(line)
+    return match.group(1) if match is not None else None
+
+
+def capture_tailscale_window(start: datetime, end: datetime,
+                             peer: Optional[str] = None) -> TailscaleCapture:
+    """Read the Tailscale network-extension log for one UTC range.
+
+    `peer` filters to one node key: the extension serves every tailnet peer, so
+    without it another peer's relay stretch could be read as the phone's.
+    """
     if (end - start).total_seconds() <= 0:
         return TailscaleCapture(captured=False, reason="export range is empty")
     if (end - start).total_seconds() > MAX_TAILSCALE_WINDOW_SECONDS:
@@ -654,26 +789,29 @@ def capture_tailscale_window(
     arguments = [TAILSCALE_LOG_TOOL, "show", "--style", "compact",
                  "--start", format_local(start), "--end", format_local(end),
                  "--predicate", f'process == "{TAILSCALE_EXTENSION_PROCESS}"']
-    invoke = runner or (lambda args, timeout: subprocess.run(
-        args, capture_output=True, text=True, timeout=timeout))
     try:
-        completed = invoke(arguments, LOG_SHOW_TIMEOUT_SECONDS)
+        completed = subprocess.run(arguments, capture_output=True, text=True,
+                                   timeout=LOG_SHOW_TIMEOUT_SECONDS)
     except (OSError, subprocess.SubprocessError) as error:
-        return TailscaleCapture(captured=False, reason=f"log show failed: {error}")
+        return TailscaleCapture(captured=False, reason=f"log show failed: {error}", peer=peer)
     if completed.returncode != 0:
-        return TailscaleCapture(captured=False, reason=f"log show exited {completed.returncode}")
+        return TailscaleCapture(captured=False, reason=f"log show exited {completed.returncode}",
+                                peer=peer)
     lines: List[Tuple[datetime, str]] = []
     for raw in (completed.stdout or "").splitlines():
         match = LOG_SHOW_TIMESTAMP.match(raw.strip())
         if match is None:
             continue
-        timestamp = parse_timestamp(match.group(1).replace(",", ".").replace(" ", "T"))
+        timestamp = parse_log_show_timestamp(match.group(1), match.group(2))
         if timestamp is None:
+            continue
+        if peer is not None and tailscale_peer_key(raw) != peer:
             continue
         if TAILSCALE_RELAY_LINE.search(raw) or TAILSCALE_DIRECT_LINE.search(raw) \
                 or TAILSCALE_OFFLINE_LINE.search(raw):
             lines.append((timestamp, raw.strip()))
-    return TailscaleCapture(captured=True, reason="captured", window=(start, end), lines=lines)
+    return TailscaleCapture(captured=True, reason="captured", peer=peer,
+                            window=(start, end), lines=lines)
 
 
 def epoch_connection_id(episode: Episode, before: datetime) -> Optional[str]:
@@ -688,6 +826,51 @@ def epoch_connection_id(episode: Episode, before: datetime) -> Optional[str]:
     return latest
 
 
+def socket_answered(history: Sequence[Record], transition: datetime,
+                    episode_end: datetime) -> Optional[Record]:
+    """A successful RPC this socket issued at/after `transition` and finished inside the episode.
+
+    The issue instant is `completion - durationMs`, so a request that was
+    already in flight when the label was published proves nothing about whether
+    the socket was live then: the whole span must sit inside
+    `[transition, episode_end]`, and the socket must still be open at
+    completion.
+    """
+    closed_at = [record.timestamp for record in history
+                 if record.event == "connection.closed" and record.timestamp is not None]
+
+    def open_at(moment: datetime) -> bool:
+        return not any(closed <= moment for closed in closed_at)
+
+    for record in history:
+        if record.event != "rpc.completed" or record.timestamp is None:
+            continue
+        if record.field("outcome", "success") != "success":
+            continue
+        duration = record.number("durationMs")
+        if duration is None:
+            continue
+        if record.timestamp - timedelta(milliseconds=duration) < transition:
+            continue
+        if record.timestamp > episode_end:
+            continue
+        if open_at(record.timestamp):
+            return record
+    return None
+
+
+def window_connection_ids(gateway: GatewayIndex, start: datetime, end: datetime) -> List[str]:
+    """The Gateway connections any record in this window names, once each."""
+    ids: List[str] = []
+    seen: Set[str] = set()
+    for record in gateway.window(start, end):
+        value = record.field("connectionId")
+        if value and value not in seen:
+            seen.add(value)
+            ids.append(value)
+    return ids
+
+
 def label_over_live_socket(episode: Episode, gateway: GatewayIndex) -> Optional[Record]:
     """A `reconnecting` label while the Gateway socket answered requests.
 
@@ -696,32 +879,34 @@ def label_over_live_socket(episode: Episode, gateway: GatewayIndex) -> Optional[
     socket. The Gateway proves the socket was live by completing a request on
     the connection that phone epoch named while that connection was still open,
     so a socket that had already closed is a real loss, not a wrong label.
+
+    An export written before O-1 carries no `gatewayConnectionId`, so there the
+    fallback is any connection that was already open when the label was
+    published and still answered inside the episode; a mismatched connection id
+    (the retained client's own numeric `connectionID`) is discarded before this
+    runs.
     """
+    search_start = episode.start - timedelta(seconds=EPOCH_LOOKBACK_SECONDS)
     for record in episode.phone_records:
         if record.event != "connection.state-changed" or record.timestamp is None:
             continue
-        if (record.field("new") or record.field("outcome") or "") not in OUTAGE_STATES:
+        # Only the transition that opened *this* episode can be its wrong label;
+        # an earlier window's transition is not this episode's.
+        if record.timestamp < episode.start:
+            continue
+        if not is_outage_state(record.field("new") or record.field("outcome") or ""):
             continue
         connection_id = epoch_connection_id(episode, record.timestamp)
-        if connection_id is None:
-            continue
-        history = gateway.connection(connection_id)
-        if not history:
-            continue
-        opened = any(candidate.event == "connection.opened" and candidate.timestamp is not None
-                     and candidate.timestamp <= record.timestamp for candidate in history)
-        closed_at = [candidate.timestamp for candidate in history
-                     if candidate.event == "connection.closed" and candidate.timestamp is not None]
-
-        def open_at(moment: datetime) -> bool:
-            return not any(closed <= moment for closed in closed_at)
-
-        answered = any(candidate.event == "rpc.completed" and candidate.timestamp is not None
-                       and candidate.timestamp >= record.timestamp
-                       and candidate.field("outcome", "success") == "success"
-                       and open_at(candidate.timestamp) for candidate in history)
-        if opened and answered:
-            return record
+        candidates = ([connection_id] if connection_id is not None
+                      else window_connection_ids(gateway, search_start, episode.end))
+        for candidate in candidates:
+            history = gateway.connection(candidate)
+            if not history:
+                continue
+            opened = any(item.event == "connection.opened" and item.timestamp is not None
+                         and item.timestamp <= record.timestamp for item in history)
+            if opened and socket_answered(history, record.timestamp, episode.end):
+                return record
     return None
 
 
@@ -733,13 +918,16 @@ def attempt_reached_mac(attempt: Attempt, window: Sequence[Record]) -> bool:
     attempt's own span and needs the records to agree on the peer key: a
     Gateway record whose peer key contradicts the attempt is skipped, and a
     record with no peer key at all cannot confirm an attempt that has one, so a
-    live main connection or the successful retry that followed is never read as
-    this attempt's arrival. When neither side carries the key (a protocol-5
-    phone and a protocol-5 Gateway), the span's own accept is the best evidence
-    there is.
+    live main connection is never read as this attempt's arrival. Arrival must
+    also precede the attempt's own end, because the next retry's accept lands
+    1.6–2.4 s after a timeout and falls inside any pad past it. When neither
+    side carries the key (a protocol-5 phone and a protocol-5 Gateway), the
+    span's own accept is the best evidence there is.
     """
     for record in window:
-        if record.event not in UPGRADE_EVENTS:
+        if record.event not in UPGRADE_EVENTS or record.timestamp is None:
+            continue
+        if record.timestamp > attempt.timestamp:
             continue
         peer_client = record.field("peerClientId")
         peer_attempt = record.field("peerAttemptId")
@@ -759,13 +947,14 @@ def attempt_reached_mac(attempt: Attempt, window: Sequence[Record]) -> bool:
 
 def background_at_end(episode: Episode) -> Optional[Record]:
     """The scene record that leaves the app in the background at the episode's end."""
-    scenes = [record for record in episode.phone_records
-              if record.event in SCENE_EVENTS and record.timestamp is not None
+    scenes = [(record, scene_phase(record)) for record in episode.phone_records
+              if record.timestamp is not None
               and episode.start <= record.timestamp <= episode.end]
+    scenes = [(record, phase) for record, phase in scenes if phase is not None]
     if not scenes:
         return None
-    last = max(scenes, key=lambda record: record.timestamp)
-    return last if last.event == "scene.background" else None
+    record, phase = max(scenes, key=lambda item: item[0].timestamp)
+    return record if phase == SCENE_BACKGROUND else None
 
 
 def background_parked(episode: Episode) -> Optional[Tuple[str, Optional[Record]]]:
@@ -802,6 +991,20 @@ def classify(episode: Episode, gateway: GatewayIndex, tolerance: timedelta,
         join_modes.add(mode)
         matches.append((mode, record))
     episode.join = "key" if "key" in join_modes else ("window" if "window" in join_modes else "none")
+    # One join decides the evidence: when the O-1 key joins any record, a record
+    # that names another connection is that connection's and not this episode's,
+    # because mixing the two modes reads a neighbour's slow span as this
+    # episode's cause. Gateway-wide records (a delayed event loop, host
+    # resources) name no connection and still count when they fall inside the
+    # episode. The 60 s window join is the fallback for logs written before the
+    # key existed.
+    if episode.join == "key":
+        matches = [(mode, record) for mode, record in matches
+                   if mode == "key"
+                   or (record.field("connectionId") is None
+                       and record.field("peerClientId") is None)]
+    elif episode.join == "window":
+        matches = [(mode, record) for mode, record in matches if mode == "window"]
 
     # Rule 1 — path: inbound silence the Gateway attributed to a relay or an
     # offline peer, or a transport-open failure that never reached this Mac
@@ -834,6 +1037,8 @@ def classify(episode: Episode, gateway: GatewayIndex, tolerance: timedelta,
         unanswered: List[Attempt] = []
         for attempt in episode.attempt_records:
             if not attempt.failed or attempt.stage != "transport-open":
+                continue
+            if not attempt_belongs(episode, attempt):
                 continue
             start, end = attempt.span()
             if not attempt_reached_mac(attempt, gateway.window(start, end)):
@@ -893,13 +1098,28 @@ def classify(episode: Episode, gateway: GatewayIndex, tolerance: timedelta,
                     f"{epoch_connection_id(episode, labelled.timestamp) or 'unknown'}"))
 
     # Rule 4 — gateway-stall: a delayed event loop, or a slow span on this
-    # connection.
+    # connection. A slow span counts only when the work itself overlapped the
+    # outage: `completion - durationMs` through `completion` must touch
+    # `[start, end]`. A refresh the reconnect issued after the episode ended
+    # changes nothing about it, and a delayed heartbeat outside the episode is
+    # not evidence either.
     if episode.cause == CAUSE_UNKNOWN:
-        stalled = [record for mode, record in matches
-                   if record.event == "gateway.event-loop-delay"
-                   or (record.event == "gateway.resources" and record.level in ("warning", "error"))
-                   or (record.event == "rpc.completed"
-                       and (record.number("durationMs") or 0) >= SLOW_RPC_WARNING_MS)]
+        stalled: List[Record] = []
+        for _mode, record in matches:
+            if record.timestamp is None:
+                continue
+            if record.event == "gateway.event-loop-delay":
+                if episode.start <= record.timestamp <= episode.end:
+                    stalled.append(record)
+            elif record.event == "gateway.resources" and record.level in ("warning", "error"):
+                stalled.append(record)
+            elif record.event == "rpc.completed":
+                duration = record.number("durationMs")
+                if duration is None or duration < SLOW_RPC_WARNING_MS:
+                    continue
+                if overlaps(record.timestamp - timedelta(milliseconds=duration),
+                            record.timestamp, episode.start, episode.end):
+                    stalled.append(record)
         if stalled:
             episode.cause = CAUSE_GATEWAY_STALL
             for record in stalled[:MAX_EVIDENCE_LINES]:
@@ -959,7 +1179,7 @@ def default_gateway_directory() -> Path:
 
 def triage_reports(export_paths: Sequence[Path], gateway_directory: Optional[Path],
                    tolerance_seconds: int, tailscale_requested: bool,
-                   runner: Optional[Callable[..., subprocess.CompletedProcess]] = None) -> Dict[str, Any]:
+                   tailscale_peer: Optional[str] = None) -> Dict[str, Any]:
     if not export_paths:
         raise TriageError("at least one phone export is required")
     exports = [load_phone_export(path) for path in export_paths]
@@ -991,8 +1211,8 @@ def triage_reports(export_paths: Sequence[Path], gateway_directory: Optional[Pat
     tailscale: Optional[TailscaleCapture] = None
     if tailscale_requested:
         stamps = [record.timestamp for record in phone_records if record.timestamp is not None]
-        tailscale = (capture_tailscale_window(min(stamps), max(stamps), runner) if stamps
-                     else TailscaleCapture(captured=False,
+        tailscale = (capture_tailscale_window(min(stamps), max(stamps), tailscale_peer) if stamps
+                     else TailscaleCapture(captured=False, peer=tailscale_peer,
                                            reason="no phone records to bound the window"))
 
     for episode in episodes:
@@ -1004,7 +1224,7 @@ def triage_reports(export_paths: Sequence[Path], gateway_directory: Optional[Pat
         by_cause[episode.cause] = by_cause.get(episode.cause, 0) + 1
         join_modes[episode.join] = join_modes.get(episode.join, 0) + 1
 
-    unjoined = sum(
+    outside_episodes = sum(
         1 for record in phone_records
         if record.timestamp is not None
         and record.event in ("gateway.attempt", "connection.episode", "gateway.connection")
@@ -1029,6 +1249,7 @@ def triage_reports(export_paths: Sequence[Path], gateway_directory: Optional[Pat
             "tailscaleWindow": None if tailscale is None else {
                 "captured": tailscale.captured,
                 "reason": tailscale.reason,
+                "peer": tailscale.peer,
                 "lines": len(tailscale.lines),
                 "window": None if tailscale.window is None else [
                     format_timestamp(tailscale.window[0]), format_timestamp(tailscale.window[1])],
@@ -1042,7 +1263,7 @@ def triage_reports(export_paths: Sequence[Path], gateway_directory: Optional[Pat
             "joinModes": join_modes,
             "phoneRecords": len(phone_records),
             "gatewayRecords": len(gateway.records),
-            "unjoinedConnectionRecords": unjoined,
+            "connectionRecordsOutsideEpisodes": outside_episodes,
         },
         "episodes": [
             {
@@ -1054,6 +1275,7 @@ def triage_reports(export_paths: Sequence[Path], gateway_directory: Optional[Pat
                 "attempts": episode.attempts,
                 "endedBy": episode.ended_by,
                 "profile": episode.profile,
+                "clientId": episode.client_id,
                 "derived": episode.derived,
                 "declaredCauses": episode.declared_causes,
                 "joinedBy": episode.join,
@@ -1084,6 +1306,7 @@ def render_text(report: Dict[str, Any]) -> str:
     tailscale = inputs["tailscaleWindow"]
     if tailscale is not None:
         lines.append(f"  tailscale window: {tailscale['reason']}, {tailscale['lines']} path line(s)"
+                     + ("" if tailscale["peer"] is None else f" for peer {tailscale['peer']}")
                      + ("" if tailscale["window"] is None
                         else f" over {tailscale['window'][0]}..{tailscale['window'][1]}"))
     lines.append(
@@ -1138,6 +1361,10 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--tailscale-window", action="store_true",
                         help="capture the Tailscale network-extension log with log show for the "
                              "export's time range and use it as path evidence")
+    parser.add_argument("--tailscale-peer", metavar="NODE",
+                        help="only read path lines naming this Magicsock peer node key "
+                             "(e.g. 6wPGm), so another peer's relay stretch is not read as "
+                             "the phone's")
     parser.add_argument("--tolerance-seconds", type=int, default=DEFAULT_JOIN_TOLERANCE_SECONDS,
                         metavar="N",
                         help="time-window join tolerance for logs without the O-1 key "
@@ -1176,7 +1403,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
                 return EXIT_INVALID
     try:
         report = triage_reports(exports, gateway_directory, arguments.tolerance_seconds,
-                                arguments.tailscale_window)
+                                arguments.tailscale_window, arguments.tailscale_peer)
     except TriageError as error:
         print(f"error: {error}", file=sys.stderr)
         return EXIT_INVALID

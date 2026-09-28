@@ -2,6 +2,8 @@
 
 - **Started:** 2026-09-27
 - **Status:** Active (Phase 1 runs on `hardening/integration`; that branch's copy of this plan is authoritative until R-1)
+- **Last updated:** 2026-09-28, O-7 review round 1 addressed; O-7 Blocked until the Context causes reproduce on the real device exports
+
 - **Last updated:** 2026-09-28, O-7 incident triage tool Done
 
 - **Last updated:** 2026-09-28, O-6a blocked on a quiet-host repeat (second review response landed)
@@ -545,7 +547,7 @@ rows are in priority order.
 | O-4 | Done | Phone connection records that survive an export, stall watchdog, exact scene records | O-1 | orchestrator-dispatched deepseek-worker, 2026-09-28; review rounds 1–4 addressed; focused suites and the iOS Gateway E2E blackhole runs pass |
 | O-6b | Claimed | Impairment in the qualification scenario: blackhole, bandwidth cap, Gateway restart | O-6a | orchestrator-dispatched deepseek-worker, 2026-09-28 |
 | O-5 | Done | Gateway resource sampler and event-loop histogram | O-3 | orchestrator-dispatched deepseek-worker, 2026-09-28 |
-| O-7 | Done | Incident triage tool: phone export plus Gateway log in, episodes by cause out | O-1, O-2, O-4 | orchestrator-dispatched deepseek-worker, 2026-09-28 |
+| O-7 | Blocked | Incident triage tool: phone export plus Gateway log in, episodes by cause out | O-1, O-2, O-4 | orchestrator-dispatched deepseek-worker, 2026-09-28; review round 1 addressed (attribution, older-export records, Tailscale capture); blocked until the Context causes reproduce on the real exports |
 | C-1 | Ready | Projection work never blocks or parks reconnect; parked episodes self-resume | O-4, O-6b | |
 | G-1a | Done | Catalog owner and in-memory index fed by Gateway-owned changes | O-3, O-6a | orchestrator-dispatched deepseek-worker, 2026-09-28 |
 | G-1b | Claimed | Filesystem watcher and background reconciliation for external writers | G-1a | orchestrator-dispatched deepseek-worker, 2026-09-28 |
@@ -4391,7 +4393,15 @@ events; widen them to name the pool owner in the same change.
   on ambient opens that excludes routed re-opens and assumes the pass keeps the
   750 ms cadence (finding 5, nit); the retained artifact's figure matches.
 
-### O-7 · Done · 2026-09-28 · orchestrator-dispatched deepseek-worker (branch `hardening/o-7`)
+### O-7 · Blocked · 2026-09-28 · orchestrator-dispatched deepseek-worker (branch `hardening/o-7`)
+
+- Blocked on: the Context causes do not reproduce on the real device exports.
+  The first pass marked this Done on a synthetic export; review round 1 ran the
+  tool on the ten real exports in `~/.tron/logs/device-exports/` and addressed
+  the misattribution and the unread shapes below. Real exports now reproduce
+  `path`, `phone-background` and `gateway-stall`, but **no** `phone-stall` and
+  no `gateway-capacity`; the row stays Blocked until the Context causes appear
+  or are explained on the evaluation day's export.
 
 - Result: `scripts/tron-triage` (front door) and `scripts/tron_triage.py` read
   one or more phone exports and the Gateway log with its rotations, join the two
@@ -4399,41 +4409,99 @@ events; widen them to name the pool owner in the same change.
   print one row per outage with its cause and the records behind it. `--json`
   prints the `tron.triage-report.v1` report and `--out PATH` writes it.
   `--tailscale-window` captures the Tailscale network-extension log with
-  `log show` over the export's range as extra path evidence. Inputs are opened
+  `log show` over the export's range as extra path evidence, and
+  `--tailscale-peer NODEKEY` bounds that read to the phone's Magicsock peer.
+  Inputs are opened
   read-only; the only write is the `--out` report.
 - Evidence:
-  - `python3 scripts/test-tron-triage.py` passes 22/22 in 2.4 s (Homebrew
-    Python 3.14) and 22/22 under `/usr/bin/python3` 3.9. Each test runs the real
-    front door against sanitized fixtures that reproduce one cause from Context,
-    and the combined run keeps its report at `TRON_TRIAGE_TEST_REPORT`
+  - `python3 scripts/test-tron-triage.py` passes 33/33 in 3.5 s (Homebrew
+    Python 3.14) and 33/33 under `/usr/bin/python3` 3.9 (the pre-review suite
+    was 22/22). Each test runs the real front door against sanitized fixtures
+    that reproduce one cause from Context, and the combined run keeps its
+    report at `TRON_TRIAGE_TEST_REPORT`
     (default `$TMPDIR/tron-triage-report.json` plus a `.txt` of the table).
-  - **"Done when", run against the live Gateway log (read-only) plus a synthetic
-    export**: `scripts/tron-triage ~/.tron/workspace/files/hardening/o-7/synthetic-phone-export.jsonl
-    --gateway-logs ~/.tron/logs --out ~/.tron/workspace/files/hardening/o-7/triage-report.json`
-    exits 0 in 0.32 s over 10,769 Gateway records and 31 phone records (the live
-    log grows while it runs: 10,767 on the first run, 10,769 on the third) and
-    reports 8 episodes: `unknown=1, gateway-capacity=1, phone-background=1,
-    gateway-stall=3, phone-stall=1, path=1`, joined `key=4 window=2 none=2`. The
-    artifacts are `triage-report.json` and `triage-report.txt` in that directory.
-    The Gateway side is the live log's real records: the 2026-09-27T22:20:37.619Z
-    `connection.outbound-capacity` that closed socket `3d9b80a0…`
-    (`queuedFrames=282 queuedBytes=8368863 nextBytes=638554` — the record in
-    Context), the 12,339 ms `push.registration.upsert` and 14,987 ms
-    `session.list` on `b7dacfd8…`, the still-open socket `ea33c149…` that
-    answered 1,249 ms and 1,855 ms RPCs, and the pool attempt with no accept
-    behind it. Periods reproduce Context: the two measured silent gaps
-    (345 s = 03:24:45–03:30:30 and 135 s = 04:56:31–04:58:46) appear as
-    zero-attempt windows with the gap statement in their evidence.
-  - `scripts/tron-triage /tmp/export --gateway-logs ~/.tron/logs --tailscale-window`
-    ran the real `/usr/bin/log show` (1.9 s, `captured: true`, 0 path lines in
-    that window) without touching the input.
+  - **"Done when", first pass (superseded): a synthetic export**. The handoff
+    reported running the tool against the live Gateway log (read-only) plus a
+    hand-written `synthetic-phone-export.jsonl`. That run proved the plumbing,
+    not the rules: the episode times and the causes were typed into the fixture,
+    so reproducing Context with it was circular. The ten real exports were on
+    local disk the whole time (`~/.tron/logs/device-exports/`), and review round
+    1 used them instead.
+  - **"Done when", review round 1: the real exports**. Over the ten exports
+    (183 episodes, joined `window=183` because these builds predate O-1 and
+    carry no `gatewayConnectionId`): `unknown=107, gateway-stall=59,
+    phone-background=9, path=8, phone-stall=0, gateway-capacity=0`. The 21
+    episodes on `…2026-09-28T07-37-42-420Z.jsonl` are
+    `unknown=14, gateway-stall=4, phone-background=3`; the four remaining
+    `gateway-stall` episodes each have a slow span whose issue-to-completion
+    overlaps the episode (`completion - durationMs … completion`), which the
+    fix counts and a post-episode completion no longer does. The 09-28 export
+    overlaps the incident day's 05:58 abnormal close, so the causes do not yet
+    reproduce and the row is Blocked.
+  - `scripts/tron-triage …2026-09-28T07-37-42-420Z.jsonl --gateway-logs
+    ~/.tron/logs --tailscale-window --tailscale-peer 6wPGm` ran the real
+    `/usr/bin/log show` (`captured: true`, 12 path lines for that peer) without
+    touching the input. The first pass's "`captured: true`, 0 path lines" was
+    the bug: the compact timestamp had no UTC offset and every line was
+    dropped (finding 4).
   - `python3 scripts/check-documentation-policy.py` (46 authored files) and
     `scripts/personal-info-guard.sh` pass.
-- Changes: four commits on `hardening/o-7`: `feat(triage): add the incident
+- Changes: five commits on `hardening/o-7`: `feat(triage): add the incident
   triage tool (O-7)`, `docs(triage): name the triage command first, close label
   windows at scene and episode boundaries (O-7)`,
   `feat(triage): pair the inbound-silence evidence with its resume record (O-7)`,
-  `docs(triage): give the capture and evidence bounds their reasons (O-7)`.
+  `docs(triage): give the capture and evidence bounds their reasons (O-7)`,
+  `fix(triage): attribute a cause only to the episode's own connection (O-7)`.
+- **Review round 1 (changes-required → addressed).** The review's blockers and
+  majors, and what each one changed:
+  1. *Blocker — rule 4 took any slow span in the padded window as the cause.*
+     Rule 4 now requires a slow span's own issue-to-completion interval
+     (`completion - durationMs … completion`) to overlap `[start, end]`, an
+     event-loop delay to fall inside the episode rather than the +30 s pad, and
+     an episode to use one join: when the key joins any record, a record naming
+     another connection is not this episode's evidence (Gateway-wide records
+     still count). On the 09-28 export this moved 12/12 `gateway-stall` to
+     4, with the rest `unknown`/`phone-background`.
+  2. *Blocker — the row was Done although "Done when" was not met, and the
+     handoff claimed the incident exports were unavailable.* They are on local
+     disk (`~/.tron/logs/device-exports/`, ten files). The synthetic-export run
+     is marked superseded, the real-export result is recorded above, and the
+     row is Blocked.
+  3. *Major — older exports' records were not recognised.* `scene_phase` now
+     reads `app.backgrounded`/`app.foregrounded`, `scene.*` and the retained
+     client's `gateway.lifecycle kind=scene.*`, so both the background window
+     closer and `phone-background` fire (3 episodes on the 09-28 export).
+     `label_over_live_socket` gained a time-window fallback for exports with no
+     `gatewayConnectionId`, and the dead `reconnect.connected` branch became
+     `gateway_id_of` recognising the retained client's `kind=reconnect.connected`.
+     `is_covered` also stopped merging two label windows that merely sit within
+     the 5 s pad, which had been swallowing the background-parked episode.
+  4. *Major — `--tailscale-window` produced no evidence.* The compact timestamp
+     is parsed as local time, the real Magicsock forms are matched (`via=derp`
+     relay, `now using <addr>` direct), `--tailscale-peer NODEKEY` filters to
+     the phone's peer, and the tests use a fixture `log` executable with real
+     sanitized lines instead of a `runner` hook in production code.
+  5. *Major — the path rule ignored an attempt's profile.* `attempt_belongs`
+     keeps an episode's declared profile (or client), so the settings pool's
+     transport-open timeout no longer makes a main-profile episode `path`.
+  6. *Major — the wrong-label rule over-reached.* `socket_answered` requires the
+     request to have been issued at/after the label and completed inside the
+     episode, and the label must be this episode's own transition, so a request
+     issued before the loss is not proof the socket was live.
+  7. *Minor — attempt counting.* `phone_attempts` prefers the O-4
+     `gateway.attempt` record, dedupes the transport store's rows by
+     `(clientID, sequence)` (the loop's `attemptId` is shared by every retry),
+     and `attempt_reached_mac` requires the arrival before the attempt's own end
+     rather than anywhere in the pad.
+  8. *Minor — the phone-only export fixture invented a `connectionId`.* The test
+     uses the real `AppLogRecord` shape (null `connectionID`) and asserts
+     `joinedBy=window`.
+  9. *Minor — test-only `runner` parameters.* Removed; the Tailscale tests drive
+     a fixture executable through `TAILSCALE_LOG_TOOL`.
+  10. *Nits.* The doc's `.1` rotation is now `.1`–`.7`;
+     `unjoinedConnectionRecords` is renamed `connectionRecordsOutsideEpisodes`
+     (the count is records outside every episode); `offline(_:)` no longer
+     splits a label window.
 - Failure modes written before the code (one test each): a relay-path outage
   attributed to the phone because the Gateway's silent-socket record was not
   joined; a transport-open timeout read as a Gateway stall, and a live main
@@ -4449,7 +4517,11 @@ events; widen them to name the pool owner in the same change.
   entering the background and a `connection.episode` record both close a
   label window), and a neighbouring episode swallowed by the 60 s join
   tolerance (fixed: episode coverage uses a 5 s pad, the join tolerance only
-  joins).
+  joins). Review round 1 added one written failure mode per finding — a slow
+  span that ended after the episode, another connection's slow span in a
+  key-joined episode, the app's real scene records, the settings pool's
+  second-profile attempt, a request issued before the loss, and one attempt
+  recorded by both phone shapes — as `ReviewRegressionTests`.
 - Tasks added: none.
 - Kept on purpose:
   - The report's cause is the plan's rule order, not a vote: `path` first, so a
@@ -4459,11 +4531,12 @@ events; widen them to name the pool owner in the same change.
     there, which is the only place the rules as written would have called a
     designed suspension a path fault.
   - `unknown` is a real outcome and is reported with the gap statement, not
-    silently reclassified: in the live-log run the two measured silent gaps
-    classify `gateway-stall` because the log's own slow `session.list` records
-    land inside the padded evidence window (the socket that ended the gap opened
-    3.5 s later and then took 8.7 s and 11.7 s). Both the gap line and the slow
-    spans are in the evidence, and the durations match Context.
+    silently reclassified: a zero-attempt foreground gap with no overlapping
+    slow span stays `unknown` with the gap line in its evidence. The first
+    pass's live-log run classified the two measured silent gaps `gateway-stall`
+    only because a slow `session.list` completed inside the +30 s pad; the span
+    overlap bound in review round 1 removed that, which is the point of the
+    bound.
   - The 60 s join tolerance is the documented fallback for protocol-5 logs and
     is a flag; key joins always win and the report says which join each episode
     used.
@@ -4484,22 +4557,34 @@ events; widen them to name the pool owner in the same change.
   - `--tailscale-window` reads the extension log as text and is a heuristic
     (a relay line opens a window, a direct line closes it) that is reported as
     evidence, not as proof; the authoritative path signal is O-2's `peerPath`.
+    `--tailscale-peer` bounds it to one Magicsock node key, because the
+    extension serves every tailnet peer.
+  - `attempt_belongs` filters by the episode's declared profile (or client). A
+    label-window episode the phone publishes through `connection.state-changed`
+    declares neither, so its attempts are not filtered; on the real exports the
+    transport store's rows carry no profile either, so the filter is a no-op
+    there and exact for O-4 exports.
   - The task named `new tron-triage in scripts/` as an owning file: the command's
     only other entry point, `scripts/tron`, was left unchanged, so the command is
     `scripts/tron-triage` (like `scripts/tron-profile`).
 - For the next agent (owed by the orchestrator / R-4):
-  1. Run the tool on the incident's real exports. Both files named in the Draft
-     handoff exist (`tron-diagnostics.jsonl` and `tron-diagnostics-3.jsonl` in
-     `~/Library/CloudStorage/SynologyDrive-SynologyDrive/`) but every read fails
-     with `EDEADLK` and `ls -lO` reports the `dataless` flag: they are cloud
-     placeholders whose content was not downloaded, so they could not be used
-     read-only, copied, or attributed. Nothing in the tool depends on them: R-4
-     should run it on the evaluation day's export and the Gateway log, and the
-     "at least 95% of episodes attributed to one cause" exit criterion is
-     measured there.
-  2. If R-4 finds the two silent gaps being reported `gateway-stall` because of
-     the evidence pad, that is a rule-order question (should a zero-attempt
-     foreground gap with a slow Gateway in the window be `unknown`,
-     `phone-stall` or `gateway-stall`?) — C-1 and O-4's `reconnect.stalled`
-     should make it `phone-stall` before the release; decide it there rather
-     than silently widening the pad.
+  1. The incident exports are the ten files in
+     `~/.tron/logs/device-exports/`; the first pass looked for the two Draft
+     handoff names in `~/Library/CloudStorage/SynologyDrive-SynologyDrive/`,
+     which are `dataless` cloud placeholders that cannot be read. Running the
+     tool over the ten (review round 1 did, read-only) reproduces `path`,
+     `phone-background` and `gateway-stall` but no `phone-stall` and no
+     `gateway-capacity`, so the row is Blocked: the causes have to reproduce
+     there, or R-4 has to explain why these exports cannot show them, before
+     the row moves off Blocked. The exports are all pre-O-1 (`gatewayConnectionId`
+     absent, joined `window=183`), so the correlation key is untested against
+     real data. R-4 measures the "at least 95% of episodes attributed to one
+     cause" exit criterion on the evaluation day's export.
+  2. The two measured silent gaps are no longer reported `gateway-stall` by the
+     evidence pad: a slow span now has to overlap the episode, and an
+     event-loop delay has to fall inside it. What remains is a rule-order
+     question for a zero-attempt foreground gap with a Gateway slow span that
+     genuinely overlaps it (should it be `unknown`, `phone-stall` or
+     `gateway-stall`?) — C-1 and O-4's `reconnect.stalled` should make it
+     `phone-stall` before the release; decide it there rather than silently
+     widening the pad.

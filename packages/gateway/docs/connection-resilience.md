@@ -198,7 +198,9 @@ keeps today's uncompressed frames.
    matching rule in `scripts/tron_triage.py`. `--json` prints the report and
    `--out PATH` writes it; `--tailscale-window` captures the Tailscale network
    extension's own log with `log show` over the export's range and uses it as
-   path evidence for logs written before O-2. Start there, then read the
+   path evidence for logs written before O-2, and `--tailscale-peer NODEKEY`
+   restricts that read to the phone's Magicsock peer so another tailnet peer's
+   relay stretch is not read as the phone's. Start there, then read the
    evidence lines it prints.
 2. Export iOS Logs if `tron-triage` was given no export yet. Keep its capture
    time, represented time range, app build, source freshness, profile
@@ -206,15 +208,19 @@ keeps today's uncompressed frames.
    not a live Gateway health check. If the initial fault predates the
    represented range, it is missing evidence.
 3. Compare the same UTC interval with `<tronHome>/logs/gateway.jsonl` and its
-   bounded `.1` rotation. The tool joins the two sides by the O-1 key: a phone
-   record's `gatewayConnectionId` is the Gateway record's `connectionId`, and
-   its `clientId`/`attemptId`/`epoch` are the Gateway's `peerClientId`,
-   `peerAttemptId` and `peerEpoch`. Only logs from before the correlation key
-   shipped (protocol 5) have to be matched by time window instead, and the
-   report says which join each episode used (`joinedBy`). A cause is only as
-   good as its evidence line: an `unknown` episode lists what the records did
-   contain, and an `unknown` for a foreground silent gap is the measured silent
-   recovery gap until C-1 removes it.
+   `gateway.jsonl.1`–`.7` rotations. The tool joins the two sides by the O-1
+   key: a phone record's `gatewayConnectionId` is the Gateway record's
+   `connectionId`, and its `clientId`/`attemptId`/`epoch` are the Gateway's
+   `peerClientId`, `peerAttemptId` and `peerEpoch`. Only logs from before the
+   correlation key shipped (protocol 5) have to be matched by time window
+   instead, and the report says which join each episode used (`joinedBy`). One
+   join decides an episode: when the key joins any record, only key-joined
+   records and Gateway-wide records (a delayed event loop, host resources)
+   count as evidence, so a neighbour connection's slow span is never read as
+   this episode's cause. A cause is only as good as its evidence line: an
+   `unknown` episode lists what the records did contain, and an `unknown` for a
+   foreground silent gap is the measured silent recovery gap until C-1 removes
+   it.
 4. Use existing local Mac status/health observations to distinguish a responsive
    Gateway from an unreachable mobile path. An OS network path of `satisfied`
    proves neither Tailscale tunnel health nor reachability of the selected Mac.
