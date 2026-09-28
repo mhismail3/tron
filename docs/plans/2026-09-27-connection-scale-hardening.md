@@ -518,7 +518,7 @@ rows are in priority order.
 | E-2b | Claimed | Record `time-profiler` with `xctrace record --attach <pid>` if a real traced run proves it samples the simulator app; re-measure export and parser peaks (see E-2 handoff) | E-2 | orchestrator-dispatched deepseek-worker, 2026-09-28 |
 | O-2 | Ready | Gateway transport records: upgrade phases, inbound silence with Tailscale peer path | O-1 | |
 | O-3 | Claimed | Request span: one `rpc.completed` per slow RPC with every stage, wait and count | O-1 | orchestrator-dispatched deepseek-worker, 2026-09-28 |
-| O-4 | Blocked | Phone connection records that survive an export, stall watchdog, exact scene records | O-1 | orchestrator-dispatched deepseek-worker, 2026-09-28; review round 1 addressed, focused suites pass, the E2E export evidence is still unrun |
+| O-4 | Done | Phone connection records that survive an export, stall watchdog, exact scene records | O-1 | orchestrator-dispatched deepseek-worker, 2026-09-28; review round 1 addressed; focused suites and the iOS Gateway E2E blackhole run pass |
 | O-6b | Ready | Impairment in the qualification scenario: blackhole, bandwidth cap, Gateway restart | O-6a | |
 | O-5 | Ready | Gateway resource sampler and event-loop histogram | O-3 | |
 | O-7 | Ready | Incident triage tool: phone export plus Gateway log in, episodes by cause out | O-1, O-2, O-4 | |
@@ -1784,16 +1784,16 @@ the day cannot measure a synthetic case).
   `Table.resolve` became `Table.value`, since it only drops absent or
   `<sentinel/>` cells now (finding 4).
 
-### O-4 · Blocked (review round 1 addressed) · 2026-09-28 · orchestrator-dispatched deepseek-worker (branch `hardening/o-4`)
+### O-4 · Done (review round 1 addressed) · 2026-09-28 · orchestrator-dispatched deepseek-worker (branch `hardening/o-4`)
 
-- Result: the code, tests and docs are written and committed, but no check was
-  run: the shared owned iOS test simulator was leased for the whole session by
-  the E-2b worker (`--scenario control`), so `scripts/tron-ios-test build`
-  exited 73 (busy) on every attempt and nothing in the first commit is compiled
-  here. Round 1 of review then built and ran it (see the review response at the
-  end of this entry): the focused suites pass now, and the row stays Blocked
-  because the E2E export artifact for the second "Done when" item still does not
-  exist.
+- Result: the code, tests and docs are written and committed. The first commit
+  ran no check (the shared owned iOS test simulator was leased for the whole
+  session by the E-2b worker), so nothing in it was compiled here. Round 1 of
+  review then built and ran it (see the review response at the end of this
+  entry) and returned changes-required; every finding is addressed, and both
+  "Done when" items now have evidence: the focused suites pass and the iOS
+  Gateway E2E blackhole run wrote one episode that explains every attempt with
+  its gaps.
 - Evidence: `python3 scripts/check-documentation-policy.py` passes (46 authored
   files) and `scripts/personal-info-guard.sh` passes; both were run before the
   commit. No test command could run: `scripts/tron-ios-test build` and `status`
@@ -1801,8 +1801,22 @@ the day cannot measure a synthetic case).
   `scripts/tron-profile-ios --scenario control` run) for 25+ minutes, and the
   environment rules forbid booting another simulator or bypassing the lease.
   Nothing is claimed about behavior.
+- Evidence (round 1, follow-up commit `2bc68ad21`):
+  `scripts/tron-ios-test build` succeeds; `scripts/tron-ios-test run` passes
+  `TronMobileTests/AppModelReconnectTests`, `AppModelLifecycleTests`,
+  `GatewayConnectionEpisodeRecorderTests` and `AppLogTests` (50 tests, 4
+  suites), `AppModelPerformanceSignpostTests` (23), `SessionPresentationStoreTests`,
+  `SessionMutationServiceTests` and `AppModelWorkspaceTests` (75), and
+  `PushNotificationCoordinatorTests`/`WorkspaceBrowserOwnerTests`. Negative
+  control: with the folded `stallGuard` closure restored, the new coordinator
+  test fails (`reconnect.stalled` count 1) and the fix makes it pass.
+  `scripts/ios-gateway-e2e-test prepare|build|run` passes
+  `RealGatewayPiBoundaryTests` (1 test, 0 failures, 28.6 s).
+  `python3 scripts/check-documentation-policy.py` and
+  `scripts/personal-info-guard.sh` pass.
 - Changes: `feat(ios): phone connection records, stall watchdogs and exact scene
-  records (O-4)` on `hardening/o-4`.
+  records (O-4)` and `fix(ios): address the O-4 review round 1 findings`
+  (`2bc68ad21`) on `hardening/o-4`.
 - Failure modes written before the code (in the header of the new recorder test
   file): the stall watchdog ticks while backgrounded; an episode record spans a
   background transition; a second recorder on the same always-on log mixes its
@@ -1896,17 +1910,20 @@ the day cannot measure a synthetic case).
     wording and is not O-4's call; the row documents the behaviour as it is.
   - `Tests/Gateway/RealGatewayPiBoundaryTests.swift` carries the blackhole E2E
     case; O-1 extended the same file for its correlation join.
-- For the next agent (this is the whole remaining work):
-  1. The E2E blackhole evidence for Do item "Done when" is still unrun. It is
-     written as `exerciseBlackholedReconnect` in
-     `packages/ios-app/Tests/Gateway/RealGatewayPiBoundaryTests.swift`: it
-     blackholes the fixture proxy, backgrounds and foregrounds the lifecycle,
-     restores the path, then asserts one `gateway.attempt` per attempt of the
-     outage, one `connection.episode` resolving it (`endedBy=connected`), a gap
-     that covers the blackholed attempt, and returns every record for the caller
-     to attach as `phone-connection-records`. Run `scripts/ios-gateway-e2e-test all`
-     and keep the attachment.
-  2. If the recorder tests pass but the coordinator-level expectations move
+- For the next agent (the remaining work is C-5's, not O-4's):
+  1. O-4 is Done. The E2E evidence, run on 2026-09-28 with
+     `scripts/ios-gateway-e2e-test prepare` then `build` then `run` (plain Node
+     22.22.0, after `npm run build` in `packages/gateway`), is the
+     `phone-connection-records` attachment of `RealGatewayPiBoundaryTests`
+     (1 test, 0 failures, 28.6 s). The records are retained at
+     `~/.tron/workspace/files/hardening/o-4-blackhole-phone-connection-records.txt`:
+     the forward attempt, the blackholed failure
+     (`stageReached=hello-receive reason=transport durationMs=5078`), the recovery
+     attempt (`delayBeforeMs=1975`) and exactly one
+     `connection.episode ... attempts=2 causes=transport foregroundMs=7135
+     maxGapBetweenAttemptsMs=7053 endedBy=connected`.
+  2. C-5 owns the pool's records; its API is in the "For C-5" note below.
+  3. If the recorder tests pass but the coordinator-level expectations move
      (for example an extra `gateway.attempt` for a cold start), check
      `attemptStage` in `GatewayLifecycleCoordinator.swift` first: it derives the
      stage from the client's handshake diagnostic when the failure path already
