@@ -6143,6 +6143,13 @@ export class RuntimeSlot {
 
   publishSnapshot(): void {
     if (this.disposed || this.trustReloadPending) return;
+    // This publication already carries every change a pending coalesced frame
+    // was scheduled for; letting that timer fire would rebroadcast the same
+    // state. Later mutations schedule their own frame.
+    if (this.snapshotTimer) {
+      clearTimeout(this.snapshotTimer);
+      this.snapshotTimer = undefined;
+    }
     this.publishStateChange();
     // A coalesced streaming frame must not overtake the state transition this
     // snapshot publishes.

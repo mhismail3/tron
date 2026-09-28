@@ -2368,8 +2368,12 @@ the workload. Metrics, one sample per iteration, all lower-is-better:
   fixture Gateway process from `proc_pid_rusage`; tool subprocesses are excluded.
 
 Most wire counts repeat exactly, but a few Gateway publications depend on
-timing: prompt admission sometimes sends one extra same-size `session.snapshot`,
-and throttled summaries and tool progress can shift by a frame. `compare`
+timing: prompt admission sometimes sends one extra same-size `session.snapshot`
+(Pi's user `message_end` frame fires before admission's receipt I/O finishes,
+so admission's own publication differs only by `revision`),
+and throttled summaries and tool progress can shift by a frame. An immediate
+snapshot publication cancels any pending 20 ms coalesced frame it already
+covers, so the Gateway never rebroadcasts an identical snapshot. `compare`
 therefore never treats a one-unit move in an integer count as a verdict; for a
 larger unexplained move check `timeline.jsonl` or run more iterations. Gateway CPU varies with host load and garbage
 collection, so compare CPU only between runs on a quiet host. Reports live under

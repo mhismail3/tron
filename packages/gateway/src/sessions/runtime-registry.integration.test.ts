@@ -918,6 +918,62 @@ describe.sequential("RuntimeRegistry with the pinned agent runtime", () => {
     });
   });
 
+  it("never rebroadcasts a snapshot already covered by an immediate publication", async () => {
+    // Failure mode: an event schedules the 20 ms coalesced snapshot, then an
+    // immediate publication (run settlement, prompt admission) broadcasts that
+    // state and the stale timer later broadcasts the identical state again.
+    const root = await mkdtemp(join(tmpdir(), "tron-duplicate-snapshot-"));
+    const agentDir = join(root, "agent");
+    const cwd = join(root, "workspace");
+    await Promise.all([mkdir(agentDir), mkdir(cwd)]);
+    const runtime = await ModelRuntime.create({ modelsPath: null, refreshOnCreate: false });
+    const faux = fauxProvider({ provider: "tron-duplicate-snapshot", tokensPerSecond: 400 });
+    faux.setResponses([fauxAssistantMessage("streamed reply ".repeat(12))]);
+    runtime.registerNativeProvider(faux.provider);
+    const snapshots: any[] = [];
+    const registry = new RuntimeRegistry({
+      agentDir,
+      tronHome: join(root, "tron"),
+      idleRuntimeMs: 60_000,
+      modelRuntimeFactory: async () => runtime,
+      trust: new TrustService(agentDir),
+      broadcast: (_id, topic, payload) => { if (topic === "session.snapshot") snapshots.push(payload); },
+      sessionSummaryChanged: () => {},
+      sessionListChanged: () => {},
+    });
+    registries.push(registry);
+    await registry.initialize();
+    const slot = await registry.create(cwd);
+    const model = faux.getModel();
+    await slot.setModel(model.provider, model.id);
+    const state = ({ eventSequence: _sequence, ...rest }: any) => JSON.stringify(rest);
+
+    const before = snapshots.length;
+    const receipt = await slot.prompt("duplicate snapshot owner");
+    // A client that opens mid-admission installs the current snapshot, then
+    // applies only later sequences, exactly like the phone reducer.
+    const midAdmission = slot.snapshot();
+    await waitUntil(() => !slot.isBusy);
+    // Outlive any coalescing window still pending after settlement.
+    await new Promise((resolve) => setTimeout(resolve, 60));
+
+    const published = snapshots.slice(before);
+    for (let index = 1; index < published.length; index += 1) {
+      expect(state(published[index]), `snapshot ${published[index].eventSequence} repeats its predecessor`)
+        .not.toBe(state(published[index - 1]));
+    }
+    const final = slot.snapshot();
+    expect(final.phase).toBe("idle");
+    expect(final.pendingPrompt).toBeUndefined();
+    expect(final.transcript.find((item: any) => item.role === "user")?.presentationId).toBe(receipt.operationId);
+    // Both an early subscriber and the mid-admission subscriber converge on
+    // the owner's settled state.
+    expect(state(published.at(-1))).toBe(state(final));
+    const lateSubscriberFrames = published.filter((snapshot) => snapshot.eventSequence > midAdmission.eventSequence);
+    expect(lateSubscriberFrames.length).toBeGreaterThan(0);
+    expect(state(lateSubscriberFrames.at(-1))).toBe(state(final));
+  });
+
   it("keeps row-summary revisions separate and lists phase without transcript snapshots", async () => {
     const root = await mkdtemp(join(tmpdir(), "tron-catalog-summary-revision-"));
     const agentDir = join(root, "agent");
