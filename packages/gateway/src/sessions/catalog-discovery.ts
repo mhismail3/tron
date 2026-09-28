@@ -18,13 +18,11 @@ export const DEFAULT_CATALOG_DISCOVERY_LIMITS = {
   maximumEntries: 50_001,
   maximumTraversalBytes: 8 * 1_024 * 1_024,
   maximumSessions: 25_000,
-  maximumRetainedBytes: 8 * 1_024 * 1_024,
   maximumAcquisitionBytes: 4 * 1_024 * 1_024,
   maximumHeaderBytes: 64 * 1_024 * 1_024,
   maximumHeaderBytesPerFile: 64 * 1_024,
-  // Ten concurrent streams cap descriptor pressure while keeping metadata I/O independent of folder concurrency.
-  metadataReadConcurrency: 10,
-  // Match the existing bounded normalization width for folder visits.
+  // The width one folder-visit batch runs at, for the evidence scan and its
+  // header batches.
   normalizationConcurrency: 16,
 };
 
@@ -159,23 +157,6 @@ export async function buildCatalogSessionInfo(filePath: string): Promise<Catalog
   } catch {
     return null;
   }
-}
-
-async function buildCatalogSessionInfos(
-  files: readonly string[],
-  concurrency = DEFAULT_CATALOG_DISCOVERY_LIMITS.metadataReadConcurrency,
-): Promise<CatalogSessionInfo[]> {
-  const results: Array<CatalogSessionInfo | null> = new Array(files.length).fill(null);
-  let next = 0;
-  const worker = async (): Promise<void> => {
-    while (true) {
-      const index = next++;
-      if (index >= files.length) return;
-      results[index] = await buildCatalogSessionInfo(files[index]!);
-    }
-  };
-  await Promise.all(Array.from({ length: Math.min(concurrency, files.length) }, worker));
-  return results.filter((info): info is CatalogSessionInfo => info !== null);
 }
 
 export interface CatalogHeaderIdentity {
@@ -464,90 +445,4 @@ export class CatalogDiscovery {
       await handle.close();
     }
   }
-
-  async sessionInfos(scope: "user" | "all" = "all") {
-    const limits = this.options.limits;
-    const catalogRoot = await realpath(resolve(this.options.catalogDirectory())).catch(() => resolve(this.options.catalogDirectory()));
-    let frontier = [catalogRoot];
-    const seen = new Set<string>();
-    const files: string[] = [];
-    let entriesExamined = 0;
-    let traversalBytes = Buffer.byteLength(catalogRoot);
-    while (frontier.length > 0) {
-      const nextFrontier: string[] = [];
-      await visitConcurrently(frontier, limits.normalizationConcurrency, async (candidate) => {
-        let directory: string;
-        try { directory = await realpath(candidate); }
-        catch (error) {
-          if (isMissingFilesystemError(error)) return;
-          throw new GatewayError("busy", "Session catalog directory could not be validated", true);
-        }
-        if (isIgnoredCatalogDirectory(directory, catalogRoot) || !seen.add(directory)) return;
-        traversalBytes += Buffer.byteLength(directory);
-        if (seen.size > limits.maximumDirectories
-          || traversalBytes > limits.maximumTraversalBytes) this.options.catalogCapacityExceeded();
-        try {
-          const entries = await this.openDirectory(directory);
-          for await (const entry of entries) {
-            entriesExamined += 1;
-            if (entriesExamined > limits.maximumEntries) this.options.catalogCapacityExceeded();
-            const child = join(directory, entry.name);
-            if (entry.isDirectory()) {
-              if (isIgnoredCatalogDirectory(child, catalogRoot)) continue;
-              traversalBytes += Buffer.byteLength(child);
-              if (traversalBytes > limits.maximumTraversalBytes) this.options.catalogCapacityExceeded();
-              nextFrontier.push(child);
-            } else if (entry.name.endsWith(".jsonl") && entry.isFile()) files.push(child);
-          }
-        } catch (error) {
-          if (error instanceof GatewayError) throw error;
-          if (!isMissingFilesystemError(error)) {
-            throw new GatewayError("busy", "Session catalog directory could not be enumerated", true);
-          }
-        }
-      });
-      frontier = nextFrontier;
-    }
-
-    // Header-based delegated classification excludes child files from user rows;
-    // full metadata reads remain globally bounded to ten concurrent files.
-    const metadataFiles = scope === "user"
-      ? files.filter((file) => this.options.delegatedTopologyParentPath(file, catalogRoot) === undefined)
-      : files;
-    const sessions = await buildCatalogSessionInfos(metadataFiles, limits.metadataReadConcurrency);
-    if (sessions.length > limits.maximumSessions) this.options.catalogCapacityExceeded();
-    let retainedBytes = 0;
-    for (const session of sessions) {
-      retainedBytes += Buffer.byteLength(JSON.stringify(session));
-      if (retainedBytes > limits.maximumRetainedBytes) this.options.catalogCapacityExceeded();
-    }
-
-    const normalized = new Array<CatalogSessionInfo>(sessions.length);
-    let nextIndex = 0;
-    const normalize = async () => {
-      while (true) {
-        const index = nextIndex;
-        nextIndex += 1;
-        const session = sessions[index];
-        if (!session) return;
-        const path = await this.options.canonicalSessionPath(session.path);
-        normalized[index] = {
-          ...session,
-          path,
-          ...(session.parentSessionPath
-            ? { parentSessionPath: await this.options.canonicalSessionPath(session.parentSessionPath) }
-            : {}),
-        };
-      }
-    };
-    await Promise.all(Array.from(
-      { length: Math.min(limits.normalizationConcurrency, sessions.length) },
-      normalize,
-    ));
-    // Overlapping recursive discovery roots may report the same canonical file
-    // more than once. Canonical path aliases are one file, not an ID collision.
-    const byPath = new Map(normalized.map((session) => [resolve(session.path), session]));
-    return sortCatalogPaths(byPath.keys()).map((path) => byPath.get(path)!);
-  }
-
 }

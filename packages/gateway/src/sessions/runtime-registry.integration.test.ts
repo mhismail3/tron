@@ -24,7 +24,7 @@ import type { ExtensionRunActivity, ExtensionToolOrigin, SessionSummaryUpdate } 
 import { GatewayWorkRegistry, type GatewayWorkHandle } from "./gateway-work-registry.js";
 import { RequestSpan, runInRequestSpan, stage } from "../transport/request-span.js";
 import type { ResourceRecorder } from "../transport/stall-diagnostics.js";
-import { CatalogDiscovery, DEFAULT_CATALOG_DISCOVERY_LIMITS, type CatalogSessionInfo } from "./catalog-discovery.js";
+import { CatalogDiscovery, DEFAULT_CATALOG_DISCOVERY_LIMITS, buildCatalogSessionInfo, type CatalogSessionInfo } from "./catalog-discovery.js";
 import { CatalogMetadataIndex } from "./catalog-metadata-index.js";
 import type { SessionCatalog } from "./session-catalog.js";
 import { INVOCATION_RECEIPT_TYPE, makeInvocationReceipt } from "./invocation-receipts.js";
@@ -3470,8 +3470,9 @@ describe.sequential("RuntimeRegistry with the pinned agent runtime", () => {
     await registry.initialize();
     const catalog = (registry as unknown as { sessionCatalog: SessionCatalog }).sessionCatalog;
     const catalogRoot = await realpath(sessions);
-    // The comparison is the Gateway's own full scan of the folder, never the
-    // index's scan source, so an index row is checked against the canonical file.
+    // The comparison is the Gateway's own walk of the folder plus one read of
+    // every canonical file, never the index's rows, so an index row is checked
+    // against the file it was built from.
     const discovery = new CatalogDiscovery({
       limits: DEFAULT_CATALOG_DISCOVERY_LIMITS,
       catalogDirectory: () => catalogRoot,
@@ -3481,7 +3482,18 @@ describe.sequential("RuntimeRegistry with the pinned agent runtime", () => {
       delegatedTopologyParentPath: () => undefined,
     });
     const compareToFullScan = async (label: string) => {
-      const scanned = await discovery.sessionInfos("all");
+      const walked = await discovery.catalogStructureEvidence();
+      const scanned = (await Promise.all(
+        [...walked.identitiesByPath.keys()].map(async (path) => {
+          const info = await buildCatalogSessionInfo(path);
+          if (!info) return null;
+          return {
+            ...info,
+            path: await realpath(info.path),
+            ...(info.parentSessionPath ? { parentSessionPath: await realpath(info.parentSessionPath) } : {}),
+          };
+        }),
+      )).filter((info): info is CatalogSessionInfo => info !== null);
       const rows = catalog.rows();
       expect(rows.map((row) => row.path), `${label}: paths`).toEqual(scanned.map((session) => session.path));
       expect(rows.map((row) => [
@@ -11468,23 +11480,22 @@ export default function (pi) {
     expect(recorded.recordRuntimeEvicted).not.toHaveBeenCalled();
   });
 
-  // A walk a request is waiting on is told apart from background work, so the
-  // request path's "zero catalog walks" criterion is readable from the record.
-  it("counts a walk a request waited on apart from background catalog walks", async () => {
+  // G-1c: the request path joins the owner's cut, so the record shows no
+  // request-path walk at all while the owner's own walks stay background work.
+  it("counts no request-path walk while the reader joins the owner's cut", async () => {
     const recorded = resourceRecorder();
     const fixture = await coldFixture("request-path-walk", { resources: recorded });
     // Settle the catalog owner before the request: its own background reconcile
-    // must not interleave and be misattributed as request-path work, and then
-    // every walk in the request's window can be asserted, not just one.
+    // must not interleave and be misattributed as request-path work, so every
+    // walk in the request's window is the request's own.
     await settleCatalog(fixture.registry);
     const backgroundWalks = recorded.recordCatalogWalk.mock.calls.length;
 
     await runInRequestSpan(new RequestSpan(), () => fixture.registry.delete(fixture.manager.getSessionId()));
 
     const requestWalks = recorded.recordCatalogWalk.mock.calls.slice(backgroundWalks);
-    expect(requestWalks.length).toBeGreaterThan(0);
-    expect(requestWalks.every((call) => call[2] === true)).toBe(true);
-    expect(recorded.recordCatalogWalk.mock.calls.slice(0, backgroundWalks).every((call) => call[2] === false)).toBe(true);
+    expect(requestWalks).toEqual([]);
+    expect(recorded.recordCatalogWalk.mock.calls.every((call) => call[2] === false)).toBe(true);
 
     // The same walk with no request waiting on it is background work.
     const evidenceSeam = fixture.registry as unknown as { catalogStructureEvidence: () => Promise<unknown> };

@@ -7353,3 +7353,36 @@ wait).
 - Deviations: readers join the owner's first cut rather than serving a
   pre-reconcile durable cut ("marked stale in the span"); that keeps a restart's
   first list correct and is recorded here for review.
+
+#### G-1c · review round 1 response · 2026-09-28 · orchestrator-dispatched deepseek-worker
+
+- Fixed (all reproduced on the built branch):
+  - Blocker 1: `SessionCatalog.hasCompleteCut()`/`whenPublished()`; storage
+    maintenance throws retryable `busy`, attention/archive prune and Knowledge
+    recovery skip, when the published rows are not a complete cut. Probe
+    `probe.mjs empty`: the read now fails retryably after the first-cut deadline
+    instead of pruning/pruning-adjacent work on an empty index.
+  - Major 3: `catalogAcquisition()` joins the owner's cut, so a cold open,
+    attention, automation and workspace read cannot miss a row the first
+    reconcile has not published. `probe-early.mjs`: acquire right after
+    `initialize()` is now ok.
+  - Major 4: `SessionCatalog.remove()` drops the row synchronously (commit
+    already removed the file; the removal record still fences in-flight passes),
+    so the list-changed event cannot republish a deleted row. `probe-delete.mjs`:
+    list right after delete no longer contains the deleted ID.
+  - Major 5 (partial): the cut wait resolves in a `finally` and is bounded by
+    `CATALOG_FIRST_CUT_DEADLINE_MS` with a retryable `busy`.
+  - Blocker 2 (partial): `CatalogDiscovery.sessionInfos`,
+    `buildCatalogSessionInfos` and the `maximumRetainedBytes` budget are deleted;
+    `catalog-discovery.test.ts` and the index-vs-full-scan case read one file at
+    a time instead; the walk-counter case now asserts zero request-path walks.
+- Not done: the owning integration suite is still red (measured 191/257 pass,
+  66 failed; was 186/257 pass, 71 failed — the full-scan fixture case below
+  passes individually after its fix, so 192/65) — the ~20 cases spying on
+  removed internals, the reader
+  capacity/fallback families, and the cluster-5 index/delegated-topology
+  mismatches listed above still need the rework; no O-5/O-6a evidence yet.
+- Residual: with a header-less `.jsonl` in the folder the owner still never
+  publishes a complete cut, so reads fail retryably rather than serving the
+  readable rows. That rule is the scan's (G-1b owner) and needs an orchestrator
+  decision: an unreadable file should not make the folder's cut incomplete.

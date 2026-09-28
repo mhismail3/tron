@@ -127,6 +127,13 @@ const MAX_EXTENSION_ROOT_ENTRIES = 4_096;
 // rather than published with a size its counts do not describe.
 const CATALOG_SUMMARY_ATTEMPTS = 3;
 
+/** How long a read joins the catalog owner's first cut before it refuses with a
+ * retryable busy. The wait is the owner's own startup read (a durable document
+ * it can load, or one reconcile of the folder) no request can shorten; the
+ * bound keeps a reader from hanging on an owner that cannot publish a complete
+ * cut at all, which the old request-path walk answered with a capacity busy. */
+const CATALOG_FIRST_CUT_DEADLINE_MS = 20_000;
+
 /** Estimated heap the live runtimes may hold together. Below the 4,096 MB V8
  * old-space limit the launcher passes, with room for the catalog index, the
  * projections and the transport, so budgeted sessions cannot reach the heap
@@ -442,12 +449,6 @@ export class RuntimeRegistry {
     generation: string;
     promise: Promise<Awaited<ReturnType<RuntimeRegistry["materializeCatalogSnapshot"]>>>;
   }>();
-  /** The owner's first published cut. A reader joins the cut its owner already
-   * started instead of walking the folder itself, so the request path performs
-   * no structure walk (the O-5 counter attributes the walk to the owner). */
-  private firstCatalogCut: Promise<void> | undefined;
-  private resolveFirstCatalogCut: (() => void) | undefined;
-  private catalogCutPublished = false;
   /** Serializes attention membership checks with set/delete/rekey. Archive
    * state shares this lane: both are Gateway-owned display projections of one
    * canonical session and must not outlive it.
@@ -626,15 +627,7 @@ export class RuntimeRegistry {
       catalogRoot: () => this.catalogDirectory(),
       index: this.catalogMetadataIndex,
       source: this.sessionCatalogSource(),
-      onReconciled: (reconciled) => {
-        // The first report means the owner has published (or refused) its first
-        // cut; a reader that joined it can now serve rows.
-        if (!this.catalogCutPublished) {
-          this.catalogCutPublished = true;
-          this.resolveFirstCatalogCut?.();
-        }
-        this.options.catalogReconciled?.(reconciled);
-      },
+      onReconciled: (reconciled) => { this.options.catalogReconciled?.(reconciled); },
       ...(options.catalogChanged ? { onChanged: options.catalogChanged } : {}),
       ...(options.catalogWatcherReset ? { onWatcherReset: options.catalogWatcherReset } : {}),
     });
@@ -697,7 +690,6 @@ export class RuntimeRegistry {
     // the folder for external writers; the periodic pass is the backstop for
     // any event the watcher could not see (G-9 moves both into the scheduler).
     // A reader joins that first cut rather than walking the folder itself.
-    this.firstCatalogCut = new Promise((resolve) => { this.resolveFirstCatalogCut = resolve; });
     this.sessionCatalog.start();
     const markerEvidence = await this.markers.evidence();
     // Recovery can open and parse large session files. Do not hold listener
@@ -765,7 +757,9 @@ export class RuntimeRegistry {
         // This keeps recovery useful after restart while avoiding foreground
         // ownership, model/session initialization, or a second runtime. The
         // indexed row is the membership, and the row's own file is read and
-        // re-proved before it is used.
+        // re-proved before it is used. An incomplete cut leaves the coverage
+        // pending rather than claiming its session is gone.
+        if (!this.sessionCatalog.hasCompleteCut()) continue;
         const candidates = this.sessionCatalog.rows()
           .filter((row) => row.id === coverage.range.sessionId)
           .map((row) => ({ path: row.path, id: row.id, cwd: row.cwd, fileIdentity: row.fileIdentity, size: row.size, mtimeMs: row.mtimeMs }));
@@ -845,7 +839,10 @@ export class RuntimeRegistry {
   ): Promise<void> {
     const scanBoundary = new Date().toISOString();
     // Startup recovery uses the owner's first cut: one indexed row per canonical
-    // file, which is the same membership the listeners serve from.
+    // file, which is the same membership the listeners serve from. An incomplete
+    // cut cannot prove either membership or absence, so attention records and
+    // the reconciliation cursor are kept for the next startup instead.
+    if (!this.sessionCatalog.hasCompleteCut()) return;
     const byID = new Map<string, Array<{ path: string }>>();
     for (const row of this.sessionCatalog.rows()) {
       const candidates = byID.get(row.id) ?? [];
@@ -1554,10 +1551,24 @@ export class RuntimeRegistry {
 
   /** The owner's first cut. A read that lands before the owner has published
    * one joins the cut the owner already started: the walk belongs to the
-   * owner's startup, so the request adds no walk of its own. */
-  private awaitCatalogCut(): Promise<void> {
-    if (this.catalogCutPublished) return Promise.resolve();
-    return this.firstCatalogCut ?? Promise.resolve();
+   * owner's startup, so the request adds no walk of its own. Bounded, because an
+   * owner that can never publish a complete cut must fail the read retryably
+   * instead of parking it. */
+  private async awaitCatalogCut(): Promise<void> {
+    if (this.sessionCatalog.hasCompleteCut()) return;
+    let timer: NodeJS.Timeout | undefined;
+    try {
+      await Promise.race([
+        this.sessionCatalog.whenPublished(),
+        new Promise<never>((_resolve, reject) => {
+          timer = setTimeout(() => reject(new GatewayError(
+            "busy", "Session catalog is still being read", true, undefined, "catalog_capacity",
+          )), CATALOG_FIRST_CUT_DEADLINE_MS);
+        }),
+      ]);
+    } finally {
+      if (timer) clearTimeout(timer);
+    }
   }
 
   private async canonicalSessionPath(path: string): Promise<string> {
@@ -1583,9 +1594,21 @@ export class RuntimeRegistry {
    * is that membership, and ambiguous canonical IDs still retain their data.
    * Live-only slots also retain their staged artifacts. */
   async sessionIDsForStorageMaintenance(): Promise<ReadonlySet<string>> {
+    // Retention prunes artifacts an owner is not in. An incomplete cut is not
+    // membership evidence, so it must refuse rather than tell the store that a
+    // session it could not read is gone.
+    this.requireCompleteCatalogCut();
     const ids = new Set(this.sessionCatalog.rows().map((row) => row.id));
     for (const slot of this.slots.values()) if (!slot.isDisposed) ids.add(slot.id);
     return ids;
+  }
+
+  /** A cut no scan has completed cannot prove absence. Callers that would drop
+   * durable records for rows it omits fail retryably instead of acting on it. */
+  private requireCompleteCatalogCut(): void {
+    if (!this.sessionCatalog.hasCompleteCut()) {
+      throw new GatewayError("busy", "Session membership could not be validated for storage maintenance", true);
+    }
   }
 
   async requireResolvedAutomationWorkspace(cwd: string): Promise<string> {
@@ -2127,6 +2150,9 @@ export class RuntimeRegistry {
    * the owner keeps current: no request walks the folder, and the entry a
    * caller then fences is re-proved against its own file at the commit. */
   private async catalogAcquisition(): Promise<CatalogAcquisitionResolution> {
+    // Every membership read joins the owner's first cut: a cold open, attention
+    // resolution, automation and workspace lookups all resolve an ID against it.
+    await this.awaitCatalogCut();
     const index = this.catalogIndex("all");
     return this.buildCatalogAcquisitionFromSessions(index.allInfos, index.ambiguousIDs);
   }

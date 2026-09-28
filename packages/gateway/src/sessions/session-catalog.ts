@@ -293,8 +293,13 @@ export class SessionCatalog {
    * load or reconcile) that a change made stale. Anything else — a shutdown
    * before the load, a load that was interrupted, a partial scan — is not
    * membership, and writing it would erase rows the next startup would then
-   * have to re-parse every transcript to rebuild. */
+   * have to re-parse every transcript to rebuild. The same flag is the one
+   * answer to whether the published rows are complete membership: a reader that
+   * prunes against them and a recoverer that treats an absent row as a removed
+   * session must both refuse an incomplete cut. */
   private canonicalCut = false;
+  private readonly firstPublished: Promise<void>;
+  private publishFirstCut: (() => void) | undefined;
   private changeGeneration = 0;
   private durableGeneration = 0;
   private closed = false;
@@ -306,6 +311,25 @@ export class SessionCatalog {
     this.watchRetryMs = options.watchRetryMs ?? CATALOG_WATCH_RETRY_MS;
     this.reconcileIntervalMs = options.reconcileIntervalMs ?? CATALOG_RECONCILE_INTERVAL_MS;
     this.now = options.now ?? Date.now;
+    this.firstPublished = new Promise((resolve) => { this.publishFirstCut = resolve; });
+  }
+
+  /** True while the published rows come from a complete cut: the durable
+   * document this startup loaded, or a reconcile that saw the whole folder.
+   * False before the first such cut and after an incomplete or failed pass that
+   * has not been superseded, so a caller that would treat an absent row as a
+   * removed session knows it cannot. */
+  hasCompleteCut(): boolean {
+    return this.canonicalCut;
+  }
+
+  /** The first complete cut, however it arrived: the durable rows a startup
+   * loaded (a previous complete cut, already on disk), or the first reconcile
+   * that saw the whole folder. A reader joins this instead of walking, so a
+   * restart's first read serves the durable rows while the folder's own cut is
+   * still being read. */
+  whenPublished(): Promise<void> {
+    return this.canonicalCut ? Promise.resolve() : this.firstPublished;
   }
 
   /** Every canonical session, ordered by canonical path. */
@@ -339,6 +363,7 @@ export class SessionCatalog {
       this.publishRows(rows, catalogRoot);
       // The document and the rows agree, so this cut is durable as it stands.
       this.canonicalCut = true;
+      this.publishFirstCut?.();
     });
     void this.reconcile();
     void this.ensureWatching();
@@ -390,21 +415,20 @@ export class SessionCatalog {
 
   /** A canonical file whose deletion the Gateway committed. Removal is announced
    * by its owner because an unreadable file proves neither absence nor presence.
-   * The row is dropped in the lane, but the removal is recorded when it is
-   * announced: a reconcile or refresh pass that read the file before this call
-   * must not publish the removed row when it finishes afterwards. The record is
-   * cleared by the removal's own lane work: every pass that read before it has
-   * finished by then, and a pass that starts later captures an epoch at or above
-   * the removal, so the record cannot outlive its one use. */
+   * The row is dropped synchronously: the commit has already removed the file,
+   * and the list-changed event its caller fires right after this call must not
+   * be able to publish a row the owner no longer admits. The removal is recorded
+   * when it is announced: a reconcile or refresh pass that read the file before
+   * this call must not publish the removed row when it finishes afterwards. The
+   * record is cleared by the removal's own lane work: every pass that read before
+   * it has finished by then, and a pass that starts later captures an epoch at or
+   * above the removal, so the record cannot outlive its one use. */
   remove(path: string): void {
     if (this.closed) return;
     const key = resolve(path);
     this.removalGenerations.set(key, (this.removalGeneration += 1));
-    void this.enqueue(async () => {
-      this.removalGenerations.delete(key);
-      if (!this.rowsByPath.delete(key)) return;
-      this.markChanged();
-    });
+    if (this.rowsByPath.delete(key)) this.markChanged();
+    void this.enqueue(async () => { this.removalGenerations.delete(key); });
   }
 
   /** Settle every queued change and durable write, without closing the owner.
@@ -762,6 +786,7 @@ export class SessionCatalog {
     const diff = this.publishRows(reconciled.rows, await this.catalogRoot(), removalFloor);
     if (this.closed) return;
     this.canonicalCut = true;
+    this.publishFirstCut?.();
     if (diff.added + diff.removed + diff.modified > 0) this.markChanged();
     report("reconciled", files, diff, reconciled.unproven);
   }
