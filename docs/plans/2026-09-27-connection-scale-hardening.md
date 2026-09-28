@@ -1865,6 +1865,16 @@ the day cannot measure a synthetic case).
     already ends with `endedBy=background`/`stopped`.
   - `GatewayReconnectSchedule` was left unchanged; `reconnectCanBeAccelerated`
     already means "waiting in a delay", which is what the guard needs.
+  - Two edits sit outside the named owning files. `PerformanceSignposts.swift`
+    gained `PerformanceResult.backgrounded`, the
+    `endOpenIntervalsAtBackground()` requirement and `PerformanceInterval.trackedID`;
+    the outcome and the protocol it belongs to can only be declared there, and
+    `AppLog.swift` implements it. `GatewayReconnectScheduleTests.swift` was not
+    extended: the stall watchdog is owned by the new recorder, so its failure
+    modes are covered by the new
+    `GatewayConnectionEpisodeRecorderTests.swift` on a manual clock instead.
+  - `Tests/Gateway/RealGatewayPiBoundaryTests.swift` carries the blackhole E2E
+    case; O-1 extended the same file for its correlation join.
 - For the next agent (this is the whole remaining work):
   1. Wait for the simulator lease, then run `scripts/tron-ios-test build` and
      `scripts/tron-ios-test run --only-testing TronMobileTests/GatewayConnectionEpisodeRecorderTests`,
