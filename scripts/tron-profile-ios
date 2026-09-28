@@ -288,6 +288,13 @@ def self_test_verdicts(comparisons: dict[str, dict[str, Any]]) -> list[tuple[str
 
 # ------------------------------------------------------------------ runner ---
 
+def development_state_path() -> Path:
+    """The remembered Development simulator's marker, as the runner names it."""
+    return Path(
+        os.environ.get("TRON_IOS_SIMULATOR_STATE_DIR", Path.home() / ".tron/internal/run")
+    ) / "ios-simulator-udid"
+
+
 def run(command: list[str], **kwargs: Any) -> subprocess.CompletedProcess[str]:
     return subprocess.run(command, text=True, **kwargs)
 
@@ -558,10 +565,14 @@ class Profiler:
         self.runtime = toolchain["TRON_CI_IOS_RUNTIME_VERSION"]
         self.device_type = toolchain["TRON_CI_IOS_SIMULATOR_NAME"]
         self.state_root = Path(os.environ.get("TRON_IOS_TEST_STATE_DIR", Path.home() / ".tron/internal/ios-test"))
+        # The lane root is what the shared sweep scans and what `status --all`
+        # reports, so this lane is discovered, attributed and reclaimed exactly
+        # like the one scripts/tron-ios-test uses.
+        self.lane_root = Path(
+            os.environ.get("TRON_IOS_TEST_DISCOVERY_ROOT", self.state_root.parent)
+        )
         self.device_name = os.environ.get("TRON_IOS_TEST_DEVICE_NAME", "Tron iOS Tests")
-        self.development_state = Path(
-            os.environ.get("TRON_IOS_SIMULATOR_STATE_DIR", Path.home() / ".tron/internal/run")
-        ) / "ios-simulator-udid"
+        self.development_state = development_state_path()
         worktree_key = run(
             [sys.executable, str(IDENTITY), "worktree-key", "--worktree", str(ROOT)],
             capture_output=True, check=True,
@@ -590,13 +601,44 @@ class Profiler:
             "--marker", str(self.state_root / "simulator.json"), "--runtime", self.runtime,
             "--device-type", self.device_type, "--name", self.device_name,
             "--development-state", str(self.development_state),
+            # The lane root, the default lane and this worktree, so this lane is
+            # discovered by the sweep, reported by the lane tables and recorded
+            # as this worktree's. The owned directories and the Development
+            # simulator are resolved by the shared owner, not here.
+            "--discovery-root", str(self.lane_root),
+            "--default-state-dir", str(self.state_root),
+            "--worktree", str(ROOT),
         ]
+
+    def sweep(self) -> None:
+        """Release orphaned owned lanes before this run boots anything.
+
+        The same sweep as `scripts/tron-ios-test`, with the same rule: this
+        run's own lane is leased, so the sweep never touches it. A sweep that
+        cannot complete warns and never replaces the run's status.
+        """
+        result = run(
+            [sys.executable, str(SIMULATOR), "sweep",
+             "--discovery-root", str(self.lane_root),
+             "--development-state", str(self.development_state)],
+            capture_output=True,
+        )
+        sys.stdout.write(result.stdout)
+        sys.stderr.write(result.stderr)
+        if result.returncode:
+            print("warning: the orphaned-simulator sweep did not complete; continuing", file=sys.stderr)
 
     def provision(self) -> None:
         result = run([sys.executable, str(SIMULATOR), "provision", *self.simulator_arguments()],
                      capture_output=True, timeout=600)
         sys.stderr.write(result.stderr)
         udid = result.stdout.strip()
+        if result.returncode == EXIT_LOCKED:
+            # The shared provisioner's "not now": a lane a live process holds, or
+            # a Mac too short of memory to admit the boot. Reported and kept as
+            # its own exit, not as a broken destination - the caller decides
+            # whether to wait.
+            raise ProfileError("the shared provisioner refused the boot (73); the Mac is short of memory or the lane is leased", EXIT_LOCKED)
         if result.returncode != 0 or len(udid) != 36:
             raise ProfileError("cannot provision the owned test simulator", EXIT_DESTINATION)
         self.simulator_id = udid
@@ -871,9 +913,13 @@ def parse_arguments(argv: list[str]) -> argparse.Namespace:
         description="Profile deterministic iOS scenarios on the owned test simulator (optimized DevicePerformance build).",
         epilog=(
             "Exit status: 0 success, 2 usage, 65 scenario failed or did not run, 66 destination, 70 build failure,\n"
-            "73 simulator lease busy, 74 runner or extraction failure, 75 deadline exceeded, 77 self-test failed.\n"
-            "Honors TRON_IOS_TEST_DEVICE_NAME and TRON_IOS_TEST_STATE_DIR (shared with scripts/tron-ios-test),\n"
-            "TRON_PROFILE_RESULTS_DIR, and TRON_PROFILE_IOS_DERIVED_DATA."
+            "73 simulator lease busy or the Mac refused the boot, 74 runner or extraction failure, 75 deadline exceeded,\n"
+            "77 self-test failed.\n"
+            "Shares the lane, the sweep, the lease, the release and the memory admission of scripts/tron-ios-test:\n"
+            "the lane's state directory is TRON_IOS_TEST_STATE_DIR in the lane root TRON_IOS_TEST_DISCOVERY_ROOT,\n"
+            "the scenario run releases the simulator it booted, and it refuses (73) rather than boot when the Mac is\n"
+            "short of memory. TRON_PROFILE_RESULTS_DIR and TRON_PROFILE_IOS_DERIVED_DATA own its own\n"
+            "reports and products. TRON_IOS_TEST_DEVICE_NAME names the device (shared with scripts/tron-ios-test)."
         ),
     )
     parser.add_argument("--list", action="store_true", help="list scenarios and exit")
@@ -922,15 +968,21 @@ def main(argv: list[str]) -> int:
         return EXIT_OK
     state_root = Path(os.environ.get("TRON_IOS_TEST_STATE_DIR", Path.home() / ".tron/internal/ios-test"))
     if os.environ.get("TRON_IOS_TEST_LOCK_HELD") != "1":
-        # The same lease as scripts/tron-ios-test: profiling and tests on the
-        # owned simulator never overlap.
+        # The same lease, and the same release, as scripts/tron-ios-test: when
+        # this run ends, on success, failure, deadline or signal, the holder
+        # shuts down the lane's simulator unless it was already booted under a
+        # keep-booted lease - and it never touches the remembered Development
+        # simulator. Profiling and tests therefore never share one simulator.
         state_root.mkdir(parents=True, exist_ok=True)
         os.chmod(state_root, 0o700)
         return subprocess.run(
-            [sys.executable, str(LOCKER), "--lock", str(state_root / "lease.lock"), "--", str(Path(__file__).resolve()), *argv]
+            [sys.executable, str(LOCKER), "--lock", str(state_root / "lease.lock"),
+             "--marker", str(state_root / "simulator.json"),
+             "--development-state", str(development_state_path()), "--", str(Path(__file__).resolve()), *argv]
         ).returncode
     try:
         profiler = Profiler(arguments)
+        profiler.sweep()
         profiler.provision()
         profiler.ensure_products()
         if arguments.self_test:

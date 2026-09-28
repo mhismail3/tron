@@ -19,6 +19,9 @@ PROCESS = ROOT / "scripts/ios-test-process.py"
 LOCK = ROOT / "scripts/ios-test-lock.py"
 IDENTITY = ROOT / "scripts/ios-test-build-identity.py"
 RUNNER = ROOT / "scripts/tron-ios-test"
+PROFILER = ROOT / "scripts/tron-profile-ios"
+E2E = ROOT / "scripts/ios-gateway-e2e-test"
+DEVELOPMENT = ROOT / "scripts/tron-ios-simulator"
 RUNTIME_ID = "com.apple.CoreSimulator.SimRuntime.iOS-26-2"
 TYPE_ID = "com.apple.CoreSimulator.SimDeviceType.iPhone-17-Pro"
 # The runner fixture's synthetic Mac pins its own runtime/device type.
@@ -1176,6 +1179,32 @@ if arguments == ['list', '--json']:
     print(json.dumps(json.loads(inventory_path.read_text()))); raise SystemExit(0)
 command = arguments[0] if arguments else ''
 udid = arguments[1] if len(arguments) > 1 else ''
+if command == 'list':
+    # `simctl list` in text form: the toolchain check reads the runtimes and
+    # scripts/tron-ios-simulator reads the devices.
+    document = json.loads(inventory_path.read_text())
+    for runtime in document.get('runtimes', []):
+        print(f"{runtime.get('name')} - {runtime['identifier']}")
+    for devices in document.get('devices', {}).values():
+        for device in devices:
+            print(f"    {device['name']} ({device['udid']}) ({device['state']})")
+    raise SystemExit(0)
+if command == 'create':
+    _, name, device_type, runtime = arguments
+    document = json.loads(inventory_path.read_text())
+    existing = sum(len(devices) for devices in document['devices'].values())
+    created = f'{existing + 1:08X}-0000-0000-0000-{existing + 1:012X}'
+    document['devices'].setdefault(runtime, []).append({
+        'name': name, 'udid': created, 'state': 'Shutdown',
+        'isAvailable': True, 'deviceTypeIdentifier': device_type,
+    })
+    inventory_path.write_text(json.dumps(document)); print(created); raise SystemExit(0)
+if command == 'bootstatus':
+    raise SystemExit(0)
+if command == 'terminate':
+    raise SystemExit(0)
+if command == 'get_app_container':
+    print('no such app container', file=sys.stderr); raise SystemExit(2)
 if command in ('boot', 'shutdown'):
     if command == 'shutdown':
         delay = float(os.environ.get('FAKE_SHUTDOWN_DELAY_SECONDS') or 0)
@@ -1207,7 +1236,22 @@ raise SystemExit(2)
         self.state.mkdir(parents=True)
         self.home = self.root / "home"
         self.home.mkdir()
-        self.inventory_path.write_text(json.dumps({"devices": {RUNTIME_ID: []}}))
+        self.inventory_path.write_text(json.dumps({
+            # The repository-pinned runtime and device type the profiler and the
+            # Gateway E2E harness provision with, plus this fixture's own.
+            "runtimes": [
+                {
+                    "identifier": RUNTIME_ID, "name": "iOS 26.2", "platform": "iOS", "version": "26.2",
+                    "buildversion": "23C54", "isAvailable": True,
+                },
+                {
+                    "identifier": RUNNER_RUNTIME_ID, "name": "iOS 26.5", "platform": "iOS", "version": "26.5",
+                    "buildversion": "23C54", "isAvailable": True,
+                },
+            ],
+            "devicetypes": [{"identifier": TYPE_ID, "name": "iPhone 17 Pro", "isAvailable": True}],
+            "devices": {RUNTIME_ID: [], RUNNER_RUNTIME_ID: []},
+        }))
         self.environment = os.environ.copy()
         self.install_readers(self.root)
         self.environment.update(self.reader_environment())
@@ -2137,6 +2181,343 @@ class StatusFixture(LaneHarness, unittest.TestCase):
             if line.split()[:1] and line.split()[0] in ("boot", "shutdown", "delete", "erase", "create", "bootstatus")
         ]
         self.assertEqual(mutations, [])
+
+
+class LifecycleHarness(LaneHarness):
+    """Synthetic Mac for the tools that share one lane lifecycle (SIM-7)."""
+
+    def add_device(self, udid: str, *, name: str, state: str = "Booted") -> None:
+        """A device no Tron ownership marker claims."""
+        document = self.inventory()
+        document["devices"].setdefault(RUNNER_RUNTIME_ID, []).append({
+            "name": name, "udid": udid, "state": state, "isAvailable": True,
+            "deviceTypeIdentifier": TYPE_ID,
+        })
+        self.inventory_path.write_text(json.dumps(document))
+
+    def simctl_commands(self) -> list[str]:
+        """The simctl verb of every call the synthetic xcrun served."""
+        try:
+            lines = self.log_path.read_text().splitlines()
+        except FileNotFoundError:
+            return []
+        return [line.split(" ", 1)[0] for line in lines]
+
+    def wait_until_lane_booted(self, marker_path: Path, timeout: float = 30) -> str:
+        """The UDID of the lane a running command booted, once it is Booted."""
+        deadline = time.time() + timeout
+        while time.time() < deadline:
+            try:
+                marker = json.loads(marker_path.read_text())
+                if self.device_entry(marker["udid"])["state"] == "Booted":
+                    return marker["udid"]
+            except (OSError, KeyError, json.JSONDecodeError):
+                pass
+            time.sleep(0.05)
+        self.fail(f"no booted device for {marker_path} within {timeout:g}s")
+
+    def status_row(self, output: str, owner: str) -> str:
+        """The one `status --all` row carrying this owner marker."""
+        matches = [line for line in output.splitlines() if owner in line]
+        self.assertEqual(len(matches), 1, f"expected exactly one row containing {owner!r}:\n{output}")
+        return matches[0]
+
+    def install_fake_xcodebuild(self) -> None:
+        """A synthetic xcodebuild that produces the E2E harness's xctestrun.
+
+        `FAKE_BUILD_GATE` (a path) holds the build open until the file exists,
+        so a case can kill the command that owns the lane while it is still
+        building.
+        """
+        xcodebuild = self.bin / "xcodebuild"
+        xcodebuild.write_text("""#!/usr/bin/env bash
+set -euo pipefail
+if [[ "${1:-}" == -version ]]; then echo 'Xcode 26.6'; exit 0; fi
+derived=''
+bundle=''
+for ((i=1; i<=$#; i++)); do
+  case "${!i}" in
+    -derivedDataPath) j=$((i + 1)); derived="${!j}" ;;
+    -resultBundlePath) j=$((i + 1)); bundle="${!j}" ;;
+  esac
+done
+if [[ " $* " == *' build-for-testing '* ]]; then
+  mkdir -p "$derived/Build/Products"
+  printf 'xctestrun\\n' >"$derived/Build/Products/Tron Development_UnitTests_iOS.xctestrun"
+  if [[ -n "${FAKE_BUILD_GATE:-}" ]]; then
+    while [[ ! -e "$FAKE_BUILD_GATE" ]]; do sleep 0.05; done
+  fi
+  exit 0
+fi
+if [[ " $* " == *' test-without-building '* ]]; then
+  [[ -z "$bundle" ]] || mkdir -p "$bundle"
+  exit 0
+fi
+exit 0
+""")
+        xcodebuild.chmod(0o755)
+
+
+class ProfilerLifecycleFixture(LifecycleHarness, unittest.TestCase):
+    """SIM-7: the iOS profiler joins the shared lane lifecycle.
+
+    Failure modes these cases target, written before the code:
+
+    1. The profiler leases the lane without its ownership marker, so the
+       simulator it booted is never released when the run ends.
+    2. The profiler does not run the shared sweep, so a lane a crash left booted
+       is not reclaimed by it, and (or) a lane a live process holds is not
+       skipped.
+    3. The profiler's lane is not attributed to this worktree, so the lane
+       tables cannot say whose lane it is.
+    4. A boot the shared admission refuses (73) is reported as a destination
+       failure, and (or) the profiler boots the simulator anyway.
+    """
+
+    def setUp(self) -> None:
+        super().setUp()
+        # The profiler's products and reports are its own, and --no-build keeps
+        # these cases free of xcodebuild: only its simulator path is exercised.
+        self.environment = {
+            **self.environment,
+            "TRON_PROFILE_IOS_DERIVED_DATA": str(self.root / "profile-derived"),
+            "TRON_PROFILE_RESULTS_DIR": str(self.root / "profile-results"),
+        }
+
+    def profile(self, *arguments: str, timeout: float = 120) -> subprocess.CompletedProcess[str]:
+        return subprocess.run(
+            [str(PROFILER), *arguments], env=self.environment,
+            text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=timeout,
+        )
+
+    def lane_marker(self) -> dict[str, object]:
+        return json.loads((self.state / "simulator.json").read_text())
+
+    def test_the_profiler_releases_its_lane_and_sweeps_orphans(self) -> None:
+        """Failure modes 1, 2 and 3: the run ends with nothing of its own booted."""
+        self.owned_lane("ios-test-orphan", UDID_A, device_name="Tron iOS Tests (orphan)")
+        self.owned_lane("ios-test-held", UDID_B, device_name="Tron iOS Tests (held)")
+        self.hold_lease(self.discovery_root / "ios-test-held", command="run")
+
+        # --no-build refuses before scenario products that were never built,
+        # which is what makes this case hardware-free while still provisioning.
+        result = self.profile("--scenario", "control", "--no-build")
+        self.assertEqual(result.returncode, 74, result.stderr)
+
+        marker = self.lane_marker()
+        self.assertEqual(marker["worktree"], os.path.realpath(ROOT))
+        self.assertEqual(self.device_entry(marker["udid"])["state"], "Shutdown")
+        self.assertEqual(self.device_entry(UDID_A)["state"], "Shutdown")
+        self.assertEqual(self.device_entry(UDID_B)["state"], "Booted")
+        self.assertIn("shut down", result.stdout)
+        self.assertEqual(self.simctl_commands().count("delete"), 0)
+
+    def test_a_profiler_boot_the_mac_refuses_keeps_the_shared_exit(self) -> None:
+        """Failure mode 4: the refusal stays 73 and nothing is booted."""
+        self.reader_value("free-percent", "0")
+
+        result = self.profile("--scenario", "control", "--no-build")
+        self.assertEqual(result.returncode, 73, result.stderr)
+        self.assertIn("reserve", result.stderr)
+        self.assertNotIn("boot", self.simctl_commands())
+        self.assertEqual(self.device_entry(self.lane_marker()["udid"])["state"], "Shutdown")
+
+
+class GatewayE2EFixture(LifecycleHarness, unittest.TestCase):
+    """SIM-7: the Gateway E2E harness joins the shared lane lifecycle.
+
+    Failure modes these cases target, written before the code:
+
+    1. The harness leases the lane without its ownership marker, so the
+       simulator it booted is never released when the command ends.
+    2. The harness does not run the shared sweep, so a lane booted by a crash is
+       not reclaimed by it, and (or) a lane a live process holds is not skipped.
+    3. The harness's lane is not attributed to this checkout, so `lane-remove`
+       cannot reclaim the products of a worktree that no longer exists.
+    4. A boot the shared admission refuses (73) is reported as a generic failure
+       and the harness carries on building.
+    5. A harness killed while it holds the lane leaves the lane booted, and the
+       next Tron test tool does not reclaim it.
+    6. `clean` deletes the remembered Development simulator when the lane's
+       marker names it.
+    """
+
+    def setUp(self) -> None:
+        super().setUp()
+        self.install_fake_xcodebuild()
+        self.environment = {
+            **self.environment,
+            "TRON_IOS_E2E_STATE_DIR": str(self.root / "e2e-state"),
+            "TRON_IOS_E2E_DERIVED_DATA": str(self.root / "e2e-derived"),
+        }
+
+    def e2e(self, *arguments: str, timeout: float = 180) -> subprocess.CompletedProcess[str]:
+        return subprocess.run(
+            [str(E2E), *arguments], env=self.environment,
+            text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=timeout,
+        )
+
+    def test_an_e2e_build_releases_its_lane_and_sweeps_orphans(self) -> None:
+        """Failure modes 1, 2 and 3: the command ends with nothing of its own booted."""
+        orphan = self.owned_lane("ios-test-orphan", UDID_A, device_name="Tron iOS Tests (orphan)")
+        self.owned_lane("ios-test-held", UDID_B, device_name="Tron iOS Tests (held)")
+        self.hold_lease(self.discovery_root / "ios-test-held", command="run")
+
+        result = self.e2e("build")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        marker = json.loads((self.state / "simulator.json").read_text())
+        self.assertEqual(marker["worktree"], os.path.realpath(ROOT))
+        self.assertEqual(marker["name"], "Tron iOS Tests")
+        self.assertEqual(self.device_entry(marker["udid"])["state"], "Shutdown")
+        self.assertEqual(self.device_entry(UDID_A)["state"], "Shutdown")
+        self.assertEqual(self.device_entry(UDID_B)["state"], "Booted")
+        self.assertIn("Focused test products ready", result.stdout)
+        self.assertIn("shut down", result.stdout)
+        # Releasing is not removing: both lanes keep their markers and devices.
+        self.assertTrue((orphan / "simulator.json").exists())
+        self.assertTrue((self.state / "simulator.json").exists())
+        self.assertTrue(self.present(marker["udid"]))
+        self.assertEqual(self.simctl_commands().count("delete"), 0)
+
+    def test_an_e2e_build_the_mac_refuses_keeps_the_shared_exit(self) -> None:
+        """Failure mode 4: the refusal stays 73 and nothing is booted or built."""
+        self.reader_value("free-percent", "0")
+
+        result = self.e2e("build")
+        self.assertEqual(result.returncode, 73, result.stderr)
+        self.assertIn("reserve", result.stderr)
+        self.assertNotIn("boot", self.simctl_commands())
+        self.assertFalse((self.root / "e2e-derived/Build/Products").exists())
+
+    def test_clean_never_deletes_the_development_simulator(self) -> None:
+        """Failure mode 6: a lane naming the Development simulator is refused."""
+        self.development_marker.parent.mkdir(parents=True, exist_ok=True)
+        self.development_marker.write_text(UDID_A + "\n")
+        self.owned_lane("ios-test", UDID_A)
+
+        result = self.e2e("clean")
+        self.assertEqual(result.returncode, 66, result.stderr)
+        self.assertIn("Development simulator", result.stderr)
+        self.assertTrue(self.present(UDID_A))
+        self.assertEqual(self.device_entry(UDID_A)["state"], "Booted")
+        self.assertEqual(self.simctl_commands().count("delete"), 0)
+        self.assertEqual(self.shutdown_targets(), [])
+
+    def test_a_killed_e2e_build_leaves_its_lane_to_the_next_sweep(self) -> None:
+        """Failure mode 5: a crash leaves the lane booted and any tool reclaims it."""
+        gate = self.root / "build-gate"
+        environment = {**self.environment, "FAKE_BUILD_GATE": str(gate)}
+        command = subprocess.Popen(
+            [str(E2E), "build"], env=environment, text=True,
+            stdout=subprocess.PIPE, stderr=subprocess.PIPE, start_new_session=True,
+        )
+        try:
+            udid = self.wait_until_lane_booted(self.state / "simulator.json")
+            # Kill the lease holder: its release never runs, exactly as after a
+            # crash, while the command it started finishes and exits.
+            command.kill()
+            gate.write_text("go\n")
+            _, stderr = command.communicate(timeout=60)
+            self.assertEqual(command.returncode, -signal.SIGKILL, stderr)
+            self.assertEqual(self.device_entry(udid)["state"], "Booted")
+
+            # Any Tron test tool reclaims it through the same sweep.
+            result = self.reap()
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertIn("shut down", result.stdout)
+            self.assertEqual(self.device_entry(udid)["state"], "Shutdown")
+        finally:
+            if command.poll() is None:
+                command.kill()
+                command.wait(timeout=30)
+            self.close_pipes(command)
+
+
+class DevelopmentSimulatorFixture(LifecycleHarness, unittest.TestCase):
+    """SIM-7: the remembered Development simulator reports its uptime.
+
+    Failure modes these cases target, written before the code:
+
+    1. `status` cannot say how long the remembered simulator has been booted, so
+       the memory it holds is invisible to the person running it.
+    2. `status` invents an uptime for a simulator that is not booted, or for a
+       booted one the process table cannot prove.
+    3. `stop` shuts down or deletes a simulator it does not own, or leaves the
+       remembered one booted.
+    4. The destructive tooling that shares its row in `status --all` deletes or
+       shuts down the Development simulator.
+    """
+
+    def remember_development(self, udid: str = UDID_A, *, state: str = "Booted", name: str = "iPhone 17 Pro") -> None:
+        self.development_marker.parent.mkdir(parents=True, exist_ok=True)
+        self.development_marker.write_text(udid + "\n")
+        self.add_device(udid, name=name, state=state)
+
+    def development(self, *arguments: str, timeout: float = 60) -> subprocess.CompletedProcess[str]:
+        return subprocess.run(
+            [str(DEVELOPMENT), *arguments], env=self.environment,
+            text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=timeout,
+        )
+
+    def test_status_reports_how_long_the_remembered_simulator_has_been_booted(self) -> None:
+        """Failure modes 1 and 2: the uptime is real, shared and never invented."""
+        self.remember_development(UDID_A)
+        self.reader_value("process-table", device_process(UDID_A, "01-04:49:13"))
+
+        result = self.development("status")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("Simulator uptime: 1d 4h", result.stdout)
+        # The one view the runner prints names the same simulator and time.
+        listing = self.runner("status", "--all")
+        self.assertEqual(listing.returncode, 0, listing.stderr)
+        self.assertIn("1d 4h", self.status_row(listing.stdout, "development "))
+
+        # A read-only boot process means the time is unknown, not invented.
+        self.reader_value("process-table", "")
+        unproven = self.development("status")
+        self.assertEqual(unproven.returncode, 0, unproven.stderr)
+        self.assertIn("Simulator uptime: unknown", unproven.stdout)
+        self.assertNotIn("1d 4h", unproven.stdout)
+
+        # A simulator that is not booted holds no memory and has no uptime.
+        self.update_device(UDID_A, state="Shutdown")
+        idle = self.development("status")
+        self.assertEqual(idle.returncode, 0, idle.stderr)
+        self.assertIn("Simulator uptime: not booted", idle.stdout)
+
+    def test_stop_releases_only_the_remembered_simulator(self) -> None:
+        """Failure mode 3: the other lane and the remembered device itself survive."""
+        self.remember_development(UDID_A)
+        self.owned_lane("ios-test-other", UDID_B)
+
+        result = self.development("stop")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(self.shutdown_targets(), [UDID_A])
+        self.assertEqual(self.device_entry(UDID_A)["state"], "Shutdown")
+        self.assertEqual(self.device_entry(UDID_B)["state"], "Booted")
+        self.assertTrue(self.present(UDID_A))
+        self.assertEqual(self.simctl_commands().count("delete"), 0)
+
+    def test_the_sharing_tools_never_change_the_development_simulator(self) -> None:
+        """Failure mode 4: sweep, lane removal and clean leave it alone."""
+        self.development_marker.parent.mkdir(parents=True, exist_ok=True)
+        self.development_marker.write_text(UDID_A + "\n")
+        self.owned_lane("ios-test", UDID_A)
+
+        swept = self.reap()
+        self.assertEqual(swept.returncode, 0, swept.stderr)
+        self.assertIn("Development simulator", swept.stderr)
+        cleaned = self.runner("clean")
+        self.assertEqual(cleaned.returncode, 66, cleaned.stderr)
+        self.assertIn("Development simulator", cleaned.stderr)
+        removed = self.runner("lane-remove", "default")
+        self.assertEqual(removed.returncode, 66, removed.stderr)
+        self.assertIn("Development simulator", removed.stderr)
+
+        self.assertTrue(self.present(UDID_A))
+        self.assertEqual(self.device_entry(UDID_A)["state"], "Booted")
+        self.assertEqual(self.simctl_commands().count("delete"), 0)
+        self.assertEqual(self.shutdown_targets(), [])
 
 
 if __name__ == "__main__":

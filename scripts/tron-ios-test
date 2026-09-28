@@ -87,6 +87,9 @@ TRON_IOS_TEST_SWAP_LIMIT_BYTES override them. A Mac (or CI) where these reports
 are unavailable admits the boot with a warning.
 Every command that provisions the simulator first releases orphaned owned lanes
 and prunes results and products; lanes a live process holds are never touched.
+The profiler (scripts/tron-profile ios) and the Gateway E2E harness
+(scripts/ios-gateway-e2e-test) lease, sweep, release and admit through these same
+paths, so a lane any of them created is reclaimed by the others.
 Commands release the simulator they
 use when they end, on success, failure, timeout or signal, unless --keep-booted
 was given. Routine runs are serial, use an exact owned simulator UDID, disable

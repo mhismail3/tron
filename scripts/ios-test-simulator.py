@@ -782,6 +782,31 @@ def admit_boot(arguments: argparse.Namespace) -> None:
     raise MemoryAdmissionError(f"refusing to boot {arguments.name}: {detail}")
 
 
+def development_uptime(arguments: argparse.Namespace) -> int:
+    """Report how long the remembered Development simulator has been booted.
+
+    `scripts/tron-ios-simulator` owns the Development simulator and reports this
+    so a person can see the memory it is holding. Its own boot process proves the
+    time, exactly as the simulator table's UPTIME column does, so nothing has to
+    cooperate; a simulator that is not booted prints nothing, and an unreadable
+    process table warns rather than inventing a time.
+    """
+    udid = development_udid(arguments)
+    if udid is None:
+        raise DestinationError(f"no Development simulator is remembered: {arguments.development_state}")
+    table = process_table()
+    if table is None:
+        print(
+            "warning: cannot read the process table (ps); the Development simulator's uptime is unknown",
+            file=sys.stderr,
+        )
+        return 0
+    elapsed = booted_uptimes(table).get(udid)
+    if elapsed is not None:
+        print(human_duration(elapsed))
+    return 0
+
+
 def shutdown_owned(marker_path: Path, arguments: argparse.Namespace) -> str:
     """Shut down the booted simulator one ownership marker names, bounded.
 
@@ -1229,7 +1254,7 @@ def parse_args() -> argparse.Namespace:
         "command",
         choices=(
             "provision", "validate", "status", "delete", "state", "shutdown", "sweep", "lanes", "lane-remove",
-            "simulators", "prune", "clean-runs",
+            "simulators", "prune", "clean-runs", "development-uptime",
         ),
     )
     parser.add_argument("--marker", type=Path)
@@ -1284,6 +1309,10 @@ def parse_args() -> argparse.Namespace:
         if arguments.marker is not None:
             parser.error("lane-remove does not take --marker")
         return arguments
+    if arguments.command == "development-uptime":
+        if arguments.marker is not None:
+            parser.error("development-uptime does not take --marker")
+        return arguments
     if arguments.command == "prune":
         if arguments.results_root is None and arguments.products_root is None:
             parser.error("prune requires --results-root or --products-root")
@@ -1328,6 +1357,8 @@ def main() -> int:
             return prune_command(arguments)
         if arguments.command == "clean-runs":
             return clean_runs(arguments)
+        if arguments.command == "development-uptime":
+            return development_uptime(arguments)
         if arguments.command == "state":
             print(lane_state(arguments.marker))
             return 0

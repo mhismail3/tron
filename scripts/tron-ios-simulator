@@ -10,6 +10,7 @@ STATE_FILE="$STATE_DIR/ios-simulator-udid"
 SIMULATOR_ID="${TRON_IOS_SIMULATOR_ID:-}"
 DERIVED_DATA="${TRON_IOS_SIMULATOR_DERIVED_DATA:-$HOME/Library/Developer/Tron/ios/simulator-derived-data}"
 BUNDLE_ID="com.tron.mobile.beta"
+SIMULATOR_OWNER="$ROOT_DIR/scripts/ios-test-simulator.py"
 
 usage() {
     cat <<'USAGE'
@@ -23,7 +24,8 @@ Usage:
 Commands:
   start      Boot the remembered simulator and launch its verified Tron Development app.
   install    Build/install Tron Development without erasing its paired app container.
-  status     Show the remembered simulator and validate its installed Tron Development app.
+  status     Show the remembered simulator, how long it has been booted, and validate its
+             installed Tron Development app.
   stop       Terminate Development and shut down only the remembered simulator.
   remember   Save an explicit simulator ID, or the Simulator app's current device.
 
@@ -36,6 +38,12 @@ This helper intentionally uses the Development bundle ID and never uninstalls,
 erases, or runs tests. Pairing is stored in that bundle's data container on the
 remembered simulator, so an unavailable remembered UUID fails closed instead of
 selecting another device. Use scripts/tron-ios-test for all hosted unit tests.
+
+A booted simulator holds about 2 GB, so `status` reports how long the remembered
+one has been booted, read from its own boot process, and `scripts/tron-ios-test
+status --all` lists the same simulator and time beside every test lane. `stop` is
+the way to release it. Tron's test tooling never shuts this simulator down, and
+never deletes any simulator it owns.
 USAGE
 }
 
@@ -101,6 +109,14 @@ launch_development() {
         || die "Tron Development is not installed; run scripts/tron-ios-simulator install"
 }
 
+simulator_uptime() {
+    # The same uptime `scripts/tron-ios-test status --all` prints, from the same
+    # owner: the boot process of the remembered simulator.
+    local uptime
+    uptime="$(python3 "$SIMULATOR_OWNER" development-uptime --development-state "$STATE_FILE" 2>/dev/null || true)"
+    printf '%s\n' "${uptime:-unknown}"
+}
+
 installed_development_code_identifier() {
     local simulator_id="$1"
     local app
@@ -147,6 +163,11 @@ show_status() {
     device_line="$(available_device_line "$simulator_id")"
     echo "Remembered simulator: $device_line"
     echo "State file: $STATE_FILE"
+    if [[ "$device_line" == *"(Booted)"* ]]; then
+        echo "Simulator uptime: $(simulator_uptime)"
+    else
+        echo "Simulator uptime: not booted"
+    fi
     if [[ "$device_line" != *"(Booted)"* ]]; then
         echo "Tron Development: validation unavailable while simulator is not booted (run start)"
         return

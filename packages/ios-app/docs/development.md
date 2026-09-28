@@ -434,15 +434,17 @@ scripts/tron-profile ios --scenario streaming-reply --no-build
 scripts/tron-profile compare BASE_RUN_DIR CANDIDATE_RUN_DIR
 ```
 
-It takes the same lease and simulator overrides as `scripts/tron-ios-test`
-(`TRON_IOS_TEST_DEVICE_NAME`, `TRON_IOS_TEST_STATE_DIR`), so profiling and tests
-never share the simulator at once. It releases no simulator of its own: a
-profile run leaves its lane's simulator booted, and the next
-`scripts/tron-ios-test` command or `scripts/tron-ios-test reap` in any lane
-releases that lane once nothing holds its lease (see
-[simulator lifecycle](#simulator-lifecycle)). The lane's marker is dated by that
-run like any other lane's, so a profiler lane no command has used for 7 days is
-reclaimed by the same sweep. It builds the optimized `DevicePerformance`
+It shares the whole simulator lifecycle with `scripts/tron-ios-test`: the same
+lane (state directory `TRON_IOS_TEST_STATE_DIR`, device
+`TRON_IOS_TEST_DEVICE_NAME`, inside the lane root
+`TRON_IOS_TEST_DISCOVERY_ROOT`), the same lease and release - the lane's
+simulator is shut down when the run ends, on success, failure, deadline or
+signal - the same sweep before it provisions a boot, and the same memory
+admission, so a run the Mac cannot afford fails with the runner's 73 and the
+`status --all` table instead of swapping the Mac. The lane's marker records this
+worktree and the time of each use, so the lane tables, `lane-remove` and the
+sweep treat a profiler lane exactly like a test lane. It builds the optimized
+`DevicePerformance`
 configuration with the `Tron Device Performance` scheme into
 `~/Library/Developer/Tron/ios/profile-derived-data/<worktree-key>`, stamped with
 the worktree's source identity; `--no-build` reuses those products only when the
@@ -451,8 +453,8 @@ under `~/Library/Developer/Tron/profiles/ios/` with `report.json`, `summary.md`,
 the raw `samples.json`, the xcresult (including a screenshot of the mounted
 surface at the end of the first window), the extracted XCTest metrics, and the
 test log. Stable exits: 2 usage, 65 scenario failed or did not execute, 66
-destination, 70 build failure, 73 lease busy, 74 runner or extraction failure,
-75 deadline exceeded, 77 self-test failed.
+destination, 70 build failure, 73 lease busy or the Mac refused the boot, 74
+runner or extraction failure, 75 deadline exceeded, 77 self-test failed.
 
 Scenarios drive production owners (`AppModel`, the real `GatewayClient` over a
 scripted socket, `SessionShellView`, `ChatView`, `ComposerDraftCoordinator` and
@@ -1041,6 +1043,19 @@ it is safe to run while other sessions work. Uptime is read from each booted
 device's own boot process, so it is real elapsed time rather than a remembered
 timestamp, and a simulator a lane owns is never also listed as unowned.
 
+`scripts/tron-profile-ios` and `scripts/ios-gateway-e2e-test` do not keep a
+lifecycle of their own: both lease the lane their state directory names, run the
+same sweep before provisioning, release the simulator their command booted when
+it ends, and keep the admission refusal (73) instead of reporting it as a broken
+destination. A lane any of the three tools created is discovered, attributed and
+reclaimed by the others.
+
+The remembered Development simulator (`scripts/tron-ios-simulator`) belongs to
+its own helper, not to the test tooling. `scripts/tron-ios-simulator status`
+reports how long it has been booted, read from its own boot process and printed
+by the same owner as the `status --all` row, and `stop` is the way to release it.
+The test tooling never shuts it down and never deletes any simulator it owns.
+
 ### Test runner safety contract
 
 - Simulator lifetime is released, not remembered. Only the device named by an
@@ -1076,7 +1091,7 @@ ownership marker, and only this worktree's and lane's runs are removed by
 - CI uses the same runner core, uploads complete or partial logs, metadata,
   metrics, results, and timeout evidence unconditionally, and deletes only its
   exact owned simulator in final cleanup. UI E2E retains its distinct Gateway
-  fixture while sharing the simulator lease and process owner.
+  fixture while sharing the simulator lane, lease, sweep and process owner.
 
 Gateway transport tests inject `ManualClock`, `SequenceUUIDSource`, and
 `ScriptedGatewaySocket` below `GatewayClient`. Pairing generates a local UUID for
@@ -1770,7 +1785,13 @@ The Gateway uses a fixture-owned home, state directory, agent directory,
 delegated-artifact root, and workspace; `PI_SUBAGENTS_TEMP_ROOT` is explicitly
 bound to that fixture on initial startup and restart so a caller's store cannot
 become a migration input. Use `logs`, `status`, `stop`, and `clean` to inspect
-or manage those resources. On CI, focused result/log evidence is uploaded before
+or manage those resources. Its simulator lane is the shared test lane
+(`TRON_IOS_TEST_STATE_DIR` inside `TRON_IOS_TEST_DISCOVERY_ROOT`, device
+`TRON_IOS_TEST_DEVICE_NAME`): every mutating command sweeps orphaned lanes
+before it provisions, and the lane's simulator is released when the command
+ends, exactly as `scripts/tron-ios-test` does; a boot the Mac cannot afford is
+refused with 73 and the `status --all` table. On CI, focused result/log evidence
+is uploaded before
 owned state is removed. This simulator boundary is an explicit Pi-graph/release
 checkpoint, not an ordinary edit-loop or general UI regression suite.
 
