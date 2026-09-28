@@ -643,8 +643,9 @@ await transport.listen(async () => {
     if (!stopping) {
       await sessionSearch.warm();
       const durationMs = performance.now() - warmStartedAt;
-      logger.log("info", `Session search warm-up took ${Math.round(durationMs)} ms`, {
-        event: "session-search.warm", source: "search", durationMs,
+      const { reusedSessions, parsedSessions } = sessionSearch.indexPassStats();
+      logger.log("info", `Session search warm-up took ${Math.round(durationMs)} ms (${reusedSessions} reused, ${parsedSessions} reparsed)`, {
+        event: "session-search.warm", source: "search", durationMs, counts: { reusedSessions, parsedSessions },
       });
     }
   })().catch((error) => {

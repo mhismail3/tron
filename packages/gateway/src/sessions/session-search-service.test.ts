@@ -88,6 +88,91 @@ describe("SessionSearchService backend seams", () => {
     await control.close();
   });
 
+  it("reuses the persisted index for an unchanged corpus and re-parses only what changed", async () => {
+    const root = await mkdtemp(join(tmpdir(), "tron-search-warm-reuse-")); roots.push(root);
+    const path = join(root, "index.sqlite");
+    const identities = new Map([
+      ["one", { fileIdentity: "1:1", size: 4_096, mtimeMs: 1_759_000_000_000 }],
+      ["two", { fileIdentity: "1:2", size: 8_192, mtimeMs: 1_759_000_000_001 }],
+    ]);
+    const reads: string[] = [];
+    const registry = () => ({
+      setSearchInvalidator: () => {},
+      isArchived: () => false,
+      catalog: async () => ({ sessions: [{ id: "one" }, { id: "two" }] }),
+      searchCatalogIdentities: async () => new Map(identities),
+      readSearchCut: async (sessionId: string) => {
+        reads.push(sessionId);
+        return { summary: { id: sessionId, name: "Fixture", firstMessage: "Fixture", cwd: "/tmp", modified: new Date("2026-01-01T00:00:00Z") }, entries, fileIdentity: identities.get(sessionId)!.fileIdentity, leafEntryId: "semantic" };
+      },
+    }) as any;
+
+    const firstIndex = await SessionSearchIndex.open(path);
+    const first = new SessionSearchService(registry(), firstIndex);
+    await first.warm();
+    expect(reads).toEqual(["one", "two"]);
+    expect(first.indexPassStats()).toEqual({ reusedSessions: 0, parsedSessions: 2 });
+    const firstResponse = await first.search({ query: "needle", maxResults: 5 });
+    const coverage = firstResponse.coverage;
+    const corpusRevision = firstResponse.corpusRevision;
+    await first.close();
+
+    // Second start of the same corpus: every row is reused, so no transcript is read.
+    const secondIndex = await SessionSearchIndex.open(path);
+    const second = new SessionSearchService(registry(), secondIndex);
+    reads.length = 0;
+    await second.warm();
+    expect(reads).toEqual([]);
+    expect(second.indexPassStats()).toEqual({ reusedSessions: 2, parsedSessions: 0 });
+    const secondResponse = await second.search({ query: "needle", maxResults: 5 });
+    expect(secondResponse.corpusRevision).toBe(corpusRevision);
+    expect(secondResponse.coverage).toEqual(coverage);
+    expect(secondResponse.results.length).toBeGreaterThan(0);
+    await second.close();
+
+    // One file changed while the Gateway was down: only that session is re-read.
+    identities.set("two", { fileIdentity: "1:2", size: 8_193, mtimeMs: 1_759_000_000_002 });
+    const thirdIndex = await SessionSearchIndex.open(path);
+    const third = new SessionSearchService(registry(), thirdIndex);
+    reads.length = 0;
+    await third.warm();
+    expect(reads).toEqual(["two"]);
+    expect(third.indexPassStats()).toEqual({ reusedSessions: 1, parsedSessions: 1 });
+    await third.close();
+  });
+
+  it("parses the corpus when no catalog cut can prove a row unchanged", async () => {
+    const root = await mkdtemp(join(tmpdir(), "tron-search-warm-unproven-")); roots.push(root);
+    const path = join(root, "index.sqlite");
+    let reads = 0;
+    const registry = () => ({
+      setSearchInvalidator: () => {},
+      isArchived: () => false,
+      catalog: async () => ({ sessions: [{ id: "one" }] }),
+      // The catalog owner has published no verified cut: the durable rows must
+      // not be reused on the strength of a load alone.
+      searchCatalogIdentities: async () => undefined,
+      readSearchCut: async () => {
+        reads += 1;
+        return { summary: { id: "one", name: "Fixture", firstMessage: "Fixture", cwd: "/tmp", modified: new Date("2026-01-01T00:00:00Z") }, entries, fileIdentity: "1:1", leafEntryId: "semantic" };
+      },
+    }) as any;
+    const index = await SessionSearchIndex.open(path);
+    const service = new SessionSearchService(registry(), index);
+    await service.warm();
+    expect(reads).toBe(1);
+    expect(service.indexPassStats()).toEqual({ reusedSessions: 0, parsedSessions: 1 });
+    await service.close();
+
+    const reopened = await SessionSearchIndex.open(path);
+    const again = new SessionSearchService(registry(), reopened);
+    reads = 0;
+    await again.warm();
+    expect(reads).toBe(1);
+    expect(again.indexPassStats()).toEqual({ reusedSessions: 0, parsedSessions: 1 });
+    await again.close();
+  });
+
   it("fuses semantic candidates before the final result cap", async () => {
     const embedding = new FixtureEmbedding();
     const { index, service } = await realService(embedding);

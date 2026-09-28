@@ -18,14 +18,26 @@ import {
   type SessionSearchResult,
 } from "./session-search-contract.js";
 import { SessionSearchAllowanceLedger } from "./session-search-allowance.js";
-import { SessionSearchIndex, type SearchIndexDocument } from "./session-search-index.js";
+import { SessionSearchIndex, type SearchIndexStamp, type SearchIndexSessionFacts, type SearchIndexDocument } from "./session-search-index.js";
+import type { SessionCatalogIdentity } from "./session-catalog.js";
 import { excerpt, extractSearchText, validateSearchBranch, type SearchTextEntry } from "./session-search-text.js";
+import { yieldToEventLoop } from "../util/event-loop-yield.js";
 
 const SEARCH_CANDIDATE_LIMIT = 500;
 const MAX_SEMANTIC_VECTORS = 100_000;
 const MAX_SEMANTIC_BYTES = 128 * 1_024 * 1_024;
 const MAX_SEMANTIC_WORK = 20_000;
 const MAX_DIRTY_SESSIONS = 256;
+/** Longest stretch of warm-up or reindex work between event-loop yields, so an
+ * owned background pass cannot delay an in-flight request. */
+const SEARCH_SLICE_MS = 20;
+/** How long a start waits for the catalog owner's first verified cut before it
+ * parses whatever it cannot prove unchanged. The warm-up is a background task,
+ * so this never delays listener readiness. */
+const SEARCH_WARMUP_CATALOG_WAIT_MS = 30_000;
+/** A start's optional semantic pass stops here and reports partial coverage: it
+ * re-reads and re-embeds the corpus, which must not run without a time bound. */
+const SEARCH_SEMANTIC_WARMUP_BUDGET_MS = 120_000;
 const DEFAULT_POLICY: SessionSearchPolicy = { enabled: false, perQueryMicroCents: 0, dailyMicroCents: 0, policyRevision: 1 };
 
 async function awaitWithAbort<T>(promise: Promise<T>, signal?: AbortSignal): Promise<T> {
@@ -36,6 +48,10 @@ async function awaitWithAbort<T>(promise: Promise<T>, signal?: AbortSignal): Pro
     signal.addEventListener("abort", abort, { once: true });
     void promise.then(value => { signal.removeEventListener("abort", abort); resolve(value); }, error => { signal.removeEventListener("abort", abort); reject(error); });
   });
+}
+
+function sameFileIdentity(reuse: SearchIndexStamp, current: SessionCatalogIdentity): boolean {
+  return reuse.fileIdentity === current.fileIdentity && reuse.size === current.size && reuse.mtimeMs === current.mtimeMs;
 }
 
 function sameSemanticGeneration(left: Pick<SemanticGeneration, "dimension" | "language" | "modelRevision">, right: SemanticGeneration): boolean {
@@ -102,6 +118,9 @@ export class SessionSearchService {
   private semanticBytes = 0;
   private semanticWork = 0;
   private dirtyOverflow = false;
+  private indexReused = 0;
+  private indexParsed = 0;
+  private sliceStartedAt = 0;
 
   constructor(
     private readonly sessions: RuntimeRegistry,
@@ -115,12 +134,18 @@ export class SessionSearchService {
     this.sessions.setSearchInvalidator((sessionID, nextSessionID) => {
       this.searchCutGeneration += 1;
       this.semanticGeneration += 1;
-      this.index.remove(sessionID);
-      for (const key of this.semanticVectors.keys()) if (key.startsWith(`${sessionID}\u0000`)) this.semanticVectors.delete(key);
+      // This runs inside another owner's summary publication, so it stays
+      // cheap: no SQLite work and no scan of the whole vector map. The dirty
+      // lane replaces the session's rows in a bounded slice, and the old rows
+      // answer nothing meanwhile because every candidate is validated against
+      // a fresh canonical cut before publication.
+      for (const [key, value] of this.semanticVectors) {
+        if (!key.startsWith(`${sessionID}\u0000`)) continue;
+        this.semanticVectors.delete(key);
+        this.semanticBytes -= value.vector.length * Float64Array.BYTES_PER_ELEMENT;
+      }
       this.semanticTotal = this.semanticVectors.size;
-      this.semanticBytes = [...this.semanticVectors.values()].reduce((sum, value) => sum + value.vector.length * Float64Array.BYTES_PER_ELEMENT, 0);
       if (nextSessionID) {
-        this.index.remove(nextSessionID);
         this.initialized = false;
         this.dirtySessions.clear();
         this.semanticModel = undefined;
@@ -135,6 +160,11 @@ export class SessionSearchService {
         if (this.semanticClient) this.semanticCoverage = "partial";
       }
     });
+  }
+
+  /** What the last index pass reused and parsed, for the warm-up record. */
+  indexPassStats(): { reusedSessions: number; parsedSessions: number } {
+    return { reusedSessions: this.indexReused, parsedSessions: this.indexParsed };
   }
 
   setSemanticClient(client: SessionSearchEmbeddingClient): void {
@@ -327,7 +357,6 @@ export class SessionSearchService {
   }
 
   private async rebuild(): Promise<void> {
-    this.index.clear();
     this.semanticVectors.clear();
     this.semanticTotal = 0;
     this.semanticBytes = 0;
@@ -336,21 +365,70 @@ export class SessionSearchService {
     this.semanticModel = undefined;
     this.semanticReason = undefined;
     this.semanticCoverage = this.semanticClient ? "indexing" : "unavailable";
+    this.indexReused = 0;
+    this.indexParsed = 0;
+    this.sliceStartedAt = performance.now();
     const catalog = await this.sessions.catalog("user");
     this.coverageSessionsTotal = catalog.sessions.length;
     this.coverageOmittedSessions = 0;
     this.coverageReason = undefined;
+    // One persisted row is reused while the catalog owner still reports the
+    // exact file facts the row was indexed from: an unchanged corpus is warmed
+    // without reading a transcript, and only what changed is parsed again.
+    const identities = await this.catalogIdentities();
+    const stored = new Map(this.index.sessionFacts().map(facts => [facts.sessionId, facts]));
+    const published = new Set(catalog.sessions.map(session => session.id));
+    for (const sessionId of stored.keys()) if (!published.has(sessionId)) this.index.remove(sessionId);
     const corpusFacts: string[] = [];
     for (const session of catalog.sessions) {
       if (this.warmupAbort.signal.aborted) return;
+      const candidate = identities?.get(session.id);
+      const previous = stored.get(session.id);
+      if (previous?.reuse && candidate && sameFileIdentity(previous.reuse, candidate)) {
+        this.indexReused += 1;
+        corpusFacts.push(`${session.id}:${previous.branchDigest}`);
+        await this.yieldSlice();
+        continue;
+      }
       const document = await this.loadDocument(session.id);
       if (this.warmupAbort.signal.aborted) return;
       if (!document) { this.coverageOmittedSessions += 1; this.coverageReason = "One or more canonical sessions could not be admitted for search"; continue; }
       corpusFacts.push(`${document.sessionId}:${document.branchDigest}`);
-      try { this.index.replace(document); }
-      catch { this.coverageOmittedSessions += 1; this.coverageReason = "One or more sessions exceeded bounded search index capacity"; }
+      try {
+        await this.index.replace(document, candidate);
+        this.indexParsed += 1;
+      } catch { this.coverageOmittedSessions += 1; this.coverageReason = "One or more sessions exceeded bounded search index capacity"; }
+      await this.yieldSlice();
     }
     this.corpusRevision = digest(corpusFacts);
+  }
+
+  /** The catalog owner's verified file facts, or undefined when no complete cut
+   * arrives within this start's bounded wait: the pass then parses whatever it
+   * cannot prove unchanged instead of trusting an unverified durable row. */
+  private async catalogIdentities(): Promise<ReadonlyMap<string, SessionCatalogIdentity> | undefined> {
+    let timer: NodeJS.Timeout | undefined;
+    const expired = new Promise<undefined>(resolve => { timer = setTimeout(() => resolve(undefined), SEARCH_WARMUP_CATALOG_WAIT_MS); });
+    const identities = await Promise.race([
+      this.readCatalogIdentities(),
+      expired,
+    ]);
+    if (timer) clearTimeout(timer);
+    return identities;
+  }
+
+  /** A catalog seam that fails or is unavailable leaves every row unproven, so
+   * the pass parses instead of reusing what it cannot check. */
+  private async readCatalogIdentities(): Promise<ReadonlyMap<string, SessionCatalogIdentity> | undefined> {
+    try { return await this.sessions.searchCatalogIdentities(); } catch { return undefined; }
+  }
+
+  /** Hand the loop back between slices: the warm-up is one long background
+   * task, and a transcript read must not hold an in-flight request. */
+  private async yieldSlice(): Promise<void> {
+    if (performance.now() - this.sliceStartedAt < SEARCH_SLICE_MS) return;
+    this.sliceStartedAt = performance.now();
+    await yieldToEventLoop();
   }
 
   private startSemanticIndexing(): void {
@@ -399,14 +477,15 @@ export class SessionSearchService {
       return;
     }
     this.semanticCoverage = "indexing";
+    const deadline = performance.now() + SEARCH_SEMANTIC_WARMUP_BUDGET_MS;
     const catalog = await this.sessions.catalog("user");
     for (const session of catalog.sessions) {
-      if (this.semanticAbort.signal.aborted || this.semanticWork >= MAX_SEMANTIC_WORK || this.semanticVectors.size >= MAX_SEMANTIC_VECTORS || this.semanticBytes >= MAX_SEMANTIC_BYTES) { this.semanticCoverage = "partial"; break; }
+      if (this.semanticAbort.signal.aborted || this.semanticOutOfBudget(deadline) || this.semanticWork >= MAX_SEMANTIC_WORK || this.semanticVectors.size >= MAX_SEMANTIC_VECTORS || this.semanticBytes >= MAX_SEMANTIC_BYTES) { this.semanticCoverage = "partial"; break; }
       const document = await this.loadDocument(session.id);
       if (!document) continue;
       for (const entry of document.entries) {
         if (this.semanticAbort.signal.aborted) return;
-        if (this.semanticWork >= MAX_SEMANTIC_WORK || this.semanticVectors.size >= MAX_SEMANTIC_VECTORS) { this.semanticCoverage = "partial"; return; }
+        if (this.semanticOutOfBudget(deadline) || this.semanticWork >= MAX_SEMANTIC_WORK || this.semanticVectors.size >= MAX_SEMANTIC_VECTORS) { this.semanticCoverage = "partial"; return; }
         this.semanticWork += 1;
         try {
           const vector = await this.semanticClient.embed(entry.text, this.semanticModel?.language, this.semanticAbort.signal);
@@ -414,9 +493,16 @@ export class SessionSearchService {
           if (!this.admitSemanticVector(document.sessionId, document, entry, vector)) return;
         } catch (error) { if (this.semanticAbort.signal.aborted) return; this.semanticCoverage = "partial"; }
       }
+      await this.yieldSlice();
     }
     this.semanticTotal = this.semanticVectors.size;
     if (this.semanticCoverage === "indexing") this.semanticCoverage = "complete";
+  }
+
+  /** The optional semantic pass stops at its per-start budget with explicit
+   * partial coverage instead of re-embedding the corpus without a time bound. */
+  private semanticOutOfBudget(deadline: number): boolean {
+    return performance.now() >= deadline;
   }
 
   private enqueueSemantic(operation: () => Promise<void>): Promise<void> {
@@ -434,7 +520,7 @@ export class SessionSearchService {
         for (const [id, processedGeneration] of entries) {
           try {
             const document = await this.loadDocument(id);
-            if (document) this.index.replace(document);
+            if (document) await this.index.replace(document);
             else this.index.remove(id);
             refreshed.push({ id, generation: processedGeneration, ...(document ? { document } : {}) });
           } catch {
