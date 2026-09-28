@@ -53,9 +53,13 @@ EPOCH_LOOKBACK_SECONDS = 300
 # (diagnose.ts). One capture is bounded by this, and the report says when it
 # timed out.
 LOG_SHOW_TIMEOUT_SECONDS = 90
+# One capture covers a day at most: a longer `log show` reads history a
+# multi-hour window does not need, and a tool run should stay interactive.
 MAX_TAILSCALE_WINDOW_SECONDS = 24 * 3_600
 TAILSCALE_LOG_TOOL = "/usr/bin/log"
 TAILSCALE_EXTENSION_PROCESS = "io.tailscale.ipn.macsys.network-extension"
+# An operator reads the evidence, so it stays short: a bounded number of lines,
+# each truncated, and the counts in the summary say what was left out.
 MAX_EVIDENCE_LINES = 12
 MAX_EVIDENCE_TEXT = 240
 # Phone-side attempt evidence: `gateway.attempt` is the O-4 record, and the

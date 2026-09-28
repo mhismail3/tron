@@ -4429,11 +4429,11 @@ events; widen them to name the pool owner in the same change.
     that window) without touching the input.
   - `python3 scripts/check-documentation-policy.py` (46 authored files) and
     `scripts/personal-info-guard.sh` pass.
-- Changes: `feat(triage): add the incident triage tool (O-7)`,
-  `docs(triage): name the triage command first, close label windows at scene and
-  episode boundaries (O-7)` and
-  `feat(triage): pair the inbound-silence evidence with its resume record (O-7)`
-  on `hardening/o-7`.
+- Changes: four commits on `hardening/o-7`: `feat(triage): add the incident
+  triage tool (O-7)`, `docs(triage): name the triage command first, close label
+  windows at scene and episode boundaries (O-7)`,
+  `feat(triage): pair the inbound-silence evidence with its resume record (O-7)`,
+  `docs(triage): give the capture and evidence bounds their reasons (O-7)`.
 - Failure modes written before the code (one test each): a relay-path outage
   attributed to the phone because the Gateway's silent-socket record was not
   joined; a transport-open timeout read as a Gateway stall, and a live main
