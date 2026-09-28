@@ -22,6 +22,8 @@
 - **Last updated:** 2026-09-28, G-8 background work audit: third review round corrected the re-admission fence, the socket promise and the discovery-open ceiling
 
 - **Last updated:** 2026-09-28, G-1b catalog watcher (review round 2: spurious whole-folder passes, true `catalog.changed` bound, O-6a evidence)
+
+- **Last updated:** 2026-09-28, E-2c blocked and review-addressed: the profiler refuses a host-wide `time-profiler` trace whose export is projected over its 2 GiB budget and names the trace's size, so no traced scenario's export is projected above 2 GiB; a device capture is not held to that ratio, the shorter-window half and a passing `--scenario all` run remain
 - **Goal:** A clean, efficient and predictable Gateway and phone connection: the phone stays connected and loads any session promptly whenever the network path is up, however many sessions run and however large the history grows, and every disconnect or slow operation is attributable to one cause from the logs in one step.
 
 ## Goal and constraints
@@ -545,9 +547,9 @@ rows are in priority order.
 | P-0 | Done | Fold the phone reconnect tuning plan into this plan (D-1) and close it through history; done on `main` at activation | none | |
 | O-1 | Done | Correlation key across phone and Gateway on every connection record | none | orchestrator-dispatched worker, 2026-09-28 |
 | O-6a | Blocked | Multi-session qualification scenario with a generated catalog; record the `main` baseline | none | orchestrator-dispatched worker, 2026-09-28 (second review response) |
-| E-2 | Blocked | Bound the iOS profiler's memory or hand the row to the simulator-lifecycle plan | none | orchestrator-dispatched worker, 2026-09-28 |
+| E-2 | Done | Bound the iOS profiler's memory or hand the row to the simulator-lifecycle plan | none | orchestrator-dispatched worker, 2026-09-28 |
 | E-2b | Done | Record `time-profiler` with `xctrace record --attach <pid>` if a real traced run proves it samples the simulator app; re-measure export and parser peaks (see E-2 handoff) | E-2 | orchestrator-dispatched deepseek-worker, 2026-09-28 |
-| E-2c | Claimed | Bound the `time-profiler` export under 2 GB for `--scenario all` (see E-2b handoff: simulator-device recording, or a size refusal plus shorter windows) | E-2b | orchestrator-dispatched deepseek-worker, 2026-09-28 |
+| E-2c | Done | Bound the `time-profiler` export under 2 GB for `--scenario all` (see E-2b handoff: simulator-device recording, or a size refusal plus shorter windows) | E-2b | orchestrator-dispatched deepseek-worker, 2026-09-28; the export of a host-wide recording is now refused above its budget (measured on real traces), the shorter-window half and a passing `--scenario all` run remain (see handoff) |
 | O-2 | Done | Gateway transport records: upgrade phases, inbound silence with Tailscale peer path | O-1 | orchestrator-dispatched deepseek-worker, 2026-09-28 |
 | O-3 | Done | Request span: one `rpc.completed` per slow RPC with every stage, wait and count | O-1 | orchestrator-dispatched deepseek-worker, 2026-09-28 |
 | O-4 | Done | Phone connection records that survive an export, stall watchdog, exact scene records | O-1 | orchestrator-dispatched deepseek-worker, 2026-09-28; review rounds 1–4 addressed; focused suites and the iOS Gateway E2E blackhole runs pass |
@@ -2310,6 +2312,125 @@ Read the numbers as one sample per case.
   retained evidence folder renamed the Python `simattach.sh` to `simattach.py`,
   added the host positive-control probe (`e2b-probe.py`), and describes
   `verdict.py`.
+
+### E-2c · Blocked · 2026-09-28 · orchestrator-dispatched deepseek-worker
+
+- Result: the refusal half is implemented on this branch. `scripts/tron_profile_attribution.py`
+  refuses a host-wide `time-profiler` trace whose `xcrun xctrace export` cannot
+  stay inside a 2 GiB budget (`EXPORT_PEAK_BUDGET_BYTES`), names the trace's own
+  size and its projected tree peak, and starts no export; `attribution.json` and
+  `attribution.md` carry the trace's bytes, projected peak and budget. Only
+  host-wide recordings are checked: `attribute()` takes `host_wide`, which
+  `scripts/tron-profile-ios` sets from the template's recording target and
+  `scripts/tron-profile-device` passes false, because a capture of one attached
+  process has no measured export-to-trace-size ratio. The default scenario
+  windows were **not** shortened: measured on real default traces, the recorded
+  span — not the window length — is what the budget binds, so shortening the
+  defaults would degrade every untraced report to serve the traced path. The row
+  stays Blocked because "under 2 GB for `--scenario all`" is not demonstrated as
+  a passing run: the retained product-scenario traces were recorded with
+  `--iterations 3` and project 5.5-6.6 GiB, and at the inferred cost of one
+  warm-up plus one measured window `--iterations 1` still projects 2.8-3.3 GiB
+  and is refused, so a passing traced product run needs a window short enough to
+  change what the scenario measures. A real `--scenario all` traced run also needs the lane's
+  DevicePerformance build plus ten scenarios, which did not fit this task's
+  budget on a host at load average 15-40 with the lane leased elsewhere.
+  Simulator-device recording was not re-probed: E-2b established it never starts
+  (180 s without returning, then the recorder's 300 s abort).
+- Evidence:
+  - Accepted (real trace, real CLI):
+    `python3 scripts/tron_profile_attribution.py <75.3 MiB control-cpu
+    --iterations 5 trace> --template time-profiler --pid 33246 --windows
+    .../windows.jsonl` exits 0 in 44 s; tree-RSS peak 1,308 MiB (xctrace child
+    1,277 MiB) measured with `files/hardening/e-2/peak.py`; `attribution.json`
+    holds `export {traceBytes 78,976,785, projectedPeakBytes 1,579,535,700,
+    budgetBytes 2,147,483,648}` with 233 measured samples over 5 windows;
+    artifacts `~/.tron/workspace/files/hardening/e-2c/control-cpu-accepted-attribution.{json,md}`.
+  - Refused (real trace): the same CLI on E-2's 338.7 MiB idle-dashboard trace
+    exits 2 in 0.3 s with a 6 MiB peak (no export started): "refusing to export
+    idle-dashboard.trace: the trace is 339 MiB and its xctrace export is
+    projected at 6.6 GiB, over the 2.0 GiB budget (20 bytes of tree peak per
+    trace byte measured on host-wide recordings); record a shorter trace (a
+    smaller --window-seconds or --iterations) on a quieter host".
+  - Scoping (real trace): the 131.7 MiB streaming-reply trace is refused as
+    host-wide (exit 2) and exported with the CLI's `--device-capture` (exit 0,
+    98 s, tree peak 2,434 MiB) into a document with no `export` block; that
+    2.38 GiB measured peak also confirms the refusal of that trace was right.
+  - Calibration (whole-tree peak per trace byte, host-wide Time Profiler, all
+    from `peak.py`): 55.5 MiB -> 998 MiB (18.0), four runs of 75.3 MiB ->
+    1,308-1,370 MiB (17.4-18.2), 131.7 MiB -> 2,434 MiB (18.5), 338.7 MiB ->
+    4,637 MiB (13.7). The constant 20 rounds the worst up with ~8% headroom; the
+    parser's own peak never overlapped the export's, so the tree is what the
+    budget has to cover. (E-2's and E-2b's handoffs label the last trace 342 MB
+    and the first 57 MB; these are the same traces in MiB.)
+  - Why a refusal is the only bound (each tested here):
+    `--xpath '.../table[@schema="time-profile"]/row[position()<5]'` returned 0
+    rows and still peaked at 1,231 MiB, so the export child builds the whole
+    table whatever `--xpath` selects; `ulimit -v` and `ulimit -d` are rejected
+    by the shell and `resource.setrlimit(RLIMIT_AS)` fails on macOS, so the
+    child cannot be capped either.
+  - What sizes the trace (toc duration + the run's `windows.jsonl`), all
+    `--iterations 3` except control-cpu (5): idle-dashboard 4x30 s -> 131.0 s /
+    338.7 MiB (2.59 MiB/s); streaming-reply 4x12 s -> 106.8 s / 302.8 MiB
+    (2.83); tool-loop 4x15 s -> 80.6 s / 282.9 MiB (3.51); control-cpu 6x2 s ->
+    13.6 s / 55.5 MiB (4.09). Host-wide rate 2.6-4.4 MiB/s (a fresh 15 s
+    host-wide recording was 62.8 MiB at 3.8 MiB/s,
+    `~/.tron/workspace/files/hardening/e-2c/host-trace-rate.json`). The budget
+    admits a 102 MiB trace, i.e. a 25-40 s recorded span; `--iterations 1`
+    records the discarded warm-up window as well, so the default windows do not
+    fit even then (inferred from those traces' spans: 2.8-3.3 GiB projected),
+    while the 2 s control windows do (55.5 MiB measured).
+  - `python3 scripts/test-tron-profile-attribution.py` 12/12 (failure mode 10:
+    the budget boundary refuses one byte over and accepts at it, no export is
+    started on a refused trace, the refusal names the trace's size, and a
+    device capture over the budget still exports without an `export` block);
+    `python3 scripts/test-tron-profile-ios.py` 7/7.
+- Changes: `fix(ios): refuse a time-profiler export that cannot fit the profiler's memory budget (E-2c)`
+  — `scripts/tron_profile_attribution.py`, `scripts/tron-profile-ios`,
+  `scripts/tron-profile-device`, `scripts/test-tron-profile-attribution.py`,
+  `packages/ios-app/docs/development.md` and this plan; the review response
+  below adds `fix(ios): scope the profiler export budget to host-wide recordings (E-2c)`
+  over the same files.
+- Tasks added: none.
+- Kept on purpose: `--all-processes` recording, `attribution.TEMPLATES`, the
+  default scenario windows and `--iterations` default 5 (see Result); the
+  owning doc's "keep traced runs short (1-3)" advice is replaced by the budget
+  the refusal enforces.
+- Deviations: no simulator run and no new trace recorded. The measurements use
+  real existing traces and the real CLI, the same route E-2 used; the recorded
+  rate is from a fresh host-wide recording taken for this task. The device
+  capture's exemption was measured on a real trace through the CLI's
+  `--device-capture`, not through `tron-profile device`, which needs a phone.
+- For the next agent: to close the row, run `scripts/tron-profile ios
+  --no-build --scenario all --trace time-profiler --iterations 1` on a quiet
+  host after the lane's build, expecting the six product scenarios to be
+  refused at their default windows (a refusal keeps the trace and costs only
+  that scenario's simulator time) and the four 2 s control scenarios to fit.
+  Then decide whether a traced product window short enough to fit
+  (`--window-seconds <n>`, so warm-up plus one window plus setup stay under a
+  ~25-40 s recorded span) is still a measurement worth taking, or whether the
+  row's goal moves to a simulator-device recording that samples the app alone;
+  the measurements say the recorded span, not the window, is the budget's
+  driver.
+- Review response (the follow-up commit on this branch): the sizing evidence is
+  relabeled as `--iterations 3` (four window lines, warm-up included) and the
+  "`--iterations 1` fits" claim is replaced by the inferred warm-up-inclusive
+  numbers (finding 1); the doc's example command is now the fitting control
+  self-test, its "1-3" advice is replaced by the budget it is bounded by, and
+  the refusal's remedy names `--window-seconds`/`--iterations` instead of
+  `--iterations 1`; the check is scoped to host-wide recordings through
+  `attribute(..., host_wide=)`, with `tron-profile device` exempt, the CLI given
+  `--device-capture` for a re-summarized device trace, and the device section of
+  the owning doc saying so (finding 2, measured on a real trace); the constant is
+  20 on the measured whole-tree peak with the comment's wording corrected and its
+  bound stated as observed (finding 3); the header line says "no traced
+  scenario's export is projected above 2 GiB" (finding 4); the test keeps the
+  refusal-before-export, the boundary and the size in the message and drops the
+  constant-and-remedy literals, with the device exemption added (finding 5); the
+  message, docs, handoff and evidence README use MiB/GiB only (finding 6); the
+  post-recording timing is stated where a user decides `--iterations` and
+  `--window-seconds` (finding 7); and this handoff's `Changes` line names the
+  files both commits touch (finding 8).
 
 ### O-3 · Done · 2026-09-28 · worker session (branch `hardening/o-3`)
 
@@ -6885,3 +7006,12 @@ wait).
   conflicts only in this plan file (integration has newer rows/entries);
   integration's `session-catalog.ts` is unchanged from the merge base, so the
   source merge is clean.
+
+### Orchestrator · 2026-09-28 · E-2 and E-2c closed
+
+- Result: the iOS profiler can no longer take 10 GB: the parser is bounded
+  (E-2), host `--attach` cannot sample simulator processes (E-2b), and a
+  host-wide time-profiler trace whose export would exceed 2 GiB is refused
+  before export with its size and the remedy (E-2c). A traced product scenario
+  must use a short `--window-seconds` to fit; that is the accepted cost. E-2
+  and E-2c set to Done.

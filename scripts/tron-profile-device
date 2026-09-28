@@ -168,7 +168,9 @@ def main(argv: list[str]) -> int:
         run_dir = root.expanduser() / "device" / run_id
         run_dir.mkdir(parents=True)
         trace = record(arguments, run_dir, device)
-        document = attribution.attribute(trace, arguments.template, None, None)
+        # One attached process, not `--all-processes`: the export budget's ratio
+        # is measured on host-wide recordings only, so this capture is not held to it.
+        document = attribution.attribute(trace, arguments.template, None, None, host_wide=False)
         document["device"] = device
         document["warnings"].append("device capture: whole recording window, not a deterministic scenario")
         paths = attribution.write(document, run_dir)
