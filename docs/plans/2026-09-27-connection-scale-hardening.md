@@ -9,6 +9,12 @@
   reason is corrected and the case is judged on the clients' own close →
   listening span, read from the Gateway's own record (see the handoff)
 
+- **Last updated:** 2026-09-28, E-3b done: pairing and hello advertise the
+  lane's bound endpoint and pin (base64 SHA-256 of the certificate's public key
+  as its raw X9.63 point, frozen in `protocol-fixtures/lan-endpoint-pin.json`),
+  and the phone stores both with the profile and replaces them on every hello
+  (see the handoff)
+
 - **Last updated:** 2026-09-28, E-3a done: the pinned LAN listener binds a
   private address, rebinds or disables when that address changes, shares the
   transport's admission and refuses pairing (see the handoff)
@@ -610,7 +616,7 @@ rows are in priority order.
 | C-3 | Claimed | Faster retry (D-4): about 5 s transport-open deadline, immediate retry on path change | C-1 | orchestrator-dispatched deepseek-worker, 2026-09-28 |
 | C-4 | Done | Truer liveness (D-4): any inbound frame proves liveness | O-4 | orchestrator-dispatched deepseek-worker, 2026-09-28 |
 | C-6 | Done | Cancel frame for disposable reads; a retried `session.open` joins the in-flight one | O-3 | orchestrator-dispatched deepseek-worker, 2026-09-28 (the O-6a slow-open confirmation and the qualification run are the orchestrator's) |
-| G-12 | Ready | Server-side deadlines, concurrency caps and heap-pressure shedding with typed retry hints | O-3, O-5 | |
+| G-12 | Claimed | Server-side deadlines, concurrency caps and heap-pressure shedding with typed retry hints | O-3, O-5 | orchestrator-dispatched deepseek-worker, 2026-09-28 |
 | G-2 | Claimed | Cold open in bounded time from the index and a single-file fence | G-1c | orchestrator-dispatched deepseek-worker, 2026-09-28 |
 | G-7 | Done | Reconnect diet: send only what changed | O-1, O-6a | orchestrator-dispatched deepseek-worker, 2026-09-28; both review rounds addressed, R-1/R-4 own the real-reconnect measurement |
 | G-11 | Done | Event-loop budget: find and bound every synchronous task over 50 ms | O-5, O-6a | orchestrator-dispatched deepseek-worker, 2026-09-28 (branch `hardening/g-11`): the Slot's publish-time full-transcript summary walk is now an incremental fold (largest CPU-profile run 86.9 ms → 4.8 ms); the dominant remaining stretches belong to in-flight G-8c (session-search) and G-1c (catalog/registry), so the combined O-6a max/p99 is re-measured by the orchestrator after they merge — see the handoff |
@@ -618,7 +624,7 @@ rows are in priority order.
 | G-4 | Done | Outbound queue coalescing of superseded snapshots (one covering `session.rebaseline`) and summary revisions by key | G-3 | orchestrator-dispatched deepseek-worker, 2026-09-28 (branch `hardening/g-4`; review round 1 addressed: a superseded sequence is covered by the `session.rebaseline` that replaces it; round 2: only state the snapshot fully re-states and only its own runtime generation, a one-shot frame is a fence; round 3 after merging `hardening/integration`: the replacement path's client is asserted on the authority it installs, covered `session.snapshot`/`session.rebaseline` alike, and the round's fixtures speak protocol 6); the O-6b bandwidth-stream before/after numbers are owed to the orchestrator's quiet-host runs |
 | G-5 | Done | Byte budget for live runtimes and an explicit heap limit | O-5 | orchestrator-dispatched deepseek-worker, 2026-09-28 |
 | E-3a | Done | LAN endpoint (D-5), Gateway side: pinned TLS listener bound to the private LAN address | O-1, O-2 | orchestrator-dispatched deepseek-worker, 2026-09-28 |
-| E-3b | Claimed | LAN endpoint: advertise endpoints and pin in pairing and hello | E-3a | orchestrator-dispatched deepseek-worker, 2026-09-28 |
+| E-3b | Done | LAN endpoint: advertise endpoints and pin in pairing and hello | E-3a | orchestrator-dispatched deepseek-worker, 2026-09-28 |
 | E-3c | Ready | LAN endpoint, phone side: pin validation, staggered race, seamless fallback | E-3b, C-3 | |
 | E-3d | Ready | LAN endpoint on by default in the release once E-3c's E2E cases pass; the setting is the kill switch | E-3c | |
 | G-13 | Blocked | Restart and reconnect storm: startup budget and a qualification case | G-1c, O-6b | orchestrator-dispatched deepseek-worker, 2026-09-28 (branch `hardening/g-13`): `gateway.startup-budget` (5 s, with the slowest step) and `impairment.restart.startup_ms`/`.close_to_listening_ms`, read from the new process's own record; the case reports G-13's criterion with its numbers. Blocked, not Done: the criterion is a "Done when" and no run has met it — the measured misses are host-bound plus two named causes (the old process's 2 s `work-settle` grace and the storm upgrades serialized by `DeviceStore`'s credential mutex), which need rows of their own or a quiet-host R-1 run; see the handoff |
@@ -9263,3 +9269,97 @@ wait).
   integration merge (see the commit).
 - Deviations: no code change aims at the two causes above, so the criterion is
   still not demonstrated; the quiet-host run remains the orchestrator's.
+
+### E-3b · Done · 2026-09-28 · orchestrator-dispatched deepseek-worker (branch `hardening/e-3b`)
+
+- Result: a paired phone learns the LAN lane on the two channels it already
+  owns. `lan-endpoint.ts` exposes `advertisement()` (the lane's current bind as
+  `{host, port}`, or an empty list while it is off or unbound) and
+  `lanPin(certificate)`; `server.ts` merges them into the pairing response and
+  the hello frame as `lanEndpoints` / `lanPin` and into no other response —
+  `/health` on both listeners, the lane's 404 pairing route and every other
+  unauthenticated answer are unchanged. On the phone `GatewayProfile` carries
+  `lanEndpoints`/`lanPin` (canonical host, port 1...65535, a pin that decodes to
+  32 bytes), the pairing response fills them, and
+  `GatewayProfileStore.adoptLanAdvertising` replaces both on a hello. The
+  advertisement reaches the phone through `GatewayHello`/`GatewayInfo`, because
+  `GatewayClient` already threads `decoded.info` into the connection identity
+  and that file belongs to E-3c.
+- The pin is standard base64 of SHA-256 over the certificate's public key as the
+  raw uncompressed X9.63 point (`0x04 || X || Y`): the encoding each platform
+  exports without synthesising a key structure
+  (`SecKeyCopyExternalRepresentation` on iOS, the JWK coordinates in Node).
+- Evidence: `npx vitest run src/transport/lan-endpoint.integration.test.ts` 12/12
+  — the new case pairs against a real `DeviceStore` over the primary listener and
+  reads the hello frame over both the `wss` lane and the plain listener:
+  `lanEndpoints` is the lane's bound `::1` endpoint and `lanPin` is
+  `lanPin(tls-certificate.pem)`, the main and lane `/health` documents name
+  neither, and with the setting off the hello advertises `lanEndpoints: []` and
+  no pin. Merge gate (integration at `249f242b2`, a no-op merge): `npx tsc
+  --noEmit -p .` clean; `session-archive` + `server-capacity` + `sync-protocol` +
+  `stall-diagnostics` + `server-heartbeat` + `server-http-lifecycle` 132/132;
+  `src/sessions/runtime-registry.integration.test.ts` 258/258;
+  `server-http-admission` + `server-startup` + `lan-endpoint` 18/18. Phone:
+  `scripts/tron-ios-test run` on `TronMobileTests/GatewayClientTransportTests`,
+  `GatewayPairingTransportTests`, `GatewayProfileStoreTests` and
+  `GatewayProtocolContractTests` 100/100, including the five new cases: hello
+  carries the advertisement into the connection identity and drops an entry the
+  phone cannot dial, a pairing response gives the profile the endpoints and pin,
+  an endpoint composes the `wss` socket and `https` base the race dials
+  (including a bracketed IPv6 ULA), a hello replaces what the store held (an
+  unchanged answer writes nothing, an empty list clears both), and the phone
+  reproduces the shared fixture's pin. Retained run: the 100-test run
+  `20260928T213833Z-run.x6hAyM` (`1e12290c8` with the URL-composition change
+  uncommitted); the review-fixes entry below cites a run at this branch's final
+  HEAD.
+- Deviations: the advertisement rides on `GatewayInfo` (the hello projection)
+  instead of a new field on `GatewayConnectionIdentity`, so no E-3c-owned client
+  file changed in this task. `GatewayProfileStore.adoptLanAdvertising` is the
+  seam the Phone lifecycle calls after a hello and is covered by tests here; the
+  call site itself was added in the review round below. No new log record:
+  the advertisement is state on an existing frame, not a juncture, and a
+  per-hello record would be hot-path volume.
+- For the next agent (E-3c): `profile.lanEndpoints`/`lanPin` are already
+  validated and kept current (each hello of the focused connection replaces
+  them), so race those endpoints and compare the served certificate with
+  `GatewayLanPin.pin(forCertificateDER:)`; a hello with no `lanEndpoints`
+  decodes as an empty list, which is the lane being off. Each endpoint composes
+  its own dial URLs (`socketURL`, `httpURL(path:queryItems:)`, both TLS) because
+  `URLComponents` refuses a bare IPv6 literal and a ULA-only Mac advertises one.
+  The lane binds the main listener's port on the private address.
+
+### E-3b · review fixes · 2026-09-28 · orchestrator-dispatched deepseek-worker (branch `hardening/e-3b`)
+
+- Result: an independent review's one major and two minors are fixed on the same
+  branch (no merge). (1) The hello now stores what it advertises: `AppModel`'s
+  `adoptConnectedGatewayLanAdvertising()` runs beside
+  `adoptConnectedGatewayIdentity()` in `lifecycleRefreshAll`, which the
+  lifecycle calls on every connect and reconnect, so the selected profile's
+  `lanEndpoints`/`lanPin` are replaced by the hello's advertisement before the
+  dashboard pool reconciles. No revision is bumped: nothing presents the
+  advertisement yet and the dial endpoint did not change. A phone paired before
+  this release now gets the lane on its next connection, and an address that
+  moved or a lane that was switched off corrects the profile instead of leaving
+  E-3c a stale endpoint. (2) `DashboardGatewayConnectionPool.reconcile` compares
+  a `DashboardPoolProfileIdentity` (host, port, label, machine identity, enabled
+  — plus the token it already compared) instead of whole-profile equality, so a
+  refreshed advertisement no longer stops and restarts a working background
+  connection; a changed dial identity still does. (3) The earlier entry's
+  evidence path named a sibling worktree's run and is replaced with this
+  worker's own; the run below is at this branch's final source.
+- Evidence: `scripts/tron-ios-test build` + `run` on
+  `TronMobileTests/GatewayClientTransportTests`, `GatewayPairingTransportTests`,
+  `GatewayProfileStoreTests`, `GatewayProtocolContractTests`,
+  `AppModelLifecycleTests` and `DashboardStateOwnerTests` 172/172, including the
+  two new cases below. Retained run:
+  `~/Library/Developer/Tron/ios/test-runs/20260928T220641Z-run.VlfXfG`. Each new
+  case fails on the pre-fix code for its own reason: with the comparison
+  reverted, the pooled entry dials a second socket and closes the first
+  (`DashboardStateOwnerTests.swift:295`); with the adoption call removed, the
+  stored profile keeps `[]`/`nil` (`AppModelLifecycleTests.swift:346`). No
+  Gateway source changed in this round, so the merge gate was not re-run.
+- Deviations: the adoption call lands in `AppModel.swift` (the zone table gives
+  it to E-3c) and the pool comparison in `DashboardGatewayConnectionPool.swift`
+  (C-5's file), because the plan's own E-3b "Do" and both docs already say the
+  phone replaces the advertisement on every hello; deferring either to E-3c
+  would have left the shipped branch contradicting both.

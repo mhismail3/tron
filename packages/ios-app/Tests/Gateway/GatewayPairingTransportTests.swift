@@ -101,6 +101,44 @@ struct GatewayPairingTransportTests {
         }
     }
 
+    @Test("a pairing response gives the profile the LAN endpoints and pin")
+    func pairingAdoptsLanAdvertisement() async throws {
+        let pin = Data(repeating: 9, count: 32).base64EncodedString()
+        let recorder = PairingHTTPRecorder(response: Self.response(
+            status: 200,
+            body: #"{"deviceId":"device-1","token":"secret-token","machineId":"machine-1","machineName":"Runtime Mac","gatewayChannel":"stable","lanEndpoints":[{"host":"192.168.1.24","port":9847}],"lanPin":"\#(pin)"}"#
+        ))
+        let pairer = GatewayPairer(transport: recorder.transport, uuidSource: { "connection-lan" })
+
+        let (profile, _) = try await pairer.pair(invitation, deviceName: "Test iPhone")
+
+        // Pairing is the first authenticated channel, so it is where the phone
+        // learns the LAN leg it may race (E-3c); every later hello replaces it.
+        #expect(profile.lanEndpoints == [GatewayLanEndpoint(host: "192.168.1.24", port: 9_847)])
+        #expect(profile.lanPin == pin)
+    }
+
+    @Test("a paired LAN endpoint composes the TLS socket and HTTP base the race dials")
+    func lanEndpointURLs() throws {
+        let ipv4 = try #require(GatewayLanEndpoint(host: "192.168.1.24", port: 9_847))
+        #expect(ipv4.socketURL?.absoluteString == "wss://192.168.1.24:9847/v1/socket")
+        #expect(ipv4.httpURL(path: "/health")?.absoluteString == "https://192.168.1.24:9847/health")
+        #expect(ipv4.httpURL(path: "/v1/sessions", queryItems: [URLQueryItem(name: "limit", value: "50")])
+            == URL(string: "https://192.168.1.24:9847/v1/sessions?limit=50"))
+
+        // A Mac whose only private address is an IPv6 ULA: the lane is TLS, and
+        // a bare literal is not a URL authority.
+        let ula = try #require(GatewayLanEndpoint(host: "fd12:3456:789A::1", port: 9_847))
+        #expect(ula.host == "fd12:3456:789a::1")
+        #expect(ula.socketURL?.absoluteString == "wss://[fd12:3456:789a::1]:9847/v1/socket")
+        #expect(ula.httpURL()?.absoluteString == "https://[fd12:3456:789a::1]:9847")
+
+        // An endpoint a socket cannot be composed for is not stored at all.
+        #expect(GatewayLanEndpoint(host: "[fd12::1]", port: 9_847) == nil)
+        #expect(GatewayLanEndpoint(host: "192.168.1.24", port: 0) == nil)
+        #expect(GatewayLanEndpoint.sanitized([ipv4, ula]).count == 2)
+    }
+
     @Test("a non-200 structured Gateway error is preserved exactly")
     func structuredFailure() async throws {
         let recorder = PairingHTTPRecorder(response: Self.response(

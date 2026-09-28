@@ -43,6 +43,31 @@ extension DashboardGatewayConnectionPoolDelegate {
     func dashboardPoolDevicesChanged(profileID: String) {}
 }
 
+/// Everything a background entry's connection, identity admission and catalog
+/// projection depend on. The LAN advertisement is deliberately excluded: E-3b
+/// replaces `lanEndpoints`/`lanPin` on every hello, and this pool dials the
+/// saved endpoint rather than the lane, so a refreshed advertisement must not
+/// stop and restart a working background connection.
+private struct DashboardPoolProfileIdentity: Equatable {
+    let host: String
+    let port: Int
+    let label: String
+    let machineId: String
+    let machineGroupID: String
+    let deviceId: String?
+    let isEnabled: Bool
+
+    init(_ profile: GatewayProfile) {
+        host = profile.host
+        port = profile.port
+        label = profile.label
+        machineId = profile.machineId
+        machineGroupID = profile.machineGroupID
+        deviceId = profile.deviceId
+        isEnabled = profile.isEnabled
+    }
+}
+
 /// Maintains lightweight dashboard catalog connections for non-focused servers.
 /// The focused chat remains owned by GatewayLifecycleCoordinator; each other
 /// profile has an independent connection and failure boundary.
@@ -169,7 +194,8 @@ final class DashboardGatewayConnectionPool {
                 if !desiredIDs.contains(profileID) { stop(profileID: profileID) }
                 continue
             }
-            if current.profile != profile || current.token != currentToken {
+            if DashboardPoolProfileIdentity(current.profile) != DashboardPoolProfileIdentity(profile)
+                || current.token != currentToken {
                 stop(profileID: profileID)
             }
         }

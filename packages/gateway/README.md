@@ -735,6 +735,17 @@ accepted connection's `http.upgrade` record names the leg it arrived on
 writes one `lan.listener` record with its state, address family and port but not
 the address ([observability](docs/observability.md)).
 
+A paired device learns the lane on the two channels it already owns (E-3b): the
+`POST /v1/pair` response and every `hello` answer carry `lanEndpoints` —
+`[{host, port}]` for the lane's current bind, or `[]` while the lane is off or
+has no private address — and `lanPin`, standard base64 of the SHA-256 of the
+certificate's public key as its raw uncompressed X9.63 point (`0x04 || X || Y`,
+[shared fixture](../protocol-fixtures/lan-endpoint-pin.json)). No
+unauthenticated route names the lane. A phone replaces the endpoints and pin it
+stored on every hello, so a Mac that moved, or whose lane was switched off,
+is corrected before the next connection instead of dialling an address this Mac
+no longer serves.
+
 Authenticated `system.logs.export` is a user-requested diagnostics projection: it accepts only a
 bounded already-redacted snapshot and command ID, appends the newest Gateway debug records (at most
 1 MB), writes a server-chosen `<device-hash>-<timestamp>.jsonl` file under

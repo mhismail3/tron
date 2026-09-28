@@ -4759,6 +4759,29 @@ final class AppModel {
         }
     }
 
+    /// Store the LAN endpoints and pin the hello advertised with the profile
+    /// this connection is authenticated for (E-3b). The hello is the only
+    /// source of `GatewayInfo`, so every connect and reconnect refreshes them:
+    /// a Mac whose private address moved, or whose lane was switched off,
+    /// corrects the stored profile before the LAN race (E-3c) can dial a stale
+    /// endpoint. The admission that gates this call already fences the
+    /// connection to the selected profile, so no machine identity precondition
+    /// is needed here.
+    private func adoptConnectedGatewayLanAdvertising() {
+        guard let profile = profiles.selected, let info = gatewayInfo else { return }
+        do {
+            try profiles.adoptLanAdvertising(
+                endpoints: info.lanEndpoints,
+                pin: info.lanPin,
+                for: profile.id
+            )
+        } catch {
+            // The advertisement is an optimization over the saved endpoint.
+            // Keep the authenticated runtime usable if metadata repair fails.
+            surface(error)
+        }
+    }
+
     private func reconcileDashboardConnections() {
         dashboardCacheLoadGeneration &+= 1
         let cacheGeneration = dashboardCacheLoadGeneration
@@ -5248,6 +5271,9 @@ extension AppModel: GatewayLifecycleProjectionDelegate {
     func lifecycleRefreshAll(admission: GatewayLifecycleCoordinator.Admission) async {
         guard !Task.isCancelled, admitsLifecycle(admission) else { return }
         adoptConnectedGatewayIdentity()
+        // No revision is bumped for the advertisement: nothing presents it yet,
+        // and the profile's dial endpoint did not change.
+        adoptConnectedGatewayLanAdvertising()
         // Catalog and inbox reads can begin as soon as the transport is ready;
         // provider, settings, and device reads wait for mounted-chat restoration.
         optionalReconnectRefreshTask?.cancel()
