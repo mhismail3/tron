@@ -25,6 +25,9 @@ TYPE_ID = "com.apple.CoreSimulator.SimDeviceType.iPhone-17-Pro"
 RUNNER_RUNTIME_ID = "com.apple.CoreSimulator.SimRuntime.iOS-26-5"
 RUNNER_TYPE_ID = "com.apple.CoreSimulator.SimDeviceType.iPhone-17-Pro"
 UDID_A = "AAAAAAAA-AAAA-AAAA-AAAA-AAAAAAAAAAAA"
+UDID_B = "BBBBBBBB-BBBB-BBBB-BBBB-BBBBBBBBBBBB"
+UDID_C = "CCCCCCCC-CCCC-CCCC-CCCC-CCCCCCCCCCCC"
+UDID_D = "DDDDDDDD-DDDD-DDDD-DDDD-DDDDDDDDDDDD"
 
 
 class SimulatorFixture(unittest.TestCase):
@@ -425,6 +428,24 @@ exit 0
             return []
         return [line for line in lines if line.split(" ", 1)[0] == command]
 
+    def write_orphan_lane(self, udid: str, *, name: str = "Tron iOS Tests", directory: str = "orphan-lane") -> Path:
+        """A booted owned simulator in another lane, with no process holding it."""
+        lane = self.root / directory
+        lane.mkdir(parents=True, exist_ok=True)
+        (lane / "simulator.json").write_text(json.dumps({
+            "schema": "tron.ios-test-simulator.v1", "owner": "tron-ios-test", "udid": udid,
+            "name": name, "runtime_identifier": RUNNER_RUNTIME_ID, "runtime_version": "26.5",
+            "runtime_build": "23C54", "device_type_identifier": RUNNER_TYPE_ID,
+            "device_type_name": "iPhone 17 Pro", "ephemeral": False,
+        }))
+        document = json.loads(self.simulator_inventory.read_text())
+        document["devices"][RUNNER_RUNTIME_ID].append({
+            "name": name, "udid": udid, "state": "Booted", "isAvailable": True,
+            "deviceTypeIdentifier": RUNNER_TYPE_ID,
+        })
+        self.simulator_inventory.write_text(json.dumps(document))
+        return lane
+
     def latest_metadata(self) -> dict[str, object]:
         return json.loads(((self.results / "latest").resolve() / "metadata.json").read_text())
 
@@ -567,6 +588,29 @@ exit 0
         self.assertEqual(len(self.simctl_calls("create")), 1)
         self.assertEqual(len(self.simctl_calls("boot")), 1)
         self.assertEqual(self.device_entry(udid)["state"], "Shutdown")
+
+    def test_a_command_releases_other_lanes_orphans_first(self) -> None:
+        """SIM-2: every simulator-using command sweeps, and only orphans.
+
+        Failure modes: the orphan of a killed holder could survive the next
+        command; a booted simulator with no ownership marker could be touched;
+        and this command's own simulator must still be released at its end.
+        """
+        orphan = self.write_orphan_lane("BBBBBBBB-BBBB-BBBB-BBBB-BBBBBBBBBBBB", name="Tron iOS Tests (lane b)")
+        document = json.loads(self.simulator_inventory.read_text())
+        document["devices"][RUNNER_RUNTIME_ID].append({
+            "name": "Unowned Simulator", "udid": "CCCCCCCC-CCCC-CCCC-CCCC-CCCCCCCCCCCC",
+            "state": "Booted", "isAvailable": True, "deviceTypeIdentifier": RUNNER_TYPE_ID,
+        })
+        self.simulator_inventory.write_text(json.dumps(document))
+
+        result = self.invoke(extra_args=["--only-testing", "TronMobileTests/StubTests"])
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("shut down Tron iOS Tests (lane b)", result.stdout)
+        self.assertEqual(self.device_entry("BBBBBBBB-BBBB-BBBB-BBBB-BBBBBBBBBBBB")["state"], "Shutdown")
+        self.assertEqual(self.device_entry("CCCCCCCC-CCCC-CCCC-CCCC-CCCCCCCCCCCC")["state"], "Booted")
+        self.assertEqual(self.device_entry(self.owned_udid())["state"], "Shutdown")
+        self.assertTrue(orphan.exists())
 
 
 class BuildIdentityFixture(unittest.TestCase):
@@ -770,7 +814,7 @@ class LockFixture(unittest.TestCase):
 
 
 class OwnedLaneFixture(unittest.TestCase):
-    """Synthetic xcrun/simctl for the owner that releases booted simulators.
+    """Synthetic xcrun/simctl for the owners that release booted simulators.
 
     Failure modes these fixtures make observable, written before the owners:
 
@@ -780,6 +824,12 @@ class OwnedLaneFixture(unittest.TestCase):
        own exit status with its own.
     3. A keep-booted lane is released anyway, or is kept without the lease
        recording the intent and what it found.
+    4. A sweep releases a lane a live process holds, a lane whose marker no
+       longer matches its device, a simulator with no marker, or the remembered
+       Development simulator.
+    5. Two sweeps racing double-release, fail, or leave one of them waiting.
+    6. A command starts while its lane is being swept.
+    7. A holder killed with SIGKILL leaves a stale lease that hides the orphan.
     """
 
     def setUp(self) -> None:
@@ -840,7 +890,13 @@ raise SystemExit(2)
             "TRON_IOS_TEST_SHUTDOWN_TIMEOUT_SECONDS": "2",
             "TRON_IOS_TEST_SWEEP_DEADLINE_SECONDS": "30",
         })
+        self.holders: list[subprocess.Popen[str]] = []
+
     def tearDown(self) -> None:
+        for holder in self.holders:
+            holder.kill()
+            holder.wait(timeout=5)
+            self.close_pipes(holder)
         self.temporary.cleanup()
 
     def close_pipes(self, process: subprocess.Popen[str]) -> None:
@@ -866,7 +922,7 @@ raise SystemExit(2)
                     device.update(fields)
         self.inventory_path.write_text(json.dumps(document))
 
-    def owned_lane(self, name: str = "ios-test", udid: str = UDID_A) -> Path:
+    def owned_lane(self, name: str = "ios-test", udid: str = UDID_A, *, present: bool = True) -> Path:
         """One lane: its ownership marker, and its booted device in the inventory."""
         lane = self.discovery_root / name
         lane.mkdir(parents=True, exist_ok=True)
@@ -876,14 +932,15 @@ raise SystemExit(2)
             "runtime_build": "23C54", "device_type_identifier": TYPE_ID,
             "device_type_name": "iPhone 17 Pro", "ephemeral": False,
         }))
-        document = self.inventory()
-        for devices in document["devices"].values():
-            devices[:] = [device for device in devices if device["udid"] != udid]
-        document["devices"][RUNTIME_ID].append({
-            "name": "Tron iOS Tests", "udid": udid, "state": "Booted", "isAvailable": True,
-            "deviceTypeIdentifier": TYPE_ID,
-        })
-        self.inventory_path.write_text(json.dumps(document))
+        if present:
+            document = self.inventory()
+            for devices in document["devices"].values():
+                devices[:] = [device for device in devices if device["udid"] != udid]
+            document["devices"][RUNTIME_ID].append({
+                "name": "Tron iOS Tests", "udid": udid, "state": "Booted", "isAvailable": True,
+                "deviceTypeIdentifier": TYPE_ID,
+            })
+            self.inventory_path.write_text(json.dumps(document))
         return lane
 
     def wait_for(self, path: Path, timeout: float = 10) -> None:
@@ -894,12 +951,34 @@ raise SystemExit(2)
             time.sleep(0.05)
         self.fail(f"timed out waiting for {path}")
 
+    def hold_lease(self, lane: Path) -> subprocess.Popen[str]:
+        """A live process holding a lane's lease, as a running command does."""
+        holder = subprocess.Popen(
+            [
+                sys.executable, "-c",
+                "import fcntl, sys, time; handle = open(sys.argv[1], 'a+');"
+                " fcntl.flock(handle, fcntl.LOCK_EX); print('held', flush=True); time.sleep(60)",
+                str(lane / "lease.lock"),
+            ],
+            text=True, stdout=subprocess.PIPE,
+        )
+        self.holders.append(holder)
+        assert holder.stdout is not None
+        self.assertEqual(holder.stdout.readline().strip(), "held")
+        return holder
+
     def shutdown_targets(self) -> list[str]:
         try:
             lines = self.log_path.read_text().splitlines()
         except FileNotFoundError:
             return []
         return [line.split(" ", 1)[1] for line in lines if line.startswith("shutdown ")]
+
+    def reap(self, *, environment: dict[str, str] | None = None) -> subprocess.CompletedProcess[str]:
+        return subprocess.run(
+            [str(RUNNER), "reap"], env=environment or self.environment,
+            text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+        )
 
 
 class ReleaseFixture(OwnedLaneFixture):
@@ -1001,6 +1080,154 @@ class ReleaseFixture(OwnedLaneFixture):
         self.assertEqual(completed.returncode, 0, completed.stderr)
         self.assertEqual(completed.stderr, "")
         self.assertEqual(self.shutdown_targets(), [])
+
+
+class SweepFixture(OwnedLaneFixture):
+    """SIM-2: the sweep and `scripts/tron-ios-test reap` release orphans only."""
+
+    def test_reap_releases_only_owned_orphans(self) -> None:
+        """Failure modes 4 and 5: orphans go, everything else stays, twice over."""
+        self.owned_lane("lane-a", UDID_A)
+        self.owned_lane("lane-b", UDID_B)
+        self.update_device(UDID_B, state="Shutdown")
+        self.owned_lane("lane-c", UDID_C, present=False)  # its simulator is gone
+        document = self.inventory()
+        document["devices"][RUNTIME_ID].append({
+            "name": "Unowned Simulator", "udid": UDID_D, "state": "Booted", "isAvailable": True,
+            "deviceTypeIdentifier": TYPE_ID,
+        })
+        self.inventory_path.write_text(json.dumps(document))
+
+        result = self.reap()
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("shut down Tron iOS Tests", result.stdout)
+        self.assertEqual(self.shutdown_targets(), [UDID_A])
+        self.assertEqual(self.device_entry(UDID_A)["state"], "Shutdown")
+        self.assertEqual(self.device_entry(UDID_B)["state"], "Shutdown")
+        self.assertEqual(self.device_entry(UDID_D)["state"], "Booted")
+
+        again = self.reap()
+        self.assertEqual(again.returncode, 0, again.stderr)
+        self.assertEqual(again.stdout, "")
+        self.assertEqual(self.shutdown_targets(), [UDID_A])
+
+    def test_reap_skips_a_lane_a_live_process_holds(self) -> None:
+        """Failure mode 4: a held lane is never shut down."""
+        held = self.owned_lane("lane-a", UDID_A)
+        self.owned_lane("lane-b", UDID_B)
+        self.hold_lease(held)
+        result = self.reap()
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(self.device_entry(UDID_A)["state"], "Booted")
+        self.assertEqual(self.device_entry(UDID_B)["state"], "Shutdown")
+        self.assertEqual(self.shutdown_targets(), [UDID_B])
+
+    def test_reap_reports_a_hung_release_and_recovers_on_the_next_run(self) -> None:
+        """Failure modes 4 and 5: a stuck shutdown is bounded, reported, retried."""
+        self.owned_lane("lane-a", UDID_A)
+        environment = {
+            **self.environment,
+            "FAKE_SHUTDOWN_DELAY_SECONDS": "30",
+            "TRON_IOS_TEST_SHUTDOWN_TIMEOUT_SECONDS": "1",
+        }
+        started = time.monotonic()
+        result = self.reap(environment=environment)
+        self.assertLess(time.monotonic() - started, 20)
+        self.assertEqual(result.returncode, 66, result.stderr)
+        self.assertIn("could not release", result.stderr)
+        self.assertEqual(self.device_entry(UDID_A)["state"], "Booted")
+
+        self.assertEqual(self.reap().returncode, 0)
+        self.assertEqual(self.device_entry(UDID_A)["state"], "Shutdown")
+
+    def test_concurrent_sweeps_release_each_simulator_once(self) -> None:
+        """Failure mode 5: the second sweep skips what the first holds."""
+        self.owned_lane("lane-a", UDID_A)
+        started = self.root / "shutdown-started"
+        environment = {
+            **self.environment,
+            "FAKE_SHUTDOWN_DELAY_SECONDS": "2",
+            "FAKE_SHUTDOWN_STARTED": str(started),
+            "TRON_IOS_TEST_SHUTDOWN_TIMEOUT_SECONDS": "30",
+        }
+        first = subprocess.Popen(
+            [str(RUNNER), "reap"], env=environment, text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+        )
+        self.wait_for(started)
+        second = self.reap(environment=environment)
+        _, first_stderr = first.communicate(timeout=30)
+        self.close_pipes(first)
+        self.assertEqual(first.returncode, 0, first_stderr)
+        self.assertEqual(second.returncode, 0, second.stderr)
+        self.assertEqual(second.stdout, "")
+        self.assertEqual(self.shutdown_targets(), [UDID_A])
+        self.assertEqual(self.device_entry(UDID_A)["state"], "Shutdown")
+
+    def test_a_command_cannot_start_while_its_lane_is_swept(self) -> None:
+        """Failure mode 6: the command fails busy instead of adopting the device."""
+        self.owned_lane("ios-test", UDID_A)
+        started = self.root / "shutdown-started"
+        environment = {
+            **self.environment,
+            "FAKE_SHUTDOWN_DELAY_SECONDS": "3",
+            "FAKE_SHUTDOWN_STARTED": str(started),
+            "TRON_IOS_TEST_SHUTDOWN_TIMEOUT_SECONDS": "30",
+        }
+        sweep = subprocess.Popen(
+            [str(RUNNER), "reap"], env=environment, text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+        )
+        self.wait_for(started)
+        command = subprocess.run(
+            [str(RUNNER), "run", "--only-testing", "TronMobileTests/StubTests"],
+            env=environment, text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=60,
+        )
+        _, stderr = sweep.communicate(timeout=30)
+        self.close_pipes(sweep)
+        self.assertEqual(command.returncode, 73, command.stderr)
+        self.assertIn("already leased", command.stderr)
+        self.assertEqual(sweep.returncode, 0, stderr)
+        self.assertEqual(self.shutdown_targets(), [UDID_A])
+        self.assertEqual(self.device_entry(UDID_A)["state"], "Shutdown")
+
+    def test_reap_skips_a_changed_identity_and_the_development_simulator(self) -> None:
+        """Failure mode 4: a renamed device and the Development one are left alone."""
+        self.owned_lane("lane-a", UDID_A)
+        self.update_device(UDID_A, name="Renamed Simulator")
+        self.owned_lane("development-lane", UDID_B)
+        self.development_marker.parent.mkdir(parents=True, exist_ok=True)
+        self.development_marker.write_text(UDID_B + "\n")
+
+        result = self.reap()
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("identity does not match", result.stderr)
+        self.assertIn("Development simulator", result.stderr)
+        self.assertEqual(self.shutdown_targets(), [])
+        self.assertEqual(self.device_entry(UDID_A)["state"], "Booted")
+        self.assertEqual(self.device_entry(UDID_B)["state"], "Booted")
+
+    def test_a_holder_killed_with_sigkill_leaves_the_orphan_to_the_sweep(self) -> None:
+        """Failure mode 7: a stale lease must not hide the orphan."""
+        holder = subprocess.Popen(
+            [
+                sys.executable, str(LOCK), "--lock", str(self.state / "lease.lock"),
+                "--marker", str(self.state / "simulator.json"),
+                "--development-state", str(self.development_marker),
+                "--", sys.executable, "-c", "import time; time.sleep(3)",
+            ],
+            env=self.environment, text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+        )
+        self.wait_for(self.state / "lease.lock")
+        self.owned_lane("ios-test", UDID_A)
+        holder.kill()
+        holder.wait(timeout=10)
+        self.close_pipes(holder)
+        self.assertNotEqual((self.state / "lease.lock").read_text().strip(), "")
+        self.assertEqual(self.device_entry(UDID_A)["state"], "Booted")
+
+        result = self.reap()
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(self.shutdown_targets(), [UDID_A])
+        self.assertEqual(self.device_entry(UDID_A)["state"], "Shutdown")
 
 
 if __name__ == "__main__":

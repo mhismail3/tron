@@ -10,6 +10,9 @@ source "$ROOT/config/ci-toolchain.env"
 export PATH="$ROOT/.ci-tools/bin:/opt/homebrew/bin:$PATH"
 
 STATE_ROOT="${TRON_IOS_TEST_STATE_DIR:-$HOME/.tron/internal/ios-test}"
+# Lanes are state directories: this one, and the ones beside or inside it. The
+# sweep discovers them by ownership marker, never by device name.
+DISCOVERY_ROOT="${TRON_IOS_TEST_DISCOVERY_ROOT:-$(dirname "$STATE_ROOT")}"
 MARKER="$STATE_ROOT/simulator.json"
 LOCK="$STATE_ROOT/lease.lock"
 DEVELOPMENT_STATE="${TRON_IOS_SIMULATOR_STATE_DIR:-$HOME/.tron/internal/run}/ios-simulator-udid"
@@ -39,6 +42,8 @@ Commands:
   run                  Run reusable products; defaults to the complete unit target.
   diagnose             Explicit verbose-diagnostics run with a larger finite deadline.
   status               Report toolchain, owned simulator, lease, products, and latest result.
+  reap                 Shut down this repository's owned simulators that are booted
+                       with no live lease (orphans of a crash, a kill or --keep-booted).
   clean                Delete only the owned test simulator, products, and results.
 
 Selectors:
@@ -47,18 +52,21 @@ Selectors:
 
 Options:
   --keep-booted         Keep this lane's simulator booted when the command ends, for a
-                        tight test-fix loop; a later command releases it.
+                        tight test-fix loop; the next command in this lane reuses it and
+                        the next sweep releases it once no command holds the lane's lease.
 
 Stable exits: 65 test failure, 66 destination, 70 build failure, 73 busy,
 74 runner failure, 75 process timeout. Signals retain their conventional exits.
-Commands release the simulator they use when they end, on success, failure,
-timeout or signal, unless --keep-booted was given. Routine runs are serial, use
-an exact owned simulator UDID, disable verbose test diagnostics, and preserve
-unique complete logs plus xcresults under $HOME/Library/Developer/Tron/ios/test-runs
-by default. Test products are built per worktree under
-$HOME/Library/Developer/Tron/ios/test-derived-data and stamped with the worktree
-and source state that produced them; run refuses products stamped for another
-worktree or another source state. diagnose never runs automatically.
+Every command that provisions the simulator first releases orphaned owned lanes;
+lanes a live process holds are never touched. Commands release the simulator they
+use when they end, on success, failure, timeout or signal, unless --keep-booted
+was given. Routine runs are serial, use an exact owned simulator UDID, disable
+verbose test diagnostics, and preserve unique complete logs plus xcresults under
+$HOME/Library/Developer/Tron/ios/test-runs by default. Test products are built
+per worktree under $HOME/Library/Developer/Tron/ios/test-derived-data and stamped
+with the worktree and source state that produced them; run refuses products
+stamped for another worktree or another source state. diagnose never runs
+automatically.
 USAGE
 }
 
@@ -98,7 +106,7 @@ command="${1:-checkpoint}"
 if [[ "$command" == -h || "$command" == --help || "$command" == help ]]; then usage; exit 0; fi
 shift || true
 case "$command" in
-  checkpoint|prepare|build|run|diagnose|status|clean) ;;
+  checkpoint|prepare|build|run|diagnose|status|reap|clean) ;;
   *) usage >&2; die "unknown command: $command" ;;
 esac
 
@@ -161,6 +169,13 @@ if [[ "$command" == status ]]; then
   exit 0
 fi
 
+if [[ "$command" == reap ]]; then
+  # No lease of its own: the sweep takes each orphaned lane's lease while it
+  # shuts that lane's simulator down, so a running command is never disturbed.
+  python3 "$SIMULATOR" sweep --discovery-root "$DISCOVERY_ROOT" --development-state "$DEVELOPMENT_STATE" || exit "$EXIT_DESTINATION"
+  exit 0
+fi
+
 mkdir -p "$STATE_ROOT"
 chmod 700 "$STATE_ROOT"
 if [[ "${TRON_IOS_TEST_LOCK_HELD:-0}" != 1 ]]; then
@@ -205,6 +220,13 @@ if [[ "$command" == clean ]]; then
     echo "Removed only the repository-owned iOS test simulator; preserved test artifacts."
   fi
   exit 0
+fi
+
+# Before provisioning, release what a crash or a kill left booted. A lane whose
+# lease a live process holds is never touched - including this lane, whose lease
+# this command already holds, which is why --keep-booted survives its own lane.
+if ! python3 "$SIMULATOR" sweep --discovery-root "$DISCOVERY_ROOT" --development-state "$DEVELOPMENT_STATE"; then
+  echo "warning: the orphaned-simulator sweep did not complete; continuing" >&2
 fi
 
 command -v xcodegen >/dev/null || die "pinned XcodeGen is missing; run scripts/install-ci-tools.sh xcodegen"

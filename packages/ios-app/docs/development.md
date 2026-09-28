@@ -436,7 +436,11 @@ scripts/tron-profile compare BASE_RUN_DIR CANDIDATE_RUN_DIR
 
 It takes the same lease and simulator overrides as `scripts/tron-ios-test`
 (`TRON_IOS_TEST_DEVICE_NAME`, `TRON_IOS_TEST_STATE_DIR`), so profiling and tests
-never share the simulator at once. It builds the optimized `DevicePerformance`
+never share the simulator at once. It releases no simulator of its own: a
+profile run leaves its lane's simulator booted, and the next
+`scripts/tron-ios-test` command or `scripts/tron-ios-test reap` in any lane
+releases that lane once nothing holds its lease (see
+[simulator lifecycle](#simulator-lifecycle)). It builds the optimized `DevicePerformance`
 configuration with the `Tron Device Performance` scheme into
 `~/Library/Developer/Tron/ios/profile-derived-data/<worktree-key>`, stamped with
 the worktree's source identity; `--no-build` reuses those products only when the
@@ -937,6 +941,7 @@ lease, 74 a runner failure, and 75 a process timeout.
 ```bash
 scripts/tron-ios-test status
 scripts/tron-ios-test diagnose --only-testing TronMobileTests/<Suite>
+scripts/tron-ios-test reap
 scripts/tron-ios-test clean
 ```
 
@@ -950,14 +955,29 @@ without replacing the command's own exit status. `--keep-booted` is the one
 exception, for tight test-fix loops: it records the intent in the lease metadata
 (`simulator.keep_booted`, next to `simulator.booted_when_leased`, which records
 whether the command found the simulator already booted) and leaves the
-simulator up, so the next command in that lane reuses it.
+simulator up, so the next command in that lane reuses it. A forgotten keep is
+released like any other orphan.
+
+Every command that provisions the simulator first releases orphaned owned
+lanes: owned simulators that are booted while no live process holds their
+`lease.lock`. Lanes are state directories discovered by ownership marker under
+one root - the parent of `$HOME/.tron/internal/ios-test`, so
+`$HOME/.tron/internal`, overridable with `TRON_IOS_TEST_DISCOVERY_ROOT` - never
+by device name, and only this repository's markers are acted on. The sweep holds
+the lane's lease while it shuts its simulator down, so a command starting in
+that lane at that moment fails busy (73) instead of adopting a simulator being
+released, and a lane a live process holds is skipped. Each shutdown is bounded,
+and a lane whose shutdown fails is reported and retried by the next sweep, never
+left holding the lease. `scripts/tron-ios-test reap` runs the same sweep on
+demand, taking no lease of its own; exit 66 means a release failed.
 
 ### Test runner safety contract
 
 - Simulator lifetime is released, not remembered. Only the device named by an
-ownership marker is ever shut down, and the remembered Development simulator
-(`scripts/tron-ios-simulator`) and every unmarked simulator are never shut down
-or deleted by the runner.
+ownership marker is ever shut down, each lane's lease is taken (without
+waiting) for the whole shutdown, and lanes a live process holds are skipped.
+The remembered Development simulator (`scripts/tron-ios-simulator`) and every
+unmarked simulator are never shut down or deleted by the runner.
 
 - Provisioning resolves the exact pinned runtime and device type, proves the
   repository ownership marker, and passes only

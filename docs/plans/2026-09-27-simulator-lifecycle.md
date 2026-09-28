@@ -2,7 +2,7 @@
 
 - **Started:** 2026-09-27
 - **Status:** Active
-- **Last updated:** 2026-09-28, SIM-1 done; SIM-2 to SIM-9 claimed
+- **Last updated:** 2026-09-28, SIM-1 and SIM-2 done; SIM-3 to SIM-9 claimed
 - **Goal:** Agents run as many iOS simulators in parallel as the Mac can afford, and every simulator, process and artifact the test tooling creates is released automatically, including after crashes, so the live Gateway never runs short of memory.
 
 ## Goal and constraints
@@ -72,7 +72,7 @@ Why it accumulates, from the code:
 | ID | Status | Scope | Depends on | Owner |
 | --- | --- | --- | --- | --- |
 | SIM-1 | Done | Release on exit: the lease holder shuts down the simulator its command booted when the command ends, on success, failure, timeout or signal; an explicit keep-booted option serves tight test-fix loops and is itself released by the sweep | none | chat scroll session (worker lanes), 2026-09-27 |
-| SIM-2 | Claimed | Sweep: every Tron test tool invocation first shuts down orphaned owned simulators (booted, lease free); `scripts/tron-ios-test reap` runs it on demand | SIM-1 | chat scroll session (worker lanes), 2026-09-27 |
+| SIM-2 | Done | Sweep: every Tron test tool invocation first shuts down orphaned owned simulators (booted, lease free); `scripts/tron-ios-test reap` runs it on demand | SIM-1 | chat scroll session (worker lanes), 2026-09-27 |
 | SIM-3 | Claimed | Named lanes: `--lane NAME` (and `TRON_IOS_TEST_LANE`) names a lane; `lanes` lists every lane with its worktree, state, lease holder, last use and disk size; `lane-remove NAME` deletes its simulator, state and products; the sweep deletes lanes unused for 7 days | SIM-2 | chat scroll session (worker lanes), 2026-09-27 |
 | SIM-4 | Claimed | Memory admission: before booting, read memory pressure and swap; if booting would leave less than a set reserve, fail fast with exit 73 and print what is booted, by which worktree and lane, and for how long | SIM-2 | chat scroll session (worker lanes), 2026-09-27 |
 | SIM-5 | Claimed | Scoped clean and pruning: `clean` removes only this worktree's or lane's simulator, products and runs; `prune` keeps the newest results per worktree and deletes products whose worktree no longer exists; the sweep prunes too | SIM-3 | chat scroll session (worker lanes), 2026-09-27 |
@@ -221,3 +221,46 @@ Owning files: `scripts/ios-test-simulator.py`, `scripts/tron-ios-test`.
   are the marker-scoped primitives it builds on. The `TRON_IOS_TEST_DEVICE_NAME`/
   `TRON_IOS_TEST_STATE_DIR` lanes on the real Mac (`ios-test-CT22`) are still
   used by the energy-efficiency session (SIM-10).
+
+### SIM-2 · Done · 2026-09-28 · chat scroll session (worker lanes)
+
+- Result: every `scripts/tron-ios-test` command that provisions the simulator
+  first releases orphaned owned lanes - owned simulators booted while no live
+  process holds their `lease.lock` - and `scripts/tron-ios-test reap` runs the
+  same sweep on demand, outside any lease. Discovery is the ownership markers
+  under one lane root (`$TRON_IOS_TEST_DISCOVERY_ROOT`, default the parent of
+  the state directory: `$HOME/.tron/internal`, then
+  `$HOME/.tron/internal/ios-test` and each lane beside or inside it, two levels
+  deep), never device names; each release takes that lane's lease without
+  waiting and holds it for the whole bounded shutdown.
+- Evidence: `python3 scripts/test-ios-test-infrastructure.py` — 40 tests,
+  86-113 s wall over three runs (32 tests, 69 s at the SIM-1 commit); the eight new SIM-2 cases cover
+  only-orphans, a held lane, a deleted device, a renamed identity case, the
+  Development marker, a hung shutdown with recovery, two concurrent sweeps and a
+  command starting mid-sweep. Real-machine check with the discovery root and
+  state directory in a fresh `/tmp` lane that only this task created: a booted
+  lane device with a free lease was shut down by
+  `scripts/tron-ios-test reap` (`shut down Tron Lifecycle Probe (<lane>)`, exit
+  0), a second `reap` printed nothing, and `xcrun simctl list --json` showed the
+  Mac's other devices untouched apart from another session's own concurrent
+  create/delete. The probe device was deleted; no lane under `~/.tron/internal`
+  and no Development simulator was shut down, deleted or swept (their markers
+  were only read).
+- Changes: this commit.
+- Kept on purpose: the sweep runs before provisioning for the commands that
+  provision (`checkpoint`, `prepare`, `build`, `run`, `diagnose`) and for
+  `reap`; `status` stays read-only (it never takes the lease) and `clean` only
+  removes this worktree's lane, as their contracts say. A lane whose lease is
+  free but whose simulator is booted is released by design, which is exactly
+  what reclaims a `--keep-booted` lane once its loop is over.
+- Deviations: the plan lists the sweep for `tron-profile-ios` and
+  `ios-gateway-e2e-test` too under SIM-2's owning files; those callers are wired
+  in SIM-7, and today they still lease and provision without the sweep or
+  release. A dead marker (device gone) is skipped silently rather than warned
+  about, because `provision` recovers it; a marker whose device identity changed
+  and one that names the Development simulator are skipped with a warning.
+- For the next agent: SIM-3's lanes must live under the discovery root as
+  children or siblings of the default state directory for the sweep to find them;
+  `marker_paths` is the one place that decides discovery depth. On the real Mac
+  the pre-existing `ios-test-CT22` lane (energy-efficiency) is already
+  discovered as a sibling and will be released as soon as it is orphaned.

@@ -1,9 +1,11 @@
 #!/usr/bin/env python3
-"""Own the repository's iOS test simulators: provision, validate, release."""
+"""Own the repository's iOS test simulators: provision, validate, release, sweep."""
 
 from __future__ import annotations
 
 import argparse
+import contextlib
+import fcntl
 import hashlib
 import json
 import os
@@ -12,11 +14,20 @@ import re
 import subprocess
 import sys
 import tempfile
-from typing import Any
+import time
+from typing import Any, Iterator
 
 DESTINATION_EXIT = 66
 SCHEMA = "tron.ios-test-simulator.v1"
 OWNER = "tron-ios-test"
+# A lane is one state directory holding a marker, a lease and its simulator's
+# identity. The lease file name is the lock owner's contract
+# (`scripts/ios-test-lock.py`), which the sweep must take before releasing.
+MARKER_NAME = "simulator.json"
+LEASE_NAME = "lease.lock"
+# Lanes live in the default state directory and in the directories beside or
+# inside it; the sweep scans no deeper, so it never walks a simulator's own tree.
+SWEEP_DEPTH = 2
 
 
 class DestinationError(RuntimeError):
@@ -208,6 +219,41 @@ def delete_owned(marker_path: Path, arguments: argparse.Namespace) -> None:
     marker_path.unlink(missing_ok=True)
 
 
+def marker_paths(discovery_root: Path) -> list[Path]:
+    """Every ownership marker under the lane root, at most SWEEP_DEPTH deep."""
+    found: list[Path] = []
+    frontier = [discovery_root]
+    for _ in range(SWEEP_DEPTH + 1):
+        below: list[Path] = []
+        for directory in frontier:
+            marker = directory / MARKER_NAME
+            if marker.is_file():
+                found.append(marker)
+            try:
+                children = sorted(directory.iterdir())
+            except OSError:
+                continue
+            below.extend(child for child in children if child.is_dir() and not child.is_symlink())
+        frontier = below
+    return found
+
+
+@contextlib.contextmanager
+def lease_hold(path: Path) -> Iterator[bool]:
+    """Hold a lane's lease without waiting; yields whether it was taken."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("a+", encoding="utf-8") as handle:
+        try:
+            fcntl.flock(handle.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError:
+            yield False
+            return
+        try:
+            yield True
+        finally:
+            fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
+
+
 def lane_state(marker_path: Path) -> str:
     """The lane's simulator state: a simctl state, "missing" or "not-provisioned".
 
@@ -247,6 +293,72 @@ def shutdown_owned(marker_path: Path, arguments: argparse.Namespace) -> str:
         return "already-shutdown"
     simctl("shutdown", marker["udid"], timeout=arguments.shutdown_timeout_seconds)
     return "shutdown"
+
+
+def sweep_lane(arguments: argparse.Namespace, marker_path: Path) -> str:
+    """Release one orphaned lane: booted with no live process holding its lease.
+
+    Returns "released", or "busy" (a live owner holds the lease), "idle"
+    (nothing booted), "skipped" (not safely releasable) or "failed".
+    """
+    try:
+        marker = load_marker(marker_path)
+    except DestinationError as error:
+        print(f"warning: skipping {marker_path}: {error}", file=sys.stderr)
+        return "skipped"
+    if marker is None:
+        return "idle"
+    try:
+        document = inventory()
+        identity_matches = owned_identity_matches(document, marker)
+        development_overlap = marker["udid"] == development_udid(arguments)
+        current = find_device(document, marker["udid"])
+    except DestinationError as error:
+        print(f"warning: skipping {marker_path}: {error}", file=sys.stderr)
+        return "skipped"
+    if not identity_matches:
+        print(f"warning: skipping {marker_path}: the simulator's current identity does not match its ownership marker", file=sys.stderr)
+        return "skipped"
+    if development_overlap:
+        print(f"warning: skipping {marker_path}: it names the remembered Development simulator", file=sys.stderr)
+        return "skipped"
+    if current is None or current[1].get("state") != "Booted":
+        return "idle"
+    with lease_hold(marker_path.parent / LEASE_NAME) as held:
+        if not held:
+            return "busy"
+        # Under the lease the lane cannot start a command that would adopt the
+        # device, and the owner that just released may already have shut it down.
+        try:
+            document = inventory()
+            current = find_device(document, marker["udid"])
+            if current is None or current[1].get("state") != "Booted":
+                return "idle"
+            if marker["udid"] == development_udid(arguments):
+                raise DestinationError("the lane's marker now names the remembered Development simulator")
+            simctl("shutdown", marker["udid"], timeout=arguments.shutdown_timeout_seconds)
+        except DestinationError as error:
+            print(f"warning: could not release {marker['name']} ({marker_path}): {error}", file=sys.stderr)
+            return "failed"
+    print(f"shut down {marker['name']} ({marker_path.parent})")
+    return "released"
+
+
+def sweep(arguments: argparse.Namespace) -> int:
+    """Release every orphaned lane under the discovery root. Idempotent."""
+    markers = marker_paths(arguments.discovery_root)
+    deadline = time.monotonic() + arguments.sweep_deadline_seconds
+    failures = 0
+    for index, marker_path in enumerate(markers):
+        if time.monotonic() >= deadline:
+            print(
+                f"warning: sweep deadline reached; {len(markers) - index} lane marker(s) were not inspected",
+                file=sys.stderr,
+            )
+            break
+        if sweep_lane(arguments, marker_path) == "failed":
+            failures += 1
+    return DESTINATION_EXIT if failures else 0
 
 
 def provision(arguments: argparse.Namespace) -> dict[str, Any]:
@@ -319,21 +431,33 @@ def provision(arguments: argparse.Namespace) -> dict[str, Any]:
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("command", choices=("provision", "validate", "status", "delete", "state", "shutdown"))
+    parser.add_argument("command", choices=("provision", "validate", "status", "delete", "state", "shutdown", "sweep"))
     parser.add_argument("--marker", type=Path)
     parser.add_argument("--runtime")
     parser.add_argument("--device-type")
     parser.add_argument("--name")
     parser.add_argument("--development-state", required=True, type=Path)
     parser.add_argument("--ephemeral", action="store_true")
+    parser.add_argument("--discovery-root", type=Path)
     parser.add_argument(
         "--shutdown-timeout-seconds",
         type=float,
         default=float(os.environ.get("TRON_IOS_TEST_SHUTDOWN_TIMEOUT_SECONDS", "60")),
     )
+    parser.add_argument(
+        "--sweep-deadline-seconds",
+        type=float,
+        default=float(os.environ.get("TRON_IOS_TEST_SWEEP_DEADLINE_SECONDS", "300")),
+    )
     arguments = parser.parse_args()
-    if arguments.shutdown_timeout_seconds <= 0:
+    if arguments.shutdown_timeout_seconds <= 0 or arguments.sweep_deadline_seconds <= 0:
         parser.error("deadlines must be positive")
+    if arguments.command == "sweep":
+        if arguments.discovery_root is None:
+            parser.error("sweep requires --discovery-root")
+        if arguments.marker is not None:
+            parser.error("sweep does not take --marker")
+        return arguments
     if arguments.marker is None:
         parser.error(f"{arguments.command} requires --marker")
     # Only state and shutdown read everything they need from the marker alone.
@@ -353,6 +477,8 @@ SHUTDOWN_OUTCOME = {
 def main() -> int:
     arguments = parse_args()
     try:
+        if arguments.command == "sweep":
+            return sweep(arguments)
         if arguments.command == "state":
             print(lane_state(arguments.marker))
             return 0
