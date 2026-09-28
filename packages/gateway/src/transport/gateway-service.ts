@@ -1,5 +1,5 @@
 import { abortableRead } from "../util/abortable-read.js";
-import { stage } from "./request-span.js";
+import { offLoop, stage } from "./request-span.js";
 import { join } from "node:path";
 import { performance } from "node:perf_hooks";
 import type { AuthType } from "@earendil-works/pi-ai";
@@ -1038,10 +1038,16 @@ export class GatewayService {
       }
       case "session.open": {
         const sessionId = string(params.sessionId, "sessionId", { max: 200 });
-        const slot = await this.dependencies.sessions.acquire(sessionId);
+        // A cold open's runtime load is the most expensive disposable read the
+        // Gateway serves, so its wait is abandonable and checked before the
+        // snapshot is built. The registry's shared start is not abandoned with
+        // it: a retry (or another connection) joins the runtime load already in
+        // progress instead of starting a second one (`C-6`).
+        const slot = await abortableRead(client.signal, () => this.dependencies.sessions.acquire(sessionId));
         // Join the exact canonical completion barrier before snapshotting. The
         // response and completionRevision therefore describe one admitted cut.
-        await slot.reconcileAttention();
+        await abortableRead(client.signal, () => slot.reconcileAttention());
+        client.signal?.throwIfAborted();
         // Acquire can overlap a canonical fork rekey. From this synchronous
         // boundary onward, use the slot's admitted identity for subscription,
         // snapshot, and attention so one response cannot mix parent and child.
@@ -2063,13 +2069,17 @@ export class GatewayService {
         ? await this.dependencies.receipts.status(client.identity, method, commandId)
         : undefined;
       if (prior?.status === "completed" && prior.result !== undefined) return this.knowledgeReceiptResult(prior.result);
+      // The operation is the part that waits away from the loop (a shell command,
+      // a compaction, a model, a package install), so it runs off the request's
+      // share of the loop: a background slice must not be paused for a request
+      // whose loop is idle for minutes.
       const result = await this.dependencies.receipts.execute(
         client.identity,
         method,
         commandId,
         knowledgeMutation
-          ? async () => this.knowledgeReceiptSafe(await operation())
-          : () => operation(work?.token),
+          ? async () => this.knowledgeReceiptSafe(await offLoop(operation))
+          : () => offLoop(() => operation(work?.token)),
       );
       return knowledgeMutation ? this.knowledgeReceiptResult(result) : result;
     } finally {

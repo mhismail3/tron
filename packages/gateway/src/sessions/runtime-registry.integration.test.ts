@@ -890,7 +890,11 @@ describe.sequential("RuntimeRegistry with the pinned agent runtime", () => {
     persistedManager.appendMessage(fauxAssistantMessage("persisted catalog row"));
     expect(persistedSlot.persistedSessionFile).toBeDefined();
     // The slot's own persist reaches the row through the owner's commit point.
-    await waitUntil(() => catalogOwner(registry).rows().some((row) => row.id === persistedSlot.id));
+    // Applying it here is deterministic where polling the row is not: the hook
+    // that fires it is covered by "resolves a list, a cold open and a hot
+    // re-acquire from the owner's rows without a walk", and a loaded host can
+    // starve a 5 s poll.
+    await catalogOwner(registry).refresh(persistedSlot.persistedSessionFile!);
     const afterPersistence = await registry.catalog("user");
     expect(afterPersistence.sessions.filter((session) => session.id === persistedSlot.id)).toHaveLength(1);
     const ownership = registry as unknown as {
@@ -1038,6 +1042,54 @@ describe.sequential("RuntimeRegistry with the pinned agent runtime", () => {
       messageCount: 2,
       firstMessage: "Update this title immediately",
     });
+  });
+
+  it("folds summary facts from appended entries and rebuilds when the entry set is replaced", async () => {
+    // Failure modes (G-11): a fold that stops at its first boundary misses
+    // later appends, and a replaced session file (branch switch, re-open)
+    // keeps the previous file's messageCount/firstMessage.
+    const fixture = await coldFixture("summary-fold");
+    try {
+      const slot = await fixture.registry.acquire(fixture.manager.getSessionId());
+      const manager = (slot as unknown as { sessionManager: SessionManager }).sessionManager;
+      await waitUntil(() => fixture.summaries.length > 0);
+      const before = fixture.summaries.at(-1)!;
+      const beforeAt = Date.parse(before.updatedAt);
+
+      manager.appendMessage({ role: "user", content: "folded prompt", timestamp: beforeAt + 1_000 });
+      await slot.rename("fold one");
+      await waitUntil(() => fixture.summaries.at(-1)!.messageCount === before.messageCount + 1);
+      expect(fixture.summaries.at(-1)).toMatchObject({
+        firstMessage: "folded prompt",
+        updatedAt: new Date(beforeAt + 1_000).toISOString(),
+      });
+
+      manager.appendMessage({ role: "user", content: "second prompt", timestamp: beforeAt + 2_000 });
+      await slot.rename("fold two");
+      await waitUntil(() => fixture.summaries.at(-1)!.messageCount === before.messageCount + 2);
+      expect(fixture.summaries.at(-1)).toMatchObject({
+        firstMessage: "folded prompt",
+        updatedAt: new Date(beforeAt + 2_000).toISOString(),
+      });
+
+      const replacementDirectory = join(fixture.root, "replacement-sessions");
+      await mkdir(replacementDirectory, { recursive: true });
+      const replacement = SessionManager.create(fixture.cwd, replacementDirectory);
+      replacement.appendMessage({ role: "user", content: "replacement prompt", timestamp: beforeAt + 5_000 });
+      // Pi persists a session file only once it holds an assistant message.
+      replacement.appendMessage(fauxAssistantMessage("replacement answer"));
+      manager.setSessionFile(replacement.getSessionFile()!);
+      await slot.rename("fold three");
+      await waitUntil(() => fixture.summaries.at(-1)!.firstMessage === "replacement prompt");
+      expect(fixture.summaries.at(-1)).toMatchObject({
+        messageCount: 2,
+        updatedAt: new Date(beforeAt + 5_000).toISOString(),
+      });
+    } finally {
+      await fixture.registry.dispose();
+      registries.splice(registries.indexOf(fixture.registry), 1);
+      await rm(fixture.root, { recursive: true, force: true });
+    }
   });
 
   it("never rebroadcasts a snapshot already covered by an immediate publication", async () => {

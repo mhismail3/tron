@@ -89,6 +89,7 @@ import {
   SUBAGENT_RUN_DIRECTORY,
   delegatedSessionParentPath,
   type SessionCatalogChange,
+  type SessionCatalogIdentity,
   type SessionCatalogReconcileOutcome,
   type SessionCatalogSource,
   type SessionCatalogWatcherReset,
@@ -1907,6 +1908,14 @@ export class RuntimeRegistry {
    * effective projection, so a pending restoration is already unarchived. */
   isArchived(sessionId: string): boolean {
     return this.archivedAt(sessionId) !== undefined;
+  }
+
+  /** Read-only derived-search seam: the catalog owner's verified identity for
+   * every user-scope canonical session, or undefined until one complete cut has
+   * been verified against the folder. It reads the catalog's published rows
+   * only and parses no transcript. */
+  searchCatalogIdentities(): Promise<ReadonlyMap<string, SessionCatalogIdentity> | undefined> {
+    return this.sessionCatalog.searchIdentities();
   }
 
   /** Read-only derived-search owner seam. Open sessions use the SDK-selected

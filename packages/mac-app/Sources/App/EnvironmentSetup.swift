@@ -92,8 +92,16 @@ struct EnvironmentSetup: Sendable {
     /// bar tone + wizard recovery copy depend on this distinction.
     /// Honors the supplied bearer token. `nil` means the token could not be
     /// read locally; authenticated servers should classify that as
-    /// `.unauthorized`.
+    /// `.unauthorized`. Every explicit user action (pairing, restart, health
+    /// wait, menu presentation) pings through this and so resolves Tailscale
+    /// live.
     var pingServer: @Sendable (String?) async -> ServerPingResult
+
+    /// The status poll's per-cycle ping. It differs from `pingServer` only in
+    /// transport resolution: it reuses one live Tailscale resolution for a
+    /// bounded window, so the 30 s poll does not make Tailscale reload its
+    /// network extension. `nil` falls back to `pingServer`.
+    var statusPollPingServer: (@Sendable (String?) async -> ServerPingResult)?
 
     /// Requests the Gateway-owned drain restart. This is deliberately separate
     /// from LaunchAgent registration: launchd remains the process supervisor.
@@ -149,19 +157,7 @@ struct EnvironmentSetup: Sendable {
     /// Tailscale state, falling back only to the bounded disposable cache.
     /// There is deliberately no loopback fallback for Stable.
     func resolvedTailscaleHost() async -> String? {
-        await Self.resolveTailscaleHost(probe: probeTailscale, cache: readTailscaleIPFromSettings)
-    }
-
-    private static func resolveTailscaleHost(
-        probe: @escaping @Sendable () async -> TailscaleStatus,
-        cache: @escaping @Sendable () -> String?
-    ) async -> String? {
-        let live = await probe().displayIP
-        for candidate in [live, cache()] {
-            let value = candidate?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-            if TailscaleProbe.isTailscaleAddress(value) { return value }
-        }
-        return nil
+        await TailscaleHostResolution.resolveLive(probe: probeTailscale, cache: readTailscaleIPFromSettings)
     }
 
     static let live = makeLive(profile: .stable)
@@ -176,11 +172,19 @@ struct EnvironmentSetup: Sendable {
         let marker = TronPaths.onboardedMarkerPath(profile: profile)
         let plist = TronPaths.launchAgentPlistPath(profile: profile)
         let resolveHost: @Sendable () async -> String? = {
-            await Self.resolveTailscaleHost(
+            await TailscaleHostResolution.resolveLive(
                 probe: { await TailscaleProbe.probe() },
                 cache: { GatewayNetworkCacheReader.tailscaleIP(at: cache) }
             )
         }
+        // Only the status poll reuses one Tailscale resolution for a bounded
+        // window; every explicit lifecycle action resolves live through
+        // `resolveHost`.
+        let tailscaleHost = TailscaleHostResolution(
+            probe: { await TailscaleProbe.probe() },
+            readCached: { GatewayNetworkCacheReader.tailscaleIP(at: cache) },
+            writeCached: { ip in try? GatewayNetworkCacheWriter.cacheTailscaleIP(ip, at: cache) }
+        )
         let ownership: @Sendable () async -> Bool = {
             guard profile == .stable,
                   ExistingInstallDetector.serviceStatus(label: profile.launchAgentLabel) == .enabled else { return false }
@@ -268,15 +272,21 @@ struct EnvironmentSetup: Sendable {
             },
             validateGatewayPayload: { ExistingInstallDetector.validateGatewayPayload() },
             pingServer: { token in
-                let host = await resolveHost()
-                guard let host else { return .unreachable }
-                do {
-                    return try await ServerPing.ping(host: host, port: profile.port, token: token)
-                } catch is CancellationError {
-                    return .timeout
-                } catch {
-                    return .unreachable
+                guard let host = await resolveHost() else { return .unreachable }
+                return await Self.ping(host: host, port: profile.port, token: token)
+            },
+            statusPollPingServer: { token in
+                guard let host = await tailscaleHost.host() else { return .unreachable }
+                let result = await Self.ping(host: host, port: profile.port, token: token)
+                guard Self.failedAddressLookup(result) else { return result }
+                // A reused address can be stale. Re-resolve once before reporting
+                // the Gateway down, and re-ping only when the address changed, so
+                // a Gateway that is genuinely down does not reload the CLI every
+                // cycle.
+                guard let retried = await tailscaleHost.host(previousPingFailed: true), retried != host else {
+                    return result
                 }
+                return await Self.ping(host: retried, port: profile.port, token: token)
             },
             restartGateway: {
                 let host = await resolveHost()
@@ -309,6 +319,25 @@ struct EnvironmentSetup: Sendable {
                 try MacAppVersionMarkerStore.write(version, at: TronPaths.macAppVersionMarkerPath(profile: profile))
             }
         )
+    }
+
+    private static func ping(host: String, port: Int, token: String?) async -> ServerPingResult {
+        do {
+            return try await ServerPing.ping(host: host, port: port, token: token)
+        } catch is CancellationError {
+            return .timeout
+        } catch {
+            return .unreachable
+        }
+    }
+
+    /// True when the ping never reached a Gateway at the address it used, which
+    /// is the only case a stale resolved address can explain.
+    private static func failedAddressLookup(_ result: ServerPingResult) -> Bool {
+        switch result {
+        case .unreachable, .timeout: return true
+        case .success, .unauthorized, .malformedResponse: return false
+        }
     }
 
     private static func makeDebugObserver() -> EnvironmentSetup {

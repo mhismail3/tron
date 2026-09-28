@@ -21,10 +21,12 @@ import { logUnresolvedDrainOwners, RestartDrainProgress } from "./sessions/resta
 import { acquireAgentRuntimeLocks } from "./sessions/agent-runtime-lock.js";
 import type { JsonValue } from "./protocol/types.js";
 import { GatewayLogger } from "./transport/logger.js";
-import { CommandReceiptStore } from "./transport/command-receipts.js";
+import { CommandReceiptStore, COMMAND_RECEIPT_PRUNE_INTERVAL_MS } from "./transport/command-receipts.js";
 import { GatewayService } from "./transport/gateway-service.js";
 import { GatewayServer } from "./transport/server.js";
 import { ResourceSampler, type ResourceRuntimeEntry } from "./transport/stall-diagnostics.js";
+import { requestsCompetingForLoop } from "./transport/request-span.js";
+import { backgroundWork } from "./background-work.js";
 import { installKimiK3Policy } from "./providers/kimi-k3-policy.js";
 import { NotificationGrantStore } from "./notifications/grant-store.js";
 import { PushRelayClient } from "./notifications/relay-client.js";
@@ -405,8 +407,9 @@ automationToolOperations = new GatewayScheduleToolOperations(automations, receip
 
 let stopping = false;
 let sessionSearchWarmTask: Promise<void> | undefined;
-let storageMaintenanceTimer: NodeJS.Timeout | undefined;
 let uploadStoragePressure: "normal" | "low" | "exhausted" = "normal";
+/** How often bounded artifact maintenance runs as a background slice. */
+const STORAGE_MAINTENANCE_INTERVAL_MS = 10 * 60_000;
 function recordShutdownStep(step: string, durationMs: number): void {
   logger.log("info", `Gateway shutdown step ${step} took ${Math.round(durationMs)} ms`, {
     event: "gateway.shutdown-step", source: "lifecycle", step, durationMs,
@@ -429,8 +432,9 @@ async function shutdown(reason: string, exitCode = 0): Promise<void> {
     automations.beginDrain();
     workRegistry.beginDrain();
     sessionSearch?.cancelWarmup();
-    if (storageMaintenanceTimer) clearInterval(storageMaintenanceTimer);
-    storageMaintenanceTimer = undefined;
+    // Before the owners it drives are disposed: the scheduler arms no further
+    // slice, and a slice already in flight settles on its own.
+    backgroundWork.stop();
     await shutdownStep("transport-close", () => transport.close(), recordShutdownStep);
     await shutdownStep("cancellation", async () => { await Promise.allSettled([
       automations.requestShutdownCancellation(),
@@ -594,6 +598,7 @@ transport = new GatewayServer({
   maximumSubscriptionsPerConnection: config.maxSubscriptionsPerConnection,
   maximumOutboundBytes: config.maxOutboundBytes,
   maximumSynchronizationBytes: config.maxSynchronizationBytes,
+  lanEndpoint: config.lanEndpoint,
   devices,
   uploads,
   sessions,
@@ -644,8 +649,9 @@ await transport.listen(async () => {
     if (!stopping) {
       await sessionSearch.warm();
       const durationMs = performance.now() - warmStartedAt;
-      logger.log("info", `Session search warm-up took ${Math.round(durationMs)} ms`, {
-        event: "session-search.warm", source: "search", durationMs,
+      const { reusedSessions, parsedSessions } = sessionSearch.indexPassStats();
+      logger.log("info", `Session search warm-up took ${Math.round(durationMs)} ms (${reusedSessions} reused, ${parsedSessions} reparsed)`, {
+        event: "session-search.warm", source: "search", durationMs, counts: { reusedSessions, parsedSessions },
       });
     }
   })().catch((error) => {
@@ -696,8 +702,47 @@ const maintainStorage = async (): Promise<void> => {
   }
 };
 await maintainStorage();
-storageMaintenanceTimer = setInterval(() => void maintainStorage(), 10 * 60_000);
-storageMaintenanceTimer.unref();
+// The one background-work scheduler. The jobs that used to own a timer of their
+// own (catalog reconciliation registers itself, receipt pruning and storage
+// maintenance below) now take turns one slice at a time, each yielding to the
+// loop, and wait while a request is in flight or the loop is behind.
+backgroundWork.register({
+  name: "command-receipts.prune",
+  intervalMs: COMMAND_RECEIPT_PRUNE_INTERVAL_MS,
+  slice: () => receipts.prune(),
+});
+backgroundWork.register({
+  name: "storage.maintain",
+  intervalMs: STORAGE_MAINTENANCE_INTERVAL_MS,
+  slice: () => maintainStorage(),
+});
+// A signal that ignored the signal handlers above would start the scheduler
+// after `shutdown()` stopped it, and its jobs would run against owners being
+// disposed.
+if (!stopping) backgroundWork.start({
+  requestsInFlight: requestsCompetingForLoop,
+  // One record per slice, and one per starved spell: the scheduler's own cost
+  // and its pauses have to be visible without a per-tick record. The job is the
+  // step, so a slice or a backlog can be read out of the log without parsing
+  // the message.
+  onSlice: ({ job, outcome, durationMs, waitedMs, error }) => logger.log(
+    outcome === "failed" ? "warning" : "debug",
+    `Background slice ${job} ${outcome} in ${Math.round(durationMs)}ms after waiting ${Math.round(waitedMs)}ms`,
+    {
+      event: "background.slice", source: "background", step: job, outcome, durationMs,
+      counts: { waitedMs: Math.round(waitedMs) },
+      ...(error === undefined ? {} : { error }),
+    },
+  ),
+  onBacklog: ({ job, waitedMs, reason, jobs, due }) => logger.log(
+    "warning",
+    `Background job ${job} has been due for ${Math.round(waitedMs)}ms; the scheduler is paused (${reason})`,
+    {
+      event: "background.backlog", source: "background", step: job, reason,
+      counts: { waitedMs: Math.round(waitedMs), jobs, due },
+    },
+  ),
+});
 } catch (error) {
   await releaseRuntimeLock();
   throw error;

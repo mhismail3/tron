@@ -528,6 +528,46 @@ catalog are owned by [`docs/observability.md`](docs/observability.md).
   `gateway.shutdown-step` names and times every awaited shutdown operation so a
   forced exit can be attributed to its owner.
 
+### Background work
+
+One owner decides when recurring background work may run: `backgroundWork` in
+`src/background-work.ts`, started by `gateway-main.ts` after the listener is
+serving. Registered jobs take turns **one slice at a time**; between slices the
+scheduler yields with `setImmediate`, so the next slice runs in the loop's check
+phase after the poll phase's timers and I/O. A due slice waits while a request is
+competing for the loop (`requestsCompetingForLoop()` in
+`src/transport/request-span.ts`) or while the loop's delay p99 is at or above
+`BACKGROUND_PAUSE_P99_MS` (50 ms), re-checking every
+`BACKGROUND_PAUSE_RECHECK_MS` (100 ms). A request that hands its wait to work
+outside the loop — a receipt-backed mutation (`offLoop`), such as a `session.bash`
+shell command, a `session.compact` or a `knowledge.*` model call — does not count
+as competing: it holds its receipt for its whole operation while the loop is idle,
+and the loop's own delay is what covers the loop work it still does. A slice with
+more to do than one bounded batch awaits `backgroundWork.yieldToLoop()` between
+batches: that is one loop turn, or a re-check interval while the same pause is in
+force, so the slice yields to a request that arrives mid-slice. A rejecting slice
+is reported and never stops the scheduler or the jobs registered after it.
+`background.slice` (debug, warning on failure) and `background.backlog`
+(warning once per starved spell past `BACKGROUND_BACKLOG_WARNING_MS`, 5 minutes)
+are the records, and each carries the job in its `step` field;
+[`docs/observability.md`](docs/observability.md) owns their fields.
+
+The jobs are the session catalog's periodic reconcile
+(`CATALOG_RECONCILE_INTERVAL_MS`, registered by `session-catalog.ts` itself),
+command-receipt pruning, and the attachment/display-artifact maintenance pass.
+The catalog's startup, watcher-event and watcher-replacement passes are the same
+reconcile pass, so they yield to the same pause between bounded batches (the
+durable-row batches of `CatalogMetadataIndex.reconcile` and one file per batch in
+its rebuild path) even though they are not slices of the registered job. Each
+owner keeps its own bounds; the scheduler only decides *when* a slice — or the
+next batch of one — may start. Nothing in a request path prunes, walks or
+reconciles: an admission may still force one exact pass at its own capacity
+boundary (receipts), which is correctness rather than maintenance.
+`register({ name, intervalMs, slice })` returns the function that unregisters the
+job — exactly that registration, so a later registration under the same name is
+not deleted by the replaced owner's dispose — and that call is the seam any other
+recurring owner moves its work under.
+
 ### Diagnostic bundle
 
 `scripts/tron diagnose [--since <count><s|m|h|d>] [--out <path>]` writes one
@@ -666,6 +706,28 @@ ownership, diagnostics, qualification commands, and remaining platform limits.
 For failure-boundary interpretation, evidence collection, and regression
 expectations, see [connection resilience and diagnosis](docs/connection-resilience.md).
 
+A second, TLS-only listener can serve the Mac's private LAN address, so a phone
+at home does not depend on Tailscale's path (E-3a). It is off unless
+`--lan-endpoint on` or `TRON_GATEWAY_LAN_ENDPOINT=on` enables it (E-3d decides
+the release default; the setting stays the kill switch). It binds only an
+RFC 1918 or IPv6 ULA address the Mac actually has — never a wildcard, never
+link-local, never Tailscale's own ranges — on the main listener's port, rebinds
+when the preferred address changes, and disables itself when the Mac has none.
+Its key and self-signed certificate live at `~/.tron/gateway/lan-endpoint/`
+(`tls-key.pem`, `tls-certificate.pem`, both 0600 inside a 0700 directory), are
+created once on first use, and are replaced only by an explicit rotation: a
+paired phone pins the certificate's public key, so a silent regeneration would
+break the pin instead of fixing it. The listener shares the main listener's HTTP
+and WebSocket handling — admission, capacity, heartbeat, revocation, hello and
+its header, request-idle and TLS handshake bounds are the same code — and serves
+only the socket route and the authenticated
+routes: `POST /v1/pair` stays on the main listener, and `/health` on the LAN leg
+answers its status alone because any host on that network can reach it. Each
+accepted connection's `http.upgrade` record names the leg it arrived on
+(`transport=lan`, `tailscale` or `primary`), and each bind, rebind or disable
+writes one `lan.listener` record with its state, address family and port but not
+the address ([observability](docs/observability.md)).
+
 Authenticated `system.logs.export` is a user-requested diagnostics projection: it accepts only a
 bounded already-redacted snapshot and command ID, appends the newest Gateway debug records (at most
 1 MB), writes a server-chosen `<device-hash>-<timestamp>.jsonl` file under
@@ -783,7 +845,8 @@ removes uncommitted staging and releases its reservation. An authenticated clien
 an unclaimed upload when its local chip or presentation is retired; claimed prompt attachments reject that
 operation. Remaining unclaimed uploads expire after 24 hours. Prompt attachment IDs are unique, and one
 prompt cannot materialize more than the per-prompt byte ceiling. Startup performs the one physical inventory,
-legacy migration, integrity/ownership reconciliation, and orphan-object sweep. The ten-minute pass then removes
+legacy migration, integrity/ownership reconciliation, and orphan-object sweep. The ten-minute pass, which the
+background-work scheduler runs as one slice, then removes
 stale bodies, expires indexed unclaimed files, retries pending cleanup, and removes claimed logical references
 only when the canonical session catalog proves their owner no longer exists; it does not rescan every retained
 metadata file. A later process start can always rebuild the disposable index from physical metadata.
@@ -942,6 +1005,24 @@ never rejects the hello for one. It stamps the kept values as `peerClientId`,
 diagnostic only: a peer that omits them still connects.
 
 Requests use `{type,id,method,params}` and receive `{type,id,ok,result|error}`.
+A client that stops waiting for a disposable read sends `{type:"cancel",id}` and
+receives no answer: the Gateway abandons that request's work and records
+`rpc.cancelled` with the stage it interrupted. Cancellation applies only to
+`session.open`, `session.list`, `session.transcript`, `session.history.list`,
+`session.history.entry`, `session.search`, `model.list`, `provider.list` and
+`provider.usage`; a cancel for any other method is ignored. An accepted mutation
+or admitted prompt is never cancelled, and neither is a `session.sync`
+acknowledgement: their owners settle them durably whatever the client does with
+their wait.
+A second `session.open` for the same connection and session joins the attempt
+already in flight and receives its exact result instead of a `conflict`; the
+shared attempt is abandoned only when its last waiting request leaves, and a
+genuinely overlapping open that is not a join is still rejected. A cancel for a
+request that was already cancelled or never admitted changes nothing. A cancel
+for an answered `session.open` whose barrier the client never synchronized
+revokes that barrier, so a retry in that window is answered instead of failing
+as a duplicate - unless another delivered response carries the same token, as a
+joined retry's does; that barrier stays for the client to synchronize.
 Mutations require `params.commandId`; receipts deduplicate completed commands.
 After an uncertain disconnect, clients reconnect and poll `command.status`, reuse
 a completed result, retry only a confirmed-missing command with the same ID, and
@@ -965,7 +1046,10 @@ identity/envelope overhead before decode and persistence. The store admits at mo
 completion before a mutation executes; full capacity returns retryable `busy`.
 Admission keeps an in-process usage total, reconciled from disk when a prune
 removed evidence rather than once per receipt write, so sustained revisioned
-activity is not quadratic in the receipt count;
+activity is not quadratic in the receipt count; the age-based prune is the
+background-work scheduler's job (`COMMAND_RECEIPT_PRUNE_INTERVAL_MS`, one
+minute), and admission only forces one exact pass at the capacity boundary
+before it refuses;
 owned interrupted atomic-write temporaries are scavenged, but only when the
 command that named them no longer holds a lane, so a receipt write in flight
 never loses its temporary, and arbitrary files are not treated as receipt
@@ -975,7 +1059,7 @@ a ten-minute receipt window because newer revisions supersede them. Pending,
 malformed, oversized, or identity-mismatched evidence remains outcome-unknown, is
 never pruned, and can never authorize replay. Receipt execution serializes identical command keys only;
 unrelated commands and sessions remain concurrent.
-Outbound WebSocket admission keeps the 1 MiB encoded-frame ceiling, a 32,768-value JSON node ceiling, and an 8 MiB / 4,096-frame per-connection aggregate queue ceiling. Byte size alone does not prove native decoder admission: many small browser-result records can exceed the structural limit. Transcript pages reserve 24,000 nodes and snapshots 30,000, leaving room for enclosing metadata. Aggregate structural pressure compacts disposable detail into explicit previews before publication, without changing canonical JSONL, row ordinals, or transcript cursors. The shared `gateway-json-limits.json` fixture pins the native/sender contract. This is the common bounded projection contract for local and mobile clients, not separate audience-specific schemas. Final response rejection stays correlated as `response_too_large`; rejected events request resynchronization. A rejected response does not undo an accepted command: confirmed mutations must preserve outcome uncertainty rather than treat projection failure as definitive execution failure. Node-limit diagnostics report a bounded lower count (`nodeCountAtLeast`) and maximum, never payload content. A connection-local ordered writer hands exactly one frame to the WebSocket implementation at a time; enqueue acceptance is the response/event ordering boundary, so a response remains ahead of its synchronization suffix while concurrent startup catalogs cannot manufacture `bufferedAmount` pressure. A broadcast prepares one immutable encoding per operation and reuses it for eligible connections, while each barrier and queue retains its existing connection-local byte admission and failure isolation. The queue includes its active frame and releases each completed payload at the same boundary as its byte reservation; array compaction must never retain unaccounted completed payloads. Count or byte overflow closes only that peer with `1013`. Admission and disposable observers retire immediately, including asynchronous subscription installation that returns after the retirement cut. A one-second forced-close deadline releases a stalled peer; it still consumes connection capacity until physical close. Asynchronous write failures are logged and terminate that exact connection. Each socket also owns abort controllers for in-flight requests: retirement releases disposable `session.list` waits immediately while the coalesced canonical materialization may finish for another caller; accepted prompts and durable mutations never inherit socket cancellation. `server-capacity.integration.test.ts` covers continuously busy payload retention, tiny-frame bursts, stalled overload closure, unrelated-peer responsiveness, and accepted-command settlement.
+Outbound WebSocket admission keeps the 1 MiB encoded-frame ceiling, a 32,768-value JSON node ceiling, and an 8 MiB / 4,096-frame per-connection aggregate queue ceiling. Byte size alone does not prove native decoder admission: many small browser-result records can exceed the structural limit. Transcript pages reserve 24,000 nodes and snapshots 30,000, leaving room for enclosing metadata. Aggregate structural pressure compacts disposable detail into explicit previews before publication, without changing canonical JSONL, row ordinals, or transcript cursors. The shared `gateway-json-limits.json` fixture pins the native/sender contract. This is the common bounded projection contract for local and mobile clients, not separate audience-specific schemas. Final response rejection stays correlated as `response_too_large`; rejected events request resynchronization. A rejected response does not undo an accepted command: confirmed mutations must preserve outcome uncertainty rather than treat projection failure as definitive execution failure. Node-limit diagnostics report a bounded lower count (`nodeCountAtLeast`) and maximum, never payload content. A connection-local ordered writer hands exactly one frame to the WebSocket implementation at a time; enqueue acceptance is the response/event ordering boundary, so a response remains ahead of its synchronization suffix while concurrent startup catalogs cannot manufacture `bufferedAmount` pressure. A frame whose state a newer frame replaces is dropped while it is still unsent, so a slow link queues current state instead of every superseded revision of it. A newer `session.summary` replaces the unsent revision of that session; a newer `session.snapshot` supersedes the unsent sequenced state of its own runtime generation that its own state fully re-states, up to its own `eventSequence`, and only together with the frame that covers them: the surviving snapshot is encoded as the `session.rebaseline` carrying the whole snapshot and the connection's installed `subscriptionToken`, which the phone admits as fresh authority across the sequences the queue dropped instead of resynchronizing. Installing a snapshot restores state, not every effect: a sequenced frame whose effect no snapshot installation performs (a failure receipt that retires a submission and restores its draft, a resource/structure/context revision bump that reloads commands, an editor directive) is a fence, and the queue drops neither it nor anything behind it, so no replacement has to restore what it cannot. Frames of another runtime generation are fences too, because a replacement runtime restarts `eventSequence` at zero. Without that installed token a snapshot supersedes nothing, the frame already entering `ws` is never recalled, and what a client receives stays a subsequence of what was enqueued in enqueue order. A dropped frame is released with its byte reservation and is no longer outstanding, so the `connection.closed`/`connection.write-error` frame counts still describe frames the connection owed its peer, and `gateway.resources` reports the dropped frames and bytes as `outboundCoalescedFrames`/`outboundCoalescedBytes`. A broadcast prepares one immutable encoding per operation and reuses it for eligible connections, while each barrier and queue retains its existing connection-local byte admission and failure isolation; the coalescing `session.rebaseline` is the one frame encoded per connection, because it carries that connection's installed `subscriptionToken` and nothing else differs. The queue reports the bytes it accepted, so the frame that is actually queued is the one counted. The queue includes its active frame and releases each completed payload at the same boundary as its byte reservation; array compaction must never retain unaccounted completed payloads. Count or byte overflow closes only that peer with `1013`, and the record names the topic of the frame it was waiting on and the one that did not fit. Admission and disposable observers retire immediately, including asynchronous subscription installation that returns after the retirement cut. A one-second forced-close deadline releases a stalled peer; it still consumes connection capacity until physical close. Asynchronous write failures are logged and terminate that exact connection. Each socket also owns abort controllers for in-flight requests: retirement releases disposable `session.list` waits immediately while the coalesced canonical materialization may finish for another caller; accepted prompts and durable mutations never inherit socket cancellation. `server-capacity.integration.test.ts` covers continuously busy payload retention, tiny-frame bursts, superseded-frame replacement and the unchanged backstop, stalled overload closure, unrelated-peer responsiveness, and accepted-command settlement; `sync-protocol.integration.test.ts` covers a superseded frame whose sequence was still quarantined behind a synchronization barrier.
 Paired devices that offer `permessage-deflate` get compressed frames with context takeover; local-credential clients stay uncompressed. Every frame, queue and inbound bound above applies to uncompressed bytes. The [frame compression](docs/connection-resilience.md#frame-compression) section owns the settings, measurements and the phone's decoded-size boundary.
 The gateway runs a 25-second heartbeat and terminates a socket only after three
 consecutive ticks received no frame from it, so half-open Tailscale/iOS paths
@@ -2208,7 +2292,13 @@ interpreting unavailable membership as an empty catalog.
    The client acknowledges the exact
    baseline with `session.sync`, after which only later sequenced events are released.
    While the barrier owns a session's catch-up it is the only delivery path, so every
-   in-window event reaches the client exactly once and in sequence. A bounded barrier
+   in-window event reaches the client exactly once and in sequence, except where the
+   connection's outbound queue supersedes unsent state: a dropped sequence is always
+   covered by the `session.rebaseline` that replaced it, so the client can
+   still accept what follows. Only state that replacement fully re-states may be
+   dropped; a frame whose effect installing a snapshot does not perform (a failure
+   receipt, a revision bump, an editor directive) is a fence, and it and every frame
+   behind it arrive in order. A bounded barrier
    overflow converges the client with a fresh authoritative `session.rebaseline`
    snapshot instead of a resync dead end; only an unavailable session falls back to
    `transport.resyncRequired`.

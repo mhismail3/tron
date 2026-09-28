@@ -105,7 +105,10 @@ function textFromContent(content: unknown): string {
   }).join("\n");
 }
 
-/** Search-only extractor. It intentionally does not use UI/history flatteners. */
+/** Search-only extractor. It intentionally does not use UI/history flatteners.
+ * Changing what this derives requires bumping
+ * `SESSION_SEARCH_INDEX_DERIVATION_VERSION` in session-search-index.ts, or
+ * durable rows keep postings that no longer match this extractor. */
 export function extractSearchText(entry: SessionEntry, ordinal: number): SearchTextEntry | undefined {
   if (entry.type !== "message" || !entry.message || typeof entry.message !== "object" || Array.isArray(entry.message)) return undefined;
   const message = entry.message as unknown as Record<string, unknown>;
@@ -140,7 +143,9 @@ export function terms(value: string): string[] {
 }
 
 /** Bounded substring grams. One- and two-character identifiers are indexed
- * deliberately; exact canonical reread still proves the final match. */
+ * deliberately; exact canonical reread still proves the final match. Both this
+ * and `terms()` feed durable postings: changing how they tokenize requires
+ * bumping `SESSION_SEARCH_INDEX_DERIVATION_VERSION` in session-search-index.ts. */
 export function trigrams(value: string): string[] {
   const normalized = normalizeForSearch(value).replace(/\s+/gu, " ");
   const output = new Set<string>();

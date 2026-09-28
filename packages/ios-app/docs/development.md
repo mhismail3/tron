@@ -1050,7 +1050,12 @@ lease or release each other's simulator. `--lane NAME` (or `TRON_IOS_TEST_LANE`)
 names a lane: the state directory `<lane root>/ios-test-NAME` beside the default
 lane's `<lane root>/ios-test`, and the device `Tron iOS Tests (NAME)`. The lane
 root is `$HOME/.tron/internal`, overridable with
-`TRON_IOS_TEST_DISCOVERY_ROOT`. A named lane refuses `TRON_IOS_TEST_STATE_DIR`
+`TRON_IOS_TEST_DISCOVERY_ROOT`. The lane the command was given is carried into
+the command the lease holder starts, so the whole command - lease, marker,
+device and release - stays in that one lane; a process that inherits a lease
+(`TRON_IOS_TEST_LOCK_HELD`) while naming a lane that lease does not cover is
+refused (74) rather than run on a lane it does not hold. A named lane refuses
+`TRON_IOS_TEST_STATE_DIR`
 and `TRON_IOS_TEST_DEVICE_NAME` rather than guess which spelling was meant;
 those two overrides keep naming the default lane until SIM-10 of
 [the simulator lifecycle plan](../../../docs/plans/2026-09-27-simulator-lifecycle.md)

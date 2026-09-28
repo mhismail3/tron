@@ -630,6 +630,67 @@ struct DashboardStateOwnerTests {
     }
 
     @MainActor
+    @Test("a reconnect after a failed initial connect reads the live socket's events")
+    func failedInitialConnectReconnectConsumesEvents() async throws {
+        try await withTestWatchdog(timeout: .seconds(20)) { @MainActor in
+            let profile = GatewayProfile(
+                id: "remote", label: "Remote", host: "remote.test", port: 9_847,
+                machineId: "remote-runtime", machineGroupID: "remote-machine", deviceId: "device"
+            )
+            // The first socket fails its hello, so the initial connect fails and
+            // the entry's task ends in that failure branch without ever reading
+            // the event stream. The next socket completes a handshake, so the
+            // entry is live again: its live socket's events have to be read by
+            // somebody, or `session.summary`, `system.stopping` and
+            // `transport.disconnected` are delivered to nobody.
+            let sockets = (0..<3).map { _ in ScriptedGatewaySocket() }
+            let factory = ScriptedGatewaySocketFactory(sockets: sockets)
+            let clock = ManualClock()
+            let recorder = DashboardPoolRecorder()
+            let pool = DashboardGatewayConnectionPool(
+                clientFactory: { GatewayClient(socketFactory: factory.factory, clock: clock.clock) },
+                clock: clock.clock
+            )
+            pool.delegate = recorder
+            let hello = Data(#"{"type":"hello","gatewayVersion":"1","piVersion":"1","protocolVersion":6,"minProtocolVersion":6,"machineId":"remote-runtime","machineGroupID":"remote-machine","machineName":"Remote","gatewayChannel":"stable","capabilities":[]}"#.utf8)
+            await sockets[0].failNextSend(GatewayFailure(
+                code: "timeout", message: "synthetic transport-open failure", retryable: true, details: nil
+            ))
+            await sockets[1].enqueue(hello)
+            await sockets[2].enqueue(hello)
+            pool.reconcile(profiles: [profile], selectedProfileID: nil, token: { _ in "token" })
+
+            // Attempt 1 fails; the wait that follows ends on the manual clock
+            // and attempt 2 connects on the second socket.
+            _ = try await Self.secondsUntilRequest(1, clock: clock, factory: factory, limit: 40)
+            _ = try await Self.secondsUntilRequest(2, clock: clock, factory: factory, limit: 40)
+            try await sockets[1].waitUntilSent(count: 2)
+            let catalog = try Self.requestFrame(await sockets[1].sentFrames()[1])
+            await sockets[1].enqueue(Self.catalogResponse(
+                id: catalog.id, sessions: [summary(revision: 1)], listRevision: 1
+            ))
+            try await recorder.waitForState(.connected, profileID: profile.id)
+            #expect(recorder.updates.last?.sessions.first?.summaryRevision == 1)
+
+            // The reconnected socket's live summaries reach the dashboard.
+            await sockets[1].enqueue(Self.summaryEvent(revision: 2, phase: .running))
+            try await Self.waitUntil {
+                recorder.updates.last?.sessions.first?.summaryRevision == 2
+            }
+
+            // Its control events reach it too: a Gateway restart retires the
+            // live epoch and reconnects at once, which a socket nobody reads
+            // never does.
+            await sockets[1].enqueue(Self.stoppingEvent())
+            _ = try await Self.secondsUntilRequest(3, clock: clock, factory: factory, limit: 40)
+            #expect(factory.requests.count == 3)
+
+            pool.retire()
+            await pool.waitForRetirement()
+        }
+    }
+
+    @MainActor
     @Test("dashboard retry pauses off path and resumes immediately on path return")
     func dashboardRetryPausesForUnsatisfiedPath() async throws {
         try await withTestWatchdog { @MainActor in

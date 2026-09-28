@@ -259,6 +259,7 @@ struct GatewayLogExportTests {
         await socket.enqueue(Data(#"{"type":"hello","gatewayVersion":"1","piVersion":"1","protocolVersion":6,"minProtocolVersion":6,"machineId":"machine","machineName":"Mac","gatewayChannel":"stable","capabilities":["diagnostic-export.v1"]}"#.utf8))
         let responder = respondToConnectedExport(socket, failure: false)
         await model.start()
+        await waitForDiagnosticsReadiness(model)
         #expect(model.diagnosticsAreReady)
         let exporting = Task { try await model.exportDiagnostics("fixture-jsonl") }
         let request = try #require(await responder.value)
@@ -297,6 +298,7 @@ struct GatewayLogExportTests {
         await socket.enqueue(Data(#"{"type":"hello","gatewayVersion":"1","piVersion":"1","protocolVersion":6,"minProtocolVersion":6,"machineId":"machine","machineName":"Mac","gatewayChannel":"stable","capabilities":["diagnostic-export.v1"]}"#.utf8))
         let responder = respondToConnectedExport(socket, failure: true)
         await model.start()
+        await waitForDiagnosticsReadiness(model)
         #expect(model.diagnosticsAreReady)
         let exporting = Task { try await model.exportDiagnostics("fixture-jsonl") }
         let request = try #require(await responder.value)
@@ -311,6 +313,18 @@ struct GatewayLogExportTests {
     }
 
     private struct ExportRequest: Decodable { let id: String; let method: String }
+
+    /// Startup returns at transport readiness. The projection that publishes
+    /// `diagnosticsAreReady` now runs beneath that socket, owned by the
+    /// presentation, so readiness arrives after `start()` returns.
+    @MainActor
+    private func waitForDiagnosticsReadiness(_ model: AppModel) async {
+        for _ in 0..<400 {
+            if model.diagnosticsAreReady { return }
+            try? await Task.sleep(for: .milliseconds(5))
+        }
+        Issue.record("diagnostics readiness was never published")
+    }
 
     private func respondToConnectedExport(_ socket: ScriptedGatewaySocket, failure: Bool) -> Task<ExportRequest?, Never> {
         Task {

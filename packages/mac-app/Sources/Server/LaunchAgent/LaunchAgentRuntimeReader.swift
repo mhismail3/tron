@@ -39,15 +39,28 @@ struct LaunchAgentRuntimeInfo: Equatable, Sendable {
     }
 }
 
+/// Live launchd ownership only: the job's pid plus that process's start
+/// identity. It is a change fence, never an identity proof of its own, and a
+/// reader that cannot obtain both values returns `nil` so no caller treats an
+/// unproven runtime as stable.
+struct LaunchAgentProcessFence: Equatable, Sendable {
+    let pid: Int
+    let startIdentity: String
+    /// The process's elapsed time as of this read. Display only: it stays
+    /// outside `==` so a ticking clock cannot force a re-probe, and the status
+    /// poll republishes it every cycle so the menu's uptime cannot freeze.
+    let elapsedTime: String
+
+    static func == (lhs: Self, rhs: Self) -> Bool {
+        lhs.pid == rhs.pid && lhs.startIdentity == rhs.startIdentity
+    }
+}
+
 /// Read-only launchd/ps observation shared with the native peer boundary.
 enum LaunchAgentRuntimeReader {
     enum ObservationFailure: Error { case unavailable }
     static func read(label: String) async throws -> LaunchAgentRuntimeInfo? {
-        let result = await Subprocess.run(
-            executable: URL(fileURLWithPath: "/bin/launchctl"),
-            arguments: ["print", "gui/\(getuid())/\(label)"],
-            policy: .observation
-        )
+        let result = await launchctlPrint(label: label)
         guard result.exitCode >= 0 else { throw ObservationFailure.unavailable }
         guard result.exitCode == 0 else { return nil }
         let pid = parsePID(from: result.stdout)
@@ -80,6 +93,24 @@ enum LaunchAgentRuntimeReader {
                 from: result.stdout
             ),
             needsLaunchConstraintRefresh: result.stdout.contains("needs LWCR update")
+        )
+    }
+
+    /// Reads only what the runtime fence needs: launchd's pid and one `ps`
+    /// read carrying both the start identity and the elapsed time. The display
+    /// reads `read(label:)` adds (command) stay out of a fence cycle.
+    static func readProcessFence(label: String) async -> LaunchAgentProcessFence? {
+        let result = await launchctlPrint(label: label)
+        guard result.exitCode == 0, let pid = parsePID(from: result.stdout),
+              let read = await ServerProcessProbe.processFenceRead(pid: pid) else { return nil }
+        return LaunchAgentProcessFence(pid: pid, startIdentity: read.startIdentity, elapsedTime: read.elapsedTime)
+    }
+
+    private static func launchctlPrint(label: String) async -> ProcessResult {
+        await Subprocess.run(
+            executable: URL(fileURLWithPath: "/bin/launchctl"),
+            arguments: ["print", "gui/\(getuid())/\(label)"],
+            policy: .observation
         )
     }
 

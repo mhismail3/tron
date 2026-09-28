@@ -389,6 +389,23 @@ const listChangedFrames = (client: Client) =>
 const snapshotFrames = (client: Client, sessionId: string) =>
   client.frames.filter((frame) => frame.type === "event" && frame.topic === "session.snapshot" && frame.sessionId === sessionId);
 
+/** The authoritative state a subscribed client received for one session, newest
+ * last, however the outbound queue delivered it: as its own `session.snapshot`,
+ * or — when a newer snapshot of the same runtime generation superseded an
+ * unsent one, and the queue covered the dropped sequence with a
+ * `session.rebaseline` (`G-4`) — as the snapshot nested inside that rebaseline.
+ * Both make the client install that state, so a case asserting on the state a
+ * client ends up with must read both. */
+const deliveredAuthorityFrames = (client: Client, sessionId: string) =>
+  client.frames.flatMap((frame) => {
+    if (frame.type !== "event" || frame.sessionId !== sessionId) return [];
+    if (frame.topic === "session.snapshot") return [frame];
+    if (frame.topic === "session.rebaseline" && frame.payload?.snapshot !== undefined) {
+      return [{ ...frame, topic: "session.snapshot", payload: frame.payload.snapshot }];
+    }
+    return [];
+  });
+
 const latestSnapshot = (client: Client, sessionId: string) =>
   snapshotFrames(client, sessionId).at(-1)?.payload as { archivedAt?: string } | undefined;
 
@@ -1932,11 +1949,15 @@ describe("command-driven session replacement over the real Gateway", () => {
     const markers = join(r.f.root, "gateway", "runtime-markers");
     const markerFiles = await import("node:fs/promises").then((fs) => fs.readdir(markers).catch(() => [] as string[]));
     expect(markerFiles.filter((name) => name.startsWith(r.origin.id))).toEqual([]);
-    // The origin's subscriber follows the identity change.
-    await until(() => snapshotFrames(r.client, r.replacementId).length > 0, "replacement snapshot delivered");
+    // The origin's subscriber follows the identity change and receives the
+    // replacement's authoritative state, whether the queue delivered it as the
+    // snapshot itself or as the `session.rebaseline` covering a sequence a
+    // newer snapshot superseded.
+    await until(() => deliveredAuthorityFrames(r.client, r.replacementId).length > 0, "replacement snapshot delivered");
     // The command is settled: the replacement is idle and no row for it (a
-    // fork inherits one) is projected as still running.
-    const replacementSnapshot = snapshotFrames(r.client, r.replacementId).at(-1)!.payload as {
+    // fork inherits one) is projected as still running by the newest authority
+    // the client received.
+    const replacementSnapshot = deliveredAuthorityFrames(r.client, r.replacementId).at(-1)!.payload as {
       transcript: Array<{ semantic?: { operationId?: string; lifecycle?: string } }>;
     };
     expect(replacementSnapshot.transcript.filter((item) => item.semantic?.operationId === r.operationId

@@ -46,6 +46,9 @@ export interface LogRecord {
   durationMs?: number;
   /** The request span's compact stage breakdown, one bounded string. */
   stages?: string;
+  /** The measured stage a request was in at one instant, e.g. the stage a
+   * cancellation interrupted (`rpc.cancelled`). */
+  stage?: string;
   /** The part of `durationMs` no named stage accounted for. */
   unaccountedMs?: number;
   /** How far an upgrade got: `request`, `auth`, `handshake` or `hello`. */
@@ -58,6 +61,9 @@ export interface LogRecord {
   /** The peer's Tailscale path at an inbound-silence episode (`connection.inbound-silent`). */
   peerPath?: string;
   peerRelay?: string;
+  /** The listener a connection reached: `lan`, `tailscale` or `primary`
+   * (`http.upgrade`). The phone names the two real legs it races the same way. */
+  transport?: string;
   /** How long the socket had been silent when it spoke again. */
   silentMs?: number;
   /** Named counters for one record (a reconcile's files and rows): the writer
@@ -84,6 +90,9 @@ export interface LogMetadata {
   durationMs?: number;
   /** `name=12ms×2/610KB;name=5ms`; the writer bounds it. */
   stages?: string;
+  /** The measured stage a request was in at one instant, e.g. the stage a
+   * cancellation interrupted (`rpc.cancelled`). */
+  stage?: string;
   /** The part of `durationMs` the stage breakdown did not cover. */
   unaccountedMs?: number;
   phaseReached?: string;
@@ -93,6 +102,8 @@ export interface LogMetadata {
   helloMs?: number;
   peerPath?: string;
   peerRelay?: string;
+  /** The listener a connection reached; the `transport` field of `http.upgrade`. */
+  transport?: string;
   silentMs?: number;
   /** Named integer counters, e.g. `{ files: 12, added: 1 }`. */
   counts?: Readonly<Record<string, number>>;
@@ -249,6 +260,7 @@ function normalizedFields(value: LogMetadata & { error?: unknown }, errorIsDescr
     ...(typeof value.code === "string" ? { code: boundedMessage(value.code).slice(0, 64) } : {}),
     ...(durationMs !== undefined ? { durationMs } : {}),
     ...(typeof value.stages === "string" ? { stages: boundedStages(value.stages) } : {}),
+    ...(typeof value.stage === "string" ? { stage: boundedDiagnosticID(value.stage).slice(0, 64) } : {}),
     ...(unaccountedMs !== undefined ? { unaccountedMs } : {}),
     ...(typeof value.phaseReached === "string" ? { phaseReached: boundedDiagnosticID(value.phaseReached).slice(0, 32) } : {}),
     ...(acceptToUpgradeMs !== undefined ? { acceptToUpgradeMs } : {}),
@@ -257,6 +269,7 @@ function normalizedFields(value: LogMetadata & { error?: unknown }, errorIsDescr
     ...(helloMs !== undefined ? { helloMs } : {}),
     ...(typeof value.peerPath === "string" ? { peerPath: boundedDiagnosticID(value.peerPath).slice(0, 32) } : {}),
     ...(typeof value.peerRelay === "string" ? { peerRelay: boundedDiagnosticID(value.peerRelay).slice(0, 32) } : {}),
+    ...(typeof value.transport === "string" ? { transport: boundedDiagnosticID(value.transport).slice(0, 32) } : {}),
     ...(silentMs !== undefined ? { silentMs } : {}),
     ...(value.counts ? { counts: boundedCounts(value.counts) } : {}),
     ...(error ? { error } : {}),

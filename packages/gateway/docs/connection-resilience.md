@@ -8,10 +8,25 @@ owner of accepted commands; mobile reconnect never replays a prompt blindly.
 
 - **Gateway outbound queue:** at most 8 MiB and 4,096 encoded frames per connection,
   including the active write. Exactly one frame enters `ws` at a time. Completion
-  releases both its payload reference and byte reservation. A peer exceeding
-  either limit loses request/subscription admission immediately; a one-second
-  forced-close deadline bounds a stalled close handshake. Other peers and
-  accepted domain commands continue independently.
+  releases both its payload reference and byte reservation. A newer session
+  summary replaces the unsent summary of that session, and a newer session
+  snapshot supersedes the unsent sequenced state of its own runtime generation
+  that it fully re-states, up to its own `eventSequence`, so a slow link carries
+  current state rather than every superseded revision of it. A superseded
+  sequence is never left uncovered: the surviving snapshot is sent as the
+  `session.rebaseline` carrying the whole snapshot and the connection's
+  installed `subscriptionToken`, which the phone installs as fresh authority
+  instead of resynchronizing, and a snapshot for a session this connection holds
+  no token for supersedes nothing. State is dropped only where that replacement
+  restores it: a sequenced frame whose effect no snapshot installation performs
+  (a failure receipt, a resource/structure/context revision bump, an editor
+  directive) is a fence, and it and every frame behind it are delivered in
+  order, as are frames of another runtime generation. The frame
+  already entering `ws` is never recalled, what a client receives stays in
+  enqueue order, and a dropped frame is not counted as outstanding. A peer
+  exceeding either limit loses request/subscription admission immediately; a
+  one-second forced-close deadline bounds a stalled close handshake. Other peers
+  and accepted domain commands continue independently.
 - **WebSocket admission:** live sockets cap at 32 globally and 4 per
   authenticated identity. A roaming or suspended phone leaves half-open sockets
   that heartbeat reaping retires only after three missed 25-second intervals,
@@ -288,7 +303,7 @@ keeps today's uncompressed frames.
 | `ping_timeout` with zero event-queue admission/high-water | The local event reducer did not overflow that epoch. Investigate transport/path or an unobserved process stall. |
 | Fast successful `session.open`, no `session.sync`, then client close / `decode_limit` | The client rejected response structure before sync. Compare `frameBytes`, `decodeLimit`, `decodeActual`, `decodeMaximum` and sanitized `decodePath`; a sub-megabyte response can still exceed the node ceiling. This is not proof of path loss. |
 | `event_overflow` with topic, count/byte limit, oldest age and dequeue timing | Mobile consumer pressure. Trace what held the consumer, including synchronization reads; do not merely enlarge the queue. |
-| `connection.outbound-capacity` | Actual server queue count/byte pressure. Inspect high-water marks, `wsBufferedBytes`, next-frame bytes and process memory. |
+| `connection.outbound-capacity` | Actual server queue count/byte pressure. Inspect high-water marks, `wsBufferedBytes`, `nextTopic`/`nextBytes` for the frame that did not fit, `oldestTopic` for the frame everything was waiting behind, and process memory. |
 | `http.request-capacity` / `http.connection-capacity`, or `http.upgrade` with `reason=request_capacity` / `connection_capacity` | Inspect the named global, identity, address or connection bound and retiring owners; one physical socket is not one request. The upgrade record names its bound in `reason` and carries the counts in its message. |
 | `connection.superseded` | The same identity reconnected while at its socket cap. Its logged `lastInboundAgeMs` shows how stale the replaced socket was; repeated supersession of fresh sockets suggests a client owning more concurrent sockets than the cap. A socket that had not said hello yet reports the supersession in its own `http.upgrade` (`reason=superseded`). |
 | `http.upgrade` with `outcome=abandoned` | The peer reached this Mac and opened the socket, then the attempt ended before hello (`phaseReached=handshake`; `helloMs` is how long it kept the phase open). `reason` names which side ended it: `peer_closed` the peer vanishing, `hello_timeout` the Gateway's own hello deadline (`GATEWAY_CONNECTION_POLICY.helloDeadlineMs`), `superseded` a newer connection from the same identity, `device_revoked` a revocation of the device, `shutting_down` a Gateway shutdown. A large `authMs` means the credential wait was slow, a large `acceptToUpgradeMs` means the request waited behind other HTTP work — neither is a path fault. |

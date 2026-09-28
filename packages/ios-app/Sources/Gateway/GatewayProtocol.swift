@@ -7,6 +7,34 @@ struct GatewayRequest: Encodable, Sendable {
     let params: JSONValue
 }
 
+/// The `cancel` control frame (protocol 6): this client no longer waits for the
+/// named request, so the Gateway may stop computing its answer. It has no reply.
+struct GatewayCancelFrame: Encodable, Sendable {
+    let type = "cancel"
+    let id: String
+}
+
+/// Reads whose answer nothing consumes once the caller abandons them, so the
+/// Gateway may abandon the work with them. Every entry only projects state and
+/// settles nothing durable. Accepted mutations and admitted prompts are never
+/// here: those keep their owner on the Gateway and settle durably, whatever the
+/// phone does with the wait.
+enum GatewayDisposableReadPolicy {
+    static let disposableReadMethods: Set<String> = [
+        "session.open",
+        "session.list",
+        "session.transcript",
+        "session.history.list",
+        "session.history.entry",
+        "session.search",
+        "model.list",
+        "provider.list",
+        "provider.usage"
+    ]
+
+    static func admits(_ method: String) -> Bool { disposableReadMethods.contains(method) }
+}
+
 struct GatewayResponse: Decodable, Sendable, Equatable {
     let type: String
     let id: String

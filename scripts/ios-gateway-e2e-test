@@ -447,8 +447,11 @@ run_test() {
   attempt_dir="$(mktemp -d "$run_root/results/$(date -u '+%Y%m%dT%H%M%SZ')-run.XXXXXX")"
   attempt_id="$(basename "$attempt_dir")"
   result_bundle="$attempt_dir/FocusedE2E.xcresult"
-  if run_bounded "results/$attempt_id/test" 65 "${TRON_IOS_E2E_RUN_TIMEOUT_SECONDS:-300}" \
-    "${TRON_IOS_E2E_RUN_NO_OUTPUT_SECONDS:-120}" "$result_bundle" \
+  # 600 s overall and 300 s of allowed silence: the C-1 file's 90 s blackhole
+  # leg plus its second outage are deliberately quiet for minutes at a time, and
+  # a timeout hides which leg hung.
+  if run_bounded "results/$attempt_id/test" 65 "${TRON_IOS_E2E_RUN_TIMEOUT_SECONDS:-600}" \
+    "${TRON_IOS_E2E_RUN_NO_OUTPUT_SECONDS:-300}" "$result_bundle" \
     xcodebuild test-without-building \
       -xctestrun "$xctestrun" \
       -destination "$destination" \

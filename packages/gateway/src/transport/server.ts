@@ -20,8 +20,10 @@ import { GatewayService, type ClientContext } from "./gateway-service.js";
 import { MIN_PROTOCOL_VERSION, PROTOCOL_VERSION } from "../version.js";
 import { SessionSyncBarrier, type BufferedSessionEncoding, type BufferedSessionEvent } from "./session-sync.js";
 import type { BrowserLiveViewRegistry } from "../display/browser-live-view.js";
-import { bytes, RequestSpan, runInRequestSpan, stage } from "./request-span.js";
+import { bytes, RequestSpan, runInRequestSpan, stage, wait } from "./request-span.js";
 import { TailscalePeerPaths, type PeerPathLookup, type PeerPathReader } from "./tailscale-peer.js";
+import { LanEndpoint, httpListenerOptions, type LanEndpointConfig, type LanListenerLimits } from "./lan-endpoint.js";
+import { isTailscaleAddress } from "../config.js";
 
 // Retain only recent former IDs while an active subscription is rekeyed. Older
 // IDs are stale control paths and may safely require a fresh session.open.
@@ -57,6 +59,25 @@ function rpcFailureLevel(error: unknown): "warning" | "error" {
 
 /** Per-RPC completions under this bound are debug detail; slower ones warn. */
 const SLOW_RPC_WARNING_MS = 1_000;
+/**
+ * The only methods a `cancel` frame may end (`C-6`). A disposable read computes
+ * an answer nothing consumes once its client stops waiting for it; an accepted
+ * mutation, an admitted prompt and `session.sync` all have an owner that must
+ * settle them whatever the client does with its wait, so a cancel for any other
+ * method is ignored. Mirrors the phone's disposable read policy, and the
+ * protocol section of the Gateway README lists exactly this set.
+ */
+const DISPOSABLE_READ_METHODS: ReadonlySet<string> = new Set([
+  "session.open",
+  "session.list",
+  "session.transcript",
+  "session.history.list",
+  "session.history.entry",
+  "session.search",
+  "model.list",
+  "provider.list",
+  "provider.usage",
+]);
 /** An upgrade that reaches hello within this bound is debug detail; every
  * abandoned or rejected upgrade, and any slower one, warns. */
 const UPGRADE_SLOW_WARNING_MS = 1_000;
@@ -90,6 +111,17 @@ export const HTTP_MAXIMUM_REQUESTS = 128;
 export const HTTP_MAXIMUM_REQUESTS_PER_IDENTITY = 16;
 export const HTTP_MAXIMUM_REQUESTS_PER_ADDRESS = 32;
 export const HTTP_MAXIMUM_REQUESTS_PER_CONNECTION = 8;
+// Both listeners this transport owns — the main one and the LAN lane — take
+// their bounds from here: the lane serves the same routes to the same peers out
+// of the same connection budget, so a slower bound there would let a peer that
+// has not signed in hold slots the phone's own leg needs.
+export const HTTP_LISTENER_LIMITS: LanListenerLimits = {
+  headersTimeout: HTTP_HEADERS_TIMEOUT_MS,
+  requestTimeout: HTTP_REQUEST_TIMEOUT_MS,
+  connectionsCheckingInterval: 1_000,
+  handshakeTimeout: HTTP_HEADERS_TIMEOUT_MS,
+  idleTimeout: HTTP_REQUEST_IDLE_TIMEOUT_MS,
+};
 
 export interface HttpTransportLease {
   identify(identity: string): void;
@@ -202,6 +234,44 @@ export interface ActiveSessionSynchronization {
   subscriptionToken: string;
   /** Updated if its canonical session forks while acknowledgement is pending. */
   sessionId: string;
+  /** Request IDs whose delivered response carried this barrier's token. A
+   * cancel for a `session.open` that was already answered revokes the barrier
+   * only once no other delivered response still carries it (`C-6`). */
+  deliveredRequests: Set<string>;
+}
+
+/**
+ * One shared `session.open` attempt per connection and session (`C-6`). A
+ * retried open joins it instead of failing as a duplicate, so the answer the
+ * first attempt is already computing is the one the retry receives, and the
+ * attempt is abandoned only when its last waiting request leaves: a cancellation
+ * that arrives while a retry still waits must not throw the retry's answer away.
+ */
+export interface SessionOpenFlight {
+  /** The request whose synchronization this attempt installs and owns. */
+  readonly requestId: string;
+  /** The shared attempt's signal; aborted when its last waiter leaves. */
+  readonly controller: AbortController;
+  /** The shared invocation, published by the request that created the flight. */
+  attempt?: Promise<JsonValue>;
+  /** Requests still waiting for this attempt's answer. */
+  waiters: number;
+  /** Set once a response carrying this attempt's result reached the client. */
+  answered?: boolean;
+  /** Releases the synchronization this attempt installed, registered by the
+   * request that owns its barrier while another request may still deliver it. */
+  releaseAbandoned?: () => void;
+}
+
+/** One admitted request, the owner of its abort signal and its span. */
+interface InFlightRpc {
+  readonly controller: AbortController;
+  readonly method: string;
+  readonly startedAt: number;
+  readonly span: RequestSpan;
+  /** Set with the stage it was in when an explicit `cancel` frame arrived. A
+   * socket retirement leaves it unset: that request reports `connectionClosed`. */
+  cancelledStage?: string;
 }
 
 interface SynchronizationCompletion {
@@ -214,14 +284,14 @@ interface SynchronizationCompletion {
 type SynchronizationOwner = SynchronizationCompletion;
 
 export function existingSessionOpenOwner(
-  pendingSessionOpens: ReadonlyMap<string, string>,
+  pendingSessionOpens: ReadonlyMap<string, { readonly requestId: string }>,
   synchronizations: ReadonlyMap<string, ActiveSessionSynchronization>,
   sessionId: string,
 ): string | undefined {
   // Only genuinely in-flight opens are rejected. An installed subscription is
   // not an open owner: beginSynchronization replaces it deterministically so
   // reconnecting clients always converge instead of deadlocking on conflict.
-  return pendingSessionOpens.get(sessionId)
+  return pendingSessionOpens.get(sessionId)?.requestId
     ?? synchronizations.get(sessionId)?.requestId;
 }
 
@@ -266,19 +336,91 @@ export interface OrderedOutboundQueueSnapshot {
   maximumBytes: number;
   frameHighWater: number;
   byteHighWater: number;
+  /** The topic of the oldest frame in the queue: the one the socket is writing
+   * or will write next, i.e. what everything behind it is waiting on. */
+  oldestTopic: string;
+}
+
+/** One encoded frame with the wire topic it carries and, when a newer frame can
+ * replace it in an unsent queue, what identifies the state it carries (`G-4`). */
+export interface OutboundFrame {
+  readonly encoded: string;
+  readonly bytes: number;
+  readonly topic: string;
+  /** Whole state a newer frame of the same kind replaces without covering a
+   * sequence: only a `session.summary`, which states its own revision. */
+  readonly key?: string;
+  /** A sequenced session frame's session and its per-session `eventSequence`. */
+  readonly sessionId?: string;
+  readonly sequence?: number;
+  /** The runtime generation that sequence belongs to. A replacement
+   * `RuntimeSlot` restarts `eventSequence` from zero, so a newer snapshot only
+   * covers the frames of its own generation. */
+  readonly runtimeGeneration?: string;
+  /** The gap-tolerant form of this frame. Superseding a sequenced frame is only
+   * allowed together with this: the client admits a `session.rebaseline` whose
+   * snapshot covers the sequences dropped with it
+   * (`SessionRebaselineAdmission`), where an exact-next snapshot would arrive
+   * as the gap the queue just made. */
+  readonly rebaseline?: () => OutboundFrame | undefined;
 }
 
 interface QueuedOutboundFrame {
   encoded: string;
   bytes: number;
+  topic: string;
+  key?: string;
+  sessionId?: string;
+  sequence?: number;
+  runtimeGeneration?: string;
 }
 
 type OutboundWrite = (encoded: string, completion: (error?: Error) => void) => void;
+
+const UNKNOWN_OUTBOUND_TOPIC = "other";
+
+/**
+ * The wire topics a `session.snapshot` — or an earlier `session.rebaseline`
+ * carrying one — fully re-states, so an unsent one may be dropped when a newer
+ * snapshot covers its sequence (`G-4`). Every other sequenced session frame
+ * does something installing a snapshot never does: a failure receipt restores
+ * the composer's draft and retires a submission, a revision bump reloads
+ * commands, context or the tree, and an editor directive pastes text. Those are
+ * fences: the queue never drops one, or anything behind it, across.
+ */
+const SNAPSHOT_STATED_TOPICS: ReadonlySet<string> = new Set([
+  "session.snapshot",
+  "session.rebaseline",
+  "session.progress",
+  "session.toolProgress",
+  "session.processActivity",
+  "session.extensionActivity",
+  "session.compaction",
+]);
+
+/** Whether a newer `session.snapshot`'s own state re-states one queued frame of
+ * the same session: its topic is one a snapshot installs, it belongs to the
+ * same runtime generation, and its sequence is one the snapshot covers. */
+function snapshotRestates(queued: QueuedOutboundFrame, frame: OutboundFrame): boolean {
+  return queued.runtimeGeneration === frame.runtimeGeneration
+    && queued.sequence !== undefined
+    && frame.sequence !== undefined
+    && queued.sequence <= frame.sequence
+    && SNAPSHOT_STATED_TOPICS.has(queued.topic);
+}
 
 /**
  * A connection-local ordered writer. Encoded frames remain bounded in
  * application memory and exactly one frame is handed to ws at a time, so a
  * legitimate same-turn synchronization burst cannot fill ws.bufferedAmount.
+ *
+ * A frame whose state a newer frame replaces queues once: the superseded frame
+ * is dropped unsent and the newer one keeps its own place in the queue, so a
+ * slow link is bounded by the state that is still worth sending rather than by
+ * how long it took. A session's sequenced state is superseded only where the
+ * `rebaseline` replacement that covers it re-states it, and only after the
+ * newest unsent frame of that session whose effect no snapshot restores. The
+ * backstop below is unchanged and still closes a connection that exceeds it.
  */
 export class OrderedOutboundQueue {
   private readonly frames: Array<QueuedOutboundFrame | undefined> = [];
@@ -295,25 +437,68 @@ export class OrderedOutboundQueue {
   constructor(
     private readonly maximumBytes: number,
     private readonly write: OutboundWrite,
-    private readonly overflow: (snapshot: OrderedOutboundQueueSnapshot, nextBytes: number) => void,
+    private readonly overflow: (snapshot: OrderedOutboundQueueSnapshot, nextBytes: number, nextTopic: string) => void,
     private readonly writeFailed: (error: Error, snapshot: OrderedOutboundQueueSnapshot) => void,
+    /** One frame this queue accepted, with the bytes it queued: a coalescing
+     * replacement reports itself, not the frame it replaced. */
+    private readonly accepted: (bytes: number) => void = () => {},
+    /** One superseded frame, reported where it is dropped. */
+    private readonly replaced: (bytes: number) => void = () => {},
     private readonly maximumFrames = 4_096,
   ) {}
 
-  enqueue(frame: string | { readonly encoded: string; readonly bytes: number }): boolean {
+  enqueue(frame: OutboundFrame): boolean {
     if (this.retired) return false;
-    const encoded = typeof frame === "string" ? frame : frame.encoded;
-    const bytes = typeof frame === "string" ? Buffer.byteLength(encoded, "utf8") : frame.bytes;
-    if (this.frames.length - this.head >= this.maximumFrames
-      || bytes > this.maximumBytes || this.queuedBytes > this.maximumBytes - bytes) {
+    // The frame ws is already writing cannot be recalled, so replacement looks
+    // only at frames still queued behind it. The newest frame of a state is
+    // appended where it was enqueued, after everything already queued: a
+    // delivered sequence is therefore always a subsequence of the enqueue
+    // sequence, and no frame ever overtakes an earlier one.
+    const candidates = this.supersededIndices(frame);
+    const replacement = candidates.length > 0 && frame.sequence !== undefined ? frame.rebaseline?.() : undefined;
+    // A sequenced frame is dropped only together with the replacement that
+    // covers it; an unsequenced one carries its own revision and needs no
+    // cover. Without the replacement this queue keeps every frame, so nothing
+    // it delivers can leave a gap it created.
+    const superseded = frame.sequence === undefined || replacement !== undefined ? candidates : [];
+    const entry = replacement ?? frame;
+    const releasedBytes = superseded.reduce((total, index) => total + (this.frames[index]?.bytes ?? 0), 0);
+    if (this.frames.length - this.head - superseded.length + 1 > this.maximumFrames
+      || entry.bytes > this.maximumBytes
+      || this.queuedBytes - releasedBytes > this.maximumBytes - entry.bytes) {
       const snapshot = this.snapshot();
       this.retire();
-      this.overflow(snapshot, bytes);
+      this.overflow(snapshot, entry.bytes, entry.topic);
       return false;
     }
-    this.frames.push({ encoded, bytes });
-    this.queuedBytes += bytes;
+    // `superseded` is ascending, so each earlier splice shifts the next index
+    // back by the frames already removed: drops are reported in queue order.
+    let removed = 0;
+    for (const index of superseded) {
+      const dropped = this.frames[index - removed];
+      if (dropped === undefined) continue;
+      // Payload and byte reservation are released together, at the same
+      // boundary the completed-frame path uses. A dropped frame is no longer
+      // outstanding, so the close record's completed/accepted frame counts keep
+      // describing frames this connection still owed its peer.
+      this.frames.splice(index - removed, 1);
+      this.queuedBytes -= dropped.bytes;
+      this.acceptedFrames -= 1;
+      this.replaced(dropped.bytes);
+      removed += 1;
+    }
+    this.frames.push({
+      encoded: entry.encoded,
+      bytes: entry.bytes,
+      topic: entry.topic,
+      ...(entry.key === undefined ? {} : { key: entry.key }),
+      ...(entry.sessionId === undefined ? {} : { sessionId: entry.sessionId }),
+      ...(entry.sequence === undefined ? {} : { sequence: entry.sequence }),
+      ...(entry.runtimeGeneration === undefined ? {} : { runtimeGeneration: entry.runtimeGeneration }),
+    });
+    this.queuedBytes += entry.bytes;
     this.acceptedFrames += 1;
+    this.accepted(entry.bytes);
     this.frameHighWater = Math.max(this.frameHighWater, this.frames.length - this.head);
     this.byteHighWater = Math.max(this.byteHighWater, this.queuedBytes);
     this.drain();
@@ -331,7 +516,45 @@ export class OrderedOutboundQueue {
       maximumBytes: this.maximumBytes,
       frameHighWater: this.frameHighWater,
       byteHighWater: this.byteHighWater,
+      oldestTopic: this.frames[this.head]?.topic ?? UNKNOWN_OUTBOUND_TOPIC,
     };
+  }
+
+  /** The unsent frames a newer frame replaces: a sequenced frame covers the
+   * same session's frames its own state re-states, an unsequenced one the
+   * newest frame with its key. */
+  private supersededIndices(frame: OutboundFrame): number[] {
+    // The frame ws is already writing cannot be recalled.
+    const first = this.writeActive ? this.head + 1 : this.head;
+    if (frame.sessionId !== undefined && frame.sequence !== undefined) {
+      // A snapshot re-states whole state, not every effect. A frame nothing of
+      // its state restores is a fence, and dropping anything before a fence
+      // would deliver a later frame across it, so only the run of this
+      // session's frames after the newest fence is covered.
+      let fence = first;
+      for (let index = first; index < this.frames.length; index += 1) {
+        const queued = this.frames[index];
+        if (queued === undefined || queued.sessionId !== frame.sessionId) continue;
+        if (!snapshotRestates(queued, frame)) fence = index + 1;
+      }
+      const superseded: number[] = [];
+      for (let index = fence; index < this.frames.length; index += 1) {
+        if (this.frames[index]?.sessionId === frame.sessionId) superseded.push(index);
+      }
+      return superseded;
+    }
+    if (frame.key === undefined) return [];
+    const index = this.unsentFrameWithKey(frame.key, first);
+    return index < 0 ? [] : [index];
+  }
+
+  /** The newest unsent frame carrying `key`, searched from the tail: a frame
+   * enqueued after the last frame of that state is what the search skips. */
+  private unsentFrameWithKey(key: string, first: number): number {
+    for (let index = this.frames.length - 1; index >= first; index -= 1) {
+      if (this.frames[index]?.key === key) return index;
+    }
+    return -1;
   }
 
   whenIdle(waiter: () => void): void {
@@ -413,9 +636,16 @@ interface PeerDiagnostics {
 /** How far an upgrade got, in the order its phases run. */
 type UpgradePhase = "request" | "auth" | "handshake" | "hello";
 
+/** Which listener accepted a connection: the LAN endpoint (E-3a), the main
+ * listener at a Tailscale address, or the main listener at any other address
+ * (the developer loopback default). The phone names the same two real legs. */
+export type ConnectionTransport = "lan" | "tailscale" | "primary";
+
 /** One `http.upgrade` record is written per upgrade, at whichever point it ends:
  * hello, a refusal, or the peer leaving before hello. */
 interface UpgradeTrace {
+  /** The listener the upgrade reached, so the record says which leg it used. */
+  transport: ConnectionTransport;
   /** The TCP accept, before Node parsed the upgrade request. */
   acceptAt: number;
   /** The upgrade handler entry; the auth phase is measured from here. */
@@ -508,7 +738,7 @@ interface Connection {
   presentationOnly: boolean;
   terminals: Set<string>;
   inFlight: Set<string>;
-  requestControllers: Map<string, AbortController>;
+  requestControllers: Map<string, InFlightRpc>;
   synchronizations: Map<string, ActiveSessionSynchronization>;
   subscriptionTokens: Map<string, string>;
   // A fork may occur after session.open but before session.sync. Retain the
@@ -516,8 +746,8 @@ interface Connection {
   rekeyedSessionIds: Map<string, string>;
   synchronizationBytes: number;
   // Reserved before asynchronous service invocation so overlapping opens for
-  // the same connection/session are rejected deterministically.
-  pendingSessionOpens: Map<string, string>;
+  // the same connection/session share their attempt instead of both running.
+  pendingSessionOpens: Map<string, SessionOpenFlight>;
   outbound: OrderedOutboundQueue;
   closeInitiated: boolean;
   workRetired: boolean;
@@ -559,6 +789,88 @@ interface PreparedOutboundFrame extends BufferedSessionEncoding {
   readonly nodes?: number;
 }
 
+/** What `outboundFrameIdentity` adds to one encoded frame (`G-4`). */
+interface OutboundFrameIdentity {
+  readonly topic: string;
+  readonly key?: string;
+  readonly sessionId?: string;
+  readonly sequence?: number;
+  readonly runtimeGeneration?: string;
+  readonly rebaseline?: () => OutboundFrame | undefined;
+}
+
+/**
+ * The wire topic of one outbound frame, and — when a newer frame can replace it
+ * in an unsent queue — what identifies the state it carries (`G-4`). Only a
+ * `session.snapshot` supersedes sequenced state: it is the one frame that
+ * carries the whole current state of its session, so the newest of them can
+ * stand in for the sequences the queue dropped with it. A session summary is
+ * replaced by key alone, because it states its own revision and carries no
+ * sequence. A frame with neither is always delivered.
+ */
+function outboundFrameIdentity(
+  connection: Connection,
+  value: unknown,
+  prepared: PreparedOutboundFrame,
+  maximumBytes: number,
+): OutboundFrameIdentity {
+  // An oversized projection is sent as a compact resync notice instead: that
+  // notice is its own frame and is never superseded by the projection it
+  // replaced.
+  if (prepared.fallback) return { topic: "transport.resyncRequired" };
+  const frame = typeof value === "object" && value !== null ? value as Record<string, unknown> : {};
+  const topic = typeof frame.topic === "string" ? frame.topic : typeof frame.type === "string" ? frame.type : UNKNOWN_OUTBOUND_TOPIC;
+  const payload = typeof frame.payload === "object" && frame.payload !== null ? frame.payload as Record<string, unknown> : {};
+  const sessionId = typeof frame.sessionId === "string" ? frame.sessionId : undefined;
+  if (topic === "session.summary") {
+    // A summary is a global event; the session it describes is its payload.
+    const summarySessionId = typeof payload.sessionId === "string" ? payload.sessionId : undefined;
+    return summarySessionId === undefined ? { topic } : { topic, key: `session.summary:${summarySessionId}` };
+  }
+  if (sessionId === undefined) return { topic };
+  const sequence = typeof payload.eventSequence === "number" ? payload.eventSequence : undefined;
+  if (sequence === undefined) return { topic };
+  // Every sequenced session frame is described by the session, the runtime
+  // generation its sequence belongs to and that sequence, so a newer snapshot
+  // knows which of its session's frames its own state re-states and which ones
+  // are fences it must not be dropped across (`SNAPSHOT_STATED_TOPICS`).
+  const runtimeGeneration = typeof payload.runtimeGeneration === "string" ? payload.runtimeGeneration : undefined;
+  const sequenced: OutboundFrameIdentity = {
+    topic, sessionId, sequence,
+    ...(runtimeGeneration === undefined ? {} : { runtimeGeneration }),
+  };
+  if (topic !== "session.snapshot") return sequenced;
+  // Superseding a snapshot is only safe when the client can still accept what
+  // follows: the replacement is a `session.rebaseline`, which the phone admits
+  // as fresh authority even when its `eventSequence` jumps forward
+  // (`SessionRebaselineAdmission`). It needs the subscription credential the
+  // client installed, so a session this connection holds no token for
+  // supersedes nothing.
+  const subscriptionToken = connection.subscriptionTokens.get(sessionId);
+  if (subscriptionToken === undefined) return sequenced;
+  const rebaseline = (): OutboundFrame | undefined => {
+    const encoded = stage("frame.serialize", () => prepareOutboundFrame({
+      type: "event",
+      topic: "session.rebaseline",
+      sessionId,
+      payload: { reason: "superseded snapshot", subscriptionToken, snapshot: payload },
+    }, maximumBytes));
+    if (!encoded) return undefined;
+    bytes("frame.serialize", encoded.outputBytes);
+    return {
+      encoded: encoded.output,
+      bytes: encoded.outputBytes,
+      // A rebaseline too large to encode is still the frame the client needs to
+      // fail closed: the compact notice retires its subscription instead.
+      topic: encoded.fallback ? "transport.resyncRequired" : "session.rebaseline",
+      sessionId,
+      sequence,
+      ...(runtimeGeneration === undefined ? {} : { runtimeGeneration }),
+    };
+  };
+  return { ...sequenced, rebaseline };
+}
+
 function prepareOutboundFrame(value: unknown, maximum: number): PreparedOutboundFrame | undefined {
   const encoded = JSON.stringify(value);
   if (encoded === undefined) return undefined;
@@ -594,6 +906,21 @@ function prepareOutboundFrame(value: unknown, maximum: number): PreparedOutbound
   return outputBytes <= maximum
     ? { encoded, bytes, output: fallback, outputBytes, fallback: true, nodes }
     : undefined;
+}
+
+/** A server's `connection` event is typed as a `Duplex`, but the accepted
+ * socket is the net.Socket whose address the per-address bound counts. */
+function acceptedSocketAddress(socket: Duplex): string {
+  const address = (socket as { remoteAddress?: unknown }).remoteAddress;
+  return typeof address === "string" ? address : "unknown";
+}
+
+/** The source port of an accepted socket, or undefined when the socket is not a
+ * TCP one. It joins a TLS socket to the socket it wrapped: the two report the
+ * same peer, and only one live connection holds an address and port pair. */
+function acceptedSocketPort(socket: Duplex): number | undefined {
+  const port = (socket as { remotePort?: unknown }).remotePort;
+  return typeof port === "number" ? port : undefined;
 }
 
 async function* completeRequestBody(request: IncomingMessage): AsyncGenerator<Buffer> {
@@ -653,6 +980,11 @@ export class GatewayServer {
   /** One resource sample reads the runtime inventory; a slow one must not
    * overlap the next minute's window. */
   private resourceSampleInFlight = false;
+  /** The second, TLS-only listener for the private LAN; undefined when the
+   * Gateway was composed without one. */
+  private readonly lanEndpoint: LanEndpoint | undefined;
+  /** The main listener's leg, named on every upgrade record. */
+  private readonly primaryTransport: ConnectionTransport;
   /** Whether the current run of sampler faults has already been reported. */
   private resourceSampleFailureReported = false;
   private ready = false;
@@ -686,11 +1018,14 @@ export class GatewayServer {
       stallSampler?: StallSampler;
       resourceSampler?: ResourceSampler;
       peerPathReader?: PeerPathReader;
+      /** The pinned LAN listener (E-3a). Absent means no second listener. */
+      lanEndpoint?: LanEndpointConfig;
     },
   ) {
     this.stallSampler = options.stallSampler ?? new StallSampler();
     this.resourceSampler = options.resourceSampler ?? new ResourceSampler();
     this.peerPaths = options.peerPathReader ?? new TailscalePeerPaths();
+    this.primaryTransport = isTailscaleAddress(options.host) ? "tailscale" : "primary";
     // Sampled off every record path: the heartbeat keeps this current, and a
     // phone that reconnects in the first interval still carries host evidence.
     this.stallSampler.refreshHostSample();
@@ -702,41 +1037,33 @@ export class GatewayServer {
       options.maximumHttpRequests,
       options.maximumHttpRequestsPerIdentity,
     );
-    this.server = createServer({
-      headersTimeout: HTTP_HEADERS_TIMEOUT_MS,
-      requestTimeout: HTTP_REQUEST_TIMEOUT_MS,
-      connectionsCheckingInterval: 1_000,
-    }, (request, response) => void this.handleHttp(request, response));
-    this.server.timeout = HTTP_REQUEST_IDLE_TIMEOUT_MS;
-    this.server.on("connection", (socket) => {
-      const address = socket.remoteAddress ?? "unknown";
-      const addressConnections = this.httpConnectionsByAddress.get(address) ?? 0;
-      if (this.httpSockets.size >= maximumHttpConnections
-        || addressConnections >= HTTP_MAXIMUM_CONNECTIONS_PER_ADDRESS || this.shuttingDown) {
-        this.options.logger.log("warning", `Rejected HTTP connection at capacity (connections=${this.httpSockets.size} maximumConnections=${maximumHttpConnections} addressConnections=${addressConnections} maximumPerAddress=${HTTP_MAXIMUM_CONNECTIONS_PER_ADDRESS})`, {
-          event: "http.connection-capacity", source: "transport",
-        });
-        socket.destroy();
-        return;
-      }
-      this.httpSockets.add(socket);
-      this.httpSocketAcceptedAt.set(socket, performance.now());
-      this.httpConnectionsByAddress.set(address, addressConnections + 1);
-      socket.once("close", () => {
-        this.httpSockets.delete(socket);
-        // `httpSocketAcceptedAt` is a WeakMap: the accept time it holds for this
-        // socket's upgrade is released with the socket, so it needs no delete.
-        const count = this.httpConnectionsByAddress.get(address)!;
-        if (count === 1) this.httpConnectionsByAddress.delete(address);
-        else this.httpConnectionsByAddress.set(address, count - 1);
+    // Both listeners take their bounds from one object: the lane serves the
+    // same routes to the same peers out of the same connection budget.
+    const listenerLimits = HTTP_LISTENER_LIMITS;
+    this.server = createServer(httpListenerOptions(listenerLimits), (request, response) => void this.handleHttp(request, response, this.primaryTransport));
+    this.server.timeout = listenerLimits.idleTimeout;
+    this.server.on("connection", (socket) => this.admitHttpConnection(socket, maximumHttpConnections));
+    // The LAN listener shares this transport's admission, capacity, heartbeat,
+    // revocation and hello; only its address, its certificate and the routes it
+    // refuses are its own.
+    if (options.lanEndpoint) {
+      this.lanEndpoint = new LanEndpoint({
+        ...options.lanEndpoint,
+        logger: options.logger,
+        port: options.port,
+        listenerLimits,
+        onConnection: (socket) => this.admitHttpConnection(socket, maximumHttpConnections),
+        onSecureConnection: (socket) => this.adoptAcceptedSocketTime(socket),
+        onRequest: (request, response) => void this.handleHttp(request, response, "lan"),
+        onUpgrade: (request, socket, head) => void this.handleUpgrade(request, socket, head, "lan"),
       });
-    });
+    }
     // maxPayload bounds each inbound message after inflation as well as on the wire.
     this.localSockets = new WebSocketServer({ noServer: true, maxPayload: options.maxFrameBytes, perMessageDeflate: false });
     this.pairedSockets = new WebSocketServer({
       noServer: true, maxPayload: options.maxFrameBytes, perMessageDeflate: PAIRED_PER_MESSAGE_DEFLATE,
     });
-    this.server.on("upgrade", (request, socket, head) => void this.handleUpgrade(request, socket, head));
+    this.server.on("upgrade", (request, socket, head) => void this.handleUpgrade(request, socket, head, this.primaryTransport));
     this.heartbeat = setInterval(() => {
       const heartbeatAt = performance.now();
       const timerDelayMs = heartbeatTimerDelay(heartbeatAt - this.lastHeartbeatAt);
@@ -792,6 +1119,48 @@ export class GatewayServer {
     // one minute is the cadence the sampler's volume estimate assumes.
     this.resourceTimer = setInterval(() => void this.publishResources(), RESOURCE_SAMPLE_INTERVAL_MS);
     this.resourceTimer.unref();
+  }
+
+  /** Every physical socket of every listener enters here, so the capacity bound
+   * counts the Gateway's whole HTTP surface, not one address. */
+  private admitHttpConnection(socket: Duplex, maximumHttpConnections: number): void {
+    const address = acceptedSocketAddress(socket);
+    const addressConnections = this.httpConnectionsByAddress.get(address) ?? 0;
+    if (this.httpSockets.size >= maximumHttpConnections
+      || addressConnections >= HTTP_MAXIMUM_CONNECTIONS_PER_ADDRESS || this.shuttingDown) {
+      this.options.logger.log("warning", `Rejected HTTP connection at capacity (connections=${this.httpSockets.size} maximumConnections=${maximumHttpConnections} addressConnections=${addressConnections} maximumPerAddress=${HTTP_MAXIMUM_CONNECTIONS_PER_ADDRESS})`, {
+        event: "http.connection-capacity", source: "transport",
+      });
+      socket.destroy();
+      return;
+    }
+    this.httpSockets.add(socket);
+    this.httpSocketAcceptedAt.set(socket, performance.now());
+    this.httpConnectionsByAddress.set(address, addressConnections + 1);
+    socket.once("close", () => {
+      this.httpSockets.delete(socket);
+      // `httpSocketAcceptedAt` is a WeakMap: the accept time it holds for this
+      // socket's upgrade is released with the socket, so it needs no delete.
+      const count = this.httpConnectionsByAddress.get(address)!;
+      if (count === 1) this.httpConnectionsByAddress.delete(address);
+      else this.httpConnectionsByAddress.set(address, count - 1);
+    });
+  }
+
+  /** Carries the accept time recorded at `connection` to the `TLSSocket` a TLS
+   * listener later hands the upgrade handler: `tls.Server` does not give the
+   * wrapped socket back, and a lookup that misses reports zero elapsed time for
+   * every lane upgrade — exactly the TLS handshake the field exists to show. */
+  private adoptAcceptedSocketTime(socket: Duplex): void {
+    const address = acceptedSocketAddress(socket);
+    const port = acceptedSocketPort(socket);
+    if (port === undefined) return;
+    for (const accepted of this.httpSockets) {
+      if (acceptedSocketPort(accepted) !== port || acceptedSocketAddress(accepted) !== address) continue;
+      const acceptedAt = this.httpSocketAcceptedAt.get(accepted);
+      if (acceptedAt !== undefined) this.httpSocketAcceptedAt.set(socket, acceptedAt);
+      return;
+    }
   }
 
   private async publishResources(): Promise<void> {
@@ -851,6 +1220,9 @@ export class GatewayServer {
         });
       });
       this.options.logger.log("info", "Gateway listener bound; startup warmup beginning", { event: "gateway.bound", source: "transport" });
+      // The LAN listener binds after the main one so a LAN failure can never
+      // cost the Gateway its primary surface; `start` never throws.
+      await this.lanEndpoint?.start();
       await afterBind();
       // A signal may close the transport while warmup is suspended. Never let
       // that in-flight callback publish readiness after shutdown has begun.
@@ -918,6 +1290,66 @@ export class GatewayServer {
         connection.rekeyedSessionIds.delete(oldest);
       }
     }
+  }
+
+  /** Resolve a session ID through this connection's rekey aliases. */
+  private resolveSessionId(connection: Connection, sessionId: string): string {
+    const seen = new Set<string>();
+    let current = sessionId;
+    while (!seen.has(current)) {
+      seen.add(current);
+      const replacement = connection.rekeyedSessionIds.get(current);
+      if (replacement === undefined) return current;
+      current = replacement;
+    }
+    return sessionId;
+  }
+
+  /** Drop this connection's rekey aliases that name the given session. */
+  private clearRekeyedSessionIds(connection: Connection, sessionId: string): void {
+    for (const [former, current] of connection.rekeyedSessionIds) {
+      if (former === sessionId || current === sessionId) connection.rekeyedSessionIds.delete(former);
+    }
+  }
+
+  /** Revoke one installed subscription with its pending barrier and every
+   * connection-local projection of that session. */
+  private revokeInstalledSubscription(connection: Connection, sessionId: string, token: string): boolean {
+    sessionId = this.resolveSessionId(connection, sessionId);
+    // The installed token is the ownership proof. The synchronization map is
+    // only a pending barrier and may already have been removed after a
+    // compact resync fallback was enqueued.
+    if (connection.subscriptionTokens.get(sessionId) !== token) return false;
+    const synchronization = connection.synchronizations.get(sessionId);
+    if (synchronization) {
+      clearTimeout(synchronization.timeout);
+      synchronization.barrier.abort(synchronization.requestId);
+      connection.synchronizations.delete(sessionId);
+    }
+    connection.subscriptionTokens.delete(sessionId);
+    this.clearRekeyedSessionIds(connection, sessionId);
+    releaseSessionTerminals(
+      connection.terminals,
+      sessionId,
+      (terminalId, ownerSessionId) => this.options.service.terminalBelongsToSession(terminalId, ownerSessionId),
+    );
+    this.options.sessions.unsubscribe(connection.id, sessionId);
+    this.options.service.releaseSessionProcessTranscripts?.(sessionId, connection.id, token);
+    return true;
+  }
+
+  /** Revoke one pending synchronization, if this connection still owns it. A
+   * later session.open may have replaced this request's owner; in that case
+   * only the current token may revoke the runtime subscription. */
+  private revokeSynchronization(
+    connection: Connection,
+    sessionId: string,
+    synchronization: ActiveSessionSynchronization,
+  ): boolean {
+    sessionId = this.resolveSessionId(connection, sessionId);
+    if (connection.synchronizations.get(sessionId) !== synchronization
+        || connection.subscriptionTokens.get(sessionId) !== synchronization.subscriptionToken) return false;
+    return this.revokeInstalledSubscription(connection, sessionId, synchronization.subscriptionToken);
   }
 
   broadcastSession(sessionId: string, topic: string, payload: JsonValue): void {
@@ -1032,7 +1464,7 @@ export class GatewayServer {
     }
   }
 
-  private async handleHttp(request: IncomingMessage, response: ServerResponse): Promise<void> {
+  private async handleHttp(request: IncomingMessage, response: ServerResponse, transport: ConnectionTransport): Promise<void> {
     // Node's server timeout covers idle request/socket time, while this
     // response timeout also retires a stream stalled after its headers were
     // written. Route leases still own exact reader/viewer release.
@@ -1075,9 +1507,14 @@ export class GatewayServer {
     try {
       const url = new URL(request.url ?? "/", `http://${request.headers.host ?? "localhost"}`);
       if (request.method === "GET" && url.pathname === "/health") {
+        const status = this.shuttingDown ? "stopping" : this.ready ? "ok" : this.startupPhase;
+        // The LAN listener answers the health check with its status alone: any
+        // device on the same network can reach it unauthenticated, and build
+        // and revision metadata is not what a health check owes it (E-3a).
+        if (transport === "lan") return sendJson(response, this.ready && !this.shuttingDown ? 200 : 503, { status });
         const info = this.options.service.info() as Record<string, JsonValue>;
         return sendJson(response, this.ready && !this.shuttingDown ? 200 : 503, {
-          status: this.shuttingDown ? "stopping" : this.ready ? "ok" : this.startupPhase,
+          status,
           gatewayVersion: info.gatewayVersion,
           protocolVersion: info.protocolVersion,
           minProtocolVersion: info.minProtocolVersion,
@@ -1090,6 +1527,9 @@ export class GatewayServer {
         return sendJson(response, 503, { error: { code: "busy", message: "Gateway is starting", retryable: true } });
       }
       if (request.method === "POST" && url.pathname === "/v1/pair") {
+        // Pairing is first contact, and it stays on the main listener: the LAN
+        // leg serves the socket and authenticated routes only (E-3a).
+        if (transport === "lan") return sendJson(response, 404, { error: { code: "not_found", message: "Route not found" } });
         const key = request.socket.remoteAddress ?? "unknown";
         if (!this.pairingLimiter.admit(key)) throw new GatewayError("unauthenticated", "Too many pairing attempts; wait before retrying");
         const parsed: unknown = JSON.parse((await readBoundedBody(request, 16_384)).toString("utf8"));
@@ -1365,10 +1805,11 @@ export class GatewayServer {
     sendJson(response, 404, { error: { code: "not_found", message: "Route not found" } });
   }
 
-  private async handleUpgrade(request: IncomingMessage, socket: Duplex, head: Buffer): Promise<void> {
+  private async handleUpgrade(request: IncomingMessage, socket: Duplex, head: Buffer, transport: ConnectionTransport): Promise<void> {
     const remoteAddress = request.socket.remoteAddress ?? "unknown";
     // One record per upgrade, written wherever this attempt ends.
     const trace: UpgradeTrace = {
+      transport,
       acceptAt: this.httpSocketAcceptedAt.get(socket) ?? performance.now(),
       startedAt: performance.now(),
       authMs: null,
@@ -1551,6 +1992,7 @@ export class GatewayServer {
       `Socket upgrade ${outcome} at ${phaseReached} after ${totalMs}ms (acceptToUpgrade=${acceptToUpgradeMs}ms auth=${authMs}ms handshake=${handshakeMs}ms hello=${helloMs}ms; ${detail})`,
       {
         event: "http.upgrade", source: "transport", outcome, phaseReached, reason: ending.reason,
+        transport: trace.transport,
         acceptToUpgradeMs, authMs, handshakeMs, helloMs,
         ...(trace.connectionId === undefined ? {} : { connectionId: trace.connectionId }),
         ...ending.peer,
@@ -1566,11 +2008,11 @@ export class GatewayServer {
         if (!error) connection.lastWriteProgressAt = performance.now();
         completion(error);
       }),
-      (snapshot, nextBytes) => {
+      (snapshot, nextBytes, nextTopic) => {
         if (connection.closeInitiated) return;
         this.options.logger.log(
           "warning",
-          `Closing client ${connection.id} at outbound queue capacity (queuedFrames=${snapshot.queuedFrames} queuedBytes=${snapshot.queuedBytes} maximumFrames=${snapshot.maximumFrames} maximumBytes=${snapshot.maximumBytes} frameHighWater=${snapshot.frameHighWater} byteHighWater=${snapshot.byteHighWater} wsBufferedBytes=${socket.bufferedAmount} nextBytes=${nextBytes}; ${this.pressureDiagnostic()})`,
+          `Closing client ${connection.id} at outbound queue capacity (queuedFrames=${snapshot.queuedFrames} queuedBytes=${snapshot.queuedBytes} maximumFrames=${snapshot.maximumFrames} maximumBytes=${snapshot.maximumBytes} frameHighWater=${snapshot.frameHighWater} byteHighWater=${snapshot.byteHighWater} oldestTopic=${snapshot.oldestTopic} nextTopic=${nextTopic} nextBytes=${nextBytes} wsBufferedBytes=${socket.bufferedAmount}; ${this.pressureDiagnostic()})`,
           { event: "connection.outbound-capacity", source: "transport", connectionId: connection.id, ...connection.peer },
         );
         this.closeFailedConnection(connection, 1013, "client outbound capacity exceeded");
@@ -1586,6 +2028,8 @@ export class GatewayServer {
         this.retireConnectionWork(connection);
         socket.terminate();
       },
+      (bytes) => this.resourceSampler.recordOutboundBytes(bytes),
+      (bytes) => this.resourceSampler.recordOutboundCoalesced(bytes),
     );
     connection = {
       id: randomUUID(),
@@ -1715,6 +2159,12 @@ export class GatewayServer {
     }
 
     if (frame.type !== "request" || typeof frame.id !== "string" || typeof frame.method !== "string") {
+      // A `cancel` frame is a control frame with no answer: the peer already
+      // stopped waiting for the request it names, so there is nobody to tell.
+      if (frame.type === "cancel") {
+        if (typeof frame.id === "string") this.cancelInflightRequest(connection, frame.id);
+        return;
+      }
       this.send(connection, { type: "response", id: typeof frame.id === "string" ? frame.id : "invalid", ok: false, error: publicError(new GatewayError("invalid_request", "Malformed request envelope")) });
       return;
     }
@@ -1733,7 +2183,12 @@ export class GatewayServer {
       && typeof (frame.params as Record<string, unknown>).sessionId === "string"
       ? (frame.params as Record<string, unknown>).sessionId as string
       : undefined;
+    let sessionOpenFlight: SessionOpenFlight | undefined;
     if (sessionOpenID !== undefined) {
+      const pending = connection.pendingSessionOpens.get(sessionOpenID);
+      if (pending !== undefined && pending.requestId !== frame.id) {
+        return this.joinSessionOpen(connection, frame, pending);
+      }
       const owner = existingSessionOpenOwner(
         connection.pendingSessionOpens,
         connection.synchronizations,
@@ -1748,19 +2203,26 @@ export class GatewayServer {
         });
         return;
       }
-      connection.pendingSessionOpens.set(sessionOpenID, frame.id);
+      sessionOpenFlight = { requestId: frame.id, controller: new AbortController(), waiters: 1 };
+      connection.pendingSessionOpens.set(sessionOpenID, sessionOpenFlight);
     }
     connection.inFlight.add(frame.id);
     const requestController = new AbortController();
     const admittedSubscriptionIds = new Set(connection.subscriptionTokens.keys());
     const admittedTerminalIds = new Set(connection.terminals);
-    connection.requestControllers.set(frame.id, requestController);
     const requestId = frame.id;
     const diagnosticID = diagnosticRequestID(requestId);
     const rpcStartedAt = performance.now();
     // One span per admitted request. Its breakdown rides on the rpc.completed
     // record below, so a slow request names the work that held it.
     const requestSpan = new RequestSpan();
+    const inFlightRpc: InFlightRpc = {
+      controller: requestController,
+      method: frame.method,
+      startedAt: rpcStartedAt,
+      span: requestSpan,
+    };
+    connection.requestControllers.set(frame.id, inFlightRpc);
     const params = frame.params && typeof frame.params === "object" && !Array.isArray(frame.params)
       ? frame.params as Record<string, unknown>
       : {};
@@ -1770,56 +2232,17 @@ export class GatewayServer {
       ...(typeof params.commandId === "string" ? { commandId: params.commandId } : {}),
     };
     let rpcOutcome: "success" | "failure" = "failure";
+    // Whether the session-open attempt itself produced a result, before any
+    // response of this request was written. A synchronization installed by an
+    // attempt that produced nothing is this request's to release.
+    let attemptSucceeded = false;
     const synchronizationOwners: SynchronizationOwner[] = [];
     const synchronizationCompletions: SynchronizationCompletion[] = [];
     let responseAttempted = false;
-    const resolveSessionId = (sessionId: string): string => {
-      const seen = new Set<string>();
-      let current = sessionId;
-      while (!seen.has(current)) {
-        seen.add(current);
-        const replacement = connection.rekeyedSessionIds.get(current);
-        if (replacement === undefined) return current;
-        current = replacement;
-      }
-      return sessionId;
-    };
-    const clearRekeyedSessionIds = (sessionId: string): void => {
-      for (const [former, current] of connection.rekeyedSessionIds) {
-        if (former === sessionId || current === sessionId) connection.rekeyedSessionIds.delete(former);
-      }
-    };
-    const revokeInstalledSubscription = (sessionId: string, token: string): boolean => {
-      sessionId = resolveSessionId(sessionId);
-      // The installed token is the ownership proof. The synchronization map is
-      // only a pending barrier and may already have been removed after a
-      // compact resync fallback was enqueued.
-      if (connection.subscriptionTokens.get(sessionId) !== token) return false;
-      const synchronization = connection.synchronizations.get(sessionId);
-      if (synchronization) {
-        clearTimeout(synchronization.timeout);
-        synchronization.barrier.abort(synchronization.requestId);
-        connection.synchronizations.delete(sessionId);
-      }
-      connection.subscriptionTokens.delete(sessionId);
-      clearRekeyedSessionIds(sessionId);
-      releaseSessionTerminals(
-        connection.terminals,
-        sessionId,
-        (terminalId, ownerSessionId) => this.options.service.terminalBelongsToSession(terminalId, ownerSessionId),
-      );
-      this.options.sessions.unsubscribe(connection.id, sessionId);
-      this.options.service.releaseSessionProcessTranscripts?.(sessionId, connection.id, token);
-      return true;
-    };
-    const revokeSynchronization = (sessionId: string, synchronization: ActiveSessionSynchronization): boolean => {
-      sessionId = resolveSessionId(sessionId);
-      // A later session.open may have replaced this request's owner. In that
-      // case, only the current token may revoke the runtime subscription.
-      if (connection.synchronizations.get(sessionId) !== synchronization
-          || connection.subscriptionTokens.get(sessionId) !== synchronization.subscriptionToken) return false;
-      return revokeInstalledSubscription(sessionId, synchronization.subscriptionToken);
-    };
+    const resolveSessionId = (sessionId: string): string => this.resolveSessionId(connection, sessionId);
+    const clearRekeyedSessionIds = (sessionId: string): void => this.clearRekeyedSessionIds(connection, sessionId);
+    const revokeInstalledSubscription = (sessionId: string, token: string): boolean => this.revokeInstalledSubscription(connection, sessionId, token);
+    const revokeSynchronization = (sessionId: string, synchronization: ActiveSessionSynchronization): boolean => this.revokeSynchronization(connection, sessionId, synchronization);
     const revokeSubscription = (sessionId: string, token: string): boolean => {
       sessionId = resolveSessionId(sessionId);
       const synchronization = connection.synchronizations.get(sessionId);
@@ -1861,7 +2284,10 @@ export class GatewayServer {
         id: connection.id,
         identity: connection.identity,
         isLocal: connection.isLocal,
-        signal: requestController.signal,
+        // A `session.open` waits on the connection's shared attempt for its
+        // session, so its signal is the attempt's: one waiter leaving must not
+        // abandon the answer another waiter still waits for (`C-6`).
+        signal: sessionOpenFlight?.controller.signal ?? requestController.signal,
         beginSynchronization: (sessionId) => {
           if (connection.revoked) throw new GatewayError("unauthenticated", "This device is no longer authorized");
           if (connection.workRetired) throw new GatewayError("busy", "Connection is closed", true);
@@ -1870,7 +2296,7 @@ export class GatewayServer {
           // ownership is attached to the canonical slot.
           sessionId = resolveSessionId(sessionId);
           if (connection.presentationOnly
-              && connection.pendingSessionOpens.get(sessionId) !== requestId) {
+              && connection.pendingSessionOpens.get(sessionId)?.requestId !== requestId) {
             throw new GatewayError("conflict", "This mobile presentation open was retired", true);
           }
           if (connection.presentationOnly) revokePresentationOwners(sessionId);
@@ -1922,7 +2348,7 @@ export class GatewayServer {
             });
           }, this.options.synchronizationTimeoutMs ?? 30_000);
           timeout.unref();
-          installed = { barrier, timeout, requestId, subscriptionToken: syncToken, sessionId };
+          installed = { barrier, timeout, requestId, subscriptionToken: syncToken, sessionId, deliveredRequests: new Set() };
           connection.synchronizations.set(sessionId, installed);
           synchronizationOwners.push({
             sessionId,
@@ -2017,7 +2443,32 @@ export class GatewayServer {
         },
       };
       const method = frame.method;
-      const result = await runInRequestSpan(requestSpan, (): Promise<JsonValue> => this.options.service.invoke(context, method, frame.params ?? {}));
+      const invoke = (): Promise<JsonValue> => runInRequestSpan(
+        requestSpan,
+        (): Promise<JsonValue> => this.options.service.invoke(context, method, frame.params ?? {}),
+      );
+      let result: JsonValue;
+      if (sessionOpenFlight === undefined) {
+        result = await invoke();
+        attemptSucceeded = true;
+      } else {
+        const attempt = invoke();
+        sessionOpenFlight.attempt = attempt;
+        // One answer, shared with every request that joined it. A rejection the
+        // last waiter left behind is not an unhandled rejection: nobody will
+        // read it, and the abort that ends the shared work states why.
+        void attempt.catch(() => {});
+        // Named for the cancellation record; the attempt's own stages are what
+        // measure it, and a second entry for the same interval would double it.
+        const leaveAttemptStage = requestSpan.enterStage("session.open.attempt");
+        try {
+          result = await abortableRead(requestController.signal, () => attempt);
+        } finally {
+          leaveAttemptStage();
+        }
+        attemptSucceeded = true;
+      }
+      if (requestController.signal.aborted) return;
       // Validate every synchronization created by this request before writing
       // the response. A timed-out open may have no completion at all; it must
       // not publish an orphan successful response/token after its barrier was
@@ -2043,6 +2494,10 @@ export class GatewayServer {
         }
       }
       const responseSentIntact = runInRequestSpan(requestSpan, () => this.send(connection, { type: "response", id: frame.id, ok: true, result }));
+      if (responseSentIntact && sessionOpenFlight !== undefined) {
+        sessionOpenFlight.answered = true;
+        this.markSessionOpenDelivered(connection, requestId, requestId);
+      }
       responseAttempted = true;
       if (responseSentIntact) rpcOutcome = "success";
       if (responseSentIntact && connection.revoked && connection.revokeResponseRequestId === frame.id) {
@@ -2163,16 +2618,7 @@ export class GatewayServer {
           ...(error instanceof GatewayError && error.diagnosticReason ? { reason: error.diagnosticReason } : {}),
         });
       }
-      const ownerRequestIDs = new Set([
-        requestId,
-        ...synchronizationCompletions.map((completion) => completion.requestId),
-      ]);
-      for (const ownerRequestID of ownerRequestIDs) {
-        clearRequestSynchronizations(connection.synchronizations, ownerRequestID, (sessionId, synchronization) => {
-          revokeSynchronization(sessionId, synchronization);
-        });
-      }
-      if (!responseAttempted) {
+      if (!responseAttempted && inFlightRpc.cancelledStage === undefined) {
         responseAttempted = true;
         const responseSent = runInRequestSpan(requestSpan, () => this.send(connection, { type: "response", id: frame.id, ok: false, error: publicError(error) }));
         if (responseSent && connection.revoked && connection.revokeResponseRequestId === frame.id) {
@@ -2181,38 +2627,242 @@ export class GatewayServer {
         }
       }
     } finally {
-      if (sessionOpenID !== undefined) {
-        const resolvedOpenID = resolveSessionId(sessionOpenID);
-        // Rekey retains an old duplicate-open alias but the canonical
-        // reservation is the one that must be released after begin/response.
-        if (connection.pendingSessionOpens.get(resolvedOpenID) === frame.id) {
-          connection.pendingSessionOpens.delete(resolvedOpenID);
+      const otherOpenWaiters = (sessionOpenFlight?.waiters ?? 1) > 1;
+      // An open keeps the synchronization it installed only when an answer for
+      // it is out: this request's own delivered response, or a shared attempt a
+      // waiting retry may still deliver. Everything else - a failure, a
+      // cancellation, an undelivered response - releases the barrier and its
+      // subscription here, so an abandoned open cannot block the retry that
+      // follows it (`C-6`).
+      const releaseOwnSynchronizations = (): void => {
+        const ownerRequestIDs = new Set([
+          requestId,
+          ...synchronizationCompletions.map((completion) => completion.requestId),
+        ]);
+        for (const ownerRequestID of ownerRequestIDs) {
+          clearRequestSynchronizations(connection.synchronizations, ownerRequestID, (sessionId, synchronization) => {
+            revokeSynchronization(sessionId, synchronization);
+          });
         }
-        if (resolvedOpenID !== sessionOpenID
-            && connection.pendingSessionOpens.get(sessionOpenID) === frame.id) {
-          connection.pendingSessionOpens.delete(sessionOpenID);
-        }
+      };
+      if (otherOpenWaiters && sessionOpenFlight !== undefined) {
+        // A waiting retry still needs whatever this attempt installed - including
+        // a barrier this request created before it was cancelled. The retry owns
+        // the delivery now, so the barrier is released only if it leaves without
+        // answering (`C-6`).
+        sessionOpenFlight.releaseAbandoned = releaseOwnSynchronizations;
+      } else if (!(attemptSucceeded && rpcOutcome === "success")) {
+        releaseOwnSynchronizations();
+      }
+      if (sessionOpenFlight !== undefined) {
+        // Rekey retains an old duplicate-open alias, but both spellings point at
+        // the same flight; releasing the flight releases every alias with it.
+        this.releaseSessionOpenFlight(connection, sessionOpenFlight);
       }
       connection.inFlight.delete(frame.id);
       connection.requestControllers.delete(frame.id);
-      const durationMs = Math.max(0, Math.round(performance.now() - rpcStartedAt));
       // Closing a connection aborts its requests, yet accepted domain work
       // (a prompt held behind compaction) keeps running. Name the undelivered
       // response rather than reporting that work as failed.
-      const loggedOutcome = rpcOutcome === "failure" && requestController.signal.aborted
-        ? "connectionClosed"
-        : rpcOutcome;
-      const breakdown = requestSpan.breakdown(durationMs);
+      const loggedOutcome = inFlightRpc.cancelledStage !== undefined
+        ? "cancelled"
+        : rpcOutcome === "failure" && requestController.signal.aborted ? "connectionClosed" : rpcOutcome;
+      this.logRequestOutcome(connection, {
+        method: frame.method,
+        requestId: diagnosticID,
+        correlation: rpcCorrelation,
+        startedAt: rpcStartedAt,
+        span: requestSpan,
+        outcome: loggedOutcome,
+        cancelledStage: inFlightRpc.cancelledStage,
+      });
+    }
+  }
+
+  /**
+   * Answer a `session.open` that arrived while this connection and session
+   * already had one in flight: the retry joins that attempt, receives its exact
+   * result, and leaves the shared work alone while it waits (`C-6`). Answering a
+   * retry from a shared attempt is what turns the phone's 30-second timeout into
+   * a slow open instead of a duplicate-open failure.
+   */
+  private async joinSessionOpen(
+    connection: Connection,
+    frame: Record<string, unknown>,
+    flight: SessionOpenFlight,
+  ): Promise<void> {
+    const requestId = frame.id as string;
+    connection.inFlight.add(requestId);
+    const rpcStartedAt = performance.now();
+    const requestSpan = new RequestSpan();
+    const inFlightRpc: InFlightRpc = {
+      controller: new AbortController(),
+      method: frame.method as string,
+      startedAt: rpcStartedAt,
+      span: requestSpan,
+    };
+    connection.requestControllers.set(requestId, inFlightRpc);
+    const params = frame.params && typeof frame.params === "object" && !Array.isArray(frame.params)
+      ? frame.params as Record<string, unknown>
+      : {};
+    const rpcCorrelation = {
+      ...(typeof params.sessionId === "string" ? { sessionId: params.sessionId } : {}),
+      ...(typeof params.commandId === "string" ? { commandId: params.commandId } : {}),
+    };
+    let rpcOutcome: "success" | "failure" = "failure";
+    // Join before any await: the flight's waiter count pairs with its `finally`.
+    flight.waiters += 1;
+    try {
+      const attempt = flight.attempt;
+      if (attempt === undefined) throw new GatewayError("busy", "Session open is no longer in flight", true);
+      const result = await runInRequestSpan(requestSpan, () => wait(
+        "session.open.join",
+        () => abortableRead(inFlightRpc.controller.signal, () => attempt),
+      ));
+      if (inFlightRpc.controller.signal.aborted) return;
+      if (runInRequestSpan(requestSpan, () => this.send(connection, { type: "response", id: requestId, ok: true, result }))) {
+        // A retry delivered the shared attempt's answer, so the barrier it
+        // installed is now the client's to acknowledge.
+        flight.answered = true;
+        this.markSessionOpenDelivered(connection, flight.requestId, requestId);
+        rpcOutcome = "success";
+      }
+    } catch (error) {
+      if (!inFlightRpc.controller.signal.aborted) {
+        const level = rpcFailureLevel(error);
+        this.options.logger.log(level, `RPC ${frame.method as string} for client ${connection.id} failed`, {
+          event: "rpc.error", source: "transport", method: frame.method as string, requestID: diagnosticRequestID(requestId),
+          connectionId: connection.id, ...rpcCorrelation,
+          code: diagnosticErrorCode(error), outcome: "failure",
+          ...(level === "error" ? { error } : {}),
+          ...(error instanceof GatewayError && error.diagnosticReason ? { reason: error.diagnosticReason } : {}),
+        });
+        runInRequestSpan(requestSpan, () => this.send(connection, { type: "response", id: requestId, ok: false, error: publicError(error) }));
+      }
+    } finally {
+      connection.inFlight.delete(requestId);
+      connection.requestControllers.delete(requestId);
+      this.releaseSessionOpenFlight(connection, flight);
+      const loggedOutcome = inFlightRpc.cancelledStage !== undefined
+        ? "cancelled"
+        : rpcOutcome === "failure" && inFlightRpc.controller.signal.aborted ? "connectionClosed" : rpcOutcome;
+      this.logRequestOutcome(connection, {
+        method: frame.method as string,
+        requestId: diagnosticRequestID(requestId),
+        correlation: rpcCorrelation,
+        startedAt: rpcStartedAt,
+        span: requestSpan,
+        outcome: loggedOutcome,
+        cancelledStage: inFlightRpc.cancelledStage,
+      });
+    }
+  }
+
+  /**
+   * Record the `cancel` frame of a request this connection still owns: work only
+   * a disposable read does stops, and the record names the stage it was in. A
+   * cancel for an accepted mutation, an admitted prompt or a `session.sync` is
+   * ignored: their owners settle them durably whatever the client does with its
+   * wait (`C-6`).
+   */
+  private cancelInflightRequest(connection: Connection, requestId: string): void {
+    const inFlight = connection.requestControllers.get(requestId);
+    if (inFlight === undefined) {
+      this.revokeAbandonedOpen(connection, requestId);
+      return;
+    }
+    if (!DISPOSABLE_READ_METHODS.has(inFlight.method)) return;
+    if (inFlight.cancelledStage !== undefined) return;
+    inFlight.cancelledStage = inFlight.span.currentStage() ?? "admitted";
+    inFlight.controller.abort(new GatewayError("cancelled", "The client cancelled this request", true));
+  }
+
+  /**
+   * A cancel can cross a `session.open` answer still in transit on a slow link:
+   * the phone stopped waiting, but the Gateway already delivered the response and
+   * its barrier is still pending, so a retry in that window would fail as a
+   * duplicate. Revoke the barrier the abandoned open delivered - unless another
+   * delivered response carries the same token (a joined retry the phone may
+   * still accept), which is what `deliveredRequests` records (`C-6`).
+   */
+  private revokeAbandonedOpen(connection: Connection, requestId: string): void {
+    for (const [sessionId, synchronization] of connection.synchronizations) {
+      // Removing the delivered request both detects it and consumes it: the
+      // barrier belongs to the client only while one of its delivered responses
+      // is unaccounted for.
+      if (!synchronization.deliveredRequests.delete(requestId)) continue;
+      if (synchronization.deliveredRequests.size > 0) return;
+      this.revokeSynchronization(connection, sessionId, synchronization);
+      return;
+    }
+  }
+
+  /** Record that a delivered response carried this session's synchronization
+   * token, so a later cancel can revoke the barrier only when no other delivered
+   * response still carries it. The owner request installed the barrier; the
+   * delivering request may be the retry that joined it. */
+  private markSessionOpenDelivered(connection: Connection, ownerRequestId: string, deliveredRequestId: string): void {
+    for (const synchronization of connection.synchronizations.values()) {
+      if (synchronization.requestId === ownerRequestId) synchronization.deliveredRequests.add(deliveredRequestId);
+    }
+  }
+
+  /** Release one waiter of a shared session-open attempt. The last one leaving
+   * abandons the work: nobody computes an answer nobody waits for. */
+  private releaseSessionOpenFlight(connection: Connection, flight: SessionOpenFlight): void {
+    flight.waiters -= 1;
+    if (flight.waiters > 0) return;
+    flight.controller.abort(new GatewayError("cancelled", "No request waits for this session open anymore", true));
+    for (const [sessionId, pending] of connection.pendingSessionOpens) {
+      if (pending === flight) connection.pendingSessionOpens.delete(sessionId);
+    }
+    // Nobody waits for this attempt's answer and no response carried it: what
+    // it installed is unreachable ownership, released by the request that owns
+    // the barrier.
+    if (!flight.answered) flight.releaseAbandoned?.();
+  }
+
+  /** One record per finished request: `rpc.completed` with its breakdown, or the
+   * `rpc.cancelled` juncture record naming the stage a cancel interrupted. */
+  private logRequestOutcome(
+    connection: Connection,
+    request: {
+      readonly method: string;
+      readonly requestId: string;
+      readonly correlation: Record<string, string>;
+      readonly startedAt: number;
+      readonly span: RequestSpan;
+      readonly outcome: "success" | "failure" | "connectionClosed" | "cancelled";
+      readonly cancelledStage: string | undefined;
+    },
+  ): void {
+    const durationMs = Math.max(0, Math.round(performance.now() - request.startedAt));
+    const breakdown = request.span.breakdown(durationMs);
+    if (request.cancelledStage !== undefined) {
+      // A cancellation is its own juncture, so it writes one record instead of a
+      // completion: the stage it interrupted plus the stages it reached. Only a
+      // read the peer abandoned after `SLOW_RPC_WARNING_MS` is worth a warning;
+      // an ordinary retry cadence stays debug.
       this.options.logger.log(
-        loggedOutcome !== "success" || durationMs >= SLOW_RPC_WARNING_MS ? "warning" : "debug",
-        `RPC ${frame.method} for client ${connection.id} completed in ${durationMs}ms (${loggedOutcome})`,
+        durationMs >= SLOW_RPC_WARNING_MS ? "warning" : "debug",
+        `RPC ${request.method} for client ${connection.id} was cancelled in ${request.cancelledStage} after ${durationMs}ms`,
         {
-          event: "rpc.completed", source: "transport", method: frame.method,
-          requestID: diagnosticID, connectionId: connection.id, ...rpcCorrelation, outcome: loggedOutcome, durationMs,
-          ...(breakdown ?? {}),
+          event: "rpc.cancelled", source: "transport", method: request.method, requestID: request.requestId,
+          connectionId: connection.id, ...request.correlation, outcome: "cancelled",
+          stage: request.cancelledStage, durationMs, ...(breakdown ?? {}),
         },
       );
+      return;
     }
+    this.options.logger.log(
+      request.outcome !== "success" || durationMs >= SLOW_RPC_WARNING_MS ? "warning" : "debug",
+      `RPC ${request.method} for client ${connection.id} completed in ${durationMs}ms (${request.outcome})`,
+      {
+        event: "rpc.completed", source: "transport", method: request.method,
+        requestID: request.requestId, connectionId: connection.id, ...request.correlation,
+        outcome: request.outcome, durationMs, ...(breakdown ?? {}),
+      },
+    );
   }
 
   private send(connection: Connection, value: unknown): boolean {
@@ -2298,8 +2948,12 @@ export class GatewayServer {
       // writer hands exactly one encoded frame to ws at a time, preserving a
       // response before its synchronization suffix without manufacturing
       // transport pressure from concurrent bounded RPC completions.
-      if (!connection.outbound.enqueue({ encoded: frame.output, bytes: frame.outputBytes })) return "failed";
-      this.resourceSampler.recordOutboundBytes(frame.outputBytes);
+      if (!connection.outbound.enqueue({
+        encoded: frame.output, bytes: frame.outputBytes,
+        ...outboundFrameIdentity(connection, value, frame, this.options.maxFrameBytes),
+      })) return "failed";
+      // The queue reported the bytes it accepted: a frame it replaced with a
+      // coalescing `session.rebaseline` is counted as that replacement.
       return frame.fallback ? "fallback" : "sent";
     } catch {
       // Never log the exception or payload: serialization errors can contain
@@ -2351,11 +3005,16 @@ export class GatewayServer {
     connection.synchronizations.clear();
     connection.subscriptionTokens.clear();
     connection.terminals.clear();
+    // A retiring socket has no request left to receive a shared session-open
+    // answer, so its attempts stop here instead of running for nobody.
+    for (const flight of connection.pendingSessionOpens.values()) {
+      flight.controller.abort(new GatewayError("cancelled", "The connection retired during this session open", true));
+    }
     connection.pendingSessionOpens.clear();
     connection.rekeyedSessionIds.clear();
     // Revoked accepted requests retain their controller until their own
     // completion; ordinary disconnects still abort disposable work.
-    if (!connection.revoked) for (const controller of connection.requestControllers.values()) controller.abort();
+    if (!connection.revoked) for (const request of connection.requestControllers.values()) request.controller.abort();
     connection.requestControllers.clear();
     this.options.sessions.unsubscribeClient(connection.id);
     this.options.service.releaseClient(connection.id);
@@ -2474,6 +3133,9 @@ export class GatewayServer {
     await this.options.liveViews?.joinRetirements();
     this.options.logger.log("info", "Closing Gateway transport", { event: "gateway.transport-closing", source: "transport" });
     clearInterval(this.heartbeat);
+    // The LAN leg retires first: no new connection reaches a Gateway that is
+    // stopping. Sockets it accepted keep their own bounded grace.
+    const lanRetirement = this.lanEndpoint?.stop();
     clearInterval(this.resourceTimer);
     this.stallSampler.dispose();
     this.resourceSampler.dispose();
@@ -2527,6 +3189,7 @@ export class GatewayServer {
     }, HTTP_SHUTDOWN_GRACE_MS);
     forceHttpClose.unref();
     await httpClosedPromise;
+    await lanRetirement;
     this.localSockets.close();
     this.pairedSockets.close();
   }

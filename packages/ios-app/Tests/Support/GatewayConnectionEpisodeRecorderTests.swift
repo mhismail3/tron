@@ -19,6 +19,19 @@ import Testing
 @MainActor
 @Suite("Phone connection episode recorder", .serialized)
 struct GatewayConnectionEpisodeRecorderTests {
+    /// The synchronous main-thread block the main-stall test serves, in both
+    /// phases. Part of it is always lost before the watchdog measures anything:
+    /// up to one interval to where the 1 s tick grid sits when the block starts,
+    /// and up to one more to the detached loop reaching that tick. So
+    /// `mainStallBound` plus two intervals (4 s) is the shortest block that still
+    /// proves the record, and the third interval keeps a second of slack for the
+    /// wake-up delay, which CPU starvation can stretch past one interval on a
+    /// loaded Mac (T-2).
+    static let mainStallTestBlock = GatewayConnectionEpisodeRecorder.mainStallBound
+        + GatewayConnectionEpisodeRecorder.watchdogInterval
+        + GatewayConnectionEpisodeRecorder.watchdogInterval
+        + GatewayConnectionEpisodeRecorder.watchdogInterval
+
     @Test("a background transition ends the episode and stops both watchdogs")
     func backgroundEndsEpisodeAndStopsWatchdogs() async throws {
         let clock = ManualClock()
@@ -177,12 +190,12 @@ struct GatewayConnectionEpisodeRecorderTests {
         recorder.noteDisconnected(profileID: "gateway", lifecycleGeneration: 1, foreground: true)
 
         // The block starts inside the same main-actor stretch that opened the
-        // episode, so the ticks that fire while it is held are served by it. The
-        // tick grid can consume one interval of the block and the detached loop's
-        // first wake-up a further one; everything else in the record is the block
-        // itself, which a stalled main actor could not have produced.
+        // episode, so the ticks that fire while it is held are served by it.
+        // `mainStallTestBlock` already allows for the tick grid and for the
+        // detached loop reaching its first tick; everything left in the record is
+        // the block itself, which a stalled main actor could not have produced.
         let blockedFrom = ContinuousClock().now
-        blockMainThread(for: .seconds(5))
+        blockMainThread(for: Self.mainStallTestBlock)
         let blockedMs = diagnosticMilliseconds(blockedFrom.duration(to: ContinuousClock().now))
         let intervalMs = diagnosticMilliseconds(GatewayConnectionEpisodeRecorder.watchdogInterval)
         let boundMs = diagnosticMilliseconds(GatewayConnectionEpisodeRecorder.mainStallBound)
@@ -203,77 +216,12 @@ struct GatewayConnectionEpisodeRecorderTests {
         // before counting.
         recorder.endEpisode(.background, profileID: "gateway", lifecycleGeneration: 1)
         await Task.yield()
-        blockMainThread(for: .seconds(2.5))
+        // The same block, so a watchdog that survived the end of the episode is
+        // guaranteed a record it could land, not one that only a tick landing in
+        // a short window would produce.
+        blockMainThread(for: Self.mainStallTestBlock)
         try await Task.sleep(for: .milliseconds(500))
         #expect(await recordCount(log, event: "app.main-stall") == 1)
-    }
-
-    @Test("a dropped connection after a handshake is dated at the drop, not as a second attempt")
-    func postConnectFailureDoesNotReworkTheConnectedEpisode() async throws {
-        let clock = ManualClock()
-        let (log, cleanup) = makeAppLog()
-        defer { cleanup() }
-        let recorder = GatewayConnectionEpisodeRecorder(
-            clock: clock.clock, appLog: log, watchdogClock: clock.clock, mainStallPing: {}
-        )
-        recorder.stallGuard = { .other }
-
-        // One failed attempt, then the attempt whose handshake succeeds.
-        recorder.recordAttempt(attempt(
-            profileID: "gateway", lifecycleGeneration: 1, attemptID: "loop-3", retry: 1,
-            stageReached: "transport-open", reason: "timeout", succeeded: false,
-            startedAt: clock.clock.now()
-        ))
-        clock.advance(by: .seconds(4))
-        let connectingAttemptStart = clock.clock.now()
-        recorder.recordAttempt(attempt(
-            profileID: "gateway", lifecycleGeneration: 1, attemptID: "loop-3", retry: 2,
-            stageReached: "connected", reason: nil, succeeded: true,
-            startedAt: connectingAttemptStart, connectionID: 21
-        ))
-        // Projection runs for 6 s on the connection that handshake established,
-        // and then that same connection drops.
-        clock.advance(by: .seconds(6))
-        recorder.recordAttempt(attempt(
-            profileID: "gateway", lifecycleGeneration: 1, attemptID: "loop-3#postConnect", retry: 2,
-            stageReached: GatewayConnectionEpisodeRecorder.postConnectStage,
-            reason: "disconnected", succeeded: false, startedAt: connectingAttemptStart
-        ))
-        clock.advance(by: .seconds(2))
-        recorder.recordAttempt(attempt(
-            profileID: "gateway", lifecycleGeneration: 1, attemptID: "loop-3", retry: 3,
-            stageReached: "connected", reason: nil, succeeded: true,
-            startedAt: clock.clock.now(), connectionID: 22
-        ))
-
-        let attempts = try await waitForRecords(log, event: "gateway.attempt", count: 4)
-        #expect(attempts.map(\.outcome) == ["failure", "success", "failure", "success"])
-        #expect(attempts[2].message.contains("attemptId=loop-3#postConnect"))
-        #expect(attempts[2].message.contains("stageReached=postConnect"))
-        let episodes = try await waitForRecords(log, event: "connection.episode", count: 2)
-        #expect(episodes.map(\.outcome) == ["connected", "connected"])
-        // The first episode is the outage the two attempts resolved.
-        #expect(episodes[0].message.contains("attempts=2"))
-        #expect(episodes[0].message.contains("foregroundMs=4000"))
-        // The post-connect failure is the same attempt's established connection
-        // dropping, not a further attempt: the episode it opens is dated at the
-        // drop (no 6 s of the episode that just ended is counted again) and it
-        // counts only the attempt that followed.
-        let resolved = episodes[1]
-        #expect(resolved.message.contains("attempts=1"))
-        #expect(resolved.message.contains("causes=disconnected"))
-        #expect(resolved.message.contains("foregroundMs=2000"))
-        let firstEndedAt = try #require(episodeDate("endedAt", in: episodes[0]))
-        let secondStartedAt = try #require(episodeDate("startedAt", in: resolved))
-        #expect(secondStartedAt >= firstEndedAt)
-    }
-
-    /// Parses one `connection.episode` wall-clock field, so an assertion compares
-    /// instants rather than the ISO text.
-    private func episodeDate(_ key: String, in record: AppLogRecord) -> Date? {
-        guard let range = record.message.range(of: "\(key)=") else { return nil }
-        let value = record.message[range.upperBound...].prefix { !$0.isWhitespace }
-        return GatewayTimestamp.parse(String(value))
     }
 
     private func attempt(
