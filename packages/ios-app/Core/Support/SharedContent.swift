@@ -6,7 +6,7 @@ package struct SharedContent: Codable, Equatable {
     let timestamp: Date
 }
 
-struct ShareMessagePayload: Equatable { let prompt: String }
+package struct ShareMessagePayload: Equatable { package let prompt: String }
 
 package enum SharedContentFragment: Equatable {
     case text(String)
@@ -84,7 +84,7 @@ package enum SharedContentReducer {
 }
 
 extension SharedContent {
-    func buildSharePrompt() -> ShareMessagePayload? {
+    package func buildSharePrompt() -> ShareMessagePayload? {
         guard SharedContentAdmissionPolicy.admits(self) else { return nil }
         let values = [url, text].compactMap { value in
             value?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false ? value : nil
@@ -107,7 +107,7 @@ package struct UserDefaultsPendingShareStore: PendingShareStoring {
 
     private let defaults: UserDefaults?
 
-    init(defaults: UserDefaults? = UserDefaults(suiteName: suiteName)) {
+    package init(defaults: UserDefaults? = UserDefaults(suiteName: suiteName)) {
         self.defaults = defaults
     }
 
@@ -121,7 +121,7 @@ package struct UserDefaultsPendingShareStore: PendingShareStoring {
         return true
     }
 
-    func load() -> SharedContent? {
+    package func load() -> SharedContent? {
         guard let defaults, let data = defaults.data(forKey: Self.key) else { return nil }
         guard data.count <= SharedContentAdmissionPolicy.maximumStoredDocumentBytes,
               let content = try? JSONDecoder().decode(SharedContent.self, from: data),
@@ -132,7 +132,7 @@ package struct UserDefaultsPendingShareStore: PendingShareStoring {
         return content
     }
 
-    func clear() {
+    package func clear() {
         defaults?.removeObject(forKey: Self.key)
     }
 }

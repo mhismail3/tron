@@ -346,7 +346,7 @@ package actor IOSClientDiagnosticStore {
         await mailbox.currentWriter()?.value
     }
 
-    init(defaults: UserDefaults) { self.defaults = defaults }
+    package init(defaults: UserDefaults) { self.defaults = defaults }
 
     package func load(now: Date = .now) -> [GatewayProfileLogRecord] {
         guard let data = defaults.data(forKey: key), data.count <= Self.maximumBytes,
