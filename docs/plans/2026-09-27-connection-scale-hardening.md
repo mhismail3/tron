@@ -9260,13 +9260,26 @@ wait).
   `impairment.restart.close_to_listening_ms` in its impairment list, plus that
   the restart criterion is reported rather than enforced; the
   `packages/gateway/docs/observability.md` row's reason corrected.
+- End-to-end (this host, 1-minute load 25.3, so still not the quiet run the
+  row wants): `scripts/tron-profile gateway --scenario multi-session --cases
+  restart --iterations 1 --catalog-files 200 --catalog-mib 32 --no-build`, run
+  `.../profiles/gateway/20260928T223130Z-multi-session-f3a999`. The reader took
+  the real record (`startup_ms` 4,598, the record's own `budgetMs` 5,000,
+  `modules` 4,011 ms) and the report carries
+  `impairment.restart.close_to_listening_ms` 6,987 against `reconnect_ms_max`
+  12,911 and one request over 1 s. The Gateway logged that start as "budget
+  met" — the reviewed warning would have stayed silent on exactly this storm;
+  the case now says: "the new Gateway was listening 6987 ms after the clients'
+  sockets closed, over its 4000 ms budget ... (its own process start was
+  4598 ms of the 5000 ms it records; slowest step modules at 4011 ms)".
 - Evidence: `python3 scripts/test-tron-profile.py ImpairmentCases
   MultiSessionSamples
-  MultiDriverImpairment.test_the_restart_case_reports_the_new_startups_budget`
-  13/13 (13.8 s); the two rewritten profiler cases fail against the reviewed
-  revision (stash check) and pass after; `npx vitest run
-  src/lifecycle/startup-budget.test.ts` and the merge-gate set on the
-  integration merge (see the commit).
+  MultiDriverImpairment.test_the_restart_case_counts_the_storm_from_the_restore
+  MultiDriverImpairment.test_the_restart_case_reports_the_new_startups_budget
+  MultiDriverImpairment.test_a_capped_legs_close_keeps_every_other_leg_and_the_restart`
+  15/15 (44 s); the two rewritten profiler cases fail against the reviewed
+  revision (stash check) and pass after; the merge gate on this branch with
+  `hardening/integration` merged (132 + 241 tests) and `tsc --noEmit` clean.
 - Deviations: no code change aims at the two causes above, so the criterion is
   still not demonstrated; the quiet-host run remains the orchestrator's.
 
