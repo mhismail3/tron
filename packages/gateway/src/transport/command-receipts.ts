@@ -385,6 +385,12 @@ export class CommandReceiptStore {
               if (!uncertain) {
                 await rm(path, { force: true });
                 this.removeReceipt(pendingBytes);
+                // The receipt is gone from the disk and from the totals, so the
+                // lane must stop reporting a credit for it. Leaving the removed
+                // size behind would let a rebuild credit the next write on this
+                // lane from that stale value and then count that write's own
+                // accounting again.
+                lane.creditedBytes = undefined;
               }
             } finally {
               if (reserved) this.reservedCompletionBytes -= COMMAND_RECEIPT_MAX_BYTES;

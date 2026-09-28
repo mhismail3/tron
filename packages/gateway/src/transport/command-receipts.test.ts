@@ -258,6 +258,75 @@ describe("CommandReceiptStore", () => {
     expect(third).toHaveBeenCalledTimes(1);
   });
 
+  it("does not double-count a receipt rebuilt from disk during its completed write", async () => {
+    const root = await temporaryRoot("tron-receipts-completed-rebuild-");
+    await seededBackdatedReceipt(root, "completed-rebuild-seed");
+    const receiptMaximumBytes = 1_048_576 + 4 * 1_024;
+    // Admission charges this command's own maximum receipt plus the held
+    // command's reservation, so this boundary is two of those plus an
+    // allowance for the receipt the completed write's lane still owes. The
+    // pending receipt is a few hundred bytes and the held result is 200,000,
+    // so the allowance admits the single-count total and rejects the
+    // double-counted one.
+    const boundaryAllowanceBytes = 1_024;
+    let pendingBytes = 0;
+    let completedBytes = 0;
+    let signalCompletedPublished!: () => void;
+    const completedPublished = new Promise<void>((resolve) => { signalCompletedPublished = resolve; });
+    let release!: () => void;
+    const released = new Promise<void>((resolve) => { release = resolve; });
+    const writeReceipt = async (path: string, value: unknown, mode?: number): Promise<void> => {
+      const receipt = value as { commandId?: string; status?: string };
+      if (receipt.commandId !== "completed-rebuild-command") {
+        await durableAtomicWriteJson(path, value, mode);
+        return;
+      }
+      const bytes = Buffer.byteLength(`${JSON.stringify(value, null, 2)}\n`);
+      if (receipt.status === "pending") {
+        pendingBytes = bytes;
+        await durableAtomicWriteJson(path, value, mode);
+        return;
+      }
+      completedBytes = bytes;
+      // Hold the completed write after its rename, so the receipt is on disk
+      // while the trigger's admission reconciles the totals.
+      await durableAtomicWriteJson(path, value, mode, {
+        mkdir,
+        open,
+        rm,
+        rename: async (from: string, to: string) => {
+          await rename(from, to);
+          signalCompletedPublished();
+          await released;
+        },
+      });
+    };
+    const store = new CommandReceiptStore(root, writeReceipt, {
+      maximumAggregateBytes: 2 * receiptMaximumBytes + boundaryAllowanceBytes,
+    });
+
+    const completed = store.execute("device", "session.prompt", "completed-rebuild-command", async () => ({
+      value: "x".repeat(200_000),
+    }));
+    await completedPublished;
+    // Reclaim the backdated seed so the trigger's admission has to reconcile
+    // the totals from the directory while the completed write is still open.
+    await store.prune(30_000);
+
+    const trigger = vi.fn(async () => ({ accepted: true }));
+    await expect(store.execute("device", "session.prompt", "completed-rebuild-trigger", trigger))
+      .resolves.toEqual({ accepted: true });
+    expect(trigger).toHaveBeenCalledTimes(1);
+
+    release();
+    await expect(completed).resolves.toMatchObject({ value: expect.any(String) });
+    // The boundary discriminates only because the completed receipt is far
+    // larger than the pending one it replaces.
+    expect(pendingBytes).toBeLessThan(boundaryAllowanceBytes);
+    expect(completedBytes).toBeGreaterThan(2 * boundaryAllowanceBytes);
+    expect(await receiptFiles(root)).toHaveLength(2);
+  });
+
   it("rescans the receipt directory once per prune invalidation while writes overlap", async () => {
     const root = await temporaryRoot("tron-receipts-single-rescan-");
     await mkdir(join(root, "gateway", "command-receipts"), { recursive: true });
@@ -377,6 +446,69 @@ describe("CommandReceiptStore", () => {
     await expect(store.execute("device", "session.prompt", "retryable-rejection", retry))
       .resolves.toEqual({ accepted: true });
     expect(retry).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not credit a definitively rejected receipt to the next write on its lane", async () => {
+    const root = await temporaryRoot("tron-receipts-rejected-credit-");
+    await seededBackdatedReceipt(root, "rejected-credit-seed");
+    let pendingWrites = 0;
+    let signalSuccessorPublished!: () => void;
+    const successorPublished = new Promise<void>((resolve) => { signalSuccessorPublished = resolve; });
+    let release!: () => void;
+    const released = new Promise<void>((resolve) => { release = resolve; });
+    const writeReceipt = async (path: string, value: unknown, mode?: number): Promise<void> => {
+      const receipt = value as { commandId?: string; status?: string };
+      const held = receipt.commandId === "rejected-credit-command" && receipt.status === "pending";
+      if (held) pendingWrites += 1;
+      if (held && pendingWrites === 2) {
+        // The duplicate's publication, held after the rename so its receipt is
+        // on disk while the trigger's admission reconciles the totals.
+        await durableAtomicWriteJson(path, value, mode, {
+          mkdir,
+          open,
+          rm,
+          rename: async (from: string, to: string) => {
+            await rename(from, to);
+            signalSuccessorPublished();
+            await released;
+          },
+        });
+        return;
+      }
+      await durableAtomicWriteJson(path, value, mode);
+    };
+    // Room for the seed the first admission counts and the two receipts that
+    // finish here: a store that still credits the rejected receipt's size counts
+    // three entries for two files and rejects the last command with a false
+    // `busy`.
+    const store = new CommandReceiptStore(root, writeReceipt, { maximumEntries: 3 });
+    const rejecting = vi.fn(async () => { throw new GatewayError("busy", "Try later", true); });
+    const accepted = vi.fn(async () => ({ accepted: true }));
+
+    // The duplicate queues on the rejected command's lane, so it reuses that
+    // lane's receipt accounting.
+    const rejected = store.execute("device", "session.prompt", "rejected-credit-command", rejecting);
+    const rejection = expect(rejected).rejects.toMatchObject({ code: "busy", retryable: true });
+    const successor = store.execute("device", "session.prompt", "rejected-credit-command", accepted);
+    await successorPublished;
+    // The rejection left no receipt, so the duplicate re-runs the command.
+    // Reclaiming the seed then forces the next admission to reconcile the
+    // totals while that duplicate's pending receipt is on disk.
+    await store.prune(0);
+    const trigger = vi.fn(async () => ({ accepted: true }));
+    await expect(store.execute("device", "session.prompt", "rejected-credit-rescan", trigger))
+      .resolves.toEqual({ accepted: true });
+    release();
+    await rejection;
+    await expect(successor).resolves.toEqual({ accepted: true });
+    expect(rejecting).toHaveBeenCalledTimes(1);
+    expect(accepted).toHaveBeenCalledTimes(1);
+    expect(await receiptFiles(root)).toHaveLength(2);
+
+    const last = vi.fn(async () => ({ accepted: true }));
+    await expect(store.execute("device", "session.prompt", "rejected-credit-last", last))
+      .resolves.toEqual({ accepted: true });
+    expect(last).toHaveBeenCalledTimes(1);
   });
 
   it("retains pending uncertainty after an operation reports an unknown outcome", async () => {

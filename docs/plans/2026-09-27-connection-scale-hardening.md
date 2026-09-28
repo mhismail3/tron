@@ -2723,7 +2723,7 @@ a latency percentile.
   evidence). Item 2 (no read path in the fsync list): met for every site inside
   G-10's owning files; two read-triggered writers remain, the catalog index and
   the connection admission observation named above, with their removals owned by
-  G-1a/G-1c and by the proposed connection-owner row.
+  G-1a/G-1c and by G-10a.
 - Tasks added: none. G-1c's Do list gains the persist removal (orchestrator).
 - Kept on purpose: `push.registration.upsert` still rewrites its grant document
   on every registration (2 fsyncs). It is an acknowledged mutation, so it stays
@@ -2748,8 +2748,8 @@ a latency percentile.
 - For the next agent: R-1 should read `durableWrites`/`durableWriteMs` from the
   fixture's `gateway.jsonl` for the release-candidate numbers — the counters are
   process-global and include the catalog index's read-triggered persist until
-  G-1a/G-1c land, and the connection admission observation's until the proposed
-  row lands. A window whose level stays debug is memory-only, so the
+  G-1a/G-1c land, and the connection admission observation's until G-10a lands.
+  A window whose level stays debug is memory-only, so the
   full-size run reports fewer resource windows than it has minutes. The
   `request-span.integration.test.ts` open-timing assertion above is host-load
   sensitive and is worth re-checking on a quiet host rather than at the same
@@ -2789,7 +2789,7 @@ a latency percentile.
   returns or throws before reaching the flag, so the earlier placement only had
   the effect of leaving the flag set on a lane whose pending write failed.
 - Failure mode (5) in the list above and the three missing fsync rows are from
-  this round, as is the connection-owner residual and its proposed row.
+  this round, as is the connection-owner residual and its G-10a row.
 - Evidence:
   - `npx vitest run src/transport/command-receipts.test.ts` passes 24/24
     (0.9–1.2 s) four times in a row. Negative controls: remove the lane check →
@@ -2806,19 +2806,16 @@ a latency percentile.
   - `npx tsc --noEmit -p .` is clean. `python3 scripts/check-documentation-policy.py`
     and `scripts/personal-info-guard.sh` pass.
 - Changes: the review-response commit on `hardening/g-10`.
-- Tasks added: G-10a (orchestrator decision 2026-09-28), the row after G-10
-  in the Phase 1 table — in
+- Residual scope, added as task G-10a in the second review response below: in
   `packages/gateway/src/integrations/connection-owner.ts`,
   `recordProviderObservation` returns without saving when the four projected
   fields are unchanged, so a `knowledge.raindrop.read` starts no fsync; case in
   `packages/gateway/src/integrations/connection-owner.test.ts`.
 - Kept on purpose: the completed-write window of the rebuild counter still has
   no admission-level case (superseded by the second review response below,
-  which deletes the counter). Its only unguarded effect is a byte over-count of
-  `completed - pending` for one receipt: the rebuilding admission needs the held
-  command's `COMMAND_RECEIPT_MAX_BYTES` reservation to be counted, so any
-  capacity that admits that sequence sits above the window where the extra bytes
-  could flip an admission decision. The pending-write window is where the
+  which deletes the counter, and by the third, which adds that case for the
+  lane-credited design). Its only unguarded effect is a byte over-count of
+  `completed - pending` for one receipt. The pending-write window is where the
   counter is observable (entries double-counted → false `busy`), and that case
   is present.
 - Deviations: the review's finding-2 suggestion "the fix for finding 1 can share
@@ -2887,6 +2884,71 @@ a latency percentile.
     `python3 scripts/check-documentation-policy.py` and
     `scripts/personal-info-guard.sh` pass.
 - Changes: the second review-response commit on `hardening/g-10`.
+- For the next agent: G-10a is the read-triggered fsync this row leaves open,
+  and the `request-span.integration.test.ts` host-load note in the first entry
+  still applies.
+
+### G-10 · Done · 2026-09-28 · orchestrator-dispatched deepseek-worker, third review response (branch `hardening/g-10`)
+
+- Result: the third review's two minor findings and its plan nit are closed on
+  this branch. A definitively rejected command no longer leaves its removed size
+  behind as its lane's credit, so a duplicate that re-runs that command cannot
+  be counted twice when its pending write spans a rebuild. The completed-write
+  window now has the admission-level case the previous entries said it had no
+  room for.
+- Finding 1 (a stale `creditedBytes` after a definitive rejection): the
+  rejection path removed the pending receipt from the disk and from the totals
+  but left `lane.creditedBytes` at that receipt's size, so the next write on the
+  same lane — a duplicate whose predecessor was rejected definitively, which
+  re-runs the command — reported a credit for a receipt that no longer existed.
+  A rebuild crediting it and that write's own accounting then counted the
+  receipt twice: one extra entry and its bytes, observable as a false `busy`
+  near the entry cap. Fixed by clearing `lane.creditedBytes` in the same mutex
+  step that removes the receipt, which keeps a lane's credit equal to what its
+  receipt contributes to the totals on every path (pending write, completed
+  write, retained uncertain receipt, removed definitive rejection).
+  - Case: "does not credit a definitively rejected receipt to the next write on
+    its lane" — two duplicates of one command, the first rejected definitively,
+    the second's publication held after its rename, a backdated seed reclaimed
+    by `prune(0)` so the next admission rebuilds while that publication is on
+    disk, then an admission with `maximumEntries: 3`. Without the one-line reset
+    the store counts three entries for two files and the third command is
+    rejected `busy`; 26 of the 27 cases still pass, so the case is
+    discriminating.
+  - The first entry's "a receipt is never counted twice" sentence is accurate
+    again: the rejection path was the one window where it did not hold.
+- Finding 2 (the completed-write window was untested): the second entry argued
+  that the byte over-count could not flip an admission because the held write's
+  reservation is counted at admission. That is wrong for a boundary that covers
+  two maximum receipts: with
+  `maximumAggregateBytes = 2 * COMMAND_RECEIPT_MAX_BYTES + 1024`, an admission
+  in that window is admitted against the rebuilt pending credit and rejected
+  against the same receipt counted at its completed size.
+  - Case: "does not double-count a receipt rebuilt from disk during its
+    completed write" — a 200 KB result's completed publication held after its
+    rename, the seed reclaimed so the trigger's admission rebuilds inside that
+    window, and the exact-boundary admission admitted. Removing
+    `lane.unaccountedWrite = true` before the completed write fails only this
+    case (`busy` at the boundary); the other 26 still pass.
+  - Superseded: the first review-response entry's "kept on purpose" note that
+    the completed-write window cannot have an admission-level case.
+- Nit (plan wording): the two "proposed connection-owner row" sites now name
+  G-10a, and "Tasks added: G-10a" stays only in the second review-response
+  entry; the first review response names the residual's scope and points at the
+  round that added the row.
+- Evidence:
+  - `npx vitest run src/transport/command-receipts.test.ts` passes 27/27 in
+    1.0–2.0 s, four runs in a row.
+  - Negative controls on the same file: with the `creditedBytes` reset removed,
+    only "does not credit a definitively rejected receipt to the next write on
+    its lane" fails; with `lane.unaccountedWrite = true` removed before the
+    completed write, only "does not double-count a receipt rebuilt from disk
+    during its completed write" fails. Both fail with the false `busy`.
+  - `npx tsc --noEmit -p .` and `npm run build` are clean;
+    `python3 scripts/check-documentation-policy.py` and
+    `scripts/personal-info-guard.sh` pass.
+- Changes: the third review-response commit on `hardening/g-10`.
+- Tasks added: none.
 - For the next agent: G-10a is the read-triggered fsync this row leaves open,
   and the `request-span.integration.test.ts` host-load note in the first entry
   still applies.
