@@ -521,7 +521,7 @@ rows are in priority order.
 | O-3 | Done | Request span: one `rpc.completed` per slow RPC with every stage, wait and count | O-1 | orchestrator-dispatched deepseek-worker, 2026-09-28 |
 | O-4 | Claimed | Phone connection records that survive an export, stall watchdog, exact scene records | O-1 | orchestrator-dispatched deepseek-worker, 2026-09-28 |
 | O-6b | Ready | Impairment in the qualification scenario: blackhole, bandwidth cap, Gateway restart | O-6a | |
-| O-5 | Ready | Gateway resource sampler and event-loop histogram | O-3 | |
+| O-5 | Claimed | Gateway resource sampler and event-loop histogram | O-3 | orchestrator-dispatched deepseek-worker, 2026-09-28 |
 | O-7 | Ready | Incident triage tool: phone export plus Gateway log in, episodes by cause out | O-1, O-2, O-4 | |
 | C-1 | Ready | Projection work never blocks or parks reconnect; parked episodes self-resume | O-4, O-6b | |
 | G-1a | Ready | Catalog owner and in-memory index fed by Gateway-owned changes | O-3, O-6a | |
