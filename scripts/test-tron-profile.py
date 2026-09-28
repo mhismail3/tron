@@ -41,6 +41,7 @@ REPORT = ROOT / "scripts/tron_profile_report.py"
 FRONT_DOOR = ROOT / "scripts/tron-profile"
 GATEWAY_PROFILER = ROOT / "scripts/tron-profile-gateway"
 DRIVER = ROOT / "scripts/tron-profile-gateway-driver.mjs"
+RELAY = ROOT / "scripts/tron-profile-relay.mjs"
 PROBE = ROOT / "scripts/tron-profile-gateway-probe.mjs"
 # The generator and probe tests need Node (CI provides it); they fail without it.
 NODE = shutil.which("node") or "node"
@@ -675,11 +676,12 @@ class StubGatewayHarness:
         if stub.stdout is not None:
             stub.stdout.close()
 
-    def restart_fixture(self, port: int, gap_seconds: float = 1.0) -> object:
+    def restart_fixture(self, port: int, gap_seconds: float = 1.0, **extra: object) -> object:
         """The profiler's side of the restart handshake as `wait_with_restart`
         uses it: an owned child and a restart that replaces the stub Gateway on
         the same port after a real gap, so the clients meet a refused connect
-        while it is down."""
+        while it is down. The replacement carries the same stub configuration,
+        so a behaviour the test asked for survives the restart."""
         harness = self
 
         class RestartFixture:
@@ -689,12 +691,13 @@ class StubGatewayHarness:
             def restart(self) -> None:
                 harness.stop_stub(harness.stubs[-1])
                 time.sleep(gap_seconds)
-                self.process = harness.start_stub(None, port=port)
+                self.process = harness.start_stub(None, port=port, **extra)
 
         return RestartFixture()
 
     def driver_config(self, port: int, run_dir: Path, label: str, seconds: float, **overrides) -> Path:
-        config = {**self.profiler.MULTI, "gatewayDir": str(ROOT / "packages/gateway"),
+        config = {**self.profiler.MULTI, "connection": self.profiler.CONNECTION,
+                  "gatewayDir": str(ROOT / "packages/gateway"),
                   "orchestrator": str(GATEWAY_PROFILER), "gatewayPid": self.stubs[-1].pid, "port": port,
                   "tronHome": str(self.root / "tron"), "outputDir": str(run_dir), "phase": "iteration", "label": label,
                   "devicesPath": str(self.root / "devices.json"), "probeOutput": str(self.root / "probe.json"),
@@ -750,8 +753,9 @@ class StubGatewayHarness:
         driver = subprocess.Popen([NODE, str(DRIVER), "multi", str(config_path)], stdout=subprocess.PIPE,
                                   stderr=subprocess.STDOUT, text=True, env=self.driver_environment())
         if restart_stub:
-            status = self.profiler.wait_with_restart(driver, self.restart_fixture(port), request_path, done_path,
-                                                    timeout, "impaired", run_dir / "driver-impaired.log")
+            status = self.profiler.wait_with_restart(driver, self.restart_fixture(port, **(stub_config or {})),
+                                                    request_path, done_path, timeout, "impaired",
+                                                    run_dir / "driver-impaired.log")
         else:
             try:
                 status = driver.wait(timeout=timeout)
@@ -818,22 +822,31 @@ class MultiDriverImpairment(StubGatewayHarness, unittest.TestCase):
     Failure modes written down before these: a blackhole that is not counted
     (no attempt made during the outage) or whose recovery is timed from the
     attempt loop instead of from the path's return, so it reports one fast
-    connect however long the outage really cost; a path that lets an attempt
+    connect however long the outage really cost; a blackhole whose abandon is
+    driven by the leg's own clock rather than by a counted pong miss, so it
+    reports a fixed silence whatever the client saw; a path that lets an attempt
     made during the outage succeed (the blackhole is not one) or that drops an
     attempt a returned path should carry; a bandwidth leg whose cap never
     delays a byte (the cap is then untested) or that loses a pong it should
-    not; a restart case that treats the Gateway's own close as a failure, that
-    leaves a connected client down, that reports a reconnect without the
-    downtime's failed attempts, or that waits for the profiler's answer
-    forever; and an unexpected close after an impairment leg going uncounted.
+    not; a restart case that measures the storm only after the slowest client
+    returned, so the slow requests the storm is about are left out; a restart
+    case that treats the Gateway's own close as a failure, that leaves a
+    connected client down, that reports a reconnect without the downtime's
+    failed attempts, or that waits for the profiler's answer forever; and an
+    unexpected close after an impairment leg going uncounted.
     """
 
+    # A connection fast enough for a pong miss to be counted inside a short
+    # leg; the phone's own contract values are exercised by the default runs.
+    FAST_CONNECTION = {"pingIntervalMs": 300, "pongDeadlineMs": 200, "handshakeDeadlineMs": 8_000}
+
     def test_the_blackhole_counts_its_attempts_and_recovers_to_a_ready_chat(self) -> None:
-        # The path returns 3 s into an 8 s attempt: the recovery must include
+        # The path returns 5 s into an 8 s attempt: the recovery must include
         # the rest of that attempt, not only the connect that follows it.
         status, output, result = self.run_impairment(["blackhole"], {
-            "blackholeSeconds": 3, "blackholeLivenessMs": 200,
-            "transportOpenMs": 8_000, "measuredDeadlineMs": 30_000,
+            "blackholeSeconds": 5, "blackholeSettleMs": 400,
+            "connection": dict(self.FAST_CONNECTION, handshakeDeadlineMs=8_000),
+            "measuredDeadlineMs": 30_000,
         })
         self.assertEqual(status, 0, output)
         leg = result["impairment"]["blackhole"]
@@ -844,26 +857,39 @@ class MultiDriverImpairment(StubGatewayHarness, unittest.TestCase):
         self.assertIsNotNone(leg["recoveryReadyMs"], "the recovery to a ready mounted chat was not timed")
         self.assertGreater(leg["recoveryReadyMs"], 4_000,
                            "the recovery was timed from the attempt's start, not from the path's return")
+        self.assertTrue(leg["abandonedOnMiss"],
+                        "the abandon must follow a counted pong miss, not the leg's own clock")
+        liveness_ms = 300 + 200
+        self.assertGreaterEqual(leg["silenceMs"], liveness_ms,
+                               "silence is measured from the last inbound frame, one liveness window long")
         self.assertLess(leg["silenceMs"], 2_000,
                         "the socket is abandoned one liveness window after the last inbound frame")
 
     def test_the_bandwidth_cap_meters_the_path_without_losing_the_socket(self) -> None:
         status, output, result = self.run_impairment(["bandwidth"], {
-            "bandwidthMbps": 0.05, "bandwidthOperations": 1, "transportOpenMs": 2_000,
+            "bandwidthMbps": 0.05, "bandwidthLegSeconds": 5,
         })
         self.assertEqual(status, 0, output)
         leg = result["impairment"]["bandwidth"]
+        self.assertGreaterEqual(leg["seconds"], 5, "the leg ran its full duration, not a fixed count of operations")
         self.assertGreater(leg["meteredMs"], 0, "the meter delayed nothing, so the cap was not applied")
         self.assertGreater(leg["deliveredBytes"], 0, "the capped path carried nothing")
         self.assertLessEqual(leg["deliveredBytesPerSecond"], leg["capBitsPerSecond"] / 8 * 1.5,
                              "the meter delivered more than the cap allows")
+        self.assertLessEqual(leg["linkUse"], 1.5, "link use is the delivered rate over the cap")
         self.assertEqual(leg["pongDeadlineMisses"], 0, "a capped path that carries data must not lose a pong")
         self.assertEqual(leg["unexpectedCloses"], 0, "the Gateway closed a socket on the capped path")
 
-    def test_the_restart_case_reconnects_every_client_after_the_profiler_s_answer(self) -> None:
+    def test_the_restart_case_counts_the_storm_from_the_restore(self) -> None:
+        # The mobile's first open after the restart is delayed past the request
+        # deadline's 1 s boundary. That request is the storm: a case that started
+        # measuring once every client was ready would report a fast storm and
+        # leave the slow one out.
         status, output, result = self.run_impairment(["restart"], {
-            "restartStormSeconds": 2, "restartDeadlineMs": 30_000, "transportOpenMs": 2_000,
-        }, restart_stub=True)
+            "restartStormSeconds": 2, "restartDeadlineMs": 30_000,
+            "connection": dict(self.FAST_CONNECTION, handshakeDeadlineMs=2_000),
+        }, restart_stub=True,
+            stub_config={"delay_open_session_id": "stub-run-1", "delay_ms": 2_500})
         self.assertEqual(status, 0, output)
         leg = result["impairment"]["restart"]
         self.assertEqual(len(leg["clients"]), 3, "the restart case needs the three measured clients connected")
@@ -874,28 +900,61 @@ class MultiDriverImpairment(StubGatewayHarness, unittest.TestCase):
             self.assertTrue(any(attempt.get("connected") for attempt in entry["attempts"]))
         # The clients retry from their own socket's close, so the downtime's
         # refused connects are measured, not skipped by waiting for the answer.
-        self.assertGreaterEqual(leg["failed_attempts"] if "failed_attempts" in leg else
-                                sum(1 for entry in leg["clientsAll"] for attempt in entry["attempts"]
+        self.assertGreaterEqual(sum(1 for entry in leg["clientsAll"] for attempt in entry["attempts"]
                                     if not attempt.get("connected")), 1,
                                 "no client tried while the Gateway was down")
         self.assertGreater(leg["downtimeMs"], 0, "the downtime was not reported")
         self.assertGreaterEqual(len(leg["requests"]), 3, "the storm measured no request")
+        self.assertTrue(all(request["sinceRestoreMs"] >= 0 for request in leg["requests"]),
+                        "a storm request was stamped before the new Gateway was healthy")
+        self.assertTrue(any(request["ms"] > 1_000 for request in leg["requests"]),
+                        f"the slow request made while the clients came back is missing: {leg['requests']}")
 
     def test_an_unexpected_close_after_a_blackhole_is_not_excused(self) -> None:
-        # The stub closes the mobile's socket on its second open after the
-        # blackhole (the bandwidth leg's first). A close the client did not ask
-        # for must be counted and must fail the run: `closing` left set by the
-        # blackhole's abandon would silently excuse it.
+        # The stub closes the mobile's socket on its fourth open: the mount that
+        # opens the bandwidth leg, after the blackhole's settle and recovery.
+        # A close the client did not ask for must be counted and must fail the
+        # run: `closing` left set by the blackhole's abandon would excuse it.
         status, output, result = self.run_impairment(["blackhole", "bandwidth"], {
-            "blackholeSeconds": 3, "blackholeLivenessMs": 200, "transportOpenMs": 2_000,
-            "bandwidthMbps": 0.05, "bandwidthOperations": 2, "measuredDeadlineMs": 30_000,
-        }, stub_config={"closeMobileOnOpen": 2})
+            "blackholeSeconds": 2, "blackholeSettleMs": 400,
+            "connection": dict(self.FAST_CONNECTION, handshakeDeadlineMs=2_000),
+            "bandwidthMbps": 0.05, "bandwidthLegSeconds": 3, "measuredDeadlineMs": 30_000,
+        }, stub_config={"closeMobileOnOpen": 4})
         self.assertNotEqual(status, 0, "the unexpected close was excused")
         self.assertIn("mobile closed 1013", output)
         band = (result.get("impairment") or {}).get("bandwidth") or {}
-        if band:
-            self.assertEqual(band["unexpectedCloses"], 1, "the counted close is not in the leg's result")
+        self.assertEqual(band.get("unexpectedCloses"), 1, "the counted close is not in the leg's result")
 
+
+RELAY_FLOOD = """
+import { PassThrough } from "node:stream";
+import { RelayDirection } from "RELAY_PATH";
+
+// A sink that never accepts a write: the relay must pause the source instead of
+// holding the flood in this process.
+const floodSource = new PassThrough();
+let writes = 0;
+const blockedSink = { write() { writes += 1; return false; }, on() {} };
+new RelayDirection(floodSource, blockedSink, () => 0, () => {});
+for (let index = 0; index < 2_000; index += 1) floodSource.write(Buffer.alloc(64 * 1024));
+await new Promise((resolve) => setTimeout(resolve, 250));
+const blocked = { writes, paused: floodSource.isPaused(), bufferedBytes: floodSource.readableLength };
+
+// A held direction forwards nothing while it is held: the chunks it reads wait
+// for the path to return and are written in order.
+const heldSource = new PassThrough();
+const heldSink = { written: [], write(chunk) { this.written.push(chunk.toString()); return true; }, on() {} };
+const held = new RelayDirection(heldSource, heldSink, () => 0, () => {});
+held.hold();
+heldSource.write("first");
+heldSource.write("second");
+heldSource.resume();
+await new Promise((resolve) => setTimeout(resolve, 100));
+const whileHeld = [...heldSink.written];
+held.release();
+await new Promise((resolve) => setTimeout(resolve, 100));
+process.stdout.write(JSON.stringify({ blocked, whileHeld, afterRelease: heldSink.written }));
+"""
 
 PROBE_CLIENT = """
 import { opendir } from "node:fs/promises";
@@ -906,6 +965,32 @@ process.kill(process.pid, "SIGUSR2");
 await new Promise((resolve) => setTimeout(resolve, 200));
 process.stdout.write(readFileSync(output, "utf8"));
 """
+
+
+class RelayBackpressure(unittest.TestCase):
+    """The shaped path, driven directly.
+
+    Failure modes written down before it: a relay that ignores the sink's
+    refusal holds the sender's bytes in the driver process instead of pausing
+    the source (a flooding source paired with a sink that never drains put
+    90 MB there in 2 s), and a relay that forwards a chunk read while the
+    direction is held leaks bytes past the blackhole.
+    """
+
+    def test_a_blocked_sink_pauses_the_source_and_a_held_direction_waits(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            script = Path(temporary) / "relay-flood.mjs"
+            script.write_text(RELAY_FLOOD.replace("RELAY_PATH", RELAY.as_posix()))
+            completed = subprocess.run([NODE, str(script)], capture_output=True, text=True, timeout=60)
+        self.assertEqual(completed.returncode, 0, completed.stderr)
+        result = json.loads(completed.stdout)
+        blocked = result["blocked"]
+        self.assertLess(blocked["writes"], 5,
+                        f"the relay kept writing into a full sink: {blocked}")
+        self.assertTrue(blocked["paused"], f"the source was never paused: {blocked}")
+        self.assertEqual(result["whileHeld"], [], "a held direction forwarded a chunk")
+        self.assertEqual(result["afterRelease"], ["first", "second"],
+                         "the chunks read while held are written, in order, on release")
 
 
 class FixtureProbe(unittest.TestCase):
@@ -971,6 +1056,23 @@ class ImpairmentCases(unittest.TestCase):
         recovered = {"label": "iteration-1", "cases": ["blackhole"],
                      "impairment": {"blackhole": {"silenceMs": 18_000, "attemptsDuringOutage": 5, "recoveryReadyMs": 120}}}
         self.assertEqual(self.profiler.validate_impairment([recovered]), [])
+
+    def test_a_bandwidth_case_that_never_filled_the_cap_rejects_the_run(self) -> None:
+        # A leg whose cap delayed nothing reads as a pass — zero pong misses,
+        # no capacity close — however the Gateway behaved, because the link was
+        # never loaded. It must reject the run instead.
+        def bandwidth(**overrides) -> dict:
+            leg = {"capBitsPerSecond": 2_000_000, "seconds": 90.0, "operations": [4_200.0],
+                   "deliveredBytes": 22_000_000, "deliveredBytesPerSecond": 244_000, "sentBytes": 4_000,
+                   "linkUse": 0.98, "meteredMs": 170_000.0, "pongDeadlineMisses": 0, "unexpectedCloses": 0}
+            leg.update(overrides)
+            return {"label": "iteration-1", "cases": ["bandwidth"], "impairment": {"bandwidth": leg}}
+
+        self.assertEqual(self.profiler.validate_impairment([bandwidth()]), [])
+        unfilled = self.profiler.validate_impairment([bandwidth(linkUse=0.2)])
+        self.assertEqual(len(unfilled), 1, unfilled)
+        unshaped = self.profiler.validate_impairment([bandwidth(meteredMs=1_000.0)])
+        self.assertEqual(len(unshaped), 1, unshaped)
 
     def test_a_restart_that_leaves_a_client_down_rejects_the_run(self) -> None:
         def restart(**overrides) -> dict:
@@ -1040,7 +1142,7 @@ class ImpairmentCases(unittest.TestCase):
                 "blackhole": {"silenceMs": 18_000, "attemptsDuringOutage": 5, "recoveryReadyMs": 120,
                               "attempts": [{"ms": 1_000, "connected": True}, attempt]},
                 "bandwidth": {"capBitsPerSecond": 2_000_000, "deliveredBytesPerSecond": 41_000,
-                              "sentBytes": 41_000, "seconds": 1.0, "operations": [4_200],
+                              "linkUse": 0.94, "sentBytes": 41_000, "seconds": 1.0, "operations": [4_200],
                               "pongDeadlineMisses": 0, "unexpectedCloses": 0, "meteredMs": 3_900},
                 "restart": {"downtimeMs": downtime, "restoredAtMs": 1,
                             "clients": [{"name": "mobile", "reconnectMs": reconnect,
@@ -1054,23 +1156,30 @@ class ImpairmentCases(unittest.TestCase):
             }}
 
         first = result("iteration-1", attempt={"ms": 90, "connected": True}, reconnect=1_400, downtime=3_900,
-                       storm=[{"client": "mobile", "ms": 200}, {"client": "dashboard", "ms": 1_500},
-                              {"client": "driver", "ms": 1_000}])
+                       storm=[{"client": "mobile", "ms": 200, "sinceRestoreMs": 10},
+                              {"client": "dashboard", "ms": 1_500, "sinceRestoreMs": 20},
+                              {"client": "driver", "ms": 1_000, "sinceRestoreMs": 30}])
         second = result("iteration-2", attempt={"ms": 15_000, "failed": "hello"}, reconnect=2_600, downtime=4_100,
-                        storm=[{"client": "mobile", "ms": 1_001}])
+                        storm=[{"client": "mobile", "ms": 1_001, "sinceRestoreMs": 40}])
         metrics = self.profiler.impairment_samples([first, second])
         self.assertEqual(metrics["impairment.blackhole.attempt_ms_max"]["values"], [1_000, 15_000],
                          "the longest attempt is the longest, whether it failed or not")
         self.assertEqual(metrics["impairment.restart.reconnect_ms_max"]["values"], [1_400, 2_600])
         self.assertEqual(metrics["impairment.restart.downtime_ms"]["values"], [3_900, 4_100])
-        self.assertEqual(metrics["impairment.restart.clients_ready"]["values"], [6, 6],
-                         "every connected client is counted ready, not only the measured three")
-        self.assertEqual(metrics["impairment.restart.clients_ready"]["better"], "higher")
+        self.assertEqual(metrics["impairment.bandwidth.link_use"]["values"], [0.94, 0.94])
+        for metric_id in ("impairment.bandwidth.link_use", "impairment.bandwidth.delivered_bytes_per_second",
+                          "impairment.bandwidth.sent_bytes_per_second", "impairment.restart.requests"):
+            self.assertEqual(metrics[metric_id]["better"], "higher",
+                             f"{metric_id} is a volume metric: more is not a regression")
         self.assertEqual(metrics["impairment.restart.requests_over_1s"]["values"], [1, 1],
                          "a request takes over 1 s only when it is strictly slower")
         self.assertEqual(metrics["impairment.restart.failed_attempts"]["values"], [6, 6],
                          "one refused connect per client is counted; a connected attempt is not")
         self.assertEqual(metrics["impairment.bandwidth.unexpected_closes"]["values"], [0, 0])
+        self.assertNotIn("impairment.bandwidth.cap_bits_per_second", metrics,
+                         "the cap is configuration: it belongs in the report context")
+        self.assertNotIn("impairment.restart.clients_ready", metrics,
+                         "every client is ready or the run is rejected: the count is not a measurement")
         self.assertTrue(all(entry["unit"] for entry in metrics.values()))
 
 

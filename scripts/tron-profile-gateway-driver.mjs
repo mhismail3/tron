@@ -31,13 +31,11 @@ import {
   closeSync, createWriteStream, mkdirSync, openSync, readFileSync, readSync, fstatSync, rmSync, writeFileSync, writeSync,
 } from "node:fs";
 import { appendFile } from "node:fs/promises";
-import { connect as connectTcp, createServer as createTcpServer } from "node:net";
+import { PathRelay } from "./tron-profile-relay.mjs";
 import { createRequire } from "node:module";
 import { dirname, join, relative, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 
-const CLIENT_PING_INTERVAL_MS = 10_000;
-const CLIENT_PONG_DEADLINE_MS = 8_000;
 const PRESENTATION_LEASE_RENEWAL_MS = 15_000;
 const REQUEST_TIMEOUT_MS = 30_000;
 const PROTOCOL_VERSION = 5;
@@ -54,6 +52,16 @@ if (!["seed", "run", "catalog", "multi"].includes(command) || !configPath) {
   process.exit(2);
 }
 const config = JSON.parse(readFileSync(configPath, "utf8"));
+// The phone's wire deadlines, from packages/protocol-fixtures/
+// gateway-connection-contract.json (the profiler passes them as `connection`).
+// They are not re-stated here: a driver copy would drift from the contract the
+// phone and the Gateway are held to, and C-3/C-4 change the contract.
+const CONNECTION = {
+  pingIntervalMs: 10_000,
+  pongDeadlineMs: 8_000,
+  handshakeDeadlineMs: 15_000,
+  ...(config.connection ?? {}),
+};
 const gatewayRequire = createRequire(join(config.gatewayDir, "package.json"));
 const started = performance.now();
 const now = () => performance.now() - started;
@@ -398,202 +406,6 @@ function generateCatalog() {
   writeFileSync(config.output, `${JSON.stringify(manifest, null, 2)}\n`);
 }
 
-/**
- * One direction of a relayed path. Raw TCP bytes read from `source` are written
- * to `sink` and charged against `bitsPerSecond` (0 = unshaped); the source is
- * paused with real TCP backpressure whenever the sink is full or the rate
- * budget is spent, so a slow path fills the sender's own socket buffers exactly
- * as a narrow link does. A hold is a blackhole: nothing is forwarded either way
- * until the path returns.
- */
-class RelayDirection {
-  constructor(source, sink, clock, onBytes) {
-    this.source = source;
-    this.sink = sink;
-    this.clock = clock;
-    this.onBytes = onBytes;
-    this.bitsPerSecond = 0;
-    this.forwardedBytes = 0;
-    this.meteredMs = 0;
-    this.readyAt = 0;
-    this.timer = null;
-    this.held = false;
-    source.on("data", (chunk) => this.data(chunk));
-    sink.on("drain", () => this.wake());
-  }
-
-  cap(bitsPerSecond) {
-    this.bitsPerSecond = bitsPerSecond;
-    this.readyAt = this.clock();
-  }
-
-  data(chunk) {
-    this.forwardedBytes += chunk.length;
-    this.onBytes(chunk.length);
-    const accepted = this.sink.write(chunk);
-    if (this.bitsPerSecond > 0) {
-      const nowMs = this.clock();
-      const at = Math.max(this.readyAt, nowMs);
-      this.readyAt = at + (chunk.length * 8000) / this.bitsPerSecond;
-      this.meteredMs += this.readyAt - at;
-    } else {
-      this.readyAt = this.clock();
-    }
-    if (!accepted || this.readyAt > this.clock()) this.waitForReady();
-  }
-
-  waitForReady() {
-    this.source.pause();
-    this.schedule();
-  }
-
-  schedule() {
-    if (this.timer !== null) return;
-    this.timer = setTimeout(() => { this.timer = null; this.wake(); }, Math.max(0, this.readyAt - this.clock()));
-    // A shaping timer is not work: it must never keep the driver alive.
-    this.timer.unref?.();
-  }
-
-  wake() {
-    if (this.held) return;
-    if (this.readyAt > this.clock()) { this.schedule(); return; }
-    this.source.resume();
-  }
-
-  /** Stop forwarding: the path is gone in this direction. */
-  hold() {
-    this.held = true;
-    if (this.timer !== null) { clearTimeout(this.timer); this.timer = null; }
-    this.source.pause();
-    this.readyAt = this.clock();
-  }
-
-  release() {
-    this.held = false;
-    this.readyAt = this.clock();
-    this.source.resume();
-  }
-
-  close() {
-    if (this.timer !== null) { clearTimeout(this.timer); this.timer = null; }
-  }
-}
-
-/**
- * The phone's path, shaped where the link really is: a loopback TCP relay that
- * forwards the client's byte stream to the Gateway under a per-direction rate
- * budget. Shaping raw bytes (rather than WebSocket frames) is what makes the
- * cap real — the Gateway's own socket buffers are the ones that fill, so its
- * outbound queue grows and its capacity policy is exercised — and it counts
- * what the link carried instead of what a decompressed frame said.
- *
- * A blackhole stops the relay forwarding and swallows new connections without
- * answering them: an established socket goes silent in both directions (the
- * Gateway sees silence, not a close) and an attempt made during the outage
- * hangs until the phone's own transport-open deadline gives up.
- */
-class PathRelay {
-  constructor(gatewayPort, clock) {
-    this.gatewayPort = gatewayPort;
-    this.clock = clock;
-    this.port = null;
-    this.blackholed = false;
-    this.bitsPerSecond = 0;
-    this.upBytes = 0;
-    this.downBytes = 0;
-    this.links = new Set();
-    this.heldSockets = new Set();
-    this.halfOpenUpstreams = new Set();
-    this.server = createTcpServer((socket) => this.accept(socket));
-  }
-
-  async listen() {
-    await new Promise((resolveListen, rejectListen) => {
-      this.server.once("error", rejectListen);
-      this.server.listen(0, "127.0.0.1", () => {
-        this.port = this.server.address().port;
-        resolveListen();
-      });
-    });
-  }
-
-  /** Apply one rate budget to every direction of the path, including links that
-   * open while it is set (a reconnect during the capped leg is still capped). */
-  cap(bitsPerSecond) {
-    this.bitsPerSecond = bitsPerSecond;
-    for (const link of this.links) { link.toGateway.cap(bitsPerSecond); link.toPhone.cap(bitsPerSecond); }
-  }
-
-  blackhole(on) {
-    this.blackholed = on;
-    for (const link of this.links) {
-      if (on) { link.toGateway.hold(); link.toPhone.hold(); }
-      else { link.toGateway.release(); link.toPhone.release(); }
-    }
-    if (!on) {
-      // The phone abandoned these sockets while the path was gone; a returned
-      // path does not resurrect them. The Gateway's half-open hold is over.
-      for (const upstream of this.halfOpenUpstreams) upstream.destroy();
-      this.halfOpenUpstreams.clear();
-    }
-  }
-
-  accept(phone) {
-    phone.on("error", () => {});
-    if (this.blackholed) {
-      // Held without an answer, as a dropping path holds a SYN: the phone's
-      // TCP connection exists here and nothing ever comes back on it.
-      this.heldSockets.add(phone);
-      phone.on("close", () => this.heldSockets.delete(phone));
-      return;
-    }
-    const gateway = connectTcp({ host: "127.0.0.1", port: this.gatewayPort });
-    const link = { phone, gateway };
-    const startForwarding = () => {
-      link.toGateway = new RelayDirection(phone, gateway, this.clock, (bytes) => { this.upBytes += bytes; });
-      link.toPhone = new RelayDirection(gateway, phone, this.clock, (bytes) => { this.downBytes += bytes; });
-      link.toGateway.cap(this.bitsPerSecond);
-      link.toPhone.cap(this.bitsPerSecond);
-      if (this.blackholed) { link.toGateway.hold(); link.toPhone.hold(); }
-      this.links.add(link);
-      phone.resume();
-    };
-    gateway.on("connect", startForwarding);
-    gateway.on("error", () => { link.toGateway?.close(); link.toPhone?.close(); this.links.delete(link); phone.destroy(); });
-    gateway.on("close", () => {
-      link.toGateway?.close();
-      link.toPhone?.close();
-      this.links.delete(link);
-      phone.destroy();
-    });
-    phone.on("close", () => {
-      // A phone that gives up on a frozen path says nothing to the Gateway: the
-      // socket stays half-open until the Gateway's own heartbeat gives up,
-      // which is what counts against its per-device socket cap.
-      if (this.blackholed) { this.halfOpenUpstreams.add(gateway); return; }
-      link.toGateway?.close();
-      link.toPhone?.close();
-      this.links.delete(link);
-      gateway.destroy();
-    });
-    return link;
-  }
-
-  close() {
-    for (const link of this.links) {
-      link.toGateway?.close();
-      link.toPhone?.close();
-      link.gateway.destroy();
-      link.phone.destroy();
-    }
-    this.links.clear();
-    for (const socket of this.heldSockets) socket.destroy();
-    this.heldSockets.clear();
-    for (const upstream of this.halfOpenUpstreams) upstream.destroy();
-    this.halfOpenUpstreams.clear();
-    this.server.close();
-  }
-}
 
 function emptyWindow() {
   return {
@@ -614,6 +426,7 @@ class RecordingClient {
     this.label = "setup";
     this.lastFrameAt = 0;
     this.closedUnexpectedly = null;
+    this.lastInboundAt = 0;
     // Counted for the impairment legs, which measure liveness and socket
     // capacity rather than only the frames inside a window.
     this.pongDeadlineMisses = 0;
@@ -621,6 +434,10 @@ class RecordingClient {
     // Set when this client's path is a shaped loopback relay instead of a
     // direct connection (the impairment legs).
     this.relay = null;
+    // An array while this client is a restart case's measured client: every
+    // request it makes is recorded, the ready sequence's included, so the storm
+    // is measured from the restart rather than after it.
+    this.requestTally = null;
     // Set by close(): permanent, so a reconnect still in flight cannot leave a
     // socket open behind a finished run.
     this.retired = false;
@@ -634,14 +451,17 @@ class RecordingClient {
     // (a deliberate abandon included) must not keep muting its closes.
     this.closing = false;
     this.awaitingPong = null;
-    const transportOpenMs = config.transportOpenMs ?? 15_000;
+    // One deadline for the whole handshake (contract `clientHandshakeDeadline`):
+    // the phone bounds open plus hello together, not each on its own.
+    const handshakeDeadlineAt = now() + CONNECTION.handshakeDeadlineMs;
+    const remainingHandshakeMs = () => Math.max(0, handshakeDeadlineAt - now());
     const socket = new WebSocket(`ws://127.0.0.1:${this.relay ? this.relay.port : config.port}/v1/socket`, {
       headers: { Authorization: `Bearer ${this.token}` },
       // URLSessionWebSocketTask's offer is exactly `permessage-deflate`; this
       // option set makes ws send the same parameterless offer.
       perMessageDeflate: { clientMaxWindowBits: false },
       autoPong: false,
-      handshakeTimeout: transportOpenMs,
+      handshakeTimeout: CONNECTION.handshakeDeadlineMs,
       maxPayload: 64 * 1024 * 1024,
     });
     this.socket = socket;
@@ -687,23 +507,23 @@ class RecordingClient {
       socket.once("open", resolveOpen);
       socket.once("error", rejectOpen);
       socket.once("unexpected-response", (_, response) => rejectOpen(new Error(`upgrade rejected with HTTP ${response.statusCode}`)));
-    }), transportOpenMs, `${this.name} WebSocket open`);
+    }), remainingHandshakeMs(), `${this.name} WebSocket open`);
     if (this.offeredExtensions !== "permessage-deflate") {
       fail(`${this.name} offered ${JSON.stringify(this.offeredExtensions)}, not the phone's parameterless permessage-deflate`);
     }
     if (!this.tcp) fail(`${this.name}: the upgrade exposed no TCP socket to count wire bytes`);
     const hello = new Promise((resolveHello, rejectHello) => { this.helloWaiter = resolveHello; this.helloReject = rejectHello; });
     this.send({ type: "hello", protocolVersion: PROTOCOL_VERSION, clientId: this.clientId, clientRole: "mobile" });
-    this.info = await withDeadline(hello, transportOpenMs, `${this.name} hello`);
+    this.info = await withDeadline(hello, remainingHandshakeMs(), `${this.name} hello`);
     if (this.info.protocolVersion !== PROTOCOL_VERSION) fail(`${this.name}: Gateway protocol ${this.info.protocolVersion} is not ${PROTOCOL_VERSION}`);
-    this.pingTimer = setInterval(() => this.clientPing(), CLIENT_PING_INTERVAL_MS);
+    this.pingTimer = setInterval(() => this.clientPing(), CONNECTION.pingIntervalMs);
   }
 
   clientPing() {
     if (this.socket?.readyState !== 1) return;
     // The phone would reconnect here; this recorder keeps measuring and the
     // orchestrator reports the miss (usually a stalled fixture on a busy host).
-    if (this.awaitingPong && now() - this.awaitingPong > CLIENT_PONG_DEADLINE_MS) {
+    if (this.awaitingPong && now() - this.awaitingPong > CONNECTION.pongDeadlineMs) {
       this.pongDeadlineMisses += 1;
       if (this.window) this.window.pongDeadlineMisses += 1;
     }
@@ -714,6 +534,7 @@ class RecordingClient {
   }
 
   note(dir, topic, bytes) {
+    if (dir === "in") this.lastInboundAt = now();
     this.timeline.write({ t: now(), client: this.name, label: this.label, dir, topic, bytes });
     if (!this.window) return;
     if (topic === "control:ping") this.window.pingsReceived += 1;
@@ -739,6 +560,7 @@ class RecordingClient {
     else if (frame.type === "response") topic = `response:${this.pending.get(frame.id)?.method ?? "unknown"}`;
     else topic = String(frame.type);
     this.lastFrameAt = now();
+    this.lastInboundAt = this.lastFrameAt;
     this.timeline.write({ t: this.lastFrameAt, client: this.name, label: this.label, dir: "in", topic, bytes });
     if (this.window) {
       const window = this.window;
@@ -781,6 +603,13 @@ class RecordingClient {
     const promise = new Promise((resolveRequest, rejectRequest) => {
       this.pending.set(id, { method, resolve: resolveRequest, reject: rejectRequest });
     });
+    if (this.requestTally) {
+      const entry = { client: this.name, method, startedAtMs: Date.now(), startedAt: now() };
+      this.requestTally.push(entry);
+      promise.then(
+        () => { entry.ms = now() - entry.startedAt; },
+        (error) => { entry.ms = now() - entry.startedAt; entry.failed = messageOf(error); });
+    }
     this.send({ type: "request", id, method, params });
     return withDeadline(promise, deadlineMs, `${this.name} ${method}`);
   }
@@ -1239,14 +1068,18 @@ async function measuredWindow(label, connected, recorded, body, options = {}) {
 //     passes with no inbound frame, abandons it and retries on the phone's
 //     backoff; the leg times the recovery to a ready mounted chat from the
 //     moment the path returned, whatever attempt was in flight then.
-//   bandwidth: the mobile's path is capped at `bandwidthMbps`. The workload
-//     moves full bounded transcript pages over it while liveness and socket
-//     capacity are observed (a pong queued behind data, no close for capacity).
+//   bandwidth: the mobile's path is capped at `bandwidthMbps` for
+//     `bandwidthLegSeconds`, with the link kept loaded by full bounded
+//     transcript pages mounted back to back, so the cap (not the workload) is
+//     what bounds the leg and the Gateway's socket buffers really fill.
+//     Liveness and socket capacity are observed (a pong queued behind data, no
+//     close for capacity) and the leg reports its own link use.
 //   restart: the profiler stops and restarts the fixture Gateway on the same
 //     port while these clients are connected. The driver asks for the restart
 //     (the fixture is the profiler's process), each client retries from the
-//     moment its own socket closes, and the leg times every client's reconnect,
-//     the attempts the downtime cost and the requests in the storm.
+//     moment its own socket closes, and every request a measured client makes
+//     from the restart on — its ready sequence included — is timestamped
+//     against the moment the new Gateway was healthy.
 
 function messageOf(error) {
   return String(error instanceof Error ? error.message : error);
@@ -1335,8 +1168,15 @@ async function relayFor(config, mobile) {
 }
 
 async function blackholeLeg(config, { mobile, chat, retry }) {
-  const leg = { seconds: config.blackholeSeconds, silenceMs: null, pathReturnedAtMs: null, recoveryReadyMs: null, attempts: [] };
+  const leg = { seconds: config.blackholeSeconds, settleMs: config.blackholeSettleMs, abandonedOnMiss: null,
+    silenceMs: null, pathReturnedAtMs: null, recoveryReadyMs: null, attempts: [] };
   const relay = await relayFor(config, mobile);
+  // Mount the chat on the shaped path and let it settle for more than one ping
+  // interval before the outage. A socket rebuilt just before it would have its
+  // first countable pong miss past the outage, and a chat that never mounted on
+  // the relay socket gives the Gateway nothing to send toward the silent one.
+  await retry("mount", () => chat.remount(config.measuredDeadlineMs));
+  await sleep(config.blackholeSettleMs);
   const missesBefore = mobile.pongDeadlineMisses;
   const outageStart = now();
   const outageEnd = outageStart + config.blackholeSeconds * 1000;
@@ -1352,11 +1192,17 @@ async function blackholeLeg(config, { mobile, chat, retry }) {
   returnTimer.unref?.();
   try {
     relay.blackhole(true);
-    // The phone trusts the link until one pong deadline passes with no inbound
-    // frame; until then the socket stays open and silent.
-    const quietUntil = Math.min(outageEnd, outageStart + config.blackholeLivenessMs);
+    // The phone trusts the link until one liveness window (ping interval plus
+    // pong deadline) passes with no inbound frame, and that miss is only
+    // counted at its next ping tick. The wait therefore allows two ticks and a
+    // deadline on top of the settle, and stops with the outage either way.
+    const quietUntil = Math.min(outageEnd, outageStart
+      + CONNECTION.pingIntervalMs * 2 + CONNECTION.pongDeadlineMs + config.blackholeSettleMs);
     while (mobile.pongDeadlineMisses === missesBefore && now() < quietUntil) await sleep(25);
-    leg.silenceMs = now() - outageStart;
+    leg.abandonedOnMiss = mobile.pongDeadlineMisses > missesBefore;
+    // Silence is what the Gateway saw: from the last frame this client got, not
+    // from the moment the leg happened to stop forwarding.
+    leg.silenceMs = now() - mobile.lastInboundAt;
     await mobile.abandon();
     leg.attempts = await connectUntilReady(mobile,
       () => retry("mount", () => chat.remount(config.measuredDeadlineMs)),
@@ -1371,32 +1217,28 @@ async function blackholeLeg(config, { mobile, chat, retry }) {
   return leg;
 }
 
-async function bandwidthLeg(config, { mobile, chat, dashboard, retry }) {
+async function bandwidthLeg(config, { mobile, chat, retry }) {
   const relay = await relayFor(config, mobile);
   const missesBefore = mobile.pongDeadlineMisses;
   const closesBefore = mobile.unexpectedCloses;
   const upBefore = relay.upBytes;
   const downBefore = relay.downBytes;
-  const meteredBefore = (() => {
-    let total = 0;
-    for (const link of relay.links) total += link.toGateway.meteredMs + link.toPhone.meteredMs;
-    return total;
-  })();
+  const meteredBefore = relay.meteredMs;
   const capBitsPerSecond = Math.round(config.bandwidthMbps * 1_000_000);
   const startedAtMs = Date.now();
   relay.cap(capBitsPerSecond);
   const startedAt = now();
   const operations = [];
   let closedEarly = false;
-  const legDeadlineMs = startedAt + config.bandwidthLegSeconds * 1000;
-  for (let index = 0; index < config.bandwidthOperations; index += 1) {
-    // The leg's own bound: a cap this narrow makes one operation slow on
-    // purpose, so the leg reports what it measured instead of running on.
-    if (index > 0 && now() > legDeadlineMs) break;
+  // A fixed duration, several ping intervals long, with the link kept loaded:
+  // the cap has to delay real traffic for a liveness window and beyond before
+  // it can lose a pong or fill the Gateway's socket buffers, and a leg that
+  // stopped after a few operations would report neither as a pass.
+  const legEnd = startedAt + config.bandwidthLegSeconds * 1000;
+  while (now() < legEnd) {
     const operationStart = now();
     try {
       await retry("mount", () => chat.remount(config.measuredDeadlineMs));
-      await retry("list", () => dashboard.request("session.list", { limit: 500, scope: "user" }, config.measuredDeadlineMs));
     } catch (error) {
       // A socket the Gateway closed under the cap is this case's own finding
       // (counted as an unexpected close), not a failure of the profile: the leg
@@ -1413,16 +1255,18 @@ async function bandwidthLeg(config, { mobile, chat, dashboard, retry }) {
   }
   const seconds = (now() - startedAt) / 1000;
   const deliveredBytes = relay.downBytes - downBefore;
-  let meteredMs = 0;
-  for (const link of relay.links) meteredMs += link.toGateway.meteredMs + link.toPhone.meteredMs;
   // Stop metering. The next chunk is forwarded without waiting: the path is not
   // shaped any more.
+  const meteredMs = relay.meteredMs - meteredBefore;
   relay.cap(0);
   return {
     capBitsPerSecond, seconds, operations, closedEarly, startedAtMs, endedAtMs: Date.now(),
     deliveredBytes, deliveredBytesPerSecond: deliveredBytes / seconds,
     sentBytes: relay.upBytes - upBefore,
-    meteredMs: meteredMs - meteredBefore,
+    // Delivered wire bytes over what the cap allows: near 0 the cap shaped
+    // nothing, near 1 the link was full for the whole leg.
+    linkUse: (deliveredBytes / seconds) / (capBitsPerSecond / 8),
+    meteredMs,
     pongDeadlineMisses: mobile.pongDeadlineMisses - missesBefore,
     unexpectedCloses: mobile.unexpectedCloses - closesBefore,
   };
@@ -1435,7 +1279,13 @@ async function bandwidthLeg(config, { mobile, chat, dashboard, retry }) {
  * answer only reports when the new Gateway was healthy), so the failed
  * attempts and the reconnect time include the downtime. The three clients the
  * exit criterion counts are the measured ones; the rest reconnect too and are
- * reported as ready, so a run cannot pass with half its clients dead. */
+ * reported as ready, so a run cannot pass with half its clients dead.
+ *
+ * The storm is everything a measured client requests from the restart on: the
+ * ready sequence's own requests (the slow full mounts and lists a returning
+ * client makes) are counted with the loop's, each timestamped against the
+ * moment the new Gateway was healthy. Each client's loop starts when that
+ * client is ready, so the storm is never anchored to the slowest one. */
 async function restartLeg(config, clients, retryMethod, measuredNames) {
   const requestPath = join(config.outputDir, `restart-request-${config.label}.json`);
   const donePath = join(config.outputDir, `restart-done-${config.label}.json`);
@@ -1444,6 +1294,9 @@ async function restartLeg(config, clients, retryMethod, measuredNames) {
   const closedAt = new Map();
   const closures = clients.map(({ client }) => waitForClosure(client, config.restartDeadlineMs)
     .then((atMs) => { closedAt.set(client.name, atMs); }));
+  for (const { name, client } of clients) {
+    if (measuredNames.includes(name)) client.requestTally = [];
+  }
   writeFileSync(requestPath, `${JSON.stringify({ requestedAtMs, gatewayPid: config.gatewayPid })}\n`);
   const ready = Promise.all(clients.map(async ({ name, client, ready: prepare }, index) => {
     await closures[index];
@@ -1451,7 +1304,16 @@ async function restartLeg(config, clients, retryMethod, measuredNames) {
     // retry starts here, not when the profiler says the new Gateway is up.
     client.expectClosure();
     const attempts = await connectUntilReady(client, prepare, now() + config.restartDeadlineMs);
-    return { name, readyAtMs: Date.now(), attempts, closedAtMs: closedAt.get(name), reconnectMs: Date.now() - closedAt.get(name) };
+    const readyAtMs = Date.now();
+    // This client's own storm, from its own ready moment: a client that came
+    // back early is measured while the others are still out.
+    const stormEnd = now() + config.restartStormSeconds * 1000;
+    while (measuredNames.includes(name) && now() < stormEnd) {
+      const cycleStart = now();
+      await retryMethod("list", () => client.request("session.list", { limit: 500, scope: "user" }, config.measuredDeadlineMs));
+      await sleep(Math.max(0, 1_000 - (now() - cycleStart)));
+    }
+    return { name, readyAtMs, attempts, closedAtMs: closedAt.get(name), reconnectMs: readyAtMs - closedAt.get(name) };
   }));
   // Both settle together: a client that cannot come back must not leave the
   // profiler's answer an unhandled rejection when it never arrives, and vice
@@ -1460,22 +1322,20 @@ async function restartLeg(config, clients, retryMethod, measuredNames) {
     ready, waitForJson(donePath, config.restartDeadlineMs, "the profiler's Gateway restart"),
   ]);
   const measured = results.filter((entry) => measuredNames.includes(entry.name));
-  // Requests in the storm: one list per measured client per second for a short
-  // window, so a slow Gateway shows in a count of slow requests, not in one
-  // stray sample.
-  const stormClients = clients.filter(({ name }) => measuredNames.includes(name));
+  // A request that started before the new Gateway was healthy is part of the
+  // downtime, not the storm; `sinceRestoreMs` is how it lines up with the
+  // restart the case is about.
   const requests = [];
-  const stormEnd = now() + config.restartStormSeconds * 1000;
-  while (now() < stormEnd) {
-    const cycleStart = now();
-    const cycle = await Promise.all(stormClients.map(async ({ name, client }) => {
-      const startedAt = now();
-      await retryMethod("list", () => client.request("session.list", { limit: 500, scope: "user" }, config.measuredDeadlineMs));
-      return { client: name, ms: now() - startedAt };
-    }));
-    requests.push(...cycle);
-    await sleep(Math.max(0, 1000 - (now() - cycleStart)));
+  for (const { name, client } of clients) {
+    if (!measuredNames.includes(name)) continue;
+    for (const entry of client.requestTally ?? []) {
+      if (entry.ms === undefined || entry.startedAtMs < restored.restoredAtMs) continue;
+      requests.push({ client: name, ms: entry.ms, sinceRestoreMs: entry.startedAtMs - restored.restoredAtMs,
+        failed: entry.failed ?? null });
+    }
+    client.requestTally = null;
   }
+  requests.sort((left, right) => left.sinceRestoreMs - right.sinceRestoreMs);
   for (const { client } of clients) client.expectClosure();
   return {
     requestedAtMs, restoredAtMs: restored.restoredAtMs, restoredPid: restored.pid,
@@ -1739,10 +1599,12 @@ async function multi() {
         clients: restartNames.map((name) => ({ name, client: byName.get(name), ready: ready(byName.get(name)) })),
       });
     }
+    // Written before the run is judged: a run rejected for an unexpected close
+    // still has its impairment legs as evidence.
+    writeFileSync(resultPath, `${JSON.stringify(result, null, 2)}\n`);
     for (const client of clients) {
       if (client.closedUnexpectedly) fail(`${client.name} ${client.closedUnexpectedly}`);
     }
-    writeFileSync(resultPath, `${JSON.stringify(result, null, 2)}\n`);
   } finally {
     for (const chat of chats) clearInterval(chat.renewal);
     if (appender) await appender.stop().catch(() => {});
