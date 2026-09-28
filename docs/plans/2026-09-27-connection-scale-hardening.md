@@ -559,7 +559,7 @@ rows are in priority order.
 | C-1 | Claimed | Projection work never blocks or parks reconnect; parked episodes self-resume | O-4, O-6b | orchestrator-dispatched deepseek-worker, 2026-09-28 |
 | G-1a | Done | Catalog owner and in-memory index fed by Gateway-owned changes | O-3, O-6a | orchestrator-dispatched deepseek-worker, 2026-09-28 |
 | G-1b | Done | Filesystem watcher and background reconciliation for external writers | G-1a | orchestrator-dispatched deepseek-worker, 2026-09-28 (the O-6a confirmation of the Done-when is owed by the orchestrator) |
-| G-1c | Done | Move every catalog reader to the index; delete request-path walks and the full-parse fallback | G-1b | review round 5 blockers fixed (unproven cut, startup automations); owning suite 235/235, session-archive 41/41; O-6a p99 is the orchestrator's quiet-host run |
+| G-1c | Done | Move every catalog reader to the index; delete request-path walks and the full-parse fallback | G-1b | round-5 blockers and the merge-gate close window fixed; owning suite 236/236, merge-gate case 10/10 alone; O-6a p99 is the orchestrator's quiet-host run |
 | G-1d | Ready | Replace the catalog wording in `connection-resilience.md` with the index contract (D-3) | G-1c | |
 | G-3 | Done | No audience, no projection: build and serialize snapshots only for subscribers | O-5, O-6a | orchestrator-dispatched deepseek-worker, 2026-09-28 (branch `hardening/g-3`; review round 1 addressed; CPU comparison and O-5's cross-check owed to the orchestrator) |
 | G-3a | Ready | Streaming progress for a session with no subscriber is still projected (`projectMessage` plus `safeJson` of the full message, up to once per 150 ms each); see G-3 handoff and review nit 8 | G-3 | |
@@ -7637,4 +7637,28 @@ wait).
   **235/235**; `npx vitest run src/sessions src/transport src/admin src/workspace`
   **1216 passed / 1 failed / 1217**, the failure being `session-catalog.test.ts`'s
   known `ENOTEMPTY` cleanup flake under directory load (29/29 alone).
+
+
+### G-1c · Done · 2026-09-28 · merge-gate response (branch `hardening/g-1c`)
+
+- The merge gate reproduced the deferred minor 2 as a real regression: "scopes
+  extension shutdown to the owning runtime slot" failed intermittently because a
+  slot's close queues its catalog row at the commit point, so a reopen could land
+  in the window and answer `not_found`.
+- Fix: membership for a *named* session now waits for the row work the Gateway
+  itself has queued (`SessionCatalog.awaitQueuedChanges()`, the owner's lane) and
+  re-resolves before it may report absence. Wired into every read that can name
+  one session: `acquire`, `delete`, `setArchived`, attention resolution,
+  automation admission and recovery, and `workspaceForSession`. A session cannot
+  become unopenable because its runtime closed.
+- Evidence: `scopes extension shutdown to the owning runtime slot` **10/10**
+  alone; new deterministic case "reopens a session whose runtime closed before
+  its index row landed" holds the row build open across the close and fails with
+  `not_found` when the wait is removed (negative control run, then reverted).
+  Owning suite **236/236**; `npx tsc --noEmit -p .` and `npm run build` clean;
+  zone sweep `npx vitest run src/sessions src/transport src/admin src/workspace`
+  **1216 passed / 2 failed / 1218**, both failures being the known load-only
+  flakes (`session-catalog.test.ts` ENOTEMPTY cleanup and
+  `recent-model-usage.integration.test.ts`), each green as its own file (32/32
+  together).
 
