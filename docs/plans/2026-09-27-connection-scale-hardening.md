@@ -7852,6 +7852,7 @@ wait).
 
 ### C-6 · Done · 2026-09-28 · orchestrator-dispatched deepseek-worker (branch `hardening/c-6`)
 
+- Commits: `14d9ba665` (gateway transport: cancel frame, joined opens), `e31d21592` (iOS: cancel frame + `rpc.cancelled`), `02038e7f4` (records, docs, plan row), `57ac20dce` (cancellation stage naming), on `hardening/c-6` merged with `hardening/integration` at `d3aecb11e`.
 - Result: protocol 6 gains `{type:"cancel",id}` (no response). The Gateway aborts
   that request's controller, a cancelled request writes one `rpc.cancelled`
   record instead of `rpc.completed` (debug under `SLOW_RPC_WARNING_MS`, warning
