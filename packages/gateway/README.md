@@ -2489,34 +2489,41 @@ cannot hold the catalog, and it takes the same per-host profile lock.
     in the decoder's bytes (`.offered_in_flight_bytes` — the unit the Gateway's
     own 8 MiB outbound queue is bounded in) and in wire bytes
     (`.offered_in_flight_wire_bytes`). A leg is rejected unless it filled at
-    least half its cap and offered more than one pong deadline of the cap in
-    flight, so "zero pong misses, no close for capacity" cannot be true by
-    construction. It also reports the mobile's longest ping-to-pong round trip
-    (`.max_ping_to_pong_ms`), which is the delay a pong deadline is set against.
-    Note what that bounds: the queue's bytes compress on the wire (about 25-30×
-    for this fixture's generated transcripts), so a pong reaches the phone's
-    8 s deadline only when the Gateway holds several MB of *wire* bytes for it —
-    around 50 MB of queued pages, above its 8 MiB per-connection backstop. At
-    the default 2 Mbit/s cap the leg therefore reports the round trip and any
-    capacity close, but a pong deadline miss is out of reach; a lower cap (a
-    slower path) is what makes one reachable.
-  - **bandwidth-stream** (`--bandwidth-stream-mbps`, default 0.3, for
+    least half its cap. What this leg *cannot* show at its default cap, stated
+    plainly: one page is about 39 kB of wire, so even six in flight are far
+    under one pong deadline of 2 Mbit/s (8 s × 250 kB/s = 2 MB of wire), and six
+    pages are under the 8 MiB per-connection backstop — at 2 Mbit/s neither a
+    pong deadline miss nor a capacity close is reachable. What it reports is the
+    mobile's longest ping-to-pong round trip (`.max_ping_to_pong_ms`, the delay
+    a pong deadline is set against) and the load it offered, and zero misses and
+    zero closes are read as "this cap never reached them", not as a pass. The
+    case that can reach them is `bandwidth-stream` below. Note what a pong waits
+    behind when they are reached: the queue's bytes compress on the wire (about
+    25-30× for this fixture's generated transcripts), and the Gateway's own
+    `autoPong` answer is not queued in its application queue at all, so what
+    delays a pong is the socket's own buffered bytes.
+  - **bandwidth-stream** (`--bandwidth-stream-mbps`, default 0.08, for
     `--bandwidth-stream-seconds`, default 30): the mobile mounts several chats on
     the phase's running sessions (up to `bandwidthStreamSessions`), which stream
-    superseding snapshots and keyed events, and the path is then capped slower
-    than they produce, so the Gateway's queue holds replaced state — the state
-    G-4 coalesces — and a pong queued behind it. This is the case that can show
-    what the page leg's default cap cannot: on code without G-4 the queue
-    reaches its 8 MiB backstop and the socket closes for capacity, and on code
-    without C-4 the phone tears down a link over a pong a busy queue delayed. It
-    reports the streams it held, their decoded payload rate,
-    `.delivered_bytes_per_second` and `.link_use` (the streams of this fixture
-    produce a fraction of the cap, so link use is what the workload used, not a
-    target), `.max_ping_to_pong_ms`, `.pong_deadline_misses` and
-    `.unexpected_closes`. The streams are attached before the cap is applied:
-    the phone mounts its chats on a working path and the path then slows. A leg
-    is rejected unless it held at least two streams and showed a backlog — a
-    round trip well above the idle one, a missed deadline or a close.
+    superseding snapshots and keyed events, and the path is then capped *below
+    what they produce* — the measured seven streams of this fixture produced
+    295,621 B/s of decoded state and 11,901 B/s of wire, so the cap's 10,000 B/s
+    is below the workload and the relay, not the workload, bounds the leg — so
+    the Gateway's queue holds replaced state — the state G-4 coalesces — and
+    whatever waits behind it. This is the case that can show what the page leg's
+    default cap cannot: on code without G-4 the queue reaches its 8 MiB backstop
+    and the socket closes for capacity, and on code without C-4 the phone tears
+    down a link over a pong a busy path delayed. It reports the streams it held,
+    their decoded payload rate, `.delivered_bytes_per_second` and `.link_use`
+    (the cap must stay full: the leg is rejected below 0.9), its
+    `.max_ping_to_pong_ms`, `.pong_deadline_misses` and `.unexpected_closes`. The
+    streams are attached before the cap is applied: the phone mounts its chats
+    on a working path and the path then slows. A leg is rejected unless it held
+    at least two mounted streams, filled at least 0.9 of its cap, and showed a
+    backlog: its own round trip longer than the *same run's* uncapped round trip,
+    a missed deadline, or a close. The round trip is the leg's own window (the
+    client's lifetime maximum is not the leg's) and each pong is charged to the
+    ping it answers.
   - **restart:** the driver asks the profiler — its parent, which owns the
     fixture process — for a Gateway restart while every connected client is
     live. The profiler stops the child and starts a fresh one on the same port,
@@ -2526,13 +2533,16 @@ cannot hold the catalog, and it takes the same per-host profile lock.
     include the downtime; the exit criterion's three clients (a mounted phone, a
     listing dashboard, one more pair) are the measured ones and every other
     client reconnects too, or the run is rejected. Every request a measured
-    client makes is kept: the ones timestamped `sinceRestoreMs` against the
-    moment the new Gateway was healthy are the storm — the ready sequence's own
-    mounts and lists included — and the ones that started before that stamp (the
-    new Gateway already served them inside the profiler's health check) are
-    marked `duringDowntime` and reported as `.downtime_requests` instead of
-    being dropped. Each client's storm loop starts when that client is ready
-    rather than when the slowest one returns.
+    client makes is kept: the requests the new Gateway served are the storm —
+    the ready sequence's own mounts and lists included, each timestamped
+    `sinceRestoreMs` against the moment the new Gateway was healthy — and the
+    ones that failed (refused while the Gateway was down, or on the socket it
+    closed) are marked `duringDowntime` and reported as `.downtime_requests`
+    instead of being dropped. The classification is by outcome, not by the
+    timestamp: the profiler stamps the restore after the new Gateway already
+    answered, and classifying by time would move its first, most contended
+    requests out of the storm. Each client's storm loop starts when that client
+    is ready rather than when the slowest one returns.
 - **Impairment metrics:** `impairment.blackhole.attempts_during_outage`,
   `.silence_ms`, `.recovery_ready_ms` (C-3's target: p95 ≤ 5 s),
   `.attempt_ms_max`; `impairment.bandwidth.link_use` (delivered rate ÷ cap),
@@ -2545,15 +2555,17 @@ cannot hold the catalog, and it takes the same per-host profile lock.
   `.failed_attempts`, `.requests`, `.downtime_requests`, `.requests_over_1s`
   (G-13: zero) and `.request_ms_p99`. Volume and throughput metrics are read as
   "higher is better"; the cap and the leg length are configuration and live in
-  the report context (`impairment.bandwidth_mbps`, `workload`), with each case's
-  attempts and per-client details, and
+  the report context (`impairment.bandwidth_mbps`,
+  `impairment.bandwidth_stream_mbps`, `workload`), with each case's attempts,
+  loads and per-client details, and
   `impairment.gateway_outbound_capacity_records` counts
   `connection.outbound-capacity` records inside the bandwidth legs' own time
   windows (both capped legs' windows). A run is rejected when a selected case
-  reported nothing, when a bandwidth leg never filled its cap or offered less
-  than one pong deadline of it in flight, when the streaming leg held fewer than
-  two streams or backed nothing up, or when any connected client is left down — and an unexpected
-  close, the phone's socket included, fails the run.
+  reported nothing, when a bandwidth leg never filled half its cap, when the
+  streaming leg held fewer than two mounted streams, did not fill 0.9 of its cap,
+  or showed no backlog (no round trip longer than the same run's uncapped one,
+  no miss and no close), or when any connected client is left down — and an
+  unexpected close, the phone's socket included, fails the run.
 
 Per iteration it reports `latency.<operation>.p50|p99|max` (nearest rank, so
 p99 is the maximum below 100 samples) for `session_list`,

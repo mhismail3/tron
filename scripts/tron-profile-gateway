@@ -177,26 +177,26 @@ MULTI = {
     "bandwidthMbps": 2.0,
     # The bandwidth leg is a fixed duration with `bandwidthInFlight` full bounded
     # transcript pages in flight at once, each on its own session. One page is
-    # about 39 kB of wire: a serial leg can never queue more than one page ahead
-    # of a pong, so "zero pong misses, no close for capacity" would be true by
-    # construction however the Gateway behaved. `MINIMUM_BANDWIDTH_OFFERED_
-    # FACTOR` below holds the leg to the load that makes the verdict mean
-    # something.
+    # about 39 kB of wire, so even six of them in flight are far under one pong
+    # deadline of this leg's 2 Mbit/s cap (8 s x 250 kB/s = 2 MB of wire). At the
+    # default cap a pong miss and a capacity close are therefore out of reach and
+    # the leg reads as zero whatever the Gateway does; what it reports is the
+    # round trip and the load it offered. The leg that can back the link up is
+    # `bandwidth-stream` (see its cap below).
     "bandwidthLegSeconds": 90,
     "bandwidthInFlight": 6,
     # The second capped case: the mobile holds several mounted chats on running
-    # sessions, which stream superseding snapshots and keyed events. The
-    # arithmetic for the cap: the streams produce roughly 0.53 snapshots/s per
-    # session, about 600 KB encoded each, so eight streams offer about 2.5 MB/s
-    # of encoded state; the Gateway's per-connection queue is bounded at 8 MiB of
-    # those bytes, so a queue that fills holds about 8 MiB / 25.6 (the measured
-    # wire compression of this fixture's content) = about 320 kB of wire. One
-    # pong deadline (8 s) of a 0.3 Mbit/s path (37,500 B/s) is 300 kB, so at
-    # 0.3 Mbit/s a full queue puts a pong behind more than its deadline, while
-    # the same rate leaves the *page* leg's one-page offer far below it. The cap
-    # is deliberately below the stream rate: the queue, not the workload, is
-    # then what the leg measures.
-    "bandwidthStreamMbps": 0.3,
+    # sessions, which stream superseding snapshots and keyed events. The cap's
+    # arithmetic, from the fourth review's measurement of seven such streams on
+    # this fixture: their transcripts produced 295,621 B/s of decoded state,
+    # which reached the phone as 11,901 B/s of wire (about 25x compression), so
+    # the workload itself puts about 0.095 Mbit/s on the path. A cap above that
+    # lets the workload, not the link, bound the leg (that run's link_use was
+    # 0.32); 0.08 Mbit/s (10,000 B/s) sits below the measured production, so the
+    # relay holds the excess back and the queue grows for the whole leg. This is
+    # the case that can reach what the page leg's 2 Mbit/s cap cannot: a pong
+    # behind a real backlog, and the Gateway's 8 MiB outbound backstop.
+    "bandwidthStreamMbps": 0.08,
     "bandwidthStreamSeconds": 30,
     # Seven more running sessions plus the mounted chat: every running session
     # the phase has, so the streams out-produce the cap.
@@ -211,26 +211,14 @@ MULTI = {
 }
 PHONE_REQUEST_DEADLINE_MS = 30_000
 # A bandwidth leg only means something if the cap limited real traffic: the link
-# has to be nearly full (delivered rate against the cap) and the workload has to
-# offer more in flight than the cap can carry inside one pong deadline. Without
-# the second rule, "zero pong misses" and "no close for capacity" are true by
-# construction: a serial leg has one page in flight, which is a fraction of a
-# second of the link.
+# has to be nearly full (delivered rate against the cap). Without that rule, a
+# cap that was never reached reads as a pass — zero pong misses, no capacity
+# close — however the Gateway behaved.
 MINIMUM_BANDWIDTH_LINK_USE = 0.5
-# Offered load against `pong deadline x cap`, in the decoder's bytes — the unit
-# the Gateway's own outbound queue (8 MiB backstop, G-4's coalescing) is bounded
-# in. Note that those bytes compress on the wire (about 25-30x for this
-# fixture's generated transcripts), so this is not the same number as the bytes
-# that queue on the link; `offered_in_flight_wire_bytes` is reported beside it.
-MINIMUM_BANDWIDTH_OFFERED_FACTOR = 1.0
-# The streaming case is bounded by the streams, not by its cap: the running
-# sessions of this fixture produce about 296 kB/s of decoded state over eight
-# streams (measured), which is a fraction of the 0.3 Mbit/s cap, so the leg is
-# rejected on the backlog it actually showed rather than on cap use: a pong set
-# a quarter of the way to its deadline, a missed deadline, or a close are each
-# proof the queue held something. The idle round trip on this path is about
-# 0.1-0.2 s.
-MINIMUM_BANDWIDTH_STREAM_SIGNAL_MS = 1_000
+# The streaming leg is held to a full cap, not a busy one: its cap sits below
+# what the streams produce, so the link must stay full for the leg or the queue
+# never grew and the leg measured the workload instead of the Gateway.
+MINIMUM_BANDWIDTH_STREAM_LINK_USE = 0.9
 # Host guard: a qualification run on a swapping or pressured host measures the
 # host, not the Gateway (plan O-6a).
 HOST_SWAP_LIMIT_BYTES = 4 * 1024 ** 3
@@ -1017,9 +1005,9 @@ def driver_deadline_seconds(config: dict, restart_case: bool) -> float:
     It is the sum of every phase's own bound, not a target: the mixed window is
     its fixed length plus its censoring tail, the blackhole is its length plus
     one recovery deadline, the bandwidth leg is its own bound plus one
-    operation's deadline, and the restart covers the profiler's stop and start
-    budgets plus the storm. A case that passes its own bound fails inside the
-    driver (or times out here) either way."""
+    operation's deadline and the unmounts that follow it, and the restart covers
+    the profiler's stop and start budgets plus the storm. A case that passes its
+    own bound fails inside the driver (or times out here) either way."""
     seconds = config["mixedSeconds"] + config["tailGraceMs"] / 1000
     seconds += config["noSubscriberSeconds"] + 60
     if "blackhole" in config["cases"]:
@@ -1029,13 +1017,19 @@ def driver_deadline_seconds(config: dict, restart_case: bool) -> float:
         seconds += config["blackholeSettleMs"] / 1000 + config["measuredDeadlineMs"] / 1000 + 60
         seconds += config["blackholeSeconds"] + config["measuredDeadlineMs"] / 1000
     if "bandwidth" in config["cases"]:
-        # Each lane may still finish one operation past the leg's deadline.
+        # Each lane may still finish one operation past the leg's deadline, and
+        # every extra chat it mounted is unmounted before the next case (a
+        # visibility request and a close, each on its own deadline).
         seconds += config["bandwidthLegSeconds"] + config["measuredDeadlineMs"] / 1000
+        seconds += (config["bandwidthInFlight"] + 1) * 2 * PHONE_REQUEST_DEADLINE_MS / 1000
     if "bandwidth-stream" in config["cases"]:
         # Every stream is attached before the capped window starts, each on its
-        # own attach deadline; then the leg is its own length.
+        # own attach deadline; then the leg is its own length and every stream
+        # is unmounted (a visibility request and a close, each on its own
+        # deadline).
         seconds += (config["bandwidthStreamSessions"] + 1) * config["bandwidthStreamAttachDeadlineMs"] / 1000
         seconds += config["bandwidthStreamSeconds"] + 60
+        seconds += (config["bandwidthStreamSessions"] + 1) * 2 * PHONE_REQUEST_DEADLINE_MS / 1000
     if restart_case:
         seconds += config["restartDeadlineMs"] / 1000 + config["restartStormSeconds"] + 60
     return seconds
@@ -1105,14 +1099,16 @@ def validate_multi(results: list[dict]) -> tuple[list[str], list[str]]:
 
 
 def validate_impairment(results: list[dict]) -> list[str]:
-    """Every selected impairment case must have run and reported, and a
-    bandwidth case must have exercised the cap it is about.
+    """Every selected impairment case must have run and reported, and a capped
+    case must have exercised the cap it is about.
 
     The case numbers themselves are the baseline, not a verdict: a run is only
     rejected when a case measured nothing at all, or when its cap never limited
-    traffic (a leg whose link was idle, or which offered less in flight than the
-    cap can carry inside one pong deadline, would report "zero pong misses" and
-    "no close for capacity" however the Gateway behaved)."""
+    traffic (a leg whose link was idle would report "zero pong misses" and "no
+    close for capacity" however the Gateway behaved). What each cap can reach is
+    documented with the case's constants: at the page leg's 2 Mbit/s defaults
+    neither a pong miss nor a capacity close is reachable, so that leg is held
+    only to the traffic it moved and the load it offered."""
     problems: list[str] = []
     for result in results:
         label = result["label"]
@@ -1130,33 +1126,32 @@ def validate_impairment(results: list[dict]) -> list[str]:
             elif name == "bandwidth":
                 if not leg.get("operations") or not leg.get("deliveredBytes"):
                     problems.append(f"{label}: the bandwidth case moved no data")
-                elif leg.get("linkUse", 0) < MINIMUM_BANDWIDTH_LINK_USE:
-                    problems.append(f"{label}: the bandwidth case filled only {leg['linkUse']:.2f} of its cap, "
-                                    "so the cap never limited the traffic and the case proves nothing")
-                offered = leg.get("offeredInFlightBytes")
-                required = (MINIMUM_BANDWIDTH_OFFERED_FACTOR * CONNECTION["pongDeadlineMs"] / 1000
-                            * leg.get("capBitsPerSecond", 0) / 8)
-                if offered is None:
-                    problems.append(f"{label}: the bandwidth case reported no offered in-flight load")
-                elif offered < required:
-                    problems.append(f"{label}: the bandwidth case offered {offered:.0f} B in flight, less than one "
-                                    f"pong deadline of its {leg.get('capBitsPerSecond', 0) / 1e6:.2f} Mbit/s cap "
-                                    f"({required:.0f} B), so a queued pong could never be late and the case "
-                                    "proves nothing")
+                elif (leg.get("linkUse") or 0) < MINIMUM_BANDWIDTH_LINK_USE:
+                    problems.append(f"{label}: the bandwidth case filled only {(leg.get('linkUse') or 0):.2f} of its "
+                                    "cap, so the cap never limited the traffic and the case proves nothing")
                 if leg.get("maxPingToPongMs") is None:
                     problems.append(f"{label}: the bandwidth case reported no ping-to-pong round trip")
             elif name == "bandwidth-stream":
                 if leg.get("streams", 0) < 2 or not leg.get("payloadBytes"):
                     problems.append(f"{label}: the streaming bandwidth case held "
                                     f"{leg.get('streams', 0)} streaming chat(s), so it measured no queue")
+                elif (leg.get("linkUse") or 0) < MINIMUM_BANDWIDTH_STREAM_LINK_USE:
+                    problems.append(f"{label}: the streaming bandwidth case filled only "
+                                    f"{(leg.get('linkUse') or 0):.2f} of its cap, so the cap never bounded the "
+                                    "streams and the queue cannot have grown")
                 backlog = leg.get("maxPingToPongMs")
+                uncapped = leg.get("uncappedPingToPongMs")
                 if backlog is None:
                     problems.append(f"{label}: the streaming bandwidth case reported no ping-to-pong round trip")
-                elif (backlog < MINIMUM_BANDWIDTH_STREAM_SIGNAL_MS and not leg.get("pongDeadlineMisses")
-                        and not leg.get("unexpectedCloses")):
-                    problems.append(f"{label}: the streaming bandwidth case's longest ping-to-pong round trip was "
-                                    f"{backlog:.0f} ms, with no pong miss and no close: the streams never backed "
-                                    "the link up, so the case proves nothing")
+                elif not leg.get("pongDeadlineMisses") and not leg.get("unexpectedCloses"):
+                    if uncapped is None:
+                        problems.append(f"{label}: the streaming bandwidth case reported no uncapped round trip "
+                                        "to compare its own against, so its backlog cannot be judged")
+                    elif backlog <= uncapped:
+                        problems.append(f"{label}: the streaming bandwidth case's longest ping-to-pong round trip "
+                                        f"was {backlog:.0f} ms, no longer than this run's uncapped {uncapped:.0f} ms, "
+                                        "with no pong miss and no close: the streams never backed the link up, so "
+                                        "the case proves nothing")
             elif name == "restart":
                 measured = leg.get("clients") or []
                 ready = leg.get("clientsAll") or []
@@ -1169,7 +1164,7 @@ def validate_impairment(results: list[dict]) -> list[str]:
                 if not leg.get("requests"):
                     problems.append(f"{label}: the restart case made no request in the storm")
                 elif not any(not request["duringDowntime"] for request in leg["requests"]):
-                    problems.append(f"{label}: the restart case made no request after the new Gateway was healthy")
+                    problems.append(f"{label}: the restart case recorded no request the new Gateway served")
     return problems
 
 
@@ -1308,8 +1303,8 @@ def impairment_samples(results: list[dict]) -> dict:
     streamed = legs("bandwidth-stream")
     if streamed:
         add("impairment.bandwidth_stream.link_use", "ratio", [leg["linkUse"] for leg in streamed],
-            "delivered wire bytes per second against the cap; the streams of this fixture produce a "
-            "fraction of a 0.3 Mbit/s cap, so this is how much of it the workload used, not a target",
+            "delivered wire bytes per second against the cap; the cap sits below what the streams produce, so "
+            "this is a validity gate (the leg is rejected below 0.9), not how much of the workload it carried",
             better="higher")
         add("impairment.bandwidth_stream.delivered_bytes_per_second", "B/s",
             [leg["deliveredBytesPerSecond"] for leg in streamed],
@@ -1345,7 +1340,8 @@ def impairment_samples(results: list[dict]) -> dict:
             "included", better="higher")
         add("impairment.restart.downtime_requests", "count",
             [sum(1 for request in leg["requests"] if request["duringDowntime"]) for leg in restart],
-            "requests that started while the new Gateway was not yet healthy (kept so none is dropped)")
+            "requests that failed on the way down or back up (refused while the Gateway was down, or on the "
+            "socket it closed); they are kept so none is dropped, and they are not the storm")
         add("impairment.restart.requests_over_1s", "count",
             [sum(1 for request in leg["requests"] if not request["duringDowntime"] and request["ms"] > 1_000)
              for leg in restart],
@@ -1597,8 +1593,8 @@ def parse(argv: list[str]) -> argparse.Namespace:
                              "not a baseline")
     parser.add_argument("--bandwidth-stream-mbps", type=float, default=MULTI["bandwidthStreamMbps"],
                         help="multi-session streaming bandwidth cap (default "
-                             f"{MULTI['bandwidthStreamMbps']}); slower than the running sessions produce, "
-                             "which is what makes a queued pong and a capacity close reachable")
+                             f"{MULTI['bandwidthStreamMbps']}); below what the running sessions produce, which "
+                             "is what makes a queued pong and a capacity close reachable")
     parser.add_argument("--bandwidth-stream-seconds", type=float, default=MULTI["bandwidthStreamSeconds"],
                         help="multi-session streaming leg length in seconds "
                              f"(default {MULTI['bandwidthStreamSeconds']})")
@@ -1642,8 +1638,8 @@ def parse(argv: list[str]) -> argparse.Namespace:
         parser.error("--bandwidth-mbps must be between 0.5 and 1000")
     if not 5 <= args.bandwidth_seconds <= 3_600:
         parser.error("--bandwidth-seconds must be between 5 and 3600")
-    if not 0.1 <= args.bandwidth_stream_mbps <= 1_000:
-        parser.error("--bandwidth-stream-mbps must be between 0.1 and 1000")
+    if not 0.05 <= args.bandwidth_stream_mbps <= 1_000:
+        parser.error("--bandwidth-stream-mbps must be between 0.05 and 1000")
     if not 5 <= args.bandwidth_stream_seconds <= 3_600:
         parser.error("--bandwidth-stream-seconds must be between 5 and 3600")
     if not 5 <= args.window_seconds <= 3600:

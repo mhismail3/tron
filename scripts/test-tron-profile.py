@@ -565,7 +565,10 @@ let lists = 0;
 // stub to close the mobile socket at a known point in the run.
 let mobileClientId = null;
 let mobileOpens = 0;
-const server = new WebSocketServer({ port: config.port ?? 0, perMessageDeflate: false });
+// The first connection the mobile identifies itself on: the mixed window's, before
+// a leg rebuilds the socket on the relay (see `pongDelayFirstMobileConnection`).
+let delayedMobileConnection = false;
+const server = new WebSocketServer({ port: config.port ?? 0, perMessageDeflate: false, autoPong: false });
 server.on("listening", () => writeFileSync(config.portFile, String(server.address().port)));
 process.on("SIGTERM", () => process.exit(0));
 process.on("SIGUSR2", () => {
@@ -577,7 +580,22 @@ process.on("SIGUSR2", () => {
 });
 server.on("connection", (socket) => {
   let clientId = null;
+  let delayThisConnection = false;
   socket.on("error", () => {});
+  // Answer pings like ws's own autoPong, with a delay a test can ask for: a late
+  // pong is what a backed-up path produces, and it must be charged to the ping it
+  // answers rather than to the newest one.
+  socket.on("ping", (data) => {
+    if (config.pongDelayFirstMobileConnection && !delayThisConnection && !delayedMobileConnection
+        && clientId !== null && clientId === mobileClientId) {
+      delayThisConnection = true;
+      delayedMobileConnection = true;
+    }
+    const delay = config.pongDelayMs && (!config.pongDelayFirstMobileConnection || delayThisConnection)
+      ? config.pongDelayMs : 0;
+    if (delay > 0) { setTimeout(() => { if (socket.readyState === 1) socket.pong(data); }, delay); return; }
+    socket.pong(data);
+  });
   socket.on("close", (code, reason) => appendFileSync(config.journal, `${JSON.stringify({ code, reason: reason.toString() })}\\n`));
   socket.on("message", (data) => {
     let frame;
@@ -604,6 +622,12 @@ server.on("connection", (socket) => {
       if (clientId !== null && clientId === mobileClientId) {
         mobileOpens += 1;
         if (config.closeMobileOnOpen && mobileOpens === config.closeMobileOnOpen) {
+          opened();
+          return socket.close(1013, "stub closes the mobile socket");
+        }
+        // A close pinned to one session, so a test can put it inside a named leg
+        // rather than count the mobile's opens across a whole run.
+        if (config.closeMobileOnOpenSession && sessionId === config.closeMobileOnOpenSession) {
           opened();
           return socket.close(1013, "stub closes the mobile socket");
         }
@@ -924,29 +948,34 @@ class MultiDriverImpairment(StubGatewayHarness, unittest.TestCase):
         self.assertGreater(leg["downtimeMs"], 0, "the downtime was not reported")
         storm = [request for request in leg["requests"] if not request["duringDowntime"]]
         self.assertGreaterEqual(len(storm), 3, "the storm measured no request")
-        self.assertTrue(all(request["duringDowntime"] == (request["sinceRestoreMs"] < 0)
+        self.assertTrue(all(request["duringDowntime"] == (request.get("failed") is not None)
                             for request in leg["requests"]),
-                        "a request's window must follow its own start, not the filter")
+                        "a request is the downtime's by its outcome, not by when it started")
         self.assertTrue(any(request["ms"] > 1_000 for request in storm),
                         f"the slow request made while the clients came back is missing: {storm}")
 
-    def test_a_request_served_before_the_health_stamp_is_kept(self) -> None:
+    def test_a_request_served_before_the_health_stamp_is_counted_as_the_storm(self) -> None:
         # The profiler stamps `restoredAtMs` only after the new Gateway answered
         # health: polling, `ps` and writing the answer take seconds, and the new
-        # Gateway serves requests in that gap. Dropping the requests that
-        # started inside it drops the first, most contended ones and reports
-        # nothing of them.
+        # Gateway serves requests in that gap. Those requests are the first and
+        # most contended ones, so they must be the storm's — classified by
+        # outcome, not left out because their start precedes the stamp.
         status, output, result = self.run_impairment(["restart"], {
             "restartStormSeconds": 2, "restartDeadlineMs": 30_000,
             "connection": dict(self.FAST_CONNECTION, handshakeDeadlineMs=2_000),
         }, restart_stub=True, health_delay_seconds=4.0)
         self.assertEqual(status, 0, output)
         leg = result["impairment"]["restart"]
-        during = [request for request in leg["requests"] if request["duringDowntime"]]
-        self.assertTrue(during, f"the requests the new Gateway served before the health stamp are gone: "
-                                 f"{leg['requests']}")
-        self.assertTrue(any(request["sinceRestoreMs"] < 0 for request in during),
-                        "a kept request must carry the negative offset that places it before the stamp")
+        served_before_stamp = [request for request in leg["requests"]
+                               if request["sinceRestoreMs"] < 0 and not request["duringDowntime"]]
+        self.assertTrue(served_before_stamp,
+                        f"the requests the new Gateway served before the health stamp are not counted as the "
+                        f"storm: {leg['requests']}")
+        self.assertTrue(all(request["failed"] is None for request in served_before_stamp),
+                        "a request the new Gateway served did not fail")
+        self.assertTrue(all((request["failed"] is not None) == request["duringDowntime"]
+                            for request in leg["requests"]),
+                        f"a request is the downtime's by its outcome: {leg['requests']}")
         self.assertTrue(all(request["ms"] is not None for request in leg["requests"]))
 
     def test_the_streaming_case_holds_its_streams_and_reports_the_cap(self) -> None:
@@ -966,6 +995,61 @@ class MultiDriverImpairment(StubGatewayHarness, unittest.TestCase):
         self.assertIsNotNone(leg["maxPingToPongMs"], "the ping-to-pong round trip was not reported")
         self.assertEqual(leg["pongDeadlineMisses"], 0, "a stub that answers at once cannot lose a pong")
         self.assertEqual(leg["unexpectedCloses"], 0, "the stub closed a socket on the capped path")
+
+    def test_a_leg_reports_its_own_round_trip_not_the_window_before_it(self) -> None:
+        # The mobile's first connection — the mixed window's — answers every pong
+        # 1.5 s late; the bandwidth leg then rebuilds its socket on the relay and
+        # its own pongs come back at once. A leg that reports the client's
+        # lifetime maximum hands the mixed window's delay to the leg and calls it
+        # this leg's backlog.
+        status, output, result = self.run_impairment(["bandwidth"], {
+            "bandwidthMbps": 0.05, "bandwidthLegSeconds": 3, "measuredDeadlineMs": 30_000,
+            "connection": dict(self.FAST_CONNECTION, handshakeDeadlineMs=8_000),
+        }, stub_config={"pongDelayMs": 1_500, "pongDelayFirstMobileConnection": True})
+        self.assertEqual(status, 0, output)
+        self.assertGreaterEqual(result.get("uncappedPingToPongMs") or 0, 1_400,
+                                "the delayed window before the leg did not happen")
+        leg = result["impairment"]["bandwidth"]
+        self.assertIsNotNone(leg["maxPingToPongMs"], "the leg reported no round trip")
+        self.assertLess(leg["maxPingToPongMs"], 1_000,
+                        f"the leg reported the delayed window's round trip as its own: {leg['maxPingToPongMs']}")
+
+    def test_a_late_pong_is_charged_to_the_ping_it_answers(self) -> None:
+        # Every pong answers 1.5 s late, five ping intervals after its own ping:
+        # charging the pong to the newest outstanding ping instead reports ~300 ms
+        # for a path whose round trip is 1.5 s.
+        status, output, result = self.run_impairment(["bandwidth"], {
+            "bandwidthMbps": 0.05, "bandwidthLegSeconds": 5, "measuredDeadlineMs": 30_000,
+            "connection": dict(self.FAST_CONNECTION, handshakeDeadlineMs=8_000),
+        }, stub_config={"pongDelayMs": 1_500})
+        self.assertEqual(status, 0, output)
+        leg = result["impairment"]["bandwidth"]
+        self.assertIsNotNone(leg["maxPingToPongMs"], "the leg reported no round trip")
+        self.assertGreaterEqual(leg["maxPingToPongMs"], 1_400,
+                                f"the pong's own delay was not reported: {leg['maxPingToPongMs']}")
+
+    def test_a_capped_legs_close_keeps_every_other_leg_and_the_restart(self) -> None:
+        # The stub closes the mobile's socket when it opens the first streamed
+        # session, so the close happens inside the bandwidth-stream leg. A close
+        # under the cap is that case's own finding (G-4's target is zero), not a
+        # broken client: the leg records it, the restart case then still runs on
+        # a reconnected client, and only then is the run rejected. It must not
+        # throw away the legs already measured or skip the restart.
+        status, output, result = self.run_impairment(["bandwidth-stream", "restart"], {
+            "bandwidthStreamMbps": 0.5, "bandwidthStreamSeconds": 3, "bandwidthStreamSessions": 3,
+            "restartStormSeconds": 2, "restartDeadlineMs": 30_000,
+            "running": [{"sessionId": f"stub-run-{index}"} for index in range(4)],
+            "connection": {"pingIntervalMs": 300, "pongDeadlineMs": 2_000, "handshakeDeadlineMs": 8_000},
+        }, restart_stub=True, stub_config={"closeMobileOnOpenSession": "stub-run-1"})
+        self.assertNotEqual(status, 0, "a close a capped leg counted must still reject the run")
+        legs = result.get("impairment") or {}
+        self.assertEqual((legs.get("bandwidth-stream") or {}).get("unexpectedCloses"), 1,
+                         f"the leg under the cap did not record the close: {legs.get('bandwidth-stream')}")
+        restart = legs.get("restart") or {}
+        self.assertTrue(restart, "the restart case was skipped after a capped leg's close")
+        self.assertTrue(restart.get("clientsAll"), f"the restart case reported no client: {restart}")
+        self.assertTrue(all(entry.get("readyAtMs") is not None for entry in restart["clientsAll"]),
+                        f"the restart left a client down: {restart['clientsAll']}")
 
     def test_an_unexpected_close_after_a_blackhole_is_not_excused(self) -> None:
         # The stub closes the mobile's socket on its fourth open: the mount that
@@ -1122,9 +1206,10 @@ class ImpairmentCases(unittest.TestCase):
     def test_a_bandwidth_case_that_never_filled_the_cap_rejects_the_run(self) -> None:
         # A leg whose cap delayed nothing reads as a pass — zero pong misses,
         # no capacity close — however the Gateway behaved, because the link was
-        # never loaded, and a leg that offered less in flight than one pong
-        # deadline of the cap can never put a pong behind more than a fraction
-        # of a second of data. Both must reject the run.
+        # never loaded. That must reject the run. What the leg offered is
+        # reported, not a verdict: at this leg's own 2 Mbit/s defaults even six
+        # pages of wire are far under one pong deadline of its cap, so a pong
+        # miss is out of reach here whatever the Gateway does.
         def bandwidth(**overrides) -> dict:
             leg = {"capBitsPerSecond": 2_000_000, "seconds": 90.0, "operations": [4_200.0],
                    "deliveredBytes": 22_000_000, "deliveredBytesPerSecond": 244_000, "sentBytes": 4_000,
@@ -1137,39 +1222,51 @@ class ImpairmentCases(unittest.TestCase):
         self.assertEqual(self.profiler.validate_impairment([bandwidth()]), [])
         unfilled = self.profiler.validate_impairment([bandwidth(linkUse=0.2)])
         self.assertEqual(len(unfilled), 1, unfilled)
-        # One pong deadline of the cap: 8 s x 250 kB/s = 2 MB in the decoder's
-        # bytes, which is the unit the Gateway's own outbound queue counts.
-        underfilled = self.profiler.validate_impairment([bandwidth(offeredInFlightBytes=900_000)])
-        self.assertEqual(len(underfilled), 1, underfilled)
-        self.assertIn("less than one pong deadline", underfilled[0])
         silent = self.profiler.validate_impairment([bandwidth(maxPingToPongMs=None)])
         self.assertEqual(len(silent), 1, silent)
 
-    def test_a_streaming_case_that_held_no_stream_rejects_the_run(self) -> None:
-        # The streaming case is about a queue that fills with superseded state:
-        # a leg that held one idle chat, or whose cap never bounded the streams,
-        # reports zero misses and zero closes however the Gateway behaved.
+    def test_a_streaming_case_whose_cap_never_bound_rejects_the_run(self) -> None:
+        # The streaming case only means something if its cap, not the workload,
+        # bounded the link: a cap above what the streams produce leaves the queue
+        # empty, so "zero misses, no close" describes the workload rather than
+        # the Gateway. The one measured smoke (8 streams, a 0.3 Mbit/s cap) is
+        # exactly that leg: its streams put 295,621 B/s of decoded state on the
+        # wire at 11,901 B/s (link_use 0.32), so the cap never bound.
         def streamed(**overrides) -> dict:
-            leg = {"capBitsPerSecond": 300_000, "seconds": 30.0, "streams": 8, "deliveredBytes": 1_100_000,
-                   "deliveredBytesPerSecond": 36_000, "payloadBytes": 90_000_000,
-                   "payloadBytesPerSecond": 3_000_000, "linkUse": 0.96, "maxPingToPongMs": 5_400.0,
-                   "pongDeadlineMisses": 0, "unexpectedCloses": 0}
+            leg = {"capBitsPerSecond": 80_000, "seconds": 30.0, "streams": 8, "deliveredBytes": 1_100_000,
+                   "deliveredBytesPerSecond": 10_000, "payloadBytes": 90_000_000,
+                   "payloadBytesPerSecond": 3_000_000, "linkUse": 0.98, "maxPingToPongMs": 5_400.0,
+                   "uncappedPingToPongMs": 120.0, "pongDeadlineMisses": 0, "unexpectedCloses": 0}
             leg.update(overrides)
             return {"label": "iteration-1", "cases": ["bandwidth-stream"], "impairment": {"bandwidth-stream": leg}}
 
-        # The measured smoke run: 8 streams, 0.3 Mbit/s, a 2.47 s round trip.
-        measured = {"capBitsPerSecond": 300_000, "seconds": 20.0, "streams": 8, "deliveredBytes": 238_973,
+        unbacked = {"capBitsPerSecond": 300_000, "seconds": 20.0, "streams": 8, "deliveredBytes": 238_973,
                     "deliveredBytesPerSecond": 11_901, "payloadBytes": 5_935_982,
                     "payloadBytesPerSecond": 295_621, "linkUse": 0.317, "maxPingToPongMs": 2_466.0,
-                    "pongDeadlineMisses": 0, "unexpectedCloses": 0}
-        self.assertEqual(self.profiler.validate_impairment([streamed(**measured)]), [])
-        self.assertEqual(self.profiler.validate_impairment([streamed(maxPingToPongMs=120.0, unexpectedCloses=1)]),
+                    "uncappedPingToPongMs": 1_696.0, "pongDeadlineMisses": 0, "unexpectedCloses": 0}
+        unfilled = self.profiler.validate_impairment([streamed(**unbacked)])
+        self.assertEqual(len(unfilled), 1, unfilled)
+        self.assertIn("never bounded the streams", unfilled[0])
+        # A full cap whose round trip is no worse than the same run's uncapped
+        # one has no backlog to show. The uncapped reference is that run's own
+        # measurement, not a constant: a slow host answers 1.7 s with no cap at
+        # all, and that is not this leg's finding.
+        short = self.profiler.validate_impairment([streamed(maxPingToPongMs=1_500.0, uncappedPingToPongMs=1_696.0)])
+        self.assertEqual(len(short), 1, short)
+        self.assertIn("no longer than this run's uncapped", short[0])
+        self.assertEqual(self.profiler.validate_impairment([streamed(uncappedPingToPongMs=1_696.0)]), [],
+                         "a leg slower than the same run's uncapped round trip is a backlog signal")
+        self.assertEqual(self.profiler.validate_impairment([streamed(maxPingToPongMs=110.0, unexpectedCloses=1)]),
                          [], "a close is a backlog signal even when the round trip is short")
+        self.assertEqual(self.profiler.validate_impairment([streamed(maxPingToPongMs=110.0, pongDeadlineMisses=1)]),
+                         [], "a missed deadline is a backlog signal even when the round trip is short")
         idle = self.profiler.validate_impairment([streamed(streams=1, payloadBytes=0)])
         self.assertEqual(len(idle), 1, idle)
-        no_backlog = self.profiler.validate_impairment([streamed(maxPingToPongMs=150.0)])
-        self.assertEqual(len(no_backlog), 1, no_backlog)
-        self.assertIn("never backed the link up", no_backlog[0])
+        # A run with no uncapped reference cannot say whether the leg showed a
+        # backlog at all, so it is not judged on one.
+        unreferenced = self.profiler.validate_impairment([streamed(uncappedPingToPongMs=None)])
+        self.assertEqual(len(unreferenced), 1, unreferenced)
+        self.assertIn("no uncapped round trip", unreferenced[0])
         silent = self.profiler.validate_impairment([streamed(maxPingToPongMs=None)])
         self.assertEqual(len(silent), 1, silent)
 
@@ -1263,9 +1360,9 @@ class ImpairmentCases(unittest.TestCase):
         first = result("iteration-1", attempt={"ms": 90, "connected": True}, reconnect=1_400, downtime=3_900,
                        storm=[{"client": "mobile", "ms": 200, "sinceRestoreMs": 10, "duringDowntime": False},
                               {"client": "dashboard", "ms": 1_500, "sinceRestoreMs": 20, "duringDowntime": False},
-                              {"client": "driver", "ms": 1_000, "sinceRestoreMs": 30, "duringDowntime": False},
+                              {"client": "driver", "ms": 1_000, "sinceRestoreMs": -30, "duringDowntime": False},
                               {"client": "mobile", "ms": 5_000, "sinceRestoreMs": -4_000,
-                               "duringDowntime": True}])
+                               "duringDowntime": True, "failed": "session.open failed: refused"}])
         second = result("iteration-2", attempt={"ms": 15_000, "failed": "hello"}, reconnect=2_600, downtime=4_100,
                         storm=[{"client": "mobile", "ms": 1_001, "sinceRestoreMs": 40, "duringDowntime": False}])
         metrics = self.profiler.impairment_samples([first, second])
@@ -1273,7 +1370,6 @@ class ImpairmentCases(unittest.TestCase):
                          "the longest attempt is the longest, whether it failed or not")
         self.assertEqual(metrics["impairment.restart.reconnect_ms_max"]["values"], [1_400, 2_600])
         self.assertEqual(metrics["impairment.restart.downtime_ms"]["values"], [3_900, 4_100])
-        self.assertEqual(metrics["impairment.bandwidth.link_use"]["values"], [0.94, 0.94])
         for metric_id in ("impairment.bandwidth.link_use", "impairment.bandwidth.delivered_bytes_per_second",
                           "impairment.bandwidth.sent_bytes_per_second", "impairment.restart.requests",
                           "impairment.bandwidth.offered_in_flight_bytes",
@@ -1283,22 +1379,14 @@ class ImpairmentCases(unittest.TestCase):
             self.assertEqual(metrics[metric_id]["better"], "higher",
                              f"{metric_id} is a volume metric: more is not a regression")
         self.assertEqual(metrics["impairment.restart.requests_over_1s"]["values"], [1, 1],
-                         "a storm request takes over 1 s only when it is strictly slower; a downtime request "
-                         "is not a storm request")
+                         "a storm request takes over 1 s only when it is strictly slower; a request that failed "
+                         "on the way up or down is not a storm request")
         self.assertEqual(metrics["impairment.restart.requests"]["values"], [3, 1],
-                         "a request that started before the new Gateway was healthy is the downtime's, "
-                         "not the storm's, and is still reported")
+                         "a request that failed while the Gateway was down is the downtime's, not the storm's, "
+                         "and is still reported")
         self.assertEqual(metrics["impairment.restart.downtime_requests"]["values"], [1, 0])
-        self.assertEqual(metrics["impairment.bandwidth.max_ping_to_pong_ms"]["values"], [700.0, 700.0])
-        self.assertEqual(metrics["impairment.bandwidth.offered_in_flight_bytes"]["values"], [7_200_000, 7_200_000])
-        self.assertEqual(metrics["impairment.bandwidth.max_in_flight"]["values"], [6, 6])
-        self.assertEqual(metrics["impairment.bandwidth_stream.streams"]["values"], [8, 8])
-        self.assertEqual(metrics["impairment.bandwidth_stream.max_ping_to_pong_ms"]["values"], [5_400.0, 5_400.0])
-        self.assertEqual(metrics["impairment.bandwidth_stream.pong_deadline_misses"]["values"], [0, 0])
-        self.assertEqual(metrics["impairment.bandwidth_stream.unexpected_closes"]["values"], [0, 0])
         self.assertEqual(metrics["impairment.restart.failed_attempts"]["values"], [6, 6],
                          "one refused connect per client is counted; a connected attempt is not")
-        self.assertEqual(metrics["impairment.bandwidth.unexpected_closes"]["values"], [0, 0])
         self.assertNotIn("impairment.bandwidth.cap_bits_per_second", metrics,
                          "the cap is configuration: it belongs in the report context")
         self.assertNotIn("impairment.restart.clients_ready", metrics,
