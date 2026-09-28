@@ -8019,15 +8019,23 @@ wait).
   lane measures the TLS handshake instead of reading 0. (5) The committed
   merge-base marker `||||||| 3d90561d4` is deleted from this file.
 - Evidence: `npx tsc --noEmit -p .` clean; `npx vitest run
-  src/transport/lan-endpoint.integration.test.ts` 10/10 (the four new cases fail
-  on the pre-fix code: OpenSSL refuses a drawn serial; the lane's unauthenticated
-  sockets outlive the bound; `acceptToUpgradeMs` is 0; `stop` leaves the listener
-  bound); `src/config.test.ts` and the merge-gate set green below their own rows.
+  src/transport/lan-endpoint.integration.test.ts` 10/10 and `src/config.test.ts`
+  28/28. Each new case fails on the pre-review code for its own reason (a drawn
+  serial is refused by OpenSSL; the lane's unauthenticated sockets outlive a 30 s
+  bound; `acceptToUpgradeMs` is 0; `stop` leaves the listener bound), and the two
+  lane cases fail again when the shared-limits wiring is reverted. Merge gate
+  with `hardening/integration` at `218abab28`: 132/132 across the six transport
+  files and 257/257 in `src/sessions/runtime-registry.integration.test.ts`. The
+  merge resolution in this file kept both sides of the handoff log and wrote no
+  conflict marker.
 - Deviations: the lane's bounds are declared by `LanListenerLimits` in
-  `lan-endpoint.ts` and valued by `server.ts`; `LanEndpointHandlers` gained
-  `onSecureConnection`; `selfSignedCertificate`'s serial stays 16 random bytes.
-- Left: the lane bounds case waits out the real 15 s header bound (~16 s), since
-  Node enforces it with its own timers.
+  `lan-endpoint.ts` and valued by `HTTP_LISTENER_LIMITS` in `server.ts`;
+  `LanEndpointHandlers` gained `onSecureConnection`; `selfSignedCertificate`'s
+  serial stays 16 random bytes.
+- Left: the lane bounds case waits out the real 15 s header bound (about 16 s of
+  the file's 19 s), because Node enforces it with its own timers; it observes the
+  408 rather than a client close, since a paused TLS socket never surfaces the
+  server's FIN.
 
 ### C-1 · Done · 2026-09-28 · orchestrator-dispatched deepseek-worker (branch `hardening/c-1`)
 
