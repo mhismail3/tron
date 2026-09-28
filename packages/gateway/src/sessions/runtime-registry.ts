@@ -1591,8 +1591,42 @@ export class RuntimeRegistry {
     return ids;
   }
 
-  /** A cut no scan has completed cannot prove absence. Callers that would drop
-   * durable records for rows it omits fail retryably instead of acting on it. */
+  /** Automation admission and recovery run at startup, before the owner may have
+   * published a cut: `initialize()` starts the owner and returns. Wait for its
+   * first pass, then require the cut — a catalog that still has none is deferred
+   * retryably instead of being reported as a missing session, so a slow first
+   * read cannot fail startup or turn into a terminal automation outcome. */
+  private async awaitAutomationCatalogCut(): Promise<void> {
+    if (!this.sessionCatalog.hasCompleteCut()) {
+      await Promise.race([this.sessionCatalog.whenPublished(), this.sessionCatalog.whenReconciled()]);
+    }
+    this.requireCatalogCut();
+  }
+
+  /** An ID that may name a canonical file the owner could not prove is not a
+   * missing session: reporting absence would tell a client that a session's
+   * records and artifacts are gone when the file is still there. A pass that
+   * could read the file's header names the ID exactly; one that could not leaves
+   * membership unknown for the whole cut. Both refuse retryably. */
+  private unprovenSessionRefusal(sessionId: string): GatewayError | undefined {
+    if (this.sessionCatalog.unprovenSessionIds().has(sessionId)) {
+      return new GatewayError(
+        "busy", "The session's canonical file is not yet provable", true, undefined, "catalog_not_ready",
+      );
+    }
+    if (this.sessionCatalog.hasUnknownMembership()) {
+      return new GatewayError(
+        "busy", "Session membership is not fully proven yet", true, undefined, "catalog_not_ready",
+      );
+    }
+    return undefined;
+  }
+
+  /** A cut no scan has completed cannot prove absence. An unproven file whose
+   * ID the owner read has no row to return and is only in the owner's unproven
+   * set, so callers that would drop durable records or artifacts for the rows a
+   * cut omits fail retryably instead of acting on it: refusing is what keeps
+   * that session's record in the retained set. */
   private requireCompleteCatalogCut(): void {
     if (!this.sessionCatalog.hasReconciledCut()) {
       throw new GatewayError("busy", "Session membership could not be validated for storage maintenance", true);
@@ -1612,10 +1646,12 @@ export class RuntimeRegistry {
   }
 
   async requirePersistedUserSession(sessionId: string): Promise<void> {
+    await this.awaitAutomationCatalogCut();
     const acquisition = await this.catalogAcquisition();
     this.requireUnambiguousSessionId(sessionId, acquisition.ambiguousIDs);
     const entry = acquisition.entriesByID.get(sessionId);
-    if (!entry) throw new GatewayError("not_found", "Automation target session was not found");
+    if (!entry) throw this.unprovenSessionRefusal(sessionId)
+      ?? new GatewayError("not_found", "Automation target session was not found");
     if (entry.structuralSubagent) {
       throw new GatewayError("conflict", "Automations cannot target runtime-owned subagent sessions");
     }
@@ -1639,6 +1675,9 @@ export class RuntimeRegistry {
     marker?: RunMarkerEvidence;
     invocation?: InvocationProjection;
   }> {
+    // The scheduler's recovery runs at startup: wait for the owner's first pass
+    // rather than deciding an automation's outcome on an unready catalog.
+    await this.awaitAutomationCatalogCut();
     const acquisition = await this.catalogAcquisition();
     this.requireUnambiguousSessionId(sessionId, acquisition.ambiguousIDs);
     const entry = acquisition.entriesByID.get(sessionId);
@@ -2754,7 +2793,8 @@ export class RuntimeRegistry {
       existing.touch();
       return existing;
     }
-    if (!entry) throw new GatewayError("not_found", "Tron session was not found");
+    if (!entry) throw this.unprovenSessionRefusal(sessionId)
+      ?? new GatewayError("not_found", "Tron session was not found");
     if (entry.structuralSubagent) {
       throw new GatewayError("conflict", "Subagent sessions are informational and remain owned by their originating runtime");
     }
@@ -3127,7 +3167,8 @@ export class RuntimeRegistry {
         const entry = acquisition.entriesByID.get(sessionId);
         const slot = this.slots.get(sessionId);
         if (!entry && (!slot || slot.persistedSessionFile !== undefined)) {
-          throw new GatewayError("not_found", "Tron session was removed before it could be deleted");
+          throw this.unprovenSessionRefusal(sessionId)
+            ?? new GatewayError("not_found", "Tron session was removed before it could be deleted");
         }
         if (entry?.structuralSubagent) {
           throw new GatewayError("conflict", "Delete the originating user session instead of mutating its runtime-owned subagent session");

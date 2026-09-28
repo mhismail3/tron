@@ -37,6 +37,7 @@ import { KnowledgeService } from "../knowledge/knowledge-service.js";
 import { observationEntriesDigest, type KnowledgeObservationService } from "../knowledge/knowledge-observation.js";
 import { RunMarkerCompletionConflictError, type RunMarkerStore } from "./run-markers.js";
 import { toolSegmentId } from "./projection.js";
+import { AutomationService } from "../automations/automation-service.js";
 import { pngDimensions } from "../../test-fixtures/pi-sdk/computer-use-image.js";
 import { syntheticPng } from "../../test-fixtures/synthetic-image.js";
 
@@ -1330,7 +1331,7 @@ describe.sequential("RuntimeRegistry with the pinned agent runtime", () => {
     } finally { await lease.release(); }
   });
 
-  it.each(["exact", "duplicate", "unprovable", "changed"])("recovers pending Knowledge observations from %s header evidence without a warmed catalog", async (mode) => {
+  it.each(["exact", "duplicate", "unprovable", "changed"])("recovers pending Knowledge observations from %s header evidence after the owner's cut", async (mode) => {
     const fixture = await coldFixture("knowledge-header-recovery", {
       catalogDiscoveryLimits: { maximumRetainedBytes: 1 },
     });
@@ -1364,6 +1365,8 @@ describe.sequential("RuntimeRegistry with the pinned agent runtime", () => {
     if (mode === "duplicate") await copyFile(fixture.sessionFile, join(dirname(fixture.sessionFile), "duplicate.jsonl"));
     // An unprovable neighbour is not membership evidence for itself and does not
     // blind the cut (G-1c); the recovery still resolves this session's exact row.
+    // An unprovable neighbour (a header-less file) leaves the cut's membership
+    // unknown, so recovery defers instead of marking a coverage unavailable.
     if (mode === "unprovable") await writeFile(join(dirname(fixture.sessionFile), "unprovable.jsonl"), "");
     if (mode === "changed") {
       const open = SessionManager.open;
@@ -1378,7 +1381,7 @@ describe.sequential("RuntimeRegistry with the pinned agent runtime", () => {
     await settleCatalog(fixture.registry);
     const unavailable = vi.spyOn(store, "setCoverage");
     await fixture.registry.recoverKnowledgeObservation();
-    if (mode === "exact" || mode === "unprovable") {
+    if (mode === "exact") {
       expect(admit).toHaveBeenCalledExactlyOnceWith({ sessionId, entries, outcome: "completed", invocationId, invocationIds: [invocationId] });
       expect(unavailable).not.toHaveBeenCalled();
     } else {
@@ -1763,6 +1766,129 @@ describe.sequential("RuntimeRegistry with the pinned agent runtime", () => {
     }
   });
 
+  // G-1c/B1: a file the scan read a header for but could not prove, with no
+  // stored row to keep, is unknown membership. Publishing that cut would report
+  // the session as absent and let every destructive caller drop its records and
+  // artifacts for a file that is still there (review probe-prune.mjs).
+  it("keeps the records of an unprovable session that has no stored row", async () => {
+    const fixture = await coldFixture("unproven-no-row");
+    const sessionId = fixture.manager.getSessionId();
+    await settleCatalog(fixture.registry);
+    await fixture.registry.setArchived(sessionId, true);
+    await settleCatalog(fixture.registry);
+    expect(fixture.registry.isArchived(sessionId)).toBe(true);
+    await fixture.registry.dispose();
+    registries.splice(registries.indexOf(fixture.registry), 1);
+    // The durable document is what would otherwise keep a row: drop it, then
+    // leave the transcript mid-append so no row can be rebuilt from the file.
+    await rm(join(fixture.root, "tron", "gateway", "catalog-metadata-v2.json"), { force: true });
+    const completeBytes = (await fsPromises.stat(fixture.sessionFile)).size;
+    await appendFile(fixture.sessionFile, '{"type":"message"');
+
+    const reconciled: SessionCatalogReconcileOutcome[] = [];
+    const restarted = new RuntimeRegistry({
+      agentDir: fixture.agentDir,
+      tronHome: join(fixture.root, "tron"),
+      idleRuntimeMs: 60_000,
+      trust: new TrustService(fixture.agentDir),
+      broadcast: () => {},
+      sessionSummaryChanged: () => {},
+      sessionListChanged: () => {},
+      catalogReconciled: (outcome) => reconciled.push(outcome),
+    });
+    registries.push(restarted);
+    await restarted.initialize();
+    const owner = catalogOwner(restarted);
+    await owner.whenReconciled();
+
+    // The pass proves nothing about that file, so it is not a complete cut: its
+    // rows are served, and no destructive caller and no "this session is gone"
+    // answer is authorized.
+    expect(reconciled.at(-1)).toMatchObject({ outcome: "incomplete" });
+    expect(reconciled.at(-1)!.unproven).toBeGreaterThan(0);
+    expect(owner.hasReconciledCut()).toBe(false);
+    expect(owner.hasUnknownMembership()).toBe(true);
+    expect(owner.unprovenSessionIds().has(sessionId)).toBe(true);
+    // Startup recovery keeps the record, maintenance refuses, and acquire refuses
+    // retryably instead of reporting the session as absent. The row cannot be
+    // built from a torn file, so the session is missing from the list until a
+    // pass can prove it — its records and artifacts are what must survive.
+    await restarted.recoverCanonicalAttention();
+    expect(restarted.isArchived(sessionId)).toBe(true);
+    await expect(restarted.sessionIDsForStorageMaintenance())
+      .rejects.toMatchObject({ code: "busy", retryable: true });
+    expect((await restarted.list("all")).map((session) => session.id)).not.toContain(sessionId);
+    await expect(restarted.acquire(sessionId)).rejects.toMatchObject({ code: "busy", retryable: true, diagnosticReason: "catalog_not_ready" });
+    await expect(restarted.delete(sessionId)).rejects.toMatchObject({ code: "busy", retryable: true });
+
+    // The torn append is rolled back, which proves the file again: the cut
+    // publishes and the session is still the archived session it was.
+    await truncate(fixture.sessionFile, completeBytes);
+    await settleCatalog(restarted);
+    expect(owner.hasReconciledCut()).toBe(true);
+    expect(restarted.isArchived(sessionId)).toBe(true);
+    expect((await restarted.list("all")).find((session) => session.id === sessionId)?.archivedAt).toBeDefined();
+    expect((await restarted.sessionIDsForStorageMaintenance()).has(sessionId)).toBe(true);
+    expect((await restarted.acquire(sessionId)).id).toBe(sessionId);
+  });
+
+  // G-1c/B2: automations.initialize() runs right after sessions.initialize(),
+  // which starts the catalog owner and returns before its first cut. Admission
+  // and recovery must wait for that cut instead of failing startup with a
+  // retryable busy (review probe-automation.mjs).
+  it.each([false, true])("admits an existing-session automation while the first cut runs (durable index: %s)", async (withDocument) => {
+    const root = await mkdtemp(join(tmpdir(), "tron-automation-startup-"));
+    const agentDir = join(root, "agent");
+    const cwd = join(root, "workspace");
+    const sessionDirectory = join(agentDir, "sessions", "workspace");
+    await Promise.all([mkdir(sessionDirectory, { recursive: true }), mkdir(cwd, { recursive: true })]);
+    process.env.PI_CODING_AGENT_DIR = agentDir;
+    let target = "";
+    for (let index = 0; index < 200; index += 1) {
+      const manager = SessionManager.create(cwd, sessionDirectory);
+      manager.appendMessage(fauxAssistantMessage("x".repeat(2_000)));
+      target ||= manager.getSessionId();
+    }
+    const make = () => new RuntimeRegistry({
+      agentDir,
+      tronHome: join(root, "tron"),
+      idleRuntimeMs: 60_000,
+      trust: new TrustService(agentDir),
+      broadcast: () => {},
+      sessionSummaryChanged: () => {},
+      sessionListChanged: () => {},
+    });
+    if (withDocument) {
+      const seeded = make();
+      registries.push(seeded);
+      await initializeRegistry(seeded);
+      await settleCatalog(seeded);
+      await seeded.dispose();
+      registries.splice(registries.indexOf(seeded), 1);
+    }
+
+    const registry = make();
+    registries.push(registry);
+    const blocked: Array<[string, string]> = [];
+    const store = {
+      initialize: async () => {},
+      snapshot: () => [{
+        id: "automation-startup", activation: "active",
+        target: { kind: "existingSession", sessionId: target },
+      }],
+      blockTarget: async (sessionId: string, reason: string) => { blocked.push([sessionId, reason]); },
+    };
+    const scheduler = { recover: async () => {}, start: () => {} };
+    await registry.initialize();
+    const service = new AutomationService(
+      store as never,
+      scheduler as never,
+      registry,
+    );
+    await expect(service.initialize()).resolves.toBeUndefined();
+    expect(blocked).toEqual([]);
+  });
+
   it("keeps the published rows through an incomplete pass and authorizes nothing destructive", async () => {
     const fixture = await coldFixture("incomplete-index-evidence");
     await settleCatalog(fixture.registry);
@@ -1938,9 +2064,11 @@ describe.sequential("RuntimeRegistry with the pinned agent runtime", () => {
       expect((await fixture.registry.acquire(fixture.manager.getSessionId())).id)
         .toBe(fixture.manager.getSessionId());
       // The unreadable neighbour is unproven: it neither forces a second
-      // discovery pass nor removes the admitted session from the cut.
-      expect(reconciled.at(-1)).toMatchObject({ outcome: "reconciled" });
+      // discovery pass nor removes the admitted session from the cut, and its
+      // unknown membership keeps every destructive caller off this cut.
+      expect(reconciled.at(-1)).toMatchObject({ outcome: "incomplete" });
       expect(reconciled.at(-1)!.unproven).toBeGreaterThan(0);
+      expect(catalogOwner(fixture.registry).hasReconciledCut()).toBe(false);
       expect((await fixture.registry.catalog("all")).sessions.map((session) => session.id))
         .toEqual([fixture.manager.getSessionId()]);
       expect(walks.count()).toBe(0);
@@ -2226,12 +2354,13 @@ describe.sequential("RuntimeRegistry with the pinned agent runtime", () => {
       const ids = await fixture.registry.sessionIDsForStorageMaintenance();
       expect([...ids].sort()).toEqual([fixture.manager.getSessionId(), child.getSessionId(), live.id].sort());
       expect(walks.count()).toBe(before);
-      // An unprovable neighbour adds no row and removes none, so it neither
-      // blinds the cut nor hides an owner.
+      // An unprovable neighbour adds no row and removes none: its membership is
+      // unknown, so the maintenance read refuses retryably rather than reporting
+      // any owner as gone.
       await writeFile(join(dirname(parentFile), "incomplete-header.jsonl"), "{}");
       await settleCatalog(fixture.registry);
-      expect([...(await fixture.registry.sessionIDsForStorageMaintenance())].sort())
-        .toEqual([fixture.manager.getSessionId(), child.getSessionId(), live.id].sort());
+      await expect(fixture.registry.sessionIDsForStorageMaintenance())
+        .rejects.toMatchObject({ code: "busy", retryable: true });
       expect(walks.count()).toBeGreaterThan(before);
     } finally { walks.restore(); }
   });
@@ -2425,7 +2554,7 @@ describe.sequential("RuntimeRegistry with the pinned agent runtime", () => {
       await catalogOwner(headerRegistry).whenReconciled();
       // The per-file header budget cannot prove this file, so no row is added for
       // it and the pass still reports a complete traversal (G-1c).
-      expect(reconciled.at(-1)).toMatchObject({ outcome: "reconciled" });
+      expect(reconciled.at(-1)).toMatchObject({ outcome: "incomplete" });
       expect(reconciled.at(-1)!.unproven).toBe(1);
       expect((await headerRegistry.catalog("all")).sessions).toEqual([]);
       // The read serves the owner's cut and walks nothing.
@@ -2450,10 +2579,11 @@ describe.sequential("RuntimeRegistry with the pinned agent runtime", () => {
     await admissionRegistry.initialize();
     await catalogOwner(admissionRegistry).whenReconciled();
     // The identity-retention budget cannot hold any row, so every file is
-    // unproven and the acquisition refuses to fabricate an entry for it.
+    // unproven: the acquisition refuses retryably instead of reporting the
+    // session as absent.
     expect((await admissionRegistry.catalog("all")).sessions).toEqual([]);
     await expect(admissionRegistry.acquire(fixture.manager.getSessionId()))
-      .rejects.toMatchObject({ code: "not_found" });
+      .rejects.toMatchObject({ code: "busy", retryable: true, diagnosticReason: "catalog_not_ready" });
   });
 
   it("admits scaled short headers within the aggregate validation budget", async () => {
