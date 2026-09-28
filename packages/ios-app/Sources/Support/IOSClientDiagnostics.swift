@@ -214,6 +214,9 @@ struct IOSClientDiagnosticBuffer: Sendable {
             "durationMs=\(max(0, diagnostic.durationMilliseconds))",
             "recordKind=\(diagnostic.overflowReason != nil ? "admission-rejection" : diagnostic.reason == .eventOverflow ? "transport-retirement" : "connection")",
         ]
+        if let gatewayConnectionID = diagnostic.gatewayConnectionID {
+            fields.append("gatewayConnectionId=\(boundedUTF8(gatewayConnectionID, maximumBytes: 64))")
+        }
         if let reason = diagnostic.reason { fields.append("reason=\(reason.rawValue)") }
         if let platformCode = diagnostic.platformCode { fields.append("platformCode=\(platformCode)") }
         if let closeCode = diagnostic.closeCode { fields.append("closeCode=\(closeCode)") }

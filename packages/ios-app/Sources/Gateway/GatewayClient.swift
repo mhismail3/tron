@@ -524,6 +524,8 @@ actor GatewayClient {
         var lastWriteProgressAt: ContinuousClock.Instant?
         var overflowResyncSignaled = false
         var info: GatewayInfo?
+        /// From hello; stamped on this epoch's connection records.
+        var gatewayConnectionID: String?
     }
 
     nonisolated let events: GatewayEventStream
@@ -649,6 +651,7 @@ actor GatewayClient {
         profileID: String? = nil,
         profileLabel: String? = nil,
         attemptID: String? = nil,
+        gatewayConnectionID: String? = nil,
         frameBytes: Int? = nil,
         decodeLimitKind: JSONValueDecodingLimitKind? = nil,
         decodeActual: Int? = nil,
@@ -669,6 +672,8 @@ actor GatewayClient {
             clientID: diagnosticOwnerID,
             attemptID: attemptID ?? (connectionID == connection?.id ? connection?.attemptID : nil),
             connectionID: connectionID,
+            gatewayConnectionID: gatewayConnectionID
+                ?? (connectionID == connection?.id ? connection?.gatewayConnectionID : nil),
             timestamp: GatewayTimestamp.preciseString(from: .now),
             profileID: profileID ?? self.profile?.id,
             profileLabel: profileLabel ?? self.profile?.label,
@@ -847,6 +852,13 @@ actor GatewayClient {
                 "protocolVersion": .number(Double(TronGatewayProtocolContract.protocolVersion)),
                 "clientId": .string(uuidSource.next().uuidString),
                 "clientRole": .string("mobile"),
+                // O-1 correlation key: the Gateway stamps it on this
+                // connection's records (packages/gateway/README.md, hello).
+                "diagnostics": .object([
+                    "clientId": .string(diagnosticOwnerID),
+                    "attemptId": .string(attemptID ?? "initial"),
+                    "epoch": .string(String(epochID)),
+                ]),
             ])
             let helloData = try JSONEncoder.gateway.encode(hello)
             let data = try await Self.withTimeout(clock: clock, duration: handshakeTimeout, onTimeout: { await socket.close() }) {
@@ -877,6 +889,7 @@ actor GatewayClient {
             }
             guard var epoch = connection, epoch.id == epochID else { throw CancellationError() }
             epoch.info = decoded.info
+            epoch.gatewayConnectionID = decoded.connectionId
             epoch.lastInboundAt = clock.now()
             connection = epoch
             if activateEvents { try activateEventDelivery(connectionID: epochID) }
@@ -896,7 +909,9 @@ actor GatewayClient {
                     reachedHelloReceive: true
                 )
             )
-            return GatewayConnectionIdentity(id: epochID, info: decoded.info)
+            return GatewayConnectionIdentity(
+                id: epochID, info: decoded.info, gatewayConnectionID: decoded.connectionId
+            )
         } catch {
             let metadata = await socket.metadata()
             let upgradeFailure = Self.upgradeFailure(error, metadata: metadata)
@@ -1874,7 +1889,8 @@ actor GatewayClient {
             lastWriteProgressAgeMilliseconds: ageMilliseconds(epoch.lastWriteProgressAt),
             profileID: epoch.profileID,
             profileLabel: epoch.profileLabel,
-            attemptID: epoch.attemptID
+            attemptID: epoch.attemptID,
+            gatewayConnectionID: epoch.gatewayConnectionID
         )
         epoch.receiveTask?.cancel()
         epoch.livenessTask?.cancel()

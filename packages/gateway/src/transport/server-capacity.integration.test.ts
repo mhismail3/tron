@@ -718,7 +718,77 @@ describe("WebSocket connection and outbound capacity", () => {
     await bounded(new Promise<void>(resolve => socket!.once("open", resolve)), "hello socket open");
     socket.send(JSON.stringify({ type: "hello", protocolVersion: 5 }));
     await waitUntil(() => frames.some(frame => frame.type === "hello"));
-    expect(frames.find(frame => frame.type === "hello")).toEqual({ type: "hello", ...info });
+    expect(frames.find(frame => frame.type === "hello")).toEqual({ type: "hello", ...info, connectionId: expect.any(String) });
+  });
+
+  // Failure modes (O-1 correlation key): a malformed diagnostics object rejects
+  // the hello; an unsafe value reaches a record; a connection record lacks the
+  // peer key; the hello's connectionId differs from the records'; a superseded
+  // record carries the newcomer's key instead of the displaced connection's.
+  it("keys every connection record to the peer's hello diagnostics and returns the connection ID", async () => {
+    const root = await mkdtemp(join(tmpdir(), "tron-server-correlation-"));
+    const sockets: WebSocket[] = [];
+    let gateway: GatewayServer | undefined;
+    cleanups.push(async () => {
+      for (const socket of sockets) if (socket.readyState !== WebSocket.CLOSED) socket.terminate();
+      await bounded(gateway?.close() ?? Promise.resolve(), "correlation fixture close");
+      await rm(root, { recursive: true, force: true });
+    });
+    const devices = new DeviceStore(root, "machine");
+    await devices.initialize();
+    const phone = await devices.pair((await devices.ensureEnrollment()).code, "Phone");
+    const port = await unusedPort();
+    const logger = { log: vi.fn() };
+    gateway = new GatewayServer({
+      host: "127.0.0.1", port, maxFrameBytes: 16_384, maximumConnections: 8, maximumConnectionsPerIdentity: 2,
+      devices, uploads: {} as any, sessions: { unsubscribeClient: vi.fn() } as any,
+      auth: { detachClient: vi.fn(), cancelOwner: vi.fn() } as any,
+      service: { info: () => ({ protocolVersion: 5 }), terminalBelongsToSession: () => false, releaseClient: vi.fn(), invoke: vi.fn() } as any,
+      logger: logger as any,
+    });
+    await gateway.listen();
+    const connect = async (label: string, diagnostics: unknown) => {
+      const socket = new WebSocket(`ws://127.0.0.1:${port}/v1/socket`, { headers: { authorization: `Bearer ${phone.token}` } });
+      sockets.push(socket);
+      const frames: any[] = [];
+      socket.on("message", (raw) => frames.push(JSON.parse(raw.toString())));
+      socket.on("error", () => {});
+      await bounded(new Promise<void>((resolve) => socket.once("open", () => resolve())), `${label} open`);
+      socket.send(JSON.stringify({ type: "hello", protocolVersion: 5, clientRole: "mobile", diagnostics }));
+      await bounded(waitUntil(() => frames.some((frame) => frame.type === "hello")), `${label} hello`);
+      const connectionId = frames.find((frame) => frame.type === "hello").connectionId as string;
+      expect(connectionId).toMatch(/^[0-9a-f-]{36}$/u);
+      return { socket, connectionId };
+    };
+    const recordFor = (event: string, connectionId: string) => logger.log.mock.calls
+      .find((call) => call[2]?.event === event && call[2]?.connectionId === connectionId)?.[2];
+    const staleKey = { peerClientId: "client-A", peerAttemptId: "initial", peerEpoch: "1" };
+
+    const stale = await connect("stale", { clientId: "client-A", attemptId: "initial", epoch: "1" });
+    // Each invalid token is dropped on its own; the hello is still admitted.
+    const invalid = await connect("invalid", { clientId: "c".repeat(65), attemptId: "loop/../x", epoch: "2" });
+    const unkeyed = await connect("not an object", ["client-A"]);
+    expect(recordFor("connection.opened", unkeyed.connectionId))
+      .toEqual({ event: "connection.opened", source: "transport", connectionId: unkeyed.connectionId });
+    expect(recordFor("connection.opened", stale.connectionId))
+      .toEqual({ event: "connection.opened", source: "transport", connectionId: stale.connectionId, ...staleKey });
+    expect(recordFor("connection.opened", invalid.connectionId))
+      .toEqual({ event: "connection.opened", source: "transport", connectionId: invalid.connectionId, peerEpoch: "2" });
+
+    // The third socket superseded the least recently active one: stale.
+    await waitUntil(() => recordFor("connection.closed", stale.connectionId) !== undefined);
+    expect(recordFor("connection.superseded", stale.connectionId))
+      .toEqual({ event: "connection.superseded", source: "transport", connectionId: stale.connectionId, ...staleKey });
+    expect(recordFor("connection.closed", stale.connectionId)).toMatchObject(staleKey);
+
+    const writer = [...(gateway as any).clients.values()].find((client: any) => client.id === invalid.connectionId);
+    vi.spyOn(writer.socket, "send").mockImplementation(((_data: unknown, callback: (error?: Error) => void) => {
+      queueMicrotask(() => callback(new Error("fixture write failure")));
+    }) as any);
+    gateway.broadcast("test.event", { sequence: 1 });
+    await waitUntil(() => recordFor("connection.write-error", invalid.connectionId) !== undefined);
+    expect(recordFor("connection.write-error", invalid.connectionId)).toMatchObject({ peerEpoch: "2" });
+    expect(recordFor("connection.write-error", invalid.connectionId)).not.toHaveProperty("peerClientId");
   });
 
   it.each([{ sessions: 1, peers: 1 }, { sessions: 4, peers: 4 }, { sessions: 16, peers: 16 }, { sessions: 16, peers: 32 }])(
@@ -899,7 +969,7 @@ describe("WebSocket connection and outbound capacity", () => {
     first.on("message", (raw) => frames.push(JSON.parse(raw.toString())));
     await new Promise<void>((resolve) => first.once("open", () => resolve()));
     expect(first.extensions).toBe(credential === "local" ? "" : "permessage-deflate");
-    first.send(JSON.stringify({ type: "hello", protocolVersion: 5 }));
+    first.send(JSON.stringify({ type: "hello", protocolVersion: 5, diagnostics: { clientId: "client-B", attemptId: "initial", epoch: "7" } }));
     await waitUntil(() => frames.some((frame) => frame.type === "hello"));
 
     // Global capacity never displaces another identity's live connection.
@@ -945,7 +1015,10 @@ describe("WebSocket connection and outbound capacity", () => {
     expect(logger.log.mock.calls).toContainEqual([
       "warning",
       expect.stringContaining(`Closing client ${correlation} at outbound queue capacity`),
-      { event: "connection.outbound-capacity", source: "transport", connectionId: correlation },
+      {
+        event: "connection.outbound-capacity", source: "transport", connectionId: correlation,
+        peerClientId: "client-B", peerAttemptId: "initial", peerEpoch: "7",
+      },
     ]);
     expect(logger.log.mock.calls).toContainEqual([
       expect.stringMatching(/^(?:info|debug)$/u),

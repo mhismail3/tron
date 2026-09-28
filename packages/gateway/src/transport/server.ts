@@ -390,11 +390,39 @@ export class OrderedOutboundQueue {
   }
 }
 
+/** Hello `diagnostics` tokens: bounded, and safe to write into records verbatim. */
+const PEER_DIAGNOSTIC_TOKEN = /^[A-Za-z0-9-]{1,64}$/u;
+
+/** The peer's O-1 correlation key, carried on every connection-scoped record. */
+interface PeerDiagnostics {
+  peerClientId?: string;
+  peerAttemptId?: string;
+  peerEpoch?: string;
+}
+
+/** Diagnostics only: an invalid token is dropped, never a reason to reject hello. */
+function peerDiagnostics(value: unknown): PeerDiagnostics {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) return {};
+  const fields = value as Record<string, unknown>;
+  const token = (candidate: unknown): string | undefined =>
+    typeof candidate === "string" && PEER_DIAGNOSTIC_TOKEN.test(candidate) ? candidate : undefined;
+  const peerClientId = token(fields.clientId);
+  const peerAttemptId = token(fields.attemptId);
+  const peerEpoch = token(fields.epoch);
+  return {
+    ...(peerClientId ? { peerClientId } : {}),
+    ...(peerAttemptId ? { peerAttemptId } : {}),
+    ...(peerEpoch ? { peerEpoch } : {}),
+  };
+}
+
 interface Connection {
   id: string;
   identity: string;
   isLocal: boolean;
   socket: WebSocket;
+  /** Empty until hello; see `peerDiagnostics`. */
+  peer: PeerDiagnostics;
   unansweredHeartbeats: number;
   ready: boolean;
   presentationOnly: boolean;
@@ -628,7 +656,7 @@ export class GatewayServer {
           this.options.logger.log(
             "warning",
             `Closing unresponsive client ${connection.id} after ${connection.unansweredHeartbeats} unanswered heartbeats (lastInboundAgeMs=${progressAge(connection.lastInboundAt, heartbeatAt)} lastWriteProgressAgeMs=${progressAge(connection.lastWriteProgressAt, heartbeatAt)} queuedFrames=${heartbeatQueue.queuedFrames} queuedBytes=${heartbeatQueue.queuedBytes} completedFrames=${heartbeatQueue.completedFrames})`,
-            { event: "connection.heartbeat-timeout", source: "transport" },
+            { event: "connection.heartbeat-timeout", source: "transport", connectionId: connection.id, ...connection.peer },
           );
           connection.socket.terminate();
           continue;
@@ -1234,7 +1262,7 @@ export class GatewayServer {
         }
         const supersededAt = performance.now();
         for (const client of identityConnections.slice(0, superseded)) {
-          this.options.logger.log("warning", `Superseding client ${client.id} with a newer connection from the same identity (lastInboundAgeMs=${progressAge(client.lastInboundAt, supersededAt)} identityConnections=${identityConnections.length} maximumPerIdentity=${maximumPerIdentity})`, { event: "connection.superseded", source: "transport" });
+          this.options.logger.log("warning", `Superseding client ${client.id} with a newer connection from the same identity (lastInboundAgeMs=${progressAge(client.lastInboundAt, supersededAt)} identityConnections=${identityConnections.length} maximumPerIdentity=${maximumPerIdentity})`, { event: "connection.superseded", source: "transport", connectionId: client.id, ...client.peer });
           this.closeFailedConnection(client, SUPERSEDED_CLOSE_CODE, "superseded by a newer connection");
         }
         const isLocal = authenticated.kind === "local";
@@ -1270,7 +1298,7 @@ export class GatewayServer {
         this.options.logger.log(
           "warning",
           `Closing client ${connection.id} at outbound queue capacity (queuedFrames=${snapshot.queuedFrames} queuedBytes=${snapshot.queuedBytes} maximumFrames=${snapshot.maximumFrames} maximumBytes=${snapshot.maximumBytes} frameHighWater=${snapshot.frameHighWater} byteHighWater=${snapshot.byteHighWater} wsBufferedBytes=${socket.bufferedAmount} nextBytes=${nextBytes}; ${this.pressureDiagnostic()})`,
-          { event: "connection.outbound-capacity", source: "transport", connectionId: connection.id },
+          { event: "connection.outbound-capacity", source: "transport", connectionId: connection.id, ...connection.peer },
         );
         this.closeFailedConnection(connection, 1013, "client outbound capacity exceeded");
       },
@@ -1280,7 +1308,7 @@ export class GatewayServer {
         this.options.logger.log(
           "error",
           `Client ${connection.id} outbound write failed after ${snapshot.completedFrames}/${snapshot.acceptedFrames} frames`,
-          { event: "connection.write-error", source: "transport", connectionId: connection.id, error },
+          { event: "connection.write-error", source: "transport", connectionId: connection.id, ...connection.peer, error },
         );
         this.retireConnectionWork(connection);
         socket.terminate();
@@ -1291,6 +1319,7 @@ export class GatewayServer {
       identity,
       isLocal,
       socket,
+      peer: {},
       unansweredHeartbeats: 0,
       ready: false,
       presentationOnly: false,
@@ -1357,15 +1386,19 @@ export class GatewayServer {
       if (protocol < MIN_PROTOCOL_VERSION || protocol > PROTOCOL_VERSION) return this.closeFailedConnection(connection, 1008, "protocol version mismatch");
       connection.ready = true;
       connection.presentationOnly = (frame as Record<string, unknown>).clientRole === "mobile";
+      connection.peer = peerDiagnostics(frame.diagnostics);
       // Admission and handshake are one `connection.opened` record. The Mac
       // app's local probes reconnect constantly, so they are debug detail.
       this.options.logger.log(
         connection.isLocal ? "debug" : "info",
         `Client ${connection.id} connection opened (${connection.isLocal ? "local" : "paired"}, ${connection.presentationOnly ? "mobile" : "local"} role, compression=${connection.socket.extensions || "none"}) after ${Math.max(0, Math.round(performance.now() - connection.admittedAt))}ms`,
-        { event: "connection.opened", source: "transport", connectionId: connection.id },
+        { event: "connection.opened", source: "transport", connectionId: connection.id, ...connection.peer },
       );
       clearTimeout(connection.helloTimer);
-      this.send(connection, { type: "hello", ...this.options.service.info() as Record<string, JsonValue> });
+      // `connectionId` lets the peer log the key of this connection's records.
+      this.send(connection, {
+        type: "hello", ...this.options.service.info() as Record<string, JsonValue>, connectionId: connection.id,
+      });
       return;
     }
 
@@ -1972,7 +2005,7 @@ export class GatewayServer {
     this.options.logger.log(
       connection.isLocal ? "debug" : "info",
       `Client ${connection.id} connection closed after ${Math.max(0, Math.round(closedAt - connection.admittedAt))}ms (${detail}; ${outbound.completedFrames}/${outbound.acceptedFrames} outbound frames completed, ${outbound.queuedBytes} queued bytes; lastInboundAgeMs=${progressAge(connection.lastInboundAt, closedAt)} lastWriteProgressAgeMs=${progressAge(connection.lastWriteProgressAt, closedAt)} queuedFrames=${outbound.queuedFrames} queuedBytes=${outbound.queuedBytes} completedFrames=${outbound.completedFrames})`,
-      { event: "connection.closed", source: "transport", connectionId: connection.id,
+      { event: "connection.closed", source: "transport", connectionId: connection.id, ...connection.peer,
         durationMs: Math.max(0, closedAt - connection.admittedAt) },
     );
     clearTimeout(connection.closeDeadline);

@@ -15,10 +15,17 @@ import { GatewayServer } from "./server.js";
 // 3. A client that proves liveness with its own pings is still server-pinged
 //    (the wakeup this rule removes) or, worse, is falsely retired.
 // 4. A client that goes quiet is never pinged again and is retired while alive.
+// 5. The retirement record cannot be joined to the phone's own records because
+//    it lacks the connection ID or the peer's hello correlation key.
 
 const INTERVAL_MS = GATEWAY_CONNECTION_POLICY.heartbeatIntervalMs;
 const TICK_SECONDS = INTERVAL_MS / 1_000;
 const ROUND_TRIP_MS = 100;
+
+const PEER_DIAGNOSTICS = { clientId: "client-heartbeat", attemptId: "initial", epoch: "1" };
+
+/** The latest run's Gateway log calls. */
+let gatewayLog: ReturnType<typeof vi.fn> | undefined;
 
 const cleanups: Array<() => Promise<void>> = [];
 afterEach(async () => {
@@ -73,6 +80,7 @@ async function observeHeartbeats(script: ClientScript, ticks: number): Promise<T
   const token = JSON.parse(await readFile(join(root, "gateway", "local-auth.json"), "utf8")).bearerToken;
   const port = await unusedPort();
   const logger = { log: vi.fn() };
+  gatewayLog = logger.log;
   const gateway = new GatewayServer({
     host: "127.0.0.1", port, maxFrameBytes: 16_384, devices,
     uploads: {} as never,
@@ -109,7 +117,7 @@ async function observeHeartbeats(script: ClientScript, ticks: number): Promise<T
   });
   await new Promise<void>((resolve, reject) => { socket.once("open", () => resolve()); socket.once("error", reject); });
   // The hello is client-initiated inbound at virtual second 0.
-  socket.send(JSON.stringify({ type: "hello", protocolVersion: 5 }));
+  socket.send(JSON.stringify({ type: "hello", protocolVersion: 5, diagnostics: PEER_DIAGNOSTICS }));
   await realWait(() => logger.log.mock.calls.some((call) => call[2]?.event === "connection.opened"), "hello");
   const connection = () => [...(gateway as unknown as { clients: Map<string, { unansweredHeartbeats: number }> }).clients.values()][0];
 
@@ -176,6 +184,12 @@ describe("Gateway heartbeat pings", () => {
     const observations = await observeHeartbeats({ autoPong: false }, 6);
     expect(pingedTicks(observations)).toEqual([1, 2, 3]);
     expect(closedAtTick(observations)).toBe(4);
+    const opened = gatewayLog?.mock.calls.find((call) => call[2]?.event === "connection.opened");
+    const timeout = gatewayLog?.mock.calls.find((call) => call[2]?.event === "connection.heartbeat-timeout");
+    expect(timeout?.[2]).toEqual({
+      event: "connection.heartbeat-timeout", source: "transport", connectionId: opened?.[2]?.connectionId,
+      peerClientId: "client-heartbeat", peerAttemptId: "initial", peerEpoch: "1",
+    });
   });
 
   it("retires a phone that dies on the fourth tick after its last frame", async () => {
