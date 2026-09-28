@@ -59,8 +59,10 @@ struct GatewayConnectionAttempt: Sendable {
 @MainActor
 final class GatewayConnectionEpisodeRecorder {
     /// An episode with no attempt in flight or scheduled for this long is
-    /// stalled. It exceeds the 15 s transport-open deadline plus one backoff
-    /// interval, so a healthy retry never trips it.
+    /// stalled. Attempts in flight and pending backoff waits both read as
+    /// progress, so a healthy retry holds no guard at all; the bound only has
+    /// to exceed the longest single wait a healthy timeline can have, which is
+    /// the 15 s backoff cap.
     static let reconnectStallBound = Duration.seconds(20)
     /// A main actor that cannot answer a ping within this bound is stalled.
     static let mainStallBound = Duration.seconds(2)

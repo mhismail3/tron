@@ -39,4 +39,29 @@ struct GatewayReconnectScheduleTests {
         #expect(await wait.value)
         #expect(clock.activeSleeperCount() == 0)
     }
+
+    @Test("a path change cancels the pending wait at once and restarts the curve")
+    func pathChangeRestartsTheCurve() async throws {
+        let clock = ManualClock()
+        let schedule = GatewayReconnectSchedule(clock: clock.clock, delayPolicy: .init(nextUnitInterval: { 0.5 }))
+        // One failure's wait outlives its interval, so the curve has grown to
+        // the second step before the path change.
+        let first = Task { await schedule.afterFailure() }
+        try await clock.waitUntilSleeping(count: 1, duration: .seconds(2))
+        clock.advance(by: .seconds(2))
+        #expect(await first.value)
+        let second = Task { await schedule.afterFailure() }
+        try await clock.waitUntilSleeping(count: 1, duration: .seconds(3.4000000000000004))
+
+        schedule.restartForPathChange()
+
+        #expect(await second.value)
+        #expect(clock.activeSleeperCount() == 0)
+        // The next wait is the base interval again, not the third step.
+        let third = Task { await schedule.afterFailure() }
+        try await clock.waitUntilSleeping(count: 1, duration: .seconds(2))
+        schedule.cancel()
+        #expect(!(await third.value))
+        #expect(clock.recordedSleeps() == [.seconds(2), .seconds(3.4000000000000004), .seconds(2)])
+    }
 }

@@ -3,6 +3,7 @@ import Observation
 import Synchronization
 import Testing
 @testable import TronMobile
+@testable import TronMobileCore
 
 @MainActor
 @Suite("AppModel reconnect delay ownership", .serialized)
@@ -620,6 +621,106 @@ struct AppModelReconnectTests {
             #expect(clock.recordedSleeps() == [.seconds(1.6)])
             #expect(fixture.socketFactory.requests.count == 2)
             #expect(fixture.model.connectionState == .reconnecting)
+        }
+    }
+
+    @Test("a path change cancels a pending backoff wait, attempts at once and restarts the curve")
+    func pathReturnCancelsPendingBackoff() async throws {
+        let clock = ManualClock()
+        let sockets = (0..<3).map { _ in ScriptedGatewaySocket() }
+        try await withFixture(sockets: sockets, clock: clock, units: SequenceReconnectUnits([0, 0, 0])) { fixture in
+            // The route the phone is on before the change below.
+            fixture.model.lifecycleNotePathHint(satisfied: true, signature: "wifi")
+            let start = Task { await fixture.model.start() }
+            defer { start.cancel() }
+            try await failHandshake(sockets[0])
+            try await clock.waitUntilSleeping(count: 1, duration: .seconds(1.6))
+            await start.value
+            #expect(fixture.socketFactory.requests.count == 1)
+
+            // The route changed while the wait was pending: a handoff keeps the
+            // path satisfied, so the monitor's interface signature is what names
+            // the change. The wait is cancelled and the phone attempts at once
+            // instead of running it out.
+            fixture.model.lifecycleNotePathHint(satisfied: true, signature: "cellular")
+            try await sockets[1].waitUntilSent(count: 1)
+            for _ in 0..<20 { await Task.yield() }
+            #expect(clock.activeSleeperCount() == 0)
+            #expect(clock.recordedSleeps() == [.seconds(1.6)])
+            #expect(fixture.socketFactory.requests.count == 2)
+
+            // That attempt fails on the new route: because the path change also
+            // restarted the curve, the wait after it is the base interval again
+            // rather than the second step the closed route had grown.
+            try await failHandshake(sockets[1])
+            try await sockets[1].waitUntilClosed()
+            try await clock.waitUntilSleeping(count: 1, duration: .seconds(1.6))
+            #expect(clock.recordedSleeps() == [.seconds(1.6), .seconds(1.6)])
+        }
+    }
+
+    @Test("a repeated notice about the same route keeps the curve the path grew")
+    func unchangedPathNoticeKeepsTheGrownCurve() async throws {
+        let clock = ManualClock()
+        let sockets = (0..<3).map { _ in ScriptedGatewaySocket() }
+        try await withFixture(sockets: sockets, clock: clock, units: SequenceReconnectUnits([0, 0, 0])) { fixture in
+            fixture.model.lifecycleNotePathHint(satisfied: true, signature: "wifi")
+            let start = Task { await fixture.model.start() }
+            defer { start.cancel() }
+            try await failHandshake(sockets[0])
+            try await clock.waitUntilSleeping(count: 1, duration: .seconds(1.6))
+            await start.value
+
+            // A scene activation and a monitor update on the route the phone is
+            // already on: the wait is cancelled (the O-4 probe), but the route
+            // did not change, so the curve is left alone (C-3).
+            fixture.model.lifecycleNotePathHint(satisfied: true, signature: "wifi")
+            try await sockets[1].waitUntilSent(count: 1)
+            #expect(clock.recordedSleeps() == [.seconds(1.6)])
+
+            try await failHandshake(sockets[1])
+            try await sockets[1].waitUntilClosed()
+            try await clock.waitUntilSleeping(count: 1, duration: .seconds(2.72))
+            #expect(clock.recordedSleeps() == [.seconds(1.6), .seconds(2.72)])
+        }
+    }
+
+    @Test("a path change during a reconnect attempt starts no second socket and retries at once")
+    func pathChangeDuringReconnectAttemptStartsNoSecondSocket() async throws {
+        let clock = ManualClock()
+        let sockets = (0..<3).map { _ in ScriptedGatewaySocket() }
+        try await withFixture(sockets: sockets, clock: clock, units: SequenceReconnectUnits([0, 0, 0])) { fixture in
+            fixture.model.lifecycleNotePathHint(satisfied: true, signature: "wifi")
+            let start = Task { await fixture.model.start() }
+            defer { start.cancel() }
+            try await failHandshake(sockets[0])
+            try await clock.waitUntilSleeping(count: 1, duration: .seconds(1.6))
+            await start.value
+
+            // The retry's hello is unanswered, so this attempt is in flight.
+            clock.advance(by: .seconds(1.6))
+            try await sockets[1].waitUntilSent(count: 1)
+
+            // The route changes while that attempt is on the wire: the attempt
+            // keeps its own bound and no third socket appears beside it.
+            fixture.model.lifecycleNotePathHint(satisfied: true, signature: "cellular")
+            for _ in 0..<20 { await Task.yield() }
+            #expect(fixture.socketFactory.requests.count == 2)
+
+            // The loop consumes the change when the attempt ends: the next
+            // attempt starts at once, with no wait to run out.
+            try await failHandshake(sockets[1])
+            try await sockets[1].waitUntilClosed()
+            try await sockets[2].waitUntilSent(count: 1)
+            #expect(clock.activeSleeperCount() == 0)
+            #expect(clock.recordedSleeps() == [.seconds(1.6)])
+
+            // The change restarted the curve, so the wait after that attempt is
+            // the base interval rather than the second step.
+            try await failHandshake(sockets[2])
+            try await sockets[2].waitUntilClosed()
+            try await clock.waitUntilSleeping(count: 1, duration: .seconds(1.6))
+            #expect(clock.recordedSleeps() == [.seconds(1.6), .seconds(1.6)])
         }
     }
 

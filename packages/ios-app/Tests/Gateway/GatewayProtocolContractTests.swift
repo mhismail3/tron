@@ -31,8 +31,11 @@ struct GatewayProtocolContractTests {
         let fixture = try JSONDecoder().decode(GatewayConnectionContractFixture.self, from: Data(contentsOf: fixtureURL))
         #expect(fixture.clientPingInterval.milliseconds == Int(GatewayConnectionPolicy.clientPingInterval.components.seconds * 1_000))
         #expect(fixture.clientPongDeadline.milliseconds == Int(GatewayConnectionPolicy.clientPongDeadline.components.seconds * 1_000))
-        #expect(fixture.clientHandshakeDeadline.milliseconds == Int(GatewayConnectionPolicy.handshakeDeadline.components.seconds * 1_000))
-        #expect(GatewayConnectionPolicy.requestInactivityTimeout > Double(GatewayConnectionPolicy.handshakeDeadline.components.seconds))
+        #expect(fixture.clientHelloDeadline.milliseconds == Int(GatewayConnectionPolicy.helloDeadline.components.seconds * 1_000))
+        #expect(fixture.clientTransportOpenDeadline.milliseconds == Int(GatewayConnectionPolicy.transportOpenDeadline.components.seconds * 1_000))
+        #expect(GatewayConnectionPolicy.requestInactivityTimeout
+            > Double(GatewayConnectionPolicy.transportOpenDeadline.components.seconds
+                + GatewayConnectionPolicy.helloDeadline.components.seconds))
     }
 
     @Test("the LAN pin matches the certificate in the shared fixture both platforms assert against")

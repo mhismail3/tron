@@ -522,8 +522,8 @@ struct GatewayClientTransportTests {
         }
     }
 
-    @Test("handshake timeout advances on the injected monotonic clock")
-    func virtualHandshakeTimeout() async throws {
+    @Test("the hello deadline advances on the injected monotonic clock")
+    func virtualHelloTimeout() async throws {
         try await withTestWatchdog {
             let clock = ManualClock()
             let socket = ScriptedGatewaySocket()
@@ -539,9 +539,11 @@ struct GatewayClientTransportTests {
 
             let connection = Task { try await client.connect(profile: profile, token: "token") }
             defer { connection.cancel() }
+            // This socket opens at once, so the wait the deadline owns is the
+            // hello one that follows the write.
             try await socket.waitUntilSent(count: 1)
-            try await clock.waitUntilSleeping(count: 1)
-            clock.advance(by: .seconds(15))
+            try await clock.waitUntilSleeping(count: 1, duration: GatewayConnectionPolicy.helloDeadline)
+            clock.advance(by: GatewayConnectionPolicy.helloDeadline)
 
             do {
                 _ = try await valueOfOwnedTask(connection)
@@ -660,8 +662,8 @@ struct GatewayClientTransportTests {
         await client.close()
     }
 
-    @Test("handshake deadline closes a socket stalled in hello send")
-    func stalledHelloSendIsRetiredAtDeadline() async throws {
+    @Test("a stall before the socket opens ends at the transport-open deadline")
+    func transportOpenStallIsRetiredAtItsDeadline() async throws {
         try await withTestWatchdog {
             let clock = ManualClock()
             let socket = ScriptedGatewaySocket(suspendsSend: true)
@@ -672,13 +674,64 @@ struct GatewayClientTransportTests {
             let connection = Task { try await client.connect(profile: profile, token: "token") }
             defer { connection.cancel() }
             try await socket.waitUntilSendInvoked(count: 1)
-            try await clock.waitUntilSleeping(count: 1)
-            clock.advance(by: .seconds(15))
+            try await clock.waitUntilSleeping(count: 1, duration: GatewayConnectionPolicy.transportOpenDeadline)
+            clock.advance(by: GatewayConnectionPolicy.transportOpenDeadline)
             for _ in 0..<10 { await Task.yield() }
             try await socket.waitUntilCloseInvoked()
             await socket.releaseSend()
             await #expect(throws: GatewayFailure.self) { try await valueOfOwnedTask(connection) }
             #expect(await socket.closeInvocationCount() >= 1)
+            #expect(await client.activeConnectionID() == nil)
+            await client.close()
+        }
+    }
+
+    @Test("a socket that opened but never answers hello keeps the hello deadline")
+    func slowHelloKeepsItsOwnDeadline() async throws {
+        try await withTestWatchdog {
+            let clock = ManualClock()
+            let socket = ScriptedGatewaySocket()
+            let client = GatewayClient(
+                socketFactory: ScriptedGatewaySocketFactory(socket: socket).factory,
+                clock: clock.clock
+            )
+            let connection = Task { try await client.connect(profile: profile, token: "token") }
+            defer { connection.cancel() }
+            try await socket.waitUntilSendInvoked(count: 1)
+            // The hello write completed, so the socket is open: the pending wait
+            // is the hello bound, and the transport bound has no answer to end.
+            try await clock.waitUntilSleeping(count: 1, duration: GatewayConnectionPolicy.helloDeadline)
+            clock.advance(by: GatewayConnectionPolicy.transportOpenDeadline)
+            for _ in 0..<10 { await Task.yield() }
+            #expect(await socket.closeInvocationCount() == 0)
+            // A Mac that answers late, but inside its own bound, is admitted.
+            await socket.enqueue(helloFrame())
+            let info = try await valueOfOwnedTask(connection)
+            #expect(info.machineId == "machine")
+            await client.close()
+        }
+    }
+
+    @Test("a socket that opened and then went silent ends at the hello deadline")
+    func silentHelloEndsAtTheHelloDeadline() async throws {
+        try await withTestWatchdog {
+            let clock = ManualClock()
+            let socket = ScriptedGatewaySocket()
+            let client = GatewayClient(
+                socketFactory: ScriptedGatewaySocketFactory(socket: socket).factory,
+                clock: clock.clock
+            )
+            let connection = Task { try await client.connect(profile: profile, token: "token") }
+            defer { connection.cancel() }
+            try await socket.waitUntilSendInvoked(count: 1)
+            try await clock.waitUntilSleeping(count: 1, duration: GatewayConnectionPolicy.helloDeadline)
+            clock.advance(by: GatewayConnectionPolicy.transportOpenDeadline)
+            for _ in 0..<10 { await Task.yield() }
+            #expect(await socket.closeInvocationCount() == 0)
+            clock.advance(by: GatewayConnectionPolicy.helloDeadline)
+            for _ in 0..<10 { await Task.yield() }
+            try await socket.waitUntilCloseInvoked()
+            await #expect(throws: GatewayFailure.self) { try await valueOfOwnedTask(connection) }
             #expect(await client.activeConnectionID() == nil)
             await client.close()
         }
@@ -692,8 +745,9 @@ struct GatewayClientTransportTests {
             let store = IOSClientDiagnosticStore(defaults: try #require(UserDefaults(suiteName: suite)))
             let clock = ManualClock()
             // A path that never reaches the Mac stalls the hello write on an
-            // unopened socket; a Mac that accepts but never answers stalls the
-            // hello read on an open one. Both time out at the same deadline.
+            // unopened socket and gives up at the transport-open bound; a Mac
+            // that accepts but never answers stalls the hello read on an open
+            // socket and gives up at the hello bound.
             let socket = opens
                 ? ScriptedGatewaySocket(metadata: .init(closeCode: nil, httpStatusCode: nil, transportOpenMilliseconds: 42))
                 : ScriptedGatewaySocket(suspendsSend: true, metadata: .init(closeCode: nil, httpStatusCode: nil, waitedForConnectivity: true))
@@ -706,8 +760,9 @@ struct GatewayClientTransportTests {
             let connection = Task { try await client.connect(profile: profile, token: "token") }
             defer { connection.cancel() }
             try await socket.waitUntilSendInvoked(count: 1)
-            try await clock.waitUntilSleeping(count: 1)
-            clock.advance(by: .seconds(15))
+            let deadline = opens ? GatewayConnectionPolicy.helloDeadline : GatewayConnectionPolicy.transportOpenDeadline
+            try await clock.waitUntilSleeping(count: 1, duration: deadline)
+            clock.advance(by: deadline)
             for _ in 0..<10 { await Task.yield() }
             try await socket.waitUntilCloseInvoked()
             if !opens { await socket.releaseSend() }
@@ -817,7 +872,7 @@ struct GatewayClientTransportTests {
         }
     }
 
-    @Test("handshake timeout closes before a cancellation-insensitive hello receive can finish")
+    @Test("hello deadline closes before a cancellation-insensitive hello receive can finish")
     func stalledHelloReceiveClosesBeforeLateCallback() async throws {
         try await withTestWatchdog {
             let clock = ManualClock()
@@ -829,8 +884,8 @@ struct GatewayClientTransportTests {
             let connection = Task { try await client.connect(profile: profile, token: "token") }
             defer { connection.cancel() }
             try await socket.waitUntilSendInvoked(count: 1)
-            try await clock.waitUntilSleeping(count: 1)
-            clock.advance(by: .seconds(15))
+            try await clock.waitUntilSleeping(count: 1, duration: GatewayConnectionPolicy.helloDeadline)
+            clock.advance(by: GatewayConnectionPolicy.helloDeadline)
             for _ in 0..<10 { await Task.yield() }
             try await socket.waitUntilCloseInvoked()
             await socket.enqueue(helloFrame())

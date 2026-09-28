@@ -128,7 +128,8 @@ def connection_settings() -> dict[str, int]:
     contract = json.loads(CONNECTION_CONTRACT.read_text())
     return {"pingIntervalMs": contract["clientPingInterval"]["milliseconds"],
             "pongDeadlineMs": contract["clientPongDeadline"]["milliseconds"],
-            "handshakeDeadlineMs": contract["clientHandshakeDeadline"]["milliseconds"]}
+            "transportOpenDeadlineMs": contract["clientTransportOpenDeadline"]["milliseconds"],
+            "helloDeadlineMs": contract["clientHelloDeadline"]["milliseconds"]}
 
 
 CONNECTION = connection_settings()

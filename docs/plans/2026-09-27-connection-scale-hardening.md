@@ -615,7 +615,7 @@ rows are in priority order.
 | C-5 | Done | Back off an unreachable non-selected Gateway profile; record pool attempts and episodes | O-4 | orchestrator-dispatched deepseek-worker, 2026-09-28 |
 | G-10 | Done | Durable-write audit: no process-wide serialization of fsyncs, no fsync on reads | O-5 | orchestrator-dispatched deepseek-worker, 2026-09-28 |
 | G-10a | Done | Connection owner: a read (e.g. knowledge.raindrop.read) must not fsync — skip an unchanged provider observation in ConnectionOwner.recordProviderObservation, preserving stateRevision/updatedAt semantics | G-10 | orchestrator-dispatched deepseek-worker, 2026-09-28 |
-| C-3 | Claimed | Faster retry (D-4): about 5 s transport-open deadline, immediate retry on path change | C-1 | orchestrator-dispatched deepseek-worker, 2026-09-28 |
+| C-3 | Done | Faster retry (D-4): about 5 s transport-open deadline, immediate retry on path change | C-1 | orchestrator-dispatched deepseek-worker, 2026-09-28 (the O-6b blackhole p95 and the 90 s E2E re-run are the orchestrator's quiet-host run) |
 | C-4 | Done | Truer liveness (D-4): any inbound frame proves liveness | O-4 | orchestrator-dispatched deepseek-worker, 2026-09-28 |
 | C-6 | Done | Cancel frame for disposable reads; a retried `session.open` joins the in-flight one | O-3 | orchestrator-dispatched deepseek-worker, 2026-09-28 (the O-6a slow-open confirmation and the qualification run are the orchestrator's) |
 | G-12 | Claimed | Server-side deadlines, concurrency caps and heap-pressure shedding with typed retry hints | O-3, O-5 | orchestrator-dispatched deepseek-worker, 2026-09-28 |
@@ -9584,3 +9584,97 @@ wait).
   files"; the shipped owner batches at `RECONCILE_CONCURRENCY` (16), so the docs
   state 16.
 - For the next agent: none. Nothing in this row is owed.
+
+### C-3 · Done · 2026-09-28 · orchestrator-dispatched deepseek-worker (branch `hardening/c-3`)
+
+- Failure modes written before the change (plan, C-3; each isolated test below
+  targets one of them):
+  1. a working path opening in 4–6 s: the transport-open bound must give up at
+     5 s without spending the hello budget, and a hello that answers after the
+     socket opened must still get its own 15 s;
+  2. a path flapping every second: each return cancels the pending wait and
+     attempts at once, and never puts two sockets on the wire;
+  3. an attempt in flight when the path changes: the change starts no second
+     attempt, and the in-flight attempt keeps its own deadline;
+  4. a path change after a long run of failures: the curve restarts at the base
+     interval, while repeated failures on an unchanged path keep the cap and
+     jitter.
+- Result: the transport open and the hello after it have separate bounds, and a
+  path return cancels a pending backoff wait and restarts the curve.
+  `clientTransportOpenDeadline` (5 s) replaces the first half of the shared
+  15-second `clientHandshakeDeadline`, which is now `clientHelloDeadline` and
+  bounds only the hello exchange on a socket that opened. The phone's retry
+  owner cancels a pending wait on a satisfied path notice and restarts the
+  backoff curve from its base interval, so the route that just returned is
+  attempted at once instead of after the wait the route that went away had
+  grown; repeated failures that see no path notice keep the capped, jittered
+  curve. The O-6b driver reads both bounds from the contract for its phone model
+  and cancels the modelled wait at the blackhole's path return.
+- Evidence: `scripts/tron-ios-test build --lane C3` succeeds;
+  `scripts/tron-ios-test run --lane C3` for `AppModelReconnectTests` (50/50,
+  including `pathReturnCancelsPendingBackoff` and
+  `pathChangeDuringReconnectAttemptStartsNoSecondSocket`), `GatewayClientTransportTests`
+  (57/57, including the transport-open/hello boundary pair),
+  `GatewayProtocolContractTests` + `GatewayReconnectScheduleTests`, the four
+  neighbouring suites and E-3b's tests after merging `hardening/integration` —
+  232 tests in 8 suites, 0 failures, retained at
+  `~/Library/Developer/Tron/ios/test-runs/20260928T223640Z-run.9udavo`;
+  `npx vitest run src/transport/connection-policy.test.ts` 1/1 (the fixture's
+  server-side parity); `python3 scripts/test-tron-profile.py` 45/45 against the
+  driver's updated phone model (the blackhole case now recovers 3.5 s after the
+  path's return — the rest of the transport-open attempt that was in flight —
+  and asserts it stays inside one transport-open deadline).
+- Deviations: `handshakeDeadline`/`clientHandshakeDeadline` are renamed to the
+  hello bound because the split leaves them owning only the hello, and the name
+  is what the contract's reason text now says. `GatewayConnectionPolicy`,
+  `GatewayClient`, `GatewayLifecycleCoordinator`, `ReconnectDelayPolicy`
+  (`GatewayReconnectSchedule.restartForPathChange`), the fixture, the O-6b
+  driver, `scripts/tron-profile-gateway`, `scripts/test-tron-profile.py` and the
+  three docs change with it.
+- For the next agent: O-6b's blackhole p95 (target ≤ 5 s from the path's
+  return) and the 90 s iOS E2E case's recovery measurement are the
+  orchestrator's quiet-host run; the driver's model bounds the p95 at one
+  transport-open deadline plus one connect once the path returns, and the relay
+  still refuses to forward the attempt that was in flight.
+
+#### C-3 review round · 2026-09-28 · same branch, same worker
+
+An independent reviewer found the modelled phone's wait broken and two real
+recovery gaps; all three were fixed on the same branch.
+
+1. The driver handed `phoneBackoffWait` a *function* as its race value, so
+   `Promise.race` settled it immediately and every modelled wait was zero — the
+   recovery figure was a floor the phone never had. `connectUntilReady` now
+   takes the leg's path-change object (`returnedAt`/`signal`), `phoneBackoffWait`
+   returns whether the return cancelled it, an attempt record carries the
+   `waitMs` that preceded it, and a change that arrived while an attempt was on
+   the wire is consumed when it fails. The `ws` library's `handshakeTimeout` is
+   now a backstop 1 s past the phone's bound: the library destroying the socket
+   first reported the model's own timeout as an unexpected close.
+2. `GatewayLifecycleCoordinator.notePathHint` recorded nothing when a satisfied
+   notice arrived during an in-flight attempt, so the loop then waited the grown
+   curve (up to 15 s) after it. It now records the change, and the loop consumes
+   it after that attempt fails and retries at once from the restarted curve
+   (`reconnect.delay cause=pathChanged`; the next attempt's `actualDelayMs`≈0).
+3. Every satisfied notice — a scene activation, an interface-flag or VPN
+   update, and the monitor's own repeats — restarted the curve, which weakens
+   Do 3. The observer now forwards the monitored route's interface signature
+   (`TronMobileApp.routeSignature`, status-independent), and only a change of
+   that signature (or an unsatisfied→satisfied transition) restarts the curve;
+   a notice on the same route still cancels a pending wait. The dashboard pool
+   keeps its own transition gate.
+- Evidence (review round): `scripts/test-tron-profile.py -k test_the_blackhole`
+  2/2 (~30 s) — the 5 s/8 s leg recovers 3.5 s after the return with the
+  consumed change's attempt at `waitMs: 0`, and the new 6 s/2 s leg pays a
+  ~2.1 s base-interval wait before its second attempt and recovers 0.61 s after
+  the return; a zero-gap retry model fails the new leg's backoff assertion.
+  `scripts/tron-ios-test run --lane C3` for `AppModelReconnectTests`,
+  `GatewayReconnectScheduleTests`, `GatewayClientTransportTests` and
+  `GatewayProtocolContractTests`: 131 tests in 4 suites, 0 failures, retained at
+  `~/Library/Developer/Tron/ios/test-runs/20260928T230918Z-run.T7wXvI`.
+- Deviation: the modelled cancel assumes the phone sees a path change at the
+  relay's return. A relay blackhole raises no path callback — `NWPathMonitor`
+  still reports a satisfied path — so on a device the O-6b leg's recovery is the
+  wait it was in plus the attempt that follows, and the modelled p95 ≤ 5 s is
+  the path-change case C-3 targets. The gateway README now says so; the quiet
+  host run still owns the real numbers.

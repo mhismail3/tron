@@ -833,11 +833,15 @@ actor GatewayClient {
         guard let socketURL = profile.socketURL else { throw Self.invalidProfileEndpoint() }
         self.profile = profile
         self.token = token
-        let handshakeTimeout = GatewayConnectionPolicy.handshakeDeadline
+        // Two bounds, not one shared deadline: the socket open gives up at
+        // `transportOpenDeadline` so a down path is named in 5 s, and only a
+        // socket that opened may spend the hello budget (D-4, C-3).
+        let transportOpenTimeout = GatewayConnectionPolicy.transportOpenDeadline
+        let helloTimeout = GatewayConnectionPolicy.helloDeadline
         let attemptStartedAt = clock.now()
         let handshakeStage = GatewayHandshakeStage()
-        // One deadline covers hello send and receive. The URL loading inactivity
-        // timeout stays above the application-owned liveness decision.
+        // The URL loading inactivity timeout stays above the
+        // application-owned liveness decision.
         var request = URLRequest(url: socketURL, timeoutInterval: GatewayConnectionPolicy.requestInactivityTimeout)
         request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
         let socket = socketFactory.makeConnection(request)
@@ -861,11 +865,22 @@ actor GatewayClient {
                 ]),
             ])
             let helloData = try JSONEncoder.gateway.encode(hello)
-            let data = try await Self.withTimeout(clock: clock, duration: handshakeTimeout, onTimeout: { await socket.close() }) {
+            _ = try await Self.withTimeout(
+                clock: clock,
+                duration: transportOpenTimeout,
+                onTimeout: { await socket.close() },
+                timeoutFailure: Self.transportOpenTimeoutFailure
+            ) {
                 handshakeStage.set(.helloSend)
+                // The hello write completes only once the socket opened, so its
+                // deadline is the transport-open one.
                 try await socket.send(helloData)
                 await self.markWriteProgress(epochID: epochID)
                 try await self.requireEpoch(epochID)
+            }
+            // One hello deadline covers send and receive once the socket is
+            // open; the transport-open bound above is what a connect gets.
+            let data = try await Self.withTimeout(clock: clock, duration: helloTimeout, onTimeout: { await socket.close() }) {
                 handshakeStage.set(.helloReceive)
                 return try await socket.receive()
             }
@@ -2064,6 +2079,17 @@ actor GatewayClient {
             return nil
         }
     }
+
+    /// The transport-open deadline's own failure. The code stays `timeout`: the
+    /// attempt record's `stage=transport-open` plus `transportOpened=false` is
+    /// what names a path that never opened (the no-path presentation reads
+    /// those), while this message keeps the two bounds tellable apart by eye.
+    private nonisolated static let transportOpenTimeoutFailure = GatewayFailure(
+        code: "timeout",
+        message: "The Mac gateway did not open the connection.",
+        retryable: true,
+        details: nil
+    )
 
     private nonisolated static func transportFailure(_ error: Error) -> GatewayFailure {
         if error is CancellationError {

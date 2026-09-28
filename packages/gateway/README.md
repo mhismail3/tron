@@ -2627,12 +2627,12 @@ cannot hold the catalog, and it takes the same per-host profile lock.
   - **blackhole** (`--blackhole-seconds`, default 90, longer than the Gateway's
     75 s half-open hold): the relay stops forwarding in both directions, so an
     established socket goes silent and an attempt made during the outage is held
-    with no answer until the phone's handshake deadline gives up. A held attempt
-    is deliberately never forwarded when the path returns; that is a pessimistic
-    model, not the phone's behaviour (an attempt still inside its deadline has
-    not been abandoned and real TCP would retransmit), and it inflates the
-    recovery baseline by the rest of that attempt. The mobile chat is
-    mounted on the shaped path and settles for one ping interval
+    with no answer until the phone's transport-open deadline gives up. A held
+    attempt is deliberately never forwarded when the path returns; that is a
+    pessimistic model, not the phone's behaviour (an attempt still inside its
+    deadline has not been abandoned and real TCP would retransmit), and it
+    inflates the recovery baseline by the rest of that attempt. The mobile chat
+    is mounted on the shaped path and settles for one ping interval
     (`blackholeSettleMs`) before the outage, so the client is between pings; it
     keeps its socket open until one liveness window (18 s: its ping interval
     plus its pong deadline) passes with no inbound frame, then abandons it, and
@@ -2640,7 +2640,14 @@ cannot hold the catalog, and it takes the same per-host profile lock.
     Because the phone says nothing to the Gateway when it gives up on a frozen
     path, the Gateway keeps that socket half-open. The path returns on its own
     timer, and the case times the recovery to a ready mounted chat from that
-    moment — an attempt still in flight then is part of the recovery.
+    moment — an attempt still in flight then is part of the recovery. The model
+    hands the phone that return as a path change (C-3): it cancels a pending
+    reconnect wait, restarts the backoff curve, and is consumed by an attempt
+    still on the wire when it arrives, which retries at once. A relay blackhole
+    changes nothing the phone's own path monitor can see, so on a device this
+    leg's recovery is the wait it happened to be in plus the attempt after it;
+    the modelled cancel is the path-change case C-3 is about (a route whose
+    interface set really changes), not something this leg observes on a device.
   - **bandwidth** (`--bandwidth-mbps`, default 2, for `--bandwidth-seconds`,
     default 90): the relay holds one rate budget per direction and pauses the
     sending socket when it is spent — until the receiving socket drains — so a
