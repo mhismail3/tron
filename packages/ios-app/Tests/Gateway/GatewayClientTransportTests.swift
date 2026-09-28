@@ -223,9 +223,13 @@ struct GatewayClientTransportTests {
             let socket = ScriptedGatewaySocket()
             let client = GatewayClient(
                 socketFactory: ScriptedGatewaySocketFactory(socket: socket).factory,
+                // The connection consumes the first identity, so the shed read is
+                // the second, its retry the third and the mutation the fourth.
                 uuidSource: SequenceUUIDSource([
                     UUID(uuidString: "00000000-0000-0000-0000-000000000021")!,
                     UUID(uuidString: "00000000-0000-0000-0000-000000000022")!,
+                    UUID(uuidString: "00000000-0000-0000-0000-000000000023")!,
+                    UUID(uuidString: "00000000-0000-0000-0000-000000000024")!,
                 ]).source
             )
             let appLog = AppLog(fileURL: FileManager.default.temporaryDirectory.appending(path: "retry-after-app-log-\(UUID().uuidString).jsonl"))
@@ -236,20 +240,20 @@ struct GatewayClientTransportTests {
             // The Gateway sheds the read with a hint; the phone waits it out and
             // asks again under a new identity.
             let read = Task { try await client.requestValue("session.list", EmptyParams()) }
-            try await socket.waitUntilSent(count: 1)
-            await socket.enqueue(shedResponseFrame(id: "00000000-0000-0000-0000-000000000021", retryAfterMs: 1))
             try await socket.waitUntilSent(count: 2)
+            await socket.enqueue(shedResponseFrame(id: "00000000-0000-0000-0000-000000000022", retryAfterMs: 1))
+            try await socket.waitUntilSent(count: 3)
             let retry = try #require(await socket.sentFrames().last)
             let frame = try #require(try JSONSerialization.jsonObject(with: retry) as? [String: Any])
             #expect(frame["method"] as? String == "session.list")
-            #expect(frame["id"] as? String == "00000000-0000-0000-0000-000000000022")
-            await socket.enqueue(responseFrame(id: "00000000-0000-0000-0000-000000000022", result: .array([])))
+            #expect(frame["id"] as? String == "00000000-0000-0000-0000-000000000023")
+            await socket.enqueue(responseFrame(id: "00000000-0000-0000-0000-000000000023", result: .array([])))
             _ = try await valueOfOwnedTask(read)
 
             // An admitted mutation is never retried, even with the same hint.
             let mutation = Task { try await client.requestValue("session.prompt", EmptyParams()) }
-            try await socket.waitUntilSent(count: 3)
-            await socket.enqueue(shedResponseFrame(id: "00000000-0000-0000-0000-000000000022", retryAfterMs: 1))
+            try await socket.waitUntilSent(count: 4)
+            await socket.enqueue(shedResponseFrame(id: "00000000-0000-0000-0000-000000000024", retryAfterMs: 1))
             do {
                 _ = try await valueOfOwnedTask(mutation)
                 Issue.record("the shed mutation unexpectedly answered")
@@ -257,7 +261,7 @@ struct GatewayClientTransportTests {
                 #expect(failure.code == "busy")
             }
             await Task.yield()
-            #expect(await socket.sentFrames().count == 3)
+            #expect(await socket.sentFrames().count == 4)
 
             let retries = await appLog.snapshot().filter { $0.event == "rpc.retry-after" }
             #expect(retries.count == 1)

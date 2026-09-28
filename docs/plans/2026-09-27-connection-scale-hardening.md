@@ -9338,11 +9338,14 @@ wait).
   `signal` used only for the cold-load queue wait (the shared start is
   deliberately not abandoned, C-6), so `session.open` passes `client.signal`.
   `RuntimeEvictionReason` gained `heap`, documented in the row above.
+- Phone evidence: `scripts/tron-ios-test build` + `run --only-testing
+  TronMobileTests/GatewayClientTransportTests` 57 passed / 0 failed, including
+  the new case "a shed disposable read is retried after the Gateway's hint, a
+  mutation is not" (asserts the retry frame's own identity, exactly one
+  `rpc.retry-after` with `code=busy` and the hint's `durationMs`, and that a shed
+  `session.prompt` is never retried). Retained run:
+  `~/Library/Developer/Tron/ios/test-runs/20260928T225017Z-run.GXO9TZ`.
 - Remaining: the plan's "Done when" — O-6a with the heap limit lowered, showing
   the Gateway sheds instead of exceeding the limit and no request exceeding its
   deadline — is the orchestrator's qualification run; this branch proves the
-  mechanisms it depends on. The iOS half is source-complete and its focused suite
-  (`scripts/tron-ios-test run --only-testing
-  TronMobileTests/GatewayClientTransportTests`) was not re-run in this window:
-  the new case (a shed read retried after its hint with one `rpc.retry-after`,
-  and a shed mutation never retried) needs the owned test simulator.
+  mechanisms it depends on.
