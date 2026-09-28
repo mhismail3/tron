@@ -190,10 +190,10 @@ export const RSS_INFO_STEP_SHARE = 0.1;
 /** An event-loop p99 over this bound in one minute misses the exit criterion. */
 export const EVENT_LOOP_P99_WARNING_MS = 100;
 
-/** A window recording one snapshot projected for nobody. The slot builds a
- * snapshot only for a subscriber, so after that guard any such build is a lost
- * audience check rather than an expected condition, which is why it is the one
- * threshold here that has no value to compare against. */
+/** A window that recorded a snapshot built for a subscriber no ready socket could
+ * receive. The slot builds a snapshot only for a session with a subscriber, so
+ * such a build is a lost audience check rather than an expected condition, which
+ * is why it is the one threshold here that has no value to compare against. */
 export const UNAUDIENCED_SNAPSHOT_WARNING = 0;
 
 /** Named entries in the message's topic and runtime detail; the rest are
@@ -234,9 +234,10 @@ export interface ResourceSample {
   runtimeBytes: number;
   runtimesLoaded: number;
   runtimesEvicted: number;
-  /** Snapshot builds, and the part of them with no subscriber at build time:
-   * after `UNAUDIENCED_SNAPSHOT_WARNING` the second is a lost audience check,
-   * because the slot builds only for a subscriber. */
+  /** Snapshot projections broadcast for a session, and the part of them built
+   * while no ready recipient could receive them (`UNAUDIENCED_SNAPSHOT_WARNING`).
+   * Topic frames count only frames that had a recipient, so this pair is where a
+   * projection that reached nobody stays visible. */
   snapshotBuilds: number;
   unaudiencedSnapshotBuilds: number;
   topics: ReadonlyMap<string, ResourceTopicTraffic>;
@@ -258,9 +259,9 @@ export interface ResourceSample {
  * discover what happened.
  */
 export interface ResourceRecorder {
-  /** One snapshot projected for a session that has a subscriber, with that
-   * recipient count; a publication with no audience builds nothing and is not
-   * recorded. */
+  /** One snapshot projection built for a session, with the ready recipients the
+   * frame could reach; the transport records it where it counts those
+   * recipients. A projection with none was still built and is counted. */
   recordSnapshotBuild(subscribers: number): void;
   /** One serialized frame offered on a topic, and the recipients it had. */
   recordTopicFrame(topic: string, bytes: number, subscribers: number): void;
@@ -502,8 +503,8 @@ export function resourceSteps(sample: ResourceSample): ResourceSteps {
 
 /**
  * The level a sample is recorded at and why. Warning is a broken bound — the
- * heap share, the event-loop p99, or a snapshot projected for nobody
- * (`UNAUDIENCED_SNAPSHOT_WARNING`); info is
+ * heap share, the event-loop p99, or a snapshot built while no ready recipient
+ * could receive it (`UNAUDIENCED_SNAPSHOT_WARNING`); info is
  * a named step that moved since `previous` (the window before this one), heap
  * used moved `HEAP_USED_INFO_STEP_BYTES` or RSS moved `RSS_INFO_STEP_SHARE` from
  * the last window written at info or above (`anchoredHeapUsedBytes`,
@@ -527,7 +528,7 @@ export function resourceSampleLevel(
     return { level: "warning", reason: `eventLoopDelayP99Ms=${Math.round(sample.eventLoopDelayP99Ms)} at or above ${EVENT_LOOP_P99_WARNING_MS}` };
   }
   if (sample.unaudiencedSnapshotBuilds > UNAUDIENCED_SNAPSHOT_WARNING) {
-    return { level: "warning", reason: `unaudiencedSnapshotBuilds=${sample.unaudiencedSnapshotBuilds} with no subscriber` };
+    return { level: "warning", reason: `unaudiencedSnapshotBuilds=${sample.unaudiencedSnapshotBuilds} with no ready recipient` };
   }
   if (previous !== undefined) {
     const steps = resourceSteps(sample);

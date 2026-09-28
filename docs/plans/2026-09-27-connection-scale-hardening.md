@@ -2,7 +2,7 @@
 
 - **Started:** 2026-09-27
 - **Status:** Active (Phase 1 runs on `hardening/integration`; that branch's copy of this plan is authoritative until R-1)
-- **Last updated:** 2026-09-28, G-3 (no audience, no projection) done; the empty snapshot builds are gone, `resources.unaudienced-work` is back, and the CPU comparison is left to the orchestrator
+- **Last updated:** 2026-09-28, G-3 review round 1 addressed: the unaudienced count is recorded by the transport where the recipients are (so it can fire), the registry is no longer a second audience owner, and the row is Claimed again because the CPU half of "Done when" is still owed to the orchestrator
 
 - **Last updated:** 2026-09-28, O-6a blocked on a quiet-host repeat (second review response landed)
 
@@ -551,7 +551,8 @@ rows are in priority order.
 | G-1b | Claimed | Filesystem watcher and background reconciliation for external writers | G-1a | orchestrator-dispatched deepseek-worker, 2026-09-28 |
 | G-1c | Ready | Move every catalog reader to the index; delete request-path walks and the full-parse fallback | G-1b | |
 | G-1d | Ready | Replace the catalog wording in `connection-resilience.md` with the index contract (D-3) | G-1c | |
-| G-3 | Done | No audience, no projection: build and serialize snapshots only for subscribers | O-5, O-6a | orchestrator-dispatched deepseek-worker, 2026-09-28 (branch `hardening/g-3`; CPU comparison and O-5's cross-check owed to the orchestrator) |
+| G-3 | Claimed | No audience, no projection: build and serialize snapshots only for subscribers | O-5, O-6a | orchestrator-dispatched deepseek-worker, 2026-09-28 (branch `hardening/g-3`; review round 1 addressed; CPU comparison and O-5's cross-check owed to the orchestrator) |
+| G-3a | Ready | Streaming progress for a session with no subscriber is still projected (`projectMessage` plus `safeJson` of the full message, up to once per 150 ms each); see G-3 handoff and review nit 8 | G-3 | |
 | C-2 | Ready | "Connected" follows the transport (D-2); chat restoration shows its own loading state | C-1 | |
 | C-5 | Claimed | Back off an unreachable non-selected Gateway profile; record pool attempts and episodes | O-4 | orchestrator-dispatched deepseek-worker, 2026-09-28 |
 | G-10 | Done | Durable-write audit: no process-wide serialization of fsyncs, no fsync on reads | O-5 | orchestrator-dispatched deepseek-worker, 2026-09-28 |
@@ -4391,7 +4392,7 @@ events; widen them to name the pool owner in the same change.
   on ambient opens that excludes routed re-opens and assumes the pass keeps the
   750 ms cadence (finding 5, nit); the retained artifact's figure matches.
 
-### G-3 · Done · 2026-09-28 · orchestrator-dispatched deepseek-worker (branch `hardening/g-3`)
+### G-3 · Claimed · 2026-09-28 · orchestrator-dispatched deepseek-worker (branch `hardening/g-3`)
 
 - Result: a session snapshot is now built, serialized and broadcast only when
   its slot has a subscriber. With none, a state change runs the same summary
@@ -4399,11 +4400,15 @@ events; widen them to name the pool owner in the same change.
   frame. `broadcastSession` and the global `broadcast` count ready recipients
   before preparing a frame and return before `prepareBroadcastFrame` when there
   are none, so a frame nobody can receive is not encoded, measured or queued,
-  and no `session.snapshot` topic entry is recorded for it. The O-5 record's
-  `resources.unaudienced-work` warning is back as
-  `UNAUDIENCED_SNAPSHOT_WARNING` (`unaudiencedSnapshotBuilds > 0`): with the
-  guard in place that count is no longer an expected condition, so a window that
-  records one has lost an audience check and is written at warning.
+  and no `session.snapshot` topic entry is recorded for it. The O-5 warning
+  `UNAUDIENCED_SNAPSHOT_WARNING` (`unaudiencedSnapshotBuilds > 0`) records a
+  snapshot built for a subscriber no ready socket could receive: the transport
+  counts every snapshot frame's recipients where it decides delivery, so the
+  slot's guard keeps that count out of a normal minute and a window that records
+  one has lost an audience check. The shipping name for it is
+  `unaudiencedSnapshotBuilds` in code, docs and the level reason; O-5's plan
+  wording `resources.unaudienced-work` stays only in O-5's own handoff, which
+  already says that threshold belongs to this row.
 - Do item 1 finding (verified in code, not inferred): **no client consumes
   `session.snapshot` for a session it is not subscribed to**, as the plan
   expected. The transport already scoped session frames to
@@ -4413,8 +4418,8 @@ events; widen them to name the pool owner in the same change.
   dashboard reads `session.summary` and `session.listChanged` only, the Mac app
   has no `session.snapshot` consumer, and the CLI client reads it for the session
   it opened (`packages/gateway/src/client/terminal-chat.ts`, its `session.snapshot`
-  branch). The registry
-  subscriber set is therefore the whole audience fact, and the transport
+  branch). The subscriber record is therefore the whole audience fact, the
+  transport is its only writer, and the transport
   subscribes a client before it installs that client's synchronization barrier
   (`server.ts` `beginSynchronization`), which is why a pending barrier is always
   also a subscriber here.
@@ -4427,11 +4432,15 @@ events; widen them to name the pool owner in the same change.
   barrier, and `sync-protocol.integration.test.ts` covers the quarantine,
   overflow and recovery paths; (3) a summary field that only a snapshot build
   produced stops being published — `summary()` is computed independently, and
-  the resource-inventory test publishes a summary with no snapshot; (4) a
+  the resource-inventory test renames a session with no subscriber and asserts
+  its summary still reaches `sessionSummaryChanged`; (4) a
   no-audience broadcast is still serialized or counted as a frame — the early
   return is before `prepareBroadcastFrame` and before `recordTopicFrame`; (5) an
-  unaudienced build in a window stays a quiet debug minute (level test); (6) the
-  no-audience warning fires for a build that had a recipient (level test).
+  unaudienced build in a window stays a quiet debug minute — the transport-path
+  level test; (6) the no-audience warning fires for a build that had a recipient
+  — the transport-path level test; (7) the transport's recipient count and the
+  subscriber record disagree for a closing socket, so a projection reaches nobody
+  — the build is recorded as unaudienced and warns (the reason the count exists).
 - Evidence:
   - Named checks: `npx vitest run src/transport/sync-protocol.integration.test.ts`
     passes 3/3 (6.1 s) and
@@ -4442,15 +4451,22 @@ events; widen them to name the pool owner in the same change.
     `src/transport/server-heartbeat.integration.test.ts` pass 32/32 together, so
     subscribed clients receive the same frames and the same oversized-frame
     recovery as before.
-  - `npx vitest run src/transport/stall-diagnostics.test.ts` passes 21/21; the
-    wiring test now proves one frame for the subscribed session and none for the
-    unsubscribed one, and the two level tests prove the warning fires on an
-    unaudienced build and stays at debug for an audienced one.
+  - `npx vitest run src/transport/stall-diagnostics.test.ts` passes 22/22; the
+    wiring test proves one frame for the subscribed session, and the two level
+    tests drive the production path (`broadcastSession`) to prove a build no ready
+    recipient can receive warns and a build with a recipient stays at debug.
   - `npx vitest run src/sessions/runtime-registry.integration.test.ts` passes
-    248/248 in 61 s. Ten snapshot-delivery tests subscribe a test audience, and
-    the resource-inventory test proves both directions of the guard: a subscriber
-    gives `recordSnapshotBuild(1)` plus a `session.snapshot` broadcast, and after
-    `unsubscribe` the publication records nothing and broadcasts no snapshot.
+    249/249 in 72 s. Eleven snapshot-delivery tests in this file subscribe a test
+    audience (thirteen with the compaction fixtures);
+    the resource-inventory test proves both directions of the guard: with a
+    subscriber the publication calls `slot.snapshot` once and broadcasts a
+    `session.snapshot`; with none, a rename publishes the summary (asserted by
+    name) and calls `slot.snapshot` no further. The new
+    "keeps a transported subscription across a closed slot" case covers the
+    review's re-acquire scenario: after an extension-requested shutdown the
+    subscription survives and the re-acquired slot broadcasts snapshots again.
+    The reviewer's flaky test ("records interruption intent before fast SDK
+    settlement") passed in this full-file run.
   - `npx vitest run src/sessions/runtime-compaction.integration.test.ts` passes
     22/22; both of its registry fixtures subscribe an audience, so the compaction
     snapshots are delivered as before.
@@ -4466,7 +4482,11 @@ events; widen them to name the pool owner in the same change.
     `snapshotBuilds=46 unaudiencedSnapshotBuilds=0` with
     `topics=session.snapshot:46/26714307B/1` and `liveRuntimes=8`, whose eight
     running runtimes are all `...KB/0` — every build had exactly the one client
-    that wanted it and the eight unsubscribed running sessions built none. The
+    that wanted it and the eight unsubscribed running sessions built none. That
+    window was written by the first commit of this branch, when the slot recorded
+    the count itself; under the review response the same numbers come from the
+    transport's recipient count at delivery, which is the count that can report a
+    build reaching nobody. The
     window is not the audience warning: its level is the shared host's
     `eventLoopDelayP99Ms=2847` band. Debug windows stay in the O-5 memory-only
     buffer, so this mixed-window record is the on-disk counter evidence; the
@@ -4479,38 +4499,67 @@ events; widen them to name the pool owner in the same change.
   - `python3 scripts/check-documentation-policy.py` and
     `scripts/personal-info-guard.sh` pass.
 - Changes: the G-3 commits on `hardening/g-3`.
-- Tasks added: none.
+- Tasks added: G-3a (the progress projection for a session with no subscriber,
+  review nit 8).
 - Kept on purpose: T-GW-DUPSNAP's pending-`snapshotTimer` cancellation in
   `publishSnapshot` (an identical rebroadcast stays removed);
   `publishStateChange()`, `flushPendingProgress()` and the `eventSequence`
   increment on every publication, because the summary, the progress frames and
   the state-change waiters are not snapshot work and dropping them would change
-  ordering or stall held-prompt flushing; `recordSnapshotBuild(audience)` in the
-  slot, which is the measurement's owner and is now called only for a build it
-  performed, so `snapshotBuilds` counts delivered projections and a zero-audience
-  frame is never recorded as a topic frame either. The sampler's per-topic
-  `session.snapshot:frames/bytes/subscribers` entry remains the reader's way to
-  see who received what.
+  ordering or stall held-prompt flushing. The snapshot build is counted by the
+  transport (`broadcastSession`) rather than by the slot: the recipients exist
+  only there, a build the slot skipped is not a build at all, and one place for
+  the count is what makes `UNAUDIENCED_SNAPSHOT_WARNING` reachable. The sampler's
+  per-topic `session.snapshot:frames/bytes/subscribers` entry remains the reader's
+  way to see who received what, and now counts only frames that had a recipient.
 - Deviations: (1) the failure modes above were written down with the tests rather
   than before the first edit; each has a test. (2) The global `broadcast` gained
   the same recipient check as `broadcastSession`: `session.listChanged` and
   `models.recentChanged` were serialized for nobody in the same way, and one rule
-  for both seams is smaller than two. (3) `resources.unaudienced-work` is a
-  warning reason on the `gateway.resources` record, as O-5's handoff allowed,
-  rather than a second record line. (4) Twelve test fixtures in
+  for both seams is smaller than two. (3) The warning is a reason on the
+  `gateway.resources` record, as O-5's handoff allowed, rather than a second
+  record line. (4) Thirteen test fixtures in
   `runtime-registry.integration.test.ts` and
   `runtime-compaction.integration.test.ts` now subscribe an audience because a
   test that reads published snapshots has to be a subscriber; no production
-  behavior was relaxed for them.
+  behavior was relaxed for them. (5) Review round 1 kept the guard in the slot and
+  made the transport the count's owner instead of moving the build into the
+  transport behind a lazy payload: the lazy form would have made every fixture's
+  `broadcast` double receive a function rather than a payload, and the fixtures
+  record those payloads for assertions that read snapshot fields back, so the
+  audience decision would have moved out of them while leaving silent
+  `.toBeUndefined()`-style checks behind.
+- Review response (round 1, on `c867597a2`): finding 1 (the warning could not
+  fire) — the count now comes from the transport's own recipient count for every
+  snapshot frame, recorded before its no-recipient return, so the case the review
+  named is counted and warned, and the level is exercised through
+  `broadcastSession` rather than a synthetic `recordSnapshotBuild(0)`. Finding 2
+  (the navigation test passed vacuously) — it subscribes and asserts the
+  recording is non-empty before the last assertion. Finding 3 (two audience
+  owners) — the registry's close hook no longer deletes the subscriber set,
+  because the transport owns subscription lifetime; the new closed-slot test
+  reproduces the review's re-acquire scenario and failed before the fix. Finding 4
+  (`buildSnapshot` side effects) — `publishSnapshot` calls
+  `ensureAgentProjection()` before the audience check, so the projection settles
+  exactly as often as before the guard. Finding 5 (row status) — the row and this
+  heading are Claimed again, following O-3's precedent, because the CPU half of
+  "Done when" is unmet. Finding 6 (the no-subscriber check proved little) — the
+  test now renames the session with no subscriber and asserts the summary fires
+  with the new name while `slot.snapshot` is not called again. Nits 7 and 8 — one
+  name for the count in code, docs and reason string; the progress projection that
+  is still built for an unsubscribed session is `G-3a` rather than part of this
+  row.
 - For the next agent: G-4 (outbound queue coalescing) depends on this row and can
   assume a snapshot for a session with no subscriber is never built; the
   `unaudiencedSnapshotBuilds` warning is a regression tripwire, so a nonzero
   window means an audience check was lost rather than that G-3 needs tuning.
-  Residual: the registry subscriber set and the transport's `ready &&
-  subscriptionTokens.has(sessionId)` set can differ for a closing socket, and in
-  that window the slot builds a snapshot the transport then drops before
-  recording anything. Counted cost of that window is one wasted build with no
-  record of it; closing it would need a recipient count the slot cannot see
-  before deciding (the transport's own count) and is not claimed here. The
-  orchestrator owes G-3's CPU comparison and O-5's 5% cross-check on a
+  G-3a owns the same rule for streaming progress frames, which are still projected
+  for a session with no subscriber. Residual: the subscriber record and the
+  transport's `ready && subscriptionTokens.has(sessionId)` set can still differ
+  for a closing socket, and in that window the slot builds a snapshot the
+  transport can only hand to nobody; that build is now counted as unaudienced and
+  reported (one wasted build, at warning) instead of passing as a normal
+  publication. Removing the window entirely would need the recipient count before
+  the slot decides, which is the lazy-payload shape declined in Deviations (5).
+  The orchestrator owes G-3's CPU comparison and O-5's 5% cross-check on a
   quiet-host O-6a run.

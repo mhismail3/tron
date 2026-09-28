@@ -928,6 +928,12 @@ export class GatewayServer {
     for (const client of this.clients.values()) {
       if (client.ready && client.subscriptionTokens.has(sessionId)) recipients += 1;
     }
+    // The snapshot build is counted here, where the recipients that can receive
+    // it are known, and before the no-recipient return: a projection built for a
+    // subscriber this transport has no ready socket for is recorded as
+    // unaudienced, which is the window's lost-audience warning rather than a
+    // normal minute. Serializing a frame the client cannot take is still skipped.
+    if (topic === "session.snapshot") this.resourceSampler.recordSnapshotBuild(recipients);
     if (recipients === 0) return;
     const event: BufferedSessionEvent = { type: "event", topic, sessionId, payload };
     // Prepare once for this broadcast operation. Each connection still owns

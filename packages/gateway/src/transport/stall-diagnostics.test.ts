@@ -385,9 +385,9 @@ describe("ResourceSampler", () => {
   });
 
   it("keeps the unaudienced snapshot count in the record, not a second line", async () => {
-    // Failure mode: a window that recorded a snapshot built for nobody is still
-    // a quiet debug minute, so the lost audience check is invisible in the only
-    // record that carries the count.
+    // Failure mode: the count of snapshot builds no ready socket could receive
+    // is the window's lost-audience evidence, so it has to sit in the one record
+    // that carries the window rather than on a line of its own.
     const sampler = resourceSampler();
     sampler.recordSnapshotBuild(0);
     sampler.recordSnapshotBuild(2);
@@ -395,16 +395,48 @@ describe("ResourceSampler", () => {
     const message = formatResourceSample(sample);
     expect(message).toContain("snapshotBuilds=2");
     expect(message).toContain("unaudiencedSnapshotBuilds=1");
-    expect(sampler.level(sample)).toEqual({ level: "warning", reason: "unaudiencedSnapshotBuilds=1 with no subscriber" });
+  });
+
+  // The counter production actually drives: `broadcastSession` records every
+  // snapshot it is handed against the recipients that can receive it.
+  it("warns when a snapshot reaches no ready recipient", async () => {
+    // Failure mode: the slot built a snapshot for a subscriber whose socket is
+    // closing, the transport delivered it to nobody, and the window reported a
+    // quiet debug minute instead of the lost audience check.
+    const sampler = resourceSampler();
+    const gateway = resourceServer(vi.fn(), sampler);
+    const client = subscribedClient("session-1");
+    client.ready = false;
+    (gateway as unknown as { clients: Map<string, unknown> }).clients.set("client-1", client);
+    gateway.broadcastSession("session-1", "session.snapshot", { revision: 1 } as never);
+    const sample = await sampler.sample();
+    expect(sample.snapshotBuilds).toBe(1);
+    expect(sample.unaudiencedSnapshotBuilds).toBe(1);
+    expect(sample.topics.has("session.snapshot")).toBe(false);
+    expect(sampler.level(sample)).toEqual({ level: "warning", reason: "unaudiencedSnapshotBuilds=1 with no ready recipient" });
+    // The fixture's close path models a ready connection; this window's delivery
+    // facts are already recorded.
+    client.ready = true;
+    client.closeInitiated = true;
+    await gateway.close();
+    sampler.dispose();
   });
 
   it("keeps an audienced snapshot build at debug", async () => {
     // Failure mode: the no-audience warning fires for a build that had a
     // recipient, so a normal window writes a warning to disk every minute.
     const sampler = resourceSampler();
-    sampler.recordSnapshotBuild(1);
+    const gateway = resourceServer(vi.fn(), sampler);
+    const client = subscribedClient("session-1");
+    (gateway as unknown as { clients: Map<string, unknown> }).clients.set("client-1", client);
+    gateway.broadcastSession("session-1", "session.snapshot", { revision: 1 } as never);
     const sample = await sampler.sample();
+    expect(sample.snapshotBuilds).toBe(1);
+    expect(sample.unaudiencedSnapshotBuilds).toBe(0);
     expect(sampler.level(sample)).toEqual({ level: "debug" });
+    client.closeInitiated = true;
+    await gateway.close();
+    sampler.dispose();
   });
 });
 
@@ -505,10 +537,10 @@ it("records the resource window through the transport's timer", async () => {
   const gateway = resourceServer(log, sampler);
   const client = subscribedClient("session-1");
   (gateway as unknown as { clients: Map<string, unknown> }).clients.set("client-1", client);
-  // One snapshot build for a subscriber, and none for a session with nobody
-  // subscribed to it: that frame is never prepared.
+  // One snapshot build for a subscriber. A frame for a session with nobody
+  // subscribed to it is never prepared and is covered by "warns when a snapshot
+  // reaches no ready recipient".
   gateway.broadcastSession("session-1", "session.snapshot", { revision: 1 } as never);
-  gateway.broadcastSession("session-2", "session.snapshot", { revision: 1 } as never);
   await vi.advanceTimersByTimeAsync(RESOURCE_SAMPLE_INTERVAL_MS);
   const first = recordsWithEvent(log, "gateway.resources")[0]!;
   expect(first[0]).toBe("debug");

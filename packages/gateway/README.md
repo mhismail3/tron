@@ -985,10 +985,16 @@ to `session.snapshot`, progress, tool, queue, and extension events only for chat
 they actually open. No client consumes a session's snapshot for a session it has
 not opened, so the Gateway builds and serializes one only for a session with a
 subscriber: the transport subscribes a client before it installs that client's
-synchronization barrier, and a state change for an unsubscribed session
-publishes its `session.summary` with no transcript projection at all. A client
-that subscribes later receives its snapshot through the ordinary open and
-synchronization path. Streaming progress republishes the cumulative live message, so
+synchronization barrier, so a pending barrier is always a subscriber, and a
+state change for an unsubscribed session publishes its `session.summary` with no
+transcript projection at all. The transport is the only writer of that
+subscriber record: a slot that closes without the client unsubscribing does not
+end the subscription, so a re-acquired session still reaches the client that was
+watching it. The transport also counts the recipients of every snapshot frame it
+is handed, and a projection no ready socket could receive is recorded as
+unaudienced and warns (`UNAUDIENCED_SNAPSHOT_WARNING`) rather than passing as an
+ordinary build. A client that subscribes later receives its snapshot through the
+ordinary open and synchronization path. Streaming progress republishes the cumulative live message, so
 updates are throttled to at most one frame, carrying the newest message, per
 150 ms window while they keep arriving (the first update after a quiet window
 stays immediate, and a snapshot publishes any pending frame ahead of itself),

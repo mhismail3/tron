@@ -6179,16 +6179,20 @@ export class RuntimeSlot {
     this.eventSequence += 1;
     // No audience, no projection: a snapshot is a canonical branch walk plus a
     // transcript page, so building one for a session nobody receives it for is
-    // work for nobody. The registry subscriber set is the slot's only audience
-    // fact, and the transport subscribes a client before it installs that
-    // client's synchronization barrier, so a pending barrier is always a
-    // subscriber here. A client that subscribes later receives a fresh snapshot
-    // through the ordinary open and synchronization path, which builds on
-    // demand. An RPC-driven build is audienced by its requester and is not
-    // counted here.
-    const audience = this.dependencies.sessionAudience(this.id);
-    if (audience > 0) {
-      this.dependencies.resources?.recordSnapshotBuild(audience);
+    // work for nobody. The subscriber record is the slot's whole audience fact,
+    // and the transport is its only writer: it subscribes a client before
+    // installing that client's synchronization barrier, so a pending barrier is
+    // always a subscriber here, and a client that subscribes later receives a
+    // fresh snapshot through the ordinary open and synchronization path. The
+    // transport counts the recipients of every snapshot frame it is handed, so
+    // a projection a ready socket cannot receive is still recorded and warns
+    // (`UNAUDIENCED_SNAPSHOT_WARNING`) rather than passing as an ordinary build.
+    //
+    // `buildSnapshot` also settles this slot's agent projection. That settlement
+    // belongs to every publication, not only to the ones with an audience, so it
+    // runs here rather than inside the build.
+    this.ensureAgentProjection();
+    if (this.dependencies.sessionAudience(this.id) > 0) {
       this.hooks.broadcast(this.id, "session.snapshot", this.snapshot(this.eventSequence) as unknown as JsonValue);
     }
     this.publishSummary();
