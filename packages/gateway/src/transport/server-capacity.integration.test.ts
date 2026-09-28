@@ -923,7 +923,8 @@ describe("WebSocket connection and outbound capacity", () => {
     expect(active.socket.readyState).toBe(WebSocket.OPEN);
     expect(replacement.socket.readyState).toBe(WebSocket.OPEN);
     expect(logger.log.mock.calls.filter((call) => call[2]?.event === "connection.superseded")).toHaveLength(1);
-    expect(logger.log.mock.calls.some((call) => call[2]?.event === "connection.capacity")).toBe(false);
+    // Superseding an identity's stale socket is not a capacity refusal.
+    expect(logger.log.mock.calls.some((call) => call[2]?.reason === "connection_capacity")).toBe(false);
     replacement.socket.send(JSON.stringify({ type: "request", id: "usable", method: "test.usable", params: {} }));
     await bounded(waitUntil(() => replacement.frames.some((frame) => frame.id === "usable" && frame.ok)), "replacement request");
   });

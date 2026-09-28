@@ -17,6 +17,13 @@ import { GatewayServer, HTTP_MAXIMUM_CONNECTIONS_PER_ADDRESS, HTTP_MAXIMUM_REQUE
 // 2. A refused upgrade is only visible in its own bound-specific record, so
 //    the phase it was refused at is lost.
 // 3. The upgrade record cannot be joined to the peer's records.
+// 4. A peer that leaves while authentication is pending is recorded as a
+//    request-phase refusal, which sends triage to Gateway readiness or
+//    admission instead of the abandoned credential wait.
+// 5. A handshake refused after authentication (a bad key or version, or
+//    extension negotiation) writes no upgrade record at all.
+// 6. A first frame that is not JSON is recorded as an abandoned handshake
+//    instead of a refusal at hello.
 
 const cleanups: Array<() => Promise<void>> = [];
 afterEach(async () => {
@@ -125,22 +132,87 @@ describe("HTTP pending-work ownership", () => {
     await bounded(closed, "abandoned upgrade close");
     const record = await loggedRecord(f, "http.upgrade");
     expect(record.level).toBe("warning");
-    expect(record.fields).toMatchObject({ outcome: "abandoned", phaseReached: "handshake" });
+    expect(record.fields).toMatchObject({ outcome: "abandoned", phaseReached: "handshake", reason: "peer_closed" });
     // No hello arrived, so there is no peer key; helloMs is the time the
-    // attempt spent waiting in that phase before the socket went away.
+    // attempt spent waiting in that phase before the socket went away. The
+    // connection ID joins this upgrade to its own `connection.closed` record.
     expect(record.fields).not.toHaveProperty("peerClientId");
     expect(typeof record.fields.helloMs).toBe("number");
     expect(typeof record.fields.authMs).toBe("number");
+    expect(record.fields).toHaveProperty("connectionId");
   });
 
-  it("records a refusal at the authentication phase and keeps its bound-specific record", async () => {
+  it("records a refusal at the authentication phase as the upgrade's only record", async () => {
     const f = await fixture();
     const peer = new WebSocket(`ws://127.0.0.1:${f.port}/v1/socket`, { headers: { authorization: "Bearer fixture" } });
     peer.on("error", () => {});
     const record = await loggedRecord(f, "http.upgrade");
     expect(record.level).toBe("warning");
-    expect(record.fields).toMatchObject({ outcome: "rejected", phaseReached: "auth" });
-    expect(f.logger.log.mock.calls.some((call) => call[2]?.event === "connection.rejected")).toBe(true);
+    expect(record.fields).toMatchObject({ outcome: "rejected", phaseReached: "auth", reason: "unauthenticated" });
+    // One record per upgrade: the refusal the bound-specific records used to
+    // restate is the `reason` field now.
+    expect(f.logger.log.mock.calls.some((call) => call[2]?.event === "connection.rejected")).toBe(false);
+  });
+
+  it("records a peer that leaves while authentication is pending as abandoned at the auth phase", async () => {
+    const f = await fixture();
+    const ownerEntered = gate(), ownerRelease = gate(), authEntered = gate();
+    const mutex = (f.devices as unknown as { mutex: AsyncMutex }).mutex;
+    const owner = mutex.run(async () => { ownerEntered.resolve(); await ownerRelease.promise; });
+    cleanups.push(async () => { ownerRelease.resolve(); await owner; });
+    await bounded(ownerEntered.promise, "credential owner entry");
+    const authenticate = f.devices.authenticateAndAdmit.bind(f.devices);
+    vi.spyOn(f.devices, "authenticateAndAdmit").mockImplementation((...args) => {
+      const result = authenticate(...args);
+      authEntered.resolve();
+      return result;
+    });
+    const socket = createConnection({ host: "127.0.0.1", port: f.port });
+    f.clientSockets.push(socket);
+    socket.on("error", () => {});
+    await bounded(once(socket, "connect"), "abandoned upgrade connect");
+    socket.write("GET /v1/socket HTTP/1.1\r\nHost: localhost\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Version: 13\r\nSec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\nAuthorization: Bearer fixture\r\n\r\n");
+    await bounded(authEntered.promise, "queued upgrade authentication");
+    const physicallyClosed = once(f.serverSockets[0]!, "close");
+    socket.destroy();
+    await bounded(physicallyClosed, "abandoned upgrade socket close");
+    const record = await loggedRecord(f, "http.upgrade");
+    // The peer reached the Mac and stopped in the credential wait, not at the
+    // request: `abandoned` sends triage to the peer, `request` would not.
+    expect(record.level).toBe("warning");
+    expect(record.fields).toMatchObject({ outcome: "abandoned", phaseReached: "auth", reason: "peer_closed" });
+    expect(typeof record.fields.authMs).toBe("number");
+  });
+
+  it("records a WebSocket handshake the Gateway refuses after authentication", async () => {
+    const f = await fixture();
+    vi.spyOn(f.devices, "authenticateAndAdmit").mockImplementation(async (_token, admit) => admit({ kind: "local" }));
+    const socket = createConnection({ host: "127.0.0.1", port: f.port });
+    f.clientSockets.push(socket);
+    socket.on("error", () => {});
+    await bounded(once(socket, "connect"), "refused handshake connect");
+    const response = capture(socket);
+    // Version 13 is the only one ws completes; anything else is `abortHandshake`
+    // with no callback, so only the trace can record the refusal.
+    socket.write("GET /v1/socket HTTP/1.1\r\nHost: localhost\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Version: 12\r\nSec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\nAuthorization: Bearer fixture\r\n\r\n");
+    expect(await response).toContain("400");
+    const record = await loggedRecord(f, "http.upgrade");
+    expect(record.level).toBe("warning");
+    expect(record.fields).toMatchObject({ outcome: "rejected", phaseReached: "handshake", reason: "handshake_refused" });
+    expect(record.fields).not.toHaveProperty("connectionId");
+  });
+
+  it("records a first frame that is not JSON as a refusal at hello", async () => {
+    const f = await fixture();
+    vi.spyOn(f.devices, "authenticateAndAdmit").mockImplementation(async (_token, admit) => admit({ kind: "local" }));
+    const peer = new WebSocket(`ws://127.0.0.1:${f.port}/v1/socket`, { headers: { authorization: "Bearer fixture" } });
+    peer.on("error", () => {});
+    await bounded(once(peer, "open"), "upgrade open");
+    peer.send("not a frame");
+    const record = await loggedRecord(f, "http.upgrade");
+    expect(record.level).toBe("warning");
+    expect(record.fields).toMatchObject({ outcome: "rejected", phaseReached: "hello", reason: "invalid_frame" });
+    expect(record.fields).toHaveProperty("connectionId");
   });
 
   it("records a hello that arrived but was refused as rejected at the hello phase", async () => {
@@ -152,7 +224,7 @@ describe("HTTP pending-work ownership", () => {
     peer.send(JSON.stringify({ type: "hello", protocolVersion: 99 }));
     const record = await loggedRecord(f, "http.upgrade");
     expect(record.level).toBe("warning");
-    expect(record.fields).toMatchObject({ outcome: "rejected", phaseReached: "hello" });
+    expect(record.fields).toMatchObject({ outcome: "rejected", phaseReached: "hello", reason: "protocol_mismatch" });
     // The frame was refused before it could name the peer.
     expect(record.fields).not.toHaveProperty("peerClientId");
     expect(typeof record.fields.helloMs).toBe("number");

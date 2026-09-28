@@ -19,8 +19,9 @@ import type { PeerPathLookup, PeerPathReader } from "./tailscale-peer.js";
 // 4. A client that goes quiet is never pinged again and is retired while alive.
 // 5. The retirement record cannot be joined to the phone's own records because
 //    it lacks the connection ID or the peer's hello correlation key.
-// 6. Inbound silence is reported every tick instead of once per episode, or is
-//    reported for a phone that pings every ten seconds.
+// 6. Inbound silence is reported every tick instead of once per episode, is
+//    reported for a phone that pings every ten seconds, or is reported at all
+//    for a healthy client that only answers the Gateway's own pings.
 // 7. A silence episode that ends before the Tailscale read settles loses its
 //    resume record or its duration, or reports the resume before the silence.
 // 8. A blackholed path (no bytes in either direction, socket still open) is not
@@ -268,10 +269,17 @@ describe("Gateway heartbeat pings", () => {
     expect(loggedRecords("connection.inbound-silent")).toEqual([]);
   });
 
-  it("pings a pong-only client on every tick and never retires it", async () => {
-    const observations = await observeHeartbeats({ autoPong: true }, 8);
+  it("pings a pong-only client on every tick, never retires it and never reports it silent", async () => {
+    // A client that only answers the Gateway's pings is idle between them, not
+    // cut off: its silence says nothing until a ping goes unanswered, and every
+    // tick's ping is answered well inside the next interval.
+    const lookup = vi.fn(async (): Promise<PeerPathLookup> => ({ peerPath: "unknown", peerRelay: "" }));
+    const observations = await observeHeartbeats({ autoPong: true }, 8, { peerPathReader: { lookup } });
     expect(pingedTicks(observations)).toEqual([1, 2, 3, 4, 5, 6, 7, 8]);
     expect(closedAtTick(observations)).toBeUndefined();
+    expect(loggedRecords("connection.inbound-silent")).toEqual([]);
+    expect(loggedRecords("connection.inbound-resumed")).toEqual([]);
+    expect(lookup).not.toHaveBeenCalled();
   });
 
   it("retires a silent dead client on the fourth tick, as before", async () => {

@@ -24,6 +24,16 @@ const TAILSCALE_STATUS = JSON.stringify({
       Relay: "sea",
       LastSeen: "2026-09-24T10:50:28.1Z",
     },
+    // Reachable-looking address, but Tailscale says the peer is not on the net:
+    // the shared classifier must read this as offline, not direct.
+    node2: {
+      HostName: "offline-phone",
+      DNSName: "offline-phone.tailnet.example.ts.net.",
+      Online: false,
+      CurAddr: "192.0.2.9:41641",
+      Relay: "sfo",
+      LastSeen: "2026-09-24T09:00:00.0Z",
+    },
   },
 });
 
@@ -67,7 +77,8 @@ async function harness(options: { logs?: boolean } = {}): Promise<Harness> {
   await writeFile(join(home, "gateway", "payloads", "stable", "update-progress.json"), '{"schema":1,"state":"ready","commandId":"CMD-TEST"}\n');
   await writeFile(join(home, "gateway", "devices.json"), `${JSON.stringify({
     version: 1,
-    devices: [{ id: "device-id-1", name: "iPhone", observedName: "Fixture's iPhone", tokenHash: "planted-device-token-hash", createdAt: "2026-09-19T00:49:32.548Z" }],
+    devices: [{ id: "device-id-1", name: "iPhone", observedName: "Fixture's iPhone", tokenHash: "planted-device-token-hash", createdAt: "2026-09-19T00:49:32.548Z" },
+      { id: "device-id-2", name: "offline-phone", observedName: "Fixture's offline phone", tokenHash: "planted-offline-token-hash", createdAt: "2026-09-19T00:49:32.548Z" }],
   })}\n`);
   const commands: string[] = [];
   const healthUrls: string[] = [];
@@ -165,6 +176,9 @@ describe("scripts/tron diagnose", () => {
     const fixture = await harness();
     const bundle = await run(fixture);
     expect(bundle).toContain("path=relay endpoint=sea");
+    // One classifier with the transport's silence records: an offline peer is
+    // offline even though its last direct address is still in the document.
+    expect(bundle).toContain("path=offline");
     expect(bundle).toContain("magicsock: disco");
     expect(bundle).not.toContain(EXTENSION_NOISE_LINE);
     expect(bundle).toContain("self: 100.64.0.10");

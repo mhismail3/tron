@@ -2,7 +2,8 @@
 
 - **Started:** 2026-09-27
 - **Status:** Active (Phase 1 runs on `hardening/integration`; that branch's copy of this plan is authoritative until R-1)
-- **Last updated:** 2026-09-28, O-2 Done (upgrade phases, inbound silence with the peer's Tailscale path)
+- **Last updated:** 2026-09-28, O-2 review response (silence requires expected
+  liveness, upgrade refusals collapse into one record)
 - **Goal:** A clean, efficient and predictable Gateway and phone connection: the phone stays connected and loads any session promptly whenever the network path is up, however many sessions run and however large the history grows, and every disconnect or slow operation is attributable to one cause from the logs in one step.
 
 ## Goal and constraints
@@ -1775,7 +1776,13 @@ a latency percentile.
   (one shared capture); silence ends during the capture; remote address not in
   Tailscale status (loopback/LAN); a phone that pings every 10 s must never be
   reported silent; a failed read must not spawn a process per socket; a
-  blackholed path must be visible from the Gateway log alone.
+  blackholed path must be visible from the Gateway log alone. The review response
+  added: a client that only answers server pings is never reported silent and
+  never reaches the path reader; a peer that leaves during authentication is
+  abandoned at the auth phase; a refused WebSocket handshake is recorded; a first
+  frame that is not JSON is refused at hello; a CLI that never settles cannot
+  hold the reader; a `null` peer value cannot reject a lookup; `offline` outranks
+  a remembered direct address; a direct peer reports no relay.
 - Evidence:
   - `npm run build` is clean (`~/.tron/workspace/files/hardening/o-2/build.txt`).
   - `npx vitest run src/transport/tailscale-peer.test.ts src/transport/logger.test.ts
@@ -1803,15 +1810,83 @@ a latency percentile.
     order, with the socket never closed. A second case gates the path read until
     after the socket speaks again: `silentMs` is exactly 27,000 ms and the
     silence record still precedes the resume record.
-- Changes: `feat(gateway): record upgrade phases and inbound silence (O-2)`.
+- Changes: `feat(gateway): record upgrade phases and inbound silence (O-2)`, then
+  `fix(gateway): close the O-2 review findings` (see the review response below).
 - Tasks added: none.
-- Kept on purpose: the bound-specific records (`http.request-capacity`,
-  `connection.rejected`, `connection.capacity`, `http.authentication-timeout`)
-  stay, because they name which bound refused an upgrade and the phase record
-  does not; `http.upgrade` for the Mac app's constant local probes is debug, like
-  `connection.opened`, so it stays in the memory-only buffer; the unreported
-  trace is finished in `disconnect`, not in `closeFailedConnection`, so a socket
-  that never got past hello is `abandoned` whichever side ended it.
+- Kept on purpose: `http.upgrade` for the Mac app's constant local probes is
+  debug, like `connection.opened`, so it stays in the memory-only buffer; the
+  unreported trace is finished in `disconnect`, not in `closeFailedConnection`,
+  so a socket that never got past hello is `abandoned` whichever side ended it.
+  Readiness and shutdown refusals are `info` on `http.upgrade` (they are
+  expected and clients retry), so a startup retry storm adds no warnings.
+- Reviewer's round (changes-required, 2026-09-28) and this response:
+  - **Blocker, fixed — a pong-only client was reported silent on every tick.**
+    A client that only answers the Gateway's pings is idle between them and its
+    last pong is always ~25 s old at the next tick, so the old age-only rule
+    wrote a false `connection.inbound-silent` per tick and ran the Tailscale CLI
+    on a 25 s timer. `observeInboundSilence` now opens an episode only when
+    liveness was expected: a server ping is unanswered
+    (`unansweredHeartbeats > 0`), or the client pings on its own
+    (`lastClientPingAt`, set by the socket's `ping` handler) and has been quiet
+    for the threshold. The pong-only heartbeat case now asserts no silence and
+    no resume record and that the injected path reader is never called; a
+    temporary revert of the guard reproduced 8 false records in that case.
+  - **Major, fixed — a peer that left during authentication looked like a
+    request-phase refusal.** The aborted credential read now records its cause
+    (`retirePendingUpgrade("peer" | "timeout")`), and the `catch` writes
+    `abandoned/auth/peer_closed` for a peer that left or
+    `rejected/auth/authentication_timeout` for the deadline, with `authMs` set
+    from the elapsed wait. `server-http-lifecycle.integration.test.ts` gained the
+    case (real `DeviceStore`, credential mutex held, raw socket destroyed);
+    against the pre-review commit it reproduces `rejected/request`.
+  - **Major, fixed — one status read and one classifier, not a parallel copy.**
+    `tailscale-peer.ts` now exports `readTailscaleStatus(run, timeoutMs)` and
+    `classifyPeer(peer)`; `admin/diagnose.ts` imports both and lost its own
+    candidate loop, its own parse and its own path expression. The bundle and the
+    silence record therefore agree about the same peer: `diagnose` now reports
+    `path=offline` for an offline peer whose last direct address is still in the
+    document (asserted in `diagnose.test.ts`).
+  - **Major (process), resolved by the orchestrator.** The "Done when" needs
+    O-6b's blackhole run; the orchestrator explicitly accepted the fixture
+    hold-proxy blackhole against a fixture Gateway as the evidence, and owns the
+    confirmation in O-6b's qualification blackhole run (baseline/R-1). The row
+    stays Done on that decision.
+  - **Minor, fixed — the read's bound no longer depends on `execFile`
+    settling.** The whole read races one wall-clock `TAILSCALE_LOOKUP_TIMEOUT_MS`
+    (2 s) timer that also clears `inFlight`, so a child that ignores SIGTERM or a
+    grandchild holding the pipe cannot suppress every later silence record. A
+    `null` peer value is dropped at the parse boundary and the call site maps a
+    rejecting reader to `unknown`.
+  - **Minor, fixed — a handshake refused after authentication was invisible.**
+    After the synchronous `handleUpgrade`, a null `handshakeAt` writes
+    `rejected/handshake/handshake_refused` (`abortHandshake` answers 400 without
+    a callback).
+  - **Minor, fixed — a first frame that is not JSON is a hello refusal, not an
+    abandon.** `rejected/hello/invalid_frame`.
+  - **Minor, fixed — one record per upgrade.** The duplicate bound records
+    (`connection.rejected`, `connection.capacity`, `http.authentication-timeout`,
+    and the upgrade site's `http.request-capacity`) are deleted; `http.upgrade`
+    carries the structured `reason` (counts stay in the message) and readiness /
+    shutdown refusals stay `info`. `http.request-capacity` remains for HTTP
+    requests. Rows updated in `observability.md` and `connection-resilience.md`.
+  - **Minor, fixed — `helloMs` and the slow warning are documented correctly.**
+    `helloMs` runs from handshake completion to processing the hello frame
+    (including the peer's send delay), and the warning is the total from the TCP
+    accept, not `authMs` or `helloMs` alone.
+  - **Minor, fixed — `peerRelay` is empty unless a relay carries the path.** A
+    direct or offline peer returns `""`, matching its doc comment and the
+    observability row.
+  - **Nit, fixed — `http.upgrade` carries `connectionId`** once the connection
+    exists (so an abandoned upgrade joins its own `connection.closed`), the
+    `acceptToUpgradeMs` keep-alive caveat is documented, and the redundant
+    `httpSocketAcceptedAt` delete is gone (a WeakMap releases with the socket).
+- Review-response evidence: `npm run build` clean; `npx tsc --noEmit -p .` clean;
+  the 11-file focused set above passes **100/100** (new cases: pong-only client
+  never reported silent, `peerRelay` empty for direct/offline, a hung CLI read,
+  a null peer value, loopback/LAN without a CLI run, peer abandons during auth,
+  refused WebSocket handshake, non-JSON first frame, offline peer in the bundle);
+  the eight neighboring suites still pass 92/92;
+  `check-documentation-policy.py` and `personal-info-guard.sh` pass.
 - Deviations:
   - The record fields needed the writer's shape: `logger.ts` gained
     `phaseReached`, the four duration fields, `peerPath`, `peerRelay` and
@@ -1822,6 +1897,9 @@ a latency percentile.
   - `helloMs` on an abandoned upgrade is the time the attempt spent in the hello
     phase before the socket went away (0 only when the handshake never
     completed), not a completed round trip.
+  - `peerRelay` names the relay actually carrying the path, so it is empty for a
+    direct peer (the review's finding): the peer's home DERP region is not the
+    path in use, and `peerPath=direct` already says so.
   - The blackhole proxy holds bytes instead of dropping them: dropping part of a
     WebSocket frame would desynchronize the stream both ends share, while the
     path still carries nothing in either direction while holding.
@@ -1832,13 +1910,14 @@ a latency percentile.
     16.6 s on this branch, 14.8 s on an untouched worktree of the same commit's
     parent, 7.8 s and 2.8 s when the host was quieter. No group of changes here
     touches that path; treat it as a host-load flake, not a regression.
-- For the next agent: **O-6b's blackhole case is still owed a confirmation in
-  the qualification scenario** (O-6b is in progress in a sibling worktree and
-  its blackhole case is not merged); the evidence above is the equivalent
-  fault-proxy blackhole against a fixture Gateway. O-7 can join on the peer key
-  and use `peerPath`/`silentMs`; E-1's Tailscale flap guidance can cite the
-  silent/resume pair. `http.upgrade` carries no `connectionId`: the peer key is
-  the join for an opened upgrade, while `connection.opened` owns `connectionId`.
+- For the next agent: the fixture-proxy blackhole above is the evidence the
+  **orchestrator accepted** for O-2's "Done when"; the confirmation in O-6b's
+  qualification blackhole run is the orchestrator's, at the baseline/R-1 runs,
+  not a worker's. O-7 can join on the peer key and use `peerPath`/`silentMs`;
+  E-1's Tailscale flap guidance can cite the
+  silent/resume pair. `http.upgrade` carries the `connectionId` whenever a
+  connection exists, so an upgrade that died before hello still joins its own
+  `connection.closed`; the peer key remains the join for phone records.
 
 ### E-2 · Blocked · 2026-09-28 · orchestrator-dispatched worker
 

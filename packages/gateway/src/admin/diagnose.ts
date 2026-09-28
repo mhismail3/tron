@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { redact } from "../transport/logger.js";
-import { TAILSCALE_CLI_CANDIDATES } from "../transport/tailscale-peer.js";
+import { classifyPeer, readTailscaleStatus, type TailscalePeer } from "../transport/tailscale-peer.js";
 import { resolveTronHome } from "../tron-home.js";
 
 /**
@@ -85,15 +85,6 @@ interface GatewayProcess {
   readonly pid: string;
   readonly host: string;
   readonly port: number | undefined;
-}
-
-interface TailscalePeer {
-  readonly HostName?: unknown;
-  readonly DNSName?: unknown;
-  readonly Online?: unknown;
-  readonly CurAddr?: unknown;
-  readonly Relay?: unknown;
-  readonly LastSeen?: unknown;
 }
 
 interface PairedDevice {
@@ -359,33 +350,14 @@ async function pairedDevices(tronHome: string): Promise<PairedDevice[]> {
 
 async function tailscaleSection(tronHome: string, since: string, runCommand: BoundedCommand): Promise<{ section: Section; selfAddress: string | undefined }> {
   const lines: string[] = [];
-  const failures: string[] = [];
-  let cli: string | undefined;
-  let document: { Self?: unknown; Peer?: unknown } | undefined;
-  for (const candidate of TAILSCALE_CLI_CANDIDATES) {
-    const result = await runCommand(candidate, ["status", "--json"], TAILSCALE_TIMEOUT_MS);
-    if (result.code !== 0 || result.timedOut) {
-      failures.push(`${candidate}: ${result.timedOut ? "timed out" : result.error ?? `exit ${result.code ?? "none"}`}`);
-      continue;
-    }
-    try {
-      const parsed: unknown = JSON.parse(result.output);
-      if (parsed && typeof parsed === "object") {
-        cli = candidate;
-        document = parsed as { Self?: unknown; Peer?: unknown };
-        break;
-      }
-      failures.push(`${candidate}: unreadable status document`);
-    } catch {
-      failures.push(`${candidate}: unreadable status document`);
-    }
+  // One shared status read and one shared path classifier: the bundle and the
+  // transport's silence records must not describe the same peer differently.
+  const read = await readTailscaleStatus(runCommand, TAILSCALE_TIMEOUT_MS);
+  if (!read.ok) {
+    return { section: { name: "tailscale", lines: [`no usable Tailscale CLI (${read.failures.join("; ")})`] }, selfAddress: undefined };
   }
-  if (document === undefined || cli === undefined) {
-    return { section: { name: "tailscale", lines: [`no usable Tailscale CLI (${failures.join("; ")})`] }, selfAddress: undefined };
-  }
-  const self = document.Self && typeof document.Self === "object" ? (document.Self as { TailscaleIPs?: unknown }).TailscaleIPs : undefined;
-  const selfAddress = Array.isArray(self) ? self.find((address): address is string => typeof address === "string" && !address.includes(":")) : undefined;
-  const peers = document.Peer && typeof document.Peer === "object" ? Object.values(document.Peer as Record<string, TailscalePeer>) : [];
+  const { cli, self, peers } = read.status;
+  const selfAddress = self.find((address) => !address.includes(":"));
   lines.push(`cli: ${cli}`, `self: ${selfAddress ?? "no Tailscale IPv4 address"}`);
   lines.push("### paired devices");
   const devices = await pairedDevices(tronHome);
@@ -393,7 +365,7 @@ async function tailscaleSection(tronHome: string, since: string, runCommand: Bou
   for (const device of devices) {
     const peer = matchPeer(peers, device.names);
     const endpoint = peer === undefined ? undefined : peerField(peer, "CurAddr") ?? peerField(peer, "Relay");
-    const path = peer === undefined ? "unknown" : peerField(peer, "CurAddr") !== undefined ? "direct" : peerField(peer, "Relay") !== undefined ? "relay" : "unknown";
+    const path = classifyPeer(peer).peerPath;
     lines.push([
       `deviceIdHash=${createHash("sha256").update(device.id).digest("hex").slice(0, 12)}`,
       `peer=${peer === undefined ? "none" : peerField(peer, "DNSName")?.split(".")[0] ?? peerField(peer, "HostName") ?? "unnamed"}`,
