@@ -1804,14 +1804,16 @@ the day cannot measure a synthetic case).
 - Evidence: `~/.tron/workspace/files/hardening/e-2b/` — `README.md` holds the
   commands, exit statuses and numbers, with `hosted-test-attach-xctrace.log`,
   `hosted-test-process.json`, `attach-cpu.out/.err` (the failed traced run's
-  output and tree-RSS peaks: 532 MB, exit 74) and the `simattach.sh` /
-  `devattach.py` probes. Failed run retained at
+  output and tree-RSS peaks: 532 MB, exit 74) and the `simattach.py` /
+  `devattach.py` / `e2b-probe.py` probes. Failed run retained at
   `~/Library/Developer/Tron/profiles/ios/20260928T090007Z-control-cpu-trace-time-profiler-1d4470/`.
   The kept `--all-processes` mode is unchanged: `python3
   scripts/test-tron-profile-attribution.py` 10/10 and `python3
   scripts/test-tron-profile-ios.py` 7/7 pass after the reverted switch.
-- Changes: `docs(ios): record that host attach cannot sample simulator processes
-  (E-2b)` — `packages/ios-app/docs/development.md` only.
+- Changes: `docs(ios): record that host xctrace attach cannot sample simulator
+  processes (E-2b)` — `packages/ios-app/docs/development.md` and this plan; the
+  review response below adds `docs(ios): correct the time-profiler attach note
+  after review (E-2b)`.
 - Tasks added: none; E-2c proposed below.
 - Kept on purpose: `--all-processes` and its `samples_other_processes` field,
   which is exactly what showed 73,865 other-process samples against 273 measured
@@ -1836,3 +1838,12 @@ the day cannot measure a synthetic case).
   refusal's message naming the trace size, and shorten the default windows as
   far as `attribution.json` still ranks the scenario's work. Do not re-try host
   `--attach` — it cannot see simulator processes at all.
+- Review response (the follow-up commit on this branch): the owning doc's added
+  paragraph no longer blames the kernel — xctrace cannot be told to record the
+  test process alone, and host attach by name fails the same way (status 19) —
+  it points up to the export-memory paragraph instead of down, and the hour-long
+  uptime detail is gone (it stays in this handoff). The `Changes` line above now
+  quotes the real commit title and names both files that commit changed. The
+  retained evidence folder renamed the Python `simattach.sh` to `simattach.py`,
+  added the host positive-control probe (`e2b-probe.py`), and describes
+  `verdict.py`.

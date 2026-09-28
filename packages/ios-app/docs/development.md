@@ -559,10 +559,10 @@ Templates and what was verified (Xcode 26.6, iOS 26.5 simulator runtime):
 
 `--all-processes` is the only working recording for `time-profiler` today: host
 `xcrun xctrace record --attach <pid>` fails with status 21 "Cannot find process
-for provided pid" for a simulator process, including one that has been up for an
-hour (the same command attaches to a plain host process and records only it), so
-the host kernel cannot be told to sample the test process alone. Every other
-process's samples therefore land in the trace and its export (below).
+for provided pid" for a simulator process (the same command attaches to a plain
+host process and records only that one), so xctrace cannot be told to record the
+test process alone; host attach by name fails the same way (status 19). Every
+other process's samples therefore land in the trace and its export (above).
 
 A host-wide recording cannot read the simulator's own `logd`, so
 `time-profiler` attribution has no `com.tron.mobile` signposts; the summary says
