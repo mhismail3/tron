@@ -31,6 +31,7 @@ import {
   closeSync, createWriteStream, mkdirSync, openSync, readFileSync, readSync, fstatSync, rmSync, writeFileSync, writeSync,
 } from "node:fs";
 import { appendFile } from "node:fs/promises";
+import { connect as connectTcp, createServer as createTcpServer } from "node:net";
 import { createRequire } from "node:module";
 import { dirname, join, relative, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
@@ -40,16 +41,12 @@ const CLIENT_PONG_DEADLINE_MS = 8_000;
 const PRESENTATION_LEASE_RENEWAL_MS = 15_000;
 const REQUEST_TIMEOUT_MS = 30_000;
 const PROTOCOL_VERSION = 5;
-// A WebSocket control frame is 2-6 header bytes plus an optional 125-byte
-// payload; the meter charges this so a ping or pong queued behind data waits
-// like any other frame.
-const CONTROL_FRAME_BYTES = 125;
-// A meter queue that only exists to bound memory: a WebSocket is reliable, so
-// this path may not drop a frame (a dropped response would hang the request
-// that waits for it, and the Gateway's own outbound queue is the backstop for
-// real capacity). Reaching this limit means the path buffered far beyond what
-// any phone would; the frames are dropped and counted instead of growing.
-const METER_QUEUE_LIMIT_BYTES = 256 * 1024 * 1024;
+// The phone's reconnect backoff (ReconnectDelayPolicy.standard): a failed
+// attempt is followed by 2 s x 1.7, capped at 15 s, with ±20% jitter.
+const PHONE_RETRY_INITIAL_SECONDS = 2;
+const PHONE_RETRY_MULTIPLIER = 1.7;
+const PHONE_RETRY_MAXIMUM_SECONDS = 15;
+const PHONE_RETRY_JITTER_FRACTION = 0.2;
 
 const [command, configPath] = process.argv.slice(2);
 if (!["seed", "run", "catalog", "multi"].includes(command) || !configPath) {
@@ -402,88 +399,199 @@ function generateCatalog() {
 }
 
 /**
- * The mobile client's path, shaped in place. A blackhole stops delivering every
- * frame in both directions until the path returns, which is what the phone sees
- * when Tailscale relays or drops. A bandwidth cap meters every frame (control
- * frames included) through one ordered queue, so a queued pong waits behind the
- * data in flight exactly as it does on a saturated link. Shaping the client's
- * own socket keeps the profile's clients on the real Gateway port.
+ * One direction of a relayed path. Raw TCP bytes read from `source` are written
+ * to `sink` and charged against `bitsPerSecond` (0 = unshaped); the source is
+ * paused with real TCP backpressure whenever the sink is full or the rate
+ * budget is spent, so a slow path fills the sender's own socket buffers exactly
+ * as a narrow link does. A hold is a blackhole: nothing is forwarded either way
+ * until the path returns.
  */
-class PathShaper {
-  constructor(clock) {
+class RelayDirection {
+  constructor(source, sink, clock, onBytes) {
+    this.source = source;
+    this.sink = sink;
     this.clock = clock;
-    this.blackholed = false;
+    this.onBytes = onBytes;
     this.bitsPerSecond = 0;
-    this.creditAt = 0;
-    this.queue = [];
-    this.timer = null;
-    this.deliveredBytes = 0;
-    this.queuedBytes = 0;
+    this.forwardedBytes = 0;
     this.meteredMs = 0;
-    this.droppedFrames = 0;
-  }
-
-  shaped() {
-    return this.blackholed || this.bitsPerSecond !== 0;
-  }
-
-  blackhole(on) {
-    this.blackholed = on;
-    // A blackhole loses whatever the queue still held; the path is gone.
-    if (on) this.dropQueued();
+    this.readyAt = 0;
+    this.timer = null;
+    this.held = false;
+    source.on("data", (chunk) => this.data(chunk));
+    sink.on("drain", () => this.wake());
   }
 
   cap(bitsPerSecond) {
     this.bitsPerSecond = bitsPerSecond;
-    this.creditAt = this.clock();
-    if (bitsPerSecond === 0) this.flush(); // fast path again: deliver what was held
+    this.readyAt = this.clock();
   }
 
-  /** Run `deliver` once this frame's bytes have been paid for at the cap. */
-  deliver(bytes, deliver) {
-    if (this.blackholed) { this.droppedFrames += 1; return; }
-    if (this.bitsPerSecond === 0) { this.deliveredBytes += bytes; deliver(); return; }
-    if (this.queuedBytes + bytes > METER_QUEUE_LIMIT_BYTES) { this.droppedFrames += 1; return; }
-    const now = this.clock();
-    const at = Math.max(now, this.creditAt);
-    this.creditAt = at + (bytes * 8000) / this.bitsPerSecond;
-    this.meteredMs += this.creditAt - at;
-    this.queuedBytes += bytes;
-    this.queue.push({ at: this.creditAt, bytes, deliver });
-    this.pump();
+  data(chunk) {
+    this.forwardedBytes += chunk.length;
+    this.onBytes(chunk.length);
+    const accepted = this.sink.write(chunk);
+    if (this.bitsPerSecond > 0) {
+      const nowMs = this.clock();
+      const at = Math.max(this.readyAt, nowMs);
+      this.readyAt = at + (chunk.length * 8000) / this.bitsPerSecond;
+      this.meteredMs += this.readyAt - at;
+    } else {
+      this.readyAt = this.clock();
+    }
+    if (!accepted || this.readyAt > this.clock()) this.waitForReady();
   }
 
-  pump() {
-    if (this.timer !== null || this.queue.length === 0) return;
-    const wait = Math.max(0, this.queue[0].at - this.clock());
-    this.timer = setTimeout(() => {
-      this.timer = null;
-      const item = this.queue.shift();
-      this.queuedBytes -= item.bytes;
-      // Counted when the frame lands, not when it was queued: the delivered
-      // rate is what the path actually carried.
-      this.deliveredBytes += item.bytes;
-      item.deliver();
-      this.pump();
-    }, wait);
+  waitForReady() {
+    this.source.pause();
+    this.schedule();
   }
 
-  /** Deliver everything the meter held now. */
-  flush() {
+  schedule() {
+    if (this.timer !== null) return;
+    this.timer = setTimeout(() => { this.timer = null; this.wake(); }, Math.max(0, this.readyAt - this.clock()));
+    // A shaping timer is not work: it must never keep the driver alive.
+    this.timer.unref?.();
+  }
+
+  wake() {
+    if (this.held) return;
+    if (this.readyAt > this.clock()) { this.schedule(); return; }
+    this.source.resume();
+  }
+
+  /** Stop forwarding: the path is gone in this direction. */
+  hold() {
+    this.held = true;
     if (this.timer !== null) { clearTimeout(this.timer); this.timer = null; }
-    for (const item of this.queue.splice(0)) {
-      this.queuedBytes -= item.bytes;
-      this.deliveredBytes += item.bytes;
-      item.deliver();
+    this.source.pause();
+    this.readyAt = this.clock();
+  }
+
+  release() {
+    this.held = false;
+    this.readyAt = this.clock();
+    this.source.resume();
+  }
+
+  close() {
+    if (this.timer !== null) { clearTimeout(this.timer); this.timer = null; }
+  }
+}
+
+/**
+ * The phone's path, shaped where the link really is: a loopback TCP relay that
+ * forwards the client's byte stream to the Gateway under a per-direction rate
+ * budget. Shaping raw bytes (rather than WebSocket frames) is what makes the
+ * cap real — the Gateway's own socket buffers are the ones that fill, so its
+ * outbound queue grows and its capacity policy is exercised — and it counts
+ * what the link carried instead of what a decompressed frame said.
+ *
+ * A blackhole stops the relay forwarding and swallows new connections without
+ * answering them: an established socket goes silent in both directions (the
+ * Gateway sees silence, not a close) and an attempt made during the outage
+ * hangs until the phone's own transport-open deadline gives up.
+ */
+class PathRelay {
+  constructor(gatewayPort, clock) {
+    this.gatewayPort = gatewayPort;
+    this.clock = clock;
+    this.port = null;
+    this.blackholed = false;
+    this.bitsPerSecond = 0;
+    this.upBytes = 0;
+    this.downBytes = 0;
+    this.links = new Set();
+    this.heldSockets = new Set();
+    this.halfOpenUpstreams = new Set();
+    this.server = createTcpServer((socket) => this.accept(socket));
+  }
+
+  async listen() {
+    await new Promise((resolveListen, rejectListen) => {
+      this.server.once("error", rejectListen);
+      this.server.listen(0, "127.0.0.1", () => {
+        this.port = this.server.address().port;
+        resolveListen();
+      });
+    });
+  }
+
+  /** Apply one rate budget to every direction of the path, including links that
+   * open while it is set (a reconnect during the capped leg is still capped). */
+  cap(bitsPerSecond) {
+    this.bitsPerSecond = bitsPerSecond;
+    for (const link of this.links) { link.toGateway.cap(bitsPerSecond); link.toPhone.cap(bitsPerSecond); }
+  }
+
+  blackhole(on) {
+    this.blackholed = on;
+    for (const link of this.links) {
+      if (on) { link.toGateway.hold(); link.toPhone.hold(); }
+      else { link.toGateway.release(); link.toPhone.release(); }
+    }
+    if (!on) {
+      // The phone abandoned these sockets while the path was gone; a returned
+      // path does not resurrect them. The Gateway's half-open hold is over.
+      for (const upstream of this.halfOpenUpstreams) upstream.destroy();
+      this.halfOpenUpstreams.clear();
     }
   }
 
-  /** Drop the queue: frames held for a socket that is gone never arrive. */
-  dropQueued() {
-    if (this.timer !== null) { clearTimeout(this.timer); this.timer = null; }
-    this.queue.length = 0;
-    this.queuedBytes = 0;
-    this.creditAt = this.clock();
+  accept(phone) {
+    phone.on("error", () => {});
+    if (this.blackholed) {
+      // Held without an answer, as a dropping path holds a SYN: the phone's
+      // TCP connection exists here and nothing ever comes back on it.
+      this.heldSockets.add(phone);
+      phone.on("close", () => this.heldSockets.delete(phone));
+      return;
+    }
+    const gateway = connectTcp({ host: "127.0.0.1", port: this.gatewayPort });
+    const link = { phone, gateway };
+    const startForwarding = () => {
+      link.toGateway = new RelayDirection(phone, gateway, this.clock, (bytes) => { this.upBytes += bytes; });
+      link.toPhone = new RelayDirection(gateway, phone, this.clock, (bytes) => { this.downBytes += bytes; });
+      link.toGateway.cap(this.bitsPerSecond);
+      link.toPhone.cap(this.bitsPerSecond);
+      if (this.blackholed) { link.toGateway.hold(); link.toPhone.hold(); }
+      this.links.add(link);
+      phone.resume();
+    };
+    gateway.on("connect", startForwarding);
+    gateway.on("error", () => { link.toGateway?.close(); link.toPhone?.close(); this.links.delete(link); phone.destroy(); });
+    gateway.on("close", () => {
+      link.toGateway?.close();
+      link.toPhone?.close();
+      this.links.delete(link);
+      phone.destroy();
+    });
+    phone.on("close", () => {
+      // A phone that gives up on a frozen path says nothing to the Gateway: the
+      // socket stays half-open until the Gateway's own heartbeat gives up,
+      // which is what counts against its per-device socket cap.
+      if (this.blackholed) { this.halfOpenUpstreams.add(gateway); return; }
+      link.toGateway?.close();
+      link.toPhone?.close();
+      this.links.delete(link);
+      gateway.destroy();
+    });
+    return link;
+  }
+
+  close() {
+    for (const link of this.links) {
+      link.toGateway?.close();
+      link.toPhone?.close();
+      link.gateway.destroy();
+      link.phone.destroy();
+    }
+    this.links.clear();
+    for (const socket of this.heldSockets) socket.destroy();
+    this.heldSockets.clear();
+    for (const upstream of this.halfOpenUpstreams) upstream.destroy();
+    this.halfOpenUpstreams.clear();
+    this.server.close();
   }
 }
 
@@ -510,7 +618,9 @@ class RecordingClient {
     // capacity rather than only the frames inside a window.
     this.pongDeadlineMisses = 0;
     this.unexpectedCloses = 0;
-    this.path = new PathShaper(now);
+    // Set when this client's path is a shaped loopback relay instead of a
+    // direct connection (the impairment legs).
+    this.relay = null;
     // Set by close(): permanent, so a reconnect still in flight cannot leave a
     // socket open behind a finished run.
     this.retired = false;
@@ -520,8 +630,12 @@ class RecordingClient {
 
   async connect() {
     const WebSocket = gatewayRequire("ws");
+    // connect() is the start of a fresh socket: whatever ended the previous one
+    // (a deliberate abandon included) must not keep muting its closes.
+    this.closing = false;
+    this.awaitingPong = null;
     const transportOpenMs = config.transportOpenMs ?? 15_000;
-    const socket = new WebSocket(`ws://127.0.0.1:${config.port}/v1/socket`, {
+    const socket = new WebSocket(`ws://127.0.0.1:${this.relay ? this.relay.port : config.port}/v1/socket`, {
       headers: { Authorization: `Bearer ${this.token}` },
       // URLSessionWebSocketTask's offer is exactly `permessage-deflate`; this
       // option set makes ws send the same parameterless offer.
@@ -537,26 +651,18 @@ class RecordingClient {
       this.offeredExtensions = socket._req?.getHeader("sec-websocket-extensions") ?? null;
       this.negotiatedExtensions = response.headers["sec-websocket-extensions"] ?? "";
     });
-    // Answer like URLSession, through the path meter: a control frame queued
-    // behind data is delayed, which is the busy links C-4 must survive.
+    // Answer like URLSession, and count both directions.
     socket.on("ping", (data) => {
-      this.path.deliver(CONTROL_FRAME_BYTES, () => {
-        this.note("in", "control:ping", data.length);
-        if (socket.readyState === 1) socket.pong(data);
-        if (this.window) this.window.pongsSent += 1;
-        this.timeline.write({ t: now(), client: this.name, label: this.label, dir: "out", topic: "control:pong", bytes: data.length });
-      });
+      this.note("in", "control:ping", data.length);
+      if (socket.readyState === 1) socket.pong(data);
+      if (this.window) this.window.pongsSent += 1;
+      this.timeline.write({ t: now(), client: this.name, label: this.label, dir: "out", topic: "control:pong", bytes: data.length });
     });
     socket.on("pong", (data) => {
-      this.path.deliver(CONTROL_FRAME_BYTES, () => {
-        this.awaitingPong = null;
-        this.note("in", "control:pong", data.length);
-      });
+      this.awaitingPong = null;
+      this.note("in", "control:pong", data.length);
     });
-    socket.on("message", (data, isBinary) => {
-      const bytes = Array.isArray(data) ? data.reduce((total, chunk) => total + chunk.length, 0) : data.length;
-      this.path.deliver(bytes, () => this.onMessage(data, isBinary));
-    });
+    socket.on("message", (data, isBinary) => this.onMessage(data, isBinary));
     socket.on("close", (code, reason) => {
       // A socket retired by reconnect() may finish closing after its successor opened.
       if (socket !== this.socket) return;
@@ -565,6 +671,14 @@ class RecordingClient {
       if (!this.closing) {
         this.closedUnexpectedly = `closed ${code} ${reason.toString()}`;
         this.unexpectedCloses += 1;
+      }
+      // A close during hello is the answer: fail the attempt now instead of
+      // waiting out the transport-open deadline for an hello that cannot come.
+      if (this.helloReject) {
+        const rejectHello = this.helloReject;
+        this.helloWaiter = null;
+        this.helloReject = null;
+        rejectHello(new Error(`${this.name} socket closed during hello (${code})`));
       }
       for (const { reject } of this.pending.values()) reject(new Error(`${this.name} socket closed (${code})`));
       this.pending.clear();
@@ -578,7 +692,7 @@ class RecordingClient {
       fail(`${this.name} offered ${JSON.stringify(this.offeredExtensions)}, not the phone's parameterless permessage-deflate`);
     }
     if (!this.tcp) fail(`${this.name}: the upgrade exposed no TCP socket to count wire bytes`);
-    const hello = new Promise((resolveHello) => { this.helloWaiter = resolveHello; });
+    const hello = new Promise((resolveHello, rejectHello) => { this.helloWaiter = resolveHello; this.helloReject = rejectHello; });
     this.send({ type: "hello", protocolVersion: PROTOCOL_VERSION, clientId: this.clientId, clientRole: "mobile" });
     this.info = await withDeadline(hello, transportOpenMs, `${this.name} hello`);
     if (this.info.protocolVersion !== PROTOCOL_VERSION) fail(`${this.name}: Gateway protocol ${this.info.protocolVersion} is not ${PROTOCOL_VERSION}`);
@@ -594,8 +708,7 @@ class RecordingClient {
       if (this.window) this.window.pongDeadlineMisses += 1;
     }
     this.awaitingPong = now();
-    const socket = this.socket;
-    this.path.deliver(CONTROL_FRAME_BYTES, () => { if (socket.readyState === 1) socket.ping(); });
+    if (this.socket.readyState === 1) this.socket.ping();
     if (this.window) this.window.pingsSent += 1;
     this.timeline.write({ t: now(), client: this.name, label: this.label, dir: "out", topic: "control:ping", bytes: 0 });
   }
@@ -613,10 +726,7 @@ class RecordingClient {
     const topic = frame.type === "request" ? `request:${frame.method}` : frame.type;
     this.timeline.write({ t: now(), client: this.name, label: this.label, dir: "out", topic, bytes });
     if (this.window) { this.window.outboundFrames += 1; this.window.outboundBytes += bytes; }
-    if (!this.path.shaped()) { this.socket.send(encoded); return; }
-    // The app sent the frame; a shaped path decides when (or whether) it lands.
-    const socket = this.socket;
-    this.path.deliver(bytes, () => { if (socket?.readyState === 1) socket.send(encoded); });
+    this.socket.send(encoded);
   }
 
   onMessage(data, isBinary) {
@@ -644,7 +754,13 @@ class RecordingClient {
       // Runtime failure detail is the evidence for a rejected workload.
       process.stderr.write(`${this.name} ${this.label} ${topic}: ${JSON.stringify(frame.payload).slice(0, 2_000)}\n`);
     }
-    if (frame.type === "hello" && this.helloWaiter) { this.helloWaiter(frame); this.helloWaiter = null; return; }
+    if (frame.type === "hello" && this.helloWaiter) {
+      const resolveHello = this.helloWaiter;
+      this.helloWaiter = null;
+      this.helloReject = null;
+      resolveHello(frame);
+      return;
+    }
     if (frame.type === "response") {
       const waiter = this.pending.get(frame.id);
       if (!waiter) return;
@@ -689,7 +805,6 @@ class RecordingClient {
     this.closing = false;
     this.awaitingPong = null;
     this.tcp = null;
-    this.path.dropQueued();
     await this.connect();
     if (this.retired) await this.disconnect();
     if (window) {
@@ -727,7 +842,7 @@ class RecordingClient {
    *
    * A path that drops frames never answers a close handshake, so an attempt
    * loop that waited for one would stall for the close timeout instead of
-   * retrying. Frames the meter still held for this socket are dropped. */
+   * retrying. */
   async abandon() {
     this.closing = true;
     clearInterval(this.pingTimer);
@@ -735,10 +850,19 @@ class RecordingClient {
     const socket = this.socket;
     this.socket = null;
     this.awaitingPong = null;
+    this.helloWaiter = null;
+    this.helloReject = null;
     if (socket && socket.readyState !== 3) socket.terminate();
     for (const { reject } of this.pending.values()) reject(new Error(`${this.name} abandoned`));
     this.pending.clear();
-    this.path.dropQueued();
+  }
+
+  /** Move this client's path onto a loopback relay the profile can shape. The
+   * socket is dropped here and rebuilt on the relay by the caller, as the phone
+   * rebuilds it after a path change. */
+  async attachRelay(relay) {
+    await this.abandon();
+    this.relay = relay;
   }
 
   /** This socket is expected to close: the Gateway is being restarted. */
@@ -746,16 +870,11 @@ class RecordingClient {
     this.closedUnexpectedly = null;
   }
 
-  connected() {
-    return this.socket?.readyState === 1;
-  }
-
   /** Drop the open socket, whatever state it is in, and stop the pings. */
   async disconnect() {
     this.closing = true;
     clearInterval(this.pingTimer);
     this.pingTimer = null;
-    this.path.dropQueued();
     const socket = this.socket;
     if (!socket) return;
     if (socket.readyState === 1) {
@@ -1114,21 +1233,41 @@ async function measuredWindow(label, connected, recorded, body, options = {}) {
 // fixture and the clients that are already connected. Each writes its own
 // section of the iteration's result:
 //
-//   blackhole: the mobile path delivers nothing for `blackholeSeconds`. The
-//     client keeps its socket until a pong deadline passes (the Gateway sees a
-//     silent connection), then abandons it and retries like the phone; the leg
-//     times the recovery to a ready mounted chat once the path returns.
-//   bandwidth: the mobile path is capped at `bandwidthMbps`. The workload moves
-//     full bounded transcript pages over it while liveness and socket capacity
-//     are observed (a queued pong, no close for capacity).
+//   blackhole: the mobile's path (a shaped loopback relay, so the Gateway's own
+//     socket buffers are the ones that fill) delivers nothing for
+//     `blackholeSeconds`. The client keeps its socket until a pong deadline
+//     passes with no inbound frame, abandons it and retries on the phone's
+//     backoff; the leg times the recovery to a ready mounted chat from the
+//     moment the path returned, whatever attempt was in flight then.
+//   bandwidth: the mobile's path is capped at `bandwidthMbps`. The workload
+//     moves full bounded transcript pages over it while liveness and socket
+//     capacity are observed (a pong queued behind data, no close for capacity).
 //   restart: the profiler stops and restarts the fixture Gateway on the same
 //     port while these clients are connected. The driver asks for the restart
-//     (the fixture is the profiler's process), waits for the moment the new
-//     Gateway was healthy, and times every client's reconnect and the requests
-//     in the storm.
+//     (the fixture is the profiler's process), each client retries from the
+//     moment its own socket closes, and the leg times every client's reconnect,
+//     the attempts the downtime cost and the requests in the storm.
 
 function messageOf(error) {
   return String(error instanceof Error ? error.message : error);
+}
+
+// The restart case's clients that the exit criterion counts: a mounted phone, a
+// listing dashboard and one more pair. Every other connected client reconnects
+// too (reported ready below), so a run cannot pass with half its clients dead.
+const RESTART_MEASURED_CLIENTS = ["mobile", "dashboard", "driver"];
+
+/** The phone's reconnect delay after `failures` consecutive failures
+ * (ReconnectDelayPolicy.standard: 2 s x 1.7 up to 15 s, ±20% jitter). */
+function phoneRetryDelayMs(failures) {
+  let nominal = PHONE_RETRY_INITIAL_SECONDS;
+  for (let index = 1; index < Math.max(1, failures); index += 1) {
+    if (nominal >= PHONE_RETRY_MAXIMUM_SECONDS) break;
+    nominal = Math.min(nominal * PHONE_RETRY_MULTIPLIER, PHONE_RETRY_MAXIMUM_SECONDS);
+  }
+  const lower = nominal * (1 - PHONE_RETRY_JITTER_FRACTION);
+  const upper = Math.min(nominal * (1 + PHONE_RETRY_JITTER_FRACTION), PHONE_RETRY_MAXIMUM_SECONDS);
+  return (lower + (upper - lower) * Math.random()) * 1000;
 }
 
 async function waitForJson(path, deadlineMs, what) {
@@ -1143,135 +1282,193 @@ async function waitForJson(path, deadlineMs, what) {
   }
 }
 
+/** Resolve after this client's socket has closed and its close was accounted
+ * for, with the epoch millisecond it went: the moment the phone starts
+ * retrying. The close event is what is waited for, because the client's own
+ * close handler runs before this listener and the caller can then decide
+ * whether that close was expected. */
 function waitForClosure(client, timeoutMs) {
   return withDeadline(new Promise((resolveClosed) => {
-    const check = () => {
-      const socket = client.socket;
-      if (!socket || socket.readyState >= 2) resolveClosed();
-      else setTimeout(check, 25);
-    };
-    check();
+    const socket = client.socket;
+    if (!socket || socket.readyState === 3) { setImmediate(() => resolveClosed(Date.now())); return; }
+    socket.once("close", () => resolveClosed(Date.now()));
   }), timeoutMs, `${client.name} socket close`);
 }
 
 /** Connect, then run this client's ready sequence, until it succeeds. Each
- * failed attempt is recorded with the error that ended it, so the report shows
- * how many attempts the outage cost, not only how long recovery took. */
-async function connectUntilReady(client, ready, deadlineMs, retryMs) {
+ * failed attempt is recorded with the error that ended it, and the next one
+ * waits the phone's own backoff, so the report shows what the outage cost
+ * rather than only how long recovery took. */
+async function connectUntilReady(client, ready, deadlineMs, annotate = () => ({})) {
   const attempts = [];
-  for (;;) {
+  for (let failures = 1; ; failures += 1) {
     const startedAt = now();
+    // Annotated when the attempt starts: an attempt that began during the
+    // outage is an attempt the outage cost, even if it ends after the path
+    // returned.
+    const annotations = annotate();
     try {
       await client.connect();
       await ready();
-      attempts.push({ ms: now() - startedAt, connected: true });
+      attempts.push({ ms: now() - startedAt, connected: true, ...annotations });
       return attempts;
     } catch (error) {
-      attempts.push({ ms: now() - startedAt, failed: messageOf(error) });
+      attempts.push({ ms: now() - startedAt, failed: messageOf(error), ...annotations });
       await client.abandon();
       if (now() > deadlineMs) fail(`${client.name} did not recover within ${Math.round(deadlineMs - startedAt)} ms: ${messageOf(error)}`);
-      await sleep(retryMs);
+      await sleep(phoneRetryDelayMs(failures));
     }
   }
 }
 
+/** The shaped path this client is on, attaching and connecting one if it is
+ * still on a direct socket. The blackhole and bandwidth legs share it, so the
+ * relay is built once and the mobile's socket is rebuilt on it only when it
+ * must be. */
+async function relayFor(config, mobile) {
+  if (mobile.relay) return mobile.relay;
+  const relay = new PathRelay(config.port, now);
+  await relay.listen();
+  await mobile.attachRelay(relay);
+  await mobile.connect();
+  return relay;
+}
+
 async function blackholeLeg(config, { mobile, chat, retry }) {
   const leg = { seconds: config.blackholeSeconds, silenceMs: null, pathReturnedAtMs: null, recoveryReadyMs: null, attempts: [] };
+  const relay = await relayFor(config, mobile);
   const missesBefore = mobile.pongDeadlineMisses;
-  mobile.path.blackhole(true);
   const outageStart = now();
   const outageEnd = outageStart + config.blackholeSeconds * 1000;
-  // The phone trusts the link until one pong deadline passes with no inbound
-  // frame; until then the socket stays open and silent.
-  const quietUntil = Math.min(outageEnd, outageStart + config.blackholeLivenessMs);
-  while (mobile.pongDeadlineMisses === missesBefore && now() < quietUntil) await sleep(25);
-  leg.silenceMs = now() - outageStart;
-  await mobile.abandon();
+  // The path returns on its own clock, not when the attempt loop next looks:
+  // an attempt still in flight when it returns waits out its own deadline, and
+  // that wait is part of the recovery this leg measures.
   let returnedAt = null;
-  for (;;) {
-    if (returnedAt === null && now() >= outageEnd) {
-      // The path returns. Frames the blackhole dropped are gone, so the client
-      // must reconnect: its next attempt is the recovery this leg measures.
-      mobile.path.blackhole(false);
-      returnedAt = now();
-      leg.pathReturnedAtMs = Date.now();
-    }
-    const startedAt = now();
-    const duringOutage = returnedAt === null;
-    try {
-      await mobile.connect();
-      await retry("mount", () => chat.remount(config.measuredDeadlineMs));
-      const attempts = [{ ms: now() - startedAt, connected: true }];
-      if (returnedAt === null) {
-        // The path came back while this attempt was in flight.
-        returnedAt = now();
-        leg.pathReturnedAtMs = Date.now();
-      }
-      leg.attempts.push(...attempts.map((attempt) => ({ ...attempt, duringOutage })));
-      leg.recoveryReadyMs = now() - returnedAt;
-      break;
-    } catch (error) {
-      leg.attempts.push({ ms: now() - startedAt, failed: messageOf(error), duringOutage });
-      await mobile.abandon();
-      if (now() > outageEnd + config.measuredDeadlineMs) fail(`the blackholed mobile client did not recover: ${messageOf(error)}`);
-      await sleep(config.blackholeRetryMs);
-    }
+  const returnTimer = setTimeout(() => {
+    relay.blackhole(false);
+    returnedAt = now();
+    leg.pathReturnedAtMs = Date.now();
+  }, config.blackholeSeconds * 1000);
+  returnTimer.unref?.();
+  try {
+    relay.blackhole(true);
+    // The phone trusts the link until one pong deadline passes with no inbound
+    // frame; until then the socket stays open and silent.
+    const quietUntil = Math.min(outageEnd, outageStart + config.blackholeLivenessMs);
+    while (mobile.pongDeadlineMisses === missesBefore && now() < quietUntil) await sleep(25);
+    leg.silenceMs = now() - outageStart;
+    await mobile.abandon();
+    leg.attempts = await connectUntilReady(mobile,
+      () => retry("mount", () => chat.remount(config.measuredDeadlineMs)),
+      outageEnd + config.measuredDeadlineMs,
+      () => ({ duringOutage: returnedAt === null }));
+  } finally {
+    clearTimeout(returnTimer);
   }
+  if (returnedAt === null) fail("the blackhole path never returned");
+  leg.recoveryReadyMs = now() - returnedAt;
   leg.attemptsDuringOutage = leg.attempts.filter((attempt) => attempt.duringOutage).length;
   return leg;
 }
 
 async function bandwidthLeg(config, { mobile, chat, dashboard, retry }) {
+  const relay = await relayFor(config, mobile);
   const missesBefore = mobile.pongDeadlineMisses;
   const closesBefore = mobile.unexpectedCloses;
-  const bytesBefore = mobile.path.deliveredBytes;
-  const meteredBefore = mobile.path.meteredMs;
-  const droppedBefore = mobile.path.droppedFrames;
+  const upBefore = relay.upBytes;
+  const downBefore = relay.downBytes;
+  const meteredBefore = (() => {
+    let total = 0;
+    for (const link of relay.links) total += link.toGateway.meteredMs + link.toPhone.meteredMs;
+    return total;
+  })();
   const capBitsPerSecond = Math.round(config.bandwidthMbps * 1_000_000);
-  mobile.path.cap(capBitsPerSecond);
+  const startedAtMs = Date.now();
+  relay.cap(capBitsPerSecond);
   const startedAt = now();
   const operations = [];
+  let closedEarly = false;
+  const legDeadlineMs = startedAt + config.bandwidthLegSeconds * 1000;
   for (let index = 0; index < config.bandwidthOperations; index += 1) {
+    // The leg's own bound: a cap this narrow makes one operation slow on
+    // purpose, so the leg reports what it measured instead of running on.
+    if (index > 0 && now() > legDeadlineMs) break;
     const operationStart = now();
-    await retry("mount", () => chat.remount(config.measuredDeadlineMs));
-    await retry("list", () => dashboard.request("session.list", { limit: 500, scope: "user" }, config.measuredDeadlineMs));
+    try {
+      await retry("mount", () => chat.remount(config.measuredDeadlineMs));
+      await retry("list", () => dashboard.request("session.list", { limit: 500, scope: "user" }, config.measuredDeadlineMs));
+    } catch (error) {
+      // A socket the Gateway closed under the cap is this case's own finding
+      // (counted as an unexpected close), not a failure of the profile: the leg
+      // ends with the operations it measured and the metric that says why. A
+      // socket that is gone without being counted is a measurement bug, and is
+      // reported as one.
+      if (mobile.socket?.readyState !== 1 && !mobile.closedUnexpectedly) {
+        fail(`${mobile.name} socket died under the cap without being counted: ${messageOf(error)}`);
+      }
+      if (mobile.closedUnexpectedly) { closedEarly = true; break; }
+      throw error;
+    }
     operations.push(now() - operationStart);
   }
   const seconds = (now() - startedAt) / 1000;
-  const deliveredBytes = mobile.path.deliveredBytes - bytesBefore;
-  // Stop metering. The queue drains at once: the path is not shaped any more.
-  mobile.path.cap(0);
+  const deliveredBytes = relay.downBytes - downBefore;
+  let meteredMs = 0;
+  for (const link of relay.links) meteredMs += link.toGateway.meteredMs + link.toPhone.meteredMs;
+  // Stop metering. The next chunk is forwarded without waiting: the path is not
+  // shaped any more.
+  relay.cap(0);
   return {
-    capBitsPerSecond, seconds, operations,
+    capBitsPerSecond, seconds, operations, closedEarly, startedAtMs, endedAtMs: Date.now(),
     deliveredBytes, deliveredBytesPerSecond: deliveredBytes / seconds,
-    droppedFrames: mobile.path.droppedFrames - droppedBefore,
-    meteredMs: mobile.path.meteredMs - meteredBefore,
+    sentBytes: relay.upBytes - upBefore,
+    meteredMs: meteredMs - meteredBefore,
     pongDeadlineMisses: mobile.pongDeadlineMisses - missesBefore,
     unexpectedCloses: mobile.unexpectedCloses - closesBefore,
   };
 }
 
-async function restartLeg(config, clients, retryMethod) {
+/** Restart the fixture Gateway while every client is connected, and time what
+ * each one did about it.
+ *
+ * Every client retries from the moment its own socket closes (the profiler's
+ * answer only reports when the new Gateway was healthy), so the failed
+ * attempts and the reconnect time include the downtime. The three clients the
+ * exit criterion counts are the measured ones; the rest reconnect too and are
+ * reported as ready, so a run cannot pass with half its clients dead. */
+async function restartLeg(config, clients, retryMethod, measuredNames) {
   const requestPath = join(config.outputDir, `restart-request-${config.label}.json`);
   const donePath = join(config.outputDir, `restart-done-${config.label}.json`);
   rmSync(donePath, { force: true }); // a stale answer from an earlier phase would be read as this one's
-  const closures = clients.map(({ client }) => waitForClosure(client, config.restartDeadlineMs));
-  writeFileSync(requestPath, `${JSON.stringify({ requestedAtMs: Date.now(), gatewayPid: config.gatewayPid })}\n`);
-  const restored = await waitForJson(donePath, config.restartDeadlineMs, "the profiler's Gateway restart");
-  const results = await Promise.all(clients.map(async ({ name, client, ready }, index) => {
+  const requestedAtMs = Date.now();
+  const closedAt = new Map();
+  const closures = clients.map(({ client }) => waitForClosure(client, config.restartDeadlineMs)
+    .then((atMs) => { closedAt.set(client.name, atMs); }));
+  writeFileSync(requestPath, `${JSON.stringify({ requestedAtMs, gatewayPid: config.gatewayPid })}\n`);
+  const ready = Promise.all(clients.map(async ({ name, client, ready: prepare }, index) => {
     await closures[index];
-    // The Gateway is going away: this close is the case, not a failure.
+    // The Gateway is going away: this close is the case, not a failure. The
+    // retry starts here, not when the profiler says the new Gateway is up.
     client.expectClosure();
-    const attempts = await connectUntilReady(client, ready, now() + config.restartDeadlineMs, config.restartAttemptMs);
-    return { name, readyAtMs: Date.now(), attempts, reconnectMs: Date.now() - restored.restoredAtMs };
+    const attempts = await connectUntilReady(client, prepare, now() + config.restartDeadlineMs);
+    return { name, readyAtMs: Date.now(), attempts, closedAtMs: closedAt.get(name), reconnectMs: Date.now() - closedAt.get(name) };
   }));
-  // Requests in the storm: one list per client per second for a short window, so
-  // a slow Gateway shows in a count of slow requests, not in one stray sample.
+  // Both settle together: a client that cannot come back must not leave the
+  // profiler's answer an unhandled rejection when it never arrives, and vice
+  // versa.
+  const [results, restored] = await Promise.all([
+    ready, waitForJson(donePath, config.restartDeadlineMs, "the profiler's Gateway restart"),
+  ]);
+  const measured = results.filter((entry) => measuredNames.includes(entry.name));
+  // Requests in the storm: one list per measured client per second for a short
+  // window, so a slow Gateway shows in a count of slow requests, not in one
+  // stray sample.
+  const stormClients = clients.filter(({ name }) => measuredNames.includes(name));
   const requests = [];
   const stormEnd = now() + config.restartStormSeconds * 1000;
   while (now() < stormEnd) {
     const cycleStart = now();
-    const cycle = await Promise.all(clients.map(async ({ name, client }) => {
+    const cycle = await Promise.all(stormClients.map(async ({ name, client }) => {
       const startedAt = now();
       await retryMethod("list", () => client.request("session.list", { limit: 500, scope: "user" }, config.measuredDeadlineMs));
       return { client: name, ms: now() - startedAt };
@@ -1280,10 +1477,15 @@ async function restartLeg(config, clients, retryMethod) {
     await sleep(Math.max(0, 1000 - (now() - cycleStart)));
   }
   for (const { client } of clients) client.expectClosure();
-  return { restoredAtMs: restored.restoredAtMs, restoredPid: restored.pid, clients: results, requests };
+  return {
+    requestedAtMs, restoredAtMs: restored.restoredAtMs, restoredPid: restored.pid,
+    downtimeMs: restored.restoredAtMs - requestedAtMs,
+    clients: measured, clientsAll: results, requests,
+  };
 }
 
-/** Run the selected impairment cases in order, on the clients already connected. */
+/** Run the selected impairment cases in order, on the clients already
+ * connected. */
 async function impairmentLegs(config, context) {
   const legs = {};
   for (const name of config.cases) {
@@ -1295,7 +1497,7 @@ async function impairmentLegs(config, context) {
       for (const client of context.all) {
         if (client.closedUnexpectedly) fail(`${client.name} ${client.closedUnexpectedly} before the restart case`);
       }
-      legs.restart = await restartLeg(config, context.clients, context.retry);
+      legs.restart = await restartLeg(config, context.clients, context.retry, RESTART_MEASURED_CLIENTS);
       // Every remaining socket dies with the old Gateway process.
       for (const client of context.all) client.expectClosure();
     } else fail(`unknown impairment case ${name}`);
@@ -1522,16 +1724,19 @@ async function multi() {
     result.appendedEntries = await appender.stop();
     appender = null;
     if (config.cases.length > 0) {
+      const ready = (client) => (client === mobile
+        ? () => retryingBusy(retries, "mount", () => chat.remount(measured))
+        : () => retryingBusy(retries, "list", () => client.request("session.list", { limit: 500, scope: "user" }, measured)));
+      // The restart case's clients: the exit criterion's three first, then
+      // every other connected client, because a restart must not leave half the
+      // clients dead even though only three are measured.
+      const byName = new Map(clients.map((client) => [client.name, client]));
+      const restartNames = [...RESTART_MEASURED_CLIENTS,
+        ...clients.map((client) => client.name).filter((name) => !RESTART_MEASURED_CLIENTS.includes(name))];
       result.impairment = await impairmentLegs(config, {
-        mobile, chat, dashboard, driver, all: clients,
-        // The restart case's three clients: a mounted phone, a listing
-        // dashboard and one more pair, matching the exit criterion.
+        mobile, chat, dashboard, all: clients,
         retry: (method, operation) => retryingBusy(retries, method, operation),
-        clients: [
-          { name: "mobile", client: mobile, ready: () => retryingBusy(retries, "mount", () => chat.remount(measured)) },
-          { name: "dashboard", client: dashboard, ready: () => retryingBusy(retries, "list", () => dashboard.request("session.list", { limit: 500, scope: "user" }, measured)) },
-          { name: "driver", client: driver, ready: () => retryingBusy(retries, "list", () => driver.request("session.list", { limit: 500, scope: "user" }, measured)) },
-        ],
+        clients: restartNames.map((name) => ({ name, client: byName.get(name), ready: ready(byName.get(name)) })),
       });
     }
     for (const client of clients) {
@@ -1542,6 +1747,10 @@ async function multi() {
     for (const chat of chats) clearInterval(chat.renewal);
     if (appender) await appender.stop().catch(() => {});
     for (const client of clients) await client.close();
+    // The shaped path owns a listening socket and any half-open upstream socket
+    // a blackhole left; closing the clients first keeps its teardown out of
+    // their unexpected-close accounting.
+    for (const client of clients) client.relay?.close();
     // A lane abandoned by the mixed window's tail can restore a mounted chat
     // while its socket closes; nothing may keep the driver process alive after
     // every client is closed.

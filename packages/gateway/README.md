@@ -2454,38 +2454,50 @@ cannot hold the catalog, and it takes the same per-host profile lock.
 
 - **Impairment cases (`--cases`, default `blackhole,bandwidth,restart`):** they
   run after the mixed window, on the clients it already connected, and measure
-  recovery rather than throughput. `--cases none` runs none.
-  - **blackhole** (`--blackhole-seconds`, default 90): the mobile path stops
-    delivering frames in both directions (the driver shapes the client's own
-    socket, so the Gateway sees a silent connection and the other clients stay
-    honest). The client keeps its socket open until one liveness window (18 s:
-    its ping interval plus its pong deadline) passes with no inbound frame,
-    abandons it and retries like the phone; when the path returns, the case
-    times the recovery to a ready mounted chat.
-  - **bandwidth** (`--bandwidth-mbps`, default 2): every frame on the mobile
-    path, control frames included, is metered through one ordered queue, so a
-    queued pong waits behind the data in flight as on a saturated link. The
-    workload moves full bounded transcript pages over it. The meter's queue is
-    bounded only by memory (a WebSocket is reliable; a dropped response would
-    hang its request) and the Gateway's own outbound queue is the real capacity
-    backstop.
+  recovery rather than throughput. `--cases none` runs none. The mobile client's
+  path is a loopback TCP relay the driver shapes, so what a cap or a blackhole
+  applies to is the real byte stream — the Gateway's own socket buffers fill and
+  its capacity policy is exercised — and the bytes counted are the ones the link
+  carried, not a decompressed frame's size. Every client retries on the phone's
+  own backoff (2 s × 1.7, capped at 15 s, ±20% jitter).
+  - **blackhole** (`--blackhole-seconds`, default 90, longer than the Gateway's
+    75 s half-open hold): the relay stops forwarding in both directions, so an
+    established socket goes silent and an attempt made during the outage is held
+    with no answer until the phone's transport-open deadline gives up. The
+    client keeps its socket open until one liveness window (18 s: its ping
+    interval plus its pong deadline) passes with no inbound frame, then abandons
+    it; because the phone says nothing to the Gateway when it gives up on a
+    frozen path, the Gateway keeps that socket half-open. The path returns on
+    its own timer, and the case times the recovery to a ready mounted chat from
+    that moment — an attempt still in flight then is part of the recovery.
+  - **bandwidth** (`--bandwidth-mbps`, default 2): the relay holds one rate
+    budget per direction and pauses the sending socket when it is spent, so a
+    queued pong really does wait behind the data in flight on the Gateway's side
+    of the link. The workload moves full bounded transcript pages over it,
+    bounded by `bandwidthLegSeconds` (300 s) plus one operation's deadline.
   - **restart:** the driver asks the profiler — its parent, which owns the
-    fixture process — for a Gateway restart while three clients are connected
-    (a mounted phone, a listing dashboard, one more pair, as the exit criterion
-    counts them). The profiler stops the child and starts a fresh one on the
-    same port, and tells the driver the epoch millisecond at which the new
-    Gateway was healthy; the driver times each client from there.
+    fixture process — for a Gateway restart while every connected client is
+    live. The profiler stops the child and starts a fresh one on the same port,
+    and reports the epoch millisecond at which the new Gateway was healthy, plus
+    the downtime (request to healthy) as its own metric. Each client retries as
+    soon as its own socket closes, so the refused connects and the reconnects
+    include the downtime; the exit criterion's three clients (a mounted phone, a
+    listing dashboard, one more pair) are the measured ones and every other
+    client reconnects too.
 - **Impairment metrics:** `impairment.blackhole.attempts_during_outage`,
   `.silence_ms`, `.recovery_ready_ms` (C-3's target: p95 ≤ 5 s),
   `.attempt_ms_max`; `impairment.bandwidth.cap_bits_per_second`,
-  `.delivered_bytes_per_second`, `.operation_ms_p99`, `.pong_deadline_misses`
-  (C-4's target: zero), `.unexpected_closes` (G-12: zero for capacity),
-  `.metered_ms`, `.dropped_frames`; `impairment.restart.reconnect_ms_max`
-  (G-13: ≤ 10 s), `.clients_ready`, `.failed_attempts`, `.requests`,
+  `.delivered_bytes_per_second` and `.sent_bytes_per_second` (wire bytes each
+  way), `.operation_ms_p99`, `.pong_deadline_misses` (C-4's target: zero),
+  `.unexpected_closes` (G-4: zero for capacity), `.metered_ms`;
+  `impairment.restart.reconnect_ms_max` (G-13: ≤ 10 s), `.downtime_ms`,
+  `.clients_ready` (every connected client), `.failed_attempts`, `.requests`,
   `.requests_over_1s` (G-13: zero) and `.request_ms_p99`. The report context
   carries each case's attempts and per-client details, and
-  `impairment.gateway_outbound_capacity_records` from the retained log. A run is
-  rejected when a selected case reported nothing.
+  `impairment.gateway_outbound_capacity_records` counts
+  `connection.outbound-capacity` records inside the bandwidth legs' own time
+  windows. A run is rejected when a selected case reported nothing, and an
+  unexpected close — the phone's socket included — fails the run.
 
 Per iteration it reports `latency.<operation>.p50|p99|max` (nearest rank, so
 p99 is the maximum below 100 samples) for `session_list`,

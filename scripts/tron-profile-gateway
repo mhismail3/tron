@@ -117,6 +117,8 @@ SCENARIOS = {
 # bounded tail) runs only when named.
 WIRE_SCENARIOS = ("stream-reply", "tool-loop", "idle", "dashboard-observer")
 
+# The impairment cases the multi-session scenario can run, in run order.
+IMPAIRMENT_CASES = ("blackhole", "bandwidth", "restart")
 # Multi-session qualification workload (plan: connection and scale hardening,
 # O-6a). Each phase (the priming start and every iteration) gets its own
 # running and cold sessions from the generated catalog.
@@ -148,23 +150,27 @@ MULTI = {
     "coldPrompt": "tron-profile stream-reply chars=600 thinking=200 seed=1",
     # Impairment cases (plan: connection and scale hardening, O-6b). They run
     # after the mixed window, on the same fixture and clients.
-    "cases": ["blackhole", "bandwidth", "restart"],
+    "cases": list(IMPAIRMENT_CASES),
+    # Longer than the Gateway's own 75 s half-open hold (25 s heartbeat x 3), so
+    # the case exercises that hold and the socket cap it counts against.
     "blackholeSeconds": 90,
     # One pong deadline with no inbound frame is what stops the phone trusting
     # a link: its ping interval plus the pong deadline.
     "blackholeLivenessMs": 18_000,
-    "blackholeRetryMs": 250,
     "bandwidthMbps": 2.0,
     "bandwidthOperations": 3,
+    # The bandwidth leg's own bound: a cap this narrow makes an operation slow
+    # on purpose, and a leg that outran it would never report. Together with the
+    # per-operation deadline this bounds the leg.
+    "bandwidthLegSeconds": 300,
     # The phone's transport-open deadline: a connection that does not complete
     # `hello` within it is abandoned (C-3 replaces the phone's wait with ~5 s).
     "transportOpenMs": 15_000,
-    "restartAttemptMs": 250,
     "restartStormSeconds": 5,
-    "restartDeadlineMs": 180_000,
+    # The profiler's own restart budget: up to 30 s to stop the old Gateway plus
+    # FixtureGateway.restart's 300 s start deadline, plus the storm.
+    "restartDeadlineMs": 360_000,
 }
-# The impairment cases the multi-session scenario can run, in run order.
-IMPAIRMENT_CASES = ("blackhole", "bandwidth", "restart")
 PHONE_REQUEST_DEADLINE_MS = 30_000
 # Host guard: a qualification run on a swapping or pressured host measures the
 # host, not the Gateway (plan O-6a).
@@ -913,6 +919,26 @@ def wait_with_restart(driver: subprocess.Popen[bytes], fixture: FixtureGateway, 
         time.sleep(0.2)
 
 
+def driver_deadline_seconds(config: dict, restart_case: bool) -> float:
+    """The per-iteration watchdog for the driver process.
+
+    It is the sum of every phase's own bound, not a target: the mixed window is
+    its fixed length plus its censoring tail, the blackhole is its length plus
+    one recovery deadline, the bandwidth leg is its own bound plus one
+    operation's deadline, and the restart covers the profiler's stop and start
+    budgets plus the storm. A case that passes its own bound fails inside the
+    driver (or times out here) either way."""
+    seconds = config["mixedSeconds"] + config["tailGraceMs"] / 1000
+    seconds += config["noSubscriberSeconds"] + 60
+    if "blackhole" in config["cases"]:
+        seconds += config["blackholeSeconds"] + config["measuredDeadlineMs"] / 1000
+    if "bandwidth" in config["cases"]:
+        seconds += config["bandwidthLegSeconds"] + config["measuredDeadlineMs"] / 1000
+    if restart_case:
+        seconds += config["restartDeadlineMs"] / 1000 + config["restartStormSeconds"] + 60
+    return seconds
+
+
 def run_multi_driver(fixture: FixtureGateway, run_dir: Path, phase: str, label: str, workload: dict,
                      restart_case: bool = False) -> dict:
     config = {
@@ -928,7 +954,7 @@ def run_multi_driver(fixture: FixtureGateway, run_dir: Path, phase: str, label: 
     done_path = run_dir / f"restart-done-{label}.json"
     for path in (request_path, done_path):
         path.unlink(missing_ok=True)
-    deadline = 900
+    deadline = driver_deadline_seconds(config, restart_case)
     with driver_log.open("wb") as handle:
         driver = subprocess.Popen(["node", str(DRIVER), "multi", str(config_path)], env=scrubbed_environment(),
                                   stdout=handle, stderr=subprocess.STDOUT, start_new_session=True)
@@ -998,9 +1024,14 @@ def validate_impairment(results: list[dict]) -> list[str]:
                 if not leg.get("operations") or not leg.get("deliveredBytes"):
                     problems.append(f"{label}: the bandwidth case moved no metered data")
             elif name == "restart":
-                ready = leg.get("clients") or []
-                if len(ready) != 3 or any(entry.get("readyAtMs") is None for entry in ready):
-                    problems.append(f"{label}: the restart case did not reconnect all three clients")
+                measured = leg.get("clients") or []
+                ready = leg.get("clientsAll") or []
+                if len(measured) != 3 or any(entry.get("readyAtMs") is None for entry in measured):
+                    problems.append(f"{label}: the restart case did not reconnect all three measured clients")
+                if not ready or any(entry.get("readyAtMs") is None for entry in ready):
+                    problems.append(f"{label}: the restart case left a connected client down")
+                if leg.get("downtimeMs") is None:
+                    problems.append(f"{label}: the restart case did not report the downtime")
                 if not leg.get("requests"):
                     problems.append(f"{label}: the restart case made no request in the storm")
     return problems
@@ -1053,8 +1084,13 @@ def multi_samples(results: list[dict]) -> tuple[dict, list[str]]:
     return metrics, warnings
 
 
-def log_event_count(log_path: Path, event: str) -> int:
-    """How many times the fixture logged one event in the retained log."""
+def log_event_count(log_path: Path, event: str, windows: list[tuple[int, int]] | None = None) -> int:
+    """How many times the fixture logged one event in the retained log.
+
+    With `windows` (epoch-millisecond pairs) only records stamped inside one are
+    counted, so a metric that belongs to one leg is not inflated by the same
+    event from the priming phase or another iteration. The retained log is
+    trimmed to its last mebibytes, so a window that fell off it counts nothing."""
     total = 0
     if not log_path.is_file():
         return total
@@ -1063,8 +1099,16 @@ def log_event_count(log_path: Path, event: str) -> int:
             record = json.loads(line)
         except ValueError:
             continue
-        if record.get("event") == event:
-            total += 1
+        if record.get("event") != event:
+            continue
+        if windows is not None:
+            try:
+                at_ms = int(datetime.fromisoformat(record["timestamp"].replace("Z", "+00:00")).timestamp() * 1000)
+            except (KeyError, TypeError, ValueError):
+                continue
+            if not any(start <= at_ms <= end for start, end in windows):
+                continue
+        total += 1
     return total
 
 
@@ -1076,8 +1120,8 @@ def impairment_samples(results: list[dict]) -> dict:
     the run is only rejected when a case measured nothing (validate_impairment)."""
     metrics: dict = {}
 
-    def add(metric_id: str, unit: str, values: list[float], description: str) -> None:
-        metrics[metric_id] = {"unit": unit, "better": "lower", "values": values, "description": description}
+    def add(metric_id: str, unit: str, values: list[float], description: str, better: str = "lower") -> None:
+        metrics[metric_id] = {"unit": unit, "better": better, "values": values, "description": description}
 
     def legs(name: str) -> list[dict]:
         return [result["impairment"][name] for result in results
@@ -1101,30 +1145,33 @@ def impairment_samples(results: list[dict]) -> dict:
             [leg["capBitsPerSecond"] for leg in bandwidth], "the cap the path was given")
         add("impairment.bandwidth.delivered_bytes_per_second", "B/s",
             [leg["deliveredBytesPerSecond"] for leg in bandwidth],
-            "bytes the meter delivered over the leg's wall time")
+            "wire bytes the capped path carried toward the phone over the leg's wall time")
+        add("impairment.bandwidth.sent_bytes_per_second", "B/s",
+            [leg["sentBytes"] / leg["seconds"] for leg in bandwidth],
+            "wire bytes the capped path carried toward the Gateway over the leg's wall time")
         add("impairment.bandwidth.operation_ms_p99", "ms",
             [percentile(leg["operations"], 99) for leg in bandwidth],
             "p99 of a mounted chat plus a dashboard list over the capped path")
         add("impairment.bandwidth.pong_deadline_misses", "count", [leg["pongDeadlineMisses"] for leg in bandwidth],
             "pong deadlines missed while data flowed (C-4's target is zero)")
         add("impairment.bandwidth.unexpected_closes", "count", [leg["unexpectedCloses"] for leg in bandwidth],
-            "sockets closed without the client asking (G-12's target is zero for capacity)")
+            "sockets closed without the client asking (G-4's target is zero for capacity)")
         add("impairment.bandwidth.metered_ms", "ms", [leg["meteredMs"] for leg in bandwidth],
-            "total delay the cap added to frames it forwarded")
-        add("impairment.bandwidth.dropped_frames", "count", [leg["droppedFrames"] for leg in bandwidth],
-            "frames the meter dropped because the path's buffers were full")
+            "total delay the cap added to bytes it forwarded")
     restart = legs("restart")
     if restart:
         add("impairment.restart.reconnect_ms_max", "ms",
-            [max(entry["reconnectMs"] for entry in leg["clients"]) for leg in restart],
-            "healthy Gateway to the slowest of three clients being ready (G-13's target is 10 s)")
-        add("impairment.restart.clients_ready", "count", [len(leg["clients"]) for leg in restart],
-            "clients that reached ready after the restart")
+            [max(entry["reconnectMs"] for entry in leg["clientsAll"]) for leg in restart],
+            "each client's own socket close to that client's ready (G-13's target is 10 s)")
+        add("impairment.restart.downtime_ms", "ms", [leg["downtimeMs"] for leg in restart],
+            "restart requested to the new Gateway answering health, measured by the profiler")
+        add("impairment.restart.clients_ready", "count", [len(leg["clientsAll"]) for leg in restart],
+            "every connected client that reached ready after the restart", better="higher")
         add("impairment.restart.failed_attempts", "count",
-            [sum(1 for entry in leg["clients"] for attempt in entry["attempts"] if not attempt.get("connected"))
-             for leg in restart], "connects refused, or requests refused, during the outage")
+            [sum(1 for entry in leg["clientsAll"] for attempt in entry["attempts"] if not attempt.get("connected"))
+             for leg in restart], "connects refused, or requests refused, while the Gateway was down")
         add("impairment.restart.requests", "count", [len(leg["requests"]) for leg in restart],
-            "requests made by the three clients during the storm")
+            "requests made by the measured clients during the storm")
         add("impairment.restart.requests_over_1s", "count",
             [sum(1 for request in leg["requests"] if request["ms"] > 1_000) for leg in restart],
             "requests slower than 1 s during the storm (G-13's target is zero)")
@@ -1218,8 +1265,12 @@ def run_multi_session(args: argparse.Namespace, results_dir: Path) -> Path:
                     "bandwidth": (result.get("impairment") or {}).get("bandwidth"),
                     "restart": (result.get("impairment") or {}).get("restart"),
                 } for result in results],
-                "gateway_outbound_capacity_records": log_event_count(evidence / "gateway.jsonl",
-                                                                      "connection.outbound-capacity"),
+                # Only the bandwidth legs' own windows: the same record from the priming
+                # phase or another iteration is not this leg's capacity evidence.
+                "gateway_outbound_capacity_records": log_event_count(
+                    evidence / "gateway.jsonl", "connection.outbound-capacity",
+                    [(result["impairment"]["bandwidth"]["startedAtMs"], result["impairment"]["bandwidth"]["endedAtMs"])
+                     for result in results if (result.get("impairment") or {}).get("bandwidth")]),
             },
             "host": args.host_state,
             "prime": prime,
