@@ -184,11 +184,13 @@ actor ScriptedGatewaySocket: GatewaySocketConnection {
         suspendsSend = true
     }
 
-    func releasePing() {
+    func releasePing(throwing error: Error? = nil) {
         suspendsPing = false
         let waiters = pingBarrierWaiters.values
         pingBarrierWaiters.removeAll()
-        for waiter in waiters { waiter.resume() }
+        for waiter in waiters {
+            if let error { waiter.resume(throwing: error) } else { waiter.resume() }
+        }
     }
 
     func releaseSend() {
