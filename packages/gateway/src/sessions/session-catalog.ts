@@ -70,6 +70,15 @@ export const CATALOG_EVENT_DIRECTORY_LIMIT = 64;
  * by reading the folder's own cut this often. */
 export const CATALOG_RECONCILE_INTERVAL_MS = 30 * 60_000;
 
+/** An incomplete pass publishes nothing, so every read refuses retryably until a
+ * pass publishes. A transient reason (a transcript mid-append, a file being
+ * replaced) clears in seconds, so the owner re-reads the folder after this delay
+ * instead of waiting out `CATALOG_RECONCILE_INTERVAL_MS`. The retry is armed at
+ * most `CATALOG_INCOMPLETE_RETRY_ATTEMPTS` times in a row: a catalog that stays
+ * unreadable keeps the backstop's cadence rather than a scan loop. */
+export const CATALOG_INCOMPLETE_RETRY_MS = 2_000;
+export const CATALOG_INCOMPLETE_RETRY_ATTEMPTS = 3;
+
 /** How soon a watcher that could not start is tried again: a root that is
  * missing now (a fresh installation, a folder being moved back) is watched as
  * soon as it exists instead of at the next reconciliation. */
@@ -123,12 +132,20 @@ export interface SessionCatalogIdentity {
   mtimeMs: number;
 }
 
-/** One complete structural cut of the canonical catalog. A scan is only a path
- * set: every row is rebuilt from its canonical file through the durable index,
- * so an incomplete cut is never membership evidence. */
+/** One structural cut of the canonical catalog. A scan is only a path set:
+ * every row is rebuilt from its canonical file through the durable index, so
+ * an incomplete cut is never membership evidence.
+ *
+ * `complete` describes the traversal: it saw the whole folder. A canonical file
+ * the traversal found whose own header could not be read is listed in
+ * `unproven` instead, and is not membership evidence either: the owner keeps
+ * whatever row it already had for it and adds none, while every other file in
+ * the same cut is still published. */
+
 export interface SessionCatalogScan {
   complete: boolean;
   candidates: readonly SessionCatalogCandidate[];
+  unproven?: readonly string[];
 }
 
 /** Why the folder watcher is not observing the catalog. `error` is a watcher
@@ -309,13 +326,24 @@ export class SessionCatalog {
    * load or reconcile) that a change made stale. Anything else — a shutdown
    * before the load, a load that was interrupted, a partial scan — is not
    * membership, and writing it would erase rows the next startup would then
-   * have to re-parse every transcript to rebuild. */
+   * have to re-parse every transcript to rebuild. The same flag is the one
+   * answer to whether the published rows are complete membership: a reader that
+   * prunes against them and a recoverer that treats an absent row as a removed
+   * session must both refuse an incomplete cut. */
   private canonicalCut = false;
-  /** True once one complete cut has been verified against the folder, so every
-   * published row's facts were checked against the file itself and not only
-   * loaded from the durable document. A derived reader must not treat a durable
-   * row as proof that a file did not change while the Gateway was down. */
-  private verifiedCut = false;
+  private reconciledCut = false;
+  /** Session IDs whose canonical file this owner read a header for but could not
+   * build a row from, and which it has no published row for. Membership for
+   * them is unknown, so a read must refuse retryably instead of reporting the
+   * session as absent. Refreshed by every pass. */
+  private readonly unprovenIds = new Set<string>();
+  private unknownMembership = false;
+  private incompleteRetryTimer: NodeJS.Timeout | undefined;
+  private incompleteRetryAttempts = 0;
+  private readonly firstPublished: Promise<void>;
+  private publishFirstCut: (() => void) | undefined;
+  private readonly firstReconcileReported: Promise<void>;
+  private reportFirstReconcile: (() => void) | undefined;
   private changeGeneration = 0;
   private durableGeneration = 0;
   private closed = false;
@@ -328,6 +356,68 @@ export class SessionCatalog {
     this.reconcileIntervalMs = options.reconcileIntervalMs ?? CATALOG_RECONCILE_INTERVAL_MS;
     this.backgroundWork = options.backgroundWork ?? backgroundWork;
     this.now = options.now ?? Date.now;
+    this.firstPublished = new Promise((resolve) => { this.publishFirstCut = resolve; });
+    this.firstReconcileReported = new Promise((resolve) => { this.reportFirstReconcile = resolve; });
+  }
+
+  /** True while the published rows come from a complete cut: the durable
+   * document this startup loaded, or a reconcile that saw the whole folder.
+   * False before the first such cut, so a caller that would treat an absent row
+   * as a removed session knows it cannot. This is the reader's fact; it says
+   * nothing about how old the cut is. */
+  hasCompleteCut(): boolean {
+    return this.canonicalCut;
+  }
+
+  /** True only while the rows come from a reconcile that completed in *this*
+   * process over the whole folder. The durable document a startup loaded is a
+   * complete cut for readers, but it lags the folder by up to the persist
+   * debounce, so a caller that would destroy durable records for the rows it
+   * omits — artifact ownership, attention and archive records, Knowledge
+   * coverage — must wait for this instead, and so must a derived reader
+   * (`searchIdentities`) that stamps its own rows with these facts. It is
+   * cleared by an incomplete or failed pass, so a stale document cannot keep
+   * authorizing that work. */
+  hasReconciledCut(): boolean {
+    return this.reconciledCut;
+  }
+
+  /** Apply the row work this owner has already queued and resolve. The
+   * Gateway's own changes reach the index asynchronously at their commit point
+   * (a slot's close, persist, rename or delete), so a reader that finds no row
+   * for a named session waits for that change to land instead of answering from
+   * a cut that predates it. Nothing queued settles immediately. */
+  awaitQueuedChanges(): Promise<void> {
+    return this.lane;
+  }
+
+  /** Session IDs a pass could read a header for but could not publish a row or
+   * keep one for. A caller that would report such an ID as absent must refuse
+   * retryably instead. */
+  unprovenSessionIds(): ReadonlySet<string> {
+    return this.unprovenIds;
+  }
+
+  /** True while the published rows are known to miss a file this owner could not
+   * prove and has no row for. The rows are still served — an unreadable
+   * neighbour must not blind the cut — but an answer of "this session does not
+   * exist" would be a guess, so membership questions refuse retryably. */
+  hasUnknownMembership(): boolean {
+    return this.unknownMembership;
+  }
+
+  /** The first complete cut, however it arrived: the durable rows a startup
+   * loaded (a previous complete cut, already on disk), or the first reconcile
+   * that saw the whole folder. */
+  whenPublished(): Promise<void> {
+    return this.canonicalCut ? Promise.resolve() : this.firstPublished;
+  }
+
+  /** After the first reconcile pass of this process has reported, whatever its
+   * outcome. A destructive caller waits for this instead of failing startup on
+   * a cut that may never arrive, and then checks `hasReconciledCut`. */
+  whenReconciled(): Promise<void> {
+    return this.firstReconcileReported;
   }
 
   /** Every canonical session, ordered by canonical path. */
@@ -341,13 +431,14 @@ export class SessionCatalog {
   }
 
   /** The verified identity of every published row, keyed by session ID, or
-   * undefined while no complete cut has been verified against the folder. A
-   * duplicated ID is omitted: a reader must not resolve it to either file. */
+   * undefined while no cut this process verified against the folder authorizes
+   * them. A duplicated ID is omitted: a reader must not resolve it to either
+   * file. */
   async searchIdentities(): Promise<ReadonlyMap<string, SessionCatalogIdentity> | undefined> {
     // The startup durable load and its reconcile are already in this lane, so
     // one await is a completed cut rather than a second pass.
     await this.lane;
-    if (this.closed || !this.verifiedCut) return undefined;
+    if (this.closed || !this.reconciledCut) return undefined;
     const duplicates = this.duplicateSessionIds();
     const identities = new Map<string, SessionCatalogIdentity>();
     for (const row of this.rowsByPath.values()) {
@@ -380,6 +471,7 @@ export class SessionCatalog {
       this.publishRows(rows, catalogRoot);
       // The document and the rows agree, so this cut is durable as it stands.
       this.canonicalCut = true;
+      this.publishFirstCut?.();
     });
     void this.reconcile();
     void this.ensureWatching();
@@ -431,21 +523,20 @@ export class SessionCatalog {
 
   /** A canonical file whose deletion the Gateway committed. Removal is announced
    * by its owner because an unreadable file proves neither absence nor presence.
-   * The row is dropped in the lane, but the removal is recorded when it is
-   * announced: a reconcile or refresh pass that read the file before this call
-   * must not publish the removed row when it finishes afterwards. The record is
-   * cleared by the removal's own lane work: every pass that read before it has
-   * finished by then, and a pass that starts later captures an epoch at or above
-   * the removal, so the record cannot outlive its one use. */
+   * The row is dropped synchronously: the commit has already removed the file,
+   * and the list-changed event its caller fires right after this call must not
+   * be able to publish a row the owner no longer admits. The removal is recorded
+   * when it is announced: a reconcile or refresh pass that read the file before
+   * this call must not publish the removed row when it finishes afterwards. The
+   * record is cleared by the removal's own lane work: every pass that read before
+   * it has finished by then, and a pass that starts later captures an epoch at or
+   * above the removal, so the record cannot outlive its one use. */
   remove(path: string): void {
     if (this.closed) return;
     const key = resolve(path);
     this.removalGenerations.set(key, (this.removalGeneration += 1));
-    void this.enqueue(async () => {
-      this.removalGenerations.delete(key);
-      if (!this.rowsByPath.delete(key)) return;
-      this.markChanged();
-    });
+    if (this.rowsByPath.delete(key)) this.markChanged();
+    void this.enqueue(async () => { this.removalGenerations.delete(key); });
   }
 
   /** Settle every queued change and durable write, without closing the owner.
@@ -468,6 +559,9 @@ export class SessionCatalog {
 
   async dispose(): Promise<void> {
     this.closed = true;
+    // A destructive caller waiting for the first reconcile must not park on an
+    // owner that will never run one.
+    this.reportFirstReconcile?.();
     this.stopWatching();
     if (this.persistTimer) {
       clearTimeout(this.persistTimer);
@@ -762,6 +856,10 @@ export class SessionCatalog {
     }
     this.unregisterReconcile?.();
     this.unregisterReconcile = undefined;
+    if (this.incompleteRetryTimer) {
+      clearTimeout(this.incompleteRetryTimer);
+      this.incompleteRetryTimer = undefined;
+    }
   }
 
   private async reconcileIndex(): Promise<void> {
@@ -773,6 +871,7 @@ export class SessionCatalog {
     // own work has already consumed it.
     const removalFloor = this.removalGeneration;
     const report = (outcome: SessionCatalogReconcileOutcome["outcome"], files: number, diff?: RowDiff, unproven = 0): void => {
+      this.reportFirstReconcile?.();
       this.options.onReconciled?.({
         outcome,
         files,
@@ -787,32 +886,83 @@ export class SessionCatalog {
     try {
       scan = await this.options.source.scan();
     } catch {
+      this.reconciledCut = false;
       report("failed", 0);
       return;
     }
-    const files = scan.candidates.length;
-    // A cut of a folder that is not there is not membership evidence either: a
-    // root that is missing or unreadable leaves every published row alone, the
-    // way an unreadable candidate does. An empty catalog folder that *is* there
-    // is a real empty cut and publishes nothing.
-    if (!(await this.catalogRootIsDirectory())) {
+    const files = scan.candidates.length + (scan.unproven?.length ?? 0);
+    // A folder that is not there before this owner has published anything is an
+    // empty catalog, not an unreadable one: a fresh installation, or one whose
+    // sessions folder is created with the first session, has no canonical files.
+    // `start()` cannot publish a cut for it either, so refusing would leave every
+    // read and every startup recovery waiting for a cut that never comes. A root
+    // that goes away after this owner published rows is an outage instead: an
+    // absent folder proves no removal, so those rows stay and no destructive
+    // caller may act on them.
+    if (!(await this.catalogRootIsDirectory()) && (this.canonicalCut || this.rowsByPath.size > 0)) {
+      this.reconciledCut = false;
       report("incomplete", files);
       return;
     }
     if (!scan.complete) {
-      // An incomplete cut is never membership evidence: the published rows stay
-      // as they are rather than shrinking to what this pass happened to see.
+      // An incomplete traversal is never membership evidence: the published rows
+      // stay as they are rather than shrinking to what this pass happened to see,
+      // and no destructive caller may act on them.
+      this.reconciledCut = false;
       report("incomplete", files);
       return;
     }
     const reconciled = await this.reconcileRows(scan);
     if (this.closed) return;
+    this.rememberUnprovenIds(scan, reconciled.withoutRow);
+    const unknownMembership = reconciled.withoutRow.length > 0;
+    this.unknownMembership = unknownMembership;
+    if (unknownMembership) {
+      // A file this pass could not prove and has no row for is unknown
+      // membership, not an absent session. Publishing is still safe for readers:
+      // an unreadable neighbour must not blind the whole cut. But nothing may
+      // treat its absence as a removal, so this pass is not a complete cut for
+      // the callers that would drop its records or artifacts, and the owner
+      // re-reads the folder soon in case the reason was transient.
+      this.reconciledCut = false;
+      this.scheduleIncompleteRetry();
+    } else {
+      this.incompleteRetryAttempts = 0;
+      this.reconciledCut = true;
+    }
     const diff = this.publishRows(reconciled.rows, await this.catalogRoot(), removalFloor);
     if (this.closed) return;
     this.canonicalCut = true;
-    this.verifiedCut = true;
+    this.publishFirstCut?.();
     if (diff.added + diff.removed + diff.modified > 0) this.markChanged();
-    report("reconciled", files, diff, reconciled.unproven);
+    report(unknownMembership ? "incomplete" : "reconciled", files, diff, reconciled.unproven.length);
+  }
+
+  /** The IDs of the candidates this pass could read a header for but published
+   * no row for and kept none. Their records must survive: a caller that would
+   * treat the ID as absent has to refuse retryably instead. */
+  private rememberUnprovenIds(scan: SessionCatalogScan, withoutRow: readonly string[]): void {
+    this.unprovenIds.clear();
+    if (withoutRow.length === 0) return;
+    const missing = new Set(withoutRow.map((path) => resolve(path)));
+    for (const candidate of scan.candidates) {
+      if (missing.has(resolve(candidate.path))) this.unprovenIds.add(candidate.id);
+    }
+  }
+
+  /** Re-read the folder once after a bounded delay when a pass was incomplete,
+   * so a transient unprovable file costs seconds of refusal rather than the
+   * reconcile interval. A catalog that stays unreadable keeps the backstop's
+   * cadence instead of a scan loop. */
+  private scheduleIncompleteRetry(): void {
+    if (this.closed || this.incompleteRetryTimer) return;
+    if (this.incompleteRetryAttempts >= CATALOG_INCOMPLETE_RETRY_ATTEMPTS) return;
+    this.incompleteRetryAttempts += 1;
+    this.incompleteRetryTimer = setTimeout(() => {
+      this.incompleteRetryTimer = undefined;
+      void this.reconcile();
+    }, CATALOG_INCOMPLETE_RETRY_MS);
+    this.incompleteRetryTimer.unref();
   }
 
   /** One complete cut, resolved per file: durable rows are reused where their
@@ -820,7 +970,7 @@ export class SessionCatalog {
    * already published instead of shrinking the catalog to what it could read. */
   private async reconcileRows(
     scan: SessionCatalogScan,
-  ): Promise<{ rows: CatalogMetadataIndexRow[]; unproven: number }> {
+  ): Promise<{ rows: CatalogMetadataIndexRow[]; unproven: string[]; withoutRow: string[] }> {
     const reconciled = await this.options.index.reconcile(
       this.options.catalogRoot(),
       scan.candidates,
@@ -836,13 +986,26 @@ export class SessionCatalog {
         return this.closed;
       },
     );
-    if (!reconciled) return this.rebuild(scan);
-    const rows: CatalogMetadataIndexRow[] = [...reconciled.rows];
-    for (const unproven of reconciled.unproven) {
-      const retained = this.rowsByPath.get(resolve(unproven));
-      if (retained) rows.push(retained);
+    const rebuilt = reconciled ? undefined : await this.rebuild(scan);
+    const rows = reconciled ? [...reconciled.rows] : [...rebuilt!.rows];
+    // A candidate whose row could not be built is unproven whether or not a
+    // durable document was available: dropping the rebuild's own list would
+    // report `unproven: 0` for a pass that proved nothing about that file.
+    const unproven = reconciled ? [...reconciled.unproven] : [...rebuilt!.unproven];
+    // A path whose header the traversal could not read is not a candidate at
+    // all, so it is not in the index's own unproven list and must be added here.
+    for (const path of scan.unproven ?? []) {
+      const key = resolve(path);
+      if (!unproven.includes(key)) unproven.push(key);
     }
-    return { rows, unproven: reconciled.unproven.length };
+    const withoutRow: string[] = [];
+    for (const path of unproven) {
+      const key = resolve(path);
+      const retained = this.rowsByPath.get(key);
+      if (retained) rows.push(retained);
+      else withoutRow.push(key);
+    }
+    return { rows, unproven, withoutRow };
   }
 
   private async refreshPath(canonicalPath: string, fromWatcher: boolean): Promise<boolean> {
@@ -904,13 +1067,16 @@ export class SessionCatalog {
    * unprovable file proves neither presence nor absence. */
   private async rebuild(
     scan: SessionCatalogScan,
-  ): Promise<{ rows: CatalogMetadataIndexRow[]; unproven: number }> {
+  ): Promise<{ rows: CatalogMetadataIndexRow[]; unproven: string[] }> {
     const rows: CatalogMetadataIndexRow[] = [];
-    let unproven = 0;
+    const unproven: string[] = [];
     for (const candidate of scan.candidates) {
       // Shutdown must not wait behind one startup parse per file: the pass stops
       // between files and publishes nothing it could not finish.
-      if (this.closed) return { rows: [], unproven: scan.candidates.length };
+      if (this.closed) {
+        unproven.push(...scan.candidates.map((pending) => resolve(pending.path)));
+        return { rows: [], unproven };
+      }
       // One file is one bounded batch, and the scheduler's pause gates the
       // next: a first cut that has no durable rows to reuse parses every body at
       // scale, and none of that may hold the loop while a request waits.
@@ -918,8 +1084,9 @@ export class SessionCatalog {
       const summary = await this.options.source.summaryFor(candidate.path);
       const row = summary ? await this.options.index.entryFromSummary(summary) : undefined;
       if (!row || row.id !== candidate.id || row.cwd !== candidate.cwd) {
-        unproven += 1;
-        const retained = this.rowsByPath.get(resolve(candidate.path));
+        const key = resolve(candidate.path);
+        if (!unproven.includes(key)) unproven.push(key);
+        const retained = this.rowsByPath.get(key);
         if (retained) rows.push(retained);
         continue;
       }

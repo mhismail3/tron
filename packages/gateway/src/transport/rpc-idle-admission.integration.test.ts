@@ -55,7 +55,7 @@ interface Fixture {
   root: string;
   faux: ReturnType<typeof fauxProvider>;
   connect(): Promise<Client>;
-  coldSession(label: string): { id: string; file: string; entryId: string };
+  coldSession(label: string): Promise<{ id: string; file: string; entryId: string }>;
   snapshot(client: Client, sessionId: string): Promise<any>;
   openSession(client: Client, sessionId: string): Promise<any>;
 }
@@ -154,13 +154,20 @@ async function fixture(options: { tokensPerSecond?: number } = {}): Promise<Fixt
     };
   };
   /** A canonical, persisted session with no live runtime, created the way the
-   * pinned SDK creates one. */
-  const coldSession = (label: string) => {
+   * pinned SDK creates one. The fixture writes the file itself, so it forces the
+   * catalog owner's cut: a read that lands before the owner has indexed it
+   * refuses retryably, and no reader walks the folder (G-1c). */
+  const coldSession = async (label: string) => {
     const manager = SessionManager.create(cwd, sessionDirectory);
     manager.appendMessage(fauxAssistantMessage(`${label} canonical response`));
     const file = manager.getSessionFile()!;
     const entry = SessionManager.open(file).getBranch().at(-1) as { id?: string } | undefined;
     if (typeof entry?.id !== "string") throw new Error("fixture session has no canonical branch entry");
+    const owner = (registry as unknown as {
+      sessionCatalog: { reconcile(): Promise<void>; settled(): Promise<void> };
+    }).sessionCatalog;
+    await owner.reconcile();
+    await owner.settled();
     return { id: manager.getSessionId(), file, entryId: entry.id };
   };
   /** Authoritative live snapshot: `revision` and `runtimeGeneration` are the
@@ -190,7 +197,7 @@ describe("receipt-backed mutations against their own session work entry", () => 
   it("admits every idle-checked mutation on an idle session", async () => {
     const f = await fixture();
     const client = await f.connect();
-    const session = f.coldSession("idle-mutations");
+    const session = await f.coldSession("idle-mutations");
     const opened = await f.openSession(client, session.id);
 
     const accepted: string[] = [];
@@ -245,7 +252,7 @@ describe("receipt-backed mutations against their own session work entry", () => 
   it("still rejects a mutation while the session is running or another mutation holds it", async () => {
     const f = await fixture({ tokensPerSecond: 4 });
     const client = await f.connect();
-    const session = f.coldSession("busy-session");
+    const session = await f.coldSession("busy-session");
     await f.openSession(client, session.id);
 
     // A running prompt is not the caller's own entry, so idle admission must

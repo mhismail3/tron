@@ -4,6 +4,7 @@ import { join } from "node:path";
 import { describe, expect, it, vi } from "vitest";
 import { AutomationScheduler, AutomationAdmissionError, type AutomationExecutor, type AutomationExecutionHandle, type AutomationExecutionResult } from "./automation-scheduler.js";
 import { AutomationStore } from "./automation-store.js";
+import { GatewayError } from "../errors.js";
 
 async function eventually(assertion: () => void): Promise<void> {
   for (let attempt = 0; attempt < 200; attempt += 1) {
@@ -441,6 +442,55 @@ describe("AutomationScheduler", () => {
 
     scheduler.start();
     await eventually(() => expect(setTimer).toHaveBeenCalledWith(expect.any(Function), 30_000));
+  });
+
+  // G-1c/B2: the catalog owner may not have published a cut when recovery runs
+  // at startup. That is a deferral, never a terminal outcome: committing one
+  // would clear the run marker without evidence.
+  it("defers a run's recovery while the session catalog is not ready", async () => {
+    const now = Date.parse("2026-01-01T00:10:30Z");
+    const root = await mkdtemp(join(tmpdir(), "tron-automation-recovery-deferred-"));
+    const store = new AutomationStore(root, { now: () => now });
+    await store.initialize();
+    const record = await store.create({
+      name: "Review", activation: "enabled", target: { kind: "existingSession", sessionId: "session-one" },
+      trigger: { kind: "once", at: "2026-01-01T00:10:00.000Z" },
+      action: { kind: "sessionPrompt", text: "Review" }, provenance: { kind: "local" },
+    });
+    const runId = "10000000-0000-4000-8000-000000000011";
+    await store.mutateState(record.id, (current) => ({
+      ...current,
+      currentRun: {
+        runId, occurrenceId: "BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB", automationRevision: current.revision,
+        scheduledFor: "2026-01-01T00:10:00.000Z", triggerSnapshot: current.trigger, actionSnapshot: current.action, targetSnapshot: current.target, executionSessionId: "session-one",
+        state: "running", createdAt: "2026-01-01T00:10:00.000Z", startedAt: "2026-01-01T00:10:01.000Z",
+        preAdmissionAttemptCount: 0, operationId: `automation:${runId}`,
+      },
+    }));
+    const executor: AutomationExecutor = {
+      start: vi.fn(async () => { throw new Error("must not start"); }),
+      recover: vi.fn(async () => { throw new GatewayError(
+        "busy", "The session catalog has not been read yet", true, undefined, "catalog_not_ready",
+      ); }),
+      acknowledgeRecovery: vi.fn(async () => {}),
+    };
+    const diagnostics: Array<[string, string]> = [];
+    const scheduler = new AutomationScheduler(store, executor, {
+      now: () => now,
+      hostEpoch: "epoch-three",
+      onDiagnostic: (message, automationId) => diagnostics.push([message, automationId]),
+    });
+
+    await scheduler.recover();
+
+    // Nothing terminal is committed and the run stays recoverable.
+    const after = store.get(record.id);
+    expect(after.currentRun).toMatchObject({ runId, state: "running" });
+    expect(after.lastRun).toBeUndefined();
+    expect(after.activation).toBe("enabled");
+    expect(executor.acknowledgeRecovery).not.toHaveBeenCalled();
+    expect(diagnostics).toMatchObject([[expect.stringContaining("deferred"), record.id]]);
+    expect(executor.start).not.toHaveBeenCalled();
   });
 
   it("does not replay an admitted run when recovery has no terminal proof", async () => {

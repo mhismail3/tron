@@ -3,6 +3,7 @@ import { join } from "node:path";
 import { existsSync } from "node:fs";
 import { ModelRuntime, SettingsManager } from "@earendil-works/pi-coding-agent";
 import { loadConfig } from "./config.js";
+import { GatewayError } from "./errors.js";
 import { DeviceStore } from "./security/device-store.js";
 import { TrustService } from "./admin/trust-service.js";
 import { FilesystemService } from "./machine/filesystem-service.js";
@@ -657,7 +658,15 @@ await transport.listen(async () => {
     if (!stopping) logger.log("warning", "Session search warm-up failed; lexical search will recover on demand", { event: "session-search.warm-failed", source: "search", error });
   });
   transport.setStartupPhase("automation-recovery");
-  await automations.initialize();
+  await automations.initialize().catch((error) => {
+    // The owner may not have published a cut yet (a large catalog with no
+    // durable document). Automation targets are re-checked on the next start;
+    // failing startup here would turn a slow first read into a crash-loop.
+    if (!(error instanceof GatewayError) || !error.retryable || error.diagnosticReason !== "catalog_not_ready") throw error;
+    logger.log("warning", "Automation recovery deferred: the session catalog is not ready", {
+      event: "automation.recovery-deferred", source: "automations", reason: error.diagnosticReason,
+    });
+  });
   startupCheckpoint("automation-recovery");
   transport.setStartupPhase("storage-warming");
   await sessions.initializeBlobStorage();

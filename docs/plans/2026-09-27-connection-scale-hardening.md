@@ -593,7 +593,7 @@ rows are in priority order.
 | C-1 | Done | Projection work never blocks or parks reconnect; parked episodes self-resume | O-4, O-6b | orchestrator-dispatched deepseek-worker, 2026-09-28 (review round addressed; E2E re-run passed, run `20260928T193255Z-run.E6rrDl`) |
 | G-1a | Done | Catalog owner and in-memory index fed by Gateway-owned changes | O-3, O-6a | orchestrator-dispatched deepseek-worker, 2026-09-28 |
 | G-1b | Done | Filesystem watcher and background reconciliation for external writers | G-1a | orchestrator-dispatched deepseek-worker, 2026-09-28 (the O-6a confirmation of the Done-when is owed by the orchestrator) |
-| G-1c | Claimed | Move every catalog reader to the index; delete request-path walks and the full-parse fallback | G-1b | orchestrator-dispatched deepseek-worker, 2026-09-28 |
+| G-1c | Done | Move every catalog reader to the index; delete request-path walks and the full-parse fallback | G-1b | merged `hardening/integration`; `verifiedCut` unified into `reconciledCut`, G-9 keeps the periodic reconcile, `searchIdentities()` reads the index rows. Owning suite 237/237, merge gate 363/363; O-6a p99 is the orchestrator's quiet-host run |
 | G-1d | Ready | Replace the catalog wording in `connection-resilience.md` with the index contract (D-3) | G-1c | |
 | G-3 | Done | No audience, no projection: build and serialize snapshots only for subscribers | O-5, O-6a | orchestrator-dispatched deepseek-worker, 2026-09-28 (branch `hardening/g-3`; review round 1 addressed; CPU comparison and O-5's cross-check owed to the orchestrator) |
 | G-3a | Ready | Streaming progress for a session with no subscriber is still projected (`projectMessage` plus `safeJson` of the full message, up to once per 150 ms each); see G-3 handoff and review nit 8 | G-3 | |
@@ -7737,7 +7737,6 @@ wait).
   — pass. The disconnecting shape is read from the code and the contract
   constants (phone liveness retirement, the 25 s heartbeat tick and the close
   path), not reproduced: O-2's blackhole test uses a client that never gives up.
-
 ### T-2 · Done · 2026-09-28 · orchestrator-dispatched deepseek-worker (branch `hardening/t-2`)
 
 - Result: no hosted-test watchdog kills a synchronously blocked main thread. A
@@ -8526,3 +8525,433 @@ wait).
   service seam with a stubbed registry, not yet end-to-end with a real registry
   and a real navigation. The budget check's stall claim has no timing assertion:
   at test-sized indexes the commit's fsync floor exceeds the whole-index scan.
+
+### G-1c · Claimed · 2026-09-28 · orchestrator-dispatched deepseek-worker (branch `hardening/g-1c`)
+
+- Result: the source-level slice is implemented and compiles; the owning suite is
+  **red**, so this is a deliberate WIP commit for the resumed session, not a
+  mergeable one. Budget (90 min) ran out inside the test-rework slice.
+- Landed (runtime-registry.ts, -698/+165 lines):
+  - `catalogIndex(scope)` is the request path's only membership source: one
+    immutable in-memory cut of the owner's rows, user scope dropping `delegated`
+    rows, ambiguity from `duplicateSessionIds()` plus live-only collisions.
+  - `materializeCatalogSnapshot` (list/`catalog`/`pageSource`/search cut) and
+    `catalogAcquisition` (open, attention, automation, `workspaceForSession`,
+    `requirePersistedUserSession`, archive, delete) read that cut and do no I/O.
+  - `attentionEntryStillAdmitted` and the cold-open fence check the index plus
+    the target file's own stat and header only; `attentionLiveOnlyStillAdmitted`
+    asks the index; `sessionIDsForStorageMaintenance` returns indexed IDs plus
+    live slots; delete and archive take the index for membership and re-prove the
+    one file at their commit.
+  - Startup recovery (`recoverCanonicalAttention`, `recoverKnowledgeObservation`)
+    reconciles against the owner's rows.
+  - Readers join the owner's first cut (`awaitCatalogCut`, resolved by the
+    owner's first `catalog.reconciled`/`failed`/`incomplete` report) so a read
+    adds no walk of its own.
+  - Deleted: `validatedStructuralIndex`, `loadDurableCatalogIndex`,
+    `scanCatalogMaterialization`, `sharedCatalogStructureEvidence`,
+    `sharedCatalogSessionInfos`, `sessionInfos`, `withCatalogEvidence`,
+    `catalogIdentitiesForScope`, `catalogFactsDigest`,
+    `catalogEvidenceMatchesScope`, `hasRelevantUnstableFiles`, `sameStringSet`,
+    `dynamicAmbiguousSessionIDs`, `diskAmbiguousSessionIDs*`,
+    `catalogEvidenceMatchesIndexedUserScope`, `removeIndexedCatalogFile`,
+    `fallbackCatalogAcquisition`, `sdkCatalogIdentityFingerprint`,
+    `buildCatalogAcquisition(evidence)`, `publishCatalogAcquisition`,
+    `resolveCatalogAcquisition` and the acquisition promise/mutex/admission
+    cache, the cold-open final validation walk, and the `CatalogStructuralIndex`
+    and `CatalogAcquisitionAdmission` types with their digest fields.
+  - `catalogStructureEvidence()` is now the owner's scan seam only: the one
+    counted whole-folder walk.
+- Evidence: `npx tsc --noEmit -p .` clean; `npm run build` clean.
+  `catalog-discovery.test.ts` 2/2 and `session-catalog.test.ts` 29/29 pass
+  (the one run that paired them failed two `session-catalog.ts` cases under
+  parallel-file load; they pass alone, unchanged by this branch).
+- Red: `runtime-registry.integration.test.ts` **187 passed / 70 failed / 257**
+  (JSON report at `/tmp/g1c-full.json`). The failures are the rework this row
+  still owes, in five clusters:
+  1. ~20 cases spy on removed internals (`sessionInfos`,
+     `validatedStructuralIndex`, `fallbackCatalogAcquisition`,
+     `sharedCatalogStructureEvidence`). Their intent survives and each needs the
+     index-shaped assertion (read performs no walk; the owner's first cut is the
+     only walk).
+  2. Reader-path capacity/fallback/stability cases (`bounds recursive catalog
+     directories…`, `initializes storage without requiring catalog
+     presentation…`, `bounds discovered session count and bytes…`, `caps
+     canonical session path normalization concurrency`, the `fallback`/`unstable`
+     families) asserted `busy`/`catalog_changed` from a reader walk. Capacity and
+     instability are now the owner scan's and belong on `catalogReconciled`/
+     `reconcile()` expectations.
+  3. Cases that inject canonical files after `initialize()` need the
+     `settleCatalog` helper (now: force one owner `reconcile()` then `settled()`),
+     which is in this WIP.
+  4. `counts a walk a request waited on apart from background catalog walks`
+     must invert into this row's own evidence: a request-path walk count of
+     **0** while the owner's cut is joined.
+  5. Duplicate/delegated-topology semantics: `int8`-free cases such as
+     `recognizes only the exact delegated-session producer topology`, `keeps a
+     child mutation-protected when its parent ID is duplicated` and
+     `admits scaled short headers within the aggregate validation budget` show
+     the index cut currently publishes rows a whole-tree header pass would have
+     withheld (a `delegated`/`duplicate` mismatch to close in the cut, not in the
+     test).
+- Still owed after the suite is green: delete `CatalogDiscovery.sessionInfos`,
+  `buildCatalogSessionInfos` and the `maximumRetainedBytes` budget that only
+  those walks used, with `catalog-discovery.test.ts` and the integration case at
+  `runtime-registry.integration.test.ts:3483` pruned; the O-5 request-path-walk
+  counter evidence and the O-6a smoke (`--no-build`, `--mixed-seconds 30`); the
+  `session.list` p99 number (orchestrator's quiet-host run); and G-1d's doc
+  wording.
+- Deviations: readers join the owner's first cut rather than serving a
+  pre-reconcile durable cut ("marked stale in the span"); that keeps a restart's
+  first list correct and is recorded here for review.
+
+#### G-1c · review round 1 response · 2026-09-28 · orchestrator-dispatched deepseek-worker
+
+- Fixed (all reproduced on the built branch):
+  - Blocker 1: `SessionCatalog.hasCompleteCut()`/`whenPublished()`; storage
+    maintenance throws retryable `busy`, attention/archive prune and Knowledge
+    recovery skip, when the published rows are not a complete cut. Probe
+    `probe.mjs empty`: the read now fails retryably after the first-cut deadline
+    instead of pruning/pruning-adjacent work on an empty index.
+  - Major 3: `catalogAcquisition()` joins the owner's cut, so a cold open,
+    attention, automation and workspace read cannot miss a row the first
+    reconcile has not published. `probe-early.mjs`: acquire right after
+    `initialize()` is now ok.
+  - Major 4: `SessionCatalog.remove()` drops the row synchronously (commit
+    already removed the file; the removal record still fences in-flight passes),
+    so the list-changed event cannot republish a deleted row. `probe-delete.mjs`:
+    list right after delete no longer contains the deleted ID.
+  - Major 5 (partial): the cut wait resolves in a `finally` and is bounded by
+    `CATALOG_FIRST_CUT_DEADLINE_MS` with a retryable `busy`.
+  - Blocker 2 (partial): `CatalogDiscovery.sessionInfos`,
+    `buildCatalogSessionInfos` and the `maximumRetainedBytes` budget are deleted;
+    `catalog-discovery.test.ts` and the index-vs-full-scan case read one file at
+    a time instead; the walk-counter case now asserts zero request-path walks.
+- Not done: the owning integration suite is still red (measured 191/257 pass,
+  66 failed; was 186/257 pass, 71 failed — the full-scan fixture case below
+  passes individually after its fix, so 192/65) — the ~20 cases spying on
+  removed internals, the reader
+  capacity/fallback families, and the cluster-5 index/delegated-topology
+  mismatches listed above still need the rework; no O-5/O-6a evidence yet.
+- Residual: with a header-less `.jsonl` in the folder the owner still never
+  publishes a complete cut, so reads fail retryably rather than serving the
+  readable rows. That rule is the scan's (G-1b owner) and needs an orchestrator
+  decision: an unreadable file should not make the folder's cut incomplete.
+
+### G-1c · Claimed · 2026-09-28 · orchestrator-dispatched deepseek-worker, review round 2 (branch `hardening/g-1c`)
+
+- Result: all three review blockers are fixed at the source; the listed check
+  `session-archive.integration.test.ts` is **41/41** (was 4/41). The owning
+  suite is still red, so the row stays Claimed.
+- Fixes (commit `5d38ee986`, plus the cut rule below):
+  1. An empty or missing sessions root publishes an empty complete cut when this
+     owner has published nothing yet (a fresh install), so startup recovery and
+     the first read no longer wait for a cut that never comes; a root that goes
+     away after rows were published stays an outage (rows kept, `incomplete`).
+     A file whose header cannot be read is `unprovenPaths` in the cut: its prior
+     row is kept, no row is added, every other file still publishes, and
+     `catalog.reconciled` counts it (the cut's `complete` now means the traversal
+     only).
+  2. `hasReconciledCut()` is a second fact: only a reconcile completed in this
+     process authorizes destructive work. Storage maintenance throws retryable
+     busy, attention/archive prune and Knowledge recovery keep their records, and
+     an incomplete or failed pass clears the flag. The durable document still
+     serves reads (`hasCompleteCut`).
+  3. A read with no published cut fails fast with its own retryable reason
+     `catalog_not_ready` (row added to `observability.md`), no 20 s park, and
+     startup recovery waits for the in-process pass (`whenReconciled()`) instead
+     of failing startup on it.
+- Test rework landed: `initializeRegistry` awaits the owner's first cut at all
+  86 registry-init sites, 8 inline readers initialize, the archive fixture waits
+  for the first cut and settles the owner after it writes canonical files itself
+  (`coldSession`/`rawSession` are async; a `settle()` helper forces the owner's
+  cut, which is the deterministic form of waiting the watcher out).
+- Evidence: `npx tsc --noEmit -p .` clean; `npm run build` clean;
+  `session-archive.integration.test.ts` **41/41**;
+  `catalog-discovery.test.ts` + `session-catalog.test.ts` **31/31**;
+  `runtime-registry.integration.test.ts` **197 passed / 60 failed / 257**
+  (`/tmp/g1c-r6.json`).
+- Remaining owning-suite work, by cluster:
+  - 33 cases spy on removed internals (`sessionInfos`,
+    `fallbackCatalogAcquisition`, `validatedStructuralIndex`,
+    `sharedCatalogStructureEvidence`) or drive a race inside the deleted
+    acquisition/publication machinery. Each needs a behaviour assertion or the
+    race reformulated at the commit fence (index claimant + target-file stat and
+    header). The symlink-swap, same-inode rewrite, identity/duplicate and delete
+    gap cases are the ones the reviewer named.
+  - 27 behaviour cases: capacity/fallback/instability families belong on the
+    owner (`catalogReconciled` outcome, retryable `catalog_not_ready`) rather
+    than a reader walk; the delegated-topology and duplicate-quarantine cases
+    write canonical files after `initialize()` and need `settleCatalog`; the two
+    Knowledge-recovery cases named "without a warmed catalog" now need the owner's
+    cut by design (decision 2).
+  - Cases writing canonical files after `initialize()` need `settleCatalog`
+    (already the helper's shape: force `reconcile()` then `settled()`).
+- Still owed: the O-5 zero-request-path-walk evidence and the O-6a smoke; the
+  `session.list` p99 (orchestrator's quiet-host run); G-1d's doc wording.
+- Deviations: the missing-root rule above is narrower than the reviewed decision
+  (fresh install publishes empty; a root away after rows exist keeps them and
+  reports `incomplete`) because an absent root proves no removal and the existing
+  G-1a case pins that. `catalog_not_ready` is the new reason for a read before
+  the first cut.
+
+### G-1c · Claimed · 2026-09-28 · orchestrator-dispatched deepseek-worker, review round 3 (branch `hardening/g-1c`)
+
+- Result: review-2's blockers stay fixed; the owning suite is 213/232 (review
+  time: 192/257 with 65 failures; 21 obsolete cases deleted since).
+  `session-archive.integration.test.ts` 41/41 and `catalog-discovery.test.ts` +
+  `session-catalog.test.ts` 31/31. Row stays Claimed: 18 cases remain.
+- Landed (`371306fb7`, `89c62abc2`, `1f5ce404d`): test seams `catalogWalks()`
+  (the owner's one whole-folder walk) and `catalogHeaderReads()`; a read now
+  asserts it adds no walk and reads only the file it admits. Rewritten to the new
+  contract: list/cold-open/hot-re-acquire, restart index, unprovable artifact,
+  unrelated malformed header, incomplete-pass contract, duplicate/removal
+  membership, the Knowledge recovery matrix (`incomplete` mode becomes decision
+  1's unprovable neighbour), parallel delegated appends, artifact ownership,
+  user-vs-all scope, duplicate quarantine beside a contradictory child.
+- Deleted 21 cases whose subject no longer exists (one line each, same commit):
+  durable-index materialization and publication gaps (retires a durable load,
+  cannot republish, rejects a mutation in the final publication gap, fails busy
+  after a second unstable materialization, never stamps captured stale fields,
+  keeps cold acquisition independent of mutable metadata, acquires from header
+  evidence while materialization is suspended, serializes an all-scope
+  materialization, lets user discovery finish while all-scope is blocked, retires
+  viewer capacity during one shared wait); fallback SDK acquisition and its
+  retries (coalesces concurrent fallback scans, revalidates oversized SDK
+  identities, retries lightweight acquisition, fails busy after a second
+  lightweight invalidation, coalesces acquisition successors); shared
+  request-path walks and caches (shares one successor header walk, keeps a
+  live-owned index cut during reconciliation, rejects an inode replacement that
+  races durable-index reconciliation, keeps a warmed disk index, retains the
+  stable user cut, isolates an unfinished child append).
+- Remaining 18: reader-capacity family (`bounds recursive catalog directories`,
+  `bounds discovered session count and bytes`, `caps canonical session path
+  normalization concurrency`, `bounds validation reads and retained acquisition
+  evidence`, `reserves a deterministic aggregate header-read budget`,
+  `initializes storage without requiring catalog presentation metadata`) → assert
+  the owner's `catalogReconciled` outcome plus a retryable `catalog_not_ready`
+  read; commit-fence races (`rejects identity, cwd, or duplicate mutation` — its
+  duplicate arm writes the claimant inside the race; `does not follow a session
+  path replaced by a symlink during delete`; `revalidates parent creation,
+  duplicate identity, and topology changes in the delete gap`; `fails closed when
+  multiple canonical files claim one session ID`) → drive at the new fence;
+  unstable-file rule (`rejects an unowned append that races durable-index
+  reconciliation`, `fails closed with retryable busy when an unowned canonical
+  file ends in a partial line`) → decision 1 answers with the last provable row,
+  not `busy`; and the live-only/identity group (`projects empty live sessions
+  until deletion, persistence, eviction, or restart`, `advances user catalog
+  identity when canonical membership changes beside delegated rows`, `refreshes
+  user metadata and duplicate quarantine after a scoped cut is warm`, `reclaims
+  reloadable idle runtimes under pressure`, `bounds cold catalog previews`
+  (fixture Buffer/string fault), `discovers oversized active lifecycle headers`).
+- Evidence: `npx tsc --noEmit -p .` clean; `npm run build` clean; registry suite
+  213/232 (`/tmp/g1c-r13.json`).
+- Still owed: the O-5 zero-request-path-walk evidence, the O-6a smoke and the
+  `session.list` p99 (orchestrator's quiet-host run); G-1d's doc wording.
+
+
+### G-1c · Done · 2026-09-28 · orchestrator-dispatched deepseek-worker, review round 4 (branch `hardening/g-1c`)
+
+- Result: **green**. `runtime-registry.integration.test.ts` 232/232 (review
+  time: 192/257 with 65 failures), `session-archive.integration.test.ts` 41/41,
+  `session-catalog.test.ts` + `catalog-discovery.test.ts` +
+  `catalog-metadata-index.test.ts` 91/91. Only the request path's real work
+  remains: `session.list` p99 and the O-6a quiet-host run are the orchestrator's.
+- Commits this round: `371306fb7` (removed-internals rework + 21 deletions),
+  `89c62abc2`, `1f5ce404d`, `c8c97145f` (finish the rework: owner outcomes,
+  commit-fence races, T-1 fix, row-facts projection digest), `d187aa3c8`
+  (three fixtures wait for the owner's cut), plus round-3 source commits
+  `5d38ee986`, `cdb2f2f77`.
+- Zero-request-path-walk evidence (Done-when, O-5 counter): the case "counts no
+  request-path walk while the reader joins the owner's cut" runs a
+  `session.delete` inside a `RequestSpan` with `resources.recordCatalogWalk`
+  recorded and asserts **no** request-path walk at all while the owner's own
+  passes stay background (`/tmp/g1c-r17.json`). T-1's race case
+  ("discovers oversized active lifecycle headers…") uses the documented fix
+  (`discoverExtensionArtifactsUntil`).
+- Guarantees kept by the 21 deletions (each deleted case → the case that now
+  holds, or the reason the subject is gone):
+  1. "keeps a live-owned index cut when the owner appends during reconciliation"
+     → session-catalog.test.ts's append-to-row cases + "resolves a list, a cold
+     open and a hot re-acquire…" (the reader no longer loads the durable index).
+  2. "rejects an inode replacement that races durable-index reconciliation"
+     → "reads only the admitted file's own header…" + the delete/attention fences.
+  3. "retires a durable load invalidated before publication and falls back to a
+     fresh canonical cut" → "keeps the published rows through an incomplete pass
+     and authorizes nothing destructive" (the load/fallback path is deleted).
+  4. "keeps a warmed disk index across live-only create and delete" → "projects
+     empty live sessions until deletion, persistence, eviction, or restart" +
+     "retains persisted, ambiguous, and live-only artifact owners…".
+  5. "coalesces concurrent fallback acquisition scans for one catalog generation"
+     and 6. "revalidates oversized SDK identities after fallback resolution"
+     → "falls back to stable SDK discovery…" is gone; membership is the index
+     ("keeps an unrelated malformed header out of the cut without a fallback
+     scan").
+  7. "retries lightweight acquisition without stamping invalidated evidence
+     current" and 8. "fails busy after a second lightweight acquisition
+     invalidation" → the lightweight/fallback loop is deleted; the generation
+     fence remains and is covered by "rejects identity, cwd, or duplicate
+     mutation before runtime creation".
+  9. "cannot republish an acquisition invalidated during full materialization"
+     and 10. "rejects a mutation in the final full-catalog publication gap"
+     → no publication step remains; the slot-publication generation fence is the
+     same case as 7.
+  11. "fails busy without publishing after a second unstable full materialization"
+     → "keeps the last provable row when an unowned canonical file ends in a
+     partial line" (decision 1's rule replaces the busy).
+  12. "retains the stable user cut during a real child-session write" → "advances
+     user catalog identity when canonical membership changes beside delegated
+     rows".
+  13. "isolates an unfinished child append from unrelated catalog and cold-open
+     reads" → "keeps an unrelated malformed header out of the cut…" and "keeps
+     an unprovable artifact out of the index…".
+  14. "shares one successor header walk across concurrent post-read validations"
+     → "caps canonical session path normalization concurrency" (the owner's one
+     pass) + "reads only the admitted file's own header…".
+  15. "keeps cold acquisition independent of mutable catalog metadata"
+     → "uses only bounded header evidence…" is deleted with
+     `validatedStructuralIndex`; cold acquisition reads the owner's rows by
+     design.
+  16. "coalesces acquisition successors across invalidations until prior physical
+     work settles" and 17. "lets user discovery finish while an all-scope scan
+     remains blocked and fails" → acquisition has no physical work: "resolves a
+     list, a cold open and a hot re-acquire…".
+  18. "retires viewer capacity during one shared catalog wait without multiplying
+     physical scans" and 19. "serializes an all-scope materialization behind an
+     active user flight" → a read either serves the published cut or refuses
+     retryably ("bounds recursive catalog directories…").
+  20. "acquires from header evidence while a full catalog materialization is
+     suspended" → "reads only the admitted file's own header when a cold open
+     has no cached admission".
+  21. "never stamps captured stale catalog fields with a newer summary revision"
+     → the captured-materialization path is deleted; summary revisioning is
+     covered by the attention/summary cases.
+- Production fixes this round beyond the review blockers:
+  - Page-source generations carry a digest of the index-owned row facts
+    (`materializeCatalogSnapshot`), so a row field that changes without moving
+    `listRevision` (an external rename) moves the projection token instead of
+    serving a cached stale page — required by the `projectionToken` contract and
+    covered by "refreshes user metadata and duplicate quarantine after a scoped
+    cut is warm".
+  - `catalog.changed`-driven row changes reach a read only through the owner;
+    tests that write canonical files themselves now settle the owner.
+- Merge gate (branch `hardening/g-1c`): `npx tsc --noEmit -p .` clean;
+  `npm run build` clean; `npx vitest run src/sessions src/transport src/admin
+  src/workspace` **1210 passed / 4 failed / 1214**; all four fail only under the
+  whole-directory load (`recent-model-usage`, `session-catalog`'s ENOTEMPTY
+  cleanup, `transport/logger` rotation, T-1's documented `request-span`
+  `durationMs > 100`) and pass when run as their own file
+  (`session-catalog` + `logger` + `recent-model-usage` 46/46;
+  `request-span` 1/1). `python3 scripts/check-documentation-policy.py` and
+  `scripts/personal-info-guard.sh` pass.
+- Not owed by this row: the O-6a qualification smoke, `session.list` p99 and the
+  G-1d doc wording.
+
+
+### G-1c · Done · 2026-09-28 · review round 5 (branch `hardening/g-1c`)
+
+- B1 (unproven file with no kept row was pruned as deleted): a pass that
+  cannot prove a file and has no row to keep is no longer a complete cut for
+  destructive callers — `hasReconciledCut()` stays false and the pass reports
+  `incomplete` with its unproven count — while the rows it *can* prove are still
+  published (an unreadable neighbour must not blind the reader). The IDs it read
+  are remembered (`unprovenSessionIds`), so `acquire`, `delete` and automation
+  admission refuse retryably instead of answering `not_found`; the owner
+  re-reads the folder once after `CATALOG_INCOMPLETE_RETRY_MS` (2 s, at most
+  three times) so a torn append costs seconds of refusal; `rebuild`'s own
+  unproven list is kept (it used to be dropped, hiding the signal).
+  Regression: "keeps the records of an unprovable session that has no stored
+  row" — archived session, durable document removed, transcript torn; the pass
+  reports incomplete, startup recovery keeps the archive record, maintenance
+  refuses retryably, `list` serves, `acquire`/`delete` refuse retryably, and
+  rolling the append back restores the listed session with its archived state.
+- B2 (startup automations failed on the unready catalog): `automations.initialize()`
+  runs right after `initialize()` returns, so `requirePersistedUserSession` and
+  `automationRecoveryEvidence` now wait for the owner's first pass
+  (`whenPublished()` raced with `whenReconciled()`), the scheduler treats a
+  `catalog_not_ready` recovery as a deferral (no `outcomeUnknown`, no marker
+  clear, a diagnostic instead), and `gateway-main` logs
+  `automation.recovery-deferred` and continues rather than aborting startup.
+  Regression: "admits an existing-session automation while the first cut runs"
+  (`it.each([false, true])`, 200 sessions) and a scheduler case that asserts a
+  deferred recovery commits nothing.
+- Minor 1 fixed (above). Minor 4 fixed earlier (the deleted `maximumRetainedBytes`
+  argument is gone; the Knowledge case is renamed to "after the owner's cut").
+  Minor 2 (closed-hook gap) is not fixed: the `closed` hook is synchronous, so
+  awaiting the row refresh there needs a hook-contract change — noted for the
+  next round rather than patched.
+- Residual of the B1 fix, stated for review: a session whose row cannot be built
+  from a torn transcript is absent from `list` until a pass proves it. Its
+  records, artifact ownership and Knowledge coverage survive, and no caller is
+  told it does not exist.
+- Checks: `npx tsc --noEmit -p .` and `npm run build` clean; owning suite
+  **235/235**; `npx vitest run src/sessions src/transport src/admin src/workspace`
+  **1216 passed / 1 failed / 1217**, the failure being `session-catalog.test.ts`'s
+  known `ENOTEMPTY` cleanup flake under directory load (29/29 alone).
+
+
+### G-1c · Done · 2026-09-28 · merge-gate response (branch `hardening/g-1c`)
+
+- The merge gate reproduced the deferred minor 2 as a real regression: "scopes
+  extension shutdown to the owning runtime slot" failed intermittently because a
+  slot's close queues its catalog row at the commit point, so a reopen could land
+  in the window and answer `not_found`.
+- Fix: membership for a *named* session now waits for the row work the Gateway
+  itself has queued (`SessionCatalog.awaitQueuedChanges()`, the owner's lane) and
+  re-resolves before it may report absence. Wired into every read that can name
+  one session: `acquire`, `delete`, `setArchived`, attention resolution,
+  automation admission and recovery, and `workspaceForSession`. A session cannot
+  become unopenable because its runtime closed.
+- Evidence: `scopes extension shutdown to the owning runtime slot` **10/10**
+  alone; new deterministic case "reopens a session whose runtime closed before
+  its index row landed" holds the row build open across the close and fails with
+  `not_found` when the wait is removed (negative control run, then reverted).
+  Owning suite **236/236**; `npx tsc --noEmit -p .` and `npm run build` clean;
+  zone sweep `npx vitest run src/sessions src/transport src/admin src/workspace`
+  **1216 passed / 2 failed / 1218**, both failures being the known load-only
+  flakes (`session-catalog.test.ts` ENOTEMPTY cleanup and
+  `recent-model-usage.integration.test.ts`), each green as its own file (32/32
+  together).
+
+
+### G-1c · Done · 2026-09-28 · merge of `hardening/integration` (branch `hardening/g-1c`)
+
+- Merged `hardening/integration` (76 commits: G-9, G-8c, G-11, E-3a, C-7 and the
+  rest). Two files conflicted: this plan (both handoff tails kept) and
+  `session-catalog.ts` (five regions).
+- Resolutions:
+  - `verifiedCut` (G-8c) and `reconciledCut` are one flag: the owner keeps
+    `reconciledCut`, set only by a pass this process verified over the whole
+    folder and cleared by an incomplete or failed pass, and `searchIdentities()`
+    now tests it. G-8c's stricter-than-durable requirement holds, and it is
+    stricter still where a pass could not prove every file: a derived reader gets
+    `undefined` rather than rows that are not complete membership.
+  - `searchIdentities()` still reads the owner's index rows (`rowsByPath`), skips
+    delegated and duplicated IDs, and `searchCatalogIdentities()` delegates to it;
+    none of G-1c's deleted helpers are referenced.
+  - G-9 keeps the periodic pass: `scheduleReconcileInterval()` registers
+    `catalog.reconcile` with `backgroundWork`, `stopWatching()` unregisters it,
+    and both the reconcile batches and `rebuild` hand the loop back with
+    `yieldToLoop()`. G-1c's incomplete-pass re-read stays a bounded one-shot
+    (`CATALOG_INCOMPLETE_RETRY_MS`, at most three), not a second periodic timer,
+    and its work yields through the same scheduler.
+  - G-1c's additions are intact through the merge: the unified cut flags,
+    `whenPublished`/`whenReconciled`, `awaitQueuedChanges`, `unprovenSessionIds`,
+    `hasUnknownMembership`, `catalog_not_ready`, the automation wait/deferral,
+    `SessionCatalogScan.unproven` and `CatalogStructureEvidence.unprovenPaths`.
+  - The merge-gate case "projects empty live sessions until deletion,
+    persistence, eviction, or restart" polled for the persisted row and timed out
+    under whole-directory load; it now applies the owner's commit point itself
+    (`refresh(persistedSessionFile)`), which is deterministic. The hook that
+    fires that change stays covered by "resolves a list, a cold open and a
+    hot re-acquire from the owner's rows without a walk".
+- Evidence: `npx tsc --noEmit -p .` and `npm run build` clean; merge gate
+  **363/363** over `runtime-registry.integration`, `session-archive.integration`,
+  `session-catalog`, `catalog-discovery`, `catalog-metadata-index`,
+  `session-search-service`, `session-search-index`, `session-search-stall` and
+  `background-work`; owning suite **237/237**; zone sweep
+  `npx vitest run src/sessions src/transport src/admin src/workspace`
+  **1250 passed / 2 failed / 1252**, both failures load-only
+  (`transport/logger.test.ts` 40 MB rotation; `session-search-stall.test.ts`
+  event-loop bounds, 2/2 alone three times).
+

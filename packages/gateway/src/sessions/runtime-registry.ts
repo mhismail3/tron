@@ -109,7 +109,6 @@ import {
   type CatalogDiscoveryOptions,
   type CatalogHeaderIdentity,
   type CatalogSessionInfo,
-  type CatalogStructureEvidence,
   type DelegatedSessionTopology,
 } from "./catalog-discovery.js";
 
@@ -343,13 +342,6 @@ interface CatalogAcquisitionEntry {
 interface CatalogAcquisitionResolution {
   entriesByID: ReadonlyMap<string, CatalogAcquisitionEntry>;
   ambiguousIDs: ReadonlySet<string>;
-  structureDigest: string;
-  fallbackIdentityFingerprint?: string;
-  fallbackInvalidationGeneration?: number;
-}
-
-interface CatalogAcquisitionAdmission extends CatalogAcquisitionResolution {
-  invalidationGeneration: number;
 }
 
 interface ReadOnlySubagentAdmission {
@@ -394,14 +386,13 @@ interface CatalogPageSource {
   readonly page: (offset: number, limit: number) => Promise<SessionSummary[]>;
 }
 
-interface CatalogStructuralIndex {
-  scope: "user" | "all";
-  allInfos: readonly CatalogSessionInfo[];
-  ambiguousDiskIDs: ReadonlySet<string>;
-  structureDigest: string;
-  factsDigest: string;
-  structuralGeneration: number;
-  invalidationGeneration: number;
+/** One immutable read cut of the catalog index. `allInfos` is the scope's
+ * every indexed row; `infos` is that set without the IDs the index reports as
+ * ambiguous, which no reader may resolve. */
+interface CatalogIndexCut {
+  allInfos: CatalogSessionInfo[];
+  infos: CatalogSessionInfo[];
+  ambiguousIDs: ReadonlySet<string>;
 }
 
 interface IdleEviction {
@@ -452,16 +443,6 @@ export class RuntimeRegistry {
     generation: string;
     promise: Promise<Awaited<ReturnType<RuntimeRegistry["materializeCatalogSnapshot"]>>>;
   }>();
-  /** One bounded structural walk can serve catalog and acquisition callers.
-   * `refresh` is reserved for a post-materialization stability check. */
-  private catalogEvidencePromise: Promise<CatalogStructureEvidence> | undefined;
-  private catalogEvidenceKey: string | undefined;
-  private catalogSessionInfosPromise: Promise<CatalogSessionInfo[]> | undefined;
-  private catalogSessionInfosKey: string | undefined;
-  private catalogEvidenceRefresh = 0;
-  private readonly catalogAcquisitionMutex = new RequestSpanLane("registry.catalog-mutex");
-  private catalogAcquisitionPromise: Promise<CatalogAcquisitionResolution> | undefined;
-  private catalogAcquisitionPromiseKey: string | undefined;
   /** Serializes attention membership checks with set/delete/rekey. Archive
    * state shares this lane: both are Gateway-owned display projections of one
    * canonical session and must not outlive it.
@@ -523,8 +504,6 @@ export class RuntimeRegistry {
   private catalogUserFingerprint: string | undefined;
   private catalogAcquisitionInvalidationGeneration = 0;
   private catalogStructuralGeneration = 0;
-  private catalogAcquisitionAdmission: CatalogAcquisitionAdmission | undefined;
-  private catalogStructuralIndex: CatalogStructuralIndex | undefined;
   /** Mutable page overlays are separate from structural listRevision. This
    * generation keys immutable compact page seeds without making them catalog
    * authority. */
@@ -642,7 +621,7 @@ export class RuntimeRegistry {
       catalogRoot: () => this.catalogDirectory(),
       index: this.catalogMetadataIndex,
       source: this.sessionCatalogSource(),
-      ...(options.catalogReconciled ? { onReconciled: options.catalogReconciled } : {}),
+      onReconciled: (reconciled) => { this.options.catalogReconciled?.(reconciled); },
       ...(options.catalogChanged ? { onChanged: options.catalogChanged } : {}),
       ...(options.catalogWatcherReset ? { onWatcherReset: options.catalogWatcherReset } : {}),
     });
@@ -704,6 +683,7 @@ export class RuntimeRegistry {
     // The catalog owner loads its durable rows, reconciles once, and watches
     // the folder for external writers; the periodic pass is the backstop for
     // any event the watcher could not see (G-9 moves both into the scheduler).
+    // A reader joins that first cut rather than walking the folder itself.
     this.sessionCatalog.start();
     const markerEvidence = await this.markers.evidence();
     // Recovery can open and parse large session files. Do not hold listener
@@ -725,10 +705,14 @@ export class RuntimeRegistry {
     if (!markerEvidence) return;
     this.pendingAttentionRecovery = undefined;
     this.pendingStartupPhaseObserver?.("catalog-warming");
-    const catalogEvidence = await this.sharedCatalogStructureEvidence();
+    // Wait for this process's own reconcile pass to report, whatever it found:
+    // pruning attention and archive records for rows a cut omits destroys data,
+    // so it waits for a cut that saw the folder now, and keeps every record when
+    // the pass could not produce one. Recovery never fails startup.
+    await this.sessionCatalog.whenReconciled();
     this.pendingStartupPhaseObserver?.("attention-recovery");
     this.pendingStartupPhaseObserver = undefined;
-    await this.reconcileCanonicalAttention(markerEvidence, catalogEvidence);
+    await this.reconcileCanonicalAttention(markerEvidence);
     this.interrupted = await this.markers.interruptedSessionIds();
   }
 
@@ -744,11 +728,12 @@ export class RuntimeRegistry {
     const config = await knowledge.store.config().catch(() => undefined);
     if (!config) return;
     // Recovery owns its canonical membership read; storage initialization is
-    // not a presentation-catalog warmup. Incomplete evidence cannot turn a
-    // durable pending cut into a claim that its session disappeared.
-    const recoveryEvidence = pending.length > 0
-      ? await this.sharedCatalogStructureEvidence().catch(() => undefined)
-      : undefined;
+    // not a presentation-catalog warmup. The indexed rows cannot turn a durable
+    // pending cut into a claim that its session disappeared.
+    // The first reconcile pass of this process, not merely a loaded durable
+    // document: a mark this recovery writes is permanent, so it may only be
+    // made against a cut that saw the folder now.
+    if (pending.length > 0) await this.sessionCatalog.whenReconciled();
     for (const coverage of pending) {
       const markUnavailable = async (reason: string): Promise<void> => {
         await knowledge.store.setCoverage({
@@ -769,11 +754,14 @@ export class RuntimeRegistry {
       } else {
         // Read the admitted canonical file without constructing a live slot.
         // This keeps recovery useful after restart while avoiding foreground
-        // ownership, model/session initialization, or a second runtime.
-        if (!recoveryEvidence?.complete || recoveryEvidence.unstableCanonicalFiles) continue;
-        const candidates = [...recoveryEvidence.identitiesByPath]
-          .filter(([, identity]) => identity.id === coverage.range.sessionId)
-          .map(([path, identity]) => ({ path, ...identity }));
+        // ownership, model/session initialization, or a second runtime. The
+        // indexed row is the membership, and the row's own file is read and
+        // re-proved before it is used. An incomplete cut leaves the coverage
+        // pending rather than claiming its session is gone.
+        if (!this.sessionCatalog.hasReconciledCut()) continue;
+        const candidates = this.sessionCatalog.rows()
+          .filter((row) => row.id === coverage.range.sessionId)
+          .map((row) => ({ path: row.path, id: row.id, cwd: row.cwd, fileIdentity: row.fileIdentity, size: row.size, mtimeMs: row.mtimeMs }));
         if (candidates.length !== 1) { await markUnavailable(candidates.length === 0 ? "canonical-session-unavailable" : "canonical-session-identity-ambiguous"); continue; }
         const candidate = candidates[0]!;
         let manager: SessionManager;
@@ -847,22 +835,18 @@ export class RuntimeRegistry {
 
   private async reconcileCanonicalAttention(
     markerEvidence: ReadonlyMap<string, readonly RunMarkerEvidence[]>,
-    evidence: CatalogStructureEvidence,
   ): Promise<void> {
     const scanBoundary = new Date().toISOString();
-    // Startup recovery uses the exact bounded structural cut acquired by
-    // initialize(). It must not start a second walk while attention is being
-    // reconciled.
-    if (!evidence.complete) {
-      // Incomplete discovery cannot prove either membership or absence. Keep
-      // attention records and the reconciliation cursor for the next startup.
-      return;
-    }
-    const byID = new Map<string, Array<{ path: string; identity: CatalogHeaderIdentity }>>();
-    for (const [path, identity] of evidence.identitiesByPath) {
-      const candidates = byID.get(identity.id) ?? [];
-      candidates.push({ path, identity });
-      byID.set(identity.id, candidates);
+    // Startup recovery uses the owner's first cut: one indexed row per canonical
+    // file, which is the same membership the listeners serve from. An incomplete
+    // cut cannot prove either membership or absence, so attention records and
+    // the reconciliation cursor are kept for the next startup instead.
+    if (!this.sessionCatalog.hasReconciledCut()) return;
+    const byID = new Map<string, Array<{ path: string }>>();
+    for (const row of this.sessionCatalog.rows()) {
+      const candidates = byID.get(row.id) ?? [];
+      candidates.push({ path: row.path });
+      byID.set(row.id, candidates);
     }
     const retainedSessionIds = new Set(byID.keys());
     // Live ownership is membership too: a session that was opened or created
@@ -952,8 +936,8 @@ export class RuntimeRegistry {
         const persistedPath = slot.persistedSessionFile;
         const removedLiveOnlySession = removed && persistedPath === undefined;
         const persistedPathWasIndexed = persistedPath !== undefined
-          && this.catalogStructuralIndex?.allInfos.some((info) => info.id === sessionId
-            && resolve(info.path) === resolve(persistedPath)) === true;
+          && this.sessionCatalog.rows().some((row) => row.id === sessionId
+            && resolve(row.path) === resolve(persistedPath));
         if (removed) {
           this.slots.delete(sessionId);
           this.recordRuntimeEviction(sessionId, "closed");
@@ -1296,9 +1280,8 @@ export class RuntimeRegistry {
       && !this.ambiguousSessionIds.has(sessionId)) {
       return { generation: this.catalogAcquisitionInvalidationGeneration, persistedSlot };
     }
-    const acquisition = await stage("attention.resolve", () => this.catalogAcquisition());
+    const { acquisition, entry } = await stage("attention.resolve", () => this.catalogMembership(sessionId));
     this.requireUnambiguousSessionId(sessionId, acquisition.ambiguousIDs);
-    const entry = acquisition.entriesByID.get(sessionId);
     if (entry) return { generation: this.catalogAcquisitionInvalidationGeneration, entry };
     // Empty sessions are visible before their first canonical append. Their
     // exact runtime owner is a valid attention target until it is persisted or
@@ -1322,8 +1305,8 @@ export class RuntimeRegistry {
         if (this.deletingSessionIds.has(sessionId)) {
           throw new GatewayError("not_found", "Tron session was not found");
         }
-        const current = this.catalogAcquisitionAdmission;
-        const currentEntry = current?.entriesByID.get(sessionId);
+        const current = await this.catalogAcquisition();
+        const currentEntry = current.entriesByID.get(sessionId);
         const currentLiveOnly = this.slots.get(sessionId);
         const admittedEntry = admission.entry;
         if (admission.persistedSlot !== undefined) {
@@ -1332,7 +1315,7 @@ export class RuntimeRegistry {
             || currentLiveOnly.persistedSessionFile === undefined
             || this.ambiguousSessionIds.has(sessionId)) return undefined;
         } else if (admission.generation !== this.catalogAcquisitionInvalidationGeneration
-          || current !== undefined && admittedEntry !== undefined && (
+          || admittedEntry !== undefined && (
             currentEntry === undefined
             || currentEntry.path !== admittedEntry.path
             || currentEntry.id !== admittedEntry.id
@@ -1512,115 +1495,68 @@ export class RuntimeRegistry {
 
   private invalidateCatalogAdmission(): void {
     this.catalogAcquisitionInvalidationGeneration += 1;
-    this.catalogAcquisitionAdmission = undefined;
   }
 
   private invalidateCatalogAcquisition(): void {
     this.invalidateCatalogAdmission();
     this.catalogStructuralGeneration += 1;
-    this.catalogStructuralIndex = undefined;
     this.catalogProjectionGeneration += 1;
   }
 
-  private dynamicAmbiguousSessionIDs(index: CatalogStructuralIndex): Set<string> {
-    const ambiguous = new Set(index.ambiguousDiskIDs);
-    const persistedIDs = new Set(index.allInfos.map((session) => session.id));
+  /** The request path's only membership source (G-1c): the owner's rows, kept
+   * current by the Gateway's own commit points and by the folder watcher. No
+   * I/O, so no request can walk the session folder. */
+  private catalogIndex(scope: "user" | "all"): CatalogIndexCut {
+    const rows = this.sessionCatalog.rows();
+    const scoped = scope === "user" ? rows.filter((row) => !row.delegated) : rows;
+    const allInfos: CatalogSessionInfo[] = scoped.map((row) => ({
+      id: row.id,
+      path: row.path,
+      cwd: row.cwd,
+      ...(row.parentSessionPath ? { parentSessionPath: row.parentSessionPath } : {}),
+      ...(row.name ? { name: row.name } : {}),
+      created: new Date(row.createdAt),
+      modified: new Date(row.updatedAt),
+      messageCount: row.messageCount,
+      firstMessage: row.firstMessage,
+      fileIdentity: row.fileIdentity,
+      ...(row.creationOrigin ? { creationOrigin: row.creationOrigin } : {}),
+    }));
+    const ambiguousIDs = this.indexAmbiguousSessionIds();
+    return {
+      allInfos,
+      infos: allInfos.filter((info) => !ambiguousIDs.has(info.id)),
+      ambiguousIDs,
+    };
+  }
+
+  /** A duplicate ID is an admission property of the whole canonical tree, so
+   * the quarantine set always comes from every indexed row, not one scope. A
+   * live-only runtime that claims an indexed ID is a second claimant too. */
+  private indexAmbiguousSessionIds(): Set<string> {
+    const ambiguous = new Set(this.sessionCatalog.duplicateSessionIds());
+    const indexedIDs = new Set(this.sessionCatalog.rows().map((row) => row.id));
     for (const [id, slot] of this.slots) {
       // A persisted slot is the runtime owner of its indexed canonical file,
       // not a second claimant. Only live-only ownership colliding with any disk
       // identity creates an additional ambiguity.
-      if (!slot.isDisposed && slot.persistedSessionFile === undefined && persistedIDs.has(id)) {
+      if (!slot.isDisposed && slot.persistedSessionFile === undefined && indexedIDs.has(id)) {
         ambiguous.add(id);
       }
     }
     return ambiguous;
   }
 
-  private diskAmbiguousSessionIDs(infos: readonly CatalogSessionInfo[]): Set<string> {
-    const counts = new Map<string, number>();
-    for (const info of infos) counts.set(info.id, (counts.get(info.id) ?? 0) + 1);
-    return new Set([...counts].filter(([, count]) => count > 1).map(([id]) => id));
-  }
-
-  private diskAmbiguousSessionIDsFromEvidence(evidence: CatalogStructureEvidence): Set<string> {
-    const counts = new Map<string, number>();
-    for (const identity of evidence.identitiesByPath.values()) {
-      counts.set(identity.id, (counts.get(identity.id) ?? 0) + 1);
-    }
-    return new Set([...counts].filter(([, count]) => count > 1).map(([id]) => id));
-  }
-
-  private async validatedStructuralIndex(scope: "user" | "all" = "all"): Promise<CatalogStructuralIndex | undefined> {
-    const index = this.catalogStructuralIndex;
-    if (!index || index.structuralGeneration !== this.catalogStructuralGeneration
-      || (scope === "all" && index.scope === "user")) return undefined;
-    const structuralGeneration = this.catalogStructuralGeneration;
-    const evidence = await this.sharedCatalogStructureEvidence(true);
-    if (this.catalogStructuralIndex === index
-        && structuralGeneration === this.catalogStructuralGeneration
-        && evidence.complete
-        && (index.scope === "user"
-          ? this.catalogEvidenceMatchesIndexedUserScope(index.allInfos, evidence)
-            && this.sameStringSet(index.ambiguousDiskIDs, this.diskAmbiguousSessionIDsFromEvidence(evidence))
-          : evidence.digest === index.structureDigest)
-        && this.catalogFactsDigest(evidence, index.scope) === index.factsDigest) return index;
-    // Metadata freshness cannot revoke a concurrent identity-only acquisition.
-    if (this.catalogStructuralIndex === index) {
-      this.catalogStructuralIndex = undefined;
-      this.catalogProjectionGeneration += 1;
-    }
-    return undefined;
-  }
-
-  private sameStringSet(left: ReadonlySet<string>, right: ReadonlySet<string>): boolean {
-    return left.size === right.size && [...left].every((value) => right.has(value));
-  }
-
-  private catalogEvidenceMatchesIndexedUserScope(
-    infos: readonly CatalogSessionInfo[],
-    evidence: CatalogStructureEvidence,
-  ): boolean {
-    const indexed = infos.map((info) => [
-      resolve(info.path), info.id, info.cwd, info.fileIdentity ?? "", info.parentSessionPath ?? "",
-    ].join("\\0")).sort();
-    const discovered = this.catalogIdentitiesForScope(evidence, "user")
-      .map(([path, identity]) => [
-        path, identity.id, identity.cwd, identity.fileIdentity, identity.parentSessionPath ?? "",
-      ].join("\\0")).sort();
-    return JSON.stringify(indexed) === JSON.stringify(discovered);
-  }
-
-  private async removeIndexedCatalogFile(path: string): Promise<boolean> {
-    const index = this.catalogStructuralIndex;
-    if (!index || index.structuralGeneration !== this.catalogStructuralGeneration) return false;
-    const canonicalPath = resolve(path);
-    const remaining = index.allInfos.filter((info) => resolve(info.path) !== canonicalPath);
-    if (remaining.length === index.allInfos.length) return false;
-    const admittedGeneration = this.catalogStructuralGeneration;
-    const evidence = await this.catalogStructureEvidence();
-    if (this.catalogStructuralIndex !== index
-        || this.catalogStructuralGeneration !== admittedGeneration) return false;
-    const exact = evidence.complete && remaining.every((info) => {
-      const identity = evidence.identitiesByPath.get(resolve(info.path));
-      return identity?.id === info.id && resolve(identity.cwd || process.cwd()) === resolve(info.cwd);
-    });
-    if (!exact || evidence.identitiesByPath.size !== remaining.length) return false;
-    this.invalidateCatalogAdmission();
-    this.catalogStructuralGeneration += 1;
-    this.catalogStructuralIndex = {
-      scope: index.scope,
-      allInfos: remaining,
-      ambiguousDiskIDs: this.diskAmbiguousSessionIDs(remaining),
-      structureDigest: evidence.digest,
-      factsDigest: this.catalogFactsDigest(evidence, index.scope),
-      structuralGeneration: this.catalogStructuralGeneration,
-      invalidationGeneration: this.catalogAcquisitionInvalidationGeneration,
-    };
-    this.catalogFingerprint = this.catalogIdentityFingerprint(remaining);
-    this.catalogUserFingerprint = this.catalogIdentityFingerprint(
-      remaining.filter((session) => !this.delegatedSessionTopologies(remaining).has(resolve(session.path))),
+  /** A read needs a cut the owner has already published: the durable rows it
+   * loaded, or a reconcile it completed. Nothing waits here — a read that lands
+   * before either is a retryable `busy`, so a client retries instead of a
+   * request parking on an owner that may never publish. The reason is its own,
+   * so an unready catalog is never mistaken for capacity pressure. */
+  private requireCatalogCut(): void {
+    if (this.sessionCatalog.hasCompleteCut()) return;
+    throw new GatewayError(
+      "busy", "The session catalog has not been read yet", true, undefined, "catalog_not_ready",
     );
-    return true;
   }
 
   private async canonicalSessionPath(path: string): Promise<string> {
@@ -1642,18 +1578,79 @@ export class RuntimeRegistry {
     return (await this.catalog(scope)).sessions;
   }
 
-  /** Artifact retention needs membership, never transcript metadata. Ambiguous
-   * canonical IDs still retain their data; incomplete evidence cannot authorize
-   * orphan collection. Live-only slots also retain their staged artifacts. */
+  /** Artifact retention needs membership, never transcript metadata. The index
+   * is that membership, and ambiguous canonical IDs still retain their data.
+   * Live-only slots also retain their staged artifacts. */
   async sessionIDsForStorageMaintenance(): Promise<ReadonlySet<string>> {
-    const generation = this.catalogAcquisitionInvalidationGeneration;
-    const evidence = await this.sharedCatalogStructureEvidence();
-    if (!evidence.complete || generation !== this.catalogAcquisitionInvalidationGeneration) {
-      throw new GatewayError("busy", "Session membership could not be validated for storage maintenance", true);
-    }
-    const ids = new Set([...evidence.identitiesByPath.values()].map(identity => identity.id));
+    // Retention prunes artifacts an owner is not in. An incomplete cut is not
+    // membership evidence, so it must refuse rather than tell the store that a
+    // session it could not read is gone.
+    this.requireCompleteCatalogCut();
+    const ids = new Set(this.sessionCatalog.rows().map((row) => row.id));
     for (const slot of this.slots.values()) if (!slot.isDisposed) ids.add(slot.id);
     return ids;
+  }
+
+  /** Automation admission and recovery run at startup, before the owner may have
+   * published a cut: `initialize()` starts the owner and returns. Wait for its
+   * first pass, then require the cut — a catalog that still has none is deferred
+   * retryably instead of being reported as a missing session, so a slow first
+   * read cannot fail startup or turn into a terminal automation outcome. */
+  private async awaitAutomationCatalogCut(): Promise<void> {
+    if (!this.sessionCatalog.hasCompleteCut()) {
+      await Promise.race([this.sessionCatalog.whenPublished(), this.sessionCatalog.whenReconciled()]);
+    }
+    this.requireCatalogCut();
+  }
+
+  /** Membership for one named session. A Gateway-owned change reaches the index
+   * at its commit point (G-1a) but asynchronously, so a read that lands between
+   * a slot's close and its row must wait for that change rather than answer
+   * that the session does not exist: a session must never become unopenable
+   * because its runtime closed. */
+  private async catalogMembership(sessionId: string): Promise<{
+    acquisition: CatalogAcquisitionResolution;
+    entry: CatalogAcquisitionEntry | undefined;
+  }> {
+    const acquisition = await this.catalogAcquisition();
+    const entry = acquisition.entriesByID.get(sessionId);
+    if (entry) return { acquisition, entry };
+    await this.sessionCatalog.awaitQueuedChanges();
+    if (this.sessionCatalog.rows().some((row) => row.id === sessionId)) {
+      const refreshed = await this.catalogAcquisition();
+      return { acquisition: refreshed, entry: refreshed.entriesByID.get(sessionId) };
+    }
+    return { acquisition, entry };
+  }
+
+  /** An ID that may name a canonical file the owner could not prove is not a
+   * missing session: reporting absence would tell a client that a session's
+   * records and artifacts are gone when the file is still there. A pass that
+   * could read the file's header names the ID exactly; one that could not leaves
+   * membership unknown for the whole cut. Both refuse retryably. */
+  private unprovenSessionRefusal(sessionId: string): GatewayError | undefined {
+    if (this.sessionCatalog.unprovenSessionIds().has(sessionId)) {
+      return new GatewayError(
+        "busy", "The session's canonical file is not yet provable", true, undefined, "catalog_not_ready",
+      );
+    }
+    if (this.sessionCatalog.hasUnknownMembership()) {
+      return new GatewayError(
+        "busy", "Session membership is not fully proven yet", true, undefined, "catalog_not_ready",
+      );
+    }
+    return undefined;
+  }
+
+  /** A cut no scan has completed cannot prove absence. An unproven file whose
+   * ID the owner read has no row to return and is only in the owner's unproven
+   * set, so callers that would drop durable records or artifacts for the rows a
+   * cut omits fail retryably instead of acting on it: refusing is what keeps
+   * that session's record in the retained set. */
+  private requireCompleteCatalogCut(): void {
+    if (!this.sessionCatalog.hasReconciledCut()) {
+      throw new GatewayError("busy", "Session membership could not be validated for storage maintenance", true);
+    }
   }
 
   async requireResolvedAutomationWorkspace(cwd: string): Promise<string> {
@@ -1661,18 +1658,18 @@ export class RuntimeRegistry {
   }
 
   async workspaceForSession(sessionId: string): Promise<string> {
-    const acquisition = await this.catalogAcquisition();
+    const { acquisition, entry } = await this.catalogMembership(sessionId);
     this.requireUnambiguousSessionId(sessionId, acquisition.ambiguousIDs);
-    const entry = acquisition.entriesByID.get(sessionId);
     if (!entry) throw new GatewayError("not_found", "Tron session was not found");
     return (await this.options.trust.requireResolved(entry.canonicalCwd)).cwd;
   }
 
   async requirePersistedUserSession(sessionId: string): Promise<void> {
-    const acquisition = await this.catalogAcquisition();
+    await this.awaitAutomationCatalogCut();
+    const { acquisition, entry } = await this.catalogMembership(sessionId);
     this.requireUnambiguousSessionId(sessionId, acquisition.ambiguousIDs);
-    const entry = acquisition.entriesByID.get(sessionId);
-    if (!entry) throw new GatewayError("not_found", "Automation target session was not found");
+    if (!entry) throw this.unprovenSessionRefusal(sessionId)
+      ?? new GatewayError("not_found", "Automation target session was not found");
     if (entry.structuralSubagent) {
       throw new GatewayError("conflict", "Automations cannot target runtime-owned subagent sessions");
     }
@@ -1696,9 +1693,11 @@ export class RuntimeRegistry {
     marker?: RunMarkerEvidence;
     invocation?: InvocationProjection;
   }> {
-    const acquisition = await this.catalogAcquisition();
+    // The scheduler's recovery runs at startup: wait for the owner's first pass
+    // rather than deciding an automation's outcome on an unready catalog.
+    await this.awaitAutomationCatalogCut();
+    const { acquisition, entry } = await this.catalogMembership(sessionId);
     this.requireUnambiguousSessionId(sessionId, acquisition.ambiguousIDs);
-    const entry = acquisition.entriesByID.get(sessionId);
     if (!entry || entry.structuralSubagent) return {};
     let manager: SessionManager;
     try { manager = SessionManager.open(entry.path, this.sessionDirectoryFor(entry.canonicalCwd)); }
@@ -1745,11 +1744,11 @@ export class RuntimeRegistry {
     this.options.sessionListChanged();
   }
 
-  private async catalogStructureEvidence(): Promise<CatalogStructureEvidence> {
-    // Every walk, shared or request-path, goes through here, so this is the one
-    // seam that can count them; a caller that joins a shared walk does not walk.
-    // A walk a request is waiting on is counted apart, so the request path's
-    // "zero catalog walks" criterion is readable from the record.
+  private async catalogStructureEvidence(): Promise<import("./catalog-discovery.js").CatalogStructureEvidence> {
+    // The catalog owner's scan is the only whole-folder walk left. It goes
+    // through this one seam, which counts it and says whether a request started
+    // it: the request path's "zero catalog walks" criterion (G-1c) is readable
+    // from the record, and a walk a read *waits on* is still created here.
     const startedAt = performance.now();
     const requestPath = currentRequestSpan() !== undefined;
     const evidence = await this.catalogDiscovery().catalogStructureEvidence();
@@ -1762,8 +1761,10 @@ export class RuntimeRegistry {
   }
 
   /** The catalog owner's canonical readers. Its scan is this registry's counted
-   * background walk, and one file's row is read from that exact file: a live
-   * slot summary is a presentation overlay, never catalog authority. */
+   * walk, run by the owner (startup, its interval, or a watcher event the owner
+   * cannot resolve from one path), and one file's row is read from that exact
+   * file: a live slot summary is a presentation overlay, never catalog
+   * authority. No request-path reader calls this. */
   private sessionCatalogSource(): SessionCatalogSource {
     return {
       scan: async () => {
@@ -1774,6 +1775,7 @@ export class RuntimeRegistry {
             path, id: identity.id, cwd: identity.cwd, fileIdentity: identity.fileIdentity,
             size: identity.size, mtimeMs: identity.mtimeMs,
           })),
+          unproven: [...evidence.unprovenPaths],
         };
       },
       summaryFor: (path) => this.canonicalCatalogSummary(path),
@@ -1821,10 +1823,6 @@ export class RuntimeRegistry {
     );
   }
 
-  private async sessionInfos(scope: "user" | "all" = "all"): Promise<CatalogSessionInfo[]> {
-    return this.catalogDiscovery().sessionInfos(scope);
-  }
-
   private isLiveRuntimeOwnedPath(path: string, sessionID: string): boolean {
     const canonicalPath = resolve(path);
     return [...this.slots.values()].some((slot) => !slot.isDisposed
@@ -1833,31 +1831,27 @@ export class RuntimeRegistry {
       && resolve(slot.persistedSessionFile) === canonicalPath);
   }
 
+  /** An empty runtime that has not persisted yet is a valid attention target
+   * only while no indexed row claims its ID. */
   private async attentionLiveOnlyStillAdmitted(sessionId: string): Promise<boolean> {
-    const evidence = await this.catalogStructureEvidence();
-    if (!evidence.complete) return false;
-    return ![...evidence.identitiesByPath].some(([, identity]) => identity.id === sessionId);
+    return !this.sessionCatalog.rows().some((row) => row.id === sessionId);
   }
 
+  /** The commit fence for one admitted row: the index must still claim this
+   * exact file, and that file's own stat and header must still be the ones the
+   * index admitted. No other file is read, so a request never walks the tree. */
   private async attentionEntryStillAdmitted(entry: CatalogAcquisitionEntry): Promise<boolean> {
-    // Refresh the complete bounded header set at commit. This closes the race
-    // where an external writer creates a same-ID file after admission without
-    // changing Gateway's generation counters.
-    const evidence = await this.catalogStructureEvidence();
-    if (!evidence.complete) return false;
-    const matches = [...evidence.identitiesByPath]
-      .filter(([, identity]) => identity.id === entry.id);
-    if (matches.length !== 1 || resolve(matches[0]![0]) !== entry.path) return false;
-    const identity = matches[0]![1];
-    if (identity.fileIdentity !== entry.fileIdentity
-      || resolve(identity.cwd || process.cwd()) !== entry.canonicalCwd) return false;
+    const claimants = this.sessionCatalog.rows().filter((row) => row.id === entry.id);
+    if (claimants.length !== 1 || resolve(claimants[0]!.path) !== entry.path) return false;
+    if (claimants[0]!.fileIdentity !== entry.fileIdentity
+      || resolve(claimants[0]!.cwd || process.cwd()) !== entry.canonicalCwd) return false;
     let metadata: Awaited<ReturnType<typeof lstat>>;
     try { metadata = await lstat(entry.path); }
     catch { return false; }
     if (!metadata.isFile() || metadata.isSymbolicLink()) return false;
     if (entry.fileIdentity !== undefined && `${metadata.dev}:${metadata.ino}` !== entry.fileIdentity) return false;
-    // A same-inode rewrite can change the header without changing the catalog
-    // generation. Re-read only this bounded header at the commit boundary.
+    // A same-inode rewrite can change the header without moving the index. Re-read
+    // only this bounded header at the commit boundary.
     const headerIdentity = (await this.readCatalogHeader(
       entry.path,
       this.catalogDiscoveryLimits().maximumHeaderBytesPerFile,
@@ -1880,7 +1874,7 @@ export class RuntimeRegistry {
     const projectionGeneration = this.catalogProjectionGeneration;
     // The archive filter and its committed revision are part of the generation:
     // one pagination lease can never mix archive states or serve a stale filter.
-    const generation = `${materialized.listRevision}:${projectionGeneration}:${scope}:${archived}:${this.archive.revision}`;
+    const generation = `${materialized.listRevision}:${materialized.factsDigest}:${projectionGeneration}:${scope}:${archived}:${this.archive.revision}`;
     const existing = this.catalogPageSources.get(generation)?.deref();
     if (existing) return existing;
     const seeds = this.buildCatalogPageSeeds(materialized.infos, scope, materialized.ambiguousIDs);
@@ -2008,7 +2002,6 @@ export class RuntimeRegistry {
     sessions: SessionSummary[];
     ambiguousIDs: ReadonlySet<string>;
     listRevision: number;
-    structureDigest: string;
     generation: string;
   }> {
     // Capture mutable overlays only after structural I/O has completed. The
@@ -2017,64 +2010,18 @@ export class RuntimeRegistry {
     const materialized = await this.sharedCatalogMaterialization(scope);
     const projectionGeneration = this.catalogProjectionGeneration;
     const seeds = this.buildCatalogPageSeeds(materialized.infos, scope, materialized.ambiguousIDs);
-    const source = this.createCatalogPageSource(`${materialized.listRevision}:${projectionGeneration}:${scope}`, materialized.listRevision, seeds);
+    const source = this.createCatalogPageSource(
+      `${materialized.listRevision}:${materialized.factsDigest}:${projectionGeneration}:${scope}`,
+      materialized.listRevision,
+      seeds,
+    );
     return {
       infos: materialized.infos,
       sessions: await source.page(0, seeds.length),
       ambiguousIDs: materialized.ambiguousIDs,
       listRevision: materialized.listRevision,
-      structureDigest: materialized.structureDigest,
       generation: source.generation,
     };
-  }
-
-  private sharedCatalogSessionInfos(
-    scope: "user" | "all" = "all",
-    refresh = false,
-  ): Promise<CatalogSessionInfo[]> {
-    const key = `${this.catalogStructuralGeneration}:${this.catalogAcquisitionInvalidationGeneration}:${scope}:${refresh ? `refresh:${++this.catalogEvidenceRefresh}` : "current"}`;
-    if (!refresh && this.catalogSessionInfosPromise && this.catalogSessionInfosKey === key) return this.catalogSessionInfosPromise;
-    const operation = this.sessionInfos(scope);
-    this.catalogSessionInfosPromise = operation;
-    this.catalogSessionInfosKey = key;
-    void operation.finally(() => {
-      if (this.catalogSessionInfosPromise === operation) {
-        this.catalogSessionInfosPromise = undefined;
-        this.catalogSessionInfosKey = undefined;
-      }
-    }).catch(() => {});
-    return operation;
-  }
-
-  private async sharedCatalogStructureEvidence(refresh = false): Promise<CatalogStructureEvidence> {
-    const generationKey = `${this.catalogStructuralGeneration}:${this.catalogAcquisitionInvalidationGeneration}`;
-    const active = this.catalogEvidencePromise;
-    if (active) {
-      if (!refresh && this.catalogEvidenceKey === generationKey) {
-        // Joining a walk another caller started is this request's wait, not a
-        // walk of its own: `catalog.walk` counts walks performed, and the files
-        // are counted once, where the walk is created.
-        return await wait("catalog.walk-join", () => active);
-      }
-      // A post-read check must begin after its caller's read. Concurrent post-read
-      // callers share the successor walk, rather than each starting another one.
-      try { await wait("catalog.walk-join", () => active); } catch { /* a fresh cut owns its own outcome */ }
-      return this.sharedCatalogStructureEvidence();
-    }
-    const operation = stage("catalog.walk", async () => {
-      const evidence = await this.catalogStructureEvidence();
-      count("catalog.walk.files", evidence.identitiesByPath.size);
-      return evidence;
-    });
-    this.catalogEvidencePromise = operation;
-    this.catalogEvidenceKey = generationKey;
-    void operation.finally(() => {
-      if (this.catalogEvidencePromise === operation) {
-        this.catalogEvidencePromise = undefined;
-        this.catalogEvidenceKey = undefined;
-      }
-    }).catch(() => {});
-    return operation;
   }
 
   private async sharedCatalogMaterialization(
@@ -2100,267 +2047,39 @@ export class RuntimeRegistry {
     return operation;
   }
 
-  private async loadDurableCatalogIndex(scope: "user" | "all" = "all"): Promise<void> {
-    const structuralGeneration = this.catalogStructuralGeneration;
-    const invalidationGeneration = this.catalogAcquisitionInvalidationGeneration;
-    const before = await this.sharedCatalogStructureEvidence();
-    if (!before.complete) return;
-    const candidates = [...this.catalogIdentitiesForScope(before, scope)].map(([path, identity]) => ({
-      path, id: identity.id, cwd: identity.cwd, fileIdentity: identity.fileIdentity,
-      size: identity.size, mtimeMs: identity.mtimeMs,
-    }));
-    // reconcile admits and reads the durable document once. A missing/corrupt
-    // document deliberately falls through to the canonical first-cut scan, and so
-    // does a file this pass could not prove: the cut then omits a real canonical
-    // file, which the admission below must never accept.
-    const reconciled = await stage("catalog.reconcile", () => this.catalogMetadataIndex.reconcile(
-      this.catalogDirectory(),
-      candidates,
-      async (candidate) => {
-        const info = await buildCatalogSessionInfo(candidate.path);
-        if (!info || info.id !== candidate.id || info.cwd !== candidate.cwd) return undefined;
-        return {
-          id: info.id, path: info.path, cwd: info.cwd,
-          ...(info.parentSessionPath ? { parentSessionPath: info.parentSessionPath } : {}),
-          ...(info.creationOrigin ? { creationOrigin: info.creationOrigin } : {}),
-          ...(info.name ? { name: info.name } : {}),
-          firstMessage: info.firstMessage,
-          createdAt: info.created.toISOString(), updatedAt: info.modified.toISOString(),
-          messageCount: info.messageCount,
-        };
-      },
-      // This reader discards the whole cut when one candidate is unprovable, so
-      // there is nothing to gain from parsing the candidates after it.
-      ({ unproven }) => unproven > 0,
-    ));
-    if (!reconciled || reconciled.unproven.length > 0) return;
-    const rows = reconciled.rows;
-    count("catalog.reconcile.rows", rows.length);
-    const after = await this.sharedCatalogStructureEvidence(true);
-    const rowsMatchAfterFacts = rows.length === this.catalogIdentitiesForScope(after, scope).length
-      && rows.every((row) => {
-        const identity = after.identitiesByPath.get(resolve(row.path));
-        const liveOwner = identity !== undefined && this.isLiveRuntimeOwnedPath(resolve(row.path), row.id);
-        return identity?.id === row.id && identity.cwd === row.cwd
-          && identity.fileIdentity === row.fileIdentity
-          // A Gateway-owned session may append between the index read and the
-          // post-read evidence cut. Its exact slot owns the live summary
-          // overlay, while identity remains the admission boundary; requiring
-          // old size/mtime here would discard a valid index and rescan every
-          // canonical body during normal active work.
-          && (liveOwner || (identity.size === row.size && identity.mtimeMs === row.mtimeMs));
-      });
-    if (structuralGeneration !== this.catalogStructuralGeneration
-      || invalidationGeneration !== this.catalogAcquisitionInvalidationGeneration
-      || !after.complete || after.digest !== before.digest || !rowsMatchAfterFacts) return;
-    const infos: CatalogSessionInfo[] = rows.map((row) => ({
-      path: row.path,
-      id: row.id,
-      cwd: row.cwd,
-      ...(row.parentSessionPath ? { parentSessionPath: row.parentSessionPath } : {}),
-      ...(row.creationOrigin ? { creationOrigin: row.creationOrigin } : {}),
-      ...(row.name ? { name: row.name } : {}),
-      created: new Date(row.createdAt),
-      modified: new Date(row.updatedAt),
-      messageCount: row.messageCount,
-      firstMessage: row.firstMessage,
-      fileIdentity: row.fileIdentity,
-    }));
-    this.catalogStructuralIndex = {
-      scope,
-      allInfos: infos,
-      ambiguousDiskIDs: this.diskAmbiguousSessionIDsFromEvidence(after),
-      structureDigest: before.digest,
-      factsDigest: this.catalogFactsDigest(after, scope),
-      structuralGeneration,
-      invalidationGeneration,
-    };
-    // A durable generation can differ from the admission cached before this
-    // filesystem cut (for example, a newly duplicated ID). Force acquisition
-    // to rebuild from the exact index rather than pairing stale membership
-    // with the freshly published rows.
-    this.catalogAcquisitionAdmission = undefined;
-  }
-
+  /** One immutable read cut of the catalog index. */
   private async materializeCatalogSnapshot(scope: "user" | "all"): Promise<{
     infos: CatalogSessionInfo[];
     ambiguousIDs: ReadonlySet<string>;
     listRevision: number;
-    structureDigest: string;
+    /** The index-owned facts of every row in this cut. A row field can change
+     * without moving `listRevision` (a name, a count, a size), and a cached page
+     * source that kept serving the previous facts would hand a revalidating
+     * client a stale row. The digest is therefore part of the page-source
+     * generation, the way the plan's projection token requires. */
+    factsDigest: string;
   }> {
-    let cached = await this.validatedStructuralIndex(scope);
-    if (!cached) {
-      await this.loadDurableCatalogIndex(scope);
-      cached = await this.validatedStructuralIndex(scope);
+    // The owner's own cut is the membership authority. A read that lands before
+    // the owner has published one joins that cut instead of walking itself, and
+    // never re-derives a row from a transcript it does not return.
+    this.requireCatalogCut();
+    const cut = this.catalogIndex(scope);
+    // Publishing this cut's identity is what moves listRevision when the
+    // membership the index holds changed.
+    this.updateCatalogIdentity(cut.allInfos, cut.ambiguousIDs, scope);
+    const facts = createHash("sha256");
+    for (const info of cut.allInfos) {
+      facts.update(info.id).update("\0").update(info.path).update("\0")
+        .update(info.name ?? "").update("\0").update(info.firstMessage).update("\0")
+        .update(String(info.messageCount)).update("\0").update(info.modified.toISOString()).update("\0")
+        .update(info.fileIdentity ?? "").update("\n");
     }
-    if (cached) {
-      const ambiguousIDs = this.dynamicAmbiguousSessionIDs(cached);
-      const infos = cached.allInfos.filter((session) => !ambiguousIDs.has(session.id));
-      // Reconciled sidecar rows can change membership just like a full scan.
-      // Publish their identity before returning the matching structural revision.
-      this.updateCatalogIdentity(cached.allInfos, ambiguousIDs, cached.scope);
-      return {
-        infos: [...infos],
-        ambiguousIDs,
-        listRevision: this.revision,
-        structureDigest: cached.structureDigest,
-      };
-    }
-
-    let materialized = await stage("catalog.scan", () => this.scanCatalogMaterialization(scope));
-    if (!materialized.stable) {
-      materialized = await stage("catalog.scan-retry", () => this.scanCatalogMaterialization(scope));
-    }
-    if (!materialized.stable) {
-      await this.catalogAcquisitionMutex.run(() => { this.catalogAcquisitionAdmission = undefined; });
-      throw new GatewayError("busy", "Session catalog changed during discovery", true, undefined, "catalog_changed");
-    }
-
-    const admitted = await this.publishCatalogAcquisition(
-      materialized.after,
-      materialized.invalidationGeneration,
-    );
-    if (materialized.invalidationGeneration !== this.catalogAcquisitionInvalidationGeneration
-        || materialized.structuralGeneration !== this.catalogStructuralGeneration) {
-      if (admitted) this.catalogAcquisitionAdmission = undefined;
-      throw new GatewayError("busy", "Session catalog changed during publication", true, undefined, "catalog_changed");
-    }
-    const index: CatalogStructuralIndex = {
-      scope,
-      allInfos: materialized.allInfos,
-      ambiguousDiskIDs: materialized.ambiguousDiskIDs,
-      structureDigest: materialized.after.digest,
-      factsDigest: this.catalogFactsDigest(materialized.after, scope),
-      structuralGeneration: materialized.structuralGeneration,
-      invalidationGeneration: materialized.invalidationGeneration,
-    };
-    // Only a complete cut may replace the on-disk all-scope acceleration.
-    // The in-memory index records its scope so user cuts remain reusable.
-    const indexIsExact = materialized.after.complete
-      && materialized.after.identitiesByPath.size === materialized.allInfos.length
-      && materialized.allInfos.every((info) => {
-        const identity = materialized.after.identitiesByPath.get(resolve(info.path));
-        return identity?.id === info.id && resolve(identity.cwd || process.cwd()) === resolve(info.cwd);
-      });
-    // Keep the admitted user cut in the same bounded index. Its scope prevents
-    // acquisition/all-scope callers from mistaking omitted children for absence.
-    if (indexIsExact) {
-      index.scope = "all";
-      index.factsDigest = materialized.after.factsDigest;
-    }
-    this.catalogStructuralIndex = materialized.after.complete ? index : undefined;
-    const ambiguousIDs = scope === "user"
-      ? this.diskAmbiguousSessionIDsFromEvidence(materialized.after)
-      : this.dynamicAmbiguousSessionIDs(index);
-    const infos = index.allInfos.filter((session) => !ambiguousIDs.has(session.id));
-    // No await may separate the final generation confirmation from publication
-    // of catalog identity and its matching revision. User cuts update only the
-    // non-delegated membership fingerprint; all-scope cuts update full identity
-    // even when a duplicate makes the index ineligible, so live acquisition
-    // fails closed.
-    if (scope === "all") this.updateCatalogIdentity(materialized.allInfos, ambiguousIDs, "all");
-    else {
-      // The partial user cut owns user membership/revision; whole-tree header
-      // evidence still owns duplicate-ID quarantine.
-      this.updateCatalogIdentity(materialized.allInfos, ambiguousIDs, "user");
-    }
-    // The durable document is the catalog owner's: this reader's rows come from
-    // a summary it parsed for the in-memory cut, which is not the count and size
-    // the owner stamped, so writing them here would put a second writer on one
-    // document (SessionCatalogOptions.index).
     return {
-      infos: [...infos],
-      ambiguousIDs,
+      infos: cut.infos,
+      ambiguousIDs: cut.ambiguousIDs,
       listRevision: this.revision,
-      structureDigest: materialized.after.digest,
+      factsDigest: facts.digest("base64url"),
     };
-  }
-
-  private async scanCatalogMaterialization(
-    scope: "user" | "all",
-  ): Promise<{
-    allInfos: CatalogSessionInfo[];
-    ambiguousDiskIDs: Set<string>;
-    after: CatalogStructureEvidence;
-    invalidationGeneration: number;
-    structuralGeneration: number;
-    stable: boolean;
-  }> {
-    const invalidationGeneration = this.catalogAcquisitionInvalidationGeneration;
-    const structuralGeneration = this.catalogStructuralGeneration;
-    const before = await stage("catalog.validate.before", () => this.sharedCatalogStructureEvidence());
-    const discoveredInfos = await stage(
-      "catalog.metadata-materialize",
-      () => this.sharedCatalogSessionInfos(scope),
-    );
-    const after = await stage("catalog.validate.after", () => this.sharedCatalogStructureEvidence(true));
-    const allInfos = this.withCatalogEvidence(discoveredInfos, after);
-    // User metadata intentionally omits delegated bodies, but duplicate IDs are
-    // an admission property of the whole canonical tree. Header evidence is
-    // already complete here and must remain the source for this quarantine set.
-    const ambiguousDiskIDs = scope === "user"
-      ? this.diskAmbiguousSessionIDsFromEvidence(after)
-      : this.diskAmbiguousSessionIDs(allInfos);
-    return {
-      allInfos,
-      ambiguousDiskIDs,
-      after,
-      invalidationGeneration,
-      structuralGeneration,
-      stable: invalidationGeneration === this.catalogAcquisitionInvalidationGeneration
-        && structuralGeneration === this.catalogStructuralGeneration
-        && !this.hasRelevantUnstableFiles(before, scope)
-        && !this.hasRelevantUnstableFiles(after, scope)
-        && this.catalogEvidenceMatchesScope(before, after, scope),
-    };
-  }
-
-  private catalogIdentitiesForScope(evidence: CatalogStructureEvidence, scope: "user" | "all") {
-    const identities = [...evidence.identitiesByPath];
-    if (scope === "all") return identities;
-    let root: string;
-    try { root = realpathSync(this.catalogDirectory()); }
-    catch { root = resolve(this.catalogDirectory()); }
-    return identities.filter(([path]) => delegatedSessionParentPath(path, root) === undefined);
-  }
-
-  private catalogFactsDigest(evidence: CatalogStructureEvidence, scope: "user" | "all"): string {
-    if (scope === "all") return evidence.factsDigest;
-    const facts = this.catalogIdentitiesForScope(evidence, scope).map(([path, value]) => {
-      const live = this.isLiveRuntimeOwnedPath(path, value.id);
-      return [path, value.id, value.cwd, value.fileIdentity,
-        live ? "live-append" : value.size, live ? "live-append" : value.mtimeMs];
-    });
-    return createHash("sha256").update(JSON.stringify(facts)).digest("base64url");
-  }
-
-  private catalogEvidenceMatchesScope(
-    before: CatalogStructureEvidence,
-    after: CatalogStructureEvidence,
-    scope: "user" | "all",
-  ): boolean {
-    if (scope === "all") return before.digest === after.digest && before.factsDigest === after.factsDigest;
-    const identity = (evidence: CatalogStructureEvidence) => this.catalogIdentitiesForScope(evidence, scope)
-      .map(([path, value]) => [
-        path, value.id, value.cwd, value.fileIdentity, value.parentSessionPath ?? "",
-      ].join("\\0"))
-      .sort();
-    return JSON.stringify(identity(before)) === JSON.stringify(identity(after))
-      && this.catalogFactsDigest(before, scope) === this.catalogFactsDigest(after, scope);
-  }
-
-  private hasRelevantUnstableFiles(
-    evidence: CatalogStructureEvidence,
-    scope: "user" | "all",
-  ): boolean {
-    if (!evidence.unstableCanonicalFiles) return false;
-    if (scope === "all" || evidence.unstableCanonicalPaths === undefined) return true;
-    let catalogRoot: string;
-    try { catalogRoot = realpathSync(this.catalogDirectory()); }
-    catch { catalogRoot = resolve(this.catalogDirectory()); }
-    return [...evidence.unstableCanonicalPaths].some((path) =>
-      delegatedSessionParentPath(path, catalogRoot) === undefined,
-    );
   }
 
   private catalogIdentityFingerprint(infos: readonly CatalogSessionInfo[]): string {
@@ -2384,7 +2103,7 @@ export class RuntimeRegistry {
 
   private updateCatalogIdentity(
     infos: readonly CatalogSessionInfo[],
-    ambiguousIDs: Set<string>,
+    ambiguousIDs: ReadonlySet<string>,
     scope: "user" | "all" = "all",
   ): void {
     const fingerprint = this.catalogIdentityFingerprint(infos);
@@ -2405,20 +2124,9 @@ export class RuntimeRegistry {
         infos.filter((session) => !delegated.has(resolve(session.path))),
       );
     }
-    // This set is derived from complete header evidence even for user lists, so
-    // a live slot cannot fast-path an ID duplicated by an omitted child row.
-    this.ambiguousSessionIds = ambiguousIDs;
-  }
-
-  private withCatalogEvidence(
-    sessions: readonly CatalogSessionInfo[],
-    evidence: CatalogStructureEvidence,
-  ): CatalogSessionInfo[] {
-    return sessions.map((session) => {
-      const identity = evidence.identitiesByPath.get(resolve(session.path));
-      if (identity?.id !== session.id) return session;
-      return { ...session, fileIdentity: identity.fileIdentity };
-    });
+    // This set is derived from every indexed row even for a user list, so a
+    // live slot cannot fast-path an ID duplicated by an omitted child row.
+    this.ambiguousSessionIds = new Set(ambiguousIDs);
   }
 
   /** The only delegated-session catalog contract. pi-subagents reserves
@@ -2465,7 +2173,6 @@ export class RuntimeRegistry {
       parentSessionPath?: string;
     }>,
     ambiguousIDs: ReadonlySet<string>,
-    structureDigest: string,
   ): Promise<CatalogAcquisitionResolution> {
     // Lightweight header and SDK fallback discovery both omit runtime slots.
     // Count live-only ownership here so an on-disk claimant cannot be opened
@@ -2510,140 +2217,20 @@ export class RuntimeRegistry {
       retainedBytes += Buffer.byteLength(id);
       if (retainedBytes > limits.maximumAcquisitionBytes) this.catalogCapacityExceeded();
     }
-    return { entriesByID, ambiguousIDs: resolvedAmbiguousIDs, structureDigest };
+    return { entriesByID, ambiguousIDs: resolvedAmbiguousIDs };
   }
 
-  private async buildCatalogAcquisition(
-    evidence: CatalogStructureEvidence,
-  ): Promise<CatalogAcquisitionResolution> {
-    if (!evidence.complete) {
-      throw new GatewayError("busy", "Session catalog headers could not be validated", true, undefined, "catalog_headers_unavailable");
-    }
-    const identities = [...evidence.identitiesByPath].map(([path, identity]) => ({ path, ...identity }));
-    const counts = new Map<string, number>();
-    for (const identity of identities) counts.set(identity.id, (counts.get(identity.id) ?? 0) + 1);
-    const ambiguousIDs = new Set(
-      [...counts].filter(([, count]) => count > 1).map(([id]) => id),
-    );
-    return this.buildCatalogAcquisitionFromSessions(
-      identities.filter((identity) => !ambiguousIDs.has(identity.id)),
-      ambiguousIDs,
-      evidence.digest,
-    );
-  }
-
-  private async publishCatalogAcquisition(
-    evidence: CatalogStructureEvidence,
-    invalidationGeneration: number,
-  ): Promise<boolean> {
-    return this.catalogAcquisitionMutex.run(async () => {
-      if (invalidationGeneration !== this.catalogAcquisitionInvalidationGeneration) return false;
-      if (!evidence.complete) return false;
-      const resolution = await this.buildCatalogAcquisition(evidence);
-      if (invalidationGeneration !== this.catalogAcquisitionInvalidationGeneration) return false;
-      this.catalogAcquisitionAdmission = { ...resolution, invalidationGeneration };
-      return true;
-    });
-  }
-
+  /** Membership for every open, attention, automation and workspace read. The
+   * index is the authority, so this is a pure in-memory projection of the rows
+   * the owner keeps current: no request walks the folder, and the entry a
+   * caller then fences is re-proved against its own file at the commit. */
   private async catalogAcquisition(): Promise<CatalogAcquisitionResolution> {
-    const key = `${this.catalogStructuralGeneration}:${this.catalogAcquisitionInvalidationGeneration}`;
-    if (this.catalogAcquisitionPromise) {
-      if (this.catalogAcquisitionPromiseKey === key) return this.catalogAcquisitionPromise;
-      // A retired generation still owns its physical discovery. Join its
-      // settlement before admitting one successor, including fallback scans.
-      try { await this.catalogAcquisitionPromise; } catch { /* successor owns its outcome */ }
-      return this.catalogAcquisition();
-    }
-    const operation = this.resolveCatalogAcquisition();
-    const settled = operation.then((value) => {
-      if (this.catalogAcquisitionPromiseKey === key) {
-        this.catalogAcquisitionPromise = undefined;
-        this.catalogAcquisitionPromiseKey = undefined;
-      }
-      return value;
-    }, (error) => {
-      if (this.catalogAcquisitionPromiseKey === key) {
-        this.catalogAcquisitionPromise = undefined;
-        this.catalogAcquisitionPromiseKey = undefined;
-      }
-      throw error;
-    });
-    this.catalogAcquisitionPromise = settled;
-    this.catalogAcquisitionPromiseKey = key;
-    return settled;
-  }
-
-  private async resolveCatalogAcquisition(): Promise<CatalogAcquisitionResolution> {
-    const lightweight = await this.catalogAcquisitionMutex.run(async () => {
-      for (let attempt = 0; attempt < 2; attempt += 1) {
-        const invalidationGeneration = this.catalogAcquisitionInvalidationGeneration;
-        const evidence = await this.sharedCatalogStructureEvidence();
-        if (invalidationGeneration !== this.catalogAcquisitionInvalidationGeneration) continue;
-        if (!evidence.complete) return undefined;
-        const admission = this.catalogAcquisitionAdmission;
-        if (admission
-          && admission.invalidationGeneration === invalidationGeneration
-          && admission.structureDigest === evidence.digest) {
-          return admission;
-        }
-        const resolution = await this.buildCatalogAcquisition(evidence);
-        if (invalidationGeneration !== this.catalogAcquisitionInvalidationGeneration) continue;
-        this.catalogAcquisitionAdmission = { ...resolution, invalidationGeneration };
-        return resolution;
-      }
-      throw new GatewayError("busy", "Session catalog changed during acquisition", true, undefined, "catalog_changed");
-    });
-    if (lightweight) return lightweight;
-    return this.fallbackCatalogAcquisition();
-  }
-
-  private sdkCatalogIdentityFingerprint(infos: readonly CatalogSessionInfo[]): string {
-    const delegated = this.delegatedSessionTopologies(infos);
-    const records = infos.map((session) => JSON.stringify([
-      resolve(session.path),
-      session.id,
-      session.cwd,
-      session.fileIdentity ?? "",
-      session.parentSessionPath ? resolve(session.parentSessionPath) : "",
-      delegated.has(resolve(session.path)),
-    ])).sort();
-    const digest = createHash("sha256");
-    for (const record of records) digest.update(record).update("\n");
-    return digest.digest("base64url");
-  }
-
-  private async fallbackCatalogAcquisition(): Promise<CatalogAcquisitionResolution> {
-    for (let attempt = 0; attempt < 2; attempt += 1) {
-      const invalidationGeneration = this.catalogAcquisitionInvalidationGeneration;
-      const before = await this.sharedCatalogStructureEvidence();
-      const firstInfos = this.withCatalogEvidence(await this.sharedCatalogSessionInfos(), before);
-      const firstFingerprint = this.sdkCatalogIdentityFingerprint(firstInfos);
-      const discoveredInfos = await this.sessionInfos();
-      const after = await this.sharedCatalogStructureEvidence(true);
-      const allInfos = this.withCatalogEvidence(discoveredInfos, after);
-      const identityFingerprint = this.sdkCatalogIdentityFingerprint(allInfos);
-      if (firstFingerprint !== identityFingerprint) continue;
-      const counts = new Map<string, number>();
-      for (const session of allInfos) counts.set(session.id, (counts.get(session.id) ?? 0) + 1);
-      const ambiguousIDs = new Set(
-        [...counts].filter(([, count]) => count > 1).map(([id]) => id),
-      );
-      const resolution = await this.buildCatalogAcquisitionFromSessions(
-        allInfos.filter((session) => !ambiguousIDs.has(session.id)),
-        ambiguousIDs,
-        before.digest,
-      );
-      if (invalidationGeneration === this.catalogAcquisitionInvalidationGeneration
-        && before.digest === after.digest) {
-        return {
-          ...resolution,
-          fallbackIdentityFingerprint: identityFingerprint,
-          fallbackInvalidationGeneration: invalidationGeneration,
-        };
-      }
-    }
-    throw new GatewayError("busy", "Session catalog changed during acquisition", true, undefined, "catalog_changed");
+    // Every membership read resolves against the cut the owner has published: a
+    // cold open, attention resolution, automation and workspace lookups. An
+    // owner that has published none yet is a retryable busy, not a wait.
+    this.requireCatalogCut();
+    const index = this.catalogIndex("all");
+    return this.buildCatalogAcquisitionFromSessions(index.allInfos, index.ambiguousIDs);
   }
 
   private buildCatalogPageSeeds(
@@ -3218,12 +2805,11 @@ export class RuntimeRegistry {
     const alreadyStarting = this.pendingSlotStarts.get(sessionId);
     if (alreadyStarting) return alreadyStarting;
     const existing = this.slots.get(sessionId);
-    const acquisition = await stage(
+    const { acquisition, entry } = await stage(
       "session.open.catalog",
-      () => this.catalogAcquisition(),
+      () => this.catalogMembership(sessionId),
     );
     this.requireUnambiguousSessionId(sessionId, acquisition.ambiguousIDs);
-    const entry = acquisition.entriesByID.get(sessionId);
     if (existing && !existing.isDisposed) {
       if (entry?.structuralSubagent) {
         throw new GatewayError("conflict", "Subagent sessions are informational and remain owned by their originating runtime");
@@ -3231,7 +2817,8 @@ export class RuntimeRegistry {
       existing.touch();
       return existing;
     }
-    if (!entry) throw new GatewayError("not_found", "Tron session was not found");
+    if (!entry) throw this.unprovenSessionRefusal(sessionId)
+      ?? new GatewayError("not_found", "Tron session was not found");
     if (entry.structuralSubagent) {
       throw new GatewayError("conflict", "Subagent sessions are informational and remain owned by their originating runtime");
     }
@@ -3325,31 +2912,16 @@ export class RuntimeRegistry {
         || resolve(manager.getCwd()) !== entry.canonicalCwd) {
         throw new GatewayError("conflict", "Tron session identity changed after catalog discovery", true);
       }
-      if (acquisition.fallbackIdentityFingerprint !== undefined) {
-        const invalidationGeneration = acquisition.fallbackInvalidationGeneration;
-        if (invalidationGeneration === undefined
-          || invalidationGeneration !== this.catalogAcquisitionInvalidationGeneration) {
-          throw new GatewayError("busy", "Session catalog changed while opening the session", true, undefined, "catalog_changed");
-        }
-        const finalEvidence = await this.sharedCatalogStructureEvidence(true);
-        const finalInfos = this.withCatalogEvidence(await this.sessionInfos(), finalEvidence);
-        if (invalidationGeneration !== this.catalogAcquisitionInvalidationGeneration
-          || this.sdkCatalogIdentityFingerprint(finalInfos) !== acquisition.fallbackIdentityFingerprint) {
-          throw new GatewayError("busy", "Session catalog changed while opening the session", true, undefined, "catalog_changed");
-        }
-      } else {
-        // Fence this session's own identity: exactly one unchanged canonical
-        // claimant. Unrelated churn (active subagents create child files
-        // continuously) must not make every cold open fail as catalog_changed.
-        const validated = await this.sharedCatalogStructureEvidence(true);
-        const claimants = [...validated.identitiesByPath].filter(([, identity]) => identity.id === sessionId);
-        const [claimedPath, claimed] = claimants[0] ?? [];
-        if (!validated.complete || claimants.length !== 1
-          || claimedPath === undefined || resolve(claimedPath) !== canonicalPath
-          || (entry.fileIdentity !== undefined && claimed?.fileIdentity !== entry.fileIdentity)
-          || validated.unstableCanonicalPaths?.has(canonicalPath)) {
-          throw new GatewayError("busy", "Session catalog changed while opening the session", true, undefined, "catalog_changed");
-        }
+      // Membership is the index and the file fence above is this exact file:
+      // exactly one indexed claimant that is still this path with this identity.
+      // Unrelated churn (active subagents create child files continuously) must
+      // not make every cold open fail as catalog_changed, and no read here walks
+      // the folder.
+      const claimants = this.sessionCatalog.rows().filter((row) => row.id === sessionId);
+      if (claimants.length !== 1
+        || resolve(claimants[0]!.path) !== canonicalPath
+        || (entry.fileIdentity !== undefined && claimants[0]!.fileIdentity !== entry.fileIdentity)) {
+        throw new GatewayError("busy", "Session catalog changed while opening the session", true, undefined, "catalog_changed");
       }
       if (selectedAcquisitionGeneration !== this.catalogAcquisitionInvalidationGeneration) {
         throw new GatewayError("busy", "Session catalog changed while opening the session", true, undefined, "catalog_changed");
@@ -3368,9 +2940,7 @@ export class RuntimeRegistry {
             || this.trustReloadProjects.has(entry.canonicalCwd)) {
           throw new GatewayError("busy", "Session runtime start was retired before publication", true);
         }
-        const ambiguous = this.catalogStructuralIndex
-          ? this.dynamicAmbiguousSessionIDs(this.catalogStructuralIndex)
-          : this.ambiguousSessionIds;
+        const ambiguous = this.indexAmbiguousSessionIds();
         this.requireUnambiguousSessionId(sessionId, ambiguous);
         const raced = this.slots.get(sessionId);
         if (raced && raced !== slot && !raced.isDisposed) {
@@ -3523,13 +3093,10 @@ export class RuntimeRegistry {
   ): Promise<{ archived: boolean; archivedAt?: string }> {
     return this.mutex.run(async () => {
       // Archive state is written for an admitted canonical session, so it needs
-      // the same hardened structural cut delete uses rather than a mutable
-      // presentation projection. A cached admission could name a duplicate or
-      // replaced file that another client populated before this request.
-      const evidence = await this.catalogStructureEvidence();
-      const acquisition = await this.buildCatalogAcquisition(evidence);
+      // the same index membership delete uses rather than a mutable
+      // presentation projection.
+      const { acquisition, entry } = await this.catalogMembership(sessionId);
       this.requireUnambiguousSessionId(sessionId, acquisition.ambiguousIDs);
-      const entry = acquisition.entriesByID.get(sessionId);
       const slot = this.slots.get(sessionId);
       if (!entry && (!slot || slot.persistedSessionFile !== undefined)) {
         throw new GatewayError("not_found", "Tron session was not found");
@@ -3615,18 +3182,15 @@ export class RuntimeRegistry {
     try {
       await this.mutex.run(async () => {
         // Deletion needs structural identity and ownership, not a mutable
-        // presentation projection. Acquisition admission remains hardened by
-        // exact path/inode and is revalidated by removeCanonicalCatalogFile.
-        // Take a fresh bounded structural cut rather than trusting a cached
-        // admission that another client may have populated before a duplicate
-        // or replacement appeared on disk.
-        const evidence = await this.catalogStructureEvidence();
-        const acquisition = await this.buildCatalogAcquisition(evidence);
+        // presentation projection. The index is that membership, and
+        // removeCanonicalCatalogFile re-proves this exact file's path and inode
+        // at the commit.
+        const { acquisition, entry } = await this.catalogMembership(sessionId);
         this.requireUnambiguousSessionId(sessionId, acquisition.ambiguousIDs);
-        const entry = acquisition.entriesByID.get(sessionId);
         const slot = this.slots.get(sessionId);
         if (!entry && (!slot || slot.persistedSessionFile !== undefined)) {
-          throw new GatewayError("not_found", "Tron session was removed before it could be deleted");
+          throw this.unprovenSessionRefusal(sessionId)
+            ?? new GatewayError("not_found", "Tron session was removed before it could be deleted");
         }
         if (entry?.structuralSubagent) {
           throw new GatewayError("conflict", "Delete the originating user session instead of mutating its runtime-owned subagent session");
@@ -3661,12 +3225,11 @@ export class RuntimeRegistry {
             entry.path,
             sessionId,
             entry.fileIdentity,
-            acquisition.structureDigest,
           );
           // The deletion is committed; the owner announces it because an
           // unreadable path proves neither absence nor presence.
           this.sessionCatalog.remove(entry.path);
-          if (!(await this.removeIndexedCatalogFile(entry.path))) this.invalidateCatalogAcquisition();
+          this.invalidateCatalogAcquisition();
         } else {
           this.invalidateCatalogAdmission();
         }
@@ -3706,21 +3269,16 @@ export class RuntimeRegistry {
     path: string,
     expectedSessionId: string,
     expectedFileIdentity: string | undefined,
-    admittedStructureDigest: string,
   ): Promise<void> {
     if (!expectedFileIdentity) {
       throw new GatewayError("busy", "Session file identity is unavailable for deletion", true);
     }
 
     // Deletion is the only catalog mutation committed from a prior row
-    // admission. Rebuild the bounded structural classification at the commit
-    // boundary so a newly created parent, duplicate ID, or topology change
-    // cannot make a stale user admission destructive.
-    const evidence = await this.catalogStructureEvidence();
-    if (!evidence.complete || evidence.digest !== admittedStructureDigest) {
-      throw new GatewayError("busy", "Session catalog changed before deletion", true, undefined, "catalog_changed");
-    }
-    const acquisition = await this.buildCatalogAcquisition(evidence);
+    // admission. The index must still claim this exact file, and the file's own
+    // inode and header below are the destructive boundary; no other file is
+    // read, so a delete request never walks the folder.
+    const acquisition = await this.catalogAcquisition();
     const entry = acquisition.entriesByID.get(expectedSessionId);
     if (acquisition.ambiguousIDs.has(expectedSessionId)
       || !entry || entry.structuralSubagent || entry.path !== resolve(path)) {
