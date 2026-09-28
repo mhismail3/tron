@@ -511,7 +511,7 @@ rows are in priority order.
 
 | ID | Status | Scope | Depends on | Owner |
 | --- | --- | --- | --- | --- |
-| P-0 | Ready | Fold the phone reconnect tuning plan into this plan (D-1) and close it through history; done on `main` at activation | none | |
+| P-0 | Done | Fold the phone reconnect tuning plan into this plan (D-1) and close it through history; done on `main` at activation | none | |
 | O-1 | Ready | Correlation key across phone and Gateway on every connection record | none | |
 | O-6a | Ready | Multi-session qualification scenario with a generated catalog; record the `main` baseline | none | |
 | E-2 | Ready | Bound the iOS profiler's memory or hand the row to the simulator-lifecycle plan | none | |
@@ -580,7 +580,7 @@ needed), **Checks**, **Docs**, **Done when**, **User action**.
 - **Who and where:** the orchestrator, directly on `main`, at activation (plan
   housekeeping, not integration-branch work).
 - **Owning files:** the reconnect tuning plan file (in `docs/plans/`, named
-  `2026-09-24-phone-reconnect-tuning.md`), `docs/plans/HISTORY.md`, this file.
+  2026-09-24-phone-reconnect-tuning.md), `docs/plans/HISTORY.md`, this file.
 - **Do:**
   1. In the reconnect tuning plan, add a handoff entry: its own R-1 is answered
      by this plan's Context (most long episodes are path outages or phone-side
@@ -1643,3 +1643,11 @@ the day cannot measure a synthetic case).
 - Result: the user approved the plan and asked this session to coordinate it.
   Status set to Active; Phase 1 continues on `hardening/integration`.
 - Changes: this file only.
+
+### P-0 · Done · 2026-09-28 · orchestrator session
+
+- Result: the phone reconnect tuning plan got its closing handoff entry, a
+  `docs/plans/HISTORY.md` entry, and was deleted. The energy-efficiency plan's
+  coordination link now points here.
+- Evidence: `python3 scripts/check-documentation-policy.py` passes.
+- Changes: `plan(connection-scale-hardening): P-0 fold in phone reconnect tuning`.

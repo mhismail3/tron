@@ -135,3 +135,11 @@ Append entries in this format when closing a plan (see [the plan protocol](READM
   - A test fixture that composes the Gateway must mirror `gateway-main.ts` wiring, or it reports production defects that do not exist.
 - Knowledge moved to: `packages/gateway/README.md` (receipt ownership across a command-driven replacement).
 
+## 2026-09-24 → 2026-09-28 · Phone reconnect tuning · Abandoned (folded in)
+
+- Plan: `2026-09-24-phone-reconnect-tuning.md`, deleted in commit `plan(connection-scale-hardening): P-0 fold in phone reconnect tuning`.
+- Outcome: folded into the connection and scale hardening plan by the user's decision D-1. Its R-1 question (stall versus path) was answered by that plan's 2026-09-27/28 investigation: most long episodes were Tailscale path outages or phone-side state, not Gateway stalls. Its R-2 choice was decided by D-4 (option D plus inbound-frame liveness), carried by that plan's C-3 and C-4.
+- Key commits: none beyond the fold-in.
+- Deviations: R-1 was answered from an incident investigation rather than five days of passive collection.
+- Lessons: option B (tolerating missed pongs) would not have prevented any observed episode; path outages dominate.
+- Knowledge moved to: the connection and scale hardening plan (`2026-09-27-connection-scale-hardening.md`).

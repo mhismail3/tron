@@ -32,7 +32,7 @@ What must not change, overriding any agent's judgment:
   Mac-first rollout still holds.
 - **Coordination.** Do not change the client ping interval, pong deadline,
   reconnect or retry policy; the
-  [phone reconnect tuning plan](2026-09-24-phone-reconnect-tuning.md) owns those.
+  [connection and scale hardening plan](2026-09-27-connection-scale-hardening.md) owns those.
   Transcript container work belongs to the
   [chat transcript stability plan](2026-09-26-chat-transcript-stability.md);
   this plan only reduces work inside today's container and must pass its CT-12
