@@ -5268,7 +5268,7 @@ events; widen them to name the pool owner in the same change.
     snapshot 6]` — the superseded quarantined snapshots are gone, nothing
     overtook a response, and the surviving session frames are in broadcast
     order.
-  - Negative control (the coalescing keys removed from `outboundFrameKey`, then
+  - Negative control (the coalescing keys removed from `outboundFrameIdentity`, then
     restored): both new integration cases fail with `queuedFrames: 0` — the
     queue retired on its backstop, which is the capacity close G-4 prevents
     (`~/.tron/workspace/files/hardening/g-4/negative-control.txt`).
