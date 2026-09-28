@@ -22,7 +22,7 @@ import type { GatewayLogger, LogLevel } from "./logger.js";
  *
  * E-3b adds the other half of that pin: `lanPin` and `advertisement()`, what a
  * paired phone needs to dial this lane. They travel only on the pairing
- * response and hello (E-3b), which are the two channels a paired device owns.
+ * response and hello, the two channels a paired device owns.
  */
 
 /** No portable event says a host's private address changed. One cheap
