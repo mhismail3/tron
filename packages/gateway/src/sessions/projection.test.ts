@@ -541,6 +541,19 @@ describe("transcript projection", () => {
     expect(tree.filter(item => item.kind === "customEntry")[0]).toMatchObject({ preview: INVOCATION_RECEIPT_TYPE });
   });
 
+  it("refuses a malformed invocation receipt while projecting a branch", () => {
+    const manager = SessionManager.inMemory("/tmp/project-malformed");
+    manager.appendMessage({ role: "user", content: "before", timestamp: 1 });
+    // A canonical record that is not a valid Gateway receipt must be refused
+    // rather than projected as an ordinary custom row. The page projection
+    // validates each receipt once; this is the failure mode that guard must
+    // keep.
+    manager.appendCustomEntry(INVOCATION_RECEIPT_TYPE, { version: 1, receiptId: "start:inv" });
+    expect(() => projectTranscript(manager, new BlobStore())).toThrow(/malformed Gateway invocation receipt/u);
+    expect(() => projectTranscriptPage(manager, new BlobStore()))
+      .toThrow(/malformed Gateway invocation receipt/u);
+  });
+
   it("projects Gateway-authored extension notifications as ambient non-context status", () => {
     const manager = SessionManager.inMemory("/tmp/project");
     manager.appendCustomEntry(EXTENSION_NOTIFICATION_RECEIPT_TYPE, makeExtensionNotificationReceipt({

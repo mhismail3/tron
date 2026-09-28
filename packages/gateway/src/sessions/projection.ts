@@ -1823,17 +1823,19 @@ function projectableTranscriptEntries(
   const toolSegmentIDs = new Map<string, string>();
   let ownerId: string | undefined;
   for (const entry of branch) {
-    if (entry.type === "custom" && entry.customType === INVOCATION_RECEIPT_TYPE
-        && parseInvocationReceipt(entry.data) === undefined) {
+    // Validate this exact receipt once and reuse it below: a page projection
+    // runs this over every entry of the branch, so a second validation of the
+    // same record is pure O(branch) work (G-2).
+    const invocation = entry.type === "custom" && entry.customType === INVOCATION_RECEIPT_TYPE
+      ? parseInvocationReceipt(entry.data)
+      : undefined;
+    if (entry.type === "custom" && entry.customType === INVOCATION_RECEIPT_TYPE && invocation === undefined) {
       throw new GatewayError("conflict", "Session contains a malformed Gateway invocation receipt");
     }
     if (entry.type === "custom" && entry.customType === EXTENSION_NOTIFICATION_RECEIPT_TYPE
         && parseExtensionNotificationReceipt(entry.data) === undefined) {
       throw new GatewayError("conflict", "Session contains a malformed Gateway extension notification receipt");
     }
-    const invocation = entry.type === "custom" && entry.customType === INVOCATION_RECEIPT_TYPE
-      ? parseInvocationReceipt(entry.data)
-      : undefined;
     const notification = entry.type === "custom" && entry.customType === EXTENSION_NOTIFICATION_RECEIPT_TYPE
       ? parseExtensionNotificationReceipt(entry.data)
       : undefined;
