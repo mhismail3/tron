@@ -51,7 +51,10 @@ export const CATALOG_PERSIST_MAX_WAIT_MS = 60_000;
  * platform reports create, write and close separately, so a path is re-read
  * once per quiet spell instead of once per event. A writer that never goes quiet
  * still has to reach its row, so the quiet spell is capped the way persistence
- * is: a continuously appended transcript is re-read about once a second. */
+ * is: events arriving faster than the quiet spell cost one read a second. The
+ * ceiling bounds how long a read is delayed, not how often reads happen — a
+ * writer whose bursts each outlast the quiet spell costs one read per burst, so
+ * about four a second per path. */
 export const CATALOG_EVENT_DEBOUNCE_MS = 250;
 export const CATALOG_EVENT_MAX_WAIT_MS = 1_000;
 
@@ -268,6 +271,9 @@ export class SessionCatalog {
    * quiet still reaches its row. */
   private readonly eventWindowStartedAt = new Map<string, number>();
   private unnamedEventTimer: NodeJS.Timeout | undefined;
+  /** The unnamed event's ceiling window, so an unnameable event that never stops
+   * arriving still reaches one whole-folder pass. */
+  private unnamedEventWindowStartedAt: number | undefined;
   private watchRetryTimer: NodeJS.Timeout | undefined;
   private watchOutageClearTimer: NodeJS.Timeout | undefined;
   private reconcileTimer: NodeJS.Timeout | undefined;
@@ -452,45 +458,78 @@ export class SessionCatalog {
    * folder moved into the root as one event for the folder and none for the
    * transcripts inside it, and reports a folder renamed inside the root as one
    * event for each name, so the folder's own `.jsonl` files are re-read. A path
-   * that is gone may have taken the rows under it with it, so the folder's own
-   * cut is re-derived once. Anything else (a lock or scratch file) is not a row. */
+   * that is gone re-reads only the rows at or under it, which the absence rule
+   * then drops. Anything else (a lock, a scratch file, the temporary name of an
+   * atomic write) is not a row and costs nothing. */
   private async resolveFolderEvent(path: string, root: string): Promise<void> {
     const info = await lstat(path).catch(() => undefined);
-    if (info === undefined) {
-      // Only absence is evidence here; an unreadable path proves nothing.
-      if (!(await pathMissing(path))) return;
-      // The folder a path was named from is gone: no cut of it is membership
-      // evidence, so the rows stay and the retry attaches to it when it exists
-      // again.
-      if (!(await lstat(root).then((stats) => stats.isDirectory(), () => false))) return this.rootVanished();
-      // A recursive watcher names the folder itself through the root's own
-      // basename, once when the watch attaches. With the folder there, that
-      // names the folder and not a path inside it: its contents arrive as their
-      // own events, and no cut of the whole folder is owed for it.
-      if (path === join(root, basename(root))) return;
-      return this.debounceUnnamedEvent();
-    }
+    if (info === undefined) return this.resolveAbsentEvent(path, root);
     if (!info.isDirectory()) return;
     const transcripts = await this.transcriptsBeneath(path, root);
     if (transcripts === undefined) return this.debounceUnnamedEvent();
     for (const transcript of transcripts) this.debounceEvent(transcript);
   }
 
+  /** The named path is not there. Only absence is evidence, and only of the rows
+   * this owner published at or under the path: an atomic write's temporary name,
+   * a scratch file and the Gateway's own quarantine rename name a path no row
+   * was ever cut from, so they cost nothing rather than a whole-folder pass. */
+  private async resolveAbsentEvent(path: string, root: string): Promise<void> {
+    if (!(await pathMissing(path))) return;
+    // The folder a path was named from is gone: no cut of it is membership
+    // evidence, so the rows stay and the retry attaches to it when it exists
+    // again.
+    if (!(await lstat(root).then((stats) => stats.isDirectory(), () => false))) return this.rootVanished();
+    // A recursive watcher names the folder itself through the root's own
+    // basename, once when the watch attaches. With the folder there, that
+    // names the folder and not a path inside it: its contents arrive as their
+    // own events, and no cut of the whole folder is owed for it.
+    if (path === join(root, basename(root))) return;
+    for (const indexed of this.indexedBeneath(path)) this.debounceEvent(indexed);
+  }
+
   /** The transcripts under one folder the platform named, or undefined when the
    * folder holds more than one event can name: the whole-folder pass is then the
    * bounded reader, and it applies discovery's own capacity limits. */
   private async transcriptsBeneath(directory: string, root: string): Promise<string[] | undefined> {
-    const entries = await readdir(directory, { recursive: true, withFileTypes: true }).catch(() => undefined);
-    if (entries === undefined) return undefined;
+    // Discovery never reads an ignored folder, so an event that named one holds
+    // no rows either.
+    if (isIgnoredCatalogDirectory(directory, root)) return [];
     const transcripts: string[] = [];
-    for (const entry of entries) {
-      if (!entry.isFile() || !entry.name.endsWith(".jsonl")) continue;
-      const path = join(entry.parentPath, entry.name);
-      if (ignoredCatalogPath(path, root)) continue;
-      if (transcripts.length >= CATALOG_EVENT_DIRECTORY_LIMIT) return undefined;
-      transcripts.push(path);
+    // Walked by hand rather than with `readdir({recursive: true})`: the ignored
+    // folders discovery skips are never read, so a producer's artifacts do not
+    // cost a directory read and cannot fill the cap first.
+    let frontier = [directory];
+    while (frontier.length > 0) {
+      const nextFrontier: string[] = [];
+      for (const candidate of frontier) {
+        const entries = await readdir(candidate, { withFileTypes: true }).catch(() => undefined);
+        if (entries === undefined) return undefined;
+        for (const entry of entries) {
+          const path = join(candidate, entry.name);
+          if (entry.isDirectory()) {
+            if (!isIgnoredCatalogDirectory(path, root)) nextFrontier.push(path);
+            continue;
+          }
+          if (!entry.isFile() || !entry.name.endsWith(".jsonl")) continue;
+          if (transcripts.length >= CATALOG_EVENT_DIRECTORY_LIMIT) return undefined;
+          transcripts.push(path);
+        }
+      }
+      frontier = nextFrontier;
     }
     return transcripts;
+  }
+
+  /** The indexed rows at or under one path: the rows its absence can reach. */
+  private indexedBeneath(path: string): string[] {
+    const key = resolve(path);
+    const prefix = `${key}${sep}`;
+    const indexed: string[] = [];
+    for (const row of this.rowsByPath.keys()) {
+      if (row === key || row.startsWith(prefix)) indexed.push(row);
+    }
+    return indexed;
   }
 
   /** An unnamed event proves only that something under the folder changed, so
@@ -498,11 +537,20 @@ export class SessionCatalog {
   private debounceUnnamedEvent(): void {
     if (this.closed) return;
     if (this.unnamedEventTimer) clearTimeout(this.unnamedEventTimer);
-    this.unnamedEventTimer = setTimeout(() => {
+    const now = this.now();
+    const windowStartedAt = this.unnamedEventWindowStartedAt ?? now;
+    this.unnamedEventWindowStartedAt = windowStartedAt;
+    // Capped the way persistence and the per-path debounce are: an event the
+    // platform keeps re-reporting without a quiet spell still reaches one pass a
+    // second instead of being re-armed forever.
+    const untilCeiling = CATALOG_EVENT_MAX_WAIT_MS - (now - windowStartedAt);
+    const timer = setTimeout(() => {
       this.unnamedEventTimer = undefined;
+      this.unnamedEventWindowStartedAt = undefined;
       void this.reconcile();
-    }, CATALOG_EVENT_DEBOUNCE_MS);
-    this.unnamedEventTimer.unref();
+    }, Math.max(0, Math.min(CATALOG_EVENT_DEBOUNCE_MS, untilCeiling)));
+    timer.unref();
+    this.unnamedEventTimer = timer;
   }
 
   private debounceEvent(path: string): void {
@@ -653,6 +701,7 @@ export class SessionCatalog {
       clearTimeout(this.unnamedEventTimer);
       this.unnamedEventTimer = undefined;
     }
+    this.unnamedEventWindowStartedAt = undefined;
     if (this.watchRetryTimer) {
       clearTimeout(this.watchRetryTimer);
       this.watchRetryTimer = undefined;

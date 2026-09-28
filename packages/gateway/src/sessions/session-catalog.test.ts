@@ -91,6 +91,12 @@ import {
 //     within the ceiling instead of being re-armed forever.
 // 21. A watcher that dies right after every attach: restarts are spaced by the
 //     retry cadence, not immediate, and the outage is recorded once.
+// 22. A path that is gone and that no row was cut from (an atomic write's
+//     temporary name, a scratch file, the Gateway's own quarantine rename): no
+//     row and no whole-folder pass. A folder removed with its transcripts drops
+//     its rows without a pass.
+// 23. Unnameable events that never stop arriving: the whole-index pass still
+//     runs once a second instead of the quiet spell being re-armed forever.
 
 const roots: string[] = [];
 
@@ -676,6 +682,28 @@ describe("SessionCatalog", () => {
     expect(walks).toHaveBeenCalledTimes(1);
   });
 
+  it("re-derives the whole index once a second for unnameable events that never stop", async () => {
+    const watch = manualWatch();
+    const outcomes: SessionCatalogReconcileOutcome[] = [];
+    const { sessions, catalog } = await fixture({
+      watchCatalog: watch.backend, reconcileIntervalMs: 0,
+      onReconciled: (outcome) => outcomes.push(outcome),
+    });
+    catalog.start();
+    await catalog.settled();
+    const before = outcomes.length;
+
+    // A platform that keeps re-reporting an unnamed event every 100 ms re-arms
+    // the quiet spell forever, so without a ceiling no pass would ever run.
+    const ticker = setInterval(() => watch.emit(null), 100);
+    try {
+      await waitFor(() => outcomes.length > before, 5_000);
+    } finally {
+      clearInterval(ticker);
+    }
+    await catalog.dispose();
+  });
+
   it("ignores the paths discovery ignores and the files that are not transcripts", async () => {
     const watch = manualWatch();
     const { sessions, catalog, source } = await fixture({
@@ -750,6 +778,67 @@ describe("SessionCatalog", () => {
     await waitFor(() => catalog.row(movedChild)?.id === "id-child", 10_000);
     expect(catalog.row(child)).toBeUndefined();
     expect(catalog.row(movedChild)?.delegated).toBe(true);
+    await catalog.dispose();
+  });
+
+  it("costs no whole-folder pass for a non-transcript name that is gone", async () => {
+    // The production watcher, real file operations: an atomic write's temporary
+    // name, a scratch file created and deleted, and the Gateway's own quarantine
+    // rename and removal all name a path no row was cut from. None of them is
+    // evidence about the folder, so none may cost a structure walk.
+    const { sessions, catalog, source } = await fixture({ reconcileIntervalMs: 0 });
+    const file = join(sessions, "workspace", "a.jsonl");
+    await writeSession(file, "id-a", sessions, ["one"]);
+    catalog.start();
+    await catalog.settled();
+    expect(catalog.row(file)?.id).toBe("id-a");
+
+    const walks = vi.spyOn(source, "scan");
+    const status = join(sessions, "workspace", "status.json");
+    await writeFile(`${status}.tmp`, "{}");
+    await rename(`${status}.tmp`, status);
+    const scratch = join(sessions, "workspace", "scratch.txt");
+    await writeFile(scratch, "x");
+    await rm(scratch);
+    // The Gateway's own delete renames the transcript to a quarantine name and
+    // then removes it; both names are non-transcript paths that are gone.
+    const doomed = join(sessions, "workspace", "doomed.jsonl");
+    await writeSession(doomed, "id-doomed", sessions, ["doomed"]);
+    await waitFor(() => catalog.row(doomed)?.id === "id-doomed", 5_000);
+    const quarantine = `${doomed}.tron-delete-0f0f0f0f`;
+    await rename(doomed, quarantine);
+    await rm(quarantine);
+
+    // The append fences every event above: one watch reports its events in
+    // order, so a row published from this append means they were all resolved.
+    await appendMessage(file, "after", 1);
+    await waitFor(() => catalog.row(file)?.messageCount === 2, 10_000);
+    await catalog.settled();
+    expect(walks).not.toHaveBeenCalled();
+    expect(catalog.rows().map((row) => row.id)).toEqual(["id-a"]);
+    await catalog.dispose();
+  });
+
+  it("drops the rows under a folder removed with its transcripts, without a whole-folder pass", async () => {
+    // The production watcher: `rm -rf` of a subagent run folder names the folder
+    // and its transcript. The rows at or under the named path are the only rows
+    // that absence can reach, so they are re-read and dropped without a walk.
+    const { sessions, catalog, source } = await fixture({ reconcileIntervalMs: 0 });
+    const file = join(sessions, "workspace", "a.jsonl");
+    await writeSession(file, "id-a", sessions, ["one"]);
+    const child = join(sessions, "parent", "producer", "run-1", "session.jsonl");
+    await writeSession(child, "id-child", sessions, ["child"]);
+    catalog.start();
+    await catalog.settled();
+    expect(catalog.rows().map((row) => row.id).sort()).toEqual(["id-a", "id-child"]);
+
+    const walks = vi.spyOn(source, "scan");
+    await rm(dirname(dirname(child)), { recursive: true, force: true });
+    await appendMessage(file, "after", 1);
+    await waitFor(() => catalog.row(file)?.messageCount === 2, 10_000);
+    await catalog.settled();
+    expect(walks).not.toHaveBeenCalled();
+    expect(catalog.rows().map((row) => row.id)).toEqual(["id-a"]);
     await catalog.dispose();
   });
 
@@ -925,12 +1014,7 @@ describe("SessionCatalog", () => {
     const pathCount = 25;
     const eventsPerPath = 40;
     const paths = Array.from({ length: pathCount }, (_unused, ordinal) => join(sessions, "workspace", `${ordinal}.jsonl`));
-    // Bounded batches: 25 concurrent writers would exhaust the process's
-    // descriptor allowance before the watcher ever sees an event.
-    for (let start = 0; start < pathCount; start += 25) {
-      await Promise.all(paths.slice(start, start + 25)
-        .map((path, offset) => writeSession(path, `id-${start + offset}`, sessions, ["one"])));
-    }
+    await Promise.all(paths.map((path, ordinal) => writeSession(path, `id-${ordinal}`, sessions, ["one"])));
     // Every path is written once and then reported `eventsPerPath` times: a
     // platform that reports create, write and close separately looks like this,
     // and each path must cost exactly one read.
