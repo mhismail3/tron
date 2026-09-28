@@ -62,6 +62,8 @@ describe.sequential("RuntimeRegistry with the pinned agent runtime", () => {
     workRegistry?: GatewayWorkRegistry;
     phaseObserver?: (phase: "catalog-warming" | "attention-recovery") => void;
     sessionListChanged?: () => void;
+    catalogIndexFailure?: (stage: "save" | "rebuild" | "append", durationMs: number) => void;
+    runtimeDisposeTimeout?: (graceMs: number) => void;
     beforeInitialize?: (sessionFile: string) => Promise<void>;
     notifications?: NotificationService;
   } = {}) {
@@ -92,6 +94,8 @@ describe.sequential("RuntimeRegistry with the pinned agent runtime", () => {
       sessionSummaryChanged: (summary) => summaries.push(summary),
       sessionListChanged: options.sessionListChanged ?? (() => {}),
       ...(options.notifications ? { notifications: options.notifications } : {}),
+      ...(options.catalogIndexFailure ? { catalogIndexFailure: options.catalogIndexFailure } : {}),
+      ...(options.runtimeDisposeTimeout ? { runtimeDisposeTimeout: options.runtimeDisposeTimeout } : {}),
     });
     registries.push(registry);
     if (options.beforeInitialize) await options.beforeInitialize(manager.getSessionFile()!);
@@ -10779,17 +10783,17 @@ export default function (pi) {
   });
 
   it("force-invalidates an extension runtime whose idle-eviction shutdown never settles", async () => {
-    const { manager, registry } = await coldFixture("idle-eviction-shutdown-timeout");
+    // The registry's own option, so the test drives the production failure path;
+    // a throwing recorder must not become another disposal barrier.
+    const timedOut = vi.fn(() => { throw new Error("instrumentation failed"); });
+    const { manager, registry } = await coldFixture("idle-eviction-shutdown-timeout", { runtimeDisposeTimeout: timedOut });
     const sessionId = manager.getSessionId();
     const slot = await registry.acquire(sessionId);
     vi.spyOn(slot, "touchedAt", "get").mockReturnValue(0);
 
     const internals = slot as unknown as {
       runtime: { dispose: () => Promise<void>; session: { dispose: () => void } };
-      dependencies: { runtimeDisposalTimedOut?: (graceMs: number) => void };
     };
-    const timedOut = vi.fn(() => { throw new Error("instrumentation failed"); });
-    internals.dependencies.runtimeDisposalTimedOut = timedOut;
     const gracefulDispose = vi.spyOn(internals.runtime, "dispose")
       .mockImplementation(() => new Promise<void>(() => {}));
     const forceDispose = vi.spyOn(internals.runtime.session, "dispose");

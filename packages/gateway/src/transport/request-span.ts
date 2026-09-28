@@ -7,13 +7,16 @@ import { AsyncLocalStorage } from "node:async_hooks";
  *
  * The span is ambient for the code it covers: `stage`, `wait`, `count` and
  * `bytes` record on the span the caller runs under, and are no-ops outside one.
- * Measurements are exclusive: a stage nested inside another is subtracted from
- * its parent, so the sum of every named entry is never larger than the time the
- * request actually spent.
+ * A measurement nests inside the measurement its own async context is running
+ * under, not the last one the span happened to see, so two stages started
+ * concurrently are siblings: each keeps its own time. Measurements are
+ * exclusive against the measurement they nest under, so a request whose stages
+ * are sequential has named entries that never add up to more than the wall time
+ * it spent. Two stages that genuinely overlap do add up to more than that, and
+ * `unaccountedMs` then reads its floor of zero rather than a negative number.
  */
 export class RequestSpan {
   private readonly entries = new Map<string, SpanEntry>();
-  private readonly openStages: OpenStage[] = [];
   private sequence = 0;
   private finished = false;
 
@@ -26,11 +29,19 @@ export class RequestSpan {
   stage<T>(name: string, operation: () => T): T;
   stage<T>(name: string, operation: () => T | Promise<T>): T | Promise<T> {
     if (this.finished) return operation();
-    const stage: OpenStage = { entry: this.entry(name), startedAt: performance.now(), childMs: 0 };
-    this.openStages.push(stage);
+    const context = this.context();
+    const stage: OpenStage = {
+      entry: this.entry(name),
+      startedAt: performance.now(),
+      parent: context?.openStage,
+      childMs: 0,
+      closed: false,
+    };
     let result: T | Promise<T>;
     try {
-      result = operation();
+      result = context === undefined
+        ? operation()
+        : storage.run({ span: this, openStage: stage }, operation);
     } catch (error) {
       this.closeStage(stage);
       throw error;
@@ -55,6 +66,7 @@ export class RequestSpan {
   wait<T>(name: string, operation: (acquired: () => void) => T): T;
   wait<T>(name: string, operation: (acquired: () => void) => T | Promise<T>): T | Promise<T> {
     if (this.finished) return operation(() => {});
+    const parent = this.context()?.openStage;
     const entry = this.entry(name);
     const startedAt = performance.now();
     let acquired = false;
@@ -65,7 +77,6 @@ export class RequestSpan {
       entry.ms += waitMs;
       entry.timed = true;
       entry.count += 1;
-      const parent = this.openStages[this.openStages.length - 1];
       if (parent) parent.childMs += waitMs;
     };
     let result: T | Promise<T>;
@@ -100,31 +111,38 @@ export class RequestSpan {
   /**
    * Ends the span and describes it, most expensive entry first. `requestMs` is
    * the same duration the caller reports, so `unaccountedMs` is the part of
-   * that duration no named entry covered. Undefined when nothing was recorded:
-   * a fast request keeps its record unchanged. Later records are ignored so a
-   * published breakdown cannot move.
+   * that duration no named entry covered. Undefined when nothing worth naming
+   * was recorded: a fast request keeps its record unchanged. Later records are
+   * ignored so a published breakdown cannot move.
    */
   breakdown(requestMs: number): RequestSpanBreakdown | undefined {
     this.finished = true;
-    if (this.entries.size === 0) return undefined;
-    const recorded = [...this.entries.values()].sort((left, right) => right.ms - left.ms || left.order - right.order);
+    const recorded = [...this.entries.values()].filter(worthNaming)
+      .sort((left, right) => right.ms - left.ms || left.order - right.order);
+    if (recorded.length === 0) return undefined;
     const coveredMs = recorded.reduce((total, entry) => total + entry.ms, 0);
     return {
       stages: recorded.map(formatEntry).join(";"),
-      unaccountedMs: Math.max(0, Math.round(requestMs) - coveredMs),
+      unaccountedMs: Math.max(0, Math.round(requestMs - coveredMs)),
     };
   }
 
   private closeStage(stage: OpenStage): void {
-    const index = this.openStages.lastIndexOf(stage);
-    if (index === -1) return;
-    this.openStages.splice(index, 1);
+    if (stage.closed) return;
+    stage.closed = true;
     const exclusiveMs = Math.max(0, elapsedSince(stage.startedAt) - stage.childMs);
     stage.entry.ms += exclusiveMs;
     stage.entry.timed = true;
     stage.entry.count += 1;
-    const parent = index === 0 ? undefined : this.openStages[index - 1];
-    if (parent) parent.childMs += exclusiveMs;
+    if (stage.parent) stage.parent.childMs += exclusiveMs;
+  }
+
+  /** The ambient context, when this span owns it. A span that is not the
+   * ambient one (a test driving `stage` directly) records without re-entering a
+   * context, so it cannot adopt another span's children. */
+  private context(): RequestSpanContext | undefined {
+    const ambient = storage.getStore();
+    return ambient?.span === this ? ambient : undefined;
   }
 
   private entry(name: string): SpanEntry {
@@ -156,20 +174,30 @@ interface SpanEntry {
 interface OpenStage {
   readonly entry: SpanEntry;
   readonly startedAt: number;
-  /** Time already credited to stages and waits recorded while this one was
-   * open, so a nested measurement is never counted twice. */
+  /** The stage this one's async context was running inside, if any. */
+  readonly parent: OpenStage | undefined;
+  /** Time already credited to measurements recorded inside this one, so a
+   * nested measurement is never counted twice. */
   childMs: number;
+  closed: boolean;
 }
 
-const storage = new AsyncLocalStorage<RequestSpan>();
+interface RequestSpanContext {
+  readonly span: RequestSpan;
+  /** The stage this async context is running inside; concurrent stages each
+   * carry their own, so neither is mistaken for the other's parent. */
+  readonly openStage: OpenStage | undefined;
+}
+
+const storage = new AsyncLocalStorage<RequestSpanContext>();
 
 /** Runs `operation` as the current span, including its asynchronous work. */
 export function runInRequestSpan<T>(span: RequestSpan, operation: () => T): T {
-  return storage.run(span, operation);
+  return storage.run({ span, openStage: undefined }, operation);
 }
 
 export function currentRequestSpan(): RequestSpan | undefined {
-  return storage.getStore();
+  return storage.getStore()?.span;
 }
 
 /** Measures `operation` as a stage on the current request, or runs it
@@ -177,7 +205,7 @@ export function currentRequestSpan(): RequestSpan | undefined {
 export function stage<T>(name: string, operation: () => Promise<T>): Promise<T>;
 export function stage<T>(name: string, operation: () => T): T;
 export function stage<T>(name: string, operation: () => T | Promise<T>): T | Promise<T> {
-  const span = storage.getStore();
+  const span = storage.getStore()?.span;
   return span === undefined ? operation() : span.stage(name, operation);
 }
 
@@ -186,30 +214,38 @@ export function stage<T>(name: string, operation: () => T | Promise<T>): T | Pro
 export function wait<T>(name: string, operation: (acquired: () => void) => Promise<T>): Promise<T>;
 export function wait<T>(name: string, operation: (acquired: () => void) => T): T;
 export function wait<T>(name: string, operation: (acquired: () => void) => T | Promise<T>): T | Promise<T> {
-  const span = storage.getStore();
+  const span = storage.getStore()?.span;
   return span === undefined ? operation(() => {}) : span.wait(name, operation);
 }
 
 export function count(name: string, n = 1): void {
-  storage.getStore()?.count(name, n);
+  storage.getStore()?.span.count(name, n);
 }
 
 export function bytes(name: string, n: number): void {
-  storage.getStore()?.bytes(name, n);
+  storage.getStore()?.span.bytes(name, n);
 }
 
-/** Whole milliseconds keep the one-line breakdown readable; it names the
- * dominant stage, it does not measure below it. */
+/** Milliseconds as the breakdown reports them: totals stay fractional while
+ * measurements accumulate and are rounded once, when the entry is formatted. */
 function elapsedSince(startedAt: number): number {
-  return Math.max(0, Math.round(performance.now() - startedAt));
+  return Math.max(0, performance.now() - startedAt);
 }
 
 function isPromiseLike(value: unknown): value is PromiseLike<unknown> {
   return typeof (value as { then?: unknown } | null)?.then === "function";
 }
 
+/** Whole milliseconds keep the one-line breakdown readable; it names the
+ * dominant stage, it does not measure below it. An entry that would render as
+ * `0ms` and carries nothing else is dropped rather than paid for on every
+ * record. */
+function worthNaming(entry: SpanEntry): boolean {
+  return entry.bytes > 0 || (entry.timed ? Math.round(entry.ms) > 0 : entry.count > 0);
+}
+
 function formatEntry(entry: SpanEntry): string {
-  let detail = entry.timed ? `${entry.ms}ms` : "";
+  let detail = entry.timed ? `${Math.round(entry.ms)}ms` : "";
   if (entry.count > 1 || detail.length === 0) detail += `×${entry.count}`;
   if (entry.bytes > 0) detail += `/${entry.bytes >= 1_024 ? `${Math.round(entry.bytes / 1_024)}KB` : `${Math.round(entry.bytes)}B`}`;
   return `${entry.name}=${detail}`;

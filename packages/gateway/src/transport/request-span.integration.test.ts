@@ -1,24 +1,35 @@
-import { mkdtemp, mkdir, readFile, rm } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { existsSync, readFileSync } from "node:fs";
 import { createServer } from "node:http";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { homedir, tmpdir } from "node:os";
+import { dirname, join } from "node:path";
 import WebSocket from "ws";
 import { ModelRuntime, SessionManager } from "@earendil-works/pi-coding-agent";
 import { fauxAssistantMessage } from "@earendil-works/pi-ai";
 import { afterEach, describe, expect, it } from "vitest";
+import { AuthBroker } from "../admin/auth-broker.js";
 import { TrustService } from "../admin/trust-service.js";
+import { UploadStore } from "../machine/upload-store.js";
 import { DeviceStore } from "../security/device-store.js";
-import { PROTOCOL_VERSION } from "../version.js";
 import { RuntimeRegistry } from "../sessions/runtime-registry.js";
+import { PROTOCOL_VERSION } from "../version.js";
 import { CommandReceiptStore } from "./command-receipts.js";
-import { GatewayService } from "./gateway-service.js";
+import { GatewayService, type GatewayServiceDependencies } from "./gateway-service.js";
+import { GatewayLogger, type LogRecord } from "./logger.js";
 import { GatewayServer } from "./server.js";
 
 /**
- * Proves O-3's "Done when" without the O-6a scenario: a cold `session.open` over
- * a large generated JSONL names the work that held it. The slowest open must
- * account for at least 95% of its wall time in named stages, and the report it
- * prints is the measurement artifact.
+ * Proves the request span's breakdown reaches the real log writer: every
+ * `session.open` below runs through a real `GatewayServer`, `GatewayService`,
+ * `RuntimeRegistry` and `GatewayLogger`, and the assertions read that logger's
+ * own records instead of a double. A failed open proves the persisted JSONL
+ * line, which is where the earlier allowlist dropped `stages` and
+ * `unaccountedMs`.
+ *
+ * The 95% "Done when" bar belongs to O-6a's qualification workload and is still
+ * owed there; this case asserts the breakdown is present and names the open,
+ * and reports every open's accounted share to the artifact at `REPORT_PATH`.
+ * Regenerate with `npx vitest run src/transport/request-span.integration.test.ts`.
  */
 
 const cleanups: Array<() => Promise<void>> = [];
@@ -28,10 +39,22 @@ afterEach(async () => { await Promise.all(cleanups.splice(0).map((cleanup) => cl
  * file header, so it has enough real work to judge the accounting by. */
 const LARGE_SESSION_MESSAGES = 800;
 const LARGE_SESSION_TEXT_BYTES = 128 * 1_024;
-/** Cold opens measured per run. A single event-loop or GC pause lands between
- * two measured intervals on a loaded host, so the bar is read from the median
- * of the repeats; every run and its exact breakdown still reaches the report. */
+/** Cold opens measured per run; every one and its exact breakdown reaches the
+ * report. A loaded host can lose one open to an event-loop or GC pause between
+ * two measured intervals, which is why the report keeps all of them. */
 const COLD_OPEN_SESSIONS = 3;
+/** Stable artifact path, so the measurement can be inspected and regenerated
+ * with the same command; `TRON_O3_SPAN_REPORT` moves it. */
+const REPORT_PATH = process.env.TRON_O3_SPAN_REPORT
+  ?? join(homedir(), ".tron", "workspace", "files", "hardening", "o-3", "request-span-report.json");
+
+interface SocketFrame {
+  type?: string;
+  id?: string;
+  ok?: boolean;
+  result?: { session?: { sessionId?: string }; syncToken?: string };
+  error?: { code?: string; message?: string };
+}
 
 async function unusedPort(): Promise<number> {
   const probe = createServer();
@@ -60,8 +83,24 @@ function stagesOf(stages: string): Map<string, number> {
   return parsed;
 }
 
+function isSessionOpenCompletion(record: LogRecord): boolean {
+  return record.event === "rpc.completed" && record.method === "session.open";
+}
+
+/** Debug detail is memory-only, a slow or failed completion is persisted; the
+ * open's own record is in exactly one of the two. */
+function completedOpens(logger: GatewayLogger): LogRecord[] {
+  return [...logger.debugTail(), ...logger.recent()].filter(isSessionOpenCompletion);
+}
+
+function persistedRecords(path: string): Array<Record<string, unknown>> {
+  if (!existsSync(path)) return [];
+  return readFileSync(path, "utf8").split("\n").filter(Boolean)
+    .map((line) => JSON.parse(line) as Record<string, unknown>);
+}
+
 describe("cold session.open request span", () => {
-  it("names at least 95% of repeated cold opens in stages and reports their volume", async () => {
+  it("names a cold open's stages in the real logger's record and reports their volume", async () => {
     const root = await mkdtemp(join(tmpdir(), "tron-request-span-open-"));
     const agentDir = join(root, "agent");
     const cwd = join(root, "workspace");
@@ -101,14 +140,24 @@ describe("cold session.open request span", () => {
     const devices = new DeviceStore(root, "machine");
     await devices.initialize();
     const localToken = JSON.parse(await readFile(join(root, "gateway", "local-auth.json"), "utf8")).bearerToken as string;
-    const records: Array<Record<string, unknown>> = [];
-    const logger = { log: (_level: string, _message: string, fields?: Record<string, unknown>) => { records.push(fields ?? {}); } };
+    const logPath = join(root, "logs", "gateway.jsonl");
+    const logger = new GatewayLogger(logPath);
+    const uploads = new UploadStore(root, 1_024);
+    const auth = new AuthBroker(await ModelRuntime.create({ modelsPath: null, refreshOnCreate: false }), () => {});
+    // Only the dependencies `session.open` never reaches are absent; the
+    // registry, receipts, uploads, auth and the logger are real.
     const service = new GatewayService({
       config: { tronHome: root },
       devices,
       sessions: registry,
       receipts: new CommandReceiptStore(root),
-    } as never);
+      uploads,
+      auth,
+      logger,
+      requestRestart: () => {},
+      sessionDeleted: () => {},
+      broadcast: () => {},
+    } as unknown as GatewayServiceDependencies);
     const port = await unusedPort();
     gateway = new GatewayServer({
       host: "127.0.0.1",
@@ -117,17 +166,17 @@ describe("cold session.open request span", () => {
       // keep frame admission well above it so the measurement is the open.
       maxFrameBytes: 4 * 1_048_576,
       devices,
-      uploads: {} as never,
+      uploads,
       sessions: registry,
-      auth: { detachClient: () => {}, cancelOwner: () => {} } as never,
+      auth,
       service,
-      logger: logger as never,
+      logger,
     });
     await gateway.listen();
 
-    const frames: Array<Record<string, any>> = [];
+    const frames: SocketFrame[] = [];
     const socket = new WebSocket(`ws://127.0.0.1:${port}/v1/socket`, { headers: { authorization: `Bearer ${localToken}` } });
-    socket.on("message", (raw) => frames.push(JSON.parse(raw.toString())));
+    socket.on("message", (raw) => frames.push(JSON.parse(raw.toString()) as SocketFrame));
     await new Promise<void>((resolve) => socket.once("open", () => resolve()));
     socket.send(JSON.stringify({ type: "hello", protocolVersion: PROTOCOL_VERSION }));
     await waitUntil(() => frames.some((frame) => frame.type === "hello"));
@@ -135,7 +184,7 @@ describe("cold session.open request span", () => {
     const reports: Array<Record<string, unknown>> = [];
     for (const [index, manager] of managers.entries()) {
       const requestId = `cold-open-${index}`;
-      records.length = 0;
+      const measuredBefore = completedOpens(logger).length;
       socket.send(JSON.stringify({
         type: "request",
         id: requestId,
@@ -145,24 +194,29 @@ describe("cold session.open request span", () => {
       await waitUntil(() => frames.some((frame) => frame.id === requestId));
       const response = frames.find((frame) => frame.id === requestId);
       expect(response?.ok, JSON.stringify(response)).toBe(true);
-      await waitUntil(() => records.some((record) => record.event === "rpc.completed" && record.method === "session.open"));
+      await waitUntil(() => completedOpens(logger).length > measuredBefore);
 
-      const completion = records.find((record) => record.event === "rpc.completed" && record.method === "session.open")!;
-      const stages = completion.stages as string | undefined;
-      const unaccountedMs = completion.unaccountedMs as number | undefined;
-      const durationMs = completion.durationMs as number;
-      expect(stages, "rpc.completed must carry the span breakdown").toBeDefined();
+      const completion = completedOpens(logger).at(-1)!;
+      const stages = completion.stages;
+      const unaccountedMs = completion.unaccountedMs;
+      const durationMs = completion.durationMs!;
+      expect(stages, "the real logger must keep the span breakdown").toBeDefined();
       expect(unaccountedMs).toBeDefined();
-      // The large canonical open is named: the whole-file manager open is most
-      // of it, and no unnamed remainder is larger than that named stage.
+      expect(completion.level).toBe(durationMs >= 1_000 ? "warning" : "debug");
+      // The large canonical open is named: the whole-file manager open is on
+      // every record, and the accounting is read as a share below. No per-open
+      // ratio is asserted: a loaded host can stall any single measured interval
+      // or the request itself, and the report keeps every number for that.
       const named = stagesOf(stages!);
       expect(named.get("session.open.manager")).toBeGreaterThan(0);
       expect(durationMs).toBeGreaterThan(100);
-      expect(named.get("session.open.manager")!).toBeGreaterThan(durationMs * 0.3);
+      expect(unaccountedMs!).toBeGreaterThanOrEqual(0);
+      expect(unaccountedMs!).toBeLessThanOrEqual(durationMs);
       reports.push({
         durationMs,
         unaccountedMs,
         accountedShare: Number(((durationMs - unaccountedMs!) / durationMs).toFixed(4)),
+        level: completion.level,
         stages,
         recordBytes: Buffer.byteLength(JSON.stringify(completion), "utf8"),
         stagesBytes: Buffer.byteLength(stages!, "utf8"),
@@ -170,13 +224,52 @@ describe("cold session.open request span", () => {
       });
     }
 
-    // The retained artifact: every open's numbers and exact breakdown.
+    // A failed open is persisted, so it proves the writer keeps the breakdown in
+    // the JSONL file itself; the successful opens above are debug on this host.
+    const failedRequestId = "missing-open";
+    const persistedBefore = persistedRecords(logPath).length;
+    socket.send(JSON.stringify({
+      type: "request",
+      id: failedRequestId,
+      method: "session.open",
+      params: { sessionId: "00000000-0000-4000-8000-000000000000" },
+    }));
+    await waitUntil(() => frames.some((frame) => frame.id === failedRequestId));
+    expect(frames.find((frame) => frame.id === failedRequestId)?.ok).toBe(false);
+    await waitUntil(() => persistedRecords(logPath).length > persistedBefore);
+    const persisted = persistedRecords(logPath)
+      .filter((record) => record.event === "rpc.completed" && record.outcome === "failure")
+      .at(-1)!;
+    expect(persisted.stages, "the persisted line must carry the breakdown").toBeDefined();
+    expect(persisted.stages as string).not.toBe("");
+    expect(persisted.unaccountedMs).toBeDefined();
+    expect(persisted.unaccountedMs as number).toBeGreaterThanOrEqual(0);
+    expect(persisted.unaccountedMs as number).toBeLessThanOrEqual(persisted.durationMs as number);
+
+    // The retained artifact: every open's numbers, the exact breakdown, and the
+    // bytes the persisted line costs.
     const shares = reports.map((report) => report.accountedShare as number).sort((left, right) => left - right);
-    const medianShare = shares[Math.floor(shares.length / 2)]!;
-    console.log(`TRON_O3_SPAN_REPORT ${JSON.stringify({ medianAccountedShare: medianShare, shares, runs: reports })}`);
-    // A single event-loop or GC pause can land between two measured intervals,
-    // so the bar is met by the median of the repeated opens; the plan measures
-    // the slowest open of the qualification workload in O-6a.
-    expect(medianShare).toBeGreaterThanOrEqual(0.95);
+    const slowest = [...reports].sort((left, right) => (right.durationMs as number) - (left.durationMs as number))[0];
+    const report = {
+      coldOpens: reports.length,
+      medianAccountedShare: shares[Math.floor(shares.length / 2)],
+      lowestAccountedShare: shares[0],
+      slowestOpenAccountedShare: slowest?.accountedShare,
+      shares,
+      runs: reports,
+      failureRecord: {
+        stages: persisted.stages,
+        unaccountedMs: persisted.unaccountedMs,
+        durationMs: persisted.durationMs,
+        recordBytes: Buffer.byteLength(JSON.stringify(persisted), "utf8"),
+      },
+    };
+    await mkdir(dirname(REPORT_PATH), { recursive: true });
+    await writeFile(REPORT_PATH, `${JSON.stringify(report, null, 2)}\n`);
+    console.log(`TRON_O3_SPAN_REPORT ${REPORT_PATH} ${JSON.stringify(report)}`);
+    // A single event-loop or GC pause can land between two measured intervals on
+    // a loaded host, so the conservative bar is the median of the repeats. The
+    // plan's authority for the slowest open is O-6a's qualification workload.
+    expect(report.medianAccountedShare as number).toBeGreaterThanOrEqual(0.95);
   }, 300_000);
 });

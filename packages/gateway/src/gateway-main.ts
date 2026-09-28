@@ -236,6 +236,18 @@ const sessions = new RuntimeRegistry({
     `Extension lifecycle artifact rejected (${reason}; owner ${owner})`,
     { event: "extension.artifact-rejected", source: "sessions" },
   ),
+  // Both of these are handled background failures outside any request span, so
+  // they keep their own warning record (O-3 review).
+  catalogIndexFailure: (stage, durationMs) => logger.log(
+    "warning",
+    `Catalog metadata index ${stage} failed; the catalog falls back to a full scan`,
+    { event: "catalog-index.failure", source: "sessions", step: stage, durationMs },
+  ),
+  runtimeDisposeTimeout: (graceMs) => logger.log(
+    "warning",
+    `Extension runtime shutdown overran its ${graceMs}ms disposal grace and was forced`,
+    { event: "runtime.dispose-timeout", source: "sessions", durationMs: graceMs },
+  ),
 });
 const developmentHelperOverride = process.env.NODE_ENV === "development" ? process.env.TRON_SEARCH_EMBEDDING_HELPER : undefined;
 const bundledSearchHelper = process.env.TRON_GATEWAY_SEARCH_EMBEDDING_HELPER;

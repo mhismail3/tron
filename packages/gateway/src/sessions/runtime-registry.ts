@@ -32,7 +32,7 @@ import {
 } from "./session-presentation-presence.js";
 import { AsyncMutex } from "../util/async-mutex.js";
 import { abortableRead } from "../util/abortable-read.js";
-import { count, currentRequestSpan, runInRequestSpan, stage, wait } from "../transport/request-span.js";
+import { count, currentRequestSpan, stage } from "../transport/request-span.js";
 import type { TrustService } from "../admin/trust-service.js";
 import { BlobStore } from "./blob-store.js";
 import {
@@ -79,6 +79,7 @@ import {
 import { projectTranscriptPage, type TranscriptPage } from "./projection.js";
 import {
   CatalogMetadataIndex,
+  type CatalogMetadataIndexFailure,
   type CatalogMetadataIndexRow,
   type CatalogMetadataIndexSummary,
 } from "./catalog-metadata-index.js";
@@ -333,7 +334,9 @@ interface IdleEviction {
  * A registry lane that reports its queue wait to the current request span. The
  * mutex hands over inside its own operation, so the exact moment the wait ends
  * is known there; the wait is [request, handover), and the work the lock admits
- * stays attributed to the span that measures it.
+ * stays attributed to the span that measures it. `AsyncMutex` runs the admitted
+ * operation in this caller's async context, so its nested stages stay on this
+ * request.
  */
 class RequestSpanLane extends AsyncMutex {
   constructor(private readonly spanLabel: string) {
@@ -347,9 +350,7 @@ class RequestSpanLane extends AsyncMutex {
       this.spanLabel,
       (acquired) => super.run(() => {
         acquired();
-        // A queued lane starts inside a previous holder's async context. Restore
-        // this request's span so its nested stages are not credited elsewhere.
-        return runInRequestSpan(span, operation);
+        return operation();
       }, signal),
     );
   }
@@ -493,6 +494,12 @@ export class RuntimeRegistry {
       sessionAutomationReserved?: (sessionId: string) => boolean;
       compactionDiagnostic?: RuntimeSlotDependencies["compactionDiagnostic"];
       catalogDiscoveryLimits?: Partial<typeof DEFAULT_CATALOG_DISCOVERY_LIMITS>;
+      /** Handled catalog-index write failures. The index write is fire-and-forget
+       * outside any request span, so its owner records them (O-3 review). */
+      catalogIndexFailure?: CatalogMetadataIndexFailure;
+      /** A runtime whose extension shutdown overran its disposal grace and was
+       * forced. Outside any request span (O-3 review). */
+      runtimeDisposeTimeout?: (graceMs: number) => void;
       machineId?: string;
       notifications?: NotificationService;
       browserLiveViews?: BrowserLiveViewRegistry;
@@ -519,7 +526,7 @@ export class RuntimeRegistry {
     this.attention = new SessionAttentionStore(options.tronHome);
     this.archive = new SessionArchiveStore(options.tronHome);
     this.recentModels = new RecentModelStore(options.tronHome);
-    this.catalogMetadataIndex = new CatalogMetadataIndex(join(options.tronHome, "gateway"));
+    this.catalogMetadataIndex = new CatalogMetadataIndex(join(options.tronHome, "gateway"), options.catalogIndexFailure);
     this.workRegistry = options.workRegistry ?? new GatewayWorkRegistry();
     this.drainId = `idle-${createHash("sha256").update(this.workRegistry.runtimeEpoch).digest("hex").slice(0, 16)}`;
     this.configuredSessionDir = SettingsManager.create(
@@ -1309,6 +1316,7 @@ export class RuntimeRegistry {
       ...(this.options.connections ? { connections: this.options.connections } : {}),
       ...(this.options.mcp ? { mcp: this.options.mcp } : {}),
       resolveForkBoundary: (manager: SessionManager) => this.resolveForkBoundary(manager),
+      ...(this.options.runtimeDisposeTimeout ? { runtimeDisposalTimedOut: this.options.runtimeDisposeTimeout } : {}),
     };
   }
 
