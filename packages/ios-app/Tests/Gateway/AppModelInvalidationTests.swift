@@ -149,6 +149,11 @@ struct AppModelInvalidationTests {
             }
             try await respondToCatalogRequests(at: 3...4, on: socket, marker: "session")
             _ = await sessionLoad.value
+            // The first completed catalog load warms the picker's Recent rail
+            // with one `model.recent` read. A non-empty answer keeps that rail
+            // warm, so no later catalog load repeats the warm and the frame
+            // indices below stay stable.
+            try await respondToRecentModelsWarm(at: 5, on: socket)
             try await respondToCatalogRequests(at: 1...2, on: socket, marker: "global")
             _ = await globalLoad.value
 
@@ -158,12 +163,12 @@ struct AppModelInvalidationTests {
             #expect(model.providerCatalog(for: session)?.models.first?.id == "session-model")
 
             let olderLoad = Task { await model.refreshProviders(target: .global) }
-            try await socket.waitUntilSent(count: 7)
+            try await socket.waitUntilSent(count: 8)
             let newerLoad = Task { await model.refreshProviders(target: .global) }
-            try await socket.waitUntilSent(count: 9)
-            try await respondToCatalogRequests(at: 7...8, on: socket, marker: "newer")
+            try await socket.waitUntilSent(count: 10)
+            try await respondToCatalogRequests(at: 8...9, on: socket, marker: "newer")
             _ = await newerLoad.value
-            try await respondToCatalogRequests(at: 5...6, on: socket, marker: "older")
+            try await respondToCatalogRequests(at: 6...7, on: socket, marker: "older")
             _ = await olderLoad.value
 
             #expect(model.providerCatalog(for: .global)?.providers.first?.id == "newer")
@@ -172,9 +177,9 @@ struct AppModelInvalidationTests {
             let auth = Task {
                 try await model.beginAuth(providerID: "session", authType: "api_key", target: session)
             }
-            try await socket.waitUntilSent(count: 10)
+            try await socket.waitUntilSent(count: 11)
             try await respond(
-                toFrameAt: 9,
+                toFrameAt: 10,
                 on: socket,
                 result: .object(["operationId": .string("auth-operation")])
             )
@@ -188,13 +193,13 @@ struct AppModelInvalidationTests {
                     payload: .object(["operationId": .string("auth-operation"), "success": .bool(true)])
                 ))
             }
-            try await socket.waitUntilSent(count: 12)
-            for index in 10...11 {
+            try await socket.waitUntilSent(count: 13)
+            for index in 11...12 {
                 let request = try await requestObject(at: index, on: socket)
                 #expect(request["params"]?.objectValue?["sessionId"] == .string("session-a"))
             }
             let authenticatedPublication = observeProviderPublication(model, target: session)
-            try await respondToCatalogRequests(at: 10...11, on: socket, marker: "authenticated")
+            try await respondToCatalogRequests(at: 11...12, on: socket, marker: "authenticated")
             await completion.value
             try await awaitPublication(authenticatedPublication)
             #expect(model.providerCatalog(for: session)?.providers.first?.id == "authenticated")
@@ -206,22 +211,22 @@ struct AppModelInvalidationTests {
                 payload: .object(["operationId": .string("unknown-operation"), "success": .bool(true)])
             ))
             let sentCountAfterUnknownCompletion = await socket.sentFrames().count
-            #expect(sentCountAfterUnknownCompletion == 12)
+            #expect(sentCountAfterUnknownCompletion == 13)
 
             let secondAuth = Task {
                 try await model.beginAuth(providerID: "session", authType: "api_key", target: session)
             }
-            try await socket.waitUntilSent(count: 13)
+            try await socket.waitUntilSent(count: 14)
             try await respond(
-                toFrameAt: 12,
+                toFrameAt: 13,
                 on: socket,
                 result: .object(["operationId": .string("failed-cancel-operation")])
             )
             try await secondAuth.value
 
             let cancellation = Task { await model.cancelAuth(operationID: "failed-cancel-operation") }
-            try await socket.waitUntilSent(count: 14)
-            try await respondFailure(toFrameAt: 13, on: socket)
+            try await socket.waitUntilSent(count: 15)
+            try await respondFailure(toFrameAt: 14, on: socket)
             await cancellation.value
 
             let completionAfterFailedCancel = Task {
@@ -232,13 +237,13 @@ struct AppModelInvalidationTests {
                     payload: .object(["operationId": .string("failed-cancel-operation"), "success": .bool(true)])
                 ))
             }
-            try await socket.waitUntilSent(count: 16)
-            for index in 14...15 {
+            try await socket.waitUntilSent(count: 17)
+            for index in 15...16 {
                 let request = try await requestObject(at: index, on: socket)
                 #expect(request["params"]?.objectValue?["sessionId"] == .string("session-a"))
             }
             let completionPublication = observeProviderPublication(model, target: session)
-            try await respondToCatalogRequests(at: 14...15, on: socket, marker: "after-failed-cancel")
+            try await respondToCatalogRequests(at: 15...16, on: socket, marker: "after-failed-cancel")
             await completionAfterFailedCancel.value
             try await awaitPublication(completionPublication)
             #expect(model.providerCatalog(for: session)?.providers.first?.id == "after-failed-cancel")
@@ -464,6 +469,31 @@ struct AppModelInvalidationTests {
                 Issue.record("Unexpected catalog request: \(String(describing: request["method"]))")
             }
         }
+    }
+
+    /// A successful catalog load warms the model picker's Recent rail with one
+    /// `model.recent` read, which this suite's exact frame indices have to
+    /// account for. The non-empty answer is the point: it leaves the rail warm,
+    /// so no later catalog load repeats the read.
+    private func respondToRecentModelsWarm(
+        at index: Int,
+        on socket: ScriptedGatewaySocket
+    ) async throws {
+        try #require(
+            await socket.waitUntilSent(count: index + 1, within: .seconds(2)),
+            "the catalog's Recent-rail warm request was not sent"
+        )
+        let request = try await requestObject(at: index, on: socket)
+        #expect(request["method"] == .string("model.recent"))
+        try await respond(
+            toFrameAt: index,
+            on: socket,
+            result: .object(["models": .array([.object([
+                "provider": .string("session"),
+                "id": .string("session-model"),
+                "lastUsedAt": .string("2026-09-28T00:00:00.000Z"),
+            ])])])
+        )
     }
 
     private func respondFailure(

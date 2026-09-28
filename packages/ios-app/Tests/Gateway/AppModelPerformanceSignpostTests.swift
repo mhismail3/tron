@@ -426,9 +426,23 @@ struct AppModelPerformanceSignpostTests {
             defer { refreshing.cancel() }
 
             var expected = Set(["session.list", "provider.list", "model.list", "settings.get", "device.list"])
-            for index in 1...5 {
+            var warmRequests = 0
+            // The catalog load warms the picker's Recent rail, so a completed
+            // refresh carries one `model.recent` read beside the five reads the
+            // dashboard itself owns.
+            for index in 1...6 {
+                // A dropped frame is exactly what a regression removes, so wait
+                // for each one by name instead of letting the watchdog expire.
+                try #require(
+                    await harness.socket.waitUntilSent(count: index + 1, within: .seconds(2)),
+                    "the dashboard refresh stopped before frame \(index + 1)"
+                )
                 let next = try await request(in: harness.socket, frameIndex: index)
-                #expect(expected.remove(next.method) != nil)
+                if next.method == "model.recent" {
+                    warmRequests += 1
+                } else {
+                    #expect(expected.remove(next.method) != nil)
+                }
                 let result: JSONValue
                 switch next.method {
                 case "session.list": result = .object([
@@ -440,6 +454,7 @@ struct AppModelPerformanceSignpostTests {
                 case "model.list": result = .object(["models": .array([]), "nextCursor": .null])
                 case "settings.get": result = .object(["effective": .object([:])])
                 case "device.list": result = .object(["devices": .array([])])
+                case "model.recent": result = .object(["models": .array([])])
                 default:
                     Issue.record("unexpected dashboard refresh: \(next.method)")
                     return
@@ -448,7 +463,8 @@ struct AppModelPerformanceSignpostTests {
             }
             await refreshing.value
             #expect(expected.isEmpty)
-            #expect(await harness.socket.sentFrames().count == 6)
+            #expect(warmRequests == 1)
+            #expect(await harness.socket.sentFrames().count == 7)
             #expect(await MainActor.run { harness.model.selectedSessionID } == nil)
             await harness.close()
         }
@@ -1313,6 +1329,11 @@ struct AppModelPerformanceSignpostTests {
             .object(["models": .array([]), "nextCursor": .null])
         case "session.commands":
             .object(["commands": .array([])])
+        // A successful catalog load warms the model picker's Recent rail, so an
+        // opening or resyncing presentation also carries one `model.recent`
+        // read that every responder here has to answer.
+        case "model.recent":
+            .object(["models": .array([])])
         default:
             nil
         }
