@@ -11,10 +11,13 @@ Phone and Gateway records are joined by the O-1 correlation key (a phone
 `attemptId` are the Gateway's `peerClientId`/`peerAttemptId`), falling back to a
 time window for logs written before protocol 6. An episode uses one join: once
 the key joins any record, a record naming another connection is not this
-episode's evidence, and a connection the Gateway opened during the episode is
-the recovery's rather than the one the outage lost. A published outage is
-reported as one episode per scene phase, because the app parks recovery in the
-background and resumes it on the foreground without publishing a new state.
+episode's evidence, and a connection the Gateway opened during the episode — or
+since the reconnect cycle the episode belongs to began — is the recovery's
+rather than the one the outage lost. A published outage is reported as one
+episode per scene phase, because the app parks recovery in the background and
+resumes it on the foreground without publishing a new state. An attempt belongs
+to the stretch it began in, and a Tailscale relay window explains an episode
+only while it covers it.
 Every episode is classified by the first matching rule in `classify`, in the
 order the hardening plan fixes: `path`, `phone-background`, `phone-stall`,
 `gateway-stall`, `gateway-capacity`, `unknown`. Each classification carries the
@@ -41,10 +44,25 @@ EXIT_INVALID = 2
 # `SLOW_RPC_WARNING_MS` in packages/gateway/src/transport/server.ts: at or above
 # this a completed RPC is a warning, which is what "a slow span" means here.
 SLOW_RPC_WARNING_MS = 1_000
+# A transport attempt that writes no `durationMs` still has a deadline: the
+# measured transport-open timeout is 15 s and the client's own bound is 20 s.
+ATTEMPT_DEADLINE_MS = 20_000.0
 # Two logs are the same event when they are this close and no correlation key
 # joins them (protocol-5 exports). The measured reconnect cycle is under a
 # minute; a wider window starts matching a neighbour's socket.
 DEFAULT_JOIN_TOLERANCE_SECONDS = 60
+# The reconnect publishes a burst of label flicks around one recovery, and the
+# socket it opened for the first of them carries every later flicker's refresh
+# work. The burst is one reconnect cycle, the same under-a-minute span the join
+# tolerance is set to, so an episode never inherits a socket from an earlier
+# outage.
+RECOVERY_CYCLE_SECONDS = DEFAULT_JOIN_TOLERANCE_SECONDS
+# A relay window is the path being relayed, so it explains an outage only when
+# the window is still the path at the episode's end or came back within the
+# app's own recovery delay. The measured tail (05:01:37..05:01:42 against a
+# window closing at 05:01:42.052) is under a second; a minute-long window that
+# closed minutes earlier is not this episode's cause.
+RELAY_WINDOW_SLACK_SECONDS = 5
 # `gateway.jsonl` plus its seven numbered segments (logger.ts rotation).
 GATEWAY_LOG_SEGMENTS = 8
 # The Gateway's own records can land just outside an episode's bounds: a loss is
@@ -448,11 +466,41 @@ class Attempt:
     def failed(self) -> bool:
         return self.outcome == "failure"
 
+    def start(self) -> datetime:
+        """When this attempt began: its end timestamp less its own duration.
+
+        An attempt belongs to the stretch it started in, not the one it ended
+        in: a connect that began before a background blip and ended after the
+        app returned to the foreground is the blip's attempt, and counting it
+        against the silent stretch that followed contradicted the export.
+        """
+        length = self.duration_ms if self.duration_ms is not None else ATTEMPT_DEADLINE_MS
+        return self.timestamp - timedelta(milliseconds=length)
+
     def span(self) -> Tuple[datetime, datetime]:
         """The interval this attempt occupied, its own deadline included."""
-        length = self.duration_ms if self.duration_ms is not None else 20_000.0
-        return (self.timestamp - timedelta(milliseconds=length + 2_000),
-                self.timestamp + timedelta(seconds=2))
+        return (self.start() - timedelta(seconds=2), self.timestamp + timedelta(seconds=2))
+
+    def context_detail(self) -> str:
+        """The fields this attempt's own record carries, for the context line.
+
+        The two record shapes carry different fields: a pre-O-4
+        `operation.gatewayConnect` names an outcome and a duration and nothing
+        else, so printing `stageReached=unknown reason=none foreground=None`
+        for it invented a stage, a reason and a scene the export never wrote.
+        """
+        fields = []
+        if self.stage:
+            fields.append(f"stageReached={self.stage}")
+        if self.reason:
+            fields.append(f"reason={self.reason}")
+        if self.outcome:
+            fields.append(f"outcome={self.outcome}")
+        if self.duration_ms is not None:
+            fields.append(f"durationMs={int(self.duration_ms)}")
+        if self.foreground is not None:
+            fields.append(f"foreground={self.foreground}")
+        return " ".join(fields) or "attempt finished with no field recorded"
 
 
 def attempt_belongs(episode: "Episode", attempt: Attempt) -> bool:
@@ -560,6 +608,7 @@ class Episode:
     join: str = "none"
     cause: str = CAUSE_UNKNOWN
     evidence: List[Dict[str, Any]] = dataclass_field(default_factory=list)
+    recovery_floor: Optional[datetime] = None
 
     @property
     def duration_seconds(self) -> float:
@@ -719,13 +768,14 @@ def derived_episodes(records: Sequence[Record], attempts: Sequence[Attempt],
     for segment in outage_segments(records):
         if is_covered(segment.start, segment.end):
             continue
-        window_attempts = [attempt for attempt in attempts
-                           if segment.start <= attempt.timestamp <= segment.end]
+        # Attempts are attached by `attempt_owner` once every episode exists, so
+        # an attempt that began in a stretch's own blip is not counted against
+        # the silent stretch after it.
         derived.append(Episode(
-            start=segment.start, end=segment.end, attempts=len(window_attempts),
+            start=segment.start, end=segment.end,
             derived=True, ended_by=segment.ended_by, phase=segment.phase,
-            attempt_records=window_attempts, boundary=segment.opener,
-            outage_boundary=segment.opener, scene_record=segment.scene,
+            boundary=segment.opener, outage_boundary=segment.opener,
+            scene_record=segment.scene,
         ))
 
     cluster_start: Optional[datetime] = None
@@ -739,7 +789,7 @@ def derived_episodes(records: Sequence[Record], attempts: Sequence[Attempt],
             continue
         if not is_covered(cluster_start, attempt.timestamp):
             derived.append(Episode(
-                start=cluster_start, end=attempt.timestamp, attempts=len(cluster_attempts),
+                start=cluster_start, end=attempt.timestamp,
                 ended_by="connected", derived=True, attempt_records=list(cluster_attempts),
                 boundary=cluster_attempts[0].record,
             ))
@@ -779,8 +829,30 @@ def all_attempts(records: Iterable[Record]) -> List[Attempt]:
     return attempts
 
 
+def attempt_owner(attempt: Attempt, episodes: Sequence[Episode]) -> Optional[Episode]:
+    """The stretch this attempt belongs to, or None.
+
+    The stretch it began in owns it: the export's 03:24:45.020 record began
+    6.2 s earlier, inside the blip before the silent stretch, so counting it
+    against the silent stretch hid that stretch's gap statement and contradicted
+    the measured no-attempt gap. Only an attempt that began before the report's
+    first stretch — the failing attempt a declared `connection.episode`'s own
+    loss was published for — falls back to the stretch it ended in, because no
+    stretch contains its start at all.
+    """
+    issued = attempt.start()
+    for episode in episodes:
+        if episode.start <= issued <= episode.end:
+            return episode
+    for episode in episodes:
+        if episode.start <= attempt.timestamp <= episode.end:
+            return episode
+    return None
+
+
 def annotate_episode(episode: Episode, phone: Sequence[Record], attempts: Sequence[Attempt],
-                     all_attempts_list: Sequence[Attempt], gateway: GatewayIndex) -> None:
+                     all_attempts_list: Sequence[Attempt], gateway: GatewayIndex,
+                     episodes: Sequence[Episode]) -> None:
     """Attach the phone records, attempts and O-1 keys one episode owns."""
     episode.phone_records = [
         record for record in phone
@@ -789,12 +861,14 @@ def annotate_episode(episode: Episode, phone: Sequence[Record], attempts: Sequen
         <= episode.end + timedelta(seconds=EVIDENCE_PAD_SECONDS)
     ]
     if not episode.attempt_records:
-        # An older export records its attempts as `operation.gatewayConnect`
-        # alone, so without this fallback every episode of one reports no
-        # attempt at all. The stage-recorded attempts win where both exist.
+        # The stage-recorded attempts and the app-level `operation.gatewayConnect`
+        # rows are attached by the stretch each began in, so an episode with no
+        # attempt of its own really had none (the measured silent gap) and an
+        # episode whose attempt record sits in an older-export shape still has
+        # it. `all_attempts_list` carries both shapes.
         episode.attempt_records = [
             attempt for attempt in all_attempts_list
-            if episode.start - timedelta(seconds=5) <= attempt.timestamp <= episode.end
+            if attempt_owner(attempt, episodes) is episode
         ]
     if episode.attempts == 0 and episode.attempt_records:
         episode.attempts = len(episode.attempt_records)
@@ -819,6 +893,29 @@ def annotate_episode(episode: Episode, phone: Sequence[Record], attempts: Sequen
             episode.gateway_ids.discard(gateway_id)
 
 
+def assign_recovery_floors(episodes: Sequence[Episode]) -> None:
+    """Point each episode at the start of the reconnect cycle it belongs to.
+
+    The reconnect publishes a burst of sub-second label flicks around one
+    recovery, and the socket it opened for the first flicker carries every
+    later one's refresh work. That socket is the recovery's, not the connection
+    any later flicker "lost" (the app's retained connection id does not change
+    across such a flicker), so rule 4 must not read its slow span as the
+    Gateway stalling on the connection the loss dropped. The chain reaches back
+    only as far as the measured reconnect cycle, so an episode never inherits a
+    socket from an earlier outage, and the first stretch of a burst keeps no
+    floor of its own: its loss may be real.
+    """
+    cycle = timedelta(seconds=RECOVERY_CYCLE_SECONDS)
+    for index, episode in enumerate(episodes):
+        floor: Optional[datetime] = None
+        for earlier in reversed(episodes[:index]):
+            if episode.start - earlier.start > cycle:
+                break
+            floor = earlier.start
+        episode.recovery_floor = floor
+
+
 def build_episodes(phone: Sequence[Record], gateway: GatewayIndex,
                    tolerance: timedelta) -> List[Episode]:
     attempts = phone_attempts(phone)
@@ -826,8 +923,9 @@ def build_episodes(phone: Sequence[Record], gateway: GatewayIndex,
     episodes = declared_episodes(phone)
     episodes.extend(derived_episodes(phone, attempts, episodes))
     episodes.sort(key=lambda episode: episode.start)
+    assign_recovery_floors(episodes)
     for episode in episodes:
-        annotate_episode(episode, phone, attempts, every_attempt, gateway)
+        annotate_episode(episode, phone, attempts, every_attempt, gateway, episodes)
     return episodes
 
 
@@ -1007,7 +1105,8 @@ def window_connection_ids(gateway: GatewayIndex, start: datetime, end: datetime)
     return ids
 
 
-def label_over_live_socket(episode: Episode, gateway: GatewayIndex) -> Optional[Record]:
+def label_over_live_socket(episode: Episode,
+                           gateway: GatewayIndex) -> Optional[Tuple[Record, str, Record]]:
     """A `reconnecting` label while the Gateway socket answered requests.
 
     The 2026-09-27 incident's second cause: the published state stayed
@@ -1015,6 +1114,8 @@ def label_over_live_socket(episode: Episode, gateway: GatewayIndex) -> Optional[
     socket. The Gateway proves the socket was live by completing a request on
     the connection that phone epoch named while that connection was still open,
     so a socket that had already closed is a real loss, not a wrong label.
+    Returns the transition, the connection that answered and the request, so
+    the evidence names the socket instead of leaving it `unknown`.
 
     An export written before O-1 carries no `gatewayConnectionId`, so there the
     fallback is any connection that was already open when the label was
@@ -1038,8 +1139,11 @@ def label_over_live_socket(episode: Episode, gateway: GatewayIndex) -> Optional[
             continue
         opened = any(item.event == "connection.opened" and item.timestamp is not None
                      and item.timestamp <= transition.timestamp for item in history)
-        if opened and socket_answered(history, transition.timestamp, episode.end):
-            return transition
+        if not opened:
+            continue
+        answered = socket_answered(history, transition.timestamp, episode.end)
+        if answered is not None:
+            return (transition, candidate, answered)
     return None
 
 
@@ -1158,16 +1262,48 @@ def recovery_connection(episode: Episode, gateway: GatewayIndex,
                         connection_id: Optional[str]) -> bool:
     """Whether this Gateway connection is the recovery's, not the outage's.
 
-    Two shapes name the reconnect's own socket rather than the one whose loss
-    the episode is: a socket opened inside the episode, and a socket that had
-    already closed when the episode began (its late completion is abandoned
-    work, which the Gateway logs as `connectionClosed`).
+    Three shapes name the reconnect's own socket rather than the one whose loss
+    the episode is: a socket opened inside the episode; a socket the Gateway
+    opened after the reconnect cycle the episode belongs to began
+    (`recovery_floor`) — the burst of label flicks the reconnect publishes
+    around one recovery, where the socket it opened for the first flicker
+    carries the refresh work of the later ones; and a socket that had already
+    closed when the episode began (its late completion is abandoned work,
+    which the Gateway logs as `connectionClosed`).
     """
     if opened_within(episode, gateway, connection_id):
+        return True
+    if episode.recovery_floor is not None and any(
+            record.event == "connection.opened" and record.timestamp is not None
+            and episode.recovery_floor <= record.timestamp <= episode.start
+            for record in gateway.connection(connection_id or "")):
         return True
     return any(record.event == "connection.closed" and record.timestamp is not None
                and record.timestamp <= episode.start
                for record in gateway.connection(connection_id or ""))
+
+
+def relay_window_explains(episode: Episode, window: Tuple[datetime, datetime, str]) -> bool:
+    """Whether one relay window covers the outage, not just part of it.
+
+    The window is the path being relayed, so it explains the outage only when
+    the loss happened inside it and the episode ends inside it or within the
+    app's own recovery delay after it closes (the close is the path returning).
+    A window that closed minutes before the episode ended does not explain it:
+    the measured silent gaps end long after their relay window closed and
+    recorded no attempt, which is why the plan keeps them as the gap they are
+    rather than as path faults.
+    """
+    slack = timedelta(seconds=RELAY_WINDOW_SLACK_SECONDS)
+    return window[0] - slack <= episode.start and episode.end <= window[1] + slack
+
+
+def relay_window_miss(episode: Episode, window: Tuple[datetime, datetime, str]) -> str:
+    """Why this relay window is not the episode's cause, in one clause."""
+    if window[1] < episode.start:
+        return f"the path was direct from {format_timestamp(window[1])}"
+    return (f"it closed {int((episode.end - window[1]).total_seconds())}s before the episode "
+            f"ended")
 
 
 def classify(episode: Episode, gateway: GatewayIndex, tolerance: timedelta,
@@ -1179,6 +1315,9 @@ def classify(episode: Episode, gateway: GatewayIndex, tolerance: timedelta,
     evidence: List[Dict[str, Any]] = []
     join_modes: Set[str] = set()
     matches: List[Tuple[str, Record]] = []
+    relay_windows = tailscale.relay_windows() if tailscale is not None else []
+    relay_window = next((window for window in relay_windows
+                         if relay_window_explains(episode, window)), None)
     for record in gateway.window(padded_start, padded_end):
         mode = gateway_join(episode, record, tolerance)
         if mode is None:
@@ -1238,10 +1377,6 @@ def classify(episode: Episode, gateway: GatewayIndex, tolerance: timedelta,
             start, end = attempt.span()
             if not attempt_reached_mac(attempt, gateway.window(start, end)):
                 unanswered.append(attempt)
-        relay_window = None
-        if tailscale is not None:
-            relay_window = next((window for window in tailscale.relay_windows()
-                                 if overlaps(episode.start, episode.end, window[0], window[1])), None)
         if unanswered:
             episode.cause = CAUSE_PATH
             for attempt in unanswered[:MAX_EVIDENCE_LINES]:
@@ -1285,12 +1420,15 @@ def classify(episode: Episode, gateway: GatewayIndex, tolerance: timedelta,
         else:
             labelled = label_over_live_socket(episode, gateway)
             if labelled is not None:
+                transition, answered_by, answered = labelled
                 episode.cause = CAUSE_PHONE_STALL
                 evidence.append(evidence_entry(
-                    "phone", labelled, "cause",
-                    f"published state stayed {labelled.field('new') or labelled.outcome} for the "
-                    f"episode while the Gateway answered requests on "
-                    f"{epoch_connection_id(episode, labelled.timestamp) or 'unknown'}"))
+                    "phone", transition, "cause",
+                    f"published state stayed "
+                    f"{transition.field('new') or transition.outcome} for the episode while "
+                    f"the Gateway answered {answered.field('method') or 'a request'} on "
+                    f"{answered_by} in "
+                    f"{int(answered.number('durationMs') or 0)}ms"))
 
     # Rule 4 — gateway-stall: a delayed event loop, or a slow span that was
     # already running when the loss happened. The work must have started before
@@ -1356,11 +1494,21 @@ def classify(episode: Episode, gateway: GatewayIndex, tolerance: timedelta,
             f"{episode.boundary.field('new') or episode.boundary.field('endedBy') or 'unknown'}"))
     for attempt in episode.attempt_records[:MAX_EVIDENCE_LINES]:
         evidence.append(evidence_entry(
-            "phone", attempt.record, "context",
-            f"stageReached={attempt.stage or 'unknown'} reason={attempt.reason or 'none'} "
-            f"outcome={attempt.outcome or 'unknown'} "
-            f"durationMs={int(attempt.duration_ms) if attempt.duration_ms is not None else 'unknown'} "
-            f"foreground={attempt.foreground}"))
+            "phone", attempt.record, "context", attempt.context_detail()))
+    for window in relay_windows:
+        # A window that only overlaps the episode is context, not a cause: the
+        # report names it so an operator can see the path was relayed nearby
+        # without the outage being attributed to it.
+        if window is relay_window or not overlaps(episode.start, episode.end,
+                                                  window[0], window[1]):
+            continue
+        evidence.append({
+            "source": "tailscale", "role": "context",
+            "timestamp": format_timestamp(window[0]), "event": "path.change",
+            "detail": f"{window[2]} path window {format_timestamp(window[0])}.."
+                      f"{format_timestamp(window[1])} does not cover this episode "
+                      f"({relay_window_miss(episode, window)})",
+        })
     if episode.join == "none":
         evidence.append({
             "source": "join", "role": "context", "timestamp": format_timestamp(episode.start),
@@ -1462,6 +1610,14 @@ def triage_reports(export_paths: Sequence[Path], gateway_directory: Optional[Pat
                 "lines": len(tailscale.lines),
                 "window": None if tailscale.window is None else [
                     format_timestamp(tailscale.window[0]), format_timestamp(tailscale.window[1])],
+                # The relay windows themselves, not just their count: the
+                # unified log rotates, so the rows a cause-1 run read are gone
+                # within days and the report is the only place they survive.
+                "relayWindows": [
+                    {"kind": kind, "start": format_timestamp(start),
+                     "end": format_timestamp(end)}
+                    for start, end, kind in tailscale.relay_windows()
+                ],
             },
             "joinToleranceSeconds": tolerance_seconds,
             "evidencePadSeconds": EVIDENCE_PAD_SECONDS,

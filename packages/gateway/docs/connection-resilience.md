@@ -217,13 +217,21 @@ keeps today's uncompressed frames.
    join decides an episode: when the key joins any record, only key-joined
    records and Gateway-wide records (a delayed event loop, host resources)
    count as evidence, so a neighbour connection's slow span is never read as
-   this episode's cause. A connection the Gateway opened during the episode is
-   the recovery's, not the one the outage lost, so its work is not this
-   episode's cause or key either. A published outage is reported as one episode
-   per scene phase: the app parks recovery in the background and resumes it on
-   the foreground without publishing a new state, so the foreground stretches
-   carry the path, label and gap evidence and only the time really spent in the
-   background reads `phone-background`. A cause is only as good as its evidence
+   this episode's cause. A connection the Gateway opened during the episode, or
+   after the reconnect cycle the episode belongs to began, is the recovery's,
+   not the one the outage lost, so the refresh work the reconnect runs on it is
+   not this episode's cause or key either. A published outage is reported as one
+   episode per scene phase: the app parks recovery in the background and resumes
+   it on the foreground without publishing a new state, so the foreground
+   stretches carry the path, label and gap evidence and only the time really
+   spent in the background reads `phone-background`. One attempt belongs to the
+   stretch it began in (its end timestamp less its `durationMs`), so a connect
+   that started in a background blip is not counted against the silent stretch
+   after it. A Tailscale relay window explains an episode only when the loss
+   falls inside the window and the episode ends inside it or within the app's
+   own recovery delay after it closes; a window that closed minutes earlier is
+   context, so a measured silent gap stays an `unknown` gap with its window
+   named beside it. A cause is only as good as its evidence
    line: an `unknown` episode lists what the records did contain, and an
    `unknown` for a foreground silent gap is the measured silent recovery gap
    until C-1 removes it.

@@ -35,6 +35,12 @@ socket the reconnect opened, the app-level `operation.gatewayConnect` attempt a
 pre-O-4 export writes, the evidence margin, and a Gateway-wide record in the
 pad.
 
+`ReviewRoundThreeTests` covers the shapes a third review found on that export
+and on the ten `device-exports`: a label flicker whose slow span is the refresh
+the reconnect had just issued on the socket it opened milliseconds earlier (the
+previous stretch's recovery socket, and the second flicker sharing the first
+one's), while the blip case holds the export's own 03:24:45.020 attempt record.
+
 The fixtures are small, sanitized records with the real shapes: phone rows are
 `AppLogRecord` JSON with details in the message, and Gateway rows are
 `gateway.jsonl` records with typed fields. The report of the full run is kept
@@ -565,6 +571,37 @@ class TailscaleWindowTests(TriageFixture):
         self.assertEqual(report["episodes"][0]["cause"], "path")
         self.assertIn("relay path window", " ".join(
             entry["detail"] for entry in report["episodes"][0]["evidence"]))
+        # The windows themselves, so the capture can be reconstructed after the
+        # unified log has dropped the lines it was read from.
+        self.assertEqual(report["inputs"]["tailscaleWindow"]["relayWindows"], [
+            {"kind": "relay", "start": "2026-09-28T09:59:00.000Z",
+             "end": "2026-09-28T10:05:00.000Z"},
+        ])
+
+    def test_a_relay_window_that_closed_before_the_episode_ended_is_context(self):
+        # Review round 3, finding 3: the 03:24:45 silent gap. Its relay window
+        # closed at 03:26:22 and the gap ran to 03:30:30, so the path had been
+        # back for four minutes: the window is nearby context, not the cause,
+        # and the episode keeps the gap statement it was measured by.
+        phone = self.write("phone.jsonl", [
+            state_change("2026-09-28T03:24:31.488Z", "connected", "reconnecting"),
+            app_record("2026-09-28T03:24:43.600Z", "app.backgrounded", "outcome=success"),
+            app_record("2026-09-28T03:24:45.005Z", "app.foregrounded", "outcome=success"),
+            app_record("2026-09-28T03:30:30.618Z", "app.backgrounded", "outcome=success"),
+        ])
+        self.log_show(self.magicsock_lines("2026-09-28T03:24:21.764Z",
+                                           "2026-09-28T03:26:22.334Z"))
+        report = tron_triage.triage_reports([phone], None, 60, True)
+        gap = report["episodes"][2]
+        self.assertEqual(gap["cause"], "unknown", gap["evidence"])
+        self.assertIn("no attempt recorded in this window (gap of 345s)",
+                      " ".join(entry["detail"] for entry in gap["evidence"]))
+        context = [entry for entry in gap["evidence"]
+                   if entry["source"] == "tailscale" and entry["event"] == "path.change"]
+        self.assertEqual([entry["role"] for entry in context], ["context"], gap["evidence"])
+        self.assertIn("does not cover this episode", context[0]["detail"])
+        # The blip's own stretch is inside the window, so it is still the path.
+        self.assertEqual(report["episodes"][0]["cause"], "path")
 
     def test_a_failing_log_show_does_not_stop_the_run(self):
         phone = self.write("phone.jsonl", [
@@ -759,6 +796,13 @@ class ReviewRoundTwoTests(TriageFixture):
             state_change("2026-09-28T03:24:31.488Z", "connected", "reconnecting"),
             app_record("2026-09-28T03:24:43.600Z", "app.backgrounded", "outcome=success"),
             app_record("2026-09-28T03:24:45.005Z", "app.foregrounded", "outcome=success"),
+            # The export's own 03:24:45.020 connect: it began 6.2 s earlier, in
+            # the blip, and ended 15 ms after the app returned to the
+            # foreground. The blip owns it; Context records no attempt in the
+            # silent stretch at all.
+            app_record("2026-09-28T03:24:45.020Z", "operation.gatewayConnect", "count=0",
+                       level="error", outcome="failure", duration_ms=6237,
+                       lifecycle_generation=None),
             app_record("2026-09-28T03:30:30.618Z", "app.backgrounded", "outcome=success"),
             app_record("2026-09-28T03:30:31.402Z", "app.foregrounded", "outcome=success"),
             state_change("2026-09-28T03:30:33.621Z", "reconnecting", "connected"),
@@ -776,9 +820,12 @@ class ReviewRoundTwoTests(TriageFixture):
         self.assertIn("no attempt recorded in this window (gap of 345s)",
                       self.causes_text(gap))
         # The stretch before the blip was foreground, so it is not the parked
-        # episode the scene record that ended it would have made it.
+        # episode the scene record that ended it would have made it, and the
+        # connect that began inside it is its own.
         self.assertEqual(report["episodes"][0]["durationMs"], 12112)
-        self.assertIn("no attempt recorded", self.causes_text(report["episodes"][0]))
+        self.assertEqual(report["episodes"][0]["attempts"], 1)
+        self.assertIn("durationMs=6237", self.causes_text(report["episodes"][0]))
+        self.assertNotIn("no attempt recorded", self.causes_text(report["episodes"][0]))
 
     def test_a_blip_does_not_stop_the_live_socket_from_being_the_cause(self):
         # 2026-09-28 04:05:25-04:11:46, the incident's second cause. Socket
@@ -821,6 +868,11 @@ class ReviewRoundTwoTests(TriageFixture):
         self.assertEqual(report["episodes"][2]["end"], "2026-09-28T04:11:46.402Z")
         self.assertIn("published state stayed reconnecting",
                       self.causes_text(report["episodes"][2]))
+        # The evidence names the socket that answered, not `unknown`: this
+        # export carries no `gatewayConnectionId`, so the connection comes from
+        # the window it was found in.
+        self.assertIn("on de22b6dd", self.causes_text(report["episodes"][2]))
+        self.assertIn("session.list", self.causes_text(report["episodes"][2]))
 
     def test_an_outage_that_opens_in_the_background_is_still_phone_background(self):
         # The phase of a stretch is the app's state when it began: an outage
@@ -923,6 +975,10 @@ class ReviewRoundTwoTests(TriageFixture):
         self.assertEqual(found["attempts"], 2, found["evidence"])
         self.assertNotIn("no attempt recorded", self.causes_text(found))
         self.assertIn("durationMs=15001", self.causes_text(found))
+        # This shape has no stage, reason or foreground flag, so the context
+        # line prints only the fields the record carries.
+        self.assertNotIn("stageReached=unknown", self.causes_text(found))
+        self.assertNotIn("foreground=None", self.causes_text(found))
         # It names no profile or stage, so it is context rather than this
         # episode's path evidence.
         self.assertEqual(found["cause"], "unknown", found["evidence"])
@@ -959,6 +1015,75 @@ class ReviewRoundTwoTests(TriageFixture):
         ])
         found = self.only_episode(self.run_tool(phone))
         self.assertEqual(found["cause"], "unknown", found["evidence"])
+
+
+class ReviewRoundThreeTests(TriageFixture):
+    """The shapes review round 3 found on the real incident export.
+
+    The fixtures are the incident's and the device exports' own record
+    sequences (timestamps, messages and durations) for the two label-flicker
+    shapes whose refresh work rule 4 read as a Gateway stall.
+    """
+
+    def test_the_socket_the_previous_stretch_opened_is_not_the_cause(self):
+        # 2026-09-28 00:12:57: the reconnect completes at .752 and the app
+        # publishes `reconnecting` again 8 ms later on the socket it opened at
+        # .696 (64 ms before that flicker's loss). The restarted refresh
+        # (`session.list`, 3865 ms) was in flight when the flicker's loss was
+        # published, and the retained connectionID is 38 on both sides of it, so
+        # no connection was lost: this is the reconnect's own handshake
+        # re-publish, not the Gateway stalling on the connection the loss
+        # dropped.
+        phone = self.write("phone.jsonl", [
+            state_change("2026-09-28T00:12:57.585Z", "connected", "reconnecting"),
+            state_change("2026-09-28T00:12:57.752Z", "reconnecting", "connected"),
+            state_change("2026-09-28T00:12:57.760Z", "connected", "reconnecting"),
+            state_change("2026-09-28T00:12:57.767Z", "reconnecting", "connected"),
+        ])
+        self.gateway([
+            gateway_record("2026-09-28T00:12:57.696Z", "connection.opened", "info",
+                           "Client flicker-socket connection opened (paired, mobile role) "
+                           "after 14ms", connectionId="flicker-socket"),
+            gateway_record("2026-09-28T00:13:01.623Z", "rpc.completed", "warning",
+                           "RPC session.list for client flicker-socket completed in 3865ms "
+                           "(success)", method="session.list", connectionId="flicker-socket",
+                           outcome="success", durationMs=3865),
+        ])
+        report = self.run_tool(phone)
+        self.assertEqual([episode["cause"] for episode in report["episodes"]],
+                         ["unknown", "unknown"], report["episodes"])
+        flicker = report["episodes"][1]
+        self.assertEqual(flicker["start"], "2026-09-28T00:12:57.760Z")
+        self.assertIn("no attempt recorded", self.causes_text(flicker))
+
+    def test_the_first_flickers_recovery_socket_is_not_the_second_flickers_cause(self):
+        # 2026-09-26 20:23:09, a device export's real sequence: `reconnecting`
+        # at .694 (the reconnect's own publication, socket opened .658), the
+        # handshake completing at .742, and a second flicker at .746. The
+        # `session.list` the reconnect then ran is on the socket the first
+        # flicker's recovery opened, so neither flicker is a Gateway stall.
+        phone = self.write("phone.jsonl", [
+            state_change("2026-09-26T20:22:12.554Z", "connected", "reconnecting"),
+            state_change("2026-09-26T20:22:12.669Z", "reconnecting", "connected"),
+            state_change("2026-09-26T20:23:09.694Z", "connected", "reconnecting"),
+            state_change("2026-09-26T20:23:09.742Z", "reconnecting", "connected"),
+            state_change("2026-09-26T20:23:09.746Z", "connected", "reconnecting"),
+            state_change("2026-09-26T20:23:09.749Z", "reconnecting", "connected"),
+        ])
+        self.gateway([
+            gateway_record("2026-09-26T20:23:09.658Z", "connection.opened", "info",
+                           "Client flicker-socket connection opened (paired, mobile role) "
+                           "after 14ms", connectionId="flicker-socket"),
+            gateway_record("2026-09-26T20:23:11.458Z", "rpc.completed", "warning",
+                           "RPC session.list for client flicker-socket completed in "
+                           "1766ms (success)", method="session.list",
+                           connectionId="flicker-socket", outcome="success", durationMs=1766),
+        ])
+        report = self.run_tool(phone)
+        self.assertEqual([episode["cause"] for episode in report["episodes"]],
+                         ["unknown", "unknown", "unknown"], report["episodes"])
+        self.assertEqual(report["episodes"][1]["start"], "2026-09-26T20:23:09.694Z")
+        self.assertEqual(report["episodes"][2]["start"], "2026-09-26T20:23:09.746Z")
 
 
 class LiveEvidenceTests(TriageFixture):
