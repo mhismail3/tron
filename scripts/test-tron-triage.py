@@ -29,6 +29,12 @@ key-joined episode, the app's real scene records, the settings pool's
 second-profile attempt, a request issued before the loss, and one attempt
 recorded by both phone shapes.
 
+`ReviewRoundTwoTests` covers the shapes a second review of the real incident
+export found: a scene blip splitting a published outage, a slow span on the
+socket the reconnect opened, the app-level `operation.gatewayConnect` attempt a
+pre-O-4 export writes, the evidence margin, and a Gateway-wide record in the
+pad.
+
 The fixtures are small, sanitized records with the real shapes: phone rows are
 `AppLogRecord` JSON with details in the message, and Gateway rows are
 `gateway.jsonl` records with typed fields. The report of the full run is kept
@@ -40,6 +46,7 @@ from __future__ import annotations
 
 import json
 import os
+from datetime import timedelta
 from pathlib import Path
 import shlex
 import subprocess
@@ -337,17 +344,25 @@ class BackgroundTests(TriageFixture):
                          ["phone-background", "unknown"])
         self.assertEqual(report["episodes"][1]["start"], "2026-09-28T02:15:05.000Z")
 
-    def test_scene_background_at_the_end_is_phone_background(self):
+    def test_scene_background_at_the_end_splits_the_episode(self):
+        # Review round 2, finding 1: the app was in the foreground for the whole
+        # first stretch, so the scene record that ends it (where the app left
+        # the foreground) cannot make that stretch a background episode. Only
+        # the time really spent in the background is `phone-background`.
         phone = self.write("phone.jsonl", [
             state_change("2026-09-28T02:10:00.000Z", "connected", "reconnecting"),
             app_record("2026-09-28T02:10:20.000Z", "scene.background",
                        "sceneAt=2026-09-28T02:10:20.000Z from=active"),
             state_change("2026-09-28T02:12:00.000Z", "reconnecting", "connected"),
         ])
-        found = self.only_episode(self.run_tool(phone))
-        self.assertEqual(found["cause"], "phone-background")
+        report = self.run_tool(phone)
+        self.assertEqual([item["cause"] for item in report["episodes"]],
+                         ["unknown", "phone-background"], report["episodes"])
+        foreground, background = report["episodes"]
+        self.assertEqual(foreground["start"], "2026-09-28T02:10:00.000Z")
+        self.assertEqual(foreground["end"], "2026-09-28T02:10:20.000Z")
         self.assertIn("scene.background",
-                      " ".join(entry["event"] for entry in found["evidence"]))
+                      " ".join(entry["event"] for entry in background["evidence"]))
 
 
 class GatewayTests(TriageFixture):
@@ -620,18 +635,31 @@ class ReviewRegressionTests(TriageFixture):
         ])
         report = self.run_tool(phone)
         causes = [episode["cause"] for episode in report["episodes"]]
-        self.assertEqual(len(causes), 2, report["episodes"])
-        self.assertEqual(causes[0], "unknown")
-        self.assertEqual(causes[1], "phone-background", report["episodes"])
+        # The 187 s stretch the last `app.backgrounded` closes was foreground
+        # until that record, so it is a silent gap, and only the 1.6 s after the
+        # record is `phone-background` (review round 2, finding 1).
+        self.assertEqual(len(causes), 3, report["episodes"])
+        self.assertEqual(causes, ["unknown", "unknown", "phone-background"], report["episodes"])
+        self.assertEqual(report["episodes"][1]["durationMs"], 187950)
+        self.assertEqual(report["episodes"][2]["durationMs"], 1647)
 
-    def test_retained_client_scene_kind_parks_the_episode(self):
+    def test_retained_client_scene_kind_splits_the_episode(self):
+        # The retained client log writes the same transition as
+        # `gateway.lifecycle kind=scene.*`; both phases have to be read, or the
+        # background stretch is misreported as foreground time.
         phone = self.write("phone.jsonl", [
             state_change("2026-09-28T09:00:01.000Z", "connected", "reconnecting"),
             app_record("2026-09-28T09:00:30.000Z", "gateway.lifecycle",
                        "kind=scene.background clientID=cX scene=background"),
+            app_record("2026-09-28T09:00:40.000Z", "gateway.lifecycle",
+                       "kind=scene.foreground clientID=cX scene=foreground"),
+            state_change("2026-09-28T09:01:00.000Z", "reconnecting", "connected"),
         ])
-        found = self.only_episode(self.run_tool(phone))
-        self.assertEqual(found["cause"], "phone-background", found["evidence"])
+        report = self.run_tool(phone)
+        self.assertEqual([item["cause"] for item in report["episodes"]],
+                         ["unknown", "phone-background", "unknown"], report["episodes"])
+        self.assertEqual(report["episodes"][1]["start"], "2026-09-28T09:00:30.000Z")
+        self.assertEqual(report["episodes"][1]["end"], "2026-09-28T09:00:40.000Z")
 
     def test_another_profiles_failed_attempt_is_not_this_episodes_path(self):
         phone = self.write("phone.jsonl", [
@@ -712,6 +740,210 @@ class ReviewRegressionTests(TriageFixture):
         gateway = tron_triage.GatewayIndex(records=tron_triage.load_gateway_logs(self.logs).records)
         self.assertFalse(tron_triage.attempt_reached_mac(
             attempts[0], gateway.window(*attempts[0].span())))
+
+
+class ReviewRoundTwoTests(TriageFixture):
+    """The shapes review round 2 found on the real incident export.
+
+    The fixtures are the incident's own record sequences (timestamps, messages
+    and durations), reduced to the records each finding needs, so a fixture
+    cannot pass by inventing a shape the export does not write.
+    """
+
+    def test_a_background_blip_does_not_hide_the_silent_gap_after_it(self):
+        # 2026-09-28 03:24: the state is published once at the loss, a 1.4 s
+        # background blip interrupts recovery, and the app publishes nothing on
+        # the way back to the foreground. The measured silent gap is the stretch
+        # between the blip and the next `app.backgrounded`.
+        phone = self.write("phone.jsonl", [
+            state_change("2026-09-28T03:24:31.488Z", "connected", "reconnecting"),
+            app_record("2026-09-28T03:24:43.600Z", "app.backgrounded", "outcome=success"),
+            app_record("2026-09-28T03:24:45.005Z", "app.foregrounded", "outcome=success"),
+            app_record("2026-09-28T03:30:30.618Z", "app.backgrounded", "outcome=success"),
+            app_record("2026-09-28T03:30:31.402Z", "app.foregrounded", "outcome=success"),
+            state_change("2026-09-28T03:30:33.621Z", "reconnecting", "connected"),
+        ])
+        report = self.run_tool(phone)
+        self.assertEqual(
+            [episode["cause"] for episode in report["episodes"]],
+            ["unknown", "phone-background", "unknown", "phone-background", "unknown"],
+            report["episodes"])
+        gap = report["episodes"][2]
+        self.assertEqual(gap["start"], "2026-09-28T03:24:45.005Z")
+        self.assertEqual(gap["end"], "2026-09-28T03:30:30.618Z")
+        self.assertEqual(gap["durationMs"], 345613)
+        self.assertEqual(gap["attempts"], 0)
+        self.assertIn("no attempt recorded in this window (gap of 345s)",
+                      self.causes_text(gap))
+        # The stretch before the blip was foreground, so it is not the parked
+        # episode the scene record that ended it would have made it.
+        self.assertEqual(report["episodes"][0]["durationMs"], 12112)
+        self.assertIn("no attempt recorded", self.causes_text(report["episodes"][0]))
+
+    def test_a_blip_does_not_stop_the_live_socket_from_being_the_cause(self):
+        # 2026-09-28 04:05:25-04:11:46, the incident's second cause. Socket
+        # de22b6dd opened 30 ms before the label was published and kept
+        # answering; a 4.4 s background blip at 04:10:44 splits the label, and
+        # the app restarts at 04:11:46.
+        phone = self.write("phone.jsonl", [
+            app_record("2026-09-28T04:05:25.790Z", "app.foregrounded", "outcome=success"),
+            state_change("2026-09-28T04:05:25.843Z", "connected", "reconnecting"),
+            app_record("2026-09-28T04:10:44.428Z", "app.backgrounded", "outcome=success"),
+            app_record("2026-09-28T04:10:48.871Z", "app.foregrounded", "outcome=success"),
+            app_record("2026-09-28T04:11:46.389Z", "app.started",
+                       "appVersion=0.1.0 build=7", lifecycle_generation=None),
+            state_change("2026-09-28T04:11:46.402Z", "unpaired", "connecting"),
+            state_change("2026-09-28T04:11:46.529Z", "connecting", "connected"),
+        ])
+        self.gateway([
+            gateway_record("2026-09-28T04:05:25.813Z", "connection.opened", "info",
+                           "Client de22b6dd connection opened (paired, mobile role, "
+                           "compression=permessage-deflate) after 12ms",
+                           connectionId="de22b6dd"),
+            gateway_record("2026-09-28T04:05:30.358Z", "rpc.completed", "warning",
+                           "RPC session.list for client de22b6dd completed in 4513ms (success)",
+                           method="session.list", connectionId="de22b6dd",
+                           outcome="success", durationMs=4513),
+            gateway_record("2026-09-28T04:10:51.326Z", "rpc.completed", "warning",
+                           "RPC push.registration.upsert for client de22b6dd completed in "
+                           "2199ms (success)", method="push.registration.upsert",
+                           connectionId="de22b6dd", outcome="success", durationMs=2199),
+            gateway_record("2026-09-28T04:11:45.392Z", "connection.closed", "info",
+                           "Client de22b6dd connection closed after 379585ms",
+                           connectionId="de22b6dd"),
+        ])
+        report = self.run_tool(phone)
+        self.assertEqual([episode["cause"] for episode in report["episodes"]],
+                         ["phone-stall", "phone-background", "phone-stall"],
+                         report["episodes"])
+        self.assertEqual(report["episodes"][0]["start"], "2026-09-28T04:05:25.843Z")
+        self.assertEqual(report["episodes"][0]["end"], "2026-09-28T04:10:44.428Z")
+        self.assertEqual(report["episodes"][2]["end"], "2026-09-28T04:11:46.402Z")
+        self.assertIn("published state stayed reconnecting",
+                      self.causes_text(report["episodes"][2]))
+
+    def test_the_socket_the_reconnect_opened_is_not_the_cause(self):
+        # 2026-09-27 23:59:39: a 76 ms reconnect. The socket it opened 38 ms in
+        # began a 4,276 ms `session.list` 6 ms before the episode ended.
+        phone = self.write("phone.jsonl", [
+            state_change("2026-09-27T23:59:39.590Z", "connected", "reconnecting"),
+            state_change("2026-09-27T23:59:39.666Z", "reconnecting", "connected"),
+        ])
+        self.gateway([
+            gateway_record("2026-09-27T23:59:39.628Z", "connection.opened", "info",
+                           "Client faeb7be1 connection opened (paired, mobile role) after 12ms",
+                           connectionId="faeb7be1", peerClientId="c1", peerAttemptId="initial"),
+            gateway_record("2026-09-27T23:59:43.936Z", "rpc.completed", "warning",
+                           "RPC session.list for client faeb7be1 completed in 4276ms (success)",
+                           method="session.list", connectionId="faeb7be1",
+                           outcome="success", durationMs=4276),
+        ])
+        found = self.only_episode(self.run_tool(phone))
+        self.assertNotEqual(found["cause"], "gateway-stall", found["evidence"])
+        self.assertEqual(found["cause"], "unknown", found["evidence"])
+
+    def test_a_slow_span_that_began_after_the_loss_is_not_the_cause(self):
+        # "The Gateway accepts then stalls `session.open`" is a C-1 failure
+        # mode, but the phone's reconnect issues that open itself: a span that
+        # began after the loss is the recovery's work, not the outage's cause.
+        phone = self.write("phone.jsonl", [
+            state_change("2026-09-28T05:26:45.138Z", "connected", "reconnecting"),
+            state_change("2026-09-28T05:26:45.303Z", "reconnecting", "connected"),
+        ])
+        self.gateway([
+            gateway_record("2026-09-28T05:26:40.000Z", "connection.opened", "info",
+                           "Client 8435c3e3 connection opened after 9ms",
+                           connectionId="8435c3e3"),
+            gateway_record("2026-09-28T05:26:52.554Z", "rpc.completed", "warning",
+                           "RPC session.list for client 8435c3e3 completed in 7390ms (success)",
+                           method="session.list", connectionId="8435c3e3",
+                           outcome="success", durationMs=7390),
+        ])
+        found = self.only_episode(self.run_tool(phone))
+        self.assertEqual(found["cause"], "unknown", found["evidence"])
+
+    def test_the_episodes_key_is_the_connection_it_lost(self):
+        # The record at the end names the socket the reconnect opened; the key
+        # of the episode is the connection the failed attempt lost.
+        phone = self.write("phone.jsonl", [
+            attempt("2026-09-28T11:00:05.000Z", 15000, "failure", "transport-open", "timeout",
+                    gateway_connection_id="gw-old", attempt_id="a1", profile_id="p1"),
+            attempt("2026-09-28T11:00:20.000Z", 38, "success", "connected", "none",
+                    gateway_connection_id="gw-new", attempt_id="a1", profile_id="p1"),
+            episode("2026-09-28T11:00:00.000Z", "2026-09-28T11:00:20.000Z", 2, "transport",
+                    "connected"),
+        ])
+        self.gateway([
+            gateway_record("2026-09-28T10:59:00.000Z", "connection.opened", "info",
+                           "Client gw-old connection opened after 9ms", connectionId="gw-old"),
+            gateway_record("2026-09-28T11:00:00.500Z", "connection.closed", "info",
+                           "Client gw-old connection closed after 60000ms", connectionId="gw-old"),
+            gateway_record("2026-09-28T11:00:19.900Z", "connection.opened", "info",
+                           "Client gw-new connection opened after 9ms", connectionId="gw-new"),
+        ])
+        records, _ = tron_triage.read_jsonl(phone)
+        gateway = tron_triage.GatewayIndex(
+            records=tron_triage.load_gateway_logs(self.logs).records)
+        episodes = tron_triage.build_episodes(records, gateway, timedelta(seconds=60))
+        self.assertEqual(len(episodes), 1, episodes)
+        self.assertEqual(episodes[0].gateway_ids, {"gw-old"}, episodes[0].gateway_ids)
+        tron_triage.classify(episodes[0], gateway, timedelta(seconds=60), None)
+        self.assertEqual(episodes[0].join, "key", episodes[0].join)
+
+    def test_an_app_connect_operation_counts_as_the_episodes_attempt(self):
+        # A pre-O-4 export records its attempts as `operation.gatewayConnect`
+        # alone: 149 of them on the incident export. The 02:40 episode had two,
+        # so reporting no attempt at all contradicts the export.
+        phone = self.write("phone.jsonl", [
+            state_change("2026-09-28T02:40:01.670Z", "connected", "reconnecting"),
+            app_record("2026-09-28T02:40:24.000Z", "operation.gatewayConnect", "count=0",
+                       level="error", outcome="failure", duration_ms=15001,
+                       lifecycle_generation=None),
+            app_record("2026-09-28T02:40:52.000Z", "operation.gatewayConnect", "count=0",
+                       level="error", outcome="failure", duration_ms=15001,
+                       lifecycle_generation=None),
+            state_change("2026-09-28T02:40:53.337Z", "reconnecting", "connected"),
+        ])
+        found = self.only_episode(self.run_tool(phone))
+        self.assertEqual(found["attempts"], 2, found["evidence"])
+        self.assertNotIn("no attempt recorded", self.causes_text(found))
+        self.assertIn("durationMs=15001", self.causes_text(found))
+        # It names no profile or stage, so it is context rather than this
+        # episode's path evidence.
+        self.assertEqual(found["cause"], "unknown", found["evidence"])
+
+    def test_the_tolerance_widens_how_far_evidence_reaches(self):
+        # A relay-silence record 45 s before the loss: outside the model's own
+        # 30 s pad, inside the documented 60 s default. A tolerance above 30 s
+        # has to change the result, or the flag does nothing.
+        phone = self.write("phone.jsonl", [
+            state_change("2026-09-28T04:05:25.843Z", "connected", "reconnecting"),
+            state_change("2026-09-28T04:05:26.843Z", "reconnecting", "connected"),
+        ])
+        self.gateway([
+            gateway_record("2026-09-28T04:04:40.843Z", "connection.inbound-silent", "warning",
+                           "Client gw-1 has sent nothing for 25000ms (unansweredPingMs=none)",
+                           connectionId="gw-1", peerPath="relay", peerRelay="sfo"),
+        ])
+        self.assertEqual(self.only_episode(self.run_tool(phone))["cause"], "path")
+        narrowed = self.only_episode(
+            self.run_tool(phone, extra=["--tolerance-seconds", "10"]))
+        self.assertEqual(narrowed["cause"], "unknown", narrowed["evidence"])
+
+    def test_a_resource_warning_in_the_pad_is_not_the_cause(self):
+        # The handoff and the doc say a Gateway-wide record counts when it falls
+        # inside the episode; a resource warning 25 s after it ended is about
+        # whatever the Gateway was doing then.
+        phone = self.write("phone.jsonl", [
+            state_change("2026-09-28T05:00:00.000Z", "connected", "reconnecting"),
+            state_change("2026-09-28T05:00:15.000Z", "reconnecting", "connected"),
+        ])
+        self.gateway([
+            gateway_record("2026-09-28T05:00:40.000Z", "gateway.resources", "warning",
+                           "Host memory low (hostFreeBytes=100000000)"),
+        ])
+        found = self.only_episode(self.run_tool(phone))
+        self.assertEqual(found["cause"], "unknown", found["evidence"])
 
 
 class LiveEvidenceTests(TriageFixture):

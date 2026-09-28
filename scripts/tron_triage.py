@@ -11,11 +11,14 @@ Phone and Gateway records are joined by the O-1 correlation key (a phone
 `attemptId` are the Gateway's `peerClientId`/`peerAttemptId`), falling back to a
 time window for logs written before protocol 6. An episode uses one join: once
 the key joins any record, a record naming another connection is not this
-episode's evidence. Every episode is classified by the first matching rule in
-`classify`, in the order the hardening plan fixes: `path`, `phone-background`,
-`phone-stall`, `gateway-stall`, `gateway-capacity`, `unknown`. Each
-classification carries the records it used, so an operator checks the
-attribution instead of trusting it.
+episode's evidence, and a connection the Gateway opened during the episode is
+the recovery's rather than the one the outage lost. A published outage is
+reported as one episode per scene phase, because the app parks recovery in the
+background and resumes it on the foreground without publishing a new state.
+Every episode is classified by the first matching rule in `classify`, in the
+order the hardening plan fixes: `path`, `phone-background`, `phone-stall`,
+`gateway-stall`, `gateway-capacity`, `unknown`. Each classification carries the
+records it used, so an operator checks the attribution instead of trusting it.
 """
 
 from __future__ import annotations
@@ -47,6 +50,8 @@ GATEWAY_LOG_SEGMENTS = 8
 # The Gateway's own records can land just outside an episode's bounds: a loss is
 # admitted after the last readable frame, and a slow open answers after the
 # phone gives up. Evidence is collected over this pad, and the report states it.
+# `--tolerance-seconds` widens it, because the time-window join and the evidence
+# read are the same read: a record the join would keep must be in the query.
 EVIDENCE_PAD_SECONDS = 30
 # An episode's `gatewayConnectionId` comes from the epoch that was connected
 # just before it, which can be minutes earlier than the loss.
@@ -68,6 +73,10 @@ MAX_EVIDENCE_TEXT = 240
 # incident store's `gateway.connection` stage rows are all a protocol-5 export
 # has.
 ATTEMPT_STAGES = ("transport-open", "hello-send", "hello-receive")
+# `operation.gatewayConnect` is what a pre-O-4 app build wrote per connect: one
+# finished attempt, with its end timestamp and `durationMs`, and no profile,
+# connection or stage. It is context for an episode, not path evidence.
+CONNECT_OPERATION_EVENT = "operation.gatewayConnect"
 # A Gateway record that proves the path reached this Mac.
 UPGRADE_EVENTS = ("http.upgrade", "connection.opened", "connection.admitted",
                   "connection.handshake", "connection.rejected")
@@ -112,13 +121,15 @@ ISO_TIMESTAMP = re.compile(
 # the default style appends one. Both are accepted, and a missing offset means
 # the line is local time (see `parse_log_show_timestamp`).
 LOG_SHOW_TIMESTAMP = re.compile(r"^(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}[.,]\d+)(Z|[+-]\d{4})?")
-# The two real Magicsock path forms: `new contact: peer=[6wPGm] … via=derp`
-# (relay) and `disco: node [6wPGm] d:… now using 192.0.2.23:41641` (direct).
+# The two real Magicsock path forms: `new contact: peer=[fakeNodeKey] …
+# via=derp` (relay) and `disco: node [fakeNodeKey] d:… now using
+# 192.0.2.23:41641` (direct).
 TAILSCALE_RELAY_LINE = re.compile(r"via=derp\b|\bderp\b|\brelay\b", re.IGNORECASE)
 TAILSCALE_DIRECT_LINE = re.compile(r"now using\b|\bdirect\b", re.IGNORECASE)
 TAILSCALE_OFFLINE_LINE = re.compile(r"offline|no route|unreachable", re.IGNORECASE)
-# Magicsock names the peer as a short node key in brackets (`node [6wPGm]`,
-# `peer=[6wPGm]`); the log's own `[pid:tid]` carries a colon and never matches.
+# Magicsock names the peer as a short node key in brackets (`node
+# [fakeNodeKey]`, `peer=[fakeNodeKey]`); the log's own `[pid:tid]` carries a
+# colon and never matches.
 TAILSCALE_PEER_KEY = re.compile(r"(?:peer|node)[=\s]*\[([A-Za-z0-9+/=]{4,})\]")
 
 
@@ -520,7 +531,15 @@ def phone_attempts(records: Iterable[Record]) -> List[Attempt]:
 
 @dataclass
 class Episode:
-    """One outage, from a `connection.episode` record or derived from evidence."""
+    """One outage, from a `connection.episode` record or derived from evidence.
+
+    A published outage is reported as one episode per scene phase: the stretches
+    the app spent in the foreground are what the path, label and gap rules
+    judge, and the stretches it spent in the background are parked by design.
+    `outage_boundary` names the state change that published the outage a stretch
+    belongs to, so a stretch that starts after a background blip is still known
+    to be part of that same published outage.
+    """
 
     start: datetime
     end: datetime
@@ -531,6 +550,9 @@ class Episode:
     derived: bool = False
     declared_causes: List[str] = dataclass_field(default_factory=list)
     boundary: Optional[Record] = None
+    phase: Optional[str] = None
+    outage_boundary: Optional[Record] = None
+    scene_record: Optional[Record] = None
     phone_records: List[Record] = dataclass_field(default_factory=list)
     attempt_records: List[Attempt] = dataclass_field(default_factory=list)
     gateway_ids: Set[str] = dataclass_field(default_factory=set)
@@ -542,6 +564,31 @@ class Episode:
     @property
     def duration_seconds(self) -> float:
         return max(0.0, (self.end - self.start).total_seconds())
+
+
+@dataclass
+class OutageSegment:
+    """One stretch of a published outage, in one scene phase.
+
+    A scene transition splits the outage rather than closing it: the app parks
+    recovery in the background and resumes it on the foreground, and in between
+    it publishes no new state. Closing the window there dropped the foreground
+    stretch after a short blip from the report entirely, and left the stretch
+    before it reading as a background episode even though the app was in the
+    foreground for all but its last instant.
+    """
+
+    opener: Record
+    start: datetime
+    end: datetime
+    phase: str
+    closer: Optional[Record] = None
+    scene: Optional[Record] = None
+
+    @property
+    def ended_by(self) -> str:
+        closer_phase = scene_phase(self.closer) if self.closer is not None else None
+        return closer_phase or "connected"
 
 
 def overlaps(start: datetime, end: datetime, other_start: datetime, other_end: datetime,
@@ -571,55 +618,86 @@ def declared_episodes(records: Iterable[Record]) -> List[Episode]:
     return episodes
 
 
-def label_windows(records: Sequence[Record]) -> List[Tuple[Record, datetime, datetime]]:
-    """Windows the published connection state called an outage.
+def outage_segments(records: Sequence[Record]) -> List[OutageSegment]:
+    """The published outage split into foreground and background stretches.
 
     This is the evidence a protocol-5 export has for a loss, and it is how an
     episode with no attempt of its own (a silent recovery gap, or a label over a
     socket that never dropped) is found at all. A window opens on a transition
-    into an outage state and closes on the first of: a transition out of one, a
-    scene entering the background (which retires recovery without publishing a
-    new state), or the end of a `connection.episode` record. Without those two
-    extra closers, an outage that ended in the background would swallow every
-    later one into a single window.
+    into an outage state and the outage runs until the first of: a transition
+    out of one, or the end of a `connection.episode` record. A scene transition
+    does not end it: it splits it, because the iPhone parks recovery in the
+    background and does not publish a new state when it returns to the
+    foreground, so the outage continues across the transition and only its
+    phase changes.
     """
-    windows: List[Tuple[Record, datetime, datetime]] = []
-    opened: Optional[Tuple[Record, datetime]] = None
+    segments: List[OutageSegment] = []
+    opener: Optional[Record] = None
+    start: Optional[datetime] = None
+    phase = "foreground"
+    opened_scene: Optional[Record] = None
+    background = False
     last: Optional[datetime] = None
 
-    def close(at: datetime) -> None:
-        nonlocal opened
-        if opened is not None and at >= opened[1]:
-            windows.append((opened[0], opened[1], at))
-        opened = None
+    def close(at: datetime, closer: Optional[Record], keep_opener: bool = False) -> None:
+        nonlocal start, opener, opened_scene
+        # A stretch that contains no time is not an outage: the export can end on
+        # the scene record that left the app in the background, and a state
+        # change can publish a loss and a recovery in the same millisecond.
+        if start is not None and at > start:
+            segments.append(OutageSegment(opener=opener, start=start, end=at, phase=phase,
+                                          closer=closer, scene=opened_scene))
+        start = None
+        opened_scene = None
+        if not keep_opener:
+            opener = None
+
+    def split(at: datetime, next_phase: str, scene_record: Record) -> None:
+        """End the current stretch at `at` and start the next one in its phase."""
+        nonlocal start, phase, opened_scene
+        if start is None or at <= start:
+            return
+        close(at, scene_record, keep_opener=True)
+        start = at
+        phase = next_phase
+        opened_scene = scene_record
 
     for record in records:
         if record.timestamp is None:
             continue
         last = record.timestamp if last is None else max(last, record.timestamp)
+        record_phase = scene_phase(record)
         if record.event == "connection.state-changed":
             state = record.field("new") or record.field("outcome") or ""
             if is_outage_state(state):
-                if opened is None:
-                    opened = (record, record.timestamp)
+                if start is None:
+                    opener = record
+                    start = record.timestamp
+                    phase = SCENE_BACKGROUND if background else "foreground"
             else:
-                close(record.timestamp)
-        elif scene_phase(record) == SCENE_BACKGROUND:
-            close(record.timestamp)
+                close(record.timestamp, record)
+        elif record_phase == SCENE_BACKGROUND:
+            background = True
+            if phase == "foreground":
+                split(record.timestamp, SCENE_BACKGROUND, record)
+        elif record_phase == "foreground":
+            background = False
+            if phase == SCENE_BACKGROUND:
+                split(record.timestamp, "foreground", record)
         elif record.event == "connection.episode":
-            close(record.timestamp)
-    if opened is not None and last is not None:
-        close(last)
-    return windows
+            close(record.timestamp, record)
+    if start is not None and last is not None:
+        close(last, None)
+    return segments
 
 
 def derived_episodes(records: Sequence[Record], attempts: Sequence[Attempt],
                      covered: Sequence[Episode]) -> List[Episode]:
     """Episodes no `connection.episode` record describes.
 
-    Two shapes are derived: an outage-label window (which can carry no attempt
+    Two shapes are derived: an outage-label stretch (which can carry no attempt
     at all, the measured silent recovery gap) and a cluster of consecutive
-    failed attempts that ends at the attempt which connected. The label window
+    failed attempts that ends at the attempt which connected. The label stretch
     wins when both describe one outage, because it starts at the loss the app
     published rather than at the first attempt's start.
     """
@@ -628,21 +706,26 @@ def derived_episodes(records: Sequence[Record], attempts: Sequence[Attempt],
 
     def is_covered(start: datetime, end: datetime) -> bool:
         # A declared episode's own boundary can trail the loss by a few seconds,
-        # so the pad absorbs it. A second label window is a second outage by
+        # so the pad absorbs it. A second label stretch is a second outage by
         # construction — the first was closed by a state change or a scene
-        # transition — and only real overlap merges it.
+        # transition — and only a real overlap merges one: the two stretches a
+        # scene transition splits apart touch at the boundary, and counting that
+        # as an overlap dropped every background stretch.
         if any(overlaps(start, end, episode.start, episode.end, merge_pad)
                for episode in covered):
             return True
-        return any(overlaps(start, end, episode.start, episode.end) for episode in derived)
+        return any(start < episode.end and episode.start < end for episode in derived)
 
-    for opener, start, end in label_windows(records):
-        if is_covered(start, end):
+    for segment in outage_segments(records):
+        if is_covered(segment.start, segment.end):
             continue
-        window_attempts = [attempt for attempt in attempts if start <= attempt.timestamp <= end]
+        window_attempts = [attempt for attempt in attempts
+                           if segment.start <= attempt.timestamp <= segment.end]
         derived.append(Episode(
-            start=start, end=end, attempts=len(window_attempts), derived=True,
-            ended_by="connected", attempt_records=window_attempts, boundary=opener,
+            start=segment.start, end=segment.end, attempts=len(window_attempts),
+            derived=True, ended_by=segment.ended_by, phase=segment.phase,
+            attempt_records=window_attempts, boundary=segment.opener,
+            outage_boundary=segment.opener, scene_record=segment.scene,
         ))
 
     cluster_start: Optional[datetime] = None
@@ -665,8 +748,39 @@ def derived_episodes(records: Sequence[Record], attempts: Sequence[Attempt],
     return derived
 
 
+def app_connect_attempts(records: Iterable[Record]) -> List[Attempt]:
+    """`operation.gatewayConnect` rows: the attempt a pre-O-4 export recorded.
+
+    Each row is one finished connect with its end timestamp and `durationMs`,
+    so it bounds the interval the attempt occupied like the other shapes. It
+    names no profile, connection, stage or foreground flag: the settings
+    dashboard runs a second profile whose timeouts land in the same window while
+    the main connection is up, so this shape is context for an episode and not
+    this episode's own path evidence, and it never opens a derived outage.
+    """
+    attempts: List[Attempt] = []
+    for record in records:
+        if record.event != CONNECT_OPERATION_EVENT or record.timestamp is None:
+            continue
+        attempts.append(Attempt(
+            timestamp=record.timestamp, record=record,
+            stage="", outcome=record.field("outcome", "") or "", reason="",
+            gateway_connection_id=None, client_id=None, attempt_id=None,
+            foreground=None, profile=None, duration_ms=record.number("durationMs"),
+        ))
+    attempts.sort(key=lambda attempt: attempt.timestamp)
+    return attempts
+
+
+def all_attempts(records: Iterable[Record]) -> List[Attempt]:
+    """Every finished attempt an export recorded, for an episode's own count."""
+    attempts = phone_attempts(records) + app_connect_attempts(records)
+    attempts.sort(key=lambda attempt: attempt.timestamp)
+    return attempts
+
+
 def annotate_episode(episode: Episode, phone: Sequence[Record], attempts: Sequence[Attempt],
-                     gateway: GatewayIndex) -> None:
+                     all_attempts_list: Sequence[Attempt], gateway: GatewayIndex) -> None:
     """Attach the phone records, attempts and O-1 keys one episode owns."""
     episode.phone_records = [
         record for record in phone
@@ -675,15 +789,24 @@ def annotate_episode(episode: Episode, phone: Sequence[Record], attempts: Sequen
         <= episode.end + timedelta(seconds=EVIDENCE_PAD_SECONDS)
     ]
     if not episode.attempt_records:
+        # An older export records its attempts as `operation.gatewayConnect`
+        # alone, so without this fallback every episode of one reports no
+        # attempt at all. The stage-recorded attempts win where both exist.
         episode.attempt_records = [
-            attempt for attempt in attempts
+            attempt for attempt in all_attempts_list
             if episode.start - timedelta(seconds=5) <= attempt.timestamp <= episode.end
         ]
     if episode.attempts == 0 and episode.attempt_records:
         episode.attempts = len(episode.attempt_records)
     for record in episode.phone_records:
         # Every phone record that names the Gateway connection, or the pair the
-        # Gateway stamps as peerClientId/peerAttemptId, is a join key.
+        # Gateway stamps as peerClientId/peerAttemptId, is a join key — but only
+        # up to the episode's end: the record at the end is the reconnect that
+        # ended it. A connection the Gateway opened inside the episode is the
+        # recovery's too, so it is not this outage's key (see
+        # `opened_within`).
+        if record.timestamp > episode.end:
+            continue
         gateway_id = gateway_id_of(record)
         if gateway_id:
             episode.gateway_ids.add(gateway_id)
@@ -692,18 +815,19 @@ def annotate_episode(episode: Episode, phone: Sequence[Record], attempts: Sequen
         if client_id and attempt_id:
             episode.phone_keys.add((client_id, attempt_id))
     for gateway_id in list(episode.gateway_ids):
-        if not gateway.connection(gateway_id):
+        if not gateway.connection(gateway_id) or opened_within(episode, gateway, gateway_id):
             episode.gateway_ids.discard(gateway_id)
 
 
 def build_episodes(phone: Sequence[Record], gateway: GatewayIndex,
                    tolerance: timedelta) -> List[Episode]:
     attempts = phone_attempts(phone)
+    every_attempt = all_attempts(phone)
     episodes = declared_episodes(phone)
     episodes.extend(derived_episodes(phone, attempts, episodes))
     episodes.sort(key=lambda episode: episode.start)
     for episode in episodes:
-        annotate_episode(episode, phone, attempts, gateway)
+        annotate_episode(episode, phone, attempts, every_attempt, gateway)
     return episodes
 
 
@@ -718,9 +842,21 @@ def gateway_join(episode: Episode, record: Record, tolerance: timedelta) -> Opti
         return "key"
     if record.timestamp is None:
         return None
-    if episode.start - tolerance <= record.timestamp <= episode.end + timedelta(seconds=EVIDENCE_PAD_SECONDS):
+    margin = evidence_margin(tolerance)
+    if episode.start - margin <= record.timestamp <= episode.end + margin:
         return "window"
     return None
+
+
+def evidence_margin(tolerance: timedelta) -> timedelta:
+    """How far outside an episode its evidence and its time-window join reach.
+
+    The pad is the model's own bound (a loss is admitted after the last readable
+    frame, a slow open answers after the phone gave up); `--tolerance-seconds`
+    is the operator's, and a tolerance narrower than the pad cannot shrink the
+    pad below what the records need.
+    """
+    return max(tolerance, timedelta(seconds=EVIDENCE_PAD_SECONDS))
 
 
 def evidence_entry(source: str, record: Record, role: str, detail: str = "") -> Dict[str, Any]:
@@ -884,29 +1020,46 @@ def label_over_live_socket(episode: Episode, gateway: GatewayIndex) -> Optional[
     fallback is any connection that was already open when the label was
     published and still answered inside the episode; a mismatched connection id
     (the retained client's own numeric `connectionID`) is discarded before this
-    runs.
+    runs. The label that counts for a stretch of an outage is the transition
+    that published the outage (`outage_boundary`): a stretch that starts after a
+    background blip has no transition of its own, and the socket it must be
+    judged against was opened before the blip.
     """
-    search_start = episode.start - timedelta(seconds=EPOCH_LOOKBACK_SECONDS)
+    transition = outage_transition(episode)
+    if transition is None or transition.timestamp is None:
+        return None
+    search_start = transition.timestamp - timedelta(seconds=EPOCH_LOOKBACK_SECONDS)
+    connection_id = epoch_connection_id(episode, transition.timestamp)
+    candidates = ([connection_id] if connection_id is not None
+                  else window_connection_ids(gateway, search_start, episode.end))
+    for candidate in candidates:
+        history = gateway.connection(candidate)
+        if not history:
+            continue
+        opened = any(item.event == "connection.opened" and item.timestamp is not None
+                     and item.timestamp <= transition.timestamp for item in history)
+        if opened and socket_answered(history, transition.timestamp, episode.end):
+            return transition
+    return None
+
+
+def outage_transition(episode: Episode) -> Optional[Record]:
+    """The transition whose published outage this episode is a stretch of.
+
+    A stretch of a label-derived outage carries it as `outage_boundary`. A
+    declared or attempt-cluster episode has no published outage of its own, so
+    the only transition that can be its wrong label is one it contains: an
+    earlier window's transition is not this episode's.
+    """
+    if episode.outage_boundary is not None:
+        return episode.outage_boundary
     for record in episode.phone_records:
         if record.event != "connection.state-changed" or record.timestamp is None:
             continue
-        # Only the transition that opened *this* episode can be its wrong label;
-        # an earlier window's transition is not this episode's.
         if record.timestamp < episode.start:
             continue
-        if not is_outage_state(record.field("new") or record.field("outcome") or ""):
-            continue
-        connection_id = epoch_connection_id(episode, record.timestamp)
-        candidates = ([connection_id] if connection_id is not None
-                      else window_connection_ids(gateway, search_start, episode.end))
-        for candidate in candidates:
-            history = gateway.connection(candidate)
-            if not history:
-                continue
-            opened = any(item.event == "connection.opened" and item.timestamp is not None
-                         and item.timestamp <= record.timestamp for item in history)
-            if opened and socket_answered(history, record.timestamp, episode.end):
-                return record
+        if is_outage_state(record.field("new") or record.field("outcome") or ""):
+            return record
     return None
 
 
@@ -963,8 +1116,16 @@ def background_parked(episode: Episode) -> Optional[Tuple[str, Optional[Record]]
     A backgrounded phone parks recovery by design, so its attempts time out at
     transport-open without the Mac ever seeing them. That is not a path fault:
     the path clause of the first rule is skipped for a parked episode, which is
-    reported as `phone-background` instead.
+    reported as `phone-background` instead. A stretch of a published outage
+    knows its own phase, so a foreground stretch is never parked by the scene
+    record that closes it: that record is where the app left the foreground, not
+    where the outage was spent.
     """
+    if episode.phase == "foreground":
+        return None
+    if episode.phase == SCENE_BACKGROUND:
+        return ("the app was in the background for this stretch of the outage",
+                episode.scene_record or episode.boundary)
     scene = background_at_end(episode)
     if scene is not None:
         return ("the app was in the background at the episode's end", scene)
@@ -976,11 +1137,45 @@ def background_parked(episode: Episode) -> Optional[Tuple[str, Optional[Record]]
     return None
 
 
+def opened_within(episode: Episode, gateway: GatewayIndex,
+                  connection_id: Optional[str]) -> bool:
+    """Whether the Gateway opened this connection inside the episode.
+
+    Such a socket belongs to the recovery: the work it carries is the
+    reconnect's own refresh, and it is not the connection the outage lost, so it
+    is neither this episode's join key nor its cause. A connection with no
+    readable `connection.opened` record (a rotated log) is not excluded on a
+    guess.
+    """
+    if not connection_id:
+        return False
+    return any(record.event == "connection.opened" and record.timestamp is not None
+               and episode.start <= record.timestamp <= episode.end
+               for record in gateway.connection(connection_id))
+
+
+def recovery_connection(episode: Episode, gateway: GatewayIndex,
+                        connection_id: Optional[str]) -> bool:
+    """Whether this Gateway connection is the recovery's, not the outage's.
+
+    Two shapes name the reconnect's own socket rather than the one whose loss
+    the episode is: a socket opened inside the episode, and a socket that had
+    already closed when the episode began (its late completion is abandoned
+    work, which the Gateway logs as `connectionClosed`).
+    """
+    if opened_within(episode, gateway, connection_id):
+        return True
+    return any(record.event == "connection.closed" and record.timestamp is not None
+               and record.timestamp <= episode.start
+               for record in gateway.connection(connection_id or ""))
+
+
 def classify(episode: Episode, gateway: GatewayIndex, tolerance: timedelta,
              tailscale: Optional[TailscaleCapture]) -> None:
     """Set one episode's cause and evidence; the first matching rule wins."""
-    padded_start = episode.start - timedelta(seconds=EVIDENCE_PAD_SECONDS)
-    padded_end = episode.end + timedelta(seconds=EVIDENCE_PAD_SECONDS)
+    margin = evidence_margin(tolerance)
+    padded_start = episode.start - margin
+    padded_end = episode.end + margin
     evidence: List[Dict[str, Any]] = []
     join_modes: Set[str] = set()
     matches: List[Tuple[str, Record]] = []
@@ -1097,13 +1292,18 @@ def classify(episode: Episode, gateway: GatewayIndex, tolerance: timedelta,
                     f"episode while the Gateway answered requests on "
                     f"{epoch_connection_id(episode, labelled.timestamp) or 'unknown'}"))
 
-    # Rule 4 — gateway-stall: a delayed event loop, or a slow span on this
-    # connection. A slow span counts only when the work itself overlapped the
-    # outage: `completion - durationMs` through `completion` must touch
-    # `[start, end]`. A refresh the reconnect issued after the episode ended
-    # changes nothing about it, and a delayed heartbeat outside the episode is
-    # not evidence either.
+    # Rule 4 — gateway-stall: a delayed event loop, or a slow span that was
+    # already running when the loss happened. The work must have started before
+    # the loss and still been running then: `completion - durationMs < loss <=
+    # completion`. A refresh the reconnect issued after the episode ended changes
+    # nothing about it, and neither does one issued on the connection the
+    # reconnect opened at its end: on the incident export most `gateway-stall`
+    # episodes rested on the recovering socket's own `session.list`, which the
+    # reconnect had just requested. A delayed heartbeat or a resource warning
+    # counts only inside the episode, never in the pad.
     if episode.cause == CAUSE_UNKNOWN:
+        loss = outage_transition(episode)
+        loss_at = loss.timestamp if loss is not None and loss.timestamp is not None else episode.start
         stalled: List[Record] = []
         for _mode, record in matches:
             if record.timestamp is None:
@@ -1112,13 +1312,15 @@ def classify(episode: Episode, gateway: GatewayIndex, tolerance: timedelta,
                 if episode.start <= record.timestamp <= episode.end:
                     stalled.append(record)
             elif record.event == "gateway.resources" and record.level in ("warning", "error"):
-                stalled.append(record)
+                if episode.start <= record.timestamp <= episode.end:
+                    stalled.append(record)
             elif record.event == "rpc.completed":
                 duration = record.number("durationMs")
                 if duration is None or duration < SLOW_RPC_WARNING_MS:
                     continue
-                if overlaps(record.timestamp - timedelta(milliseconds=duration),
-                            record.timestamp, episode.start, episode.end):
+                if recovery_connection(episode, gateway, record.field("connectionId")):
+                    continue
+                if record.timestamp - timedelta(milliseconds=duration) < loss_at <= record.timestamp:
                     stalled.append(record)
         if stalled:
             episode.cause = CAUSE_GATEWAY_STALL
@@ -1127,20 +1329,25 @@ def classify(episode: Episode, gateway: GatewayIndex, tolerance: timedelta,
                 detail = record.message if duration is None else f"durationMs={int(duration)} {record.message}"
                 evidence.append(evidence_entry("gateway", record, "cause", detail))
 
-    # Rule 5 — gateway-capacity: a named bound refused or dropped the work.
+    # Rule 5 — gateway-capacity: a named bound refused or dropped the work. It
+    # counts inside the episode only: a refusal in the pad belongs to whatever
+    # the Gateway was doing then, not to this outage.
     if episode.cause == CAUSE_UNKNOWN:
         capacity = [record for mode, record in matches
-                    if record.event in CAPACITY_EVENTS
-                    or (record.event == "http.upgrade"
-                        and record.field("reason") in CAPACITY_UPGRADE_REASONS)
-                    or (record.event == "rpc.error" and record.field("code") == "busy")]
+                    if episode.start <= (record.timestamp or episode.start) <= episode.end
+                    and (record.event in CAPACITY_EVENTS
+                         or (record.event == "http.upgrade"
+                             and record.field("reason") in CAPACITY_UPGRADE_REASONS)
+                         or (record.event == "rpc.error" and record.field("code") == "busy"))]
         if capacity:
             episode.cause = CAUSE_GATEWAY_CAPACITY
             for record in capacity[:MAX_EVIDENCE_LINES]:
                 evidence.append(evidence_entry("gateway", record, "cause", record.message))
 
     # Context, always: what the phone's own attempts did, and the one join fact
-    # an `unknown` episode still has to show.
+    # an `unknown` episode still has to show. The gap statement is only true when
+    # neither attempt shape recorded one, which is why an export's own
+    # `operation.gatewayConnect` rows are counted here too.
     if not episode.attempt_records and episode.boundary is not None:
         evidence.append(evidence_entry(
             "phone", episode.boundary, "context",
@@ -1151,7 +1358,9 @@ def classify(episode: Episode, gateway: GatewayIndex, tolerance: timedelta,
         evidence.append(evidence_entry(
             "phone", attempt.record, "context",
             f"stageReached={attempt.stage or 'unknown'} reason={attempt.reason or 'none'} "
-            f"outcome={attempt.outcome or 'unknown'} foreground={attempt.foreground}"))
+            f"outcome={attempt.outcome or 'unknown'} "
+            f"durationMs={int(attempt.duration_ms) if attempt.duration_ms is not None else 'unknown'} "
+            f"foreground={attempt.foreground}"))
     if episode.join == "none":
         evidence.append({
             "source": "join", "role": "context", "timestamp": format_timestamp(episode.start),
@@ -1256,6 +1465,7 @@ def triage_reports(export_paths: Sequence[Path], gateway_directory: Optional[Pat
             },
             "joinToleranceSeconds": tolerance_seconds,
             "evidencePadSeconds": EVIDENCE_PAD_SECONDS,
+            "evidenceMarginSeconds": int(evidence_margin(tolerance).total_seconds()),
         },
         "summary": {
             "episodes": len(episodes),
@@ -1363,12 +1573,14 @@ def build_parser() -> argparse.ArgumentParser:
                              "export's time range and use it as path evidence")
     parser.add_argument("--tailscale-peer", metavar="NODE",
                         help="only read path lines naming this Magicsock peer node key "
-                             "(e.g. 6wPGm), so another peer's relay stretch is not read as "
+                             "(e.g. fakeNodeKey), so another peer's relay stretch is "
+                             "not read as "
                              "the phone's")
     parser.add_argument("--tolerance-seconds", type=int, default=DEFAULT_JOIN_TOLERANCE_SECONDS,
                         metavar="N",
-                        help="time-window join tolerance for logs without the O-1 key "
-                             f"(default: {DEFAULT_JOIN_TOLERANCE_SECONDS})")
+                        help="time-window join and evidence margin for logs without the O-1 "
+                             f"key; below {EVIDENCE_PAD_SECONDS} the model's own bound still "
+                             f"applies (default: {DEFAULT_JOIN_TOLERANCE_SECONDS})")
     parser.add_argument("--json", action="store_true",
                         help="print the JSON report instead of the table")
     parser.add_argument("--out", type=Path, metavar="PATH", help="also write the JSON report to PATH")
