@@ -18,6 +18,7 @@
 - **Last updated:** 2026-09-28, G-10 second review round (receipt totals kept across a rebuild, connection-owner row added)
 
 - **Last updated:** 2026-09-28, G-8 background work audit: third review round corrected the re-admission fence, the socket promise and the discovery-open ceiling
+- **Last updated:** 2026-09-28, T-2 review round 1 addressed: the kill is another worktree's run on the same default-lane simulator, and T-3 tracks the lease that did not serialize them
 - **Goal:** A clean, efficient and predictable Gateway and phone connection: the phone stays connected and loads any session promptly whenever the network path is up, however many sessions run and however large the history grows, and every disconnect or slow operation is attributable to one cause from the logs in one step.
 
 ## Goal and constraints
@@ -583,7 +584,8 @@ rows are in priority order.
 | G-8c | Ready | Bound the session-search warm-up (persisted index vs bounded slices in G-9's scheduler: user decision); see G-8 handoff | G-9 | |
 | E-1 | Claimed | Document Tailscale flap diagnosis and user-side checks; the evaluation day confirms | O-2, O-7 | orchestrator-dispatched deepseek-worker, 2026-09-28 |
 | T-1 | Ready | Pre-existing test race: registry extension-artifact discovery tests treat an awaited `discoverExtensionArtifacts()` as a barrier; wait for a pass that settles (three tests, one a false green) | G-1a (Registry zone) | |
-| T-2 | Claimed | `GatewayConnectionEpisodeRecorderTests/blockedMainActorIsMeasuredAndReported` (O-4) was killed once ("Test crashed with signal kill") when run with four other suites on integration, then passed 3/3; find whether the 5 s main-thread block trips a hosted-test watchdog and bound the block so the test cannot be killed while still proving the stall record | O-4 | orchestrator-dispatched deepseek-worker, 2026-09-28 |
+| T-2 | Done | `GatewayConnectionEpisodeRecorderTests/blockedMainActorIsMeasuredAndReported` (O-4) was killed once ("Test crashed with signal kill") when run with four other suites on integration, then passed 3/3; find whether the 5 s main-thread block trips a hosted-test watchdog and bound the block so the test cannot be killed while still proving the stall record | O-4 | orchestrator-dispatched deepseek-worker, 2026-09-28; no hosted-test watchdog exists (a 5 + 10 + 20 s block probe passed); the kill came from another worktree's run on the same default-lane simulator (`E816D194…`), not from the block — see the T-2 handoff and T-3; the block is now the named `mainStallTestBlock` (5 s) in both phases |
+| T-3 | Ready | Default-lane iOS runs must serialize on `~/.tron/internal/ios-test/lease.lock`, but runs from three worktrees held the one owned simulator (`E816D194…`) at the same time and killed each other's host app (see the T-2 handoff); establish whether the lease was bypassed — a descendant of a leased command inherits `TRON_IOS_TEST_LOCK_HELD=1`, which skips the locker in `scripts/tron-ios-test` entirely — or whether one run used a different lock path, then make one lane's lease serialize every run on its simulator. One-step signal: two runs' `owner.json`/`summary.json` windows overlap on one simulator (every run of 2026-09-28 in the results root is checked this way: 3 of 87 runs overlap, all three cross-worktree, all in the default lane, and in each pair the later run survived while the one already running failed) | none | |
 | C-7 | Ready | Dashboard-pool event consumption stops after a failed initial connect (see the C-5 handoff): a successful reconnect brings the socket back but nothing consumes `client.events`, so a background profile stops receiving summaries, `system.stopping` and `transport.disconnected` until its entry is recreated | C-2 | |
 
 ### Phase 2 — Release and one evaluation day
@@ -6242,3 +6244,65 @@ wait).
   `gateway-stall` episode is the correct reading, not a defect. Episode count
   (121 vs 77) is the tool splitting outages at background blips by design.
   R-4 confirms on the evaluation day's O-1-keyed exports.
+
+### T-2 · Done · 2026-09-28 · orchestrator-dispatched deepseek-worker (branch `hardening/t-2`)
+
+- Result: no hosted-test watchdog kills a synchronously blocked main thread. A
+  probe test that blocked it 5 s, then 10 s, then 20 s in one test passed after
+  35 s, and the only watchdog in this tree is the repo's own `withTestWatchdog`
+  (`packages/ios-app/Tests/Support/TestWatchdog.swift`), which this test does not
+  use and whose expiry is the "Test exceeded its 5.0 seconds watchdog" text seen
+  in other suites. The kill came from another worktree's run launching the same
+  host app on the same simulator: `20260928T160853Z-run.0UFrCv` (worktree
+  `tron-hardening`, default lane) recorded `owner.json` at 1790611733 and ran its
+  tests 1790611737.6–1790611779.1, and `20260928T160908Z-run.Y9hYTh` (worktree
+  `tron-hardening-g-7`, default lane, same simulator) started its tests at
+  1790611753.8 inside that window. The killed attempt is the stall test's, which
+  starts ~10.8 s into its suites and so lands within a second of the second app's
+  launch. The test's block is the named constant `mainStallTestBlock` (5 s) in
+  both phases.
+- Evidence: combined set (5 suites, 161 tests) green 5× before the change
+  (`20260928T170751Z-run.KpSLNJ`, `20260928T171235Z-run.d1TwFp`,
+  `20260928T171323Z-run.yMiBKP`, `20260928T171429Z-run.T3Ig4q`,
+  `20260928T171524Z-run.dKkmIF`; stall test 8.02 s) and green twice on the final
+  block (`20260928T182458Z-run.tPLyAI`, `20260928T182539Z-run.DhgWVH`: 5/5 in the
+  suite, stall test 10.52 s; the intermediate 4 s form also ran 4× green —
+  `20260928T173926Z-run.QJjdCa`, `20260928T174026Z-run.TuYhxq`,
+  `20260928T174123Z-run.KvlTxr`, `20260928T174222Z-run.Ri2Zsd`). Probe:
+  `20260928T171741Z-run.FF4ms5`. The killed run is
+  `~/Library/Developer/Tron/ios/test-runs/20260928T160853Z-run.0UFrCv`
+  (`summary.json`: "Test crashed with signal kill.", 160 passed of 161;
+  `test.log`: the run restarts at 09:09:37.574). Two more pairs have the same
+  shape: g-7's `20260928T160029Z-run.9dbW2W` (tests 1790611233.8–1790611262.0,
+  "Test crashed with signal kill before establishing connection") with c-4's
+  `20260928T160033Z-run.13mFm5` (1790611236.9–1790611241.9), and g-7's
+  `20260928T164851Z-run.Yqb7gv` (1790614134.9–1790614194.9, includes "Test
+  crashed with signal kill.") with g-4's `20260928T164907Z-run.EmmlGW`
+  (1790614150.0–1790614154.6). All six runs name lane `default` and simulator
+  `E816D194…`, and the locker refuses a second holder of one lock path (checked
+  by hand: exit 73), so at least one run in each pair never took the lane's
+  lease. Those three pairs are the only overlaps in all 87 recorded runs of
+  2026-09-28, and in each pair the later run survived while the one already
+  running failed. T-2's own post-change runs do not overlap any other run's
+  window.
+- Changes: the commit on this branch touches only
+  `packages/ios-app/Tests/Support/GatewayConnectionEpisodeRecorderTests.swift`
+  besides this plan.
+- Tasks added: T-3 (after T-2: default-lane runs across worktrees shared one
+  simulator despite the lease).
+- Kept on purpose: the production ping and production clocks (the test exists to
+  prove the off-main-actor watchdog measures a real block), and the assertion
+  that the record's `durationMs` is at least `blockedMs - 2 × watchdogInterval`.
+- Deviations: the second phase's block grows 2.5 s → 5 s while the first keeps
+  its 5 s, so the test blocks 10 s instead of 7.5 s. A 2.5 s block gives a
+  would-be surviving watchdog only a ~50% chance of a tick inside the window it
+  needs, so that negative control could pass vacuously; at the same constant it
+  always lands one. The first phase keeps the third interval on purpose: two
+  intervals are the derivation (`mainStallBound` + the tick grid + the loop's
+  first wake-up) and the third is the margin the literal 5 s always had, because
+  that wake-up delay is not interval-bounded under CPU starvation.
+- For the next agent: the lease that should have serialized these runs is T-3's.
+  Until it is fixed, a lone "Test crashed with signal kill" (or "…before
+  establishing connection") is contention first: compare the run's
+  `owner.json`/`summary.json` window with every other run's on the same
+  simulator before blaming the code under test.
