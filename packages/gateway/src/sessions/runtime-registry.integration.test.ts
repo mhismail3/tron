@@ -29,7 +29,14 @@ import { CatalogMetadataIndex } from "./catalog-metadata-index.js";
 import type { SessionCatalog, SessionCatalogReconcileOutcome } from "./session-catalog.js";
 import { INVOCATION_RECEIPT_TYPE, makeInvocationReceipt } from "./invocation-receipts.js";
 import { EXTENSION_ACTIVITY_RECEIPT_TYPE, MAX_EXTENSION_HISTORY_BYTES, type ExtensionActivityReceipt } from "./extension-activity-history.js";
-import { LIVE_RUNTIME_HEAP_ESTIMATE_FACTOR, RuntimeRegistry, type ExtensionArtifactDiscoveryCounts, type RuntimeLifecycleRecord } from "./runtime-registry.js";
+import {
+  HEAP_REFUSAL_RETRY_AFTER_MS,
+  LIVE_RUNTIME_HEAP_ESTIMATE_FACTOR,
+  RuntimeRegistry,
+  type CapacityShedRecord,
+  type ExtensionArtifactDiscoveryCounts,
+  type RuntimeLifecycleRecord,
+} from "./runtime-registry.js";
 import { RuntimeSlot } from "./runtime-slot.js";
 import { invocationReceipts } from "./invocation-receipts.js";
 import { KnowledgeStore } from "../knowledge/knowledge-store.js";
@@ -144,6 +151,8 @@ describe.sequential("RuntimeRegistry with the pinned agent runtime", () => {
     notifications?: NotificationService;
     resources?: ResourceRecorder;
     runtimeLifecycleRecord?: (record: RuntimeLifecycleRecord) => void;
+    heapSample?: () => { usedBytes: number; limitBytes: number };
+    capacityShedRecord?: (record: CapacityShedRecord) => void;
   } = {}) {
     const root = await mkdtemp(join(tmpdir(), `tron-cold-acquire-${label}-`));
     const agentDir = join(root, "agent");
@@ -180,6 +189,8 @@ describe.sequential("RuntimeRegistry with the pinned agent runtime", () => {
       ...(options.runtimeDisposeTimeout ? { runtimeDisposeTimeout: options.runtimeDisposeTimeout } : {}),
       ...(options.resources ? { resources: options.resources } : {}),
       ...(options.runtimeLifecycleRecord ? { runtimeLifecycleRecord: options.runtimeLifecycleRecord } : {}),
+      ...(options.heapSample ? { heapSample: options.heapSample } : {}),
+      ...(options.capacityShedRecord ? { capacityShedRecord: options.capacityShedRecord } : {}),
     });
     registries.push(registry);
     if (options.beforeInitialize) await options.beforeInitialize(manager.getSessionFile()!);
@@ -11436,5 +11447,204 @@ export default function (pi) {
     expect(Date.now() - appendedAt).toBeLessThanOrEqual(1_000);
     expect(catalog.row(child)?.size).toBe((await fsPromises.stat(child)).size);
     expect(recorded.recordCatalogWalk.mock.calls.length).toBe(walksBeforeAppend);
+  });
+
+  // Failure mode (G-12): a cold runtime load that queues behind the concurrency
+  // cap keeps loading for a client that already left, so a transcript nobody
+  // waits for is parsed into the live set.
+  it("queues cold runtime loads and drops a queued one whose client disconnects", async () => {
+    const fixture = await coldFixture("cold-load-queue");
+    const directory = dirname(fixture.sessionFile);
+    const queued = SessionManager.create(fixture.cwd, directory, { id: "40000000-0000-4000-8000-000000000002" });
+    queued.appendMessage(fauxAssistantMessage("queued cold load"));
+    const abandonedSession = SessionManager.create(fixture.cwd, directory, { id: "40000000-0000-4000-8000-000000000003" });
+    abandonedSession.appendMessage(fauxAssistantMessage("abandoned cold load"));
+    await settleCatalog(fixture.registry);
+    const loads: string[] = [];
+    // The loader is held to queue real cold loads, so no earlier case's spy on
+    // `RuntimeSlot.create` may still be installed.
+    vi.restoreAllMocks();
+    const releaseLoads: Array<() => void> = [];
+    const realCreate = RuntimeSlot.create.bind(RuntimeSlot);
+    vi.spyOn(RuntimeSlot, "create").mockImplementation(async (...args) => {
+      loads.push(args[0].getSessionId());
+      await new Promise<void>((resolve) => { releaseLoads.push(resolve); });
+      return await realCreate(...args);
+    });
+
+    const first = fixture.registry.acquire(fixture.manager.getSessionId());
+    const second = fixture.registry.acquire(queued.getSessionId());
+    await waitUntil(() => loads.length === 2);
+    const controller = new AbortController();
+    const abandoned = fixture.registry.acquire(abandonedSession.getSessionId(), controller.signal);
+    // The third waits for one of the two places instead of loading beside them.
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    expect(loads).toHaveLength(2);
+    controller.abort(new Error("the client left"));
+    await expect(abandoned).rejects.toThrow("the client left");
+    for (const release of releaseLoads.splice(0)) release();
+    await Promise.all([first, second]);
+    // Which of two concurrently admitted loads reaches the loader first is I/O
+    // order, not a contract; what this case owns is that only those two started.
+    expect([...loads].sort()).toEqual([fixture.manager.getSessionId(), queued.getSessionId()].sort());
+  });
+
+  // Failure mode (G-12): one requester leaving ends the shared cold load for
+  // everyone waiting on it, so a phone that reconnected on a new socket while the
+  // retired connection's open was still queued gets a non-busy `cancelled` and
+  // does not retry (`C-6`).
+  it("keeps a queued cold load for the waiters that are still there when one leaves", async () => {
+    const fixture = await coldFixture("cold-load-shared");
+    const directory = dirname(fixture.sessionFile);
+    const shared = SessionManager.create(fixture.cwd, directory, { id: "40000000-0000-4000-8000-000000000004" });
+    shared.appendMessage(fauxAssistantMessage("shared cold load"));
+    const filler = SessionManager.create(fixture.cwd, directory, { id: "40000000-0000-4000-8000-000000000005" });
+    filler.appendMessage(fauxAssistantMessage("filler cold load"));
+    const other = SessionManager.create(fixture.cwd, directory, { id: "40000000-0000-4000-8000-000000000006" });
+    other.appendMessage(fauxAssistantMessage("other cold load"));
+    await settleCatalog(fixture.registry);
+    const loads: string[] = [];
+    vi.restoreAllMocks();
+    const releaseLoads: Array<() => void> = [];
+    const realCreate = RuntimeSlot.create.bind(RuntimeSlot);
+    vi.spyOn(RuntimeSlot, "create").mockImplementation(async (...args) => {
+      loads.push(args[0].getSessionId());
+      await new Promise<void>((resolve) => { releaseLoads.push(resolve); });
+      return await realCreate(...args);
+    });
+    const tick = (): Promise<void> => new Promise((resolve) => setTimeout(resolve, 50));
+
+    // Two loads hold both places, so the shared session's start queues behind
+    // them and the waiters of that one start are what this case counts.
+    const held = [fixture.registry.acquire(fixture.manager.getSessionId()), fixture.registry.acquire(filler.getSessionId())];
+    await waitUntil(() => loads.length === 2);
+    const firstLeaving = new AbortController();
+    const secondLeaving = new AbortController();
+    const firstWaiter = fixture.registry.acquire(shared.getSessionId(), firstLeaving.signal);
+    const secondWaiter = fixture.registry.acquire(shared.getSessionId(), secondLeaving.signal);
+    await tick();
+    expect(loads).toHaveLength(2);
+
+    // The first requester's connection retires while the second still waits: the
+    // queued load is still the second requester's answer, so it stays queued.
+    firstLeaving.abort(new Error("the first connection left"));
+    await tick();
+    expect(loads).toHaveLength(2);
+
+    // The last waiter leaves: now the queued load has no audience and is dropped
+    // before it parses anything.
+    secondLeaving.abort(new Error("the second connection left"));
+    await expect(secondWaiter).rejects.toThrow("the second connection left");
+    await expect(firstWaiter).rejects.toThrow("the second connection left");
+
+    // The place a held load releases is handed to the waiter queued for it, and
+    // the gate still counts the place the other held load occupies: a later
+    // arrival queues rather than loading beside it.
+    const thirdLeaving = new AbortController();
+    const thirdWaiter = fixture.registry.acquire(shared.getSessionId(), thirdLeaving.signal);
+    await tick();
+    expect(loads).toHaveLength(2);
+    releaseLoads.shift()!();
+    await waitUntil(() => loads.length === 3);
+    expect(loads[2]).toBe(shared.getSessionId());
+    const otherWaiter = fixture.registry.acquire(other.getSessionId());
+    await tick();
+    expect(loads).toHaveLength(3);
+
+    for (let pass = 0; pass < 8 && loads.length < 4; pass += 1) {
+      for (const release of releaseLoads.splice(0)) release();
+      await tick();
+    }
+    for (const release of releaseLoads.splice(0)) release();
+    await Promise.all([...held, thirdWaiter, otherWaiter]);
+    // The two held loads started first in whatever order the loader reached
+    // them; the queued one is third because the place it waited for was handed
+    // to it, and the fourth followed it.
+    expect([...loads].sort()).toEqual([
+      fixture.manager.getSessionId(),
+      filler.getSessionId(),
+      shared.getSessionId(),
+      other.getSessionId(),
+    ].sort());
+  });
+
+  // Failure mode (G-12): heap pressure retires a runtime that has an audience, or
+  // the refusal it should make instead never happens and the load takes the
+  // process to the limit.
+  it("reclaims the largest idle runtime under heap pressure and refuses a cold load when only a protected one is left", async () => {
+    // The fixture loads real runtimes; an earlier case's spy on the loader would
+    // never settle for this one.
+    vi.restoreAllMocks();
+    const mebibyte = 1_024 * 1_024;
+    const records: RuntimeLifecycleRecord[] = [];
+    const sheds: CapacityShedRecord[] = [];
+    // A sample that never changes on eviction, like the process's own:
+    // `heapUsed` does not fall until V8 collects, so only the registry's
+    // accounting of what it retired can end the pass. A sample that dropped on
+    // eviction hid the pass retiring every idle runtime for one load.
+    let heapUsedBytes = 100 * mebibyte;
+    const fixture = await coldFixture("heap-pressure", {
+      heapSample: () => ({ usedBytes: heapUsedBytes, limitBytes: 1_000 * mebibyte }),
+      runtimeLifecycleRecord: (record) => records.push(record),
+      capacityShedRecord: (record) => sheds.push(record),
+    });
+    const directory = dirname(fixture.sessionFile);
+    const large = SessionManager.create(fixture.cwd, directory, { id: "40000000-0000-4000-8000-000000000010" });
+    large.appendMessage(fauxAssistantMessage("large idle runtime"));
+    const survivor = SessionManager.create(fixture.cwd, directory, { id: "40000000-0000-4000-8000-000000000013" });
+    survivor.appendMessage(fauxAssistantMessage("idle runtime the pass must leave alone"));
+    const target = SessionManager.create(fixture.cwd, directory, { id: "40000000-0000-4000-8000-000000000011" });
+    target.appendMessage(fauxAssistantMessage("refused cold load"));
+    await settleCatalog(fixture.registry);
+    const protectedSlot = await fixture.registry.acquire(fixture.manager.getSessionId());
+    const largeSlot = await fixture.registry.acquire(large.getSessionId());
+    const survivorSlot = await fixture.registry.acquire(survivor.getSessionId());
+    // The protected runtime is the one that must survive every pass.
+    subscribeAudience(fixture.registry, fixture.manager.getSessionId());
+    await growTranscript(protectedSlot.sessionFile!, 4 * mebibyte);
+    await growTranscript(largeSlot.sessionFile!, 100 * mebibyte);
+    await growTranscript(survivorSlot.sessionFile!, 10 * mebibyte);
+
+    // 900 MiB of 1,000, held there: the largest idle runtime's own 300 MiB
+    // estimate (`LIVE_RUNTIME_HEAP_ESTIMATE_FACTOR` x 100 MiB) takes the
+    // projection under `HEAP_EVICTION_SHARE`, so the pass stops after one
+    // retirement — the second idle runtime keeps its state — and admits.
+    heapUsedBytes = 900 * mebibyte;
+    const admitted = await fixture.registry.acquire(target.getSessionId());
+    expect(admitted.id).toBe(target.getSessionId());
+    // The largest idle runtime gave the memory back; the protected one and the
+    // runtime the pass no longer needed did not.
+    expect(records.filter((record) => record.event === "runtime.evicted").map((record) => [record.sessionId, record.reason])).toEqual([
+      [large.getSessionId(), "heap"],
+    ]);
+    expect(largeSlot.isDisposed).toBe(true);
+    expect(survivorSlot.isDisposed).toBe(false);
+    expect(protectedSlot.isDisposed).toBe(false);
+
+    // The one idle runtime left cannot take the projection under
+    // `HEAP_REFUSAL_SHARE` and the protected runtime is never retired, so the
+    // load is refused instead of pushing the process to its limit.
+    const another = SessionManager.create(fixture.cwd, directory, { id: "40000000-0000-4000-8000-000000000012" });
+    another.appendMessage(fauxAssistantMessage("second refused cold load"));
+    await settleCatalog(fixture.registry);
+    await expect(fixture.registry.acquire(another.getSessionId())).rejects.toMatchObject({
+      code: "busy",
+      details: { retryAfterMs: HEAP_REFUSAL_RETRY_AFTER_MS },
+    });
+    expect(records.filter((record) => record.event === "runtime.evicted").map((record) => [record.sessionId, record.reason])).toEqual([
+      [large.getSessionId(), "heap"],
+      [survivor.getSessionId(), "heap"],
+      // The runtime the first load published is idle now too, and reclaiming it
+      // still leaves the projection above the refusal share.
+      [target.getSessionId(), "heap"],
+    ]);
+    expect(sheds).toEqual([{
+      reason: "heap",
+      admission: "open",
+      heapUsedBytes: 900 * mebibyte,
+      heapLimitBytes: 1_000 * mebibyte,
+      retryAfterMs: HEAP_REFUSAL_RETRY_AFTER_MS,
+    }]);
+    expect(protectedSlot.isDisposed).toBe(false);
   });
 });

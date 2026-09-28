@@ -1143,7 +1143,69 @@ actor GatewayClient {
         case admission(GatewayConnectionAdmission)
     }
 
+    /// Send one request, and retry a shed disposable read after the hint its
+    /// `busy` answer carried (`G-12`). Each attempt is a complete request of its
+    /// own — its own identity, timeout and pending entry — so the retry cannot
+    /// inherit a stale one, and a caller that leaves cancels the attempt in
+    /// flight. A mutation, a prompt and any failure without a Gateway hint are
+    /// never retried here.
     private func requestValue<P: Encodable>(
+        _ method: String,
+        _ params: P,
+        timeout: Duration,
+        epochExpectation: EpochExpectation,
+        correlation: String? = nil
+    ) async throws -> JSONValue {
+        var retries = 0
+        while true {
+            let id = uuidSource.next().uuidString
+            do {
+                return try await requestOnce(
+                    id: id,
+                    method,
+                    params,
+                    timeout: timeout,
+                    epochExpectation: epochExpectation,
+                    correlation: correlation
+                )
+            } catch let failure as GatewayFailure {
+                guard retries < GatewayDisposableReadPolicy.busyRetryLimit,
+                      let delay = GatewayDisposableReadPolicy.retryAfterDelay(for: failure, method: method)
+                else { throw failure }
+                retries += 1
+                recordRetryAfter(method: method, requestID: id, delay: delay)
+                try await clock.sleep(delay)
+            }
+        }
+    }
+
+    /// Record that the Gateway shed this read and the phone is waiting its hint
+    /// out (`G-12`): the phone's half of one `gateway.shed`.
+    private func recordRetryAfter(method: String, requestID: String, delay: Duration) {
+        guard let appLog else { return }
+        let components = delay.components
+        let milliseconds = Int(
+            components.seconds * 1_000
+                + components.attoseconds / 1_000_000_000_000_000
+        )
+        let profileID = profile?.id
+        let connectionID = connection?.id
+        Task {
+            await appLog.recordRPC(
+                event: "rpc.retry-after",
+                method: method,
+                requestID: requestID,
+                outcome: "retrying",
+                code: "busy",
+                durationMilliseconds: milliseconds,
+                profileID: profileID,
+                connectionID: connectionID
+            )
+        }
+    }
+
+    private func requestOnce<P: Encodable>(
+        id: String,
         _ method: String,
         _ params: P,
         timeout: Duration,
@@ -1165,7 +1227,6 @@ actor GatewayClient {
         }
         let epochID = epoch.id
         let socket = epoch.socket
-        let id = uuidSource.next().uuidString
         if let correlation { latestRequestIDByCorrelation[correlation] = id }
         let frame = GatewayRequest(id: id, method: method, params: try JSONValue.encode(params))
         let data = try JSONEncoder.gateway.encode(frame)

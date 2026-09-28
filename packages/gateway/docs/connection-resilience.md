@@ -111,6 +111,33 @@ owner of accepted commands; mobile reconnect never replays a prompt blindly.
   that fails after prune/dispose also releases its retired reservation and bytes.
   A lost upload receipt discards only unclaimed staging, with the store's
   serialized claim check protecting accepted prompt attachments.
+- **Deadlines, caps and load shedding (`G-12`):** every limit is one named
+  constant next to its only user. A request that is shed is answered `busy` with
+  a `retryAfterMs` hint and one `gateway.shed` record. A deadline, a cancel and
+  the phone's retry never apply to an admitted mutation or prompt: their owners
+  settle them durably. The heap bound is the one bound that can refuse an
+  admission, and it refuses only a cold load, before that load starts its write —
+  a `session.import` is a cold load too, so it can be refused, and its
+  `gateway.shed` record names the admission it refused (`open` for a cold runtime
+  load, `import` for the import) rather than claiming the RPC that asked for it:
+  `acquire` serves reads, leases and automation alike.
+
+  | Bound | Value | Owner | What it does |
+  | --- | --- | --- | --- |
+  | `DISPOSABLE_READ_DEADLINES_MS` (`session.open`) | 10 s | `transport/server.ts` | A cold open may parse a large transcript before its subscription commits, so it gets the longer bound. |
+  | `DISPOSABLE_READ_DEADLINES_MS` (`session.list`, `session.transcript`, `session.history.list`, `session.history.entry`) | 5 s | `transport/server.ts` | The request is aborted at its deadline and answered `busy` with `SHED_RETRY_AFTER_MS`; the work it abandoned keeps running only while another waiter needs it. A disposable read outside this table — `session.search` (Jev's own 20 s remote ranking), `provider.usage` (10 s per fetch, then a typed timed-out snapshot), `model.list`, `provider.list` — has no deadline and is never shed, so the phone's one retry can never buy a second paid search. |
+  | `MAXIMUM_CONCURRENT_COLD_LOADS` | 2 | `sessions/runtime-registry.ts` | Cold runtime loads (a `session.open` or a JSONL import) queue in FIFO order; a queued load whose *last* waiter left is dropped, so one requester leaving does not end the load another still waits for. |
+  | `MAXIMUM_CONCURRENT_SESSION_EXPORTS` | 1 | `transport/gateway-service.ts` | A second export queues rather than halving both. |
+  | `MAXIMUM_CONCURRENT_WORKSPACE_INSPECTIONS` | 2 | `transport/gateway-service.ts` | Directory/git inspections queue behind each other. |
+  | `HEAP_EVICTION_SHARE` | 0.70 of the V8 heap limit | `sessions/runtime-registry.ts` | A cold load first retires idle runtimes largest first until the projected share — the sampled heap less the estimates it just gave back — is under it; the registry's own accounting ends the pass, because `heapUsed` does not fall until V8 collects. |
+  | `HEAP_REFUSAL_SHARE` | 0.85 of the V8 heap limit | `sessions/runtime-registry.ts` | A cold load is refused with `busy` and `HEAP_REFUSAL_RETRY_AFTER_MS`; a protected runtime is never retired to make room. |
+  | `GatewayDisposableReadPolicy.busyRetryLimit` / `.maximumRetryAfterDelay` | one retry / 10 s | `ios-app/Sources/Gateway/GatewayProtocol.swift` | The phone waits a shed read's hint (bounded) and retries it once, recording `rpc.retry-after`; a mutation is never retried. |
+
+  The heap shares are read from the process's own `process.memoryUsage()` and
+  `getHeapStatistics().heap_size_limit`, so the launcher's
+  `--max-old-space-size` is what they are a share of. The byte budget
+  (`LIVE_RUNTIME_BYTE_BUDGET`, G-5) stays eviction pressure and never refuses;
+  this gate is where refusal lives.
 - **Route workload envelope:** `BlobStore` defaults to 128 items / 200 MiB
   total / 25 MiB per item with 32 concurrent readers and four file
   productions. Attachment downloads reserve 32 readers before metadata/path I/O;

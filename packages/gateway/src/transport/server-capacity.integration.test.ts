@@ -7,7 +7,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { DeviceStore } from "../security/device-store.js";
 import { CommandReceiptStore } from "./command-receipts.js";
 import { GatewayService } from "./gateway-service.js";
-import { GatewayServer, OrderedOutboundQueue, SUPERSEDED_CLOSE_CODE, type OutboundFrame } from "./server.js";
+import { DISPOSABLE_READ_DEADLINES_MS, GatewayServer, OrderedOutboundQueue, SUPERSEDED_CLOSE_CODE, type OutboundFrame } from "./server.js";
 import { ResourceSampler } from "./stall-diagnostics.js";
 
 const cleanups: Array<() => Promise<void>> = [];
@@ -1547,5 +1547,125 @@ describe("WebSocket connection and outbound capacity", () => {
     const closeMessage = logger.log.mock.calls.find((call) => call[2]?.event === "connection.closed")?.[1] as string;
     expect(closeMessage).toContain("WebSocket close 1013: client outbound capacity exceeded");
     expect(closeMessage).toMatch(/lastInboundAgeMs=\d+ lastWriteProgressAgeMs=\d+ queuedFrames=\d+ queuedBytes=\d+ completedFrames=\d+/u);
+  });
+
+  it("sheds a disposable read at its deadline, releases the subscription it committed, and never sheds an admitted mutation", async () => {
+    const root = await mkdtemp(join(tmpdir(), "tron-server-deadline-shed-"));
+    let gateway: GatewayServer | undefined;
+    let socket: WebSocket | undefined;
+    const gates = new Map<string, { promise: Promise<void>; release: () => void }>();
+    cleanups.push(async () => {
+      for (const gate of gates.values()) gate.release();
+      if (socket && socket.readyState !== WebSocket.CLOSED) {
+        const closed = new Promise<void>((resolve) => socket!.once("close", () => resolve()));
+        socket.terminate();
+        await bounded(closed, "shed socket disposal");
+      }
+      if (gateway) await bounded(gateway.close(), "shed fixture disposal");
+      await rm(root, { recursive: true, force: true });
+    });
+    const devices = new DeviceStore(root, "machine");
+    await devices.initialize();
+    const token = JSON.parse(await readFile(join(root, "gateway", "local-auth.json"), "utf8")).bearerToken;
+    const port = await unusedPort();
+    const logger = { log: vi.fn() };
+    const subscriptions = new Set<string>();
+    // A held read is the load that made it slow: its deadline is what ends the
+    // request, not the work behind it. The fixture cannot wait a production
+    // bound, so the table is overridden the way the other named bounds are —
+    // over the production table's own keys, so a read the Gateway deliberately
+    // leaves out of it stays out of this case too.
+    const held = (method: string): { promise: Promise<void>; release: () => void } => {
+      const existing = gates.get(method);
+      if (existing) return existing;
+      let release = (): void => {};
+      const entry = { promise: new Promise<void>((resolve) => { release = resolve; }), release: () => release() };
+      gates.set(method, entry);
+      return entry;
+    };
+    gateway = new GatewayServer({
+      host: "127.0.0.1", port, maxFrameBytes: 1_048_576,
+      devices, logger: logger as any, uploads: {} as any,
+      disposableReadDeadlinesMs: new Map([...DISPOSABLE_READ_DEADLINES_MS.keys()].map((method) => [method, 80])),
+      sessions: {
+        subscribe: (_client: string, session: string) => subscriptions.add(session),
+        unsubscribe: (_client: string, session: string) => subscriptions.delete(session),
+        unsubscribeClient: () => subscriptions.clear(),
+      } as any,
+      auth: { detachClient: vi.fn(), cancelOwner: vi.fn() } as any,
+      service: {
+        info: () => ({ gatewayVersion: "test", piVersion: "test", protocolVersion: 6, minProtocolVersion: 6,
+          machineId: "machine", machineName: "test", capabilities: [] }),
+        terminalBelongsToSession: () => false, releaseClient: vi.fn(),
+        invoke: async (context: any, method: string, params: any) => {
+          const gate = held(method).promise;
+          if (method === "session.open") {
+            // The subscription commits before the response is written, so the
+            // deadline fires with a committed barrier in place.
+            const syncToken = context.beginSynchronization(params.sessionId);
+            context.establishSynchronization(params.sessionId, { runtimeGeneration: "generation", eventSequence: 1 });
+            await gate;
+            return { session: { healthy: true }, syncToken, subscriptionToken: syncToken };
+          }
+          await gate;
+          return { method };
+        },
+      } as any,
+    });
+    await gateway.listen();
+    socket = new WebSocket(`ws://127.0.0.1:${port}/v1/socket`, { headers: { authorization: `Bearer ${token}` } });
+    const frames: any[] = [];
+    socket.on("message", (raw) => frames.push(JSON.parse(raw.toString())));
+    await bounded(new Promise<void>((resolve) => socket!.once("open", () => resolve())), "shed socket open");
+    socket.send(JSON.stringify({ type: "hello", protocolVersion: 6 }));
+    await waitUntil(() => frames.some((frame) => frame.type === "hello"));
+
+    // The open's subscription is committed while its response is still pending;
+    // the deadline answers the request anyway and gives the barrier back.
+    socket.send(JSON.stringify({ type: "request", id: "shed-open", method: "session.open", params: { sessionId: "session" } }));
+    await waitUntil(() => frames.some((frame) => frame.id === "shed-open"));
+    expect(frames.find((frame) => frame.id === "shed-open")).toMatchObject({
+      ok: false, error: { code: "busy", retryable: true, details: { retryAfterMs: 1_000 } },
+    });
+    await waitUntil(() => subscriptions.size === 0);
+    const shed = () => logger.log.mock.calls.find((call) => call[2]?.event === "gateway.shed" && call[2]?.method === "session.open");
+    expect(shed()?.[2]).toMatchObject({ reason: "deadline", source: "transport", counts: { retryAfterMs: 1_000 } });
+    expect(shed()?.[1]).toContain("Shed session.open");
+
+    // The same deadline covers the projection reads, and a retry of the shed
+    // open is answered normally: nothing it installed leaked.
+    socket.send(JSON.stringify({ type: "request", id: "shed-list", method: "session.list", params: {} }));
+    await waitUntil(() => frames.some((frame) => frame.id === "shed-list"));
+    expect(frames.find((frame) => frame.id === "shed-list")).toMatchObject({
+      ok: false, error: { code: "busy", details: { retryAfterMs: 1_000 } },
+    });
+
+    // An admitted mutation has no entry in the table: it is never shed, and its
+    // response is the work's own answer.
+    socket.send(JSON.stringify({ type: "request", id: "held-command", method: "accepted-command", params: {} }));
+    // A read the table deliberately leaves out is never shed either: a
+    // remote-ranked `session.search` spends up to Jev's 20 s on an evaluation the
+    // user paid for, so shedding it would have the phone pay for it twice.
+    socket.send(JSON.stringify({ type: "request", id: "held-search", method: "session.search", params: { query: "x", remoteRanking: true } }));
+    // Longer than the deadline: a mutation that were in the table would have
+    // been shed by now.
+    await new Promise((resolve) => setTimeout(resolve, 300));
+    expect(frames.some((frame) => frame.id === "held-command")).toBe(false);
+    expect(frames.some((frame) => frame.id === "held-search")).toBe(false);
+    expect(logger.log.mock.calls.some((call) => call[2]?.event === "gateway.shed" && call[2]?.method === "accepted-command")).toBe(false);
+    expect(logger.log.mock.calls.some((call) => call[2]?.event === "gateway.shed" && call[2]?.method === "session.search")).toBe(false);
+    gates.get("accepted-command")?.release();
+    gates.get("session.search")?.release();
+    await waitUntil(() => frames.some((frame) => frame.id === "held-command"));
+    expect(frames.find((frame) => frame.id === "held-command")).toMatchObject({ ok: true, result: { method: "accepted-command" } });
+    await waitUntil(() => frames.some((frame) => frame.id === "held-search"));
+    expect(frames.find((frame) => frame.id === "held-search")).toMatchObject({ ok: true, result: { method: "session.search" } });
+
+    gates.get("session.open")?.release();
+    socket.send(JSON.stringify({ type: "request", id: "retry-open", method: "session.open", params: { sessionId: "session" } }));
+    await waitUntil(() => frames.some((frame) => frame.id === "retry-open"));
+    expect(frames.find((frame) => frame.id === "retry-open")).toMatchObject({ ok: true, result: { session: { healthy: true } } });
+    expect(subscriptions.has("session")).toBe(true);
+    expect(socket.readyState).toBe(WebSocket.OPEN);
   });
 });

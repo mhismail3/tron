@@ -247,6 +247,18 @@ const sessions = new RuntimeRegistry({
         ...(record.overBudget === true ? { overBudget: 1 } : {}),
       },
     }),
+  capacityShedRecord: (record) => logger.log("warning",
+    `Shed a cold load (${record.admission}) under heap pressure (${Math.round(record.heapUsedBytes / 1_048_576)} MiB of ${Math.round(record.heapLimitBytes / 1_048_576)} MiB)`, {
+      event: "gateway.shed",
+      source: "sessions",
+      reason: record.reason,
+      admission: record.admission,
+      counts: {
+        heapUsedBytes: record.heapUsedBytes,
+        heapLimitBytes: record.heapLimitBytes,
+        retryAfterMs: record.retryAfterMs,
+      },
+    }),
   compactionDiagnostic: (diagnostic) => logger.log(
     diagnostic.outcome === "failure" ? "error" : "info",
     `Session compaction ${diagnostic.outcome}`,

@@ -2,6 +2,7 @@
 
 - **Started:** 2026-09-27
 - **Status:** Active (Phase 1 runs on `hardening/integration`; that branch's copy of this plan is authoritative until R-1)
+- **Last updated:** 2026-09-28, G-12 review round 1 addressed: a shared cold start no longer carries one requester's signal (the queued load is dropped only when its last waiter leaves), the heap pass measures progress from its own accounting, and the deadline table is limited to the reads the plan names (see the handoff)
 - **Last updated:** 2026-09-28, G-8a/G-8d/T-1 Done: an unchanged extension artifact costs one `stat` and no read, the ambient pass stays bound and reports a stop, and both read lanes retry a replace before warning (see the handoff)
 - **Last updated:** 2026-09-28, G-2 Done: a 100–200 MiB cold `session.open` is the parse (45–56%, `session.open.manager`) plus the SDK runtime create (22–28%) and the bounded snapshot projection (19–24%) — the three named candidates (registry mutex, idle eviction, fork-boundary reads) are 3–13 ms (`session.open.catalog`) or absent; the whole-branch receipt index maps the snapshot projection allocated for nothing are gone (≈19 ms per snapshot at 100 k entries, measured) and the O-6a prime now retries the fresh fixture's `catalog_not_ready` (see the handoff)
 - **Last updated:** 2026-09-28, G-11 Done: the Slot's publish-time full-transcript summary walk is now an incremental fold (largest run 86.9 ms → 4.8 ms); the dominant remaining stretches are session-search (G-8c) and catalog/registry (G-1c), both in flight, and the combined O-6a max/p99 is re-measured after they merge (see the handoff)
@@ -618,7 +619,7 @@ rows are in priority order.
 | C-3 | Done | Faster retry (D-4): about 5 s transport-open deadline, immediate retry on path change | C-1 | orchestrator-dispatched deepseek-worker, 2026-09-28 (the O-6b blackhole p95 and the 90 s E2E re-run are the orchestrator's quiet-host run) |
 | C-4 | Done | Truer liveness (D-4): any inbound frame proves liveness | O-4 | orchestrator-dispatched deepseek-worker, 2026-09-28 |
 | C-6 | Done | Cancel frame for disposable reads; a retried `session.open` joins the in-flight one | O-3 | orchestrator-dispatched deepseek-worker, 2026-09-28 (the O-6a slow-open confirmation and the qualification run are the orchestrator's) |
-| G-12 | Claimed | Server-side deadlines, concurrency caps and heap-pressure shedding with typed retry hints | O-3, O-5 | orchestrator-dispatched deepseek-worker, 2026-09-28 |
+| G-12 | Done | Server-side deadlines, concurrency caps and heap-pressure shedding with typed retry hints | O-3, O-5 | orchestrator-dispatched deepseek-worker, 2026-09-28 (branch `hardening/g-12`; review round 1 addressed; the O-6a heap-limit-lowered run is the orchestrator's) |
 | G-2 | Done | Cold open in bounded time from the index and a single-file fence | G-1c | orchestrator-dispatched deepseek-worker, 2026-09-28 (see handoff: 100–200 MiB cold opens hold at 951 ms max on a load-56 host and 494 ms on a load-10 one; the parse is 45–56% of a slow open; the quiet-host multi-iteration p99 confirmation is the orchestrator's) |
 | G-7 | Done | Reconnect diet: send only what changed | O-1, O-6a | orchestrator-dispatched deepseek-worker, 2026-09-28; both review rounds addressed, R-1/R-4 own the real-reconnect measurement |
 | G-11 | Done | Event-loop budget: find and bound every synchronous task over 50 ms | O-5, O-6a | orchestrator-dispatched deepseek-worker, 2026-09-28 (branch `hardening/g-11`): the Slot's publish-time full-transcript summary walk is now an incremental fold (largest CPU-profile run 86.9 ms → 4.8 ms); the dominant remaining stretches belong to in-flight G-8c (session-search) and G-1c (catalog/registry), so the combined O-6a max/p99 is re-measured by the orchestrator after they merge — see the handoff |
@@ -9476,6 +9477,146 @@ wait).
   (C-5's file), because the plan's own E-3b "Do" and both docs already say the
   phone replaces the advertisement on every hello; deferring either to E-3c
   would have left the shipped branch contradicting both.
+
+### G-12 · Done · 2026-09-28 · orchestrator-dispatched deepseek-worker (branch `hardening/g-12`)
+
+- Result: overload is predictable. One table, `DISPOSABLE_READ_DEADLINES_MS`
+  (`packages/gateway/src/transport/server.ts`), gives every disposable read a
+  server-side deadline (10 s for `session.open`, whose cold load may parse a
+  large transcript before its subscription commits; 5 s for the other eight);
+  expiry marks the request shed, aborts it through C-6's abort plumbing and the
+  ordinary failure path answers `busy` with `details.retryAfterMs`
+  (`SHED_RETRY_AFTER_MS`, 1 s) — the one record for it is `gateway.shed` with
+  `reason=deadline` instead of `rpc.completed`. A method with no entry (every
+  mutation, every prompt, `session.sync`) has no timer and is never shed. Three
+  concurrency caps queue rather than refuse: `MAXIMUM_CONCURRENT_COLD_LOADS` (2,
+  `sessions/runtime-registry.ts`, via the new `util/queued-work-gate.ts`),
+  `MAXIMUM_CONCURRENT_SESSION_EXPORTS` (1) and
+  `MAXIMUM_CONCURRENT_WORKSPACE_INSPECTIONS` (2) in
+  `transport/gateway-service.ts`; a queued waiter whose requester left is
+  dropped, so the work it queued for is never started (the load already in
+  flight still keeps running and is shared, C-6). Cold loads are additionally
+  gated on real heap pressure read from `process.memoryUsage()` and
+  `getHeapStatistics().heap_size_limit`: above `HEAP_EVICTION_SHARE` (0.70) idle
+  runtimes are retired largest first through G-5's own `retireIdleRuntime` (new
+  reason `heap`), and above `HEAP_REFUSAL_SHARE` (0.85) the load is refused with
+  `busy`, `HEAP_REFUSAL_RETRY_AFTER_MS` (5 s) and one `gateway.shed` with
+  `reason=heap` and the heap counts; a protected runtime is never retired to make
+  room, so a heap made of protected runtimes refuses instead of pretending it
+  made room. The phone (`GatewayDisposableReadPolicy` +
+  `GatewayClient.requestOnce`) waits a shed disposable read's hint (bounded to
+  10 s), retries it once under a fresh request identity, records
+  `rpc.retry-after`, and never retries a mutation.
+- Failure modes written first: (1) the deadline fires while an open's
+  subscription is already committed, leaving an orphan barrier and no answer;
+  (2) a cold load queued behind the cap still loads for a client that left, so a
+  transcript nobody waits for is parsed into the live set; (3) heap pressure
+  retires a runtime that has an audience, or the refusal that should replace it
+  never happens and the load takes the process to the limit.
+- Evidence:
+  - `npx vitest run src/transport/server-capacity.integration.test.ts` 35/35
+    (the new case drives a held `session.open` whose subscription commits before
+    the response, a held `session.list`, and a held mutation: the two reads are
+    answered `busy` with `retryAfterMs=1000` while the work is still held, the
+    committed subscription is given back (`subscriptions.size === 0`), one
+    `gateway.shed` carries `reason=deadline`, the mutation gets no shed record
+    and its own `ok:true` answer after 300 ms past its (absent) deadline, and a
+    retry of the same open is answered normally — no leaked barrier).
+  - `npx vitest run src/sessions/runtime-registry.integration.test.ts` 239/239
+    (the two new cases: three cold loads with the loader held prove exactly two
+    loads start, the third waits, an aborted waiter rejects and never loads; and
+    a heap sample driven over the shares proves the largest *idle* runtime is
+    retired with `reason=heap` while the protected one survives, then that a
+    second cold load is refused with `busy`/`retryAfterMs=5000` and one
+    `capacityShedRecord` — the refusal happens because every remaining runtime is
+    protected, not because the pass gave up early).
+  - Merge gate on this branch merged with `hardening/integration`
+    (`c70ccb4df`, "Already up to date"): the six-file transport set 133/133;
+    `src/sessions/runtime-registry.integration.test.ts` 239/239; `npx tsc
+    --noEmit -p .` clean. One earlier full-file registry run reported 1 failure
+    and the immediate rerun 239/239, matching the host-load flake G-9 recorded.
+  - `python3 scripts/check-documentation-policy.py` passes.
+- Checks: the row's two named owners (`server-capacity.integration.test.ts`,
+  `runtime-registry.integration.test.ts`) carry the deadline, cap and
+  heap-pressure cases above.
+- Docs: `packages/gateway/docs/connection-resilience.md` gains the G-12 limits
+  table (every bound, its value, its owner and what it does);
+  `packages/gateway/docs/observability.md` gains the `gateway.shed` row (both
+  producers), the `heap` eviction reason on `runtime.evicted` and the phone's
+  `rpc.retry-after` row; `packages/gateway/README.md` states the deadline table,
+  the caps, the heap shares and the phone's retry in the protocol and session
+  invariants sections.
+- Volume: `gateway.shed` is one record per shed request or refused load (a rare
+  event by construction: it needs a real deadline overrun or heap past 85%);
+  `rpc.retry-after` is one memory-only phone record per honoured hint.
+- Deviations: the deadlines are overridable through the server's existing
+  named-bound option style (`disposableReadDeadlinesMs`, like
+  `synchronizationTimeoutMs`) so a fixture can prove a deadline in milliseconds
+  instead of waiting a production bound; the heap sample is injectable for the
+  same reason, defaulting to the process's own numbers. The queue logic is one
+  shared `util/queued-work-gate.ts` used by both the registry's cold-load cap and
+  the service's two caps instead of two copies. `acquire` gained an optional
+  `signal` used only for the cold-load queue wait (the shared start is
+  deliberately not abandoned, C-6), so `session.open` passes `client.signal`.
+  `RuntimeEvictionReason` gained `heap`, documented in the row above.
+- Phone evidence: `scripts/tron-ios-test build` + `run --only-testing
+  TronMobileTests/GatewayClientTransportTests` 57 passed / 0 failed, including
+  the new case "a shed disposable read is retried after the Gateway's hint, a
+  mutation is not" (asserts the retry frame's own identity, exactly one
+  `rpc.retry-after` with `code=busy` and the hint's `durationMs`, and that a shed
+  `session.prompt` is never retried). Retained run:
+  `~/Library/Developer/Tron/ios/test-runs/20260928T225017Z-run.GXO9TZ`.
+- Remaining: the plan's "Done when" — O-6a with the heap limit lowered, showing
+  the Gateway sheds instead of exceeding the limit and no request exceeding its
+  deadline — is the orchestrator's qualification run; this branch proves the
+  mechanisms it depends on.
+
+### G-12 · review round 1 addressed · 2026-09-28 · deepseek-worker (branch `hardening/g-12`)
+
+- Result: the independent review's three majors and three minors are fixed on the
+  same branch (no merge). (1) A shared cold start no longer carries one
+  requester's signal: `pendingSlotStarts` now holds a `PendingColdLoad` (its
+  operation, one `AbortController` for the queue wait, and its live waiters), each
+  `acquire` joins it through `joinColdLoad`, and the queued load is dropped only
+  when the *last* waiter leaves, so a phone reconnecting on a new socket keeps the
+  load the retiring connection was waiting for (`C-6`). (2) The heap pass measures
+  progress from the registry's own accounting: it returns the
+  `estimatedHeapBytes` of each runtime it actually retired and both its stop
+  condition and the refusal behind it read the sampled heap less that total
+  (`projectedHeapShare`), so a sample that does not fall on eviction no longer
+  retires the whole live set for one load. (3) The deadline table is limited to
+  the reads the plan names (`session.open` 10 s; `session.list`, `session.transcript`,
+  `session.history.list`, `session.history.entry` 5 s); `session.search` (Jev's
+  own 20 s paid remote ranking), `provider.usage` (10 s per fetch, then a typed
+  timed-out snapshot), `model.list` and `provider.list` have no deadline, so
+  nothing can shed them and the phone's one retry can never buy a second paid
+  search. (4) The deadline timer is cleared the moment a response is attempted
+  (`clearDeadline`), so an answered request cannot be relabelled `gateway.shed` by
+  a timer that fires during its own catch-up. (5) `CapacityShedRecord` carries
+  `admission` (`open` / `import`) instead of claiming `session.open` for every
+  refusal, and the docs say a JSONL import is the one mutation the heap bound can
+  refuse — before it writes anything. (6) `QueuedWorkGate` hands a released place
+  to the next waiter directly instead of lowering the count and re-checking.
+- Evidence: `npx vitest run src/sessions/runtime-registry.integration.test.ts
+  src/transport/server-capacity.integration.test.ts` 275/275. The two new cases
+  fail on the pre-fix code for their own reason: with the pass ignoring its own
+  accounting, the heap case retires the idle runtime it must leave alone
+  (`AssertionError` on the eviction list); with the shared start carrying the
+  first requester's signal, the two-waiter case never starts the queued load.
+  The capacity case now derives its table from `DISPOSABLE_READ_DEADLINES_MS`'s
+  own keys and asserts a held `session.search` is never shed.
+- Deviations: (a) `session.search`/`provider.usage` keep no deadline rather than
+  getting one above their owner's bound, which is the plan's "initial" list read
+  literally; the phone needed no change because the Gateway never answers those
+  reads with a retry hint. (b) Finding 4's window needs a request that owns a
+  synchronization completion, and today only `session.sync` pushes one — a method
+  with no deadline — so that fix is ordering hardening with no reachable
+  reproduction, and no fixture pretends otherwise. (c) The gate's FIFO pass-over
+  could not be reproduced: with a queued waiter the new case passes on the old
+  gate too, so the change is kept as the simpler structural form of the same
+  bound, not as a proven defect.
+- Remaining: the plan's "Done when" (O-6a with the heap limit lowered) stays the
+  orchestrator's qualification run.
 
 ### G-8a · G-8d · T-1 · Done · 2026-09-28 · orchestrator-dispatched deepseek-worker (branch `hardening/g-8a`)
 
