@@ -207,8 +207,11 @@ def main() -> int:
             # The command tree can hand the lease on, and a process it detaches on
             # purpose - the Gateway fixture of scripts/ios-gateway-e2e-test -
             # must not inherit it, so both the descriptor and its number are
-            # named where a child needs them.
+            # named where a child needs them. The lock the descriptor holds is
+            # named too, so a child that re-derives its own lane can prove the
+            # lease it inherited is that lane's (T-3).
             environment["TRON_IOS_TEST_LEASE_FD"] = str(handle.fileno())
+            environment["TRON_IOS_TEST_LEASE_LOCK"] = str(arguments.lock)
             process = subprocess.Popen(
                 arguments.command,
                 env=environment,
