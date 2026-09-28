@@ -28,7 +28,7 @@
 
 - **Last updated:** 2026-09-28, G-10 second review round (receipt totals kept across a rebuild, connection-owner row added)
 
-- **Last updated:** 2026-09-28, G-9 background-work scheduler: catalog reconciliation, receipt pruning and attachment/display maintenance now share one scheduler that yields to requests; the libuv pool measurement was host-limited and the launcher is unchanged
+- **Last updated:** 2026-09-28, G-9 background-work scheduler: catalog reconciliation, receipt pruning and attachment/display maintenance now share one scheduler that yields to requests, a reconcile pass yields to the pause between bounded batches, and only requests on the loop pause it; the libuv pool measurement was host-limited and the launcher is unchanged
 
 - **Last updated:** 2026-09-28, G-8 background work audit: third review round corrected the re-admission fence, the socket promise and the discovery-open ceiling
 
@@ -7953,8 +7953,10 @@ wait).
   touched), command-receipt pruning, and the attachment/display-artifact
   maintenance pass. Admission no longer prunes the receipt directory: only the
   capacity boundary still forces one exact pass before it refuses. `gateway-main.ts`
-  starts the scheduler and owns both records; `activeRequestSpans()`
-  (`transport/request-span.ts`) is the in-flight-request signal.
+  starts the scheduler and owns both records; `requestsCompetingForLoop()`
+  (`transport/request-span.ts`) is the in-flight-request signal, and it counts
+  only requests that are on the loop: a receipt-backed mutation parks its own
+  span (`offLoop`) for the length of its operation.
 - Evidence:
   - `npx vitest run src/background-work.test.ts` — 7/7 (the failure-mode list is
     in the file header: a slice while a request is in flight, a slice at the p99
@@ -7977,6 +7979,10 @@ wait).
     the fixture Gateway logged `catalog.reconciled` (300 files in 38.0 s) and ran
     to completion in 2.6 min. Report:
     `~/Library/Developer/Tron/profiles/gateway/20260928T202515Z-multi-session-16b386/report.json`.
+    That one record is the **startup** pass, not a scheduler slice: the 30-minute
+    job cannot fire in a 2.6-minute run, and `background.slice` is debug (memory
+    only), so the fixture log holds no `background.*` record at all. The smoke
+    shows the pass runs in a real Gateway; it does not show a slice.
 - Not met, deliberately:
   - **The libuv pool measurement (Do 3).** The smoke ran on a host at 1-minute
     load 179 on 18 CPUs; the report's own warning is "host busy: 1-minute load
@@ -7986,27 +7992,49 @@ wait).
     comparison would measure the host, not the pool. `UV_THREADPOOL_SIZE` is
     unchanged in `packages/mac-app/scripts/tron-gateway-launcher.c`, because a
     value set from that run would be an unmeasured change.
+  - **Session-search indexing.** Step 2 also names it; it is not in this change.
+    It is G-8c's task (the plan gives it the scheduler registration seam).
   - **The "Done when" (O-6a latency targets hold while reconciliation runs).**
     O-6a is Blocked on a quiet host, so no valid run exists; this branch proves
-    the mechanism (the schedule, the pause conditions, the records and the moved
-    jobs) and the smoke above proves it runs in a real Gateway. The confirmation
-    is owed by the orchestrator, which owns the probe, together with the pool
+    the mechanism (the schedule, the pause conditions, the records, the moved
+    jobs, and a reconcile that yields to the pause between bounded batches) and
+    the smoke above proves the pass runs in a real Gateway. The confirmation is
+    owed by the orchestrator, which owns the probe, together with the pool
     comparison (4/8/16 on one quiet host, comparing `latency.session_list.p99`,
     `latency.prompt_admission.p99` and `gateway.event_loop.delay_p99`).
 - Deviations: the in-flight-request signal is the live `RequestSpan` count in
   `packages/gateway/src/transport/request-span.ts` rather than a counter in
   `transport/server.ts`: one span is exactly one admitted request (constructed at
   admission, finished in the same `finally` that writes `rpc.completed` or
-  `rpc.cancelled`), and the transport zone is held by E-3a. The catalog takes the
+  `rpc.cancelled`), and the transport zone is held by E-3a. The catalog's startup,
+  watcher-event and watcher-replacement passes are not registered slices: they run
+  the owner's own pass, whose every bounded batch yields to the scheduler's pause
+  (the durable-row batches of `CatalogMetadataIndex.reconcile` and one file per
+  batch in the rebuild path), so they are paced like a slice but produce no
+  `background.slice` record. The catalog takes the
   scheduler as an injectable option defaulting to the process-wide instance, so
   `runtime-registry.ts` needed no change while G-1c held it. Jobs are registered
-  by name; a second registration of one name replaces the first.
+  by name; a second registration of one name replaces the first, and the replaced
+  owner's unregister no longer deletes the replacement.
 - For the next agent: G-8c registers session-search indexing through
   `backgroundWork.register({ name, intervalMs, slice })` (returned function
-  unregisters); the scheduler starts after the listener is serving, so a job
-  registered before that runs from its first due time. `background.slice` is
-  debug (memory only) and `background.backlog` warning; both have rows in
+  unregisters); a slice with more than one bounded batch awaits
+  `backgroundWork.yieldToLoop()` between batches. The scheduler starts after the
+  listener is serving, so a job registered before that runs from its first due
+  time. `background.slice` is debug (memory only) and `background.backlog`
+  warning, each carrying the job in `step`; both have rows in
   `packages/gateway/docs/observability.md` and the contract is in
   `packages/gateway/README.md` ("Background work"). Nothing is running: the
   profile fixture Gateway exited and the retained evidence stays under the run
   directory above.
+- Review fixes (second round, same branch): the pause no longer counts a request
+  that is waiting away from the loop (a receipt-backed mutation parks its span in
+  `GatewayService.mutation`), which stops one `session.bash` or `session.compact`
+  from pausing background work indefinitely; a reconcile pass yields to the same
+  pause between bounded batches; a replaced job's unregister no longer deletes the
+  replacement; both background records carry the job in `step`; and startup skips
+  `backgroundWork.start()` when a signal already set `stopping`. Evidence: the new
+  `src/transport/request-span.integration.test.ts` case fails when the parking is
+  removed (assertion `requestsCompetingForLoop() === false` while a held
+  `session.rename` waits); `src/background-work.test.ts` 9/9 and
+  `src/transport/request-span.test.ts` 10/10.

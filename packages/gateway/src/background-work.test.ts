@@ -21,6 +21,10 @@ import {
 //    once per re-check instead of once per starved spell.
 // 6. `stop()` leaves a wake armed, or an armed wake that fires after it still
 //    starts a slice.
+// 7. A slice with more than one bounded batch holds the loop between batches,
+//    instead of yielding to the same pause the next slice waits for.
+// 8. A registration's dispose stops the job a later owner registered under the
+//    same name.
 
 interface Armed {
   callback: () => void;
@@ -207,6 +211,76 @@ describe("BackgroundWorkScheduler", () => {
     // scheduler's own reading.
     expect(slices.length).toBeGreaterThan(1);
     expect(slices.every((record) => record.job === "job.one" && record.outcome === "completed")).toBe(true);
+  });
+
+  it("holds a yielding slice until the pause clears, then resumes it", async () => {
+    // A slice with more than one bounded batch yields between batches; the pause
+    // has to hold it there, not only between slices.
+    const scheduler = new BackgroundWorkScheduler();
+    const state = { requests: false };
+    const batches: number[] = [];
+    let finished = false;
+    let proceed!: () => void;
+    const allowed = new Promise<void>((resolve) => { proceed = resolve; });
+    scheduler.register({
+      name: "job.batched",
+      intervalMs: 1,
+      slice: async () => {
+        batches.push(1);
+        // The test decides when the second batch begins.
+        await allowed;
+        await scheduler.yieldToLoop();
+        batches.push(2);
+        finished = true;
+      },
+    });
+    scheduler.start({ requestsInFlight: () => state.requests, eventLoopP99Ms: () => 0 });
+    try {
+      const waitFor = async (check: () => boolean): Promise<void> => {
+        const deadline = Date.now() + 2_000;
+        while (!check()) {
+          expect(Date.now(), "the scheduler did not resume the held slice").toBeLessThan(deadline);
+          await new Promise((resolve) => setTimeout(resolve, 5));
+        }
+      };
+      await waitFor(() => batches.length >= 1);
+
+      // The request arrives while the slice is between batches: the yield waits
+      // for the same pause the next slice would.
+      state.requests = true;
+      proceed();
+      await new Promise((resolve) => setTimeout(resolve, 2 * BACKGROUND_PAUSE_RECHECK_MS));
+      expect(batches).toEqual([1]);
+      expect(finished).toBe(false);
+
+      state.requests = false;
+      await waitFor(() => finished);
+      // Later runs repeat the same two batches; the case is the first run's.
+      expect(batches.slice(0, 2)).toEqual([1, 2]);
+    } finally {
+      scheduler.stop();
+    }
+  });
+
+  it("leaves a later registration under one name running when the replaced owner unregisters", async () => {
+    const h = harness();
+    const runs: string[] = [];
+    const removeReplaced = h.scheduler.register({
+      name: "catalog.reconcile",
+      intervalMs: 10,
+      slice: () => { runs.push("replaced"); },
+    });
+    h.scheduler.register({
+      name: "catalog.reconcile",
+      intervalMs: 10,
+      slice: () => { runs.push("current"); },
+    });
+    // The replaced owner's dispose runs after the replacement registered: the
+    // name belongs to the replacement, and the job must keep running.
+    removeReplaced();
+    h.state.now = 10;
+    await h.drive();
+    expect(runs).toEqual(["current"]);
   });
 
   it("arms nothing after stop, and a wake that fires later starts nothing", async () => {

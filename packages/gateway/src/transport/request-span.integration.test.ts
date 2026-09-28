@@ -8,15 +8,18 @@ import { ModelRuntime, SessionManager } from "@earendil-works/pi-coding-agent";
 import { fauxAssistantMessage } from "@earendil-works/pi-ai";
 import { afterEach, describe, expect, it } from "vitest";
 import { AuthBroker } from "../admin/auth-broker.js";
+import { BackgroundWorkScheduler } from "../background-work.js";
 import { TrustService } from "../admin/trust-service.js";
 import { UploadStore } from "../machine/upload-store.js";
 import { DeviceStore } from "../security/device-store.js";
+import { GatewayWorkRegistry } from "../sessions/gateway-work-registry.js";
 import { RuntimeRegistry } from "../sessions/runtime-registry.js";
 import { PROTOCOL_VERSION } from "../version.js";
 import { CommandReceiptStore } from "./command-receipts.js";
-import { GatewayService, type GatewayServiceDependencies } from "./gateway-service.js";
+import { GatewayService, type ClientContext, type GatewayServiceDependencies } from "./gateway-service.js";
 import { GatewayLogger, type LogRecord } from "./logger.js";
 import { GatewayServer } from "./server.js";
+import { RequestSpan, requestsCompetingForLoop, runInRequestSpan } from "./request-span.js";
 
 /**
  * Proves the request span's breakdown reaches the real log writer: every
@@ -32,6 +35,11 @@ import { GatewayServer } from "./server.js";
  * The 95% bar is asserted on the median of the three repeats, the honest
  * measure on a shared host; the slowest open under the qualification workload
  * is measured by that workload, not here.
+ *
+ * The second case drives the scheduler's in-flight signal (`requestsCompetingForLoop`,
+ * the predicate `gateway-main.ts` passes) through the real `GatewayService`
+ * mutation boundary: only the receipt store is a double there, and it hands the
+ * operation straight through.
  */
 
 const cleanups: Array<() => Promise<void>> = [];
@@ -277,4 +285,100 @@ describe("cold session.open request span", () => {
     // slowest open is measured by the qualification workload.
     expect(report.medianAccountedShare as number).toBeGreaterThanOrEqual(0.95);
   }, 300_000);
+});
+
+describe("request loop signal", () => {
+  const client: ClientContext = {
+    id: "phone",
+    identity: "device:test",
+    isLocal: false,
+    beginSynchronization: () => "sync",
+    establishSynchronization: () => {},
+    completeSynchronization: () => {},
+    unsubscribe: () => true,
+    attachTerminal: () => {},
+    detachTerminal: () => {},
+    ownsTerminal: () => false,
+    isSubscribed: () => true,
+    isRevoked: () => false,
+    revokeDevice: () => {},
+  };
+
+  it("keeps running a due slice while a receipt-backed mutation waits, and pauses for a request that shares the loop", async () => {
+    const scheduler = new BackgroundWorkScheduler();
+    const slices: number[] = [];
+    scheduler.register({ name: "check.slice", intervalMs: 1, slice: () => { slices.push(1); } });
+    // The production wiring: the in-flight signal is the request span count.
+    scheduler.start({ requestsInFlight: requestsCompetingForLoop });
+    const waitFor = async (check: () => boolean, timeoutMs = 5_000): Promise<void> => {
+      const deadline = Date.now() + timeoutMs;
+      while (!check()) {
+        if (Date.now() >= deadline) throw new Error("condition timed out");
+        await new Promise((resolve) => setTimeout(resolve, 5));
+      }
+    };
+    try {
+      // An idle loop runs the job.
+      await waitFor(() => slices.length >= 2);
+      const idle = slices.length;
+
+      // A request that shares the loop pauses the slices.
+      const readSpan = new RequestSpan();
+      await new Promise((resolve) => setTimeout(resolve, 50));
+      const paused = slices.length;
+      await new Promise((resolve) => setTimeout(resolve, 60));
+      expect(slices.length).toBe(paused);
+      readSpan.breakdown(0);
+
+      // A receipt-backed mutation whose operation waits away from the loop does
+      // not: one `!` bash command or one manual compaction holds its receipt for
+      // minutes without using the loop, and pausing for it would stop the loop's
+      // background work for that whole time.
+      const workRegistry = new GatewayWorkRegistry("epoch", 8);
+      let finishRename: (() => void) | undefined;
+      const service = new GatewayService({
+        sessions: {
+          acquire: async () => ({
+            rename: () => new Promise<void>((resolve) => { finishRename = resolve; }),
+          }),
+        },
+        receipts: {
+          execute: async (
+            _identity: string,
+            _method: string,
+            _commandId: string,
+            operation: () => Promise<unknown>,
+          ) => operation(),
+        },
+        workRegistry,
+      } as unknown as GatewayServiceDependencies);
+
+      const mutationSpan = new RequestSpan();
+      const pending = runInRequestSpan(mutationSpan, () => service.invoke(
+        client,
+        "session.rename",
+        { commandId: "rename-command", sessionId: "session-1", name: "Renamed" },
+      ));
+      await waitFor(() => finishRename !== undefined);
+      expect(requestsCompetingForLoop()).toBe(false);
+      expect(workRegistry.facts()).toEqual([
+        expect.objectContaining({ kind: "rpc-mutation", method: "session.rename" }),
+      ]);
+      // A slice already decided before the mutation started settles here; every
+      // slice after it must still start while the mutation waits.
+      await new Promise((resolve) => setTimeout(resolve, 30));
+      const holding = slices.length;
+      await waitFor(() => slices.length > holding);
+
+      finishRename!();
+      await pending;
+      // The request is on the loop again for its receipt write and its response.
+      expect(requestsCompetingForLoop()).toBe(true);
+      mutationSpan.breakdown(0);
+      expect(requestsCompetingForLoop()).toBe(false);
+      await waitFor(() => workRegistry.size === 0);
+    } finally {
+      scheduler.stop();
+    }
+  }, 30_000);
 });

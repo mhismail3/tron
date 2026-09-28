@@ -336,7 +336,9 @@ export class SessionCatalog {
    * A missing, corrupt or foreign durable document leaves the index empty and
    * the reconcile rebuilds every row from its canonical file. The folder
    * watcher and the periodic backstop start with it, so a file an external
-   * writer changes reaches its row without any reader walking the catalog. */
+   * writer changes reaches its row without any reader walking the catalog. The
+   * pass yields to the scheduler between batches, so it cannot hold the loop
+   * while a request waits. */
   start(): void {
     this.enqueue(async () => {
       const rows = await this.options.index.load(this.options.catalogRoot()).catch(() => undefined);
@@ -685,8 +687,11 @@ export class SessionCatalog {
   }
 
   /** The periodic pass is one of the scheduler's jobs, not a timer of its own:
-   * the scheduler runs it one slice at a time and pauses it while a request is in
-   * flight or the loop is behind. */
+   * the scheduler runs it one slice at a time and pauses it while a request
+   * competes for the loop or the loop is behind. The startup pass and the
+   * passes a watcher event or a watcher replacement asks for are the same pass,
+   * so they yield to the same pause between batches even though they are not
+   * slices of this job. */
   private scheduleReconcileInterval(): void {
     if (this.closed || this.reconcileIntervalMs <= 0) return;
     this.unregisterReconcile = this.backgroundWork.register({
@@ -786,9 +791,16 @@ export class SessionCatalog {
       this.options.catalogRoot(),
       scan.candidates,
       (candidate) => this.options.source.summaryFor(candidate.path),
-      // The index's own `closed` flag is set only after this owner has finished
-      // disposing, so shutdown has to tell the pass where to stop.
-      () => this.closed,
+      // Asked between batches and before each parse: shutdown stops the pass
+      // there, and that is also where the pass hands the loop back to the
+      // scheduler, which pauses it while a request competes for the loop or the
+      // loop is behind. A startup or watcher-triggered pass is paced exactly
+      // like the registered slice, because it is the same pass.
+      async () => {
+        if (this.closed) return true;
+        await this.backgroundWork.yieldToLoop();
+        return this.closed;
+      },
     );
     if (!reconciled) return this.rebuild(scan);
     const rows: CatalogMetadataIndexRow[] = [...reconciled.rows];
@@ -865,6 +877,10 @@ export class SessionCatalog {
       // Shutdown must not wait behind one startup parse per file: the pass stops
       // between files and publishes nothing it could not finish.
       if (this.closed) return { rows: [], unproven: scan.candidates.length };
+      // One file is one bounded batch, and the scheduler's pause gates the
+      // next: a first cut that has no durable rows to reuse parses every body at
+      // scale, and none of that may hold the loop while a request waits.
+      await this.backgroundWork.yieldToLoop();
       const summary = await this.options.source.summaryFor(candidate.path);
       const row = summary ? await this.options.index.entryFromSummary(summary) : undefined;
       if (!row || row.id !== candidate.id || row.cwd !== candidate.cwd) {

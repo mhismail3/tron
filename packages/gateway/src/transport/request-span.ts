@@ -1,13 +1,27 @@
 import { AsyncLocalStorage } from "node:async_hooks";
 
 /** Requests this process has admitted and not yet answered. One live span is one
- * request the transport is serving, so background work can yield to it; span
- * construction and `breakdown` are the request's own boundaries
- * (`transport/server.ts` admits, the response or its failure closes). */
+ * request the transport is serving; span construction and `breakdown` are the
+ * request's own boundaries (`transport/server.ts` admits, the response or its
+ * failure closes). */
 let activeSpans = 0;
 
-export function activeRequestSpans(): number {
-  return activeSpans;
+/** Of the live requests, the ones whose time is not on this loop right now: a
+ * receipt-backed mutation parked by `offLoop` while it waits on work outside the
+ * loop. */
+let parkedSpans = 0;
+
+/** The background scheduler's in-flight signal: live requests competing for this
+ * process's event loop. A parked request (`offLoop`) does not count, because a
+ * receipt-backed mutation holds its receipt for its whole operation and spends
+ * that time away from the loop — `session.bash` runs a shell command with no
+ * timeout, `session.compact` waits minutes on a model, `packages.install` and
+ * the `knowledge.*` calls wait the same way. Pausing background work for such a
+ * request stops the loop's background work for as long as it runs and protects
+ * nothing, because the loop is idle; the loop's own delay p99 is what covers the
+ * loop work a parked request still does. */
+export function requestsCompetingForLoop(): boolean {
+  return activeSpans - parkedSpans > 0;
 }
 
 /**
@@ -30,6 +44,9 @@ export class RequestSpan {
   /** Measurements that are open right now, oldest first: the last one is the
    * stage the request is in when a peer cancels it. */
   private readonly open = new Set<OpenMeasurement>();
+  /** Non-zero while `offLoop` operations hold this request away from the loop. */
+  private offLoopDepth = 0;
+  private parked = false;
   private sequence = 0;
   private finished = false;
 
@@ -153,6 +170,33 @@ export class RequestSpan {
   }
 
   /**
+   * Runs `operation` as time this request spends away from the event loop, so it
+   * stops competing for it and background work no longer pauses for it
+   * (`requestsCompetingForLoop`). Returns what the operation returned. Nested calls
+   * park once: the outermost operation holds the request away from the loop.
+   */
+  offLoop<T>(operation: () => Promise<T>): Promise<T> {
+    if (this.finished) return operation();
+    if (this.offLoopDepth === 0) this.setParked(true);
+    this.offLoopDepth += 1;
+    const resume = (): void => {
+      this.offLoopDepth -= 1;
+      if (this.offLoopDepth === 0) this.setParked(false);
+    };
+    let result: Promise<T>;
+    try {
+      result = operation();
+    } catch (error) {
+      resume();
+      throw error;
+    }
+    return result.then(
+      (value) => { resume(); return value; },
+      (error) => { resume(); throw error; },
+    );
+  }
+
+  /**
    * Ends the span and describes it, most expensive entry first. `requestMs` is
    * the same duration the caller reports, so `unaccountedMs` is the part of
    * that duration no named entry covered. Undefined when nothing worth naming
@@ -163,6 +207,8 @@ export class RequestSpan {
     if (!this.finished) {
       this.finished = true;
       activeSpans -= 1;
+      // A request that ends while parked stops competing with it.
+      this.setParked(false);
     }
     const recorded = [...this.entries.values()].filter(worthNaming)
       .sort((left, right) => right.ms - left.ms || left.order - right.order);
@@ -172,6 +218,13 @@ export class RequestSpan {
       stages: recorded.map(formatEntry).join(";"),
       unaccountedMs: Math.max(0, Math.round(requestMs - coveredMs)),
     };
+  }
+
+  /** A parked span is counted once, whatever number of `offLoop` calls hold it. */
+  private setParked(parked: boolean): void {
+    if (this.parked === parked) return;
+    this.parked = parked;
+    parkedSpans += parked ? 1 : -1;
   }
 
   private beginMeasurement(name: string): OpenMeasurement {
@@ -284,6 +337,14 @@ export function wait<T>(name: string, operation: (acquired: () => void) => T | P
 
 export function count(name: string, n = 1): void {
   storage.getStore()?.span.count(name, n);
+}
+
+/** Runs `operation` as time the current request spends away from the event loop,
+ * so background work does not pause for it. Runs unmarked when no request owns
+ * this code. */
+export function offLoop<T>(operation: () => Promise<T>): Promise<T> {
+  const span = storage.getStore()?.span;
+  return span === undefined ? operation() : span.offLoop(operation);
 }
 
 export function bytes(name: string, n: number): void {

@@ -24,7 +24,7 @@ import { CommandReceiptStore, COMMAND_RECEIPT_PRUNE_INTERVAL_MS } from "./transp
 import { GatewayService } from "./transport/gateway-service.js";
 import { GatewayServer } from "./transport/server.js";
 import { ResourceSampler, type ResourceRuntimeEntry } from "./transport/stall-diagnostics.js";
-import { activeRequestSpans } from "./transport/request-span.js";
+import { requestsCompetingForLoop } from "./transport/request-span.js";
 import { backgroundWork } from "./background-work.js";
 import { installKimiK3Policy } from "./providers/kimi-k3-policy.js";
 import { NotificationGrantStore } from "./notifications/grant-store.js";
@@ -705,22 +705,31 @@ backgroundWork.register({
   intervalMs: STORAGE_MAINTENANCE_INTERVAL_MS,
   slice: () => maintainStorage(),
 });
-backgroundWork.start({
-  requestsInFlight: () => activeRequestSpans() > 0,
+// A signal that ignored the signal handlers above would start the scheduler
+// after `shutdown()` stopped it, and its jobs would run against owners being
+// disposed.
+if (!stopping) backgroundWork.start({
+  requestsInFlight: requestsCompetingForLoop,
   // One record per slice, and one per starved spell: the scheduler's own cost
-  // and its pauses have to be visible without a per-tick record.
+  // and its pauses have to be visible without a per-tick record. The job is the
+  // step, so a slice or a backlog can be read out of the log without parsing
+  // the message.
   onSlice: ({ job, outcome, durationMs, waitedMs, error }) => logger.log(
     outcome === "failed" ? "warning" : "debug",
     `Background slice ${job} ${outcome} in ${Math.round(durationMs)}ms after waiting ${Math.round(waitedMs)}ms`,
     {
-      event: "background.slice", source: "background", outcome, durationMs, counts: { waitedMs: Math.round(waitedMs) },
+      event: "background.slice", source: "background", step: job, outcome, durationMs,
+      counts: { waitedMs: Math.round(waitedMs) },
       ...(error === undefined ? {} : { error }),
     },
   ),
   onBacklog: ({ job, waitedMs, reason, jobs, due }) => logger.log(
     "warning",
     `Background job ${job} has been due for ${Math.round(waitedMs)}ms; the scheduler is paused (${reason})`,
-    { event: "background.backlog", source: "background", reason, counts: { waitedMs: Math.round(waitedMs), jobs, due } },
+    {
+      event: "background.backlog", source: "background", step: job, reason,
+      counts: { waitedMs: Math.round(waitedMs), jobs, due },
+    },
   ),
 });
 } catch (error) {

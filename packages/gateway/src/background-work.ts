@@ -36,6 +36,10 @@ export interface BackgroundWorkJob {
  * test's own instance. */
 export interface BackgroundWorkRegistration {
   register(job: BackgroundWorkJob): () => void;
+  /** Hands the loop back between the bounded batches of one slice, and waits
+   * while the scheduler is paused. A slice with more work than one batch stays
+   * interactive by awaiting this between batches instead of holding the loop. */
+  yieldToLoop(): Promise<void>;
 }
 
 /** Why a due slice did not start. */
@@ -74,9 +78,9 @@ export interface BackgroundWorkClock {
 }
 
 export interface BackgroundWorkStartOptions extends BackgroundWorkClock {
-  /** True while a request is being served. The scheduler asks this at every tick
-   * and starts nothing while it is true, so an interactive request never shares
-   * the loop with a background slice. */
+  /** True while a request is competing for the loop. The scheduler asks this at
+   * every tick and starts nothing while it is true, so an interactive request
+   * never shares the loop with a background slice. */
   requestsInFlight: () => boolean;
   /** The loop's p99 delay over the window since the previous sounding. Defaults
    * to the scheduler's own `monitorEventLoopDelay` histogram, read and reset per
@@ -131,14 +135,38 @@ export class BackgroundWorkScheduler implements BackgroundWorkRegistration {
     }
     // One job per name: a second registration would schedule the same work
     // twice under one record.
-    this.unregister(job.name);
-    this.jobs.set(job.name, { job, nextDueAt: this.now() + job.intervalMs, reportedPause: undefined });
+    const registered: RegisteredJob = { job, nextDueAt: this.now() + job.intervalMs, reportedPause: undefined };
+    this.jobs.set(job.name, registered);
     if (this.started) {
       // The armed wake may be waiting for a job that is now the later one.
       this.cancelPending();
       this.wake();
     }
-    return () => this.unregister(job.name);
+    return () => this.unregister(registered);
+  }
+
+  /**
+   * One turn of the loop, or a re-check interval while the scheduler is paused:
+   * a slice that has more to do than one bounded batch awaits this between
+   * batches, so a request that arrives mid-slice is served before the next batch
+   * and the slice's own records stay one per slice. The re-check timer is this
+   * promise's own, not the scheduler's armed wake, so it cannot start a second
+   * slice. Resolves on the next turn when the scheduler was never started, and
+   * when it is stopped: nothing is being paced then.
+   */
+  yieldToLoop(): Promise<void> {
+    return new Promise((resolve) => {
+      if (!this.started) {
+        this.immediate(resolve);
+        return;
+      }
+      const step = (): void => {
+        if (!this.started) { resolve(); return; }
+        if (this.pauseReason() !== undefined) { this.timer(step, BACKGROUND_PAUSE_RECHECK_MS); return; }
+        this.immediate(resolve);
+      };
+      step();
+    });
   }
 
   start(options: BackgroundWorkStartOptions): void {
@@ -166,8 +194,10 @@ export class BackgroundWorkScheduler implements BackgroundWorkRegistration {
     this.histogram = undefined;
   }
 
-  private unregister(name: string): void {
-    this.jobs.delete(name);
+  /** Removes this exact registration: a later registration under the same name
+   * owns that name now, so this one's dispose must not delete the replacement. */
+  private unregister(registered: RegisteredJob): void {
+    if (this.jobs.get(registered.job.name) === registered) this.jobs.delete(registered.job.name);
   }
 
   private wake(): void {
@@ -206,15 +236,22 @@ export class BackgroundWorkScheduler implements BackgroundWorkRegistration {
       if (nextDueAt !== undefined) this.wait(Math.max(1, nextDueAt - now));
       return;
     }
-    const pause = this.requestsInFlight()
-      ? "requests-in-flight" as const
-      : this.eventLoopP99Ms() >= BACKGROUND_PAUSE_P99_MS ? "event-loop-p99" as const : undefined;
+    const pause = this.pauseReason();
     if (pause) {
       this.reportBacklog(due, pause, now);
       this.wait(BACKGROUND_PAUSE_RECHECK_MS);
       return;
     }
     this.runSlice(due, now);
+  }
+
+  /** Why no slice may start right now, or none. The loop's own delay is read
+   * only when no request is in flight: the pause the requests already impose is
+   * the stronger one, and its sounding must not be spent on a tick that cannot
+   * start a slice anyway. */
+  private pauseReason(): BackgroundPauseReason | undefined {
+    if (this.requestsInFlight()) return "requests-in-flight";
+    return this.eventLoopP99Ms() >= BACKGROUND_PAUSE_P99_MS ? "event-loop-p99" : undefined;
   }
 
   /** One slice, then one yield: the next wake is an immediate, which runs in the

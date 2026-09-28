@@ -534,25 +534,39 @@ One owner decides when recurring background work may run: `backgroundWork` in
 `src/background-work.ts`, started by `gateway-main.ts` after the listener is
 serving. Registered jobs take turns **one slice at a time**; between slices the
 scheduler yields with `setImmediate`, so the next slice runs in the loop's check
-phase after the poll phase's timers and I/O. A due slice waits while a
-request is in flight (`activeRequestSpans()` in `src/transport/request-span.ts`)
-or while the loop's delay p99 is at or above `BACKGROUND_PAUSE_P99_MS` (50 ms),
-re-checking every `BACKGROUND_PAUSE_RECHECK_MS` (100 ms). A rejecting slice is
-reported and never stops the scheduler or the jobs registered after it.
+phase after the poll phase's timers and I/O. A due slice waits while a request is
+competing for the loop (`requestsCompetingForLoop()` in
+`src/transport/request-span.ts`) or while the loop's delay p99 is at or above
+`BACKGROUND_PAUSE_P99_MS` (50 ms), re-checking every
+`BACKGROUND_PAUSE_RECHECK_MS` (100 ms). A request that hands its wait to work
+outside the loop — a receipt-backed mutation (`offLoop`), such as a `session.bash`
+shell command, a `session.compact` or a `knowledge.*` model call — does not count
+as competing: it holds its receipt for its whole operation while the loop is idle,
+and the loop's own delay is what covers the loop work it still does. A slice with
+more to do than one bounded batch awaits `backgroundWork.yieldToLoop()` between
+batches: that is one loop turn, or a re-check interval while the same pause is in
+force, so the slice yields to a request that arrives mid-slice. A rejecting slice
+is reported and never stops the scheduler or the jobs registered after it.
 `background.slice` (debug, warning on failure) and `background.backlog`
 (warning once per starved spell past `BACKGROUND_BACKLOG_WARNING_MS`, 5 minutes)
-are the records; [`docs/observability.md`](docs/observability.md) owns their
-fields.
+are the records, and each carries the job in its `step` field;
+[`docs/observability.md`](docs/observability.md) owns their fields.
 
 The jobs are the session catalog's periodic reconcile
 (`CATALOG_RECONCILE_INTERVAL_MS`, registered by `session-catalog.ts` itself),
 command-receipt pruning, and the attachment/display-artifact maintenance pass.
-Each owner keeps its own bounds; the scheduler only decides *when* a slice may
-start. Nothing in a request path prunes, walks or reconciles: an admission may
-still force one exact pass at its own capacity boundary (receipts), which is
-correctness rather than maintenance. `register({ name, intervalMs, slice })`
-returns the function that unregisters the job, and that call is the seam any
-other recurring owner moves its work under.
+The catalog's startup, watcher-event and watcher-replacement passes are the same
+reconcile pass, so they yield to the same pause between bounded batches (the
+durable-row batches of `CatalogMetadataIndex.reconcile` and one file per batch in
+its rebuild path) even though they are not slices of the registered job. Each
+owner keeps its own bounds; the scheduler only decides *when* a slice — or the
+next batch of one — may start. Nothing in a request path prunes, walks or
+reconciles: an admission may still force one exact pass at its own capacity
+boundary (receipts), which is correctness rather than maintenance.
+`register({ name, intervalMs, slice })` returns the function that unregisters the
+job — exactly that registration, so a later registration under the same name is
+not deleted by the replaced owner's dispose — and that call is the seam any other
+recurring owner moves its work under.
 
 ### Diagnostic bundle
 
