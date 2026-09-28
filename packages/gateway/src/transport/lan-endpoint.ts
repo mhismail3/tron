@@ -1,4 +1,4 @@
-import { createPrivateKey, createPublicKey, generateKeyPairSync, randomBytes, sign, X509Certificate, type KeyObject } from "node:crypto";
+import { createHash, createPrivateKey, createPublicKey, generateKeyPairSync, randomBytes, sign, X509Certificate, type KeyObject } from "node:crypto";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { hostname } from "node:os";
 import { join } from "node:path";
@@ -19,6 +19,10 @@ import type { GatewayLogger, LogLevel } from "./logger.js";
  * What this listener must never do: bind a wildcard or a public address, serve
  * `POST /v1/pair` or any unauthenticated route beyond a health check, or
  * regenerate its key under a certificate a paired phone already pinned.
+ *
+ * E-3b adds the other half of that pin: `lanPin` and `advertisement()`, what a
+ * paired phone needs to dial this lane. They travel only on the pairing
+ * response and hello (E-3b), which are the two channels a paired device owns.
  */
 
 /** No portable event says a host's private address changed. One cheap
@@ -105,6 +109,63 @@ export interface LanEndpointOptions extends LanEndpointConfig, LanEndpointHandle
 interface LanCredentials {
   readonly key: string;
   readonly certificate: string;
+}
+
+/**
+ * What a paired phone needs to reach this lane and pin its certificate. Every
+ * field is derived from state this endpoint already holds, so `server.ts`
+ * advertises it without knowing how the lane is bound.
+ */
+export interface LanAdvertisement {
+  /** The lane's current bind, or empty while it is enabled but unbound. Empty
+   * is a truthful answer, not an error: a phone replaces the endpoints it
+   * saved, falls back to its other leg, and does not dial an address this Mac
+   * no longer offers. */
+  readonly endpoints: readonly { readonly host: string; readonly port: number }[];
+  /** Absent until the credential pair exists (the setting is off, or the pair
+   * is broken), because a phone can only pin a key it was told about. */
+  readonly pin?: string;
+}
+
+/**
+ * The pin a paired phone compares the served certificate against: standard
+ * base64 of SHA-256 over the certificate's public key as the raw uncompressed
+ * X9.63 point (`0x04 || X || Y`).
+ *
+ * That encoding is what each platform hands out without synthesising a key
+ * structure — `SecKeyCopyExternalRepresentation` on iOS, the JWK coordinates
+ * here — so both sides hash the same bytes for the same key. The certificate
+ * is always the P-256 EC key this endpoint generates; a key of another type
+ * has no point to hash and leaves the lane unadvertised rather than pinning
+ * something the phone would compute differently.
+ *
+ * `protocol-fixtures/lan-endpoint-pin.json` freezes this value for one
+ * certificate, and both sides assert against it.
+ */
+export function lanPin(certificate: string): string {
+  let publicKey: KeyObject;
+  try {
+    publicKey = new X509Certificate(certificate).publicKey;
+  } catch {
+    throw new LanCredentialError("certificate_unreadable");
+  }
+  return createHash("sha256").update(publicKeyPoint(publicKey)).digest("base64");
+}
+
+function publicKeyPoint(publicKey: KeyObject): Buffer {
+  const exported: unknown = publicKey.export({ format: "jwk" });
+  if (!isEcPublicJwk(exported)) throw new LanCredentialError("certificate_unreadable");
+  return Buffer.concat([
+    Buffer.from([0x04]),
+    Buffer.from(exported.x, "base64url"),
+    Buffer.from(exported.y, "base64url"),
+  ]);
+}
+
+function isEcPublicJwk(value: unknown): value is { readonly kty: string; readonly x: string; readonly y: string } {
+  if (value === null || typeof value !== "object") return false;
+  const candidate = value as { kty?: unknown; x?: unknown; y?: unknown };
+  return candidate.kty === "EC" && typeof candidate.x === "string" && typeof candidate.y === "string";
 }
 
 class LanCredentialError extends Error {
@@ -287,6 +348,9 @@ async function loadOrCreateLanCredentials(stateDirectory: string): Promise<LanCr
 
 export class LanEndpoint {
   private credentials: LanCredentials | undefined;
+  /** Derived once with the credentials: it is the same value for every hello
+   * until an explicit rotation replaces the pair. */
+  private pin: string | undefined;
   private listener: SecureServer | undefined;
   private bound: (LanAddress & { readonly port: number }) | undefined;
   private timer: NodeJS.Timeout | undefined;
@@ -315,6 +379,7 @@ export class LanEndpoint {
     }
     try {
       this.credentials = await loadOrCreateLanCredentials(this.options.stateDirectory);
+      this.pin = lanPin(this.credentials.certificate);
     } catch (error) {
       // A malformed or half-present pair is not retried: only the explicit
       // rotation replaces an existing certificate.
@@ -329,6 +394,16 @@ export class LanEndpoint {
     // that starts with Wi-Fi off must expose the LAN leg once it associates.
     this.timer = setInterval(() => void this.reconcile(), this.options.reconcileIntervalMs ?? LAN_ADDRESS_RECONCILE_MS);
     this.timer.unref();
+  }
+
+  /** What a paired phone is told about this lane (E-3b). Called on the pairing
+   * response and every hello, so it reads only state the reconcile already
+   * published: the current bind and the pin derived at start. */
+  advertisement(): LanAdvertisement {
+    return {
+      endpoints: this.bound === undefined ? [] : [{ host: this.bound.address, port: this.bound.port }],
+      ...(this.pin === undefined ? {} : { pin: this.pin }),
+    };
   }
 
   /** Stop listening. Sockets this listener accepted keep their own bounded
