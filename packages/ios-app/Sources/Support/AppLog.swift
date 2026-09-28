@@ -74,14 +74,17 @@ actor AppLog {
         if eventLevel == "error" { flush() }
     }
 
+    /// One bounded per-request record: `rpc.completed` for every completion, and
+    /// `rpc.cancelled` for the reads this client told the Gateway to stop.
     func recordRPC(
+        event: String = "rpc.completed",
         method: String, requestID: String, outcome: String, code: String?,
         durationMilliseconds: Int, profileID: String?, connectionID: Int?
     ) {
         restoreIfNeeded()
         append(AppLogRecord(
             timestamp: Self.timestampFormatter.string(from: Date()),
-            level: "debug", event: "rpc.completed", source: "rpc",
+            level: "debug", event: event, source: "rpc",
             message: method, process: "ios", requestID: bounded(requestID),
             durationMs: max(0, durationMilliseconds), outcome: outcome,
             code: code.map { bounded($0) }, profileID: profileID.map { bounded($0) },

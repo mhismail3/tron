@@ -17,6 +17,9 @@ import { AsyncLocalStorage } from "node:async_hooks";
  */
 export class RequestSpan {
   private readonly entries = new Map<string, SpanEntry>();
+  /** Measurements that are open right now, oldest first: the last one is the
+   * stage the request is in when a peer cancels it. */
+  private readonly open = new Set<OpenMeasurement>();
   private sequence = 0;
   private finished = false;
 
@@ -38,21 +41,22 @@ export class RequestSpan {
       closed: false,
     };
     let result: T | Promise<T>;
+    const measurement = this.beginMeasurement(name);
     try {
       result = context === undefined
         ? operation()
         : storage.run({ span: this, openStage: stage }, operation);
     } catch (error) {
-      this.closeStage(stage);
+      this.closeStage(stage, measurement);
       throw error;
     }
     if (!isPromiseLike(result)) {
-      this.closeStage(stage);
+      this.closeStage(stage, measurement);
       return result;
     }
     return result.then(
-      (value) => { this.closeStage(stage); return value as T; },
-      (error) => { this.closeStage(stage); throw error; },
+      (value) => { this.closeStage(stage, measurement); return value as T; },
+      (error) => { this.closeStage(stage, measurement); throw error; },
     );
   }
 
@@ -69,6 +73,7 @@ export class RequestSpan {
     const parent = this.context()?.openStage;
     const entry = this.entry(name);
     const startedAt = performance.now();
+    const measurement = this.beginMeasurement(name);
     let acquired = false;
     const handover = (): void => {
       if (acquired) return;
@@ -84,16 +89,41 @@ export class RequestSpan {
       result = operation(handover);
     } catch (error) {
       handover();
+      this.closeMeasurement(measurement);
       throw error;
     }
     if (!isPromiseLike(result)) {
       handover();
+      this.closeMeasurement(measurement);
       return result;
     }
     return result.then(
-      (value) => { handover(); return value as T; },
-      (error) => { handover(); throw error; },
+      (value) => { handover(); this.closeMeasurement(measurement); return value as T; },
+      (error) => { handover(); this.closeMeasurement(measurement); throw error; },
     );
+  }
+
+  /**
+   * Names the stage this request is in for `currentStage()` without measuring
+   * it, and returns the call that ends it. Work that already measures itself
+   * uses this: a second entry for the same interval would count the request's
+   * covered time twice. Always call the returned closure.
+   */
+  enterStage(name: string): () => void {
+    const measurement = this.beginMeasurement(name);
+    return () => this.closeMeasurement(measurement);
+  }
+
+  /**
+   * The name of the innermost stage or wait still open, for the cancellation
+   * record: a peer that abandons a request needs to know what it interrupted.
+   * Concurrent stages are ordered by when they started, so the answer is the
+   * most recently started one, not a reconstruction of nesting.
+   */
+  currentStage(): string | undefined {
+    let current: OpenMeasurement | undefined;
+    for (const measurement of this.open) current = measurement;
+    return current?.name;
   }
 
   /** Counts repeated work that carries no duration of its own (walked files,
@@ -127,7 +157,18 @@ export class RequestSpan {
     };
   }
 
-  private closeStage(stage: OpenStage): void {
+  private beginMeasurement(name: string): OpenMeasurement {
+    const measurement: OpenMeasurement = { name };
+    this.open.add(measurement);
+    return measurement;
+  }
+
+  private closeMeasurement(measurement: OpenMeasurement): void {
+    this.open.delete(measurement);
+  }
+
+  private closeStage(stage: OpenStage, measurement?: OpenMeasurement): void {
+    if (measurement) this.open.delete(measurement);
     if (stage.closed) return;
     stage.closed = true;
     const exclusiveMs = Math.max(0, elapsedSince(stage.startedAt) - stage.childMs);
@@ -159,6 +200,12 @@ export interface RequestSpanBreakdown {
   stages: string;
   /** Time in the request that no named entry covered. */
   unaccountedMs: number;
+}
+
+/** An open measurement of the current span, by name only: the cancellation
+ * record reports the stage, not the accounting it already has. */
+interface OpenMeasurement {
+  readonly name: string;
 }
 
 interface SpanEntry {
