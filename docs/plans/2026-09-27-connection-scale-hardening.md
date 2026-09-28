@@ -2,6 +2,7 @@
 
 - **Started:** 2026-09-27
 - **Status:** Active (Phase 1 runs on `hardening/integration`; that branch's copy of this plan is authoritative until R-1)
+- **Last updated:** 2026-09-28, G-2 Done: a 100–200 MiB cold `session.open` is the parse (45–56%, `session.open.manager`) plus the SDK runtime create (22–28%) and the bounded snapshot projection (19–24%) — the three named candidates (registry mutex, idle eviction, fork-boundary reads) are 3–13 ms (`session.open.catalog`) or absent; the whole-branch receipt index maps the snapshot projection allocated for nothing are gone (≈19 ms per snapshot at 100 k entries, measured) and the O-6a prime now retries the fresh fixture's `catalog_not_ready` (see the handoff)
 - **Last updated:** 2026-09-28, G-11 Done: the Slot's publish-time full-transcript summary walk is now an incremental fold (largest run 86.9 ms → 4.8 ms); the dominant remaining stretches are session-search (G-8c) and catalog/registry (G-1c), both in flight, and the combined O-6a max/p99 is re-measured after they merge (see the handoff)
 
 - **Last updated:** 2026-09-28, E-3b done: pairing and hello advertise the
@@ -612,7 +613,7 @@ rows are in priority order.
 | C-4 | Done | Truer liveness (D-4): any inbound frame proves liveness | O-4 | orchestrator-dispatched deepseek-worker, 2026-09-28 |
 | C-6 | Done | Cancel frame for disposable reads; a retried `session.open` joins the in-flight one | O-3 | orchestrator-dispatched deepseek-worker, 2026-09-28 (the O-6a slow-open confirmation and the qualification run are the orchestrator's) |
 | G-12 | Claimed | Server-side deadlines, concurrency caps and heap-pressure shedding with typed retry hints | O-3, O-5 | orchestrator-dispatched deepseek-worker, 2026-09-28 |
-| G-2 | Claimed | Cold open in bounded time from the index and a single-file fence | G-1c | orchestrator-dispatched deepseek-worker, 2026-09-28 |
+| G-2 | Done | Cold open in bounded time from the index and a single-file fence | G-1c | orchestrator-dispatched deepseek-worker, 2026-09-28 (see handoff: 100–200 MiB cold opens hold at 951 ms max on a load-56 host and 494 ms on a load-10 one; the parse is 45–56% of a slow open; the quiet-host multi-iteration p99 confirmation is the orchestrator's) |
 | G-7 | Done | Reconnect diet: send only what changed | O-1, O-6a | orchestrator-dispatched deepseek-worker, 2026-09-28; both review rounds addressed, R-1/R-4 own the real-reconnect measurement |
 | G-11 | Done | Event-loop budget: find and bound every synchronous task over 50 ms | O-5, O-6a | orchestrator-dispatched deepseek-worker, 2026-09-28 (branch `hardening/g-11`): the Slot's publish-time full-transcript summary walk is now an incremental fold (largest CPU-profile run 86.9 ms → 4.8 ms); the dominant remaining stretches belong to in-flight G-8c (session-search) and G-1c (catalog/registry), so the combined O-6a max/p99 is re-measured by the orchestrator after they merge — see the handoff |
 | G-9 | Done | One background-work scheduler that yields to requests; measure the libuv pool size | O-5, G-1b | orchestrator-dispatched deepseek-worker, 2026-09-28 (the libuv pool comparison and the O-6a latency confirmation are owed by the orchestrator's quiet-host run; the background `node_modules` clone in this worktree is private) |
@@ -9162,6 +9163,104 @@ wait).
 - Deviations: the plan's "profile switch during restoration" case is still
   covered only by the route-change cases above; no profile-switch test holds the
   notice timer pending.
+
+### G-2 · Done · 2026-09-28 · orchestrator-dispatched deepseek-worker (branch `hardening/g-2`)
+
+- Result: measured what fills a cold `session.open` from the O-3 spans and
+  removed the one whole-branch cost the snapshot projection still carried. For
+  a 200 MB session the open is the JSONL parse (45–56%,
+  `session.open.manager`), the SDK runtime create (22–28%,
+  `session.open.runtime`) and the bounded snapshot projection (19–24%,
+  `snapshot.build`); the three candidates G-2 named — registry mutex, idle
+  eviction, fork-boundary parent reads — are not the cost (`session.open.catalog`
+  3–13 ms from the index, no lane wait, no parent read for a top-level session).
+- Parse share (reported separately, as the task asks): the pinned SDK's
+  `loadEntriesFromFile`/`parseSessionEntryLine` runs inside
+  `session.open.manager` and is 45–56% of every slow open measured
+  (3,936/8,034; 2,496/5,492; 3,985/8,034; 2,677/4,782 ms). It is not
+  Gateway-owned and is not reducible without an SDK change; the target is met
+  with it in place.
+- Evidence for "Done when" (cold p99 ≤ 1.5 s for sessions up to 200 MB):
+  - `scripts/tron-profile gateway --scenario multi-session --no-build
+    --iterations 1 --cases none --catalog-files 100 --catalog-mib 2048
+    --mixed-seconds 40` — this catalog's five large sessions are
+    104,876,508 / 131,076,142 / 157,297,276 / 183,508,419 / 209,721,307 B
+    (`catalog.json` `largeBytes`), so the largest is exactly 200 MiB.
+    `latency.session_open_cold_large` (largest first, seconds×1000):
+    **951 / 857 / 671 / 483 / 412 ms** at 1-minute load **56**
+    (`20260928T215040Z-multi-session-1b30cf`), and **494 / 446 / 366 / 369 /
+    266 ms** at load **10** (`20260928T221024Z-multi-session-957a94`). Both
+    runs hold the target with margin; the between-run difference is the host
+    load and is not claimed as this change. Warm opens ≤ 1,025 ms in the loaded
+    run (35 ms in the quiet one), `session.list` ≤ 751 ms / ≤ 13 ms.
+  - Copy of report, catalog, per-iteration samples, prime result and the
+    extracted O-3 `session.open` spans for those runs:
+    `~/.tron/workspace/files/hardening/g-2/`.
+  - O-3 span source for the composition split: a third smoke at
+    `--catalog-mib 3072` (150–300 MiB files) whose opens cross the 1,000 ms
+    `rpc.completed` warning threshold, so the fixture log carries the stage
+    breakdown (`20260928T220150Z-multi-session-e8c752`, run at load 22):
+    `session.open.manager` 45–56%, `session.open.runtime` 22–28%,
+    `snapshot.build` 19–24%, `session.open.catalog` 3–13 ms,
+    `response.encode` ≤ 19 ms, `attention.reconcile` 2–58 ms.
+  - The change itself, measured on the removed work: on a 100,000-entry branch
+    with no delivery or invocation receipt — the shape of the qualification
+    catalog, where a snapshot projection still built three whole-branch index
+    maps per build — `contextDeliveryMetadataByEntry` falls **12.4 → 0.42 ms**
+    and `invocationReceipts` **6.7 → 0.4 ms** (median of 5, one-off script
+    `~/.tron/workspace/files/hardening/g-2/g2-alloc-measure.mjs`, Node 25.9.0; ≈19 ms of synchronous whole-branch
+    work per snapshot gone, the removable part of G-11's 62 ms
+    `projectTranscriptPage` stretch).
+  - Merge gate after merging `hardening/integration` at `5ccc7a009`:
+    `session-archive` + `server-capacity` + `sync-protocol` +
+    `stall-diagnostics` + `server-heartbeat` + `server-http-lifecycle`
+    integration/unit files **132/132**, `runtime-registry.integration.test.ts`
+    **237/237**, `npx vitest run src/sessions/projection.test.ts
+    src/sessions/invocation-receipts.test.ts` **85/85**,
+    `npx tsc --noEmit -p .` clean, `npm run build` clean,
+    `python3 scripts/check-documentation-policy.py` and
+    `scripts/personal-info-guard.sh` pass. Re-run after merging E-3b at
+    `c70ccb4df` (final merge `ec1c3f8f5`): the same six files plus
+    `lan-endpoint.integration.test.ts` **144/144**, and
+    `runtime-registry` + `projection` + `invocation-receipts` **322/322**;
+    `tsc --noEmit` clean. After the validation-once half landed, all ten files
+    together are **466/466**. E-3b does not touch the measured cold-open path, so
+    the smoke numbers above stay as measured.
+  - Negative control for the new case: reverting the single-validation
+    refactor in `projectableTranscriptEntries` (back to parsing the receipt once
+    for the refusal and again for use) leaves it green, and deleting the refusal
+    makes `refuses a malformed invocation receipt while projecting a branch`
+    fail.
+- Changes: commit on `hardening/g-2`: `projection.ts` (validate each invocation
+  receipt once per entry instead of twice), `context-delivery-receipts.ts` and
+  `invocation-receipts.ts` (skip building the whole-branch index maps when the
+  branch holds no receipt of that type), `projection.test.ts` (the missing
+  malformed-receipt refusal case), this plan.
+- Tasks added: none. **Deviation the orchestrator should record under O-6a:**
+  on `hardening/integration` the multi-session prime failed on the first
+  attempt — a fresh fixture answers the prime's `session.list` with a retryable
+  `busy` (`catalog_not_ready`) until the catalog owner publishes its first cut,
+  and the driver did not retry it (24 such records, run
+  `20260928T214631Z-multi-session-00d238` exited 1 at prime). `G-1c` made that
+  refusal deliberate, so the prime now retries it like every other read the
+  driver times (`scripts/tron-profile-gateway-driver.mjs`, the Profiler zone);
+  without it no O-6a smoke can run on a generated catalog whose first cut takes
+  longer than pairing.
+- Kept on purpose: the parse (the SDK's, above); `session.open.runtime`'s agent
+  runtime create (the SDK's `createAgentSessionRuntime`/extension binding, G-11
+  measured its module compile as not Gateway-owned); `projectTranscriptPage`'s
+  remaining O(branch) classification walk (it produces `total`, the page
+  boundaries and each row's invocation/delivery semantics, so it is not
+  removable by slicing); `attention.reconcile` on the open path (≤58 ms).
+- Deviations: the smoke catalog is 100 files, not 3,000: the large-session sizes
+  scale with `--catalog-mib`, so a 100–200 MiB large session is only reachable at
+  the 2,048 MiB reference total. A cold open reads the index for membership and
+  one header, so the file count does not enter its cost. The driver retry above
+  is outside G-2's owning files and is here only because the evidence needs it.
+- For the next agent: the O-6a quiet-host repeat should run
+  `--catalog-files 100 --catalog-mib 2048 --iterations 3` and read
+  `latency.session_open_cold_large.p99`; on a host above load 20 a 200 MiB open
+  moves by seconds, so compare runs at similar load only.
 
 ### E-3b · Done · 2026-09-28 · orchestrator-dispatched deepseek-worker (branch `hardening/e-3b`)
 
