@@ -19,6 +19,17 @@ enum StableProbe: Equatable, Sendable {
 /// between the ping and the fence read cannot pin "needs repair" for the
 /// process's lifetime.
 actor StableProbeCache {
+    /// How one cycle resolves the fail-closed probe.
+    enum Mode: Sendable {
+        /// A 30 s poll cycle: reuse an admission while the runtime fence and the
+        /// authenticated ping identity are unchanged.
+        case reusable
+        /// An explicit user action: always run the full probe and record its
+        /// outcome, so a failure it finds cannot be overwritten by the next
+        /// cycle's reused admission.
+        case explicit
+    }
+
     private let runtimeFence: @Sendable () async -> StableGatewayObserver.RuntimeFence?
     private let fullProbe: @Sendable (ServerPingInfo) async -> StableProbe
     private var entry: (fence: StableGatewayObserver.RuntimeFence, admission: StableGatewayObserver.Admission)?
@@ -31,15 +42,24 @@ actor StableProbeCache {
         self.fullProbe = fullProbe
     }
 
-    func probe(info: ServerPingInfo) async -> StableProbe {
-        guard let fence = await runtimeFence() else { return await fullProbe(info) }
+    func probe(info: ServerPingInfo, mode: Mode) async -> StableProbe {
+        guard let fence = await runtimeFence() else {
+            let probe = await fullProbe(info)
+            // A refusal found without a fence is still a refusal: an older
+            // admission must not stay replayable behind it.
+            if case .refused = probe { entry = nil }
+            return probe
+        }
         // The ping identity is the only per-cycle link between whoever answered
         // and the admitted runtime now that `lsof` is skipped between polls, so
         // a changed identity re-admits.
-        if let entry, entry.fence == fence, entry.admission.info == info {
+        if mode == .reusable, let entry, entry.fence == fence, entry.admission.info == info {
             return .admitted(Self.republished(entry.admission, uptime: fence.process.elapsedTime))
         }
         let probe = await fullProbe(info)
+        // Both modes record: an explicit user action's refusal must replace the
+        // admission the next cycle would otherwise replay, and its admission
+        // may be reused by the cycles that follow it.
         switch probe {
         case .admitted(let admission): entry = (fence, admission)
         case .refused: entry = nil
@@ -69,10 +89,14 @@ actor StableProbeCache {
 struct ServerStatusPoller: Sendable {
     private let setup: EnvironmentSetup
     private let interval: TimeInterval
-    /// The status poll's runtime fence. It reads launchd's pid and that
-    /// process's start identity, so a restart under the same payload cannot
-    /// keep a stale admission. A fence that cannot be read re-probes.
-    private let runtimeFence: @Sendable () async -> StableGatewayObserver.RuntimeFence?
+    /// One admission cache for this poller's life: the 30 s stream and the
+    /// explicit user actions share it, so a refusal an explicit probe finds is
+    /// not overwritten by the next cycle's reused admission.
+    private let probeCache: StableProbeCache
+    /// The stream's per-cycle ping; it is the only ping that reuses one bounded
+    /// Tailscale resolution. Explicit actions go through `setup.pingServer`,
+    /// which resolves live.
+    private let statusPollPing: @Sendable (String?) async -> ServerPingResult
 
     init(
         setup: EnvironmentSetup,
@@ -81,13 +105,17 @@ struct ServerStatusPoller: Sendable {
     ) {
         self.setup = setup
         self.interval = interval
-        self.runtimeFence = runtimeFence ?? {
-            await StableGatewayObserver.RuntimeFence.read(
-                label: setup.launchAgentLabel,
-                store: GatewayPayloadStore(home: setup.tronHome, channel: setup.profile.channel),
-                bundledPayloadRoot: TronPaths.gatewayPayloadRoot
-            )
-        }
+        self.statusPollPing = setup.statusPollPingServer ?? setup.pingServer
+        self.probeCache = StableProbeCache(
+            runtimeFence: runtimeFence ?? {
+                await StableGatewayObserver.RuntimeFence.read(
+                    label: setup.launchAgentLabel,
+                    store: GatewayPayloadStore(home: setup.tronHome, channel: setup.profile.channel),
+                    bundledPayloadRoot: TronPaths.gatewayPayloadRoot
+                )
+            },
+            fullProbe: { info in await ServerStatusPoller.fullProbe(setup: setup, info: info) }
+        )
     }
 
     /// Returns a latest-only `AsyncStream` that emits an immediate snapshot on
@@ -96,19 +124,13 @@ struct ServerStatusPoller: Sendable {
     func snapshots() -> AsyncStream<ServerStatusSnapshot> {
         let setup = self.setup
         let interval = self.interval
-        let runtimeFence = self.runtimeFence
-        // The poll reuses one live Tailscale resolution for a bounded window;
-        // explicit user actions keep `pingServer`, which resolves live.
-        let pingServer = setup.statusPollPingServer ?? setup.pingServer
+        let probeCache = self.probeCache
+        let pingServer = self.statusPollPing
         return AsyncStream(bufferingPolicy: .bufferingNewest(1)) { continuation in
             let task = Task {
-                let probeCache = StableProbeCache(
-                    runtimeFence: runtimeFence,
-                    fullProbe: { info in await ServerStatusPoller.fullProbe(setup: setup, info: info) }
-                )
                 while !Task.isCancelled {
                     let snapshot = await ServerStatusPoller.singleSnapshot(
-                        setup: setup, probeCache: probeCache, pingServer: pingServer
+                        setup: setup, probeCache: probeCache, probeMode: .reusable, pingServer: pingServer
                     )
                     guard !Task.isCancelled else { break }
                     continuation.yield(snapshot)
@@ -126,20 +148,25 @@ struct ServerStatusPoller: Sendable {
         }
     }
 
-    /// Performs a single status probe synchronously, with the full fail-closed
-    /// Stable probe. Used by explicit user actions (menu presentation, restart
-    /// wait, startup) and by the wizard's "wait for Tron" loop.
-    static func singleSnapshot(setup: EnvironmentSetup) async -> ServerStatusSnapshot {
-        await singleSnapshot(setup: setup, probeCache: nil)
+    /// The full fail-closed probe for one explicit user action, recorded in the
+    /// poller's shared admission cache. Menu presentation and post-action
+    /// refreshes use this, so a failure they find is not overwritten by the next
+    /// 30 s cycle's reused admission.
+    func explicitSnapshot() async -> ServerStatusSnapshot {
+        await ServerStatusPoller.singleSnapshot(
+            setup: setup, probeCache: probeCache, probeMode: .explicit
+        )
     }
 
     /// One cycle of the poll. `probeCache` may reuse an admission while the
-    /// runtime fence is unchanged; explicit user actions pass none. `pingServer`
-    /// is the cycle's transport ping: the poll passes its bounded-resolution
-    /// ping, and a nil value (explicit user actions) resolves live.
+    /// runtime fence is unchanged; `probeMode` decides whether this cycle may
+    /// reuse one or must run the full probe and record it. `pingServer` is the
+    /// cycle's transport ping: the poll passes its bounded-resolution ping, and
+    /// a nil value (explicit user actions, startup, restart wait) resolves live.
     static func singleSnapshot(
         setup: EnvironmentSetup,
-        probeCache: StableProbeCache?,
+        probeCache: StableProbeCache? = nil,
+        probeMode: StableProbeCache.Mode = .reusable,
         pingServer: (@Sendable (String?) async -> ServerPingResult)? = nil
     ) async -> ServerStatusSnapshot {
         guard !Task.isCancelled else { return ServerStatusSnapshot(state: .checking) }
@@ -168,7 +195,7 @@ struct ServerStatusPoller: Sendable {
         case .success(let info):
             let probe: StableProbe
             if let probeCache {
-                probe = await probeCache.probe(info: info)
+                probe = await probeCache.probe(info: info, mode: probeMode)
             } else {
                 probe = await fullProbe(setup: setup, info: info)
             }

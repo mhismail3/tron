@@ -2,6 +2,10 @@
 
 - **Started:** 2026-09-27
 - **Status:** Active (Phase 1 runs on `hardening/integration`; that branch's copy of this plan is authoritative until R-1)
+- **Last updated:** 2026-09-28, G-8b review round 2 addressed: the poller
+  owns one admission cache shared with the explicit user actions, the explicit
+  probe records its outcome, and the runtime fence stamps the bundled manifest
+  too
 - **Last updated:** 2026-09-28, G-8b review round 1 addressed: the poll
   republishes the fence's uptime, reuses only an admission whose ping identity
   still matches, realigns the windowed Tailscale ping to the poll alone, and the
@@ -6286,6 +6290,9 @@ wait).
     cache cannot answer is reused without a probe; (11) a newly resolved address
     is not persisted, so the menu would present a different host than the poll
     pings.
+  - explicit recording and poll wiring (review round 2): (12) a failure an
+    explicit check finds is overwritten by the next cycle's reused admission;
+    (13) the poll stream uses the live ping or a fresh probe per cycle.
 - Review round 1 (2026-09-28) addressed: the fence read now carries `ps
   -o etime=,lstart=` in one spawn and the poll republishes that elapsed time
   instead of the cached admission's (the menu's uptime no longer freezes and
@@ -6295,12 +6302,31 @@ wait).
   moved from `pingServer` onto the poll's own `statusPollPingServer`, which is
   what the row requires — before it, menu-open and pairing inherited the window;
   `RuntimeFence.read` is now exercised against a real temporary payload store.
+- Review round 2 (2026-09-28) addressed: one `StableProbeCache` now belongs to
+  the `ServerStatusPoller` instance and is shared by its 30 s stream and its
+  explicit probes; `explicitSnapshot()` always runs the full probe and records
+  the outcome (admission stored, refusal cleared), and `menuWillOpen` and
+  `MenuBarActionHandler.refreshStatus` go through it, so a failure an explicit
+  check finds is no longer overwritten by the next cycle's reused admission.
+  Negative control: with the record step removed, the new poll-cycle test saw the
+  cycle after the explicit refusal report Running from the cache (captured before
+  the fix). The poll stream's own wiring is now driven by a test (one cache per
+  poller, the bounded ping only, one full probe across two cycles), and
+  `RuntimeFence` stamps the bundled manifest unconditionally alongside the active
+  one, so replacing the app bundle moves the fence even when the selection names
+  a version whose payload does not validate and `GatewayPayloadResolver` admits
+  the bundled payload.
 - Evidence:
-  - Suites: `TronMacTests/ServerStatusPollerBoundedAdmissionTests` (8 tests,
+  - Suites: `TronMacTests/ServerStatusPollerBoundedAdmissionTests` (10 tests,
     was `SingleInstance`-free and deterministic),
-    `TronMacTests/StableGatewayObserverTests` (9 tests) and
+    `TronMacTests/StableGatewayObserverTests` (10 tests) and
     `TronMacTests/TailscaleHostResolutionTests` (5 tests) pass with the three
-    neighbouring suites on the Debug test host. Review round 1 re-ran:
+    neighbouring suites on the Debug test host. Review round 2 re-ran
+    `build-for-testing` then `test-without-building -only-testing:`
+    `ServerStatusPollerBoundedAdmissionTests`, `StableGatewayObserverTests`,
+    `ServerStatusPollerTests` and `TailscaleHostResolutionTests` →
+    `Test run with 32 tests in 4 suites passed`, `TEST EXECUTE SUCCEEDED`.
+    Review round 1 re-ran:
     `xcodebuild build-for-testing … -derivedDataPath build/DerivedData` (3m13s,
     TEST BUILD SUCCEEDED; the first attempt failed on an unwrapped optional and
     the re-run succeeded) then `test-without-building -only-testing:` the six

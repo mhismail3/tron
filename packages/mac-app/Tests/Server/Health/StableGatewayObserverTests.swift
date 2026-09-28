@@ -174,6 +174,26 @@ struct StableGatewayObserverTests {
         #expect(fallback?.manifest.bytes == Data("bundled-manifest".utf8))
     }
 
+    @Test("the fence follows the bundled manifest even when the selection names a selected version")
+    func runtimeFenceTracksTheBundledManifest() async throws {
+        let fixture = try makeFenceFixture()
+        defer { try? FileManager.default.removeItem(at: fixture.root) }
+
+        // The selection names v1, whose manifest exists, so the fence stamps it
+        // as the active manifest. When v1's payload does not validate,
+        // `activePayload` admits the bundled payload instead — replacing the
+        // app bundle must still move the fence.
+        try select("v1", in: fixture.store)
+        let before = await readFence(fixture)
+        try Data("bundled-manifest-2".utf8).write(to: fixture.bundled.appendingPathComponent("manifest.json"))
+        let after = await readFence(fixture)
+
+        #expect(before != nil && after != nil)
+        #expect(before != after)
+        #expect(after?.bundledManifest.bytes == Data("bundled-manifest-2".utf8))
+        #expect(after?.manifest.bytes == Data("manifest-1".utf8))
+    }
+
     @Test("a selection or manifest that exists but cannot be stamped makes the fence unreadable")
     func runtimeFenceIsUnreadableWhenAStampCannotBeRead() async throws {
         let fixture = try makeFenceFixture()

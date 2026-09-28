@@ -12,7 +12,8 @@ struct ServerStatusPollerTests {
         serverPort: Int = 9847,
         launchAgentLoaded: Bool? = false,
         admitStableRuntime: (@Sendable (ServerPingInfo) async -> StableGatewayObserver.Admission?)? = nil,
-        pingServer: (@Sendable (String?) async -> ServerPingResult)? = nil
+        pingServer: (@Sendable (String?) async -> ServerPingResult)? = nil,
+        statusPollPingServer: (@Sendable (String?) async -> ServerPingResult)? = nil
     ) -> EnvironmentSetup {
         let tmp = URL(fileURLWithPath: NSTemporaryDirectory(), isDirectory: true)
         let launchAgentManager = MockLaunchAgentManager()
@@ -65,6 +66,7 @@ struct ServerStatusPollerTests {
                 #expect(receivedToken == token)
                 return pingResult
             },
+            statusPollPingServer: statusPollPingServer,
             launchAgentManager: launchAgentManager,
             touchOnboardedSentinel: { }
         )

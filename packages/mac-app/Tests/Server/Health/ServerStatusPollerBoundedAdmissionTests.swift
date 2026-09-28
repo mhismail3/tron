@@ -12,7 +12,10 @@ import Testing
 /// 6. a transient refusal is reused, pinning "needs repair" for as long as the
 ///    process lives;
 /// 7. a reused admission freezes the displayed uptime at the value the first
-///    probe saw.
+///    probe saw;
+/// 8. an explicit check's refusal is overwritten by the next cycle's cached
+///    admission;
+/// 9. the poll stream wires the live ping or a fresh probe per cycle.
 @Suite("ServerStatusPoller — bounded admission reuse")
 struct ServerStatusPollerBoundedAdmissionTests {
     private actor RuntimeFenceFeed {
@@ -65,7 +68,8 @@ struct ServerStatusPollerBoundedAdmissionTests {
         StableGatewayObserver.RuntimeFence(
             process: LaunchAgentProcessFence(pid: pid, startIdentity: startIdentity, elapsedTime: elapsedTime),
             selection: selection,
-            manifest: manifest
+            manifest: manifest,
+            bundledManifest: stamp("bundled-manifest-1")
         )
     }
 
@@ -264,6 +268,78 @@ struct ServerStatusPollerBoundedAdmissionTests {
         #expect(explicit.state == .running(version: "0.5.0", port: 9847))
         #expect(await boundedPings.count == 1)
         #expect(await livePings.count == 1)
+    }
+
+    @Test("an explicit check's refusal survives the next poll cycle's cached admission")
+    func explicitRefusalIsNotOverwrittenByTheNextPollCycle() async {
+        let probes = CallCounter()
+        let pings = CallCounter()
+        let setup = ServerStatusPollerTests.makeSetup(
+            token: "abc123",
+            admitStableRuntime: { info in
+                await probes.record()
+                // The first admission holds; the explicit check then finds the
+                // extra listener the cached admission never sees again.
+                guard await probes.count == 1 else { return nil }
+                return Self.admission(info: info, processID: 16027)
+            },
+            pingServer: { _ in
+                await pings.record()
+                return .success(ServerPingInfo(version: "0.5.0", gatewayChannel: "stable"))
+            }
+        )
+        let poller = ServerStatusPoller(setup: setup, interval: 2, runtimeFence: { Self.fence() })
+        var iterator = poller.snapshots().makeAsyncIterator()
+
+        let admittedCycle = await iterator.next()
+        let explicit = await poller.explicitSnapshot()
+        let nextCycle = await iterator.next()
+
+        #expect(admittedCycle?.state == .running(version: "0.5.0", port: 9847))
+        // Failure mode 8: a refusal the explicit check proved under this fence
+        // must not be replayed by the next cycle's cached admission.
+        guard case .needsRepair = explicit.state, case .needsRepair = nextCycle?.state else {
+            Issue.record("expected needsRepair on both the explicit and the next poll cycle, got \(explicit.state) / \(nextCycle?.state as Any)")
+            return
+        }
+        #expect(await probes.count == 3)
+    }
+
+    @Test("the poll stream reuses one admission and pings only through the bounded resolution")
+    func pollStreamWiresOneCacheAndTheBoundedPing() async {
+        let probes = CallCounter()
+        let livePings = CallCounter()
+        let boundedPings = CallCounter()
+        let setup = ServerStatusPollerTests.makeSetup(
+            token: "abc123",
+            admitStableRuntime: { info in
+                await probes.record()
+                return Self.admission(info: info, processID: 16027)
+            },
+            pingServer: { _ in
+                await livePings.record()
+                return .success(ServerPingInfo(version: "0.5.0", gatewayChannel: "stable"))
+            },
+            statusPollPingServer: { _ in
+                await boundedPings.record()
+                return .success(ServerPingInfo(version: "0.5.0", gatewayChannel: "stable"))
+            }
+        )
+        let poller = ServerStatusPoller(setup: setup, interval: 0.05, runtimeFence: { Self.fence() })
+
+        var states: [ServerStatusState] = []
+        for await snapshot in poller.snapshots() {
+            states.append(snapshot.state)
+            if states.count == 2 { break }
+        }
+
+        let running = ServerStatusState.running(version: "0.5.0", port: 9847)
+        #expect(states == [running, running])
+        // Failure mode 9: both cycles ping, only through the poll's bounded
+        // resolution, and one admission covers the whole stream.
+        #expect(await boundedPings.count >= 2)
+        #expect(await livePings.count == 0)
+        #expect(await probes.count == 1)
     }
 
     @Test("an explicit user action never reuses the cached admission")
