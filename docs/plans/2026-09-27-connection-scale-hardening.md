@@ -9219,7 +9219,12 @@ wait).
     src/sessions/invocation-receipts.test.ts` **85/85**,
     `npx tsc --noEmit -p .` clean, `npm run build` clean,
     `python3 scripts/check-documentation-policy.py` and
-    `scripts/personal-info-guard.sh` pass.
+    `scripts/personal-info-guard.sh` pass. Re-run after merging E-3b at
+    `c70ccb4df` (final merge `ec1c3f8f5`): the same six files plus
+    `lan-endpoint.integration.test.ts` **144/144**, and
+    `runtime-registry` + `projection` + `invocation-receipts` **322/322**;
+    `tsc --noEmit` clean. E-3b does not touch the measured cold-open path, so
+    the smoke numbers above stay as measured.
   - Negative control for the new case: reverting the single-validation
     refactor in `projectableTranscriptEntries` (back to parsing the receipt once
     for the refusal and again for use) leaves it green, and deleting the refusal
