@@ -89,7 +89,135 @@ def device_process(udid: str, elapsed: str = "00:05") -> str:
     )
 
 
-class SyntheticReaders:
+# Every Tron root a tool derives from the environment, plus HOME: one spelling of
+# what the containment guard covers.
+CONTAINMENT_VARIABLES = (
+    "HOME",
+    "TRON_IOS_TEST_STATE_DIR",
+    "TRON_IOS_TEST_DISCOVERY_ROOT",
+    "TRON_IOS_TEST_RESULTS_DIR",
+    "TRON_IOS_TEST_DERIVED_DATA",
+    "TRON_IOS_SIMULATOR_STATE_DIR",
+    "TRON_IOS_SIMULATOR_DERIVED_DATA",
+    "TRON_PROFILE_RESULTS_DIR",
+    "TRON_PROFILE_IOS_DERIVED_DATA",
+    "TRON_IOS_E2E_STATE_DIR",
+    "TRON_IOS_E2E_DERIVED_DATA",
+)
+_VARIABLE_LIST = ",\n        ".join(f'"{name}"' for name in CONTAINMENT_VARIABLES)
+# Prepended to every synthetic tool, so even a script that a fixture launched by
+# hand cannot quietly reach this Mac's state.
+CONTAINMENT_GUARD = f'''import os, sys
+
+
+def _containment_violations():
+    root = os.environ.get("FAKE_CONTAINMENT_ROOT")
+    if not root:
+        return []
+    root = os.path.realpath(root)
+    escaped = []
+    for name in (
+        {_VARIABLE_LIST},
+    ):
+        value = os.environ.get(name)
+        if not value:
+            continue
+        resolved = os.path.realpath(value)
+        if resolved != root and not resolved.startswith(root + os.sep):
+            escaped.append(name + "=" + value)
+    return escaped
+
+
+_escaped_roots = _containment_violations()
+if _escaped_roots:
+    _log = os.environ.get("FAKE_CONTAINMENT_LOG")
+    if _log:
+        with open(_log, "a", encoding="utf-8") as _handle:
+            _handle.write("\\n".join(_escaped_roots) + "\\n")
+    print(
+        "refusing to serve a script whose environment escapes the test fixture: " + ", ".join(_escaped_roots),
+        file=sys.stderr,
+    )
+    raise SystemExit(3)
+'''
+
+
+class ContainedFixture:
+    """The base every fixture here inherits: no script can reach the real Mac.
+
+    Failure mode the guard closes, written before the code: a fixture that runs a
+    Tron tool without replacing HOME or the Tron roots, so the tool derives the
+    real `~/.tron/internal` lane root or `~/Library/Developer/Tron/ios` results
+    and products roots, and a sweep, `clean` or `prune` then reclaims this Mac's
+    own state. That happened at the SIM-5 commit, where the sweep-level fixtures
+    inherited the real HOME and their `reap` pruned the real results root; the
+    negative control below is `ContainmentFixture`.
+
+    So every fixture builds each script-under-test environment through
+    `contained_environment` (or `run_script`): HOME and every Tron state, lane,
+    discovery, results and products root point inside the fixture's own temporary
+    directory, and the runner's per-worktree products path follows that HOME. The
+    synthetic tool then refuses (exit 3, recorded in the fixture) to serve a
+    script whose environment still names a root outside the fixture, so a fixture
+    that forgets is an immediate failure rather than a real mutation.
+    """
+
+    contained_root: Path
+
+    def containment_log(self, root: Path) -> Path:
+        """Where the synthetic tools record an environment that escaped."""
+        return root / "containment-violations"
+
+    def contained_environment(self, root: Path) -> dict[str, str]:
+        """This process's environment with every Tron root inside `root`.
+
+        TRON_IOS_TEST_DERIVED_DATA and TRON_IOS_TEST_DISCOVERY_ROOT are
+        deliberately left unset: the tools derive that products path and the
+        lane root from HOME and from the state directory, both of which are
+        contained here, so a fixture that needs its own value sets the variable
+        (and the synthetic tools still refuse a value that escapes).
+        """
+        self.contained_root = root
+        home = root / "home"
+        environment = os.environ.copy()
+        environment.update({
+            "HOME": str(home),
+            "TRON_IOS_TEST_STATE_DIR": str(home / ".tron/internal/ios-test"),
+            "TRON_IOS_TEST_RESULTS_DIR": str(home / "Library/Developer/Tron/ios/test-runs"),
+            "TRON_IOS_SIMULATOR_STATE_DIR": str(home / ".tron/internal/run"),
+            "TRON_IOS_SIMULATOR_DERIVED_DATA": str(home / "Library/Developer/Tron/ios/simulator-derived-data"),
+            "TRON_PROFILE_RESULTS_DIR": str(home / "Library/Developer/Tron/profiles"),
+            "TRON_PROFILE_IOS_DERIVED_DATA": str(home / "Library/Developer/Tron/ios/profile-derived-data"),
+            "TRON_IOS_E2E_STATE_DIR": str(root / "e2e-state"),
+            "TRON_IOS_E2E_DERIVED_DATA": str(root / "e2e-derived"),
+            "FAKE_CONTAINMENT_ROOT": str(root),
+            "FAKE_CONTAINMENT_LOG": str(self.containment_log(root)),
+        })
+        environment.pop("TRON_IOS_TEST_DERIVED_DATA", None)
+        environment.pop("TRON_IOS_TEST_DISCOVERY_ROOT", None)
+        return environment
+
+    def run_script(self, command: list[str], root: Path, **kwargs: object) -> subprocess.CompletedProcess[str]:
+        """Run one script under test with every Tron root inside `root`."""
+        return subprocess.run(command, env=self.contained_environment(root), **kwargs)  # type: ignore[arg-type]
+
+    def synthetic_stub(self, path: Path, body: str) -> None:
+        """Write one synthetic tool: shebang, containment guard, then its body."""
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text("#!/usr/bin/env python3\n" + CONTAINMENT_GUARD + body)
+        path.chmod(0o755)
+
+    def assert_no_containment_violations(self) -> None:
+        """Fail the test if a script under test ran outside this fixture."""
+        root = getattr(self, "contained_root", None)
+        if root is None:
+            return
+        log = self.containment_log(root)
+        if log.exists():
+            self.fail("a script under test ran with state outside the fixture:\n" + log.read_text())
+
+
+class SyntheticReaders(ContainedFixture):
     """Install the injectable readers every owner reads, per fixture."""
 
     readers: Path
@@ -129,9 +257,8 @@ class SimulatorHarness(SyntheticReaders):
         self.development = self.root / "development-udid"
         self.fake_xcrun = self.root / "xcrun"
         self.install_readers(self.root)
-        self.fake_xcrun.write_text(
-            """#!/usr/bin/env python3
-import json, os, sys
+        self.synthetic_stub(
+            self.fake_xcrun, """import json, os, sys
 from pathlib import Path
 path = Path(os.environ['FAKE_SIMCTL_INVENTORY'])
 doc = json.loads(path.read_text())
@@ -168,13 +295,15 @@ if command == 'bootstatus':
     raise SystemExit(0)
 print('unexpected simctl arguments: ' + repr(args), file=sys.stderr)
 raise SystemExit(2)
-"""
+""",
         )
-        self.fake_xcrun.chmod(0o755)
         self.write_inventory()
 
     def tearDown(self) -> None:
-        self.temporary.cleanup()
+        try:
+            self.assert_no_containment_violations()
+        finally:
+            self.temporary.cleanup()
 
     def write_inventory(self, *, runtimes: list[dict[str, object]] | None = None, devices: dict[str, list[dict[str, object]]] | None = None) -> None:
         value = {
@@ -202,7 +331,7 @@ raise SystemExit(2)
         self, action: str, *, name: str = "Tron iOS Tests", development_on_shutdown: bool = False,
         override: dict[str, str] | None = None,
     ) -> subprocess.CompletedProcess[str]:
-        environment = os.environ.copy()
+        environment = self.contained_environment(self.root)
         environment.update({"TRON_IOS_XCRUN": str(self.fake_xcrun), "FAKE_SIMCTL_INVENTORY": str(self.inventory_path)})
         environment.update(self.reader_environment())
         if override is not None:
@@ -482,8 +611,7 @@ class RunnerFixture(SyntheticReaders, unittest.TestCase):
         self.bin.mkdir()
         self.install_readers(self.root)
         self.xcrun = self.bin / "xcrun"
-        self.xcrun.write_text("""#!/usr/bin/env python3
-import json, os, sys
+        self.synthetic_stub(self.xcrun, """import json, os, sys
 from pathlib import Path
 args = sys.argv[1:]
 if args[:1] == ['simctl']:
@@ -517,7 +645,6 @@ if args[:2] == ['xcresulttool', 'get']:
     print(os.environ.get('FAKE_SUMMARY', '{}')); raise SystemExit(0)
 print('unexpected xcrun arguments', args, file=sys.stderr); raise SystemExit(2)
 """)
-        self.xcrun.chmod(0o755)
         self.simulator_inventory = self.root / "simulator-inventory.json"
         self.simulator_inventory.write_text(json.dumps({
             "runtimes": [{"identifier": RUNNER_RUNTIME_ID, "version": "26.5", "platform": "iOS", "buildversion": "23C54", "isAvailable": True}],
@@ -564,7 +691,10 @@ exit 0
         self.write_products_identity()
 
     def tearDown(self) -> None:
-        self.temporary.cleanup()
+        try:
+            self.assert_no_containment_violations()
+        finally:
+            self.temporary.cleanup()
 
     def source_identity(self, worktree: Path = ROOT) -> dict[str, object]:
         completed = subprocess.run(
@@ -588,7 +718,7 @@ exit 0
         lane: str | None = None, discovery_root: Path | None = None,
         override: dict[str, str] | None = None,
     ) -> subprocess.CompletedProcess[str]:
-        environment = os.environ.copy()
+        environment = self.contained_environment(self.root)
         environment.update(self.reader_environment())
         environment.update({
             "PATH": f"{self.bin}:{environment['PATH']}",
@@ -939,7 +1069,7 @@ exit 0
         self.assertFalse((self.root / "ios-test-gone").exists())
 
 
-class BuildIdentityFixture(unittest.TestCase):
+class BuildIdentityFixture(ContainedFixture, unittest.TestCase):
     """Exercise the products identity owner against real git states."""
 
     def setUp(self) -> None:
@@ -966,40 +1096,40 @@ class BuildIdentityFixture(unittest.TestCase):
         ).stdout.strip()
 
     def identity(self, worktree: Path | None = None) -> dict[str, object]:
-        completed = subprocess.run(
+        completed = self.run_script(
             [sys.executable, str(IDENTITY), "show", "--worktree", str(worktree or self.worktree)],
-            text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+            self.root, text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
         )
         self.assertEqual(completed.returncode, 0, completed.stderr)
         return json.loads(completed.stdout)
 
     def stamp(self, value: dict[str, object]) -> subprocess.CompletedProcess[str]:
-        return subprocess.run(
+        return self.run_script(
             [sys.executable, str(IDENTITY), "write", "--worktree", str(self.worktree), "--derived-data", str(self.derived)],
-            text=True, input=json.dumps(value), stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+            self.root, text=True, input=json.dumps(value), stdout=subprocess.PIPE, stderr=subprocess.PIPE,
         )
 
     def verify(self) -> subprocess.CompletedProcess[str]:
-        return subprocess.run(
+        return self.run_script(
             [sys.executable, str(IDENTITY), "verify", "--worktree", str(self.worktree), "--derived-data", str(self.derived)],
-            text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+            self.root, text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
         )
 
     def test_directory_key_is_stable_and_unique_per_worktree(self) -> None:
-        first = subprocess.run(
+        first = self.run_script(
             [sys.executable, str(IDENTITY), "worktree-key", "--worktree", str(self.worktree)],
-            check=True, text=True, stdout=subprocess.PIPE,
+            self.root, check=True, text=True, stdout=subprocess.PIPE,
         ).stdout.strip()
         self.assertEqual(first, self.identity()["worktree_key"])
         self.assertNotIn("/", first)
         other = self.root / "worktree"  # same path, no trailing component change
-        self.assertEqual(first, subprocess.run(
+        self.assertEqual(first, self.run_script(
             [sys.executable, str(IDENTITY), "worktree-key", "--worktree", str(other / ".")],
-            check=True, text=True, stdout=subprocess.PIPE,
+            self.root, check=True, text=True, stdout=subprocess.PIPE,
         ).stdout.strip())
-        second = subprocess.run(
+        second = self.run_script(
             [sys.executable, str(IDENTITY), "worktree-key", "--worktree", str(self.root / "another-worktree")],
-            check=True, text=True, stdout=subprocess.PIPE,
+            self.root, check=True, text=True, stdout=subprocess.PIPE,
         ).stdout.strip()
         self.assertNotEqual(first, second)
 
@@ -1054,15 +1184,15 @@ class BuildIdentityFixture(unittest.TestCase):
     def test_identity_requires_the_worktree_top_level(self) -> None:
         nested = self.worktree / "packages"
         nested.mkdir()
-        result = subprocess.run(
+        result = self.run_script(
             [sys.executable, str(IDENTITY), "show", "--worktree", str(nested)],
-            text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+            self.root, text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
         )
         self.assertEqual(result.returncode, 1)
         self.assertIn("not the top level of a worktree", result.stderr)
 
 
-class ProcessFixture(unittest.TestCase):
+class ProcessFixture(ContainedFixture, unittest.TestCase):
     def setUp(self) -> None:
         self.temporary = tempfile.TemporaryDirectory()
         self.root = Path(self.temporary.name)
@@ -1089,7 +1219,9 @@ class ProcessFixture(unittest.TestCase):
             f"Path({str(pid_path)!r}).write_text(str(descendant.pid)); "
             "signal.signal(signal.SIGTERM, signal.SIG_IGN); time.sleep(30)"
         )
-        result = subprocess.run(self.command([sys.executable, "-c", child], overall=5, no_output=0.4, artifact=artifact))
+        result = self.run_script(
+            self.command([sys.executable, "-c", child], overall=5, no_output=0.4, artifact=artifact), self.root,
+        )
         self.assertEqual(result.returncode, 124)
         timeout = json.loads((self.root / "evidence/timeout.json").read_text())
         self.assertEqual(timeout["reason"], "no-output")
@@ -1110,32 +1242,33 @@ class ProcessFixture(unittest.TestCase):
             self.assertTrue(stat.startswith("Z") or not stat, f"descendant still alive: {pid} {stat}")
 
 
-class LockFixture(unittest.TestCase):
+class LockFixture(ContainedFixture, unittest.TestCase):
     def test_concurrent_owner_fails_and_release_allows_next_owner(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
-            lock = Path(temporary) / "lease.lock"
+            self.root = Path(temporary)
+            lock = self.root / "lease.lock"
             first = subprocess.Popen([
                 sys.executable, str(LOCK), "--lock", str(lock), "--",
                 sys.executable, "-c", "import time; time.sleep(30)",
-            ])
+            ], env=self.contained_environment(self.root))
             deadline = time.time() + 3
             while time.time() < deadline:
                 if lock.exists() and lock.read_text().strip():
                     break
                 time.sleep(0.02)
             self.assertTrue(lock.exists() and lock.read_text().strip())
-            second = subprocess.run([
+            second = self.run_script([
                 sys.executable, str(LOCK), "--lock", str(lock), "--",
                 sys.executable, "-c", "pass",
-            ], stderr=subprocess.PIPE, text=True)
+            ], self.root, stderr=subprocess.PIPE, text=True)
             self.assertEqual(second.returncode, 73)
             self.assertIn("already leased", second.stderr)
             first.send_signal(signal.SIGTERM)
             first.wait(timeout=5)
-            third = subprocess.run([
+            third = self.run_script([
                 sys.executable, str(LOCK), "--lock", str(lock), "--",
                 sys.executable, "-c", "pass",
-            ])
+            ], self.root)
             self.assertEqual(third.returncode, 0)
 
 
@@ -1164,8 +1297,7 @@ class OwnedLaneFixture(SyntheticReaders, unittest.TestCase):
         self.bin = self.root / "bin"
         self.bin.mkdir()
         self.xcrun = self.bin / "xcrun"
-        self.xcrun.write_text("""#!/usr/bin/env python3
-import json, os, sys, time
+        self.synthetic_stub(self.xcrun, """import json, os, sys, time
 from pathlib import Path
 
 inventory_path = Path(os.environ['FAKE_SIMCTL_INVENTORY'])
@@ -1227,7 +1359,6 @@ if command == 'delete':
 print('unexpected simctl arguments: ' + repr(arguments), file=sys.stderr)
 raise SystemExit(2)
 """)
-        self.xcrun.chmod(0o755)
         self.inventory_path = self.root / "inventory.json"
         self.log_path = self.root / "simctl.log"
         self.development_marker = self.root / "development/ios-simulator-udid"
@@ -1252,7 +1383,7 @@ raise SystemExit(2)
             "devicetypes": [{"identifier": TYPE_ID, "name": "iPhone 17 Pro", "isAvailable": True}],
             "devices": {RUNTIME_ID: [], RUNNER_RUNTIME_ID: []},
         }))
-        self.environment = os.environ.copy()
+        self.environment = self.contained_environment(self.root)
         self.install_readers(self.root)
         self.environment.update(self.reader_environment())
         self.environment.update({
@@ -1278,7 +1409,10 @@ raise SystemExit(2)
             holder.kill()
             holder.wait(timeout=5)
             self.close_pipes(holder)
-        self.temporary.cleanup()
+        try:
+            self.assert_no_containment_violations()
+        finally:
+            self.temporary.cleanup()
 
     def close_pipes(self, process: subprocess.Popen[str]) -> None:
         for pipe in (process.stdout, process.stderr):
@@ -2518,6 +2652,54 @@ class DevelopmentSimulatorFixture(LifecycleHarness, unittest.TestCase):
         self.assertEqual(self.device_entry(UDID_A)["state"], "Booted")
         self.assertEqual(self.simctl_commands().count("delete"), 0)
         self.assertEqual(self.shutdown_targets(), [])
+
+
+class ContainmentFixture(ContainedFixture, unittest.TestCase):
+    """The guard that keeps every other fixture inside its own temporary directory.
+
+    Failure mode this case targets, written before the code: a fixture (or a
+    future caller) runs a script under test with HOME or a Tron state, lane,
+    discovery, results or products root pointing at this Mac's real state, so a
+    sweep, `clean` or `prune` touches something the fixture does not own - the
+    leak the SIM-5 commit had, where the sweep-level fixtures inherited the real
+    HOME and their `reap` pruned the real results root.
+    """
+
+    def setUp(self) -> None:
+        self.temporary = tempfile.TemporaryDirectory()
+        self.root = Path(self.temporary.name)
+        self.bin = self.root / "bin"
+        self.stub = self.bin / "xcrun"
+        # A tool that does nothing itself: only the shared guard decides.
+        self.synthetic_stub(self.stub, "raise SystemExit(0)\n")
+
+    def tearDown(self) -> None:
+        self.temporary.cleanup()
+
+    def run_stub(self, **override: str) -> subprocess.CompletedProcess[str]:
+        environment = self.contained_environment(self.root)
+        environment.update(override)
+        return subprocess.run([str(self.stub)], env=environment, text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+
+    def test_a_script_whose_environment_escapes_the_fixture_is_refused(self) -> None:
+        """Failure mode 1: a leaked root fails the run and the test that caused it."""
+        inside = self.run_stub()
+        self.assertEqual(inside.returncode, 0, inside.stderr)
+        self.assertFalse(self.containment_log(self.root).exists())
+
+        real_home = str(Path.home())
+        leaked = self.run_stub(HOME=real_home)
+        self.assertEqual(leaked.returncode, 3, leaked.stderr)
+        self.assertIn("escapes the test fixture", leaked.stderr)
+        self.assertIn(f"HOME={real_home}", leaked.stderr)
+        with self.assertRaises(AssertionError):
+            self.assert_no_containment_violations()
+
+        self.containment_log(self.root).unlink()
+        elsewhere = self.root.parent / "Tron/ios/test-runs"
+        pruned = self.run_stub(TRON_IOS_TEST_RESULTS_DIR=str(elsewhere))
+        self.assertEqual(pruned.returncode, 3, pruned.stderr)
+        self.assertIn(f"TRON_IOS_TEST_RESULTS_DIR={elsewhere}", self.containment_log(self.root).read_text())
 
 
 if __name__ == "__main__":

@@ -2,7 +2,7 @@
 
 - **Started:** 2026-09-27
 - **Status:** Active
-- **Last updated:** 2026-09-28, SIM-6 done; SIM-7 to SIM-9 claimed
+- **Last updated:** 2026-09-28, SIM-7 done; SIM-8 and SIM-9 claimed
 - **Goal:** Agents run as many iOS simulators in parallel as the Mac can afford, and every simulator, process and artifact the test tooling creates is released automatically, including after crashes, so the live Gateway never runs short of memory.
 
 ## Goal and constraints
@@ -77,7 +77,7 @@ Why it accumulates, from the code:
 | SIM-4 | Done | Memory admission: before booting, read memory pressure and swap; if booting would leave less than a set reserve, fail fast with exit 73 and print what is booted, by which worktree and lane, and for how long | SIM-2 | chat scroll session (worker lanes), 2026-09-27 |
 | SIM-5 | Done | Scoped clean and pruning: `clean` removes only this worktree's or lane's simulator, products and runs; `prune` keeps the newest results per worktree and deletes products whose worktree no longer exists; the sweep prunes too | SIM-3 | chat scroll session (worker lanes), 2026-09-27 |
 | SIM-6 | Done | One view: `scripts/tron-ios-test status --all` lists every booted simulator (owned lanes, the Development simulator, unowned ones), its owner, lease holder and uptime, plus `Simulator.app` | SIM-3 | chat scroll session (worker lanes), 2026-09-27 |
-| SIM-7 | Claimed | Same lifecycle everywhere: `scripts/tron-profile-ios`, `scripts/ios-gateway-e2e-test` and `scripts/tron-ios-simulator` use the lane, release, sweep and admission paths; the Development simulator reports idle uptime and is shut down by its `stop` | SIM-1, SIM-2, SIM-4 | chat scroll session (worker lanes), 2026-09-27 |
+| SIM-7 | Done | Same lifecycle everywhere: `scripts/tron-profile-ios`, `scripts/ios-gateway-e2e-test` and `scripts/tron-ios-simulator` use the lane, release, sweep and admission paths; the Development simulator reports idle uptime and is shut down by its `stop` | SIM-1, SIM-2, SIM-4 | chat scroll session (worker lanes), 2026-09-27 |
 | SIM-8 | Claimed | Diagnosable disconnects: the Gateway records the Mac's memory pressure and swap in its diagnostics when phone connections drop and reconnect, with a row in `packages/gateway/docs/observability.md` and a test | none | chat scroll session (worker lanes), 2026-09-27 |
 | SIM-9 | Claimed | Docs and guidance: `packages/ios-app/docs/development.md`, `.agents/skills/tron-ios/SKILL.md`, `.agents/skills/tron-workspace-housekeeping/SKILL.md` and `AGENTS.md` describe lanes, release, sweep and admission, and replace the manual cleanup steps the tooling now owns | SIM-1 to SIM-7 | chat scroll session (worker lanes), 2026-09-27 |
 | SIM-10 | Ready | Remove `TRON_IOS_TEST_STATE_DIR` and `TRON_IOS_TEST_DEVICE_NAME` in favour of lanes, with every caller, once the energy-efficiency plan no longer runs profiling lanes through them | SIM-3 | |
@@ -526,3 +526,111 @@ Owning files: `scripts/ios-test-simulator.py`, `scripts/tron-ios-test`.
   refusal tables see their own lane plus booted devices. SIM-9 documents
   `status --all` in the skill; `packages/ios-app/docs/development.md` already has
   the runner section.
+
+### SIM-7 · Done · 2026-09-28 · chat scroll session (worker lanes)
+
+- Result: `scripts/tron-profile-ios`, `scripts/ios-gateway-e2e-test` and
+  `scripts/tron-ios-simulator` no longer keep a lifecycle of their own. The
+  profiler and the Gateway E2E harness lease the lane together with its
+  ownership marker, so the holder shuts down the simulator their command booted
+  when the command ends; both run the same sweep before they provision; both
+  pass `--discovery-root`, `--default-state-dir` and `--worktree` to the shared
+  provisioner, so their lanes are discovered, attributed, reported and
+  reclaimed like any other lane; and both keep exit 73 when the shared
+  provisioner refuses a boot (the Mac's memory admission, or a lane a live
+  process holds) instead of reporting it as a broken destination.
+  `scripts/tron-ios-simulator status` reports how long the remembered
+  Development simulator has been booted - the same boot-process fact the
+  `status --all` row prints, through a new `development-uptime` command on
+  `scripts/ios-test-simulator.py` rather than a second uptime implementation -
+  and `stop` remains the way to release it. The Development simulator is never
+  shut down or deleted by the test tooling, which the new cases guard as well as
+  the existing simulator-level ones.
+- Evidence: `python3 scripts/test-ios-test-infrastructure.py` - 76 tests,
+  213.6 s wall at the containment commit (75 tests, 173.2 s with SIM-7's own
+  cases; 66 tests, 344.9-557.1 s at the SIM-6 commit), with ten new cases. The
+  five that fail against the pre-change scripts: `ProfilerLifecycleFixture`
+  `test_the_profiler_releases_its_lane_and_sweeps_orphans` (the lane it boots is
+  released, an orphan lane in the lane root is swept, a held lane is left Booted,
+  the marker records this worktree) and
+  `test_a_profiler_boot_the_mac_refuses_keeps_the_shared_exit` (73 survives, no
+  `boot` in the synthetic simctl log), `GatewayE2EFixture`
+  `test_an_e2e_build_releases_its_lane_and_sweeps_orphans` and
+  `test_an_e2e_build_the_mac_refuses_keeps_the_shared_exit` (73 instead of 1, and
+  nothing built), and `DevelopmentSimulatorFixture`
+  `test_status_reports_how_long_the_remembered_simulator_has_been_booted`
+  (`1d 4h` from the boot process, `unknown` when the table is unreadable, and
+  `not booted` for a shutdown device). The four contract guards pass before and
+  after by design: `test_a_killed_e2e_build_leaves_its_lane_to_the_next_sweep`
+  (a command killed while it holds the lane leaves it booted and
+  `scripts/tron-ios-test reap` reclaims it), the Development simulator's
+  `stop`-touches-only-the-remembered-simulator case, and the two cases where the
+  sweep, `clean`, `lane-remove` and the E2E `clean` refuse a lane whose marker
+  names the remembered Development simulator. `python3
+  scripts/test-tron-profile-ios.py` - 7 tests, 0.001 s; `python3
+  scripts/test-tron-profile.py` - 10 tests, 36.4 s;
+  `python3 scripts/check-documentation-policy.py` and
+  `scripts/personal-info-guard.sh` pass. Real-machine read-only check:
+  `scripts/ios-test-simulator.py development-uptime` against a marker in a fresh
+  `/tmp/tron-sim7-probe` directory naming another session's booted lane device
+  printed `1h 38m`, matching that device's own boot process (`65790 01:38:53
+  launchd_sim .../6B59E412-79C4-430C-8885-24C05956DD82`);
+  `TRON_IOS_SIMULATOR_STATE_DIR=/tmp/tron-sim7-probe scripts/tron-ios-simulator
+  status` printed the same uptime, and `scripts/tron-ios-test status --all` with
+  its lane root inside that directory listed the Development simulator and the
+  booted devices read-only. Nothing was booted, shut down, deleted or swept:
+  every state and discovery root in the probe was inside the probe directory,
+  which was deleted afterwards, and `~/.tron/internal/run/ios-simulator-udid`
+  kept its 2026-09-25 mtime. No real boot/release check of a profiler or E2E
+  lane: their lifecycle is the shared provisioner, lease and sweep already
+  verified against real simulators in SIM-1, SIM-2 and SIM-4, and a real
+  create+boot would add device churn (3-14 GB) while other sessions test.
+- Changes: `b9c11e9d0` and this commit.
+- Kept on purpose: the profiler and the E2E harness still select their lane with
+  the pre-lane `TRON_IOS_TEST_STATE_DIR`/`TRON_IOS_TEST_DEVICE_NAME` spellings
+  (SIM-10 replaces them with lanes for every caller); the profiler's sweep
+  reclaims lanes only and prunes no results or products, because the runner's
+  roots are not the profiler's; `scripts/tron-ios-simulator start` still boots
+  the user's paired Development simulator without the memory admission, since
+  this task scoped that helper to reporting uptime and never being deleted;
+  `--keep-booted` was not added to the profiler or the E2E harness, where one
+  boot per command already serves a scenario set or a boundary run.
+- Deviations: the E2E harness reports a refused boot as 73 (was 1) and the
+  profiler as 73 (was 66), which is what "the same admission path" means to a
+  caller that decides whether to wait; `development-uptime` is a new read-only
+  command on the shared module rather than a second uptime reader in
+  `scripts/tron-ios-simulator`; the plan's "`status --all` flags it when booted
+  with no app interaction for a bounded time" is implemented as the real uptime
+  (the UPTIME column, and the line `status` prints) because the Mac records no
+  app-interaction signal, and no idle threshold was invented. This commit also
+  contains the containment guard the SIM-6 correction below describes.
+- Risks: the E2E harness now applies memory admission on CI too. The runner
+  already did, so this is not new evidence of a CI regression, but no GitHub
+  runner was observed from here; `TRON_IOS_TEST_MEMORY_RESERVE_BYTES` tunes it if
+  a runner is tight.
+- For the next agent: SIM-8 (Gateway memory diagnostics) runs on its own branch;
+  SIM-9 owns the skills and the remaining documentation. Every fixture in
+  `scripts/test-ios-test-infrastructure.py` now inherits `ContainedFixture`, so a
+  fixture that lets HOME or a Tron root fall outside its temporary directory
+  fails immediately with the escaping variable named instead of mutating this
+  Mac's state; keep new fixtures on `contained_environment`/`run_script`.
+
+### SIM-6 correction · 2026-09-28 · chat scroll session (worker lanes)
+
+- Corrects: the SIM-6 handoff entry above, in its "Risks and deviation"
+  paragraph about the real results and products roots.
+- Result: the eight dead worktrees' 8.8 GB of test products were deleted
+  manually by the supervisor at about 20:40 local on 2026-09-28, before these
+  test runs. The products of the deleted `tron-perf-follow` and
+  `tron-perf-reveal` worktrees are gone and may have been reclaimed by those
+  leaked test `reap`s, which is the intended prune behaviour for the products of
+  a worktree that no longer exists. Nothing else in that paragraph changes:
+  every fixture root, the live worktrees' products, and every lane, lease and
+  simulator were untouched.
+- Evidence: the supervisor's account, recorded here. The guard added by SIM-7
+  (`ContainedFixture` and its negative control in
+  `scripts/test-ios-test-infrastructure.py`) makes any fixture that inherited a
+  real HOME or Tron root fail immediately, so the leak cannot recur.
+- Changes: this commit.
+- For the next agent: run the infrastructure suite after touching any fixture
+  environment; a leaked root now fails with the escaping variable named.
