@@ -295,7 +295,7 @@ keeps today's uncompressed frames.
 | `http.upgrade` with `outcome=rejected` | The Gateway refused the upgrade; `reason` names which bound or phase did. `phaseReached=request` means before credentials (`warming_up`, `shutting_down`, `request_capacity`, `unexpected_path`, `unreadable_request`), `auth` means the credential or the readiness recheck (`unauthenticated`, `warming_up`, `shutting_down`, `authentication_timeout`) or capacity (`connection_capacity`), `handshake` means the WebSocket handshake itself was refused, `hello` means a hello arrived and was refused (`hello_required`, `protocol_mismatch`) or a frame was (`invalid_frame`: a first frame that is not JSON, or one the WebSocket library itself refuses as oversized or malformed). |
 | `http.upgrade` with `outcome=abandoned` and `phaseReached=auth` | The attempt ended while the credential was still being read: `reason=peer_closed` means the peer left, `shutting_down` means a Gateway shutdown destroyed the socket. A peer that left is not a refusal: check the phone's records at that instant before the Gateway's readiness. |
 | `http.upgrade` with `outcome=opened` and `authMs` or `helloMs` near or over `UPGRADE_SLOW_WARNING_MS` (1,000 ms) | The connection needed a second or more to become usable. The record is a warning whenever the attempt took at least 1,000 ms from the TCP accept (`acceptToUpgradeMs + authMs + handshakeMs + helloMs`), whatever the phase that was slow. `authMs` is the credential read (device-store mutex); `helloMs` runs from handshake completion to the Gateway processing the hello frame, so it includes the peer's own send delay and the network path, not only the Gateway's handling. Check `gateway.event-loop-delay` and `gateway.resources` around the same instant; the peer's hello key joins this record to its phone records. |
-| `connection.inbound-silent` | The socket stayed open, received no frame for at least 12 s, and liveness was expected: either a ping the Gateway sent went unanswered or the client pings on its own and went quiet. `peerPath=relay` or `offline` points at the Tailscale path (`peerRelay` names the relay carrying it, empty for a direct or offline peer); `direct` with a silent socket points at the phone or its process; `unknown` means there is no Tailscale answer for that address (loopback/LAN, no CLI, or a status timeout) and says nothing about the path. The paired `connection.inbound-resumed` gives the episode's `silentMs`. Repeated pairs on one path are a Tailscale flap (see "Tailscale flaps"). |
+| `connection.inbound-silent` | The socket stayed open, received no frame for at least 12 s, and liveness was expected: either a ping the Gateway sent went unanswered or the client pings on its own and went quiet. `peerPath=relay` or `offline` points at the Tailscale path (`peerRelay` names the relay carrying it, empty for a direct or offline peer); `direct` with a silent socket points at the phone or its process; `unknown` means there is no Tailscale answer for that address (loopback/LAN, no CLI, or a status timeout) and says nothing about the path. The paired `connection.inbound-resumed`, when the socket survives the episode, gives its `silentMs`. Repeated silences at `peerPath=relay`/`offline` are a Tailscale flap (see "Tailscale flaps"). |
 | `http.upgrade` with `reason=authentication_timeout` | A pending upgrade exceeded its authentication deadline, so the Gateway refused it (`outcome=rejected`, `phaseReached=auth`). The callback is fenced and its cancellable credential wait is retired. |
 | `closeCode` / `httpStatusCode` / `platformCode` | Separate facts, never interchangeable numbers. HTTP 401/403 stop automatic admission; 503 is retryable capacity/unavailability. URLSession may report 1005/1006 rather than expose the peer's exact close frame; that absence must remain explicit. |
 | `connection.projection-rejected` | A producer violated the projection contract. Narrow/reproduce that producer instead of reconnecting the whole service indefinitely. |
@@ -334,28 +334,46 @@ stall. A current low-RSS process likewise does not describe its historical peak.
 
 A flap is Tailscale's path between the phone and this Mac dropping to relay-only
 (or offline) while the local network keeps working. Nothing in the Gateway is at
-fault: the open socket stays alive and simply carries nothing in either
-direction until the path returns.
+fault: the socket at the Mac carries nothing in either direction until the path
+returns. How long the path stays quiet decides whether that socket survives it.
+The phone pings every 10 s and waits 8 s for the answer
+(`GatewayConnectionPolicy.clientPingInterval`/`clientPongDeadline`), and a probe
+whose deadline passes with no inbound frame since it was sent retires the
+connection, so the phone drops the socket within about 18 s of the path going
+quiet. The Gateway retires a socket only after three missed 25 s heartbeats
+(`GATEWAY_CONNECTION_POLICY.heartbeatIntervalMs`). A flap shorter than about
+18 s therefore ends with the socket still open and nothing but the records
+below; the worked example's 30–121 s flaps disconnect the phone.
 
-- **Gateway records.** One `connection.inbound-silent` (warning) per flap per
-  socket, once the socket has received no frame for `INBOUND_SILENCE_WARNING_MS`
-  (12 s) with liveness expected, naming the peer (`connectionId`,
-  `peerClientId`, `peerAttemptId`, `peerEpoch`) and the path
-  (`peerPath=relay`/`offline`, `peerRelay` the relay carrying it); the socket's
-  next inbound frame writes `connection.inbound-resumed` (info) with the
-  episode's `silentMs`. Repeated pairs at `peerPath=relay` are a flap; `direct`
+- **Gateway records.** One `connection.inbound-silent` (warning) per silence
+  episode per socket, written at the first heartbeat tick (every 25 s) that
+  finds no inbound frame for `INBOUND_SILENCE_WARNING_MS` (12 s) with liveness
+  expected: the record lands between 12 s and about 37 s after the last frame,
+  and a flap that ends sooner leaves no Gateway record at all. It names the
+  peer (`connectionId`, `peerClientId`, `peerAttemptId`, `peerEpoch`) and the
+  path (`peerPath=relay`/`offline`, `peerRelay` the relay carrying it). When the
+  socket survives the flap, its next inbound frame writes
+  `connection.inbound-resumed` (info) with the episode's `silentMs`, and that
+  pair is the whole flap. When the flap disconnects the phone, the silent record
+  stays unpaired: the phone has already retired its connection with a liveness
+  `ping_timeout` failure and is reconnecting, and the Mac ends the socket either
+  when the phone's close reaches it after the path returns (`connection.closed`
+  with a large `lastInboundAgeMs`) or, if no close arrives, on the
+  three-missed-heartbeat bound (`connection.heartbeat-timeout` at roughly
+  75–100 s of silence, followed by that socket's `connection.closed`) — the
+  worked example's "abnormal Gateway close with a long-silent phone". `direct`
   with silence points at the phone or its process, and `unknown` says nothing
   about the path.
 - **Triage output.** `scripts/tron-triage EXPORT` reports each outage as one
   episode whose cause is `path` when the Gateway's `connection.inbound-silent`
-  for it carries `peerPath=relay`/`offline`, or when an attempt's own
-  `transport-open` timeout never reached the Mac. Add `--tailscale-window` for a
-  log written before those records: the tool reads the Tailscale network
-  extension's own log over the export's range and names the covering window as
-  cause evidence (`[cause] tailscale … path.change: relay path window
-  <start>..<end>`). A window that closed before the outage ended is `[context]`
-  ("does not cover this episode") and the episode keeps its measured cause, so a
-  silent recovery gap is not blamed on the path. Filter the read with
+  for it carries `peerPath=relay`/`offline` (the resume record is not required),
+  or when an attempt's own `transport-open` timeout never reached the Mac. Add
+  `--tailscale-window` for a log written before those records: the tool reads
+  the Tailscale network extension's own log over the export's range and names
+  the covering window as cause evidence (`[cause] tailscale … path.change: relay
+  path window <start>..<end>`). A window that closed before the outage ended is
+  `[context]` ("does not cover this episode") and the episode keeps its measured
+  cause, so a silent recovery gap is not blamed on the path. Filter the read with
   `--tailscale-peer NODEKEY`: the extension serves every tailnet peer, so
   another peer's relay stretch could otherwise be read as the phone's. The
   report carries the windows it read (`inputs.tailscaleWindow.relayWindows`), so
@@ -376,8 +394,11 @@ direction until the path returns.
 - **User-side checks** when flaps recur:
   - iPhone Tailscale: keep the app current (App Store) and confirm its VPN
     configuration is enabled and shows a **direct** connection to the Mac while
-    both are on the same Wi-Fi. A stale app or a disabled extension leaves every
-    socket on `relay`/`offline`.
+    both are on the same Wi-Fi. With the extension disabled the phone has no
+    route to the Mac's Tailscale address, so it opens no socket at all: the
+    symptom is the phone's own `transport-open` timeouts with no matching
+    Gateway `http.upgrade`, which triage reports as `path`. An outdated app is
+    worth updating, but nothing here attributes a relay-only socket to one.
   - Wi-Fi private address (iOS Settings → Wi-Fi → the network's info button →
     Private Wi-Fi Address): a rotating address presents a new MAC to the router
     and discards the state the direct path was using. Check whether a flap lines

@@ -6248,7 +6248,8 @@ wait).
 - Result: `packages/gateway/docs/connection-resilience.md` gains a "Tailscale
   flaps" section: the Gateway records a flap leaves (`connection.inbound-silent`
   at `peerPath=relay`/`offline` with `peerRelay`, paired with
-  `connection.inbound-resumed` and its `silentMs`, joined by the O-1 key), the
+  `connection.inbound-resumed` and its `silentMs` when the socket survives the
+  flap and unpaired when it does not, joined by the O-1 key), the
   triage tool's reading (`scripts/tron-triage` reports the `path` cause from the
   Gateway's silent record, from an attempt's `transport-open` timeout that never
   reached the Mac, or — with `--tailscale-window --tailscale-peer NODEKEY` for
@@ -6275,13 +6276,32 @@ wait).
   12 path line(s)` with no window covering an episode — the context behavior the
   section describes. `python3 scripts/check-documentation-policy.py` (46 authored
   files) and `scripts/personal-info-guard.sh` pass.
-- Changes: `docs(gateway): document Tailscale flap diagnosis (E-1)`.
+- Changes: `docs(gateway): document Tailscale flap diagnosis (E-1)`;
+  `docs(gateway): correct Tailscale flap timing (E-1 review round 1)`.
 - Tasks added: none.
 - Kept on purpose: the existing `connection.inbound-silent` row in the
-  diagnostics table keeps its wording and gains one pointer to the new section;
-  the records themselves, their observability row and the triage tool are O-2's
-  and O-7's and were not re-documented.
+  diagnostics table keeps its shape and gains the pointer to the new section
+  (round 1 changed only its closing "repeated …" clause); the records
+  themselves, their observability row and the triage tool are O-2's and O-7's
+  and were not re-documented.
 - Deviations: none.
 - For the next agent: R-4 counts the evaluation day's flaps with
   `scripts/tron-triage … --tailscale-window --tailscale-peer NODEKEY` (the
   section says what to read); E-3 is what removes the effect at home.
+- Review round 1 (changes required; all findings addressed in the follow-up
+  commit): the flap section now states the phone drops the socket within about
+  18 s of the path going quiet and the Gateway only after three missed 25 s
+  heartbeats, names the disconnecting shape (unpaired
+  `connection.inbound-silent`, then the phone's close as `connection.closed` or
+  the Gateway's `connection.heartbeat-timeout` at ~75–100 s, with the phone's
+  liveness `ping_timeout`), gives the silent record's 12–37 s detection window,
+  says "repeated silences at `peerPath=relay`/`offline`" in the diagnostics row,
+  and replaces the stale-app→`relay` claim with the disabled-extension symptom
+  (`transport-open` timeouts, no Gateway `http.upgrade`). Minor: deleted the
+  paired-record claim from `observability.md`'s budget paragraph (a silence that
+  ends in the socket's close leaves only its silent record) and dropped the
+  "keeps its wording" line above. Checks re-run: `test-tron-triage.py` 51/51
+  (14.2 s), `check-documentation-policy.py` (46 files), `personal-info-guard.sh`
+  — pass. The disconnecting shape is read from the code and the contract
+  constants (phone liveness retirement, the 25 s heartbeat tick and the close
+  path), not reproduced: O-2's blackhole test uses a client that never gives up.
