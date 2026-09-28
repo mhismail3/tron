@@ -265,14 +265,6 @@ final class KnowledgeModelsTests: XCTestCase {
         }
     }
 
-    func testPartialUTF8TextRemainsTextualUntilTheNextChunkArrives() {
-        let prefix = Data([0x63, 0x61, 0x66, 0xC3])
-        let rendered = KnowledgeObjectPresentationPolicy.renderedText(prefix, mediaType: "text/plain", label: "source")
-        XCTAssertFalse(rendered.contains("Binary"))
-        XCTAssertTrue(rendered.hasPrefix("caf"))
-        XCTAssertEqual(KnowledgeObjectPresentationPolicy.renderedText(Data([0x00, 0x01]), mediaType: "application/octet-stream", label: "source"), "Binary source (2 bytes loaded)")
-    }
-
     @MainActor
     func testCoverageReadExposesPendingFailedAndUnavailableCuts() async throws {
         let client = KnowledgeRPCClient(request: { method, _ in
@@ -370,61 +362,6 @@ final class KnowledgeModelsTests: XCTestCase {
         } catch let error as GatewayFailure { XCTAssertEqual(error.code, "unsupported") }
         catch { XCTFail("Unexpected error: \(error)") }
         XCTAssertEqual(calls, 0)
-    }
-
-    @MainActor
-    func testObjectReaderOwnerKeepsMultichunkRepresentationsAndRetiresLateResponse() async {
-        let primary = KnowledgeObjectRef(hash: String(repeating: "p", count: 64), mediaType: "text/plain", bytes: 12)
-        let article = KnowledgeObjectRef(hash: String(repeating: "a", count: 64), mediaType: "text/html", bytes: 7)
-        let primaryKey = KnowledgeObjectSelectionKey(recordID: "source", revisionID: "revision", reference: primary)
-        let articleKey = KnowledgeObjectSelectionKey(recordID: "source", revisionID: "revision", reference: article)
-        let store = KnowledgeObjectReaderStore()
-        await store.load(primaryKey, offset: 0, request: { reference, offset in
-            KnowledgeObjectRead(hash: reference.hash, mediaType: reference.mediaType, bytes: 6, totalBytes: 12, offset: offset, nextOffset: 6, base64: Data("first-".utf8).base64EncodedString())
-        }, isCurrent: { true })
-        await store.load(primaryKey, offset: 6, request: { reference, offset in
-            KnowledgeObjectRead(hash: reference.hash, mediaType: reference.mediaType, bytes: 6, totalBytes: 12, offset: offset, nextOffset: nil, base64: Data("second".utf8).base64EncodedString())
-        }, isCurrent: { true })
-        XCTAssertEqual(String(data: store.state(for: primaryKey).bytes, encoding: .utf8), "first-second")
-        await store.load(articleKey, offset: 0, request: { reference, offset in
-            KnowledgeObjectRead(hash: reference.hash, mediaType: reference.mediaType, bytes: 7, totalBytes: 7, offset: offset, nextOffset: nil, base64: Data("ARTICLE".utf8).base64EncodedString())
-        }, isCurrent: { true })
-        XCTAssertEqual(String(data: store.state(for: primaryKey).bytes, encoding: .utf8), "")
-        let stale = Task { @MainActor in
-            await store.load(articleKey, offset: 0, request: { reference, offset in
-                try await Task.sleep(for: .milliseconds(80))
-                return KnowledgeObjectRead(hash: reference.hash, mediaType: reference.mediaType, bytes: 7, totalBytes: 7, offset: offset, nextOffset: nil, base64: Data("STALE!!".utf8).base64EncodedString())
-            }, isCurrent: { true })
-        }
-        try? await Task.sleep(for: .milliseconds(5))
-        await store.load(articleKey, offset: 0, request: { reference, offset in
-            KnowledgeObjectRead(hash: reference.hash, mediaType: reference.mediaType, bytes: 7, totalBytes: 7, offset: offset, nextOffset: nil, base64: Data("FRESH!!".utf8).base64EncodedString())
-        }, isCurrent: { true })
-        await stale.value
-        XCTAssertEqual(String(data: store.state(for: articleKey).bytes, encoding: .utf8), "FRESH!!")
-        XCTAssertTrue(store.state(for: primaryKey).bytes.isEmpty, "Switching representations releases the previous bounded reader")
-        XCTAssertNil(store.state(for: primaryKey).nextOffset)
-    }
-
-    @MainActor
-    func testObjectReaderRejectsInconsistentEnvelopeAndRetiresLoadingOnSuspend() async {
-        let reference = KnowledgeObjectRef(hash: String(repeating: "h", count: 64), mediaType: "text/plain", bytes: 6)
-        let key = KnowledgeObjectSelectionKey(recordID: "source", revisionID: "revision", reference: reference)
-        let store = KnowledgeObjectReaderStore()
-        let request = Task { @MainActor in
-            await store.load(key, offset: 0, request: { _, _ in
-                try await Task.sleep(for: .milliseconds(80))
-                return KnowledgeObjectRead(hash: reference.hash, mediaType: reference.mediaType, bytes: 4, totalBytes: 6, offset: 0, nextOffset: nil, base64: Data("four".utf8).base64EncodedString())
-            }, isCurrent: { true })
-        }
-        store.suspend()
-        await request.value
-        XCTAssertFalse(store.state(for: key).loading)
-
-        await store.load(key, offset: 0, request: { _, _ in
-            KnowledgeObjectRead(hash: reference.hash, mediaType: reference.mediaType, bytes: 4, totalBytes: 6, offset: 0, nextOffset: nil, base64: Data("four".utf8).base64EncodedString())
-        }, isCurrent: { true })
-        XCTAssertEqual(store.state(for: key).error, "Retained object response is invalid.")
     }
 
     @MainActor
@@ -632,11 +569,6 @@ final class KnowledgeModelsTests: XCTestCase {
         XCTAssertEqual(record.summary, "")
         XCTAssertNil(source.assessment?.confidence, "Missing confidence must remain missing")
         XCTAssertNotEqual(KnowledgeSourcePresentationPolicy.evidenceDigest(title: "Metadata", text: "changed"), KnowledgeSourcePresentationPolicy.evidenceDigest(title: "Metadata", text: ""))
-    }
-
-    func testSavedTextEntityPresentationDoesNotDecodeNestedEntitiesTwice() {
-        XCTAssertEqual(KnowledgeSourcePresentationPolicy.decodeSavedTextEntities("don&#x27;t &lt;tag&gt; &amp;"), "don't <tag> &")
-        XCTAssertEqual(KnowledgeSourcePresentationPolicy.decodeSavedTextEntities("&amp;#x27; &amp;lt; &amp;amp;"), "&#x27; &lt; &amp;")
     }
 
     func testSummaryDigestMatchesGatewayEncodingAndIgnoresMetadataUpdates() throws {

@@ -1,7 +1,6 @@
 import AVFoundation
 import AVKit
 import ImageIO
-import SafariServices
 import SwiftUI
 import WebKit
 
@@ -1194,42 +1193,9 @@ private struct DisplayRemoteWebView: View {
 
     var body: some View {
         if let value = display.remoteURL, let url = URL(string: value) {
-            SafariDisplayView(url: url)
+            TronSafariView(url: url)
         } else {
             DisplayUnavailableView(text: display.fallbackText)
-        }
-    }
-}
-
-private struct SafariDisplayView: UIViewControllerRepresentable {
-    let url: URL
-    @Environment(\.dismiss) private var dismiss
-
-    func makeCoordinator() -> Coordinator {
-        Coordinator(onFinish: { dismiss() })
-    }
-
-    func makeUIViewController(context: Context) -> SFSafariViewController {
-        let configuration = SFSafariViewController.Configuration()
-        configuration.barCollapsingEnabled = true
-        let controller = SFSafariViewController(url: url, configuration: configuration)
-        controller.delegate = context.coordinator
-        controller.dismissButtonStyle = .close
-        return controller
-    }
-
-    func updateUIViewController(_ controller: SFSafariViewController, context: Context) {}
-
-    @MainActor
-    final class Coordinator: NSObject, @preconcurrency SFSafariViewControllerDelegate {
-        private let onFinish: () -> Void
-
-        init(onFinish: @escaping () -> Void) {
-            self.onFinish = onFinish
-        }
-
-        func safariViewControllerDidFinish(_ controller: SFSafariViewController) {
-            onFinish()
         }
     }
 }
@@ -1461,7 +1427,7 @@ struct DisplaySheet: View {
         } else if (route.display.kind == .webpage || route.display.kind == .hls),
            let value = route.display.remoteURL,
            let url = URL(string: value) {
-            SafariDisplayView(url: url)
+            TronSafariView(url: url)
                 .ignoresSafeArea(.container, edges: .all)
                 .accessibilityLabel(route.display.altText)
                 .presentationDetents([.large])

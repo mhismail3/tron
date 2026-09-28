@@ -16,8 +16,15 @@ Sources without a preview use a deterministic domain/title fallback.
 Routine capture and admission state is intentionally hidden from rows; actionable
 limitations appear in **More source details**.
 
-Source details lead with an explicit content summary (when generated), original
-link, and source publication/save dates when the source system provides them.
+The **Entry Detail** sheet leads with one header container: preview, title,
+domain, and an **Open original** pill that opens the page in the in-app browser
+(`TronSafariView`, the same full-bleed `SFSafariViewController` sheet public
+webpage displays use). The original link is the source of truth. The Gateway
+keeps the captured bytes and readable extraction as a backup and as model input,
+but the sheet does not expose them as reading surfaces: a raw HTML object is not
+readable, and page extraction includes site chrome. Below the header, the
+Summary container shows any generated summary with its grounded tags and the
+source publication/save dates when the source system provides them.
 For redirected connector captures, **Open original** uses the requested URL
 recorded for that exact saved-item identity in origin provenance; the resolved
 page URI remains capture metadata. Unrelated referral origins are never used as
@@ -26,12 +33,9 @@ The Raindrop `created` timestamp is the originating save time, not a publication
 date. Historical Raindrop records with the old misfiled `created` timestamp are
 not mislabeled as publication dates; absent origin-save dates stay absent and
 Tron capture time is labeled separately.
-Additional tags, metadata, nested links, references, and capture details live in
-a separate **More source details** sheet. Saved text stays a progressive disclosure.
-Raw objects and provider representations remain in technical details.
-The saved-text reader uses the extracted text, including sources without a raw
-object, and provides Previous/Next pages of at most 12,000 characters. Raw-file
-inspection is separate and bounded; it does not replace the readable source.
+Metadata, saved notes, nested links, references, related records, and capture
+coverage live in a standard **Source Details** sheet opened from the **More
+source details** row.
 Full stored summaries are available in detail; row line limits keep the list compact.
 
 An absent content summary is shown honestly as **No content summary yet**.

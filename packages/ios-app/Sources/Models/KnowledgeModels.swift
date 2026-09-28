@@ -46,24 +46,6 @@ struct KnowledgeCoveragePage: Codable, Hashable, Sendable {
     let coverage: [KnowledgeObservationCoverage]; let stateRevision: Int; let nextCursor: String?
 }
 
-struct KnowledgeObjectSelectionKey: Hashable, Sendable {
-    let recordID: String; let revisionID: String; let reference: KnowledgeObjectRef
-}
-struct KnowledgeObjectReaderState: Sendable {
-    var bytes = Data(); var totalBytes: Int?; var nextOffset: Int?; var loading = false; var error: String?; var generation = 0
-}
-
-enum KnowledgeObjectPresentationPolicy {
-    static func renderedText(_ bytes: Data, mediaType: String, label: String) -> String {
-        let type = mediaType.lowercased()
-        if type.hasPrefix("text/") || type == "application/json" || type == "application/xml" {
-            if let text = String(data: bytes, encoding: .utf8) { return text }
-            return String(decoding: bytes, as: UTF8.self)
-        }
-        return "Binary \(label) (\(bytes.count) bytes loaded)"
-    }
-}
-
 struct KnowledgeSessionEntryCitation: Codable, Hashable, Sendable {
     let sessionId: String; let branchId: String?; let entryId: String; let digest: String?; let startOffset: Int?; let endOffset: Int?
 }
@@ -277,16 +259,6 @@ enum KnowledgeSourcePresentationPolicy {
         if host.contains("x.com") || host.contains("twitter") { return "Post" }
         if source.mediaType?.contains("pdf") == true { return "PDF" }
         return "Web page"
-    }
-
-    static func decodeSavedTextEntities(_ value: String) -> String {
-        // Ampersands last: &amp;#x27; denotes the literal entity, not an apostrophe.
-        value.replacingOccurrences(of: "&quot;", with: "\"")
-            .replacingOccurrences(of: "&#x27;", with: "'")
-            .replacingOccurrences(of: "&#39;", with: "'")
-            .replacingOccurrences(of: "&lt;", with: "<")
-            .replacingOccurrences(of: "&gt;", with: ">")
-            .replacingOccurrences(of: "&amp;", with: "&")
     }
 
     static func thumbnailLetters(_ source: KnowledgeSourceContent) -> String {

@@ -935,79 +935,6 @@ struct KnowledgeSourceRow: View {
     }
 }
 
-struct KnowledgeSavedTextReader: View {
-    let text: String?
-    let reference: KnowledgeObjectRef?
-    let recordID: String
-    let revisionID: String
-    let label: String
-    @Bindable var readers: KnowledgeObjectReaderStore
-    var loadNext: ((KnowledgeObjectRef, Int) -> Void)? = nil
-    @State private var page = 0
-    private let pageSize = 12_000
-
-    var body: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: TronSpacing.section) {
-                Text(label.capitalized)
-                    .font(TronTypography.largeTitle)
-                    .foregroundStyle(Color.tronKnowledge)
-                if let text, !text.isEmpty {
-                    pagedText(KnowledgeSourcePresentationPolicy.decodeSavedTextEntities(text))
-                } else if let reference { let state = state(for: reference)
-                    if state.loading && state.bytes.isEmpty { TronLoadingState(label: "Loading saved text…", accent: .tronKnowledge) }
-                    else if let error = state.error, state.bytes.isEmpty { Text(error).font(TronTypography.body).foregroundStyle(Color.tronAmber) }
-                    else if state.bytes.isEmpty { Text("No readable text is available for this source.").font(TronTypography.body).foregroundStyle(Color.tronTextSecondary) }
-                    else {
-                        let full = KnowledgeObjectPresentationPolicy.renderedText(state.bytes, mediaType: reference.mediaType, label: label)
-                        // Raw evidence stays verbatim; only the readable-text presentation decodes entities.
-                        pagedText(full)
-                        if let error = state.error { Text(error).foregroundStyle(Color.tronAmber) }
-                        if let next = state.nextOffset, let loadNext {
-                            TronPaginationButton(label: "Load more of this file", loadingLabel: "Loading…", icon: "arrow.down", isLoading: state.loading, accent: .tronKnowledge) { loadNext(reference, next) }
-                        }
-                        Text("\(state.bytes.count) of \(state.totalBytes ?? reference.bytes) bytes loaded")
-                            .font(TronTypography.caption).foregroundStyle(Color.tronTextSecondary)
-                    }
-                } else {
-                    Text("Saved text is unavailable for this source.").font(TronTypography.body).foregroundStyle(Color.tronTextSecondary)
-                }
-            }
-            .padding(24)
-        }
-        .id(page) // Each bounded page starts at the top, rather than inheriting the previous page's scroll.
-        .tronScrollEdgeChrome()
-        .tronSettingsVisualTheme(accent: .tronKnowledge)
-        .onChange(of: text) { _, _ in page = 0 }
-        .onChange(of: recordID) { _, _ in page = 0 }
-        .onChange(of: revisionID) { _, _ in page = 0 }
-        .onChange(of: reference) { _, _ in page = 0 }
-    }
-
-    private func state(for reference: KnowledgeObjectRef) -> KnowledgeObjectReaderState {
-        readers.state(for: KnowledgeObjectSelectionKey(recordID: recordID, revisionID: revisionID, reference: reference))
-    }
-
-    @ViewBuilder private func pagedText(_ value: String) -> some View {
-        let count = value.count
-        let start = min(page * pageSize, count)
-        let end = min(start + pageSize, count)
-        let first = value.index(value.startIndex, offsetBy: start)
-        let last = value.index(value.startIndex, offsetBy: end)
-        Text(value[first..<last])
-            .font(TronTypography.body).foregroundStyle(Color.tronTextPrimary)
-            .textSelection(.enabled).fixedSize(horizontal: false, vertical: true)
-        HStack {
-            Button("Previous") { page = max(0, page - 1) }.disabled(page == 0)
-            Spacer()
-            Text("Page \(page + 1) of \(max(1, (count + pageSize - 1) / pageSize))").font(TronTypography.caption)
-            Spacer()
-            Button("Next") { page += 1 }.disabled(end >= count)
-        }
-        .buttonStyle(TronActionButtonStyle(expands: false, accent: .tronKnowledge))
-    }
-}
-
 struct KnowledgeDetailView: View {
     @Environment(AppModel.self) private var model
     @Environment(\.dismiss) private var dismiss
@@ -1038,15 +965,11 @@ struct KnowledgeDetailView: View {
     @State private var evidenceMessage: String?
     @State private var reflectedHandoff: KnowledgeRecord?
     @State private var reflectionRequestGeneration = 0
-    @State private var objectReaders = KnowledgeObjectReaderStore()
     @State private var linkedReader = KnowledgeLinkedRecordReaderStore()
     @State private var citationTitles: [String: String] = [:]
     @State private var detailPreviewImage: UIImage?
     @State private var detailPreviewTicket = UUID()
-    @State private var readerPresented = false
-    @State private var readerReference: KnowledgeObjectRef?
-    @State private var readerText: String?
-    @State private var readerLabel = "saved text"
+    @State private var externalPageURL: URL?
     private var admitsOrigin: Bool { model.knowledgePresentationIdentity == origin && activity.allowsPresentationPublication }
     private var observationPresentation: KnowledgeObservationPresentation? { KnowledgeObservationPresentation(record: currentRecord) }
 
@@ -1059,7 +982,8 @@ struct KnowledgeDetailView: View {
                     observationEvidence(observation)
                 } else if case .source(let source) = currentRecord.content {
                     sourceDetailHeader(source)
-                    sourceLink
+                    sourceSummary(source)
+                    sourceDetailsRow
                 } else {
                     TronSettingsGroup("Record", accent: .tronKnowledge) {
                         VStack(alignment: .leading, spacing: TronSpacing.md) {
@@ -1136,7 +1060,7 @@ struct KnowledgeDetailView: View {
                   requestActivity.allowsPresentationPublication else { return }
             detailPreviewImage = image
         }
-        .tronNavigationTitle(observationPresentation == nil ? "Knowledge detail" : "Observation", accent: .tronKnowledge)
+        .tronNavigationTitle(observationPresentation == nil ? "Entry Detail" : "Observation", accent: .tronKnowledge)
         .toolbar {
             if observationPresentation != nil {
                 ToolbarItem(placement: .topBarLeading) {
@@ -1174,16 +1098,21 @@ struct KnowledgeDetailView: View {
         .confirmationDialog("Forget this record?", isPresented: $forgetConfirmation) {
             Button("Forget", role: .destructive) { forget() }
         }
-        .tronManagedSheet(isPresented: $readerPresented, identity: "knowledge.reader.\(currentRecord.id)") {
-            KnowledgeSavedTextReader(text: readerText, reference: readerReference, recordID: currentRecord.id, revisionID: currentRecord.revisionId, label: readerLabel, readers: objectReaders, loadNext: { reference, offset in readObject(reference, offset: offset) })
-        }
         .tronManagedSheet(isPresented: $technicalDetailsSheet, identity: "knowledge.technical.\(currentRecord.id)") {
             if let observation = observationPresentation {
                 KnowledgeObservationTechnicalDetailsSheet(presentation: observation)
             }
         }
         .tronManagedSheet(isPresented: $sourceDetailsSheet, identity: "knowledge.source-details.\(currentRecord.id)") {
-            if case .source(let source) = currentRecord.content { KnowledgeSourceMoreDetailsSheet(record: currentRecord, source: source, citationTitles: citationTitles, technicalContent: AnyView(technicalSourceDetails(source))) }
+            if case .source(let source) = currentRecord.content { KnowledgeSourceMoreDetailsSheet(record: currentRecord, source: source, citationTitles: citationTitles) }
+        }
+        .tronManagedSheet(isPresented: Binding(get: { externalPageURL != nil }, set: { if !$0 { externalPageURL = nil } }), identity: "knowledge.external.\(currentRecord.id)") {
+            if let externalPageURL {
+                TronSafariView(url: externalPageURL)
+                    .ignoresSafeArea(.container, edges: .all)
+                    .presentationDetents([.large])
+                    .presentationDragIndicator(.hidden)
+            }
         }
         .tronManagedSheet(isPresented: $correctionSheet, identity: "knowledge.correction.\(currentRecord.id)") {
             KnowledgeCorrectionView(record: currentRecord, origin: origin) { updated in
@@ -1200,7 +1129,7 @@ struct KnowledgeDetailView: View {
             KnowledgeDetailView(record: linked, origin: origin, onChanged: onChanged,
                                 onOpenDraft: onOpenDraft, onOpenSession: onOpenSession, navigationAncestors: navigationAncestors)
         }
-        .onDisappear { objectReaders.suspend(); linkedReader.suspend() }
+        .onDisappear { linkedReader.suspend() }
     }
     @ViewBuilder private var recordMetadata: some View {
         TronSettingsGroup("Metadata", accent: .tronKnowledge) {
@@ -1245,107 +1174,68 @@ struct KnowledgeDetailView: View {
         }
     }
     private func sourceDetailHeader(_ source: KnowledgeSourceContent) -> some View {
-        TronSettingsGroup("Source", accent: .tronKnowledge) {
-            HStack(alignment: .top, spacing: TronSpacing.md) {
-                Group {
-                    if let detailPreviewImage { Image(uiImage: detailPreviewImage).resizable().scaledToFill().frame(width: 76, height: 76).clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous)) }
-                    else { KnowledgeSourceThumbnail(source: source, size: 76) }
+        HStack(alignment: .top, spacing: TronSpacing.md) {
+            Group {
+                if let detailPreviewImage { Image(uiImage: detailPreviewImage).resizable().scaledToFill().frame(width: 76, height: 76).clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous)) }
+                else { KnowledgeSourceThumbnail(source: source, size: 76) }
+            }
+            VStack(alignment: .leading, spacing: TronSpacing.sm) {
+                Text(source.title)
+                    .font(TronTypography.headline)
+                    .foregroundStyle(Color.tronTextPrimary)
+                    .fixedSize(horizontal: false, vertical: true)
+                if let domain = KnowledgeSourcePresentationPolicy.domain(source.uri) {
+                    Label(domain, systemImage: "globe")
+                        .font(TronTypography.secondaryDescription)
+                        .foregroundStyle(Color.tronKnowledgeText)
                 }
-                VStack(alignment: .leading, spacing: TronSpacing.md) {
-                    Text(source.title)
-                        .font(TronTypography.largeTitle)
-                        .foregroundStyle(Color.tronTextPrimary)
-                        .fixedSize(horizontal: false, vertical: true)
-                    if let domain = KnowledgeSourcePresentationPolicy.domain(source.uri) {
-                        Label(domain, systemImage: "globe")
-                            .font(TronTypography.secondaryDescription)
-                            .foregroundStyle(Color.tronKnowledgeText)
+                // The original link is the source of truth; retained bytes are a
+                // backup for the Gateway, not a reading surface.
+                if let url = KnowledgeSourcePresentationPolicy.originalURL(source) {
+                    Button { externalPageURL = url } label: { TronInlineActionLabel("Open original", icon: "safari", accent: .tronKnowledge) }
+                        .buttonStyle(.plain)
+                        .controlSize(.small)
+                        .accessibilityHint("Opens the page in the in-app browser")
+                }
+            }
+            Spacer(minLength: 0)
+        }
+        .padding(14)
+        .tronGlassSurface(accent: .tronKnowledge, tintOpacity: 0.06)
+    }
+
+    private func sourceSummary(_ source: KnowledgeSourceContent) -> some View {
+        TronSettingsGroup("Summary", accent: .tronKnowledge) {
+            VStack(alignment: .leading, spacing: TronSpacing.md) {
+                if let summary = KnowledgeSourcePresentationPolicy.summary(source) {
+                    Text(summary).font(TronTypography.body).foregroundStyle(Color.tronTextPrimary).fixedSize(horizontal: false, vertical: true).textSelection(.enabled)
+                    if source.summary?.coverage == "sampled" { Label("Based on a bounded excerpt", systemImage: "text.magnifyingglass").font(TronTypography.caption).foregroundStyle(Color.tronTextSecondary) }
+                    if let tags = source.summary?.tags, !tags.isEmpty { KnowledgeSummaryTags(tags: tags) }
+                } else {
+                    Text(source.summary == nil ? "No content summary yet" : "Summary no longer matches the saved text")
+                        .font(TronTypography.bodySM.bold()).foregroundStyle(Color.tronTextPrimary)
+                    Text(source.text == nil ? "A summary needs saved readable text. This source has no extracted text." : "Uses your configured Knowledge model; provider charges may apply. Only saved evidence is sent—linked pages and discussions are not fetched or assumed.")
+                        .font(TronTypography.secondaryDescription).foregroundStyle(Color.tronTextSecondary)
+                    if source.text != nil {
+                        Button("Generate AI summary", systemImage: "sparkles") { summarizeSource() }
+                            .buttonStyle(TronActionButtonStyle(expands: false, accent: .tronKnowledge)).disabled(mutationInFlight || !admitsOrigin)
                     }
                 }
+                if let published = KnowledgeSourcePresentationPolicy.publishedAt(source) { Label("Published \(humanDate(published))", systemImage: "calendar") }
+                if let saved = source.sourceSavedAt { Label("Saved in \(source.identity?.provider.capitalized ?? "source") \(humanDate(saved))", systemImage: "bookmark") }
+                else { Label("Saved in Tron \(humanDate(source.capturedAt))", systemImage: "clock") }
             }
-            .padding(14)
+            .font(TronTypography.secondaryDescription).foregroundStyle(Color.tronTextSecondary).padding(14)
         }
     }
 
-    @ViewBuilder private var sourceLink: some View {
-        if case .source(let source) = currentRecord.content {
-            if let url = KnowledgeSourcePresentationPolicy.originalURL(source) {
-                HStack(spacing: TronSpacing.lg) {
-                    Link(destination: url) { Label("Open original", systemImage: "safari") }
-                }
-                .font(TronTypography.bodySM)
-                .foregroundStyle(Color.tronKnowledgeText)
-            }
-            TronSettingsGroup("Summary", accent: .tronKnowledge) {
-                VStack(alignment: .leading, spacing: TronSpacing.md) {
-                    if let summary = KnowledgeSourcePresentationPolicy.summary(source) {
-                        Text(summary).font(TronTypography.body).foregroundStyle(Color.tronTextPrimary).fixedSize(horizontal: false, vertical: true).textSelection(.enabled)
-                        if source.summary?.coverage == "sampled" { Label("Based on a bounded excerpt", systemImage: "text.magnifyingglass").font(TronTypography.caption).foregroundStyle(Color.tronTextSecondary) }
-                    } else {
-                        Text(source.summary == nil ? "No content summary yet" : "Summary no longer matches the saved text")
-                            .font(TronTypography.bodySM.bold()).foregroundStyle(Color.tronTextPrimary)
-                        Text(source.text == nil ? "A summary needs saved readable text. This source has no extracted text." : "Uses your configured Knowledge model; provider charges may apply. Only saved evidence is sent—linked pages and discussions are not fetched or assumed.")
-                            .font(TronTypography.secondaryDescription).foregroundStyle(Color.tronTextSecondary)
-                        if source.text != nil {
-                            Button("Generate AI summary", systemImage: "sparkles") { summarizeSource() }
-                                .buttonStyle(TronActionButtonStyle(expands: false, accent: .tronKnowledge)).disabled(mutationInFlight || !admitsOrigin)
-                        }
-                    }
-                    if let published = KnowledgeSourcePresentationPolicy.publishedAt(source) { Label("Published \(humanDate(published))", systemImage: "calendar") }
-                    if let saved = source.sourceSavedAt { Label("Saved in \(source.identity?.provider.capitalized ?? "source") \(humanDate(saved))", systemImage: "bookmark") }
-                    else { Label("Saved in Tron \(humanDate(source.capturedAt))", systemImage: "clock") }
-                }
-                .font(TronTypography.secondaryDescription).foregroundStyle(Color.tronTextSecondary).padding(14)
-            }
-            Button { sourceDetailsSheet = true } label: { Label("More source details", systemImage: "info.circle") }
-                .font(TronTypography.bodySM).foregroundStyle(Color.tronKnowledgeText)
-                .padding(.horizontal, 14).padding(.vertical, 12)
-                .tronScrollSurface(accent: .tronKnowledge, tintOpacity: 0.06)
-            DisclosureGroup {
-                savedTextAction(source)
-            } label: {
-                Label("Read saved text", systemImage: "text.alignleft")
-            }
-            .padding(.horizontal, 14)
-            .padding(.vertical, 12)
-            .tronScrollSurface(accent: .tronKnowledge, tintOpacity: 0.06)
+    private var sourceDetailsRow: some View {
+        Button { sourceDetailsSheet = true } label: {
+            TronSettingsRow(icon: "info.circle", title: "More source details", accent: .tronKnowledge)
         }
-    }
-
-    @ViewBuilder private func savedTextAction(_ source: KnowledgeSourceContent) -> some View {
-        if let text = source.text, !text.isEmpty {
-            Button("Open saved text") {
-                readerText = text; readerReference = nil; readerLabel = "saved text"; readerPresented = true
-            }
-            .buttonStyle(TronActionButtonStyle(expands: false, accent: .tronKnowledge))
-            Text("Saved readable text is separate from the original evidence file.")
-                .font(TronTypography.caption).foregroundStyle(Color.tronTextSecondary)
-        } else {
-            Text("No readable text was saved. The original reference and any retained evidence remain available in Technical details.")
-                .font(TronTypography.secondaryDescription).foregroundStyle(Color.tronTextSecondary)
-        }
-    }
-
-    @ViewBuilder private func technicalSourceDetails(_ source: KnowledgeSourceContent) -> some View {
-        VStack(alignment: .leading, spacing: TronSpacing.sm) {
-            Text("Capture: \(source.captureDisposition.rawValue)")
-            if let object = source.object { objectReader(object, label: "raw source") }
-            if let representations = source.representations, !representations.isEmpty {
-                ForEach(Array(representations.enumerated()), id: \.offset) { _, representation in
-                    objectReader(representation.object, label: representation.kind == .providerAPI ? "provider data" : "retained representation")
-                }
-            }
-            if let annotations = source.annotations, !annotations.isEmpty {
-                Text("Annotations").font(TronTypography.bodySM.bold())
-                ForEach(Array(annotations.prefix(10).enumerated()), id: \.offset) { _, annotation in
-                    Text(annotation.text).font(TronTypography.caption).foregroundStyle(Color.tronTextSecondary)
-                }
-            }
-            if let identity = source.identity { Text("Origin identity: \(identity.provider) · \(identity.itemId)").font(TronTypography.caption).foregroundStyle(Color.tronTextSecondary) }
-        }
-        .font(TronTypography.caption)
-        .foregroundStyle(Color.tronTextSecondary)
-        .padding(.top, 8)
+        .buttonStyle(.plain)
+        .tronGlassSurface(accent: .tronKnowledge, tintOpacity: 0.06)
+        .accessibilityLabel("More source details")
     }
 
     private func humanDate(_ value: String) -> String {
@@ -1354,18 +1244,6 @@ struct KnowledgeDetailView: View {
         let date = formatter.date(from: value) ?? ISO8601DateFormatter().date(from: value)
         guard let date else { return value }
         let output = DateFormatter(); output.dateStyle = .medium; output.timeStyle = .none; return output.string(from: date)
-    }
-
-    @ViewBuilder private func objectReader(_ reference: KnowledgeObjectRef, label: String) -> some View {
-        let key = KnowledgeObjectSelectionKey(recordID: currentRecord.id, revisionID: currentRecord.revisionId, reference: reference)
-        let state = objectReaders.state(for: key)
-        Button(state.bytes.isEmpty ? "Open \(label) (\(reference.bytes) bytes)" : "Load \(label)") {
-            readerText = nil; readerReference = reference; readerLabel = label; readerPresented = true; readObject(reference, offset: state.nextOffset ?? 0)
-        }
-        .buttonStyle(TronActionButtonStyle(expands: false, accent: .tronKnowledge))
-        .disabled(state.loading || (state.nextOffset == nil && !state.bytes.isEmpty))
-        if state.loading { TronLoadingState(label: "Loading \(label)…", accent: .tronKnowledge) }
-        if let error = state.error { Text(error).font(TronTypography.secondaryDescription).foregroundStyle(Color.tronAmber).fixedSize(horizontal: false, vertical: true) }
     }
 
     private var evidence: some View {
@@ -1434,22 +1312,6 @@ struct KnowledgeDetailView: View {
         // exact Gateway/session/entry citation even when the row is off-page.
         return model.sessions.first(where: { $0.id == sessionID })?.title ?? "Originating session"
     }
-    private func readObject(_ reference: KnowledgeObjectRef, offset: Int) {
-        guard admitsOrigin else { evidenceMessage = "Gateway changed; reopen this entry."; return }
-        let key = KnowledgeObjectSelectionKey(recordID: currentRecord.id, revisionID: currentRecord.revisionId, reference: reference)
-        let requestIdentity = origin
-        let includeArchived: Bool = {
-            guard case .source(let source) = currentRecord.content else { return false }
-            return source.admission?.status == .archived
-        }()
-        Task { @MainActor in
-            await objectReaders.load(key, offset: offset,
-                request: { reference, offset in
-                    try await model.knowledge.readObject(reference, recordID: currentRecord.id, revisionID: currentRecord.revisionId, includeArchived: includeArchived, offset: offset)
-                },
-                isCurrent: { model.knowledgePresentationIdentity == requestIdentity && activity.allowsPresentationPublication })
-        }
-    }
     private func loadCitationTitles() async {
         let refs = currentRecord.provenance.evidence + {
             if case .observation(let observation) = currentRecord.content { return observation.items.flatMap { $0.evidence ?? [] } }
@@ -1515,35 +1377,33 @@ struct KnowledgeDetailView: View {
     private func forget() { guard admitsOrigin else { message = "Gateway changed; reopen this entry."; return }; guard !mutationInFlight else { return }; mutationInFlight = true; let requestIdentity = origin; Task { @MainActor in guard model.knowledgePresentationIdentity == requestIdentity else { return }; do { _ = try await model.knowledge.forget(id: currentRecord.id, expectedRevision: currentRecord.revisionId, reason: "Forgotten from iOS"); guard model.knowledgePresentationIdentity == requestIdentity, activity.allowsPresentationPublication else { return }; mutationInFlight = false; dismiss() } catch is CancellationError { if model.knowledgePresentationIdentity == requestIdentity { mutationInFlight = false }; return } catch { guard model.knowledgePresentationIdentity == requestIdentity, activity.allowsPresentationPublication else { return }; mutationInFlight = false; message = error.localizedDescription } } }
 }
 
+/// Grounded tags generated together with a content summary.
+private struct KnowledgeSummaryTags: View {
+    let tags: [KnowledgeSourceSummaryTag]
+
+    var body: some View {
+        LazyVGrid(columns: [GridItem(.adaptive(minimum: 110), alignment: .leading)], alignment: .leading, spacing: TronSpacing.sm) {
+            ForEach(Array(tags.enumerated()), id: \.offset) { _, tag in
+                Label(tag.label, systemImage: tag.kind == "semantic" ? "sparkle" : "number")
+                    .font(TronTypography.caption).foregroundStyle(Color.tronKnowledgeText)
+                    .padding(.horizontal, 10).padding(.vertical, 7)
+                    .background(Color.tronKnowledge.opacity(0.09), in: Capsule())
+            }
+        }
+    }
+}
+
 private struct KnowledgeSourceMoreDetailsSheet: View {
     let record: KnowledgeRecord
     let source: KnowledgeSourceContent
     let citationTitles: [String: String]
-    let technicalContent: AnyView
     @Environment(\.dismiss) private var dismiss
+    @State private var detent: PresentationDetent = .large
 
     var body: some View {
+        NavigationStack {
         ScrollView {
             VStack(alignment: .leading, spacing: TronSpacing.section) {
-                HStack {
-                    Text("Source details").font(TronTypography.sheetSectionHeader).foregroundStyle(Color.tronKnowledge)
-                    Spacer()
-                    Button("Done") { dismiss() }.buttonStyle(TronActionButtonStyle(expands: false, accent: .tronKnowledge))
-                }
-                detailSection("Generated tags", icon: "tag") {
-                    if KnowledgeSourcePresentationPolicy.summary(source) != nil, let tags = source.summary?.tags, !tags.isEmpty {
-                        LazyVGrid(columns: [GridItem(.adaptive(minimum: 110), alignment: .leading)], alignment: .leading, spacing: TronSpacing.sm) {
-                            ForEach(Array(tags.enumerated()), id: \.offset) { _, tag in
-                                Label(tag.label, systemImage: tag.kind == "semantic" ? "sparkle" : "number")
-                                    .font(TronTypography.caption).padding(.horizontal, 10).padding(.vertical, 7)
-                                    .background(Color.tronKnowledge.opacity(0.09), in: Capsule())
-                            }
-                        }
-                    } else {
-                        Text("Generate an AI summary to create grounded semantic and keyword tags from this saved evidence.")
-                            .font(TronTypography.secondaryDescription).foregroundStyle(Color.tronTextSecondary)
-                    }
-                }
                 detailSection("Metadata", icon: "square.stack.3d.up") {
                     metadataLine("Type", KnowledgeSourcePresentationPolicy.sourceType(source) ?? "Source")
                     metadataLine("Capture", source.captureDisposition.rawValue.capitalized)
@@ -1594,14 +1454,30 @@ private struct KnowledgeSourceMoreDetailsSheet: View {
                         if let object = source.object { Text("Original evidence: \(object.bytes) bytes · \(object.mediaType)").font(TronTypography.caption).foregroundStyle(Color.tronTextSecondary) }
                     }
                 }
-                detailSection("Technical details", icon: "wrench.and.screwdriver") { technicalContent }
             }
-            .padding(TronSpacing.xlarge)
+            .padding(.horizontal, TronSpacing.xlarge)
+            .padding(.vertical, TronSpacing.large)
+        }
+        .tronScrollEdgeChrome()
+        .tronNavigationTitle("Source Details", accent: .tronKnowledge)
+        .toolbar {
+            ToolbarItem(placement: .confirmationAction) {
+                Button { dismiss() } label: {
+                    Image(systemName: "checkmark").font(TronTypography.buttonSM)
+                        .foregroundStyle(Color.tronKnowledge)
+                }
+                .accessibilityLabel("Done")
+            }
         }
         .tronSettingsLayout()
-        .tronSettingsVisualTheme(accent: .tronKnowledge)
         .accessibilityElement(children: .contain)
         .accessibilityLabel("Additional source details")
+        }
+        .tronTopBlur(.sheet)
+        .presentationDetents([.medium, .large], selection: $detent)
+        .presentationDragIndicator(.hidden)
+        .tronSettingsVisualTheme(accent: .tronKnowledge)
+        .tronPresentation()
     }
 
     @ViewBuilder private func detailSection<Content: View>(_ title: String, icon: String, @ViewBuilder content: () -> Content) -> some View {
