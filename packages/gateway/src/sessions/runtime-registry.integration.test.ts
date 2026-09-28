@@ -11126,11 +11126,12 @@ export default function (pi) {
     expect(registry.isSubscribed("race-client", sessionId)).toBe(true);
   });
 
-  /** Every counter the resource sampler takes, as the registry would report
-   * them; one object per fixture keeps the recorder shape in one place. */
+  /** Every counter the resource sampler takes from the registry, as the registry
+   * would report them; one object per fixture keeps the recorder shape in one
+   * place. `recordSnapshotBuild` is not here: it is the transport's own method on
+   * `ResourceSampler`, because only the transport counts recipient sockets. */
   function resourceRecorder() {
     return {
-      recordSnapshotBuild: vi.fn(),
       recordTopicFrame: vi.fn(),
       recordCatalogWalk: vi.fn(),
       recordOutboundBytes: vi.fn(),

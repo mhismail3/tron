@@ -2,20 +2,7 @@
 
 - **Started:** 2026-09-27
 - **Status:** Active (Phase 1 runs on `hardening/integration`; that branch's copy of this plan is authoritative until R-1)
-- **Last updated:** 2026-09-28, G-3 review round 1 addressed: the unaudienced count is recorded by the transport where the recipients are (so it can fire), the registry is no longer a second audience owner, and the row is Claimed again because the CPU half of "Done when" is still owed to the orchestrator
-
-- **Last updated:** 2026-09-28, O-6a blocked on a quiet-host repeat (second review response landed)
-
-- **Last updated:** 2026-09-28, O-4 (review round 4 addressed)
-
-- **Last updated:** 2026-09-28, O-2 review response (silence requires expected
-  liveness, upgrade refusals collapse into one record)
-
-- **Last updated:** 2026-09-28, G-10 second review round (receipt totals kept across a rebuild, connection-owner row added)
-
-- **Last updated:** 2026-09-28, G-8 background work audit: third review round corrected the re-admission fence, the socket promise and the discovery-open ceiling
-
-- **Last updated:** 2026-09-28, O-6b Blocked (the capped cases now back their links up and report their own round trips; the full-length baseline is the orchestrator's quiet-host run)
+- **Last updated:** 2026-09-28, G-3 review round 2 addressed: the `unaudiencedSnapshotBuilds` warning and its test are now stated as a tripwire for a lost slot guard or a divergence between the registry's subscription record and the transport's, not for a closing socket
 - **Goal:** A clean, efficient and predictable Gateway and phone connection: the phone stays connected and loads any session promptly whenever the network path is up, however many sessions run and however large the history grows, and every disconnect or slow operation is attributable to one cause from the logs in one step.
 
 ## Goal and constraints
@@ -4482,10 +4469,11 @@ events; widen them to name the pool owner in the same change.
   are none, so a frame nobody can receive is not encoded, measured or queued,
   and no `session.snapshot` topic entry is recorded for it. The O-5 warning
   `UNAUDIENCED_SNAPSHOT_WARNING` (`unaudiencedSnapshotBuilds > 0`) records a
-  snapshot built for a subscriber no ready socket could receive: the transport
-  counts every snapshot frame's recipients where it decides delivery, so the
-  slot's guard keeps that count out of a normal minute and a window that records
-  one has lost an audience check. The shipping name for it is
+  snapshot built although no ready socket held a subscription token for its
+  session: the transport counts every snapshot frame's recipients where it
+  decides delivery, so the slot's guard keeps that count out of a normal minute
+  and a window that records one has lost an audience check. The shipping name for
+  it is
   `unaudiencedSnapshotBuilds` in code, docs and the level reason; O-5's plan
   wording `resources.unaudienced-work` stays only in O-5's own handoff, which
   already says that threshold belongs to this row.
@@ -4518,9 +4506,10 @@ events; widen them to name the pool owner in the same change.
   return is before `prepareBroadcastFrame` and before `recordTopicFrame`; (5) an
   unaudienced build in a window stays a quiet debug minute — the transport-path
   level test; (6) the no-audience warning fires for a build that had a recipient
-  — the transport-path level test; (7) the transport's recipient count and the
-  subscriber record disagree for a closing socket, so a projection reaches nobody
-  — the build is recorded as unaudienced and warns (the reason the count exists).
+  — the transport-path level test; (7) the slot's no-audience guard regresses or
+  the registry's subscriber record and the transport's diverge, so a projection
+  is built that no ready socket can receive — the build is recorded as
+  unaudienced and warns, which is what this count exists to catch.
 - Evidence:
   - Named checks: `npx vitest run src/transport/sync-protocol.integration.test.ts`
     passes 3/3 (6.1 s) and
@@ -4629,18 +4618,34 @@ events; widen them to name the pool owner in the same change.
   name for the count in code, docs and reason string; the progress projection that
   is still built for an unsubscribed session is `G-3a` rather than part of this
   row.
+- Review response (round 2, on `767180635`): finding 1 (the warning test drove a
+  state production cannot reach) — the test now broadcasts a `session-1` snapshot
+  while the only ready connection holds a `session-2` token, which is the
+  zero-recipient state a regressed slot guard or a registry/transport
+  subscription divergence produces; failure mode (7) and the Residual are
+  restated as that tripwire and the false closing-socket window is dropped. The
+  production counter is unchanged, because the transport already records every
+  snapshot it is handed where it counts the recipients. Finding 2 (dead surface)
+  — `recordSnapshotBuild` moved off the `ResourceRecorder` interface onto
+  `ResourceSampler`, the only caller, and the registry fixture's mock of it is
+  deleted. Nit 3 (failure modes written after the code) is recorded in Deviations
+  (1) and unchanged, and finding 1 is the drift it produced. Nit 4 (stacked
+  `Last updated` lines) — the header keeps one current line.
 - For the next agent: G-4 (outbound queue coalescing) depends on this row and can
   assume a snapshot for a session with no subscriber is never built; the
   `unaudiencedSnapshotBuilds` warning is a regression tripwire, so a nonzero
   window means an audience check was lost rather than that G-3 needs tuning.
   G-3a owns the same rule for streaming progress frames, which are still projected
-  for a session with no subscriber. Residual: the subscriber record and the
-  transport's `ready && subscriptionTokens.has(sessionId)` set can still differ
-  for a closing socket, and in that window the slot builds a snapshot the
-  transport can only hand to nobody; that build is now counted as unaudienced and
-  reported (one wasted build, at warning) instead of passing as a normal
-  publication. Removing the window entirely would need the recipient count before
-  the slot decides, which is the lazy-payload shape declined in Deviations (5).
+  for a session with no subscriber. Residual: the transport's
+  `ready && subscriptionTokens.has(sessionId)` set and the registry's subscriber
+  record can drift (a regressed guard, or a subscription node one owner kept and
+  the other dropped), and a session in that state builds a snapshot no ready
+  socket can take; the count above turns that into a warning instead of a quiet
+  debug minute. It is a tripwire, not a description of a runtime window: no
+  reachable production path builds for a session with no ready recipient, which is
+  exactly why a nonzero window is a defect signal. Removing the drift itself would
+  need the recipient count before the slot decides, which is the lazy-payload
+  shape declined in Deviations (5).
   The orchestrator owes G-3's CPU comparison and O-5's 5% cross-check on a
   quiet-host O-6a run.
 
