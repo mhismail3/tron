@@ -11,7 +11,11 @@ export PATH="$ROOT/.ci-tools/bin:/opt/homebrew/bin:$PATH"
 
 DEVELOPMENT_STATE="${TRON_IOS_SIMULATOR_STATE_DIR:-$HOME/.tron/internal/run}/ios-simulator-udid"
 IOS_BUILD_ROOT="$HOME/Library/Developer/Tron/ios"
+# The results root holds every worktree's and lane's runs; the products root holds
+# one directory per worktree. Both are pruned by the sweep, and `clean` removes
+# only this worktree's and lane's share of them.
 RESULTS_ROOT="${TRON_IOS_TEST_RESULTS_DIR:-$IOS_BUILD_ROOT/test-runs}"
+PRODUCTS_ROOT="$IOS_BUILD_ROOT/test-derived-data"
 EPHEMERAL="${TRON_IOS_TEST_EPHEMERAL:-0}"
 PROCESS="$ROOT/scripts/ios-test-process.py"
 SIMULATOR="$ROOT/scripts/ios-test-simulator.py"
@@ -42,8 +46,14 @@ Commands:
                        a lane a live process holds (73) and state with no ownership marker (66).
   reap                 Shut down this repository's owned simulators that are booted
                        with no live lease (orphans of a crash, a kill or --keep-booted),
-                       and delete lanes no command has used for 7 days.
-  clean                Delete only the owned test simulator, products, and results.
+                       delete lanes no command has used for 7 days, and prune results
+                       and products.
+  prune                Reclaim disk only: keep the newest 50 runs of each worktree plus
+                       everything younger than 7 days, and delete the test products of
+                       worktrees that no longer exist. Touches no simulator, so it takes
+                       no lease. Every sweep prunes too.
+  clean                Delete this lane's owned test simulator and runs, and this
+                       worktree's test products. The shared results root is never removed.
 
 Selectors:
   --only-testing OWNER  Repeat without shell-generated command fragments, for example:
@@ -70,12 +80,15 @@ phone's connection through the Gateway - into swap. The defaults are 8 GB free
 and 4 GB of swap; TRON_IOS_TEST_MEMORY_RESERVE_BYTES and
 TRON_IOS_TEST_SWAP_LIMIT_BYTES override them. A Mac (or CI) where these reports
 are unavailable admits the boot with a warning.
-Every command that provisions the simulator first releases orphaned owned lanes;
-lanes a live process holds are never touched. Commands release the simulator they
+Every command that provisions the simulator first releases orphaned owned lanes
+and prunes results and products; lanes a live process holds are never touched.
+Commands release the simulator they
 use when they end, on success, failure, timeout or signal, unless --keep-booted
 was given. Routine runs are serial, use an exact owned simulator UDID, disable
 verbose test diagnostics, and preserve unique complete logs plus xcresults under
-$HOME/Library/Developer/Tron/ios/test-runs by default. Test products are built
+$HOME/Library/Developer/Tron/ios/test-runs by default; each run directory records
+the worktree and lane that produced it, which is what clean and prune scope and
+group by. Test products are built
 per worktree under $HOME/Library/Developer/Tron/ios/test-derived-data and stamped
 with the worktree and source state that produced them; run refuses products
 stamped for another worktree or another source state. diagnose never runs
@@ -183,7 +196,10 @@ LOCK="$STATE_ROOT/lease.lock"
 # run re-proves before executing anything. TRON_IOS_TEST_DERIVED_DATA still wins.
 WORKTREE_KEY="$(python3 "$IDENTITY" worktree-key --worktree "$ROOT")" \
   || die "cannot derive this worktree's test product directory"
-DERIVED_DATA="${TRON_IOS_TEST_DERIVED_DATA:-$IOS_BUILD_ROOT/test-derived-data/$WORKTREE_KEY}"
+DERIVED_DATA="${TRON_IOS_TEST_DERIVED_DATA:-$PRODUCTS_ROOT/$WORKTREE_KEY}"
+# The lane's own name: what `clean` scopes its runs by and what the lease, the
+# marker and every refusal message report.
+LANE_LABEL="${lane:-default}"
 
 simulator_args=(
   --marker "$MARKER"
@@ -216,7 +232,7 @@ command="${1:-checkpoint}"
 if [[ "$command" == -h || "$command" == --help || "$command" == help ]]; then usage; exit 0; fi
 shift || true
 case "$command" in
-  checkpoint|prepare|build|run|diagnose|status|reap|lanes|lane-remove|clean) ;;
+  checkpoint|prepare|build|run|diagnose|status|reap|prune|lanes|lane-remove|clean) ;;
   *) usage >&2; die "unknown command: $command" ;;
 esac
 
@@ -297,8 +313,18 @@ fi
 if [[ "$command" == reap ]]; then
   # No lease of its own: the sweep takes each orphaned lane's lease while it
   # shuts that lane's simulator down or removes the lane, so a running command
-  # is never disturbed.
-  python3 "$SIMULATOR" sweep --discovery-root "$DISCOVERY_ROOT" --development-state "$DEVELOPMENT_STATE" || exit "$EXIT_DESTINATION"
+  # is never disturbed. Disk is reclaimed here too: every sweep prunes.
+  python3 "$SIMULATOR" sweep --discovery-root "$DISCOVERY_ROOT" \
+    --results-root "$RESULTS_ROOT" --products-root "$PRODUCTS_ROOT" \
+    --development-state "$DEVELOPMENT_STATE" || exit "$EXIT_DESTINATION"
+  exit 0
+fi
+
+if [[ "$command" == prune ]]; then
+  # Disk only, and no lease: reclaiming runs and the products of deleted
+  # worktrees never touches a simulator, so it cannot disturb a running command.
+  python3 "$SIMULATOR" prune --results-root "$RESULTS_ROOT" --products-root "$PRODUCTS_ROOT" \
+    --development-state "$DEVELOPMENT_STATE" || exit "$EXIT_DESTINATION"
   exit 0
 fi
 
@@ -336,7 +362,7 @@ PY
     --default-state-dir "$DEFAULT_STATE_ROOT" --development-state "$DEVELOPMENT_STATE" \
     || exit $?
   if [[ -n "$lane_removal_worktree" ]]; then
-    lane_products_root="$IOS_BUILD_ROOT/test-derived-data"
+    lane_products_root="$PRODUCTS_ROOT"
     lane_products="$lane_products_root/$(python3 "$IDENTITY" worktree-key --worktree "$lane_removal_worktree")" \
       || die "cannot derive the lane worktree's test product directory"
     if [[ -e "$lane_removal_worktree" ]]; then
@@ -365,9 +391,14 @@ fi
 if [[ "$command" == clean ]]; then
   python3 "$SIMULATOR" delete "${simulator_args[@]}" || exit "$EXIT_DESTINATION"
   if [[ "${TRON_IOS_TEST_PRESERVE_ARTIFACTS:-0}" != 1 ]]; then
+    # Scoped on purpose: the results root is shared by every worktree and lane,
+    # so `clean` removes this lane's runs and this worktree's products, never the
+    # root. The lane's lease is held here, so no run of this lane is in flight.
+    python3 "$SIMULATOR" clean-runs --results-root "$RESULTS_ROOT" \
+      --worktree "$ROOT" --lane "$LANE_LABEL" \
+      --development-state "$DEVELOPMENT_STATE" || exit "$EXIT_DESTINATION"
     clean_owned_directory "$DERIVED_DATA"
-    clean_owned_directory "$RESULTS_ROOT"
-    echo "Removed only repository-owned iOS test simulator state, products, and results."
+    echo "Removed only repository-owned iOS test simulator state, this lane's runs, and this worktree's products."
   else
     echo "Removed only the repository-owned iOS test simulator; preserved test artifacts."
   fi
@@ -377,7 +408,9 @@ fi
 # Before provisioning, release what a crash or a kill left booted. A lane whose
 # lease a live process holds is never touched - including this lane, whose lease
 # this command already holds, which is why --keep-booted survives its own lane.
-if ! python3 "$SIMULATOR" sweep --discovery-root "$DISCOVERY_ROOT" --development-state "$DEVELOPMENT_STATE"; then
+if ! python3 "$SIMULATOR" sweep --discovery-root "$DISCOVERY_ROOT" \
+  --results-root "$RESULTS_ROOT" --products-root "$PRODUCTS_ROOT" \
+  --development-state "$DEVELOPMENT_STATE"; then
   echo "warning: the orphaned-simulator sweep did not complete; continuing" >&2
 fi
 
@@ -404,6 +437,23 @@ source_identity="$(python3 "$IDENTITY" show --worktree "$ROOT")" \
 run_prefix="$(date -u '+%Y%m%dT%H%M%SZ')-$command"
 run_dir="$(mktemp -d "$RESULTS_ROOT/$run_prefix.XXXXXX")"
 run_identity="$(basename "$run_dir")"
+# The run's owner is written before anything else in the directory: a run killed
+# before its first metadata.json is still attributable, which is what `clean`
+# scopes by and what `prune` keeps the newest 50 of per worktree.
+TRON_RUN_OWNER_PATH="$run_dir/owner.json" TRON_RUN_WORKTREE="$ROOT" \
+TRON_RUN_WORKTREE_KEY="$WORKTREE_KEY" TRON_RUN_LANE="$LANE_LABEL" \
+TRON_RUN_COMMAND="$command" TRON_RUN_STARTED="$(date +%s)" python3 - <<'PY'
+import json, os
+from pathlib import Path
+Path(os.environ["TRON_RUN_OWNER_PATH"]).write_text(json.dumps({
+    "schema": "tron.ios-test-run-owner.v1",
+    "worktree": os.path.realpath(os.environ["TRON_RUN_WORKTREE"]),
+    "worktree_key": os.environ["TRON_RUN_WORKTREE_KEY"],
+    "lane": os.environ["TRON_RUN_LANE"],
+    "command": os.environ["TRON_RUN_COMMAND"],
+    "started_epoch_seconds": int(os.environ["TRON_RUN_STARTED"]),
+}, indent=2, sort_keys=True) + "\n")
+PY
 result_bundle="$run_dir/TestResults.xcresult"
 summary_path="$run_dir/summary.json"
 metadata_path="$run_dir/metadata.json"

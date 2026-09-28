@@ -928,9 +928,21 @@ are never shared between worktrees: `build` stamps its products with the
 building worktree, its HEAD revision and a fingerprint of its dirty-tree content
 (`scripts/ios-test-build-identity.py`), and `run` re-proves that stamp, exiting
 74 with both identities named when they differ. `clean` removes this worktree's
-products (about 1 GB) and the retained runs; a products directory left behind by
-a deleted worktree is removable by hand or by `lane-remove` of the lane that
-created it, because it carries the runner's ownership marker. `TRON_IOS_TEST_DERIVED_DATA` still overrides the products
+products (about 1 GB) and this lane's runs - the results root is shared by every
+worktree and lane, so it is never removed wholesale - and refuses (66) a results
+root that does not carry the runner's ownership marker rather than skipping it
+silently. `scripts/tron-ios-test prune` reclaims disk: it keeps the newest 50
+runs of each worktree and everything younger than 7 days, and deletes the test
+products of worktrees that no longer exist, which is what a products directory's
+`build-identity.json` proves. Every sweep prunes too, so `reap` and each
+provisioning command reclaim disk as well as memory. A run directory records the
+worktree and lane that created it in `owner.json`, written before the run starts,
+so a run killed with no `metadata.json` is still attributable and still cleaned
+and pruned; runs from before that file existed are attributed by the
+`source.worktree` in their metadata and count as the default lane. A products
+directory left behind by a deleted worktree is therefore reclaimed
+automatically, and `lane-remove` of the lane that created it still removes it
+together with that lane. `TRON_IOS_TEST_DERIVED_DATA` still overrides the products
 directory, and an override inside the worktree must stay under a git-ignored
 path, because the stamp covers the worktree's non-ignored content. Any edit
 after a build, documentation included, therefore needs a rebuild before `run`.
@@ -947,6 +959,7 @@ scripts/tron-ios-test lanes
 scripts/tron-ios-test lane-remove <name>
 scripts/tron-ios-test diagnose --only-testing TronMobileTests/<Suite>
 scripts/tron-ios-test reap
+scripts/tron-ios-test prune
 scripts/tron-ios-test clean
 ```
 
@@ -1025,7 +1038,10 @@ ownership marker is ever shut down or deleted (a lane no command has used for 7
 days is reclaimed), each lane's lease is taken (without waiting) for the whole
 shutdown or removal, and lanes a live process holds are skipped.
 The remembered Development simulator (`scripts/tron-ios-simulator`) and every
-unmarked simulator are never shut down or deleted by the runner.
+unmarked simulator are never shut down or deleted by the runner. Runs and
+products are only ever removed inside a directory the runner proved with its own
+ownership marker, and only this worktree's and lane's runs are removed by
+`clean`.
 
 - Provisioning resolves the exact pinned runtime and device type, proves the
   repository ownership marker, and passes only

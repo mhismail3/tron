@@ -60,6 +60,7 @@ OWNERSHIP_MARKER_NAME = ".tron-ios-test-owned"
 # worktree and lane that produced the run, which is what `clean` and `prune`
 # scope and group by.
 RUN_OWNER_NAME = "owner.json"
+RUN_METADATA_NAME = "metadata.json"
 # The products stamp `scripts/ios-test-build-identity.py` writes after a
 # successful build; its `worktree` is the path whose existence decides whether
 # those products still have an owner.
@@ -180,6 +181,15 @@ def atomic_write(path: Path, value: dict[str, Any]) -> None:
             os.unlink(temporary_name)
         except FileNotFoundError:
             pass
+
+
+def load_json(path: Path) -> dict[str, Any] | None:
+    """The JSON object in a file, or None when it is missing or unreadable."""
+    try:
+        value = json.loads(path.read_text())
+    except (OSError, json.JSONDecodeError):
+        return None
+    return value if isinstance(value, dict) else None
 
 
 def load_marker(path: Path) -> dict[str, Any] | None:
@@ -847,7 +857,7 @@ def sweep_lane(arguments: argparse.Namespace, marker_path: Path) -> str:
 
 
 def sweep(arguments: argparse.Namespace) -> int:
-    """Reclaim every orphaned and expired lane under the discovery root. Idempotent."""
+    """Reclaim every orphaned lane, expired lane and stale artifact. Idempotent."""
     markers = marker_paths(arguments.discovery_root)
     deadline = time.monotonic() + arguments.sweep_deadline_seconds
     failures = 0
@@ -862,6 +872,10 @@ def sweep(arguments: argparse.Namespace) -> int:
             failures += 1
         if sweep_lane(arguments, marker_path) == "failed":
             failures += 1
+    # Disk is the other half of what a command leaves behind, so the sweep that
+    # reclaims memory reclaims it too: every provisioning command and `reap`
+    # pass the runner's roots and prune through the same paths as `prune`.
+    failures += prune_artifacts(arguments)
     return DESTINATION_EXIT if failures else 0
 
 
@@ -950,6 +964,174 @@ def remove_lane_command(arguments: argparse.Namespace) -> int:
             raise LaneBusyError(f"lane {label} is leased ({lease_holder(directory / LEASE_NAME)})")
         remove_lane(directory, arguments)
     print(f"removed lane {lane_label(directory, arguments.default_state_dir)} ({directory})")
+    return 0
+
+
+def owned_root(path: Path) -> bool:
+    """Whether the runner's ownership marker proves a directory is the tooling's."""
+    marker = path / OWNERSHIP_MARKER_NAME
+    return marker.is_file() and not marker.is_symlink()
+
+
+def run_started(run: Path, owner: dict[str, Any] | None) -> float:
+    """When a run began: its owner file, else its UTC-named directory, else mtime."""
+    if owner is not None:
+        started = owner.get("started_epoch_seconds")
+        if isinstance(started, (int, float)) and not isinstance(started, bool):
+            return float(started)
+    match = RUN_NAME_PATTERN.match(run.name)
+    if match is not None:
+        try:
+            return float(calendar.timegm(time.strptime(match.group(1), "%Y%m%dT%H%M%SZ")))
+        except ValueError:
+            pass
+    try:
+        return run.stat().st_mtime
+    except OSError:
+        # An unreadable timestamp must not age a run into deletion.
+        return time.time()
+
+
+def run_attribution(run: Path) -> tuple[str | None, str, float]:
+    """(worktree, lane, start) for one run directory.
+
+    `owner.json` is written when the runner creates the run directory, so a run
+    killed before its first metadata is still attributable. `metadata.json`,
+    written after each phase, names the building worktree under
+    `source.worktree`; runs from before `owner.json` existed carry only that, and
+    they predate named lanes, so they belong to the default lane.
+    """
+    owner = load_json(run / RUN_OWNER_NAME)
+    worktree = owner.get("worktree") if owner is not None else None
+    lane = owner.get("lane") if owner is not None else None
+    if not isinstance(worktree, str) or not worktree:
+        metadata = load_json(run / RUN_METADATA_NAME)
+        source = metadata.get("source") if metadata is not None else None
+        worktree = source.get("worktree") if isinstance(source, dict) else None
+        lane = "default"
+    return (
+        worktree if isinstance(worktree, str) and worktree else None,
+        lane if isinstance(lane, str) and lane else "default",
+        run_started(run, owner),
+    )
+
+
+def remove_dangling_latest(root: Path) -> None:
+    latest = root / "latest"
+    if latest.is_symlink() and not latest.exists():
+        latest.unlink()
+        print(f"removed the dangling results symlink {latest}")
+
+
+def prune_runs(root: Path) -> int:
+    """Keep the newest 50 runs of each worktree and everything under 7 days.
+
+    Returns the number of runs that could not be removed. A root without the
+    runner's ownership marker is never pruned: runs live in a shared results
+    root, and a caller's wrong root must not cost it data.
+    """
+    if not root.exists():
+        return 0
+    if not owned_root(root):
+        print(f"warning: not pruning runs in a directory without the runner's ownership marker: {root}", file=sys.stderr)
+        return 0
+    groups: dict[str, list[tuple[float, Path]]] = {}
+    for run in sorted(root.iterdir()):
+        if run.is_symlink() or not run.is_dir():
+            continue
+        worktree, _, started = run_attribution(run)
+        groups.setdefault(worktree if worktree is not None else UNKNOWN_WORKTREE, []).append((started, run))
+    now = time.time()
+    failures = 0
+    for worktree, runs in sorted(groups.items()):
+        runs.sort(key=lambda entry: entry[0], reverse=True)
+        for index, (started, run) in enumerate(runs):
+            if index < RUNS_KEPT_PER_WORKTREE or now - started < RUN_TTL_SECONDS:
+                continue
+            try:
+                shutil.rmtree(run)
+            except OSError as error:
+                print(f"warning: could not remove the result run {run}: {error}", file=sys.stderr)
+                failures += 1
+                continue
+            print(
+                f"removed result run {run.name} of {worktree} "
+                f"({human_duration(int(now - started))} old, beyond the newest {RUNS_KEPT_PER_WORKTREE})"
+            )
+    remove_dangling_latest(root)
+    return failures
+
+
+def prune_products(root: Path) -> int:
+    """Delete the test products of worktrees that no longer exist.
+
+    The products root holds one directory per worktree, each proved by the
+    runner's ownership marker and stamped after its last successful build; only
+    a stamp naming a worktree path that is gone proves the products have no
+    owner left, so a directory without a readable stamp is kept. Returns the
+    number of directories that could not be removed.
+    """
+    if not root.exists():
+        return 0
+    failures = 0
+    for directory in sorted(root.iterdir()):
+        if directory.is_symlink() or not directory.is_dir() or not owned_root(directory):
+            continue
+        stamp = load_json(directory / BUILD_IDENTITY_NAME)
+        worktree = stamp.get("worktree") if stamp is not None else None
+        if not isinstance(worktree, str) or not worktree or Path(worktree).exists():
+            continue
+        try:
+            shutil.rmtree(directory)
+        except OSError as error:
+            print(f"warning: could not remove the test products {directory}: {error}", file=sys.stderr)
+            failures += 1
+            continue
+        print(f"removed the test products of the deleted worktree {worktree}: {directory}")
+    return failures
+
+
+def prune_artifacts(arguments: argparse.Namespace) -> int:
+    """Reclaim the runs and products a finished or killed command left behind."""
+    failures = 0
+    if arguments.results_root is not None:
+        failures += prune_runs(arguments.results_root)
+    if arguments.products_root is not None:
+        failures += prune_products(arguments.products_root)
+    return failures
+
+
+def prune_command(arguments: argparse.Namespace) -> int:
+    return DESTINATION_EXIT if prune_artifacts(arguments) else 0
+
+
+def clean_runs(arguments: argparse.Namespace) -> int:
+    """Delete only this worktree's and lane's runs from the shared results root.
+
+    `clean` runs while the command holds this lane's lease, so no command can be
+    creating a run in this lane as its runs are removed, and a run of another
+    lane or another worktree is never touched.
+    """
+    root = arguments.results_root
+    if not root.exists():
+        return 0
+    if not owned_root(root):
+        raise DestinationError(f"refusing to remove runs in a directory without the runner's ownership marker: {root}")
+    worktree = os.path.realpath(arguments.worktree)
+    removed = 0
+    for run in sorted(root.iterdir()):
+        if run.is_symlink() or not run.is_dir():
+            continue
+        owner, lane, _ = run_attribution(run)
+        if owner is None or os.path.realpath(owner) != worktree or lane != arguments.lane:
+            continue
+        try:
+            shutil.rmtree(run)
+        except OSError as error:
+            raise DestinationError(f"could not remove the result run {run}: {error}") from error
+        removed += 1
+    remove_dangling_latest(root)
+    print(f"removed {removed} result run(s) of {worktree} in lane {arguments.lane}")
     return 0
 
 
@@ -1044,13 +1226,19 @@ def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
         "command",
-        choices=("provision", "validate", "status", "delete", "state", "shutdown", "sweep", "lanes", "lane-remove"),
+        choices=(
+            "provision", "validate", "status", "delete", "state", "shutdown", "sweep", "lanes", "lane-remove",
+            "prune", "clean-runs",
+        ),
     )
     parser.add_argument("--marker", type=Path)
     parser.add_argument("--runtime")
     parser.add_argument("--device-type")
     parser.add_argument("--name")
     parser.add_argument("--worktree", type=Path)
+    parser.add_argument("--lane")
+    parser.add_argument("--results-root", type=Path)
+    parser.add_argument("--products-root", type=Path)
     parser.add_argument("--development-state", required=True, type=Path)
     parser.add_argument("--ephemeral", action="store_true")
     parser.add_argument("--discovery-root", type=Path)
@@ -1095,6 +1283,19 @@ def parse_args() -> argparse.Namespace:
         if arguments.marker is not None:
             parser.error("lane-remove does not take --marker")
         return arguments
+    if arguments.command == "prune":
+        if arguments.results_root is None and arguments.products_root is None:
+            parser.error("prune requires --results-root or --products-root")
+        if arguments.marker is not None:
+            parser.error("prune does not take --marker")
+        return arguments
+    if arguments.command == "clean-runs":
+        for required in ("results_root", "worktree", "lane"):
+            if getattr(arguments, required) is None:
+                parser.error(f"clean-runs requires --{required.replace('_', '-')}")
+        if arguments.marker is not None:
+            parser.error("clean-runs does not take --marker")
+        return arguments
     if arguments.marker is None:
         parser.error(f"{arguments.command} requires --marker")
     # Only state and shutdown read everything they need from the marker alone.
@@ -1120,6 +1321,10 @@ def main() -> int:
             return list_lanes(arguments)
         if arguments.command == "lane-remove":
             return remove_lane_command(arguments)
+        if arguments.command == "prune":
+            return prune_command(arguments)
+        if arguments.command == "clean-runs":
+            return clean_runs(arguments)
         if arguments.command == "state":
             print(lane_state(arguments.marker))
             return 0

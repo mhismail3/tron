@@ -196,13 +196,13 @@ raise SystemExit(2)
 
     def invoke(
         self, action: str, *, name: str = "Tron iOS Tests", development_on_shutdown: bool = False,
-        readers: dict[str, str] | None = None,
+        override: dict[str, str] | None = None,
     ) -> subprocess.CompletedProcess[str]:
         environment = os.environ.copy()
         environment.update({"TRON_IOS_XCRUN": str(self.fake_xcrun), "FAKE_SIMCTL_INVENTORY": str(self.inventory_path)})
         environment.update(self.reader_environment())
-        if readers is not None:
-            environment.update(readers)
+        if override is not None:
+            environment.update(override)
         if development_on_shutdown:
             environment["FAKE_DEVELOPMENT_ON_SHUTDOWN"] = str(self.development)
         return subprocess.run(self.command(action, name=name), env=environment, text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
@@ -447,7 +447,7 @@ class AdmissionFixture(SimulatorHarness, unittest.TestCase):
                 self.marker.unlink(missing_ok=True)
                 self.write_inventory(devices={RUNTIME_ID: []})
                 self.reader_value("free-percent", percent)
-                result = self.invoke("provision", readers=environment)
+                result = self.invoke("provision", override=environment)
                 self.assertEqual(result.returncode, 0, result.stderr)
                 self.assertIn(expected, result.stderr)
                 self.assertIn("admitting the boot without that check", result.stderr)
@@ -582,7 +582,7 @@ exit 0
         mode: str = "success", xcode_status: int = 0,
         extra_args: list[str] | None = None,
         lane: str | None = None, discovery_root: Path | None = None,
-        readers: dict[str, str] | None = None,
+        override: dict[str, str] | None = None,
     ) -> subprocess.CompletedProcess[str]:
         environment = os.environ.copy()
         environment.update(self.reader_environment())
@@ -611,8 +611,8 @@ exit 0
             environment.setdefault("TRON_IOS_TEST_DISCOVERY_ROOT", str(self.root))
         if discovery_root is not None:
             environment["TRON_IOS_TEST_DISCOVERY_ROOT"] = str(discovery_root)
-        if readers is not None:
-            environment.update(readers)
+        if override is not None:
+            environment.update(override)
         if home is not None:
             # Exercise the runner's own defaults under a synthetic HOME.
             environment.pop("TRON_IOS_TEST_DERIVED_DATA", None)
@@ -1584,7 +1584,7 @@ class SweepFixture(OwnedLaneFixture):
         self.assertEqual(self.device_entry(UDID_A)["state"], "Shutdown")
 
 
-class LaneFixture(OwnedLaneFixture):
+class LaneHarness(OwnedLaneFixture):
     """SIM-3: `--lane`, `lanes`, `lane-remove` and lane expiry.
 
     Failure modes these cases target, written before the code:
@@ -1625,6 +1625,7 @@ class LaneFixture(OwnedLaneFixture):
                 return line
         raise AssertionError(f"no {lane!r} row in:\n{output}")
 
+class LaneFixture(LaneHarness, unittest.TestCase):
     def test_lanes_lists_worktree_state_holder_last_use_and_disk(self) -> None:
         """Failure mode 4: every lane row reports its whole ownership state."""
         last_used = time.time() - 3600
@@ -1813,6 +1814,195 @@ class LaneFixture(OwnedLaneFixture):
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertFalse(lane.exists())
         self.assertFalse(self.present(UDID_A))
+
+
+class ReclaimFixture(LaneHarness, unittest.TestCase):
+    """SIM-5 scoped `clean` and `prune`, at the runner and command level.
+
+    Failure modes these cases target, written before the code:
+
+    1. `clean` removes the shared results root, deleting another worktree's or
+       another lane's runs.
+    2. `clean` leaves this worktree's own runs - including the ones a killed
+       command left with no metadata - behind.
+    3. `prune` deletes a run inside the retention window, or one of the newest 50
+       runs of its worktree.
+    4. `prune` keeps an unbounded pile of old runs of one busy worktree.
+    5. `prune` deletes the products of a worktree that still exists, or keeps the
+       products of a worktree that is gone.
+    6. `prune` deletes inside a root that does not carry the runner's ownership
+       marker (a caller's wrong root), fails a command because such a root
+       exists, or `clean` skips such a root silently instead of refusing it.
+    7. The sweep releases lanes but does not prune, so `reap` reclaims memory and
+       leaves the disk behind.
+    """
+
+    def setUp(self) -> None:
+        super().setUp()
+        # The runner derives both roots from HOME, which this fixture owns.
+        self.results_root = self.home / "Library/Developer/Tron/ios/test-runs"
+        self.products_root = self.home / "Library/Developer/Tron/ios/test-derived-data"
+        self.results_root.mkdir(parents=True)
+        self.products_root.mkdir(parents=True)
+        (self.results_root / ".tron-ios-test-owned").write_text("tron.ios-test-owned.v1\n")
+        self.serial = 0
+
+    def run_name(self, started: float) -> str:
+        """A run directory name as the runner makes one: a UTC stamp and a suffix."""
+        self.serial += 1
+        return f"{time.strftime('%Y%m%dT%H%M%SZ', time.gmtime(started))}-run.A{self.serial:05d}"
+
+    def write_run(
+        self, *, worktree: Path, lane: str = "default", started: float | None = None, name: str | None = None,
+    ) -> Path:
+        """A run directory with the owner the runner writes when it creates it."""
+        started = time.time() if started is None else started
+        run = self.results_root / (name or self.run_name(started))
+        run.mkdir()
+        (run / "owner.json").write_text(json.dumps({
+            "schema": "tron.ios-test-run-owner.v1", "worktree": str(worktree),
+            "worktree_key": "unused-by-prune", "lane": lane, "command": "run",
+            "started_epoch_seconds": int(started),
+        }))
+        return run
+
+    def write_legacy_run(self, *, worktree: Path, name: str) -> Path:
+        """A run from before owner.json: only its metadata names the worktree."""
+        run = self.results_root / name
+        run.mkdir()
+        (run / "metadata.json").write_text(json.dumps({
+            "schema": "tron.ios-test-run.v1", "source": {"worktree": str(worktree)},
+        }))
+        return run
+
+    def write_products(self, worktree: Path, *, stamped: bool = True) -> Path:
+        key = subprocess.run(
+            [sys.executable, str(IDENTITY), "worktree-key", "--worktree", str(worktree)],
+            check=True, text=True, stdout=subprocess.PIPE,
+        ).stdout.strip()
+        directory = self.products_root / key
+        (directory / "Build/Products").mkdir(parents=True)
+        (directory / ".tron-ios-test-owned").write_text("tron.ios-test-owned.v1\n")
+        if stamped:
+            (directory / "build-identity.json").write_text(json.dumps({
+                "schema": "tron.ios-test-build-identity.v1", "worktree": str(worktree),
+                "worktree_key": key, "revision": "0" * 40, "dirty": False,
+                "source_fingerprint": "0" * 64,
+            }))
+        return directory
+
+    def test_clean_removes_only_this_worktrees_lane_runs_and_products(self) -> None:
+        """Failure modes 1 and 2: the shared root survives, this lane's runs do not."""
+        mine = [self.write_run(worktree=ROOT) for _ in range(2)]
+        legacy = self.write_legacy_run(worktree=ROOT, name="20260801T000000Z-run.LEGACY1")
+        other_lane = self.write_run(worktree=ROOT, lane="alpha")
+        other_worktree = self.root / "other-worktree"
+        other_worktree.mkdir()
+        foreign = self.write_run(worktree=other_worktree)
+        (self.results_root / "latest").symlink_to(mine[0])
+        products = self.write_products(ROOT)
+        foreign_products = self.write_products(other_worktree)
+        self.owned_lane("ios-test", UDID_A)
+
+        result = self.runner("clean")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertTrue(self.results_root.exists())
+        self.assertFalse((self.results_root / ".tron-ios-test-owned").exists() is False)
+        for run in (*mine, legacy):
+            self.assertFalse(run.exists(), f"{run} should have been removed")
+        self.assertTrue(other_lane.exists())
+        self.assertTrue(foreign.exists())
+        self.assertFalse((self.results_root / "latest").is_symlink())
+        self.assertFalse(products.exists())
+        self.assertTrue(foreign_products.exists())
+        self.assertFalse(self.present(UDID_A))
+
+    def test_prune_keeps_the_newest_50_of_a_worktree_and_anything_under_7_days(self) -> None:
+        """Failure modes 3 and 4: both retention rules hold, per worktree."""
+        now = time.time()
+        young = [self.write_run(worktree=ROOT, started=now - 3600 * (index + 1)) for index in range(51)]
+        old = [
+            self.write_run(worktree=ROOT, started=now - 8 * 86400),
+            self.write_run(worktree=ROOT, started=now - 9 * 86400),
+        ]
+        other_worktree = self.root / "other-worktree"
+        other_worktree.mkdir()
+        other = self.write_run(worktree=other_worktree, started=now - 30 * 86400)
+
+        result = self.runner("prune")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        # Beyond the newest 50 and past the window: removed.
+        self.assertFalse(old[0].exists())
+        self.assertFalse(old[1].exists())
+        # Beyond the newest 50 but inside the window: kept.
+        self.assertTrue(young[-1].exists())
+        self.assertEqual(sum(1 for run in young if run.exists()), len(young))
+        # Another worktree's only run is inside its own newest 50.
+        self.assertTrue(other.exists())
+        self.assertEqual(result.stdout.count("removed result run"), 2)
+
+        again = self.runner("prune")
+        self.assertEqual(again.returncode, 0, again.stderr)
+        self.assertNotIn("removed result run", again.stdout)
+
+    def test_prune_deletes_the_products_of_a_deleted_worktree_only(self) -> None:
+        """Failure mode 5: only a stamp naming a missing worktree proves no owner."""
+        live = self.root / "live-worktree"
+        live.mkdir()
+        gone = self.root / "gone-worktree"
+        unstamped = self.root / "unstamped-worktree"
+        live_products = self.write_products(live)
+        gone_products = self.write_products(gone)
+        unstamped_products = self.write_products(unstamped, stamped=False)
+
+        result = self.runner("prune")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertFalse(gone_products.exists())
+        self.assertIn(str(gone), result.stdout)
+        self.assertTrue(live_products.exists())
+        self.assertTrue(unstamped_products.exists())
+
+    def test_prune_leaves_a_root_without_the_ownership_marker_alone(self) -> None:
+        """Failure mode 6: a caller's wrong results root costs it nothing."""
+        unmarked = self.root / "unmarked-results"
+        (unmarked / "20260101T000000Z-run.STALE1").mkdir(parents=True)
+        environment = {**self.environment, "TRON_IOS_TEST_RESULTS_DIR": str(unmarked)}
+
+        result = self.runner("prune", environment=environment)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("without the runner's ownership marker", result.stderr)
+        self.assertTrue((unmarked / "20260101T000000Z-run.STALE1").exists())
+        # Every sweep prunes, so a sweep must not fail for the same reason.
+        self.assertEqual(self.reap(environment=environment).returncode, 0)
+
+    def test_clean_refuses_a_results_root_without_the_ownership_marker(self) -> None:
+        """Failure mode 6: an explicit clean fails instead of silently skipping."""
+        unmarked = self.root / "unmarked-results"
+        (unmarked / "20260101T000000Z-run.STALE1").mkdir(parents=True)
+        products = self.write_products(ROOT)
+        environment = {**self.environment, "TRON_IOS_TEST_RESULTS_DIR": str(unmarked)}
+
+        result = self.runner("clean", environment=environment)
+        self.assertEqual(result.returncode, 66, result.stderr)
+        self.assertIn("ownership marker", result.stderr)
+        self.assertTrue((unmarked / "20260101T000000Z-run.STALE1").exists())
+        self.assertTrue(products.exists())
+
+    def test_the_sweep_prunes_so_reap_reclaims_memory_and_disk(self) -> None:
+        """Failure mode 7: one `reap` releases the orphan and prunes the runs."""
+        self.owned_lane("ios-test", UDID_A)
+        now = time.time()
+        runs = [self.write_run(worktree=ROOT, started=now - 8 * 86400) for _ in range(52)]
+
+        result = self.reap()
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(self.device_entry(UDID_A)["state"], "Shutdown")
+        self.assertEqual(result.stdout.count("removed result run"), 2)
+        self.assertEqual(sum(1 for run in runs if run.exists()), 50)
+
+        again = self.reap()
+        self.assertEqual(again.returncode, 0, again.stderr)
+        self.assertNotIn("removed result run", again.stdout)
 
 
 if __name__ == "__main__":

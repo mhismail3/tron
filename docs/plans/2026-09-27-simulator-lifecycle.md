@@ -2,7 +2,7 @@
 
 - **Started:** 2026-09-27
 - **Status:** Active
-- **Last updated:** 2026-09-28, SIM-4 done; SIM-5 to SIM-9 claimed
+- **Last updated:** 2026-09-28, SIM-5 done; SIM-6 to SIM-9 claimed
 - **Goal:** Agents run as many iOS simulators in parallel as the Mac can afford, and every simulator, process and artifact the test tooling creates is released automatically, including after crashes, so the live Gateway never runs short of memory.
 
 ## Goal and constraints
@@ -75,7 +75,7 @@ Why it accumulates, from the code:
 | SIM-2 | Done | Sweep: every Tron test tool invocation first shuts down orphaned owned simulators (booted, lease free); `scripts/tron-ios-test reap` runs it on demand | SIM-1 | chat scroll session (worker lanes), 2026-09-27 |
 | SIM-3 | Done | Named lanes: `--lane NAME` (and `TRON_IOS_TEST_LANE`) names a lane; `lanes` lists every lane with its worktree, state, lease holder, last use and disk size; `lane-remove NAME` deletes its simulator, state and products; the sweep deletes lanes unused for 7 days | SIM-2 | chat scroll session (worker lanes), 2026-09-27 |
 | SIM-4 | Done | Memory admission: before booting, read memory pressure and swap; if booting would leave less than a set reserve, fail fast with exit 73 and print what is booted, by which worktree and lane, and for how long | SIM-2 | chat scroll session (worker lanes), 2026-09-27 |
-| SIM-5 | Claimed | Scoped clean and pruning: `clean` removes only this worktree's or lane's simulator, products and runs; `prune` keeps the newest results per worktree and deletes products whose worktree no longer exists; the sweep prunes too | SIM-3 | chat scroll session (worker lanes), 2026-09-27 |
+| SIM-5 | Done | Scoped clean and pruning: `clean` removes only this worktree's or lane's simulator, products and runs; `prune` keeps the newest results per worktree and deletes products whose worktree no longer exists; the sweep prunes too | SIM-3 | chat scroll session (worker lanes), 2026-09-27 |
 | SIM-6 | Claimed | One view: `scripts/tron-ios-test status --all` lists every booted simulator (owned lanes, the Development simulator, unowned ones), its owner, lease holder and uptime, plus `Simulator.app` | SIM-3 | chat scroll session (worker lanes), 2026-09-27 |
 | SIM-7 | Claimed | Same lifecycle everywhere: `scripts/tron-profile-ios`, `scripts/ios-gateway-e2e-test` and `scripts/tron-ios-simulator` use the lane, release, sweep and admission paths; the Development simulator reports idle uptime and is shut down by its `stop` | SIM-1, SIM-2, SIM-4 | chat scroll session (worker lanes), 2026-09-27 |
 | SIM-8 | Claimed | Diagnosable disconnects: the Gateway records the Mac's memory pressure and swap in its diagnostics when phone connections drop and reconnect, with a row in `packages/gateway/docs/observability.md` and a test | none | chat scroll session (worker lanes), 2026-09-27 |
@@ -395,3 +395,59 @@ Owning files: `scripts/ios-test-simulator.py`, `scripts/tron-ios-test`.
   Uptime comes from `ps -axo pid=,etime=,command=` (macOS has no `etimes`);
   macOS `ps` in this Xcode is what proves a device's boot time, so
   `TRON_IOS_PS` is also what SIM-6's tests must fake.
+
+### SIM-5 · Done · 2026-09-28 · chat scroll session (worker lanes)
+
+- Result: `clean` is scoped and `prune` reclaims disk. `clean` removes this
+  lane's simulator, this lane's runs (attributed by a `owner.json` the runner
+  writes when it creates the run directory, or by the `source.worktree` of an
+  older run's `metadata.json`) and this worktree's products; the shared results
+  root is never removed wholesale, and a results root without the runner's
+  ownership marker is refused (66) rather than skipped. `scripts/tron-ios-test
+  prune` keeps the newest 50 runs of each worktree plus everything younger than
+  7 days, deletes the test products whose `build-identity.json` names a worktree
+  that no longer exists, and drops a `latest` symlink whose run it pruned. Every
+  sweep prunes too, so `reap` and each provisioning command reclaim disk as well
+  as memory.
+- Evidence: `python3 scripts/test-ios-test-infrastructure.py` - 62 tests, 92.8 s
+  wall (56 tests, 94.7 s at the SIM-4 commit), with six new SIM-5 cases in
+  `ReclaimFixture`: `test_clean_removes_only_this_worktrees_lane_runs_and_products`
+  (this worktree's two runs and its legacy metadata-only run go, another lane's
+  run, another worktree's run and its products stay, the root and its marker
+  stay, a dangling `latest` goes, the lane's simulator is deleted),
+  `test_prune_keeps_the_newest_50_of_a_worktree_and_anything_under_7_days`
+  (51 young runs of one worktree: the 51st is beyond the newest 50 and stays; two
+  8- and 9-day-old runs beyond the window go; another worktree's 30-day-old only
+  run stays; a second `prune` prints nothing),
+  `test_prune_deletes_the_products_of_a_deleted_worktree_only`,
+  `test_prune_leaves_a_root_without_the_ownership_marker_alone` (and `reap` in
+  the same state still exits 0),
+  `test_clean_refuses_a_results_root_without_the_ownership_marker` and
+  `test_the_sweep_prunes_so_reap_reclaims_memory_and_disk`.
+  `python3 scripts/test-tron-profile-ios.py` - 7 tests, 0.05 s. No real-machine
+  check: every case runs against the synthetic simctl and a HOME the fixture
+  owns, so nothing under `~/Library/Developer/Tron/ios` or `~/.tron/internal` was
+  read, pruned or removed.
+- Changes: this commit.
+- Kept on purpose: `lane-remove` still keeps a live worktree's products (they are
+  shared by that worktree's lanes) and reclaims them only once its recorded
+  worktree is gone - `prune` now performs the same reclamation for a worktree
+  that has no lane left. `clean` keeps `TRON_IOS_TEST_PRESERVE_ARTIFACTS=1`
+  behaviour (simulator only), which is what CI uses. Prune skips, with a warning,
+  a root it cannot prove; the explicit `clean` refuses instead, because an agent
+  asking for 5 GB back must not be told nothing happened.
+- Deviations: the retained-run bookkeeping is a new `owner.json` inside each run
+  directory (the plan's "newest results per worktree" needs an owner, and the
+  runner has no index); it is additive, so the result layout is otherwise
+  unchanged. Retention uses the module constants `RUNS_KEPT_PER_WORKTREE` (50)
+  and `RUN_TTL_SECONDS` (7 days) with no environment override, so tests date the
+  runs instead of waiting. Products of a worktree whose stamp is missing are kept
+  (nothing proves the owner is gone). Pruning runs inside the sweep rather than
+  as a step the runner sequences, so every existing sweep caller prunes.
+- For the next agent: SIM-6's `status --all` should reuse `simulator_rows` (it is
+  already the admission refusal table) and only has to add the command, wire the
+  runner's `status --all`, and test the Development/unowned/Simulator.app rows -
+  `TRON_IOS_PS` is the injectable process table those uptimes come from. Runs and
+  products are pruned by the sweep before provisioning, so a `run` still holds
+  its lane's lease while another worktree's old runs are reclaimed; nothing in
+  these paths takes a second lease.
