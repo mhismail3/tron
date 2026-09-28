@@ -2564,11 +2564,12 @@ a latency percentile.
 - Evidence: `npx vitest run src/sessions/session-catalog.test.ts` 4/4 in 2.2 s;
   `npx vitest run src/sessions/catalog-metadata-index.test.ts
   src/sessions/catalog-discovery.test.ts src/sessions/session-catalog.test.ts`
-  23/23 in 1.5 s; `npx vitest run src/sessions/runtime-registry.integration.test.ts`
-  244 passed / 3 failed in 62–77 s (the 3 failures are the two durable-index
-  counting tests updated here plus one load flake, below), and the new case
-  `-t "matches a full scan after create, rename, fork and delete in the catalog
-  index"` passes alone in 3.6 s. `npx tsc -p tsconfig.json --noEmit` clean.
+  23/23 in 2.7 s; `npx vitest run src/sessions/runtime-registry.integration.test.ts`
+  **247 passed / 247 in 99 s** (the whole owner file, after the accounting
+  adjustments below). The new case `-t "matches a full scan after create, rename,
+  fork and delete in the catalog index"` passes alone in 3.6–6.2 s.
+  `npx tsc -p tsconfig.json --noEmit` clean; `check-documentation-policy.py` and
+  `personal-info-guard.sh` pass.
   The new integration case compares the index against the Gateway's own full
   scan (`CatalogDiscovery.sessionInfos("all")`) after each of create, rename,
   fork and delete: paths, id, cwd, parent path, name, first message, message
@@ -2601,15 +2602,24 @@ a latency percentile.
 - Deviation (transitional dual owner): the owner deliberately reads and writes
   the same durable document as the reader path until G-1c deletes that path, so
   two writers can exchange a full-document snapshot. Both are full canonical
-  cuts, so the content is the same; G-1c removes the second writer. Two existing
-  durable-index counting tests were narrowed rather than deleted: "reuses an
-  on-disk catalog…" now counts only the reader call's `append`s, and "rejects an
-  unowned append that races durable-index reconciliation" settles the owner's
-  background reconcile before injecting its append, because both call the same
-  prototype method.
+  cuts, so the content is the same; G-1c removes the second writer. Three
+  existing counting tests were narrowed rather than deleted, all because
+  background maintenance now calls the same methods they count: "reuses an
+  on-disk catalog…" counts only the reader call's `append`s, "rejects an unowned
+  append that races durable-index reconciliation" settles the owner's background
+  reconcile before injecting its append, and O-3/O-5's "counts a walk a request
+  waited on apart from background catalog walks" identifies the request's walks
+  by their `requestPath` flag instead of by their position in the call list (the
+  owner's startup reconcile may interleave with the request; the counters
+  themselves are unchanged).
 - No catalog field changes for archive: archiving is a dashboard projection of
   the same canonical membership and the row contract has no archive field, so
   the plan's "archive" hook has nothing to apply.
+- Flake watch (not this change's, recorded for the orchestrator): one full-file
+  run timed out in `keeps a large streamed write visible through snapshot
+  recovery and canonical handoff` (5.1 s) under the whole-file load; it passes
+  alone (8.3 s) and the next full run was 247/247, so treat it as a load
+  flake until the separate registry investigation says otherwise.
 - For the next agent: G-1b owns the watcher, the per-path
   `CATALOG_EVENT_DEBOUNCE_MS` (250 ms) and the `CATALOG_RECONCILE_INTERVAL_MS`
   (30-minute) batched reconcile plus `catalog.watcher-reset`; the startup
