@@ -559,7 +559,7 @@ rows are in priority order.
 | C-1 | Claimed | Projection work never blocks or parks reconnect; parked episodes self-resume | O-4, O-6b | orchestrator-dispatched deepseek-worker, 2026-09-28 |
 | G-1a | Done | Catalog owner and in-memory index fed by Gateway-owned changes | O-3, O-6a | orchestrator-dispatched deepseek-worker, 2026-09-28 |
 | G-1b | Done | Filesystem watcher and background reconciliation for external writers | G-1a | orchestrator-dispatched deepseek-worker, 2026-09-28 (the O-6a confirmation of the Done-when is owed by the orchestrator) |
-| G-1c | Claimed | Move every catalog reader to the index; delete request-path walks and the full-parse fallback | G-1b | review round 2 blockers fixed (empty cut, in-process reconciled cut, fail-fast reads); owning suite 197/257 — resume list in the handoff entry |
+| G-1c | Done | Move every catalog reader to the index; delete request-path walks and the full-parse fallback | G-1b | owning suite 232/232, session-archive 41/41, catalog suites 91/91; O-5 counter case asserts zero request-path walks. O-6a p99 is the orchestrator's quiet-host run |
 | G-1d | Ready | Replace the catalog wording in `connection-resilience.md` with the index contract (D-3) | G-1c | |
 | G-3 | Done | No audience, no projection: build and serialize snapshots only for subscribers | O-5, O-6a | orchestrator-dispatched deepseek-worker, 2026-09-28 (branch `hardening/g-3`; review round 1 addressed; CPU comparison and O-5's cross-check owed to the orchestrator) |
 | G-3a | Ready | Streaming progress for a session with no subscriber is still projected (`projectMessage` plus `safeJson` of the full message, up to once per 150 ms each); see G-3 handoff and review nit 8 | G-3 | |
@@ -7497,4 +7497,102 @@ wait).
   213/232 (`/tmp/g1c-r13.json`).
 - Still owed: the O-5 zero-request-path-walk evidence, the O-6a smoke and the
   `session.list` p99 (orchestrator's quiet-host run); G-1d's doc wording.
+
+
+### G-1c · Done · 2026-09-28 · orchestrator-dispatched deepseek-worker, review round 4 (branch `hardening/g-1c`)
+
+- Result: **green**. `runtime-registry.integration.test.ts` 232/232 (review
+  time: 192/257 with 65 failures), `session-archive.integration.test.ts` 41/41,
+  `session-catalog.test.ts` + `catalog-discovery.test.ts` +
+  `catalog-metadata-index.test.ts` 91/91. Only the request path's real work
+  remains: `session.list` p99 and the O-6a quiet-host run are the orchestrator's.
+- Commits this round: `371306fb7` (removed-internals rework + 21 deletions),
+  `89c62abc2`, `1f5ce404d`, `c8c97145f` (finish the rework: owner outcomes,
+  commit-fence races, T-1 fix, row-facts projection digest), `d187aa3c8`
+  (three fixtures wait for the owner's cut), plus round-3 source commits
+  `5d38ee986`, `cdb2f2f77`.
+- Zero-request-path-walk evidence (Done-when, O-5 counter): the case "counts no
+  request-path walk while the reader joins the owner's cut" runs a
+  `session.delete` inside a `RequestSpan` with `resources.recordCatalogWalk`
+  recorded and asserts **no** request-path walk at all while the owner's own
+  passes stay background (`/tmp/g1c-r17.json`). T-1's race case
+  ("discovers oversized active lifecycle headers…") uses the documented fix
+  (`discoverExtensionArtifactsUntil`).
+- Guarantees kept by the 21 deletions (each deleted case → the case that now
+  holds, or the reason the subject is gone):
+  1. "keeps a live-owned index cut when the owner appends during reconciliation"
+     → session-catalog.test.ts's append-to-row cases + "resolves a list, a cold
+     open and a hot re-acquire…" (the reader no longer loads the durable index).
+  2. "rejects an inode replacement that races durable-index reconciliation"
+     → "reads only the admitted file's own header…" + the delete/attention fences.
+  3. "retires a durable load invalidated before publication and falls back to a
+     fresh canonical cut" → "keeps the published rows through an incomplete pass
+     and authorizes nothing destructive" (the load/fallback path is deleted).
+  4. "keeps a warmed disk index across live-only create and delete" → "projects
+     empty live sessions until deletion, persistence, eviction, or restart" +
+     "retains persisted, ambiguous, and live-only artifact owners…".
+  5. "coalesces concurrent fallback acquisition scans for one catalog generation"
+     and 6. "revalidates oversized SDK identities after fallback resolution"
+     → "falls back to stable SDK discovery…" is gone; membership is the index
+     ("keeps an unrelated malformed header out of the cut without a fallback
+     scan").
+  7. "retries lightweight acquisition without stamping invalidated evidence
+     current" and 8. "fails busy after a second lightweight acquisition
+     invalidation" → the lightweight/fallback loop is deleted; the generation
+     fence remains and is covered by "rejects identity, cwd, or duplicate
+     mutation before runtime creation".
+  9. "cannot republish an acquisition invalidated during full materialization"
+     and 10. "rejects a mutation in the final full-catalog publication gap"
+     → no publication step remains; the slot-publication generation fence is the
+     same case as 7.
+  11. "fails busy without publishing after a second unstable full materialization"
+     → "keeps the last provable row when an unowned canonical file ends in a
+     partial line" (decision 1's rule replaces the busy).
+  12. "retains the stable user cut during a real child-session write" → "advances
+     user catalog identity when canonical membership changes beside delegated
+     rows".
+  13. "isolates an unfinished child append from unrelated catalog and cold-open
+     reads" → "keeps an unrelated malformed header out of the cut…" and "keeps
+     an unprovable artifact out of the index…".
+  14. "shares one successor header walk across concurrent post-read validations"
+     → "caps canonical session path normalization concurrency" (the owner's one
+     pass) + "reads only the admitted file's own header…".
+  15. "keeps cold acquisition independent of mutable catalog metadata"
+     → "uses only bounded header evidence…" is deleted with
+     `validatedStructuralIndex`; cold acquisition reads the owner's rows by
+     design.
+  16. "coalesces acquisition successors across invalidations until prior physical
+     work settles" and 17. "lets user discovery finish while an all-scope scan
+     remains blocked and fails" → acquisition has no physical work: "resolves a
+     list, a cold open and a hot re-acquire…".
+  18. "retires viewer capacity during one shared catalog wait without multiplying
+     physical scans" and 19. "serializes an all-scope materialization behind an
+     active user flight" → a read either serves the published cut or refuses
+     retryably ("bounds recursive catalog directories…").
+  20. "acquires from header evidence while a full catalog materialization is
+     suspended" → "reads only the admitted file's own header when a cold open
+     has no cached admission".
+  21. "never stamps captured stale catalog fields with a newer summary revision"
+     → the captured-materialization path is deleted; summary revisioning is
+     covered by the attention/summary cases.
+- Production fixes this round beyond the review blockers:
+  - Page-source generations carry a digest of the index-owned row facts
+    (`materializeCatalogSnapshot`), so a row field that changes without moving
+    `listRevision` (an external rename) moves the projection token instead of
+    serving a cached stale page — required by the `projectionToken` contract and
+    covered by "refreshes user metadata and duplicate quarantine after a scoped
+    cut is warm".
+  - `catalog.changed`-driven row changes reach a read only through the owner;
+    tests that write canonical files themselves now settle the owner.
+- Merge gate (branch `hardening/g-1c`): `npx tsc --noEmit -p .` clean;
+  `npm run build` clean; `npx vitest run src/sessions src/transport src/admin
+  src/workspace` **1210 passed / 4 failed / 1214**; all four fail only under the
+  whole-directory load (`recent-model-usage`, `session-catalog`'s ENOTEMPTY
+  cleanup, `transport/logger` rotation, T-1's documented `request-span`
+  `durationMs > 100`) and pass when run as their own file
+  (`session-catalog` + `logger` + `recent-model-usage` 46/46;
+  `request-span` 1/1). `python3 scripts/check-documentation-policy.py` and
+  `scripts/personal-info-guard.sh` pass.
+- Not owed by this row: the O-6a qualification smoke, `session.list` p99 and the
+  G-1d doc wording.
 
