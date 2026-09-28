@@ -1004,7 +1004,8 @@ describe("disposable read cancellation", () => {
     await waitFor(() => answered("open-7") !== undefined && answered("open-8") !== undefined, "both joined answers");
     expect(answered("open-7").result.subscriptionToken).toBe(answered("open-8").result.subscriptionToken);
     cancel("open-7");
-    await tick();
+    // A later answered frame proves the cancel was already processed.
+    await awaitAdmitted("cancel-fence");
     expect(connection.synchronizations.has("slow")).toBe(true);
     cancel("open-8");
     await waitFor(() => !connection.synchronizations.has("slow"), "the barrier revoked with its last delivered response");
