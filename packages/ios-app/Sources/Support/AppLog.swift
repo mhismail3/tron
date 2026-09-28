@@ -215,8 +215,19 @@ actor AppLog {
 }
 
 final class AppLogSignposts: PerformanceSignposting, @unchecked Sendable {
+    private struct OpenInterval {
+        let operation: PerformanceOperation
+        let startedAt: ContinuousClock.Instant
+    }
+
     private let base: any PerformanceSignposting
     private let log: AppLog
+    private let lock = NSLock()
+    private var openIntervals: [Int: OpenInterval] = [:]
+    /// Intervals this wrapper already signed at background; their owner's later
+    /// `end` closes only the OS signpost, not a second record.
+    private var backgroundedIntervals: Set<Int> = []
+    private var nextIntervalID = 1
 
     init(base: any PerformanceSignposting, log: AppLog) {
         self.base = base
@@ -225,19 +236,54 @@ final class AppLogSignposts: PerformanceSignposting, @unchecked Sendable {
 
     func begin(_ operation: PerformanceOperation) -> PerformanceInterval {
         let interval = base.begin(operation)
+        let startedAt = ContinuousClock().now
+        let trackedID = lock.withLock { () -> Int in
+            defer { nextIntervalID += 1 }
+            openIntervals[nextIntervalID] = OpenInterval(operation: operation, startedAt: startedAt)
+            return nextIntervalID
+        }
         return PerformanceInterval(operation: operation, state: interval.state,
-            measuredStart: ContinuousClock().now)
+            measuredStart: startedAt, trackedID: trackedID)
     }
 
     func end(_ interval: PerformanceInterval, result: PerformanceResult, metrics: PerformanceMetrics) {
         base.end(interval, result: result, metrics: metrics)
-        guard let started = interval.measuredStart else { return }
+        let alreadySignedAtBackground = takeTracked(interval)
+        guard let started = interval.measuredStart, !alreadySignedAtBackground else { return }
         let duration = diagnosticMilliseconds(started.duration(to: ContinuousClock().now))
         guard duration >= AppLog.slowOperationThresholdMilliseconds else { return }
+        let outcome = result == .success ? "success" : result == .backgrounded ? "backgrounded" : "failure"
         Task {
             await log.recordCausal(name: "operation.\(interval.operation)",
-                outcome: result == .success ? "success" : "failure", durationMilliseconds: duration,
+                outcome: outcome, durationMilliseconds: duration,
                 count: metrics.itemCount, level: result == .failure ? "error" : "warning")
+        }
+    }
+
+    func endOpenIntervalsAtBackground() {
+        let open = lock.withLock { () -> [OpenInterval] in
+            let values = Array(openIntervals.values)
+            backgroundedIntervals.formUnion(openIntervals.keys)
+            openIntervals.removeAll()
+            return values
+        }
+        guard !open.isEmpty else { return }
+        let now = ContinuousClock().now
+        for interval in open {
+            let duration = diagnosticMilliseconds(interval.startedAt.duration(to: now))
+            guard duration >= AppLog.slowOperationThresholdMilliseconds else { continue }
+            Task {
+                await log.recordCausal(name: "operation.\(interval.operation)",
+                    outcome: "backgrounded", durationMilliseconds: duration, level: "warning")
+            }
+        }
+    }
+
+    private func takeTracked(_ interval: PerformanceInterval) -> Bool {
+        guard let id = interval.trackedID else { return false }
+        return lock.withLock {
+            openIntervals.removeValue(forKey: id)
+            return backgroundedIntervals.remove(id) != nil
         }
     }
 }

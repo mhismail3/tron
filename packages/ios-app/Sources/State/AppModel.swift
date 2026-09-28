@@ -513,7 +513,8 @@ final class AppModel {
             pairer: pairer,
             pairingCommit: resolvedPairingCommit,
             pairingCommitWithoutSelection: resolvedPairingCommitWithoutSelection,
-            profileTokenLookup: resolvedProfileTokenLookup
+            profileTokenLookup: resolvedProfileTokenLookup,
+            appLog: appLog
         )
         let mutationExecutor = ConfirmedMutationExecutor(
             client: client,
@@ -1687,7 +1688,7 @@ final class AppModel {
     }
 
     func becameInactive() {
-        Task { await appLog.recordCausal(name: "app.backgrounded", outcome: "success"); await appLog.flush() }
+        recordSceneTransition(to: .inactive, flush: true)
         pushNavigationActivationReady = false
         pushNavigationActivationGeneration &+= 1
         noticeCenter.setBackgrounded(true)
@@ -1703,7 +1704,7 @@ final class AppModel {
         pushNavigationActivationGeneration &+= 1
         let activationGeneration = pushNavigationActivationGeneration
         noticeCenter.setBackgrounded(false)
-        Task { await appLog.recordCausal(name: "app.foregrounded", outcome: "success") }
+        recordSceneTransition(to: .active)
         let requiresRetirementBarrier = lifecycle.routeActivationRequiresRetirementBarrier
         let lifecycleTask = lifecycle.becameActive()
         return Task { @MainActor [weak self] in
@@ -1722,8 +1723,46 @@ final class AppModel {
         }
     }
 
+    private enum SceneTransition: String {
+        case active, inactive, background
+    }
+
+    private var recordedSceneTransition: SceneTransition = .active
+    /// Scene records are chained so their order in the log is the order the
+    /// scene moved, not the order three tasks happened to reach the log actor.
+    private var sceneRecordTask: Task<Void, Never>?
+
+    /// Records the scene's own transitions once, at the instant each happened.
+    /// `.inactive` arriving from `.background` is the scene re-entering the
+    /// foreground, not the app backgrounding; recording that as
+    /// `app.backgrounded` is why exports showed a background immediately before
+    /// a resume. The scene timestamp travels with the record because the log's
+    /// own write time can trail the transition.
+    private func recordSceneTransition(to transition: SceneTransition, flush: Bool = false) {
+        guard transition != recordedSceneTransition else { return }
+        let previous = recordedSceneTransition
+        recordedSceneTransition = transition
+        let event = switch (previous, transition) {
+        case (_, .active): "scene.active"
+        case (_, .background): "scene.background"
+        case (.background, .inactive): "scene.foreground"
+        case (_, .inactive): "scene.resign-active"
+        }
+        let sceneAt = GatewayTimestamp.preciseString(from: Date())
+        let previousRecord = sceneRecordTask
+        sceneRecordTask = Task {
+            await previousRecord?.value
+            await appLog.recordCausal(
+                name: event, outcome: "success",
+                details: "sceneAt=\(sceneAt) from=\(previous.rawValue)"
+            )
+            if flush { await appLog.flush() }
+        }
+    }
+
     @discardableResult
     func enteredBackground() -> Task<Void, Never> {
+        recordSceneTransition(to: .background, flush: true)
         sceneAllowsCatalogRefresh = false
         pushNavigationActivationReady = false
         pushNavigationActivationGeneration &+= 1
@@ -1743,6 +1782,9 @@ final class AppModel {
         sessionCatalog.markDisconnected()
         let draftCheckpoint = composerDrafts.checkpointDrafts()
         lifecycle.enteredBackground()
+        // Intervals still open when the scene retires end as `backgrounded`, not
+        // as the failure their eventual cancellation would otherwise report.
+        performanceSignposts.endOpenIntervalsAtBackground()
         catalogInvalidationGeneration &+= 1
         cancelCatalogRefresh()
         // Provider login is stable-device-owned on the Gateway. Retire only
@@ -3438,7 +3480,7 @@ final class AppModel {
                 name: "session.open.failure", outcome: "failure",
                 profileID: profileID, connectionID: admission.connectionID,
                 lifecycleGeneration: admission.generation, level: "warning",
-                details: "code=\(GatewayDiagnosticFailure.code(error))"
+                details: "code=\(GatewayDiagnosticFailure.answerCode(error))"
             )
             throw error
         }
@@ -5077,7 +5119,7 @@ extension AppModel: GatewayLifecycleProjectionDelegate {
         if event == "reconnect.failure" || event == "reconnect.exhausted" || event == "reconnect.stopped" {
             beginRecoveryDisplayEpisodeIfNeeded()
         }
-        let recordedEvents = ["scene.foreground", "scene.background", "reconnect.scheduled", "reconnect.attempt", "reconnect.failure", "reconnect.delay", "reconnect.connected", "reconnect.exhausted", "reconnect.stopped", "path.changed", "detail.tap", "detail.preparation"]
+        let recordedEvents = ["reconnect.scheduled", "reconnect.attempt", "reconnect.failure", "reconnect.delay", "reconnect.connected", "reconnect.exhausted", "reconnect.stopped", "path.changed", "detail.tap", "detail.preparation"]
         guard recordedEvents.contains(event) else { return }
         iosClientDiagnostics.recordLifecycle(
             event: "gateway.lifecycle",

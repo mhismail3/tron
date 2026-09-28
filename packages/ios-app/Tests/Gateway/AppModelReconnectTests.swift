@@ -1231,6 +1231,67 @@ struct AppModelReconnectTests {
         ))
     }
 
+    @Test("every reconnect attempt and one episode reach the always-on app log")
+    func reconnectAttemptsAndEpisodeAreRecorded() async throws {
+        let clock = ManualClock()
+        let sockets = (0..<4).map { _ in ScriptedGatewaySocket() }
+        let logURL = FileManager.default.temporaryDirectory
+            .appending(path: "reconnect-records-\(UUID().uuidString).jsonl")
+        defer {
+            try? FileManager.default.removeItem(at: logURL)
+            try? FileManager.default.removeItem(at: logURL.appendingPathExtension("1"))
+        }
+        let appLog = AppLog(fileURL: logURL)
+        try await withFixture(
+            sockets: sockets, clock: clock,
+            units: SequenceReconnectUnits(Array(repeating: 0.5, count: 8)), appLog: appLog
+        ) { fixture in
+            let start = Task { await fixture.model.start() }
+            defer { start.cancel() }
+            try await failHandshake(sockets[0])
+            try await clock.waitUntilSleeping(count: 1)
+            await start.value
+
+            for index in 1...2 {
+                clock.advance(by: .seconds(60))
+                try await sockets[index].waitUntilSent(count: 1)
+                try await failHandshake(sockets[index])
+                try await sockets[index].waitUntilClosed()
+                try await clock.waitUntilSleeping(count: 1)
+            }
+            await sockets[3].enqueue(helloFrame())
+            clock.advance(by: .seconds(60))
+            try await sockets[3].waitUntilSent(count: 1)
+            while fixture.model.connectionState != .connected {
+                try Task.checkCancellation()
+                await Task.yield()
+            }
+
+            let attempts = try await waitForRecords(in: appLog, event: "gateway.attempt", count: 3)
+            #expect(attempts.map(\.outcome) == ["failure", "failure", "success"])
+            #expect(attempts[0].message.contains("attemptId=initial"))
+            #expect(attempts[1].message.contains("retry=1"))
+            #expect(attempts[2].message.contains("stageReached=connected"))
+            let episodes = try await waitForRecords(in: appLog, event: "connection.episode", count: 1)
+            #expect(episodes.count == 1)
+            #expect(episodes[0].message.contains("endedBy=connected"))
+            #expect(episodes[0].message.contains("attempts=3"))
+            #expect(episodes[0].message.contains("maxGapBetweenAttemptsMs="))
+        }
+    }
+
+    private func waitForRecords(
+        in log: AppLog, event: String, count: Int
+    ) async throws -> [AppLogRecord] {
+        for _ in 0..<600 {
+            let values = await log.snapshot().filter { $0.event == event }
+            if values.count >= count { return values }
+            try await Task.sleep(for: .milliseconds(5))
+        }
+        Issue.record("timed out waiting for \(count) \(event) record(s)")
+        return await log.snapshot().filter { $0.event == event }
+    }
+
     private func withStartupCoordinator(
         cacheGate: TestReadGate? = nil,
         sockets: [ScriptedGatewaySocket]? = nil,
@@ -1279,9 +1340,10 @@ struct AppModelReconnectTests {
         clock: ManualClock,
         units: SequenceReconnectUnits,
         recoveryClock: ManualClock? = nil,
+        appLog: AppLog = .shared,
         operation: @escaping @MainActor @Sendable (ReconnectFixture) async throws -> Void
     ) async throws {
-        let fixture = makeFixture(sockets: sockets, clock: clock, units: units, recoveryClock: recoveryClock)
+        let fixture = makeFixture(sockets: sockets, clock: clock, units: units, recoveryClock: recoveryClock, appLog: appLog)
         do {
             try await withTestWatchdog {
                 try await operation(fixture)
@@ -1297,7 +1359,8 @@ struct AppModelReconnectTests {
         sockets: [ScriptedGatewaySocket],
         clock: ManualClock,
         units: SequenceReconnectUnits,
-        recoveryClock: ManualClock? = nil
+        recoveryClock: ManualClock? = nil,
+        appLog: AppLog = .shared
     ) -> ReconnectFixture {
         let suiteName = "AppModelReconnectTests.\(UUID().uuidString)"
         let defaults = UserDefaults(suiteName: suiteName)!
@@ -1323,7 +1386,8 @@ struct AppModelReconnectTests {
             clock: clock.clock,
             recoveryDisplayClock: recoveryClock?.clock ?? .continuous,
             reconnectDelayPolicy: ReconnectDelayPolicy(nextUnitInterval: units.next),
-            profileTokenLookup: { _ in "token" }
+            profileTokenLookup: { _ in "token" },
+            appLog: appLog
         )
         return ReconnectFixture(
             suiteName: suiteName,

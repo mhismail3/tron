@@ -23,6 +23,9 @@ enum PerformanceResult: Int, Sendable {
     case failure = 1
     case cancelled = 2
     case discarded = 3
+    /// The scene backgrounded while the operation was still open. It must not
+    /// be recorded as a failure: scene retirement did not fail the work.
+    case backgrounded = 4
 
     static func forFailure(_ error: Error) -> PerformanceResult {
         Task.isCancelled || error is CancellationError ? .cancelled : .failure
@@ -45,15 +48,20 @@ struct PerformanceInterval: Sendable {
     let operation: PerformanceOperation
     let state: OSSignpostIntervalState?
     let measuredStart: ContinuousClock.Instant?
+    /// Identifies an interval a logging wrapper is tracking, so that wrapper
+    /// can close it at scene background before its owner ends it.
+    let trackedID: Int?
 
     init(
         operation: PerformanceOperation,
         state: OSSignpostIntervalState? = nil,
-        measuredStart: ContinuousClock.Instant? = nil
+        measuredStart: ContinuousClock.Instant? = nil,
+        trackedID: Int? = nil
     ) {
         self.operation = operation
         self.state = state
         self.measuredStart = measuredStart
+        self.trackedID = trackedID
     }
 }
 
@@ -64,6 +72,14 @@ protocol PerformanceSignposting: Sendable {
         result: PerformanceResult,
         metrics: PerformanceMetrics
     )
+    /// Ends every interval still open at scene background with outcome
+    /// `backgrounded`. Signs the record, not the OS interval: the operation's
+    /// own `end` still closes its signpost when its work unwinds.
+    func endOpenIntervalsAtBackground()
+}
+
+extension PerformanceSignposting {
+    func endOpenIntervalsAtBackground() {}
 }
 
 struct SystemPerformanceSignposts: PerformanceSignposting {

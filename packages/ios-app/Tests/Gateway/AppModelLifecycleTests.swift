@@ -407,12 +407,53 @@ struct AppModelLifecycleTests {
         }
     }
 
+    @Test("scene transitions are recorded once, and a resume is not a backgrounding")
+    func sceneTransitionsAreRecordedOnce() async throws {
+        let logURL = FileManager.default.temporaryDirectory
+            .appending(path: "scene-records-\(UUID().uuidString).jsonl")
+        defer {
+            try? FileManager.default.removeItem(at: logURL)
+            try? FileManager.default.removeItem(at: logURL.appendingPathExtension("1"))
+        }
+        let appLog = AppLog(fileURL: logURL)
+        try await withFixture(socketCount: 1, appLog: appLog) { fixture in
+            // Backgrounding: the inactive phase is a resignation, not a background.
+            fixture.model.becameInactive()
+            _ = fixture.model.enteredBackground()
+            // Resume: the scene reports inactive again on the way back, which
+            // must not be recorded as a background.
+            fixture.model.becameInactive()
+            fixture.model.becameActive()
+            // A repeated callback for the phase the model is already in is not
+            // a new transition.
+            fixture.model.becameActive()
+
+            let records = try await waitForSceneRecords(in: appLog, count: 4)
+            #expect(records.map(\.event) == [
+                "scene.resign-active", "scene.background", "scene.foreground", "scene.active",
+            ])
+            #expect(records.allSatisfy { $0.message.contains("sceneAt=") })
+            #expect(records[2].message.contains("from=background"))
+        }
+    }
+
+    private func waitForSceneRecords(in log: AppLog, count: Int) async throws -> [AppLogRecord] {
+        for _ in 0..<600 {
+            let values = await log.snapshot().filter { $0.event.hasPrefix("scene.") }
+            if values.count >= count { return values }
+            try await Task.sleep(for: .milliseconds(5))
+        }
+        Issue.record("timed out waiting for \(count) scene record(s)")
+        return await log.snapshot().filter { $0.event.hasPrefix("scene.") }
+    }
+
     private func withFixture(
         socketCount: Int,
         suspendsClose: Bool = false,
+        appLog: AppLog = .shared,
         operation: @escaping @MainActor @Sendable (LifecycleFixture) async throws -> Void
     ) async throws {
-        let fixture = makeFixture(socketCount: socketCount, suspendsClose: suspendsClose)
+        let fixture = makeFixture(socketCount: socketCount, suspendsClose: suspendsClose, appLog: appLog)
         do {
             try await withTestWatchdog {
                 try await operation(fixture)
@@ -424,7 +465,7 @@ struct AppModelLifecycleTests {
         await fixture.cleanup()
     }
 
-    private func makeFixture(socketCount: Int, suspendsClose: Bool) -> LifecycleFixture {
+    private func makeFixture(socketCount: Int, suspendsClose: Bool, appLog: AppLog = .shared) -> LifecycleFixture {
         let suiteName = "AppModelLifecycleTests.\(UUID().uuidString)"
         let defaults = UserDefaults(suiteName: suiteName)!
         defaults.removePersistentDomain(forName: suiteName)
@@ -442,7 +483,8 @@ struct AppModelLifecycleTests {
             client: client,
             profiles: store,
             cache: SnapshotCache(root: cacheRoot),
-            profileTokenLookup: { profile in "token-for-\(profile.id)" }
+            profileTokenLookup: { profile in "token-for-\(profile.id)" },
+            appLog: appLog
         )
         return LifecycleFixture(
             suiteName: suiteName,

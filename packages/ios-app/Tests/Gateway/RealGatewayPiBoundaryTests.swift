@@ -350,6 +350,141 @@ final class RealGatewayPiBoundaryTests: XCTestCase {
             proxyToken: proxyToken,
             sessionID: created.sessionId
         )
+        try await exerciseBlackholedReconnect(
+            profile: profile,
+            token: token,
+            port: port,
+            proxyToken: proxyToken
+        )
+    }
+
+    /// A fault-proxy blackhole with the app foregrounded, then a restore. The
+    /// export must explain the outage: one `gateway.attempt` record per attempt
+    /// (including the one that recovered) and exactly one `connection.episode`
+    /// with the gap between them. The records are attached for inspection.
+    @MainActor
+    private func exerciseBlackholedReconnect(
+        profile: GatewayProfile,
+        token: String,
+        port: Int,
+        proxyToken: String
+    ) async throws {
+        let memoryTokens = MemoryGatewayTokenStore()
+        let profiles = GatewayProfileStore(metadata: MemoryProfileMetadataStore(), tokens: memoryTokens)
+        try profiles.save(profile, token: token)
+        let logURL = FileManager.default.temporaryDirectory
+            .appending(path: "o-4-blackhole-\(UUID().uuidString).jsonl")
+        defer {
+            try? FileManager.default.removeItem(at: logURL)
+            try? FileManager.default.removeItem(at: logURL.appendingPathExtension("1"))
+        }
+        let appLog = AppLog(fileURL: logURL)
+        let client = GatewayClient()
+        let lifecycle = GatewayLifecycleCoordinator(
+            client: client,
+            profiles: profiles,
+            clock: .continuous,
+            reconnectDelayPolicy: .standard,
+            uuidSource: .random,
+            pairer: GatewayPairer(),
+            pairingCommit: { _, _ in },
+            profileTokenLookup: { try? memoryTokens.read(profileID: $0.id) },
+            appLog: appLog
+        )
+        do {
+            lifecycle.notePathHint(satisfied: true)
+            await lifecycle.start()
+            guard lifecycle.connectionState == .connected else {
+                throw BoundaryFailure.invalidFixture("The lifecycle did not connect before the blackhole")
+            }
+            guard try await Self.waitForAttemptCount(1, in: appLog, deadline: .seconds(15)) else {
+                throw BoundaryFailure.invalidFixture("The initial attempt was not recorded")
+            }
+
+            // Retire the live socket beneath a blackholed route, so recovery
+            // has to attempt the Gateway while nothing gets through.
+            try await Self.setProxyMode("blackhole", port: port, token: proxyToken)
+            lifecycle.enteredBackground()
+            let activation = lifecycle.becameActive()
+            guard try await Self.waitForAttemptCount(2, in: appLog, deadline: .seconds(60)) else {
+                throw BoundaryFailure.timedOut("No reconnect attempt was recorded during the blackhole")
+            }
+            try await Self.setProxyMode("pass", port: port, token: proxyToken)
+            await activation?.value
+            guard let admission = lifecycle.generationAdmission,
+                  await lifecycle.waitForConnected(
+                    until: ContinuousClock().now + .seconds(60),
+                    admission: admission
+                  ) else {
+                throw BoundaryFailure.timedOut("The lifecycle did not reconnect after the blackhole")
+            }
+
+            let records = try await Self.waitForEpisode(
+                in: appLog, deadline: ContinuousClock().now + .seconds(20)
+            )
+            let attempts = records.filter { $0.event == "gateway.attempt" }
+            let episodes = records.filter { $0.event == "connection.episode" }
+            XCTAssertGreaterThanOrEqual(attempts.count, 2, "Every attempt must be on the timeline")
+            XCTAssertEqual(attempts.filter { $0.outcome == "success" }.count, 1)
+            XCTAssertTrue(attempts.contains { $0.message.contains("stageReached=connected") })
+            XCTAssertTrue(attempts.contains { $0.outcome == "failure" && $0.message.contains("stageReached=") })
+            XCTAssertEqual(episodes.count, 1, "One outage is one episode record")
+            XCTAssertTrue(episodes[0].message.contains("endedBy=connected"))
+            XCTAssertTrue(episodes[0].message.contains("attempts=\(attempts.count)"))
+            XCTAssertTrue(episodes[0].message.contains("maxGapBetweenAttemptsMs="))
+            let attachment = XCTAttachment(string: records.map { record in
+                "\(record.timestamp) \(record.level) \(record.event) durationMs=\(record.durationMs ?? -1) outcome=\(record.outcome ?? "-") \(record.message)"
+            }.joined(separator: "\n"))
+            attachment.name = "phone-connection-records"
+            attachment.lifetime = .keepAlways
+            add(attachment)
+        } catch {
+            await lifecycle.teardown()
+            await client.close()
+            throw error
+        }
+        await lifecycle.teardown()
+        await client.close()
+    }
+
+    private static func setProxyMode(_ mode: String, port: Int, token: String) async throws {
+        let url = URL(string: "http://127.0.0.1:\(port)/_fixture/control")!
+        var request = URLRequest(url: url, timeoutInterval: 10)
+        request.httpMethod = "POST"
+        request.setValue(token, forHTTPHeaderField: "x-tron-fixture-token")
+        request.httpBody = try JSONEncoder.gateway.encode(["mode": JSONValue.string(mode)])
+        let (_, response) = try await URLSession.shared.data(for: request)
+        guard (response as? HTTPURLResponse)?.statusCode == 200 else {
+            throw BoundaryFailure.invalidFixture("Isolated fault control did not acknowledge \(mode)")
+        }
+    }
+
+    private static func recordCount(in appLog: AppLog, event: String) async -> Int {
+        await appLog.snapshot().filter { $0.event == event }.count
+    }
+
+    private static func waitForAttemptCount(
+        _ count: Int, in appLog: AppLog, deadline: Duration
+    ) async throws -> Bool {
+        let until = ContinuousClock().now + deadline
+        while ContinuousClock().now < until {
+            if await recordCount(in: appLog, event: "gateway.attempt") >= count { return true }
+            try await Task.sleep(for: .milliseconds(100))
+        }
+        return false
+    }
+
+    private static func waitForEpisode(
+        in appLog: AppLog, deadline: ContinuousClock.Instant
+    ) async throws -> [AppLogRecord] {
+        while ContinuousClock().now < deadline {
+            let records = await appLog.snapshot().filter {
+                $0.event == "gateway.attempt" || $0.event == "connection.episode"
+            }
+            if records.contains(where: { $0.event == "connection.episode" }) { return records }
+            try await Task.sleep(for: .milliseconds(100))
+        }
+        throw BoundaryFailure.timedOut("No connection.episode record was written")
     }
 
     @MainActor
