@@ -4440,8 +4440,12 @@ events; widen them to name the pool owner in the same change.
   - Boundary checks: `npx vitest run src/extensions/tron-modules.test.ts
     src/knowledge/connectors.test.ts` passes 44/44 (10.0 s), and
     `npx vitest run src/integrations/mcp-adapter.test.ts
-    src/knowledge/multi-account-connectors.test.ts` passes 15/15 (2.3 s) —
-    including the mcp-adapter case that persists an admission observation.
+    src/knowledge/multi-account-connectors.test.ts` passes 15/15 (2.3 s) — that
+    pair covers MCP `setup`, `markRuntimeReady` and `admitRuntimeBinding` plus
+    the multi-account connector surface, all of which read the same projection.
+    The file's pre-existing first case (admission, mismatched identity, policy
+    revision, disconnect) is the unchanged golden path for the observation and
+    stays green.
   - Negative controls (each one term of the new guard removed, then restored):
     deleting `instance.providerDisplayName === admittedDisplayName` fails the
     rename assertion with `expected +0 to be 2`; deleting
