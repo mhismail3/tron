@@ -4,16 +4,86 @@ import SwiftUI
 /// the installed transcript. It deliberately keeps every token in layout and
 /// changes only glyph opacity, so revealing text cannot move the scroll viewport.
 enum ChatStreamingTextRevealPolicy {
-    static let wordIntervalMilliseconds = 55
+    /// The slowest (and low-backlog) spacing between word starts.
+    static let wordIntervalMilliseconds = 55.0
+    /// The fastest spacing: one 120 Hz display frame. Several words start in
+    /// one tick when the spacing is shorter than the tick.
+    static let minimumWordIntervalMilliseconds = 8.0
+    /// Each admitted word should start within this long of its arrival: one
+    /// Gateway progress window (150 ms) plus slack.
+    static let drainHorizonMilliseconds = 180.0
     static let fadeMilliseconds = 220
-    static let maximumAnimatedBacklog = 18
+    /// Fade frames are refreshed at least this often while a word fades.
+    static let fadeTickMilliseconds = 33.0
+    /// Reveal ticks never run faster than one 60 Hz frame.
+    static let minimumTickMilliseconds = 16.0
+    /// Safety valve for real stalls only: a backlog that the fastest spacing
+    /// cannot drain in about a second, or a word that already waited that
+    /// long, is shown at once so the UI never lags the authoritative stream.
+    static let maximumAnimatedBacklog = Int(1_000 / minimumWordIntervalMilliseconds)
+    static let maximumPendingWaitMilliseconds = 1_000.0
     /// Large streaming bodies render authoritatively without per-word
     /// reconstruction. The transcript remains current while avoiding O(message)
     /// allocation on every reveal tick.
     static let maximumAnimatedUTF16Length = 16_384
 
-    static func shouldCatchUp(pendingTokenCount: Int) -> Bool {
-        pendingTokenCount > maximumAnimatedBacklog
+    struct Admission {
+        /// Show every pending word at once (safety valve).
+        var catchUp = false
+        /// Scheduled start times of the leading pending words, in order.
+        var startTimes: [Double] = []
+        /// The scheduled start of the most recent word after this admission.
+        var clock: Double?
+        /// When the next still-pending word becomes due.
+        var nextStart: Double?
+    }
+
+    /// Spacing for the next word start: the slowest that still starts every
+    /// pending word within `drainHorizonMilliseconds` of its arrival. When all
+    /// pending words arrived together this is `drainHorizon / pendingWords`;
+    /// it is exactly `wordIntervalMilliseconds` at a backlog of three or fewer.
+    static func wordInterval(now: Double, pendingArrivals: ArraySlice<Double>) -> Double {
+        var interval = wordIntervalMilliseconds
+        for (offset, arrival) in pendingArrivals.enumerated() {
+            interval = min(interval, (arrival + drainHorizonMilliseconds - now) / Double(offset + 1))
+        }
+        return max(minimumWordIntervalMilliseconds, interval)
+    }
+
+    /// Decides which pending words start at `now` (all times in milliseconds
+    /// on one monotonic origin). Pacing depends only on elapsed time since the
+    /// last scheduled start and on pending arrivals, never on how often the
+    /// caller is invoked, so a new stream frame neither grants an extra word
+    /// nor delays the next one. `pendingArrivals` is in reveal order.
+    static func admission(now: Double, clock: Double?, pendingArrivals: [Double]) -> Admission {
+        guard let oldest = pendingArrivals.first else { return Admission(clock: clock) }
+        if pendingArrivals.count > maximumAnimatedBacklog
+            || now - oldest > maximumPendingWaitMilliseconds {
+            return Admission(catchUp: true)
+        }
+        var remaining = pendingArrivals[...]
+        var interval = wordInterval(now: now, pendingArrivals: remaining)
+        // Credit covers at most one tick, so an idle stream or a late tick
+        // never releases a burst of words that should have started earlier.
+        var clock = max(clock ?? -.infinity, now - max(interval, fadeTickMilliseconds))
+        var startTimes: [Double] = []
+        while let arrival = remaining.first, clock + interval <= now {
+            clock = max(clock + interval, arrival)
+            startTimes.append(clock)
+            remaining = remaining.dropFirst()
+            interval = wordInterval(now: now, pendingArrivals: remaining)
+        }
+        return Admission(
+            startTimes: startTimes,
+            clock: clock,
+            nextStart: remaining.isEmpty ? nil : clock + interval
+        )
+    }
+
+    /// How long the reveal loop sleeps before its next tick.
+    static func tickMilliseconds(now: Double, nextStart: Double?) -> Double {
+        guard let nextStart else { return fadeTickMilliseconds }
+        return min(fadeTickMilliseconds, max(minimumTickMilliseconds, nextStart - now))
     }
 
     static func permitsAnimation(renderedUTF16Length: Int) -> Bool {
@@ -79,7 +149,40 @@ enum ChatThinkingTraceLayoutPolicy {
     }
 }
 
-private struct ChatStreamingTextToken: Identifiable {
+/// Reveal pacing bookkeeping that the body never reads: when each pending word
+/// was admitted and the scheduled start of the most recent word. Kept outside
+/// view state so updating it costs no body evaluation.
+private final class ChatStreamingTextRevealSchedule {
+    var clock: Double?
+    private var arrivals: [String: Double] = [:]
+
+    /// Arrival times of `pending` in order; a word seen for the first time
+    /// arrives at `now`.
+    func arrivals(of pending: [ChatStreamingTextToken], now: Double) -> [Double] {
+        pending.map { token in
+            if let arrival = arrivals[token.id] { return arrival }
+            arrivals[token.id] = now
+            return now
+        }
+    }
+
+    func started(_ id: String) {
+        arrivals.removeValue(forKey: id)
+    }
+
+    func retain(_ ids: Set<String>) {
+        if arrivals.keys.contains(where: { !ids.contains($0) }) {
+            arrivals = arrivals.filter { ids.contains($0.key) }
+        }
+    }
+
+    func reset() {
+        clock = nil
+        if !arrivals.isEmpty { arrivals.removeAll() }
+    }
+}
+
+struct ChatStreamingTextToken: Identifiable {
     let id: String
     let value: AttributedString
     let isWord: Bool
@@ -234,6 +337,7 @@ struct ChatStreamingInlineText: View {
     @State private var hasAdmittedInitialContent = false
     @State private var tokenCache = ChatStreamingTextTokenCache()
     @State private var settlement = ChatStreamingTextSettlement()
+    @State private var schedule = ChatStreamingTextRevealSchedule()
 
     var body: some View {
         let _ = animationTick
@@ -320,6 +424,7 @@ struct ChatStreamingInlineText: View {
             // Record it without writing view state; a later switch to
             // streaming folds it in below before any fade starts.
             if !revealStarts.isEmpty { revealStarts.removeAll() }
+            schedule.reset()
             if settlement.isFull { foldSettlement() }
             settlement.settle(
                 inline: inline,
@@ -336,22 +441,22 @@ struct ChatStreamingInlineText: View {
             // uncovered; its authoritative text remains immediately visible.
             revealedIDs.formUnion(currentIDs)
             revealStarts.removeAll()
+            schedule.reset()
             hasAdmittedInitialContent = true
             return
         }
         revealedIDs.formIntersection(currentIDs)
         revealStarts = revealStarts.filter { currentIDs.contains($0.key) }
+        schedule.retain(currentIDs)
 
         guard !reduceMotion else {
             revealedIDs.formUnion(currentIDs)
             revealStarts.removeAll()
+            schedule.reset()
             hasAdmittedInitialContent = true
             return
         }
 
-        let pendingCount = tokens.lazy
-            .filter { $0.isWord && !revealedIDs.contains($0.id) && revealStarts[$0.id] == nil }
-            .count
         if !hasAdmittedInitialContent {
             // The first mounted frame is already authoritative and measured.
             // Never render it transparent while the bookkeeping task starts:
@@ -361,27 +466,37 @@ struct ChatStreamingInlineText: View {
             hasAdmittedInitialContent = true
             revealedIDs.formUnion(currentIDs)
             revealStarts.removeAll()
-            return
-        } else if ChatStreamingTextRevealPolicy.shouldCatchUp(pendingTokenCount: pendingCount) {
-            // A slow renderer/network update must never make the native UI lag
-            // behind the authoritative stream by an unbounded word queue.
-            revealedIDs.formUnion(currentIDs)
-            revealStarts.removeAll()
+            schedule.reset()
             return
         }
 
+        // Every stream frame restarts this task. Pacing lives in `schedule`
+        // and the pure policy, so the restart itself changes nothing.
         while !Task.isCancelled {
-            let startedNewToken: Bool
-            if let next = tokens.first(where: {
+            let now = Date.now
+            let nowMilliseconds = now.timeIntervalSinceReferenceDate * 1_000
+            let pending = tokens.filter {
                 $0.isWord && !revealedIDs.contains($0.id) && revealStarts[$0.id] == nil
-            }) {
-                revealStarts[next.id] = .now
-                startedNewToken = true
-            } else {
-                startedNewToken = false
+            }
+            let admission = ChatStreamingTextRevealPolicy.admission(
+                now: nowMilliseconds,
+                clock: schedule.clock,
+                pendingArrivals: schedule.arrivals(of: pending, now: nowMilliseconds)
+            )
+            if admission.catchUp {
+                // A stalled renderer/network update must never make the native
+                // UI lag behind the authoritative stream by an unbounded queue.
+                revealedIDs.formUnion(currentIDs)
+                revealStarts.removeAll()
+                schedule.reset()
+                return
+            }
+            schedule.clock = admission.clock
+            for (token, start) in zip(pending, admission.startTimes) {
+                revealStarts[token.id] = Date(timeIntervalSinceReferenceDate: start / 1_000)
+                schedule.started(token.id)
             }
 
-            let now = Date.now
             let completedIDs = revealStarts.compactMap { id, started in
                 now.timeIntervalSince(started) * 1_000 >= Double(ChatStreamingTextRevealPolicy.fadeMilliseconds)
                     ? id
@@ -393,13 +508,11 @@ struct ChatStreamingInlineText: View {
             }
             animationTick &+= 1
 
-            let stillPending = tokens.contains { $0.isWord && !revealedIDs.contains($0.id) }
-            guard stillPending || !revealStarts.isEmpty else { return }
-            try? await Task.sleep(for: .milliseconds(
-                startedNewToken
-                    ? ChatStreamingTextRevealPolicy.wordIntervalMilliseconds
-                    : 33
-            ))
+            guard admission.nextStart != nil || !revealStarts.isEmpty else { return }
+            try? await Task.sleep(for: .milliseconds(ChatStreamingTextRevealPolicy.tickMilliseconds(
+                now: nowMilliseconds,
+                nextStart: admission.nextStart
+            )))
         }
     }
 
@@ -422,7 +535,10 @@ struct ChatStreamingInlineText: View {
         let surfaceActive: Bool
     }
 
-    private static func tokens(
+    /// Splits `value` into word tokens (a word plus its trailing whitespace,
+    /// with any leading whitespace) and whitespace-only runs whose
+    /// concatenation is exactly `value`.
+    static func tokens(
         in value: AttributedString,
         identity: String
     ) -> [ChatStreamingTextToken] {
@@ -430,7 +546,7 @@ struct ChatStreamingInlineText: View {
         var cursor = value.startIndex
         var ordinal = 0
 
-        while cursor < value.endIndex {
+        runs: while cursor < value.endIndex {
             let runStart = cursor
             var wordStart: AttributedString.Index?
             while cursor < value.endIndex {
@@ -449,7 +565,9 @@ struct ChatStreamingInlineText: View {
                         isWord: true
                     ))
                     ordinal += 1
-                    break
+                    // The word is emitted with its trailing whitespace; the
+                    // end-of-text check below must not append it again.
+                    continue runs
                 }
                 cursor = next
             }

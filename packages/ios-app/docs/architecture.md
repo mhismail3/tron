@@ -1638,8 +1638,13 @@ lifecycle-safe attachments; event/control capsules and tool-run/detail routes ar
 with unchanged SwiftUI identity and private state. While an authoritative assistant message or thinking run is
 streaming, `ChatStreamingInlineText` keeps the complete source in layout and reveals only newly admitted lexical
 words through presentation-only foreground opacity. Stable message/block/run identities preserve the reveal ledger
-across projection snapshots; a large initial/backlogged stream catches up immediately, oversized bodies bypass
-per-word tokenization, and completion shows the full source without replay. Rendered text is concatenated once per
+across projection snapshots; initial content is shown at once, oversized bodies bypass per-word tokenization, and
+completion shows the full source without replay. `ChatStreamingTextRevealPolicy.admission` paces word starts by elapsed
+time since the last scheduled start, never by how often progress frames restart the reveal task: the spacing is the
+slowest that starts each pending word within 180 ms of its arrival, clamped to 8–55 ms (exactly 55 ms at a backlog of
+three or fewer), with several words per tick when shorter than a tick. Only a real stall (more than 125 pending words
+or a word waiting over a second) catches up without a fade. `StreamingTextRevealPacingTests` replays 150 ms, 75 ms, and
+bursty cadences at 10–80 words/s; `StreamingTextRevealContinuityTests` samples the mounted view for ink jumps. Rendered text is concatenated once per
 token revision; a reveal tick reuses the memoized fully revealed prefix and rebuilds only the pending or fading tail.
 Settling text that is not streaming writes no view state; the settled words are recorded lazily and folded in only if
 the same inline later streams, so they still never fade. The eager Markdown block stack publishes its exact wrapped vertical ideal even when its
