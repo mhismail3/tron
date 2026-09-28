@@ -553,7 +553,7 @@ rows are in priority order.
 | C-2 | Ready | "Connected" follows the transport (D-2); chat restoration shows its own loading state | C-1 | |
 | C-5 | Claimed | Back off an unreachable non-selected Gateway profile; record pool attempts and episodes | O-4 | orchestrator-dispatched deepseek-worker, 2026-09-28 |
 | G-10 | Done | Durable-write audit: no process-wide serialization of fsyncs, no fsync on reads | O-5 | orchestrator-dispatched deepseek-worker, 2026-09-28 |
-| G-10a | Claimed | Connection owner: a read (e.g. knowledge.raindrop.read) must not fsync — skip or debounce an unchanged provider observation in ConnectionOwner.recordProviderObservation, preserving stateRevision/updatedAt semantics | G-10 | orchestrator-dispatched deepseek-worker, 2026-09-28 |
+| G-10a | Done | Connection owner: a read (e.g. knowledge.raindrop.read) must not fsync — skip an unchanged provider observation in ConnectionOwner.recordProviderObservation, preserving stateRevision/updatedAt semantics | G-10 | orchestrator-dispatched deepseek-worker, 2026-09-28 |
 | C-3 | Ready | Faster retry (D-4): about 5 s transport-open deadline, immediate retry on path change | C-1 | |
 | C-4 | Claimed | Truer liveness (D-4): any inbound frame proves liveness | O-4 | orchestrator-dispatched deepseek-worker, 2026-09-28 |
 | C-6 | Ready | Cancel frame for disposable reads; a retried `session.open` joins the in-flight one | O-3 | |
@@ -4389,20 +4389,102 @@ events; widen them to name the pool owner in the same change.
   on ambient opens that excludes routed re-opens and assumes the pass keeps the
   750 ms cadence (finding 5, nit); the retained artifact's figure matches.
 
-### G-10a · Draft · 2026-09-28 · orchestrator-dispatched deepseek-worker (branch `hardening/g-10a`)
+### G-10a · Done · 2026-09-28 · orchestrator-dispatched deepseek-worker (branch `hardening/g-10a`)
 
-- Failure modes written before the code (worker procedure step 4):
-  1. **An unchanged observation still writes.** A second, identical
-     `knowledge.raindrop.read` observation for the same setup revision must
-     leave the state document (`state/integrations/connections.json` under the
-     Tron home) byte-identical, with the same mtime and the same
-     `stateRevision`, and must add no fsync to the O-5 `durableWrites` counter.
+- Result: the last read-triggered durable write left the read path.
+  `ConnectionOwner.recordProviderObservation` now computes the four projected
+  fields (`credentialAvailability`, `providerIdentity`, `providerDisplayName`,
+  `health`) before touching the instance and returns, still inside its mutex and
+  after the admission checks, when all four already hold those values. An
+  unchanged observation therefore saves nothing: no `updatedAt`/`stateRevision`
+  bump, no document rewrite, no fsync. `knowledge.raindrop.read` reuses its
+  existing `/user` verification to publish this observation on every attempt, so
+  the second and later reads in a stable state now do no durable I/O at all.
+- Failure modes written before the code (worker procedure step 4), with the
+  pre-change reproduction:
+  1. **An unchanged observation still writes.** A second, identical observation
+     must leave the state document byte-identical with the same mtime and
+     `stateRevision`, and add no fsync to the O-5 `durableWrites` counter.
+     Reproduced before the change: the new case failed at
+     `expect(drainDurableWriteStats().count).toBe(0)` with `expected 2 to be +0`
+     (`src/integrations/connection-owner.test.ts`), and the read-path case failed
+     the same way through `knowledge.raindrop.read`.
   2. **A changed observation is dropped, so a state transition is lost or a
-     projection goes stale.** An availability or identity change (`mismatch`,
-     `unavailable`, `unknown`) must still persist `credentialAvailability`,
-     `providerIdentity` and the derived `health` and remove
-     `providerDisplayName` before its response; a display-name-only change must
-     still refresh `providerDisplayName` (a renamed provider account must not
-     keep the old label).
-  Each case is written before the change, against the current code.
-- Result: pending implementation.
+     projection goes stale.** An availability/identity change must still persist
+     `health`/`credentialAvailability`/`providerIdentity` and remove
+     `providerDisplayName`; a display-name-only change must still refresh the
+     label; and an identity change that leaves `health` and the availability
+     equal (for example `unavailable`+`unknown` to `unavailable`+`mismatch`) is
+     still a different admission state. Not reproducible before the change (the
+     old code never skipped), so it is guarded by the two negative controls
+     below instead.
+- Evidence:
+  - `npx vitest run src/integrations/connection-owner.test.ts` passes 4/4
+    (0.4–0.9 s). The new case
+    "skips an unchanged provider observation and persists every changed one"
+    asserts the skip through the sampler's own drain, the document mtime, the
+    raw file text and `stateRevision`, then asserts each changed observation and
+    its derived `health` in the persisted document, with `durableWrites == 2`
+    (document + directory fsync) for each write.
+  - `npx vitest run src/knowledge/connectors.test.ts` passes 40/40 (5.1 s). The
+    new read-path case "starts no durable write when a read observes the same
+    provider admission" drives the real path
+    (`KnowledgeConnectorExtension.invoke("knowledge.raindrop.read")` with a
+    ConnectionOwner-backed instance), drains `drainDurableWriteStats()` — the
+    exact function the O-5 `gateway.resources` sampler drains
+    (`packages/gateway/src/transport/stall-diagnostics.ts`, line 344) — around the
+    second read and asserts 0, then changes only the provider's `/user` display
+    name, drains again, asserts 2 and asserts the new label in the connection
+    snapshot. The rest of the file covers the unchanged error, credential and
+    shape paths.
+  - Boundary checks: `npx vitest run src/extensions/tron-modules.test.ts
+    src/knowledge/connectors.test.ts` passes 44/44 (10.0 s), and
+    `npx vitest run src/integrations/mcp-adapter.test.ts
+    src/knowledge/multi-account-connectors.test.ts` passes 15/15 (2.3 s) —
+    including the mcp-adapter case that persists an admission observation.
+  - Negative controls (each one term of the new guard removed, then restored):
+    deleting `instance.providerDisplayName === admittedDisplayName` fails the
+    rename assertion with `expected +0 to be 2`; deleting
+    `instance.providerIdentity === observation.providerIdentity` fails the
+    equal-health identity transition. Both are discriminating; the pre-change
+    run is the control for failure mode 1.
+  - `npm run build` is clean (tsc, no output).
+  - `python3 scripts/check-documentation-policy.py` and
+    `scripts/personal-info-guard.sh` pass.
+- Changes: the G-10a commits on `hardening/g-10a`.
+- "Done when" items: (1) a read cycle with no state change reports no new
+  durable write in the O-5 counters — met by the read-path case, which counts
+  through the sampler's drain function around a real `knowledge.raindrop.read`
+  that only re-observes the current projection; (2) a changed observation still
+  persists before its response — met by the same case (a changed display name
+  persists with 2 fsyncs before `invoke` resolves) and by the
+  `connection-owner.test.ts` transitions. No qualification run was made for this
+  row: the O-6a scenario has no provider credential and never performs a
+  `knowledge.raindrop.read`, so it cannot exercise this path (the same
+  counter-level substitution the orchestrator allowed for G-10's concurrency
+  item).
+- Kept on purpose: the admission checks (instance, exact setup revision, policy
+  enabled, not disconnected), the mutex and the caller's `await` in
+  `packages/gateway/src/knowledge/connectors.ts` are unchanged; only the write
+  of an unchanged projection is skipped. `execute`, `markRuntimeReady` and
+  `disconnect` still persist every accepted command, so "acknowledged mutation is
+  durable before its response" is untouched. An absent legacy
+  `credentialAvailability`/`providerIdentity` is compared as `unknown`, which is
+  what the presentation projection already reports for it
+  (`ConnectionOwner.snapshotOf`), so such an instance is also not rewritten for
+  an `unknown` observation.
+- Deviations: none from the task's Do list. Beyond it, the `providerIdentity`
+  comparison was made load-bearing by adding the equal-health identity
+  transition case, and the rename case was moved ahead of the mismatch case so
+  that it is caught by the display-name term alone rather than by a preceding
+  identity transition (the first ordering let a guard without that term pass).
+- Tasks added: none.
+- For the next agent: R-1 should read `durableWrites`/`durableWriteMs` from the
+  fixture's `gateway.jsonl`; the connection owner now contributes fsyncs only
+  when a connection command, a runtime admission or a changed observation
+  writes, so G-10's fsync table row for
+  `ConnectionOwner.recordProviderObservation` should be read as
+  "only when the projection changes". Two review notes from this round are worth
+  keeping: `stateRevision` on an instance is not a liveness heartbeat anywhere in
+  the Gateway or iOS (iOS only validates `stateRevision >= 0`), and
+  `markRuntimeReady` is MCP-only, so no other owner depends on this write.
