@@ -221,20 +221,59 @@ keeps today's uncompressed frames.
 
 ## Collect evidence before recovery
 
-1. Export iOS Logs. Keep its capture time, represented time range, app build,
-   source freshness, profile labels/aliases, and available Gateway identity.
-   Retained/offline records are not a live Gateway health check. If the initial
-   fault predates the represented range, it is missing evidence.
-2. Compare the same UTC interval with `<tronHome>/logs/gateway.jsonl` and its
-   bounded `.1` rotation. Join the two sides by the O-1 key: a phone record's
-   `gatewayConnectionId` is the Gateway record's `connectionId`, and its
-   `clientId`/`attemptId`/`epoch` are the Gateway's `peerClientId`,
-   `peerAttemptId` and `peerEpoch`. Only logs from before the correlation key
-   shipped (protocol 5) have to be matched by time window instead.
-3. Use existing local Mac status/health observations to distinguish a responsive
+1. Run `scripts/tron-triage PHONE-EXPORT...` first. It reads the export(s) and
+   `<tronHome>/logs` (`gateway.jsonl` with its rotations; `--gateway-logs DIR`
+   for another home) read-only and prints one row per outage with its cause and
+   the records behind it: `path`, `phone-background`, `phone-stall`,
+   `gateway-stall`, `gateway-capacity` or `unknown`, decided by the first
+   matching rule in `scripts/tron_triage.py`. `--json` prints the report and
+   `--out PATH` writes it; `--tailscale-window` captures the Tailscale network
+   extension's own log with `log show` over the export's range and uses it as
+   path evidence for logs written before O-2, and `--tailscale-peer NODEKEY`
+   restricts that read to the phone's Magicsock peer so another tailnet peer's
+   relay stretch is not read as the phone's. Start there, then read the
+   evidence lines it prints.
+2. Export iOS Logs if `tron-triage` was given no export yet. Keep its capture
+   time, represented time range, app build, source freshness, profile
+   labels/aliases, and available Gateway identity. Retained/offline records are
+   not a live Gateway health check. If the initial fault predates the
+   represented range, it is missing evidence.
+3. Compare the same UTC interval with `<tronHome>/logs/gateway.jsonl` and its
+   `gateway.jsonl.1`–`.7` rotations. The tool joins the two sides by the O-1
+   key: a phone record's `gatewayConnectionId` is the Gateway record's
+   `connectionId`, and its `clientId`/`attemptId`/`epoch` are the Gateway's
+   `peerClientId`, `peerAttemptId` and `peerEpoch`. Only logs from before the
+   correlation key shipped (protocol 5) have to be matched by time window
+   instead, and the report says which join each episode used (`joinedBy`). One
+   join decides an episode: when the key joins any record, only key-joined
+   records and Gateway-wide records (a delayed event loop, host resources)
+   count as evidence, so a neighbour connection's slow span is never read as
+   this episode's cause. A connection the Gateway opened during the episode is
+   the recovery's, not the one the outage lost, so it is neither this episode's
+   join key nor its cause; rule 4 also reads a socket that opened within the
+   handshake the reconnect had just completed before the loss, one the previous
+   stretch's own recovery opened a flicker earlier, and a socket the phone's own
+   unchanged connection id says never dropped, as the recovery's for the cause,
+   because the refresh the reconnect runs on any of them is not the Gateway
+   stalling on the connection the loss dropped. A published outage is reported as one
+   episode per scene phase: the app parks recovery in the background and resumes
+   it on the foreground without publishing a new state, so the foreground
+   stretches carry the path, label and gap evidence and only the time really
+   spent in the background reads `phone-background`. One attempt belongs to the
+   stretch it began in (its end timestamp less its `durationMs`), so a connect
+   that started in a background blip is not counted against the silent stretch
+   after it. A Tailscale relay window explains an episode only when the loss
+   falls inside the window and the episode ends inside it or within the app's
+   own recovery delay after it closes; a window that closed minutes earlier is
+   context, so a measured silent gap stays an `unknown` gap with its window
+   named beside it. A cause is only as good as its evidence
+   line: an `unknown` episode lists what the records did contain, and an
+   `unknown` for a foreground silent gap is the measured silent recovery gap
+   until C-1 removes it.
+4. Use existing local Mac status/health observations to distinguish a responsive
    Gateway from an unreachable mobile path. An OS network path of `satisfied`
    proves neither Tailscale tunnel health nor reachability of the selected Mac.
-4. Preserve the first fault and the source/payload revisions used to reproduce it.
+5. Preserve the first fault and the source/payload revisions used to reproduce it.
    Do not clear app data, Keychain, canonical sessions, or credentials. Gateway
    transitions remain explicit user/maintainer actions.
 
