@@ -799,11 +799,19 @@ export class SessionCatalog {
       return;
     }
     const files = scan.candidates.length + (scan.unproven?.length ?? 0);
-    // A folder that is not there is an empty catalog, not an unreadable one: a
-    // fresh installation, or one whose sessions folder is created with the first
-    // session, has no canonical files to publish. `start()` cannot publish a cut
-    // for it either, so refusing here would leave every read and every startup
-    // recovery waiting for a cut that never comes.
+    // A folder that is not there before this owner has published anything is an
+    // empty catalog, not an unreadable one: a fresh installation, or one whose
+    // sessions folder is created with the first session, has no canonical files.
+    // `start()` cannot publish a cut for it either, so refusing would leave every
+    // read and every startup recovery waiting for a cut that never comes. A root
+    // that goes away after this owner published rows is an outage instead: an
+    // absent folder proves no removal, so those rows stay and no destructive
+    // caller may act on them.
+    if (!(await this.catalogRootIsDirectory()) && (this.canonicalCut || this.rowsByPath.size > 0)) {
+      this.reconciledCut = false;
+      report("incomplete", files);
+      return;
+    }
     if (!scan.complete) {
       // An incomplete traversal is never membership evidence: the published rows
       // stay as they are rather than shrinking to what this pass happened to see,

@@ -559,7 +559,7 @@ rows are in priority order.
 | C-1 | Claimed | Projection work never blocks or parks reconnect; parked episodes self-resume | O-4, O-6b | orchestrator-dispatched deepseek-worker, 2026-09-28 |
 | G-1a | Done | Catalog owner and in-memory index fed by Gateway-owned changes | O-3, O-6a | orchestrator-dispatched deepseek-worker, 2026-09-28 |
 | G-1b | Done | Filesystem watcher and background reconciliation for external writers | G-1a | orchestrator-dispatched deepseek-worker, 2026-09-28 (the O-6a confirmation of the Done-when is owed by the orchestrator) |
-| G-1c | Claimed | Move every catalog reader to the index; delete request-path walks and the full-parse fallback | G-1b | WIP committed on `hardening/g-1c`; owning suite red (70/257) — resume list in the handoff entry |
+| G-1c | Claimed | Move every catalog reader to the index; delete request-path walks and the full-parse fallback | G-1b | review round 2 blockers fixed (empty cut, in-process reconciled cut, fail-fast reads); owning suite 197/257 — resume list in the handoff entry |
 | G-1d | Ready | Replace the catalog wording in `connection-resilience.md` with the index contract (D-3) | G-1c | |
 | G-3 | Done | No audience, no projection: build and serialize snapshots only for subscribers | O-5, O-6a | orchestrator-dispatched deepseek-worker, 2026-09-28 (branch `hardening/g-3`; review round 1 addressed; CPU comparison and O-5's cross-check owed to the orchestrator) |
 | G-3a | Ready | Streaming progress for a session with no subscriber is still projected (`projectMessage` plus `safeJson` of the full message, up to once per 150 ms each); see G-3 handoff and review nit 8 | G-3 | |
@@ -7386,3 +7386,60 @@ wait).
   publishes a complete cut, so reads fail retryably rather than serving the
   readable rows. That rule is the scan's (G-1b owner) and needs an orchestrator
   decision: an unreadable file should not make the folder's cut incomplete.
+
+### G-1c · Claimed · 2026-09-28 · orchestrator-dispatched deepseek-worker, review round 2 (branch `hardening/g-1c`)
+
+- Result: all three review blockers are fixed at the source; the listed check
+  `session-archive.integration.test.ts` is **41/41** (was 4/41). The owning
+  suite is still red, so the row stays Claimed.
+- Fixes (commit `5d38ee986`, plus the cut rule below):
+  1. An empty or missing sessions root publishes an empty complete cut when this
+     owner has published nothing yet (a fresh install), so startup recovery and
+     the first read no longer wait for a cut that never comes; a root that goes
+     away after rows were published stays an outage (rows kept, `incomplete`).
+     A file whose header cannot be read is `unprovenPaths` in the cut: its prior
+     row is kept, no row is added, every other file still publishes, and
+     `catalog.reconciled` counts it (the cut's `complete` now means the traversal
+     only).
+  2. `hasReconciledCut()` is a second fact: only a reconcile completed in this
+     process authorizes destructive work. Storage maintenance throws retryable
+     busy, attention/archive prune and Knowledge recovery keep their records, and
+     an incomplete or failed pass clears the flag. The durable document still
+     serves reads (`hasCompleteCut`).
+  3. A read with no published cut fails fast with its own retryable reason
+     `catalog_not_ready` (row added to `observability.md`), no 20 s park, and
+     startup recovery waits for the in-process pass (`whenReconciled()`) instead
+     of failing startup on it.
+- Test rework landed: `initializeRegistry` awaits the owner's first cut at all
+  86 registry-init sites, 8 inline readers initialize, the archive fixture waits
+  for the first cut and settles the owner after it writes canonical files itself
+  (`coldSession`/`rawSession` are async; a `settle()` helper forces the owner's
+  cut, which is the deterministic form of waiting the watcher out).
+- Evidence: `npx tsc --noEmit -p .` clean; `npm run build` clean;
+  `session-archive.integration.test.ts` **41/41**;
+  `catalog-discovery.test.ts` + `session-catalog.test.ts` **31/31**;
+  `runtime-registry.integration.test.ts` **197 passed / 60 failed / 257**
+  (`/tmp/g1c-r6.json`).
+- Remaining owning-suite work, by cluster:
+  - 33 cases spy on removed internals (`sessionInfos`,
+    `fallbackCatalogAcquisition`, `validatedStructuralIndex`,
+    `sharedCatalogStructureEvidence`) or drive a race inside the deleted
+    acquisition/publication machinery. Each needs a behaviour assertion or the
+    race reformulated at the commit fence (index claimant + target-file stat and
+    header). The symlink-swap, same-inode rewrite, identity/duplicate and delete
+    gap cases are the ones the reviewer named.
+  - 27 behaviour cases: capacity/fallback/instability families belong on the
+    owner (`catalogReconciled` outcome, retryable `catalog_not_ready`) rather
+    than a reader walk; the delegated-topology and duplicate-quarantine cases
+    write canonical files after `initialize()` and need `settleCatalog`; the two
+    Knowledge-recovery cases named "without a warmed catalog" now need the owner's
+    cut by design (decision 2).
+  - Cases writing canonical files after `initialize()` need `settleCatalog`
+    (already the helper's shape: force `reconcile()` then `settled()`).
+- Still owed: the O-5 zero-request-path-walk evidence and the O-6a smoke; the
+  `session.list` p99 (orchestrator's quiet-host run); G-1d's doc wording.
+- Deviations: the missing-root rule above is narrower than the reviewed decision
+  (fresh install publishes empty; a root away after rows exist keeps them and
+  reports `incomplete`) because an absent root proves no removal and the existing
+  G-1a case pins that. `catalog_not_ready` is the new reason for a read before
+  the first cut.
