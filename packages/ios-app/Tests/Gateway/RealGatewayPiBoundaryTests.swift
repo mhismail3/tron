@@ -423,10 +423,12 @@ final class RealGatewayPiBoundaryTests: XCTestCase {
             let lossSeen = LossInstant()
             let observer = Task {
                 for await delivery in client.events where delivery.event.topic == "transport.disconnected" {
-                    await lossSeen.record()
+                    let reason = delivery.event.payload.objectValue?["reason"]?.stringValue ?? "disconnected"
+                    let connectionID = delivery.connectionID
+                    await lossSeen.record(code: reason)
                     await lifecycle.noteDisconnected(
-                        connectionID: delivery.connectionID,
-                        reason: delivery.event.payload.objectValue?["reason"]?.stringValue ?? "disconnected"
+                        connectionID: connectionID,
+                        reason: reason
                     )
                     lifecycle.requestReconnect(immediate: true)
                 }
@@ -462,11 +464,17 @@ final class RealGatewayPiBoundaryTests: XCTestCase {
             XCTAssertEqual(attempts.filter { $0.outcome == "success" }.count, 1)
             let episode = try XCTUnwrap(resolved.first)
             XCTAssertTrue(episode.message.contains("attempts=\(attempts.count)"))
-            // The loss the phone saw opens the episode, so its start is at or
-            // after that loss and before the first attempt of the outage. An
-            // episode dated by the failed attempt would not satisfy both.
+            // The loss the phone saw opens the episode; the first recovery attempt
+            // starts about a millisecond later, so both bounds below are coarse on
+            // purpose: an episode dated by that attempt would satisfy them too.
+            // They catch a start before the loss or after the attempt's end.
             let observedLoss = await lossSeen.instant
             let lossAt = try XCTUnwrap(observedLoss, "The phone must record the loss it saw")
+            let observedLossCode = await lossSeen.lossCode
+            let lossCode = try XCTUnwrap(
+                observedLossCode,
+                "The phone must record the loss code it saw"
+            )
             let startedAt = try XCTUnwrap(
                 Self.episodeDate("startedAt", in: episode.message),
                 "The episode must report its start"
@@ -474,6 +482,16 @@ final class RealGatewayPiBoundaryTests: XCTestCase {
             XCTAssertGreaterThanOrEqual(startedAt, lossAt.addingTimeInterval(-1))
             let firstAttemptAt = try XCTUnwrap(GatewayTimestamp.parse(attempts[0].timestamp))
             XCTAssertLessThanOrEqual(startedAt, firstAttemptAt)
+            // Only the loss opens the episode with a cause, and only
+            // `noteDisconnected` contributes the loss's own code; the codes after
+            // it come from the failed attempts. An episode opened by the first
+            // failed attempt instead of by the loss would not name it first, which
+            // is the evidence this leg exists for.
+            let causes = try XCTUnwrap(
+                Self.episodeCauses(in: episode.message),
+                "The episode must report its causes"
+            )
+            XCTAssertEqual(causes.first, GatewayDiagnosticFailure.normalizedCode(lossCode))
             let outage = records
             await lifecycle.teardown()
             await client.close()
@@ -493,15 +511,28 @@ final class RealGatewayPiBoundaryTests: XCTestCase {
         return GatewayTimestamp.parse(String(value))
     }
 
-    /// The instant the phone observed a transport loss, for the assertion that
-    /// the episode is dated at that loss.
+    /// The comma-separated `causes` of one `connection.episode` record, so an
+    /// assertion can name the loss that opened it.
+    private static func episodeCauses(in message: String) -> [String]? {
+        guard let range = message.range(of: "causes=") else { return nil }
+        let value = message[range.upperBound...].prefix { !$0.isWhitespace }
+        return value.split(separator: ",").map(String.init)
+    }
+
+    /// The instant and code the phone observed for a transport loss, for the
+    /// assertions that the episode is dated at that loss and names it first.
     private actor LossInstant {
         private var value: Date?
+        private var code: String?
 
         var instant: Date? { value }
+        var lossCode: String? { code }
 
-        func record() {
-            if value == nil { value = Date() }
+        func record(code: String) {
+            if value == nil {
+                value = Date()
+                self.code = code
+            }
         }
     }
 

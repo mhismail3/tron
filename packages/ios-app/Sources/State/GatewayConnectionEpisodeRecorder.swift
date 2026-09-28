@@ -90,8 +90,9 @@ final class GatewayConnectionEpisodeRecorder {
         let profileID: String?
         let lifecycleGeneration: Int
         var attempts = 0
-        /// When recovery last made progress: the episode's open plus every
-        /// attempt start and finish. The stall bound measures from here.
+        /// When recovery last made progress: the episode's open, every attempt
+        /// start, and the drop instant of a post-connect failure. The stall bound
+        /// measures from here.
         var lastProgressAt: ContinuousClock.Instant
         /// When the current holding guard began holding, or nil while recovery
         /// is progressing.

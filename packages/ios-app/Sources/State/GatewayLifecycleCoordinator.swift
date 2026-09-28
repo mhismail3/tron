@@ -308,6 +308,31 @@ final class GatewayLifecycleCoordinator {
         return task
     }
 
+    /// A transport-only recovery request from a caller that saw one request fail
+    /// but did not move the scene (the workspace browser's transient retry). It
+    /// mirrors `becameActive()`'s non-scene branch exactly: it revives a parked
+    /// `offline`/`reconnecting`/`restarting` route and does nothing else. A
+    /// rejected credential is not retried, a live socket is not replaced, and
+    /// foreground reconciliation never runs, so a failed read cannot change
+    /// reconnect behaviour.
+    @discardableResult
+    func requestTransportRecovery() -> Task<Void, Never>? {
+        guard phase.admitsWork, !sceneIsBackgrounded else { return nil }
+        // A background retirement barrier owns the next socket; a read failure
+        // must not start a peer while the old epoch is still retiring.
+        guard backgroundRetirementTask == nil,
+              connectionAdmissionTask == nil,
+              committedConnectionTask == nil else { return nil }
+        switch connectionState {
+        case .offline, .reconnecting, .restarting:
+            guard !nonRetryableRecoveryFailure else { return nil }
+            requestReconnect(immediate: true, replaceExisting: true)
+            return reconnectTask
+        case .unpaired, .unauthorized, .connecting, .connected:
+            return nil
+        }
+    }
+
     /// A suspended app cannot service the shared event stream reliably. Retire
     /// the transport epoch before suspension, discard its queued deliveries, and
     /// let the next active scene perform one authoritative reconnect.

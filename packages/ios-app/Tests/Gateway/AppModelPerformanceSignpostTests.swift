@@ -1086,6 +1086,47 @@ struct AppModelPerformanceSignpostTests {
         }
     }
 
+    @Test("a locally minted open failure reports no Gateway code")
+    func sessionOpenLocalFailureReportsNoGatewayCode() async throws {
+        try await withTestWatchdog {
+            let logURL = FileManager.default.temporaryDirectory
+                .appending(path: "session-open-local-\(UUID().uuidString).jsonl")
+            defer {
+                try? FileManager.default.removeItem(at: logURL)
+                try? FileManager.default.removeItem(at: logURL.appendingPathExtension("1"))
+            }
+            let appLog = AppLog(fileURL: logURL)
+            let harness = try await makeHarness(appLog: appLog)
+            // The Gateway answers every open with a body the store cannot admit.
+            // The failure code is therefore the phone's own `invalid_response`,
+            // minted from the answer without the Gateway naming a code, so there
+            // is no Gateway code to report. A locally minted `disconnected` or
+            // `timeout` is the same case: the phone never reached the Gateway.
+            let responder = Task {
+                for index in 1...3 {
+                    let open = try await request(in: harness.socket, frameIndex: index)
+                    #expect(open.method == "session.open")
+                    await harness.socket.enqueue(successResponse(
+                        id: open.id,
+                        result: .object(["session": .object([:])])
+                    ))
+                }
+            }
+            defer { responder.cancel() }
+            do {
+                _ = try await harness.model.openSessionPresentation("session")
+                Issue.record("a malformed projection unexpectedly opened")
+            } catch {
+                // The store's own retry budget ends the open with its failure.
+            }
+            try await valueOfOwnedTask(responder)
+            let records = await operationRecords(in: appLog, event: "session.open.failure")
+            #expect(records.count == 1)
+            #expect(records.allSatisfy { $0.message.contains("gatewayCode=none") })
+            await harness.close()
+        }
+    }
+
     private func operationRecords(in log: AppLog, event: String) async -> [AppLogRecord] {
         for _ in 0..<600 {
             let values = await log.snapshot().filter { $0.event == event }

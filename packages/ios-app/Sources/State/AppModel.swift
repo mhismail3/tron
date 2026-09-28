@@ -1118,10 +1118,14 @@ final class AppModel {
 
     /// A workspace read that failed because the transport was unavailable asks
     /// recovery for one immediate attempt on the selected profile. The scene did
-    /// not move, so this is not a scene activation: it writes no scene record and
-    /// mints no navigation activation.
+    /// not move, so this is not a scene activation: it writes no scene record,
+    /// mints no navigation activation, and runs no foreground reconciliation. It
+    /// only revives recovery the lifecycle already owns: a parked
+    /// `offline`/`reconnecting`/`restarting` route. A rejected credential, a
+    /// connecting route and a live connection are left exactly as they are, so a
+    /// failed read can never change reconnect behaviour.
     func recoverTransientTransportFailure() {
-        lifecycle.requestReconnect(immediate: true, replaceExisting: true)
+        lifecycle.requestTransportRecovery()
     }
 
     func sessionPresentationGeneration(for sessionID: String) -> Int? {
@@ -1774,10 +1778,13 @@ final class AppModel {
     }
 
     private func recordSceneTransition(to transition: AppScenePhase, flush: Bool = false) {
+        // Every observed transition spends the launch seed, including one that
+        // matches the phase already recorded: the scene has moved on its own, so
+        // the phase the launch sampled is stale and must not overwrite it.
+        hasRecordedSceneTransition = true
         guard transition != recordedSceneTransition else { return }
         let previous = recordedSceneTransition
         recordedSceneTransition = transition
-        hasRecordedSceneTransition = true
         let event = switch (previous, transition) {
         case (_, .active): "scene.active"
         case (_, .background): "scene.background"

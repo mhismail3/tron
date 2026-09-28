@@ -652,6 +652,80 @@ struct AppModelReconnectTests {
         }
     }
 
+    @Test("a workspace retry cannot retry a credential the Gateway already rejected")
+    func transientTransportRetryLeavesUnauthorized() async throws {
+        let clock = ManualClock()
+        let sockets = [ScriptedGatewaySocket(), ScriptedGatewaySocket()]
+        let logURL = FileManager.default.temporaryDirectory
+            .appending(path: "transient-unauthorized-\(UUID().uuidString).jsonl")
+        defer {
+            try? FileManager.default.removeItem(at: logURL)
+            try? FileManager.default.removeItem(at: logURL.appendingPathExtension("1"))
+        }
+        let appLog = AppLog(fileURL: logURL)
+        try await withFixture(
+            sockets: sockets, clock: clock, units: SequenceReconnectUnits([0]), appLog: appLog
+        ) { fixture in
+            let start = Task { await fixture.model.start() }
+            try await sockets[0].waitUntilSent(count: 1)
+            await sockets[0].failPendingReceivers(GatewayFailure(
+                code: "unauthenticated", message: "Pair this Gateway again.",
+                retryable: false, details: nil
+            ))
+            try await sockets[0].waitUntilClosed()
+            await start.value
+            #expect(fixture.model.connectionState == .unauthorized)
+
+            // The browser's transient-error retry is neither a scene activation
+            // nor an explicit Retry: it may revive a parked route, and a
+            // credential the Gateway rejected is not a parked route. It must
+            // leave the state, the attempts and the schedule untouched instead
+            // of retrying the token and flickering the unauthorized surface.
+            let sleepersBefore = clock.activeSleeperCount()
+            fixture.model.recoverTransientTransportFailure()
+            for _ in 0..<20 { await Task.yield() }
+            #expect(fixture.model.connectionState == .unauthorized)
+            #expect(fixture.socketFactory.requests.count == 1)
+            #expect(clock.activeSleeperCount() == sleepersBefore)
+            #expect(await recordCount(in: appLog, event: "gateway.attempt") == 1)
+        }
+    }
+
+    @Test("a workspace retry cannot replace a live connection")
+    func transientTransportRetryLeavesConnectedTransport() async throws {
+        let clock = ManualClock()
+        let sockets = [ScriptedGatewaySocket(), ScriptedGatewaySocket()]
+        let logURL = FileManager.default.temporaryDirectory
+            .appending(path: "transient-connected-\(UUID().uuidString).jsonl")
+        defer {
+            try? FileManager.default.removeItem(at: logURL)
+            try? FileManager.default.removeItem(at: logURL.appendingPathExtension("1"))
+        }
+        let appLog = AppLog(fileURL: logURL)
+        try await withFixture(
+            sockets: sockets, clock: clock, units: SequenceReconnectUnits([0]), appLog: appLog
+        ) { fixture in
+            await sockets[0].enqueue(helloFrame())
+            let start = Task { await fixture.model.start() }
+            defer { start.cancel() }
+            await start.value
+            #expect(fixture.model.connectionState == .connected)
+            #expect(await recordCount(in: appLog, event: "gateway.attempt") == 1)
+
+            // A failed read on a live connection is not a lost connection: the
+            // retry must not replace the socket, publish `.reconnecting`, write a
+            // scene record for a scene that did not move, or count an attempt.
+            let sleepersBefore = clock.activeSleeperCount()
+            fixture.model.recoverTransientTransportFailure()
+            for _ in 0..<20 { await Task.yield() }
+            #expect(fixture.model.connectionState == .connected)
+            #expect(fixture.socketFactory.requests.count == 1)
+            #expect(clock.activeSleeperCount() == sleepersBefore)
+            #expect(await appLog.snapshot().filter { $0.event.hasPrefix("scene.") }.isEmpty)
+            #expect(await recordCount(in: appLog, event: "gateway.attempt") == 1)
+        }
+    }
+
     @Test("ordinary short successful foreground visits do not become an artificial outage")
     func healthyForegroundVisitsDoNotExhaustRecovery() async throws {
         let suiteName = "GatewayHealthyForegroundTests.\(UUID().uuidString)"

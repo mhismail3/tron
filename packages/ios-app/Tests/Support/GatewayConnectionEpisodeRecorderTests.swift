@@ -196,10 +196,14 @@ struct GatewayConnectionEpisodeRecorderTests {
         #expect(stalls[0].outcome == "failure")
 
         // An episode that ends stops the watchdog: the same block is not recorded
-        // again under a lifecycle that no longer owns it.
+        // again under a lifecycle that no longer owns it. A watchdog that was
+        // never stopped finishes its ping and writes through its own task after
+        // the block ends, so give a would-be record a bounded window to land
+        // before counting.
         recorder.endEpisode(.background, profileID: "gateway", lifecycleGeneration: 1)
         await Task.yield()
         blockMainThread(for: .seconds(2.5))
+        try await Task.sleep(for: .milliseconds(500))
         #expect(await recordCount(log, event: "app.main-stall") == 1)
     }
 

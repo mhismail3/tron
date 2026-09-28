@@ -2030,6 +2030,9 @@ final class SessionPresentationStore {
         var result = PerformanceResult.failure
         var metrics = PerformanceMetrics.none
         defer { performanceSignposts.end(interval, result: result, metrics: metrics) }
+        // This attempt owns the answer: a code kept from the attempt that asked
+        // for a retry must not be read as the one that ended the open.
+        openingFailureGatewayCodes[sessionID] = nil
         let attemptConnectionGeneration = connectionGeneration
         var provisionalToken: String?
         do {
@@ -2312,9 +2315,14 @@ final class SessionPresentationStore {
             ) else {
                 return .failed(showCatchUpNotice: false)
             }
-            // `open` rewords this failure, so keep what the Gateway answered for
-            // the opening synchronization's own record.
-            if case .presentation = lease.intent, let failure = error as? GatewayFailure {
+            // `open` rewords this failure, so keep the code the Gateway itself
+            // answered for the opening synchronization's own record. A locally
+            // minted failure (`disconnected`, `timeout`, `closed`, …) has no
+            // Gateway answer to report, so it is not stored and the record
+            // reads `gatewayCode=none`.
+            if case .presentation = lease.intent,
+               let failure = error as? GatewayFailure,
+               failure.answeredByGateway == true {
                 openingFailureGatewayCodes[sessionID] = failure.code
             }
             if let failure = error as? GatewayFailure,
