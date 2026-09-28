@@ -100,6 +100,23 @@ with no incident. That is about 750 records and **about 300 KB/day**, so the
 40 MB budget holds roughly four months and the 1,000-record client tail covers
 more than a day.
 
+`gateway.resources` is the one periodic record. Its quiet minute is `debug` and
+is written only to the 4,000-record / 2 MB memory-only debug buffer, which is
+shared with every other debug record and **is not kept for a day**: about 1,440
+debug minutes a day compete with each fast event's record for the same buffer, so
+the oldest are dropped as they age and none of them reaches disk. It reaches
+`gateway.jsonl` only when a named step
+moved (info) or a threshold broke (warning): event-loop p99 in 20 ms bands,
+event-loop max in 250 ms bands, heap used moved 256 MiB and RSS moved 10% from
+the last window written at info or above (the first window the process records
+starts both anchors), a runtime published or evicted, or
+`HEAP_WARNING_SHARE` (0.70 of the limit) or `EVENT_LOOP_P99_WARNING_MS`
+(100 ms). The worst case — every minute a record at about 0.5 KB — is 1,440
+records, **about 0.7 MB**, which with the measured
+300 KB/day baseline is about 1.0 MB: at the 1 MB budget rather than under it, so
+a day that spent every minute crossing a step would have to change the cap. A
+normal day writes a small number of those records, not 1,440.
+
 The Mac and iOS volume figures above are deliberately unset. Both writers ship
 in builds the user has not installed, so any number now would be invented. When a
 day of each stream exists, record it here and change a cap only if it holds less
@@ -174,6 +191,8 @@ Conventions used in the rows:
 | `gateway.restart-drain.completed` | info | `packages/gateway/src/gateway-main.ts` | the drain reached zero blockers | — | Closes the timeline opened by `gateway.restart.requested` |
 | `gateway.restart-drain-failed` | error | `packages/gateway/src/gateway-main.ts` | the drain promise rejects | `error` | A rejected drain used to look like an ordinary failed restart |
 | `gateway.event-loop-delay` | warning | `packages/gateway/src/transport/server.ts`; evidence owner `packages/gateway/src/transport/stall-diagnostics.ts` | a heartbeat arrives `EVENT_LOOP_DELAY_WARNING_MS` (1,000 ms) or more late | `durationMs`; GC pause count/total/max, event-loop utilization, host free memory, swap used and memory pressure in the message | The 2026-09-23 6–36 s stalls could not say whether GC, host paging or the Gateway's own work caused them |
+| `gateway.resources` | debug for a quiet minute; info when a named step moved (event-loop p99 or max band, heap used moved 256 MiB or RSS moved 10% from the last window written at info or above, or a runtime published/evicted); warning past `HEAP_WARNING_SHARE` (0.70 of the V8 heap limit) or `EVENT_LOOP_P99_WARNING_MS` (100 ms) | `packages/gateway/src/transport/server.ts`; sampler and level owner `packages/gateway/src/transport/stall-diagnostics.ts` | every `RESOURCE_SAMPLE_INTERVAL_MS` (60 s), one closed window each (longer when a sample was still in flight) | the message carries `windowMs`, heap used/limit/share, RSS, event-loop delay p50/p99/max from `monitorEventLoopDelay` (its 20 ms sampling period subtracted, reset with the window), event-loop utilization, live runtimes with their canonical transcript bytes and subscriber counts, `runtimesLoaded`/`runtimesEvicted`, snapshot builds and how many had no audience, frames/bytes/subscribers per topic, catalog walks with their files and time (and `requestPathCatalogWalks`, the part a request waited on), completed fsyncs with their time, and outbound bytes | Every one of these owners (registry, transport, durable stores, snapshots) had no measured input: memory growth had no record until it disconnected a phone, and the event-loop, byte and durable-write budgets had nothing to bound. Every fsync in the Gateway routes through `syncDurably` in `packages/gateway/src/util/durable-json.ts`, so one counter covers every store rather than one record per write. Host memory (free bytes, swap used, memory pressure) deliberately stays with `gateway.event-loop-delay`'s evidence: this record is about the Gateway process |
+| `gateway.resources-failed` | warning, once per run of failures | `packages/gateway/src/transport/server.ts`; sampler `packages/gateway/src/transport/stall-diagnostics.ts` | a resource sample throws, or a tick finds the previous sample still running | `error` for a throw; `reason` (`previous sample still running`) for a skipped window | A window that keeps failing, or one that never settles, would otherwise stop `gateway.resources` in silence, and the failed window's histogram was already closed with it |
 | `connection.opened` | debug for the Mac app's local probes, info for a paired device | `packages/gateway/src/transport/server.ts` | the first valid hello on an admitted socket | `connectionId`, `peerClientId`, `peerAttemptId`, `peerEpoch` (the peer's hello correlation key, when sent); local/paired, role, negotiated compression (`compression=permessage-deflate` or `none`) and admission-to-hello time in the message | Admission and handshake were two info records per probe — about 714 lines in 3 h from local `system.info` polls — and one record now carries both; compression tells a compressed paired socket from an uncompressed one ([frame compression](connection-resilience.md#frame-compression)) |
 | `connection.closed` | debug for a local probe, info for a device | `packages/gateway/src/transport/server.ts` | the socket closes | `connectionId`, `peerClientId`, `peerAttemptId`, `peerEpoch` (the peer's hello correlation key, when sent), `durationMs`; close detail, frame counters and queue ages in the message | A close has to carry why it happened, without the per-probe volume on disk |
 | `connection.rejected` | info (with `reason`) while warming up or shutting down; warning for an unauthenticated upgrade | `packages/gateway/src/transport/server.ts` | an upgrade arrives before readiness, or without a valid credential | `reason` (`warming_up` / `shutting_down`) at the info site | Warmup rejections are an expected transient state, but an unauthenticated upgrade is a notable rejection |

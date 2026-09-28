@@ -3,6 +3,7 @@ import { lstat, mkdir, open, realpath, rename, rm } from "node:fs/promises";
 import { createReadStream } from "node:fs";
 import { createInterface } from "node:readline";
 import { AsyncMutex } from "../util/async-mutex.js";
+import { syncDurably } from "../util/durable-json.js";
 import { dirname, isAbsolute, join, relative, resolve } from "node:path";
 import type { SessionCreationOrigin } from "../protocol/types.js";
 import { userFacingPromptPreview } from "./resource-invocation.js";
@@ -176,11 +177,11 @@ export class CatalogMetadataIndex {
       const handle = await open(temporary, "wx", 0o600);
       try {
         await handle.writeFile(encoded, "utf8");
-        await handle.sync();
+        await syncDurably(handle);
       } finally { await handle.close(); }
       await rename(temporary, this.path);
       const directory = await open(dirname(this.path), "r");
-      try { await directory.sync(); } finally { await directory.close(); }
+      try { await syncDurably(directory); } finally { await directory.close(); }
       return true;
     } catch (error) {
       this.failed("save", started);

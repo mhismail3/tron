@@ -61,6 +61,7 @@ import type {
 } from "../protocol/types.js";
 import { AsyncMutex } from "../util/async-mutex.js";
 import { stage } from "../transport/request-span.js";
+import type { ResourceRecorder } from "../transport/stall-diagnostics.js";
 import type { TrustService } from "../admin/trust-service.js";
 import type { BlobStore } from "./blob-store.js";
 import {
@@ -395,6 +396,10 @@ export interface RuntimeSlotDependencies {
   processActivityRecency: ProcessActivityRecency;
   workRegistry: GatewayWorkRegistry;
   isSessionPresented: (sessionId: string) => boolean;
+  /** Subscribers the registry currently holds for a session; the slot's only
+   * view of an audience at build time. */
+  sessionAudience: (sessionId: string) => number;
+  resources?: ResourceRecorder;
   machineId?: string;
   notifications?: NotificationService;
   extensionArtifactWarning?: (warning: { reason: ExtensionArtifactRejectionReason; owner: string }) => void;
@@ -498,6 +503,10 @@ export class RuntimeSlot {
   private eventSequence = 0;
   private phase: SessionPhase;
   private disposed = false;
+  /** Set by the registry when it publishes this slot as a live runtime. Only a
+   * published slot is an eviction when it is disposed; a start that was retired
+   * before publication never was one. */
+  private published = false;
   private readonly stateChangeWaiters = new Set<() => void>();
   private retainedLeaseCount = 0;
   private readonly automationTerminalObservers = new Map<string, (terminal: AutomationOperationTerminal) => Promise<void> | void>();
@@ -6168,6 +6177,11 @@ export class RuntimeSlot {
     // snapshot publishes.
     this.flushPendingProgress();
     this.eventSequence += 1;
+    // A build for broadcast is only worth its bytes if a subscriber receives
+    // it; the sampler counts the audience, which is the count the
+    // no-projection-without-an-audience work removes the empty builds from. An
+    // RPC-driven build is audienced by the requester and is not counted.
+    this.dependencies.resources?.recordSnapshotBuild(this.dependencies.sessionAudience(this.id));
     this.hooks.broadcast(this.id, "session.snapshot", this.snapshot(this.eventSequence) as unknown as JsonValue);
     this.publishSummary();
   }
@@ -8188,6 +8202,13 @@ export class RuntimeSlot {
     return this.disposed;
   }
 
+  /** The registry publishes one newly live runtime. Until then the slot is a
+   * start that may still be retired, so it is not yet a runtime the sample can
+   * report a load or an eviction for. */
+  markPublished(): void {
+    this.published = true;
+  }
+
   async shutdown(): Promise<void> {
     if (this.disposed) return;
     if (this.shutdownPromise) return this.shutdownPromise;
@@ -8327,6 +8348,11 @@ export class RuntimeSlot {
     this.lifecycle.retire();
     this.ui.retire();
     this.disposed = true;
+    // One live runtime is gone. This is the only place a slot stops existing, so
+    // the resource sample counts the eviction where it happens and can see a
+    // load and an eviction inside one window. A slot the registry never
+    // published was never live, so its retirement is not an eviction.
+    if (this.published) this.dependencies.resources?.recordRuntimeEvicted();
     this.publishStateChange();
   }
 

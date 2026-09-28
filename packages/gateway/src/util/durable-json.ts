@@ -1,6 +1,39 @@
 import { randomBytes } from "node:crypto";
 import { mkdir, open, rename, rm } from "node:fs/promises";
 import { dirname } from "node:path";
+import { performance } from "node:perf_hooks";
+
+/*
+ * Every fsync the Gateway performs goes through `syncDurably`, so the rate and
+ * time of durable synchronization are counted at one primitive and drained by
+ * the transport's resource sampler. A store then needs no record of its own on
+ * an interactive path (run markers, upload commits, catalog metadata, session
+ * exports, workspace and knowledge state, display artifacts). The counters are
+ * process global because the primitive is.
+ */
+let durableFsyncCount = 0;
+let durableFsyncMs = 0;
+
+/** Closes the fsync window: how many synchronizations completed and how long
+ * they took, since this call. */
+export function drainDurableWriteStats(): { count: number; ms: number } {
+  const stats = { count: durableFsyncCount, ms: durableFsyncMs };
+  durableFsyncCount = 0;
+  durableFsyncMs = 0;
+  return stats;
+}
+
+/**
+ * Synchronizes one durable handle and counts the fsync that completed. Time is
+ * the sync call alone, not the write or rename around it, and a failed sync
+ * throws without counting: the sample never reports a write that did not land.
+ */
+export async function syncDurably(handle: { sync(): Promise<void> }): Promise<void> {
+  const startedAt = performance.now();
+  await handle.sync();
+  durableFsyncCount += 1;
+  durableFsyncMs += Math.max(0, performance.now() - startedAt);
+}
 
 export interface DurableJsonFileSystem {
   mkdir: typeof mkdir;
@@ -40,7 +73,7 @@ export async function durableAtomicWriteJson(
     temporaryExists = true;
     try {
       await handle.writeFile(`${JSON.stringify(value, null, 2)}\n`, "utf8");
-      await handle.sync();
+      await syncDurably(handle);
     } finally {
       await handle.close();
     }
@@ -49,7 +82,7 @@ export async function durableAtomicWriteJson(
     temporaryExists = false;
     const directoryHandle = await fileSystem.open(directory, "r");
     try {
-      await directoryHandle.sync();
+      await syncDurably(directoryHandle);
     } finally {
       await directoryHandle.close();
     }
@@ -87,9 +120,11 @@ export async function durableRemove(
     if ((error as NodeJS.ErrnoException).code === "ENOENT") return;
     throw error;
   }
+  // Only a removal that reaches the directory sync is a durable write; removing
+  // a file that was already gone fsyncs nothing.
   const directoryHandle = await fileSystem.open(directory, "r");
   try {
-    await directoryHandle.sync();
+    await syncDurably(directoryHandle);
   } finally {
     await directoryHandle.close();
   }

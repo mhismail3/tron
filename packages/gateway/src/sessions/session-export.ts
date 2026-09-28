@@ -7,6 +7,7 @@ import { Readable, Transform } from "node:stream";
 import { pipeline } from "node:stream/promises";
 import { fileURLToPath } from "node:url";
 import { GatewayError } from "../errors.js";
+import { syncDurably } from "../util/durable-json.js";
 
 export const SESSION_EXPORT_MAX_ITEM_BYTES = 2 * 1_024 * 1_024 * 1_024;
 export const SESSION_EXPORT_MAX_ITEMS = 8;
@@ -67,7 +68,7 @@ export async function copyCanonicalSessionCut(
       }
       offset += bytesRead;
     }
-    await output.sync();
+    await syncDurably(output);
   } finally {
     await output.close();
   }
@@ -111,7 +112,7 @@ export async function writeSessionProjectionCut(
       offset += line.length;
       reservedWritableBytes -= line.length;
     }
-    await output.sync();
+    await syncDurably(output);
   } finally {
     await output.close();
   }
