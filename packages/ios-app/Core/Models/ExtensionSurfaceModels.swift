@@ -316,7 +316,7 @@ package struct ExtensionSemanticState: Codable, Hashable, Sendable {
         }
         package var message: String?
         package var visible: Bool
-        package var indicator: Indicator? = nil
+        var indicator: Indicator? = nil
 
         package init(message: String? = nil, visible: Bool, indicator: Indicator? = nil) {
             self.message = message
@@ -486,9 +486,9 @@ package struct ExtensionSurface: Codable, Hashable, Identifiable, Sendable {
 package struct ExtensionInputLease: Codable, Hashable, Sendable {
     package var id: String
     package var connectionId: String
-    package var surfaceId: String
-    package var surfaceRevision: Int
-    package var acquiredAt: String
+    var surfaceId: String
+    var surfaceRevision: Int
+    var acquiredAt: String
 
     package init(
         id: String,
@@ -665,7 +665,7 @@ package enum ExtensionPresentationPolicy {
     static let maximumColumns = 160
     package static let maximumLines = 120
     static let maximumRuns = 4_096
-    package static let maximumFrameBytes = 256 * 1_024
+    static let maximumFrameBytes = 256 * 1_024
     static let maximumPresentationBytes = 700 * 1_024
 
     package static func admit(_ state: ExtensionPresentationState) -> Bool {

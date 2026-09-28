@@ -21,7 +21,7 @@ package struct BoundedHTTPFileTransport: Sendable {
         self.downloadForRequest = downloadForRequest
     }
 
-    package func download(
+    func download(
         for request: URLRequest,
         maximumBytes: Int
     ) async throws -> BoundedHTTPDownloadedFile {
@@ -29,9 +29,9 @@ package struct BoundedHTTPFileTransport: Sendable {
         return try await downloadForRequest(request, maximumBytes)
     }
 
-    package static let urlSession = urlSession(configuration: .ephemeral)
+    static let urlSession = urlSession(configuration: .ephemeral)
 
-    package static func urlSession(configuration: URLSessionConfiguration) -> BoundedHTTPFileTransport {
+    static func urlSession(configuration: URLSessionConfiguration) -> BoundedHTTPFileTransport {
         let sessions = BoundedHTTPFileSessions(configuration: configuration)
         return BoundedHTTPFileTransport { request, maximumBytes in
             try await BoundedURLSessionFileLoader.load(
@@ -88,7 +88,7 @@ package final class BoundedHTTPFileStaging: @unchecked Sendable {
         self.maximumAge = maximumAge
     }
 
-    package func reserveDestination(incomingBytes: Int64 = 0, now: Date = Date()) throws -> URL {
+    func reserveDestination(incomingBytes: Int64 = 0, now: Date = Date()) throws -> URL {
         lock.lock()
         defer { lock.unlock() }
         guard incomingBytes >= 0, incomingBytes <= maximumTotalBytes else {
@@ -189,13 +189,13 @@ package struct BoundedHTTPFileAdmission {
         self.maximumBytes = Int64(maximumBytes)
     }
 
-    package func admitExpectedLength(_ expectedLength: Int64) throws {
+    func admitExpectedLength(_ expectedLength: Int64) throws {
         guard expectedLength < 0 || expectedLength <= maximumBytes else {
             throw URLError(.dataLengthExceedsMaximum)
         }
     }
 
-    package func admitProgress(_ totalBytesWritten: Int64) throws {
+    func admitProgress(_ totalBytesWritten: Int64) throws {
         guard totalBytesWritten >= 0, totalBytesWritten <= maximumBytes else {
             throw URLError(.dataLengthExceedsMaximum)
         }
@@ -285,7 +285,7 @@ final class BoundedURLSessionFileLoader: NSObject, URLSessionDownloadDelegate, @
         finish(.failure(CancellationError()))
     }
 
-    package func urlSession(
+    func urlSession(
         _ session: URLSession,
         downloadTask: URLSessionDownloadTask,
         didWriteData bytesWritten: Int64,
@@ -301,7 +301,7 @@ final class BoundedURLSessionFileLoader: NSObject, URLSessionDownloadDelegate, @
         }
     }
 
-    package func urlSession(
+    func urlSession(
         _ session: URLSession,
         downloadTask: URLSessionDownloadTask,
         didFinishDownloadingTo location: URL
@@ -345,7 +345,7 @@ final class BoundedURLSessionFileLoader: NSObject, URLSessionDownloadDelegate, @
         }
     }
 
-    package func urlSession(
+    func urlSession(
         _ session: URLSession,
         task: URLSessionTask,
         didCompleteWithError error: Error?

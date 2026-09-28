@@ -17,7 +17,7 @@ package struct GatewayRequest: Encodable, Sendable {
 package struct GatewayResponse: Decodable, Sendable, Equatable {
     let type: String
     package let id: String
-    package let ok: Bool
+    let ok: Bool
     package let result: JSONValue?
     package let error: GatewayFailure?
 }
@@ -142,7 +142,7 @@ package struct GatewayEvent: Decodable, Sendable, Equatable {
     package let sessionId: String?
     package let payload: JSONValue
     /// Trusted encoded frame size supplied before synchronization admission.
-    package let admittedBytes: Int
+    let admittedBytes: Int
     package let preparation: GatewayEventPreparation
 
     private enum CodingKeys: String, CodingKey {
@@ -162,7 +162,7 @@ package struct GatewayEvent: Decodable, Sendable, Equatable {
     /// network decoder has already prepared typed session data from the original
     /// Decoder; rebuilding through JSONValue here would repeat expensive work and
     /// can lose decoder-specific numeric/date representation.
-    package func withAdmittedBytes(_ bytes: Int) -> Self {
+    func withAdmittedBytes(_ bytes: Int) -> Self {
         Self(
             type: type,
             topic: topic,
@@ -233,7 +233,7 @@ package struct GatewayEvent: Decodable, Sendable, Equatable {
         }
     }
 
-    package var isConsumableSessionReplay: Bool {
+    var isConsumableSessionReplay: Bool {
         switch preparation {
         case .sessionSnapshot(let snapshot):
             return sessionId != nil && sessionId == snapshot.sessionId
@@ -369,9 +369,9 @@ package enum GatewayInboundFrame: Decodable, Sendable, Equatable {
 }
 
 package enum GatewayFramePolicy {
-    package static let maximumInboundBytes = 1_048_576
+    static let maximumInboundBytes = 1_048_576
 
-    package static func validateInboundBytes(_ data: Data) throws {
+    static func validateInboundBytes(_ data: Data) throws {
         guard data.count <= maximumInboundBytes else {
             throw GatewayFailure(
                 code: "frame_too_large",

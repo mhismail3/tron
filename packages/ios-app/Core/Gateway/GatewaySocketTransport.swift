@@ -31,8 +31,8 @@ final class GatewayPingCompletion: @unchecked Sendable {
 }
 
 package struct GatewaySocketMetadata: Sendable, Equatable {
-    package let closeCode: Int?
-    package let httpStatusCode: Int?
+    let closeCode: Int?
+    let httpStatusCode: Int?
 
     package init(closeCode: Int?, httpStatusCode: Int?, transportOpenMilliseconds: Int? = nil, waitedForConnectivity: Bool = false) {
         self.closeCode = closeCode
@@ -43,9 +43,9 @@ package struct GatewaySocketMetadata: Sendable, Equatable {
     /// Milliseconds from task start until the WebSocket opened; nil when it
     /// never opened. Distinguishes a path that never reached the Mac from a
     /// Mac that accepted the socket but did not answer.
-    package var transportOpenMilliseconds: Int? = nil
+    var transportOpenMilliseconds: Int? = nil
     /// URLSession reported waiting for connectivity during this task.
-    package var waitedForConnectivity = false
+    var waitedForConnectivity = false
 }
 
 package protocol GatewaySocketConnection: Sendable {
@@ -62,13 +62,13 @@ extension GatewaySocketConnection {
 
 
 package struct GatewaySocketFactory: Sendable {
-    package let makeConnection: @Sendable (URLRequest) -> any GatewaySocketConnection
+    let makeConnection: @Sendable (URLRequest) -> any GatewaySocketConnection
 
     package init(makeConnection: @escaping @Sendable (URLRequest) -> any GatewaySocketConnection) {
         self.makeConnection = makeConnection
     }
 
-    package static let urlSession = GatewaySocketFactory { request in
+    static let urlSession = GatewaySocketFactory { request in
         URLSessionGatewaySocketConnection(request: request)
     }
 }

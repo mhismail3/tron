@@ -33,14 +33,14 @@ package struct GatewayProfile: Codable, Hashable, Identifiable, Sendable {
         )
     }
 
-    package var hasValidEndpoint: Bool {
+    var hasValidEndpoint: Bool {
         PairingInvitationParser.canonicalHost(host) != nil
             && (1...65_535).contains(port)
             && httpURL() != nil
             && socketURL != nil
     }
 
-    package func httpURL(path: String = "", queryItems: [URLQueryItem] = []) -> URL? {
+    func httpURL(path: String = "", queryItems: [URLQueryItem] = []) -> URL? {
         var components = URLComponents()
         components.scheme = "http"
         components.host = host
@@ -55,7 +55,7 @@ package struct GatewayProfile: Codable, Hashable, Identifiable, Sendable {
     /// pairing response, hello, and system.info projection.
     package var gatewayChannel: String { port == 9848 ? "dev" : "stable" }
 
-    package var socketURL: URL? {
+    var socketURL: URL? {
         var components = URLComponents()
         components.scheme = "ws"
         components.host = host

@@ -42,7 +42,7 @@ package struct KnowledgeCoverageSummary: Codable, Hashable, Sendable {
     package let observedCount: Int; package let emptyCount: Int; package let excludedCount: Int; package let pendingCount: Int; package let failedCount: Int; package let unavailableCount: Int; package let remainingCount: Int
 }
 package struct KnowledgeObservationCoverage: Codable, Hashable, Sendable, Identifiable {
-    package let schemaVersion: Int; package let id: String; package let revisionId: String; package let range: KnowledgeObservationRange
+    let schemaVersion: Int; package let id: String; package let revisionId: String; package let range: KnowledgeObservationRange
     package let disposition: KnowledgeCoverageDisposition; let groupRevisionIds: [String]; let recordedAt: String; package let reason: String?
 }
 package struct KnowledgeCoverageDismissResult: Codable, Sendable {
@@ -173,7 +173,7 @@ extension KnowledgeRecordContent {
 }
 struct KnowledgeImportReview: Codable, Hashable, Sendable { let batch: String?; let auditId: String?; let receiptId: String?; let resultRevision: String?; let basis: String? }
 package struct KnowledgeRecord: Codable, Hashable, Identifiable, Sendable {
-    package let schemaVersion: Int; package let id: String; package let revisionId: String; package let kind: KnowledgeRecordKind; package let scope: KnowledgeScope; package let createdAt: String; package let updatedAt: String
+    let schemaVersion: Int; package let id: String; package let revisionId: String; package let kind: KnowledgeRecordKind; package let scope: KnowledgeScope; package let createdAt: String; package let updatedAt: String
     package let provenance: KnowledgeProvenance; package let temporal: KnowledgeTemporalQualification?; package let relations: [KnowledgeRelation]; package let content: KnowledgeRecordContent
 }
 package struct KnowledgeRecordDraft: Codable, Hashable, Sendable {

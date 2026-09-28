@@ -28,7 +28,7 @@ package enum DisplayKind: String, Codable, Hashable, Sendable {
 
     package var isLive: Bool { liveViewSchema != nil }
 
-    package var liveViewSchema: String? {
+    var liveViewSchema: String? {
         switch self {
         case .browserLive: "tron.browser-live-view.v1"
         case .nativeLive: "tron.native-live-view.v1"
@@ -36,7 +36,7 @@ package enum DisplayKind: String, Codable, Hashable, Sendable {
         }
     }
 
-    package var liveViewCapability: String? {
+    var liveViewCapability: String? {
         switch self {
         case .browserLive: "browser-live-view.v1"
         case .nativeLive: "native-live-view.v1"
@@ -46,7 +46,7 @@ package enum DisplayKind: String, Codable, Hashable, Sendable {
 }
 
 package struct DisplayPresentationPreference: Codable, Hashable, Sendable {
-    package let requestedSurface: DisplaySurface
+    let requestedSurface: DisplaySurface
     package let inlineTapAction: DisplayInlineTapAction
 
     package init(requestedSurface: DisplaySurface, inlineTapAction: DisplayInlineTapAction) {
@@ -56,7 +56,7 @@ package struct DisplayPresentationPreference: Codable, Hashable, Sendable {
 }
 
 package struct LiveViewDescriptor: Codable, Hashable, Sendable {
-    package let schema: String
+    let schema: String
     package let viewId: String
     package let generation: String
     package let title: String
@@ -98,15 +98,15 @@ package struct DisplayArtifactDescriptor: Codable, Hashable, Sendable {
 }
 
 package struct DisplayProjection: Codable, Hashable, Sendable, Identifiable {
-    package let schema: String
-    package let displayId: String
+    let schema: String
+    let displayId: String
     package let revision: Int
     package let title: String
     package let caption: String?
     package let altText: String
     package let kind: DisplayKind
     package let presentation: DisplayPresentationPreference
-    package let eligibleSurfaces: [DisplaySurface]
+    let eligibleSurfaces: [DisplaySurface]
     package let fallbackText: String
     package let artifact: DisplayArtifactDescriptor?
     package let remoteURL: String?
@@ -287,9 +287,9 @@ package enum DisplayFloatingAdmissionPolicy {
 
 package enum DisplayPresentationPolicy {
     static let maximumArtifactBytes = 2 * 1_024 * 1_024 * 1_024
-    package static let maximumEmbeddedMediaBytes = 50 * 1_024 * 1_024
+    static let maximumEmbeddedMediaBytes = 50 * 1_024 * 1_024
 
-    package static func eligibleSurfaces(
+    static func eligibleSurfaces(
         for kind: DisplayKind,
         artifactSize: Int? = nil
     ) -> [DisplaySurface] {

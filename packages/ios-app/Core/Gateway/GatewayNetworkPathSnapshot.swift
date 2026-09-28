@@ -33,7 +33,7 @@ package struct GatewayHandshakeDiagnostic: Sendable, Equatable {
     /// Whether the WebSocket opened: the socket reported opening, or the hello
     /// write completed (which requires an open socket).
     package let transportOpened: Bool
-    package let transportOpenMilliseconds: Int?
-    package let waitedForConnectivity: Bool
+    let transportOpenMilliseconds: Int?
+    let waitedForConnectivity: Bool
     package let networkInterfaces: String?
 }

@@ -157,7 +157,7 @@ package struct SessionProcessActivity: Codable, Hashable, Identifiable, Sendable
 
     /// Progress/output changes may repeat the same duration sample. Such frames
     /// must not move its receipt anchor forward and make the counter restart.
-    package func retainingDurationSample(from previous: Self?) -> Self {
+    func retainingDurationSample(from previous: Self?) -> Self {
         guard let previous,
               processId == previous.processId, runId == previous.runId, startedAt == previous.startedAt,
               lifecycle.state == .running, previous.lifecycle.state == .running,

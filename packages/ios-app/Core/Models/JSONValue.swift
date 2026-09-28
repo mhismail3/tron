@@ -1,11 +1,11 @@
 import Foundation
 
 package struct JSONValueDecodingLimits: Sendable, Equatable {
-    package let maximumDepth: Int
-    package let maximumNodes: Int
-    package let maximumCollectionMembers: Int
-    package let maximumStringBytes: Int
-    package let maximumTotalStringBytes: Int
+    let maximumDepth: Int
+    let maximumNodes: Int
+    let maximumCollectionMembers: Int
+    let maximumStringBytes: Int
+    let maximumTotalStringBytes: Int
 
     package init(
         maximumDepth: Int,
@@ -43,7 +43,7 @@ package enum JSONValueDecodingLimitKind: String, Sendable, Equatable {
 /// decoder; response-owned dictionary keys never cross this boundary.
 package struct JSONValueDecodingLimitViolation: Error, Sendable, Equatable, LocalizedError {
     package let kind: JSONValueDecodingLimitKind
-    package let actual: Int
+    let actual: Int
     package let maximum: Int
     package let codingPath: String
 

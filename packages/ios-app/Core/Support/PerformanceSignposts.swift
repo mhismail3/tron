@@ -44,7 +44,7 @@ package struct PerformanceMetrics: Equatable, Sendable {
 package struct PerformanceInterval: Sendable {
     package let operation: PerformanceOperation
     package let state: OSSignpostIntervalState?
-    package let measuredStart: ContinuousClock.Instant?
+    let measuredStart: ContinuousClock.Instant?
 
     package init(
         operation: PerformanceOperation,

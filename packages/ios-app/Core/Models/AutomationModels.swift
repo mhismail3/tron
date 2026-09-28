@@ -374,7 +374,7 @@ package struct GatewayAutomationOccurrence: Decodable, Hashable, Identifiable, S
     package let kind: Kind
     package let automationId: String
     package let automationRevision: Int
-    package let occurrenceId: String?
+    let occurrenceId: String?
     package let scheduledFor: String?
     let dayStart: String?
     package let firstAt: String?
@@ -530,7 +530,7 @@ package struct GatewayAutomationDeleteResponse: Codable, Hashable, Sendable {
 package enum AutomationAdmissionPolicy {
     package static let capability = "automations.v2"
     static let minimumNewSessionIntervalSeconds = 86_400
-    package static let timelineCapability = "automations.timeline.v1"
+    static let timelineCapability = "automations.timeline.v1"
     static let maximumPageCount = 100
     static let maximumTimelinePageCount = 200
     package static let maximumRetainedCount = 1_024
@@ -707,7 +707,7 @@ package enum AutomationAdmissionPolicy {
         }
     }
 
-    package static func validGeneratedSessionID(_ value: String) -> Bool {
+    static func validGeneratedSessionID(_ value: String) -> Bool {
         value.utf8.count == 36 && UUID(uuidString: value) != nil
     }
 

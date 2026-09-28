@@ -346,23 +346,27 @@ source files, then regenerate. Because the application uses a checked-in plist, 
 The application target `TronMobile` and the framework `TronMobileCore`
 (`Core/`) are separate Swift modules; [Modules](architecture.md#modules) owns
 their ownership and access rules. The framework is built and embedded for
-every configuration, so a configuration needs no framework entry of its own,
-and a `Core` move never touches the share extension.
+every configuration, so a configuration needs no framework entry of its own.
+Until MS-5, the share extension still compiles `Core/Support/SharedContent.swift`
+directly, so it shares `SWIFT_PACKAGE_NAME`.
 
-One slice of `Core` moves at a time, proven by the compiler and the existing
-suites rather than by new tests for moved types:
+Where new code goes: a Foundation-only value type, wire model, Gateway client
+facility or logging/timing primitive belongs in `Core/<Layer>/`; anything that
+imports SwiftUI, UIKit, Observation or UserNotifications, and anything that
+presents or owns UI state, belongs in `Sources/`.
 
-1. Move the whole file into the matching `Core/<Layer>/` directory. A type has
-   one owner, so nothing is copied or shimmed behind it.
-2. Mark the declarations and members other modules use `package`, and give a
-   struct another module constructs an explicit `package init`. Leave test-only
-   fixtures and everything else `internal`.
-3. Add `import TronMobileCore` to the app files that use the moved API, and
-   `@testable import TronMobileCore` to tests that use its internals.
-4. Regenerate with `scripts/tron ios generate`, then build all five
-   configurations and run `scripts/tron-ios-test run`. A file that carries the
-   Gateway protocol constants must have its path updated in
-   `scripts/gateway_protocol_contract.py` in the same change.
+Adding API to `Core`:
+
+1. Mark only the declarations and members the app target uses `package`, never
+   `public`. A struct the app constructs needs an explicit `package init`
+   (Swift's implicit memberwise init stays internal); keep its labels, order
+   and `nil` defaults. Members only tests use stay `internal`.
+2. App files add `import TronMobileCore`; test files use
+   `@testable import TronMobileCore`.
+3. Regenerate with `scripts/tron ios generate`, build, and run
+   `scripts/tron-ios-test run` and `packages/ios-app/scripts/test-source-policy.sh`.
+   A file that carries the Gateway protocol constants must keep its path in
+   `scripts/gateway_protocol_contract.py` current.
 
 ### Build matrix
 

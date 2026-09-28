@@ -1,7 +1,7 @@
 import Foundation
 
 package struct BoundedHTTPDataTransport: Sendable {
-    package let dataForRequest: @Sendable (URLRequest, Int) async throws -> (Data, HTTPURLResponse)
+    let dataForRequest: @Sendable (URLRequest, Int) async throws -> (Data, HTTPURLResponse)
 
     package init(dataForRequest: @escaping @Sendable (URLRequest, Int) async throws -> (Data, HTTPURLResponse)) {
         self.dataForRequest = dataForRequest
@@ -15,7 +15,7 @@ package struct BoundedHTTPDataTransport: Sendable {
         return try await dataForRequest(request, maximumBytes)
     }
 
-    package static let urlSession = BoundedHTTPDataTransport { request, maximumBytes in
+    static let urlSession = BoundedHTTPDataTransport { request, maximumBytes in
         try await BoundedURLSessionDataLoader.load(request, maximumBytes: maximumBytes)
     }
 
@@ -47,7 +47,7 @@ package struct BoundedHTTPUploadTransport: Sendable {
         return try await dataForFileRequest(request, fileURL, maximumBytes)
     }
 
-    package static let urlSession = BoundedHTTPUploadTransport { request, fileURL, maximumBytes in
+    static let urlSession = BoundedHTTPUploadTransport { request, fileURL, maximumBytes in
         try await BoundedURLSessionDataLoader.load(
             request,
             uploadFileURL: fileURL,

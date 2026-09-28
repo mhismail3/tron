@@ -36,8 +36,8 @@ package struct GatewayDebugPromotionCandidate: Hashable, Sendable {
     package let version: String
     package let payloadFingerprint: String
     package let sourceRevision: String
-    package let testedRuntimeEpoch: String
-    package let candidateRuntimeEpoch: String
+    let testedRuntimeEpoch: String
+    let candidateRuntimeEpoch: String
 
     init?(identity: GatewayUpdateIdentity?, provenance: GatewayDebugCandidateProvenance?) {
         guard let identity, let provenance,
@@ -86,7 +86,7 @@ package struct GatewayDebugPromotionCandidate: Hashable, Sendable {
 }
 
 package enum GatewayUpdateConfigPolicy {
-    package static let maximumPathBytes = 4_096
+    static let maximumPathBytes = 4_096
     static let maximumTimestampBytes = 64
 
     package static func admitPath(_ path: String, name: String) throws -> String {
@@ -528,7 +528,7 @@ enum IosDeviceInstallProjectionPolicy {
 
 
 package enum PairedDeviceCatalogPolicy {
-    package static let maximumDevices = 256
+    static let maximumDevices = 256
     static let maximumIDBytes = 100
     package static let maximumNameBytes = 320
     static let maximumTimestampBytes = 64

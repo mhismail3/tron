@@ -8,12 +8,13 @@ implementation detail; all user-facing language calls the agent Tron.
 
 | Directory | Owner |
 |---|---|
-| `Core` | the `TronMobileCore` framework: the app's lowest layer, shared with the unit tests |
+| `Core/Gateway` | `TronMobileCore`: pairing profiles, HTTP, WebSocket protocol and Gateway client |
+| `Core/Models` | `TronMobileCore`: provider-qualified model and snapshot DTOs |
+| `Core/Support` | `TronMobileCore`: logging, diagnostics, timing and share intake |
 | `Sources/App` | app composition and lifecycle |
-| `Sources/Gateway` | pairing, Keychain profiles, HTTP, WebSocket protocol |
-| `Sources/Models` | provider-qualified model and snapshot DTOs |
+| `Sources/Auth` | provider OAuth presentation |
+| `Sources/Notifications` | push registration and the notification inbox |
 | `Sources/State` | authoritative UI projection and reconnect orchestration |
-| `Sources/Support` | bounded cache and share intake |
 | `Sources/UI/Chat` | session shell, chat composition, attachment presentation, entrance rows, transcript, composer, context, and forks |
 | `Sources/UI/Automations` | dashboard selector, chronological agenda, inventory, detail/run presentations, and schedule editor |
 | `Sources/UI/Onboarding` | pairing/setup flow, reusable onboarding chrome, workspace, provider, and default setup |
@@ -30,12 +31,17 @@ embeds. The split makes the layering a compiler rule instead of a convention: a
 lower module cannot see a higher one, each module declares the surface it
 offers, and code in a module can only use what that module may reach.
 
-`Core` owns the app's lowest layer. It currently holds the compiled-in Gateway
-wire contract — `Core/Gateway/GatewayProtocolContract.swift`,
-`Core/Gateway/GatewayRequestTimeout.swift` and
-`Core/Gateway/GatewayConnectionPolicy.swift`. Models, Gateway, Auth and Support
-move in as the split proceeds, each file keeping the layer directory it will own
-there.
+`Core` owns the app's lowest layer: Models, Gateway and Support, each in its own
+directory under `Core/`. It is Foundation-only: it may import Foundation and
+system frameworks that draw nothing (CryptoKit, Network, OSLog, Security,
+AVFoundation for camera authorization), never SwiftUI, UIKit, Observation or
+UserNotifications, and `packages/ios-app/scripts/test-source-policy.sh` fails
+if it does. Presentation stores, UI decoding and notification delivery
+therefore live in the app target, next to their consumers. Auth,
+Notifications, State and UI stay in the app target until they are split out
+after the simplification program cleans them up. `Core` reads UserDefaults, so
+the framework ships its own `Core/PrivacyInfo.xcprivacy`, which
+`PrivacyManifestTests` checks in source and in the built app.
 
 Access is the module boundary:
 
@@ -44,8 +50,9 @@ Access is the module boundary:
   and the unit-test target all set `SWIFT_PACKAGE_NAME = TronIOSApp` in
   `packages/ios-app/project.yml`; that shared value is what makes package
   access visible across them.
-- A declaration nothing outside `Core` uses stays `internal`, including
-  test-only fixtures; tests reach those with `@testable import TronMobileCore`.
+- A declaration only the unit tests use stays `internal`; tests import the
+  framework with `@testable import TronMobileCore`, so a test never forces a
+  wider surface.
 - A type has exactly one owner: no duplicate copies, re-export shims or
   compatibility typealiases in the app module.
 
@@ -59,7 +66,7 @@ How a type moves into the module is in the
 
 The dashboard selector's template logo has a bounded 24-point intrinsic size in its source asset; the full-resolution SVG view box must never become UIKit toolbar layout authority.
 
-`Sources/Models` keeps wire-compatible value types grouped by authority rather than in one DTO
+`Core/Models` keeps wire-compatible value types grouped by authority rather than in one DTO
 monolith: gateway connection, session catalog, transcript, session runtime, resource catalog,
 workspace, and terminal files. Cross-file references remain plain value composition; no split model becomes a
 second cache or reducer.
