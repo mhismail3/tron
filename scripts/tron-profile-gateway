@@ -360,6 +360,16 @@ def scrubbed_environment() -> dict[str, str]:
 
 # --- Fixture Gateway ---------------------------------------------------------
 
+# The restart case's budget: a slow host can spend seconds in the old Gateway's
+# shutdown, the new one's startup, and any wait for a killed predecessor's
+# runtime lock to go stale.
+RESTART_START_DEADLINE_SECONDS = 300
+RESTART_LOCK_RETRY_SECONDS = 5
+# agent-runtime-lock.ts: one Gateway owns an agent directory, and a lock a
+# killed process left behind is only reusable once it is stale (60 s).
+RUNTIME_LOCK_CONFLICT = "owns a canonical session directory"
+
+
 class FixtureGateway:
     """One owned fixture: temporary home, faux-model agent dir, Gateway child."""
 
@@ -507,10 +517,33 @@ class FixtureGateway:
         driver's clients stay connected; keeping the port is what lets them
         reconnect to the address they already know. The tron home, the agent
         directory and the paired devices survive, as they do on a user's
-        restart."""
+        restart.
+
+        A predecessor that had to be killed cannot release its agent-directory
+        runtime lock until the lock is stale (60 s), and a fresh child started
+        inside that window exits on the ownership conflict. Wait it out inside
+        the same start budget instead of failing the run for the previous
+        owner's cleanup."""
         port = self.port
         self.stop()
-        self.start(deadline_seconds=300, port=port)
+        deadline = time.monotonic() + RESTART_START_DEADLINE_SECONDS
+        while True:
+            try:
+                self.start(deadline_seconds=max(30, deadline - time.monotonic()), port=port)
+                return
+            except ProfileFailure:
+                if time.monotonic() > deadline or not self.log_tail_has(RUNTIME_LOCK_CONFLICT):
+                    raise
+                log(f"{port}: the previous Gateway's runtime lock is still held; waiting for it to go stale")
+                time.sleep(RESTART_LOCK_RETRY_SECONDS)
+
+    def log_tail_has(self, text: str, limit: int = 4_000) -> bool:
+        """Whether this fixture's retained log ends with `text`: a startup
+        failure a caller may be able to wait out."""
+        try:
+            return text in self.log_path.read_text(errors="replace")[-limit:]
+        except OSError:
+            return False
 
     def stop(self) -> None:
         """Stop the owned child (verified by PID and command) and its group.

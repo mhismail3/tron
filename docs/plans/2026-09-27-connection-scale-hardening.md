@@ -1601,8 +1601,8 @@ a latency percentile.
 | snapshots built without an audience | | | |
 | Gateway CPU, 8 running, no subscriber | 57% of one core | | n/a |
 | Gateway heap peak (% of limit) / RSS peak | 1.98 GiB (49%) / 2.00 GiB | | |
-| reconnect after path return p95 | 14.9 s in the one short impairment run: one 15 s attempt was in flight when the path returned and the phone waited its 2 s backoff after it; C-3's target is not met by `main` | | |
-| Gateway restart with all clients | the profiler replaced the Gateway in 11.6 s (busy host); all six clients reconnected from their own socket's close, the slowest 40.3 s; 21 refused connects; all 3 storm requests over 1 s | | n/a |
+| reconnect after path return p95 | 14.9 s and 15.3 s in two short impairment runs: one 15 s attempt was in flight when the path returned plus the phone's 2 s backoff after it; C-3's target is not met by `main` | | |
+| Gateway restart with all clients | the profiler replaced the Gateway in 11.6 s and 10.3 s (busy host); every one of the six clients reconnected from its own socket's close, the slowest 40.3 s and 27.2 s; 19–21 refused connects; all 3 storm requests the 5 s window fitted took over 1 s | | n/a |
 | requests / bytes per reconnect | | | |
 | episodes by cause (triage) | n/a | n/a | |
 | visible disconnects during Tailscale flaps | n/a | n/a | |
@@ -1610,44 +1610,50 @@ a latency percentile.
 
 ### Impairment cases (O-6b)
 
-One short smoke run proves every case runs and reports and shows the shape of
-`main`; the full-length default baseline is owed on a quiet host (the row is
-Blocked). Read it as one sample per case, and read the restart numbers with the
-host in mind.
+Two short smoke runs of the final code prove every case runs and reports and
+show the shape of `main`; the full-length default baseline is owed on a quiet
+host (the row is Blocked). Read them as one sample per case, and read the
+restart numbers with the host in mind.
 
 - Command: `scripts/tron-profile gateway --scenario multi-session --iterations 1
   --catalog-files 200 --catalog-mib 32 --mixed-seconds 30 --blackhole-seconds 20
-  --no-build` (report under `~/Library/Developer/Tron/profiles/gateway/`,
-  `20260928T123224Z-multi-session-0bee33`; the run warned "host busy: 1-minute
-  load 24.7").
+  --no-build` (reports under `~/Library/Developer/Tron/profiles/gateway/`,
+  `20260928T123224Z-multi-session-0bee33` and `20260928T125343Z-multi-session-99ae69`;
+  both warned "host busy", 1-minute load 24.7 and 15.0).
 - Blackhole (the mobile path delivers nothing for 20 s): the client kept its
   socket open and silent for 18.0 s, one pong deadline after the last inbound
-  frame, then abandoned it and its one attempt during the outage burned the
+  frame, then abandoned it, and its one attempt during the outage burned the
   phone's 15.0 s transport-open deadline (the relay held that attempt with no
   answer, so the Gateway never saw it). Recovery from the path's return to a
-  ready mounted chat was 14.9 s — the rest of that in-flight attempt plus the
-  phone's 2 s backoff. The earlier 28 ms and 43 ms were timed from the end of
-  the attempt loop's own look at the clock, so they measured one connect
-  whatever the outage cost; that is what C-3 has to move.
-- Bandwidth cap (2 Mbit/s = 250,000 B/s): the capped path carried 139,228 wire
-  bytes at 70,710 B/s toward the phone and 276 B/s toward the Gateway over
-  1.97 s, adding 559 ms of metering; the mounted chat plus a dashboard list took
-  1.4 s, 0.2 s and 0.3 s; no pong deadline was missed and the Gateway closed no
-  socket. The cap now shapes the socket, so the rate is the bytes that crossed
-  the wire: the earlier 249,782 B/s counted decompressed payload that was about
-  23× what the link carried, and its 3–4 pong-deadline misses were that
-  artefact.
+  ready mounted chat was 14.9 s and 15.3 s: the rest of that in-flight attempt
+  plus the phone's 2 s backoff. The earlier 28 ms and 43 ms were timed from the
+  attempt loop's own look at the clock, so they measured one connect whatever
+  the outage cost; that is what C-3 has to move.
+- Bandwidth cap (2 Mbit/s = 250,000 B/s): the capped path carried 139,228 B at
+  70,710 B/s and 173,681 B at 56,656 B/s toward the phone and ~200–280 B/s
+  toward the Gateway over 2.0–3.1 s, adding 559–697 ms of metering; the mounted
+  chat plus a dashboard list took 1.4 s, 0.2 s and 0.3 s in the first run and
+  2.6 s, 0.2 s and 0.2 s in the second; no pong deadline was missed and the
+  Gateway closed no socket. The cap now shapes the socket, so the rate is the
+  bytes that crossed the wire: the earlier 249,782 B/s counted decompressed
+  payload about 23× what the link carried, and its 3–4 pong-deadline misses
+  were that artefact.
 - Restart (every connected client live): the profiler's stop, start and health
-  check took 11.6 s on this host. All six clients retried from the moment their
-  own socket closed: 21 refused connects in total, every client ready, the
-  slowest 40.3 s (the mobile, whose relay-dial retries met the down port), and
-  the three storm requests that fitted the 5 s window all took over 1 s. The
-  three-client reading of 220–341 ms with no failed attempt came from waiting
-  for the profiler's answer before retrying, which skipped the downtime.
+  check took 11.6 s and 10.3 s on these hosts. All six clients retried from the
+  moment their own socket closed: 19–21 refused connects in total, every client
+  ready, the slowest 40.3 s and 27.2 s, and the three storm requests that fitted
+  the 5 s window all took over 1 s. The three-client reading of 220–341 ms with
+  no failed attempt came from waiting for the profiler's answer before retrying,
+  which skipped the downtime entirely.
+- One run of the earlier commit also exposed a harness failure worth keeping:
+  with the host this loaded, the Gateway's own SIGTERM shutdown outlasted the
+  fixture's 20 s wait and the killed predecessor's agent-directory runtime lock
+  (stale after 60 s) made the new child exit on the ownership conflict.
+  `FixtureGateway.restart` now waits that conflict out inside its start budget.
 - `main` has no `connection.outbound-capacity` records inside any bandwidth
   leg's window (`impairment.gateway_outbound_capacity_records: 0`), so G-4 has
-  no capacity evidence yet either way; the next quiet-host run says whether the
-  real backpressure now produces one.
+  no capacity evidence yet either way; a run where the real backpressure bites
+  says whether one appears.
 
 ## Handoff log
 
@@ -2397,7 +2403,13 @@ host in mind.
     (`driver_deadline_seconds`: 165 s mixed + 90 s no-subscriber + 270 s blackhole
     + 480 s bandwidth + 425 s restart = 1,430 s on the defaults), the bandwidth leg has
     its own bound, and `restartDeadlineMs` is 360 s, above the profiler's 300 s
-    start deadline plus up to 30 s to stop the old Gateway.
+    start deadline plus up to 30 s to stop the old Gateway. Found with those
+    budgets: on a host this loaded the Gateway's own SIGTERM shutdown can
+    outlast the fixture's 20 s wait, and a killed predecessor's agent-directory
+    runtime lock is only reusable once it is stale (60 s), so the new child
+    exited on the ownership conflict and failed the run. `FixtureGateway.restart`
+    now waits that conflict out inside its 300 s start budget (and only that
+    conflict).
   - **Minor — only three of six clients reconnected.** Every connected client
     reconnects now; `clients_ready` counts all of them and the run is rejected
     if one is left down. The README no longer claims the exit criterion counts

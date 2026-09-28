@@ -34,6 +34,7 @@ import sys
 import tempfile
 import time
 import unittest
+from unittest import mock
 
 ROOT = Path(__file__).resolve().parent.parent
 REPORT = ROOT / "scripts/tron_profile_report.py"
@@ -992,6 +993,43 @@ class ImpairmentCases(unittest.TestCase):
         short = restart(clients=[{"name": "mobile", "readyAtMs": 11, "reconnectMs": 10, "attempts": []}])
         self.assertEqual(len(self.profiler.validate_impairment([short])), 1,
                          "the three measured clients must all report")
+
+    def test_a_restart_waits_out_a_previous_owners_runtime_lock(self) -> None:
+        # A predecessor that had to be killed leaves its agent-directory runtime
+        # lock until it is stale (60 s), and a child started inside that window
+        # exits on the ownership conflict. The restart retries the start while
+        # that is the failure, and only while it is.
+        profiler = self.profiler
+        fixture = profiler.FixtureGateway.__new__(profiler.FixtureGateway)
+        with tempfile.TemporaryDirectory() as temporary:
+            fixture.port = 51_234
+            fixture.log_path = Path(temporary) / "gateway.stdout.log"
+            fixture.log_path.write_text(f"Gateway failed during startup: {profiler.RUNTIME_LOCK_CONFLICT}\n")
+            calls: list = []
+            starts: list[tuple] = []
+            failures = {"left": 1}
+            fixture.stop = lambda: calls.append("stop")
+
+            def start(deadline_seconds: float = 90, port: int | None = None) -> None:
+                starts.append((port, deadline_seconds))
+                calls.append("start")
+                if failures["left"] > 0:
+                    failures["left"] -= 1
+                    raise profiler.ProfileFailure("fixture Gateway exited during startup (exit 1)",
+                                                  profiler.EXIT_FIXTURE, fixture.log_path)
+
+            fixture.start = start
+            with mock.patch.object(profiler, "RESTART_LOCK_RETRY_SECONDS", 0):
+                fixture.restart()
+            self.assertEqual(calls, ["stop", "start", "start"], "the restart did not retry the start")
+            self.assertEqual([port for port, _ in starts], [51_234, 51_234], "the restart moved the port")
+            self.assertTrue(all(deadline > 0 for _, deadline in starts), "a retry started without a budget")
+
+            fixture.log_path.write_text("Gateway failed during startup: a real crash\n")
+            failures["left"] = 1
+            with mock.patch.object(profiler, "RESTART_LOCK_RETRY_SECONDS", 0):
+                with self.assertRaises(profiler.ProfileFailure):
+                    fixture.restart()
 
     def test_each_case_contributes_its_own_metrics(self) -> None:
         # Two iterations whose extremes are not the first one, and whose
