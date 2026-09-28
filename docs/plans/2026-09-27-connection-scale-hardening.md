@@ -9208,7 +9208,7 @@ wait).
     catalog, where a snapshot projection still built three whole-branch index
     maps per build — `contextDeliveryMetadataByEntry` falls **12.4 → 0.42 ms**
     and `invocationReceipts` **6.7 → 0.4 ms** (median of 5, one-off script
-    `/tmp/g2-alloc-measure.mjs`, Node 25.9.0; ≈19 ms of synchronous whole-branch
+    `~/.tron/workspace/files/hardening/g-2/g2-alloc-measure.mjs`, Node 25.9.0; ≈19 ms of synchronous whole-branch
     work per snapshot gone, the removable part of G-11's 62 ms
     `projectTranscriptPage` stretch).
   - Merge gate after merging `hardening/integration` at `5ccc7a009`:
