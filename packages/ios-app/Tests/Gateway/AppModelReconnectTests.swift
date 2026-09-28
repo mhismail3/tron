@@ -1638,6 +1638,59 @@ struct AppModelReconnectTests {
         }
     }
 
+    /// A mounted restoration the real foreground pass left blocked on an
+    /// unanswered `session.open`, so a test can drive the clock and the route
+    /// while that restoration is still in flight.
+    private struct HeldMountedRestoration {
+        let target: SessionPresentationIdentity
+        let snapshot: SessionSnapshot
+        let openID: String
+        let index: Int
+    }
+
+    /// Drives the real replacement reconnect (`enteredBackground` →
+    /// `becameActive` → authenticated handshake) up to a mounted restoration
+    /// whose `session.open` the Gateway never answers. `index` is the frame
+    /// cursor just past that request.
+    private func holdMountedRestoration(
+        _ fixture: ReconnectFixture
+    ) async throws -> HeldMountedRestoration {
+        let model = fixture.model
+        let first = fixture.sockets[0]
+        let replacement = fixture.sockets[1]
+        let profile = try #require(model.profiles.selected)
+        await first.enqueue(helloFrame())
+        try await model.connectHostedGateway(profile: profile, token: "token")
+        let snapshot = try SessionScenarioBuilder(seed: 61_204).openingTail(targetEncodedBytes: 4_096)
+        model.installHostedSubscribedSnapshot(snapshot)
+        model.sessions = [startupSummary(snapshot.sessionId)]
+        let target = try #require(model.mountedPresentationTarget)
+
+        await model.enteredBackground().value
+        await model.becameActive()?.value
+        try await replacement.waitUntilSent(count: 1)
+        await replacement.enqueue(helloFrame())
+        var index = 1
+        var openID: String?
+        while openID == nil {
+            try await replacement.waitUntilSent(count: index + 1)
+            let request = try requestFrame(await replacement.sentFrames()[index])
+            index += 1
+            switch request.method {
+            case "session.open": openID = request.id
+            case "session.list", "notification.inbox.list": break // Optional owners stay pending.
+            default:
+                Issue.record("Unexpected request before mounted restoration: \(request.method)")
+                throw CancellationError()
+            }
+        }
+        #expect(model.connectionState == .connected)
+        #expect(model.isReconcilingForeground)
+        return HeldMountedRestoration(
+            target: target, snapshot: snapshot, openID: try #require(openID), index: index
+        )
+    }
+
     private func startupSummary(_ id: String) -> SessionSummary {
         SessionSummary(
             id: id, name: id, cwd: "/workspace", parentSessionId: nil,
@@ -2071,40 +2124,14 @@ struct AppModelReconnectTests {
             clock: clock, units: SequenceReconnectUnits([])
         ) { fixture in
             let model = fixture.model
-            let first = fixture.sockets[0]
             let replacement = fixture.sockets[1]
             let profile = try #require(model.profiles.selected)
-            await first.enqueue(helloFrame())
-            try await model.connectHostedGateway(profile: profile, token: "token")
-            let snapshot = try SessionScenarioBuilder(seed: 61_204).openingTail(targetEncodedBytes: 4_096)
-            model.installHostedSubscribedSnapshot(snapshot)
-            model.sessions = [startupSummary(snapshot.sessionId)]
-            let target = try #require(model.mountedPresentationTarget)
-
-            await model.enteredBackground().value
-            await model.becameActive()?.value
-            try await replacement.waitUntilSent(count: 1)
-            await replacement.enqueue(helloFrame())
             // The replacement socket is live and this restoration's
             // `session.open` is never answered: the slow server work of the
             // incident. Held until this test answers it.
-            var index = 1
-            var openID: String?
-            while openID == nil {
-                try await replacement.waitUntilSent(count: index + 1)
-                let request = try requestFrame(await replacement.sentFrames()[index])
-                index += 1
-                switch request.method {
-                case "session.open": openID = request.id
-                case "session.list", "notification.inbox.list": break // Optional owners stay pending.
-                default:
-                    Issue.record("Unexpected request before mounted restoration: \(request.method)")
-                    throw CancellationError()
-                }
-            }
-            #expect(model.connectionState == .connected)
+            let held = try await holdMountedRestoration(fixture)
+            var index = held.index
             #expect(model.dashboardServerState(for: profile.id).label == "Connected")
-            #expect(model.isReconcilingForeground)
             #expect(!model.noticeCenter.notices.contains { $0.replacement?.key == .sessionCatchUp })
 
             // The chat's own catch-up treatment appears once the restoration
@@ -2116,15 +2143,16 @@ struct AppModelReconnectTests {
             }
             let notice = try #require(model.noticeCenter.notices.first { $0.replacement?.key == .sessionCatchUp })
             #expect(notice.title == SessionPresentationStore.sessionCatchUpNotice)
+            #expect(notice.scope == .session(id: held.target.sessionID, generation: held.target.generation))
             #expect(model.connectionState == .connected)
             #expect(model.dashboardServerState(for: profile.id).label == "Connected")
-            #expect(model.mountedPresentationTarget == target)
+            #expect(model.mountedPresentationTarget == held.target)
 
             // The restoration completing retires the treatment; the socket
             // that admitted it is still the connection.
-            let recovered = try #require(openID)
+            let recovered = held.openID
             await replacement.enqueue(successResponse(id: recovered, result: .object([
-                "session": try JSONValue.encode(snapshot),
+                "session": try JSONValue.encode(held.snapshot),
                 "syncToken": .string("slow-restoration-sync"),
                 "subscriptionToken": .string("slow-restoration-subscription"),
             ])))
@@ -2152,7 +2180,97 @@ struct AppModelReconnectTests {
             #expect(!model.noticeCenter.notices.contains { $0.replacement?.key == .sessionCatchUp })
             #expect(model.connectionState == .connected)
             #expect(model.dashboardServerState(for: profile.id).label == "Connected")
-            #expect(model.mountedPresentationTarget == target)
+            #expect(model.mountedPresentationTarget == held.target)
+        }
+    }
+
+    @Test("leaving the chat inside the restoration grace never posts the catch-up notice")
+    func leavingChatInsideRestorationGraceDropsTheTreatment() async throws {
+        let clock = ManualClock()
+        try await withFixture(
+            sockets: [ScriptedGatewaySocket(), ScriptedGatewaySocket()],
+            clock: clock, units: SequenceReconnectUnits([])
+        ) { fixture in
+            let model = fixture.model
+            let held = try await holdMountedRestoration(fixture)
+
+            // The user leaves the chat while its restoration still holds
+            // `session.open`. The treatment belongs to the chat that left: it
+            // must post neither into that chat's retired scope nor its
+            // app-wide fallback.
+            await model.closeSessionPresentation(held.target.sessionID, generation: held.target.generation)
+            #expect(model.mountedPresentationTarget == nil)
+
+            // The restoration's grace expires with the chat gone. The sleeper
+            // is observed first, so the absence asserted next is the timer's
+            // own decision rather than a wake-up that never happened.
+            try await clock.waitUntilSleeping(count: 1, duration: .seconds(2))
+            clock.advance(by: .seconds(3))
+            for _ in 0..<50 { await Task.yield() }
+            #expect(!model.noticeCenter.notices.contains { $0.replacement?.key == .sessionCatchUp })
+            #expect(!model.noticeCenter.notices.contains { $0.title == SessionPresentationStore.sessionCatchUpNotice })
+        }
+    }
+
+    @Test("opening another chat inside the restoration grace posts no catch-up notice into it")
+    func openingAnotherChatInsideRestorationGraceDropsTheTreatment() async throws {
+        let clock = ManualClock()
+        try await withFixture(
+            sockets: [ScriptedGatewaySocket(), ScriptedGatewaySocket()],
+            clock: clock, units: SequenceReconnectUnits([])
+        ) { fixture in
+            let model = fixture.model
+            let replacement = fixture.sockets[1]
+            let held = try await holdMountedRestoration(fixture)
+            let other = "scenario-other"
+            var otherSnapshot = try SessionScenarioBuilder(seed: 61_205).openingTail(targetEncodedBytes: 2_048)
+            otherSnapshot.sessionId = other
+            model.sessions = [startupSummary(held.snapshot.sessionId), startupSummary(other)]
+
+            // The abandoned restoration's `session.open` stays unanswered
+            // while the user's own open completes: the mounted route is now
+            // the other chat.
+            var cursor = held.index
+            let opening = Task { try await model.openSessionPresentation(other) }
+            for _ in 0..<20 {
+                if model.mountedPresentationTarget?.sessionID == other { break }
+                try await replacement.waitUntilSent(count: cursor + 1)
+                let frame = try JSONDecoder.gateway.decode(JSONValue.self, from: await replacement.sentFrames()[cursor])
+                cursor += 1
+                let method = try #require(frame.objectValue?["method"]?.stringValue)
+                let id = try #require(frame.objectValue?["id"]?.stringValue)
+                let sessionID = frame.objectValue?["params"]?.objectValue?["sessionId"]?.stringValue
+                switch method {
+                case "session.open" where sessionID == other:
+                    await replacement.enqueue(successResponse(id: id, result: .object([
+                        "session": try JSONValue.encode(otherSnapshot),
+                        "syncToken": .string("other-sync"),
+                        "subscriptionToken": .string("other-subscription"),
+                    ])))
+                case "session.sync":
+                    await replacement.enqueue(successResponse(id: id, result: .object(["synchronized": .bool(true)])))
+                case "session.commands":
+                    await replacement.enqueue(successResponse(id: id, result: .object(["commands": .array([])])))
+                case "session.list", "notification.inbox.list":
+                    break // Optional owners stay pending.
+                default:
+                    Issue.record("Unexpected request while opening another chat: \(method)")
+                    throw CancellationError()
+                }
+                // The mount is published by the client task processing that
+                // response, so let the MainActor run before deciding.
+                for _ in 0..<40 where model.mountedPresentationTarget?.sessionID != other {
+                    try await Task.sleep(for: .milliseconds(1))
+                }
+            }
+            _ = try await opening.value
+            #expect(model.mountedPresentationTarget?.sessionID == other)
+
+            try await clock.waitUntilSleeping(count: 1, duration: .seconds(2))
+            clock.advance(by: .seconds(3))
+            for _ in 0..<50 { await Task.yield() }
+            #expect(!model.noticeCenter.notices.contains { $0.replacement?.key == .sessionCatchUp })
+            #expect(!model.noticeCenter.notices.contains { $0.title == SessionPresentationStore.sessionCatchUpNotice })
         }
     }
 

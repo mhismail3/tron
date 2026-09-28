@@ -8065,24 +8065,27 @@ wait).
   (one assertion-bearing test only; C-1 had already removed the post-handshake
   `.reconnecting` assignments, and the C-2 label invariant is now protected by
   tests), `packages/ios-app/Sources/State/SessionPresentationStore.swift` (the
-  published `isRestoringMountedPresentation` restoration state, its grace and
-  the catch-up treatment it retires when interrupted),
+  restoring chat's identity, its grace and the catch-up treatment scoped to and
+  retired against it),
   `packages/ios-app/Tests/Gateway/AppModelReconnectTests.swift`,
   `packages/ios-app/Tests/UI/MountedRestorationLabelHostedTests.swift` (new),
   `packages/ios-app/docs/architecture.md`.
 - Result detail: `SessionPresentationStore` now owns restoration as its own
-  loading state. `reconnectMountedPresentation()` publishes
-  `isRestoringMountedPresentation` for the restoration it runs, and a
-  restoration that outlasts `mountedRestorationTreatmentGrace` (2 s, the same
+  loading state. `reconnectMountedPresentation()` captures the mounted chat it
+  is restoring, and a restoration that outlasts
+  `mountedRestorationTreatmentGrace` (2 s, the same
   shape as the outage copy's delay) shows the chat's existing catch-up notice
   (`sessionCatchUpNotice`, "Live session view is catching up; the run continues
-  on your Mac."). A restoration that completes inside the grace shows nothing.
+  on your Mac.") **in that chat's own scope**, and only while that chat is still
+  the mounted one with no open pending. A restoration that completes inside the
+  grace shows nothing.
   Success and failure keep the outcomes the synchronization owner already
   publishes (success removes the notice, failure replaces it with "The
   conversation could not catch up…", and Manage Session keeps the Retry
-  Conversation surface for a failed mounted sync while connected); only an
-  interrupted restoration — the socket that admitted it is gone — retires the
-  catch-up notice. A newer restoration supersedes an older one's cleanup by
+  Conversation surface for a failed mounted sync while connected); a restoration
+  that ends without such an outcome retires its own treatment, whether it was
+  cancelled, superseded by another chat or connection generation, or interrupted
+  by the transport's loss. A newer restoration supersedes an older one's cleanup by
   owner generation, so a late finish cannot clear the state the chat is showing.
 - Failure modes written first (C-2's list, mapped): a slow `session.open` after
   a replacement handshake (the label and the treatment in
@@ -8091,10 +8094,12 @@ wait).
   live-socket `.connected` before the drop and `.reconnecting` at once after it);
   restoration failing while the socket lives (existing
   `mountedRestoreFailureKeepsTransport`, `AppModelEventTests.resyncFailureHasScopedRecovery`
-  for the retry surface); profile switch and background during restoration
+  for the retry surface); leaving the chat and opening another chat while the
+  notice timer is pending (`leavingChatInsideRestorationGraceDropsTheTreatment`,
+  `openingAnotherChatInsideRestorationGraceDropsTheTreatment`, added in review
+  round 1); profile switch and background during restoration
   (existing `AppModelLifecycleTests` / `enteredBackground` cancellation of the
-  deferred projection, which is also what makes `Task.isCancelled` name an
-  interrupted restoration).
+  deferred projection).
 - Evidence: `scripts/tron-ios-test build` succeeds;
   `scripts/tron-ios-test run --only-testing TronMobileTests/AppModelReconnectTests`
   passes 46/46 (the file's 45 plus the new case);
@@ -8135,3 +8140,28 @@ wait).
   transport-open deadline); do not merge `hardening/integration` into this
   branch without re-running the two suites above, since the plan file is the
   only expected conflict.
+
+#### C-2 review round 1 (changes-required) — 2026-09-28
+
+- Fixed: the grace timer posted the catch-up notice through `noticeScope`
+  (`pendingTarget ?? target`), so leaving the chat posted it app-wide and
+  opening another chat posted it into that chat, and nothing removed it when the
+  restoration ended without a latched failure; the published
+  `isRestoringMountedPresentation` had no reader. The timer now requires the
+  restoring chat to still be mounted with no open pending, posts with
+  `noticeScope(for: target)`, and `finishMountedRestoration(owner:restored:)`
+  removes the treatment in that captured scope unless the store latched a
+  failure for the same target. `isRestoringMountedPresentation` is deleted;
+  `packages/ios-app/docs/architecture.md` no longer names it.
+- Evidence: `scripts/tron-ios-test build --lane C2R` succeeds; one run of
+  `AppModelReconnectTests`, `MountedRestorationLabelHostedTests`,
+  `SessionPresentationStoreTests`, `AppModelEventTests`,
+  `AppModelCatalogSyncTests` and `AppModelLifecycleTests` passes 183 Swift
+  Testing tests in 5 suites plus the 1 XCTest, retained at
+  `~/Library/Developer/Tron/ios/test-runs/20260928T215653Z-run.2qXI8r`.
+  Negative control (the two guards reverted to the reviewed revision): both new
+  cases fail on the leaked `.sessionCatchUp` notice; the edit was reverted,
+  rebuilt and re-run green.
+- Deviations: the plan's "profile switch during restoration" case is still
+  covered only by the route-change cases above; no profile-switch test holds the
+  notice timer pending.
