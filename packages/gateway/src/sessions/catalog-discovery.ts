@@ -177,7 +177,16 @@ export interface CatalogStructureEvidence {
   digest: string;
   factsDigest: string;
   identitiesByPath: ReadonlyMap<string, CatalogHeaderIdentity>;
+  /** The traversal covered the whole folder. A file whose own header this pass
+   * could not prove is reported in `unprovenPaths`, not here: one unreadable
+   * transcript must not blind the membership of every other one. */
   complete: boolean;
+  /** Canonical paths the traversal found whose header this pass could not read:
+   * a zero-byte file, a partial header, an oversized file over the retention
+   * budget, or the rest of the cut after a header read failed. A path here
+   * proves neither presence nor absence, so its caller keeps whatever row it
+   * already had for it and adds none. */
+  unprovenPaths: ReadonlySet<string>;
   unstableCanonicalFiles: boolean;
   unstableCanonicalPaths?: ReadonlySet<string>;
 }
@@ -274,6 +283,7 @@ export class CatalogDiscovery {
     const digest = createHash("sha256");
     const factsDigest = createHash("sha256");
     const identitiesByPath = new Map<string, CatalogHeaderIdentity>();
+    const unprovenPaths = new Set<string>();
     digest.update(`count:${paths.length}\n`);
     factsDigest.update(`count:${paths.length}\n`);
     let headerFailure = false;
@@ -310,7 +320,7 @@ export class CatalogDiscovery {
           if (retainedIdentityBytes + identityBytes > limits.maximumAcquisitionBytes) identity = undefined;
           else retainedIdentityBytes += identityBytes;
         }
-        if (!identity) complete = false;
+        if (!identity) unprovenPaths.add(path);
         digest.update(path).update("\0")
           .update(identity?.id ?? "").update("\0")
           .update(identity?.cwd ?? "").update("\0")
@@ -329,11 +339,16 @@ export class CatalogDiscovery {
         if (identity) identitiesByPath.set(path, identity);
       }
     }
+    // A header read that failed stops the batch loop, so every path it never
+    // reached is unproven too: the remaining rows are kept rather than dropped
+    // as if the files were gone.
+    for (const path of paths) if (!identitiesByPath.has(path)) unprovenPaths.add(path);
     return {
       digest: digest.digest("base64url"),
       factsDigest: factsDigest.digest("base64url"),
       identitiesByPath,
       complete,
+      unprovenPaths,
       unstableCanonicalFiles,
       unstableCanonicalPaths,
     };

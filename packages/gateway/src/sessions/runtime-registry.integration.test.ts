@@ -65,6 +65,17 @@ function subscribeAudience(registry: RuntimeRegistry, sessionId: string): void {
  * is the deterministic equivalent of waiting the watcher out, and settling the
  * owner then makes its rows and the durable document current without waiting
  * out the persist debounce. */
+/** Initialize a registry and wait for the catalog owner's first published cut.
+ * A read that lands before that cut refuses retryably (G-1c), and no reader
+ * walks the folder any more, so a test lets the owner publish one first. */
+async function initializeRegistry(
+  registry: RuntimeRegistry,
+  phaseObserver?: (phase: "catalog-warming" | "attention-recovery") => void,
+): Promise<void> {
+  await registry.initialize(phaseObserver);
+  await catalogOwner(registry).whenPublished();
+}
+
 async function settleCatalog(registry: RuntimeRegistry): Promise<void> {
   await catalogOwner(registry).reconcile();
   await catalogOwner(registry).settled();
@@ -128,7 +139,7 @@ describe.sequential("RuntimeRegistry with the pinned agent runtime", () => {
     });
     registries.push(registry);
     if (options.beforeInitialize) await options.beforeInitialize(manager.getSessionFile()!);
-    await registry.initialize(options.phaseObserver);
+    await initializeRegistry(registry, options.phaseObserver);
     await registry.recoverCanonicalAttention();
     return {
       root,
@@ -353,7 +364,7 @@ describe.sequential("RuntimeRegistry with the pinned agent runtime", () => {
       sessionListChanged: () => {},
     });
     registries.push(cold);
-    await cold.initialize();
+    await initializeRegistry(cold);
 
     expect((await cold.list("user")).find((session) => session.id === sessionId))
       .toMatchObject({ creationOrigin: { kind: "automation", automationId } });
@@ -380,7 +391,7 @@ describe.sequential("RuntimeRegistry with the pinned agent runtime", () => {
     });
     registries.push(indexed);
     const scanner = vi.spyOn(indexed as any, "sessionInfos");
-    await indexed.initialize();
+    await initializeRegistry(indexed);
     expect((await indexed.list("user")).find((session) => session.id === sessionId))
       .toMatchObject({ creationOrigin: { kind: "automation", automationId } });
     expect(scanner).not.toHaveBeenCalled();
@@ -488,7 +499,7 @@ describe.sequential("RuntimeRegistry with the pinned agent runtime", () => {
       notifications: { enqueue, suppressAutomatic, markSessionInboxRead: vi.fn(async () => {}) } as unknown as NotificationService,
     });
     registries.push(registry);
-    await registry.initialize();
+    await initializeRegistry(registry);
     const slot = await registry.create(cwd);
     const model = faux.getModel();
     await slot.setModel(model.provider, model.id);
@@ -577,7 +588,7 @@ describe.sequential("RuntimeRegistry with the pinned agent runtime", () => {
       sessionListChanged: () => {},
     });
     registries.push(restarted);
-    await restarted.initialize();
+    await initializeRegistry(restarted);
     await restarted.recoverCanonicalAttention();
     expect(restarted.attentionProjection(fixture.manager.getSessionId()))
       .toMatchObject({ completionRevision: 1, isUnread: true });
@@ -606,7 +617,7 @@ describe.sequential("RuntimeRegistry with the pinned agent runtime", () => {
       sessionListChanged: () => {},
     });
     registries.push(restarted);
-    await restarted.initialize();
+    await initializeRegistry(restarted);
     expect(restarted.attentionProjection(sessionId)).toEqual({
       completionRevision: 0,
       attentionRevision: 0,
@@ -646,7 +657,7 @@ describe.sequential("RuntimeRegistry with the pinned agent runtime", () => {
       sessionListChanged: () => {},
     });
     registries.push(restarted);
-    await restarted.initialize();
+    await initializeRegistry(restarted);
     await restarted.recoverCanonicalAttention();
     expect(restarted.attentionProjection(sessionId)).toMatchObject({ completionRevision: 1, isUnread: true });
 
@@ -663,7 +674,7 @@ describe.sequential("RuntimeRegistry with the pinned agent runtime", () => {
       sessionListChanged: () => {},
     });
     registries.push(secondRestart);
-    await secondRestart.initialize();
+    await initializeRegistry(secondRestart);
     expect(secondRestart.attentionProjection(sessionId).completionRevision).toBe(1);
   });
 
@@ -813,7 +824,7 @@ describe.sequential("RuntimeRegistry with the pinned agent runtime", () => {
       sessionListChanged: () => { listChanges += 1; },
     });
     registries.push(registry);
-    await registry.initialize();
+    await initializeRegistry(registry);
     const initial = await registry.catalog("user");
 
     const deletedSlot = await registry.create(cwd);
@@ -883,7 +894,7 @@ describe.sequential("RuntimeRegistry with the pinned agent runtime", () => {
       sessionListChanged: () => {},
     });
     registries.push(fresh);
-    await fresh.initialize();
+    await initializeRegistry(fresh);
     const freshIDs = (await fresh.catalog("user")).sessions.map((session) => session.id);
     expect(freshIDs).toContain(persistedSlot.id);
     expect(freshIDs).not.toContain(evictedSlot.id);
@@ -905,7 +916,7 @@ describe.sequential("RuntimeRegistry with the pinned agent runtime", () => {
       sessionListChanged: () => {},
     });
     registries.push(registry);
-    await registry.initialize();
+    await initializeRegistry(registry);
     const baseline = await registry.catalog("all");
     const slot = await registry.create(cwd);
     const beforeCollision = await registry.catalog("all");
@@ -959,7 +970,7 @@ describe.sequential("RuntimeRegistry with the pinned agent runtime", () => {
       sessionListChanged: () => {},
     });
     registries.push(registry);
-    await registry.initialize();
+    await initializeRegistry(registry);
     const slot = await registry.create(cwd);
     const model = faux.getModel();
     await slot.setModel(model.provider, model.id);
@@ -1013,7 +1024,7 @@ describe.sequential("RuntimeRegistry with the pinned agent runtime", () => {
       sessionListChanged: () => {},
     });
     registries.push(registry);
-    await registry.initialize();
+    await initializeRegistry(registry);
     const slot = await registry.create(cwd);
     subscribeAudience(registry, slot.id);
     const model = faux.getModel();
@@ -1068,7 +1079,7 @@ describe.sequential("RuntimeRegistry with the pinned agent runtime", () => {
       sessionListChanged: () => { listChanges += 1; },
     });
     registries.push(registry);
-    await registry.initialize();
+    await initializeRegistry(registry);
     const slot = await registry.create(cwd);
     const model = faux.getModel();
     await slot.setModel(model.provider, model.id);
@@ -1200,6 +1211,7 @@ describe.sequential("RuntimeRegistry with the pinned agent runtime", () => {
       catalogDiscoveryLimits: { maximumDirectories: 2, maximumSessions: 2 },
     });
     registries.push(registry);
+    await initializeRegistry(registry);
     expect((await registry.catalog("all")).sessions.map((session) => session.id).sort()).toEqual([
       childSession.getSessionId(), directSession.getSessionId(),
     ].sort());
@@ -1405,6 +1417,7 @@ describe.sequential("RuntimeRegistry with the pinned agent runtime", () => {
     });
 
     try {
+      await initializeRegistry(registry);
       const loading = registry.catalog("all");
       await capacity;
       expect(maximumActive).toBe(2);
@@ -1463,7 +1476,7 @@ describe.sequential("RuntimeRegistry with the pinned agent runtime", () => {
       sessionListChanged: () => {},
     });
     registries.push(restarted);
-    await restarted.initialize();
+    await initializeRegistry(restarted);
     // The owner reconciles behind the listener. Settle it, so the only append
     // left in this case's window belongs to the reader.
     await settleCatalog(restarted);
@@ -1572,7 +1585,7 @@ describe.sequential("RuntimeRegistry with the pinned agent runtime", () => {
       sessionListChanged: () => {},
     });
     registries.push(restarted);
-    await restarted.initialize();
+    await initializeRegistry(restarted);
     // The catalog owner reconciles behind the listener. Settle it so the
     // injected append lands in the reader's reconciliation, which this case is
     // about, rather than in background maintenance.
@@ -1655,7 +1668,7 @@ describe.sequential("RuntimeRegistry with the pinned agent runtime", () => {
           broadcast: () => {}, sessionSummaryChanged: () => {}, sessionListChanged: () => {},
         });
         registries.push(registry);
-        await registry.initialize();
+        await initializeRegistry(registry);
       }
       const before = await registry.pageSource("all");
       const first = await pagination.firstPage("old-reader", "all", before, 1);
@@ -1715,7 +1728,7 @@ describe.sequential("RuntimeRegistry with the pinned agent runtime", () => {
       sessionListChanged: () => {},
     });
     registries.push(restarted);
-    await restarted.initialize();
+    await initializeRegistry(restarted);
     const internals = restarted as unknown as {
       catalogMetadataIndex: CatalogMetadataIndex;
       sessionInfos: () => Promise<unknown[]>;
@@ -1946,7 +1959,7 @@ describe.sequential("RuntimeRegistry with the pinned agent runtime", () => {
       sessionListChanged: () => {},
     });
     registries.push(registry);
-    await registry.initialize();
+    await initializeRegistry(registry);
     await registry.catalog("all");
 
     const first = registry.acquire(firstManager.getSessionId());
@@ -2905,6 +2918,7 @@ describe.sequential("RuntimeRegistry with the pinned agent runtime", () => {
       catalogDiscoveryLimits: { maximumHeaderBytes: 1 },
     });
     registries.push(headerRegistry);
+    await initializeRegistry(headerRegistry);
     await expect(headerRegistry.catalog("all")).resolves.toMatchObject({
       sessions: expect.arrayContaining([expect.objectContaining({ id: headerFixture.manager.getSessionId() })]),
     });
@@ -2920,6 +2934,7 @@ describe.sequential("RuntimeRegistry with the pinned agent runtime", () => {
       catalogDiscoveryLimits: { maximumAcquisitionBytes: 1 },
     });
     registries.push(admissionRegistry);
+    await initializeRegistry(admissionRegistry);
     await expect(admissionRegistry.catalog("all")).resolves.toMatchObject({
       sessions: expect.arrayContaining([expect.objectContaining({ id: headerFixture.manager.getSessionId() })]),
     });
@@ -2997,6 +3012,7 @@ describe.sequential("RuntimeRegistry with the pinned agent runtime", () => {
     expect((await evidence).identitiesByPath.size).toBe(count);
     expect(headers).toHaveBeenCalledTimes(count);
     headers.mockRestore();
+    await initializeRegistry(registry);
     expect((await registry.catalog("all")).sessions).toHaveLength(count);
   });
 
@@ -3036,6 +3052,7 @@ describe.sequential("RuntimeRegistry with the pinned agent runtime", () => {
     });
     registries.push(registry);
 
+    await initializeRegistry(registry);
     const all = await registry.catalog("all");
     expect(all.sessions.map((session) => session.id)).not.toContain(parentId);
     expect(all.sessions.find((session) => session.id === childId)).toMatchObject({ kind: "subagent" });
@@ -3077,6 +3094,7 @@ describe.sequential("RuntimeRegistry with the pinned agent runtime", () => {
     });
     registries.push(registry);
 
+    await initializeRegistry(registry);
     expect((await registry.catalog("all")).sessions.map((session) => session.id)).not.toContain(childId);
     const acquisition = await (registry as unknown as {
       catalogAcquisition: () => Promise<{
@@ -3119,6 +3137,7 @@ describe.sequential("RuntimeRegistry with the pinned agent runtime", () => {
     });
     registries.push(registry);
 
+    await initializeRegistry(registry);
     expect((await registry.catalog("all")).sessions.find((session) => session.id === childId)?.kind)
       .toBe("subagent");
     await rm(parentFile);
@@ -3172,6 +3191,7 @@ describe.sequential("RuntimeRegistry with the pinned agent runtime", () => {
     });
     registries.push(registry);
 
+    await initializeRegistry(registry);
     const all = await registry.catalog("all");
     expect(all.sessions).toHaveLength(1_541);
     expect(all.sessions.find((session) => session.id === childId)?.kind).toBe("subagent");
@@ -3337,7 +3357,7 @@ describe.sequential("RuntimeRegistry with the pinned agent runtime", () => {
       sessionListChanged: () => {},
     });
     registries.push(registry);
-    await registry.initialize();
+    await initializeRegistry(registry);
     const internals = registry as unknown as {
       latestSummaries: Map<string, SessionSummaryUpdate>;
       publishRevisionedSummary: (summary: SessionSummaryUpdate) => void;
@@ -3411,7 +3431,7 @@ describe.sequential("RuntimeRegistry with the pinned agent runtime", () => {
       sessionListChanged: () => {},
     });
     registries.push(registry);
-    await registry.initialize();
+    await initializeRegistry(registry);
     const slot = await registry.create(cwd);
     const model = faux.getModel();
     await slot.setModel(model.provider, model.id);
@@ -3467,7 +3487,7 @@ describe.sequential("RuntimeRegistry with the pinned agent runtime", () => {
       sessionListChanged: () => {},
     });
     registries.push(registry);
-    await registry.initialize();
+    await initializeRegistry(registry);
     const catalog = (registry as unknown as { sessionCatalog: SessionCatalog }).sessionCatalog;
     const catalogRoot = await realpath(sessions);
     // The comparison is the Gateway's own walk of the folder plus one read of
@@ -3578,7 +3598,7 @@ describe.sequential("RuntimeRegistry with the pinned agent runtime", () => {
       sessionListChanged: () => {},
     });
     registries.push(registry);
-    await registry.initialize();
+    await initializeRegistry(registry);
     const slot = await registry.create(cwd);
     const model = faux.getModel();
     await slot.setModel(model.provider, model.id);
@@ -3656,7 +3676,7 @@ describe.sequential("RuntimeRegistry with the pinned agent runtime", () => {
     registries.push(registry);
     let acquisitions: Promise<unknown>[] = [];
     try {
-      await registry.initialize();
+      await initializeRegistry(registry);
       acquisitions = managers.flatMap(manager => [registry.acquire(manager.getSessionId()), registry.acquire(manager.getSessionId())]);
       const acquired = await Promise.all(acquisitions) as Awaited<ReturnType<RuntimeRegistry["acquire"]>>[];
       const slots = acquired.filter((_, index) => index % 2 === 0);
@@ -3725,7 +3745,7 @@ describe.sequential("RuntimeRegistry with the pinned agent runtime", () => {
       sessionListChanged: () => {},
     });
     registries.push(registry);
-    await registry.initialize();
+    await initializeRegistry(registry);
 
     const [first, second] = await Promise.all([registry.create(firstCwd), registry.create(secondCwd)]);
     expect(first.modelRuntime).not.toBe(second.modelRuntime);
@@ -3803,7 +3823,7 @@ describe.sequential("RuntimeRegistry with the pinned agent runtime", () => {
       sessionSummaryChanged: () => {}, sessionListChanged: () => {},
     });
     registries.push(registry);
-    await registry.initialize();
+    await initializeRegistry(registry);
     const slot = await registry.create(cwd);
     const model = faux.getModel();
     await slot.setModel(model.provider, model.id);
@@ -3846,7 +3866,7 @@ describe.sequential("RuntimeRegistry with the pinned agent runtime", () => {
       sessionSummaryChanged: () => {}, sessionListChanged: () => {},
     });
     registries.push(registry);
-    await registry.initialize();
+    await initializeRegistry(registry);
     const slot = await registry.create(cwd);
     const model = faux.getModel();
     await slot.setModel(model.provider, model.id);
@@ -3891,7 +3911,7 @@ describe.sequential("RuntimeRegistry with the pinned agent runtime", () => {
       sessionListChanged: () => {},
     });
     registries.push(registry);
-    await registry.initialize();
+    await initializeRegistry(registry);
 
     const creating = registry.create(cwd);
     await trustEntered;
@@ -5685,7 +5705,7 @@ describe.sequential("RuntimeRegistry with the pinned agent runtime", () => {
       sessionSummaryChanged: () => {}, sessionListChanged: () => {},
     });
     registries.push(recoveredRegistry);
-    await recoveredRegistry.initialize();
+    await initializeRegistry(recoveredRegistry);
     const recoveredSlot = await recoveredRegistry.acquire(slot.id);
     vi.spyOn(recoveredSlot as unknown as { extensionToolOrigin: (name: string) => { source: string } | undefined }, "extensionToolOrigin")
       .mockReturnValue({ source: "pi-subagents" });
@@ -5793,7 +5813,7 @@ describe.sequential("RuntimeRegistry with the pinned agent runtime", () => {
       sessionSummaryChanged: () => {}, sessionListChanged: () => {},
     });
     registries.push(recoveredRegistry);
-    await recoveredRegistry.initialize();
+    await initializeRegistry(recoveredRegistry);
     const recoveredSlot = await recoveredRegistry.acquire(slot.id);
     vi.spyOn(recoveredSlot as unknown as { extensionToolOrigin: (name: string) => { source: string } | undefined }, "extensionToolOrigin")
       .mockReturnValue({ source: "pi-subagents" });
@@ -6192,7 +6212,7 @@ describe.sequential("RuntimeRegistry with the pinned agent runtime", () => {
       broadcast: () => {}, sessionSummaryChanged: () => {}, sessionListChanged: () => {},
     });
     registries.push(registry);
-    await registry.initialize();
+    await initializeRegistry(registry);
     const slot = await registry.create(cwd);
     const model = faux.getModel();
     model.inputLimits = { images: { resize: { maxWidth: 1_000, maxHeight: 1_000 } } };
@@ -6233,7 +6253,7 @@ describe.sequential("RuntimeRegistry with the pinned agent runtime", () => {
       broadcast: () => {}, sessionSummaryChanged: () => {}, sessionListChanged: () => {},
     });
     registries.push(registry);
-    await registry.initialize();
+    await initializeRegistry(registry);
     const slot = await registry.create(cwd);
     const model = faux.getModel();
     await slot.setModel(model.provider, model.id);
@@ -6275,7 +6295,7 @@ describe.sequential("RuntimeRegistry with the pinned agent runtime", () => {
       broadcast: () => {}, sessionSummaryChanged: () => {}, sessionListChanged: () => {},
     });
     registries.push(registry);
-    await registry.initialize();
+    await initializeRegistry(registry);
     const slot = await registry.create(cwd);
     await waitUntil(() => slot.snapshot().extensionPresentation.semanticState.statuses["oversized-widget-callback"] === "completed");
     expect(slot.snapshot().extensionPresentation.semanticState.widgets).toEqual([]);
@@ -6312,7 +6332,7 @@ describe.sequential("RuntimeRegistry with the pinned agent runtime", () => {
       broadcast: () => {}, sessionSummaryChanged: () => {}, sessionListChanged: () => {},
     });
     registries.push(registry);
-    await registry.initialize();
+    await initializeRegistry(registry);
     const slot = await registry.create(cwd);
     const internal = slot as unknown as { extensionHost: { isTuiStarted: boolean; mountedComponentCount: number } };
     await waitUntil(() => internal.extensionHost.mountedComponentCount === 1);
@@ -6350,7 +6370,7 @@ describe.sequential("RuntimeRegistry with the pinned agent runtime", () => {
       notifications: { userInputRequired, markSessionInboxRead: vi.fn(async () => {}) } as unknown as NotificationService,
     });
     registries.push(registry);
-    await registry.initialize();
+    await initializeRegistry(registry);
     const slot = await registry.create(cwd);
     const command = slot.prompt("/semantic-ask");
     await waitUntil(() => slot.snapshot().extensionPresentation.pendingInteractions.length === 1);
@@ -6416,7 +6436,7 @@ describe.sequential("RuntimeRegistry with the pinned agent runtime", () => {
       broadcast: () => {}, sessionSummaryChanged: () => {}, sessionListChanged: () => {},
     });
     registries.push(registry);
-    await registry.initialize();
+    await initializeRegistry(registry);
     const slot = await registry.create(cwd);
     const internal = slot as unknown as { ui: { context(): { confirm(title: string, message: string): Promise<boolean>; setStatus(key: string, text: string): void } } };
     const oldContext = internal.ui.context();
@@ -6479,7 +6499,7 @@ export default function (pi) {
       broadcast: () => {}, sessionSummaryChanged: () => {}, sessionListChanged: () => {},
     });
     registries.push(registry);
-    await registry.initialize();
+    await initializeRegistry(registry);
     const slot = await registry.create(cwd);
     await slot.setModel(faux.getModel().provider, faux.getModel().id);
     await slot.prompt("original request");
@@ -6560,7 +6580,7 @@ export default function (pi) {
       sessionListChanged: () => {},
     });
     registries.push(registry);
-    await registry.initialize();
+    await initializeRegistry(registry);
     const slot = await registry.create(cwd);
     expect(slot.sessionFile?.startsWith(join(agentDir, "sessions"))).toBe(true);
     subscribeAudience(registry, slot.id);
@@ -6659,7 +6679,7 @@ export default function (pi) {
       broadcast: () => {}, sessionSummaryChanged: () => {}, sessionListChanged: () => {},
     });
     registries.push(registry);
-    await registry.initialize();
+    await initializeRegistry(registry);
     const slot = await registry.create(cwd);
     const model = faux.getModel();
     await slot.setModel(model.provider, model.id);
@@ -6715,7 +6735,7 @@ export default function (pi) {
       attention: { complete: (sessionId: string, completionId: string) => Promise<unknown> };
     }).attention;
     const recovered = vi.spyOn(restartedAttention, "complete");
-    await restarted.initialize();
+    await initializeRegistry(restarted);
     await restarted.recoverCanonicalAttention();
 
     expect(recovered.mock.calls.map(([, completionId]) => completionId)).toEqual(durableCompletionIds);
@@ -6746,7 +6766,7 @@ export default function (pi) {
       sessionSummaryChanged: () => {}, sessionListChanged: () => {},
     });
     registries.push(registry);
-    await registry.initialize();
+    await initializeRegistry(registry);
     const slot = await registry.acquire(manager.getSessionId());
     subscribeAudience(registry, slot.id);
     const model = faux.getModel();
@@ -6815,7 +6835,7 @@ export default function (pi) {
       sessionSummaryChanged: () => {}, sessionListChanged: () => {},
     });
     registries.push(registry);
-    await registry.initialize();
+    await initializeRegistry(registry);
     const slot = await registry.create(cwd);
     currentSlot = slot;
     const model = faux.getModel();
@@ -6883,7 +6903,7 @@ export default function (pi) {
       sessionListChanged: () => {},
     });
     registries.push(registry);
-    await registry.initialize();
+    await initializeRegistry(registry);
     const slot = await registry.create(cwd);
     subscribeAudience(registry, slot.id);
     const model = faux.getModel();
@@ -6995,7 +7015,7 @@ export default function (pi) {
         sessionListChanged: () => {},
       });
       registries.push(registry);
-      await registry.initialize();
+      await initializeRegistry(registry);
       const slot = await registry.create(cwd);
       const model = faux.getModel();
       await slot.setModel(model.provider, model.id);
@@ -7048,7 +7068,7 @@ export default function (pi) {
       broadcast: () => {}, sessionSummaryChanged: () => {}, sessionListChanged: () => {},
     });
     registries.push(registry);
-    await registry.initialize();
+    await initializeRegistry(registry);
     const slot = await registry.create(cwd);
     const prompting = slot.prompt("handled without agent");
     await waitUntil(() => slot.isBusy);
@@ -7092,7 +7112,7 @@ export default function (pi) {
       sessionSummaryChanged: () => {}, sessionListChanged: () => {},
     });
     registries.push(registry);
-    await registry.initialize();
+    await initializeRegistry(registry);
     const slot = await registry.create(cwd);
     const model = faux.getModel();
     await slot.setModel(model.provider, model.id);
@@ -7137,7 +7157,7 @@ export default function (pi) {
       sessionSummaryChanged: () => {}, sessionListChanged: () => {},
     });
     registries.push(registry);
-    await registry.initialize();
+    await initializeRegistry(registry);
     const slot = await registry.create(cwd);
     const model = faux.getModel();
     await slot.setModel(model.provider, model.id);
@@ -7165,7 +7185,7 @@ export default function (pi) {
       sessionListChanged: () => {},
     });
     registries.push(registry);
-    await registry.initialize();
+    await initializeRegistry(registry);
     const slot = await registry.create(cwd);
     const session = (slot as unknown as {
       runtime: { session: { prompt: (
@@ -7437,7 +7457,7 @@ export default function (pi) {
       sessionListChanged: () => {},
     });
     registries.push(registry);
-    await registry.initialize();
+    await initializeRegistry(registry);
     const slot = await registry.create(cwd);
     const model = faux.getModel();
     await slot.setModel(model.provider, model.id);
@@ -7538,7 +7558,7 @@ export default function (pi) {
       sessionListChanged: () => {},
     });
     registries.push(registry);
-    await registry.initialize();
+    await initializeRegistry(registry);
     const slot = await registry.create(cwd);
     const model = faux.getModel();
     await slot.setModel(model.provider, model.id);
@@ -8125,7 +8145,7 @@ export default function (pi) {
       sessionListChanged: () => {},
     });
     registries.push(registry);
-    await registry.initialize();
+    await initializeRegistry(registry);
     const slot = await registry.create(cwd);
     subscribeAudience(registry, slot.id);
     const session = (slot as unknown as {
@@ -8180,7 +8200,7 @@ export default function (pi) {
       sessionSummaryChanged: () => {}, sessionListChanged: () => {},
     });
     registries.push(registry);
-    await registry.initialize();
+    await initializeRegistry(registry);
     const slot = await registry.create(cwd);
     subscribeAudience(registry, slot.id);
     const model = faux.getModel();
@@ -8230,7 +8250,7 @@ export default function (pi) {
       broadcast: () => {}, sessionSummaryChanged: () => {}, sessionListChanged: () => {},
     });
     registries.push(registry);
-    await registry.initialize();
+    await initializeRegistry(registry);
     const slot = await registry.create(cwd);
     const model = faux.getModel();
     await slot.setModel(model.provider, model.id);
@@ -8284,7 +8304,7 @@ export default function (pi) {
       sessionListChanged: () => {},
     });
     registries.push(registry);
-    await registry.initialize();
+    await initializeRegistry(registry);
     const slot = await registry.create(cwd);
     const model = faux.getModel();
     await slot.setModel(model.provider, model.id);
@@ -8425,7 +8445,7 @@ export default function (pi) {
       sessionListChanged: () => {},
     });
     registries.push(registry);
-    await registry.initialize();
+    await initializeRegistry(registry);
     const slot = await registry.create(cwd);
     const model = faux.getModel();
     await slot.setModel(model.provider, model.id);
@@ -8511,7 +8531,7 @@ export default function (pi) {
       sessionListChanged: () => {},
     });
     registries.push(registry);
-    await registry.initialize();
+    await initializeRegistry(registry);
     const slot = await registry.create(cwd);
     const model = faux.getModel();
     await slot.setModel(model.provider, model.id);
@@ -8570,7 +8590,7 @@ export default function (pi) {
       sessionListChanged: () => {},
     });
     registries.push(registry);
-    await registry.initialize();
+    await initializeRegistry(registry);
     const slot = await registry.create(cwd);
     const model = faux.getModel();
     await slot.setModel(model.provider, model.id);
@@ -8621,7 +8641,7 @@ export default function (pi) {
       sessionListChanged: () => {},
     });
     registries.push(registry);
-    await registry.initialize();
+    await initializeRegistry(registry);
     const slot = await registry.create(cwd);
     const model = faux.getModel();
     await slot.setModel(model.provider, model.id);
@@ -8669,7 +8689,7 @@ export default function (pi) {
       sessionListChanged: () => {},
     });
     registries.push(registry);
-    await registry.initialize();
+    await initializeRegistry(registry);
     const slot = await registry.create(cwd);
     const model = faux.getModel();
     await slot.setModel(model.provider, model.id);
@@ -8716,7 +8736,7 @@ export default function (pi) {
       sessionListChanged: () => {},
     });
     registries.push(registry);
-    await registry.initialize();
+    await initializeRegistry(registry);
     const slot = await registry.create(cwd);
     let releaseCompaction!: () => void;
     const barrier = new Promise<void>((resolve) => { releaseCompaction = resolve; });
@@ -8767,7 +8787,7 @@ export default function (pi) {
       sessionListChanged: () => {},
     });
     registries.push(registry);
-    await registry.initialize();
+    await initializeRegistry(registry);
     const slot = await registry.create(cwd);
     subscribeAudience(registry, slot.id);
     const runtime = (slot as unknown as {
@@ -8831,7 +8851,7 @@ export default function (pi) {
       sessionSummaryChanged: () => {}, sessionListChanged: () => {},
     });
     registries.push(registry);
-    await registry.initialize();
+    await initializeRegistry(registry);
     const slot = await registry.create(cwd);
     subscribeAudience(registry, slot.id);
     const internal = slot as unknown as {
@@ -8886,7 +8906,7 @@ export default function (pi) {
       sessionListChanged: () => {},
     });
     registries.push(registry);
-    await registry.initialize();
+    await initializeRegistry(registry);
     const slot = await registry.create(cwd);
     const session = (slot as unknown as {
       runtime: { session: { compact: (instructions?: string) => Promise<unknown> } };
@@ -8931,7 +8951,7 @@ export default function (pi) {
       sessionListChanged: () => {},
     });
     registries.push(registry);
-    await registry.initialize();
+    await initializeRegistry(registry);
     const slot = await registry.create(cwd);
     const model = faux.getModel();
     await slot.setModel(model.provider, model.id);
@@ -9006,7 +9026,7 @@ export default function (pi) {
       sessionListChanged: () => {},
     });
     registries.push(registry);
-    await registry.initialize();
+    await initializeRegistry(registry);
     const slot = await registry.create(cwd);
     const model = faux.getModel();
     await slot.setModel(model.provider, model.id);
@@ -9051,7 +9071,7 @@ export default function (pi) {
       sessionListChanged: () => {},
     });
     registries.push(registry);
-    await registry.initialize();
+    await initializeRegistry(registry);
     const slot = await registry.create(cwd);
     let releaseCompaction!: () => void;
     const compactionBarrier = new Promise<void>((resolve) => { releaseCompaction = resolve; });
@@ -9106,7 +9126,7 @@ export default function (pi) {
       sessionListChanged: () => {},
     });
     registries.push(registry);
-    await registry.initialize();
+    await initializeRegistry(registry);
 
     const creating = registry.create(cwd);
     await factoryWasEntered;
@@ -9147,7 +9167,7 @@ export default function (pi) {
       broadcast: () => {}, sessionSummaryChanged: () => {}, sessionListChanged: () => {},
     });
     registries.push(registry);
-    await registry.initialize();
+    await initializeRegistry(registry);
     const slot = await registry.create(cwd);
     const model = faux.getModel();
     await slot.setModel(model.provider, model.id);
@@ -9175,7 +9195,7 @@ export default function (pi) {
       sessionListChanged: () => {},
     });
     registries.push(registry);
-    await registry.initialize();
+    await initializeRegistry(registry);
     const slot = await registry.create(cwd);
 
     let shutdownEntered!: () => void;
@@ -9402,7 +9422,7 @@ export default function (pi) {
       sessionListChanged: () => {},
     });
     registries.push(registry);
-    await registry.initialize();
+    await initializeRegistry(registry);
     const slot = await registry.create(cwd);
     const model = faux.getModel();
     await slot.setModel(model.provider, model.id);
@@ -9459,7 +9479,7 @@ export default function (pi) {
       sessionListChanged: () => {},
     });
     registries.push(registry);
-    await registry.initialize();
+    await initializeRegistry(registry);
     const slot = await registry.create(cwd);
     subscribeAudience(registry, slot.id);
     const model = faux.getModel();
@@ -9636,7 +9656,7 @@ export default function (pi) {
       sessionListChanged: () => {},
     });
     registries.push(registry);
-    await registry.initialize();
+    await initializeRegistry(registry);
     const slot = await registry.create(cwd);
     const model = faux.getModel();
     await slot.setModel(model.provider, model.id);
@@ -9693,7 +9713,7 @@ export default function (pi) {
       sessionListChanged: () => {},
     });
     registries.push(registry);
-    await registry.initialize();
+    await initializeRegistry(registry);
     const slot = await registry.create(cwd);
     subscribeAudience(registry, slot.id);
     const model = faux.getModel();
@@ -9785,7 +9805,7 @@ export default function (pi) {
       sessionListChanged: () => {},
     });
     registries.push(registry);
-    await registry.initialize();
+    await initializeRegistry(registry);
     const slot = await registry.create(cwd);
     const model = faux.getModel();
     await slot.setModel(model.provider, model.id);
@@ -9838,7 +9858,7 @@ export default function (pi) {
       sessionSummaryChanged: () => {}, sessionListChanged: () => {},
     });
     registries.push(registry);
-    await registry.initialize();
+    await initializeRegistry(registry);
     const slot = await registry.create(cwd);
     const model = faux.getModel();
     await slot.setModel(model.provider, model.id);
@@ -9883,7 +9903,7 @@ export default function (pi) {
       broadcast: () => {}, sessionSummaryChanged: () => {}, sessionListChanged: () => {},
     });
     registries.push(registry);
-    await registry.initialize();
+    await initializeRegistry(registry);
     const slot = await registry.create(cwd);
     const model = faux.getModel();
     await slot.setModel(model.provider, model.id);
@@ -10088,7 +10108,7 @@ export default function (pi) {
       broadcast: () => {}, sessionSummaryChanged: () => {}, sessionListChanged: () => {},
     });
     registries.push(registry);
-    await registry.initialize();
+    await initializeRegistry(registry);
     const slot = await registry.create(cwd);
     const model = faux.getModel();
     await slot.setModel(model.provider, model.id);
@@ -10248,7 +10268,7 @@ export default function (pi) {
       sessionListChanged: () => {},
     });
     registries.push(registry);
-    await registry.initialize();
+    await initializeRegistry(registry);
     const slot = await registry.create(cwd);
 
     await expect(slot.prompt("/notify-command count to 20")).resolves.toEqual({ operationId: expect.any(String) });
@@ -10322,7 +10342,7 @@ export default function (pi) {
       sessionListChanged: () => {},
     });
     registries.push(registry);
-    await registry.initialize();
+    await initializeRegistry(registry);
     const slot = await registry.create(cwd);
 
     await expect(slot.prompt("/fail-command")).resolves.toEqual({ operationId: expect.any(String) });
@@ -10450,7 +10470,7 @@ export default function (pi) {
       sessionListChanged: () => { listChanges += 1; },
     });
     registries.push(registry);
-    await registry.initialize();
+    await initializeRegistry(registry);
     const closing = await registry.create(closingCwd);
     const other = await registry.create(otherCwd);
     const closingID = closing.id;
@@ -10530,7 +10550,7 @@ export default function (pi) {
       sessionListChanged: () => {},
     });
     registries.push(registry);
-    await registry.initialize();
+    await initializeRegistry(registry);
 
     const [first, second] = await Promise.all([registry.create(firstCwd), registry.create(secondCwd)]);
     expect(first.modelRuntime).not.toBe(second.modelRuntime);
@@ -10563,7 +10583,7 @@ export default function (pi) {
       sessionListChanged: () => {},
     });
     registries.push(registry);
-    await registry.initialize();
+    await initializeRegistry(registry);
     const slot = await registry.create(cwd);
     expect(slot.sessionFile?.startsWith(sessionDir)).toBe(true);
     const model = faux.getModel();
@@ -10610,7 +10630,7 @@ export default function (pi) {
       sessionListChanged: () => {},
     });
     registries.push(registry);
-    await registry.initialize();
+    await initializeRegistry(registry);
 
     const slot = await registry.create(cwd);
     const resources = await slot.resources() as any;
@@ -10705,7 +10725,7 @@ export default function (pi) {
       sessionListChanged: () => {},
     });
     registries.push(registry);
-    await registry.initialize();
+    await initializeRegistry(registry);
     return registry.create(cwd);
   }
 
@@ -10777,7 +10797,7 @@ export default function (pi) {
       },
     });
     registries.push(registry);
-    await registry.initialize();
+    await initializeRegistry(registry);
     const slot = await registry.create(cwd);
     const model = faux.getModel();
     await slot.setModel(model.provider, model.id);
@@ -11078,7 +11098,7 @@ export default function (pi) {
     });
     registries.push(registry);
     registry.setKnowledgeService(new KnowledgeService(new KnowledgeStore(registry.knowledgeWorkspace()), { admit(cut: any) { admissions.push(structuredClone(cut)); }, dispose() {} } as any));
-    await registry.initialize();
+    await initializeRegistry(registry);
     const slot = await registry.create(cwd);
     const selectedModel = faux.getModel();
     await slot.setModel(selectedModel.provider, selectedModel.id);
