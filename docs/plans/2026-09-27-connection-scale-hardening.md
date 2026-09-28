@@ -576,8 +576,8 @@ rows are in priority order.
 | G-8 | Done | Background work audit: delete or bound each unowned or repeating job | O-5 | orchestrator-dispatched deepseek-worker, 2026-09-28 |
 | G-8a | Ready | Discovery lane retries an atomically replaced `status.json` (bounded, like the watcher lane) so a replace is not `extension.artifact-rejected`; see G-8 handoff | G-1c | |
 | G-8d | Ready | Bound the 750 ms ambient artifact discovery pass by change and make its 1,024-entry truncation impossible or visible; see G-8 handoff | G-8a | |
-| G-8b | Needs scoping | Bound the Mac app status poll's child processes and per-poll payload re-hash (user/security decision in "Decisions still open"); see G-8 handoff | G-8 | |
-| G-8c | Needs scoping | Bound the session-search warm-up (persisted index vs bounded slices in G-9's scheduler: user decision); see G-8 handoff | G-9 | |
+| G-8b | Ready | Bound the Mac app status poll's child processes and per-poll payload re-hash (user/security decision in "Decisions still open"); see G-8 handoff | G-8 | |
+| G-8c | Ready | Bound the session-search warm-up (persisted index vs bounded slices in G-9's scheduler: user decision); see G-8 handoff | G-9 | |
 | E-1 | Ready | Document Tailscale flap diagnosis and user-side checks; the evaluation day confirms | O-2, O-7 | |
 | T-1 | Ready | Pre-existing test race: registry extension-artifact discovery tests treat an awaited `discoverExtensionArtifacts()` as a barrier; wait for a pass that settles (three tests, one a false green) | G-1a (Registry zone) | |
 | T-2 | Ready | `GatewayConnectionEpisodeRecorderTests/blockedMainActorIsMeasuredAndReported` (O-4) was killed once ("Test crashed with signal kill") when run with four other suites on integration, then passed 3/3; find whether the 5 s main-thread block trips a hosted-test watchdog and bound the block so the test cannot be killed while still proving the stall record | O-4 | |
@@ -5719,3 +5719,15 @@ keeps this line. Superseded: the C-5 handoff's "Kept on purpose" claim that
 `unreachableSecondaryProfileRetriesAtOnce`'s path-return leg goes through a
 satisfied hint alone (that notice is now the finding-2 case that must not cut a
 wait).
+
+### Decisions · 2026-09-28 · user (relayed by the orchestrator)
+
+- G-8b: approved. The Mac app status poll may stop re-hashing an unchanged,
+  already-admitted Gateway payload on every poll, and may skip the `lsof` and
+  `ps` display reads between polls. The fail-closed payload checks run when the
+  selection stamp or the process fence (live launchd pid plus start identity)
+  changes, and on explicit user actions.
+- G-8c: approved. Session search keeps a persisted index keyed by
+  `fileIdentity` (new durable state with one owner, rebuildable from canonical
+  JSONL), so a start warms it without a full-corpus parse.
+- Rows G-8b and G-8c move from Needs scoping to Ready.
