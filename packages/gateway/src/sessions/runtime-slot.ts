@@ -674,6 +674,18 @@ export class RuntimeSlot {
     messageCount: number;
     firstMessage: string;
   } | undefined;
+  /** Summary facts are folded from the entries appended since the last fold, so
+   * publishing a change never re-walks a long transcript (G-11: a live session
+   * with tens of thousands of entries otherwise spends its publish window on
+   * history). An entry set that is not a pure append (branch switch, file
+   * re-open, external rewrite) is walked whole instead. */
+  private summaryContentFold: {
+    messageCount: number;
+    firstMessage: string;
+    updatedAt: string | undefined;
+    entryCount: number;
+    lastEntryId: string | undefined;
+  } | undefined;
   /** Snapshot-derived SDK scans are exact but need not repeat while the
    * RuntimeSlot revision is unchanged. A canonical event/rebind/branch change
    * increments revision before publication, naturally invalidating this cut. */
@@ -2542,35 +2554,57 @@ export class RuntimeSlot {
     return boundedSummaryText([...title].slice(0, 80).join(""), 256);
   }
 
-  private summary(): SessionSummaryUpdate {
-    if (this.summaryContentDirty || !this.cachedSummaryContent) {
-      const entries = this.sessionManager.getEntries();
-      let firstMessage = "";
-      let messageCount = 0;
-      let updatedAt: string | undefined;
-      for (const entry of entries) {
-        if (entry.type === "message") {
-          // Pi 0.87 persists system-message transcript deltas for provider context;
-          // they are canonical but not visible conversation rows.
-          if (entry.message.role !== "system") messageCount += 1;
-          if (!firstMessage && entry.message.role === "user") {
-            firstMessage = boundedSummaryText(userFacingPromptPreview(typeof entry.message.content === "string"
-              ? entry.message.content
-              : entry.message.content.flatMap((part) => part.type === "text" ? [part.text] : []).join("")));
-          }
-        }
-        const activityAt = catalogActivityTimestamp(entry);
-        if (activityAt !== undefined && (updatedAt === undefined || activityAt > Date.parse(updatedAt))) {
-          updatedAt = new Date(activityAt).toISOString();
+  /** Fold the summary facts over the entries appended since the previous fold.
+   * `getEntries()` returns the file's entries in append order, so the previous
+   * boundary id proves the earlier entries are still the same ones; anything
+   * else (shorter array, different entry at the boundary) is not an append. */
+  private foldSummaryContent(): { messageCount: number; firstMessage: string; updatedAt: string | undefined } {
+    const entries = this.sessionManager.getEntries();
+    const folded = this.summaryContentFold
+      && this.summaryContentFold.entryCount <= entries.length
+      && (this.summaryContentFold.entryCount === 0
+        || entries[this.summaryContentFold.entryCount - 1]?.id === this.summaryContentFold.lastEntryId)
+      ? this.summaryContentFold
+      : (this.summaryContentFold = {
+        messageCount: 0,
+        firstMessage: "",
+        updatedAt: undefined,
+        entryCount: 0,
+        lastEntryId: undefined,
+      });
+    for (let index = folded.entryCount; index < entries.length; index += 1) {
+      const entry = entries[index]!;
+      if (entry.type === "message") {
+        // Pi 0.87 persists system-message transcript deltas for provider context;
+        // they are canonical but not visible conversation rows.
+        if (entry.message.role !== "system") folded.messageCount += 1;
+        if (!folded.firstMessage && entry.message.role === "user") {
+          folded.firstMessage = boundedSummaryText(userFacingPromptPreview(typeof entry.message.content === "string"
+            ? entry.message.content
+            : entry.message.content.flatMap((part) => part.type === "text" ? [part.text] : []).join("")));
         }
       }
+      const activityAt = catalogActivityTimestamp(entry);
+      if (activityAt !== undefined
+        && (folded.updatedAt === undefined || activityAt > Date.parse(folded.updatedAt))) {
+        folded.updatedAt = new Date(activityAt).toISOString();
+      }
+    }
+    folded.entryCount = entries.length;
+    folded.lastEntryId = entries[entries.length - 1]?.id;
+    return folded;
+  }
+
+  private summary(): SessionSummaryUpdate {
+    if (this.summaryContentDirty || !this.cachedSummaryContent) {
+      const folded = this.foldSummaryContent();
       const rawName = this.sessionManager.getSessionName();
       const name = rawName ? boundedSummaryText(rawName) : undefined;
       this.cachedSummaryContent = {
         ...(name ? { name } : {}),
-        updatedAt: updatedAt ?? this.sessionManager.getHeader()?.timestamp ?? new Date().toISOString(),
-        messageCount,
-        firstMessage,
+        updatedAt: folded.updatedAt ?? this.sessionManager.getHeader()?.timestamp ?? new Date().toISOString(),
+        messageCount: folded.messageCount,
+        firstMessage: folded.firstMessage,
       };
       this.summaryContentDirty = false;
     }
