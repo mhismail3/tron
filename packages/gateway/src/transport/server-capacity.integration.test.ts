@@ -7,7 +7,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { DeviceStore } from "../security/device-store.js";
 import { CommandReceiptStore } from "./command-receipts.js";
 import { GatewayService } from "./gateway-service.js";
-import { GatewayServer, OrderedOutboundQueue } from "./server.js";
+import { GatewayServer, OrderedOutboundQueue, SUPERSEDED_CLOSE_CODE } from "./server.js";
 
 const cleanups: Array<() => Promise<void>> = [];
 afterEach(async () => { await Promise.all(cleanups.splice(0).map((cleanup) => cleanup())); });
@@ -923,9 +923,52 @@ describe("WebSocket connection and outbound capacity", () => {
     expect(active.socket.readyState).toBe(WebSocket.OPEN);
     expect(replacement.socket.readyState).toBe(WebSocket.OPEN);
     expect(logger.log.mock.calls.filter((call) => call[2]?.event === "connection.superseded")).toHaveLength(1);
-    expect(logger.log.mock.calls.some((call) => call[2]?.event === "connection.capacity")).toBe(false);
+    // Superseding an identity's stale socket is not a capacity refusal.
+    expect(logger.log.mock.calls.some((call) => call[2]?.reason === "connection_capacity")).toBe(false);
     replacement.socket.send(JSON.stringify({ type: "request", id: "usable", method: "test.usable", params: {} }));
     await bounded(waitUntil(() => replacement.frames.some((frame) => frame.id === "usable" && frame.ok)), "replacement request");
+  });
+
+  it("records a pre-hello socket the Gateway supersedes as the Gateway's ending", async () => {
+    const root = await mkdtemp(join(tmpdir(), "tron-server-supersede-before-hello-"));
+    const sockets: WebSocket[] = [];
+    let gateway: GatewayServer | undefined;
+    cleanups.push(async () => {
+      for (const socket of sockets) if (socket.readyState !== WebSocket.CLOSED) socket.terminate();
+      await bounded(gateway?.close() ?? Promise.resolve(), "supersede pre-hello fixture close");
+      await rm(root, { recursive: true, force: true });
+    });
+    const devices = new DeviceStore(root, "machine");
+    await devices.initialize();
+    const phone = await devices.pair((await devices.ensureEnrollment()).code, "Phone");
+    const port = await unusedPort();
+    const logger = { log: vi.fn() };
+    gateway = new GatewayServer({
+      host: "127.0.0.1", port, maxFrameBytes: 16_384, maximumConnectionsPerIdentity: 1,
+      devices, uploads: {} as any, sessions: { unsubscribeClient: vi.fn() } as any,
+      auth: { detachClient: vi.fn(), cancelOwner: vi.fn() } as any,
+      service: { info: () => ({ protocolVersion: 5 }), terminalBelongsToSession: () => false, releaseClient: vi.fn(), invoke: vi.fn() } as any,
+      logger: logger as any,
+    });
+    await gateway.listen();
+    const silent = new WebSocket(`ws://127.0.0.1:${port}/v1/socket`, { headers: { authorization: `Bearer ${phone.token}` } });
+    sockets.push(silent);
+    silent.on("error", () => {});
+    await bounded(new Promise<void>((resolve) => silent.once("open", () => resolve())), "silent socket open");
+    const closed = new Promise<number>((resolve) => silent.once("close", (code) => resolve(code)));
+    // The newcomer takes the identity's only slot before either has said hello:
+    // the Gateway ends the silent socket, so its record must not say the peer
+    // left.
+    const newcomer = new WebSocket(`ws://127.0.0.1:${port}/v1/socket`, { headers: { authorization: `Bearer ${phone.token}` } });
+    sockets.push(newcomer);
+    newcomer.on("error", () => {});
+    await bounded(new Promise<void>((resolve) => newcomer.once("open", () => resolve())), "newcomer open");
+    expect(await bounded(closed, "superseded pre-hello close")).toBe(SUPERSEDED_CLOSE_CODE);
+    await bounded(waitUntil(() => logger.log.mock.calls.some((call) => call[2]?.event === "http.upgrade")), "superseded upgrade record");
+    const record = logger.log.mock.calls.find((call) => call[2]?.event === "http.upgrade")!;
+    expect(record[0]).toBe("warning");
+    expect(record[2]).toMatchObject({ outcome: "abandoned", phaseReached: "handshake", reason: "superseded" });
+    expect(record[1]).toContain("superseded by a newer connection");
   });
 
   it.each(["local", "paired"] as const)("admits same-turn ordered bursts, rejects connection overflow, and closes byte-oversized output for a %s client", async (credential) => {

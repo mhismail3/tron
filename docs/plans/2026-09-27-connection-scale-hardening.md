@@ -5,6 +5,9 @@
 - **Last updated:** 2026-09-28, O-6a blocked on a quiet-host repeat (second review response landed)
 
 - **Last updated:** 2026-09-28, O-4 (review round 4 addressed)
+
+- **Last updated:** 2026-09-28, O-2 review response (silence requires expected
+  liveness, upgrade refusals collapse into one record)
 - **Goal:** A clean, efficient and predictable Gateway and phone connection: the phone stays connected and loads any session promptly whenever the network path is up, however many sessions run and however large the history grows, and every disconnect or slow operation is attributable to one cause from the logs in one step.
 
 ## Goal and constraints
@@ -519,7 +522,7 @@ rows are in priority order.
 | E-2 | Blocked | Bound the iOS profiler's memory or hand the row to the simulator-lifecycle plan | none | orchestrator-dispatched worker, 2026-09-28 |
 | E-2b | Done | Record `time-profiler` with `xctrace record --attach <pid>` if a real traced run proves it samples the simulator app; re-measure export and parser peaks (see E-2 handoff) | E-2 | orchestrator-dispatched deepseek-worker, 2026-09-28 |
 | E-2c | Ready | Bound the `time-profiler` export under 2 GB for `--scenario all` (see E-2b handoff: simulator-device recording, or a size refusal plus shorter windows) | E-2b | |
-| O-2 | Claimed | Gateway transport records: upgrade phases, inbound silence with Tailscale peer path | O-1 | orchestrator-dispatched deepseek-worker, 2026-09-28 |
+| O-2 | Done | Gateway transport records: upgrade phases, inbound silence with Tailscale peer path | O-1 | orchestrator-dispatched deepseek-worker, 2026-09-28 |
 | O-3 | Done | Request span: one `rpc.completed` per slow RPC with every stage, wait and count | O-1 | orchestrator-dispatched deepseek-worker, 2026-09-28 |
 | O-4 | Done | Phone connection records that survive an export, stall watchdog, exact scene records | O-1 | orchestrator-dispatched deepseek-worker, 2026-09-28; review rounds 1–4 addressed; focused suites and the iOS Gateway E2E blackhole runs pass |
 | O-6b | Claimed | Impairment in the qualification scenario: blackhole, bandwidth cap, Gateway restart | O-6a | orchestrator-dispatched deepseek-worker, 2026-09-28 |
@@ -1745,6 +1748,288 @@ a latency percentile.
   `gatewayConnectionId` (phone). The profiler driver
   (`scripts/tron-profile-gateway-driver.mjs`, Profiler zone) does not send the
   key yet.
+
+### O-2 · Done · 2026-09-28 · orchestrator-dispatched worker (branch `hardening/o-2`)
+
+- Result: the Gateway transport writes the three records it lacked.
+  - `http.upgrade`, one per WebSocket upgrade: `outcome`
+    (`opened`/`abandoned`/`rejected`), `phaseReached`
+    (`request`/`auth`/`handshake`/`hello`), the four phase durations
+    `acceptToUpgradeMs`, `authMs`, `handshakeMs`, `helloMs`, and the O-1 peer key
+    once hello named it. Debug when it opens at hello within
+    `UPGRADE_SLOW_WARNING_MS` (1,000 ms); warning when abandoned, rejected or
+    slower.
+  - `connection.inbound-silent` (warning), one per silence episode, when a
+    heartbeat tick finds no inbound frame for `INBOUND_SILENCE_WARNING_MS`
+    (12,000 ms), carrying `peerPath` (`direct`/`relay`/`offline`/`unknown`) and
+    `peerRelay`.
+  - `connection.inbound-resumed` (info) on the next inbound frame, with
+    `silentMs`.
+- The Tailscale read is a new bounded `TailscalePeerPaths`
+  (`packages/gateway/src/transport/tailscale-peer.ts`): the existing CLI
+  candidates, a 2 s timeout, one read in flight, the result reused for 10 s,
+  joined to the socket's remote address (IPv4-mapped IPv6 normalised). It never
+  rejects, never delays a heartbeat, and `admin/diagnose.ts` now imports
+  `readTailscaleStatus` and `classifyPeer` from it instead of keeping its own
+  candidate loop, parse and path expression.
+- O-1's leftover review finding is closed: `connection-resilience.md` no longer
+  says client-side and server-side connection IDs are different namespaces to be
+  matched by time. "Collect evidence before recovery" now joins by the O-1 key
+  (`gatewayConnectionId` ↔ `connectionId`; `clientId`/`attemptId`/`epoch` ↔
+  `peerClientId`/`peerAttemptId`/`peerEpoch`), with a time window only for
+  pre-protocol-6 logs. The "Interpret the diagnostics" table gained rows for
+  `http.upgrade` (abandoned, rejected, slow open), `connection.inbound-silent`
+  and `connection.inbound-resumed`. The heartbeat bullet and the README's
+  transport paragraph state the two silence records and the 12 s threshold.
+- Failure modes written before the tests, one case each: peer abandons at each
+  phase; Tailscale CLI missing, slow or failing; many sockets silent at once
+  (one shared capture); silence ends during the capture; remote address not in
+  Tailscale status (loopback/LAN); a phone that pings every 10 s must never be
+  reported silent; a failed read must not spawn a process per socket; a
+  blackholed path must be visible from the Gateway log alone. The review response
+  added: a client that only answers server pings is never reported silent and
+  never reaches the path reader; a peer that leaves during authentication is
+  abandoned at the auth phase; a refused WebSocket handshake is recorded; a first
+  frame that is not JSON is refused at hello; a CLI that never settles cannot
+  hold the reader; a `null` peer value cannot reject a lookup; `offline` outranks
+  a remembered direct address; a direct peer reports no relay.
+- Evidence:
+  - `npm run build` is clean (`~/.tron/workspace/files/hardening/o-2/build.txt`).
+  - `npx vitest run src/transport/tailscale-peer.test.ts src/transport/logger.test.ts
+    src/transport/server-heartbeat.integration.test.ts src/transport/server-http-lifecycle.integration.test.ts
+    src/transport/server-capacity.integration.test.ts src/transport/server-http-admission.integration.test.ts
+    src/transport/server-revocation.integration.test.ts src/transport/sync-protocol.integration.test.ts
+    src/transport/server-startup.integration.test.ts src/transport/request-span.integration.test.ts
+    src/admin/diagnose.test.ts` passes 95/95 in 11 files
+    (`~/.tron/workspace/files/hardening/o-2/focused-vitest.txt`). New cases: 8 in
+    `tailscale-peer.test.ts` (direct, relay, offline, mapped address,
+    loopback/LAN unknown, missing/slow/malformed CLI, candidate fall-through,
+    shared and reused read, reused failure), 3 in
+    `server-heartbeat.integration.test.ts`, 3 in
+    `server-http-lifecycle.integration.test.ts` (abandoned before hello, refused
+    at the authentication phase, refused at the hello phase).
+  - Eight more neighboring suites (blob, compression, live-view,
+    terminal-delete, upload, session-archive, rpc-idle-admission,
+    stall-diagnostics) pass 92/92.
+  - Blackhole (the Done-when's evidence, fault proxy against a fixture Gateway):
+    in `server-heartbeat.integration.test.ts` a hold proxy carries the client's
+    socket between virtual seconds 40 and 72 while the socket stays open; the
+    Gateway log alone shows exactly one `connection.inbound-silent` (warning,
+    `peerPath=relay`, `peerRelay=sfo`, message `has sent nothing for 17000ms`)
+    and one `connection.inbound-resumed` (info, `silentMs: 47000`), in that
+    order, with the socket never closed. A second case gates the path read until
+    after the socket speaks again: `silentMs` is exactly 27,000 ms and the
+    silence record still precedes the resume record.
+- Changes: `feat(gateway): record upgrade phases and inbound silence (O-2)`,
+  `fix(gateway): close the O-2 review findings`, then the second and third
+  reviewers' rounds (see the three review responses below).
+- Tasks added: none.
+- Kept on purpose: `http.upgrade` for the Mac app's constant local probes is
+  debug, like `connection.opened`, so it stays in the memory-only buffer; an
+  attempt that never got past hello is `abandoned` whichever side ended it, and
+  the side is named in `reason` (`peer_closed` only for a peer that vanished;
+  the Gateway's own endings are `hello_timeout`, `shutting_down`, `superseded`
+  and `device_revoked`, each recorded before the socket is closed) rather than
+  splitting that outcome. Readiness and shutdown refusals are `info` on
+  `http.upgrade` (they are expected and clients retry), so a startup retry storm
+  adds no warnings; the shutdown destruction of a socket that never reached
+  hello keeps the default warning level, where it already was.
+- Reviewer's round (changes-required, 2026-09-28) and this response:
+  - **Blocker, fixed — a pong-only client was reported silent on every tick.**
+    A client that only answers the Gateway's pings is idle between them and its
+    last pong is always ~25 s old at the next tick, so the old age-only rule
+    wrote a false `connection.inbound-silent` per tick and ran the Tailscale CLI
+    on a 25 s timer. `observeInboundSilence` now opens an episode only when
+    liveness was expected: a server ping is unanswered
+    (`unansweredHeartbeats > 0` in this round; the second review showed that
+    count includes ticks that skipped the ping — see below), or the client pings
+    on its own (`lastClientPingAt`, set by the socket's `ping` handler) and has
+    been quiet for the threshold. The pong-only heartbeat case now asserts no
+    silence and no resume record and that the injected path reader is never
+    called; a temporary revert of the guard reproduced 8 false records in that
+    case.
+  - **Major, fixed — a peer that left during authentication looked like a
+    request-phase refusal.** The aborted credential read now records its cause
+    (`retirePendingUpgrade("peer" | "timeout")`), and the `catch` writes
+    `abandoned/auth/peer_closed` for a peer that left or
+    `rejected/auth/authentication_timeout` for the deadline, with `authMs` set
+    from the elapsed wait. `server-http-lifecycle.integration.test.ts` gained the
+    case (real `DeviceStore`, credential mutex held, raw socket destroyed);
+    against the pre-review commit it reproduces `rejected/request`.
+  - **Major, fixed — one status read and one classifier, not a parallel copy.**
+    `tailscale-peer.ts` now exports `readTailscaleStatus(run, timeoutMs)` and
+    `classifyPeer(peer)`; `admin/diagnose.ts` imports both and lost its own
+    candidate loop, its own parse and its own path expression. The bundle and the
+    silence record therefore agree about the same peer: `diagnose` now reports
+    `path=offline` for an offline peer whose last direct address is still in the
+    document (asserted in `diagnose.test.ts`).
+  - **Major (process), resolved by the orchestrator.** The "Done when" needs
+    O-6b's blackhole run; the orchestrator explicitly accepted the fixture
+    hold-proxy blackhole against a fixture Gateway as the evidence, and owns the
+    confirmation in O-6b's qualification blackhole run (baseline/R-1). The row
+    stays Done on that decision.
+  - **Minor, fixed — the read's bound no longer depends on `execFile`
+    settling.** The whole read races one wall-clock `TAILSCALE_LOOKUP_TIMEOUT_MS`
+    (2 s) timer that also clears `inFlight`, so a child that ignores SIGTERM or a
+    grandchild holding the pipe cannot suppress every later silence record. A
+    `null` peer value is dropped at the parse boundary and the call site maps a
+    rejecting reader to `unknown`.
+  - **Minor, fixed — a handshake refused after authentication was invisible.**
+    After the synchronous `handleUpgrade`, a null `handshakeAt` writes
+    `rejected/handshake/handshake_refused` (`abortHandshake` answers 400 without
+    a callback).
+  - **Minor, fixed — a first frame that is not JSON is a hello refusal, not an
+    abandon.** `rejected/hello/invalid_frame`.
+  - **Minor, fixed — one record per upgrade.** The duplicate bound records
+    (`connection.rejected`, `connection.capacity`, `http.authentication-timeout`,
+    and the upgrade site's `http.request-capacity`) are deleted; `http.upgrade`
+    carries the structured `reason` (counts stay in the message) and readiness /
+    shutdown refusals stay `info`. `http.request-capacity` remains for HTTP
+    requests. Rows updated in `observability.md` and `connection-resilience.md`.
+  - **Minor, fixed — `helloMs` and the slow warning are documented correctly.**
+    `helloMs` runs from handshake completion to processing the hello frame
+    (including the peer's send delay), and the warning is the total from the TCP
+    accept, not `authMs` or `helloMs` alone.
+  - **Minor, fixed — `peerRelay` is empty unless a relay carries the path.** A
+    direct or offline peer returns `""`, matching its doc comment and the
+    observability row.
+  - **Nit, fixed — `http.upgrade` carries `connectionId`** once the connection
+    exists (so an abandoned upgrade joins its own `connection.closed`), the
+    `acceptToUpgradeMs` keep-alive caveat is documented, and the redundant
+    `httpSocketAcceptedAt` delete is gone (a WeakMap releases with the socket).
+- Review-response evidence: `npm run build` clean; `npx tsc --noEmit -p .` clean;
+  the 11-file focused set above passes **100/100** (new cases: pong-only client
+  never reported silent, `peerRelay` empty for direct/offline, a hung CLI read,
+  a null peer value, loopback/LAN without a CLI run, peer abandons during auth,
+  refused WebSocket handshake, non-JSON first frame, offline peer in the bundle);
+  the eight neighboring suites still pass 92/92;
+  `check-documentation-policy.py` and `personal-info-guard.sh` pass.
+- Second reviewer's round (changes-required, 2026-09-28, against commit
+  `bbde19b8f`) and this response:
+  - **Major, fixed — a skipped ping was counted as an unanswered one.** The
+    round-1 guard tested `unansweredHeartbeats > 0`, but that counter counts
+    ticks: a tick that skips its ping (the client spoke within the last
+    interval) still increments it. A pong-only client whose own frame landed
+    mid-interval carried a miss into the next tick and was reported silent, once
+    per such episode, which also falsified the "a day with no path outage adds
+    neither" pair claim. `Connection.pingOutstandingSince` now records the tick
+    whose `socket.ping()` really went out and `noteInbound` clears it, so an
+    episode needs a ping the Gateway actually sent. `server-heartbeat.
+    integration.test.ts` gained the reviewer's shape (hello at second 0, one
+    application frame at second 7, pong-only after): no silence record, no
+    resume record, no path read, and the documented one-tick ping transition
+    (`pingedTicks` `[2..8]`). Reverting the guard to the miss count reproduces
+    one `connection.inbound-silent` "has sent nothing for 43000ms" and its
+    resume.
+  - **Minor, fixed — the resilience rows for the upgrade records were wrong.**
+    `authentication_timeout` is `rejected/auth`, not `abandoned/auth`: the
+    `outcome=abandoned` + `phaseReached=auth` row now covers `peer_closed` and
+    `shutting_down` only, the `reason=authentication_timeout` row says the
+    Gateway refused it, and the `outcome=rejected` row lists
+    `authentication_timeout` (auth) and `unreadable_request` (request).
+  - **Minor, fixed — closes the Gateway started were recorded as
+    `peer_closed`.** The hello deadline writes `abandoned/handshake/
+    hello_timeout` before it closes the socket; shutdown writes
+    `abandoned/handshake/shutting_down` for a socket that never sent hello and
+    `abandoned/auth/shutting_down` for a credential wait it destroys (registered
+    per upgrade, ended at the shutdown destroy). `hello_timeout` joined the
+    `UpgradeEnding` union, the observability `reason` list and both resilience
+    rows; `server-http-lifecycle.integration.test.ts` gained one case for the
+    deadline and one per shutdown path, and reverting the three call sites
+    reproduces `peer_closed` in each.
+  - **Nit, fixed — `observability.md` no longer lists deleted records** in the
+    `http.upgrade` why column and says which side each cause names; the
+    `connection.rejected` literal assertion was deleted from
+    `server-http-lifecycle.integration.test.ts` (the `reason` field covers it).
+  - **Nit, fixed — the status read kills a child that ignores SIGTERM.**
+    `execFile` now gets `killSignal: "SIGKILL"`, so one ignored SIGTERM cannot
+    leave a process per 10 s reuse window behind the shared reader.
+  - **Rejected: none.** Every review item was addressed.
+- Second-round evidence: `npm run build` clean; `npx tsc --noEmit -p .` clean;
+  the same 11-file focused set passes **105/105** (five new cases: the
+  mid-interval pong-only client, the blackholed pong-only path once its ping
+  goes unanswered, the hello deadline, shutdown before hello, shutdown during
+  authentication). The reviewer's own repros now pass against
+  the rebuilt dist: `pong-after-message.mjs` prints no silence, no resume and 0
+  path lookups, and `hello-deadline.mjs` prints
+  `abandoned/handshake/hello_timeout`. Outputs, the focused run and the
+  negative controls (guard reverted: one false `has sent nothing for 43000ms`;
+  endings reverted: `peer_closed` in all three cases) are retained in the
+  internal workspace under `files/hardening/o-2-round2/`.
+- Third reviewer's round (approved, 2026-09-28, against commit `f03f413aa`) and
+  this response:
+  - **Minor, fixed — other Gateway-started endings before hello were still
+    recorded as the peer leaving.** `disconnect` no longer labels a socket
+    `peer_closed` when the Gateway opened the close (`closeInitiated`), and
+    every Gateway-started pre-hello ending states its own cause at the close
+    site: `closeFailedConnection` takes the ending, `superseded` for an identity
+    socket the newcomer displaces, `device_revoked` for a socket `disconnectDevice`
+    closes before it had introduced itself, and the ws library's own frame
+    refusal (an oversized or malformed frame, `WS_ERR_*`) is
+    `rejected/hello/invalid_frame` instead of an abandoned handshake. The stale
+    comment in `disconnect` and the plan's "Kept on purpose" bullet were
+    reworded. Three new cases: a pre-hello supersession (per-identity cap 1), a
+    pre-hello revocation, and an oversized pre-hello frame; reverting the source
+    makes all three report `peer_closed`.
+  - **Nit, fixed — `pingOutstandingSince` was only compared with null.** The
+    timestamp now dates the liveness signal in the silence record's message as
+    `unansweredPingMs=25000`, or `none` when the client's own pings were what
+    stopped; both shapes are asserted.
+  - **Confirmed, no new test needed — the receive-only C-4 phone.** `pings a
+    pong-only client on every tick, never retires it and never reports it
+    silent` already runs that shape (answers every Gateway ping, sends nothing
+    else after hello) for 200 virtual seconds, past the 60 s silence threshold,
+    and asserts no `connection.inbound-silent`, no `connection.inbound-resumed`
+    and zero path lookups.
+  - **Rejected: none.** Both items were addressed.
+- Third-round evidence: `npm run build` clean; `npx tsc --noEmit -p .` clean; the
+  same 11-file focused set passes **108/108** (three new cases plus the two
+  `unansweredPingMs` assertions). The reviewer's own repros pass against the
+  rebuilt dist: `supersede-before-hello.mjs` prints `reason=superseded` and
+  `oversize-before-hello.mjs` prints `rejected/hello/invalid_frame`; the round-2
+  repros still print no false silence and `reason=hello_timeout`. The negative
+  control (source reverted, tests kept) and the receive-only run are retained in
+  the internal workspace under `files/hardening/o-2-round3/`.
+- Deviations:
+  - The record fields needed the writer's shape: `logger.ts` gained
+    `phaseReached`, the four duration fields, `peerPath`, `peerRelay` and
+    `silentMs`, plus one `durationField` helper that the existing `durationMs`
+    and `unaccountedMs` lines now share. `Connection` gained `remoteAddress`
+    (the Tailscale join; never logged) and the upgrade trace, both handed to
+    `admit` by `handleUpgrade`.
+  - The silence record's message gained `unansweredPingMs`, the age of the
+    Gateway's unanswered ping at detection (`none` when the client's own pings
+    were the liveness signal). The pre-hello frame refusal is told from a peer
+    departure by the ws receiver's `WS_ERR_*` error code, not by its message
+    text: a path failure carries a socket error code or none.
+  - `helloMs` on an abandoned upgrade is the time the attempt spent in the hello
+    phase before the socket went away (0 only when the handshake never
+    completed), not a completed round trip.
+  - `peerRelay` names the relay actually carrying the path, so it is empty for a
+    direct peer (the review's finding): the peer's home DERP region is not the
+    path in use, and `peerPath=direct` already says so.
+  - The blackhole proxy holds bytes instead of dropping them: dropping part of a
+    WebSocket frame would desynchronize the stream both ends share, while the
+    path still carries nothing in either direction while holding.
+  - `GatewayServer` gained a `peerPathReader` option so no test can reach the
+    host's Tailscale CLI.
+  - `logger.test.ts`'s 40 MB rotation case (a 15 s timeout) flaked twice on this
+    host while the parallel hardening workers loaded it (load average 16-24):
+    16.6 s on this branch, 14.8 s on an untouched worktree of the same commit's
+    parent, 7.8 s and 2.8 s when the host was quieter. No group of changes here
+    touches that path; treat it as a host-load flake, not a regression. The
+    second round saw the same kind of flake in
+    `request-span.integration.test.ts` (a wall-clock assertion, "expected 99 to
+    be greater than 100", at load average 27): it passes in isolation and in the
+    next run of the whole focused set.
+- For the next agent: the fixture-proxy blackhole above is the evidence the
+  **orchestrator accepted** for O-2's "Done when"; the confirmation in O-6b's
+  qualification blackhole run is the orchestrator's, at the baseline/R-1 runs,
+  not a worker's. O-7 can join on the peer key and use `peerPath`/`silentMs`;
+  E-1's Tailscale flap guidance can cite the
+  silent/resume pair. `http.upgrade` carries the `connectionId` whenever a
+  connection exists, so an upgrade that died before hello still joins its own
+  `connection.closed`; the peer key remains the join for phone records.
 
 ### E-2 · Blocked · 2026-09-28 · orchestrator-dispatched worker
 

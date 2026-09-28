@@ -13,7 +13,7 @@ import type { UploadStore } from "../machine/upload-store.js";
 import type { RuntimeRegistry } from "../sessions/runtime-registry.js";
 import type { BlobByteRange } from "../sessions/blob-store.js";
 import type { AuthBroker } from "../admin/auth-broker.js";
-import type { GatewayLogger } from "./logger.js";
+import type { GatewayLogger, LogLevel } from "./logger.js";
 import { GATEWAY_CONNECTION_POLICY } from "./connection-policy.js";
 import { formatStallEvidence, formatResourceSample, ResourceSampler, RESOURCE_SAMPLE_INTERVAL_MS, StallSampler } from "./stall-diagnostics.js";
 import { GatewayService, type ClientContext } from "./gateway-service.js";
@@ -21,6 +21,7 @@ import { MIN_PROTOCOL_VERSION, PROTOCOL_VERSION } from "../version.js";
 import { SessionSyncBarrier, type BufferedSessionEncoding, type BufferedSessionEvent } from "./session-sync.js";
 import type { BrowserLiveViewRegistry } from "../display/browser-live-view.js";
 import { bytes, RequestSpan, runInRequestSpan, stage } from "./request-span.js";
+import { TailscalePeerPaths, type PeerPathLookup, type PeerPathReader } from "./tailscale-peer.js";
 
 // Retain only recent former IDs while an active subscription is rekeyed. Older
 // IDs are stale control paths and may safely require a fresh session.open.
@@ -56,6 +57,14 @@ function rpcFailureLevel(error: unknown): "warning" | "error" {
 
 /** Per-RPC completions under this bound are debug detail; slower ones warn. */
 const SLOW_RPC_WARNING_MS = 1_000;
+/** An upgrade that reaches hello within this bound is debug detail; every
+ * abandoned or rejected upgrade, and any slower one, warns. */
+const UPGRADE_SLOW_WARNING_MS = 1_000;
+/** A socket this long without an inbound frame has missed at least one of the
+ * phone's 10-second pings, and liveness was expected: one record per silence
+ * episode says so, where a per-tick record would repeat for as long as the path
+ * stays down. */
+const INBOUND_SILENCE_WARNING_MS = 12_000;
 /** A heartbeat this late means the event loop stalled long enough for clients
  * to notice; shorter timer jitter is normal and not recorded. */
 const EVENT_LOOP_DELAY_WARNING_MS = 1_000;
@@ -401,6 +410,65 @@ interface PeerDiagnostics {
   peerEpoch?: string;
 }
 
+/** How far an upgrade got, in the order its phases run. */
+type UpgradePhase = "request" | "auth" | "handshake" | "hello";
+
+/** One `http.upgrade` record is written per upgrade, at whichever point it ends:
+ * hello, a refusal, or the peer leaving before hello. */
+interface UpgradeTrace {
+  /** The TCP accept, before Node parsed the upgrade request. */
+  acceptAt: number;
+  /** The upgrade handler entry; the auth phase is measured from here. */
+  startedAt: number;
+  /** Null until the credential wait settles. */
+  authMs: number | null;
+  /** Null until the WebSocket handshake completes; the hello phase runs after. */
+  handshakeAt: number | null;
+  /** Set once the connection exists, so an upgrade that dies before hello still
+   * joins its own `connection.closed` record. */
+  connectionId?: string;
+  reported: boolean;
+}
+
+/** A frame the ws library itself refused — an oversized payload or a malformed
+ * frame — carries a `WS_ERR_*` code; a path failure carries a socket error code
+ * or none. */
+function isFrameRefusal(error: Error): boolean {
+  const code: unknown = (error as { code?: unknown }).code;
+  return typeof code === "string" && code.startsWith("WS_ERR_");
+}
+
+/** The structured ending of one upgrade. `reason` is what triage groups on; the
+ * message carries the human detail. */
+interface UpgradeEnding {
+  reason:
+    | "request_capacity" | "unexpected_path" | "warming_up" | "shutting_down"
+    | "connection_capacity" | "unauthenticated" | "unreadable_request" | "peer_closed"
+    | "superseded" | "device_revoked"
+    | "authentication_timeout" | "handshake_refused" | "hello_timeout" | "hello_required"
+    | "protocol_mismatch" | "invalid_frame" | "hello";
+  /** The O-1 peer key, once hello named it. */
+  peer?: PeerDiagnostics;
+  /** Overrides the level rule for an ending the Gateway expects and clients
+   * retry: readiness and shutdown refusals are info, not a warning. */
+  level?: LogLevel;
+}
+
+/** One episode of inbound silence, from its last frame to the next one. */
+interface SilenceEpisode {
+  startedAt: number;
+  resumedAt?: number;
+  reported: boolean;
+  /** Silence already observed when this episode was detected. */
+  detectedMs: number;
+  /** How long the Gateway's unanswered ping had been waiting at detection, or
+   * null when the client's own pings were the liveness signal that stopped. */
+  detectedPingMs: number | null;
+  /** The shared, bounded peer-path read; it never rejects and never blocks the
+   * heartbeat. */
+  peer: Promise<PeerPathLookup>;
+}
+
 /** Diagnostics only: an invalid token is dropped, never a reason to reject hello. */
 function peerDiagnostics(value: unknown): PeerDiagnostics {
   if (typeof value !== "object" || value === null || Array.isArray(value)) return {};
@@ -422,9 +490,20 @@ interface Connection {
   identity: string;
   isLocal: boolean;
   socket: WebSocket;
+  /** The peer's socket address; joins it to its Tailscale peer, never logged. */
+  remoteAddress: string;
+  /** Set by the upgrade that created this connection; see `UpgradeTrace`. */
+  upgrade: UpgradeTrace;
   /** Empty until hello; see `peerDiagnostics`. */
   peer: PeerDiagnostics;
+  /** The open inbound-silence episode, if the socket is silent now. */
+  silence?: SilenceEpisode | undefined;
   unansweredHeartbeats: number;
+  // When the Gateway's own last ping went out, cleared by any inbound frame.
+  // `unansweredHeartbeats` counts ticks, including ticks that skipped the ping
+  // for a client that had just spoken, so only this field says a ping is
+  // actually outstanding; the silent record reports how long it has waited.
+  pingOutstandingSince: number | null;
   ready: boolean;
   presentationOnly: boolean;
   terminals: Set<string>;
@@ -452,6 +531,8 @@ interface Connection {
   // Messages and client pings only. A pong answers the Gateway's own ping, so
   // it never proves that the client will speak again without being asked.
   lastClientInitiatedInboundAt: number | null;
+  // The client's own WebSocket pings, the one signal that it speaks unprompted.
+  lastClientPingAt: number | null;
   // Successful ordered application-frame callbacks, not send start or pong traffic.
   lastWriteProgressAt: number | null;
   helloTimer: NodeJS.Timeout;
@@ -552,8 +633,17 @@ export class GatewayServer {
   private readonly pairedSockets: WebSocketServer;
   private readonly clients = new Map<string, Connection>();
   private readonly httpSockets = new Set<Duplex>();
+  /** Pending WebSocket upgrades, ended by shutdown with the Gateway as the
+   * cause: a socket the Gateway destroys is not a peer departure. */
+  private readonly pendingUpgrades = new Set<() => void>();
   private readonly httpConnectionsByAddress = new Map<string, number>();
+  /** The TCP accept instant per HTTP socket, so an upgrade record can say how
+   * long the request waited before Node dispatched it. */
+  private readonly httpSocketAcceptedAt = new WeakMap<object, number>();
   private readonly httpAdmission: HttpTransportAdmission;
+  /** The transport's only Tailscale reader; it shares one bounded status read
+   * between every socket that goes silent in the same window. */
+  private readonly peerPaths: PeerPathReader;
   private readonly pairingLimiter = new RateLimiter(10, 10 * 60_000);
   private readonly heartbeat: NodeJS.Timeout;
   private lastHeartbeatAt = performance.now();
@@ -595,10 +685,12 @@ export class GatewayServer {
       authorizeBrowserLiveView?: (sessionId: string, viewId: string, generation: string) => boolean;
       stallSampler?: StallSampler;
       resourceSampler?: ResourceSampler;
+      peerPathReader?: PeerPathReader;
     },
   ) {
     this.stallSampler = options.stallSampler ?? new StallSampler();
     this.resourceSampler = options.resourceSampler ?? new ResourceSampler();
+    this.peerPaths = options.peerPathReader ?? new TailscalePeerPaths();
     const maximumHttpConnections = options.maximumHttpConnections ?? HTTP_MAXIMUM_CONNECTIONS;
     if (!Number.isSafeInteger(maximumHttpConnections) || maximumHttpConnections < 1) {
       throw new Error("HTTP connection bounds are invalid");
@@ -625,9 +717,12 @@ export class GatewayServer {
         return;
       }
       this.httpSockets.add(socket);
+      this.httpSocketAcceptedAt.set(socket, performance.now());
       this.httpConnectionsByAddress.set(address, addressConnections + 1);
       socket.once("close", () => {
         this.httpSockets.delete(socket);
+        // `httpSocketAcceptedAt` is a WeakMap: the accept time it holds for this
+        // socket's upgrade is released with the socket, so it needs no delete.
         const count = this.httpConnectionsByAddress.get(address)!;
         if (count === 1) this.httpConnectionsByAddress.delete(address);
         else this.httpConnectionsByAddress.set(address, count - 1);
@@ -658,6 +753,7 @@ export class GatewayServer {
       }
       for (const connection of this.clients.values()) {
         if (connection.closeInitiated || connection.socket.readyState !== WebSocket.OPEN) continue;
+        this.observeInboundSilence(connection, heartbeatAt);
         // Retire only after three complete heartbeat intervals received no frame.
         // One delayed timer or transiently starved callback cannot destroy a
         // healthy epoch; the fourth tick observes and retires the three misses.
@@ -680,6 +776,7 @@ export class GatewayServer {
         const clientInitiatedAt = connection.lastClientInitiatedInboundAt;
         if (clientInitiatedAt === null
           || heartbeatAt - clientInitiatedAt >= GATEWAY_CONNECTION_POLICY.heartbeatIntervalMs) {
+          connection.pingOutstandingSince = heartbeatAt;
           connection.socket.ping();
         }
       }
@@ -901,6 +998,11 @@ export class GatewayServer {
         client.revokeResponseRequestId = origin.requestId;
         client.revokeResponseQueued = false;
       } else {
+        // The Gateway ends this socket because the device is gone, so a socket
+        // that never said hello states that cause rather than the peer leaving.
+        if (!client.ready) {
+          this.finishUpgrade(client.upgrade, "abandoned", "handshake", "device revoked", { reason: "device_revoked" });
+        }
         client.socket.close(1008, "device revoked");
       }
       this.options.service.releaseClient(client.id);
@@ -1241,30 +1343,53 @@ export class GatewayServer {
   }
 
   private async handleUpgrade(request: IncomingMessage, socket: Duplex, head: Buffer): Promise<void> {
+    const remoteAddress = request.socket.remoteAddress ?? "unknown";
+    // One record per upgrade, written wherever this attempt ends.
+    const trace: UpgradeTrace = {
+      acceptAt: this.httpSocketAcceptedAt.get(socket) ?? performance.now(),
+      startedAt: performance.now(),
+      authMs: null,
+      handshakeAt: null,
+      reported: false,
+    };
     // Node relinquishes its HTTP parser on upgrade, before async credentials
     // return. Own EOF/error and the auth deadline until ws takes the socket;
     // otherwise a half-closed pre-handshake peer can live indefinitely.
     const readLifetime = new AbortController();
-    const retirePendingUpgrade = (): void => { readLifetime.abort(); socket.destroy(); };
-    socket.once("end", retirePendingUpgrade);
-    socket.once("error", retirePendingUpgrade);
-    socket.once("close", retirePendingUpgrade);
-    const authenticationDeadline = setTimeout(() => {
-      this.options.logger.log("warning", "Socket upgrade authentication timed out", { event: "http.authentication-timeout", source: "transport" });
-      retirePendingUpgrade();
-    }, HTTP_REQUEST_IDLE_TIMEOUT_MS);
+    // Both ends of the credential wait destroy this socket, but only the phase
+    // record can say which one did: a peer that leaves is abandoned, an expired
+    // authentication deadline is a refusal.
+    let retireCause: "peer" | "timeout" | null = null;
+    // Shutdown destroys this socket too. Registered so the record names the
+    // Gateway as the cause instead of reporting the peer as leaving.
+    const endPendingUpgradeAtShutdown = (): void => {
+      trace.authMs ??= performance.now() - trace.startedAt;
+      this.finishUpgrade(trace, "abandoned", "auth", "Gateway shutdown during authentication", { reason: "shutting_down" });
+    };
+    this.pendingUpgrades.add(endPendingUpgradeAtShutdown);
+    const retirePendingUpgrade = (cause: "peer" | "timeout"): void => {
+      retireCause ??= cause;
+      readLifetime.abort();
+      socket.destroy();
+    };
+    const retireForPeer = (): void => retirePendingUpgrade("peer");
+    socket.once("end", retireForPeer);
+    socket.once("error", retireForPeer);
+    socket.once("close", retireForPeer);
+    const authenticationDeadline = setTimeout(() => retirePendingUpgrade("timeout"), HTTP_REQUEST_IDLE_TIMEOUT_MS);
     authenticationDeadline.unref();
     const releasePendingUpgrade = (): void => {
+      this.pendingUpgrades.delete(endPendingUpgradeAtShutdown);
       clearTimeout(authenticationDeadline);
-      socket.off("end", retirePendingUpgrade);
-      socket.off("error", retirePendingUpgrade);
-      socket.off("close", retirePendingUpgrade);
+      socket.off("end", retireForPeer);
+      socket.off("error", retireForPeer);
+      socket.off("close", retireForPeer);
     };
     // An upgrade awaiting credentials is still an admitted HTTP operation.
     // Physical close alone cannot release its pending authentication budget.
-    const transportLease = this.httpAdmission.admit(request.socket.remoteAddress ?? "unknown", socket);
+    const transportLease = this.httpAdmission.admit(remoteAddress, socket);
     if (!transportLease) {
-      this.options.logger.log("warning", "Rejected upgrade at HTTP authentication capacity", { event: "http.request-capacity", source: "transport" });
+      this.finishUpgrade(trace, "rejected", "request", "http admission capacity", { reason: "request_capacity" });
       socket.write("HTTP/1.1 503 Service Unavailable\r\nConnection: close\r\n\r\n");
       socket.destroy();
       releasePendingUpgrade();
@@ -1273,24 +1398,33 @@ export class GatewayServer {
     try {
       const url = new URL(request.url ?? "/", `http://${request.headers.host ?? "localhost"}`);
       if (url.pathname !== "/v1/socket") {
+        this.finishUpgrade(trace, "rejected", "request", "unexpected upgrade path", { reason: "unexpected_path" });
         socket.destroy();
         return;
       }
       if (!this.ready || this.shuttingDown) {
         // Expected during startup warmup and shutdown; clients retry.
-        this.options.logger.log("info", `Rejected socket upgrade while gateway is ${this.shuttingDown ? "shutting down" : "warming up"}`, {
-          event: "connection.rejected", source: "transport", reason: this.shuttingDown ? "shutting_down" : "warming_up",
-        });
+        const reason = this.shuttingDown ? "shutting_down" : "warming_up";
+        this.finishUpgrade(trace, "rejected", "request", `Gateway is ${reason.replace("_", " ")}`, { reason, level: "info" });
         socket.write("HTTP/1.1 503 Service Unavailable\r\nConnection: close\r\n\r\n");
         socket.destroy();
         return;
       }
       const admission = await this.options.devices.authenticateAndAdmit(bearer(request), (authenticated) => {
+        // The credential callback runs at the auth boundary, and the WebSocket
+        // handshake follows it on the same stack, so each phase is timed from
+        // the point it actually ended.
+        trace.authMs ??= performance.now() - trace.startedAt;
         // Authentication can yield while shutdown starts. Recheck the
         // admission cut after that await so an upgrade cannot become a live
         // connection after the listener has begun retiring work.
-        if (socket.destroyed) return false;
+        if (socket.destroyed) {
+          this.finishUpgrade(trace, "abandoned", "auth", "peer socket closed during authentication", { reason: "peer_closed" });
+          return false;
+        }
         if (this.shuttingDown || !this.ready) {
+          const reason = this.shuttingDown ? "shutting_down" : "warming_up";
+          this.finishUpgrade(trace, "rejected", "auth", `Gateway is ${reason.replace("_", " ")}`, { reason, level: "info" });
           socket.write("HTTP/1.1 503 Service Unavailable\r\nConnection: close\r\n\r\n");
           socket.destroy();
           return false;
@@ -1317,7 +1451,9 @@ export class GatewayServer {
           superseded += 1;
         }
         if (live.length - superseded >= maximumConnections) {
-          this.options.logger.log("warning", `Rejected socket upgrade at connection capacity (connections=${live.length} maximumConnections=${maximumConnections} identityConnections=${identityConnections.length} maximumPerIdentity=${maximumPerIdentity})`, { event: "connection.capacity", source: "transport" });
+          this.finishUpgrade(trace, "rejected", "auth",
+            `connection capacity (connections=${live.length} maximumConnections=${maximumConnections} identityConnections=${identityConnections.length} maximumPerIdentity=${maximumPerIdentity})`,
+            { reason: "connection_capacity" });
           socket.write("HTTP/1.1 503 Service Unavailable\r\nConnection: close\r\n\r\n");
           socket.destroy();
           return false;
@@ -1325,20 +1461,40 @@ export class GatewayServer {
         const supersededAt = performance.now();
         for (const client of identityConnections.slice(0, superseded)) {
           this.options.logger.log("warning", `Superseding client ${client.id} with a newer connection from the same identity (lastInboundAgeMs=${progressAge(client.lastInboundAt, supersededAt)} identityConnections=${identityConnections.length} maximumPerIdentity=${maximumPerIdentity})`, { event: "connection.superseded", source: "transport", connectionId: client.id, ...client.peer });
-          this.closeFailedConnection(client, SUPERSEDED_CLOSE_CODE, "superseded by a newer connection");
+          this.closeFailedConnection(client, SUPERSEDED_CLOSE_CODE, "superseded by a newer connection", { reason: "superseded" });
         }
         const isLocal = authenticated.kind === "local";
         (isLocal ? this.localSockets : this.pairedSockets).handleUpgrade(request, socket, head, (webSocket) => {
-          this.admit(webSocket, identity, isLocal);
+          trace.handshakeAt = performance.now();
+          this.admit(webSocket, identity, isLocal, remoteAddress, trace);
         });
+        // `abortHandshake` answers 400 without a callback: a bad
+        // `Sec-WebSocket-Key` or version, or a refused extension negotiation.
+        // The credential callback returns true, so only this check records it.
+        if (trace.handshakeAt === null) {
+          this.finishUpgrade(trace, "rejected", "handshake", "WebSocket handshake refused", { reason: "handshake_refused" });
+        }
         return true;
       }, readLifetime.signal);
+      trace.authMs ??= performance.now() - trace.startedAt;
       if (admission === null) {
-        this.options.logger.log("warning", "Rejected unauthenticated socket upgrade", { event: "connection.rejected", source: "transport" });
+        this.finishUpgrade(trace, "rejected", "auth", "unauthenticated credential", { reason: "unauthenticated" });
         socket.write("HTTP/1.1 401 Unauthorized\r\nConnection: close\r\n\r\n");
         socket.destroy();
       }
     } catch {
+      // A credential wait cut short never reaches the callback above: the peer
+      // left (`readLifetime` aborted by its own close) or the authentication
+      // deadline expired. Both reached this Mac and stopped in the auth phase.
+      if (retireCause === null) {
+        this.finishUpgrade(trace, "rejected", "request", "upgrade request could not be read", { reason: "unreadable_request" });
+      } else {
+        const abandoned = retireCause === "peer";
+        trace.authMs ??= performance.now() - trace.startedAt;
+        this.finishUpgrade(trace, abandoned ? "abandoned" : "rejected", "auth",
+          abandoned ? "peer socket closed during authentication" : "authentication timed out",
+          { reason: abandoned ? "peer_closed" : "authentication_timeout" });
+      }
       socket.destroy();
     } finally {
       releasePendingUpgrade();
@@ -1346,7 +1502,39 @@ export class GatewayServer {
     }
   }
 
-  private admit(socket: WebSocket, identity: string, isLocal: boolean): void {
+  /** Writes the one `http.upgrade` record for an upgrade, at whichever phase it
+   * ended. `phaseReached` names the last phase the attempt actually reached, so
+   * a missing `hello` phase means no hello frame arrived. This is the only
+   * record a refused upgrade writes: `reason` names the bound or phase cause
+   * that the separate bound-specific records used to restate. */
+  private finishUpgrade(
+    trace: UpgradeTrace,
+    outcome: "opened" | "abandoned" | "rejected",
+    phaseReached: UpgradePhase,
+    detail: string,
+    ending: UpgradeEnding,
+  ): void {
+    if (trace.reported) return;
+    trace.reported = true;
+    const at = performance.now();
+    const acceptToUpgradeMs = Math.max(0, Math.round(trace.startedAt - trace.acceptAt));
+    const authMs = Math.max(0, Math.round(trace.authMs ?? 0));
+    const handshakeAt = trace.handshakeAt;
+    const handshakeMs = handshakeAt === null ? 0 : Math.max(0, Math.round(handshakeAt - trace.startedAt - authMs));
+    const helloMs = handshakeAt === null ? 0 : Math.max(0, Math.round(at - handshakeAt));
+    const totalMs = Math.max(0, Math.round(at - trace.acceptAt));
+    const slow = totalMs >= UPGRADE_SLOW_WARNING_MS;
+    this.options.logger.log(ending.level ?? (outcome === "opened" && !slow ? "debug" : "warning"),
+      `Socket upgrade ${outcome} at ${phaseReached} after ${totalMs}ms (acceptToUpgrade=${acceptToUpgradeMs}ms auth=${authMs}ms handshake=${handshakeMs}ms hello=${helloMs}ms; ${detail})`,
+      {
+        event: "http.upgrade", source: "transport", outcome, phaseReached, reason: ending.reason,
+        acceptToUpgradeMs, authMs, handshakeMs, helloMs,
+        ...(trace.connectionId === undefined ? {} : { connectionId: trace.connectionId }),
+        ...ending.peer,
+      });
+  }
+
+  private admit(socket: WebSocket, identity: string, isLocal: boolean, remoteAddress: string, upgrade: UpgradeTrace): void {
     let connection: Connection;
     const maximumOutboundBytes = this.options.maximumOutboundBytes ?? 8 * 1_048_576;
     const outbound = new OrderedOutboundQueue(
@@ -1381,6 +1569,8 @@ export class GatewayServer {
       identity,
       isLocal,
       socket,
+      remoteAddress,
+      upgrade,
       peer: {},
       unansweredHeartbeats: 0,
       ready: false,
@@ -1402,30 +1592,41 @@ export class GatewayServer {
       admittedAt: performance.now(),
       lastInboundAt: null,
       lastClientInitiatedInboundAt: null,
+      lastClientPingAt: null,
       lastWriteProgressAt: null,
-      helloTimer: setTimeout(() => this.closeFailedConnection(connection, 1008, "hello required"), GATEWAY_CONNECTION_POLICY.helloDeadlineMs),
+      pingOutstandingSince: null,
+      helloTimer: setTimeout(() => {
+        // The Gateway's own deadline ended this attempt, so the record must not
+        // name the peer as the cause.
+        this.finishUpgrade(connection.upgrade, "abandoned", "handshake", "hello deadline", { reason: "hello_timeout" });
+        this.closeFailedConnection(connection, 1008, "hello required");
+      }, GATEWAY_CONNECTION_POLICY.helloDeadlineMs),
     };
     this.clients.set(connection.id, connection);
+    upgrade.connectionId = connection.id;
     socket.on("message", (data, binary) => {
-      connection.unansweredHeartbeats = 0;
-      connection.lastInboundAt = performance.now();
-      connection.lastClientInitiatedInboundAt = connection.lastInboundAt;
+      this.noteInbound(connection, true);
       void this.onMessage(connection, binary ? data : data.toString());
     });
     socket.on("ping", () => {
-      connection.unansweredHeartbeats = 0;
-      connection.lastInboundAt = performance.now();
-      connection.lastClientInitiatedInboundAt = connection.lastInboundAt;
+      this.noteInbound(connection, true);
+      connection.lastClientPingAt = performance.now();
     });
-    socket.on("pong", () => {
-      connection.unansweredHeartbeats = 0;
-      connection.lastInboundAt = performance.now();
-    });
+    socket.on("pong", () => this.noteInbound(connection, false));
     socket.on("close", (code, reason) => {
       const suffix = reason.length > 0 ? `: ${reason.toString("utf8")}` : "";
       this.disconnect(connection, `WebSocket close ${code}${suffix}`);
     });
-    socket.on("error", (error) => this.disconnect(connection, `WebSocket error: ${error.message}`));
+    socket.on("error", (error) => {
+      // A frame the ws library refused at the protocol level (an oversized
+      // payload, a malformed frame) is the hello phase's refusal, not the peer
+      // leaving the socket it opened. Later frames are already reported by the
+      // upgrade's own ending.
+      if (!connection.ready && isFrameRefusal(error)) {
+        this.finishUpgrade(connection.upgrade, "rejected", "hello", `WebSocket error: ${error.message}`, { reason: "invalid_frame" });
+      }
+      this.disconnect(connection, `WebSocket error: ${error.message}`);
+    });
   }
 
   private async onMessage(connection: Connection, raw: unknown): Promise<void> {
@@ -1439,16 +1640,28 @@ export class GatewayServer {
       frame = JSON.parse(text) as Record<string, unknown>;
       if (typeof frame !== "object" || frame === null || Array.isArray(frame)) throw new Error();
     } catch {
+      // A frame that is not JSON before hello is the Gateway refusing the
+      // hello phase, not the peer leaving after the handshake.
+      if (!connection.ready) {
+        this.finishUpgrade(connection.upgrade, "rejected", "hello", "invalid JSON", { reason: "invalid_frame" });
+      }
       return this.closeFailedConnection(connection, 1007, "invalid JSON");
     }
 
     if (!connection.ready) {
-      if (frame.type !== "hello" || !Number.isSafeInteger(frame.protocolVersion)) return this.closeFailedConnection(connection, 1008, "valid hello required");
+      if (frame.type !== "hello" || !Number.isSafeInteger(frame.protocolVersion)) {
+        this.finishUpgrade(connection.upgrade, "rejected", "hello", "valid hello required", { reason: "hello_required" });
+        return this.closeFailedConnection(connection, 1008, "valid hello required");
+      }
       const protocol = frame.protocolVersion as number;
-      if (protocol < MIN_PROTOCOL_VERSION || protocol > PROTOCOL_VERSION) return this.closeFailedConnection(connection, 1008, "protocol version mismatch");
+      if (protocol < MIN_PROTOCOL_VERSION || protocol > PROTOCOL_VERSION) {
+        this.finishUpgrade(connection.upgrade, "rejected", "hello", "protocol version mismatch", { reason: "protocol_mismatch" });
+        return this.closeFailedConnection(connection, 1008, "protocol version mismatch");
+      }
       connection.ready = true;
       connection.presentationOnly = (frame as Record<string, unknown>).clientRole === "mobile";
       connection.peer = peerDiagnostics(frame.diagnostics);
+      this.finishUpgrade(connection.upgrade, "opened", "hello", "hello accepted", { reason: "hello", peer: connection.peer });
       // Admission and handshake are one `connection.opened` record. The Mac
       // app's local probes reconnect constantly, so they are debug detail.
       this.options.logger.log(
@@ -2077,6 +2290,15 @@ export class GatewayServer {
   private disconnect(connection: Connection, detail = "WebSocket closed"): void {
     if (!this.clients.delete(connection.id)) return;
     const closedAt = performance.now();
+    // A socket that never got past hello leaves through here when the peer
+    // ended it: the upgrade reached this Mac and then went away before the
+    // handshake finished. Every ending the Gateway itself starts records its
+    // own `reason` before it closes the socket (`closeFailedConnection`, the
+    // hello deadline, revocation, shutdown), so only a peer-driven ending can
+    // still be unreported here.
+    if (!connection.closeInitiated) {
+      this.finishUpgrade(connection.upgrade, "abandoned", "handshake", detail, { reason: "peer_closed" });
+    }
     const outbound = connection.outbound.snapshot();
     connection.outbound.retire();
     this.options.logger.log(
@@ -2114,9 +2336,15 @@ export class GatewayServer {
     this.options.auth.detachClient(connection.id);
   }
 
-  private closeFailedConnection(connection: Connection, code: number, reason: string): void {
+  private closeFailedConnection(connection: Connection, code: number, reason: string, ending?: UpgradeEnding): void {
     if (connection.closeInitiated) return;
     connection.closeInitiated = true;
+    // The Gateway is ending this socket, so an attempt that never reached hello
+    // states the Gateway's own cause here, before the close: `disconnect` would
+    // otherwise report the peer as leaving.
+    if (ending !== undefined && !connection.ready) {
+      this.finishUpgrade(connection.upgrade, "abandoned", "handshake", reason, ending);
+    }
     connection.outbound.retire();
     // Disposable observers/read waits retire now, not after a dead peer's close
     // handshake. Accepted domain commands still settle with their receipt owner.
@@ -2126,6 +2354,70 @@ export class GatewayServer {
     }, 1_000);
     connection.closeDeadline.unref();
     connection.socket.close(code, reason);
+  }
+
+  /** Any inbound frame proves liveness, and it closes a logged silence episode. */
+  private noteInbound(connection: Connection, clientInitiated: boolean): void {
+    const inboundAt = performance.now();
+    connection.unansweredHeartbeats = 0;
+    connection.pingOutstandingSince = null;
+    connection.lastInboundAt = inboundAt;
+    if (clientInitiated) connection.lastClientInitiatedInboundAt = inboundAt;
+    const episode = connection.silence;
+    if (episode === undefined) return;
+    connection.silence = undefined;
+    episode.resumedAt = inboundAt;
+    // The silent record is written when the shared peer-path read settles; a
+    // silence that ends first still reports silence before its resume.
+    if (episode.reported) this.logInboundResumed(connection, episode);
+  }
+
+  /** One warning per silence episode, not one per heartbeat tick. The peer's
+   * Tailscale path is captured once per episode and never delays the tick. */
+  private observeInboundSilence(connection: Connection, heartbeatAt: number): void {
+    if (connection.silence !== undefined) return;
+    const startedAt = connection.lastInboundAt ?? connection.admittedAt;
+    if (heartbeatAt - startedAt < INBOUND_SILENCE_WARNING_MS) return;
+    // A client that only answers the Gateway's pings is idle between them, not
+    // cut off: its silence says nothing until a ping the Gateway actually sent
+    // goes unanswered. A client that pings on its own (the phone, every ten
+    // seconds) proves liveness without being asked, so silence past the
+    // threshold is the path going quiet. Without this, a pong-only client
+    // reports silence on every tick.
+    const pingUnanswered = connection.pingOutstandingSince !== null;
+    const clientPingsOnItsOwn = connection.lastClientPingAt !== null;
+    if (!pingUnanswered && !clientPingsOnItsOwn) return;
+    const episode: SilenceEpisode = {
+      startedAt,
+      reported: false,
+      detectedMs: Math.max(0, Math.round(heartbeatAt - startedAt)),
+      detectedPingMs: connection.pingOutstandingSince === null
+        ? null
+        : Math.max(0, Math.round(heartbeatAt - connection.pingOutstandingSince)),
+      // A reader that rejects must still leave a record: the silence is the
+      // point, the path is the detail.
+      peer: this.peerPaths.lookup(connection.remoteAddress)
+        .catch((): PeerPathLookup => ({ peerPath: "unknown", peerRelay: "" })),
+    };
+    connection.silence = episode;
+    void episode.peer.then((peer) => {
+      if (episode.reported) return;
+      episode.reported = true;
+      // The message reports the silence observed at detection; the resume
+      // record carries the episode's full duration.
+      this.options.logger.log("warning", `Client ${connection.id} has sent nothing for ${episode.detectedMs}ms (unansweredPingMs=${episode.detectedPingMs ?? "none"} peerPath=${peer.peerPath} peerRelay=${peer.peerRelay || "none"})`, {
+        event: "connection.inbound-silent", source: "transport", connectionId: connection.id, ...connection.peer,
+        peerPath: peer.peerPath, peerRelay: peer.peerRelay,
+      });
+      if (episode.resumedAt !== undefined) this.logInboundResumed(connection, episode);
+    });
+  }
+
+  private logInboundResumed(connection: Connection, episode: SilenceEpisode): void {
+    const silentMs = Math.max(0, Math.round((episode.resumedAt ?? performance.now()) - episode.startedAt));
+    this.options.logger.log("info", `Client ${connection.id} inbound resumed after ${silentMs}ms of silence`, {
+      event: "connection.inbound-resumed", source: "transport", connectionId: connection.id, ...connection.peer, silentMs,
+    });
   }
 
   private pressureDiagnostic(): string {
@@ -2158,6 +2450,11 @@ export class GatewayServer {
     this.stallSampler.dispose();
     this.resourceSampler.dispose();
     for (const client of this.clients.values()) {
+      // The Gateway ends this socket, not its peer: a socket that never said
+      // hello must not be recorded as a peer departure when the process stops.
+      if (!client.ready) {
+        this.finishUpgrade(client.upgrade, "abandoned", "handshake", "Gateway shutdown before hello", { reason: "shutting_down" });
+      }
       const stoppingAccepted = this.send(client, { type: "event", topic: "system.stopping", payload: {} });
       this.retireConnectionWork(client);
       if (!stoppingAccepted) {
@@ -2194,6 +2491,9 @@ export class GatewayServer {
       });
     });
     forceHttpClose = setTimeout(() => {
+      // The Gateway stops these pending upgrades too, at whatever phase they
+      // reached; each record is written before its socket is destroyed.
+      for (const endPendingUpgrade of this.pendingUpgrades) endPendingUpgrade();
       for (const socket of this.httpSockets) socket.destroy();
       if (httpClosed) clearTimeout(forceHttpClose);
     }, HTTP_SHUTDOWN_GRACE_MS);

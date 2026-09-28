@@ -33,8 +33,17 @@ owner of accepted commands; mobile reconnect never replays a prompt blindly.
   may skip its ping, so its first ping can come one tick later and that pong must
   return within about 50 seconds instead of 75 before the fourth tick. Real mobile
   clients enforce an 8-second pong deadline on their own pings, and pong-only
-  clients are unaffected. `server-heartbeat.integration.test.ts` pins each case
-  against real sockets on a fake heartbeat clock.
+  clients are unaffected. A skipped ping is never an unanswered one. A socket that
+  stops proving liveness for 12 seconds — a ping the Gateway sent that the client
+  left unanswered, or a client that pings on its own and has gone quiet — logs
+  one `connection.inbound-silent` (warning) with the peer's Tailscale path, and
+  its next inbound frame logs
+  `connection.inbound-resumed` (info) with `silentMs`. A client that only answers
+  the Gateway's pings is idle between them, not silent, and is never reported:
+  its silence says nothing until a ping goes unanswered.
+  Both are read from the Gateway log alone and neither changes what the tick does.
+  `server-heartbeat.integration.test.ts` pins each case against real sockets on a
+  fake heartbeat clock.
 - **Projection:** the wire ceiling remains 1 MiB, with a shared 32,768 JSON-value
   node ceiling for local and mobile clients. Transcript pages reserve 24,000
   nodes and snapshots 30,000; dense detail is compacted without editing canonical
@@ -186,8 +195,11 @@ keeps today's uncompressed frames.
    Retained/offline records are not a live Gateway health check. If the initial
    fault predates the represented range, it is missing evidence.
 2. Compare the same UTC interval with `<tronHome>/logs/gateway.jsonl` and its
-   bounded `.1` rotation. Match mobile hello successes with server admissions;
-   client-side and server-side connection IDs are different namespaces.
+   bounded `.1` rotation. Join the two sides by the O-1 key: a phone record's
+   `gatewayConnectionId` is the Gateway record's `connectionId`, and its
+   `clientId`/`attemptId`/`epoch` are the Gateway's `peerClientId`,
+   `peerAttemptId` and `peerEpoch`. Only logs from before the correlation key
+   shipped (protocol 5) have to be matched by time window instead.
 3. Use existing local Mac status/health observations to distinguish a responsive
    Gateway from an unreachable mobile path. An OS network path of `satisfied`
    proves neither Tailscale tunnel health nor reachability of the selected Mac.
@@ -206,9 +218,14 @@ keeps today's uncompressed frames.
 | Fast successful `session.open`, no `session.sync`, then client close / `decode_limit` | The client rejected response structure before sync. Compare `frameBytes`, `decodeLimit`, `decodeActual`, `decodeMaximum` and sanitized `decodePath`; a sub-megabyte response can still exceed the node ceiling. This is not proof of path loss. |
 | `event_overflow` with topic, count/byte limit, oldest age and dequeue timing | Mobile consumer pressure. Trace what held the consumer, including synchronization reads; do not merely enlarge the queue. |
 | `connection.outbound-capacity` | Actual server queue count/byte pressure. Inspect high-water marks, `wsBufferedBytes`, next-frame bytes and process memory. |
-| `connection.capacity` / `http.request-capacity` / `http.connection-capacity` | Inspect the named global, identity, address or connection bound and retiring owners; one physical socket is not one request. |
-| `connection.superseded` | The same identity reconnected while at its socket cap. Its logged `lastInboundAgeMs` shows how stale the replaced socket was; repeated supersession of fresh sockets suggests a client owning more concurrent sockets than the cap. |
-| `http.authentication-timeout` | A pending upgrade exceeded its authentication deadline. The callback is fenced and its cancellable credential wait is retired. |
+| `http.request-capacity` / `http.connection-capacity`, or `http.upgrade` with `reason=request_capacity` / `connection_capacity` | Inspect the named global, identity, address or connection bound and retiring owners; one physical socket is not one request. The upgrade record names its bound in `reason` and carries the counts in its message. |
+| `connection.superseded` | The same identity reconnected while at its socket cap. Its logged `lastInboundAgeMs` shows how stale the replaced socket was; repeated supersession of fresh sockets suggests a client owning more concurrent sockets than the cap. A socket that had not said hello yet reports the supersession in its own `http.upgrade` (`reason=superseded`). |
+| `http.upgrade` with `outcome=abandoned` | The peer reached this Mac and opened the socket, then the attempt ended before hello (`phaseReached=handshake`; `helloMs` is how long it kept the phase open). `reason` names which side ended it: `peer_closed` the peer vanishing, `hello_timeout` the Gateway's own hello deadline (`GATEWAY_CONNECTION_POLICY.helloDeadlineMs`), `superseded` a newer connection from the same identity, `device_revoked` a revocation of the device, `shutting_down` a Gateway shutdown. A large `authMs` means the credential wait was slow, a large `acceptToUpgradeMs` means the request waited behind other HTTP work — neither is a path fault. |
+| `http.upgrade` with `outcome=rejected` | The Gateway refused the upgrade; `reason` names which bound or phase did. `phaseReached=request` means before credentials (`warming_up`, `shutting_down`, `request_capacity`, `unexpected_path`, `unreadable_request`), `auth` means the credential or the readiness recheck (`unauthenticated`, `warming_up`, `shutting_down`, `authentication_timeout`) or capacity (`connection_capacity`), `handshake` means the WebSocket handshake itself was refused, `hello` means a hello arrived and was refused (`hello_required`, `protocol_mismatch`) or a frame was (`invalid_frame`: a first frame that is not JSON, or one the WebSocket library itself refuses as oversized or malformed). |
+| `http.upgrade` with `outcome=abandoned` and `phaseReached=auth` | The attempt ended while the credential was still being read: `reason=peer_closed` means the peer left, `shutting_down` means a Gateway shutdown destroyed the socket. A peer that left is not a refusal: check the phone's records at that instant before the Gateway's readiness. |
+| `http.upgrade` with `outcome=opened` and `authMs` or `helloMs` near or over `UPGRADE_SLOW_WARNING_MS` (1,000 ms) | The connection needed a second or more to become usable. The record is a warning whenever the attempt took at least 1,000 ms from the TCP accept (`acceptToUpgradeMs + authMs + handshakeMs + helloMs`), whatever the phase that was slow. `authMs` is the credential read (device-store mutex); `helloMs` runs from handshake completion to the Gateway processing the hello frame, so it includes the peer's own send delay and the network path, not only the Gateway's handling. Check `gateway.event-loop-delay` and `gateway.resources` around the same instant; the peer's hello key joins this record to its phone records. |
+| `connection.inbound-silent` | The socket stayed open, received no frame for at least 12 s, and liveness was expected: either a ping the Gateway sent went unanswered or the client pings on its own and went quiet. `peerPath=relay` or `offline` points at the Tailscale path (`peerRelay` names the relay carrying it, empty for a direct or offline peer); `direct` with a silent socket points at the phone or its process; `unknown` means there is no Tailscale answer for that address (loopback/LAN, no CLI, or a status timeout) and says nothing about the path. The paired `connection.inbound-resumed` gives the episode's `silentMs`. |
+| `http.upgrade` with `reason=authentication_timeout` | A pending upgrade exceeded its authentication deadline, so the Gateway refused it (`outcome=rejected`, `phaseReached=auth`). The callback is fenced and its cancellable credential wait is retired. |
 | `closeCode` / `httpStatusCode` / `platformCode` | Separate facts, never interchangeable numbers. HTTP 401/403 stop automatic admission; 503 is retryable capacity/unavailability. URLSession may report 1005/1006 rather than expose the peer's exact close frame; that absence must remain explicit. |
 | `connection.projection-rejected` | A producer violated the projection contract. Narrow/reproduce that producer instead of reconnecting the whole service indefinitely. |
 | `gateway.event-loop-delay` | A sampled heartbeat timer was delayed by at least one second (`durationMs`). Counts, queued bytes, RSS, heap and external-memory bytes help separate queue pressure from wider process work. Over exactly the delayed heartbeat interval it also carries `gcCount`, `gcPauseMs`, `gcMaxPauseMs` and `eventLoopUtilization`, plus host `hostFreeBytes`, `swapUsedBytes` and `memoryPressure` (sampled once per record, bounded to 1 s, `host=unavailable` otherwise). GC pause time close to the delay points at garbage collection; utilization near 1 with little GC points at the Gateway's own synchronous work; low utilization with heavy swap or `memoryPressure=warn`/`critical` points at the host not running the process. These are observations, not attribution. |
