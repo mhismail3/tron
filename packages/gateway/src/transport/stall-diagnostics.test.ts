@@ -175,6 +175,8 @@ describe("ResourceSampler", () => {
     sampler.recordCatalogWalk(120.4, 3_000);
     sampler.recordCatalogWalk(9, 4, true);
     sampler.recordOutboundBytes(700);
+    sampler.recordOutboundCoalesced(400);
+    sampler.recordOutboundCoalesced(0);
     sampler.recordSnapshotBuild(1);
     sampler.recordSnapshotBuild(0);
     sampler.recordRuntimeLoaded();
@@ -184,13 +186,13 @@ describe("ResourceSampler", () => {
     expect(first).toMatchObject({
       catalogWalks: 2, requestPathCatalogWalks: 1, catalogWalkMs: 129.4, catalogWalkFiles: 3_004, outboundBytes: 700,
       snapshotBuilds: 2, unaudiencedSnapshotBuilds: 1, durableWrites: 3, durableWriteMs: 12,
-      runtimesLoaded: 1, runtimesEvicted: 1,
+      runtimesLoaded: 1, runtimesEvicted: 1, outboundCoalescedFrames: 2, outboundCoalescedBytes: 400,
     });
     const second = await sampler.sample();
     expect(second.topics.size).toBe(0);
     expect(second).toMatchObject({
       catalogWalks: 0, requestPathCatalogWalks: 0, catalogWalkMs: 0, catalogWalkFiles: 0, outboundBytes: 0, snapshotBuilds: 0,
-      unaudiencedSnapshotBuilds: 0, runtimesLoaded: 0, runtimesEvicted: 0,
+      unaudiencedSnapshotBuilds: 0, runtimesLoaded: 0, runtimesEvicted: 0, outboundCoalescedFrames: 0, outboundCoalescedBytes: 0,
     });
   });
 
@@ -549,6 +551,9 @@ it("records the resource window through the transport's timer", async () => {
   expect(first[1]).toContain("durableWrites=2");
   expect(first[1]).toMatch(/topics=session\.snapshot:1\/\d+B\/1/u);
   expect(Number(/outboundBytes=(\d+)/u.exec(first[1] as string)![1])).toBeGreaterThan(0);
+  // A quiet connection supersedes nothing, so this window's coalescing pair is
+  // present and zero rather than absent.
+  expect(first[1]).toContain("outboundCoalescedFrames=0 outboundCoalescedBytes=0");
   // The next window crosses the heap bound: the same record promotes to warning.
   heapUsed = 7_000;
   await vi.advanceTimersByTimeAsync(RESOURCE_SAMPLE_INTERVAL_MS);

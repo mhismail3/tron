@@ -635,3 +635,123 @@ describe("connection-wide synchronization ownership", () => {
     socket.close();
   });
 });
+
+describe("outbound queue coalescing across a synchronization barrier", () => {
+  it("keeps the newest superseded state of a quarantined session instead of filling the queue with it", async () => {
+    const root = await mkdtemp(join(tmpdir(), "tron-sync-coalesce-"));
+    const devices = new DeviceStore(root, "machine");
+    await devices.initialize();
+    const token = JSON.parse(await (await import("node:fs/promises")).readFile(join(root, "gateway", "local-auth.json"), "utf8")).bearerToken;
+    const probe = createServer();
+    await new Promise<void>((resolve) => probe.listen(0, "127.0.0.1", resolve));
+    const address = probe.address();
+    if (!address || typeof address === "string") throw new Error("probe did not bind");
+    const port = address.port;
+    await new Promise<void>((resolve) => probe.close(() => resolve()));
+
+    let beganOpen!: () => void;
+    const openBegan = new Promise<void>((resolve) => { beganOpen = resolve; });
+    let releaseOpen!: () => void;
+    const openGate = new Promise<void>((resolve) => { releaseOpen = resolve; });
+    const service = {
+      info: () => ({ gatewayVersion: "test", piVersion: "test", protocolVersion: 5, minProtocolVersion: 5, machineId: "machine", machineName: "test", capabilities: [] }),
+      terminalBelongsToSession: () => false,
+      releaseClient: vi.fn(),
+      invoke: async (context: any, method: string, params: any) => {
+        const sessionId = params.sessionId as string;
+        if (method === "session.open") {
+          const syncToken = context.beginSynchronization(sessionId);
+          beganOpen();
+          await openGate;
+          const snapshot = { sessionId, runtimeGeneration: "generation-barrier", eventSequence: 1, revision: 1 };
+          context.establishSynchronization(sessionId, snapshot);
+          return { session: snapshot, syncToken, subscriptionToken: syncToken };
+        }
+        if (method === "session.sync") {
+          context.completeSynchronization(sessionId, params.syncToken as string);
+          return { synchronized: true };
+        }
+        throw new Error(`unexpected method ${method}`);
+      },
+    };
+    const logger = { log: vi.fn() };
+    const gateway = new GatewayServer({
+      host: "127.0.0.1",
+      port,
+      maxFrameBytes: 512 * 1_024,
+      maximumOutboundBytes: 48 * 1_024,
+      devices,
+      uploads: {} as any,
+      sessions: { subscribe: vi.fn(), unsubscribeClient: vi.fn(), unsubscribe: vi.fn() } as any,
+      auth: { detachClient: vi.fn(), cancelOwner: vi.fn() } as any,
+      service: service as any,
+      logger: logger as any,
+    });
+    await gateway.listen();
+    cleanups.push(async () => { await gateway.close(); });
+
+    const socket = new WebSocket(`ws://127.0.0.1:${port}/v1/socket`, { headers: { authorization: `Bearer ${token}` } });
+    const frames: any[] = [];
+    socket.on("message", (raw) => frames.push(JSON.parse(raw.toString())));
+    await new Promise<void>((resolve) => socket.once("open", () => resolve()));
+    socket.send(JSON.stringify({ type: "hello", protocolVersion: 5 }));
+    while (!frames.some((frame) => frame.type === "hello")) await new Promise((resolve) => setTimeout(resolve, 1));
+
+    const connection = [...(gateway as any).clients.values()][0] as {
+      outbound: OrderedOutboundQueue;
+      socket: WebSocket;
+      synchronizations: Map<string, unknown>;
+      synchronizationBytes: number;
+    };
+    // Hold every application write, so the baseline response and its
+    // synchronization suffix stay in the queue the way a slow link leaves them.
+    const held: Array<{ encoded: string; done: (error?: Error) => void }> = [];
+    vi.spyOn(connection.socket, "send").mockImplementation(((encoded: string, done?: (error?: Error) => void) => {
+      held.push({ encoded, done: done ?? (() => {}) });
+    }) as never);
+    const release = () => { for (let index = 0; index < held.length; index += 1) held[index]!.done(); };
+    const snapshot = (eventSequence: number) => ({
+      runtimeGeneration: "generation-barrier", eventSequence, revision: eventSequence,
+      data: "x".repeat(24 * 1_024),
+    });
+
+    socket.send(JSON.stringify({ type: "request", id: "barrier-open", method: "session.open", params: { sessionId: "barrier-session" } }));
+    await openBegan;
+    // While the barrier is pending, this session's state is quarantined, not
+    // queued: only the hello frame has been accepted so far.
+    gateway.broadcastSession("barrier-session", "session.snapshot", snapshot(2) as never);
+    gateway.broadcastSession("barrier-session", "session.snapshot", snapshot(3) as never);
+    gateway.broadcastSession("barrier-session", "session.snapshot", snapshot(4) as never);
+    gateway.broadcastSession("barrier-session", "session.progress", { runtimeGeneration: "generation-barrier", eventSequence: 5, revision: 5, data: {} } as never);
+    expect(connection.outbound.snapshot()).toMatchObject({ queuedFrames: 0, acceptedFrames: 1 });
+    expect(connection.synchronizations.has("barrier-session")).toBe(true);
+
+    releaseOpen();
+    await vi.waitFor(() => expect(held).toHaveLength(1)); // the open response
+    const opened = JSON.parse(held[0]!.encoded) as { id: string; result: { syncToken: string } };
+    expect(opened.id).toBe("barrier-open");
+    socket.send(JSON.stringify({ type: "request", id: "barrier-sync", method: "session.sync", params: { sessionId: "barrier-session", syncToken: opened.result.syncToken } }));
+    await vi.waitFor(() => expect(connection.synchronizations.has("barrier-session")).toBe(false));
+    // Three quarantined 24 KiB snapshots exceed this connection's 48 KiB queue
+    // once the response ahead of them is counted; only the newest survives, and
+    // a later snapshot then supersedes even that.
+    gateway.broadcastSession("barrier-session", "session.snapshot", snapshot(6) as never);
+    expect(connection.outbound.snapshot()).toMatchObject({ queuedFrames: 4, acceptedFrames: 8, oldestTopic: "response" });
+    expect(connection.synchronizationBytes).toBe(0);
+    expect(logger.log.mock.calls.some((call) => call[2]?.event === "connection.outbound-capacity")).toBe(false);
+    release();
+
+    // Both responses precede the synchronization suffix, which is a
+    // subsequence of what was broadcast: the superseded snapshots are gone and
+    // the newest session state is delivered last.
+    expect(held).toHaveLength(4);
+    const delivered = held.map((write) => JSON.parse(write.encoded) as { id?: string; topic?: string; payload: { eventSequence: number } });
+    expect(delivered[0]!.id).toBe("barrier-open");
+    expect(delivered[1]!.id).toBe("barrier-sync");
+    expect(delivered.slice(2).map((frame) => [frame.topic, frame.payload.eventSequence])).toEqual([
+      ["session.progress", 5],
+      ["session.snapshot", 6],
+    ]);
+    socket.close();
+  });
+});

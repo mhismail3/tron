@@ -266,19 +266,41 @@ export interface OrderedOutboundQueueSnapshot {
   maximumBytes: number;
   frameHighWater: number;
   byteHighWater: number;
+  /** The topic of the oldest frame in the queue: the one the socket is writing
+   * or will write next, i.e. what everything behind it is waiting on. */
+  oldestTopic: string;
+}
+
+/** One encoded frame with the wire topic it carries and, when a newer frame of
+ * the same state can replace it, the key that identifies that state (`G-4`). */
+export interface OutboundFrame {
+  readonly encoded: string;
+  readonly bytes: number;
+  readonly topic: string;
+  readonly key?: string;
 }
 
 interface QueuedOutboundFrame {
   encoded: string;
   bytes: number;
+  topic: string;
+  key?: string;
 }
 
 type OutboundWrite = (encoded: string, completion: (error?: Error) => void) => void;
+
+const UNKNOWN_OUTBOUND_TOPIC = "other";
 
 /**
  * A connection-local ordered writer. Encoded frames remain bounded in
  * application memory and exactly one frame is handed to ws at a time, so a
  * legitimate same-turn synchronization burst cannot fill ws.bufferedAmount.
+ *
+ * A frame whose state a newer frame replaces queues once: the superseded frame
+ * is dropped unsent and the newer one keeps its own place in the queue, so a
+ * slow link is bounded by the state that is still worth sending rather than by
+ * how long it took. The backstop below is unchanged and still closes a
+ * connection that exceeds it.
  */
 export class OrderedOutboundQueue {
   private readonly frames: Array<QueuedOutboundFrame | undefined> = [];
@@ -295,23 +317,38 @@ export class OrderedOutboundQueue {
   constructor(
     private readonly maximumBytes: number,
     private readonly write: OutboundWrite,
-    private readonly overflow: (snapshot: OrderedOutboundQueueSnapshot, nextBytes: number) => void,
+    private readonly overflow: (snapshot: OrderedOutboundQueueSnapshot, nextBytes: number, nextTopic: string) => void,
     private readonly writeFailed: (error: Error, snapshot: OrderedOutboundQueueSnapshot) => void,
+    /** One superseded frame, reported where it is dropped. */
+    private readonly replaced: (bytes: number) => void = () => {},
     private readonly maximumFrames = 4_096,
   ) {}
 
-  enqueue(frame: string | { readonly encoded: string; readonly bytes: number }): boolean {
+  enqueue(frame: OutboundFrame): boolean {
     if (this.retired) return false;
-    const encoded = typeof frame === "string" ? frame : frame.encoded;
-    const bytes = typeof frame === "string" ? Buffer.byteLength(encoded, "utf8") : frame.bytes;
-    if (this.frames.length - this.head >= this.maximumFrames
-      || bytes > this.maximumBytes || this.queuedBytes > this.maximumBytes - bytes) {
+    const { encoded, bytes, topic, key } = frame;
+    // The frame ws is already writing cannot be recalled, so replacement looks
+    // only at frames still queued behind it. The newest frame of a state is
+    // appended where it was enqueued, after everything already queued: a
+    // delivered sequence is therefore always a subsequence of the enqueue
+    // sequence, and no frame ever overtakes an earlier one.
+    const replacedIndex = key === undefined ? -1 : this.unsentFrameWithKey(key, this.writeActive ? this.head + 1 : this.head);
+    const replacedBytes = replacedIndex < 0 ? 0 : this.frames[replacedIndex]!.bytes;
+    if (this.frames.length - this.head + (replacedIndex < 0 ? 1 : 0) > this.maximumFrames
+      || bytes > this.maximumBytes || this.queuedBytes - replacedBytes > this.maximumBytes - bytes) {
       const snapshot = this.snapshot();
       this.retire();
-      this.overflow(snapshot, bytes);
+      this.overflow(snapshot, bytes, topic);
       return false;
     }
-    this.frames.push({ encoded, bytes });
+    if (replacedIndex >= 0) {
+      // Payload and byte reservation are released together, at the same
+      // boundary the completed-frame path uses.
+      this.frames.splice(replacedIndex, 1);
+      this.queuedBytes -= replacedBytes;
+      this.replaced(replacedBytes);
+    }
+    this.frames.push({ encoded, bytes, topic, ...(key === undefined ? {} : { key }) });
     this.queuedBytes += bytes;
     this.acceptedFrames += 1;
     this.frameHighWater = Math.max(this.frameHighWater, this.frames.length - this.head);
@@ -331,7 +368,17 @@ export class OrderedOutboundQueue {
       maximumBytes: this.maximumBytes,
       frameHighWater: this.frameHighWater,
       byteHighWater: this.byteHighWater,
+      oldestTopic: this.frames[this.head]?.topic ?? UNKNOWN_OUTBOUND_TOPIC,
     };
+  }
+
+  /** The newest unsent frame carrying `key`, searched from the tail: a frame
+   * enqueued after the last frame of that state is what the search skips. */
+  private unsentFrameWithKey(key: string, first: number): number {
+    for (let index = this.frames.length - 1; index >= first; index -= 1) {
+      if (this.frames[index]?.key === key) return index;
+    }
+    return -1;
   }
 
   whenIdle(waiter: () => void): void {
@@ -557,6 +604,39 @@ function sendJson(response: ServerResponse, status: number, value: unknown): voi
 
 interface PreparedOutboundFrame extends BufferedSessionEncoding {
   readonly nodes?: number;
+}
+
+/**
+ * The wire topic of one outbound frame, and — for the state a newer frame can
+ * replace in an unsent queue — that state's coalescing key (`G-4`). Only whole
+ * current state is coalesced: a snapshot for a session, a session summary, and
+ * one process's activity. An event that carries a deltas-only or multi-key
+ * change (a progress frame, a process removal naming several processes) has no
+ * key and is always delivered.
+ */
+function outboundFrameIdentity(value: unknown, prepared: PreparedOutboundFrame): { topic: string; key?: string } {
+  // An oversized projection is sent as a compact resync notice instead: that
+  // notice is its own frame and is never superseded by the projection it
+  // replaced.
+  if (prepared.fallback) return { topic: "transport.resyncRequired" };
+  const frame = typeof value === "object" && value !== null ? value as Record<string, unknown> : {};
+  const topic = typeof frame.topic === "string" ? frame.topic : typeof frame.type === "string" ? frame.type : UNKNOWN_OUTBOUND_TOPIC;
+  const payload = typeof frame.payload === "object" && frame.payload !== null ? frame.payload as Record<string, unknown> : {};
+  const sessionId = typeof frame.sessionId === "string" ? frame.sessionId : undefined;
+  if (topic === "session.summary") {
+    // A summary is a global event; the session it describes is its payload.
+    const summarySessionId = typeof payload.sessionId === "string" ? payload.sessionId : undefined;
+    return summarySessionId === undefined ? { topic } : { topic, key: `session.summary:${summarySessionId}` };
+  }
+  if (sessionId === undefined) return { topic };
+  if (topic === "session.snapshot") return { topic, key: `session.snapshot:${sessionId}` };
+  if (topic === "session.processActivity") {
+    const data = typeof payload.data === "object" && payload.data !== null ? payload.data as Record<string, unknown> : {};
+    const activity = typeof data.activity === "object" && data.activity !== null ? data.activity as Record<string, unknown> : {};
+    const processId = typeof activity.processId === "string" ? activity.processId : undefined;
+    return processId === undefined ? { topic } : { topic, key: `session.processActivity:${sessionId}:${processId}` };
+  }
+  return { topic };
 }
 
 function prepareOutboundFrame(value: unknown, maximum: number): PreparedOutboundFrame | undefined {
@@ -1566,11 +1646,11 @@ export class GatewayServer {
         if (!error) connection.lastWriteProgressAt = performance.now();
         completion(error);
       }),
-      (snapshot, nextBytes) => {
+      (snapshot, nextBytes, nextTopic) => {
         if (connection.closeInitiated) return;
         this.options.logger.log(
           "warning",
-          `Closing client ${connection.id} at outbound queue capacity (queuedFrames=${snapshot.queuedFrames} queuedBytes=${snapshot.queuedBytes} maximumFrames=${snapshot.maximumFrames} maximumBytes=${snapshot.maximumBytes} frameHighWater=${snapshot.frameHighWater} byteHighWater=${snapshot.byteHighWater} wsBufferedBytes=${socket.bufferedAmount} nextBytes=${nextBytes}; ${this.pressureDiagnostic()})`,
+          `Closing client ${connection.id} at outbound queue capacity (queuedFrames=${snapshot.queuedFrames} queuedBytes=${snapshot.queuedBytes} maximumFrames=${snapshot.maximumFrames} maximumBytes=${snapshot.maximumBytes} frameHighWater=${snapshot.frameHighWater} byteHighWater=${snapshot.byteHighWater} oldestTopic=${snapshot.oldestTopic} nextTopic=${nextTopic} nextBytes=${nextBytes} wsBufferedBytes=${socket.bufferedAmount}; ${this.pressureDiagnostic()})`,
           { event: "connection.outbound-capacity", source: "transport", connectionId: connection.id, ...connection.peer },
         );
         this.closeFailedConnection(connection, 1013, "client outbound capacity exceeded");
@@ -1586,6 +1666,7 @@ export class GatewayServer {
         this.retireConnectionWork(connection);
         socket.terminate();
       },
+      (bytes) => this.resourceSampler.recordOutboundCoalesced(bytes),
     );
     connection = {
       id: randomUUID(),
@@ -2298,7 +2379,9 @@ export class GatewayServer {
       // writer hands exactly one encoded frame to ws at a time, preserving a
       // response before its synchronization suffix without manufacturing
       // transport pressure from concurrent bounded RPC completions.
-      if (!connection.outbound.enqueue({ encoded: frame.output, bytes: frame.outputBytes })) return "failed";
+      if (!connection.outbound.enqueue({
+        encoded: frame.output, bytes: frame.outputBytes, ...outboundFrameIdentity(value, frame),
+      })) return "failed";
       this.resourceSampler.recordOutboundBytes(frame.outputBytes);
       return frame.fallback ? "fallback" : "sent";
     } catch {
