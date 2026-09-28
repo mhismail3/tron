@@ -67,6 +67,10 @@ function cosine(left: readonly number[], right: readonly number[]): number {
 
 interface SearchDocument extends SearchIndexDocument {
   texts: Map<string, SearchTextEntry>;
+  /** Set when the document was read from an open session's in-memory branch
+   * rather than from the canonical file, so the catalog's file facts do not
+   * describe it (`RuntimeRegistry.readSearchCut`). */
+  runtimeGeneration?: string;
 }
 export interface SessionSearchEmbeddingClient {
   qualify(signal?: AbortSignal): Promise<{ dimension: number; language: string; modelRevision: string }>;
@@ -378,7 +382,11 @@ export class SessionSearchService {
     const identities = await this.catalogIdentities();
     const stored = new Map(this.index.sessionFacts().map(facts => [facts.sessionId, facts]));
     const published = new Set(catalog.sessions.map(session => session.id));
-    for (const sessionId of stored.keys()) if (!published.has(sessionId)) this.index.remove(sessionId);
+    for (const sessionId of stored.keys()) {
+      if (published.has(sessionId)) continue;
+      await this.index.remove(sessionId);
+      await this.yieldSlice();
+    }
     const corpusFacts: string[] = [];
     for (const session of catalog.sessions) {
       if (this.warmupAbort.signal.aborted) return;
@@ -395,7 +403,11 @@ export class SessionSearchService {
       if (!document) { this.coverageOmittedSessions += 1; this.coverageReason = "One or more canonical sessions could not be admitted for search"; continue; }
       corpusFacts.push(`${document.sessionId}:${document.branchDigest}`);
       try {
-        await this.index.replace(document, candidate);
+        // Only a cut read from the file may carry the catalog's file facts: an
+        // open session's in-memory branch can move (a tree navigation writes
+        // nothing), and a row stamped with facts it was not derived from would
+        // be reused across a restart and then dropped by its own digest.
+        await this.index.replace(document, document.runtimeGeneration ? undefined : candidate);
         this.indexParsed += 1;
       } catch { this.coverageOmittedSessions += 1; this.coverageReason = "One or more sessions exceeded bounded search index capacity"; }
       await this.yieldSlice();
@@ -521,10 +533,10 @@ export class SessionSearchService {
           try {
             const document = await this.loadDocument(id);
             if (document) await this.index.replace(document);
-            else this.index.remove(id);
+            else await this.index.remove(id);
             refreshed.push({ id, generation: processedGeneration, ...(document ? { document } : {}) });
           } catch {
-            this.index.remove(id);
+            await this.index.remove(id);
             this.coverageReason = "A changed session could not be indexed and will be retried on a later search";
           }
           if (this.dirtySessions.get(id) === processedGeneration) this.dirtySessions.delete(id);
@@ -588,11 +600,14 @@ export class SessionSearchService {
         if (text) texts.set(text.id, text);
         return text ? [text] : [];
       });
+      // The branch digest is derived state too: changing what it covers (the
+      // entries, their order, or their projection) requires bumping
+      // SESSION_SEARCH_INDEX_DERIVATION_VERSION in session-search-index.ts.
       const branchDigest = digest(branch.entries);
       const fileIdentity = cut.fileIdentity ?? createHash("sha256").update(branchDigest).digest("hex");
       return {
         sessionId, title: typeof cut.summary.name === "string" && cut.summary.name.trim() ? cut.summary.name.trim() : cut.summary.firstMessage.slice(0, 80), cwd: cut.summary.cwd,
-        updatedAt: cut.summary.modified instanceof Date ? cut.summary.modified.toISOString() : String(cut.summary.modified), fileIdentity, branchDigest, ...(branch.leafEntryId ? { leafEntryId: branch.leafEntryId } : {}), ...(boundary ? { forkBoundary: boundary } : {}), entries, texts,
+        updatedAt: cut.summary.modified instanceof Date ? cut.summary.modified.toISOString() : String(cut.summary.modified), fileIdentity, branchDigest, ...(branch.leafEntryId ? { leafEntryId: branch.leafEntryId } : {}), ...(boundary ? { forkBoundary: boundary } : {}), ...(cut.runtimeGeneration ? { runtimeGeneration: cut.runtimeGeneration } : {}), entries, texts,
       };
     } catch {
       return undefined;

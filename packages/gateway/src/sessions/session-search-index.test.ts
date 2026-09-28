@@ -16,6 +16,20 @@ function document(): SearchIndexDocument {
   };
 }
 
+const STAMP = { fileIdentity: "file-1", size: 4_096, mtimeMs: 1_759_000_000_123.5 };
+
+/** Enough postings that one document's insert spans several write slices, so a
+ * second writer can be issued while the first is still inside its transaction. */
+function bulkDocument(sessionId: string): SearchIndexDocument {
+  const text = Array.from({ length: 60 }, (_, index) => `word-${index % 17}`).join(" ");
+  return {
+    sessionId, title: "Lane fixture", cwd: "/tmp/project", updatedAt: "2025-01-01T00:00:00Z", fileIdentity: "file-1", branchDigest: "branch-1",
+    entries: Array.from({ length: 200 }, (_, index) => ({
+      id: `entry-${index}`, parentId: index === 0 ? null : `entry-${index - 1}`, timestamp: "2025-01-01T00:00:00Z", role: "user" as const, text, ordinal: index,
+    })),
+  };
+}
+
 describe("SessionSearchIndex", () => {
   it("discards an unreadable index file before constructing a fresh capability", async () => {
     const root = await mkdtemp(join(tmpdir(), "tron-search-corrupt-")); roots.push(root);
@@ -105,8 +119,28 @@ describe("SessionSearchIndex", () => {
     const root = await mkdtemp(join(tmpdir(), "tron-search-")); roots.push(root);
     const index = await SessionSearchIndex.open(join(root, "index.sqlite"));
     await index.replace(document());
-    index.remove("session-1");
+    await index.remove("session-1");
     expect(index.candidates("violet", 10)).toEqual([]);
+    index.close();
+  });
+
+  it("serializes writers that overlap one transaction instead of joining it", async () => {
+    const root = await mkdtemp(join(tmpdir(), "tron-search-lane-")); roots.push(root);
+    const index = await SessionSearchIndex.open(join(root, "index.sqlite"));
+    await index.replace(bulkDocument("session-1"), STAMP);
+    await index.replace(bulkDocument("session-2"), STAMP);
+    // A rekey clears the dirty set while a search's refresh is mid-replace, so a
+    // second search starts its own replace and a remove can land in between.
+    // Each of these is issued while the one before it is still running.
+    await Promise.all([
+      index.replace(bulkDocument("session-1"), STAMP),
+      index.replace(bulkDocument("session-2"), STAMP),
+      index.remove("session-2"),
+    ]);
+    expect(index.stats()).toMatchObject({ sessionsIndexed: 1, passagesIndexed: 200 });
+    const candidates = index.candidates("violet", 10);
+    expect(candidates.map(candidate => candidate.sessionId)).toEqual(Array.from({ length: 10 }, () => "session-1"));
+    expect(index.sessionFacts().map(facts => facts.sessionId)).toEqual(["session-1"]);
     index.close();
   });
 });

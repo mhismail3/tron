@@ -141,6 +141,52 @@ describe("SessionSearchService backend seams", () => {
     await third.close();
   });
 
+  it("re-derives an open session's in-memory branch instead of stamping it as file-verified", async () => {
+    const root = await mkdtemp(join(tmpdir(), "tron-search-open-cut-")); roots.push(root);
+    const path = join(root, "index.sqlite");
+    const identities = new Map([["s", { fileIdentity: "file-1", size: 4_096, mtimeMs: 1_759_000_000_000 }]]);
+    // An open session answers from its SDK-selected branch: that branch moves on
+    // a tree navigation which writes nothing to the file, so the catalog's file
+    // facts do not describe this cut (RuntimeRegistry.readSearchCut marks it
+    // with the slot's runtimeGeneration).
+    let slotOpen = true;
+    const reads: string[] = [];
+    const registry = () => ({
+      setSearchInvalidator: () => {},
+      isArchived: () => false,
+      catalog: async () => ({ sessions: [{ id: "s" }] }),
+      searchCatalogIdentities: async () => new Map(identities),
+      readSearchCut: async () => {
+        reads.push(slotOpen ? "slot" : "file");
+        const selected = slotOpen ? [entries[0], entries[1]] : entries;
+        return { summary: { id: "s", name: "Fixture", firstMessage: "Fixture", cwd: "/tmp", modified: new Date("2026-01-01T00:00:00Z") }, entries: selected, fileIdentity: "file-1", ...(slotOpen ? { runtimeGeneration: "generation-1" } : {}), leafEntryId: selected.at(-1)?.id };
+      },
+    }) as any;
+
+    const index = await SessionSearchIndex.open(path);
+    const openRead = new SessionSearchService(registry(), index);
+    await openRead.warm();
+    expect(index.sessionFacts()).toEqual([{ sessionId: "s", fileIdentity: "file-1", branchDigest: expect.any(String), reuse: null }]);
+    await openRead.close();
+
+    // The next start reads the file's cut instead, and only that cut may carry
+    // the catalog's facts: it is stamped, and the start after it reuses the row.
+    slotOpen = false;
+    const fileIndex = await SessionSearchIndex.open(path);
+    const fileRead = new SessionSearchService(registry(), fileIndex);
+    await fileRead.warm();
+    expect(fileRead.indexPassStats()).toEqual({ reusedSessions: 0, parsedSessions: 1 });
+    expect(fileIndex.sessionFacts()).toEqual([{ sessionId: "s", fileIdentity: "file-1", branchDigest: expect.any(String), reuse: identities.get("s") }]);
+    await fileRead.close();
+
+    const reusedIndex = await SessionSearchIndex.open(path);
+    const reused = new SessionSearchService(registry(), reusedIndex);
+    await reused.warm();
+    expect(reused.indexPassStats()).toEqual({ reusedSessions: 1, parsedSessions: 0 });
+    await reused.close();
+    expect(reads).toEqual(["slot", "file"]);
+  });
+
   it("parses the corpus when no catalog cut can prove a row unchanged", async () => {
     const root = await mkdtemp(join(tmpdir(), "tron-search-warm-unproven-")); roots.push(root);
     const path = join(root, "index.sqlite");
