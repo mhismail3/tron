@@ -29,7 +29,7 @@ import { CatalogMetadataIndex } from "./catalog-metadata-index.js";
 import type { SessionCatalog } from "./session-catalog.js";
 import { INVOCATION_RECEIPT_TYPE, makeInvocationReceipt } from "./invocation-receipts.js";
 import { EXTENSION_ACTIVITY_RECEIPT_TYPE, MAX_EXTENSION_HISTORY_BYTES, type ExtensionActivityReceipt } from "./extension-activity-history.js";
-import { RuntimeRegistry } from "./runtime-registry.js";
+import { RuntimeRegistry, LIVE_RUNTIME_HEAP_ESTIMATE_FACTOR } from "./runtime-registry.js";
 import { RuntimeSlot } from "./runtime-slot.js";
 import { invocationReceipts } from "./invocation-receipts.js";
 import { KnowledgeStore } from "../knowledge/knowledge-store.js";
@@ -84,6 +84,7 @@ describe.sequential("RuntimeRegistry with the pinned agent runtime", () => {
     beforeInitialize?: (sessionFile: string) => Promise<void>;
     notifications?: NotificationService;
     resources?: ResourceRecorder;
+    runtimeLifecycleRecord?: (record: { event: string; sessionId: string; transcriptBytes: number; estimatedHeapBytes: number }) => void;
   } = {}) {
     const root = await mkdtemp(join(tmpdir(), `tron-cold-acquire-${label}-`));
     const agentDir = join(root, "agent");
@@ -115,6 +116,7 @@ describe.sequential("RuntimeRegistry with the pinned agent runtime", () => {
       ...(options.catalogIndexFailure ? { catalogIndexFailure: options.catalogIndexFailure } : {}),
       ...(options.runtimeDisposeTimeout ? { runtimeDisposeTimeout: options.runtimeDisposeTimeout } : {}),
       ...(options.resources ? { resources: options.resources } : {}),
+      ...(options.runtimeLifecycleRecord ? { runtimeLifecycleRecord: options.runtimeLifecycleRecord } : {}),
     });
     registries.push(registry);
     if (options.beforeInitialize) await options.beforeInitialize(manager.getSessionFile()!);
@@ -11175,6 +11177,86 @@ export default function (pi) {
 
     await slot.dispose();
     expect(recorded.recordRuntimeEvicted).toHaveBeenCalledTimes(1);
+  });
+
+  /** One collected `runtime.loaded`/`runtime.evicted` record, as the registry's
+   * log seam receives it. */
+  function runtimeLifecycleRecords() {
+    const records: Array<{ event: string; sessionId: string; transcriptBytes: number; estimatedHeapBytes: number }> = [];
+    return { records, record: (record: (typeof records)[number]) => records.push(record) };
+  }
+
+  // Failure mode: a live runtime that grew past the byte budget is never
+  // reclaimed, because admission checks only the runtime count; the largest
+  // idle runtime is the one whose retirement reclaims the most headroom.
+  it("retires the largest idle runtime first when the byte budget cannot hold an opening session", async () => {
+    const fixture = await coldFixture("byte-budget-largest-first");
+    const large = SessionManager.create(fixture.cwd, dirname(fixture.sessionFile));
+    large.appendMessage(fauxAssistantMessage("large idle transcript"));
+    const small = SessionManager.create(fixture.cwd, dirname(fixture.sessionFile));
+    small.appendMessage(fauxAssistantMessage("small idle transcript"));
+    await settleCatalog(fixture.registry);
+    await fixture.registry.catalog("all");
+    const largeSlot = await fixture.registry.acquire(large.getSessionId());
+    const smallSlot = await fixture.registry.acquire(small.getSessionId());
+    const mebibyte = 1_024 * 1_024;
+    // A live runtime grown to two budgets' worth of heap, as a long run does; the
+    // opening session starts empty, so only retiring the large one fits.
+    vi.spyOn(fixture.registry, "resourceInventory").mockResolvedValue([
+      { sessionId: largeSlot.id, bytes: 800 * mebibyte, subscribers: 0 },
+      { sessionId: smallSlot.id, bytes: mebibyte, subscribers: 0 },
+    ]);
+
+    const opened = await fixture.registry.acquire(fixture.manager.getSessionId());
+    expect(largeSlot.isDisposed).toBe(true);
+    expect(smallSlot.isDisposed).toBe(false);
+    // Exactly one runtime was retired: the largest one reclaims enough on its own.
+    expect((fixture.registry as unknown as { slots: Map<string, unknown> }).slots.size).toBe(2);
+    expect((fixture.registry as unknown as { slots: Map<string, unknown> }).slots.has(opened.id)).toBe(true);
+  });
+
+  // Failure mode: an opening session is admitted although no idle runtime can
+  // be retired for it, so loaded sessions push the heap toward the limit; the
+  // refusal must be the same retryable `busy` the runtime count uses, and it
+  // must not publish a runtime.
+  it("refuses an opening session the budget cannot hold and publishes no runtime for it", async () => {
+    const lifecycle = runtimeLifecycleRecords();
+    const fixture = await coldFixture("byte-budget-refusal", { runtimeLifecycleRecord: lifecycle.record });
+    const subscribedSlot = await fixture.registry.create(fixture.cwd);
+    fixture.registry.subscribe("phone", subscribedSlot.id);
+    vi.spyOn(fixture.registry, "resourceInventory").mockResolvedValue([
+      { sessionId: subscribedSlot.id, bytes: 800 * 1_024 * 1_024, subscribers: 1 },
+    ]);
+    const loadedBefore = lifecycle.records.filter((record) => record.event === "runtime.loaded").length;
+
+    // The only runtime over the budget has an audience, so none may be retired
+    // and the new session cannot be admitted.
+    await expect(fixture.registry.create(fixture.cwd)).rejects.toMatchObject({
+      code: "busy",
+      retryable: true,
+    });
+    expect(subscribedSlot.isDisposed).toBe(false);
+    expect(lifecycle.records.filter((record) => record.event === "runtime.loaded")).toHaveLength(loadedBefore);
+  });
+
+  // Failure mode: the transitions are counted but never named, so an incident
+  // cannot tell which session's runtime was loaded or evicted, nor what the
+  // byte budget charged it for.
+  it("records runtime.loaded and runtime.evicted with the bytes the budget charged", async () => {
+    const lifecycle = runtimeLifecycleRecords();
+    const fixture = await coldFixture("runtime-lifecycle-records", { runtimeLifecycleRecord: lifecycle.record });
+    const slot = await fixture.registry.acquire(fixture.manager.getSessionId());
+
+    const loaded = lifecycle.records.find((record) => record.event === "runtime.loaded");
+    expect(loaded).toMatchObject({ sessionId: slot.id });
+    expect(loaded!.transcriptBytes).toBeGreaterThan(0);
+    expect(loaded!.estimatedHeapBytes).toBe(loaded!.transcriptBytes * LIVE_RUNTIME_HEAP_ESTIMATE_FACTOR);
+
+    await slot.dispose();
+    const evicted = lifecycle.records.find((record) => record.event === "runtime.evicted");
+    expect(evicted).toMatchObject({ sessionId: slot.id });
+    expect(evicted!.transcriptBytes).toBeGreaterThan(0);
+    expect(evicted!.estimatedHeapBytes).toBe(evicted!.transcriptBytes * LIVE_RUNTIME_HEAP_ESTIMATE_FACTOR);
   });
 
   // The transport owns subscription lifetime: it subscribes a client before

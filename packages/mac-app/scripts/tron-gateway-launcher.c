@@ -1131,12 +1131,17 @@ int main(int argc, char **argv) {
         return 70;
     }
 
-    char **child_argv = calloc((size_t)argc + 2, sizeof(char *));
+    /* The explicit V8 old-space limit. The Gateway's live-runtime byte budget
+     * (LIVE_RUNTIME_BYTE_BUDGET) is sized below this, so loaded sessions cannot
+     * reach the heap limit; Node's default would let them approach it. */
+    const char *heap_flag = "--max-old-space-size=4096";
+    char **child_argv = calloc((size_t)argc + 3, sizeof(char *));
     if (child_argv == NULL) return 71;
     child_argv[0] = node;
-    child_argv[1] = entrypoint;
-    for (int index = 1; index < argc; ++index) child_argv[index + 1] = argv[index];
-    child_argv[argc + 1] = NULL;
+    child_argv[1] = (char *)heap_flag;
+    child_argv[2] = entrypoint;
+    for (int index = 1; index < argc; ++index) child_argv[index + 2] = argv[index];
+    child_argv[argc + 2] = NULL;
     execv(node, child_argv);
     perror("Tron could not start its gateway runtime");
     free(child_argv);

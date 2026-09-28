@@ -126,6 +126,40 @@ const MAX_EXTENSION_ROOT_ENTRIES = 4_096;
 // rather than published with a size its counts do not describe.
 const CATALOG_SUMMARY_ATTEMPTS = 3;
 
+/** Estimated heap the live runtimes may hold together. Below the 4,096 MB V8
+ * old-space limit the launcher passes, with room for the catalog index, the
+ * projections and the transport, so budgeted sessions cannot reach the heap
+ * limit the memory exit criterion measures. */
+export const LIVE_RUNTIME_BYTE_BUDGET = 1_536 * 1_024 * 1_024;
+
+/** Estimated heap one loaded runtime holds per canonical transcript byte.
+ * Measured 2026-09-28 on the live Gateway: a 108 MB session cost about 310 MB of
+ * heap (2.9x). The registry fixture measured 1.0x for plain repeated text, which
+ * has no projection duplication, so the live figure is the honest one. */
+export const LIVE_RUNTIME_HEAP_ESTIMATE_FACTOR = 3;
+
+/** One runtime load or eviction, with the bytes the byte budget charges it.
+ * `transcriptBytes` is the canonical JSONL size the estimate came from, so a
+ * reader can cross-check the record against the sampler's runtime inventory. */
+export interface RuntimeLifecycleRecord {
+  event: "runtime.loaded" | "runtime.evicted";
+  sessionId: string;
+  transcriptBytes: number;
+  estimatedHeapBytes: number;
+}
+
+/** The heap one loaded runtime is estimated to hold. */
+function estimateRuntimeHeapBytes(transcriptBytes: number): number {
+  return Math.ceil(Math.max(0, transcriptBytes) * LIVE_RUNTIME_HEAP_ESTIMATE_FACTOR);
+}
+
+/** Canonical transcript bytes of a live or starting runtime; a session that has
+ * not written its file yet holds none. */
+async function sessionFileBytes(path: string | undefined): Promise<number> {
+  if (path === undefined) return 0;
+  return stat(path).then((metadata) => metadata.size).catch(() => 0);
+}
+
 function assertProcessSessionRef(value: string): void {
   if (!value || Buffer.byteLength(value) > 256 || /[\\/\0]/u.test(value)) {
     throw new GatewayError("invalid_request", "Invalid subagent session reference");
@@ -461,6 +495,11 @@ export class RuntimeRegistry {
   private readonly catalogPageSources = new Map<string, WeakRef<CatalogPageSource>>();
   private readonly pendingSlotStarts = new Map<string, Promise<RuntimeSlot>>();
   private reservedSlotStarts = 0;
+  /** Heap the byte budget has charged to session starts that are not published
+   * yet, keyed by the session being opened; a reservation is taken in the same
+   * mutex section that checked capacity, so two concurrent opens cannot both
+   * find room only one of them has. */
+  private readonly reservedRuntimeBytes = new Map<string, number>();
   private evictionTimer?: NodeJS.Timeout;
   private artifactDiscoveryTimer?: NodeJS.Timeout;
   private artifactDiscoveryInFlight = false;
@@ -500,6 +539,8 @@ export class RuntimeRegistry {
       beforeSessionDelete?: (sessionId: string) => Promise<void>;
       sessionClosed?: (sessionId: string) => void;
       persistenceDiagnostic?: (sessionId: string, code: string) => void;
+      /** One runtime load or eviction, for the Gateway log. */
+      runtimeLifecycleRecord?: (record: RuntimeLifecycleRecord) => void;
       /** Privacy-safe archive lifecycle outcome, never a session ID. */
       archiveDiagnostic?: (diagnostic: ArchiveDiagnostic) => void;
       /** Read-only automation admission query, so archiving cannot hide a
@@ -1356,6 +1397,13 @@ export class RuntimeRegistry {
       isSessionPresented: (sessionId: string) => this.isSessionPresented(sessionId),
       sessionAudience: (sessionId: string) => this.subscribers.get(sessionId)?.size ?? 0,
       ...(this.options.resources ? { resources: this.options.resources } : {}),
+      ...(this.options.runtimeLifecycleRecord ? {
+        runtimeEvicted: (sessionId: string, transcriptBytes: number) => this.recordRuntimeTransition(
+          "runtime.evicted",
+          sessionId,
+          transcriptBytes,
+        ),
+      } : {}),
       beforeRunAdmission: (sessionId: string) => this.beforeRunAdmission(sessionId),
       archivedAt: (sessionId: string) => this.archivedAt(sessionId),
       ...(this.options.machineId ? { machineId: this.options.machineId } : {}),
@@ -2705,6 +2753,9 @@ export class RuntimeRegistry {
         () => this.options.trust.requireResolved(cwdInput),
       );
       await this.evictIdle(true, sessionId);
+      // A session that has not written a transcript yet holds no bytes, so this
+      // admission only has to fit beside the runtimes already loaded.
+      const liveBytes = await this.makeRoomForRuntimeBytes({ requestedSessionID: sessionId, incomingBytes: 0 });
       const existing = await this.mutex.run(() => {
         this.assertSlotAdmissionOpen();
         if (this.trustReloadProjects.has(trust.cwd)) {
@@ -2720,6 +2771,7 @@ export class RuntimeRegistry {
           return { slot: current, release: current.retainLease() };
         }
         this.requireLiveSlotCapacity();
+        this.requireRuntimeByteBudget({ liveBytes, incomingBytes: 0 });
         this.reservedSlotStarts += 1;
         reserved = true;
         return undefined;
@@ -2735,6 +2787,7 @@ export class RuntimeRegistry {
         "automation.session.runtime",
         () => RuntimeSlot.create(manager, this.dependencies(), this.hooks(), false),
       );
+      const transcriptBytes = await sessionFileBytes(slot.sessionFile);
       return await this.mutex.run(() => {
         this.assertSlotAdmissionOpen();
         if (this.trustReloadProjects.has(trust.cwd)) {
@@ -2747,7 +2800,7 @@ export class RuntimeRegistry {
         this.automationSessionOwners.set(slot!, { operationId, automationId });
         this.reservedSlotStarts = Math.max(0, this.reservedSlotStarts - 1);
         reserved = false;
-        this.publishRuntime(sessionId, slot!);
+        this.publishRuntime(sessionId, slot!, transcriptBytes);
         published = true;
         this.invalidateCatalogAdmission();
         void this.sessionCatalog.refresh(slot!.persistedSessionFile);
@@ -2778,12 +2831,16 @@ export class RuntimeRegistry {
         () => this.options.trust.requireResolved(cwdInput),
       );
       await this.evictIdle(true);
+      // A session that has not written a transcript yet holds no bytes, so this
+      // admission only has to fit beside the runtimes already loaded.
+      const liveBytes = await this.makeRoomForRuntimeBytes({ incomingBytes: 0 });
       await this.mutex.run(() => {
         this.assertSlotAdmissionOpen();
         if (this.trustReloadProjects.has(trust.cwd)) {
           throw new GatewayError("busy", "Project trust is being reconfigured", true);
         }
         this.requireLiveSlotCapacity();
+        this.requireRuntimeByteBudget({ liveBytes, incomingBytes: 0 });
         this.reservedSlotStarts += 1;
         reserved = true;
       });
@@ -2792,6 +2849,7 @@ export class RuntimeRegistry {
         "session.create.runtime",
         () => RuntimeSlot.create(manager, this.dependencies(), this.hooks(), false),
       );
+      const transcriptBytes = await sessionFileBytes(slot.sessionFile);
       await this.mutex.run(() => {
         if (this.trustReloadProjects.has(trust.cwd)) {
           throw new GatewayError("busy", "Session creation was retired before publication", true);
@@ -2801,7 +2859,7 @@ export class RuntimeRegistry {
         }
         this.reservedSlotStarts = Math.max(0, this.reservedSlotStarts - 1);
         reserved = false;
-        this.publishRuntime(manager.getSessionId(), slot!);
+        this.publishRuntime(manager.getSessionId(), slot!, transcriptBytes);
         this.invalidateCatalogAdmission();
         // A fresh session is live before Pi writes its first canonical entry;
         // the slot's own `changed` commit point adds the row when it does.
@@ -3103,6 +3161,9 @@ export class RuntimeRegistry {
       throw new GatewayError("conflict", "Subagent sessions are informational and remain owned by their originating runtime");
     }
     await this.evictIdle(true, sessionId);
+    const transcriptBytes = await sessionFileBytes(entry.path);
+    const incomingBytes = estimateRuntimeHeapBytes(transcriptBytes);
+    const liveBytes = await this.makeRoomForRuntimeBytes({ requestedSessionID: sessionId, incomingBytes });
     const selectedAcquisitionGeneration = this.catalogAcquisitionInvalidationGeneration;
     const selected = await this.mutex.run(() => {
       let raced = this.slots.get(sessionId);
@@ -3124,12 +3185,15 @@ export class RuntimeRegistry {
       if (pending) return { operation: pending };
       this.assertSlotAdmissionOpen();
       this.requireLiveSlotCapacity();
+      this.requireRuntimeByteBudget({ liveBytes, incomingBytes });
       this.reservedSlotStarts += 1;
+      this.reservedRuntimeBytes.set(sessionId, incomingBytes);
       const operation = this.startAcquiredSlot(
         sessionId,
         entry,
         acquisition,
         selectedAcquisitionGeneration,
+        transcriptBytes,
       );
       this.pendingSlotStarts.set(sessionId, operation);
       return { operation };
@@ -3142,6 +3206,7 @@ export class RuntimeRegistry {
     entry: CatalogAcquisitionEntry,
     acquisition: CatalogAcquisitionResolution,
     selectedAcquisitionGeneration: number,
+    transcriptBytes: number,
   ): Promise<RuntimeSlot> {
     let slot: RuntimeSlot | undefined;
     let reservationReleased = false;
@@ -3232,8 +3297,9 @@ export class RuntimeRegistry {
           throw new GatewayError("conflict", "Replacement session is already active", true);
         }
         this.reservedSlotStarts = Math.max(0, this.reservedSlotStarts - 1);
+        this.reservedRuntimeBytes.delete(sessionId);
         reservationReleased = true;
-        this.publishRuntime(sessionId, slot!);
+        this.publishRuntime(sessionId, slot!, transcriptBytes);
       });
       return slot;
     } catch (error) {
@@ -3246,6 +3312,7 @@ export class RuntimeRegistry {
         }
         if (!reservationReleased) {
           this.reservedSlotStarts = Math.max(0, this.reservedSlotStarts - 1);
+          this.reservedRuntimeBytes.delete(sessionId);
         }
       });
     }
@@ -3256,12 +3323,17 @@ export class RuntimeRegistry {
     try {
       const trust = await this.options.trust.requireResolved(cwdInput);
       await this.evictIdle(true);
+      // The fork copies the source transcript, so the source's bytes are the
+      // bytes this admission has to fit beside the runtimes already loaded.
+      const incomingBytes = estimateRuntimeHeapBytes(await sessionFileBytes(path));
+      const liveBytes = await this.makeRoomForRuntimeBytes({ incomingBytes });
       return await this.mutex.run(async () => {
         this.assertSlotAdmissionOpen();
         if (this.trustReloadProjects.has(trust.cwd)) {
           throw new GatewayError("busy", "Project trust is being reconfigured", true);
         }
         this.requireLiveSlotCapacity();
+        this.requireRuntimeByteBudget({ liveBytes, incomingBytes });
         const sessionDirectory = this.sessionDirectoryFor(trust.cwd);
         const manager = SessionManager.forkFrom(path, trust.cwd, sessionDirectory);
         const importedId = manager.getSessionId();
@@ -3278,7 +3350,7 @@ export class RuntimeRegistry {
           if (this.slots.has(importedId)) {
             throw new GatewayError("conflict", "Imported session identity became registered");
           }
-          this.publishRuntime(importedId, slot);
+          this.publishRuntime(importedId, slot, await sessionFileBytes(slot.sessionFile));
           published = true;
           this.invalidateCatalogAcquisition();
           void this.sessionCatalog.refresh(slot.persistedSessionFile);
@@ -3614,6 +3686,66 @@ export class RuntimeRegistry {
     }
   }
 
+  /** Retires idle runtimes largest first until the byte budget can hold one more
+   * of `incomingBytes`, and answers the live estimate that is left. Largest
+   * first, because the runtime holding the most heap is the one whose retirement
+   * reclaims the most headroom; only a reloadable, unprotected idle runtime is a
+   * candidate, so a subscriber, run or lease keeps its runtime live. */
+  private async makeRoomForRuntimeBytes(input: { requestedSessionID?: string; incomingBytes: number }): Promise<number> {
+    const estimates = new Map<string, number>();
+    for (const runtime of await this.resourceInventory()) {
+      estimates.set(runtime.sessionId, estimateRuntimeHeapBytes(runtime.bytes));
+    }
+    let liveBytes = 0;
+    for (const bytes of estimates.values()) liveBytes += bytes;
+    if (this.byteBudgetFits(liveBytes, input.incomingBytes)) return liveBytes;
+    for (const [sessionId, bytes] of [...estimates].sort(([, left], [, right]) => right - left)) {
+      if (this.byteBudgetFits(liveBytes, input.incomingBytes) || sessionId === input.requestedSessionID) break;
+      const slot = this.slots.get(sessionId);
+      if (!slot || slot.persistedSessionFile === undefined) continue;
+      const retired = await this.retireIdleRuntime({
+        sessionId,
+        slot,
+        eligible: () => this.isIdleEvictionEligible(sessionId, slot, Infinity),
+      });
+      if (retired) liveBytes = Math.max(0, liveBytes - bytes);
+    }
+    this.blobs.prune();
+    return liveBytes;
+  }
+
+  /** True when the live estimate, the starts already reserved for and this one
+   * fit the budget. */
+  private byteBudgetFits(liveBytes: number, incomingBytes: number): boolean {
+    let reservedBytes = 0;
+    for (const bytes of this.reservedRuntimeBytes.values()) reservedBytes += bytes;
+    return liveBytes + reservedBytes + incomingBytes <= LIVE_RUNTIME_BYTE_BUDGET;
+  }
+
+  /** Reserves one starting runtime against the byte budget in the same mutex
+   * section that checked the runtime count. A set that cannot come under the
+   * budget even with every idle runtime retired is refused as the retryable
+   * `busy` the count uses, so loaded sessions cannot push the heap toward its
+   * limit. */
+  private requireRuntimeByteBudget(input: { liveBytes: number; incomingBytes: number }): void {
+    if (!this.byteBudgetFits(input.liveBytes, input.incomingBytes)) {
+      throw new GatewayError(
+        "busy",
+        "Gateway live runtime memory budget is full; close or wait for an idle session",
+        true,
+      );
+    }
+  }
+
+  private recordRuntimeTransition(event: RuntimeLifecycleRecord["event"], sessionId: string, transcriptBytes: number): void {
+    this.options.runtimeLifecycleRecord?.({
+      event,
+      sessionId,
+      transcriptBytes,
+      estimatedHeapBytes: estimateRuntimeHeapBytes(transcriptBytes),
+    });
+  }
+
   private requireUnambiguousSessionId(
     sessionId: string,
     ambiguousIDs: ReadonlySet<string> = this.ambiguousSessionIds,
@@ -3632,16 +3764,18 @@ export class RuntimeRegistry {
    * comparison of live sets, so the transition is counted where it happens; the
    * slot only counts its disposal as an eviction once it was published here.
    */
-  private publishRuntime(sessionId: string, slot: RuntimeSlot): void {
+  private publishRuntime(sessionId: string, slot: RuntimeSlot, transcriptBytes: number): void {
     this.slots.set(sessionId, slot);
     slot.markPublished();
     this.options.resources?.recordRuntimeLoaded();
+    this.recordRuntimeTransition("runtime.loaded", sessionId, transcriptBytes);
   }
 
   /**
    * The live runtimes and the canonical transcript bytes each holds, for the
-   * transport's resource sample. Bytes come from one `stat` per live runtime a
-   * minute, not from a projection kept in step with every append.
+   * transport's resource sample and for the byte budget. Bytes come from one
+   * `stat` per live runtime, not from a projection kept in step with every
+   * append.
    */
   async resourceInventory(): Promise<readonly ResourceRuntimeEntry[]> {
     const entries: ResourceRuntimeEntry[] = [];
@@ -3860,43 +3994,57 @@ export class RuntimeRegistry {
       const eligible = () => id !== requestedSessionID
         && (!forCapacity || (needsCapacity() && slot.persistedSessionFile !== undefined))
         && this.isIdleEvictionEligible(id, slot, cutoff);
-      const selected = await this.mutex.run(() => {
-        if (this.idleEvictions.has(id) || !eligible()) return false;
-        this.idleEvictions.set(id, { slot, committed: false });
-        return true;
-      });
-      if (!selected) continue;
-      try {
-        const eviction = this.idleEvictions.get(id);
-        if (eviction?.slot !== slot) continue;
-        let removedLiveOnlySession = false;
-        const disposal = slot.disposeIf(() => {
-          if (this.idleEvictions.get(id) !== eviction || !eligible()) return false;
-          eviction.committed = true;
-          removedLiveOnlySession = slot.persistedSessionFile === undefined;
-          return true;
-        });
-        eviction.completion = disposal;
-        const disposed = await disposal;
-        if (disposed && this.slots.get(id) === slot && this.idleEvictions.get(id) === eviction) {
-          this.slots.delete(id);
-          if (removedLiveOnlySession) {
-            this.subscribers.delete(id);
-            this.interrupted.delete(id);
-            this.summaryRevisions.delete(id);
-            this.latestSummaries.delete(id);
-            this.invalidateCatalogAdmission();
-            this.revision += 1;
-            this.options.sessionListChanged();
-          }
-        }
-      } catch {
-        // A slot may have become busy after the eligibility check; retain it.
-      } finally {
-        if (this.idleEvictions.get(id)?.slot === slot) this.idleEvictions.delete(id);
-      }
+      await this.retireIdleRuntime({ sessionId: id, slot, eligible });
     }
     this.blobs.prune();
+  }
+
+  /** One idle runtime's retirement under an eligibility closure that is checked
+   * under the mutex and again inside the slot's own disposal commit, so a
+   * subscription or a run that arrives mid-eviction keeps the runtime live. */
+  private async retireIdleRuntime(input: {
+    sessionId: string;
+    slot: RuntimeSlot;
+    eligible: () => boolean;
+  }): Promise<boolean> {
+    const { sessionId: id, slot, eligible } = input;
+    const selected = await this.mutex.run(() => {
+      if (this.idleEvictions.has(id) || !eligible()) return false;
+      this.idleEvictions.set(id, { slot, committed: false });
+      return true;
+    });
+    if (!selected) return false;
+    try {
+      const eviction = this.idleEvictions.get(id);
+      if (eviction?.slot !== slot) return false;
+      let removedLiveOnlySession = false;
+      const disposal = slot.disposeIf(() => {
+        if (this.idleEvictions.get(id) !== eviction || !eligible()) return false;
+        eviction.committed = true;
+        removedLiveOnlySession = slot.persistedSessionFile === undefined;
+        return true;
+      });
+      eviction.completion = disposal;
+      const disposed = await disposal;
+      if (disposed && this.slots.get(id) === slot && this.idleEvictions.get(id) === eviction) {
+        this.slots.delete(id);
+        if (removedLiveOnlySession) {
+          this.subscribers.delete(id);
+          this.interrupted.delete(id);
+          this.summaryRevisions.delete(id);
+          this.latestSummaries.delete(id);
+          this.invalidateCatalogAdmission();
+          this.revision += 1;
+          this.options.sessionListChanged();
+        }
+      }
+      return disposed;
+    } catch {
+      // A slot may have become busy after the eligibility check; retain it.
+      return false;
+    } finally {
+      if (this.idleEvictions.get(id)?.slot === slot) this.idleEvictions.delete(id);
+    }
   }
 
   activeSessionIds(): string[] {

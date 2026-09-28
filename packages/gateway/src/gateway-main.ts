@@ -223,6 +223,15 @@ const sessions = new RuntimeRegistry({
       event: "sessions.archive.auto-unarchived", source: "sessions", outcome: diagnostic.outcome, reason: diagnostic.trigger,
     }),
   sessionAutomationReserved: (sessionId) => automationSchedulerForArchive?.hasSessionRun(sessionId) ?? false,
+  // Load and eviction are transitions at info: the byte budget's decisions have
+  // to be attributable to one session from the log alone.
+  runtimeLifecycleRecord: (record) => logger.log("info",
+    // The bytes ride in the message, as `gateway.resources` keeps its measurements, rather than widening `LogMetadata`.
+    `Session runtime ${record.event === "runtime.loaded" ? "loaded" : "evicted"} (transcriptBytes=${record.transcriptBytes} estimatedHeapBytes=${record.estimatedHeapBytes})`, {
+      event: record.event,
+      source: "sessions",
+      sessionId: record.sessionId,
+    }),
   compactionDiagnostic: (diagnostic) => logger.log(
     diagnostic.outcome === "failure" ? "error" : "info",
     `Session compaction ${diagnostic.outcome}`,

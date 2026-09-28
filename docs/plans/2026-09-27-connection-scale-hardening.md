@@ -555,7 +555,7 @@ rows are in priority order.
 | G-11 | Ready | Event-loop budget: find and bound every synchronous task over 50 ms | O-5, O-6a | |
 | G-9 | Ready | One background-work scheduler that yields to requests; measure the libuv pool size | O-5, G-1b | |
 | G-4 | Claimed | Outbound queue coalescing of superseded snapshots and keyed events | G-3 | orchestrator-dispatched deepseek-worker, 2026-09-28 |
-| G-5 | Claimed | Byte budget for live runtimes and an explicit heap limit | O-5 | orchestrator-dispatched deepseek-worker, 2026-09-28 |
+| G-5 | Done | Byte budget for live runtimes and an explicit heap limit | O-5 | orchestrator-dispatched deepseek-worker, 2026-09-28 |
 | E-3a | Ready | LAN endpoint (D-5), Gateway side: pinned TLS listener bound to the private LAN address | O-1, O-2 | |
 | E-3b | Ready | LAN endpoint: advertise endpoints and pin in pairing and hello | E-3a | |
 | E-3c | Ready | LAN endpoint, phone side: pin validation, staggered race, seamless fallback | E-3b, C-3 | |
@@ -5103,6 +5103,132 @@ events; widen them to name the pool owner in the same change.
   `--bandwidth-stream-seconds` 30) on a quiet host. Whether the new 0.08 Mbit/s
   leg reaches a pong miss or a capacity close inside 30 s is part of that
   baseline; the leg is not tuned for it.
+
+### G-5 · Done · 2026-09-28 · orchestrator-dispatched deepseek-worker (branch `hardening/g-5`)
+
+- Result: live runtimes are bounded by bytes as well as by count.
+  `LIVE_RUNTIME_BYTE_BUDGET` (1.5 GiB) in
+  `packages/gateway/src/sessions/runtime-registry.ts` charges each live runtime
+  `LIVE_RUNTIME_HEAP_ESTIMATE_FACTOR` (3) times its canonical transcript bytes,
+  measured at admission from the same one-`stat`-per-runtime inventory the
+  resource sample reads (`resourceInventory`, now documented as shared by the
+  sampler and the budget). An admission that cannot fit retires idle runtimes
+  **largest first** (the largest reclaims the most), under the existing
+  protections (subscriber, run, lease, blocked ownership) and only when the
+  runtime can be reloaded; if the set still cannot fit, the admission is refused
+  with the retryable `busy` the runtime count already uses. Concurrent starts
+  reserve their bytes in the same mutex section that checks the count, so two
+  opens cannot both find room only one of them has. Each transition writes one
+  record: `runtime.loaded` at publication and `runtime.evicted` at the slot's
+  disposal, both with the session, its transcript bytes and the heap the budget
+  charged (`estimatedHeapBytes`), logged by `gateway-main.ts` at info.
+  `packages/mac-app/scripts/tron-gateway-launcher.c` now passes
+  `--max-old-space-size=4096` before the entrypoint, so the budget is under an
+  explicit limit instead of Node's default.
+- Failure modes written before the code (all covered by
+  `packages/gateway/src/sessions/runtime-registry.integration.test.ts`): (1) a
+  live runtime that grew past the budget is never reclaimed, because admission
+  checks only the runtime count; (2) the smallest idle runtime is retired when
+  the largest would have been enough, so extra sessions lose their state; (3) an
+  opening session is admitted although no idle runtime can be retired for it, so
+  loaded sessions push the heap toward the limit; (4) a protected runtime (an
+  audience) is retired under byte pressure; (5) the transitions are counted but
+  never named, so no record says which session was loaded or evicted or what the
+  budget charged it.
+  Three tests were added (failure modes 1+2, 3+4, 5) and each was shown failing
+  on the previous source with a distinct failure: `expected false to be true`
+  (no eviction happened), `promise resolved "RuntimeSlot{…}" instead of
+  rejecting` (the over-budget open was admitted), and `expected undefined to
+  match object { Object (sessionId) }` (no lifecycle record).
+- Evidence:
+  - `npx vitest run src/sessions/runtime-registry.integration.test.ts` passes
+    252/252 (249 before this change; 3 added) on the changed tree.
+  - `npx vitest run src/sessions/runtime-registry.integration.test.ts -t
+    "budget"` passes 6/6 (the three new tests plus three matching existing
+    ones); on the previous source the same filter fails 3/3 with the failures
+    quoted above.
+  - `npx vitest run src/transport/stall-diagnostics.test.ts` passes 22/22 (the
+    sampler and the shared inventory seam), `npm run build` is clean, and
+    `npx tsc --noEmit` is clean.
+  - Launcher: `xcrun --sdk macosx clang -O2 -Wall -Wextra -Werror
+    -Wno-deprecated-declarations -arch arm64 -mmacosx-version-min=15.0
+    packages/mac-app/scripts/tron-gateway-launcher.c` compiles clean, and the
+    launcher fixture's fake Node now asserts `$1 = --max-old-space-size=4096`
+    before the entrypoint (exit 13 otherwise), so the whole
+    `packages/mac-app/scripts/test-tron-gateway-launcher.sh` fixture covers the
+    flag. The fixture was run with the pinned Node 22.22.0 on `PATH` and passes
+    end to end (exit 0, its closing "pass" line), so the flag reaches the child
+    argv in every launch case.
+  - Heap-per-runtime measurement (Do item 1). Method: a temporary focused
+    integration measurement in the registry fixture (real SDK runtime, one
+    transcript written by `SessionManager.appendMessage`, `heapUsed` delta and a
+    10 ms-sampled peak across `RuntimeRegistry.acquire`), then deleted. Result:
+    a 48 MiB transcript (50,576,622 B) with a heap delta of 52,455,056 B
+    (1.04x) and a 150 MiB transcript (157,926,944 B) with 130,789,816 B (0.83x)
+    for plain repeated ASCII, which has no projection duplication; the plan's
+    own live-Gateway measurement (2026-09-27) is 108 MB of session for about
+    310 MB of heap (2.9x) on real content. The factor is set from the larger,
+    real-content figure rounded up to 3, and the constant says so; the
+    fixture's own figure is recorded here as the floor it is.
+- Checks: `runtime-registry.integration.test.ts` (the row's named owner) covers
+  the budget, the largest-first order, the protected-runtime case, the refusal
+  and the two records.
+- Docs: `packages/gateway/README.md` (Session invariants) states the budget, the
+  factor, the largest-first order, the refusal, the explicit `--max-old-space-size`
+  and the records; `packages/gateway/docs/observability.md` has rows for
+  `runtime.loaded` and `runtime.evicted` with their levels, triggers, fields and
+  reason.
+- Volume: the two records are per transition (one per session load and one per
+  eviction — tens a day on a normal day, a few hundred worst case), far inside
+  the 1 MB/day budget; the per-minute `gateway.resources` volume is unchanged.
+- "Done when" (a sequence of large idle sessions in O-6a never exceeds the
+  budget): **not run in this session.** The budget is enforced on the admission
+  path and proven by the integration cases above, but the O-6a multi-session
+  scenario (a 2 GB catalog with five 100–200 MB sessions and 8 running sessions)
+  was not run here: the host is shared with several parallel hardening workers
+  and a 15-minute default run would both spoil their measurements and be
+  refused by O-6a's own memory/swap guard on a busy host. What a quiet-host
+  O-6a run has to show: with the four large sessions open at once, the total
+  charge stays at or under `LIVE_RUNTIME_BYTE_BUDGET`, the fifth either retires
+  an idle one or is refused with `busy`, and the `runtime.loaded`/`runtime.evicted`
+  records in the fixture Gateway's `gateway.jsonl` name the sessions and their
+  bytes. The row is Done on the orchestrator's usual terms for a scenario-run
+  criterion (like O-3's and O-5's cross-checks); if the run shows the real heap
+  2.9x figure is too low for the fixture's content mix, the factor is the one
+  number to move.
+- Kept on purpose: the budget is a named constant next to its only user rather
+  than a config surface (the plan names `LIVE_RUNTIME_BYTE_BUDGET`; a deployment
+  override would be speculative); the count still caps the runtime number while
+  the budget caps bytes, so both checks stay where each belongs; `resourceInventory`
+  stayed the one place that stats live runtimes, so the sampler and the budget
+  cannot disagree about a runtime's size; new sessions (`create`, an automation
+  start) are charged nothing because they have not written a transcript yet, so
+  they only have to fit beside the runtimes already loaded; `importFromJsonl` is
+  charged the source transcript's bytes, which is what the fork copies.
+- Deviations: `runtime-registry.ts` kept the retirement body of `evictIdle` as a
+  new private `retireIdleRuntime` so the byte pass reuses the same commit logic
+  (mutex check, slot eligibility fence, bookkeeping) instead of a second copy;
+  `runtime-slot.ts` gained one optional dependency
+  (`runtimeEvicted(sessionId, transcriptBytes)`) so the eviction is recorded
+  where it happens, as its counter already is; `gateway-main.ts` gained the log
+  wiring. No new files.
+- Withdrawn: none.
+- For the next agent: G-12 (heap-pressure shedding) reuses
+  `LIVE_RUNTIME_BYTE_BUDGET`, `byteBudgetFits` and the `busy` refusal this task
+  added — it should add the retry hint and the shed record rather than a second
+  budget. The refusal message is deliberately the same shape as the runtime
+  count's, so a typed `busy` already reaches the phone; the reserve path is
+  `acquireMissing` only (the count already guards the other starts).
+- Open risks (residual, for the orchestrator's review): (a) the estimate is
+  linear in transcript bytes, so a session whose heap is dominated by something
+  other than its transcript (a huge single entry, an image-heavy compaction)
+  can be charged less than it holds; (b) the live estimate is a snapshot taken
+  just before the admission mutex, so a runtime published in that window is
+  charged from the next inventory read — reservations cover the starts, not a
+  publication that raced the read; (c) `makeRoomForRuntimeBytes` reaches the
+  whole live set with one `stat` per runtime per admission (bounded by the
+  runtime count, 128), which is the same cost `gateway.resources` already pays
+  once a minute.
 
 ### G-10a · Done · 2026-09-28 · orchestrator-dispatched deepseek-worker (branch `hardening/g-10a`)
 
