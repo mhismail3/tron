@@ -888,8 +888,11 @@ class MultiDriverImpairment(StubGatewayHarness, unittest.TestCase):
         self.assertTrue(any(attempt.get("failed") for attempt in leg["attempts"]),
                         f"no attempt failed during the outage: {leg['attempts']}")
         self.assertIsNotNone(leg["recoveryReadyMs"], "the recovery to a ready mounted chat was not timed")
-        self.assertGreater(leg["recoveryReadyMs"], 4_000,
-                           "the recovery was timed from the attempt's start, not from the path's return")
+        self.assertGreater(leg["recoveryReadyMs"], 2_000,
+                           "the recovery must include the rest of the transport-open attempt that was in "
+                           "flight at the path's return, not only the connect that follows it")
+        self.assertLessEqual(leg["recoveryReadyMs"], self.FAST_CONNECTION["transportOpenDeadlineMs"] + 1_000,
+                             "recovery from the path's return stays inside one transport-open deadline")
         self.assertTrue(leg["abandonedOnMiss"],
                         "the abandon must follow a counted pong miss, not the leg's own clock")
         liveness_ms = 300 + 200
