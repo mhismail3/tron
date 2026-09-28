@@ -514,7 +514,8 @@ rows are in priority order.
 | P-0 | Done | Fold the phone reconnect tuning plan into this plan (D-1) and close it through history; done on `main` at activation | none | |
 | O-1 | Done | Correlation key across phone and Gateway on every connection record | none | orchestrator-dispatched worker, 2026-09-28 |
 | O-6a | Claimed | Multi-session qualification scenario with a generated catalog; record the `main` baseline | none | orchestrator-dispatched worker, 2026-09-28 |
-| E-2 | Claimed | Bound the iOS profiler's memory or hand the row to the simulator-lifecycle plan | none | orchestrator-dispatched worker, 2026-09-28 |
+| E-2 | Blocked | Bound the iOS profiler's memory or hand the row to the simulator-lifecycle plan | none | orchestrator-dispatched worker, 2026-09-28 |
+| E-2b | Ready | Record `time-profiler` with `xctrace record --attach <pid>` if a real traced run proves it samples the simulator app; re-measure export and parser peaks (see E-2 handoff) | E-2 | |
 | O-2 | Ready | Gateway transport records: upgrade phases, inbound silence with Tailscale peer path | O-1 | |
 | O-3 | Ready | Request span: one `rpc.completed` per slow RPC with every stage, wait and count | O-1 | |
 | O-4 | Ready | Phone connection records that survive an export, stall watchdog, exact scene records | O-1 | |
@@ -1714,3 +1715,71 @@ the day cannot measure a synthetic case).
   `gatewayConnectionId` (phone). The profiler driver
   (`scripts/tron-profile-gateway-driver.mjs`, Profiler zone) does not send the
   key yet.
+||||||| f369c5bd1
+
+### E-2 · Blocked · 2026-09-28 · orchestrator-dispatched worker
+
+- Result: the attribution parser the iOS profiler runs after a traced scenario
+  (`scripts/tron_profile_attribution.py`, imported by `scripts/tron-profile-ios`)
+  now keeps each repeated xctrace value once: when an element ends, every
+  `ref` child is replaced by its shared definition, so memory grows with
+  distinct values instead of references. Cause of the ~10 GB: a host-wide
+  Time Profiler export of a loaded Mac (1,044,042 rows; 15.3 M `<frame ref>`
+  children inside 396,657 retained backtraces) kept every reference as its own
+  element. Not handed to the simulator-lifecycle plan: it has no row for the
+  profiler's own memory, and SIM-7 (`sim-lifecycle` b9c11e9d0, not yet on
+  `main`) touches only the lease, sweep and provision parts of
+  `scripts/tron-profile-ios`, which this change does not edit. Marked Blocked,
+  not Done, by the reviewer's finding: the Done-when needs the profiler's peak
+  RSS under 2 GB for the default scenarios, and the `xcrun xctrace export`
+  child the profiler launches still peaked at 4,599 MB on the largest default
+  trace, so only the parser half of the goal is met. The branch itself can
+  merge as it is; the row stays Blocked until a recording small enough for the
+  export is measured (proposed E-2b below).
+- Evidence: offline re-attribution of copies of existing traces with a
+  tree-RSS sampler (`~/.tron/workspace/files/hardening/e-2/`, `README.md` has
+  the command). idle-dashboard, 342 MB host-wide trace: old parser killed at
+  a 5 GB cap and still growing, new parser peak 1,672 MB. control-cpu, 57 MB:
+  481 MB to 136 MB, and with `PYTHONHASHSEED=0` `attribution.json` and
+  `attribution.md` are byte-identical before and after. New failure mode 9 in
+  `scripts/test-tron-profile-attribution.py`
+  (`test_retained_memory_does_not_grow_with_references`, 398,000 references):
+  peak 174 MB (166 MiB) on the old parser (fails), 6.9 MB (6.6 MiB) on the new
+  one, against the test's 24 MiB limit;
+  `python3 scripts/test-tron-profile-attribution.py` 10/10 pass.
+- Changes: `perf(ios): keep each xctrace value once in profiler attribution (E-2)`;
+  the review response below adds
+  `refactor(ios): correct the attribution memory notes and helper name (E-2)` and
+  `plan(connection-scale-hardening): mark E-2 Blocked after review`.
+- Tasks added: none; proposed below.
+- Kept on purpose: `time-profiler` still records `--all-processes`.
+  `xcrun xctrace export` itself peaked at 4,599 MB on the 342 MB trace (978 MB
+  on the 57 MB one), and only a smaller recording can reduce that. The target
+  process was 1.2% of the rows. Switching the recording to
+  `--attach <pid>` needs a real traced run, and the lane lease and profiler
+  lock were held by other sessions for this task's time budget.
+- Deviations: the peak numbers were measured offline on copies of existing
+  default-scenario traces (idle-dashboard, the largest), not on a fresh
+  `--scenario all` traced run, so the other default scenarios are unmeasured.
+  Both the parser peak and the export peak grow with how busy the Mac is during
+  an `--all-processes` recording; 99% of the rows were other processes
+  (1,031,812 of 1,044,042), so this bounds the growth, it does not cap it.
+  Ranking ties (equal ms) are ordered by string hash, so without a fixed
+  `PYTHONHASHSEED` two runs of either parser can list tied rows differently.
+  This behavior predates the change and was left as is.
+- For the next agent: proposed row E-2b (the row stays Blocked until it is
+  measured): record `time-profiler` with host
+  `xcrun xctrace record --attach <pid>` if a real traced run proves it samples the
+  simulator app. Accept only when no report section reads other processes'
+  rows (today only `samples_other_processes` does) and a paired control-cpu
+  run shows the same app numbers within noise. Then re-measure `xctrace export`
+  and the parser on `--scenario all --trace time-profiler --iterations 1`.
+  The simulator-lifecycle plan's owner should know that
+  `scripts/tron_profile_attribution.py` changed here, and that `sim-lifecycle` edits
+  `scripts/tron-profile-ios`.
+- Review response (the two commits on this branch after the profiling change):
+  the row and this heading moved from Done to Blocked as finding 1 requires; the
+  test comment records the measured peaks (174 MB old, 6.9 MB new, finding 2);
+  the module docstring says every id-carrying value is kept once (finding 3); and
+  `Table.resolve` became `Table.value`, since it only drops absent or
+  `<sentinel/>` cells now (finding 4).

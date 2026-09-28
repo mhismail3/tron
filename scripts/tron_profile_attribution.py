@@ -13,8 +13,8 @@ iterations never enter the attribution. Frames Instruments could not
 symbolicate are named as unresolved addresses per image, never dropped.
 
 Exports are streamed: a host-wide Time Profiler export of a loaded Mac runs to
-gigabytes, so rows are read one at a time and only values defined once (and
-referenced later) are retained.
+gigabytes, so rows are read one at a time and every value carrying an `id` is
+kept once, however often later rows repeat it by reference.
 """
 
 from __future__ import annotations
@@ -74,36 +74,27 @@ class AttributionError(Exception):
 # ------------------------------------------------------------------ export ---
 
 class Table:
-    """One exported xctrace table: column mnemonics and a shared id map.
+    """One exported xctrace table: the column mnemonics, indexed by position.
 
-    xctrace writes each distinct value once with an `id` and later repeats it
-    as `<element ref="id"/>`, possibly many rows later; `cell()` returns the
-    defining element so callers never see a bare reference. A `<sentinel/>`
-    cell (no value) reads as None.
+    `iter_rows` hands rows to callers with every reference already replaced by
+    its defining element. A `<sentinel/>` cell (no value) reads as None.
     """
 
-    def __init__(self, schema: str, columns: list[str], elements: dict[str, ElementTree.Element]) -> None:
+    def __init__(self, schema: str, columns: list[str]) -> None:
         self.schema = schema
         self.columns = columns
-        self._elements = elements
         self._index = {name: position for position, name in enumerate(columns)}
 
-    def resolve(self, element: ElementTree.Element | None) -> ElementTree.Element | None:
-        if element is None:
-            return None
-        reference = element.get("ref")
-        if reference is not None:
-            resolved = self._elements.get(reference)
-            if resolved is None:
-                raise AttributionError(f"{self.schema}: reference to undefined element id {reference}")
-            element = resolved
-        return None if element.tag == "sentinel" else element
+    @staticmethod
+    def value(element: ElementTree.Element | None) -> ElementTree.Element | None:
+        """The element itself, or None for an absent or `<sentinel/>` cell."""
+        return None if element is None or element.tag == "sentinel" else element
 
     def cell(self, row: list[ElementTree.Element], column: str) -> ElementTree.Element | None:
         position = self._index.get(column)
         if position is None or position >= len(row):
             return None
-        return self.resolve(row[position])
+        return self.value(row[position])
 
     def has(self, *columns: str) -> bool:
         return all(column in self._index for column in columns)
@@ -115,9 +106,13 @@ Rows = Iterable[tuple[Table, list[ElementTree.Element]]]
 def iter_rows(source: bytes | str | Path) -> Iterator[tuple[Table, list[ElementTree.Element]]]:
     """Stream `(table, row cells)` from `xctrace export --xpath` output.
 
-    `source` is the XML itself (bytes/str) or a path to it. Each row is
-    detached once consumed; elements carrying an `id` stay in the shared map
-    because later rows may reference them.
+    `source` is the XML itself (bytes/str) or a path to it. xctrace writes each
+    distinct value once with an `id` and repeats it as `<element ref="id"/>`,
+    possibly many rows later, so elements carrying an `id` stay in a map. When
+    an element ends, each reference among its children is replaced by the
+    shared definition: memory then grows with distinct values, not with
+    references (a host-wide export repeats frames ~15 M times, which kept per
+    reference took the profiler past 5 GB). Each row is detached once consumed.
     """
     stream = Path(source).open("rb") if isinstance(source, Path) else io.BytesIO(
         source.encode() if isinstance(source, str) else source)
@@ -135,12 +130,20 @@ def iter_rows(source: bytes | str | Path) -> Iterator[tuple[Table, list[ElementT
                 elif element.tag == "node":
                     node, table = element, None
                 continue
+            for position, child in enumerate(element):
+                reference = child.get("ref")
+                if reference is not None:
+                    definition = elements.get(reference)
+                    if definition is None:
+                        raise AttributionError(f"{table.schema if table else 'export'}: reference to undefined "
+                                               f"element id {reference}")
+                    element[position] = definition
             identifier = element.get("id")
             if identifier is not None:
                 elements[identifier] = element
             if element.tag == "schema" and node is not None:
                 columns = [column.findtext("mnemonic") or "" for column in element.findall("col")]
-                table = Table(element.get("name") or "", columns, elements)
+                table = Table(element.get("name") or "", columns)
             elif element.tag == "row":
                 if table is None:
                     raise AttributionError("xctrace export row precedes its <schema>; the export format changed")
@@ -257,7 +260,7 @@ def _pid(table: Table, row: list[ElementTree.Element], column: str) -> int | Non
     process = table.cell(row, column)
     if process is None:
         return None
-    pid = table.resolve(process.find("pid"))
+    pid = table.value(process.find("pid"))
     value = number(pid)
     return int(value) if value is not None else None
 
@@ -287,7 +290,7 @@ def frame_symbol(frame: ElementTree.Element, table: Table) -> tuple[str, str, bo
     unresolved app or test frames stay visible in the ranking instead of
     vanishing.
     """
-    binary = table.resolve(frame.find("binary"))
+    binary = table.value(frame.find("binary"))
     image = binary.get("name") if binary is not None and binary.get("name") else "unknown image"
     name = frame.get("name") or ""
     if not name or UNRESOLVED_ADDRESS.match(name):
@@ -407,10 +410,10 @@ def summarize_time_profile(rows: Rows, windows: list[tuple[float, float]] | None
 def _frames(table: Table, stack: ElementTree.Element | None) -> list[ElementTree.Element]:
     if stack is None:
         return []
-    backtrace = stack if stack.tag == "backtrace" else table.resolve(stack.find("backtrace"))
+    backtrace = stack if stack.tag == "backtrace" else table.value(stack.find("backtrace"))
     if backtrace is None:
         return []
-    return [frame for frame in (table.resolve(child) for child in backtrace.findall("frame")) if frame is not None]
+    return [frame for frame in (table.value(child) for child in backtrace.findall("frame")) if frame is not None]
 
 
 # -------------------------------------------------------------- signposts ---
