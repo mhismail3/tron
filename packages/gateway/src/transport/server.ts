@@ -20,6 +20,7 @@ import { GatewayService, type ClientContext } from "./gateway-service.js";
 import { MIN_PROTOCOL_VERSION, PROTOCOL_VERSION } from "../version.js";
 import { SessionSyncBarrier, type BufferedSessionEncoding, type BufferedSessionEvent } from "./session-sync.js";
 import type { BrowserLiveViewRegistry } from "../display/browser-live-view.js";
+import { bytes, RequestSpan, runInRequestSpan, stage } from "./request-span.js";
 
 // Retain only recent former IDs while an active subscription is rekeyed. Older
 // IDs are stale control paths and may safely require a fresh session.open.
@@ -1458,6 +1459,9 @@ export class GatewayServer {
     const requestId = frame.id;
     const diagnosticID = diagnosticRequestID(requestId);
     const rpcStartedAt = performance.now();
+    // One span per admitted request. Its breakdown rides on the rpc.completed
+    // record below, so a slow request names the work that held it (O-3).
+    const requestSpan = new RequestSpan();
     const params = frame.params && typeof frame.params === "object" && !Array.isArray(frame.params)
       ? frame.params as Record<string, unknown>
       : {};
@@ -1713,7 +1717,8 @@ export class GatewayServer {
           this.send(connection, { type: "event", topic, sessionId, payload });
         },
       };
-      const result = await this.options.service.invoke(context, frame.method, frame.params ?? {});
+      const method = frame.method;
+      const result = await runInRequestSpan(requestSpan, (): Promise<JsonValue> => this.options.service.invoke(context, method, frame.params ?? {}));
       // Validate every synchronization created by this request before writing
       // the response. A timed-out open may have no completion at all; it must
       // not publish an orphan successful response/token after its barrier was
@@ -1738,7 +1743,7 @@ export class GatewayServer {
           throw new GatewayError("conflict", "Session synchronization ownership changed before acknowledgement", true);
         }
       }
-      const responseSentIntact = this.send(connection, { type: "response", id: frame.id, ok: true, result });
+      const responseSentIntact = runInRequestSpan(requestSpan, () => this.send(connection, { type: "response", id: frame.id, ok: true, result }));
       responseAttempted = true;
       if (responseSentIntact) rpcOutcome = "success";
       if (responseSentIntact && connection.revoked && connection.revokeResponseRequestId === frame.id) {
@@ -1870,7 +1875,7 @@ export class GatewayServer {
       }
       if (!responseAttempted) {
         responseAttempted = true;
-        const responseSent = this.send(connection, { type: "response", id: frame.id, ok: false, error: publicError(error) });
+        const responseSent = runInRequestSpan(requestSpan, () => this.send(connection, { type: "response", id: frame.id, ok: false, error: publicError(error) }));
         if (responseSent && connection.revoked && connection.revokeResponseRequestId === frame.id) {
           connection.revokeResponseQueued = true;
           this.closeRevokedConnectionAfterResponse(connection);
@@ -1898,12 +1903,14 @@ export class GatewayServer {
       const loggedOutcome = rpcOutcome === "failure" && requestController.signal.aborted
         ? "connectionClosed"
         : rpcOutcome;
+      const breakdown = requestSpan.breakdown(durationMs);
       this.options.logger.log(
         loggedOutcome !== "success" || durationMs >= SLOW_RPC_WARNING_MS ? "warning" : "debug",
         `RPC ${frame.method} for client ${connection.id} completed in ${durationMs}ms (${loggedOutcome})`,
         {
           event: "rpc.completed", source: "transport", method: frame.method,
           requestID: diagnosticID, connectionId: connection.id, ...rpcCorrelation, outcome: loggedOutcome, durationMs,
+          ...(breakdown ?? {}),
         },
       );
     }
@@ -1915,7 +1922,9 @@ export class GatewayServer {
 
   private prepareBroadcastFrame(value: unknown): PreparedOutboundFrame | null {
     try {
-      return prepareOutboundFrame(value, this.options.maxFrameBytes) ?? null;
+      const frame = stage("frame.serialize", () => prepareOutboundFrame(value, this.options.maxFrameBytes) ?? null);
+      if (frame) bytes("frame.serialize", frame.outputBytes);
+      return frame;
     } catch {
       // Broadcast preparation is outside the per-connection failure boundary;
       // retain the old isolated failure behavior without allowing one malformed
@@ -1967,8 +1976,14 @@ export class GatewayServer {
           || !connection.inFlight.has(frame.id)) return "failed";
     }
     try {
-      const frame = prepared === undefined ? prepareOutboundFrame(value, this.options.maxFrameBytes) : prepared;
+      const frame = prepared === undefined
+        ? stage("frame.serialize", () => prepareOutboundFrame(value, this.options.maxFrameBytes))
+        : prepared;
       if (!frame) return "failed";
+      // A frame prepared once for a broadcast is measured where it is built; a
+      // fresh one is measured here. Bytes follow the serialization, not the
+      // number of subscribers that receive it.
+      if (prepared === undefined) bytes("frame.serialize", frame.outputBytes);
       if (frame.fallback) {
         const valueFrame = value as { type?: unknown; topic?: unknown };
         const type = valueFrame?.type === "response" ? "response" : valueFrame?.type === "event" ? "event" : "other";

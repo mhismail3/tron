@@ -32,6 +32,7 @@ import {
 } from "./session-presentation-presence.js";
 import { AsyncMutex } from "../util/async-mutex.js";
 import { abortableRead } from "../util/abortable-read.js";
+import { count, currentRequestSpan, runInRequestSpan, stage, wait } from "../transport/request-span.js";
 import type { TrustService } from "../admin/trust-service.js";
 import { BlobStore } from "./blob-store.js";
 import {
@@ -328,6 +329,32 @@ interface IdleEviction {
   completion?: Promise<boolean>;
 }
 
+/**
+ * A registry lane that reports its queue wait to the current request span. The
+ * mutex hands over inside its own operation, so the exact moment the wait ends
+ * is known there; the wait is [request, handover), and the work the lock admits
+ * stays attributed to the span that measures it.
+ */
+class RequestSpanLane extends AsyncMutex {
+  constructor(private readonly spanLabel: string) {
+    super();
+  }
+
+  override run<T>(operation: () => Promise<T> | T, signal?: AbortSignal): Promise<T> {
+    const span = currentRequestSpan();
+    if (span === undefined) return super.run(operation, signal);
+    return span.wait(
+      this.spanLabel,
+      (acquired) => super.run(() => {
+        acquired();
+        // A queued lane starts inside a previous holder's async context. Restore
+        // this request's span so its nested stages are not credited elsewhere.
+        return runInRequestSpan(span, operation);
+      }, signal),
+    );
+  }
+}
+
 export class RuntimeRegistry {
   private readonly slots = new Map<string, RuntimeSlot>();
   /** Live-only generated sessions are bound to the exact Automation operation
@@ -337,7 +364,7 @@ export class RuntimeRegistry {
     operationId: string;
     automationId: string;
   }>();
-  private readonly mutex = new AsyncMutex();
+  private readonly mutex = new RequestSpanLane("registry.mutex");
   /** One disposable flight per admission scope. All-scope work may wait for a
    * user cut, but a dashboard never inherits child-only delay or failure. */
   private readonly catalogMaterializations = new Map<"user" | "all", {
@@ -351,7 +378,7 @@ export class RuntimeRegistry {
   private catalogSessionInfosPromise: Promise<CatalogSessionInfo[]> | undefined;
   private catalogSessionInfosKey: string | undefined;
   private catalogEvidenceRefresh = 0;
-  private readonly catalogAcquisitionMutex = new AsyncMutex();
+  private readonly catalogAcquisitionMutex = new RequestSpanLane("registry.catalog-mutex");
   private catalogAcquisitionPromise: Promise<CatalogAcquisitionResolution> | undefined;
   private catalogAcquisitionPromiseKey: string | undefined;
   /** Serializes attention membership checks with set/delete/rekey. Archive
@@ -365,9 +392,9 @@ export class RuntimeRegistry {
    * lane: delete releases this lane before taking the mutex, and setAttention
    * resolves admission before entering. Keep that direction when adding work
    * here, or runs and archive commits can deadlock. */
-  private readonly attentionLane = new AsyncMutex();
+  private readonly attentionLane = new RequestSpanLane("registry.attention-lane");
   /** Linearizes display lease admission with canonical session deletion. */
-  private readonly displayArtifactLane = new AsyncMutex();
+  private readonly displayArtifactLane = new RequestSpanLane("registry.display-lane");
   private readonly blobs: BlobStore;
   private readonly exports: BlobStore;
   private readonly displayArtifacts: DisplayArtifactStore;
@@ -418,7 +445,6 @@ export class RuntimeRegistry {
    * generation keys immutable compact page seeds without making them catalog
    * authority. */
   private catalogProjectionGeneration = 0;
-  private catalogWorkSequence = 0;
   private readonly catalogPageSources = new Map<string, WeakRef<CatalogPageSource>>();
   private readonly pendingSlotStarts = new Map<string, Promise<RuntimeSlot>>();
   private reservedSlotStarts = 0;
@@ -467,12 +493,6 @@ export class RuntimeRegistry {
       sessionAutomationReserved?: (sessionId: string) => boolean;
       compactionDiagnostic?: RuntimeSlotDependencies["compactionDiagnostic"];
       catalogDiscoveryLimits?: Partial<typeof DEFAULT_CATALOG_DISCOVERY_LIMITS>;
-      stageTiming?: (
-        stage: string,
-        durationMs: number,
-        outcome: "success" | "failure",
-        metadata?: { workID?: string; scope?: "user" | "all" },
-      ) => void;
       machineId?: string;
       notifications?: NotificationService;
       browserLiveViews?: BrowserLiveViewRegistry;
@@ -499,10 +519,7 @@ export class RuntimeRegistry {
     this.attention = new SessionAttentionStore(options.tronHome);
     this.archive = new SessionArchiveStore(options.tronHome);
     this.recentModels = new RecentModelStore(options.tronHome);
-    this.catalogMetadataIndex = new CatalogMetadataIndex(
-      join(options.tronHome, "gateway"),
-      (stage, durationMs, outcome) => this.options.stageTiming?.(`catalog-index.${stage}`, durationMs, outcome),
-    );
+    this.catalogMetadataIndex = new CatalogMetadataIndex(join(options.tronHome, "gateway"));
     this.workRegistry = options.workRegistry ?? new GatewayWorkRegistry();
     this.drainId = `idle-${createHash("sha256").update(this.workRegistry.runtimeEpoch).digest("hex").slice(0, 16)}`;
     this.configuredSessionDir = SettingsManager.create(
@@ -555,10 +572,10 @@ export class RuntimeRegistry {
     // Load the durable recovery inputs before capturing catalog membership, as
     // before this optimization. The later evidence cut therefore cannot omit a
     // marker that was already admitted to this reconciliation pass.
-    await this.timedStage("startup.attention.initialize", () => this.attention.initialize());
-    await this.timedStage("startup.archive.initialize", () => this.archive.initialize());
-    await this.timedStage("startup.recent-model.initialize", () => this.recentModels.initialize());
-    const markerEvidence = await this.timedStage("startup.run-marker.read", () => this.markers.evidence());
+    await this.attention.initialize();
+    await this.archive.initialize();
+    await this.recentModels.initialize();
+    const markerEvidence = await this.markers.evidence();
     // Recovery can open and parse large session files. Do not hold listener
     // readiness on those full reads; recover them once the Gateway is serving.
     this.pendingAttentionRecovery = markerEvidence;
@@ -578,11 +595,11 @@ export class RuntimeRegistry {
     if (!markerEvidence) return;
     this.pendingAttentionRecovery = undefined;
     this.pendingStartupPhaseObserver?.("catalog-warming");
-    const catalogEvidence = await this.timedStage("startup.catalog.evidence", () => this.sharedCatalogStructureEvidence());
+    const catalogEvidence = await this.sharedCatalogStructureEvidence();
     this.pendingStartupPhaseObserver?.("attention-recovery");
     this.pendingStartupPhaseObserver = undefined;
-    await this.timedStage("startup.attention.reconcile", () => this.reconcileCanonicalAttention(markerEvidence, catalogEvidence));
-    this.interrupted = await this.timedStage("startup.run-marker.interrupted", () => this.markers.interruptedSessionIds());
+    await this.reconcileCanonicalAttention(markerEvidence, catalogEvidence);
+    this.interrupted = await this.markers.interruptedSessionIds();
   }
 
   /** Re-admit only durable pending/failed Knowledge cuts after restart. The
@@ -1119,7 +1136,7 @@ export class RuntimeRegistry {
       && !this.ambiguousSessionIds.has(sessionId)) {
       return { generation: this.catalogAcquisitionInvalidationGeneration, persistedSlot };
     }
-    const acquisition = await this.timedStage("attention.resolve", () => this.catalogAcquisition());
+    const acquisition = await stage("attention.resolve", () => this.catalogAcquisition());
     this.requireUnambiguousSessionId(sessionId, acquisition.ambiguousIDs);
     const entry = acquisition.entriesByID.get(sessionId);
     if (entry) return { generation: this.catalogAcquisitionInvalidationGeneration, entry };
@@ -1176,7 +1193,7 @@ export class RuntimeRegistry {
           && !(await this.attentionLiveOnlyStillAdmitted(sessionId))) {
           return undefined;
         }
-        const result = await this.timedStage(
+        const result = await stage(
           "attention.persist",
           () => this.attention.set(sessionId, unread, throughCompletionRevision),
         );
@@ -1292,9 +1309,6 @@ export class RuntimeRegistry {
       ...(this.options.connections ? { connections: this.options.connections } : {}),
       ...(this.options.mcp ? { mcp: this.options.mcp } : {}),
       resolveForkBoundary: (manager: SessionManager) => this.resolveForkBoundary(manager),
-      ...(this.options.stageTiming ? {
-        runtimeDisposalTimedOut: (graceMs: number) => this.options.stageTiming!("runtime.dispose-timeout", graceMs, "failure"),
-      } : {}),
     };
   }
 
@@ -1371,22 +1385,6 @@ export class RuntimeRegistry {
       counts.set(identity.id, (counts.get(identity.id) ?? 0) + 1);
     }
     return new Set([...counts].filter(([, count]) => count > 1).map(([id]) => id));
-  }
-
-  private async timedStage<T>(
-    stage: string,
-    operation: () => Promise<T>,
-    metadata?: { workID?: string; scope?: "user" | "all" },
-  ): Promise<T> {
-    const startedAt = performance.now();
-    try {
-      const result = await operation();
-      this.options.stageTiming?.(stage, Math.max(0, Math.round(performance.now() - startedAt)), "success", metadata);
-      return result;
-    } catch (error) {
-      this.options.stageTiming?.(stage, Math.max(0, Math.round(performance.now() - startedAt)), "failure", metadata);
-      throw error;
-    }
   }
 
   private async validatedStructuralIndex(scope: "user" | "all" = "all"): Promise<CatalogStructuralIndex | undefined> {
@@ -1810,13 +1808,21 @@ export class RuntimeRegistry {
     const generationKey = `${this.catalogStructuralGeneration}:${this.catalogAcquisitionInvalidationGeneration}`;
     const active = this.catalogEvidencePromise;
     if (active) {
-      if (!refresh && this.catalogEvidenceKey === generationKey) return active;
+      if (!refresh && this.catalogEvidenceKey === generationKey) {
+        // Waiting for a walk another caller started is this request's cost too;
+        // the files are counted once, where the walk is created.
+        return await stage("catalog.walk", () => active);
+      }
       // A post-read check must begin after its caller's read. Concurrent post-read
       // callers share the successor walk, rather than each starting another one.
-      try { await active; } catch { /* a fresh cut owns its own outcome */ }
+      try { await stage("catalog.walk", () => active); } catch { /* a fresh cut owns its own outcome */ }
       return this.sharedCatalogStructureEvidence();
     }
-    const operation = this.catalogStructureEvidence();
+    const operation = stage("catalog.walk", async () => {
+      const evidence = await this.catalogStructureEvidence();
+      count("catalog.walk.files", evidence.identitiesByPath.size);
+      return evidence;
+    });
     this.catalogEvidencePromise = operation;
     this.catalogEvidenceKey = generationKey;
     void operation.finally(() => {
@@ -1862,7 +1868,7 @@ export class RuntimeRegistry {
     }));
     // reconcile admits and reads the durable document once. A missing/corrupt
     // document deliberately falls through to the canonical first-cut scan.
-    const rows = await this.catalogMetadataIndex.reconcile(
+    const rows = await stage("catalog.reconcile", () => this.catalogMetadataIndex.reconcile(
       this.catalogDirectory(),
       candidates,
       async (candidate) => {
@@ -1878,8 +1884,9 @@ export class RuntimeRegistry {
           messageCount: info.messageCount,
         };
       },
-    );
+    ));
     if (!rows) return;
+    count("catalog.reconcile.rows", rows.length);
     const after = await this.sharedCatalogStructureEvidence(true);
     const rowsMatchAfterFacts = rows.length === this.catalogIdentitiesForScope(after, scope).length
       && rows.every((row) => {
@@ -1980,11 +1987,9 @@ export class RuntimeRegistry {
       };
     }
 
-    const workID = `catalog-${++this.catalogWorkSequence}`;
-    const stageMetadata = { workID, scope };
-    let materialized = await this.timedStage("catalog.scan", () => this.scanCatalogMaterialization(scope, stageMetadata), stageMetadata);
+    let materialized = await stage("catalog.scan", () => this.scanCatalogMaterialization(scope));
     if (!materialized.stable) {
-      materialized = await this.timedStage("catalog.scan-retry", () => this.scanCatalogMaterialization(scope, stageMetadata), stageMetadata);
+      materialized = await stage("catalog.scan-retry", () => this.scanCatalogMaterialization(scope));
     }
     if (!materialized.stable) {
       await this.catalogAcquisitionMutex.run(() => { this.catalogAcquisitionAdmission = undefined; });
@@ -2060,7 +2065,6 @@ export class RuntimeRegistry {
 
   private async scanCatalogMaterialization(
     scope: "user" | "all",
-    stageMetadata: { workID: string; scope: "user" | "all" },
   ): Promise<{
     allInfos: CatalogSessionInfo[];
     ambiguousDiskIDs: Set<string>;
@@ -2071,13 +2075,12 @@ export class RuntimeRegistry {
   }> {
     const invalidationGeneration = this.catalogAcquisitionInvalidationGeneration;
     const structuralGeneration = this.catalogStructuralGeneration;
-    const before = await this.timedStage("catalog.validate.before", () => this.sharedCatalogStructureEvidence(), stageMetadata);
-    const discoveredInfos = await this.timedStage(
+    const before = await stage("catalog.validate.before", () => this.sharedCatalogStructureEvidence());
+    const discoveredInfos = await stage(
       "catalog.metadata-materialize",
       () => this.sharedCatalogSessionInfos(scope),
-      stageMetadata,
     );
-    const after = await this.timedStage("catalog.validate.after", () => this.sharedCatalogStructureEvidence(true), stageMetadata);
+    const after = await stage("catalog.validate.after", () => this.sharedCatalogStructureEvidence(true));
     const allInfos = this.withCatalogEvidence(discoveredInfos, after);
     // User metadata intentionally omits delegated bodies, but duplicate IDs are
     // an admission property of the whole canonical tree. Header evidence is
@@ -2630,7 +2633,7 @@ export class RuntimeRegistry {
     let slot: RuntimeSlot | undefined;
     let published = false;
     try {
-      const trust = await this.timedStage(
+      const trust = await stage(
         "automation.session.trust",
         () => this.options.trust.requireResolved(cwdInput),
       );
@@ -2661,7 +2664,7 @@ export class RuntimeRegistry {
         this.sessionDirectoryFor(trust.cwd),
         { id: sessionId },
       );
-      slot = await this.timedStage(
+      slot = await stage(
         "automation.session.runtime",
         () => RuntimeSlot.create(manager, this.dependencies(), this.hooks(), false),
       );
@@ -2702,7 +2705,7 @@ export class RuntimeRegistry {
     let reserved = false;
     let slot: RuntimeSlot | undefined;
     try {
-      const trust = await this.timedStage(
+      const trust = await stage(
         "session.create.trust",
         () => this.options.trust.requireResolved(cwdInput),
       );
@@ -2717,7 +2720,7 @@ export class RuntimeRegistry {
         reserved = true;
       });
       const manager = SessionManager.create(trust.cwd, this.sessionDirectoryFor(trust.cwd));
-      slot = await this.timedStage(
+      slot = await stage(
         "session.create.runtime",
         () => RuntimeSlot.create(manager, this.dependencies(), this.hooks(), false),
       );
@@ -3011,7 +3014,7 @@ export class RuntimeRegistry {
     const alreadyStarting = this.pendingSlotStarts.get(sessionId);
     if (alreadyStarting) return alreadyStarting;
     const existing = this.slots.get(sessionId);
-    const acquisition = await this.timedStage(
+    const acquisition = await stage(
       "session.open.catalog",
       () => this.catalogAcquisition(),
     );
@@ -3095,7 +3098,7 @@ export class RuntimeRegistry {
       }
       let manager: SessionManager;
       try {
-        manager = await this.timedStage(
+        manager = await stage(
           "session.open.manager",
           async () => SessionManager.open(canonicalPath, this.sessionDirectoryFor(entry.canonicalCwd)),
         );
@@ -3135,7 +3138,7 @@ export class RuntimeRegistry {
       if (selectedAcquisitionGeneration !== this.catalogAcquisitionInvalidationGeneration) {
         throw new GatewayError("busy", "Session catalog changed while opening the session", true, undefined, "catalog_changed");
       }
-      slot = await this.timedStage(
+      slot = await stage(
         "session.open.runtime",
         () => RuntimeSlot.create(
           manager,

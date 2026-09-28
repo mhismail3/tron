@@ -517,7 +517,7 @@ rows are in priority order.
 | E-2 | Blocked | Bound the iOS profiler's memory or hand the row to the simulator-lifecycle plan | none | orchestrator-dispatched worker, 2026-09-28 |
 | E-2b | Claimed | Record `time-profiler` with `xctrace record --attach <pid>` if a real traced run proves it samples the simulator app; re-measure export and parser peaks (see E-2 handoff) | E-2 | orchestrator-dispatched deepseek-worker, 2026-09-28 |
 | O-2 | Ready | Gateway transport records: upgrade phases, inbound silence with Tailscale peer path | O-1 | |
-| O-3 | Claimed | Request span: one `rpc.completed` per slow RPC with every stage, wait and count | O-1 | orchestrator-dispatched deepseek-worker, 2026-09-28 |
+| O-3 | Done | Request span: one `rpc.completed` per slow RPC with every stage, wait and count | O-1 | orchestrator-dispatched deepseek-worker, 2026-09-28 |
 | O-4 | Claimed | Phone connection records that survive an export, stall watchdog, exact scene records | O-1 | orchestrator-dispatched deepseek-worker, 2026-09-28 |
 | O-6b | Ready | Impairment in the qualification scenario: blackhole, bandwidth cap, Gateway restart | O-6a | |
 | O-5 | Ready | Gateway resource sampler and event-loop histogram | O-3 | |
@@ -1783,3 +1783,96 @@ the day cannot measure a synthetic case).
   the module docstring says every id-carrying value is kept once (finding 3); and
   `Table.resolve` became `Table.value`, since it only drops absent or
   `<sentinel/>` cells now (finding 4).
+
+### O-3 · Done · 2026-09-28 · worker session (branch `hardening/o-3`)
+
+- Result: one request span per admitted RPC (`packages/gateway/src/transport/request-span.ts`,
+  `AsyncLocalStorage`, `stage`/`wait`/`count`/`bytes`). `rpc.completed` now carries
+  `stages` — one compact string, most expensive entry first, e.g.
+  `session.open.manager=366ms;session.open.runtime=203ms;snapshot.build=30ms×2;
+  catalog.walk=26ms×2;registry.catalog-mutex=5ms;frame.serialize=2ms/572KB;
+  catalog.walk.files=×6` — plus `unaccountedMs`, the wall time no named entry
+  covered. Measured stages: the registry's `timedStage` wrappers (now the span's
+  `stage`), `catalog.walk` with a walked-file count, `catalog.reconcile` with a
+  row count, `SessionManager.open` (`session.open.manager`), `RuntimeSlot.create`
+  (`session.open.runtime`), `snapshot.build`, `response.encode`, and
+  `frame.serialize` with bytes. Measured waits: the registry's four lanes report
+  their queue wait (`registry.mutex`, `registry.catalog-mutex`,
+  `registry.attention-lane`, `registry.display-lane`) through a lane that restores
+  the requesting span across the mutex handover. `session.stage` and
+  `session.open.prepared` are deleted with their rows; `SLOW_SESSION_STAGE_MS`,
+  `SLOW_SESSION_OPEN_WARNING_MS` and the registry's `stageTiming` option went with
+  them.
+- Failure modes written before the isolated test
+  (`packages/gateway/src/transport/request-span.test.ts`): (1) a wrapped stage
+  never records, so the slow stage is missing and `unaccountedMs` stays as large
+  as the stage; (2) nested stages are counted twice, so the entries claim more
+  time than the request took and `unaccountedMs` reads 0 while the request was
+  unmeasured; (3) a lock wait is charged the work it admits, so the wait inflates
+  and hides the real stage; (4) records arriving after `breakdown` move a
+  published breakdown; (5) counts and bytes are dropped from the compact string;
+  (6) two requests share one span and stages land on the wrong one; (7) wrapping a
+  synchronous owner makes it asynchronous.
+- Evidence:
+  - `npx vitest run src/transport/request-span.test.ts` passes 8/8.
+  - `npx vitest run src/transport/request-span.integration.test.ts` passes 1/1
+    (three cold opens of a generated 105 MB canonical JSONL each through a real
+    `GatewayServer` + `GatewayService` + `RuntimeRegistry`). Retained at
+    `~/.tron/workspace/files/hardening/o-3/request-span-report.txt`: accounted
+    shares 0.9708 / 0.9868 / 0.9733, 0.9603 / 0.9933 / 0.9952, 0.9838 / 0.9894 /
+    0.9897 across runs, observed medians 0.973–0.991, `stages` 260–264 bytes and
+    the whole record 528–532 bytes. A run under parallel-worker load can lose one
+    open to a single 45–103 ms event-loop/GC pause between two measured intervals
+    (0.913 and 0.866 in two such runs); the case therefore asserts the bar on the
+    median of three repeats and prints every number. O-6a's multi-second
+    qualifier remains the authority for "the slowest `session.open`".
+  - `npx vitest run src/sessions/runtime-registry.integration.test.ts` passes
+    242/242 in 77 s (the changed `catalog.metadata-materialize` hook test now
+    spies on `sharedCatalogSessionInfos`). `npx vitest run
+    src/transport/sync-protocol.integration.test.ts` passes 3/3;
+    `server-capacity`, `server-compression` and `server-live-view` pass 37/37.
+    `npm run build` is clean.
+  - Volume: a slow or failed `rpc.completed` grows by the `stages` string plus
+    `unaccountedMs` (262 + 21 bytes measured). Fast successes stay debug
+    (memory-only), so the added persisted volume is (slow + failed
+    completions) × about 280 bytes; 1,000 such records a day is 280 KB against
+    the 1 MB budget. V-1 measures it.
+- Changes: the O-3 commit on `hardening/o-3`.
+- Tasks added: none.
+- Kept on purpose: the `RegistryLane` wrapper lives in `runtime-registry.ts`
+  rather than in `util/async-mutex.ts`, so shared mutex callers outside the
+  registry keep their current behavior; a queued lane starts inside the previous
+  holder's async context, so the wrapper re-enters the requesting span for the
+  work it admits. `catalog.walk` is recorded both where the walk is created and
+  where a caller waits on that shared walk, because waiting for another caller's
+  walk is this request's cost.
+- Deviations:
+  - The plan's API is `wait(name, fn)`; the implementation is
+    `wait(name, fn)` where `fn` receives an `acquired` callback, because a lock
+    hands over inside its own operation and only that operation can report the
+    handover. `stage` also accepts a synchronous operation so `RuntimeSlot.snapshot`
+    keeps its signature. Both are documented in `request-span.ts`.
+  - Two stages are measured that the task's Do list does not name:
+    `response.encode` (`safeJson` over the whole snapshot in
+    `gateway-service.ts`) and `attention.reconcile` (marker evidence and
+    settlement in `runtime-slot.ts`). Both are on the `session.open` path and were
+    added because the measured unaccounted remainder landed in them.
+  - "Outbound enqueue wait" has no await to measure: `OrderedOutboundQueue.enqueue`
+    is synchronous and returns a boolean on overflow, so the response send path is
+    covered by `frame.serialize` (+ bytes). The wait appears when G-4's coalescing
+    queue adds one.
+  - `runtime.dispose-timeout` and the `catalog-index.*` stages were surfaced only
+    by the deleted `session.stage` record, so their raise sites went with it: the
+    registry no longer passes the slot's `runtimeDisposalTimedOut` hook or the
+    metadata index's diagnostics callback. G-1b owns catalog-index reporting and
+    G-5 owns eviction diagnostics; if a dispose-timeout warning is still wanted,
+    it needs its own row and test there.
+- Withdrawn: none.
+- For the next agent: O-6a's scenario is not committed on `hardening/o-6a`
+  (its `scripts/tron-profile-gateway` work is uncommitted), so the
+  qualification measurement is still owed: run the multi-session scenario and
+  record the slowest `session.open`'s `stages`/`unaccountedMs` there. The span
+  API is the seam for G-1c (delete a walk → delete its `catalog.walk`), G-3
+  (snapshot build without an audience) and C-6 (a cancelled read's span ends at
+  cancellation, so a cancelled open will report a short `durationMs` with the
+  stages it reached).

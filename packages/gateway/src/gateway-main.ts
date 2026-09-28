@@ -97,8 +97,6 @@ process.env.PI_CODING_AGENT ??= "true";
 process.env.AI_AGENT ??= "pi";
 process.env.PI_SKIP_VERSION_CHECK ??= "1";
 
-/** Session stages under this bound are debug detail; slower ones warn. */
-const SLOW_SESSION_STAGE_MS = 1_000;
 const logger = new GatewayLogger(join(config.tronHome, "logs", "gateway.jsonl"), {
   runtimeEpoch: process.env.TRON_GATEWAY_RUNTIME_EPOCH,
   payloadVersion: process.env.TRON_GATEWAY_PAYLOAD_VERSION,
@@ -238,17 +236,6 @@ const sessions = new RuntimeRegistry({
     `Extension lifecycle artifact rejected (${reason}; owner ${owner})`,
     { event: "extension.artifact-rejected", source: "sessions" },
   ),
-  stageTiming: (stage, durationMs, outcome, metadata) => {
-    const context = [
-      metadata?.workID ? `workID=${metadata.workID}` : undefined,
-      metadata?.scope ? `scope=${metadata.scope}` : undefined,
-    ].filter(Boolean).join(" ");
-    logger.log(
-      durationMs >= SLOW_SESSION_STAGE_MS || outcome === "failure" ? "warning" : "debug",
-      `Session stage ${stage} completed in ${durationMs}ms (${outcome})${context ? ` ${context}` : ""}`,
-      { event: "session.stage", source: "sessions" },
-    );
-  },
 });
 const developmentHelperOverride = process.env.NODE_ENV === "development" ? process.env.TRON_SEARCH_EMBEDDING_HELPER : undefined;
 const bundledSearchHelper = process.env.TRON_GATEWAY_SEARCH_EMBEDDING_HELPER;

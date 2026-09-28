@@ -19,8 +19,8 @@ it lives in a bounded in-memory buffer that exports include.
 | --- | --- | --- | --- |
 | error | Something failed that a user sees, work was lost, or an invariant broke. Someone should look | Yes | `gateway.fatal-startup`, `gateway.shutdown-failed`, `process.uncaught-exception`, `connection.write-error`, `launcher.candidate-rolled-back` |
 | warning | Degraded or abnormal but handled: retries, fallbacks, bounds hit, slow operations over a named threshold, notable rejections | Yes | `gateway.event-loop-delay`, `connection.capacity`, `gateway.restart-drain.stalled`, `extension.artifact-rejected` |
-| info | Lifecycle and state transitions, one line per boundary; enough to reconstruct a timeline | Yes | `gateway.started`, `connection.opened` for a paired device, `session.open.prepared`, `deploy.ready`, drain progress |
-| debug | Per-request detail useful only while diagnosing | No, memory buffer only | fast successful `rpc.completed`, session stages under the slow bound, connection open and close for the Mac app's local probes |
+| info | Lifecycle and state transitions, one line per boundary; enough to reconstruct a timeline | Yes | `gateway.started`, `connection.opened` for a paired device, `session.compaction.completed`, `deploy.ready`, drain progress |
+| debug | Per-request detail useful only while diagnosing | No, memory buffer only | fast successful `rpc.completed` with its stage breakdown, connection open and close for the Mac app's local probes |
 
 - The level is fixed per event in code and listed in the catalog below; there
   are no runtime log-level settings. A level varies only with a named threshold
@@ -144,8 +144,8 @@ Conventions used in the rows:
   and `operation.<name>` on the phone are the only three; each pattern's values
   are listed in its row.
 - **Levels with a condition.** A row whose level changes says which side of the
-  threshold or condition it is on. `SLOW_RPC_WARNING_MS` (1,000 ms) and
-  `SLOW_SESSION_STAGE_MS` (1,000 ms) are the named slow bounds; iOS uses
+  threshold or condition it is on. `SLOW_RPC_WARNING_MS` (1,000 ms) is the
+  Gateway's named slow bound; iOS uses
   `AppLog.slowOperationThresholdMilliseconds` (250 ms).
 - **`added because`.** For events that predate this catalog the column states the
   requirement the signal protects, not a commit history.
@@ -188,9 +188,7 @@ Conventions used in the rows:
 | `http.authentication-timeout` | warning | `packages/gateway/src/transport/server.ts` | an upgrade socket does not authenticate within the idle deadline | — | A half-closed pre-handshake peer used to disappear without a record |
 | `http.upload-cleanup` | warning | `packages/gateway/src/transport/server.ts` | discarding an abandoned upload fails for a reason other than conflict or not-found | — | Cleanup failure leaves owned bytes behind and must be visible |
 | `rpc.error` | warning for a `GatewayError` code other than `internal` (a caller mistake); error, with `error`, for an unexpected fault or `internal` | `packages/gateway/src/transport/server.ts` | an RPC handler throws | `method`, `requestID`, `connectionId`, `sessionId`, `commandId`, `code`, `outcome`, `reason`, `error` | Expected `busy` backpressure was logged as error; a caller's mistake is a warning and a server fault keeps its structured `error` |
-| `rpc.completed` | debug for a success under `SLOW_RPC_WARNING_MS` (1,000 ms); warning at or above it, on failure, or on `connectionClosed` | `packages/gateway/src/transport/server.ts` | every RPC finishes | `method`, `requestID`, `connectionId`, `sessionId`, `commandId`, `outcome` (`success`, `failure`, or `connectionClosed` when the client left before the response), `durationMs` | 1,187 successful completions in 3 h filled the log; only slow or failed completions need to be on disk. A prompt held behind manual compaction that ran after its phone reconnected was logged as `failure`, hiding that the work completed |
-| `session.open.prepared` | info, warning at or above `SLOW_SESSION_OPEN_WARNING_MS` (1,000 ms) | `packages/gateway/src/transport/gateway-service.ts` | a `session.open` read produced its snapshot and lease | `sessionId`, `durationMs`; acquire and snapshot splits in the message | A slow session open was invisible among the other open records |
-| `session.stage` | debug for a success under `SLOW_SESSION_STAGE_MS` (1,000 ms); warning at or above it or on failure | `packages/gateway/src/gateway-main.ts`, raised from `packages/gateway/src/sessions/runtime-registry.ts` | each timed session stage completes (`catalog-index.*`, `runtime.dispose-timeout`, and the registry's stages) | stage, outcome and `workID`/`scope` in the message | Only slow stages were recorded before, so which stage dominated a slow open could not be read |
+| `rpc.completed` | debug for a success under `SLOW_RPC_WARNING_MS` (1,000 ms); warning at or above it, on failure, or on `connectionClosed` | `packages/gateway/src/transport/server.ts`; breakdown owner `packages/gateway/src/transport/request-span.ts` | every RPC finishes | `method`, `requestID`, `connectionId`, `sessionId`, `commandId`, `outcome` (`success`, `failure`, or `connectionClosed` when the client left before the response), `durationMs`, `stages` (compact `name=12ms×2/610KB;…`, most expensive first, when the request recorded any stage, wait, count or frame), `unaccountedMs` (its wall time that no named entry covered) | 1,187 successful completions in 3 h filled the log; only slow or failed completions need to be on disk. A prompt held behind manual compaction that ran after its phone reconnected was logged as `failure`, hiding that the work completed. One record per request with its own breakdown replaces the per-stage records, which never said which stage dominated a slow open |
 | `session.abort.settled` | info | `packages/gateway/src/transport/gateway-service.ts` | `session.abort` settled | `sessionId`; kind and operation in the message | An abort that did settle and one that did not were indistinguishable |
 | `session.abort.unsettled` | warning | `packages/gateway/src/transport/gateway-service.ts` | `session.abort` throws | `sessionId`, `error`; kind and operation in the message | An unsettled abort keeps the runtime busy and must be visible |
 | `artifacts.session-cleanup-pending` | warning | `packages/gateway/src/transport/gateway-service.ts` | a session was deleted but its owned artifact cleanup rejected | — | Deletion succeeded, so the leftover bytes need their own record |
