@@ -33,6 +33,28 @@ enum GatewayDisposableReadPolicy {
     ]
 
     static func admits(_ method: String) -> Bool { disposableReadMethods.contains(method) }
+
+    /// A shed disposable read is answered `busy` with a retry hint (`G-12`). One
+    /// retry is what the hint is for; a Gateway that keeps shedding is telling
+    /// the caller the truth about its capacity rather than asking to be hammered.
+    static let busyRetryLimit = 1
+    /// The longest wait a server-supplied hint can impose, so one shed read
+    /// cannot park a caller behind an unbounded Gateway answer.
+    static let maximumRetryAfterDelay = Duration.seconds(10)
+
+    /// The wait this failure asks for, or nil when the failure is not a shed
+    /// disposable read: a locally minted failure has no hint, and a mutation or
+    /// prompt is never retried from here — its owner settles it durably.
+    static func retryAfterDelay(for failure: GatewayFailure, method: String) -> Duration? {
+        guard admits(method),
+              failure.code == "busy",
+              failure.answeredByGateway == true,
+              case .object(let details)? = failure.details,
+              case .number(let milliseconds)? = details["retryAfterMs"],
+              milliseconds > 0
+        else { return nil }
+        return min(.seconds(milliseconds / 1_000), maximumRetryAfterDelay)
+    }
 }
 
 struct GatewayResponse: Decodable, Sendable, Equatable {

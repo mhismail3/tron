@@ -24,6 +24,7 @@ import {
   PROCESS_TRANSCRIPT_CAPABILITY,
 } from "../sessions/process-activity.js";
 import { ProcessTranscriptLeaseStore } from "./process-transcript-leases.js";
+import { QueuedWorkGate } from "../util/queued-work-gate.js";
 import type { FilesystemService } from "../machine/filesystem-service.js";
 import {
   WorkspaceInspectionService,
@@ -191,6 +192,15 @@ const restartDrainMethods = new Set([
   "connections.list",
 ]);
 
+/** One session export at a time (`G-12`): an export streams a whole transcript
+ * through the loop and the disk, so a second concurrent one halves the speed of
+ * both while doubling what the host holds. */
+const MAXIMUM_CONCURRENT_SESSION_EXPORTS = 1;
+/** Two workspace inspections at once (`G-12`): each spawns git or walks a
+ * directory tree, and a client can ask for several while scrolling; the rest
+ * wait their turn instead of competing for the same disk. */
+const MAXIMUM_CONCURRENT_WORKSPACE_INSPECTIONS = 2;
+
 export interface ClientContext {
   id: string;
   identity: string;
@@ -273,6 +283,10 @@ export class GatewayService {
   private readonly automationPages = new AutomationPaginationStore();
   private readonly workspaceInspector: WorkspaceInspectionService;
   private readonly providerUsage: ProviderUsageOwner;
+  /** The named caps that queue rather than refuse (`G-12`); an admitted
+   * mutation or prompt is never behind them. */
+  private readonly exportGate = new QueuedWorkGate(MAXIMUM_CONCURRENT_SESSION_EXPORTS);
+  private readonly workspaceGate = new QueuedWorkGate(MAXIMUM_CONCURRENT_WORKSPACE_INSPECTIONS);
 
   constructor(private readonly dependencies: GatewayServiceDependencies) {
     this.updateService = dependencies.updateService ?? new GatewayUpdateService({
@@ -1043,7 +1057,7 @@ export class GatewayService {
         // snapshot is built. The registry's shared start is not abandoned with
         // it: a retry (or another connection) joins the runtime load already in
         // progress instead of starting a second one (`C-6`).
-        const slot = await abortableRead(client.signal, () => this.dependencies.sessions.acquire(sessionId));
+        const slot = await abortableRead(client.signal, () => this.dependencies.sessions.acquire(sessionId, client.signal));
         // Join the exact canonical completion barrier before snapshotting. The
         // response and completionRevision therefore describe one admitted cut.
         await abortableRead(client.signal, () => slot.reconcileAttention());
@@ -1494,7 +1508,12 @@ export class GatewayService {
       }
       case "session.export": {
         const slot = await this.openedSlot(client, params);
-        return safeJson(await slot.export(oneOf(params.format, "format", ["html", "jsonl"] as const)));
+        // A queued export whose client left is dropped before it starts: the
+        // export is a read nobody would receive (`G-12`).
+        return safeJson(await this.exportGate.run(
+          client.signal,
+          () => slot.export(oneOf(params.format, "format", ["html", "jsonl"] as const)),
+        ));
       }
       case "session.context":
         return (await this.openedSlot(client, params)).context();
@@ -1779,60 +1798,60 @@ export class GatewayService {
 
       case "session.workspace.inspect": {
         const slot = await this.openedSlot(client, params);
-        return safeJson(await this.workspaceInspector.inspect(slot.cwd));
+        return safeJson(await this.workspaceGate.run(client.signal, () => this.workspaceInspector.inspect(slot.cwd)));
       }
       case "session.workspace.list": {
         const slot = await this.openedSlot(client, params);
-        return safeJson(await this.workspaceInspector.list(
+        return safeJson(await this.workspaceGate.run(client.signal, () => this.workspaceInspector.list(
           slot.cwd,
           optionalString(params.path, "path", 4_096),
-        ));
+        )));
       }
       case "session.workspace.file": {
         const slot = await this.openedSlot(client, params);
-        return safeJson(await this.workspaceInspector.file(
+        return safeJson(await this.workspaceGate.run(client.signal, () => this.workspaceInspector.file(
           slot.cwd,
           string(params.path, "path", { min: 1, max: 4_096 }),
-        ));
+        )));
       }
       case "session.workspace.git.diff": {
         const slot = await this.openedSlot(client, params);
         const scope = params.scope === undefined
           ? "current"
           : oneOf(params.scope, "scope", ["current", "staged", "unstaged"] as const);
-        return safeJson(await this.workspaceInspector.diff(
+        return safeJson(await this.workspaceGate.run(client.signal, () => this.workspaceInspector.diff(
           slot.cwd,
           string(params.path, "path", { min: 1, max: 4_096 }),
           scope as WorkspaceDiffScope,
-        ));
+        )));
       }
       case "session.workspace.git.history.list": {
         const slot = await this.openedSlot(client, params);
         const scope = params.scope === undefined
           ? "currentBranch"
           : oneOf(params.scope, "scope", ["currentBranch", "allReferences"] as const);
-        return safeJson(await this.workspaceInspector.historyList(
+        return safeJson(await this.workspaceGate.run(client.signal, () => this.workspaceInspector.historyList(
           slot.cwd,
           client.id,
           scope as WorkspaceHistoryScope,
           optionalString(params.cursor, "cursor", 2_048),
           params.limit === undefined ? 40 : integer(params.limit, "limit", 1, 100),
-        ));
+        )));
       }
       case "session.workspace.git.history.get": {
         const slot = await this.openedSlot(client, params);
-        return safeJson(await this.workspaceInspector.historyGet(
+        return safeJson(await this.workspaceGate.run(client.signal, () => this.workspaceInspector.historyGet(
           slot.cwd,
           string(params.oid, "oid", { min: 40, max: 64 }),
-        ));
+        )));
       }
       case "session.workspace.git.history.diff": {
         const slot = await this.openedSlot(client, params);
-        return safeJson(await this.workspaceInspector.historyDiff(
+        return safeJson(await this.workspaceGate.run(client.signal, () => this.workspaceInspector.historyDiff(
           slot.cwd,
           string(params.oid, "oid", { min: 40, max: 64 }),
           string(params.path, "path", { min: 1, max: 4_096 }),
-        ));
+        )));
       }
 
       case "terminal.list": {

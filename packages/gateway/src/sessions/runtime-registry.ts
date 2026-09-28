@@ -1,4 +1,5 @@
 import { createHash, randomUUID } from "node:crypto";
+import { getHeapStatistics } from "node:v8";
 import { realpathSync } from "node:fs";
 import { lstat, open, opendir, readFile, realpath, rename, rm, stat } from "node:fs/promises";
 import { basename, dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
@@ -31,6 +32,7 @@ import {
   type SessionPresentationPresenceProjection,
 } from "./session-presentation-presence.js";
 import { AsyncMutex } from "../util/async-mutex.js";
+import { QueuedWorkGate } from "../util/queued-work-gate.js";
 import { abortableRead } from "../util/abortable-read.js";
 import { count, currentRequestSpan, stage, wait } from "../transport/request-span.js";
 import type { ResourceRecorder, ResourceRuntimeEntry } from "../transport/stall-diagnostics.js";
@@ -140,17 +142,43 @@ export const LIVE_RUNTIME_BYTE_BUDGET = 1_536 * 1_024 * 1_024;
  * has no projection duplication, so the live figure is the honest one. */
 export const LIVE_RUNTIME_HEAP_ESTIMATE_FACTOR = 3;
 
+/** Cold runtime loads admitted at once (`G-12`). A load parses a transcript into
+ * a runtime the budget then has to hold, so two at a time share the loop and the
+ * libuv pool with interactive reads; a third waits its turn instead of thrashing
+ * the same disk and heap. The wait, not the load, is what a leaving client
+ * abandons. */
+export const MAXIMUM_CONCURRENT_COLD_LOADS = 2;
+
+/** Heap share of the V8 limit above which a cold load first reclaims idle
+ * runtimes, largest first (`G-12`): the exit criterion is that the heap never
+ * passes 70% of the configured limit, so the load that would cross it is the
+ * moment to give memory back rather than after it crossed. */
+export const HEAP_EVICTION_SHARE = 0.70;
+
+/** Heap share above which a cold runtime load is refused instead of admitted
+ * (`G-12`): past this point the load is what would take the process to its
+ * limit, and a retryable refusal is cheaper than the OOM it would cause. The
+ * byte budget (eviction pressure) deliberately never refuses. */
+export const HEAP_REFUSAL_SHARE = 0.85;
+
+/** What a refused cold load tells the client to wait (`G-12`). Heap pressure is
+ * released by eviction and the collector rather than by the next tick, so the
+ * hint is longer than the transport's own deadline hint; the phone bounds any
+ * hint to 10 s. */
+export const HEAP_REFUSAL_RETRY_AFTER_MS = 5_000;
+
 /** Why a runtime was published: the admission that did it, or `oversize` for a
  * transcript whose own estimate exceeds `LIVE_RUNTIME_BYTE_BUDGET`, which is
  * admitted alone because no retirement can make it fit. */
 export type RuntimeLoadReason = "open" | "create" | "automation" | "import" | "oversize";
 
 /** What reclaimed a runtime: the idle lifetime, the runtime count, the byte
- * budget's own pass, or a lifecycle event the user or the process caused.
+ * budget's own pass, the heap-pressure pass (`G-12`), or a lifecycle event the
+ * user or the process caused.
  * `disposed` is the slot that was already disposed when a later open cleared it
  * from the live set, with no other reason recorded for it. */
 export type RuntimeEvictionReason =
-  | "idle" | "capacity" | "bytes" | "closed" | "disposed" | "deleted" | "shutdown";
+  | "idle" | "capacity" | "bytes" | "heap" | "closed" | "disposed" | "deleted" | "shutdown";
 
 export type RuntimeLifecycleReason = RuntimeLoadReason | RuntimeEvictionReason;
 
@@ -174,6 +202,23 @@ export interface RuntimeLifecycleRecord {
 interface PublishedRuntimeBytes {
   transcriptBytes: number;
   estimatedHeapBytes: number;
+}
+
+/** One admission refused because the process heap was already past
+ * `HEAP_REFUSAL_SHARE` of its limit (`G-12`). The Gateway logs one
+ * `gateway.shed` for it with the same reason and counts the transport's own
+ * deadline sheds carry, so a triage run sees every shed admission in one event. */
+export interface CapacityShedRecord {
+  reason: "heap";
+  method: "session.open";
+  heapUsedBytes: number;
+  heapLimitBytes: number;
+  retryAfterMs: number;
+}
+
+export interface HeapSample {
+  usedBytes: number;
+  limitBytes: number;
 }
 
 /** The heap one loaded runtime is estimated to hold. */
@@ -523,6 +568,7 @@ export class RuntimeRegistry {
    * record's `overBudget` compares against the budget, and the size an eviction
    * records. */
   private readonly publishedRuntimeBytes = new Map<string, PublishedRuntimeBytes>();
+  private readonly readHeapSample: () => HeapSample;
   private evictionTimer?: NodeJS.Timeout;
   private artifactDiscoveryTimer?: NodeJS.Timeout;
   private artifactDiscoveryInFlight = false;
@@ -564,6 +610,12 @@ export class RuntimeRegistry {
       persistenceDiagnostic?: (sessionId: string, code: string) => void;
       /** One runtime load or eviction, for the Gateway log. */
       runtimeLifecycleRecord?: (record: RuntimeLifecycleRecord) => void;
+      /** One cold load the heap-pressure gate refused, for the Gateway log. */
+      capacityShedRecord?: (record: CapacityShedRecord) => void;
+      /** The live heap picture the pressure gate reads. The process's own
+       * numbers by default; an injected sample drives the gate in tests without
+       * allocating past a limit the host cannot afford. */
+      heapSample?: () => HeapSample;
       /** Privacy-safe archive lifecycle outcome, never a session ID. */
       archiveDiagnostic?: (diagnostic: ArchiveDiagnostic) => void;
       /** Read-only automation admission query, so archiving cannot hide a
@@ -626,6 +678,10 @@ export class RuntimeRegistry {
       ...(options.catalogWatcherReset ? { onWatcherReset: options.catalogWatcherReset } : {}),
     });
     this.workRegistry = options.workRegistry ?? new GatewayWorkRegistry();
+    this.readHeapSample = options.heapSample ?? (() => ({
+      usedBytes: process.memoryUsage().heapUsed,
+      limitBytes: getHeapStatistics().heap_size_limit,
+    }));
     this.drainId = `idle-${createHash("sha256").update(this.workRegistry.runtimeEpoch).digest("hex").slice(0, 16)}`;
     this.configuredSessionDir = SettingsManager.create(
       process.cwd(),
@@ -2780,14 +2836,14 @@ export class RuntimeRegistry {
     return slot.retainLease();
   }
 
-  async acquire(sessionId: string): Promise<RuntimeSlot> {
+  async acquire(sessionId: string, signal?: AbortSignal): Promise<RuntimeSlot> {
     this.assertSlotAdmissionOpen();
     const existing = this.slots.get(sessionId);
     if (existing && !existing.isDisposed && !this.ambiguousSessionIds.has(sessionId)) {
       const eviction = this.idleEvictions.get(sessionId);
       if (eviction?.slot === existing && eviction.committed && eviction.completion) {
         await eviction.completion;
-        return this.acquire(sessionId);
+        return this.acquire(sessionId, signal);
       }
       this.cancelIdleEviction(sessionId, existing);
       existing.touch();
@@ -2795,13 +2851,13 @@ export class RuntimeRegistry {
     }
     const finishAdmission = this.beginSlotAdmission();
     try {
-      return await this.acquireMissing(sessionId);
+      return await this.acquireMissing(sessionId, signal);
     } finally {
       finishAdmission();
     }
   }
 
-  private async acquireMissing(sessionId: string): Promise<RuntimeSlot> {
+  private async acquireMissing(sessionId: string, signal?: AbortSignal): Promise<RuntimeSlot> {
     const alreadyStarting = this.pendingSlotStarts.get(sessionId);
     if (alreadyStarting) return alreadyStarting;
     const existing = this.slots.get(sessionId);
@@ -2861,6 +2917,7 @@ export class RuntimeRegistry {
         acquisition,
         selectedAcquisitionGeneration,
         transcriptBytes,
+        signal,
       );
       this.pendingSlotStarts.set(sessionId, operation);
       return { operation };
@@ -2874,6 +2931,7 @@ export class RuntimeRegistry {
     acquisition: CatalogAcquisitionResolution,
     selectedAcquisitionGeneration: number,
     transcriptBytes: number,
+    signal?: AbortSignal,
   ): Promise<RuntimeSlot> {
     let slot: RuntimeSlot | undefined;
     let reservationReleased = false;
@@ -2926,7 +2984,8 @@ export class RuntimeRegistry {
       if (selectedAcquisitionGeneration !== this.catalogAcquisitionInvalidationGeneration) {
         throw new GatewayError("busy", "Session catalog changed while opening the session", true, undefined, "catalog_changed");
       }
-      slot = await stage(
+      await this.admitColdLoadUnderHeapPressure();
+      slot = await this.coldLoadGate.run(signal, () => stage(
         "session.open.runtime",
         () => RuntimeSlot.create(
           manager,
@@ -2934,7 +2993,7 @@ export class RuntimeRegistry {
           this.hooks(),
           this.interrupted.has(sessionId),
         ),
-      );
+      ));
       await this.mutex.run(() => {
         if (selectedAcquisitionGeneration !== this.catalogAcquisitionInvalidationGeneration
             || this.trustReloadProjects.has(entry.canonicalCwd)) {
@@ -2977,7 +3036,11 @@ export class RuntimeRegistry {
       // bytes this admission has to fit beside the runtimes already loaded.
       const incomingBytes = estimateRuntimeHeapBytes(await sessionFileBytes(path));
       await this.makeRoomForRuntimeBytes({ incomingBytes });
-      return await this.mutex.run(async () => {
+      await this.admitColdLoadUnderHeapPressure();
+      // The import's own copy is a cold load like an open, so it takes one of
+      // the same places (`G-12`). It has no requester signal: an admitted import
+      // is a mutation whose owner settles it.
+      return await this.coldLoadGate.run(undefined, () => this.mutex.run(async () => {
         this.assertSlotAdmissionOpen();
         if (this.trustReloadProjects.has(trust.cwd)) {
           throw new GatewayError("busy", "Project trust is being reconfigured", true);
@@ -3013,7 +3076,7 @@ export class RuntimeRegistry {
           }
           throw error;
         }
-      });
+      }));
     } finally {
       finishAdmission();
     }
@@ -3317,6 +3380,74 @@ export class RuntimeRegistry {
         if (!originalExists) await rename(quarantine, path).catch(() => {});
       }
     }
+  }
+
+  /**
+   * Cold runtime loads are queued through this gate (`G-12`): a load parses a
+   * transcript into the runtime the byte budget then has to hold, so
+   * `MAXIMUM_CONCURRENT_COLD_LOADS` of them at once keep the disk, the event
+   * loop and the libuv pool shared with interactive reads. The queue, not the
+   * load, is what a requester that leaves abandons: the start already in flight
+   * keeps running and is shared with whatever retry joins it (`C-6`).
+   */
+  private readonly coldLoadGate = new QueuedWorkGate(MAXIMUM_CONCURRENT_COLD_LOADS);
+
+  /**
+   * The heap-pressure gate in front of a cold runtime load (`G-12`). Above
+   * `HEAP_EVICTION_SHARE` of the V8 heap limit, idle runtimes are retired
+   * largest first — the largest reclaims the most — until the share is back
+   * under it or no runtime is eligible. Above `HEAP_REFUSAL_SHARE` after that,
+   * the load is refused with a retryable `busy`, its retry hint, and one
+   * `gateway.shed` record: past that point this load is what would take the
+   * process to the limit the memory criterion measures. A protected runtime is
+   * never retired, so a heap made of protected runtimes refuses instead of
+   * pretending it made room.
+   */
+  private async admitColdLoadUnderHeapPressure(): Promise<void> {
+    if (this.heapShare() > HEAP_EVICTION_SHARE) await this.retireIdleRuntimesForHeap();
+    const sample = this.readHeapSample();
+    if (!(sample.limitBytes > 0) || sample.usedBytes / sample.limitBytes <= HEAP_REFUSAL_SHARE) return;
+    this.options.capacityShedRecord?.({
+      reason: "heap",
+      method: "session.open",
+      heapUsedBytes: Math.max(0, Math.round(sample.usedBytes)),
+      heapLimitBytes: sample.limitBytes,
+      retryAfterMs: HEAP_REFUSAL_RETRY_AFTER_MS,
+    });
+    throw new GatewayError(
+      "busy",
+      "Gateway heap pressure refuses new runtime loads",
+      true,
+      { retryAfterMs: HEAP_REFUSAL_RETRY_AFTER_MS },
+    );
+  }
+
+  /** Retire idle runtimes largest first while the heap is over
+   * `HEAP_EVICTION_SHARE`. The eligible set is what terminates the pass: every
+   * runtime in the inventory is considered once, and a protected one is
+   * skipped. */
+  private async retireIdleRuntimesForHeap(): Promise<void> {
+    const candidates = [...await this.resourceInventory()].sort((left, right) => right.bytes - left.bytes);
+    for (const candidate of candidates) {
+      if (this.heapShare() <= HEAP_EVICTION_SHARE) return;
+      const slot = this.slots.get(candidate.sessionId);
+      if (slot === undefined) continue;
+      await this.retireIdleRuntime({
+        sessionId: candidate.sessionId,
+        slot,
+        reason: "heap",
+        eligible: () => this.heapShare() > HEAP_EVICTION_SHARE
+          && this.isIdleEvictionEligible(candidate.sessionId, slot, Infinity),
+      });
+    }
+  }
+
+  /** The live heap share the pressure gate is applied to. A process that cannot
+   * state its limit has no measurable pressure and is never refused. */
+  private heapShare(): number {
+    const sample = this.readHeapSample();
+    if (!(sample.limitBytes > 0) || !Number.isFinite(sample.usedBytes)) return 0;
+    return sample.usedBytes / sample.limitBytes;
   }
 
   private requireLiveSlotCapacity(): void {
@@ -3737,7 +3868,7 @@ export class RuntimeRegistry {
   private async retireIdleRuntime(input: {
     sessionId: string;
     slot: RuntimeSlot;
-    reason: Extract<RuntimeEvictionReason, "idle" | "capacity" | "bytes">;
+    reason: Extract<RuntimeEvictionReason, "idle" | "capacity" | "bytes" | "heap">;
     eligible: () => boolean;
   }): Promise<boolean> {
     const { sessionId: id, slot, eligible, reason } = input;

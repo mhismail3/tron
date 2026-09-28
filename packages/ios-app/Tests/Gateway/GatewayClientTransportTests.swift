@@ -217,6 +217,58 @@ struct GatewayClientTransportTests {
         }
     }
 
+    @Test("a shed disposable read is retried after the Gateway's hint, a mutation is not")
+    func shedReadRetriesAfterHint() async throws {
+        try await withTestWatchdog {
+            let socket = ScriptedGatewaySocket()
+            let client = GatewayClient(
+                socketFactory: ScriptedGatewaySocketFactory(socket: socket).factory,
+                uuidSource: SequenceUUIDSource([
+                    UUID(uuidString: "00000000-0000-0000-0000-000000000021")!,
+                    UUID(uuidString: "00000000-0000-0000-0000-000000000022")!,
+                ]).source
+            )
+            let appLog = AppLog(fileURL: FileManager.default.temporaryDirectory.appending(path: "retry-after-app-log-\(UUID().uuidString).jsonl"))
+            await client.installAppLog(appLog)
+            await socket.enqueue(helloFrame())
+            _ = try await client.connect(profile: profile, token: "token")
+
+            // The Gateway sheds the read with a hint; the phone waits it out and
+            // asks again under a new identity.
+            let read = Task { try await client.requestValue("session.list", EmptyParams()) }
+            try await socket.waitUntilSent(count: 1)
+            await socket.enqueue(shedResponseFrame(id: "00000000-0000-0000-0000-000000000021", retryAfterMs: 1))
+            try await socket.waitUntilSent(count: 2)
+            let retry = try #require(await socket.sentFrames().last)
+            let frame = try #require(try JSONSerialization.jsonObject(with: retry) as? [String: Any])
+            #expect(frame["method"] as? String == "session.list")
+            #expect(frame["id"] as? String == "00000000-0000-0000-0000-000000000022")
+            await socket.enqueue(responseFrame(id: "00000000-0000-0000-0000-000000000022", result: .array([])))
+            _ = try await valueOfOwnedTask(read)
+
+            // An admitted mutation is never retried, even with the same hint.
+            let mutation = Task { try await client.requestValue("session.prompt", EmptyParams()) }
+            try await socket.waitUntilSent(count: 3)
+            await socket.enqueue(shedResponseFrame(id: "00000000-0000-0000-0000-000000000022", retryAfterMs: 1))
+            do {
+                _ = try await valueOfOwnedTask(mutation)
+                Issue.record("the shed mutation unexpectedly answered")
+            } catch let failure as GatewayFailure {
+                #expect(failure.code == "busy")
+            }
+            await Task.yield()
+            #expect(await socket.sentFrames().count == 3)
+
+            let retries = await appLog.snapshot().filter { $0.event == "rpc.retry-after" }
+            #expect(retries.count == 1)
+            #expect(retries.first?.message == "session.list")
+            #expect(retries.first?.code == "busy")
+            #expect(retries.first?.durationMs == 1)
+            #expect(retries.first?.outcome == "retrying")
+            await client.close()
+        }
+    }
+
     @Test("a cancel frame cannot overtake the request it cancels")
     func cancelFrameFollowsItsRequest() async throws {
         try await withTestWatchdog {
@@ -1989,6 +2041,22 @@ struct GatewayClientTransportTests {
     private func helloFrame(connectionID: String? = nil) -> Data {
         let connection = connectionID.map { #","connectionId":"\#($0)""# } ?? ""
         return Data(#"{"type":"hello","gatewayVersion":"1.0.0","piVersion":"1.0.0","protocolVersion":6,"minProtocolVersion":6,"machineId":"machine","machineName":"Mac","gatewayChannel":"stable","capabilities":["sessions.v1"]\#(connection)}"#.utf8)
+    }
+
+    /// The Gateway's own `busy` answer for a shed read (`G-12`), with the retry
+    /// hint the phone is expected to honour.
+    private func shedResponseFrame(id: String, retryAfterMs: Int) -> Data {
+        try! JSONEncoder.gateway.encode(JSONValue.object([
+            "type": .string("response"),
+            "id": .string(id),
+            "ok": .bool(false),
+            "error": .object([
+                "code": .string("busy"),
+                "message": .string("session.list did not answer within 5000ms"),
+                "retryable": .bool(true),
+                "details": .object(["retryAfterMs": .number(Double(retryAfterMs))]),
+            ]),
+        ]))
     }
 
     private func responseFrame(id: String, result: JSONValue) -> Data {

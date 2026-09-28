@@ -1025,6 +1025,24 @@ receives no answer: the Gateway abandons that request's work and records
 or admitted prompt is never cancelled, and neither is a `session.sync`
 acknowledgement: their owners settle them durably whatever the client does with
 their wait.
+The same nine methods have server-side deadlines (`DISPOSABLE_READ_DEADLINES_MS`
+in `packages/gateway/src/transport/server.ts`): 10 s for `session.open`, whose
+cold load may parse a large transcript before its subscription commits, and 5 s
+for every other disposable read. A read that outlives its deadline is aborted,
+answered `busy` with `details.retryAfterMs`, and recorded once as `gateway.shed`
+with `reason=deadline`; the phone waits that hint (bounded to 10 s), retries the
+read once and logs `rpc.retry-after`. A method with no entry in that table — every
+mutation, every prompt, `session.sync` — has no deadline and is never shed.
+Concurrency caps queue rather than refuse: two cold runtime loads, one session
+export and two workspace inspections at a time, each a named constant next to its
+user. Cold loads are additionally gated on heap pressure: above
+`HEAP_EVICTION_SHARE` (0.70) of the V8 heap limit the largest idle runtime is
+retired first, and above `HEAP_REFUSAL_SHARE` (0.85) the load is refused with
+`busy` and `HEAP_REFUSAL_RETRY_AFTER_MS` and one `gateway.shed` with
+`reason=heap`. A protected runtime (a subscriber, a run, a lease) is never retired
+to make room, so a heap made of protected runtimes refuses instead of pretending
+it made room. `packages/gateway/docs/connection-resilience.md` owns the full
+limits table.
 A second `session.open` for the same connection and session joins the attempt
 already in flight and receives its exact result instead of a `conflict`; the
 shared attempt is abandoned only when its last waiting request leaves, and a
@@ -2277,8 +2295,8 @@ that has not written a transcript yet) retires nothing either. The launcher
 passes `--max-old-space-size=4096` to the Gateway's Node process
 (`packages/mac-app/scripts/tron-gateway-launcher.c`), and the budget is sized
 below that limit. `runtime.loaded` and `runtime.evicted` record each transition
-with the session, its reason, its transcript bytes and the charge, as named
-`counts`.
+with the session, its reason (`heap` for the heap-pressure pass `G-12` added),
+its transcript bytes and the charge, as named `counts`.
 
 Catalog acquisition generations share one physical predecessor and coalesce its
 successor after settlement, including failure. Invalidations cannot multiply

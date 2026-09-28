@@ -29,7 +29,13 @@ import { CatalogMetadataIndex } from "./catalog-metadata-index.js";
 import type { SessionCatalog, SessionCatalogReconcileOutcome } from "./session-catalog.js";
 import { INVOCATION_RECEIPT_TYPE, makeInvocationReceipt } from "./invocation-receipts.js";
 import { EXTENSION_ACTIVITY_RECEIPT_TYPE, MAX_EXTENSION_HISTORY_BYTES, type ExtensionActivityReceipt } from "./extension-activity-history.js";
-import { LIVE_RUNTIME_HEAP_ESTIMATE_FACTOR, RuntimeRegistry, type RuntimeLifecycleRecord } from "./runtime-registry.js";
+import {
+  HEAP_REFUSAL_RETRY_AFTER_MS,
+  LIVE_RUNTIME_HEAP_ESTIMATE_FACTOR,
+  RuntimeRegistry,
+  type CapacityShedRecord,
+  type RuntimeLifecycleRecord,
+} from "./runtime-registry.js";
 import { RuntimeSlot } from "./runtime-slot.js";
 import { invocationReceipts } from "./invocation-receipts.js";
 import { KnowledgeStore } from "../knowledge/knowledge-store.js";
@@ -135,6 +141,8 @@ describe.sequential("RuntimeRegistry with the pinned agent runtime", () => {
     notifications?: NotificationService;
     resources?: ResourceRecorder;
     runtimeLifecycleRecord?: (record: RuntimeLifecycleRecord) => void;
+    heapSample?: () => { usedBytes: number; limitBytes: number };
+    capacityShedRecord?: (record: CapacityShedRecord) => void;
   } = {}) {
     const root = await mkdtemp(join(tmpdir(), `tron-cold-acquire-${label}-`));
     const agentDir = join(root, "agent");
@@ -168,6 +176,8 @@ describe.sequential("RuntimeRegistry with the pinned agent runtime", () => {
       ...(options.runtimeDisposeTimeout ? { runtimeDisposeTimeout: options.runtimeDisposeTimeout } : {}),
       ...(options.resources ? { resources: options.resources } : {}),
       ...(options.runtimeLifecycleRecord ? { runtimeLifecycleRecord: options.runtimeLifecycleRecord } : {}),
+      ...(options.heapSample ? { heapSample: options.heapSample } : {}),
+      ...(options.capacityShedRecord ? { capacityShedRecord: options.capacityShedRecord } : {}),
     });
     registries.push(registry);
     if (options.beforeInitialize) await options.beforeInitialize(manager.getSessionFile()!);
@@ -11187,5 +11197,109 @@ export default function (pi) {
     expect(Date.now() - appendedAt).toBeLessThanOrEqual(1_000);
     expect(catalog.row(child)?.size).toBe((await fsPromises.stat(child)).size);
     expect(recorded.recordCatalogWalk.mock.calls.length).toBe(walksBeforeAppend);
+  });
+
+  // Failure mode (G-12): a cold runtime load that queues behind the concurrency
+  // cap keeps loading for a client that already left, so a transcript nobody
+  // waits for is parsed into the live set.
+  it("queues cold runtime loads and drops a queued one whose client disconnects", async () => {
+    const fixture = await coldFixture("cold-load-queue");
+    const directory = dirname(fixture.sessionFile);
+    const queued = SessionManager.create(fixture.cwd, directory, { id: "40000000-0000-4000-8000-000000000002" });
+    queued.appendMessage(fauxAssistantMessage("queued cold load"));
+    const abandonedSession = SessionManager.create(fixture.cwd, directory, { id: "40000000-0000-4000-8000-000000000003" });
+    abandonedSession.appendMessage(fauxAssistantMessage("abandoned cold load"));
+    await settleCatalog(fixture.registry);
+    const loads: string[] = [];
+    // The loader is held to queue real cold loads, so no earlier case's spy on
+    // `RuntimeSlot.create` may still be installed.
+    vi.restoreAllMocks();
+    const releaseLoads: Array<() => void> = [];
+    const realCreate = RuntimeSlot.create.bind(RuntimeSlot);
+    vi.spyOn(RuntimeSlot, "create").mockImplementation(async (...args) => {
+      loads.push(args[0].getSessionId());
+      await new Promise<void>((resolve) => { releaseLoads.push(resolve); });
+      return await realCreate(...args);
+    });
+
+    const first = fixture.registry.acquire(fixture.manager.getSessionId());
+    const second = fixture.registry.acquire(queued.getSessionId());
+    await waitUntil(() => loads.length === 2);
+    const controller = new AbortController();
+    const abandoned = fixture.registry.acquire(abandonedSession.getSessionId(), controller.signal);
+    // The third waits for one of the two places instead of loading beside them.
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    expect(loads).toHaveLength(2);
+    controller.abort(new Error("the client left"));
+    await expect(abandoned).rejects.toThrow("the client left");
+    for (const release of releaseLoads.splice(0)) release();
+    await Promise.all([first, second]);
+    expect(loads).toEqual([fixture.manager.getSessionId(), queued.getSessionId()]);
+  });
+
+  // Failure mode (G-12): heap pressure retires a runtime that has an audience, or
+  // the refusal it should make instead never happens and the load takes the
+  // process to the limit.
+  it("reclaims the largest idle runtime under heap pressure and refuses a cold load when only a protected one is left", async () => {
+    // The fixture loads real runtimes; an earlier case's spy on the loader would
+    // never settle for this one.
+    vi.restoreAllMocks();
+    const mebibyte = 1_024 * 1_024;
+    const records: RuntimeLifecycleRecord[] = [];
+    const sheds: CapacityShedRecord[] = [];
+    let heapUsedBytes = 100;
+    let flips = 0;
+    const fixture = await coldFixture("heap-pressure", {
+      heapSample: () => ({ usedBytes: heapUsedBytes, limitBytes: 1_000 }),
+      runtimeLifecycleRecord: (record) => {
+        records.push(record);
+        // One retirement gives the memory back: the pass must stop rather than
+        // walk the whole live set.
+        if (record.event === "runtime.evicted" && flips++ === 0) heapUsedBytes = 500;
+      },
+      capacityShedRecord: (record) => sheds.push(record),
+    });
+    const directory = dirname(fixture.sessionFile);
+    const large = SessionManager.create(fixture.cwd, directory, { id: "40000000-0000-4000-8000-000000000010" });
+    large.appendMessage(fauxAssistantMessage("large idle runtime"));
+    const target = SessionManager.create(fixture.cwd, directory, { id: "40000000-0000-4000-8000-000000000011" });
+    target.appendMessage(fauxAssistantMessage("refused cold load"));
+    await settleCatalog(fixture.registry);
+    const protectedSlot = await fixture.registry.acquire(fixture.manager.getSessionId());
+    const largeSlot = await fixture.registry.acquire(large.getSessionId());
+    // The protected runtime is the one that must survive every pass.
+    subscribeAudience(fixture.registry, fixture.manager.getSessionId());
+    await growTranscript(protectedSlot.sessionFile!, 4 * mebibyte);
+    await growTranscript(largeSlot.sessionFile!, 64 * mebibyte);
+
+    heapUsedBytes = 900;
+    const admitted = await fixture.registry.acquire(target.getSessionId());
+    expect(admitted.id).toBe(target.getSessionId());
+    const evictions = records.filter((record) => record.event === "runtime.evicted");
+    // The largest idle runtime gave the memory back; the protected one did not.
+    expect(evictions.map((record) => [record.sessionId, record.reason])).toEqual([
+      [large.getSessionId(), "heap"],
+    ]);
+    expect(largeSlot.isDisposed).toBe(true);
+    expect(protectedSlot.isDisposed).toBe(false);
+
+    // Only a protected runtime is left, so nothing can be reclaimed and the
+    // load is refused instead of pushing the process to its limit.
+    heapUsedBytes = 900;
+    const another = SessionManager.create(fixture.cwd, directory, { id: "40000000-0000-4000-8000-000000000012" });
+    another.appendMessage(fauxAssistantMessage("second refused cold load"));
+    await settleCatalog(fixture.registry);
+    await expect(fixture.registry.acquire(another.getSessionId())).rejects.toMatchObject({
+      code: "busy",
+      details: { retryAfterMs: HEAP_REFUSAL_RETRY_AFTER_MS },
+    });
+    expect(sheds).toEqual([{
+      reason: "heap",
+      method: "session.open",
+      heapUsedBytes: 900,
+      heapLimitBytes: 1_000,
+      retryAfterMs: HEAP_REFUSAL_RETRY_AFTER_MS,
+    }]);
+    expect(protectedSlot.isDisposed).toBe(false);
   });
 });

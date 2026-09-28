@@ -78,6 +78,27 @@ const DISPOSABLE_READ_METHODS: ReadonlySet<string> = new Set([
   "provider.list",
   "provider.usage",
 ]);
+/** A projection that cannot answer within this bound is answering nobody: the
+ * client already stopped waiting or will, so the Gateway stops the read. */
+const DISPOSABLE_READ_DEADLINE_MS = 5_000;
+/** A cold `session.open` may parse a large transcript before its subscription
+ * commits, so it is the one disposable read with a longer bound. */
+const SESSION_OPEN_DEADLINE_MS = 10_000;
+/** What a shed response tells the client to wait. The pressure that shed the
+ * read is still there, so a retry without a pause would be shed again; the
+ * phone bounds this hint to 10 s of its own. */
+const SHED_RETRY_AFTER_MS = 1_000;
+/**
+ * Server-side deadline per disposable read (`G-12`): one table, so a read that
+ * has no entry has no deadline. An admitted mutation or prompt is deliberately
+ * absent — its owner settles it durably whatever the client does with its wait.
+ */
+export const DISPOSABLE_READ_DEADLINES_MS: ReadonlyMap<string, number> = new Map(
+  [...DISPOSABLE_READ_METHODS].map((method): [string, number] => [
+    method,
+    method === "session.open" ? SESSION_OPEN_DEADLINE_MS : DISPOSABLE_READ_DEADLINE_MS,
+  ]),
+);
 /** An upgrade that reaches hello within this bound is debug detail; every
  * abandoned or rejected upgrade, and any slower one, warns. */
 const UPGRADE_SLOW_WARNING_MS = 1_000;
@@ -272,6 +293,10 @@ interface InFlightRpc {
   /** Set with the stage it was in when an explicit `cancel` frame arrived. A
    * socket retirement leaves it unset: that request reports `connectionClosed`. */
   cancelledStage?: string;
+  /** Set with the reason when this read outlived its own deadline, so the one
+   * record for the request is `gateway.shed` instead of `rpc.completed` and the
+   * abort is answered instead of silently dropped (`G-12`). */
+  shedReason?: "deadline";
 }
 
 interface SynchronizationCompletion {
@@ -975,6 +1000,7 @@ export class GatewayServer {
   private readonly heartbeat: NodeJS.Timeout;
   private lastHeartbeatAt = performance.now();
   private readonly stallSampler: StallSampler;
+  private readonly disposableReadDeadlines: ReadonlyMap<string, number>;
   private readonly resourceSampler: ResourceSampler;
   private readonly resourceTimer: NodeJS.Timeout;
   /** One resource sample reads the runtime inventory; a slow one must not
@@ -1003,6 +1029,9 @@ export class GatewayServer {
       maximumOutboundBytes?: number;
       maximumSynchronizationBytes?: number;
       synchronizationTimeoutMs?: number;
+      /** The disposable-read deadline table (`G-12`). The module table unless a
+       * caller overrides it, like the other named bounds above. */
+      disposableReadDeadlinesMs?: ReadonlyMap<string, number>;
       maximumHttpConnections?: number;
       maximumHttpRequests?: number;
       maximumHttpRequestsPerIdentity?: number;
@@ -1023,6 +1052,7 @@ export class GatewayServer {
     },
   ) {
     this.stallSampler = options.stallSampler ?? new StallSampler();
+    this.disposableReadDeadlines = options.disposableReadDeadlinesMs ?? DISPOSABLE_READ_DEADLINES_MS;
     this.resourceSampler = options.resourceSampler ?? new ResourceSampler();
     this.peerPaths = options.peerPathReader ?? new TailscalePeerPaths();
     this.primaryTransport = isTailscaleAddress(options.host) ? "tailscale" : "primary";
@@ -2242,6 +2272,9 @@ export class GatewayServer {
       span: requestSpan,
     };
     connection.requestControllers.set(frame.id, inFlightRpc);
+    // The deadline is armed at admission, so it bounds the whole request path
+    // and not only the work the handler happens to be in (`G-12`).
+    const deadlineTimer = this.armDisposableReadDeadline(frame.method, inFlightRpc);
     const params = frame.params && typeof frame.params === "object" && !Array.isArray(frame.params)
       ? frame.params as Record<string, unknown>
       : {};
@@ -2468,7 +2501,12 @@ export class GatewayServer {
       );
       let result: JsonValue;
       if (sessionOpenFlight === undefined) {
-        result = await invoke();
+        // A read with a deadline is abandoned at that deadline instead of
+        // waiting for work whose answer nobody will accept; its owner keeps
+        // running and the abort answers the request (`G-12`).
+        result = deadlineTimer === undefined
+          ? await invoke()
+          : await abortableRead(requestController.signal, invoke);
         attemptSucceeded = true;
       } else {
         const attempt = invoke();
@@ -2646,6 +2684,7 @@ export class GatewayServer {
         }
       }
     } finally {
+      if (deadlineTimer !== undefined) clearTimeout(deadlineTimer);
       const otherOpenWaiters = (sessionOpenFlight?.waiters ?? 1) > 1;
       // An open keeps the synchronization it installed only when an answer for
       // it is out: this request's own delivered response, or a shared attempt a
@@ -2694,6 +2733,7 @@ export class GatewayServer {
         span: requestSpan,
         outcome: loggedOutcome,
         cancelledStage: inFlightRpc.cancelledStage,
+        shedReason: inFlightRpc.shedReason,
       });
     }
   }
@@ -2721,6 +2761,7 @@ export class GatewayServer {
       span: requestSpan,
     };
     connection.requestControllers.set(requestId, inFlightRpc);
+    const deadlineTimer = this.armDisposableReadDeadline(frame.method as string, inFlightRpc);
     const params = frame.params && typeof frame.params === "object" && !Array.isArray(frame.params)
       ? frame.params as Record<string, unknown>
       : {};
@@ -2747,7 +2788,12 @@ export class GatewayServer {
         rpcOutcome = "success";
       }
     } catch (error) {
-      if (!inFlightRpc.controller.signal.aborted) {
+      // A shed join still owes its own answer: unlike a cancel, nobody stopped
+      // waiting for it, so the busy response with the retry hint goes out
+      // (`G-12`).
+      if (inFlightRpc.shedReason !== undefined) {
+        runInRequestSpan(requestSpan, () => this.send(connection, { type: "response", id: requestId, ok: false, error: publicError(error) }));
+      } else if (!inFlightRpc.controller.signal.aborted) {
         const level = rpcFailureLevel(error);
         this.options.logger.log(level, `RPC ${frame.method as string} for client ${connection.id} failed`, {
           event: "rpc.error", source: "transport", method: frame.method as string, requestID: diagnosticRequestID(requestId),
@@ -2759,6 +2805,7 @@ export class GatewayServer {
         runInRequestSpan(requestSpan, () => this.send(connection, { type: "response", id: requestId, ok: false, error: publicError(error) }));
       }
     } finally {
+      if (deadlineTimer !== undefined) clearTimeout(deadlineTimer);
       connection.inFlight.delete(requestId);
       connection.requestControllers.delete(requestId);
       this.releaseSessionOpenFlight(connection, flight);
@@ -2773,8 +2820,40 @@ export class GatewayServer {
         span: requestSpan,
         outcome: loggedOutcome,
         cancelledStage: inFlightRpc.cancelledStage,
+        shedReason: inFlightRpc.shedReason,
       });
     }
+  }
+
+  /**
+   * Arm one disposable read's deadline (`G-12`). On expiry the request is marked
+   * shed and aborted; the ordinary failure path answers `busy` with the retry
+   * hint and the one record for it is `gateway.shed`. A method outside
+   * `DISPOSABLE_READ_DEADLINES_MS` — every mutation, every prompt, `session.sync`
+   * — has no deadline at all: those owners settle their work whatever the client
+   * does with its wait.
+   */
+  private armDisposableReadDeadline(
+    method: string,
+    inFlight: InFlightRpc,
+  ): NodeJS.Timeout | undefined {
+    const deadlineMs = this.disposableReadDeadlines.get(method);
+    if (deadlineMs === undefined) return undefined;
+    const timer = setTimeout(() => {
+      if (inFlight.shedReason !== undefined || inFlight.controller.signal.aborted) return;
+      // A subscriber of a joined open still waits for its own answer, so only
+      // this request is aborted; the shared attempt ends when its last waiter
+      // leaves (`C-6`).
+      inFlight.shedReason = "deadline";
+      inFlight.controller.abort(new GatewayError(
+        "busy",
+        `${method} did not answer within ${deadlineMs}ms`,
+        true,
+        { retryAfterMs: SHED_RETRY_AFTER_MS },
+      ));
+    }, deadlineMs);
+    timer.unref();
+    return timer;
   }
 
   /**
@@ -2842,7 +2921,10 @@ export class GatewayServer {
   }
 
   /** One record per finished request: `rpc.completed` with its breakdown, or the
-   * `rpc.cancelled` juncture record naming the stage a cancel interrupted. */
+   * `rpc.cancelled` juncture record naming the stage a cancel interrupted. A read
+   * the Gateway shed at its own deadline (`G-12`) writes one `gateway.shed`
+   * record instead: the client is still waiting for that answer, and what it
+   * needs to know is the reason and the retry hint. */
   private logRequestOutcome(
     connection: Connection,
     request: {
@@ -2853,10 +2935,26 @@ export class GatewayServer {
       readonly span: RequestSpan;
       readonly outcome: "success" | "failure" | "connectionClosed" | "cancelled";
       readonly cancelledStage: string | undefined;
+      readonly shedReason: "deadline" | undefined;
     },
   ): void {
     const durationMs = Math.max(0, Math.round(performance.now() - request.startedAt));
     const breakdown = request.span.breakdown(durationMs);
+    if (request.shedReason !== undefined) {
+      // A shed read is abnormal by definition: the Gateway refused work it had
+      // admitted, so the record is a warning whether or not it was slow.
+      this.options.logger.log(
+        "warning",
+        `Shed ${request.method} for client ${connection.id} at its deadline after ${durationMs}ms`,
+        {
+          event: "gateway.shed", source: "transport", reason: request.shedReason, method: request.method,
+          requestID: request.requestId, connectionId: connection.id, ...request.correlation,
+          outcome: request.outcome, durationMs, counts: { retryAfterMs: SHED_RETRY_AFTER_MS },
+          ...(breakdown ?? {}),
+        },
+      );
+      return;
+    }
     if (request.cancelledStage !== undefined) {
       // A cancellation is its own juncture, so it writes one record instead of a
       // completion: the stage it interrupted plus the stages it reached. Only a
