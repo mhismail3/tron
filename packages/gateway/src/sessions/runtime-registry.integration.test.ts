@@ -2189,7 +2189,10 @@ describe.sequential("RuntimeRegistry with the pinned agent runtime", () => {
     await mkdir(forks, { recursive: true });
     const child = SessionManager.forkFrom(parentFile, fixture.cwd, forks);
     child.appendMessage(fauxAssistantMessage("child"));
-    await appendFile(child.getSessionFile()!, '{"type":"message"');
+    // A complete line the index can prove, so this case measures membership
+    // rather than an in-progress append (its unprovable-neighbour half uses the
+    // header-less file below).
+    await appendFile(child.getSessionFile()!, '{"type":"message"}\n');
     await copyFile(parentFile, join(forks, "ambiguous.jsonl"));
     const live = await fixture.registry.create(fixture.cwd);
     await settleCatalog(fixture.registry);
