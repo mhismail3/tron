@@ -101,6 +101,23 @@ struct GatewayPairingTransportTests {
         }
     }
 
+    @Test("a pairing response gives the profile the LAN endpoints and pin")
+    func pairingAdoptsLanAdvertisement() async throws {
+        let pin = Data(repeating: 9, count: 32).base64EncodedString()
+        let recorder = PairingHTTPRecorder(response: Self.response(
+            status: 200,
+            body: #"{"deviceId":"device-1","token":"secret-token","machineId":"machine-1","machineName":"Runtime Mac","gatewayChannel":"stable","lanEndpoints":[{"host":"192.168.1.24","port":9847}],"lanPin":"\#(pin)"}"#
+        ))
+        let pairer = GatewayPairer(transport: recorder.transport, uuidSource: { "connection-lan" })
+
+        let (profile, _) = try await pairer.pair(invitation, deviceName: "Test iPhone")
+
+        // Pairing is the first authenticated channel, so it is where the phone
+        // learns the LAN leg it may race (E-3c); every later hello replaces it.
+        #expect(profile.lanEndpoints == [GatewayLanEndpoint(host: "192.168.1.24", port: 9_847)])
+        #expect(profile.lanPin == pin)
+    }
+
     @Test("a non-200 structured Gateway error is preserved exactly")
     func structuredFailure() async throws {
         let recorder = PairingHTTPRecorder(response: Self.response(
