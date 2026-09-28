@@ -2757,12 +2757,13 @@ a latency percentile.
   `packages/gateway/README.md`'s acceleration-file paragraph now say so, and the
   integration fixtures that waited for the sidecar settle the owner instead
   (`settleCatalog`). New case: "writes the durable catalog document from its
-  owner, not from a reader cut" (with a reader-path save re-added it observes
-  that write).
+  owner, not from a reader cut". Round 3 corrected that case: the deleted writer
+  was fire-and-forget, so the case now flushes the reader's deferred chain before
+  asserting instead of checking an immediate call count it could not observe.
 - Finding 3 (minor — logger scope, no bounding test, redundant escaping): the
   `counts` field and `boundedCounts` in `transport/logger.ts` stay as the
-  `catalog.reconciled` record's field contract; the orchestrator's dispatch of
-  this round accepts that scope, and this entry is the handoff for it. New case:
+  `catalog.reconciled` record's field contract; the orchestrator accepted that
+  scope as an explicit decision when it dispatched round 3. New case:
   "bounds the named counters one record carries" covers the count cap, the name
   shape, non-finite and negative values and the persisted round trip; the cap now
   counts the counters the field accepts rather than the raw entry list, and the
@@ -2800,3 +2801,40 @@ a latency percentile.
   reaches the document only when the owner next reconciles; until G-1b's watcher
   lands, a restart repairs those rows by re-reading their files. G-1b owns that
   gap.
+
+### G-1a · Done (review round 3) · 2026-09-28 · orchestrator-dispatched deepseek-worker
+
+- Result: a third review approved G-1a and reproduced the round-2 major fix and
+  the worker's negative control. It found one minor — a new case that could not
+  fail against the bug it names — plus two inaccurate sentences in the round-2
+  entry. Both are fixed here; no product code changed.
+- Finding 1 (minor, reproduced): "writes the durable catalog document from its
+  owner, not from a reader cut" asserted `expect(save).not.toHaveBeenCalled()`
+  the moment `catalog("all")` returned, but the deleted reader-path write was
+  fire-and-forget (`void this.persistDurableCatalogIndex(...)`) and reached
+  `save` only after awaiting one summary per row, so the assertion could not
+  observe it. The case now flushes that deferred chain before asserting (250 ms,
+  the bounded flush the reviewer's 200 ms probe used to surface one call) and
+  also asserts the read did not recreate the document it had removed.
+- Finding 1 negative control: with `b06aff0c8`'s `runtime-registry.ts` hunk
+  reversed in this worktree, the case fails with `Number of calls: 1` in three
+  runs of three (`expected "save" to not be called`); with the fix restored it
+  passes, alone and in the focused `-t "catalog|delete|index|durable|owner"`
+  run. The reversed patch was reverted before this entry.
+- Finding 2 (nit): the round-2 entry's claim that the case "observes that write"
+  with a reader-path save re-added was false for the real old path, and its
+  logger-scope sentence reported an orchestrator acceptance that had not been
+  given. Both sentences are corrected in place above.
+- Orchestrator decision (recorded at dispatch of this round, per the task's own
+  text): the `counts` field and `boundedCounts` scope widening in
+  `transport/logger.ts` is accepted as the `catalog.reconciled` field contract.
+  G-10 still owns the measured write volume and its resource counters.
+- Evidence: `npx tsc --noEmit -p .` clean; `runtime-registry.integration.test.ts
+  -t "catalog|delete|index|durable|owner"` 69/69; the changed case alone passes;
+  `python3 scripts/check-documentation-policy.py` and
+  `scripts/personal-info-guard.sh` pass.
+- Residual risk unchanged from round 2: the owner is the document's only writer,
+  so external writers (a Pi child, a copied file) reach it only at the owner's
+  next reconcile until G-1b's watcher lands, and a Gateway-owned append that does
+  not change the slot summary can leave a row's size and mtime behind until its
+  next summary change.

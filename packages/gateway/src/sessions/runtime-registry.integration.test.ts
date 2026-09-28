@@ -1488,7 +1488,15 @@ describe.sequential("RuntimeRegistry with the pinned agent runtime", () => {
     const save = vi.spyOn(CatalogMetadataIndex.prototype, "save");
     try {
       await fixture.registry.catalog("all");
+      // The reader-path write this case guards was fire-and-forget: it reached
+      // `save` only after awaiting one summary per row, so an assertion taken
+      // the moment `catalog()` returns cannot observe it and would pass against
+      // the very bug the case names. Flush that deferred chain first.
+      await new Promise((resolve) => setTimeout(resolve, 250));
       expect(save).not.toHaveBeenCalled();
+      // And the document the read removed is still gone, not rewritten a moment
+      // later by a caller other than its owner.
+      expect(existsSync(indexPath)).toBe(false);
     } finally {
       save.mockRestore();
     }
