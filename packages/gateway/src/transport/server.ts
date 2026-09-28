@@ -15,7 +15,7 @@ import type { BlobByteRange } from "../sessions/blob-store.js";
 import type { AuthBroker } from "../admin/auth-broker.js";
 import type { GatewayLogger } from "./logger.js";
 import { GATEWAY_CONNECTION_POLICY } from "./connection-policy.js";
-import { formatStallEvidence, StallSampler } from "./stall-diagnostics.js";
+import { formatHostEvidence, formatStallEvidence, StallSampler } from "./stall-diagnostics.js";
 import { GatewayService, type ClientContext } from "./gateway-service.js";
 import { MIN_PROTOCOL_VERSION, PROTOCOL_VERSION } from "../version.js";
 import { SessionSyncBarrier, type BufferedSessionEncoding, type BufferedSessionEvent } from "./session-sync.js";
@@ -561,6 +561,9 @@ export class GatewayServer {
     },
   ) {
     this.stallSampler = options.stallSampler ?? new StallSampler();
+    // Sampled off every record path: the heartbeat keeps this current, and a
+    // phone that reconnects in the first interval still carries host evidence.
+    this.stallSampler.refreshHostSample();
     const maximumHttpConnections = options.maximumHttpConnections ?? HTTP_MAXIMUM_CONNECTIONS;
     if (!Number.isSafeInteger(maximumHttpConnections) || maximumHttpConnections < 1) {
       throw new Error("HTTP connection bounds are invalid");
@@ -618,6 +621,9 @@ export class GatewayServer {
           });
         });
       }
+      // Keeps the host sample behind the connection records current. On a tick
+      // that already probed the host for a stall this starts nothing extra.
+      this.stallSampler.refreshHostSample();
       for (const connection of this.clients.values()) {
         if (connection.closeInitiated || connection.socket.readyState !== WebSocket.OPEN) continue;
         // Retire only after three complete heartbeat intervals received no frame.
@@ -1358,10 +1364,12 @@ export class GatewayServer {
       connection.ready = true;
       connection.presentationOnly = (frame as Record<string, unknown>).clientRole === "mobile";
       // Admission and handshake are one `connection.opened` record. The Mac
-      // app's local probes reconnect constantly, so they are debug detail.
+      // app's local probes reconnect constantly, so they are debug detail, and
+      // only a paired device's reconnect carries host memory evidence.
+      const openHostEvidence = connection.isLocal ? "" : ` ${formatHostEvidence(this.stallSampler.hostSample())}`;
       this.options.logger.log(
         connection.isLocal ? "debug" : "info",
-        `Client ${connection.id} connection opened (${connection.isLocal ? "local" : "paired"}, ${connection.presentationOnly ? "mobile" : "local"} role, compression=${connection.socket.extensions || "none"}) after ${Math.max(0, Math.round(performance.now() - connection.admittedAt))}ms`,
+        `Client ${connection.id} connection opened (${connection.isLocal ? "local" : "paired"}, ${connection.presentationOnly ? "mobile" : "local"} role, compression=${connection.socket.extensions || "none"}) after ${Math.max(0, Math.round(performance.now() - connection.admittedAt))}ms${openHostEvidence}`,
         { event: "connection.opened", source: "transport", connectionId: connection.id },
       );
       clearTimeout(connection.helloTimer);
@@ -1969,9 +1977,12 @@ export class GatewayServer {
     const closedAt = performance.now();
     const outbound = connection.outbound.snapshot();
     connection.outbound.retire();
+    // A phone's drop is the incident boundary, so the close record states what
+    // the host was doing; the local probes' debug records stay free of it.
+    const closeHostEvidence = connection.isLocal ? "" : ` ${formatHostEvidence(this.stallSampler.hostSample())}`;
     this.options.logger.log(
       connection.isLocal ? "debug" : "info",
-      `Client ${connection.id} connection closed after ${Math.max(0, Math.round(closedAt - connection.admittedAt))}ms (${detail}; ${outbound.completedFrames}/${outbound.acceptedFrames} outbound frames completed, ${outbound.queuedBytes} queued bytes; lastInboundAgeMs=${progressAge(connection.lastInboundAt, closedAt)} lastWriteProgressAgeMs=${progressAge(connection.lastWriteProgressAt, closedAt)} queuedFrames=${outbound.queuedFrames} queuedBytes=${outbound.queuedBytes} completedFrames=${outbound.completedFrames})`,
+      `Client ${connection.id} connection closed after ${Math.max(0, Math.round(closedAt - connection.admittedAt))}ms (${detail}; ${outbound.completedFrames}/${outbound.acceptedFrames} outbound frames completed, ${outbound.queuedBytes} queued bytes; lastInboundAgeMs=${progressAge(connection.lastInboundAt, closedAt)} lastWriteProgressAgeMs=${progressAge(connection.lastWriteProgressAt, closedAt)} queuedFrames=${outbound.queuedFrames} queuedBytes=${outbound.queuedBytes} completedFrames=${outbound.completedFrames})${closeHostEvidence}`,
       { event: "connection.closed", source: "transport", connectionId: connection.id,
         durationMs: Math.max(0, closedAt - connection.admittedAt) },
     );

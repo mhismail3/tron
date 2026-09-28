@@ -87,21 +87,26 @@ async function sampleHostMemory(): Promise<HostMemory> {
   };
 }
 
+/**
+ * Host memory as one bounded field list, shared by the stall and connection
+ * records so an operator reads the same names in both.
+ */
+export function formatHostEvidence(host: HostMemory | undefined): string {
+  if (!host) return "host=unavailable";
+  const fields = [`hostFreeBytes=${host.freeBytes}`, `hostTotalBytes=${host.totalBytes}`];
+  if (host.swapUsedBytes !== undefined) fields.push(`swapUsedBytes=${host.swapUsedBytes}`);
+  if (host.pressure !== undefined) fields.push(`memoryPressure=${host.pressure}`);
+  return fields.join(" ");
+}
+
 export function formatStallEvidence(window: StallWindow, host: HostMemory | undefined): string {
-  const fields = [
+  return [
     `gcCount=${window.gcCount}`,
     `gcPauseMs=${Math.round(window.gcPauseMs)}`,
     `gcMaxPauseMs=${Math.round(window.gcMaxPauseMs)}`,
     `eventLoopUtilization=${window.utilization.toFixed(2)}`,
-  ];
-  if (host) {
-    fields.push(`hostFreeBytes=${host.freeBytes}`, `hostTotalBytes=${host.totalBytes}`);
-    if (host.swapUsedBytes !== undefined) fields.push(`swapUsedBytes=${host.swapUsedBytes}`);
-    if (host.pressure !== undefined) fields.push(`memoryPressure=${host.pressure}`);
-  } else {
-    fields.push("host=unavailable");
-  }
-  return fields.join(" ");
+    formatHostEvidence(host),
+  ].join(" ");
 }
 
 export class StallSampler {
@@ -109,6 +114,7 @@ export class StallSampler {
   private readonly sampleHost: () => Promise<HostMemory>;
   private readonly disposeGc: () => void;
   private utilizationMark: EventLoopUtilization;
+  private cachedHost: HostMemory | undefined;
   private gcCount = 0;
   private gcPauseMs = 0;
   private gcMaxPauseMs = 0;
@@ -143,24 +149,42 @@ export class StallSampler {
   }
 
   /**
-   * Host memory for one stall record, bounded by HOST_SAMPLE_TIMEOUT_MS. Only
-   * one probe runs at a time; an overlapping stall reports it unavailable.
+   * Host memory for one stall record, bounded by HOST_SAMPLE_TIMEOUT_MS, and
+   * the latest sample the connection records read. Only one probe runs at a
+   * time; an overlapping caller reports it unavailable.
    */
   async hostMemory(): Promise<HostMemory | undefined> {
     if (this.hostSampleInFlight) return undefined;
     this.hostSampleInFlight = true;
     let timer: NodeJS.Timeout | undefined;
     try {
-      return await Promise.race([
+      const host = await Promise.race([
         this.sampleHost(),
         new Promise<undefined>((resolve) => { timer = setTimeout(() => resolve(undefined), HOST_SAMPLE_TIMEOUT_MS); }),
       ]);
+      if (host !== undefined) this.cachedHost = host;
+      return host;
     } catch {
       return undefined;
     } finally {
       if (timer) clearTimeout(timer);
       this.hostSampleInFlight = false;
     }
+  }
+
+  /**
+   * Keeps the connection records' host sample current. The transport calls
+   * this on every heartbeat, so the 25 s tick is the rate limit and the
+   * staleness bound at once: a phone drop or reconnect reads {@link hostSample}
+   * synchronously and never waits on, or adds, a `sysctl` of its own.
+   */
+  refreshHostSample(): void {
+    void this.hostMemory();
+  }
+
+  /** Latest host sample; undefined until a probe lands. */
+  hostSample(): HostMemory | undefined {
+    return this.cachedHost;
   }
 
   dispose(): void {

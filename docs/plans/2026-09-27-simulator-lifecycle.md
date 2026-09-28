@@ -2,7 +2,7 @@
 
 - **Started:** 2026-09-27
 - **Status:** Active
-- **Last updated:** 2026-09-28, SIM-9 done; SIM-8 runs on its own branch
+- **Last updated:** 2026-09-28, SIM-1 to SIM-9 done
 - **Goal:** Agents run as many iOS simulators in parallel as the Mac can afford, and every simulator, process and artifact the test tooling creates is released automatically, including after crashes, so the live Gateway never runs short of memory.
 
 ## Goal and constraints
@@ -78,7 +78,7 @@ Why it accumulates, from the code:
 | SIM-5 | Done | Scoped clean and pruning: `clean` removes only this worktree's or lane's simulator, products and runs; `prune` keeps the newest results per worktree and deletes products whose worktree no longer exists; the sweep prunes too | SIM-3 | chat scroll session (worker lanes), 2026-09-27 |
 | SIM-6 | Done | One view: `scripts/tron-ios-test status --all` lists every booted simulator (owned lanes, the Development simulator, unowned ones), its owner, lease holder and uptime, plus `Simulator.app` | SIM-3 | chat scroll session (worker lanes), 2026-09-27 |
 | SIM-7 | Done | Same lifecycle everywhere: `scripts/tron-profile-ios`, `scripts/ios-gateway-e2e-test` and `scripts/tron-ios-simulator` use the lane, release, sweep and admission paths; the Development simulator reports idle uptime and is shut down by its `stop` | SIM-1, SIM-2, SIM-4 | chat scroll session (worker lanes), 2026-09-27 |
-| SIM-8 | Claimed | Diagnosable disconnects: the Gateway records the Mac's memory pressure and swap in its diagnostics when phone connections drop and reconnect, with a row in `packages/gateway/docs/observability.md` and a test | none | chat scroll session (worker lanes), 2026-09-27 |
+| SIM-8 | Done | Diagnosable disconnects: the Gateway records the Mac's memory pressure and swap in its diagnostics when phone connections drop and reconnect, with a row in `packages/gateway/docs/observability.md` and a test | none | chat scroll session (worker lanes), 2026-09-27 |
 | SIM-9 | Done | Docs and guidance: `packages/ios-app/docs/development.md`, `.agents/skills/tron-ios/SKILL.md`, `.agents/skills/tron-workspace-housekeeping/SKILL.md` and `AGENTS.md` describe lanes, release, sweep and admission, and replace the manual cleanup steps the tooling now owns | SIM-1 to SIM-7 | chat scroll session (worker lanes), 2026-09-27 |
 | SIM-10 | Ready | Remove `TRON_IOS_TEST_STATE_DIR` and `TRON_IOS_TEST_DEVICE_NAME` in favour of lanes, with every caller, once the energy-efficiency plan no longer runs profiling lanes through them | SIM-3 | |
 
@@ -820,3 +820,31 @@ Owning files: `scripts/ios-test-simulator.py`, `scripts/tron-ios-test`.
   command-line roots or which `simctl` resolves) and N6 (no automated test of the
   E2E `detach` helper) stay as notes; every fixture sets its roots and
   `TRON_IOS_XCRUN` inside its temporary directory today.
+
+### SIM-8 · 2026-09-27 · chat scroll session (worker lane, branch `sim-8-gateway-memory`)
+
+- Result: a paired device's `connection.opened` and `connection.closed` records
+  now end with `hostFreeBytes=`, `hostTotalBytes=`, `swapUsedBytes=` and
+  `memoryPressure=`, so one line names the host state at a drop or a reconnect.
+- Owner and mechanism: `packages/gateway/src/transport/stall-diagnostics.ts`
+  keeps the latest host sample (`os.freemem`/`os.totalmem` plus a bounded
+  `sysctl` read of `vm.swapusage` and `kern.memorystatus_vm_pressure_level`) and
+  the transport refreshes it once at startup and on every 25 s heartbeat, which
+  is both the rate limit and the staleness bound. Connection records read the
+  cache synchronously, so no record waits on a probe and a reconnect storm adds
+  no subprocesses. The delayed-heartbeat record now stores its probe as the same
+  sample, and the heartbeat refreshes only after that path, so a stall record is
+  never starved of host evidence.
+- Local Mac probes keep their constant debug records free of host facts; the
+  evidence belongs to the phone boundary the incident was about.
+- Docs: `packages/gateway/docs/observability.md` (both catalog rows),
+  `packages/gateway/docs/connection-resilience.md` (interpret table) and
+  `packages/gateway/README.md` (transport diagnostics paragraph).
+- Test: `packages/gateway/src/transport/server-connection-memory.integration.test.ts`,
+  four cases over real sockets with an injected host probe, one per written
+  failure mode (no host evidence, a probe per record, a sample that never
+  refreshes, host facts on the local probes). Each case was confirmed to fail
+  against the code without its mechanism.
+- Validation: `npm run build`; `npx vitest run src/transport` (39 files, 299
+  tests) passes.
+- Deviations: none.
