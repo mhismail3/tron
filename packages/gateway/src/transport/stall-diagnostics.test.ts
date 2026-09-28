@@ -85,7 +85,11 @@ describe("StallSampler", () => {
 // (an empty histogram, a failed probe) is written as NaN; (8) a runtime loaded
 // and evicted inside one window is invisible to a comparison of live sets; (9)
 // the memory-growth step only compares each minute with the one before it, so
-// slow drift over a day never reaches disk.
+// slow drift over a day never reaches disk; (10) work recorded while the
+// runtime inventory read hangs is reported in the window that closed before it,
+// so a rate read from `windowMs` is wrong exactly then; (11) a heap step that
+// only compares bands with the minute before it flaps at a band edge, writing a
+// record every minute for a steady heap that a garbage collection moves.
 function resourceSampler(dependencies: ConstructorParameters<typeof ResourceSampler>[0] = {}) {
   return new ResourceSampler({
     readRuntimes: async () => [],
@@ -121,6 +125,42 @@ describe("ResourceSampler", () => {
     expect(second).toMatchObject({
       catalogWalks: 0, requestPathCatalogWalks: 0, catalogWalkMs: 0, catalogWalkFiles: 0, outboundBytes: 0, snapshotBuilds: 0,
       unaudiencedSnapshotBuilds: 0, runtimesLoaded: 0, runtimesEvicted: 0,
+    });
+  });
+
+  // Regression: the window (and its `windowMs`) closed before the runtime
+  // inventory was awaited, so counts recorded during a hung read have to open
+  // the next window instead of being reported inside the window that closed.
+  it("closes the window's counters and its fsync drain before awaiting the runtime inventory", async () => {
+    let now = 10_000;
+    vi.spyOn(performance, "now").mockImplementation(() => now);
+    let release!: () => void;
+    let hang = true;
+    let fsyncs = 2;
+    const sampler = resourceSampler({
+      readRuntimes: () => {
+        if (!hang) return Promise.resolve([]);
+        return new Promise((resolve) => { release = () => { hang = false; resolve([]); }; });
+      },
+      durableWrites: () => ({ count: fsyncs, ms: 5 }),
+    });
+    sampler.recordOutboundBytes(1_000);
+    sampler.recordCatalogWalk(120, 3, true);
+    const hung = sampler.sample();
+    // The inventory read does not return. The window already closed at 10_000,
+    // so this work belongs to the window the next sample closes.
+    now = 10_300;
+    fsyncs = 9;
+    sampler.recordOutboundBytes(7);
+    sampler.recordCatalogWalk(5, 1);
+    release();
+    expect(await hung).toMatchObject({
+      windowMs: 0, outboundBytes: 1_000, catalogWalks: 1, requestPathCatalogWalks: 1, catalogWalkFiles: 3,
+      durableWrites: 2, durableWriteMs: 5,
+    });
+    expect(await sampler.sample()).toMatchObject({
+      windowMs: 300, outboundBytes: 7, catalogWalks: 1, requestPathCatalogWalks: 0, catalogWalkFiles: 1,
+      durableWrites: 9,
     });
   });
 
@@ -173,12 +213,33 @@ describe("ResourceSampler", () => {
     expect(sampler.level(await sampler.sample())).toMatchObject({ level: "info" });
     heapUsed = HEAP_USED_INFO_STEP_BYTES + 1_000;
     expect(sampler.level(await sampler.sample())).toMatchObject({
-      level: "info", reason: `heapUsedBytes=${HEAP_USED_INFO_STEP_BYTES + 1_000} entering band 1`,
+      level: "info", reason: `heapUsedBytes=${HEAP_USED_INFO_STEP_BYTES + 1_000} moved 256 MiB from 1000`,
     });
-    // A heap that grows within its band, like an RSS that has not moved 10% from
-    // the last window written, is not a change.
+    // A heap that moves less than the anchored step, like an RSS that has not
+    // moved 10% from the last window written, is not a change.
     heapUsed = HEAP_USED_INFO_STEP_BYTES + 2_000;
     expect(sampler.level(await sampler.sample())).toEqual({ level: "debug" });
+  });
+
+  // 40 MiB swings around a 256 MiB edge, as between garbage collections, are
+  // not a heap change; a real 256 MiB move from the last window written at info
+  // or above is.
+  it("anchors the heap step so an edge oscillation does not promote every minute", async () => {
+    let heapUsed = HEAP_USED_INFO_STEP_BYTES;
+    const sampler = resourceSampler({ memoryUsage: () => ({ heapUsed, rss: 2_000 }), heapLimitBytes: () => 4_000_000_000 });
+    // The first window starts the anchor; it is never a change by itself.
+    expect(sampler.level(await sampler.sample())).toEqual({ level: "debug" });
+    const promotions: string[] = [];
+    for (let minute = 0; minute < 60; minute += 1) {
+      heapUsed = HEAP_USED_INFO_STEP_BYTES + (minute % 2 === 0 ? 1 : -1) * 40 * 1_024 * 1_024;
+      const decision = sampler.level(await sampler.sample());
+      if (decision.level !== "debug") promotions.push(String(decision.reason));
+    }
+    expect(promotions).toEqual([]);
+    heapUsed = HEAP_USED_INFO_STEP_BYTES * 2;
+    expect(sampler.level(await sampler.sample())).toEqual({
+      level: "info", reason: `heapUsedBytes=${HEAP_USED_INFO_STEP_BYTES * 2} moved 256 MiB from ${HEAP_USED_INFO_STEP_BYTES}`,
+    });
   });
 
   it("promotes slow RSS growth once it accumulates past the anchored step", async () => {

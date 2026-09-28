@@ -110,9 +110,10 @@ export const EVENT_LOOP_MAX_INFO_STEP_MS = 250;
  * has to bound. */
 export const HEAP_WARNING_SHARE = 0.7;
 
-/** Heap used in absolute bands: a window that moves bands is a memory change
- * worth a record, and a fixed step catches growth a share of a multi-gigabyte
- * limit would round away. */
+/** Heap used moved this many absolute bytes from the last window written at
+ * info or above: a growth step no share of a multi-gigabyte limit would round
+ * away, measured from an anchor so a heap that swings tens of megabytes between
+ * garbage collections does not write a record every minute. */
 export const HEAP_USED_INFO_STEP_BYTES = 256 * 1_024 * 1_024;
 
 /** RSS moved this share away from the last window written at info or above,
@@ -265,6 +266,11 @@ export class ResourceSampler implements ResourceRecorder {
    * this sampler closed; the memory-growth step is measured against it, so slow
    * drift over many debug-only minutes still promotes one record. */
   private anchoredRssBytes?: number;
+  /** The heap used by the last window written at info or above, or by the first
+   * window this sampler closed; the heap step is measured against it, the same
+   * way the RSS step is, so a heap oscillating around a band edge writes
+   * nothing while a real step of `HEAP_USED_INFO_STEP_BYTES` does. */
+  private anchoredHeapUsedBytes?: number;
   /** When the current window opened; the closed window reports its length. */
   private windowStartedAt = performance.now();
 
@@ -315,14 +321,15 @@ export class ResourceSampler implements ResourceRecorder {
 
   /** The level this window is recorded at, and why. The band comparison is
    * against the previous window, so a step change is written once, where it
-   * happens; the memory-growth anchor moves only when the window is written at
-   * info or above. */
+   * happens; the memory anchors move only when the window is written at info or
+   * above (and the first window starts them). */
   level(sample: ResourceSample): { level: "debug" | "info" | "warning"; reason?: string } {
     const previous = this.steps;
     this.steps = resourceSteps(sample);
-    const decision = resourceSampleLevel(sample, previous, this.anchoredRssBytes);
+    const decision = resourceSampleLevel(sample, previous, this.anchoredRssBytes, this.anchoredHeapUsedBytes);
     if (decision.level !== "debug" || this.anchoredRssBytes === undefined) {
       this.anchoredRssBytes = sample.rssBytes;
+      this.anchoredHeapUsedBytes = sample.heapUsedBytes;
     }
     return decision;
   }
@@ -338,9 +345,18 @@ export class ResourceSampler implements ResourceRecorder {
     const current = this.eventLoopUtilization();
     const utilization = this.eventLoopUtilization(current, this.utilizationMark).utilization;
     this.utilizationMark = current;
+    // Every counter closes at `closedAt`, before the runtime inventory is
+    // awaited: a hung inventory read would otherwise report the work done while
+    // it hung inside this window, whose `windowMs` was already fixed here, and
+    // a rate read from that pair would be wrong exactly then. A sample that
+    // fails after this point has already consumed its counters, so the window it
+    // would have reported is dropped rather than folded into the next one — the
+    // same rule the histogram and `windowStartedAt` already follow.
+    const counters = this.drainWindowCounters();
+    // The runtime set is a current value, not a counter: it is read after the
+    // window closed, while every counter above covers the closed window.
     const runtimes = [...await this.readRuntimes()];
-    const durable = this.readDurableWrites();
-    const sample: ResourceSample = {
+    return {
       windowMs,
       heapUsedBytes: nonNegative(memory.heapUsed),
       heapLimitBytes: nonNegative(this.readHeapLimitBytes()),
@@ -351,11 +367,20 @@ export class ResourceSampler implements ResourceRecorder {
       eventLoopUtilization: Number.isFinite(utilization) ? utilization : 0,
       runtimes,
       runtimeBytes: runtimes.reduce((total, runtime) => total + nonNegative(runtime.bytes), 0),
+      ...counters,
+    };
+  }
+
+  /** The closed window's counters, taken and cleared together so every value in
+   * one record covers the same span of time. */
+  private drainWindowCounters() {
+    const durable = this.readDurableWrites();
+    const counters = {
+      topics: new Map(this.topics),
       runtimesLoaded: this.loadedRuntimes,
       runtimesEvicted: this.evictedRuntimes,
       snapshotBuilds: this.snapshotBuilds,
       unaudiencedSnapshotBuilds: this.unaudiencedSnapshotBuilds,
-      topics: new Map(this.topics),
       catalogWalks: this.catalogWalks,
       requestPathCatalogWalks: this.requestPathCatalogWalks,
       catalogWalkMs: this.catalogWalkMs,
@@ -365,6 +390,8 @@ export class ResourceSampler implements ResourceRecorder {
       outboundBytes: this.outboundBytes,
     };
     this.topics.clear();
+    this.loadedRuntimes = 0;
+    this.evictedRuntimes = 0;
     this.snapshotBuilds = 0;
     this.unaudiencedSnapshotBuilds = 0;
     this.catalogWalks = 0;
@@ -372,9 +399,7 @@ export class ResourceSampler implements ResourceRecorder {
     this.catalogWalkMs = 0;
     this.catalogWalkFiles = 0;
     this.outboundBytes = 0;
-    this.loadedRuntimes = 0;
-    this.evictedRuntimes = 0;
-    return sample;
+    return counters;
   }
 
   dispose(): void {
@@ -390,8 +415,6 @@ export interface ResourceSteps {
   eventLoopP99Band: number;
   /** Event-loop max in bands of `EVENT_LOOP_MAX_INFO_STEP_MS`. */
   eventLoopMaxBand: number;
-  /** Heap used in bands of `HEAP_USED_INFO_STEP_BYTES`. */
-  heapUsedBand: number;
 }
 
 /** The named steps a sample's values are placed in. */
@@ -399,15 +422,16 @@ export function resourceSteps(sample: ResourceSample): ResourceSteps {
   return {
     eventLoopP99Band: Math.floor(sample.eventLoopDelayP99Ms / EVENT_LOOP_P99_INFO_STEP_MS),
     eventLoopMaxBand: Math.floor(sample.eventLoopDelayMaxMs / EVENT_LOOP_MAX_INFO_STEP_MS),
-    heapUsedBand: Math.floor(sample.heapUsedBytes / HEAP_USED_INFO_STEP_BYTES),
   };
 }
 
 /**
  * The level a sample is recorded at and why. Warning is a broken bound; info is
- * a named step that moved since `previous` (the window before this one), RSS
- * moved `RSS_INFO_STEP_SHARE` from `anchoredRssBytes` (the last window written at
- * info or above), or a runtime load/eviction in this window. That is what makes
+ * a named step that moved since `previous` (the window before this one), heap
+ * used moved `HEAP_USED_INFO_STEP_BYTES` or RSS moved `RSS_INFO_STEP_SHARE` from
+ * the last window written at info or above (`anchoredHeapUsedBytes`,
+ * `anchoredRssBytes`; the first window starts both anchors), or a runtime
+ * load/eviction in this window. That is what makes
  * a minute readable without writing every minute to disk; debug otherwise.
  * `undefined` `previous` is the first window, which is never a band change, and
  * an undefined anchor has no memory-growth baseline yet, which is never a step.
@@ -416,6 +440,7 @@ export function resourceSampleLevel(
   sample: ResourceSample,
   previous?: ResourceSteps,
   anchoredRssBytes?: number,
+  anchoredHeapUsedBytes?: number,
 ): { level: "debug" | "info" | "warning"; reason?: string } {
   const heapShare = heapShareOf(sample);
   if (heapShare >= HEAP_WARNING_SHARE) {
@@ -432,8 +457,11 @@ export function resourceSampleLevel(
     if (steps.eventLoopMaxBand !== previous.eventLoopMaxBand) {
       return { level: "info", reason: `eventLoopDelayMaxMs=${Math.round(sample.eventLoopDelayMaxMs)} entering band ${steps.eventLoopMaxBand}` };
     }
-    if (steps.heapUsedBand !== previous.heapUsedBand) {
-      return { level: "info", reason: `heapUsedBytes=${sample.heapUsedBytes} entering band ${steps.heapUsedBand}` };
+    const heapMove = anchoredHeapUsedBytes === undefined
+      ? 0
+      : Math.abs(sample.heapUsedBytes - anchoredHeapUsedBytes);
+    if (heapMove >= HEAP_USED_INFO_STEP_BYTES) {
+      return { level: "info", reason: `heapUsedBytes=${sample.heapUsedBytes} moved ${Math.round(heapMove / 1_048_576)} MiB from ${anchoredHeapUsedBytes}` };
     }
     const move = anchoredRssBytes !== undefined && anchoredRssBytes > 0
       ? Math.abs(sample.rssBytes - anchoredRssBytes) / anchoredRssBytes
