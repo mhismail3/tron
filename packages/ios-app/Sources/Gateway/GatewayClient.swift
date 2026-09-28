@@ -1890,6 +1890,10 @@ actor GatewayClient {
             }
         }
         Task { [socket] in
+            // The cancel must not overtake the request it cancels: a frame that
+            // reaches the Gateway first names a request that never arrived, so
+            // the read it meant to stop keeps running.
+            await request.send?.value
             try? await socket.send(data)
         }
     }
