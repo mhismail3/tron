@@ -2254,4 +2254,7 @@ the day cannot measure a synthetic case).
   run on `hardening/integration`, read the fixture Gateway's last
   `gateway.resources` records and compare `outboundBytes` with the driver's summed
   inbound bytes, and `rssBytes`/`heapUsedBytes` with the report's Gateway RSS,
-  within 5% (method and its exclusions are in the "Done when" entry above).
+  within 5% (method and its exclusions are in the "Done when" entry above). The
+  SIM-8 relay is owed by the orchestrator too: the agreement is stated in the
+  `gateway.resources` row and in the SIM-8 bullet above, but the
+  simulator-lifecycle plan's own row still has to name host memory's owner.
