@@ -1036,6 +1036,205 @@ struct ChatViewScrollHarnessTests {
         }
     }
 
+    // CT-24 field-shape fixtures. The two 2026-09-28 device incidents (exports
+    // `…T22-49-38-443Z` and `…T22-51-14-263Z`) went blank with published
+    // content estimates of about 5x and 17x the transcript's real height,
+    // because the newest replies are very tall and the lazy stack derives its
+    // estimate from the rows it places. (`chat.command.issued` at 22:50:51.585
+    // read `content=424420` for 362 rows against a history whose pre-send
+    // estimate was 23,194 pt.) These journeys re-create the two shapes the way
+    // the harness can and measure them, like CT-2, without asserting a
+    // pass/fail condition: the product change CT-23 makes is judged by this
+    // baseline reading zero blank boundaries.
+    //
+    // Each shape opens a ~250-row history whose newest replies are very tall,
+    // which is the only structural difference from an ordinary history (the
+    // other rows are one line). Shape (a) then replaces the authoritative
+    // snapshot with one carrying four more very tall replies, the way a
+    // reconnect resync installs the Gateway's current transcript, and samples
+    // 90 boundaries without user input. Shape (b) submits a prompt with the
+    // keyboard-sized viewport in place, publishes the canonical prompt row and
+    // five assistant replies of varying tall heights across 60 boundaries, and
+    // samples every boundary without further input.
+    //
+    // The line is one space-separated `key=value` set so repeated runs diff
+    // cleanly. Fields:
+    // - `blankBoundaries=<blank>/<samples>` and `blankAfterSettle`: sampled
+    //   display boundaries whose window-coordinate oracle sees no mounted
+    //   transcript row, and the same excluding the first two boundaries of each
+    //   phase, where the transition is still landing.
+    // - `longestBlankRun` and `blankPhases`: the longest consecutive blank run,
+    //   and which phases (`p<index>:<blank count>`) held any blank at all.
+    // - `maxEstimateRatio`: the largest published content estimate over the
+    //   total height of the rows whose real height is known (the probe's
+    //   semantic row frames). The lazy stack measures only the rows it places,
+    //   so that total is a lower bound on the transcript's real height and this
+    //   ratio an upper bound on how far the estimate exceeds measured truth;
+    //   `measuredRowsAtMax` says how little of the history the bound rests on.
+    // - `estimateOpen`/`estimateMax`/`measuredHeightAtMax`: the raw points.
+    // - `tallestRowHeight`: the tallest realized row frame, the shape's identity
+    //   (every shape here needs rows of at least 1,500 pt).
+    // - `tailDistanceSettled` and `maxTailDistance`: the pinned tail's distance
+    //   from the legal bottom at the end, and the largest one sampled.
+    //
+    // Each invocation runs one journey of each shape, so the line carries no run
+    // number: the plan rule's repeated runs are repeated invocations, named by
+    // the runner's own run directory.
+
+    @Test("CT-24 field shape: a reconnect resync under very tall newest replies", .enabled(if: UIValidationTier.isActive))
+    func ct24ResyncUnderVeryTallNewestReplies() async throws {
+        try await withTestWatchdog(timeout: .seconds(120)) {
+            let shape = try ct24TallNewestHistory(
+                rowCount: 250, tallCount: 6, appendedTallCount: 4, seed: 1_269
+            )
+            let terminalSemanticID = "ct24-turn-\(250 - 1)"
+            try await withHarness(snapshot: shape.opened) { harness in
+                _ = try await harness.recorder.waitUntil {
+                    $0.observation.isReady && $0.nativeRows.contains {
+                        $0.semanticID == terminalSemanticID && $0.isVisible
+                    }
+                }
+                // Phase 0 is the settled read before the resync; phase 1 is the
+                // resync itself and the 80 boundaries that follow it. No input
+                // reaches the harness from here on.
+                let phaseLengths = [10, 80]
+                var samples: [CT24BoundarySample] = []
+                for _ in 0..<phaseLengths[0] {
+                    try await harness.driveFrameBoundary()
+                    try samples.append(harness.ct24BoundarySample())
+                }
+                harness.replaceAuthoritativeSnapshot(shape.resynced)
+                for _ in 0..<phaseLengths[1] {
+                    try await harness.driveFrameBoundary()
+                    try samples.append(harness.ct24BoundarySample())
+                }
+
+                let metrics = try ct24Metrics(
+                    shape: "resync-under-tall-newest", harness: harness,
+                    samples: samples, phaseLengths: phaseLengths
+                )
+                print(metrics.line)
+                #expect(
+                    samples.count == phaseLengths.reduce(0, +),
+                    "the scenario ran every sampled display boundary"
+                )
+                #expect(
+                    metrics.tallestRowHeight >= 1_500,
+                    "the shape's newest replies were realized as at least 1,500 pt tall"
+                )
+            }
+        }
+    }
+
+    @Test("CT-24 field shape: a send under very tall newest replies", .enabled(if: UIValidationTier.isActive))
+    func ct24SendUnderVeryTallNewestReplies() async throws {
+        try await withTestWatchdog(timeout: .seconds(120)) {
+            let shape = try ct24TallNewestHistory(
+                rowCount: 250, tallCount: 6, appendedTallCount: 0, seed: 1_269
+            )
+            let terminalSemanticID = "ct24-turn-\(250 - 1)"
+            try await withHarness(snapshot: shape.opened, enablesComposerSubmission: true) { harness in
+                _ = try await harness.recorder.waitUntil {
+                    $0.observation.isReady && $0.nativeRows.contains {
+                        $0.semanticID == terminalSemanticID && $0.isVisible
+                    }
+                }
+                // The device incident's send happened with the keyboard-sized
+                // viewport in place: 624 pt of container against 758 pt at rest.
+                harness.resize(height: 620)
+                // Phase 0 is the keyboard contraction landing; the prompt is
+                // then submitted with no further input, and phase 1 publishes
+                // five assistant replies of varying tall heights, one every
+                // twelve boundaries.
+                let phaseLengths = [8, 60]
+                var samples: [CT24BoundarySample] = []
+                for _ in 0..<phaseLengths[0] {
+                    try await harness.driveFrameBoundary()
+                    try samples.append(harness.ct24BoundarySample())
+                }
+                let draft = "Keep this resumed conversation stable."
+                try harness.setComposerDraftText(draft)
+                harness.submitPrompt()
+                var published = try harnessAcknowledgedSnapshot(shape.opened, promptIndex: 0, text: draft)
+                harness.replaceAuthoritativeSnapshot(published)
+                var publishedReplies = 0
+                for boundary in 0..<phaseLengths[1] {
+                    if boundary.isMultiple(of: 12), publishedReplies < ct24FieldReplyParagraphCounts.count {
+                        published.transcript.append(try harnessRichAssistantMessage(
+                            id: "ct24-reply-\(publishedReplies)",
+                            presentationID: "ct24-reply-turn-\(publishedReplies)",
+                            thinkingLines: [],
+                            text: harnessFieldReplyText(
+                                index: publishedReplies,
+                                paragraphs: ct24FieldReplyParagraphCounts[publishedReplies]
+                            )
+                        ))
+                        published.transcriptTotal = published.transcript.count
+                        harness.replaceAuthoritativeSnapshot(published)
+                        publishedReplies += 1
+                    }
+                    try await harness.driveFrameBoundary()
+                    try samples.append(harness.ct24BoundarySample())
+                }
+
+                let metrics = try ct24Metrics(
+                    shape: "send-under-tall-newest", harness: harness,
+                    samples: samples, phaseLengths: phaseLengths
+                )
+                print(metrics.line)
+                #expect(
+                    samples.count == phaseLengths.reduce(0, +),
+                    "the scenario ran every sampled display boundary"
+                )
+                #expect(publishedReplies == 5, "the shape appended five assistant replies")
+                #expect(
+                    metrics.tallestRowHeight >= 1_500,
+                    "the shape's newest replies were realized as at least 1,500 pt tall"
+                )
+            }
+        }
+    }
+
+    /// Assemble the CT-24 metric line for one field shape. The estimate ratio is
+    /// `contentHeight / measuredRowHeightSum`: the published `LazyVStack`
+    /// content estimate over the total height of the rows whose real height is
+    /// known. The lazy stack measures only the rows it places, so that total is
+    /// a lower bound on the transcript's real height — the ratio is therefore an
+    /// upper bound on how far the estimate exceeds measured truth, and
+    /// `measuredRowsAtMax` reports how many rows it rests on.
+    private func ct24Metrics(
+        shape: String,
+        harness: ChatViewScrollHarness,
+        samples: [CT24BoundarySample],
+        phaseLengths: [Int]
+    ) throws -> CT24Metrics {
+        let blank = blankShape(
+            blankBoundaries: samples.map { $0.onScreenRowCount == 0 },
+            phaseLengths: phaseLengths
+        )
+        let ratios = samples.filter { $0.measuredRowHeightSum > 0 }
+        let ratioOf: (CT24BoundarySample) -> CGFloat = {
+            $0.contentHeight / $0.measuredRowHeightSum
+        }
+        let maxRatio = ratios.max { ratioOf($0) < ratioOf($1) }
+        var metrics = CT24Metrics()
+        metrics.shape = shape
+        metrics.samples = samples.count
+        metrics.blankBoundaries = blank.blank
+        metrics.blankAfterSettle = blank.afterSettle
+        metrics.longestBlankRun = blank.longestRun
+        metrics.blankPhases = blank.phases
+        metrics.maxEstimateRatio = maxRatio.map(ratioOf) ?? 0
+        metrics.estimateOpen = samples.first?.contentHeight ?? 0
+        metrics.estimateMax = samples.map(\.contentHeight).max() ?? 0
+        metrics.measuredRowsAtMax = maxRatio?.measuredRowCount ?? 0
+        metrics.measuredHeightAtMax = maxRatio?.measuredRowHeightSum ?? 0
+        metrics.tallestRowHeight = samples.map(\.tallestOnScreenRowHeight).max() ?? 0
+        metrics.maxTailDistance = samples.map(\.tailDistance).max() ?? 0
+        metrics.tailDistanceSettled = try harness.nativeTranscriptDistanceFromTail()
+        return metrics
+    }
+
     /// Assemble the CT-2 metric line for one journey. `baselines` are the
     /// observation's command counts and the trace's displacement count at the
     /// journey's start, and `traceFrame` the probe geometry trace's last frame
@@ -1082,7 +1281,6 @@ struct ChatViewScrollHarnessTests {
     }
 
     enum SendHistory: CaseIterable, Sendable { case short, shortToOverflow, long }
-
     @Test("short and long history preserve the mounted prompt through acknowledgement and successor", arguments: SendHistory.allCases, [false, true])
     func resumedSendAcknowledgementSuccessor(history: SendHistory, acknowledgeDuringLease: Bool) async throws {
         try await withTestWatchdog(timeout: .seconds(15)) {
@@ -3180,6 +3378,62 @@ private func harnessTallEstimateRowText(_ index: Int) -> String {
     ).joined(separator: "\n\n")
 }
 
+/// A CT-24 shape's very tall reply: 34 wrapped paragraphs measure about 1,620 pt
+/// on the owned simulator, the floor the field shapes need (the device's newest
+/// replies were tall enough to drive the published estimate to 5x and 17x the
+/// transcript's real height).
+private func harnessFieldReplyText(index: Int, paragraphs: Int) -> String {
+    Array(
+        repeating: "Very tall field reply \(index) renders a body long enough to stand more than one screen above its neighbours.",
+        count: paragraphs
+    ).joined(separator: "\n\n")
+}
+
+/// The five assistant replies shape (b) publishes while its send grows, in
+/// paragraphs: 1,900 / 1,620 / 1,140 / 1,330 / 670 pt on the owned simulator, so
+/// the shape's growth is tall and uneven rather than uniform.
+private let ct24FieldReplyParagraphCounts = [40, 34, 24, 28, 14]
+
+/// A CT-24 field shape's history: `rowCount` rows whose newest `tallCount` are
+/// very tall assistant replies and whose other rows are one line, plus the
+/// reconnect resync snapshot that appends `appendedTallCount` more very tall
+/// replies at the tail (the shape of the 2026-09-28 resync incident, where the
+/// install of new replies under tall newest rows left the pinned viewport
+/// blank).
+private func ct24TallNewestHistory(
+    rowCount: Int,
+    tallCount: Int,
+    appendedTallCount: Int,
+    seed: Int
+) throws -> (opened: SessionSnapshot, resynced: SessionSnapshot) {
+    var opened = try SessionScenarioBuilder(seed: seed).openingTail(targetEncodedBytes: 10_000)
+    opened.acceptsQueuedPrompts = false
+    opened.transcript = try (0..<rowCount).map { index in
+        try harnessRichAssistantMessage(
+            id: "ct24-history-\(index)",
+            presentationID: "ct24-turn-\(index)",
+            thinkingLines: [],
+            text: index >= rowCount - tallCount
+                ? harnessFieldReplyText(index: index, paragraphs: 34)
+                : "Short history row \(index) stays one line."
+        )
+    }
+    opened.transcriptStart = 0
+    opened.transcriptTotal = opened.transcript.count
+    var resynced = opened
+    for offset in 0..<appendedTallCount {
+        let index = rowCount + offset
+        resynced.transcript.append(try harnessRichAssistantMessage(
+            id: "ct24-history-\(index)",
+            presentationID: "ct24-turn-\(index)",
+            thinkingLines: [],
+            text: harnessFieldReplyText(index: index, paragraphs: 34 + offset)
+        ))
+    }
+    resynced.transcriptTotal = resynced.transcript.count
+    return (opened, resynced)
+}
+
 /// One display boundary of a CT-2 shape, sampled directly from the native
 /// transcript scroll view.
 struct CT2BoundarySample {
@@ -3189,6 +3443,20 @@ struct CT2BoundarySample {
     let bottomInset: CGFloat
     let visibleRowCount: Int
     let tallRowFrame: CGRect?
+}
+
+/// One display boundary of a CT-24 field shape. `measuredRowCount` and
+/// `measuredRowHeightSum` come from the probe's semantic row frames — the only
+/// rows whose real height is known, because the lazy stack measures just the
+/// rows it places — and `onScreenRowCount` from the window-coordinate blank
+/// oracle.
+struct CT24BoundarySample {
+    let contentHeight: CGFloat
+    let measuredRowCount: Int
+    let measuredRowHeightSum: CGFloat
+    let onScreenRowCount: Int
+    let tallestOnScreenRowHeight: CGFloat
+    let tailDistance: CGFloat
 }
 
 /// One `CT2-METRICS` line. The fields are the CT-2 baseline's shared
@@ -3244,6 +3512,41 @@ private func ct2Number(_ value: CGFloat) -> String {
     String(format: "%.1f", Double(value))
 }
 
+/// One `CT24-METRICS` line per field shape.
+private struct CT24Metrics {
+    var shape = ""
+    var samples = 0
+    var blankBoundaries = 0
+    var blankAfterSettle = 0
+    var longestBlankRun = 0
+    var blankPhases = "none"
+    var maxEstimateRatio: CGFloat = 0
+    var estimateOpen: CGFloat = 0
+    var estimateMax: CGFloat = 0
+    var measuredRowsAtMax = 0
+    var measuredHeightAtMax: CGFloat = 0
+    var tallestRowHeight: CGFloat = 0
+    var maxTailDistance: CGFloat = 0
+    var tailDistanceSettled: CGFloat = 0
+
+    var line: String {
+        "CT24-METRICS"
+            + " shape=\(shape) samples=\(samples)"
+            + " blankBoundaries=\(blankBoundaries)/\(samples)"
+            + " blankAfterSettle=\(blankAfterSettle)"
+            + " longestBlankRun=\(longestBlankRun)"
+            + " blankPhases=\(blankPhases)"
+            + " maxEstimateRatio=\(ct2Number(maxEstimateRatio))"
+            + " estimateOpen=\(ct2Number(estimateOpen))"
+            + " estimateMax=\(ct2Number(estimateMax))"
+            + " measuredRowsAtMax=\(measuredRowsAtMax)"
+            + " measuredHeightAtMax=\(ct2Number(measuredHeightAtMax))"
+            + " tallestRowHeight=\(ct2Number(tallestRowHeight))"
+            + " maxTailDistance=\(ct2Number(maxTailDistance))"
+            + " tailDistanceSettled=\(ct2Number(tailDistanceSettled))"
+    }
+}
+
 /// Whether the two bounded buffers the journey's counts are read from were full
 /// when it ended. `reDerivations` is derived from the probe's geometry trace,
 /// which keeps its last 240 samples (`ChatHostedProbe.recordGeometryTrace`),
@@ -3262,13 +3565,13 @@ private func ct2TraceCoverage(harness: ChatViewScrollHarness) -> String {
 }
 
 /// The blank-boundary shape of one planned sample sequence: how many sampled
-/// display boundaries showed no mounted transcript row, how many of those
-/// survived the settling bound, the longest consecutive blank run, and which
-/// phases (`p<index>:<blank count>`) held any blank at all. `phaseLengths`
-/// describes the sampled sequence in order, so a phase's first boundaries are
-/// the ones where its transition is still landing.
-private func ct2BlankShape(
-    samples: [CT2BoundarySample],
+/// display boundaries were blank, how many of those survived the settling
+/// bound, the longest consecutive blank run, and which phases
+/// (`p<index>:<blank count>`) held any blank at all. `phaseLengths` describes
+/// the sampled sequence in order, so a phase's first boundaries are the ones
+/// where its transition is still landing.
+private func blankShape(
+    blankBoundaries: [Bool],
     phaseLengths: [Int],
     settlingBoundaries: Int = 2
 ) -> (blank: Int, afterSettle: Int, longestRun: Int, phases: String) {
@@ -3280,8 +3583,8 @@ private func ct2BlankShape(
     var index = 0
     for (phase, length) in phaseLengths.enumerated() {
         var phaseBlanks = 0
-        for offset in 0..<length where index < samples.count {
-            let isBlank = samples[index].visibleRowCount == 0
+        for offset in 0..<length where index < blankBoundaries.count {
+            let isBlank = blankBoundaries[index]
             index += 1
             guard isBlank else {
                 currentRun = 0
@@ -3296,6 +3599,20 @@ private func ct2BlankShape(
         if phaseBlanks > 0 { phases.append("p\(phase):\(phaseBlanks)") }
     }
     return (blank, afterSettle, longestRun, phases.isEmpty ? "none" : phases.joined(separator: ","))
+}
+
+/// The CT-2 blank shape: a boundary is blank when the window-coordinate oracle
+/// sees no mounted transcript row.
+private func ct2BlankShape(
+    samples: [CT2BoundarySample],
+    phaseLengths: [Int],
+    settlingBoundaries: Int = 2
+) -> (blank: Int, afterSettle: Int, longestRun: Int, phases: String) {
+    blankShape(
+        blankBoundaries: samples.map { $0.visibleRowCount == 0 },
+        phaseLengths: phaseLengths,
+        settlingBoundaries: settlingBoundaries
+    )
 }
 
 private func harnessInlineMarkdownDisplaySnapshot() throws -> SessionSnapshot {
@@ -3925,7 +4242,9 @@ final class ChatViewScrollHarness {
     /// the native offset, container and bottom inset, and the mounted row hosts
     /// with their native visibility. Native rows come from the live hierarchy
     /// and exclude markers whose view has no window, so a row that unmounted
-    /// cannot be counted as visible.
+    /// cannot be counted as visible. Blankness is decided by
+    /// `onScreenRows(in:)`, the window-coordinate oracle, so the count does not
+    /// depend on the transcript's own orientation.
     func ct2BoundarySample(tallSemanticID: String) throws -> CT2BoundarySample {
         let scrollView = try nativeTranscriptScrollView()
         let rows = Self.nativeRows(in: hostingController.view)
@@ -3934,8 +4253,24 @@ final class ChatViewScrollHarness {
             offsetY: scrollView.contentOffset.y,
             containerHeight: scrollView.bounds.height,
             bottomInset: scrollView.adjustedContentInset.bottom,
-            visibleRowCount: rows.filter(\.isVisible).count,
+            visibleRowCount: Self.onScreenRows(in: hostingController.view).count,
             tallRowFrame: rows.first { $0.semanticID == tallSemanticID }?.frame
+        )
+    }
+
+    /// One display boundary of a CT-24 field shape.
+    func ct24BoundarySample() throws -> CT24BoundarySample {
+        let scrollView = try nativeTranscriptScrollView()
+        let measured = probeObservation.rowFrames
+            .filter { $0.key != "transcript-bottom" && $0.value.height > 0 }
+        let onScreen = Self.onScreenRows(in: hostingController.view)
+        return CT24BoundarySample(
+            contentHeight: scrollView.contentSize.height,
+            measuredRowCount: measured.count,
+            measuredRowHeightSum: measured.values.reduce(0) { $0 + $1.height },
+            onScreenRowCount: onScreen.count,
+            tallestOnScreenRowHeight: onScreen.map(\.windowFrame.height).max() ?? 0,
+            tailDistance: try nativeTranscriptDistanceFromTail()
         )
     }
 
@@ -4314,6 +4649,45 @@ final class ChatViewScrollHarness {
 
     private static func markers(in view: UIView) -> [ChatHostedNativeRowMarker] {
         (view as? ChatHostedNativeRowMarker).map { [$0] } ?? view.subviews.flatMap { markers(in: $0) }
+    }
+
+    /// One mounted row host the window-coordinate oracle can see.
+    struct OnScreenRow {
+        let semanticID: String
+        let windowFrame: CGRect
+    }
+
+    /// The blank oracle, in window coordinates. A row host is on screen when
+    /// its marker's frame converted to window coordinates intersects the
+    /// transcript scroll view's visible rect in window coordinates, less the
+    /// composer the transcript insets itself under. Both rects are window
+    /// rects, so the answer does not depend on the transcript's orientation: a
+    /// flipped transcript (CT-23) reports the rows today's stack reports,
+    /// because neither the row's own transform nor the scroll view's content
+    /// offset and insets decide it. The composer is subtracted from the window
+    /// rect rather than taken from `adjustedContentInset`, which a flipped
+    /// scroll view would apply at the other edge.
+    static func onScreenRows(in root: UIView) -> [OnScreenRow] {
+        guard let window = root.window,
+              let scroll = nativeTranscriptScrollView(in: root) else { return [] }
+        var visible = scroll.convert(scroll.bounds, to: window).intersection(window.bounds)
+        let composer = markers(in: root)
+            .first { $0.physicalID == ChatHostedNativeRowProbe.composerID }
+            .map { $0.convert($0.bounds, to: window) }
+        if let composerTop = composer?.minY, composerTop > visible.minY {
+            visible = visible.intersection(CGRect(
+                x: visible.minX, y: visible.minY,
+                width: visible.width, height: composerTop - visible.minY
+            ))
+        }
+        guard !visible.isNull, visible.height > 0 else { return [] }
+        return markers(in: scroll)
+            .filter { $0.window == window && !$0.isHidden }
+            .compactMap { marker in
+                let frame = marker.convert(marker.bounds, to: window).standardized
+                guard frame.height > 0, frame.intersects(visible) else { return nil }
+                return OnScreenRow(semanticID: marker.semanticID, windowFrame: frame)
+            }
     }
 
     private static func nativeTranscriptScrollView(in root: UIView) -> UIScrollView? {
