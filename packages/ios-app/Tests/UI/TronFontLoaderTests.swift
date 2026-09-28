@@ -34,7 +34,7 @@ struct TronFontLoaderTests {
         let initial = TronFontLoader.createUIFont(size: 14, settings: settings)
         #expect(initial.familyName.contains("Recursive"))
         #expect(axis(Self.casl, of: initial) == 0.5)
-        #expect(axis(Self.mono, of: initial) == 0)
+        #expect(axis(Self.mono, of: initial) == nil) // Core Text omits axes left at their default
         #expect(axis(Self.wght, of: initial) == 400)
 
         settings.setAxisValue(for: .recursive, axis: .casual, value: 1)
@@ -47,7 +47,7 @@ struct TronFontLoaderTests {
 
         let code = TronFontLoader.createUIFont(size: 14, mono: true, settings: settings)
         #expect(axis(Self.mono, of: code) == 1)
-        #expect(axis(Self.mono, of: TronFontLoader.createUIFont(size: 14, settings: settings)) == 0)
+        #expect(axis(Self.mono, of: TronFontLoader.createUIFont(size: 14, settings: settings)) == nil)
 
         let overriddenCasual = TronFontLoader.createUIFont(size: 14, casual: 0.25, settings: settings)
         #expect(axis(Self.casl, of: overriddenCasual) == 0.25)
