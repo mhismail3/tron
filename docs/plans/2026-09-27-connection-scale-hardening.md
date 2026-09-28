@@ -551,6 +551,7 @@ rows are in priority order.
 | G-13 | Ready | Restart and reconnect storm: startup budget and a qualification case | G-1c, O-6b | |
 | G-8 | Claimed | Background work audit: delete or bound each unowned or repeating job | O-5 | orchestrator-dispatched deepseek-worker, 2026-09-28 |
 | E-1 | Ready | Document Tailscale flap diagnosis and user-side checks; the evaluation day confirms | O-2, O-7 | |
+| T-1 | Ready | Pre-existing test race: registry extension-artifact discovery tests treat an awaited `discoverExtensionArtifacts()` as a barrier; wait for a pass that settles (three tests, one a false green) | G-1a (Registry zone) | |
 
 ### Phase 2 — Release and one evaluation day
 
@@ -3020,3 +3021,21 @@ onto `pathUnsatisfied`/`nonRetryable`/`reconnectTaskBusy`/`other`, returning
 `clock` and an `appLog`; leave `watchdogClock` at its default unless a test needs
 its own grid. The observability rows already list `profile` and both record
 events; widen them to name the pool owner in the same change.
+
+### Orchestrator · 2026-09-28 · T-1 added from a flake investigation
+
+- Result: an intermittent failure of "discovers oversized active lifecycle
+  headers on the registered path and after runtime reconstruction" in
+  `packages/gateway/src/sessions/runtime-registry.integration.test.ts` is a
+  pre-existing test race, not a regression: it reproduces on `main` code under
+  concurrent temp-directory I/O. `discoverExtensionArtifacts()` returns without
+  work while the pass fired by `initialize()` is in flight (a single-owner,
+  best-effort pass), so the test's awaited call is not a barrier. The same
+  pattern exists in "rejects foreign producer session headers…" (a negative
+  assertion, so a dropped pass is a false green) and "reconciles an
+  exact-owned active artifact before the bounded ambient scan".
+- Evidence: reproduction commands, counts on both trees, a probe trace and the
+  proposed test-side fix are in the internal workspace at
+  `files/hardening/t-1-investigation.md`.
+- Tasks added: T-1 (after G-1a, which holds the Registry zone and edits the
+  same test file).
