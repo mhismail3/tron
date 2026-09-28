@@ -46,6 +46,9 @@ export interface LogRecord {
   durationMs?: number;
   /** The request span's compact stage breakdown, one bounded string. */
   stages?: string;
+  /** The measured stage a request was in at one instant, e.g. the stage a
+   * cancellation interrupted (`rpc.cancelled`). */
+  stage?: string;
   /** The part of `durationMs` no named stage accounted for. */
   unaccountedMs?: number;
   /** How far an upgrade got: `request`, `auth`, `handshake` or `hello`. */
@@ -84,6 +87,9 @@ export interface LogMetadata {
   durationMs?: number;
   /** `name=12ms×2/610KB;name=5ms`; the writer bounds it. */
   stages?: string;
+  /** The measured stage a request was in at one instant, e.g. the stage a
+   * cancellation interrupted (`rpc.cancelled`). */
+  stage?: string;
   /** The part of `durationMs` the stage breakdown did not cover. */
   unaccountedMs?: number;
   phaseReached?: string;
@@ -249,6 +255,7 @@ function normalizedFields(value: LogMetadata & { error?: unknown }, errorIsDescr
     ...(typeof value.code === "string" ? { code: boundedMessage(value.code).slice(0, 64) } : {}),
     ...(durationMs !== undefined ? { durationMs } : {}),
     ...(typeof value.stages === "string" ? { stages: boundedStages(value.stages) } : {}),
+    ...(typeof value.stage === "string" ? { stage: boundedDiagnosticID(value.stage).slice(0, 64) } : {}),
     ...(unaccountedMs !== undefined ? { unaccountedMs } : {}),
     ...(typeof value.phaseReached === "string" ? { phaseReached: boundedDiagnosticID(value.phaseReached).slice(0, 32) } : {}),
     ...(acceptToUpgradeMs !== undefined ? { acceptToUpgradeMs } : {}),

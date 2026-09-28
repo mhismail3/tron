@@ -35,8 +35,8 @@ describe("bounded outbound gateway frames", () => {
     expect(heartbeatTimerDelay(61_250)).toBe(36_250);
   });
 
-  it("rejects an overlapping open without replacing the current owner", () => {
-    const pending = new Map([["session", "open-1"]]);
+  it("names the request that already owns a session's open or synchronization", () => {
+    const pending = new Map([["session", { requestId: "open-1" }]]);
     const synchronizations = new Map<string, any>();
     expect(existingSessionOpenOwner(pending, synchronizations, "session")).toBe("open-1");
     expect(existingSessionOpenOwner(pending, synchronizations, "other")).toBeUndefined();

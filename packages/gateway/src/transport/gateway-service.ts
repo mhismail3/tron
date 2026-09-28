@@ -1038,10 +1038,16 @@ export class GatewayService {
       }
       case "session.open": {
         const sessionId = string(params.sessionId, "sessionId", { max: 200 });
-        const slot = await this.dependencies.sessions.acquire(sessionId);
+        // A cold open's runtime load is the most expensive disposable read the
+        // Gateway serves, so its wait is abandonable and checked before the
+        // snapshot is built. The registry's shared start is not abandoned with
+        // it: a retry (or another connection) joins the runtime load already in
+        // progress instead of starting a second one (`C-6`).
+        const slot = await abortableRead(client.signal, () => this.dependencies.sessions.acquire(sessionId));
         // Join the exact canonical completion barrier before snapshotting. The
         // response and completionRevision therefore describe one admitted cut.
-        await slot.reconcileAttention();
+        await abortableRead(client.signal, () => slot.reconcileAttention());
+        client.signal?.throwIfAborted();
         // Acquire can overlap a canonical fork rekey. From this synchronous
         // boundary onward, use the slot's admitted identity for subscription,
         // snapshot, and attention so one response cannot mix parent and child.

@@ -135,6 +135,98 @@ struct GatewayClientTransportTests {
         await client.close()
     }
 
+    @Test("a timed-out disposable read sends a cancel frame, a mutation does not")
+    func timedOutReadSendsCancelFrame() async throws {
+        try await withTestWatchdog {
+            let clock = ManualClock()
+            let socket = ScriptedGatewaySocket()
+            let client = GatewayClient(
+                socketFactory: ScriptedGatewaySocketFactory(socket: socket).factory,
+                clock: clock.clock,
+                uuidSource: SequenceUUIDSource([
+                    UUID(uuidString: "00000000-0000-0000-0000-000000000011")!,
+                    UUID(uuidString: "00000000-0000-0000-0000-000000000012")!,
+                    UUID(uuidString: "00000000-0000-0000-0000-000000000013")!,
+                ]).source
+            )
+            let appLog = AppLog(fileURL: FileManager.default.temporaryDirectory.appending(path: "cancel-app-log-\(UUID().uuidString).jsonl"))
+            await client.installAppLog(appLog)
+            await socket.enqueue(helloFrame())
+            _ = try await client.connect(profile: profile, token: "token")
+
+            // The Gateway never answers, so the request times out and the phone
+            // tells the Gateway to stop computing the read it abandoned.
+            let read = Task { try await client.requestValue("session.open", EmptyParams(), timeout: .seconds(30)) }
+            try await clock.expireRequest(on: socket, sentCount: 2, after: .seconds(30))
+            do {
+                _ = try await valueOfOwnedTask(read)
+                Issue.record("the abandoned read unexpectedly answered")
+            } catch let failure as GatewayPossiblySentError {
+                #expect(failure.failure.code == "possibly_sent")
+            }
+            try await socket.waitUntilSent(count: 3)
+            let cancelFrame = try #require(await socket.sentFrames().last)
+            let cancel = try #require(try JSONSerialization.jsonObject(with: cancelFrame) as? [String: Any])
+            #expect(cancel["type"] as? String == "cancel")
+            #expect(cancel["id"] as? String == "00000000-0000-0000-0000-000000000012")
+
+            // An admitted mutation keeps its owner: the phone never cancels it,
+            // whatever it does with its own wait.
+            let mutation = Task { try await client.requestValue("session.prompt", EmptyParams(), timeout: .seconds(30)) }
+            try await clock.expireRequest(on: socket, sentCount: 4, after: .seconds(30))
+            do {
+                _ = try await valueOfOwnedTask(mutation)
+                Issue.record("the abandoned mutation unexpectedly answered")
+            } catch let failure as GatewayPossiblySentError {
+                #expect(failure.failure.code == "possibly_sent")
+            }
+            await Task.yield()
+            #expect(await socket.sentFrames().count == 4)
+
+            let cancellations = await appLog.snapshot().filter { $0.event == "rpc.cancelled" }
+            #expect(cancellations.count == 1)
+            #expect(cancellations.first?.message == "session.open")
+            #expect(cancellations.first?.outcome == "cancelled")
+            #expect(cancellations.first?.level == "debug")
+            await client.close()
+        }
+    }
+
+    @Test("a cancel frame cannot overtake the request it cancels")
+    func cancelFrameFollowsItsRequest() async throws {
+        try await withTestWatchdog {
+            let socket = ScriptedGatewaySocket(deliversSendsAfterCancellation: true)
+            let client = GatewayClient(socketFactory: ScriptedGatewaySocketFactory(socket: socket).factory)
+            await socket.enqueue(helloFrame())
+            _ = try await client.connect(profile: profile, token: "token")
+            // The request's own write is still in flight when its wait is abandoned.
+            await socket.suspendSends()
+            let read = Task { try await client.requestValue("session.open", EmptyParams()) }
+            try await socket.waitUntilSendInvoked(count: 2)
+            read.cancel()
+            do {
+                _ = try await valueOfOwnedTask(read)
+                Issue.record("the abandoned read unexpectedly answered")
+            } catch let failure as GatewayPossiblySentError {
+                #expect(failure.failure.code == "possibly_sent")
+            }
+            // The cancel waits for that write: a frame that jumped ahead of it
+            // would name a request the Gateway never admitted and do nothing.
+            try await Task.sleep(for: .milliseconds(50))
+            #expect(await socket.sendInvocationCount() == 2)
+            await socket.releaseSend()
+            try await socket.waitUntilSent(count: 3)
+            let frames = await socket.sentFrames()
+            #expect(frames.count == 3)
+            let request = try #require(try JSONSerialization.jsonObject(with: frames[1]) as? [String: Any])
+            let cancel = try #require(try JSONSerialization.jsonObject(with: frames[2]) as? [String: Any])
+            #expect(request["method"] as? String == "session.open")
+            #expect(cancel["type"] as? String == "cancel")
+            #expect(cancel["id"] as? String == request["id"] as? String)
+            await client.close()
+        }
+    }
+
     @Test("typed response decoding reports the RPC method and sanitized missing-key path")
     func typedResponseDecodeDiagnostics() async throws {
         struct Response: Decodable {
