@@ -7953,9 +7953,16 @@ wait).
   foreground probe fails -> same; a path hint cannot park over the initial
   connect, state stays `.connecting` and no bound is armed), `AppModelPairingAttemptTests`
   8/8 (1 new: a path hint cannot park over the pairing that owns the connect),
-  `AppModelLifecycleTests`, `GatewayConnectionEpisodeRecorderTests`,
-  `GatewayLogExportTests` 17/17 (one run had `byteEnvelopeReservesTheChatTrace`
-  killed by the simulator under load; it passes alone and in the repeat).
+  `AppModelLifecycleTests` 9/9, `GatewayConnectionEpisodeRecorderTests` 4/4,
+  `GatewayLogExportTests` 17/17 alone.
+  - Not C-1: `GatewayLogExportTests`' `byteEnvelopeReservesTheChatTrace` is
+    killed (SIGKILL, no assertion) whenever it shares a process with
+    `GatewayConnectionEpisodeRecorderTests`, whose main-stall test blocks the
+    main thread for two 4 s phases (T-2). Each suite passes alone, and it also
+    fails in that pair with every new C-1 test disabled, so the coordinator fix
+    is not the trigger; the pair passed before this merge. Retained bundles:
+    `~/Library/Developer/Tron/ios/test-runs/20260928T203739Z-run.InevV5` (crash)
+    and `20260928T201219Z-run.jNGHmH` (log export alone, green).
 - Negative controls: reverting each hunk failed its own tests (probe tests; the
   two path-hint tests) and passed the other's, then the fix was restored.
 - Gateway gate after merging `hardening/integration`: the six transport
