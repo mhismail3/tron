@@ -733,6 +733,26 @@ struct SessionPresentationStoreTests {
         #expect(sequential.authoritativeSnapshot(for: baseline.sessionId) == survivor)
         #expect(coalesced.visibleTranscript.map(\.id) == sequential.visibleTranscript.map(\.id))
         #expect(coalesced.mountedTranscriptCoverage == sequential.mountedTranscriptCoverage)
+
+        // Control: the same rebaseline without the receipt still installs the
+        // same authority and restores no draft, retires no submission. The
+        // effect only arrives with the frame no snapshot can stand in for.
+        let receiptless = SessionPresentationStore(
+            client: GatewayClient(),
+            performanceSignposts: SystemPerformanceSignposts.shared
+        )
+        let receiptlessProbe = NoticeScopeProbe()
+        receiptless.delegate = receiptlessProbe
+        receiptless.installHostedSubscription(snapshot: baseline, token: "token")
+        await receiptless.admit(GatewayEvent(
+            type: "event",
+            topic: "session.snapshot",
+            sessionId: baseline.sessionId,
+            payload: try JSONValue.encode(inFlight)
+        ))
+        await receiptless.admit(rebaseline)
+        #expect(receiptlessProbe.failedOperations.isEmpty)
+        #expect(receiptless.authoritativeSnapshot(for: baseline.sessionId) == survivor)
     }
 
     @Test("captured Gateway burst retires its epoch and preserves mounted prompt continuity")

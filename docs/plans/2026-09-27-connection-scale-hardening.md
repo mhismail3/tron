@@ -5356,6 +5356,30 @@ events; widen them to name the pool owner in the same change.
   - Nit — the observability row, the `outboundCoalesced*` doc comment and the
     `gateway.resources` row no longer say "same key" (supersession is by session
     and sequence).
+  - Evidence: `server-capacity.integration.test.ts` 34/34, the round's focused
+    set (`server-capacity` + `sync-protocol.integration` + `stall-diagnostics` +
+    `server-compression` + `server-live-view` + `session-sync`) 84/84 and
+    `server-connection-memory` + `server-heartbeat` + `server-revocation` +
+    `server-frame` 37/37; `npm run build` clean. New cases: "keeps a one-shot
+    receipt and everything behind it when its snapshot covers the run after it"
+    (a stalled link broadcasting snapshot 1, progress 2,
+    `session.operationFailed` 3, progress 4, snapshot 5 delivers
+    `session.snapshot:1`, `session.progress:2`, `session.operationFailed:3`,
+    `rebaseline:5` with the receipt's own `data.message`, `outboundCoalescedFrames: 1`,
+    and accepted minus coalesced equal to the bytes handed to the socket) and
+    "supersedes only the frames of the surviving snapshot's own runtime
+    generation" (delivers `session.snapshot:1`, `session.progress:2`,
+    `session.toolProgress:3`, `session.snapshot:4`). Negative controls, each run
+    alone and reverted: disabling the fence drops the receipt (`queuedFrames` 4 →
+    2 and the delivered-frame assertion fails); disabling the generation check
+    delivers `[session.snapshot:1, rebaseline:4]`; recording the original
+    snapshot's bytes for the rebaseline fails the byte identity (99936 accepted
+    against 49926 handed to the socket). Phone side: `SessionPresentationStoreTests`
+    67/67 with "a coalesced rebaseline still carries the one-shot receipt its
+    snapshot cannot restore" (the receipt's
+    `sessionPresentationStoreDidFailOperation` fires, the rebaseline installs the
+    same authority, visible transcript and coverage as the exact-next path, and
+    the control without the receipt installs the same authority with no failure).
 - Changes: `perf(gateway): coalesce superseded outbound frames (G-4)` and its
   review-round commits on `hardening/g-4`.
 - "Done when" items: (1) "O-6b's bandwidth-cap case never closes a socket for
