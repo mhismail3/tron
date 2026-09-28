@@ -57,20 +57,11 @@ export function isDurablePublicationUncertain(error: unknown): boolean {
  * document and directory entry before acknowledgement. The unique temporary
  * file is never reused and is removed only when this call created it.
  */
-export function durableAtomicWriteJson(
+export async function durableAtomicWriteJson(
   path: string,
   value: unknown,
   mode = 0o600,
   fileSystem: DurableJsonFileSystem = productionFileSystem,
-): Promise<void> {
-  return publishAtomicJson(path, value, mode, fileSystem);
-}
-
-async function publishAtomicJson(
-  path: string,
-  value: unknown,
-  mode: number,
-  fileSystem: DurableJsonFileSystem,
 ): Promise<void> {
   const directory = dirname(path);
   await fileSystem.mkdir(directory, { recursive: true, mode: 0o700 });

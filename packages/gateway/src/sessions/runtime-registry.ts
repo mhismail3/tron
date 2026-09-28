@@ -1589,9 +1589,16 @@ export class RuntimeRegistry {
   private async catalogStructureEvidence(): Promise<CatalogStructureEvidence> {
     // Every walk, shared or request-path, goes through here, so this is the one
     // seam that can count them; a caller that joins a shared walk does not walk.
+    // A walk a request is waiting on is counted apart, so the request path's
+    // "zero catalog walks" criterion is readable from the record.
     const startedAt = performance.now();
+    const requestPath = currentRequestSpan() !== undefined;
     const evidence = await this.catalogDiscovery().catalogStructureEvidence();
-    this.options.resources?.recordCatalogWalk(performance.now() - startedAt, evidence.identitiesByPath.size);
+    this.options.resources?.recordCatalogWalk(
+      performance.now() - startedAt,
+      evidence.identitiesByPath.size,
+      requestPath,
+    );
     return evidence;
   }
 
@@ -3573,19 +3580,22 @@ export class RuntimeRegistry {
   }
 
   /**
-   * The live runtimes and the canonical transcript bytes each holds, for the
-   * transport's resource sample. Bytes come from one `stat` per live runtime a
-   * minute, not from a projection kept in step with every append.
-   */  /**
    * Publishes one newly live runtime and counts it for the resource sample. A
    * runtime loaded and evicted inside one sample window would be invisible to a
-   * comparison of live sets, so the transition is counted where it happens.
+   * comparison of live sets, so the transition is counted where it happens; the
+   * slot only counts its disposal as an eviction once it was published here.
    */
   private publishRuntime(sessionId: string, slot: RuntimeSlot): void {
     this.slots.set(sessionId, slot);
+    slot.markPublished();
     this.options.resources?.recordRuntimeLoaded();
   }
 
+  /**
+   * The live runtimes and the canonical transcript bytes each holds, for the
+   * transport's resource sample. Bytes come from one `stat` per live runtime a
+   * minute, not from a projection kept in step with every append.
+   */
   async resourceInventory(): Promise<readonly ResourceRuntimeEntry[]> {
     const entries: ResourceRuntimeEntry[] = [];
     for (const [sessionId, slot] of this.slots) {

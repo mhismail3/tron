@@ -29,6 +29,7 @@ import { CatalogMetadataIndex } from "./catalog-metadata-index.js";
 import { INVOCATION_RECEIPT_TYPE, makeInvocationReceipt } from "./invocation-receipts.js";
 import { EXTENSION_ACTIVITY_RECEIPT_TYPE, MAX_EXTENSION_HISTORY_BYTES, type ExtensionActivityReceipt } from "./extension-activity-history.js";
 import { RuntimeRegistry } from "./runtime-registry.js";
+import { RuntimeSlot } from "./runtime-slot.js";
 import { invocationReceipts } from "./invocation-receipts.js";
 import { KnowledgeStore } from "../knowledge/knowledge-store.js";
 import { KnowledgeService } from "../knowledge/knowledge-service.js";
@@ -10957,10 +10958,10 @@ export default function (pi) {
     expect(registry.isSubscribed("race-client", sessionId)).toBe(true);
   });
 
-  // The registry is the only owner of live runtimes and of the subscriber set,
-  // so it has to answer the resource sample and count its own transitions.
-  it("answers the resource sample with live runtimes, their audience and their transitions", async () => {
-    const recorded = {
+  /** Every counter the resource sampler takes, as the registry would report
+   * them; one object per fixture keeps the recorder shape in one place. */
+  function resourceRecorder() {
+    return {
       recordSnapshotBuild: vi.fn(),
       recordTopicFrame: vi.fn(),
       recordCatalogWalk: vi.fn(),
@@ -10968,6 +10969,12 @@ export default function (pi) {
       recordRuntimeLoaded: vi.fn(),
       recordRuntimeEvicted: vi.fn(),
     };
+  }
+
+  // The registry is the only owner of live runtimes and of the subscriber set,
+  // so it has to answer the resource sample and count its own transitions.
+  it("answers the resource sample with live runtimes, their audience and their transitions", async () => {
+    const recorded = resourceRecorder();
     const fixture = await coldFixture("resource-inventory", { resources: recorded });
     const slot = await fixture.registry.acquire(fixture.manager.getSessionId());
     expect(recorded.recordRuntimeLoaded).toHaveBeenCalledTimes(1);
@@ -10984,5 +10991,42 @@ export default function (pi) {
 
     await slot.dispose();
     expect(recorded.recordRuntimeEvicted).toHaveBeenCalledTimes(1);
+  });
+
+  // A start that is retired before the registry publishes it was never a live
+  // runtime: counting its disposal as an eviction would let `runtimesEvicted`
+  // exceed loads and write an info record for a retried `catalog_changed` open.
+  it("does not count an eviction for a start that was never published", async () => {
+    const recorded = resourceRecorder();
+    const fixture = await coldFixture("unpublished-start", { resources: recorded });
+    const internals = fixture.registry as unknown as {
+      dependencies: () => Parameters<typeof RuntimeSlot.create>[1];
+      hooks: () => Parameters<typeof RuntimeSlot.create>[2];
+    };
+    const slot = await RuntimeSlot.create(fixture.manager, internals.dependencies(), internals.hooks(), false);
+    expect(recorded.recordRuntimeLoaded).not.toHaveBeenCalled();
+
+    await slot.dispose();
+    expect(recorded.recordRuntimeEvicted).not.toHaveBeenCalled();
+  });
+
+  // A walk a request is waiting on is told apart from background work, so the
+  // request path's "zero catalog walks" criterion is readable from the record.
+  it("counts a walk a request waited on apart from background catalog walks", async () => {
+    const recorded = resourceRecorder();
+    const fixture = await coldFixture("request-path-walk", { resources: recorded });
+    const backgroundWalks = recorded.recordCatalogWalk.mock.calls.length;
+
+    await runInRequestSpan(new RequestSpan(), () => fixture.registry.delete(fixture.manager.getSessionId()));
+
+    const requestWalks = recorded.recordCatalogWalk.mock.calls.slice(backgroundWalks);
+    expect(requestWalks.length).toBeGreaterThan(0);
+    expect(requestWalks.every((call) => call[2] === true)).toBe(true);
+    expect(recorded.recordCatalogWalk.mock.calls.slice(0, backgroundWalks).every((call) => call[2] === false)).toBe(true);
+
+    // The same walk with no request waiting on it is background work.
+    const interns = fixture.registry as unknown as { catalogStructureEvidence: () => Promise<unknown> };
+    await interns.catalogStructureEvidence();
+    expect(recorded.recordCatalogWalk).toHaveBeenLastCalledWith(expect.any(Number), expect.any(Number), false);
   });
 });

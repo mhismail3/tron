@@ -101,17 +101,24 @@ export const EVENT_LOOP_DELAY_RESOLUTION_MS = 20;
  * band of this size is a change the day's records have to show. */
 export const EVENT_LOOP_P99_INFO_STEP_MS = 20;
 
+/** The exit criterion's bound for one stalled turn. A window whose max reaches
+ * this is a change the day's records have to show whatever its p99 was, so the
+ * day's `max ≤ 250 ms` check has a persisted value to read. */
+export const EVENT_LOOP_MAX_INFO_STEP_MS = 250;
+
 /** Heap above this share of the V8 heap limit is the pressure the shedding work
  * has to bound. */
 export const HEAP_WARNING_SHARE = 0.7;
 
-/** Heap used in bands of this share of the limit: a window that moves bands is
- * a memory change worth a record, and one band is as fine as the shedding step
- * needs. */
-export const HEAP_SHARE_INFO_STEP = 0.1;
+/** Heap used in absolute bands: a window that moves bands is a memory change
+ * worth a record, and a fixed step catches growth a share of a multi-gigabyte
+ * limit would round away. */
+export const HEAP_USED_INFO_STEP_BYTES = 256 * 1_024 * 1_024;
 
-/** RSS moved this share away from the last window that reached disk, which is
- * the memory-growth criterion's own resolution. */
+/** RSS moved this share away from the last window written at info or above,
+ * which is the memory-growth criterion's own resolution. A slower growth has to
+ * accumulate across the debug-only minutes between records, so it still reaches
+ * disk eventually instead of never. */
 export const RSS_INFO_STEP_SHARE = 0.1;
 
 /** An event-loop p99 over this bound in one minute misses the exit criterion. */
@@ -139,6 +146,10 @@ export interface ResourceTopicTraffic {
 }
 
 export interface ResourceSample {
+  /** The closed window's length; an in-flight sample that skipped a tick makes
+   * it longer than `RESOURCE_SAMPLE_INTERVAL_MS`, and a rate reader has to know
+   * that. */
+  windowMs: number;
   heapUsedBytes: number;
   heapLimitBytes: number;
   rssBytes: number;
@@ -156,6 +167,9 @@ export interface ResourceSample {
   unaudiencedSnapshotBuilds: number;
   topics: ReadonlyMap<string, ResourceTopicTraffic>;
   catalogWalks: number;
+  /** The part of `catalogWalks` a request was waiting on; the request path's
+   * criterion is zero of them. */
+  requestPathCatalogWalks: number;
   catalogWalkMs: number;
   catalogWalkFiles: number;
   /** Durable fsyncs completed in the window and the time they took. */
@@ -174,13 +188,15 @@ export interface ResourceRecorder {
   recordSnapshotBuild(subscribers: number): void;
   /** One serialized frame offered on a topic, and the recipients it had. */
   recordTopicFrame(topic: string, bytes: number, subscribers: number): void;
-  /** One catalog walk, with the time it took and the files it read. */
-  recordCatalogWalk(durationMs: number, files: number): void;
+  /** One catalog walk, with the time it took, the files it read, and whether a
+   * request was waiting on it. */
+  recordCatalogWalk(durationMs: number, files: number, requestPath?: boolean): void;
   recordOutboundBytes(bytes: number): void;
   /** One runtime that became live, counted where it is published: a load and an
    * eviction inside one window are otherwise invisible to a set comparison. */
   recordRuntimeLoaded(): void;
-  /** One runtime that was disposed, counted at its disposal. */
+  /** One published runtime that was disposed, counted at its disposal; a start
+   * that was retired before it was ever live is not an eviction. */
   recordRuntimeEvicted(): void;
 }
 
@@ -236,6 +252,7 @@ export class ResourceSampler implements ResourceRecorder {
   private snapshotBuilds = 0;
   private unaudiencedSnapshotBuilds = 0;
   private catalogWalks = 0;
+  private requestPathCatalogWalks = 0;
   private catalogWalkMs = 0;
   private catalogWalkFiles = 0;
   private outboundBytes = 0;
@@ -244,6 +261,12 @@ export class ResourceSampler implements ResourceRecorder {
   /** The steps of the previous window; a step counts as a change only against
    * the window before it, so a value that repeats does not reach disk. */
   private steps?: ResourceSteps;
+  /** The RSS of the last window written at info or above, or of the first window
+   * this sampler closed; the memory-growth step is measured against it, so slow
+   * drift over many debug-only minutes still promotes one record. */
+  private anchoredRssBytes?: number;
+  /** When the current window opened; the closed window reports its length. */
+  private windowStartedAt = performance.now();
 
   constructor(dependencies: ResourceSamplerDependencies = {}) {
     this.readRuntimes = dependencies.readRuntimes ?? (async () => []);
@@ -271,8 +294,9 @@ export class ResourceSampler implements ResourceRecorder {
     this.topics.set(topic, traffic);
   }
 
-  recordCatalogWalk(durationMs: number, files: number): void {
+  recordCatalogWalk(durationMs: number, files: number, requestPath = false): void {
     this.catalogWalks += 1;
+    if (requestPath) this.requestPathCatalogWalks += 1;
     if (Number.isFinite(durationMs) && durationMs > 0) this.catalogWalkMs += durationMs;
     if (Number.isFinite(files) && files > 0) this.catalogWalkFiles += files;
   }
@@ -289,17 +313,26 @@ export class ResourceSampler implements ResourceRecorder {
     this.evictedRuntimes += 1;
   }
 
-  /** The level this window is recorded at, and why. The comparison is against
-   * the previous window, so a step change is written once, where it happens. */
+  /** The level this window is recorded at, and why. The band comparison is
+   * against the previous window, so a step change is written once, where it
+   * happens; the memory-growth anchor moves only when the window is written at
+   * info or above. */
   level(sample: ResourceSample): { level: "debug" | "info" | "warning"; reason?: string } {
     const previous = this.steps;
     this.steps = resourceSteps(sample);
-    return resourceSampleLevel(sample, previous);
+    const decision = resourceSampleLevel(sample, previous, this.anchoredRssBytes);
+    if (decision.level !== "debug" || this.anchoredRssBytes === undefined) {
+      this.anchoredRssBytes = sample.rssBytes;
+    }
+    return decision;
   }
 
   /** Closes the window and starts the next. Counters are drained, not re-read,
    * so one occurrence is reported exactly once. */
   async sample(): Promise<ResourceSample> {
+    const closedAt = performance.now();
+    const windowMs = Math.max(0, closedAt - this.windowStartedAt);
+    this.windowStartedAt = closedAt;
     const memory = this.readMemory();
     const delay = this.delay.read();
     const current = this.eventLoopUtilization();
@@ -308,6 +341,7 @@ export class ResourceSampler implements ResourceRecorder {
     const runtimes = [...await this.readRuntimes()];
     const durable = this.readDurableWrites();
     const sample: ResourceSample = {
+      windowMs,
       heapUsedBytes: nonNegative(memory.heapUsed),
       heapLimitBytes: nonNegative(this.readHeapLimitBytes()),
       rssBytes: nonNegative(memory.rss),
@@ -323,6 +357,7 @@ export class ResourceSampler implements ResourceRecorder {
       unaudiencedSnapshotBuilds: this.unaudiencedSnapshotBuilds,
       topics: new Map(this.topics),
       catalogWalks: this.catalogWalks,
+      requestPathCatalogWalks: this.requestPathCatalogWalks,
       catalogWalkMs: this.catalogWalkMs,
       catalogWalkFiles: this.catalogWalkFiles,
       durableWrites: nonNegative(durable.count),
@@ -333,6 +368,7 @@ export class ResourceSampler implements ResourceRecorder {
     this.snapshotBuilds = 0;
     this.unaudiencedSnapshotBuilds = 0;
     this.catalogWalks = 0;
+    this.requestPathCatalogWalks = 0;
     this.catalogWalkMs = 0;
     this.catalogWalkFiles = 0;
     this.outboundBytes = 0;
@@ -352,31 +388,34 @@ export class ResourceSampler implements ResourceRecorder {
 export interface ResourceSteps {
   /** Event-loop p99 in bands of `EVENT_LOOP_P99_INFO_STEP_MS`. */
   eventLoopP99Band: number;
-  /** Heap used in bands of `HEAP_SHARE_INFO_STEP` of the limit. */
-  heapShareBand: number;
-  /** RSS of this window, compared with the next one's. */
-  rssBytes: number;
+  /** Event-loop max in bands of `EVENT_LOOP_MAX_INFO_STEP_MS`. */
+  eventLoopMaxBand: number;
+  /** Heap used in bands of `HEAP_USED_INFO_STEP_BYTES`. */
+  heapUsedBand: number;
 }
 
 /** The named steps a sample's values are placed in. */
 export function resourceSteps(sample: ResourceSample): ResourceSteps {
   return {
     eventLoopP99Band: Math.floor(sample.eventLoopDelayP99Ms / EVENT_LOOP_P99_INFO_STEP_MS),
-    heapShareBand: Math.floor(heapShareOf(sample) / HEAP_SHARE_INFO_STEP),
-    rssBytes: sample.rssBytes,
+    eventLoopMaxBand: Math.floor(sample.eventLoopDelayMaxMs / EVENT_LOOP_MAX_INFO_STEP_MS),
+    heapUsedBand: Math.floor(sample.heapUsedBytes / HEAP_USED_INFO_STEP_BYTES),
   };
 }
 
 /**
  * The level a sample is recorded at and why. Warning is a broken bound; info is
- * a named step that moved since `previous` (the window before this one) or a
- * runtime load/eviction in this window, which is what makes a minute readable
- * without writing every minute to disk; debug otherwise. `undefined` `previous`
- * is the first window, which is never a change.
+ * a named step that moved since `previous` (the window before this one), RSS
+ * moved `RSS_INFO_STEP_SHARE` from `anchoredRssBytes` (the last window written at
+ * info or above), or a runtime load/eviction in this window. That is what makes
+ * a minute readable without writing every minute to disk; debug otherwise.
+ * `undefined` `previous` is the first window, which is never a band change, and
+ * an undefined anchor has no memory-growth baseline yet, which is never a step.
  */
 export function resourceSampleLevel(
   sample: ResourceSample,
   previous?: ResourceSteps,
+  anchoredRssBytes?: number,
 ): { level: "debug" | "info" | "warning"; reason?: string } {
   const heapShare = heapShareOf(sample);
   if (heapShare >= HEAP_WARNING_SHARE) {
@@ -390,12 +429,17 @@ export function resourceSampleLevel(
     if (steps.eventLoopP99Band !== previous.eventLoopP99Band) {
       return { level: "info", reason: `eventLoopDelayP99Ms=${Math.round(sample.eventLoopDelayP99Ms)} entering band ${steps.eventLoopP99Band}` };
     }
-    if (steps.heapShareBand !== previous.heapShareBand) {
-      return { level: "info", reason: `heapShare=${heapShare.toFixed(2)} entering band ${steps.heapShareBand}` };
+    if (steps.eventLoopMaxBand !== previous.eventLoopMaxBand) {
+      return { level: "info", reason: `eventLoopDelayMaxMs=${Math.round(sample.eventLoopDelayMaxMs)} entering band ${steps.eventLoopMaxBand}` };
     }
-    const move = previous.rssBytes > 0 ? Math.abs(sample.rssBytes - previous.rssBytes) / previous.rssBytes : 0;
+    if (steps.heapUsedBand !== previous.heapUsedBand) {
+      return { level: "info", reason: `heapUsedBytes=${sample.heapUsedBytes} entering band ${steps.heapUsedBand}` };
+    }
+    const move = anchoredRssBytes !== undefined && anchoredRssBytes > 0
+      ? Math.abs(sample.rssBytes - anchoredRssBytes) / anchoredRssBytes
+      : 0;
     if (move >= RSS_INFO_STEP_SHARE) {
-      return { level: "info", reason: `rssBytes=${sample.rssBytes} moved ${Math.round(move * 100)}%` };
+      return { level: "info", reason: `rssBytes=${sample.rssBytes} moved ${Math.round(move * 100)}% from ${anchoredRssBytes}` };
     }
   }
   if (sample.runtimesLoaded + sample.runtimesEvicted > 0) {
@@ -413,6 +457,7 @@ function heapShareOf(sample: ResourceSample): number {
 export function formatResourceSample(sample: ResourceSample): string {
   const heapShare = heapShareOf(sample);
   const fields = [
+    `windowMs=${roundMs(sample.windowMs)}`,
     `heapUsedBytes=${sample.heapUsedBytes}`,
     `heapLimitBytes=${sample.heapLimitBytes}`,
     `heapShare=${heapShare.toFixed(2)}`,
@@ -428,6 +473,7 @@ export function formatResourceSample(sample: ResourceSample): string {
     `snapshotBuilds=${sample.snapshotBuilds}`,
     `unaudiencedSnapshotBuilds=${sample.unaudiencedSnapshotBuilds}`,
     `catalogWalks=${sample.catalogWalks}`,
+    `requestPathCatalogWalks=${sample.requestPathCatalogWalks}`,
     `catalogWalkMs=${roundMs(sample.catalogWalkMs)}`,
     `catalogWalkFiles=${sample.catalogWalkFiles}`,
     `durableWrites=${sample.durableWrites}`,

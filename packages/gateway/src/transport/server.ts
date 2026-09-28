@@ -692,7 +692,21 @@ export class GatewayServer {
   }
 
   private async publishResources(): Promise<void> {
-    if (this.shuttingDown || this.resourceSampleInFlight) return;
+    if (this.shuttingDown) return;
+    if (this.resourceSampleInFlight) {
+      // A sample that never settles (a `stat` on a stuck filesystem, an
+      // inventory read that hangs) would otherwise stop `gateway.resources` in
+      // silence: every later tick returns here and the window it would have
+      // closed is never reported. One record per run says so with the same
+      // flag, so a skipped window cannot flood the log.
+      if (!this.resourceSampleFailureReported) {
+        this.resourceSampleFailureReported = true;
+        this.options.logger.log("warning", "Gateway resource sample skipped; the previous sample is still running", {
+          event: "gateway.resources-failed", source: "transport", reason: "previous sample still running",
+        });
+      }
+      return;
+    }
     this.resourceSampleInFlight = true;
     try {
       const sample = await this.resourceSampler.sample();

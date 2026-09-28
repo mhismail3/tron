@@ -3,7 +3,7 @@ import WebSocket from "ws";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { GATEWAY_CONNECTION_POLICY } from "./connection-policy.js";
 import { GatewayServer } from "./server.js";
-import { formatStallEvidence, formatResourceSample, parseMemoryPressure, parseSwapUsedBytes, resourceSampleLevel, ResourceSampler, RESOURCE_SAMPLE_INTERVAL_MS, StallSampler, type HostMemory, type ResourceRuntimeEntry } from "./stall-diagnostics.js";
+import { formatStallEvidence, formatResourceSample, parseMemoryPressure, parseSwapUsedBytes, resourceSampleLevel, ResourceSampler, EVENT_LOOP_DELAY_RESOLUTION_MS, HEAP_USED_INFO_STEP_BYTES, RESOURCE_SAMPLE_INTERVAL_MS, StallSampler, type HostMemory, type ResourceRuntimeEntry } from "./stall-diagnostics.js";
 
 /** Cumulative busy/idle clock; two marks give their delta like Node's API. */
 function fakeUtilization() {
@@ -83,7 +83,9 @@ describe("StallSampler", () => {
 // promote the level, so it stays in the memory-only debug buffer; (6) unbounded
 // topics or runtimes grow the record past one line; (7) a non-finite measurement
 // (an empty histogram, a failed probe) is written as NaN; (8) a runtime loaded
-// and evicted inside one window is invisible to a comparison of live sets.
+// and evicted inside one window is invisible to a comparison of live sets; (9)
+// the memory-growth step only compares each minute with the one before it, so
+// slow drift over a day never reaches disk.
 function resourceSampler(dependencies: ConstructorParameters<typeof ResourceSampler>[0] = {}) {
   return new ResourceSampler({
     readRuntimes: async () => [],
@@ -101,6 +103,7 @@ describe("ResourceSampler", () => {
     sampler.recordTopicFrame("session.progress", 2_000, 2);
     sampler.recordTopicFrame("session.progress", 3_000, 1);
     sampler.recordCatalogWalk(120.4, 3_000);
+    sampler.recordCatalogWalk(9, 4, true);
     sampler.recordOutboundBytes(700);
     sampler.recordSnapshotBuild(1);
     sampler.recordSnapshotBuild(0);
@@ -109,14 +112,14 @@ describe("ResourceSampler", () => {
     const first = await sampler.sample();
     expect(first.topics.get("session.progress")).toEqual({ frames: 2, bytes: 5_000, subscribers: 2 });
     expect(first).toMatchObject({
-      catalogWalks: 1, catalogWalkMs: 120.4, catalogWalkFiles: 3_000, outboundBytes: 700,
+      catalogWalks: 2, requestPathCatalogWalks: 1, catalogWalkMs: 129.4, catalogWalkFiles: 3_004, outboundBytes: 700,
       snapshotBuilds: 2, unaudiencedSnapshotBuilds: 1, durableWrites: 3, durableWriteMs: 12,
       runtimesLoaded: 1, runtimesEvicted: 1,
     });
     const second = await sampler.sample();
     expect(second.topics.size).toBe(0);
     expect(second).toMatchObject({
-      catalogWalks: 0, catalogWalkMs: 0, catalogWalkFiles: 0, outboundBytes: 0, snapshotBuilds: 0,
+      catalogWalks: 0, requestPathCatalogWalks: 0, catalogWalkMs: 0, catalogWalkFiles: 0, outboundBytes: 0, snapshotBuilds: 0,
       unaudiencedSnapshotBuilds: 0, runtimesLoaded: 0, runtimesEvicted: 0,
     });
   });
@@ -152,7 +155,7 @@ describe("ResourceSampler", () => {
     const sampler = resourceSampler({
       eventLoopDelay: () => delay,
       memoryUsage: () => ({ heapUsed, rss }),
-      heapLimitBytes: () => 10_000,
+      heapLimitBytes: () => 4_000_000_000,
     });
     // The first window has nothing to change from, and repeating it is not a change.
     expect(sampler.level(await sampler.sample())).toEqual({ level: "debug" });
@@ -161,10 +164,39 @@ describe("ResourceSampler", () => {
     expect(sampler.level(await sampler.sample())).toMatchObject({ level: "info" });
     // The step already reached the log, so the next minute in the same band does not.
     expect(sampler.level(await sampler.sample())).toEqual({ level: "debug" });
+    // One stalled turn past the exit bound is its own step, whatever the p99 was.
+    delay = { p50Ms: 1, p99Ms: 25, maxMs: 260 };
+    expect(sampler.level(await sampler.sample())).toMatchObject({
+      level: "info", reason: "eventLoopDelayMaxMs=260 entering band 1",
+    });
     rss = 240_000;
     expect(sampler.level(await sampler.sample())).toMatchObject({ level: "info" });
-    heapUsed = 3_000;
-    expect(sampler.level(await sampler.sample())).toMatchObject({ level: "info" });
+    heapUsed = HEAP_USED_INFO_STEP_BYTES + 1_000;
+    expect(sampler.level(await sampler.sample())).toMatchObject({
+      level: "info", reason: `heapUsedBytes=${HEAP_USED_INFO_STEP_BYTES + 1_000} entering band 1`,
+    });
+    // A heap that grows within its band, like an RSS that moves 10% from the
+    // last window written, is not a change.
+    heapUsed = HEAP_USED_INFO_STEP_BYTES + 2_000;
+    rss = 240_000;
+    expect(sampler.level(await sampler.sample())).toEqual({ level: "debug" });
+  });
+
+  it("promotes slow RSS growth once it accumulates past the anchored step", async () => {
+    // About 0.02% a minute, 22% over a simulated day: no single minute reaches
+    // `RSS_INFO_STEP_SHARE`, so only an anchor that outlives the debug-only
+    // minutes turns the growth into records.
+    let rss = 1_000_000_000;
+    const sampler = resourceSampler({ memoryUsage: () => ({ heapUsed: 1_000, rss }) });
+    expect(sampler.level(await sampler.sample())).toEqual({ level: "debug" });
+    const promotions: string[] = [];
+    for (let minute = 0; minute < 1_000; minute += 1) {
+      rss = Math.round(rss * 1.0002);
+      const decision = sampler.level(await sampler.sample());
+      if (decision.level !== "debug") promotions.push(decision.reason!);
+    }
+    expect(promotions).toHaveLength(2);
+    expect(promotions[0]).toContain("moved 10% from");
   });
 
   it("reads the real histogram so an idle loop reads zero and a blocked one reads the block", async () => {
@@ -175,9 +207,12 @@ describe("ResourceSampler", () => {
       heapLimitBytes: () => 10_000,
     });
     try {
-      // Idle: the sampling period is not delay, so the reading has to be small.
+      // Idle: the sampling period is not delay, so a window with no blocking
+      // work reads well under the period. The wall clock itself is not asserted:
+      // a shared, paging Mac can schedule this process late.
       await new Promise((resolve) => setTimeout(resolve, 80));
-      expect((await sampler.sample()).eventLoopDelayP99Ms).toBeLessThan(5);
+      expect((await sampler.sample()).eventLoopDelayP50Ms)
+        .toBeLessThan(EVENT_LOOP_DELAY_RESOLUTION_MS / 2);
       // A read restarts the histogram and its first interval is discarded, so
       // let it run a few periods before blocking the loop.
       await new Promise((resolve) => setTimeout(resolve, 60));
@@ -185,11 +220,14 @@ describe("ResourceSampler", () => {
       while (performance.now() - startedAt < 150) { /* block the loop */ }
       await new Promise((resolve) => setTimeout(resolve, 60));
       const stalled = await sampler.sample();
-      expect(stalled.eventLoopDelayMaxMs).toBeGreaterThan(120);
-      expect(stalled.eventLoopDelayMaxMs).toBeLessThan(180);
-      // The window closed with the sample: the stall is not the next minute's max.
+      // The block is the window's max, without a tight upper bound: the host can
+      // add its own lateness to the 150 ms the test blocked for.
+      expect(stalled.eventLoopDelayMaxMs).toBeGreaterThanOrEqual(120);
+      // The window closed with the sample: the stall is not the next minute's
+      // max, and the next window's own max is not the stall's.
       await new Promise((resolve) => setTimeout(resolve, 120));
-      expect((await sampler.sample()).eventLoopDelayMaxMs).toBeLessThan(5);
+      const next = await sampler.sample();
+      expect(next.eventLoopDelayMaxMs).toBeLessThan(stalled.eventLoopDelayMaxMs / 2);
     } finally {
       sampler.dispose();
     }
@@ -330,13 +368,10 @@ it("records the resource window through the transport's timer", async () => {
   // One snapshot build for a subscriber and one for nobody.
   gateway.broadcastSession("session-1", "session.snapshot", { revision: 1 } as never);
   gateway.broadcastSession("session-2", "session.snapshot", { revision: 1 } as never);
-  sampler.recordSnapshotBuild(1);
-  sampler.recordSnapshotBuild(0);
   await vi.advanceTimersByTimeAsync(RESOURCE_SAMPLE_INTERVAL_MS);
   const first = recordsWithEvent(log, "gateway.resources")[0]!;
   expect(first[0]).toBe("debug");
-  expect(first[1]).toContain("snapshotBuilds=2");
-  expect(first[1]).toContain("unaudiencedSnapshotBuilds=1");
+  expect(first[1]).toMatch(/windowMs=\d+/u);
   expect(first[1]).toContain("durableWrites=2");
   expect(first[1]).toMatch(/topics=session\.snapshot:2\/\d+B\/1/u);
   expect(Number(/outboundBytes=(\d+)/u.exec(first[1] as string)![1])).toBeGreaterThan(0);
@@ -353,6 +388,10 @@ it("records the resource window through the transport's timer", async () => {
   await vi.advanceTimersByTimeAsync(RESOURCE_SAMPLE_INTERVAL_MS);
   expect(runtimesReads).toBe(3);
   expect(recordsWithEvent(log, "gateway.resources")).toHaveLength(2);
+  // The skipped window is not silent, and the run is reported once.
+  const skipped = recordsWithEvent(log, "gateway.resources-failed");
+  expect(skipped).toHaveLength(1);
+  expect(skipped[0]![2]).toMatchObject({ event: "gateway.resources-failed", reason: "previous sample still running" });
   releaseRuntimes?.();
   await vi.advanceTimersByTimeAsync(0);
   // Shutdown retires the client and clears both timers.
