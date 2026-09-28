@@ -3,7 +3,7 @@ import { join, resolve } from "node:path";
 import lockfile from "proper-lockfile";
 import { GatewayError } from "../errors.js";
 import { readSecureJson } from "../util/secure-json.js";
-import { durableAtomicWriteJson } from "../util/durable-json.js";
+import { durableAtomicWriteJson, syncDurably } from "../util/durable-json.js";
 
 export interface TronWorkspaceDescriptor {
   root: string;
@@ -90,7 +90,7 @@ export class TronWorkspace {
       this.identity = await this.directory(this.root, !read.present);
       if (!read.present) {
         const parent = await open(this.home, "r");
-        try { await parent.sync(); } finally { await parent.close(); }
+        try { await syncDurably(parent); } finally { await parent.close(); }
         await durableAtomicWriteJson(marker, { version: 1 });
       }
       if (this.failure === "owned_elsewhere") this.identity = undefined;

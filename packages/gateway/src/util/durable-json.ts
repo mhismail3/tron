@@ -4,32 +4,35 @@ import { dirname } from "node:path";
 import { performance } from "node:perf_hooks";
 
 /*
- * Durable publication is the Gateway's only fsync path. Its rate and time are
- * counted here, at the one primitive every store goes through, and drained by
- * the transport's resource sampler; a store that fsyncs on an interactive path
- * is therefore visible without a record per write. The counters are process
- * global because the primitive is.
+ * Every fsync the Gateway performs goes through `syncDurably`, so the rate and
+ * time of durable synchronization are counted at one primitive and drained by
+ * the transport's resource sampler. A store then needs no record of its own on
+ * an interactive path (run markers, upload commits, catalog metadata, session
+ * exports, workspace and knowledge state, display artifacts). The counters are
+ * process global because the primitive is.
  */
-let durableWriteCount = 0;
-let durableWriteMs = 0;
+let durableFsyncCount = 0;
+let durableFsyncMs = 0;
 
-/** Closes the durable-write window: how many publications fsynced and how long
- * they held, since this call. */
+/** Closes the fsync window: how many synchronizations completed and how long
+ * they took, since this call. */
 export function drainDurableWriteStats(): { count: number; ms: number } {
-  const stats = { count: durableWriteCount, ms: durableWriteMs };
-  durableWriteCount = 0;
-  durableWriteMs = 0;
+  const stats = { count: durableFsyncCount, ms: durableFsyncMs };
+  durableFsyncCount = 0;
+  durableFsyncMs = 0;
   return stats;
 }
 
-async function countDurableWrite<T>(operation: () => Promise<T>): Promise<T> {
+/**
+ * Synchronizes one durable handle and counts the fsync that completed. Time is
+ * the sync call alone, not the write or rename around it, and a failed sync
+ * throws without counting: the sample never reports a write that did not land.
+ */
+export async function syncDurably(handle: { sync(): Promise<void> }): Promise<void> {
   const startedAt = performance.now();
-  try {
-    return await operation();
-  } finally {
-    durableWriteCount += 1;
-    durableWriteMs += Math.max(0, performance.now() - startedAt);
-  }
+  await handle.sync();
+  durableFsyncCount += 1;
+  durableFsyncMs += Math.max(0, performance.now() - startedAt);
 }
 
 export interface DurableJsonFileSystem {
@@ -60,7 +63,7 @@ export function durableAtomicWriteJson(
   mode = 0o600,
   fileSystem: DurableJsonFileSystem = productionFileSystem,
 ): Promise<void> {
-  return countDurableWrite(() => publishAtomicJson(path, value, mode, fileSystem));
+  return publishAtomicJson(path, value, mode, fileSystem);
 }
 
 async function publishAtomicJson(
@@ -79,7 +82,7 @@ async function publishAtomicJson(
     temporaryExists = true;
     try {
       await handle.writeFile(`${JSON.stringify(value, null, 2)}\n`, "utf8");
-      await handle.sync();
+      await syncDurably(handle);
     } finally {
       await handle.close();
     }
@@ -88,7 +91,7 @@ async function publishAtomicJson(
     temporaryExists = false;
     const directoryHandle = await fileSystem.open(directory, "r");
     try {
-      await directoryHandle.sync();
+      await syncDurably(directoryHandle);
     } finally {
       await directoryHandle.close();
     }
@@ -115,16 +118,9 @@ export async function durablePublishBoundedJson(
 }
 
 /** Remove one published document durably. Missing is already the desired state. */
-export function durableRemove(
+export async function durableRemove(
   path: string,
   fileSystem: Pick<DurableJsonFileSystem, "open" | "rm"> = productionFileSystem,
-): Promise<void> {
-  return removeDurableJson(path, fileSystem);
-}
-
-async function removeDurableJson(
-  path: string,
-  fileSystem: Pick<DurableJsonFileSystem, "open" | "rm">,
 ): Promise<void> {
   const directory = dirname(path);
   try {
@@ -135,12 +131,10 @@ async function removeDurableJson(
   }
   // Only a removal that reaches the directory sync is a durable write; removing
   // a file that was already gone fsyncs nothing.
-  await countDurableWrite(async () => {
-    const directoryHandle = await fileSystem.open(directory, "r");
-    try {
-      await directoryHandle.sync();
-    } finally {
-      await directoryHandle.close();
-    }
-  });
+  const directoryHandle = await fileSystem.open(directory, "r");
+  try {
+    await syncDurably(directoryHandle);
+  } finally {
+    await directoryHandle.close();
+  }
 }

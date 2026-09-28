@@ -2,6 +2,7 @@ import { randomBytes } from "node:crypto";
 import { mkdir, open, readdir, rename, rm } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { readJson, removeIfExists } from "../util/json.js";
+import { syncDurably } from "../util/durable-json.js";
 import { AsyncMutex } from "../util/async-mutex.js";
 
 export interface RunMarkerEvidence {
@@ -276,7 +277,7 @@ async function durableWriteRunMarker(
     temporaryExists = true;
     try {
       await handle.writeFile(`${JSON.stringify(marker, null, 2)}\n`, "utf8");
-      await handle.sync();
+      await syncDurably(handle);
     } finally {
       await handle.close();
     }
@@ -284,7 +285,7 @@ async function durableWriteRunMarker(
     temporaryExists = false;
     const directoryHandle = await fileSystem.open(directory, "r");
     try {
-      await directoryHandle.sync();
+      await syncDurably(directoryHandle);
     } finally {
       await directoryHandle.close();
     }

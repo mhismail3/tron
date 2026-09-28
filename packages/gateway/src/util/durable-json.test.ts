@@ -99,19 +99,22 @@ describe("durable JSON publication", () => {
     expect(directoryHandle.sync).toHaveBeenCalledOnce();
   });
 
-  // Failure modes: (1) a publication is not counted at all, so the sampler
-  // cannot show a store fsyncing on an interactive path; (2) the window is not
-  // drained, so every later sample repeats the same writes; (3) removing a file
-  // that was already gone counts as an fsync that never happened.
-  it("counts each fsyncing publication once and drains the window", async () => {
+  // Failure modes: (1) a publication or a store's own fsync is not counted, so
+  // the sampler cannot show durable I/O; (2) the window is not drained, so every
+  // later sample repeats the same writes; (3) removing a file that was already
+  // gone counts as an fsync that never happened; (4) a failed sync is recorded
+  // as a write that landed.
+  it("counts every completed fsync once and drains the window", async () => {
     drainDurableWriteStats();
+    // One publication synchronizes the document and then the directory entry.
     await durableAtomicWriteJson("/state/record.json", { a: 1 }, 0o600, fileSystem());
+    expect(drainDurableWriteStats().count).toBe(2);
     await durableRemove("/state/record.json", {
       rm: vi.fn(async () => undefined),
       open: vi.fn(async () => ({ sync: vi.fn(async () => {}), close: vi.fn(async () => {}) })),
     } as never);
     const window = drainDurableWriteStats();
-    expect(window.count).toBe(2);
+    expect(window.count).toBe(1);
     expect(window.ms).toBeGreaterThanOrEqual(0);
     expect(drainDurableWriteStats()).toEqual({ count: 0, ms: 0 });
 
@@ -120,5 +123,15 @@ describe("durable JSON publication", () => {
       open: vi.fn(async () => ({ sync: vi.fn(async () => {}), close: vi.fn(async () => {}) })),
     } as never);
     expect(drainDurableWriteStats().count).toBe(0);
+
+    const failingSync = fileSystem({
+      open: vi.fn(async () => ({
+        writeFile: vi.fn(async () => {}),
+        sync: vi.fn(async () => { throw new Error("sync failed"); }),
+        close: vi.fn(async () => {}),
+      })) as unknown as DurableJsonFileSystem["open"],
+    });
+    await expect(durableAtomicWriteJson("/state/record.json", { a: 1 }, 0o600, failingSync)).rejects.toThrow("sync failed");
+    expect(drainDurableWriteStats()).toEqual({ count: 0, ms: 0 });
   });
 });

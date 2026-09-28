@@ -6174,8 +6174,9 @@ export class RuntimeSlot {
     this.flushPendingProgress();
     this.eventSequence += 1;
     // A build for broadcast is only worth its bytes if a subscriber receives
-    // it; the sampler counts the audience G-3 removes the empty builds from.
-    // An RPC-driven build is audienced by the requester and is not counted.
+    // it; the sampler counts the audience, which is the count the
+    // no-projection-without-an-audience work removes the empty builds from. An
+    // RPC-driven build is audienced by the requester and is not counted.
     this.dependencies.resources?.recordSnapshotBuild(this.dependencies.sessionAudience(this.id));
     this.hooks.broadcast(this.id, "session.snapshot", this.snapshot(this.eventSequence) as unknown as JsonValue);
     this.publishSummary();
@@ -8336,6 +8337,10 @@ export class RuntimeSlot {
     this.lifecycle.retire();
     this.ui.retire();
     this.disposed = true;
+    // One live runtime is gone. This is the only place a slot stops existing,
+    // so the resource sample counts the eviction where it happens and can see a
+    // load and an eviction inside one window.
+    this.dependencies.resources?.recordRuntimeEvicted();
     this.publishStateChange();
   }
 

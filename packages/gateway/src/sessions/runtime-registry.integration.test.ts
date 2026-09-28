@@ -23,6 +23,7 @@ import type { NotificationService } from "../notifications/notification-service.
 import type { ExtensionRunActivity, ExtensionToolOrigin, SessionSummaryUpdate } from "../protocol/types.js";
 import { GatewayWorkRegistry, type GatewayWorkHandle } from "./gateway-work-registry.js";
 import { RequestSpan, runInRequestSpan, stage } from "../transport/request-span.js";
+import type { ResourceRecorder } from "../transport/stall-diagnostics.js";
 import { CatalogDiscovery, DEFAULT_CATALOG_DISCOVERY_LIMITS, type CatalogSessionInfo } from "./catalog-discovery.js";
 import { CatalogMetadataIndex } from "./catalog-metadata-index.js";
 import { INVOCATION_RECEIPT_TYPE, makeInvocationReceipt } from "./invocation-receipts.js";
@@ -67,6 +68,7 @@ describe.sequential("RuntimeRegistry with the pinned agent runtime", () => {
     runtimeDisposeTimeout?: (graceMs: number) => void;
     beforeInitialize?: (sessionFile: string) => Promise<void>;
     notifications?: NotificationService;
+    resources?: ResourceRecorder;
   } = {}) {
     const root = await mkdtemp(join(tmpdir(), `tron-cold-acquire-${label}-`));
     const agentDir = join(root, "agent");
@@ -97,6 +99,7 @@ describe.sequential("RuntimeRegistry with the pinned agent runtime", () => {
       ...(options.notifications ? { notifications: options.notifications } : {}),
       ...(options.catalogIndexFailure ? { catalogIndexFailure: options.catalogIndexFailure } : {}),
       ...(options.runtimeDisposeTimeout ? { runtimeDisposeTimeout: options.runtimeDisposeTimeout } : {}),
+      ...(options.resources ? { resources: options.resources } : {}),
     });
     registries.push(registry);
     if (options.beforeInitialize) await options.beforeInitialize(manager.getSessionFile()!);
@@ -10952,5 +10955,34 @@ export default function (pi) {
     expect(acquired).toBe(slot);
     expect(await registry.acquire(sessionId)).toBe(slot);
     expect(registry.isSubscribed("race-client", sessionId)).toBe(true);
+  });
+
+  // The registry is the only owner of live runtimes and of the subscriber set,
+  // so it has to answer the resource sample and count its own transitions.
+  it("answers the resource sample with live runtimes, their audience and their transitions", async () => {
+    const recorded = {
+      recordSnapshotBuild: vi.fn(),
+      recordTopicFrame: vi.fn(),
+      recordCatalogWalk: vi.fn(),
+      recordOutboundBytes: vi.fn(),
+      recordRuntimeLoaded: vi.fn(),
+      recordRuntimeEvicted: vi.fn(),
+    };
+    const fixture = await coldFixture("resource-inventory", { resources: recorded });
+    const slot = await fixture.registry.acquire(fixture.manager.getSessionId());
+    expect(recorded.recordRuntimeLoaded).toHaveBeenCalledTimes(1);
+    expect(recorded.recordRuntimeEvicted).not.toHaveBeenCalled();
+
+    fixture.registry.subscribe("phone", slot.id);
+    slot.publishSnapshot();
+    expect(recorded.recordSnapshotBuild).toHaveBeenLastCalledWith(1);
+
+    const inventory = await fixture.registry.resourceInventory();
+    expect(inventory).toHaveLength(1);
+    expect(inventory[0]).toMatchObject({ sessionId: slot.id, subscribers: 1 });
+    expect((inventory[0] as { bytes: number }).bytes).toBeGreaterThan(0);
+
+    await slot.dispose();
+    expect(recorded.recordRuntimeEvicted).toHaveBeenCalledTimes(1);
   });
 });

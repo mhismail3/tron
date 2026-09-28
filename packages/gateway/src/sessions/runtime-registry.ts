@@ -502,7 +502,8 @@ export class RuntimeRegistry {
        * forced. Outside any request span. */
       runtimeDisposeTimeout?: (graceMs: number) => void;
       /** The transport's resource sampler; the registry reports the work only it
-       * performs (catalog walks) and answers its runtime inventory. */
+       * performs (catalog walks, runtime publications) and answers its runtime
+       * inventory. */
       resources?: ResourceRecorder;
       machineId?: string;
       notifications?: NotificationService;
@@ -1586,7 +1587,12 @@ export class RuntimeRegistry {
   }
 
   private async catalogStructureEvidence(): Promise<CatalogStructureEvidence> {
-    return this.catalogDiscovery().catalogStructureEvidence();
+    // Every walk, shared or request-path, goes through here, so this is the one
+    // seam that can count them; a caller that joins a shared walk does not walk.
+    const startedAt = performance.now();
+    const evidence = await this.catalogDiscovery().catalogStructureEvidence();
+    this.options.resources?.recordCatalogWalk(performance.now() - startedAt, evidence.identitiesByPath.size);
+    return evidence;
   }
 
   private async readCatalogHeader(
@@ -1834,10 +1840,8 @@ export class RuntimeRegistry {
       return this.sharedCatalogStructureEvidence();
     }
     const operation = stage("catalog.walk", async () => {
-      const startedAt = performance.now();
       const evidence = await this.catalogStructureEvidence();
       count("catalog.walk.files", evidence.identitiesByPath.size);
-      this.options.resources?.recordCatalogWalk(performance.now() - startedAt, evidence.identitiesByPath.size);
       return evidence;
     });
     this.catalogEvidencePromise = operation;
@@ -2697,7 +2701,7 @@ export class RuntimeRegistry {
         this.automationSessionOwners.set(slot!, { operationId, automationId });
         this.reservedSlotStarts = Math.max(0, this.reservedSlotStarts - 1);
         reserved = false;
-        this.slots.set(sessionId, slot!);
+        this.publishRuntime(sessionId, slot!);
         published = true;
         this.invalidateCatalogAdmission();
         this.revision += 1;
@@ -2750,7 +2754,7 @@ export class RuntimeRegistry {
         }
         this.reservedSlotStarts = Math.max(0, this.reservedSlotStarts - 1);
         reserved = false;
-        this.slots.set(manager.getSessionId(), slot!);
+        this.publishRuntime(manager.getSessionId(), slot!);
         this.invalidateCatalogAdmission();
         this.revision += 1;
         this.options.sessionListChanged();
@@ -3179,7 +3183,7 @@ export class RuntimeRegistry {
         }
         this.reservedSlotStarts = Math.max(0, this.reservedSlotStarts - 1);
         reservationReleased = true;
-        this.slots.set(sessionId, slot!);
+        this.publishRuntime(sessionId, slot!);
       });
       return slot;
     } catch (error) {
@@ -3224,7 +3228,7 @@ export class RuntimeRegistry {
           if (this.slots.has(importedId)) {
             throw new GatewayError("conflict", "Imported session identity became registered");
           }
-          this.slots.set(importedId, slot);
+          this.publishRuntime(importedId, slot);
           published = true;
           this.invalidateCatalogAcquisition();
           this.revision += 1;
@@ -3572,11 +3576,22 @@ export class RuntimeRegistry {
    * The live runtimes and the canonical transcript bytes each holds, for the
    * transport's resource sample. Bytes come from one `stat` per live runtime a
    * minute, not from a projection kept in step with every append.
+   */  /**
+   * Publishes one newly live runtime and counts it for the resource sample. A
+   * runtime loaded and evicted inside one sample window would be invisible to a
+   * comparison of live sets, so the transition is counted where it happens.
    */
+  private publishRuntime(sessionId: string, slot: RuntimeSlot): void {
+    this.slots.set(sessionId, slot);
+    this.options.resources?.recordRuntimeLoaded();
+  }
+
   async resourceInventory(): Promise<readonly ResourceRuntimeEntry[]> {
     const entries: ResourceRuntimeEntry[] = [];
     for (const [sessionId, slot] of this.slots) {
-      const file = slot.persistedSessionFile;
+      // `sessionFile` rather than `persistedSessionFile`: the stat handles a
+      // file that is not there yet, and this path must not add a sync check.
+      const file = slot.sessionFile;
       const bytes = file === undefined ? 0 : await stat(file).then((metadata) => metadata.size).catch(() => 0);
       entries.push({ sessionId, bytes, subscribers: this.subscribers.get(sessionId)?.size ?? 0 });
     }

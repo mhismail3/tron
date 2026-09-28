@@ -15,7 +15,7 @@ import type { BlobByteRange } from "../sessions/blob-store.js";
 import type { AuthBroker } from "../admin/auth-broker.js";
 import type { GatewayLogger } from "./logger.js";
 import { GATEWAY_CONNECTION_POLICY } from "./connection-policy.js";
-import { formatStallEvidence, formatResourceSample, formatUnaudiencedWork, resourceSampleLevel, ResourceSampler, RESOURCE_SAMPLE_INTERVAL_MS, StallSampler } from "./stall-diagnostics.js";
+import { formatStallEvidence, formatResourceSample, ResourceSampler, RESOURCE_SAMPLE_INTERVAL_MS, StallSampler } from "./stall-diagnostics.js";
 import { GatewayService, type ClientContext } from "./gateway-service.js";
 import { MIN_PROTOCOL_VERSION, PROTOCOL_VERSION } from "../version.js";
 import { SessionSyncBarrier, type BufferedSessionEncoding, type BufferedSessionEvent } from "./session-sync.js";
@@ -563,6 +563,8 @@ export class GatewayServer {
   /** One resource sample reads the runtime inventory; a slow one must not
    * overlap the next minute's window. */
   private resourceSampleInFlight = false;
+  /** Whether the current run of sampler faults has already been reported. */
+  private resourceSampleFailureReported = false;
   private ready = false;
   private shuttingDown = false;
   private closeTask?: Promise<void>;
@@ -694,21 +696,23 @@ export class GatewayServer {
     this.resourceSampleInFlight = true;
     try {
       const sample = await this.resourceSampler.sample();
-      const level = resourceSampleLevel(sample);
+      const level = this.resourceSampler.level(sample);
       const message = formatResourceSample(sample);
       this.options.logger.log(level.level, level.reason === undefined ? message : `${message} (${level.reason})`, {
         event: "gateway.resources", source: "transport",
       });
-      // Snapshot work nobody could receive is G-3's target; before it lands this
-      // warning fires every window, which is the evidence the row exists for.
-      if (sample.unaudiencedSnapshotBuilds > 0) {
-        this.options.logger.log("warning", formatUnaudiencedWork(sample), {
-          event: "resources.unaudienced-work", source: "transport",
+      this.resourceSampleFailureReported = false;
+    } catch (error) {
+      // A sampler fault must never take the transport down, but a window that
+      // keeps failing would otherwise stop `gateway.resources` in silence (the
+      // histogram was already reset with the lost window). One record per run of
+      // failures says so without flooding the log.
+      if (!this.resourceSampleFailureReported) {
+        this.resourceSampleFailureReported = true;
+        this.options.logger.log("warning", "Gateway resource sample failed; the next window retries", {
+          event: "gateway.resources-failed", source: "transport", error,
         });
       }
-    } catch {
-      // A sampler fault must never take the transport down; the next window
-      // reports the same picture.
     } finally {
       this.resourceSampleInFlight = false;
     }
