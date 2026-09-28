@@ -470,17 +470,18 @@ struct PushNotificationCoordinatorTests {
         let firstUpsert = try await gatewayRequest(socket, method: "push.registration.upsert", after: 1)
         await socket.enqueue(registrationStatusResponse(id: firstUpsert))
         await startup.value
-
-        #expect(coordinator.readiness == .ready)
-        #expect(store.value?.grants[profile.id]?.acknowledgedRuntime == "machine-1:epoch-one")
+        try await waitUntil { store.value?.grants[profile.id]?.acknowledgedRuntime == "machine-1:epoch-one" }
+        try await waitUntil { coordinator.readiness == .ready }
+        #expect(coordinator.diagnostic == .complete)
 
         // The same Gateway runtime already holds this exact grant, so the
         // reconnect sends nothing at all.
         let sentBefore = await socket.sentFrames().count
         await coordinator.reconcile(profile: profile, connected: true, gatewayRuntimeEpoch: "epoch-one", client: client)
-        #expect(coordinator.readiness == .ready)
-        #expect(coordinator.diagnostic == .complete)
-        #expect(await socket.sentFrames().count == sentBefore)
+        try await waitUntil { coordinator.readiness == .ready }
+        try await Task.sleep(for: .milliseconds(30))
+        #expect(try await upsertRequests(socket) == [firstUpsert])
+        #expect(store.value?.grants[profile.id]?.acknowledgedRuntime == "machine-1:epoch-one")
 
         // A restarted Gateway runtime owns the credential document again, so
         // the acknowledgement is not trusted across it.
@@ -490,7 +491,22 @@ struct PushNotificationCoordinatorTests {
         let secondUpsert = try await gatewayRequest(socket, method: "push.registration.upsert", after: sentBefore)
         await socket.enqueue(registrationStatusResponse(id: secondUpsert))
         await restart.value
-        #expect(store.value?.grants[profile.id]?.acknowledgedRuntime == "machine-1:epoch-two")
+        try await waitUntil { store.value?.grants[profile.id]?.acknowledgedRuntime == "machine-1:epoch-two" }
+        #expect(try await upsertRequests(socket) == [firstUpsert, secondUpsert])
+    }
+
+    /// Every `push.registration.upsert` this connection sent, in order.
+    @MainActor
+    private func upsertRequests(_ socket: ScriptedGatewaySocket) async throws -> [String] {
+        var ids: [String] = []
+        for frame in await socket.sentFrames() {
+            let value = try JSONDecoder.gateway.decode(JSONValue.self, from: frame)
+            guard let object = value.objectValue,
+                  object["method"]?.stringValue == "push.registration.upsert",
+                  let id = object["id"]?.stringValue else { continue }
+            ids.append(id)
+        }
+        return ids
     }
 
     /// Answers every earlier request until one `method` arrives, then returns

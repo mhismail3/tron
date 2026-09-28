@@ -944,8 +944,8 @@ struct DashboardStateOwnerTests {
         var owner = SessionCatalogCoordinator()
         let first = owner.beginLoad()
         let second = owner.beginLoad()
-        let firstPublished = owner.publishAuthoritative([summary(revision: 1)], admission: first)
-        let secondPublished = owner.publishAuthoritative([summary(revision: 2)], admission: second)
+        let firstPublished = owner.publishAuthoritative([summary(revision: 1)], admission: first, revision: 1)
+        let secondPublished = owner.publishAuthoritative([summary(revision: 2)], admission: second, revision: 1)
         #expect(!firstPublished)
         #expect(secondPublished)
         #expect(owner.sessions.first?.summaryRevision == 2)
@@ -974,7 +974,7 @@ struct DashboardStateOwnerTests {
     func liveSummaryOverlay() {
         var owner = SessionCatalogCoordinator()
         let first = owner.beginLoad()
-        let firstPublished = owner.publishAuthoritative([summary(revision: 1)], admission: first)
+        let firstPublished = owner.publishAuthoritative([summary(revision: 1)], admission: first, revision: 1)
         let updated = owner.apply(update(
             revision: 3,
             phase: .running,
@@ -988,7 +988,7 @@ struct DashboardStateOwnerTests {
         #expect(stale == .stale)
 
         let refresh = owner.beginLoad()
-        let refreshed = owner.publishAuthoritative([summary(revision: 2)], admission: refresh)
+        let refreshed = owner.publishAuthoritative([summary(revision: 2)], admission: refresh, revision: 1)
         #expect(refreshed)
         #expect(owner.sessions.first?.summaryRevision == 3)
         #expect(owner.sessions.first?.phase == .running)
@@ -1005,7 +1005,7 @@ struct DashboardStateOwnerTests {
         #expect(owner.sessions.isEmpty)
 
         let load = owner.beginLoad()
-        let published = owner.publishAuthoritative([summary(revision: 1)], admission: load)
+        let published = owner.publishAuthoritative([summary(revision: 1)], admission: load, revision: 1)
         #expect(published)
         #expect(owner.sessions.first?.phase == .idle)
     }
@@ -1035,7 +1035,7 @@ struct DashboardStateOwnerTests {
     func attentionProjection() {
         var owner = SessionCatalogCoordinator()
         let load = owner.beginLoad()
-        let published = owner.publishAuthoritative([summary(revision: 1)], admission: load)
+        let published = owner.publishAuthoritative([summary(revision: 1)], admission: load, revision: 1)
         #expect(published)
         let appliedAttention = owner.applyAttention(
             sessionID: "session",
@@ -1070,7 +1070,7 @@ struct DashboardStateOwnerTests {
         let load = owner.beginLoad()
         let published = owner.publishAuthoritative([
             summary(revision: 1, phase: .running, waitingForUser: true),
-        ], admission: load)
+        ], admission: load, revision: 1)
         #expect(published)
         #expect(owner.activity(for: "session") == .waitingForUser)
 
@@ -1103,7 +1103,7 @@ struct DashboardStateOwnerTests {
                 foregroundPhase: .idle,
                 hasActiveSubagents: true
             ),
-        ], admission: load)
+        ], admission: load, revision: 1)
 
         #expect(published)
         #expect(owner.activity(for: "session") == .subagentsWorking)
@@ -1128,7 +1128,7 @@ struct DashboardStateOwnerTests {
         let load = owner.beginLoad()
         let published = owner.publishAuthoritative([
             summary(revision: 1, phase: .running),
-        ], admission: load)
+        ], admission: load, revision: 1)
         #expect(published)
         #expect(owner.freshness == .live)
         #expect(owner.activity(for: "session") == .active)
@@ -1140,7 +1140,8 @@ struct DashboardStateOwnerTests {
         #expect(owner.activity(for: "session") == .resuming)
         let disconnectedPublish = owner.publishAuthoritative(
             [summary(revision: 2, phase: .running)],
-            admission: pendingBeforeDisconnect
+            admission: pendingBeforeDisconnect,
+            revision: 1
         )
         #expect(!disconnectedPublish)
 
@@ -1151,7 +1152,8 @@ struct DashboardStateOwnerTests {
         #expect(owner.activity(for: "session") == .resuming)
         let cachedPublish = owner.publishAuthoritative(
             [summary(revision: 3)],
-            admission: pendingBeforeCache
+            admission: pendingBeforeCache,
+            revision: 1
         )
         #expect(!cachedPublish)
 
@@ -1164,7 +1166,7 @@ struct DashboardStateOwnerTests {
     func removal() {
         var owner = SessionCatalogCoordinator()
         let load = owner.beginLoad()
-        let published = owner.publishAuthoritative([summary(revision: 1)], admission: load)
+        let published = owner.publishAuthoritative([summary(revision: 1)], admission: load, revision: 1)
         let updated = owner.apply(update(revision: 2, phase: .running))
         #expect(published)
         #expect(updated == .updated)
@@ -1173,7 +1175,8 @@ struct DashboardStateOwnerTests {
         #expect(owner.sessions.isEmpty)
         let removedPublish = owner.publishAuthoritative(
             [summary(revision: 3)],
-            admission: pendingBeforeRemoval
+            admission: pendingBeforeRemoval,
+            revision: 1
         )
         #expect(!removedPublish)
         let unknown = owner.apply(update(revision: 2, phase: .idle))
@@ -1187,7 +1190,8 @@ struct DashboardStateOwnerTests {
         owner.replaceForFacade([summary(revision: 1)])
         let replacedPublish = owner.publishAuthoritative(
             [summary(revision: 2)],
-            admission: beforeReplacement
+            admission: beforeReplacement,
+            revision: 1
         )
         #expect(!replacedPublish)
 
@@ -1195,7 +1199,8 @@ struct DashboardStateOwnerTests {
         owner.clear()
         let clearedPublish = owner.publishAuthoritative(
             [summary(revision: 3)],
-            admission: beforeClear
+            admission: beforeClear,
+            revision: 1
         )
         #expect(!clearedPublish)
         #expect(owner.sessions.isEmpty)
@@ -1206,7 +1211,7 @@ struct DashboardStateOwnerTests {
     func catalogIndexIntegrity() {
         var owner = SessionCatalogCoordinator()
         let load = owner.beginLoad()
-        let published = owner.publishAuthoritative([summary(revision: 1)], admission: load)
+        let published = owner.publishAuthoritative([summary(revision: 1)], admission: load, revision: 1)
         #expect(published)
         #expect(owner.hasConsistentIndex())
         let updated = owner.apply(update(revision: 2, phase: .running))
@@ -1224,7 +1229,7 @@ struct DashboardStateOwnerTests {
     func archivedRowsLeaveUntilAPageReturnsThem() {
         var owner = SessionCatalogCoordinator()
         let load = owner.beginLoad()
-        let published = owner.publishAuthoritative([summary(revision: 1)], admission: load, archivedCount: 1)
+        let published = owner.publishAuthoritative([summary(revision: 1)], admission: load, revision: 1, archivedCount: 1)
         #expect(published)
         #expect(owner.archivedCount == 1)
 
@@ -1239,7 +1244,7 @@ struct DashboardStateOwnerTests {
 
         // Only an authoritative exclude page proves the row is visible again.
         let refreshed = owner.beginLoad()
-        let republished = owner.publishAuthoritative([summary(revision: 3)], admission: refreshed, archivedCount: 0)
+        let republished = owner.publishAuthoritative([summary(revision: 3)], admission: refreshed, revision: 1, archivedCount: 0)
         #expect(republished)
         #expect(owner.sessions.map(\.id) == ["session"])
         let visibleUpdate = owner.apply(update(revision: 4, phase: .idle))
@@ -1252,7 +1257,7 @@ struct DashboardStateOwnerTests {
     func archivedCountRetention() {
         var owner = SessionCatalogCoordinator()
         let load = owner.beginLoad()
-        let published = owner.publishAuthoritative([], admission: load, archivedCount: 3)
+        let published = owner.publishAuthoritative([], admission: load, revision: 1, archivedCount: 3)
         #expect(published)
         #expect(owner.archivedCount == 3)
 
