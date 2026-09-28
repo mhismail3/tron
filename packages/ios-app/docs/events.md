@@ -100,11 +100,12 @@ admits and reduces mounted-session topics:
   profile event streams converge every dashboard; Gateway invalidates the catalog when it cannot
   broadcast a full summary rather than fabricating an unknown row. `session.listChanged` marks
   the shared traversal dirty instead of cancel/restarting it. User-scoped 500-row pagination
-  has named page/item/cursor bounds and publishes atomically. A traversal whose connection already published a catalog revision
-  re-reads it conditionally: the first page names that `listRevision` and the Gateway answers `notModified` with no rows, so the
-  retained rows, selection, and scroll stay untouched and the traversal still counts as authoritative. The revision is never
-  inherited by a replacement connection, whose rows must converge through a full page read because the Gateway replays no
-  `session.summary` events to a reconnected client. Mixed page revisions
+  has named page/item/cursor bounds and publishes atomically. A traversal whose connection already published a catalog projection
+  token re-reads it conditionally: the first page names that token and the Gateway answers `notModified` with no rows, so the
+  retained rows, selection, and scroll stay untouched and the traversal still counts as authoritative. The token spans the whole
+  projection — the Gateway runtime epoch, the structural revision and every mutable row overlay — so a replacement connection
+  revalidates the rows it already holds instead of reloading them, and a restarted Gateway whose revisions begin again at zero
+  can never confirm a pre-restart token. Mixed page revisions
   and expired continuation leases restart once from a nil cursor and then retain the previous catalog silently; a current connection retries failed catalog reads with the shared reconnect backoff and shows “Session list unavailable” after three consecutive failures without stopping retries. Invalidations coalesce with the current traversal. This expected
   optimistic invalidation no longer creates the intrusive “Sessions changed while loading the
   dashboard” in-app notification or another routine synchronization notice;

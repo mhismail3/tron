@@ -2,6 +2,8 @@
 
 - **Started:** 2026-09-27
 - **Status:** Active (Phase 1 runs on `hardening/integration`; that branch's copy of this plan is authoritative until R-1)
+- **Last updated:** 2026-09-28, G-7 review response (the catalog token covers the whole projection and the push acknowledgement tracks the Gateway's advertised grant revision)
+
 - **Last updated:** 2026-09-28, O-6a blocked on a quiet-host repeat (second review response landed)
 
 - **Last updated:** 2026-09-28, O-4 (review round 4 addressed)
@@ -559,8 +561,7 @@ rows are in priority order.
 | C-6 | Ready | Cancel frame for disposable reads; a retried `session.open` joins the in-flight one | O-3 | |
 | G-12 | Ready | Server-side deadlines, concurrency caps and heap-pressure shedding with typed retry hints | O-3, O-5 | |
 | G-2 | Ready | Cold open in bounded time from the index and a single-file fence | G-1c | |
-| G-7 | Done | Reconnect diet: send only what changed | O-1, O-6a | orchestrator-dispatched deepseek-worker, 2026-09-28 |
-| G-7a | Needs scoping | Push registration no-op answer: decide whether the Gateway's no-op carries an explicit `notModified` flag and whether an identical registration may skip its command receipt, not only its credential write (see G-7 handoff) | G-7 | |
+| G-7 | Done | Reconnect diet: send only what changed | O-1, O-6a | orchestrator-dispatched deepseek-worker, 2026-09-28; review round addressed, R-1/R-4 own the real-reconnect measurement |
 | G-11 | Ready | Event-loop budget: find and bound every synchronous task over 50 ms | O-5, O-6a | |
 | G-9 | Ready | One background-work scheduler that yields to requests; measure the libuv pool size | O-5, G-1b | |
 | G-4 | Ready | Outbound queue coalescing of superseded snapshots and keyed events | G-3 | |
@@ -1287,7 +1288,9 @@ needed), **Checks**, **Docs**, **Done when**, **User action**.
 - **Checks:** `packages/ios-app/Tests/Gateway/AppModelReconnectTests.swift`,
   `packages/gateway/src/transport/session-archive.integration.test.ts` for list
   behaviour.
-- **Done when:** requests and bytes per reconnect meet the recorded target.
+- **Done when:** requests and bytes per reconnect meet the recorded target
+  (the target list and the delivered request set are fixed by this task's
+  checks; R-1 and R-4 own the real-reconnect request/byte measurement).
 - **User action:** none; ships in the release (R-2).
 
 ### G-11 — Event-loop budget
@@ -4392,6 +4395,97 @@ events; widen them to name the pool owner in the same change.
 
 ### G-7 · Done · 2026-09-28 · orchestrator-dispatched deepseek-worker (branch `hardening/g-7`)
 
+- Review response: the review round after the first handoff entry below found a
+  blocker and two major gaps. This entry records what the fixes actually are;
+  the claims below about a connection-scoped revision, the no-op answer's shape
+  and the kept command receipt are superseded by it.
+- **Finding 1 (blocker) — the conditional answer covered only structural
+  membership.** `session.list` now takes and returns a projection token:
+  `RuntimeRegistry` publishes `projectionToken` = the Gateway runtime epoch plus
+  the page-source generation (structural `listRevision`, `catalogProjectionGeneration`,
+  scope, archive filter, archive revision), the pagination store carries it on
+  every page, and an uncursored read that names the current token is answered
+  `notModified` with no rows. The case the review reproduced — another client
+  marks a cold row unread, which moves only `catalogProjectionGeneration`, then a
+  conditional read returned `notModified` with no rows while the plain read
+  showed `isUnread: true` — is now a case in
+  `session-archive.integration.test.ts`: "answers an unchanged projection token
+  without rows and re-reads after the projection moves". Its artifact records
+  `firstRevision: 0`/`afterAttentionRevision: 0` with
+  `token: <epoch>:0:0:...` and `attentionToken: <epoch>:0:1:...`, plus a restart
+  whose token carries a new epoch. The same fix covers the phone's
+  malformed-summary and metadata re-check recovery paths, which re-read through
+  this conditional path.
+- **Finding 2 (major) — the push acknowledgement could not see a runtime grant
+  disable.** The Gateway now advertises `pushRegistrationRevision` in `hello`
+  and `system.info`: a digest over the grants it stores (identity, installation,
+  activity, disabled reason, relay origin) plus the relay origin they are valid
+  for, refreshed on every notification-document write and stable across a
+  restart that changed nothing. The phone stores it as
+  `PushGrant.acknowledgedRegistrationRevision` and skips the registration only
+  while it and `machineId:runtimeEpoch` both still match, so a relay rejection
+  that disabled the grant (`notification-service.ts` `recordOutcome`) makes the
+  next reconcile re-send and act on `requiresGrantRotation`. Tested at both
+  layers: `notification-service.test.ts` "advertises a changed registration
+  revision when the relay disables a grant" (the revision moves, the grant is no
+  longer current, the re-send answers `requiresGrantRotation: true`) and
+  `PushNotificationCoordinatorTests` "an acknowledged registration is not re-sent
+  while the Gateway's grant revision is unchanged" (unchanged revision sends
+  nothing; a moved revision re-sends and discards the disabled grant; a changed
+  runtime identity re-sends).
+- **Finding 3 (major) — the plan row's Done-when and the connection-scoped
+  revision.** Decided with the supervisor: the token is runtime-scoped, so the
+  phone keeps it across a reconnect and a replacement connection revalidates the
+  rows it holds instead of reloading them ("reconnect resumes; it does not
+  reload"). A profile switch still drops it (`invalidateLoads()`), pinned by
+  `DashboardStateOwnerTests` "a retained projection token survives a reconnect
+  and drops on a profile switch". The real-reconnect request and byte
+  measurement is R-1's and R-4's, recorded in the row's Done-when.
+- **Finding 4 (minor) — a lost removal answer.** `removeRegistration` clears and
+  persists the acknowledgement before sending `push.registration.remove`, so a
+  user who re-allows notifications re-registers instead of trusting an
+  acknowledgement for a grant the Gateway may already have removed
+  (`PushNotificationCoordinatorTests` "a lost removal response leaves no
+  acknowledgement that a removed grant is current").
+- **Finding 5 (minor) — the identical registration's command receipt.** Per the
+  supervisor, G-7's Do item 2 is literal: an identical registration is answered
+  before the receipt owner opens one, so it writes neither a receipt nor the
+  document. An unchanged registration is naturally idempotent, so a retried
+  request repeating the same `commandId` gets the same stored status;
+  `gateway-notification-rpc.test.ts` "answers an identical registration without
+  opening a command receipt" spies the receipt owner and asserts it is never
+  entered. G-7a was removed: it only held this decision.
+- **Finding 6 (nit) — a late transfer completion.** `transfer` now takes the
+  runtime identity and revision from the admitted context and passes them to
+  `acknowledgeRegistration`, so a completion that lands after a reconnect
+  records the runtime that answered rather than whatever is current.
+- **Finding 7 (nit) — the version bump's search-and-replace mangled history.**
+  The two "additive field ... leave protocol version 6 unchanged" sentences now
+  say the additive field required no protocol version change, and the v5 update
+  helper claim names what actually rejects a strictly v6 candidate (a payload
+  manifest validated against the version the helper speaks, and the
+  protocol-range probe).
+- **Finding 8 (nit):** the diff outside the listed owning files is unchanged from
+  the first entry's justification (the catalog loader's owners, plus the release
+  rule that the protocol bump touches every fixture pinning the version).
+- Evidence: `npm run build` clean; `npx vitest run` on
+  `session-archive.integration.test.ts`, `session-list-pagination.test.ts`,
+  `notification-service.test.ts` and `gateway-notification-rpc.test.ts` passes
+  100/100; the session-archive report at
+  `packages/gateway/test-results/session-archive.integration.json` carries the
+  new case's evidence. `scripts/tron-ios-test build --lane G7R2` succeeded and
+  `scripts/tron-ios-test run --lane G7R2` for `AppModelReconnectTests`,
+  `PushNotificationCoordinatorTests`, `DashboardStateOwnerTests` and
+  `AppModelCatalogSyncTests` passes 151/151.
+- Changes: `f8574146d` (Gateway), `ce4c3fb12` (phone), plus the docs and this
+  entry, branch `hardening/g-7`.
+
+### G-7 · Done · 2026-09-28 · orchestrator-dispatched deepseek-worker (branch `hardening/g-7`)
+
+- (Superseded in part by the review-response entry above: the token is
+  runtime-scoped rather than connection-scoped, the no-op registration answer
+  carries the advertised revision, and an identical registration skips its
+  command receipt. The findings and their fixes are recorded there.)
 - Result: a reconnect sends the push registration only when the registration
   changed for this Gateway runtime, and revalidates its session catalog instead
   of reloading rows whenever the connection's own traversal already published
@@ -4468,20 +4562,20 @@ events; widen them to name the pool owner in the same change.
     leave them asserting a stale contract.
 - Changes: `fd14c2712` (reconnect diet + protocol bump in the same series;
   bump commit `c16e4b279`), branch `hardening/g-7`.
-- Tasks added: G-7a.
+- Tasks added: G-7a (removed by the review response above, which decided it).
 - Kept on purpose: the command receipt (idempotency evidence) on a no-op
   `push.registration.upsert`. The plan's "no receipt write" is read as the
   notification service's own durable state — the credential document and its
   receipt/revocation overlays — because `transport/command-receipts.ts` is not a
   G-7 owning file and the architecture invariant requires a bounded idempotency
-  receipt for every mutation. G-7a exists so that reading can be corrected
-  deliberately rather than silently.
-- Deviations: the push registration no-op answer keeps the existing
-  `NotificationStatus` shape; no new field was added. The message-shape change
-  that owns the version bump is the `session.list` conditional read. The
-  `listRevision` value the phone retains is connection-scoped rather than
-  Gateway-lifetime, which trades the plan's literal wording for convergence of
-  row fields a reconnect cannot otherwise recover.
+  receipt for every mutation. The review response above replaced this reading:
+  the plan's wording is literal and an identical registration now skips its
+  receipt too.
+- Deviations (superseded by the review response above): the push registration
+  no-op answer kept the existing `NotificationStatus` shape and the retained
+  value was connection-scoped. The message-shape change that owns the version
+  bump is the `session.list` conditional read, and the no-op answer does add the
+  advertised revision to `hello`/`system.info` (not to the status shape).
 - For the next agent: R-4 compares the recorded target list with a real
   evaluation-day reconnect and should also measure the bytes (the `session.list`
   page is the largest single item, so the `notModified` answer is the byte win).
