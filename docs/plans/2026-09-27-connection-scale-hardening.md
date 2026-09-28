@@ -4454,7 +4454,11 @@ events; widen them to name the pool owner in the same change.
   request repeating the same `commandId` gets the same stored status;
   `gateway-notification-rpc.test.ts` "answers an identical registration without
   opening a command receipt" spies the receipt owner and asserts it is never
-  entered. G-7a was removed: it only held this decision.
+  entered. An admitted registration keeps its previous order — the per-device
+  lane wraps the operation inside its receipt, so an accepted mutation is owned
+  by the work registry before it waits for the lane (`gateway-restart.test.ts`
+  "owns mobile mutations before they wait in the per-device lane"). G-7a was
+  removed: it only held this decision.
 - **Finding 6 (nit) — a late transfer completion.** `transfer` now takes the
   runtime identity and revision from the admitted context and passes them to
   `acknowledgeRegistration`, so a completion that lands after a reconnect
@@ -4468,17 +4472,18 @@ events; widen them to name the pool owner in the same change.
 - **Finding 8 (nit):** the diff outside the listed owning files is unchanged from
   the first entry's justification (the catalog loader's owners, plus the release
   rule that the protocol bump touches every fixture pinning the version).
-- Evidence: `npm run build` clean; `npx vitest run` on
-  `session-archive.integration.test.ts`, `session-list-pagination.test.ts`,
-  `notification-service.test.ts` and `gateway-notification-rpc.test.ts` passes
-  100/100; the session-archive report at
+- Evidence: `npm run build` clean; `npx vitest run` passes on six focused files:
+  `session-archive.integration.test.ts`, `session-list-pagination.test.ts` and
+  `server-revocation.integration.test.ts` (66 tests) and
+  `notification-service.test.ts`, `gateway-notification-rpc.test.ts` and
+  `gateway-restart.test.ts` (60 tests); the session-archive report at
   `packages/gateway/test-results/session-archive.integration.json` carries the
   new case's evidence. `scripts/tron-ios-test build --lane G7R2` succeeded and
   `scripts/tron-ios-test run --lane G7R2` for `AppModelReconnectTests`,
   `PushNotificationCoordinatorTests`, `DashboardStateOwnerTests` and
   `AppModelCatalogSyncTests` passes 151/151.
-- Changes: `f8574146d` (Gateway), `ce4c3fb12` (phone), plus the docs and this
-  entry, branch `hardening/g-7`.
+- Changes: `f8574146d` and `d38f0ec71` (Gateway), `ce4c3fb12` (phone), plus the
+  docs and this entry, branch `hardening/g-7`.
 
 ### G-7 · Done · 2026-09-28 · orchestrator-dispatched deepseek-worker (branch `hardening/g-7`)
 
