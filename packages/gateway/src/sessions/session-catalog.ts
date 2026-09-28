@@ -453,21 +453,21 @@ export class SessionCatalog {
    * transcripts inside it, and reports a folder renamed inside the root as one
    * event for each name, so the folder's own `.jsonl` files are re-read. A path
    * that is gone may have taken the rows under it with it, so the folder's own
-   * cut is re-derived once. Anything else (a lock or scratch file) is not a row.
-   * The root's own path is the one folder whose absence is an outage: no cut of
-   * a folder that is not there is membership evidence. */
+   * cut is re-derived once. Anything else (a lock or scratch file) is not a row. */
   private async resolveFolderEvent(path: string, root: string): Promise<void> {
     const info = await lstat(path).catch(() => undefined);
     if (info === undefined) {
       // Only absence is evidence here; an unreadable path proves nothing.
       if (!(await pathMissing(path))) return;
-      // A recursive watcher names the folder itself for the folder's own move or
-      // removal, and no cut of a folder that is not there is membership
-      // evidence: the rows stay and the retry attaches to the folder once it is
-      // back, whose own cut republishes what this outage could not see.
-      if (path === root || !(await lstat(root).then((stats) => stats.isDirectory(), () => false))) {
-        return this.rootVanished();
-      }
+      // The folder a path was named from is gone: no cut of it is membership
+      // evidence, so the rows stay and the retry attaches to it when it exists
+      // again.
+      if (!(await lstat(root).then((stats) => stats.isDirectory(), () => false))) return this.rootVanished();
+      // A recursive watcher names the folder itself through the root's own
+      // basename, once when the watch attaches. With the folder there, that
+      // names the folder and not a path inside it: its contents arrive as their
+      // own events, and no cut of the whole folder is owed for it.
+      if (path === join(root, basename(root))) return;
       return this.debounceUnnamedEvent();
     }
     if (!info.isDirectory()) return;
@@ -694,6 +694,14 @@ export class SessionCatalog {
       return;
     }
     const files = scan.candidates.length;
+    // A cut of a folder that is not there is not membership evidence either: a
+    // root that is missing or unreadable leaves every published row alone, the
+    // way an unreadable candidate does. An empty catalog folder that *is* there
+    // is a real empty cut and publishes nothing.
+    if (!(await this.catalogRootIsDirectory())) {
+      report("incomplete", files);
+      return;
+    }
     if (!scan.complete) {
       // An incomplete cut is never membership evidence: the published rows stay
       // as they are rather than shrinking to what this pass happened to see.
@@ -746,7 +754,11 @@ export class SessionCatalog {
     // writer deletes a session the same way. Reading such a path would only
     // report a failure for a file that is provably not canonical any more.
     if (await pathMissing(canonicalPath)) {
-      if (!existing || !this.rowsByPath.delete(resolve(existing.path))) return false;
+      // Absence is removal evidence only while the folder it was named from is
+      // there: a root that has been moved away takes every path inside it with
+      // it, and that is an outage to repair, not a deletion to publish.
+      if (!existing || !(await this.catalogRootIsDirectory())) return false;
+      if (!this.rowsByPath.delete(resolve(existing.path))) return false;
       this.markChanged();
       if (fromWatcher) this.reportChanged(existing, "removed", startedAt);
       return true;
@@ -815,6 +827,13 @@ export class SessionCatalog {
     const resolved = await realpath(this.options.catalogRoot()).catch(() => undefined);
     if (resolved) this.canonicalRoot = resolved;
     return resolved ?? resolve(this.options.catalogRoot());
+  }
+
+  /** The folder every row belongs to is there to be read. A root that is missing
+   * or unreadable is an outage: neither a cut of it nor an absent path inside it
+   * is membership evidence. */
+  private async catalogRootIsDirectory(): Promise<boolean> {
+    return lstat(await this.catalogRoot()).then((stats) => stats.isDirectory(), () => false);
   }
 
   private classify(row: CatalogMetadataIndexRow, catalogRoot: string): SessionCatalogRow {

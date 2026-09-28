@@ -13,7 +13,7 @@ import {
   writeFile,
 } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { dirname, join, relative } from "node:path";
+import { basename, dirname, join, relative } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   CatalogDiscovery,
@@ -753,10 +753,19 @@ describe("SessionCatalog", () => {
     await catalog.dispose();
   });
 
-  it("treats the root's own removal as one outage instead of an empty cut", async () => {
+  it("keeps its rows while the root itself is away, and a later cut republishes them", async () => {
+    // The production watcher: macOS reports the root's own rename as one event
+    // named for the root, which may coalesce with the report the watch makes
+    // when it attaches, so no outage record is asserted here (the injectable
+    // backend covers that path) — what must hold either way is that no pass
+    // publishes a cut of a folder that is not there.
+    const outcomes: SessionCatalogReconcileOutcome[] = [];
     const resets: SessionCatalogWatcherReset[] = [];
-    const { sessions, catalog } = await fixture({
-      reconcileIntervalMs: 0, watchRetryMs: 50, onWatcherReset: (reset) => resets.push(reset),
+    const { sessions, catalog, index } = await fixture({
+      reconcileIntervalMs: 100,
+      watchRetryMs: 50,
+      onWatcherReset: (reset) => resets.push(reset),
+      onReconciled: (outcome) => outcomes.push(outcome),
     });
     const file = join(sessions, "workspace", "a.jsonl");
     await writeSession(file, "id-a", sessions, ["one"]);
@@ -764,22 +773,65 @@ describe("SessionCatalog", () => {
     await catalog.settled();
     expect(catalog.row(file)?.id).toBe("id-a");
 
-    // The root itself is renamed away: the platform reports the root's own name
-    // and no error, and an absent root proves no removal.
     const moved = `${sessions}-moved`;
     await rename(sessions, moved);
-    await waitFor(() => resets.length === 1, 10_000);
-    expect(resets).toEqual([{ reason: "unavailable" }]);
-    expect(catalog.row(file)?.id).toBe("id-a");
+    await catalog.reconcile();
+    await catalog.settled();
+    expect(outcomes.at(-1)).toMatchObject({ outcome: "incomplete", added: 0, removed: 0 });
+    expect(catalog.rows().map((row) => row.id)).toEqual(["id-a"]);
+    expect((await index.load(sessions))?.map((row) => row.id)).toEqual(["id-a"]);
+    expect(resets.every((reset) => reset.reason === "unavailable")).toBe(true);
 
-    // Nothing is watched while the folder is elsewhere: the append below is not
-    // published, and it is the cut that follows the re-attach that repairs it.
+    // Nothing watches a folder that is elsewhere, so the append is not a row
+    // until a pass reads the folder again.
     await appendMessage(join(moved, "workspace", "a.jsonl"), "while unwatched", 1);
     await new Promise((resolve) => setTimeout(resolve, CATALOG_EVENT_DEBOUNCE_MS + 200));
     expect(catalog.row(file)?.messageCount).toBe(1);
 
     await rename(moved, sessions);
     await waitFor(() => catalog.row(file)?.messageCount === 2, 15_000);
+    await catalog.dispose();
+  });
+
+  it("records one outage for the root's own event when the folder is gone", async () => {
+    // The event macOS delivers for the root's own move, on the injectable
+    // backend that can emit it on demand: one outage, no cut of the missing
+    // folder, and a replacement whose own cut repairs the gap.
+    const watch = manualWatch();
+    const resets: SessionCatalogWatcherReset[] = [];
+    const { sessions, catalog, index } = await fixture({
+      watchCatalog: watch.backend,
+      reconcileIntervalMs: 0,
+      watchRetryMs: 30,
+      onWatcherReset: (reset) => resets.push(reset),
+    });
+    const file = join(sessions, "workspace", "a.jsonl");
+    await writeSession(file, "id-a", sessions, ["one"]);
+    catalog.start();
+    await catalog.settled();
+    expect(watch.requests).toHaveLength(1);
+
+    const moved = `${sessions}-moved`;
+    await rename(sessions, moved);
+    // The folder is gone, so the retry cannot attach to it either.
+    watch.fail = true;
+    const walks = vi.spyOn(catalog, "reconcile");
+    watch.emit(basename(sessions));
+    await waitFor(() => resets.length === 1, 5_000);
+    expect(resets).toEqual([{ reason: "unavailable" }]);
+    // No cut ran for the event, and the row the folder proved stays published:
+    // the file is not gone, the folder is.
+    expect(walks).not.toHaveBeenCalled();
+    expect(catalog.row(file)?.id).toBe("id-a");
+    expect((await index.load(sessions))?.map((row) => row.id)).toEqual(["id-a"]);
+
+    await appendMessage(join(moved, "workspace", "a.jsonl"), "while unwatched", 1);
+    await rename(moved, sessions);
+    watch.fail = false;
+    await waitFor(() => watch.requests.length === 2, 5_000);
+    // The replacement attaches to the folder that is back and its own cut is
+    // what publishes the append the outage could not see.
+    await waitFor(() => catalog.row(file)?.messageCount === 2, 5_000);
     await catalog.dispose();
   });
 
