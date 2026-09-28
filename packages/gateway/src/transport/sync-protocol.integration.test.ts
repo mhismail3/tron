@@ -11,7 +11,7 @@ const cleanups: Array<() => Promise<void>> = [];
 afterEach(async () => { await Promise.all(cleanups.splice(0).map((cleanup) => cleanup())); });
 
 describe("two-phase session synchronization protocol", () => {
-  it("rejects overlapping opens, preserves independent completion order, and cleans failed/oversized owners", async () => {
+  it("joins overlapping opens, preserves independent completion order, and cleans failed/oversized owners", async () => {
     const root = await mkdtemp(join(tmpdir(), "tron-sync-race-"));
     const devices = new DeviceStore(root, "machine");
     await devices.initialize();
@@ -108,14 +108,29 @@ describe("two-phase session synchronization protocol", () => {
     const waitStarted = async (sessionId: string, count: number): Promise<void> => {
       while ((startedCounts.get(sessionId) ?? 0) < count) await new Promise((resolve) => setTimeout(resolve, 1));
     };
+    // Frames on one socket are admitted in order, so a later frame's answer
+    // proves every frame before it was already admitted. The probe is a
+    // `session.sync` for a token no synchronization owns, which fails closed.
+    const awaitAdmitted = async (id: string): Promise<void> => {
+      request(id, "session.sync", "same", { syncToken: "not-a-token" });
+      while (!frames.some((frame) => frame.id === id)) await new Promise((resolve) => setTimeout(resolve, 1));
+      expect(frames.find((frame) => frame.id === id).error.code).toBe("conflict");
+    };
     request("open-1", "session.open", "same");
     await waitStarted("same", 1);
+    // A retried open joins the attempt already in flight for this connection and
+    // session: one invocation answers both requests with the same result instead
+    // of failing the retry as a duplicate open (C-6).
     request("open-2", "session.open", "same");
-    while (!frames.some((frame) => frame.id === "open-2")) await new Promise((resolve) => setTimeout(resolve, 1));
-    expect(frames.find((frame) => frame.id === "open-2").error.code).toBe("conflict");
+    await awaitAdmitted("join-fence");
     openResolvers.get("same")?.();
-    while (!frames.some((frame) => frame.id === "open-1")) await new Promise((resolve) => setTimeout(resolve, 1));
+    while (!frames.some((frame) => frame.id === "open-1")
+      || !frames.some((frame) => frame.id === "open-2")) await new Promise((resolve) => setTimeout(resolve, 1));
     const first = frames.find((frame) => frame.id === "open-1");
+    const joinedOpen = frames.find((frame) => frame.id === "open-2");
+    expect(startedCounts.get("same")).toBe(1);
+    expect(joinedOpen.error).toBeUndefined();
+    expect(joinedOpen.result).toEqual(first.result);
     request("sync-1", "session.sync", "same", { syncToken: first.result.syncToken });
     while (!frames.some((frame) => frame.id === "sync-1")) await new Promise((resolve) => setTimeout(resolve, 1));
 
@@ -178,7 +193,7 @@ describe("two-phase session synchronization protocol", () => {
     // Technical clients may keep independent subscriptions, but a mobile
     // presentation connection is explicitly one-slot: A -> B -> C revokes
     // every prior exact owner before installing the next one.
-    const mobile = new WebSocket(`ws://127.0.0.1:${port}/v1/socket`, { headers: { authorization: `Bearer ${token}` } });
+const mobile = new WebSocket(`ws://127.0.0.1:${port}/v1/socket`, { headers: { authorization: `Bearer ${token}` } });
     const mobileFrames: any[] = [];
     mobile.on("message", (raw) => mobileFrames.push(JSON.parse(raw.toString())));
     await new Promise<void>((resolve) => mobile.once("open", () => resolve()));
@@ -233,7 +248,7 @@ describe("two-phase session synchronization protocol", () => {
     while (!frames.some((frame) => frame.id === "technical-visible")) await new Promise((resolve) => setTimeout(resolve, 1));
     expect(frames.find((frame) => frame.id === "technical-visible").error.code).toBe("invalid_request");
 
-    const mobileEventStart = mobileFrames.length;
+const mobileEventStart = mobileFrames.length;
     gateway.broadcastSession("a", "session.progress", { runtimeGeneration: "generation-a", eventSequence: 200, revision: 200, data: { message: "a" } } as any);
     gateway.broadcastSession("b", "session.progress", { runtimeGeneration: "generation-b", eventSequence: 200, revision: 200, data: { message: "b" } } as any);
     gateway.broadcastSession("c", "session.progress", { runtimeGeneration: "generation-c", eventSequence: 200, revision: 200, data: { message: "c" } } as any);

@@ -20,7 +20,7 @@ import { GatewayService, type ClientContext } from "./gateway-service.js";
 import { MIN_PROTOCOL_VERSION, PROTOCOL_VERSION } from "../version.js";
 import { SessionSyncBarrier, type BufferedSessionEncoding, type BufferedSessionEvent } from "./session-sync.js";
 import type { BrowserLiveViewRegistry } from "../display/browser-live-view.js";
-import { bytes, RequestSpan, runInRequestSpan, stage } from "./request-span.js";
+import { bytes, RequestSpan, runInRequestSpan, stage, wait } from "./request-span.js";
 import { TailscalePeerPaths, type PeerPathLookup, type PeerPathReader } from "./tailscale-peer.js";
 
 // Retain only recent former IDs while an active subscription is rekeyed. Older
@@ -204,6 +204,35 @@ export interface ActiveSessionSynchronization {
   sessionId: string;
 }
 
+/**
+ * One shared `session.open` attempt per connection and session (`C-6`). A
+ * retried open joins it instead of failing as a duplicate, so the answer the
+ * first attempt is already computing is the one the retry receives, and the
+ * attempt is abandoned only when its last waiting request leaves: a cancellation
+ * that arrives while a retry still waits must not throw the retry's answer away.
+ */
+export interface SessionOpenFlight {
+  /** The request whose synchronization this attempt installs and owns. */
+  readonly requestId: string;
+  /** The shared attempt's signal; aborted when its last waiter leaves. */
+  readonly controller: AbortController;
+  /** The shared invocation, published by the request that created the flight. */
+  attempt?: Promise<JsonValue>;
+  /** Requests still waiting for this attempt's answer. */
+  waiters: number;
+}
+
+/** One admitted request, the owner of its abort signal and its span. */
+interface InFlightRpc {
+  readonly controller: AbortController;
+  readonly method: string;
+  readonly startedAt: number;
+  readonly span: RequestSpan;
+  /** Set with the stage it was in when an explicit `cancel` frame arrived. A
+   * socket retirement leaves it unset: that request reports `connectionClosed`. */
+  cancelledStage?: string;
+}
+
 interface SynchronizationCompletion {
   sessionId: string;
   syncToken: string;
@@ -214,14 +243,14 @@ interface SynchronizationCompletion {
 type SynchronizationOwner = SynchronizationCompletion;
 
 export function existingSessionOpenOwner(
-  pendingSessionOpens: ReadonlyMap<string, string>,
+  pendingSessionOpens: ReadonlyMap<string, { readonly requestId: string }>,
   synchronizations: ReadonlyMap<string, ActiveSessionSynchronization>,
   sessionId: string,
 ): string | undefined {
   // Only genuinely in-flight opens are rejected. An installed subscription is
   // not an open owner: beginSynchronization replaces it deterministically so
   // reconnecting clients always converge instead of deadlocking on conflict.
-  return pendingSessionOpens.get(sessionId)
+  return pendingSessionOpens.get(sessionId)?.requestId
     ?? synchronizations.get(sessionId)?.requestId;
 }
 
@@ -661,7 +690,7 @@ interface Connection {
   presentationOnly: boolean;
   terminals: Set<string>;
   inFlight: Set<string>;
-  requestControllers: Map<string, AbortController>;
+  requestControllers: Map<string, InFlightRpc>;
   synchronizations: Map<string, ActiveSessionSynchronization>;
   subscriptionTokens: Map<string, string>;
   // A fork may occur after session.open but before session.sync. Retain the
@@ -669,8 +698,8 @@ interface Connection {
   rekeyedSessionIds: Map<string, string>;
   synchronizationBytes: number;
   // Reserved before asynchronous service invocation so overlapping opens for
-  // the same connection/session are rejected deterministically.
-  pendingSessionOpens: Map<string, string>;
+  // the same connection/session share their attempt instead of both running.
+  pendingSessionOpens: Map<string, SessionOpenFlight>;
   outbound: OrderedOutboundQueue;
   closeInitiated: boolean;
   workRetired: boolean;
@@ -1952,6 +1981,12 @@ export class GatewayServer {
     }
 
     if (frame.type !== "request" || typeof frame.id !== "string" || typeof frame.method !== "string") {
+      // A `cancel` frame is a control frame with no answer: the peer already
+      // stopped waiting for the request it names, so there is nobody to tell.
+      if (frame.type === "cancel") {
+        if (typeof frame.id === "string") this.cancelInflightRequest(connection, frame.id);
+        return;
+      }
       this.send(connection, { type: "response", id: typeof frame.id === "string" ? frame.id : "invalid", ok: false, error: publicError(new GatewayError("invalid_request", "Malformed request envelope")) });
       return;
     }
@@ -1970,7 +2005,12 @@ export class GatewayServer {
       && typeof (frame.params as Record<string, unknown>).sessionId === "string"
       ? (frame.params as Record<string, unknown>).sessionId as string
       : undefined;
+    let sessionOpenFlight: SessionOpenFlight | undefined;
     if (sessionOpenID !== undefined) {
+      const pending = connection.pendingSessionOpens.get(sessionOpenID);
+      if (pending !== undefined && pending.requestId !== frame.id) {
+        return this.joinSessionOpen(connection, frame, pending);
+      }
       const owner = existingSessionOpenOwner(
         connection.pendingSessionOpens,
         connection.synchronizations,
@@ -1985,19 +2025,26 @@ export class GatewayServer {
         });
         return;
       }
-      connection.pendingSessionOpens.set(sessionOpenID, frame.id);
+      sessionOpenFlight = { requestId: frame.id, controller: new AbortController(), waiters: 1 };
+      connection.pendingSessionOpens.set(sessionOpenID, sessionOpenFlight);
     }
     connection.inFlight.add(frame.id);
     const requestController = new AbortController();
     const admittedSubscriptionIds = new Set(connection.subscriptionTokens.keys());
     const admittedTerminalIds = new Set(connection.terminals);
-    connection.requestControllers.set(frame.id, requestController);
     const requestId = frame.id;
     const diagnosticID = diagnosticRequestID(requestId);
     const rpcStartedAt = performance.now();
     // One span per admitted request. Its breakdown rides on the rpc.completed
     // record below, so a slow request names the work that held it.
     const requestSpan = new RequestSpan();
+    const inFlightRpc: InFlightRpc = {
+      controller: requestController,
+      method: frame.method,
+      startedAt: rpcStartedAt,
+      span: requestSpan,
+    };
+    connection.requestControllers.set(frame.id, inFlightRpc);
     const params = frame.params && typeof frame.params === "object" && !Array.isArray(frame.params)
       ? frame.params as Record<string, unknown>
       : {};
@@ -2007,6 +2054,10 @@ export class GatewayServer {
       ...(typeof params.commandId === "string" ? { commandId: params.commandId } : {}),
     };
     let rpcOutcome: "success" | "failure" = "failure";
+    // Whether the session-open attempt itself produced a result, before any
+    // response of this request was written. A synchronization installed by an
+    // attempt that produced nothing is this request's to release.
+    let attemptSucceeded = false;
     const synchronizationOwners: SynchronizationOwner[] = [];
     const synchronizationCompletions: SynchronizationCompletion[] = [];
     let responseAttempted = false;
@@ -2098,7 +2149,10 @@ export class GatewayServer {
         id: connection.id,
         identity: connection.identity,
         isLocal: connection.isLocal,
-        signal: requestController.signal,
+        // A `session.open` waits on the connection's shared attempt for its
+        // session, so its signal is the attempt's: one waiter leaving must not
+        // abandon the answer another waiter still waits for (`C-6`).
+        signal: sessionOpenFlight?.controller.signal ?? requestController.signal,
         beginSynchronization: (sessionId) => {
           if (connection.revoked) throw new GatewayError("unauthenticated", "This device is no longer authorized");
           if (connection.workRetired) throw new GatewayError("busy", "Connection is closed", true);
@@ -2107,7 +2161,7 @@ export class GatewayServer {
           // ownership is attached to the canonical slot.
           sessionId = resolveSessionId(sessionId);
           if (connection.presentationOnly
-              && connection.pendingSessionOpens.get(sessionId) !== requestId) {
+              && connection.pendingSessionOpens.get(sessionId)?.requestId !== requestId) {
             throw new GatewayError("conflict", "This mobile presentation open was retired", true);
           }
           if (connection.presentationOnly) revokePresentationOwners(sessionId);
@@ -2254,7 +2308,28 @@ export class GatewayServer {
         },
       };
       const method = frame.method;
-      const result = await runInRequestSpan(requestSpan, (): Promise<JsonValue> => this.options.service.invoke(context, method, frame.params ?? {}));
+      const invoke = (): Promise<JsonValue> => runInRequestSpan(
+        requestSpan,
+        (): Promise<JsonValue> => this.options.service.invoke(context, method, frame.params ?? {}),
+      );
+      let result: JsonValue;
+      if (sessionOpenFlight === undefined) {
+        result = await invoke();
+        attemptSucceeded = true;
+      } else {
+        const attempt = invoke();
+        sessionOpenFlight.attempt = attempt;
+        // One answer, shared with every request that joined it. A rejection the
+        // last waiter left behind is not an unhandled rejection: nobody will
+        // read it, and the abort that ends the shared work states why.
+        void attempt.catch(() => {});
+        result = await runInRequestSpan(
+          requestSpan,
+          () => wait("session.open.attempt", () => abortableRead(requestController.signal, () => attempt)),
+        );
+        attemptSucceeded = true;
+      }
+      if (requestController.signal.aborted) return;
       // Validate every synchronization created by this request before writing
       // the response. A timed-out open may have no completion at all; it must
       // not publish an orphan successful response/token after its barrier was
@@ -2400,16 +2475,7 @@ export class GatewayServer {
           ...(error instanceof GatewayError && error.diagnosticReason ? { reason: error.diagnosticReason } : {}),
         });
       }
-      const ownerRequestIDs = new Set([
-        requestId,
-        ...synchronizationCompletions.map((completion) => completion.requestId),
-      ]);
-      for (const ownerRequestID of ownerRequestIDs) {
-        clearRequestSynchronizations(connection.synchronizations, ownerRequestID, (sessionId, synchronization) => {
-          revokeSynchronization(sessionId, synchronization);
-        });
-      }
-      if (!responseAttempted) {
+      if (!responseAttempted && inFlightRpc.cancelledStage === undefined) {
         responseAttempted = true;
         const responseSent = runInRequestSpan(requestSpan, () => this.send(connection, { type: "response", id: frame.id, ok: false, error: publicError(error) }));
         if (responseSent && connection.revoked && connection.revokeResponseRequestId === frame.id) {
@@ -2418,38 +2484,188 @@ export class GatewayServer {
         }
       }
     } finally {
-      if (sessionOpenID !== undefined) {
-        const resolvedOpenID = resolveSessionId(sessionOpenID);
-        // Rekey retains an old duplicate-open alias but the canonical
-        // reservation is the one that must be released after begin/response.
-        if (connection.pendingSessionOpens.get(resolvedOpenID) === frame.id) {
-          connection.pendingSessionOpens.delete(resolvedOpenID);
-        }
-        if (resolvedOpenID !== sessionOpenID
-            && connection.pendingSessionOpens.get(sessionOpenID) === frame.id) {
-          connection.pendingSessionOpens.delete(sessionOpenID);
+      const otherOpenWaiters = (sessionOpenFlight?.waiters ?? 1) > 1;
+      if (sessionOpenFlight !== undefined) {
+        // Rekey retains an old duplicate-open alias, but both spellings point at
+        // the same flight; releasing the flight releases every alias with it.
+        this.releaseSessionOpenFlight(connection, sessionOpenFlight);
+      }
+      // An open keeps the synchronization it installed only when an answer for
+      // it is out (this request's own, or a shared attempt another request still
+      // waits for). Everything else - a failure, a cancellation, an undelivered
+      // response - releases the barrier and its subscription here, so an
+      // abandoned open cannot block the retry that follows it (`C-6`).
+      if (!(attemptSucceeded && (rpcOutcome === "success" || otherOpenWaiters))) {
+        const ownerRequestIDs = new Set([
+          requestId,
+          ...synchronizationCompletions.map((completion) => completion.requestId),
+        ]);
+        for (const ownerRequestID of ownerRequestIDs) {
+          clearRequestSynchronizations(connection.synchronizations, ownerRequestID, (sessionId, synchronization) => {
+            revokeSynchronization(sessionId, synchronization);
+          });
         }
       }
       connection.inFlight.delete(frame.id);
       connection.requestControllers.delete(frame.id);
-      const durationMs = Math.max(0, Math.round(performance.now() - rpcStartedAt));
       // Closing a connection aborts its requests, yet accepted domain work
       // (a prompt held behind compaction) keeps running. Name the undelivered
       // response rather than reporting that work as failed.
-      const loggedOutcome = rpcOutcome === "failure" && requestController.signal.aborted
-        ? "connectionClosed"
-        : rpcOutcome;
-      const breakdown = requestSpan.breakdown(durationMs);
+      const loggedOutcome = inFlightRpc.cancelledStage !== undefined
+        ? "cancelled"
+        : rpcOutcome === "failure" && requestController.signal.aborted ? "connectionClosed" : rpcOutcome;
+      this.logRequestOutcome(connection, {
+        method: frame.method,
+        requestId: diagnosticID,
+        correlation: rpcCorrelation,
+        startedAt: rpcStartedAt,
+        span: requestSpan,
+        outcome: loggedOutcome,
+        cancelledStage: inFlightRpc.cancelledStage,
+      });
+    }
+  }
+
+  /**
+   * Answer a `session.open` that arrived while this connection and session
+   * already had one in flight: the retry joins that attempt, receives its exact
+   * result, and leaves the shared work alone while it waits (`C-6`). Answering a
+   * retry from a shared attempt is what turns the phone's 30-second timeout into
+   * a slow open instead of a duplicate-open failure.
+   */
+  private async joinSessionOpen(
+    connection: Connection,
+    frame: Record<string, unknown>,
+    flight: SessionOpenFlight,
+  ): Promise<void> {
+    const requestId = frame.id as string;
+    connection.inFlight.add(requestId);
+    const rpcStartedAt = performance.now();
+    const requestSpan = new RequestSpan();
+    const inFlightRpc: InFlightRpc = {
+      controller: new AbortController(),
+      method: frame.method as string,
+      startedAt: rpcStartedAt,
+      span: requestSpan,
+    };
+    connection.requestControllers.set(requestId, inFlightRpc);
+    const params = frame.params && typeof frame.params === "object" && !Array.isArray(frame.params)
+      ? frame.params as Record<string, unknown>
+      : {};
+    const rpcCorrelation = {
+      ...(typeof params.sessionId === "string" ? { sessionId: params.sessionId } : {}),
+      ...(typeof params.commandId === "string" ? { commandId: params.commandId } : {}),
+    };
+    let rpcOutcome: "success" | "failure" = "failure";
+    // Join before any await: the flight's waiter count pairs with its `finally`.
+    flight.waiters += 1;
+    try {
+      const attempt = flight.attempt;
+      if (attempt === undefined) throw new GatewayError("busy", "Session open is no longer in flight", true);
+      const result = await runInRequestSpan(requestSpan, () => wait(
+        "session.open.join",
+        () => abortableRead(inFlightRpc.controller.signal, () => attempt),
+      ));
+      if (inFlightRpc.controller.signal.aborted) return;
+      if (runInRequestSpan(requestSpan, () => this.send(connection, { type: "response", id: requestId, ok: true, result }))) {
+        rpcOutcome = "success";
+      }
+    } catch (error) {
+      if (!inFlightRpc.controller.signal.aborted) {
+        const level = rpcFailureLevel(error);
+        this.options.logger.log(level, `RPC ${frame.method as string} for client ${connection.id} failed`, {
+          event: "rpc.error", source: "transport", method: frame.method as string, requestID: diagnosticRequestID(requestId),
+          connectionId: connection.id, ...rpcCorrelation,
+          code: diagnosticErrorCode(error), outcome: "failure",
+          ...(level === "error" ? { error } : {}),
+          ...(error instanceof GatewayError && error.diagnosticReason ? { reason: error.diagnosticReason } : {}),
+        });
+        runInRequestSpan(requestSpan, () => this.send(connection, { type: "response", id: requestId, ok: false, error: publicError(error) }));
+      }
+    } finally {
+      connection.inFlight.delete(requestId);
+      connection.requestControllers.delete(requestId);
+      this.releaseSessionOpenFlight(connection, flight);
+      const loggedOutcome = inFlightRpc.cancelledStage !== undefined
+        ? "cancelled"
+        : rpcOutcome === "failure" && inFlightRpc.controller.signal.aborted ? "connectionClosed" : rpcOutcome;
+      this.logRequestOutcome(connection, {
+        method: frame.method as string,
+        requestId: diagnosticRequestID(requestId),
+        correlation: rpcCorrelation,
+        startedAt: rpcStartedAt,
+        span: requestSpan,
+        outcome: loggedOutcome,
+        cancelledStage: inFlightRpc.cancelledStage,
+      });
+    }
+  }
+
+  /**
+   * Record the `cancel` frame of a request this connection still owns: its work
+   * stops, and the record names the stage it was in. A cancel naming a request
+   * that was already answered, already cancelled, or never admitted changes
+   * nothing: there is no work left to stop and no answer left to withhold.
+   */
+  private cancelInflightRequest(connection: Connection, requestId: string): void {
+    const inFlight = connection.requestControllers.get(requestId);
+    if (!inFlight || inFlight.cancelledStage !== undefined) return;
+    inFlight.cancelledStage = inFlight.span.currentStage() ?? "admitted";
+    inFlight.controller.abort(new GatewayError("cancelled", "The client cancelled this request", true));
+  }
+
+  /** Release one waiter of a shared session-open attempt. The last one leaving
+   * abandons the work: nobody computes an answer nobody waits for. */
+  private releaseSessionOpenFlight(connection: Connection, flight: SessionOpenFlight): void {
+    flight.waiters -= 1;
+    if (flight.waiters > 0) return;
+    flight.controller.abort(new GatewayError("cancelled", "No request waits for this session open anymore", true));
+    for (const [sessionId, pending] of connection.pendingSessionOpens) {
+      if (pending === flight) connection.pendingSessionOpens.delete(sessionId);
+    }
+  }
+
+  /** One record per finished request: `rpc.completed` with its breakdown, or the
+   * `rpc.cancelled` juncture record naming the stage a cancel interrupted. */
+  private logRequestOutcome(
+    connection: Connection,
+    request: {
+      readonly method: string;
+      readonly requestId: string;
+      readonly correlation: Record<string, string>;
+      readonly startedAt: number;
+      readonly span: RequestSpan;
+      readonly outcome: "success" | "failure" | "connectionClosed" | "cancelled";
+      readonly cancelledStage: string | undefined;
+    },
+  ): void {
+    const durationMs = Math.max(0, Math.round(performance.now() - request.startedAt));
+    const breakdown = request.span.breakdown(durationMs);
+    if (request.cancelledStage !== undefined) {
+      // A cancellation is its own juncture, so it writes one record instead of a
+      // completion: the stage it interrupted plus the stages it reached. Only a
+      // read the peer abandoned after `SLOW_RPC_WARNING_MS` is worth a warning;
+      // an ordinary retry cadence stays debug.
       this.options.logger.log(
-        loggedOutcome !== "success" || durationMs >= SLOW_RPC_WARNING_MS ? "warning" : "debug",
-        `RPC ${frame.method} for client ${connection.id} completed in ${durationMs}ms (${loggedOutcome})`,
+        durationMs >= SLOW_RPC_WARNING_MS ? "warning" : "debug",
+        `RPC ${request.method} for client ${connection.id} was cancelled in ${request.cancelledStage} after ${durationMs}ms`,
         {
-          event: "rpc.completed", source: "transport", method: frame.method,
-          requestID: diagnosticID, connectionId: connection.id, ...rpcCorrelation, outcome: loggedOutcome, durationMs,
-          ...(breakdown ?? {}),
+          event: "rpc.cancelled", source: "transport", method: request.method, requestID: request.requestId,
+          connectionId: connection.id, ...request.correlation, outcome: "cancelled",
+          stage: request.cancelledStage, durationMs, ...(breakdown ?? {}),
         },
       );
+      return;
     }
+    this.options.logger.log(
+      request.outcome !== "success" || durationMs >= SLOW_RPC_WARNING_MS ? "warning" : "debug",
+      `RPC ${request.method} for client ${connection.id} completed in ${durationMs}ms (${request.outcome})`,
+      {
+        event: "rpc.completed", source: "transport", method: request.method,
+        requestID: request.requestId, connectionId: connection.id, ...request.correlation,
+        outcome: request.outcome, durationMs, ...(breakdown ?? {}),
+      },
+    );
   }
 
   private send(connection: Connection, value: unknown): boolean {
@@ -2592,11 +2808,16 @@ export class GatewayServer {
     connection.synchronizations.clear();
     connection.subscriptionTokens.clear();
     connection.terminals.clear();
+    // A retiring socket has no request left to receive a shared session-open
+    // answer, so its attempts stop here instead of running for nobody.
+    for (const flight of connection.pendingSessionOpens.values()) {
+      flight.controller.abort(new GatewayError("cancelled", "The connection retired during this session open", true));
+    }
     connection.pendingSessionOpens.clear();
     connection.rekeyedSessionIds.clear();
     // Revoked accepted requests retain their controller until their own
     // completion; ordinary disconnects still abort disposable work.
-    if (!connection.revoked) for (const controller of connection.requestControllers.values()) controller.abort();
+    if (!connection.revoked) for (const request of connection.requestControllers.values()) request.controller.abort();
     connection.requestControllers.clear();
     this.options.sessions.unsubscribeClient(connection.id);
     this.options.service.releaseClient(connection.id);
