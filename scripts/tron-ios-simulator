@@ -42,8 +42,9 @@ selecting another device. Use scripts/tron-ios-test for all hosted unit tests.
 A booted simulator holds about 2 GB, so `status` reports how long the remembered
 one has been booted, read from its own boot process, and `scripts/tron-ios-test
 status --all` lists the same simulator and time beside every test lane. `stop` is
-the way to release it. Tron's test tooling never shuts this simulator down, and
-never deletes any simulator it owns.
+the way to release it. Tron's test tooling never shuts this shared Development
+simulator down and never deletes it; the test simulators it owns itself are
+deleted by `clean`, `lane-remove` and the sweep.
 USAGE
 }
 

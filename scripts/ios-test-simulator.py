@@ -45,13 +45,23 @@ SWEEP_DEPTH = 2
 # `ios-test-<name>` sibling, which is what a lane's reported name strips.
 LANE_TTL_SECONDS = 7 * 24 * 60 * 60
 LANE_DIRECTORY_PREFIX = "ios-test"
-# A boot is admitted only when the Mac would still have this much free memory
-# and its swap in use stays under the limit. Both are read before `simctl boot`,
-# so the booted simulator's own footprint (about 2 GB) comes out of the reserve.
-# The environment overrides exist for CI and for retuning from the measurements
-# the lifecycle plan records in its handoffs.
+# A boot is admitted only when the Mac would still have this much free memory.
+# It is read before `simctl boot`, so the booted simulator's own footprint (about
+# 2 GB) comes out of the reserve. Swap in use is reported in the same table and
+# never refuses a boot: it drains slowly, so a reading at a limit would refuse
+# boots persistently. The environment override exists for CI and for retuning
+# from the measurements the lifecycle plan records in its handoffs.
 MEMORY_RESERVE_BYTES = 8 * 1024**3
-SWAP_LIMIT_BYTES = 4 * 1024**3
+# A lease records the holder's pid and the second it started; the process table's
+# own age for that pid is what proves the pid has not been recycled into another
+# process. The window is wider than the truncation on either side (the recorded
+# second and the reported one) and narrow enough that a recycled pid would have
+# to appear within seconds to be believed.
+HOLDER_START_TOLERANCE_SECONDS = 5.0
+# One admission lock for this Mac: every lane's boot is serialized on it, and it
+# is held from the memory read until `simctl bootstatus` returns, so two starts
+# cannot each read memory the other has not taken yet.
+ADMISSION_LOCK_NAME = "ios-test-admission.lock"
 # The runner's ownership marker, written by `owned_directory` in
 # `scripts/tron-ios-test` before it creates a results or products directory.
 # Deletion outside the tool's own trees is refused without it.
@@ -329,11 +339,8 @@ def lease_hold(path: Path) -> Iterator[bool]:
 
 def lease_description(text: str) -> str:
     """Describe the holder recorded in a lease file's metadata."""
-    try:
-        value = json.loads(text)
-    except json.JSONDecodeError:
-        return "held"
-    if not isinstance(value, dict):
+    value = parse_lease(text)
+    if value is None:
         return "held"
     identifier = value.get("pid")
     command = value.get("command")
@@ -342,11 +349,53 @@ def lease_description(text: str) -> str:
     return f"pid {identifier}" if isinstance(identifier, int) and not isinstance(identifier, bool) else "held"
 
 
-def lease_holder(path: Path) -> str:
+def parse_lease(text: str) -> dict[str, Any] | None:
+    """The object a lease file records, or None when it records nothing usable."""
+    try:
+        value = json.loads(text)
+    except json.JSONDecodeError:
+        return None
+    return value if isinstance(value, dict) else None
+
+
+def holder_is_live(metadata: dict[str, Any], table: list[tuple[int, int, str]] | None) -> bool:
+    """Whether the process a lease's metadata names is still that process.
+
+    Liveness is `kill(pid, 0)`; the age the process table reports for that pid
+    is what separates the holder from a pid the system has recycled, because the
+    holder records the second it started.
+    """
+    pid = metadata.get("pid")
+    if not isinstance(pid, int) or isinstance(pid, bool) or pid <= 0:
+        return False
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        # Another user's process is alive; this Mac's lanes are this user's.
+        return True
+    started_at = metadata.get("started_at_epoch_seconds")
+    if not isinstance(started_at, (int, float)) or isinstance(started_at, bool):
+        return True
+    elapsed = next((seconds for holder, seconds, _ in table or [] if holder == pid), None)
+    if elapsed is None:
+        return True
+    return abs((time.time() - elapsed) - float(started_at)) <= HOLDER_START_TOLERANCE_SECONDS
+
+
+def lease_holder(
+    path: Path, *, table: list[tuple[int, int, str]] | None = None, held: bool = False
+) -> str:
     """Describe the live process holding a lane's lease, or "idle".
 
-    Read-only on purpose: listing lanes must not create the lease file it is
-    reading, or a lane with no simulator would look provisioned.
+    Read-only on purpose, and it never takes the lane's lease: a `lanes` or
+    `status --all` pass that locked each lane as it probed it made a command
+    starting at that moment fail 73, as if the lane were busy. The metadata
+    names the holder and the process table proves that pid is still the holder.
+    Reading must not create the lease file either, or a lane with no simulator
+    would look provisioned. `held` describes a lease a caller already failed to
+    lock: the lane is taken, even though the recorded holder is gone.
     """
     try:
         descriptor = os.open(path, os.O_RDONLY)
@@ -355,11 +404,11 @@ def lease_holder(path: Path) -> str:
     except OSError as error:
         raise DestinationError(f"lane lease is unreadable: {path}: {error}") from error
     with os.fdopen(descriptor, "r", encoding="utf-8") as handle:
-        try:
-            fcntl.flock(handle.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
-        except BlockingIOError:
-            return lease_description(handle.read())
-    return "idle"
+        text = handle.read()
+    metadata = parse_lease(text)
+    if metadata is None or not holder_is_live(metadata, table):
+        return "held" if held else "idle"
+    return lease_description(text)
 
 
 def lane_device(document: dict[str, Any], marker: dict[str, Any]) -> tuple[dict[str, Any] | None, str]:
@@ -593,9 +642,10 @@ def lane_states(arguments: argparse.Namespace) -> list[tuple[str, Path, dict[str
 def lane_rows(arguments: argparse.Namespace) -> list[list[str]]:
     """One row per lane, in the column order of LANE_COLUMNS."""
     document = inventory()
+    table = process_table()
     rows: list[list[str]] = []
     for label, directory, marker in lane_states(arguments):
-        lease = lease_holder(directory / LEASE_NAME)
+        lease = lease_holder(directory / LEASE_NAME, table=table)
         if marker is None:
             rows.append([label, "-", "not-provisioned", lease, "-", "-"])
             continue
@@ -659,7 +709,7 @@ def simulator_rows(arguments: argparse.Namespace) -> list[list[str]]:
     rows: list[list[str]] = []
     claimed: set[str] = set()
     for label, directory, marker in lane_states(arguments):
-        lease = lease_holder(directory / LEASE_NAME)
+        lease = lease_holder(directory / LEASE_NAME, table=table)
         if marker is None:
             rows.append(["-", "not-provisioned", f"lane {label}", "-", lease, "-", "-"])
             continue
@@ -721,11 +771,33 @@ def simulator_rows(arguments: argparse.Namespace) -> list[list[str]]:
     return rows
 
 
+def memory_summary() -> str:
+    """The Mac's free memory and swap in use, as the simulator table's own line.
+
+    Free memory is what admission gates on; swap in use is reported here and
+    never refuses a boot, because it drains slowly. A reader that is unavailable
+    simply leaves its part out.
+    """
+    state = read_memory_state()
+    parts: list[str] = []
+    if state.free_bytes is not None:
+        total = f" of {human_size(state.physical_bytes)}" if state.physical_bytes else ""
+        parts.append(f"free memory {human_size(state.free_bytes)}{total}")
+    if state.swap_used_bytes is not None:
+        parts.append(f"swap in use {human_size(state.swap_used_bytes)}")
+    return ", ".join(parts)
+
+
 def print_simulators(arguments: argparse.Namespace, stream: Any = None) -> None:
     """Print every simulator that holds memory: what is booted, whose, how long."""
     stream = sys.stdout if stream is None else stream
     rows = simulator_rows(arguments)
-    print(f"Simulators on this Mac (lane root: {arguments.discovery_root}, Development: {arguments.development_state})", file=stream)
+    memory = memory_summary()
+    print(
+        f"Simulators on this Mac (lane root: {arguments.discovery_root}, "
+        f"Development: {arguments.development_state}{'; ' + memory if memory else ''})",
+        file=stream,
+    )
     widths = [max([len(STATUS_COLUMNS[index])] + [len(row[index]) for row in rows]) for index in range(len(STATUS_COLUMNS))]
     for values in (STATUS_COLUMNS, *rows):
         print("  ".join(value.ljust(widths[index]) for index, value in enumerate(values)).rstrip(), file=stream)
@@ -752,26 +824,23 @@ def admit_boot(arguments: argparse.Namespace) -> None:
     """Refuse to boot another simulator when the Mac is already short of memory.
 
     Read before `simctl boot`, and never for a lane that is already booted, so a
-    reuse costs nothing. The refusal is fast - no wait, no retry - and carries
-    the table `status --all` prints, because the caller decides whether to wait
-    for the Mac to free memory. A reader that is unavailable admits the boot
-    with a warning: the tooling must still run where the Mac's reports are not
-    installed.
+    reuse costs nothing. Free memory is the gate; swap in use is reported beside
+    it and never refuses a boot, because swap drains slowly (the table carries
+    both). The refusal is fast - no wait, no retry - and carries the table
+    `status --all` prints, because the caller decides whether to wait for the Mac
+    to free memory. A reader that is unavailable admits the boot with a warning:
+    the tooling must still run where the Mac's reports are not installed.
     """
     state = read_memory_state()
     if state.free_bytes is None:
         print("warning: cannot read the Mac's free memory (memory_pressure); admitting the boot without that check", file=sys.stderr)
     if state.swap_used_bytes is None:
-        print("warning: cannot read the Mac's swap in use (sysctl vm.swapusage); admitting the boot without that check", file=sys.stderr)
+        print("warning: cannot read the Mac's swap in use (sysctl vm.swapusage); the status table will not report it", file=sys.stderr)
     breaches: list[str] = []
     if state.free_bytes is not None and state.free_bytes < arguments.memory_reserve_bytes:
         total = f" of {human_size(state.physical_bytes)}" if state.physical_bytes else ""
         breaches.append(
             f"free memory {human_size(state.free_bytes)}{total} is below the {human_size(arguments.memory_reserve_bytes)} reserve"
-        )
-    if state.swap_used_bytes is not None and state.swap_used_bytes >= arguments.swap_limit_bytes:
-        breaches.append(
-            f"swap in use {human_size(state.swap_used_bytes)} is at or above the {human_size(arguments.swap_limit_bytes)} limit"
         )
     if not breaches:
         return
@@ -780,6 +849,49 @@ def admit_boot(arguments: argparse.Namespace) -> None:
     if booted is not None and not booted:
         detail += "; no owned lane is booted, so processes other than the iOS test tooling hold this Mac's memory"
     raise MemoryAdmissionError(f"refusing to boot {arguments.name}: {detail}")
+
+
+def admission_lock_path(arguments: argparse.Namespace) -> Path:
+    """The one lock every lane's boot serializes on.
+
+    It lives in the lane root when the caller named one - every production
+    caller does - so all lanes under it share one lock; a caller that knows only
+    its own state directory still serializes its own boots.
+    """
+    if arguments.discovery_root is not None:
+        return arguments.discovery_root / ADMISSION_LOCK_NAME
+    return arguments.marker.parent / ADMISSION_LOCK_NAME
+
+
+@contextlib.contextmanager
+def admission_hold(arguments: argparse.Namespace) -> Iterator[None]:
+    """Serialize this Mac's simulator boots, from the memory read to the boot.
+
+    Held until `simctl bootstatus` has returned, so a second start reads the
+    memory the first boot has already taken instead of admitting a boot the Mac
+    can no longer afford. A boot that cannot take the lock in
+    `--admission-wait-seconds` is refused with the same "not now" exit and
+    table as a memory refusal, rather than waiting forever on a wedged boot.
+    """
+    lock = admission_lock_path(arguments)
+    lock.parent.mkdir(parents=True, exist_ok=True)
+    with lock.open("a+", encoding="utf-8") as handle:
+        deadline = time.monotonic() + arguments.admission_wait_seconds
+        while True:
+            try:
+                fcntl.flock(handle.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+                break
+            except BlockingIOError:
+                if time.monotonic() >= deadline:
+                    raise MemoryAdmissionError(
+                        f"refusing to boot {arguments.name}: another simulator boot has held this Mac's "
+                        f"admission lock ({lock}) for {arguments.admission_wait_seconds:g}s"
+                    )
+                time.sleep(0.1)
+        try:
+            yield
+        finally:
+            fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
 
 
 def development_uptime(arguments: argparse.Namespace) -> int:
@@ -927,7 +1039,10 @@ def remove_lane(directory: Path, arguments: argparse.Namespace) -> None:
 
     The ownership marker is the proof, and the directory must be a lane the
     runner would have created - inside the lane root, or the default lane's own
-    configured directory - so nothing but a lane can be removed here.
+    configured directory - so nothing but a lane can be removed here. A
+    directory that holds another lane's marker is that lane's ancestor (the lane
+    root itself, or a state directory above it), and removing it would take the
+    other lane's simulator state with it, so it is refused too.
     """
     root = os.path.realpath(arguments.discovery_root)
     default = os.path.realpath(arguments.default_state_dir) if arguments.default_state_dir else None
@@ -938,6 +1053,12 @@ def remove_lane(directory: Path, arguments: argparse.Namespace) -> None:
     marker_path = directory / MARKER_NAME
     if load_marker(marker_path) is None:
         raise DestinationError(f"refusing to remove lane state with no ownership marker: {directory}")
+    nested = [path for path in marker_paths(directory) if path != marker_path]
+    if nested:
+        raise DestinationError(
+            f"refusing to remove a lane directory that contains another lane's ownership marker: "
+            f"{directory} holds {nested[0]}"
+        )
     delete_owned(marker_path, arguments)
     shutil.rmtree(directory)
 
@@ -946,8 +1067,10 @@ def expire_lane(arguments: argparse.Namespace, marker_path: Path) -> str:
     """Remove a lane unused for longer than the TTL.
 
     Returns "expired", or why not: "fresh", "undated", "no-marker", "busy" (a
-    live process holds the lease), "skipped" (an unreadable marker or an
-    unsafe directory) or "failed".
+    live process holds the lease), "skipped" (an unreadable marker or an unsafe
+    directory) or "failed". A lane the file system refuses to remove is reported
+    as "failed" and the sweep carries on with the other lanes: removal races a
+    command that is provisioning the same lane, and the sweep must survive it.
     """
     try:
         outcome = expiry_of(marker_path, time.time())
@@ -966,7 +1089,9 @@ def expire_lane(arguments: argparse.Namespace, marker_path: Path) -> str:
             if outcome != "expired":
                 return outcome
             remove_lane(marker_path.parent, arguments)
-        except DestinationError as error:
+        except (DestinationError, OSError) as error:
+            # OSError covers the file system racing this removal: a directory or
+            # file that vanished, or a state directory the sweep cannot delete.
             print(f"warning: could not remove lane {marker_path.parent}: {error}", file=sys.stderr)
             return "failed"
     print(f"removed lane {lane_label(marker_path.parent)} ({marker_path.parent})")
@@ -986,7 +1111,7 @@ def remove_lane_command(arguments: argparse.Namespace) -> int:
     with lease_hold(directory / LEASE_NAME) as held:
         if not held:
             label = lane_label(directory, arguments.default_state_dir)
-            raise LaneBusyError(f"lane {label} is leased ({lease_holder(directory / LEASE_NAME)})")
+            raise LaneBusyError(f"lane {label} is leased ({lease_holder(directory / LEASE_NAME, held=True)})")
         remove_lane(directory, arguments)
     print(f"removed lane {lane_label(directory, arguments.default_state_dir)} ({directory})")
     return 0
@@ -1240,9 +1365,15 @@ def provision(arguments: argparse.Namespace) -> dict[str, Any]:
         marker = stamp_lane_use(arguments, marker)
 
     if device.get("state") != "Booted":
-        admit_boot(arguments)
-        simctl("boot", marker["udid"])
-    simctl("bootstatus", marker["udid"], "-b")
+        # The memory read, the boot and its `bootstatus` all hold the one
+        # machine-wide admission lock, so concurrent starts see each other's
+        # boots instead of each admitting memory the other has taken.
+        with admission_hold(arguments):
+            admit_boot(arguments)
+            simctl("boot", marker["udid"])
+            simctl("bootstatus", marker["udid"], "-b")
+    else:
+        simctl("bootstatus", marker["udid"], "-b")
     document = inventory()
     device = validate_marker(document, marker, runtime, device_type, dev_udid)
     return {**marker, "state": device.get("state"), "udid_sha256": hashlib.sha256(marker["udid"].encode()).hexdigest()}
@@ -1271,7 +1402,11 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--default-state-dir", type=Path)
     parser.add_argument("--lane-dir", type=Path)
     parser.add_argument("--memory-reserve-bytes", type=int)
-    parser.add_argument("--swap-limit-bytes", type=int)
+    parser.add_argument(
+        "--admission-wait-seconds",
+        type=float,
+        default=float(os.environ.get("TRON_IOS_TEST_ADMISSION_WAIT_SECONDS", "300")),
+    )
     parser.add_argument(
         "--shutdown-timeout-seconds",
         type=float,
@@ -1285,15 +1420,15 @@ def parse_args() -> argparse.Namespace:
     arguments = parser.parse_args()
     if arguments.shutdown_timeout_seconds <= 0 or arguments.sweep_deadline_seconds <= 0:
         parser.error("deadlines must be positive")
+    if arguments.admission_wait_seconds <= 0:
+        parser.error("the admission wait must be positive")
     try:
         if arguments.memory_reserve_bytes is None:
             arguments.memory_reserve_bytes = int(os.environ.get("TRON_IOS_TEST_MEMORY_RESERVE_BYTES", MEMORY_RESERVE_BYTES))
-        if arguments.swap_limit_bytes is None:
-            arguments.swap_limit_bytes = int(os.environ.get("TRON_IOS_TEST_SWAP_LIMIT_BYTES", SWAP_LIMIT_BYTES))
     except ValueError:
-        parser.error("the memory reserve and swap limit must be whole numbers of bytes")
-    if arguments.memory_reserve_bytes < 0 or arguments.swap_limit_bytes < 0:
-        parser.error("the memory reserve and swap limit must not be negative")
+        parser.error("the memory reserve must be a whole number of bytes")
+    if arguments.memory_reserve_bytes < 0:
+        parser.error("the memory reserve must not be negative")
     if arguments.command in ("sweep", "lanes", "simulators"):
         if arguments.discovery_root is None:
             parser.error(f"{arguments.command} requires --discovery-root")

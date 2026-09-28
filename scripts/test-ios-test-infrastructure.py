@@ -3,14 +3,17 @@
 
 from __future__ import annotations
 
+import fcntl
 import json
 import os
 from pathlib import Path
 import signal
-import subprocess
+import subprocess as _subprocess
 import sys
 import tempfile
+import threading
 import time
+from typing import Any
 import unittest
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -33,6 +36,8 @@ UDID_C = "CCCCCCCC-CCCC-CCCC-CCCC-CCCCCCCCCCCC"
 UDID_D = "DDDDDDDD-DDDD-DDDD-DDDD-DDDDDDDDDDDD"
 UDID_E = "EEEEEEEE-EEEE-EEEE-EEEE-EEEEEEEEEEEE"
 UDID_F = "FFFFFFFF-FFFF-FFFF-FFFF-FFFFFFFFFFFF"
+# One admission lock for the whole Mac: every lane's boot serializes on it.
+ADMISSION_LOCK = "ios-test-admission.lock"
 
 # The owners read the Mac's memory pressure, its swap and its process table.
 # These synthetic readers stand in for `memory_pressure`, `sysctl` and `ps`, so
@@ -141,6 +146,81 @@ if _escaped_roots:
     raise SystemExit(3)
 '''
 
+# The proof `ContainedFixture.contained_environment` writes into every
+# environment a fixture builds; a launcher that starts a process without it is
+# running a tool against this Mac's own state.
+CONTAINMENT_PROOF = "FAKE_CONTAINMENT_ROOT"
+
+
+def containment_violation(environment: dict[str, str]) -> str | None:
+    """Why `environment` is unsafe to hand to a process, or None when it is contained.
+
+    HOME and every Tron root the environment names must resolve inside the
+    fixture's own temporary directory. The synthetic tools refuse such an
+    environment themselves, but they are not always started: `prune` and a
+    sweep over marker-less state delete in Python, so the check has to sit where
+    the process is created.
+    """
+    proof = environment.get(CONTAINMENT_PROOF)
+    if not proof:
+        return f"{CONTAINMENT_PROOF} is missing, so the environment is not a fixture's"
+    root = os.path.realpath(proof)
+    for name in CONTAINMENT_VARIABLES:
+        value = environment.get(name)
+        if not value:
+            continue
+        resolved = os.path.realpath(value)
+        if resolved != root and not resolved.startswith(root + os.sep):
+            return f"{name}={value}"
+    return None
+
+
+class ContainedSubprocess:
+    """The one launcher: every process this module starts passes through here.
+
+    Failure modes this launcher closes, written before the code: a fixture (or a
+    caller added later) runs a Tron tool with HOME or a Tron state, lane,
+    discovery, results or products root outside its own temporary directory, so
+    a sweep, `clean` or `prune` reclaims this Mac's own state - the leak the
+    SIM-5 commit had, where the sweep-level fixtures inherited the real HOME and
+    their `reap` pruned the real results root. The guard used to live only
+    inside the synthetic tools, which a disk-only `prune` never starts.
+
+    `subprocess` at module level is this object, not the standard module, so a
+    call site cannot reach `run`, `Popen` or `check_output` unguarded.
+    """
+
+    def run(self, command: list[str], **keywords: Any) -> Any:
+        return self._launch("run", command, keywords)
+
+    def Popen(self, command: list[str], **keywords: Any) -> Any:
+        return self._launch("Popen", command, keywords)
+
+    def check_output(self, command: list[str], **keywords: Any) -> Any:
+        return self._launch("check_output", command, keywords)
+
+    def _launch(self, name: str, command: list[str], keywords: dict[str, Any]) -> Any:
+        environment = keywords.get("env")
+        if environment is None:
+            raise AssertionError(
+                f"every process this module starts needs a contained environment; "
+                f"{command[0] if command else command!r} was started without one"
+            )
+        violation = containment_violation(environment)
+        if violation is not None:
+            raise AssertionError(
+                f"refusing to start {command[0] if command else command!r} with an environment outside "
+                f"the test fixture: {violation}"
+            )
+        return getattr(_subprocess, name)(command, **keywords)
+
+    def __getattr__(self, name: str) -> Any:
+        """Everything else (`PIPE`, `CompletedProcess`, ...) is the standard module."""
+        return getattr(_subprocess, name)
+
+
+subprocess = ContainedSubprocess()
+
 
 class ContainedFixture:
     """The base every fixture here inherits: no script can reach the real Mac.
@@ -171,6 +251,11 @@ class ContainedFixture:
     def contained_environment(self, root: Path) -> dict[str, str]:
         """This process's environment with every Tron root inside `root`.
 
+        The proof this writes (`FAKE_CONTAINMENT_ROOT`) is what the module's one
+        launcher requires: an environment that reaches a process without it is
+        refused before it starts, and the synthetic tools refuse one that
+        escapes the proof.
+
         TRON_IOS_TEST_DERIVED_DATA and TRON_IOS_TEST_DISCOVERY_ROOT are
         deliberately left unset: the tools derive that products path and the
         lane root from HOME and from the state directory, both of which are
@@ -198,7 +283,11 @@ class ContainedFixture:
         return environment
 
     def run_script(self, command: list[str], root: Path, **kwargs: object) -> subprocess.CompletedProcess[str]:
-        """Run one script under test with every Tron root inside `root`."""
+        """Run one script under test with every Tron root inside `root`.
+
+        A convenience over the module's launcher, which checks the environment
+        either way.
+        """
         return subprocess.run(command, env=self.contained_environment(root), **kwargs)  # type: ignore[arg-type]
 
     def synthetic_stub(self, path: Path, body: str) -> None:
@@ -206,6 +295,12 @@ class ContainedFixture:
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text("#!/usr/bin/env python3\n" + CONTAINMENT_GUARD + body)
         path.chmod(0o755)
+
+    def close_pipes(self, process: subprocess.Popen[str]) -> None:
+        """Close a killed helper's pipes so the fixture can be cleaned up."""
+        for pipe in (process.stdout, process.stderr):
+            if pipe is not None:
+                pipe.close()
 
     def assert_no_containment_violations(self) -> None:
         """Fail the test if a script under test ran outside this fixture."""
@@ -258,7 +353,7 @@ class SimulatorHarness(SyntheticReaders):
         self.fake_xcrun = self.root / "xcrun"
         self.install_readers(self.root)
         self.synthetic_stub(
-            self.fake_xcrun, """import json, os, sys
+            self.fake_xcrun, """import json, os, sys, time
 from pathlib import Path
 path = Path(os.environ['FAKE_SIMCTL_INVENTORY'])
 doc = json.loads(path.read_text())
@@ -279,6 +374,15 @@ if command == 'create':
     path.write_text(json.dumps(doc)); print(udid); raise SystemExit(0)
 if command in ('boot', 'shutdown', 'delete'):
     udid = args[1]
+    if command == 'boot':
+        # A boot takes the Mac's memory: a case can make the reader report the
+        # memory the boot consumed, which is what admission must see next.
+        delay = float(os.environ.get('FAKE_BOOT_DELAY_SECONDS') or 0)
+        if delay:
+            time.sleep(delay)
+        consumed = os.environ.get('FAKE_FREE_PERCENT_AFTER_BOOT')
+        if consumed:
+            (Path(os.environ['FAKE_READER_VALUES']) / 'free-percent').write_text(consumed + '\\n')
     if command == 'shutdown' and os.environ.get('FAKE_DEVELOPMENT_ON_SHUTDOWN'):
         Path(os.environ['FAKE_DEVELOPMENT_ON_SHUTDOWN']).write_text(udid + '\\n')
     found = False
@@ -317,9 +421,13 @@ raise SystemExit(2)
         self.inventory_path.write_text(json.dumps(value))
 
     def command(self, action: str, *, name: str = "Tron iOS Tests") -> list[str]:
+        return self.lane_command(action, self.marker, name=name)
+
+    def lane_command(self, action: str, marker: Path, *, name: str = "Tron iOS Tests") -> list[str]:
+        """One simulator command for one lane of this fixture, sharing the lane root."""
         return [
             sys.executable, str(SIMULATOR), action,
-            "--marker", str(self.marker), "--runtime", "26.2",
+            "--marker", str(marker), "--runtime", "26.2",
             "--device-type", "iPhone 17 Pro", "--name", name,
             "--development-state", str(self.development),
             # The lane root stays inside the fixture, so a lane view can name the
@@ -508,7 +616,8 @@ class AdmissionFixture(SimulatorHarness, unittest.TestCase):
 
     1. A boot proceeds while free memory is already below the reserve, so the
        boot's own footprint pushes the Mac deeper into swap.
-    2. A boot proceeds while swap in use is at or above the limit.
+    2. Swap in use refuses boots persistently: swap drains slowly, so a reading
+       at the limit must be reported in the table, never a refusal (review P2-4).
     3. A refusal does not say what is booted, by which lane and worktree, and for
        how long, so an agent cannot tell what to release.
     4. An unavailable reader (missing, failing or unparsable) fails the boot
@@ -518,6 +627,10 @@ class AdmissionFixture(SimulatorHarness, unittest.TestCase):
        is booted and a keep-booted loop must not be refused.
     6. The reserve breached by processes that are not Tron test simulators is
        reported as if the test tooling held the Mac's memory.
+    7. Two starts read the Mac's memory before either has booted, so each admits
+       a boot the other has not paid for yet (review P2-4).
+    8. A boot that waits for the machine-wide admission lock waits forever, so a
+       wedged boot blocks every other lane instead of being refused (review P2-4).
     """
 
     def device_states(self) -> dict[str, str]:
@@ -539,12 +652,100 @@ class AdmissionFixture(SimulatorHarness, unittest.TestCase):
         self.assertIn("no owned lane is booted, so processes other than the iOS test tooling hold", result.stderr)
         self.assertEqual(set(self.device_states().values()), {"Shutdown"})
 
-    def test_a_boot_is_refused_when_swap_is_at_the_limit(self) -> None:
-        """Failure mode 2: swap in use at or above the limit refuses the boot."""
+    def test_swap_in_use_is_reported_and_never_refuses_a_boot(self) -> None:
+        """Failure mode 2: swap drains slowly, so a reading at the limit is
+        information in the refusal table, not a refusal."""
         self.reader_value("swap-used-mb", "5000")
+        self.reader_value("free-percent", "90")
         result = self.invoke("provision")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(self.device_states()[result.stdout.strip()], "Booted")
+        self.assertNotIn("refusing", result.stderr)
+
+        # The same reading is reported beside a refusal for free memory, in the
+        # table every refused admission and `status --all` print.
+        self.marker.unlink(missing_ok=True)
+        self.write_inventory(devices={RUNTIME_ID: []})
+        self.reader_value("free-percent", "5")
+        refused = self.invoke("provision")
+        self.assertEqual(refused.returncode, 73, refused.stderr)
+        self.assertIn("swap in use 4.9 GB", refused.stderr)
+        self.assertIn("free memory 1.8 GB", refused.stderr)
+        self.assertEqual(set(self.device_states().values()), {"Shutdown"})
+
+    def test_concurrent_boots_serialize_on_one_machine_wide_admission_lock(self) -> None:
+        """Failure mode 7: two starts must not each read the memory the other has
+        not consumed yet.
+
+        The synthetic boot takes a moment and then reports the memory it
+        consumed, so a start that reads before it must admit a boot the Mac can
+        no longer afford - which is exactly what the admission lock prevents.
+        """
+        lanes = []
+        devices = []
+        for name, udid in (("one", UDID_A), ("two", UDID_B)):
+            lane = self.root / f"ios-test-{name}"
+            lane.mkdir(parents=True, exist_ok=True)
+            marker = lane / "simulator.json"
+            marker.write_text(json.dumps(self.owned_marker(udid, name=f"Tron iOS Tests ({name})")))
+            _, device = self.device(udid, name=f"Tron iOS Tests ({name})")
+            devices.append(device)
+            lanes.append((marker, name))
+        self.write_inventory(devices={RUNTIME_ID: devices})
+        self.reader_value("free-percent", "90")
+        environment = {
+            **self.contained_environment(self.root),
+            **self.reader_environment(),
+            "TRON_IOS_XCRUN": str(self.fake_xcrun),
+            "FAKE_SIMCTL_INVENTORY": str(self.inventory_path),
+            "FAKE_BOOT_DELAY_SECONDS": "2",
+            "FAKE_FREE_PERCENT_AFTER_BOOT": "5",
+        }
+
+        boots = [
+            subprocess.Popen(self.lane_command("provision", marker, name=name),
+                             env=environment, text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+            for marker, name in lanes
+        ]
+        results = []
+        for boot in boots:
+            stdout, stderr = boot.communicate(timeout=60)
+            self.close_pipes(boot)
+            results.append((boot.returncode, stdout, stderr))
+
+        statuses = sorted(status for status, _, _ in results)
+        self.assertEqual(statuses, [0, 73], results)
+        refused = [stderr for status, _, stderr in results if status == 73][0]
+        self.assertIn("free memory", refused)
+        self.assertIn("reserve", refused)
+        # The boot that won the admission lock is booted, and the one that read
+        # the memory it consumed booted nothing.
+        self.assertEqual(sorted(self.device_states().values()), ["Booted", "Shutdown"], self.inventory_path.read_text())
+
+    def test_a_boot_that_cannot_take_the_admission_lock_is_refused(self) -> None:
+        """Failure mode 8: waiting for the machine-wide admission lock is bounded,
+        and a held lock is refused with the shared 73 rather than hung on."""
+        self.reader_value("free-percent", "90")
+        lock = self.root / ADMISSION_LOCK
+        holder = subprocess.Popen(
+            [
+                sys.executable, "-c",
+                "import fcntl, sys, time; handle = open(sys.argv[1], 'a+');"
+                " fcntl.flock(handle, fcntl.LOCK_EX); print('held', flush=True); time.sleep(60)",
+                str(lock),
+            ],
+            env=self.contained_environment(self.root), text=True, stdout=subprocess.PIPE,
+        )
+        try:
+            assert holder.stdout is not None
+            self.assertEqual(holder.stdout.readline().strip(), "held")
+            result = self.invoke("provision", override={"TRON_IOS_TEST_ADMISSION_WAIT_SECONDS": "1"})
+        finally:
+            holder.kill()
+            holder.wait(timeout=10)
+            holder.stdout.close()
         self.assertEqual(result.returncode, 73, result.stderr)
-        self.assertIn("swap in use 4.9 GB is at or above the 4.0 GB limit", result.stderr)
+        self.assertIn("admission", result.stderr)
         self.assertEqual(set(self.device_states().values()), {"Shutdown"})
 
     def test_the_refusal_names_the_booted_lane_its_worktree_and_uptime(self) -> None:
@@ -583,7 +784,7 @@ class AdmissionFixture(SimulatorHarness, unittest.TestCase):
                 result = self.invoke("provision", override=environment)
                 self.assertEqual(result.returncode, 0, result.stderr)
                 self.assertIn(expected, result.stderr)
-                self.assertIn("admitting the boot without that check", result.stderr)
+                self.assertNotIn("refusing", result.stderr)
                 self.assertEqual(self.device_states()[result.stdout.strip()], "Booted")
 
     def test_an_already_booted_lane_is_reused_without_admission(self) -> None:
@@ -699,6 +900,7 @@ exit 0
     def source_identity(self, worktree: Path = ROOT) -> dict[str, object]:
         completed = subprocess.run(
             [sys.executable, str(IDENTITY), "show", "--worktree", str(worktree)],
+            env=self.contained_environment(self.root),
             check=True, text=True, stdout=subprocess.PIPE,
         )
         return json.loads(completed.stdout)
@@ -706,6 +908,7 @@ exit 0
     def write_products_identity(self, value: dict[str, object] | None = None) -> None:
         subprocess.run(
             [sys.executable, str(IDENTITY), "write", "--worktree", str(ROOT), "--derived-data", str(self.derived)],
+            env=self.contained_environment(self.root),
             check=True, text=True, input=json.dumps(value if value is not None else self.source_identity()),
             stdout=subprocess.DEVNULL,
         )
@@ -881,7 +1084,8 @@ exit 0
         metadata = self.latest_metadata()
         self.assertEqual(metadata["source"], stamp)
         self.assertEqual(metadata["source"]["revision"], subprocess.run(
-            ["git", "-C", str(ROOT), "rev-parse", "HEAD"], check=True, text=True, stdout=subprocess.PIPE,
+            ["git", "-C", str(ROOT), "rev-parse", "HEAD"], env=self.contained_environment(self.root),
+            check=True, text=True, stdout=subprocess.PIPE,
         ).stdout.strip())
         self.assertIsInstance(metadata["source"]["dirty"], bool)
 
@@ -896,6 +1100,7 @@ exit 0
         self.assertEqual(result.returncode, 0, result.stderr)
         key = subprocess.run(
             [sys.executable, str(IDENTITY), "worktree-key", "--worktree", str(ROOT)],
+            env=self.contained_environment(self.root),
             check=True, text=True, stdout=subprocess.PIPE,
         ).stdout.strip()
         expected = home / "Library/Developer/Tron/ios/test-derived-data" / key
@@ -1046,6 +1251,7 @@ exit 0
         for worktree in (live, gone):
             key = subprocess.run(
                 [sys.executable, str(IDENTITY), "worktree-key", "--worktree", str(worktree)],
+                env=self.contained_environment(self.root),
                 check=True, text=True, stdout=subprocess.PIPE,
             ).stdout.strip()
             directory = products_root / key
@@ -1092,6 +1298,7 @@ class BuildIdentityFixture(ContainedFixture, unittest.TestCase):
     def git(self, *arguments: str) -> str:
         return subprocess.run(
             ["git", "-C", str(self.worktree), *arguments],
+            env=self.contained_environment(self.root),
             check=True, text=True, stdout=subprocess.PIPE,
         ).stdout.strip()
 
@@ -1238,7 +1445,8 @@ class ProcessFixture(ContainedFixture, unittest.TestCase):
                 break
             time.sleep(0.05)
         else:
-            stat = subprocess.run(["ps", "-o", "stat=", "-p", str(pid)], text=True, stdout=subprocess.PIPE).stdout.strip()
+            stat = subprocess.run(["ps", "-o", "stat=", "-p", str(pid)], env=self.contained_environment(self.root),
+                                   text=True, stdout=subprocess.PIPE).stdout.strip()
             self.assertTrue(stat.startswith("Z") or not stat, f"descendant still alive: {pid} {stat}")
 
 
@@ -1297,7 +1505,7 @@ class OwnedLaneFixture(SyntheticReaders, unittest.TestCase):
         self.bin = self.root / "bin"
         self.bin.mkdir()
         self.xcrun = self.bin / "xcrun"
-        self.synthetic_stub(self.xcrun, """import json, os, sys, time
+        self.synthetic_stub(self.xcrun, """import fcntl, json, os, sys, time
 from pathlib import Path
 
 inventory_path = Path(os.environ['FAKE_SIMCTL_INVENTORY'])
@@ -1339,6 +1547,17 @@ if command == 'get_app_container':
     print('no such app container', file=sys.stderr); raise SystemExit(2)
 if command in ('boot', 'shutdown'):
     if command == 'shutdown':
+        probe = os.environ.get('FAKE_COMMAND_TREE_PROBE')
+        if probe:
+            # Was the command tree this release belongs to still alive? Its own
+            # lock is free only once the whole tree has exited.
+            keep = open(probe, 'a+')
+            try:
+                fcntl.flock(keep.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+                outcome = 'released-after-the-command-tree-exited'
+            except BlockingIOError:
+                outcome = 'released-while-the-command-tree-lived'
+            Path(os.environ['FAKE_COMMAND_TREE_PROBE_LOG']).write_text(outcome + '\\n')
         delay = float(os.environ.get('FAKE_SHUTDOWN_DELAY_SECONDS') or 0)
         if delay:
             started = os.environ.get('FAKE_SHUTDOWN_STARTED')
@@ -1414,11 +1633,6 @@ raise SystemExit(2)
         finally:
             self.temporary.cleanup()
 
-    def close_pipes(self, process: subprocess.Popen[str]) -> None:
-        for pipe in (process.stdout, process.stderr):
-            if pipe is not None:
-                pipe.close()
-
     def inventory(self) -> dict[str, object]:
         return json.loads(self.inventory_path.read_text())
 
@@ -1478,6 +1692,25 @@ raise SystemExit(2)
             time.sleep(0.05)
         self.fail(f"timed out waiting for {path}")
 
+    def lock_holder(self, path: Path) -> bool:
+        """Whether a live process holds `path`'s flock, probed without waiting."""
+        with path.open("a+") as handle:
+            try:
+                fcntl.flock(handle.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+            except BlockingIOError:
+                return True
+            fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
+            return False
+
+    def wait_for_lock(self, path: Path, *, held: bool, timeout: float = 30) -> None:
+        """Wait until a live process does (or no longer does) hold `path`'s flock."""
+        deadline = time.time() + timeout
+        while time.time() < deadline:
+            if self.lock_holder(path) == held:
+                return
+            time.sleep(0.05)
+        self.fail(f"{path} was never {'taken' if held else 'released'} within {timeout:g}s")
+
     def hold_lease(self, lane: Path, *, command: str | None = None) -> subprocess.Popen[str]:
         """A live process holding a lane's lease, as a running command does.
 
@@ -1491,7 +1724,7 @@ raise SystemExit(2)
                 " fcntl.flock(handle, fcntl.LOCK_EX); print('held', flush=True); time.sleep(60)",
                 str(lane / "lease.lock"),
             ],
-            text=True, stdout=subprocess.PIPE,
+            env=self.contained_environment(self.root), text=True, stdout=subprocess.PIPE,
         )
         self.holders.append(holder)
         assert holder.stdout is not None
@@ -1503,6 +1736,22 @@ raise SystemExit(2)
                 "lock_path": str(lane / "lease.lock"), "uid": os.getuid(),
             }))
         return holder
+
+    def locker_arguments(self, *command: str, marker: Path | None = None, keep_booted: bool = False) -> list[str]:
+        marker = marker if marker is not None else self.state / "simulator.json"
+        arguments = [
+            sys.executable, str(LOCK), "--lock", str(marker.parent / "lease.lock"),
+            "--marker", str(marker), "--development-state", str(self.development_marker),
+        ]
+        if keep_booted:
+            arguments.append("--keep-booted")
+        return [*arguments, "--", *command]
+
+    def run_locker(self, *command: str, marker: Path | None = None, keep_booted: bool = False) -> subprocess.CompletedProcess[str]:
+        return subprocess.run(
+            self.locker_arguments(*command, marker=marker, keep_booted=keep_booted),
+            env=self.environment, text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=60,
+        )
 
     def present(self, udid: str) -> bool:
         return any(device["udid"] == udid for devices in self.inventory()["devices"].values() for device in devices)
@@ -1524,22 +1773,6 @@ raise SystemExit(2)
 class ReleaseFixture(OwnedLaneFixture):
     """SIM-1: the lease holder releases the lane's simulator when it ends."""
 
-    def locker_arguments(self, *command: str, marker: Path | None = None, keep_booted: bool = False) -> list[str]:
-        marker = marker if marker is not None else self.state / "simulator.json"
-        arguments = [
-            sys.executable, str(LOCK), "--lock", str(marker.parent / "lease.lock"),
-            "--marker", str(marker), "--development-state", str(self.development_marker),
-        ]
-        if keep_booted:
-            arguments.append("--keep-booted")
-        return [*arguments, "--", *command]
-
-    def run_locker(self, *command: str, marker: Path | None = None, keep_booted: bool = False) -> subprocess.CompletedProcess[str]:
-        return subprocess.run(
-            self.locker_arguments(*command, marker=marker, keep_booted=keep_booted),
-            env=self.environment, text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=60,
-        )
-
     def test_a_finished_command_releases_the_simulator_it_used(self) -> None:
         """Failure mode 1: success, failure and deadline all leave nothing booted."""
         for status in (0, 7, 75):
@@ -1556,17 +1789,109 @@ class ReleaseFixture(OwnedLaneFixture):
         """Failure mode 1: SIGINT, SIGTERM and SIGHUP release the simulator."""
         for signum in (signal.SIGINT, signal.SIGTERM, signal.SIGHUP):
             with self.subTest(signal=signum):
-                lane = self.owned_lane("ios-test", UDID_A)
+                self.owned_lane("ios-test", UDID_A)
+                # Wait for the command itself, not for the lease file: the
+                # holder records its own identity as soon as it holds the lease.
+                command_started = self.root / f"command-started-{signum}"
                 holder = subprocess.Popen(
-                    self.locker_arguments(sys.executable, "-c", "import time; time.sleep(30)"),
+                    self.locker_arguments(
+                        sys.executable, "-c",
+                        "import pathlib, sys, time; pathlib.Path(sys.argv[1]).write_text('started\\n');"
+                        " time.sleep(30)",
+                        str(command_started),
+                    ),
                     env=self.environment, text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
                 )
-                self.wait_for(lane / "lease.lock")
+                self.wait_for(command_started)
                 holder.send_signal(signum)
                 _, stderr = holder.communicate(timeout=30)
                 self.close_pipes(holder)
                 self.assertEqual(holder.returncode, 128 + signum, stderr)
                 self.assertEqual(self.device_entry(UDID_A)["state"], "Shutdown")
+
+    def test_a_signal_to_the_holder_ends_the_whole_command_tree(self) -> None:
+        """Failure mode 8: a signal to the holder must end everything the command
+        started, and the release must wait for it.
+
+        The holder used to forward the signal only to its direct child, the
+        shell, which died at once, while the bounded process owner below it and
+        the xcodebuild that owner runs in its own session kept going - so the
+        release shut down the simulator under a live test. The chain here is the
+        real one: bash runs scripts/ios-test-process.py in the foreground, and
+        that owner runs a grandchild in its own session.
+        """
+        self.owned_lane("ios-test", UDID_A)
+        tree_lock = self.root / "command-tree.lock"
+        probe_log = self.root / "release-probe.log"
+        grandchild = self.root / "grandchild.py"
+        grandchild.write_text(
+            "import fcntl, signal, sys, time\n"
+            "lock = open(sys.argv[1], 'a+')\n"
+            "fcntl.flock(lock.fileno(), fcntl.LOCK_EX)\n"
+            # The interrupt must be killed, not politely asked: this is what
+            # makes the process owner's own bounded termination the thing that
+            # has to finish before the simulator is released.
+            "signal.signal(signal.SIGTERM, signal.SIG_IGN)\n"
+            "print('grandchild', flush=True)\n"
+            "time.sleep(20)\n"
+        )
+        chain = self.root / "chain.sh"
+        chain.write_text(
+            "#!/bin/bash\n"
+            "set -uo pipefail\n"
+            f'python3 {PROCESS} --log {self.root}/chain.log --evidence-dir {self.root}/chain-evidence'\
+            f' --overall-seconds 30 --no-output-seconds 30 --term-grace-seconds 1'\
+            f' --artifact {self.root}/chain.xcresult -- {sys.executable} {grandchild} {tree_lock}\n'\
+            'echo "the command ended with $?" >&2\n'
+        )
+        chain.chmod(0o755)
+        environment = {
+            **self.environment,
+            "FAKE_COMMAND_TREE_PROBE": str(tree_lock),
+            "FAKE_COMMAND_TREE_PROBE_LOG": str(probe_log),
+        }
+
+        holder = subprocess.Popen(
+            self.locker_arguments(str(chain)), env=environment,
+            text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+        )
+        self.wait_for_lock(tree_lock, held=True)
+        holder.send_signal(signal.SIGTERM)
+        _, stderr = holder.communicate(timeout=60)
+        self.close_pipes(holder)
+
+        self.assertEqual(holder.returncode, 128 + signal.SIGTERM, stderr)
+        self.assertFalse(self.lock_holder(tree_lock), f"a grandchild survived the signal: {stderr}")
+        self.assertEqual(probe_log.read_text().strip(), "released-after-the-command-tree-exited", stderr)
+        self.assertEqual(self.device_entry(UDID_A)["state"], "Shutdown", stderr)
+
+    def test_a_detached_child_does_not_keep_the_lane_leased(self) -> None:
+        """Failure mode 9: the lease belongs to the command tree, so a process the
+        command deliberately detaches must not hold it.
+
+        `scripts/ios-gateway-e2e-test` keeps its Gateway fixture past the command
+        that started it; if that Gateway inherited the lease, the lane would stay
+        leased for as long as it runs and the next command would fail 73. The
+        holder names the descriptor it passes (`TRON_IOS_TEST_LEASE_FD`), which is
+        what lets a detached child close it.
+        """
+        self.owned_lane("ios-test", UDID_A)
+        detached = self.root / "detached-still-running"
+        script = self.root / "detach.sh"
+        script.write_text(
+            "#!/bin/bash\n"
+            "set -uo pipefail\n"
+            '( eval "exec ${TRON_IOS_TEST_LEASE_FD}>&-" ; exec python3 -c '
+            "'import pathlib, sys, time; pathlib.Path(sys.argv[1]).write_text(\"running\\n\"); time.sleep(5)' "
+            '\"$1\" ) &\n'
+        )
+        script.chmod(0o755)
+
+        completed = self.run_locker(str(script), str(detached))
+        self.assertEqual(completed.returncode, 0, completed.stderr)
+        self.wait_for(detached)
+        self.assertFalse(self.lock_holder(self.state / "lease.lock"), "a detached child kept the lease")
+        self.assertEqual(self.device_entry(UDID_A)["state"], "Shutdown")
 
     def test_keep_booted_is_recorded_and_released_by_the_next_command(self) -> None:
         """Failure mode 3: the intent is recorded, then the next command releases."""
@@ -1746,17 +2071,29 @@ class SweepFixture(OwnedLaneFixture):
         self.assertEqual(self.device_entry(UDID_B)["state"], "Booted")
 
     def test_a_holder_killed_with_sigkill_leaves_the_orphan_to_the_sweep(self) -> None:
-        """Failure mode 7: a stale lease must not hide the orphan."""
+        """Failure modes 7 and 8: a stale lease must not hide the orphan, and the
+        lease must live exactly as long as the command tree.
+
+        The holder passes the lease's descriptor to its command, so a holder
+        killed with SIGKILL cannot leave a live command whose simulator the
+        sweep would shut down under it: the sweep skips while the command runs,
+        and reclaims the orphan once it has exited.
+        """
+        command_ends = self.root / "orphan-command-ends"
+        command_started = self.root / "orphan-command-started"
         holder = subprocess.Popen(
             [
                 sys.executable, str(LOCK), "--lock", str(self.state / "lease.lock"),
                 "--marker", str(self.state / "simulator.json"),
                 "--development-state", str(self.development_marker),
-                "--", sys.executable, "-c", "import time; time.sleep(3)",
+                "--", sys.executable, "-c",
+                "import pathlib, sys, time; pathlib.Path(sys.argv[1]).write_text('running\\n'); time.sleep(6);"
+                " pathlib.Path(sys.argv[2]).write_text('done\\n')",
+                str(command_started), str(command_ends),
             ],
             env=self.environment, text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
         )
-        self.wait_for(self.state / "lease.lock")
+        self.wait_for(command_started)
         self.owned_lane("ios-test", UDID_A)
         holder.kill()
         holder.wait(timeout=10)
@@ -1764,6 +2101,16 @@ class SweepFixture(OwnedLaneFixture):
         self.assertNotEqual((self.state / "lease.lock").read_text().strip(), "")
         self.assertEqual(self.device_entry(UDID_A)["state"], "Booted")
 
+        # The command the killed holder started still runs, and its lease is
+        # what proves the lane is in use: releasing now would release the
+        # simulator under a live test.
+        busy = self.reap()
+        self.assertEqual(busy.returncode, 0, busy.stderr)
+        self.assertEqual(self.shutdown_targets(), [])
+        self.assertEqual(self.device_entry(UDID_A)["state"], "Booted")
+
+        self.wait_for(command_ends)
+        self.wait_for_lock(self.state / "lease.lock", held=False)
         result = self.reap()
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(self.shutdown_targets(), [UDID_A])
@@ -1931,6 +2278,46 @@ class LaneFixture(LaneHarness, unittest.TestCase):
         self.assertIn("ownership marker", marker_less.stderr)
         self.assertTrue(self.state.exists())
 
+    def test_lane_removal_refuses_a_directory_that_holds_another_lane(self) -> None:
+        """Failure mode 8: a lane directory that contains another lane's marker
+        is that lane's ancestor, so removing it would take the other lane's
+        simulator state with it."""
+        outer = self.owned_lane("ios-test-outer", UDID_A)
+        inner = outer / "ios-test-inner"
+        inner.mkdir()
+        marker = json.loads((outer / "simulator.json").read_text())
+        marker["udid"] = UDID_B
+        (inner / "simulator.json").write_text(json.dumps(marker))
+
+        result = self.runner("lane-remove", "outer")
+        self.assertEqual(result.returncode, 66, result.stderr)
+        self.assertIn("another lane", result.stderr)
+        self.assertTrue((outer / "simulator.json").exists())
+        self.assertTrue((inner / "simulator.json").exists())
+        self.assertTrue(self.present(UDID_A))
+
+    def test_a_lane_the_sweep_cannot_remove_is_reported_and_does_not_stop_it(self) -> None:
+        """Failure mode 8: removing a lane can fail on the file system (a file
+        the sweep cannot delete, or a directory that disappeared under it), and
+        the sweep must report that lane instead of dying on it."""
+        old = time.time() - 8 * 24 * 3600
+        blocked = self.owned_lane("ios-test-blocked", UDID_A, last_used=old)
+        unremovable = blocked / "unremovable"
+        unremovable.mkdir()
+        (unremovable / "kept").write_text("kept\n")
+        os.chmod(unremovable, 0o555)
+        expired = self.owned_lane("ios-test-gone", UDID_B, last_used=old)
+        try:
+            result = self.reap()
+        finally:
+            os.chmod(unremovable, 0o755)
+
+        self.assertEqual(result.returncode, 66, result.stderr)
+        self.assertIn("could not remove lane", result.stderr)
+        self.assertTrue(blocked.exists())
+        self.assertFalse(expired.exists())
+        self.assertFalse(self.present(UDID_B))
+
     def test_the_sweep_expires_lanes_unused_for_longer_than_the_ttl(self) -> None:
         """Failure mode 6: only a datable, unheld, unused lane is removed."""
         old = time.time() - 8 * 24 * 3600
@@ -1982,6 +2369,10 @@ class LaneFixture(LaneHarness, unittest.TestCase):
         holder.kill()
         holder.wait(timeout=10)
         self.close_pipes(holder)
+        # The holder's own command exits on its own and frees the lease, exactly
+        # as a holder killed on a development Mac does; what is left is the
+        # metadata of a process that is gone.
+        self.wait_for_lock(lane / "lease.lock", held=False)
         self.assertIn("pid", (lane / "lease.lock").read_text())
 
         listed = self.runner("lanes")
@@ -2056,6 +2447,7 @@ class ReclaimFixture(LaneHarness, unittest.TestCase):
     def write_products(self, worktree: Path, *, stamped: bool = True) -> Path:
         key = subprocess.run(
             [sys.executable, str(IDENTITY), "worktree-key", "--worktree", str(worktree)],
+            env=self.contained_environment(self.root),
             check=True, text=True, stdout=subprocess.PIPE,
         ).stdout.strip()
         directory = self.products_root / key
@@ -2085,7 +2477,7 @@ class ReclaimFixture(LaneHarness, unittest.TestCase):
         result = self.runner("clean")
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertTrue(self.results_root.exists())
-        self.assertFalse((self.results_root / ".tron-ios-test-owned").exists() is False)
+        self.assertTrue((self.results_root / ".tron-ios-test-owned").exists())
         for run in (*mine, legacy):
             self.assertFalse(run.exists(), f"{run} should have been removed")
         self.assertTrue(other_lane.exists())
@@ -2198,6 +2590,8 @@ class StatusFixture(LaneHarness, unittest.TestCase):
        its row claims an uptime while it is not running.
     5. The view mutates state - taking a lease, booting, shutting down or removing
        anything - so looking at the Mac changes it.
+    6. The view takes each lane's lease to find out who holds it, so a command
+       starting at that moment fails 73 as if the lane were busy (review P2-2).
     """
 
     def add_device(self, udid: str, *, name: str, state: str = "Booted", disk_bytes: int | None = None) -> None:
@@ -2224,6 +2618,89 @@ class StatusFixture(LaneHarness, unittest.TestCase):
         matches = [line for line in output.splitlines() if marker in line]
         self.assertEqual(len(matches), 1, f"expected exactly one row containing {marker!r}:\n{output}")
         return matches[0]
+
+    def test_a_command_starting_while_the_lane_view_runs_is_admitted(self) -> None:
+        """Failure mode 6: a command that starts while the view probes the lanes
+        is admitted, never refused busy."""
+        live = self.recorded_holders(count=3)[0]
+
+        view = subprocess.Popen(
+            [str(RUNNER), "status", "--all"], env=self.environment,
+            text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+        )
+        admitted = self.run_locker(sys.executable, "-c", "pass", marker=live / "simulator.json")
+        _, stderr = view.communicate(timeout=60)
+        self.close_pipes(view)
+
+        self.assertEqual(view.returncode, 0, stderr)
+        self.assertEqual(admitted.returncode, 0, admitted.stderr)
+
+    def test_the_lane_view_never_takes_a_lane_lease_to_probe_it(self) -> None:
+        """Failure mode 6, the deterministic half: while the views run, a process
+        that asks for a lane's lease is always granted it - a holder record
+        alone is what tells the view who holds a lane, so a lane whose recorded
+        holder is gone still reads idle.
+
+        Every lane carries a holder record, so each view probes every lane; the
+        view is repeated because a probe that did lock a lane would hold it for
+        only a moment.
+        """
+        lanes = self.recorded_holders(count=8)
+        dead = self.owned_lane("ios-test-dead", UDID_B, present=False)
+        finished = subprocess.Popen([sys.executable, "-c", "pass"], env=self.contained_environment(self.root),
+                                    stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        finished.wait(timeout=30)
+        (dead / "lease.lock").write_text(json.dumps({
+            "schema": "tron.ios-test-lock.v1", "pid": finished.pid,
+            "started_at_epoch_seconds": int(time.time()), "command": "run",
+            "lock_path": str(dead / "lease.lock"), "uid": os.getuid(),
+        }))
+
+        contended: list[float] = []
+        stop = threading.Event()
+
+        def contend() -> None:
+            """Ask for a lane's lease in a loop, as a starting command does."""
+            while not stop.is_set():
+                with (lanes[0] / "lease.lock").open("a+") as handle:
+                    try:
+                        fcntl.flock(handle.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+                    except BlockingIOError:
+                        contended.append(time.monotonic())
+                    else:
+                        fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
+
+        worker = threading.Thread(target=contend, daemon=True)
+        worker.start()
+        try:
+            views = [self.status_all() for _ in range(6)]
+        finally:
+            stop.set()
+            worker.join(timeout=10)
+
+        for result in views:
+            self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(contended, [], "the lane view took a lane's lease while it probed it")
+        self.assertIn(f"pid {os.getpid()} (run)", self.status_row(views[0].stdout, "lane l0"))
+        self.assertIn("idle", self.status_row(views[0].stdout, "lane dead"))
+
+    def recorded_holders(self, *, count: int) -> list[Path]:
+        """Lanes whose lease files carry a holder record, as a real holder writes it.
+
+        The record names this test process: it is live, and the synthetic process
+        table dates it at the second the fixture asks, so a probe can prove the
+        holder is that process without ever taking the lane's lease.
+        """
+        lanes = [self.owned_lane(f"ios-test-l{index}", UDID_A, present=False) for index in range(count)]
+        record: dict[str, object] = {
+            "schema": "tron.ios-test-lock.v1", "pid": os.getpid(),
+            "started_at_epoch_seconds": int(time.time()), "command": "run",
+            "lock_path": "", "uid": os.getuid(),
+        }
+        self.reader_value("process-table", f"{os.getpid()} 00:00 this test process\n")
+        for lane in lanes:
+            (lane / "lease.lock").write_text(json.dumps({**record, "lock_path": str(lane / "lease.lock")}))
+        return lanes
 
     def test_status_all_lists_every_booted_simulator_once(self) -> None:
         """Failure modes 1 and 2: every booted device appears, labelled by owner."""
@@ -2406,6 +2883,8 @@ class ProfilerLifecycleFixture(LifecycleHarness, unittest.TestCase):
        tables cannot say whose lane it is.
     4. A boot the shared admission refuses (73) is reported as a destination
        failure, and (or) the profiler boots the simulator anyway.
+    5. A signal to the profiler kills the lease holder instead of reaching it,
+       so the lane's simulator is never released (review P1-1).
     """
 
     def setUp(self) -> None:
@@ -2445,6 +2924,43 @@ class ProfilerLifecycleFixture(LifecycleHarness, unittest.TestCase):
         self.assertEqual(self.device_entry(UDID_B)["state"], "Booted")
         self.assertIn("shut down", result.stdout)
         self.assertEqual(self.simctl_commands().count("delete"), 0)
+
+    def test_a_signal_to_the_profiler_releases_the_lane_it_leased(self) -> None:
+        """Failure mode 5: the profiler must hand its process over to the lease
+        holder, not start it as a child it can kill.
+
+        `subprocess.run` kills its child with SIGKILL when CPython raises
+        KeyboardInterrupt, so the holder never reached its release. A lane that
+        is already booted, and an orphan lane whose release is slow, keep the
+        profiler inside the lease while the signal arrives.
+        """
+        self.owned_lane("ios-test", UDID_A)
+        self.owned_lane("ios-test-orphan", UDID_B, device_name="Tron iOS Tests (orphan)")
+        started = self.root / "shutdown-started"
+        environment = {
+            **self.environment,
+            "FAKE_SHUTDOWN_DELAY_SECONDS": "5",
+            "FAKE_SHUTDOWN_STARTED": str(started),
+            "TRON_IOS_TEST_SHUTDOWN_TIMEOUT_SECONDS": "30",
+        }
+
+        process = subprocess.Popen(
+            [str(PROFILER), "--scenario", "control", "--no-build"], env=environment,
+            text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, start_new_session=True,
+        )
+        try:
+            # The profiler leases the lane before its sweep: this is the sweep
+            # releasing an orphan, so the profiler is inside the lease.
+            self.wait_for(started)
+            os.killpg(process.pid, signal.SIGINT)
+            _, stderr = process.communicate(timeout=60)
+            self.assertEqual(process.returncode, 128 + signal.SIGINT, stderr)
+            self.assertEqual(self.device_entry(UDID_A)["state"], "Shutdown", stderr)
+        finally:
+            if process.poll() is None:
+                process.kill()
+                process.wait(timeout=30)
+            self.close_pipes(process)
 
     def test_a_profiler_boot_the_mac_refuses_keeps_the_shared_exit(self) -> None:
         """Failure mode 4: the refusal stays 73 and nothing is booted."""
@@ -2657,12 +3173,19 @@ class DevelopmentSimulatorFixture(LifecycleHarness, unittest.TestCase):
 class ContainmentFixture(ContainedFixture, unittest.TestCase):
     """The guard that keeps every other fixture inside its own temporary directory.
 
-    Failure mode this case targets, written before the code: a fixture (or a
-    future caller) runs a script under test with HOME or a Tron state, lane,
-    discovery, results or products root pointing at this Mac's real state, so a
-    sweep, `clean` or `prune` touches something the fixture does not own - the
-    leak the SIM-5 commit had, where the sweep-level fixtures inherited the real
-    HOME and their `reap` pruned the real results root.
+    Failure modes these cases target, written before the code:
+
+    1. A fixture (or a future caller) runs a script under test with HOME or a
+       Tron state, lane, discovery, results or products root pointing at this
+       Mac's real state, so a sweep, `clean` or `prune` touches something the
+       fixture does not own - the leak the SIM-5 commit had, where the
+       sweep-level fixtures inherited the real HOME and their `reap` pruned the
+       real results root.
+    2. The leak reaches a tool through a script under test rather than through
+       the fixture, so the launcher never sees it: the tool has to refuse it.
+    3. The leak is on the disk-only path. `prune` deletes runs and products in
+       Python and starts no synthetic tool at all, so the guard must trip before
+       the process starts (review P2-6).
     """
 
     def setUp(self) -> None:
@@ -2672,6 +3195,17 @@ class ContainmentFixture(ContainedFixture, unittest.TestCase):
         self.stub = self.bin / "xcrun"
         # A tool that does nothing itself: only the shared guard decides.
         self.synthetic_stub(self.stub, "raise SystemExit(0)\n")
+        self.spawner = self.bin / "spawn-with"
+        self.synthetic_stub(self.spawner, """import os, subprocess, sys
+environment = dict(os.environ)
+for assignment in sys.argv[1:]:
+    name, _, value = assignment.partition('=')
+    environment[name] = value
+completed = subprocess.run([os.environ['FAKE_CONTAINMENT_CHILD']], env=environment,
+                           text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+sys.stderr.write(completed.stderr)
+print(completed.returncode)
+""")
 
     def tearDown(self) -> None:
         self.temporary.cleanup()
@@ -2682,24 +3216,43 @@ class ContainmentFixture(ContainedFixture, unittest.TestCase):
         return subprocess.run([str(self.stub)], env=environment, text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
 
     def test_a_script_whose_environment_escapes_the_fixture_is_refused(self) -> None:
-        """Failure mode 1: a leaked root fails the run and the test that caused it."""
+        """Failure modes 1 and 2: a leaked root fails the run and the test that
+        caused it, whether the fixture or a script under test hands it on."""
         inside = self.run_stub()
         self.assertEqual(inside.returncode, 0, inside.stderr)
         self.assertFalse(self.containment_log(self.root).exists())
 
         real_home = str(Path.home())
-        leaked = self.run_stub(HOME=real_home)
-        self.assertEqual(leaked.returncode, 3, leaked.stderr)
-        self.assertIn("escapes the test fixture", leaked.stderr)
-        self.assertIn(f"HOME={real_home}", leaked.stderr)
+        with self.assertRaises(AssertionError) as refused:
+            self.run_stub(HOME=real_home)
+        self.assertIn(f"HOME={real_home}", str(refused.exception))
+
+        environment = self.contained_environment(self.root)
+        environment["FAKE_CONTAINMENT_CHILD"] = str(self.stub)
+        handed_on = subprocess.run(
+            [str(self.spawner), f"HOME={real_home}"], env=environment,
+            text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+        )
+        self.assertEqual(handed_on.stdout.strip(), "3", handed_on.stderr)
+        self.assertIn("escapes the test fixture", handed_on.stderr)
         with self.assertRaises(AssertionError):
             self.assert_no_containment_violations()
 
-        self.containment_log(self.root).unlink()
+    def test_a_leaking_prune_root_is_refused_before_prune_runs(self) -> None:
+        """Failure mode 3: the disk-only path is guarded too.
+
+        `prune` removes runs and products itself, so a leaking results or
+        products root reaches this Mac's state without any synthetic tool ever
+        running to refuse it.
+        """
         elsewhere = self.root.parent / "Tron/ios/test-runs"
-        pruned = self.run_stub(TRON_IOS_TEST_RESULTS_DIR=str(elsewhere))
-        self.assertEqual(pruned.returncode, 3, pruned.stderr)
-        self.assertIn(f"TRON_IOS_TEST_RESULTS_DIR={elsewhere}", self.containment_log(self.root).read_text())
+        with self.assertRaises(AssertionError) as refused:
+            self.run_stub(TRON_IOS_TEST_RESULTS_DIR=str(elsewhere))
+        self.assertIn(f"TRON_IOS_TEST_RESULTS_DIR={elsewhere}", str(refused.exception))
+        with self.assertRaises(AssertionError) as products:
+            self.run_stub(TRON_IOS_TEST_DERIVED_DATA=str(self.root.parent / "Tron/ios/test-derived-data"))
+        self.assertIn("TRON_IOS_TEST_DERIVED_DATA=", str(products.exception))
+        self.assertFalse(self.containment_log(self.root).exists())
 
 
 if __name__ == "__main__":

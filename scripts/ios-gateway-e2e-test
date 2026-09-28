@@ -265,6 +265,22 @@ prepare_fixture() {
   start_fresh_fixture
 }
 
+# Start a process this harness keeps past the command: the Gateway fixture and
+# the fault proxy outlive it on purpose, so they are not part of the command
+# tree the lease holder owns. The holder passes that tree the lease's descriptor
+# (so a killed holder cannot leave a live command whose simulator the sweep
+# would release), and a detached process must not inherit it, or the lane would
+# stay leased for as long as the Gateway runs and the next command would fail
+# 73. `exec` inside the subshell keeps `$!` the detached process's own pid, and
+# `nohup` keeps it ignoring the SIGHUP the holder forwards to the tree.
+detach() {
+  if [[ -n "${TRON_IOS_TEST_LEASE_FD:-}" ]]; then
+    ( eval "exec ${TRON_IOS_TEST_LEASE_FD}>&-" ; exec "$@" ) &
+  else
+    ( exec "$@" ) &
+  fi
+}
+
 start_fresh_fixture() {
   stop_gateway
   local tron_home="$run_root/tron" agent_dir="$run_root/agent" gateway_home="$run_root/home" workspace="$run_root/home/workspace" port code pi_version
@@ -302,7 +318,7 @@ PY
     PI_SUBAGENTS_TEMP_ROOT="$gateway_home/internal/subagents" \
     TRON_MACHINE_GROUP_ID=tron-ios-e2e \
     TRON_GATEWAY_HOST=127.0.0.1 TRON_GATEWAY_PORT="$port" \
-    nohup node "$gateway_dir/dist/index.js" >"$log_file" 2>&1 </dev/null &
+    detach nohup node "$gateway_dir/dist/index.js" >"$log_file" 2>&1 </dev/null
   spawned_pid="$!"
   echo "$spawned_pid" >"$pid_file"
 
@@ -336,7 +352,7 @@ PY
     TRON_E2E_TRON_HOME="$tron_home" TRON_E2E_AGENT_DIR="$agent_dir" \
     TRON_E2E_GATEWAY_LOG="$log_file" TRON_E2E_GATEWAY_PID_FILE="$pid_file" \
     TRON_E2E_PROXY_TOKEN="$proxy_token" TRON_E2E_PROXY_READY="$proxy_ready" \
-    nohup node "$proxy_script" >"$run_root/proxy.log" 2>&1 </dev/null &
+    detach nohup node "$proxy_script" >"$run_root/proxy.log" 2>&1 </dev/null
   proxy_pid="$!"
   echo "$proxy_pid" >"$proxy_pid_file"
   for _ in {1..100}; do

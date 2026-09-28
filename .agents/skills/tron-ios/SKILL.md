@@ -112,32 +112,39 @@ reclaim simulators yourself.
 - A lane is one state directory and one device name: `--lane NAME` (or
   `TRON_IOS_TEST_LANE`) uses `$HOME/.tron/internal/ios-test-NAME` and the device
   `Tron iOS Tests (NAME)`, while the default lane keeps
-  `$HOME/.tron/internal/ios-test` and `Tron iOS Tests`. Lanes of one worktree
-  share its single products directory, so run one lane per worktree at a time.
+  `$HOME/.tron/internal/ios-test` and `Tron iOS Tests`. Lanes do not serialize
+  against each other; lanes of one worktree share its single products directory,
+  so build in one lane per worktree at a time.
 - Every command that provisions a lane's simulator releases it when the command
   ends - success, failure, timeout, SIGINT, SIGTERM or SIGHUP - unless
-  `--keep-booted` asks to reuse it for a tight test-fix loop. A lane a live
+  `--keep-booted` asks to reuse it for a tight test-fix loop. A signal reaches
+  the whole command tree and the release waits for it, so nothing of a stopped
+  test is left running under a released simulator. A lane a live
   process leases is never disturbed, by the tooling or by an agent.
 - Every command that provisions a lane's simulator first sweeps: orphaned owned
   lanes (booted with no live lease) are shut down, and lanes unused for 7 days
   are removed. The runner's sweep also prunes runs beyond the retention windows
   and the products of worktrees that no longer exist. `scripts/tron-ios-test
   reap` runs that same sweep on demand, and `prune` reclaims disk alone.
-- A boot is admitted on the Mac's memory. Below 8 GB free or 4 GB of swap in use
-  the command fails fast with exit 73 and the simulator table instead of pushing
-  the Mac - and the phone's connection through the Gateway - into swap. Wait for
-  memory and retry; `TRON_IOS_TEST_MEMORY_RESERVE_BYTES` and
-  `TRON_IOS_TEST_SWAP_LIMIT_BYTES` move the reserve.
+- A boot is admitted on the Mac's memory. Below 8 GB free the command fails
+  fast with exit 73 and the simulator table instead of pushing the Mac - and the
+  phone's connection through the Gateway - into swap; swap in use is reported in
+  that table and never refuses a boot, because it drains slowly. Boots also
+  serialize on one machine-wide admission lock, so concurrent starts see the
+  memory earlier boots took. Wait for memory and retry;
+  `TRON_IOS_TEST_MEMORY_RESERVE_BYTES` moves the reserve.
 - `scripts/tron-ios-test status --all` is the read-only view of everything
-  holding this Mac's memory: every lane with its worktree, lease holder, uptime
+  holding this Mac's memory: the Mac's own free memory and swap in use, every
+  lane with its worktree, lease holder, uptime
   and disk, booted devices no lane owns, the remembered Development simulator,
   and `Simulator.app`. Run it before a final response. `lanes` lists lanes
   alone, `lane-remove NAME` reclaims one lane with its simulator and state, and
   `clean` reclaims this lane's simulator, its runs and this worktree's products;
   the shared results root is never removed wholesale.
 - The remembered Development simulator (`scripts/tron-ios-simulator`) is only
-  ever shut down by its own `stop`; the test tooling never deletes it or any
-  device without an ownership marker.
+  ever shut down by its own `stop`; no test tool deletes it. The simulators the
+  test tooling does own - the ones with its own marker - are deleted by `clean`,
+  `lane-remove` and the sweep.
 
 ## Stop rules
 

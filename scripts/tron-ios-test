@@ -81,12 +81,16 @@ refused by memory admission, 74 runner failure, 75 process timeout. Signals
 retain their conventional exits.
 
 Before it boots this lane's simulator, provisioning reads the Mac's free memory
-and swap in use and refuses (73) with the status table when free memory is below
-the reserve or swap is at the limit, so a boot never pushes the Mac - and the
-phone's connection through the Gateway - into swap. The defaults are 8 GB free
-and 4 GB of swap; TRON_IOS_TEST_MEMORY_RESERVE_BYTES and
-TRON_IOS_TEST_SWAP_LIMIT_BYTES override them. A Mac (or CI) where these reports
-are unavailable admits the boot with a warning.
+and refuses (73) with the status table when free memory is below the reserve (8
+GB by default, TRON_IOS_TEST_MEMORY_RESERVE_BYTES), so a boot never pushes the
+Mac - and the phone's connection through the Gateway - into swap. Swap in use is
+reported in that table and never refuses a boot, because it drains slowly.
+Boots are serialized across every lane on one machine-wide admission lock, held
+from the memory read until the boot completes, so two starts cannot each read
+memory the other boot has not taken; a boot that cannot take that lock in
+TRON_IOS_TEST_ADMISSION_WAIT_SECONDS (300 by default) is refused the same way.
+A Mac (or CI) where those reports are unavailable admits the boot with a
+warning.
 Every command that provisions the simulator first releases orphaned owned lanes
 and prunes results and products; lanes a live process holds are never touched.
 The profiler (scripts/tron-profile ios) and the Gateway E2E harness

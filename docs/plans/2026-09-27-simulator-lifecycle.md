@@ -707,3 +707,98 @@ Owning files: `scripts/ios-test-simulator.py`, `scripts/tron-ios-test`.
   lanes. SIM-8 runs on its own branch. Closing this plan then means moving the
   lasting rules (release, sweep, admission, "never touch another owner's lane")
   into the owning docs, appending a HISTORY.md entry and deleting the plan file.
+
+### Review fixes · 2026-09-28 · chat scroll session (worker lanes)
+
+- Result: the review findings P1-1, P1-2, P2-1 to P2-6 are fixed on this branch,
+  each with the failure mode written first and each new test verified against the
+  pre-fix code.
+  - **P1-1** `scripts/tron-profile-ios` started the lease holder with
+    `subprocess.run`, so a SIGINT made CPython SIGKILL the holder and the lane's
+    simulator was never released. It now `os.execv`s into the holder, as the bash
+    callers `exec` it: the run's own process is the holder, so the signal reaches
+    the holder, which forwards it and releases afterwards.
+  - **P1-2** `scripts/ios-test-lock.py` forwarded a signal only to its direct
+    child: the shell died at once while the process owner below it and the
+    xcodebuild that owner runs in its own session kept going, and the holder
+    released the simulator under a live test. The holder now starts the command
+    in its own process group, forwards SIGINT/SIGTERM/SIGHUP to that group, and
+    waits (bounded, 30 s) for the group to be empty before releasing; a tree that
+    outlives the bound is reported instead of silently outliving the lease.
+  - **P2-1** the holder passes the lease's own descriptor to the command
+    (`pass_fds`, its number in `TRON_IOS_TEST_LEASE_FD`), so the flock lives
+    exactly as long as the command tree: a holder killed with SIGKILL leaves a
+    lane whose lease the sweep skips while the orphaned command runs, and
+    reclaims once it has exited. A process a command *detaches* is not part of
+    that tree, so `scripts/ios-gateway-e2e-test` now starts the Gateway fixture
+    and fault proxy through a `detach` helper that closes the descriptor and
+    keeps `$!` the detached process's own pid; without it the lane would stay
+    leased for as long as that Gateway runs and the harness's next command
+    would fail 73.
+  - **P2-2** `lease_holder` no longer takes each lane's exclusive lease to probe
+    it (a `lanes` or `status --all` pass could make a command starting at that
+    moment fail 73). It reads the pid and start second the holder records and
+    proves them against the process table, and the holder writes its own identity
+    before it probes the simulator, so the record is readable as soon as the
+    lease is held. A caller that already failed to lock a lane still gets a
+    description of it.
+  - **P2-3** `remove_lane` refuses a directory that contains another lane's
+    ownership marker (removing it would take that lane's state with it), and
+    `expire_lane` catches `OSError` as well as `DestinationError`, so a removal
+    that races the file system is reported and the sweep carries on.
+  - **P2-4** boots are serialized across every lane on one machine-wide admission
+    lock in the lane root, held from the memory read until `bootstatus` returns,
+    so concurrent starts see the previous boot; a boot that cannot take it in
+    `--admission-wait-seconds` (300, `TRON_IOS_TEST_ADMISSION_WAIT_SECONDS`) is
+    refused with the shared 73 and table. Admission gates on free memory only:
+    `SWAP_LIMIT_BYTES`, `--swap-limit-bytes` and `TRON_IOS_TEST_SWAP_LIMIT_BYTES`
+    are gone, and swap in use is printed in the table header (with free memory)
+    instead of refusing boots persistently.
+  - **P2-5** docs corrected: `development.md` no longer claims lanes serialize
+    against each other (each lane owns its lease and simulator; lanes of one
+    worktree share its products directory, so build one lane at a time), and
+    "never deletes any simulator it owns" now says the shared Development
+    simulator is never deleted while the tooling's own marked simulators are
+    deleted by `clean`, `lane-remove` and the sweep (`scripts/tron-ios-simulator`
+    usage and `development.md`).
+  - **P2-6** the containment guard is structural: every process the test module
+    starts goes through one launcher that refuses an environment whose HOME or
+    Tron roots fall outside the fixture's temporary directory, and the module's
+    `subprocess` name is that launcher, so a call site cannot bypass it. A new
+    negative control covers the disk-only `prune` path, which starts no synthetic
+    tool at all. The double-negative `assertFalse((...).exists() is False)` in
+    `ReclaimFixture` is now `assertTrue(...exists())`.
+- Evidence: `python3 scripts/test-ios-test-infrastructure.py` — 86 tests, 201 s
+  wall on the committed tree (228 s in the first full run, while other sessions
+  shared the Mac; 76 tests at the SIM-9 commit). The nine cases for the source
+  findings were run with the fixed sources stashed and failed for their own
+  failure mode: the profiler died with `KeyboardInterrupt` inside
+  `subprocess.run` (status -2) and left the lane booted; the chain's release
+  probe reported `released-while-the-command-tree-lived`; the sweep shut down a
+  simulator a surviving orphan command still held; `lanes` reported a lane
+  `idle` while its recorded holder was live and the view took the lease;
+  `lane-remove` deleted a directory holding another lane's marker; a blocked
+  lane crashed the sweep with `PermissionError`; both concurrent boots were
+  admitted; the untakeable admission lock was ignored; and 4.9 GB of swap
+  refused a boot. The tenth case is the launcher's own negative control, which
+  fails whenever a leaking environment reaches a process at all, and the second
+  control covers the disk-only `prune` path that the tools' own guard cannot see.
+  `python3 scripts/test-tron-profile-ios.py` 7 tests pass and
+  `python3 scripts/check-documentation-policy.py` passes (46 authored files).
+- Deviations and notes: three fixture cases were adjusted because the fixes
+  changed the observable edges they relied on - the signalled-holder case now
+  waits for the command itself instead of the lease file (the holder records its
+  identity before it probes the simulator), the lane-expiry case waits for the
+  killed holder's command to exit before it asserts a stale lease is idle, and
+  the SIGKILL case waits for the orphan command to start before it kills the
+  holder. The test module keeps the synthetic tools' own guard and its log
+  alongside the new launcher, so a script under test that hands an escaping
+  environment on to a tool is still refused where the fixture cannot see it.
+  `scripts/ios-gateway-e2e-test`'s own signal trap was left as it is: the holder
+  now signals and waits for the whole tree, which covers that harness too, and
+  changing its trap would widen this task beyond its findings. Its `detach`
+  helper is the one production change P2-1 needed outside the holder, and it is
+  verified by reading the harness's own function back with a real descriptor:
+  the detached child's `/dev/fd` has neither the lease nor a stale number, the
+  caller still holds the lease while it runs, and `$!` is the child's pid. No
+  Gateway, simulator or device state outside the synthetic fixtures was touched.

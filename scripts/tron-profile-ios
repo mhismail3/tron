@@ -973,13 +973,22 @@ def main(argv: list[str]) -> int:
         # shuts down the lane's simulator unless it was already booted under a
         # keep-booted lease - and it never touches the remembered Development
         # simulator. Profiling and tests therefore never share one simulator.
+        # The holder is exec'd, not spawned: CPython's subprocess.run kills its
+        # child with SIGKILL when a Ctrl-C raises KeyboardInterrupt, so a holder
+        # started that way is killed before it can release the simulator. As the
+        # same process, this run's signal goes to the holder, which forwards it
+        # to the command tree and releases the lane's simulator afterwards.
         state_root.mkdir(parents=True, exist_ok=True)
         os.chmod(state_root, 0o700)
-        return subprocess.run(
-            [sys.executable, str(LOCKER), "--lock", str(state_root / "lease.lock"),
-             "--marker", str(state_root / "simulator.json"),
-             "--development-state", str(development_state_path()), "--", str(Path(__file__).resolve()), *argv]
-        ).returncode
+        try:
+            os.execv(sys.executable, [
+                sys.executable, str(LOCKER), "--lock", str(state_root / "lease.lock"),
+                "--marker", str(state_root / "simulator.json"),
+                "--development-state", str(development_state_path()), "--", str(Path(__file__).resolve()), *argv,
+            ])
+        except OSError as error:
+            print(f"error: cannot start the iOS test lease holder: {error}", file=sys.stderr)
+            return EXIT_RUNNER
     try:
         profiler = Profiler(arguments)
         profiler.sweep()
