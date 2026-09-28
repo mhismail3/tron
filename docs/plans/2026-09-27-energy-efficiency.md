@@ -2,7 +2,7 @@
 
 - **Started:** 2026-09-27
 - **Status:** Active (approved in chat by the user on 2026-09-27)
-- **Last updated:** 2026-09-28, streaming reveal regression and follow-up fixes merged
+- **Last updated:** 2026-09-28, T2-CHATVIEW done
 - **Goal:** Tron for iPhone does measurably less CPU, disk, timer and radio work per minute of real use, proven by a reliable profiler that every agent can run, with no change to what the user sees or does.
 
 ## Goal and constraints
@@ -167,7 +167,7 @@ two-frames-per-window cadence the same scenario measured 60.9 G instructions and
 | T2-FONTS | Done | Stop rebuilding fonts on view updates: `TronFontLoader.createUIFont` and `UIFont(descriptor:size:)` take 5–8% of main-thread time in every traced scenario; cache the created fonts by exact descriptor and size with identical output (Dynamic Type and settings changes still invalidate) | none (keep decision: P-1) | energy-efficiency supervisor, worker lane t2-theme, 2026-09-27 |
 | T2-COLORS | Done | Stop re-parsing theme colors per body (`Color(lightHex:darkHex:)`, `UIColor(hex:)` in the idle-dashboard trace): resolve each theme color once with identical light/dark and settings behavior | none (keep decision: P-1) | energy-efficiency supervisor, worker lane t2-theme, 2026-09-27 |
 | T2-PULSE | Done | Cut the per-frame main-thread cost of `TronPulseLoadingIndicator` (11% of idle-dashboard main-thread time) without changing a rendered frame, cadence or gating (not shipped: every restructuring that cut its cost stopped the redraw; T2-COLORS removed its hex re-parse instead; a liveness guard now protects all animated indicators) | none (keep decision: P-1) | energy-efficiency supervisor, worker lane t2-pulse, 2026-09-28 |
-| T2-CHATVIEW | Needs scoping | Transcript install cost from the traces: `ChatPhysicalTranscriptReplacementHost.body` with `renderedContent`/`replacementContent` (21% of tool-loop main-thread time), whole-transcript equality (`InstalledChatTranscript ==`, `ChatTranscriptItems ==`, 7.5% of streaming) and render-item copies (memmove 8–10%); ChatView observes the snapshot and the installed transcript in separate scopes | T1-TEXT | |
+| T2-CHATVIEW | Done | Transcript install cost from the traces: `ChatPhysicalTranscriptReplacementHost.body` with `renderedContent`/`replacementContent` (21% of tool-loop main-thread time), whole-transcript equality (`InstalledChatTranscript ==`, `ChatTranscriptItems ==`, 7.5% of streaming) and render-item copies (memmove 8–10%); ChatView observes the snapshot and the installed transcript in separate scopes (shipped: the projection tag keeps its layout facts in one shared immutable box, so per-row view values stop copying about a kilobyte each; the transcript host itself stays with the chat transcript stability plan) | T1-TEXT | energy-efficiency supervisor, worker lane chatview, 2026-09-28 |
 | T2-DASH | Done | Dashboard root stops re-evaluating on every summary; parsed ordering instants; cheaper per-row path helpers; filter preferences saved only on change (narrowed into T2-PULSE, T2-FONTS and T2-COLORS by the traces) | T1-CLOCKS | |
 | T2-THINK | Done | Thinking trace measures its visible text instead of a hidden full copy (dropped: not a traced hotspot) | T1-TEXT | |
 | T2-TEXTPREP | Done | Text preparation reuses history rows on the isolated streaming path and memoizes closed Markdown blocks (dropped: off the main thread and not a traced hotspot) | T1-TEXT | |
@@ -687,4 +687,21 @@ re-projection is a material share of that time.
 - Remaining: the misplaced repair itself (SwiftUI lands about 1,760 pt above
   the tail when a prompt and its reply enter together) and a mid-reply opening
   failure that did not reproduce belong to the chat transcript stability plan.
+
+### T2-CHATVIEW · Done · 2026-09-28 · energy-efficiency supervisor (worker lane chatview)
+
+- Result: `ChatTranscriptProjectionTag` stores its `LayoutIdentity` (which
+  inlines a whole streaming item) in one immutable shared box with the wrapped
+  value's exact equality and hashing, so the tag each row carries into several
+  view values no longer copies about a kilobyte per copy. No identity fast path:
+  a NaN inside the streaming item would make a box equal to itself where the
+  inline value compared unequal.
+- Evidence: tool-loop instructions −10.3% and −7.8% (two candidate runs)
+  against a back-to-back base, 0 regressions; streaming-reply −12% within
+  noise. Peak memory first looked like +12%, but two base runs of identical code
+  differed by 28% (76–177 MiB), so peak footprint is not a usable verdict on a
+  loaded host. Gates: focused suites 191/191, CT-12/CT-14 parity, full unit
+  tier 1,841 passed; focused suites 191/191 again after rebasing onto `main`.
+- Deviations: the worker reached its time box during an optional traced
+  confirmation; the supervisor stopped that run and merged the gated commit.
 
