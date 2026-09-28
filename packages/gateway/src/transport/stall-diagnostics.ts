@@ -1,6 +1,8 @@
 import { execFile } from "node:child_process";
 import { freemem, totalmem } from "node:os";
-import { PerformanceObserver, performance, type EventLoopUtilization } from "node:perf_hooks";
+import { monitorEventLoopDelay, PerformanceObserver, performance, type EventLoopUtilization, type IntervalHistogram } from "node:perf_hooks";
+import { getHeapStatistics } from "node:v8";
+import { drainDurableWriteStats } from "../util/durable-json.js";
 
 /*
  * Evidence for why the event loop stalled, attached to
@@ -85,6 +87,298 @@ async function sampleHostMemory(): Promise<HostMemory> {
     ...(swapUsedBytes === undefined ? {} : { swapUsedBytes }),
     ...(level === undefined ? {} : { pressure: level }),
   };
+}
+
+/** One resource record a minute. A faster timer would only add wakeups on a
+ * shared Mac without adding evidence to a minute's picture. */
+export const RESOURCE_SAMPLE_INTERVAL_MS = 60_000;
+
+/** Heap above this share of the V8 heap limit is the pressure G-12 sheds at. */
+export const HEAP_WARNING_SHARE = 0.7;
+
+/** An event-loop p99 over this bound in one minute misses the exit criterion. */
+export const EVENT_LOOP_P99_WARNING_MS = 100;
+
+/** Named entries in the message's topic and runtime detail; the rest are
+ * counted, so the record stays one readable line. */
+const MAX_RESOURCE_DETAIL = 8;
+
+/** One live runtime in the sample: its canonical transcript size is the byte
+ * estimate of what it holds until G-5 measures resident bytes better. */
+export interface ResourceRuntimeEntry {
+  sessionId: string;
+  bytes: number;
+  subscribers: number;
+}
+
+/** One topic's traffic over the sample window. `subscribers` is the highest
+ * recipient count a frame on that topic had; a topic whose recipients left is
+ * still visible by its frames and bytes. */
+export interface ResourceTopicTraffic {
+  frames: number;
+  bytes: number;
+  subscribers: number;
+}
+
+export interface ResourceSample {
+  heapUsedBytes: number;
+  heapLimitBytes: number;
+  rssBytes: number;
+  /** `monitorEventLoopDelay` percentiles over the closed window, in ms. */
+  eventLoopDelayP50Ms: number;
+  eventLoopDelayP99Ms: number;
+  eventLoopDelayMaxMs: number;
+  eventLoopUtilization: number;
+  runtimes: readonly ResourceRuntimeEntry[];
+  runtimeBytes: number;
+  runtimesLoaded: number;
+  runtimesEvicted: number;
+  /** Snapshot builds, and the part of them with no subscriber at build time. */
+  snapshotBuilds: number;
+  unaudiencedSnapshotBuilds: number;
+  topics: ReadonlyMap<string, ResourceTopicTraffic>;
+  catalogWalks: number;
+  catalogWalkMs: number;
+  catalogWalkFiles: number;
+  /** Durable publications and the time they spent in fsync. */
+  durableWrites: number;
+  durableWriteMs: number;
+  outboundBytes: number;
+}
+
+/**
+ * What the owners of measurable work report to the sampler. Each call counts
+ * one occurrence at the site that already knows it; the sampler never scans to
+ * discover what happened.
+ */
+export interface ResourceRecorder {
+  /** One snapshot projected for a session, with its subscriber count. */
+  recordSnapshotBuild(subscribers: number): void;
+  /** One serialized frame offered on a topic, and the recipients it had. */
+  recordTopicFrame(topic: string, bytes: number, subscribers: number): void;
+  /** One catalog walk, with the time it took and the files it read. */
+  recordCatalogWalk(durationMs: number, files: number): void;
+  recordOutboundBytes(bytes: number): void;
+}
+
+export interface ResourceSamplerDependencies {
+  readRuntimes?: () => Promise<readonly ResourceRuntimeEntry[]>;
+  durableWrites?: () => { count: number; ms: number };
+  memoryUsage?: () => { heapUsed: number; rss: number };
+  heapLimitBytes?: () => number;
+  eventLoopDelay?: () => { p50Ms: number; p99Ms: number; maxMs: number };
+  eventLoopUtilization?: (current?: EventLoopUtilization, previous?: EventLoopUtilization) => EventLoopUtilization;
+}
+
+/** The event-loop delay histogram, read once per sample and reset with it, so a
+ * percentile covers one minute and a momentary stall is not a permanent max. */
+function eventLoopDelayReader(): { read: () => { p50Ms: number; p99Ms: number; maxMs: number }; dispose: () => void } {
+  const histogram: IntervalHistogram = monitorEventLoopDelay({ resolution: 10 });
+  histogram.enable();
+  return {
+    read: () => {
+      const nanosecondsToMs = (value: number) => Number.isFinite(value) ? value / 1e6 : 0;
+      const delay = {
+        p50Ms: nanosecondsToMs(histogram.percentile(50)),
+        p99Ms: nanosecondsToMs(histogram.percentile(99)),
+        maxMs: nanosecondsToMs(histogram.max),
+      };
+      histogram.reset();
+      return delay;
+    },
+    dispose: () => histogram.disable(),
+  };
+}
+
+/**
+ * Owns the `gateway.resources` picture: what the Gateway spends memory, CPU and
+ * I/O on, one window at a time. Owners report their own work (see
+ * `ResourceRecorder`); this class only closes windows and states thresholds.
+ */
+export class ResourceSampler implements ResourceRecorder {
+  private readonly readRuntimes: () => Promise<readonly ResourceRuntimeEntry[]>;
+  private readonly readDurableWrites: () => { count: number; ms: number };
+  private readonly readMemory: () => { heapUsed: number; rss: number };
+  private readonly readHeapLimitBytes: () => number;
+  private readonly delay: { read: () => { p50Ms: number; p99Ms: number; maxMs: number }; dispose: () => void };
+  private readonly eventLoopUtilization: (current?: EventLoopUtilization, previous?: EventLoopUtilization) => EventLoopUtilization;
+  private utilizationMark: EventLoopUtilization;
+  private readonly topics = new Map<string, ResourceTopicTraffic>();
+  private runtimeIds = new Set<string>();
+  private snapshotBuilds = 0;
+  private unaudiencedSnapshotBuilds = 0;
+  private catalogWalks = 0;
+  private catalogWalkMs = 0;
+  private catalogWalkFiles = 0;
+  private outboundBytes = 0;
+
+  constructor(dependencies: ResourceSamplerDependencies = {}) {
+    this.readRuntimes = dependencies.readRuntimes ?? (async () => []);
+    this.readDurableWrites = dependencies.durableWrites ?? drainDurableWriteStats;
+    this.readMemory = dependencies.memoryUsage ?? (() => process.memoryUsage());
+    this.readHeapLimitBytes = dependencies.heapLimitBytes ?? (() => getHeapStatistics().heap_size_limit);
+    this.delay = dependencies.eventLoopDelay === undefined
+      ? eventLoopDelayReader()
+      : { read: dependencies.eventLoopDelay, dispose: () => {} };
+    this.eventLoopUtilization = dependencies.eventLoopUtilization
+      ?? ((current, previous) => performance.eventLoopUtilization(current, previous));
+    this.utilizationMark = this.eventLoopUtilization();
+  }
+
+  recordSnapshotBuild(subscribers: number): void {
+    this.snapshotBuilds += 1;
+    if (!(subscribers > 0)) this.unaudiencedSnapshotBuilds += 1;
+  }
+
+  recordTopicFrame(topic: string, bytes: number, subscribers: number): void {
+    const traffic = this.topics.get(topic) ?? { frames: 0, bytes: 0, subscribers: 0 };
+    traffic.frames += 1;
+    if (Number.isFinite(bytes) && bytes > 0) traffic.bytes += bytes;
+    if (Number.isFinite(subscribers) && subscribers > traffic.subscribers) traffic.subscribers = subscribers;
+    this.topics.set(topic, traffic);
+  }
+
+  recordCatalogWalk(durationMs: number, files: number): void {
+    this.catalogWalks += 1;
+    if (Number.isFinite(durationMs) && durationMs > 0) this.catalogWalkMs += durationMs;
+    if (Number.isFinite(files) && files > 0) this.catalogWalkFiles += files;
+  }
+
+  recordOutboundBytes(bytes: number): void {
+    if (Number.isFinite(bytes) && bytes > 0) this.outboundBytes += bytes;
+  }
+
+  /** Closes the window and starts the next. Counters are drained, not re-read,
+   * so one occurrence is reported exactly once. */
+  async sample(): Promise<ResourceSample> {
+    const memory = this.readMemory();
+    const delay = this.delay.read();
+    const current = this.eventLoopUtilization();
+    const utilization = this.eventLoopUtilization(current, this.utilizationMark).utilization;
+    this.utilizationMark = current;
+    const runtimes = [...await this.readRuntimes()];
+    const durable = this.readDurableWrites();
+    const present = new Set(runtimes.map((runtime) => runtime.sessionId));
+    let runtimesLoaded = 0;
+    for (const id of present) if (!this.runtimeIds.has(id)) runtimesLoaded += 1;
+    let runtimesEvicted = 0;
+    for (const id of this.runtimeIds) if (!present.has(id)) runtimesEvicted += 1;
+    this.runtimeIds = present;
+    const sample: ResourceSample = {
+      heapUsedBytes: nonNegative(memory.heapUsed),
+      heapLimitBytes: nonNegative(this.readHeapLimitBytes()),
+      rssBytes: nonNegative(memory.rss),
+      eventLoopDelayP50Ms: delay.p50Ms,
+      eventLoopDelayP99Ms: delay.p99Ms,
+      eventLoopDelayMaxMs: delay.maxMs,
+      eventLoopUtilization: Number.isFinite(utilization) ? utilization : 0,
+      runtimes,
+      runtimeBytes: runtimes.reduce((total, runtime) => total + nonNegative(runtime.bytes), 0),
+      runtimesLoaded,
+      runtimesEvicted,
+      snapshotBuilds: this.snapshotBuilds,
+      unaudiencedSnapshotBuilds: this.unaudiencedSnapshotBuilds,
+      topics: new Map(this.topics),
+      catalogWalks: this.catalogWalks,
+      catalogWalkMs: this.catalogWalkMs,
+      catalogWalkFiles: this.catalogWalkFiles,
+      durableWrites: nonNegative(durable.count),
+      durableWriteMs: nonNegative(durable.ms),
+      outboundBytes: this.outboundBytes,
+    };
+    this.topics.clear();
+    this.snapshotBuilds = 0;
+    this.unaudiencedSnapshotBuilds = 0;
+    this.catalogWalks = 0;
+    this.catalogWalkMs = 0;
+    this.catalogWalkFiles = 0;
+    this.outboundBytes = 0;
+    return sample;
+  }
+
+  dispose(): void {
+    this.delay.dispose();
+  }
+}
+
+/**
+ * The level a sample is recorded at and why. Warning is a broken bound; info is
+ * a lifecycle transition in the window (a runtime load or eviction), which is
+ * what makes a minute readable without writing every minute to disk; debug
+ * otherwise.
+ */
+export function resourceSampleLevel(sample: ResourceSample): { level: "debug" | "info" | "warning"; reason?: string } {
+  const heapShare = sample.heapLimitBytes > 0 ? sample.heapUsedBytes / sample.heapLimitBytes : 0;
+  if (heapShare >= HEAP_WARNING_SHARE) {
+    return { level: "warning", reason: `heapShare=${heapShare.toFixed(2)} at or above ${HEAP_WARNING_SHARE}` };
+  }
+  if (sample.eventLoopDelayP99Ms >= EVENT_LOOP_P99_WARNING_MS) {
+    return { level: "warning", reason: `eventLoopDelayP99Ms=${Math.round(sample.eventLoopDelayP99Ms)} at or above ${EVENT_LOOP_P99_WARNING_MS}` };
+  }
+  if (sample.runtimesLoaded + sample.runtimesEvicted > 0) {
+    return { level: "info", reason: `runtimes=${sample.runtimes.length}` };
+  }
+  return { level: "debug" };
+}
+
+/** One `gateway.resources` line: every number, then the per-topic and
+ * per-runtime detail, most expensive first and bounded. */
+export function formatResourceSample(sample: ResourceSample): string {
+  const heapShare = sample.heapLimitBytes > 0 ? sample.heapUsedBytes / sample.heapLimitBytes : 0;
+  const fields = [
+    `heapUsedBytes=${sample.heapUsedBytes}`,
+    `heapLimitBytes=${sample.heapLimitBytes}`,
+    `heapShare=${heapShare.toFixed(2)}`,
+    `rssBytes=${sample.rssBytes}`,
+    `eventLoopDelayP50Ms=${roundMs(sample.eventLoopDelayP50Ms)}`,
+    `eventLoopDelayP99Ms=${roundMs(sample.eventLoopDelayP99Ms)}`,
+    `eventLoopDelayMaxMs=${roundMs(sample.eventLoopDelayMaxMs)}`,
+    `eventLoopUtilization=${sample.eventLoopUtilization.toFixed(2)}`,
+    `liveRuntimes=${sample.runtimes.length}`,
+    `runtimeBytes=${sample.runtimeBytes}`,
+    `runtimesLoaded=${sample.runtimesLoaded}`,
+    `runtimesEvicted=${sample.runtimesEvicted}`,
+    `snapshotBuilds=${sample.snapshotBuilds}`,
+    `unaudiencedSnapshotBuilds=${sample.unaudiencedSnapshotBuilds}`,
+    `catalogWalks=${sample.catalogWalks}`,
+    `catalogWalkMs=${roundMs(sample.catalogWalkMs)}`,
+    `catalogWalkFiles=${sample.catalogWalkFiles}`,
+    `durableWrites=${sample.durableWrites}`,
+    `durableWriteMs=${roundMs(sample.durableWriteMs)}`,
+    `outboundBytes=${sample.outboundBytes}`,
+    `topics=${formatTopics(sample.topics)}`,
+    `runtimes=${formatRuntimes(sample.runtimes)}`,
+  ];
+  return `Gateway resources ${fields.join(" ")}`;
+}
+
+/** The warning record's own line: snapshot work nobody could receive. */
+export function formatUnaudiencedWork(sample: ResourceSample): string {
+  return `Gateway built ${sample.unaudiencedSnapshotBuilds} snapshot(s) with no audience in the last minute (snapshotBuilds=${sample.snapshotBuilds}); subscribers=${sample.topics.get("session.snapshot")?.subscribers ?? 0}`;
+}
+
+function formatTopics(topics: ReadonlyMap<string, ResourceTopicTraffic>): string {
+  const ordered = [...topics.entries()].sort((left, right) => right[1].bytes - left[1].bytes || left[0].localeCompare(right[0]));
+  const named = ordered.slice(0, MAX_RESOURCE_DETAIL)
+    .map(([topic, traffic]) => `${topic}:${traffic.frames}/${traffic.bytes}B/${traffic.subscribers}`);
+  if (ordered.length > named.length) named.push(`+${ordered.length - named.length}`);
+  return named.length === 0 ? "none" : named.join(",");
+}
+
+function formatRuntimes(runtimes: readonly ResourceRuntimeEntry[]): string {
+  const ordered = [...runtimes].sort((left, right) => right.bytes - left.bytes || left.sessionId.localeCompare(right.sessionId));
+  const named = ordered.slice(0, MAX_RESOURCE_DETAIL)
+    .map((runtime) => `${runtime.sessionId}:${Math.round(runtime.bytes / 1_024)}KB/${runtime.subscribers}`);
+  if (ordered.length > named.length) named.push(`+${ordered.length - named.length}`);
+  return named.length === 0 ? "none" : named.join(",");
+}
+
+function roundMs(value: number): number {
+  return Number.isFinite(value) ? Math.max(0, Math.round(value)) : 0;
+}
+
+function nonNegative(value: number): number {
+  return Number.isFinite(value) && value > 0 ? Math.round(value) : 0;
 }
 
 export function formatStallEvidence(window: StallWindow, host: HostMemory | undefined): string {

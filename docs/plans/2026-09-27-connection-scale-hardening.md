@@ -521,7 +521,7 @@ rows are in priority order.
 | O-3 | Done | Request span: one `rpc.completed` per slow RPC with every stage, wait and count | O-1 | orchestrator-dispatched deepseek-worker, 2026-09-28 |
 | O-4 | Claimed | Phone connection records that survive an export, stall watchdog, exact scene records | O-1 | orchestrator-dispatched deepseek-worker, 2026-09-28 |
 | O-6b | Ready | Impairment in the qualification scenario: blackhole, bandwidth cap, Gateway restart | O-6a | |
-| O-5 | Claimed | Gateway resource sampler and event-loop histogram | O-3 | orchestrator-dispatched deepseek-worker, 2026-09-28 |
+| O-5 | Done | Gateway resource sampler and event-loop histogram | O-3 | orchestrator-dispatched deepseek-worker, 2026-09-28 |
 | O-7 | Ready | Incident triage tool: phone export plus Gateway log in, episodes by cause out | O-1, O-2, O-4 | |
 | C-1 | Ready | Projection work never blocks or parks reconnect; parked episodes self-resume | O-4, O-6b | |
 | G-1a | Ready | Catalog owner and in-memory index fed by Gateway-owned changes | O-3, O-6a | |
@@ -2034,3 +2034,127 @@ the day cannot measure a synthetic case).
   Drive-by: the `sharedCatalogSessionInfos` spy cast added by this
   task named `CatalogSessionInfo` without importing it (never caught, since test
   files are outside the build); the type is imported now.
+
+### O-5 · Done · 2026-09-28 · orchestrator-dispatched deepseek-worker
+
+- Result: one `gateway.resources` record per closed 60 s window
+  (`RESOURCE_SAMPLE_INTERVAL_MS`) states what the Gateway spends memory, CPU and
+  I/O on, and promotes itself when a named threshold breaks. The sampler
+  (`ResourceSampler` in `packages/gateway/src/transport/stall-diagnostics.ts`,
+  the existing sampler owner) closes one window per sample: heap used/limit/share
+  and RSS from `process.memoryUsage`/`v8.getHeapStatistics`, event-loop delay
+  p50/p99/max from `monitorEventLoopDelay` read once and `reset()` with the
+  window (so a momentary stall is not a permanent max), event-loop utilization
+  from `performance.eventLoopUtilization`, live runtimes with their canonical
+  transcript bytes and subscriber counts, `runtimesLoaded`/`runtimesEvicted`,
+  snapshot builds and how many had no audience, frames/bytes/subscribers per
+  topic, catalog walks with files and time, durable publications with their fsync
+  time, and outbound bytes. Owners report their own work through the narrow
+  `ResourceRecorder` (`recordSnapshotBuild`, `recordTopicFrame`,
+  `recordCatalogWalk`, `recordOutboundBytes`); nothing is discovered by
+  scanning. Levels (`resourceSampleLevel`): debug for a quiet minute, info when a
+  runtime loaded or was evicted in it (the lifecycle transition the level policy
+  calls info), warning past `HEAP_WARNING_SHARE` (0.70 of the V8 heap limit) or
+  `EVENT_LOOP_P99_WARNING_MS` (100 ms). A window with unaudienced snapshot builds
+  also records the separate warning `resources.unaudienced-work` (G-3's signal).
+  Counters are drained, bounded to eight named topics and eight named runtimes
+  with `+N` for the rest, and every non-finite measurement is written as 0.
+- Failure modes written before the isolated tests
+  (`packages/gateway/src/transport/stall-diagnostics.test.ts`,
+  `packages/gateway/src/util/durable-json.test.ts`): (1) a window's counters are
+  dropped or reported twice; (2) the event-loop delay window is not closed per
+  sample, so a momentary stall becomes a permanent max; (3) the heap share is
+  computed against a wrong limit, so the warning never fires; (4) a threshold
+  crossing does not promote the level, so it stays in the memory-only debug
+  buffer; (5) unaudienced snapshot work is folded into the normal count and never
+  gets its own record; (6) unbounded topics or runtimes grow the record past one
+  line; (7) a non-finite measurement (an empty histogram, a failed probe) is
+  written as NaN; and for the durable-write counters: (8) a publication is not
+  counted, (9) the window is not drained so every later sample repeats it, and
+  (10) removing a file that was already gone counts as an fsync that never
+  happened.
+- Evidence:
+  - `npx vitest run src/transport/stall-diagnostics.test.ts src/util/durable-json.test.ts`
+    passes 17/17 (the sampler file is 10 cases; the durable-json file gained the
+    counter case).
+  - `npx vitest run src/transport/server-frame.test.ts src/transport/sync-protocol.integration.test.ts`
+    passes 11/11, `src/transport/server-live-view.integration.test.ts` +
+    `src/transport/server-heartbeat.integration.test.ts` passes 11/11, and
+    `src/sessions/runtime-registry.integration.test.ts` passes 243/243 in 57 s.
+    `npm run build` is clean.
+  - Volume: the quiet minute is debug and stays in the 2 MB memory-only buffer
+    (about 1,440 records, roughly 0.5 MB a day, none on disk). Only a runtime
+    load/eviction (info) or a crossed threshold (warning) reaches
+    `gateway.jsonl`; a warning that held all day is about 1,440 records × 0.5 KB,
+    about 0.7 MB, inside the 1 MB budget. Recorded in
+    `packages/gateway/docs/observability.md` with the two new rows and the
+    measured-volume paragraph.
+- Changes: the O-5 commit on `hardening/o-5`.
+- "Done when" (the 5% cross-check against O-6a's report): **owed to the
+  orchestrator**, not run here. O-6a's scenario is committed on `hardening/o-6a`
+  (6be09c4ba) but that worktree carries uncommitted edits to
+  `scripts/tron-profile-gateway`, `scripts/tron-profile-gateway-driver.mjs` and
+  `scripts/test-tron-profile.py`, i.e. the scripts the scenario runs, so a run
+  from there would measure a moving tree while its worker writes in it (and a
+  15-minute load run on a busy shared host would spoil the other in-flight
+  measurements). How to close it after O-6a merges: run the multi-session
+  scenario against a build of `hardening/integration`, then read the last
+  `gateway.resources` records from the fixture Gateway's `gateway.jsonl` and
+  compare, within 5%: `outboundBytes` and the per-topic `frames`/`bytes` against
+  the report's frames and bytes per topic, `liveRuntimes` against its client
+  count, and `rssBytes`/`heapUsedBytes` against the Gateway RSS it reports.
+- SIM-8 coordination (Do item 3): one owner for host memory. **Agreement, O-5's
+  side:** `gateway.resources` records process memory only — heap used/limit/share
+  and RSS — and deliberately does **not** record host free memory, swap or memory
+  pressure. Host memory stays with SIM-8's connection-drop records and the
+  existing `gateway.event-loop-delay` evidence (`StallSampler.hostMemory`,
+  `formatStallEvidence`), which already carry free bytes, swap used and
+  `memoryPressure`. `/private/tmp/tron-sim8` does not exist on this host and the
+  simulator-lifecycle plan is read-only for this task, so the link is recorded
+  here for the orchestrator to relay to that plan's SIM-8 row (`SIM-8` is
+  Claimed by `sim-lifecycle`); if its owner needs the reverse (host memory in the
+  resource record), the sampler already injects `sampleHost`-style dependencies
+  and can take one.
+- Deviations:
+  - Two files outside O-5's owning list were touched, both required by the Do
+    list rather than chosen: `packages/gateway/src/util/durable-json.ts` (the
+    durable-write counters have to sit at the Gateway's only fsync path;
+    `drainDurableWriteStats()` drains them) and `packages/gateway/src/gateway-main.ts`
+    (three lines: one sampler per process, handed to the registry and the
+    transport, since the registry needs it before the transport exists).
+    `durable-json.test.ts` gained one case with them.
+  - The registry gained `resourceInventory()` (one `stat` per live runtime a
+    minute, `slot.persistedSessionFile` bytes) and the slot gained
+    `sessionAudience`, since the subscriber set lives in the registry and the slot
+    is where the build happens. A build with a pending synchronization barrier but
+    no subscriber yet counts as unaudienced; the exact recipient count is also in
+    the per-topic counters (`session.snapshot:frames/bytes/subscribers`), which
+    G-3 should read as its criterion.
+  - Catalog walks are counted at the same seam O-3 measures
+    (`stage("catalog.walk", …)` in `runtime-registry.ts`), so the request span
+    and the sampler share one measurement instead of wrapping the walk twice.
+    Durable writes are counted in `durable-json.ts` for the same reason G-10
+    needs them; the counters are aggregate, not per store.
+- Kept on purpose: the record's field names and units follow the logging
+  contract inside the message (`heapUsedBytes`, `eventLoopDelayP99Ms`,
+  `durableWriteMs`, `outboundBytes`), as `gateway.event-loop-delay` already does,
+  instead of adding a dozen fields to `LogRecord`/`LogMetadata`; `resources` is a
+  window, so one occurrence is reported exactly once and a stopped sampler cannot
+  replay an old count. `sessionAudience` is the slot's only audience fact: the
+  transport owns subscriptions, the slot owns builds.
+- Not implemented, proposed for another row: the Logging-contract table lists
+  "Runtime load and eviction" with records `runtime.loaded` / `runtime.evicted`
+  against "O-5, G-5". This task's section does not request them and the registry
+  has no logger seam today, so the sampler reports the same transitions as
+  `runtimesLoaded`/`runtimesEvicted` with per-runtime bytes in the minute's
+  record instead. **Proposed:** G-5 owns the two named records when it bounds live
+  runtimes (it already owns registry eviction); if the orchestrator wants them in
+  Phase 1 earlier, that is a new row, not a silent O-5 extension.
+- Withdrawn: none.
+- For the next agent: G-3 reads `gateway.resources` (and
+  `resources.unaudienced-work`) for its before/after numbers, and its recipient
+  count is the `session.snapshot` topic entry; G-12 uses `heapShare` for its 70%
+  shedding step; G-10 uses `durableWrites`/`durableWriteMs`; G-9/G-11 use
+  `eventLoopDelayP99Ms`/`MaxMs` and `catalogWalkMs`. Until G-3 lands,
+  `resources.unaudienced-work` fires every window with unaudienced builds — that
+  is the evidence, and it is within the volume budget.

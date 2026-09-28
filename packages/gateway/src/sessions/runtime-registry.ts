@@ -33,6 +33,7 @@ import {
 import { AsyncMutex } from "../util/async-mutex.js";
 import { abortableRead } from "../util/abortable-read.js";
 import { count, currentRequestSpan, stage, wait } from "../transport/request-span.js";
+import type { ResourceRecorder, ResourceRuntimeEntry } from "../transport/stall-diagnostics.js";
 import type { TrustService } from "../admin/trust-service.js";
 import { BlobStore } from "./blob-store.js";
 import {
@@ -500,6 +501,9 @@ export class RuntimeRegistry {
       /** A runtime whose extension shutdown overran its disposal grace and was
        * forced. Outside any request span. */
       runtimeDisposeTimeout?: (graceMs: number) => void;
+      /** The transport's resource sampler; the registry reports the work only it
+       * performs (catalog walks) and answers its runtime inventory. */
+      resources?: ResourceRecorder;
       machineId?: string;
       notifications?: NotificationService;
       browserLiveViews?: BrowserLiveViewRegistry;
@@ -1305,6 +1309,8 @@ export class RuntimeRegistry {
       ...(this.options.persistenceDiagnostic ? { persistenceDiagnostic: this.options.persistenceDiagnostic } : {}),
       ...(this.options.compactionDiagnostic ? { compactionDiagnostic: this.options.compactionDiagnostic } : {}),
       isSessionPresented: (sessionId: string) => this.isSessionPresented(sessionId),
+      sessionAudience: (sessionId: string) => this.subscribers.get(sessionId)?.size ?? 0,
+      ...(this.options.resources ? { resources: this.options.resources } : {}),
       beforeRunAdmission: (sessionId: string) => this.beforeRunAdmission(sessionId),
       archivedAt: (sessionId: string) => this.archivedAt(sessionId),
       ...(this.options.machineId ? { machineId: this.options.machineId } : {}),
@@ -1828,8 +1834,10 @@ export class RuntimeRegistry {
       return this.sharedCatalogStructureEvidence();
     }
     const operation = stage("catalog.walk", async () => {
+      const startedAt = performance.now();
       const evidence = await this.catalogStructureEvidence();
       count("catalog.walk.files", evidence.identitiesByPath.size);
+      this.options.resources?.recordCatalogWalk(performance.now() - startedAt, evidence.identitiesByPath.size);
       return evidence;
     });
     this.catalogEvidencePromise = operation;
@@ -3558,6 +3566,21 @@ export class RuntimeRegistry {
         "Multiple canonical session files claim this ID; repair or remove the duplicate before continuing",
       );
     }
+  }
+
+  /**
+   * The live runtimes and the canonical transcript bytes each holds, for the
+   * transport's resource sample. Bytes come from one `stat` per live runtime a
+   * minute, not from a projection kept in step with every append.
+   */
+  async resourceInventory(): Promise<readonly ResourceRuntimeEntry[]> {
+    const entries: ResourceRuntimeEntry[] = [];
+    for (const [sessionId, slot] of this.slots) {
+      const file = slot.persistedSessionFile;
+      const bytes = file === undefined ? 0 : await stat(file).then((metadata) => metadata.size).catch(() => 0);
+      entries.push({ sessionId, bytes, subscribers: this.subscribers.get(sessionId)?.size ?? 0 });
+    }
+    return entries;
   }
 
   subscribe(clientId: string, sessionId: string): void {

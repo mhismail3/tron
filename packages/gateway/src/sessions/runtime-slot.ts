@@ -61,6 +61,7 @@ import type {
 } from "../protocol/types.js";
 import { AsyncMutex } from "../util/async-mutex.js";
 import { stage } from "../transport/request-span.js";
+import type { ResourceRecorder } from "../transport/stall-diagnostics.js";
 import type { TrustService } from "../admin/trust-service.js";
 import type { BlobStore } from "./blob-store.js";
 import {
@@ -395,6 +396,10 @@ export interface RuntimeSlotDependencies {
   processActivityRecency: ProcessActivityRecency;
   workRegistry: GatewayWorkRegistry;
   isSessionPresented: (sessionId: string) => boolean;
+  /** Subscribers the registry currently holds for a session; the slot's only
+   * view of an audience at build time. */
+  sessionAudience: (sessionId: string) => number;
+  resources?: ResourceRecorder;
   machineId?: string;
   notifications?: NotificationService;
   extensionArtifactWarning?: (warning: { reason: ExtensionArtifactRejectionReason; owner: string }) => void;
@@ -6168,6 +6173,10 @@ export class RuntimeSlot {
     // snapshot publishes.
     this.flushPendingProgress();
     this.eventSequence += 1;
+    // A build for broadcast is only worth its bytes if a subscriber receives
+    // it; the sampler counts the audience G-3 removes the empty builds from.
+    // An RPC-driven build is audienced by the requester and is not counted.
+    this.dependencies.resources?.recordSnapshotBuild(this.dependencies.sessionAudience(this.id));
     this.hooks.broadcast(this.id, "session.snapshot", this.snapshot(this.eventSequence) as unknown as JsonValue);
     this.publishSummary();
   }

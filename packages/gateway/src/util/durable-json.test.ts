@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { durableAtomicWriteJson, durableRemove, isDurablePublicationUncertain, type DurableJsonFileSystem } from "./durable-json.js";
+import { drainDurableWriteStats, durableAtomicWriteJson, durableRemove, isDurablePublicationUncertain, type DurableJsonFileSystem } from "./durable-json.js";
 
 function fileSystem(overrides: Partial<DurableJsonFileSystem> = {}): DurableJsonFileSystem {
   const fileHandle = {
@@ -97,5 +97,28 @@ describe("durable JSON publication", () => {
 
     expect(fs.rm).toHaveBeenCalledWith("/state/record.json");
     expect(directoryHandle.sync).toHaveBeenCalledOnce();
+  });
+
+  // Failure modes: (1) a publication is not counted at all, so the sampler
+  // cannot show a store fsyncing on an interactive path; (2) the window is not
+  // drained, so every later sample repeats the same writes; (3) removing a file
+  // that was already gone counts as an fsync that never happened.
+  it("counts each fsyncing publication once and drains the window", async () => {
+    drainDurableWriteStats();
+    await durableAtomicWriteJson("/state/record.json", { a: 1 }, 0o600, fileSystem());
+    await durableRemove("/state/record.json", {
+      rm: vi.fn(async () => undefined),
+      open: vi.fn(async () => ({ sync: vi.fn(async () => {}), close: vi.fn(async () => {}) })),
+    } as never);
+    const window = drainDurableWriteStats();
+    expect(window.count).toBe(2);
+    expect(window.ms).toBeGreaterThanOrEqual(0);
+    expect(drainDurableWriteStats()).toEqual({ count: 0, ms: 0 });
+
+    await durableRemove("/state/absent.json", {
+      rm: vi.fn(async () => { throw Object.assign(new Error("gone"), { code: "ENOENT" }); }),
+      open: vi.fn(async () => ({ sync: vi.fn(async () => {}), close: vi.fn(async () => {}) })),
+    } as never);
+    expect(drainDurableWriteStats().count).toBe(0);
   });
 });

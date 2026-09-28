@@ -1,6 +1,36 @@
 import { randomBytes } from "node:crypto";
 import { mkdir, open, rename, rm } from "node:fs/promises";
 import { dirname } from "node:path";
+import { performance } from "node:perf_hooks";
+
+/*
+ * Durable publication is the Gateway's only fsync path. Its rate and time are
+ * counted here, at the one primitive every store goes through, and drained by
+ * the transport's resource sampler; a store that fsyncs on an interactive path
+ * is therefore visible without a record per write. The counters are process
+ * global because the primitive is.
+ */
+let durableWriteCount = 0;
+let durableWriteMs = 0;
+
+/** Closes the durable-write window: how many publications fsynced and how long
+ * they held, since this call. */
+export function drainDurableWriteStats(): { count: number; ms: number } {
+  const stats = { count: durableWriteCount, ms: durableWriteMs };
+  durableWriteCount = 0;
+  durableWriteMs = 0;
+  return stats;
+}
+
+async function countDurableWrite<T>(operation: () => Promise<T>): Promise<T> {
+  const startedAt = performance.now();
+  try {
+    return await operation();
+  } finally {
+    durableWriteCount += 1;
+    durableWriteMs += Math.max(0, performance.now() - startedAt);
+  }
+}
 
 export interface DurableJsonFileSystem {
   mkdir: typeof mkdir;
@@ -24,11 +54,20 @@ export function isDurablePublicationUncertain(error: unknown): boolean {
  * document and directory entry before acknowledgement. The unique temporary
  * file is never reused and is removed only when this call created it.
  */
-export async function durableAtomicWriteJson(
+export function durableAtomicWriteJson(
   path: string,
   value: unknown,
   mode = 0o600,
   fileSystem: DurableJsonFileSystem = productionFileSystem,
+): Promise<void> {
+  return countDurableWrite(() => publishAtomicJson(path, value, mode, fileSystem));
+}
+
+async function publishAtomicJson(
+  path: string,
+  value: unknown,
+  mode: number,
+  fileSystem: DurableJsonFileSystem,
 ): Promise<void> {
   const directory = dirname(path);
   await fileSystem.mkdir(directory, { recursive: true, mode: 0o700 });
@@ -76,9 +115,16 @@ export async function durablePublishBoundedJson(
 }
 
 /** Remove one published document durably. Missing is already the desired state. */
-export async function durableRemove(
+export function durableRemove(
   path: string,
   fileSystem: Pick<DurableJsonFileSystem, "open" | "rm"> = productionFileSystem,
+): Promise<void> {
+  return removeDurableJson(path, fileSystem);
+}
+
+async function removeDurableJson(
+  path: string,
+  fileSystem: Pick<DurableJsonFileSystem, "open" | "rm">,
 ): Promise<void> {
   const directory = dirname(path);
   try {
@@ -87,10 +133,14 @@ export async function durableRemove(
     if ((error as NodeJS.ErrnoException).code === "ENOENT") return;
     throw error;
   }
-  const directoryHandle = await fileSystem.open(directory, "r");
-  try {
-    await directoryHandle.sync();
-  } finally {
-    await directoryHandle.close();
-  }
+  // Only a removal that reaches the directory sync is a durable write; removing
+  // a file that was already gone fsyncs nothing.
+  await countDurableWrite(async () => {
+    const directoryHandle = await fileSystem.open(directory, "r");
+    try {
+      await directoryHandle.sync();
+    } finally {
+      await directoryHandle.close();
+    }
+  });
 }

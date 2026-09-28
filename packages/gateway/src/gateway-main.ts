@@ -23,6 +23,7 @@ import { GatewayLogger } from "./transport/logger.js";
 import { CommandReceiptStore } from "./transport/command-receipts.js";
 import { GatewayService } from "./transport/gateway-service.js";
 import { GatewayServer } from "./transport/server.js";
+import { ResourceSampler, type ResourceRuntimeEntry } from "./transport/stall-diagnostics.js";
 import { installKimiK3Policy } from "./providers/kimi-k3-policy.js";
 import { NotificationGrantStore } from "./notifications/grant-store.js";
 import { PushRelayClient } from "./notifications/relay-client.js";
@@ -186,12 +187,18 @@ const jevClient = new JevDecisionClient(knowledgeCredentials);
 const mcp = new McpAdapter({ connections, credentials: knowledgeCredentials, workRegistry });
 let automations!: AutomationService;
 let automationToolOperations!: GatewayScheduleToolOperations;
+// One sampler for the process: the transport records its own traffic and logs
+// the record, the registry reports catalog walks and answers its inventory.
+const resourceSampler: ResourceSampler = new ResourceSampler({
+  readRuntimes: (): Promise<readonly ResourceRuntimeEntry[]> => sessions.resourceInventory(),
+});
 // Late-bound: the scheduler is constructed after the registry, and archiving
 // must not hide a session whose automation run is already dispatched.
 let automationSchedulerForArchive: Pick<AutomationScheduler, "hasSessionRun"> | undefined;
 const sessions = new RuntimeRegistry({
   agentDir: config.agentDir,
   tronHome: config.tronHome,
+  resources: resourceSampler,
   delegatedArtifactRoot: delegatedRoot,
   idleRuntimeMs: config.idleRuntimeMs,
   maximumLiveRuntimes: config.maxLiveRuntimes,
@@ -558,6 +565,7 @@ transport = new GatewayServer({
   auth,
   service,
   logger,
+  resourceSampler,
   authorizeBrowserLiveView: (sessionId, viewId, generation) => sessions.authorizeBrowserLiveView(sessionId, viewId, generation),
 });
 

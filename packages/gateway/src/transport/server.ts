@@ -15,7 +15,7 @@ import type { BlobByteRange } from "../sessions/blob-store.js";
 import type { AuthBroker } from "../admin/auth-broker.js";
 import type { GatewayLogger } from "./logger.js";
 import { GATEWAY_CONNECTION_POLICY } from "./connection-policy.js";
-import { formatStallEvidence, StallSampler } from "./stall-diagnostics.js";
+import { formatStallEvidence, formatResourceSample, formatUnaudiencedWork, resourceSampleLevel, ResourceSampler, RESOURCE_SAMPLE_INTERVAL_MS, StallSampler } from "./stall-diagnostics.js";
 import { GatewayService, type ClientContext } from "./gateway-service.js";
 import { MIN_PROTOCOL_VERSION, PROTOCOL_VERSION } from "../version.js";
 import { SessionSyncBarrier, type BufferedSessionEncoding, type BufferedSessionEvent } from "./session-sync.js";
@@ -558,6 +558,11 @@ export class GatewayServer {
   private readonly heartbeat: NodeJS.Timeout;
   private lastHeartbeatAt = performance.now();
   private readonly stallSampler: StallSampler;
+  private readonly resourceSampler: ResourceSampler;
+  private readonly resourceTimer: NodeJS.Timeout;
+  /** One resource sample reads the runtime inventory; a slow one must not
+   * overlap the next minute's window. */
+  private resourceSampleInFlight = false;
   private ready = false;
   private shuttingDown = false;
   private closeTask?: Promise<void>;
@@ -587,9 +592,11 @@ export class GatewayServer {
       /** Synchronous canonical-branch admission inside the device credential cut. */
       authorizeBrowserLiveView?: (sessionId: string, viewId: string, generation: string) => boolean;
       stallSampler?: StallSampler;
+      resourceSampler?: ResourceSampler;
     },
   ) {
     this.stallSampler = options.stallSampler ?? new StallSampler();
+    this.resourceSampler = options.resourceSampler ?? new ResourceSampler();
     const maximumHttpConnections = options.maximumHttpConnections ?? HTTP_MAXIMUM_CONNECTIONS;
     if (!Number.isSafeInteger(maximumHttpConnections) || maximumHttpConnections < 1) {
       throw new Error("HTTP connection bounds are invalid");
@@ -676,6 +683,35 @@ export class GatewayServer {
       }
     }, GATEWAY_CONNECTION_POLICY.heartbeatIntervalMs);
     this.heartbeat.unref();
+    // The resource record is the Gateway's only periodic whole-process picture;
+    // one minute is the cadence the sampler's volume estimate assumes.
+    this.resourceTimer = setInterval(() => void this.publishResources(), RESOURCE_SAMPLE_INTERVAL_MS);
+    this.resourceTimer.unref();
+  }
+
+  private async publishResources(): Promise<void> {
+    if (this.shuttingDown || this.resourceSampleInFlight) return;
+    this.resourceSampleInFlight = true;
+    try {
+      const sample = await this.resourceSampler.sample();
+      const level = resourceSampleLevel(sample);
+      const message = formatResourceSample(sample);
+      this.options.logger.log(level.level, level.reason === undefined ? message : `${message} (${level.reason})`, {
+        event: "gateway.resources", source: "transport",
+      });
+      // Snapshot work nobody could receive is G-3's target; before it lands this
+      // warning fires every window, which is the evidence the row exists for.
+      if (sample.unaudiencedSnapshotBuilds > 0) {
+        this.options.logger.log("warning", formatUnaudiencedWork(sample), {
+          event: "resources.unaudienced-work", source: "transport",
+        });
+      }
+    } catch {
+      // A sampler fault must never take the transport down; the next window
+      // reports the same picture.
+    } finally {
+      this.resourceSampleInFlight = false;
+    }
   }
 
   setStartupPhase(phase: "catalog-warming" | "attention-recovery" | "automation-recovery" | "storage-warming"): void {
@@ -768,8 +804,10 @@ export class GatewayServer {
     // Prepare once for this broadcast operation. Each connection still owns
     // admission, queue accounting, revocation, and write-failure isolation.
     const prepared = this.prepareBroadcastFrame(event);
+    let subscribers = 0;
     for (const client of this.clients.values()) {
       if (!client.ready || !client.subscriptionTokens.has(sessionId)) continue;
+      subscribers += 1;
       // While a synchronization quarantine owns this session's catch-up, its
       // barrier is the only delivery path: the event is flushed exactly once
       // after the acknowledgement. Sending it here as well would deliver every
@@ -778,14 +816,19 @@ export class GatewayServer {
       const deliverable = barrier ? barrier.offer(event, prepared ?? null) : event;
       if (deliverable) this.sendOutcome(client, deliverable, prepared ?? null);
     }
+    this.resourceSampler.recordTopicFrame(topic, prepared?.outputBytes ?? 0, subscribers);
   }
 
   broadcast(topic: string, payload: JsonValue): void {
     const event = { type: "event" as const, topic, payload };
     const prepared = this.prepareBroadcastFrame(event);
+    let subscribers = 0;
     for (const client of this.clients.values()) {
-      if (client.ready) this.sendOutcome(client, event, prepared ?? null);
+      if (!client.ready) continue;
+      subscribers += 1;
+      this.sendOutcome(client, event, prepared ?? null);
     }
+    this.resourceSampler.recordTopicFrame(topic, prepared?.outputBytes ?? 0, subscribers);
   }
 
   emitToClient(clientId: string, topic: string, payload: JsonValue): void {
@@ -2000,6 +2043,7 @@ export class GatewayServer {
       // response before its synchronization suffix without manufacturing
       // transport pressure from concurrent bounded RPC completions.
       if (!connection.outbound.enqueue({ encoded: frame.output, bytes: frame.outputBytes })) return "failed";
+      this.resourceSampler.recordOutboundBytes(frame.outputBytes);
       return frame.fallback ? "fallback" : "sent";
     } catch {
       // Never log the exception or payload: serialization errors can contain
@@ -2092,7 +2136,9 @@ export class GatewayServer {
     await this.options.liveViews?.joinRetirements();
     this.options.logger.log("info", "Closing Gateway transport", { event: "gateway.transport-closing", source: "transport" });
     clearInterval(this.heartbeat);
+    clearInterval(this.resourceTimer);
     this.stallSampler.dispose();
+    this.resourceSampler.dispose();
     for (const client of this.clients.values()) {
       const stoppingAccepted = this.send(client, { type: "event", topic: "system.stopping", payload: {} });
       this.retireConnectionWork(client);
