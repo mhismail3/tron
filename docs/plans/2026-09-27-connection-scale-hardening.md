@@ -7983,11 +7983,12 @@ wait).
   `http.upgrade` without changing that record's message shape; `lan.listener`
   keeps its detail (`state`/`family`/`port`) in the message as the bounded
   diagnostic records do. Both have rows in `packages/gateway/docs/observability.md`.
-- For the next agent (E-3b/E-3c/E-3d): the bound endpoint is `LanEndpoint`'s
-  state (`bound` + `port`, address) — a public accessor is not added yet
-  because nothing reads it; the lane's own port is the main listener's, so a
-  wildcard `--host` would collide (fail-closed, `bind_failed`); the qualification
-  scripts that start a fixture Gateway need `--lan-endpoint on` before E-3c's
-  race cases can exercise the lane.
+- For the next agent (E-3b/E-3c/E-3d): E-3b adds the accessor it needs for
+  advertising (`LanEndpoint`'s bound address, family and port are private state
+  today, deliberately: nothing reads them yet) and the `lanPin` from
+  `tls-certificate.pem`; the lane's port is the main listener's, so a wildcard
+  `--host` would collide (fail-closed, one `bind_failed` record); the
+  qualification scripts that start a fixture Gateway need `--lan-endpoint on`
+  before E-3c's race cases can exercise the lane.
 ||||||| 3d90561d4
 

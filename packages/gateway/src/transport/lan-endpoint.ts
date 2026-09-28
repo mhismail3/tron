@@ -287,13 +287,6 @@ export class LanEndpoint {
     await this.retireListener(false);
   }
 
-  /** The bound endpoint, or null while the LAN leg is unavailable. E-3b reads
-   * it to advertise LAN endpoints over an authenticated channel. */
-  endpoint(): { readonly host: string; readonly port: number; readonly family: LanAddress["family"] } | null {
-    if (!this.bound) return null;
-    return { host: this.bound.address, port: this.bound.port, family: this.bound.family };
-  }
-
   private async reconcile(): Promise<void> {
     if (!this.credentials) return;
     const next = (this.options.lanAddresses ?? resolveLanAddresses)()[0];
