@@ -283,7 +283,10 @@ describe("Gateway heartbeat pings", () => {
   it("pings a pong-only client on every tick, never retires it and never reports it silent", async () => {
     // A client that only answers the Gateway's pings is idle between them, not
     // cut off: its silence says nothing until a ping goes unanswered, and every
-    // tick's ping is answered well inside the next interval.
+    // tick's ping is answered well inside the next interval. This is the phone
+    // as C-4 leaves it — a receiver that answers pings and sends nothing else —
+    // over 200 virtual seconds, well past the 60 s silence threshold: no
+    // `connection.inbound-silent` record and no Tailscale lookup at all.
     const lookup = vi.fn(async (): Promise<PeerPathLookup> => ({ peerPath: "unknown", peerRelay: "" }));
     const observations = await observeHeartbeats({ autoPong: true }, 8, { peerPathReader: { lookup } });
     expect(pingedTicks(observations)).toEqual([1, 2, 3, 4, 5, 6, 7, 8]);
@@ -367,6 +370,9 @@ describe("Gateway heartbeat pings", () => {
     expect(silent).toHaveLength(1);
     expect(silent[0]!.level).toBe("warning");
     expect(silent[0]!.message).toContain("22000ms");
+    // No ping was outstanding: the client's own pings were the liveness signal
+    // that stopped, so the record names no unanswered ping.
+    expect(silent[0]!.message).toContain("unansweredPingMs=none");
     expect(silent[0]!.fields).toMatchObject({
       peerClientId: "client-heartbeat", peerAttemptId: "initial", peerEpoch: "1",
       peerPath: "relay", peerRelay: "sfo",
@@ -419,6 +425,8 @@ describe("Gateway heartbeat pings", () => {
     expect(silent).toHaveLength(1);
     expect(silent[0]!.level).toBe("warning");
     expect(silent[0]!.message).toContain("50000ms");
+    // The tick at 50 s reported the ping sent into the blackhole at 25 s.
+    expect(silent[0]!.message).toContain("unansweredPingMs=25000");
     expect(silent[0]!.fields).toMatchObject({ peerPath: "relay", peerRelay: "sfo" });
     expect(resumed).toHaveLength(1);
     expect(resumed[0]!.fields.silentMs).toBeGreaterThanOrEqual(50_000);

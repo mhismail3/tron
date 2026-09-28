@@ -430,12 +430,21 @@ interface UpgradeTrace {
   reported: boolean;
 }
 
+/** A frame the ws library itself refused — an oversized payload or a malformed
+ * frame — carries a `WS_ERR_*` code; a path failure carries a socket error code
+ * or none. */
+function isFrameRefusal(error: Error): boolean {
+  const code: unknown = (error as { code?: unknown }).code;
+  return typeof code === "string" && code.startsWith("WS_ERR_");
+}
+
 /** The structured ending of one upgrade. `reason` is what triage groups on; the
  * message carries the human detail. */
 interface UpgradeEnding {
   reason:
     | "request_capacity" | "unexpected_path" | "warming_up" | "shutting_down"
     | "connection_capacity" | "unauthenticated" | "unreadable_request" | "peer_closed"
+    | "superseded" | "device_revoked"
     | "authentication_timeout" | "handshake_refused" | "hello_timeout" | "hello_required"
     | "protocol_mismatch" | "invalid_frame" | "hello";
   /** The O-1 peer key, once hello named it. */
@@ -452,6 +461,9 @@ interface SilenceEpisode {
   reported: boolean;
   /** Silence already observed when this episode was detected. */
   detectedMs: number;
+  /** How long the Gateway's unanswered ping had been waiting at detection, or
+   * null when the client's own pings were the liveness signal that stopped. */
+  detectedPingMs: number | null;
   /** The shared, bounded peer-path read; it never rejects and never blocks the
    * heartbeat. */
   peer: Promise<PeerPathLookup>;
@@ -490,7 +502,7 @@ interface Connection {
   // When the Gateway's own last ping went out, cleared by any inbound frame.
   // `unansweredHeartbeats` counts ticks, including ticks that skipped the ping
   // for a client that had just spoken, so only this field says a ping is
-  // actually outstanding.
+  // actually outstanding; the silent record reports how long it has waited.
   pingOutstandingSince: number | null;
   ready: boolean;
   presentationOnly: boolean;
@@ -986,6 +998,11 @@ export class GatewayServer {
         client.revokeResponseRequestId = origin.requestId;
         client.revokeResponseQueued = false;
       } else {
+        // The Gateway ends this socket because the device is gone, so a socket
+        // that never said hello states that cause rather than the peer leaving.
+        if (!client.ready) {
+          this.finishUpgrade(client.upgrade, "abandoned", "handshake", "device revoked", { reason: "device_revoked" });
+        }
         client.socket.close(1008, "device revoked");
       }
       this.options.service.releaseClient(client.id);
@@ -1444,7 +1461,7 @@ export class GatewayServer {
         const supersededAt = performance.now();
         for (const client of identityConnections.slice(0, superseded)) {
           this.options.logger.log("warning", `Superseding client ${client.id} with a newer connection from the same identity (lastInboundAgeMs=${progressAge(client.lastInboundAt, supersededAt)} identityConnections=${identityConnections.length} maximumPerIdentity=${maximumPerIdentity})`, { event: "connection.superseded", source: "transport", connectionId: client.id, ...client.peer });
-          this.closeFailedConnection(client, SUPERSEDED_CLOSE_CODE, "superseded by a newer connection");
+          this.closeFailedConnection(client, SUPERSEDED_CLOSE_CODE, "superseded by a newer connection", { reason: "superseded" });
         }
         const isLocal = authenticated.kind === "local";
         (isLocal ? this.localSockets : this.pairedSockets).handleUpgrade(request, socket, head, (webSocket) => {
@@ -1600,7 +1617,16 @@ export class GatewayServer {
       const suffix = reason.length > 0 ? `: ${reason.toString("utf8")}` : "";
       this.disconnect(connection, `WebSocket close ${code}${suffix}`);
     });
-    socket.on("error", (error) => this.disconnect(connection, `WebSocket error: ${error.message}`));
+    socket.on("error", (error) => {
+      // A frame the ws library refused at the protocol level (an oversized
+      // payload, a malformed frame) is the hello phase's refusal, not the peer
+      // leaving the socket it opened. Later frames are already reported by the
+      // upgrade's own ending.
+      if (!connection.ready && isFrameRefusal(error)) {
+        this.finishUpgrade(connection.upgrade, "rejected", "hello", `WebSocket error: ${error.message}`, { reason: "invalid_frame" });
+      }
+      this.disconnect(connection, `WebSocket error: ${error.message}`);
+    });
   }
 
   private async onMessage(connection: Connection, raw: unknown): Promise<void> {
@@ -2264,10 +2290,15 @@ export class GatewayServer {
   private disconnect(connection: Connection, detail = "WebSocket closed"): void {
     if (!this.clients.delete(connection.id)) return;
     const closedAt = performance.now();
-    // A socket that never got past hello leaves through here whatever ended it
-    // (its own close, or the hello deadline): the upgrade reached this Mac and
-    // then went away before the handshake finished.
-    this.finishUpgrade(connection.upgrade, "abandoned", "handshake", detail, { reason: "peer_closed" });
+    // A socket that never got past hello leaves through here when the peer
+    // ended it: the upgrade reached this Mac and then went away before the
+    // handshake finished. Every ending the Gateway itself starts records its
+    // own `reason` before it closes the socket (`closeFailedConnection`, the
+    // hello deadline, revocation, shutdown), so only a peer-driven ending can
+    // still be unreported here.
+    if (!connection.closeInitiated) {
+      this.finishUpgrade(connection.upgrade, "abandoned", "handshake", detail, { reason: "peer_closed" });
+    }
     const outbound = connection.outbound.snapshot();
     connection.outbound.retire();
     this.options.logger.log(
@@ -2305,9 +2336,15 @@ export class GatewayServer {
     this.options.auth.detachClient(connection.id);
   }
 
-  private closeFailedConnection(connection: Connection, code: number, reason: string): void {
+  private closeFailedConnection(connection: Connection, code: number, reason: string, ending?: UpgradeEnding): void {
     if (connection.closeInitiated) return;
     connection.closeInitiated = true;
+    // The Gateway is ending this socket, so an attempt that never reached hello
+    // states the Gateway's own cause here, before the close: `disconnect` would
+    // otherwise report the peer as leaving.
+    if (ending !== undefined && !connection.ready) {
+      this.finishUpgrade(connection.upgrade, "abandoned", "handshake", reason, ending);
+    }
     connection.outbound.retire();
     // Disposable observers/read waits retire now, not after a dead peer's close
     // handshake. Accepted domain commands still settle with their receipt owner.
@@ -2354,6 +2391,9 @@ export class GatewayServer {
       startedAt,
       reported: false,
       detectedMs: Math.max(0, Math.round(heartbeatAt - startedAt)),
+      detectedPingMs: connection.pingOutstandingSince === null
+        ? null
+        : Math.max(0, Math.round(heartbeatAt - connection.pingOutstandingSince)),
       // A reader that rejects must still leave a record: the silence is the
       // point, the path is the detail.
       peer: this.peerPaths.lookup(connection.remoteAddress)
@@ -2365,7 +2405,7 @@ export class GatewayServer {
       episode.reported = true;
       // The message reports the silence observed at detection; the resume
       // record carries the episode's full duration.
-      this.options.logger.log("warning", `Client ${connection.id} has sent nothing for ${episode.detectedMs}ms (peerPath=${peer.peerPath} peerRelay=${peer.peerRelay || "none"})`, {
+      this.options.logger.log("warning", `Client ${connection.id} has sent nothing for ${episode.detectedMs}ms (unansweredPingMs=${episode.detectedPingMs ?? "none"} peerPath=${peer.peerPath} peerRelay=${peer.peerRelay || "none"})`, {
         event: "connection.inbound-silent", source: "transport", connectionId: connection.id, ...connection.peer,
         peerPath: peer.peerPath, peerRelay: peer.peerRelay,
       });

@@ -1812,19 +1812,19 @@ a latency percentile.
     after the socket speaks again: `silentMs` is exactly 27,000 ms and the
     silence record still precedes the resume record.
 - Changes: `feat(gateway): record upgrade phases and inbound silence (O-2)`,
-  `fix(gateway): close the O-2 review findings`, then the second reviewer's
-  round (see the two review responses below).
+  `fix(gateway): close the O-2 review findings`, then the second and third
+  reviewers' rounds (see the three review responses below).
 - Tasks added: none.
 - Kept on purpose: `http.upgrade` for the Mac app's constant local probes is
-  debug, like `connection.opened`, so it stays in the memory-only buffer; the
-  unreported trace is finished in `disconnect`, not in `closeFailedConnection`,
-  so a socket that never got past hello is `abandoned` whichever side ended it,
-  and the second reviewer's round named the Gateway-side endings in `reason`
-  (`hello_timeout`, `shutting_down`) rather than splitting that outcome.
-  Readiness and shutdown refusals are `info` on `http.upgrade` (they are
-  expected and clients retry), so a startup retry storm adds no warnings; the
-  shutdown destruction of a socket that never reached hello keeps the default
-  warning level, where it already was.
+  debug, like `connection.opened`, so it stays in the memory-only buffer; an
+  attempt that never got past hello is `abandoned` whichever side ended it, and
+  the side is named in `reason` (`peer_closed` only for a peer that vanished;
+  the Gateway's own endings are `hello_timeout`, `shutting_down`, `superseded`
+  and `device_revoked`, each recorded before the socket is closed) rather than
+  splitting that outcome. Readiness and shutdown refusals are `info` on
+  `http.upgrade` (they are expected and clients retry), so a startup retry storm
+  adds no warnings; the shutdown destruction of a socket that never reached
+  hello keeps the default warning level, where it already was.
 - Reviewer's round (changes-required, 2026-09-28) and this response:
   - **Blocker, fixed — a pong-only client was reported silent on every tick.**
     A client that only answers the Gateway's pings is idle between them and its
@@ -1947,6 +1947,40 @@ a latency percentile.
   negative controls (guard reverted: one false `has sent nothing for 43000ms`;
   endings reverted: `peer_closed` in all three cases) are retained in the
   internal workspace under `files/hardening/o-2-round2/`.
+- Third reviewer's round (approved, 2026-09-28, against commit `f03f413aa`) and
+  this response:
+  - **Minor, fixed — other Gateway-started endings before hello were still
+    recorded as the peer leaving.** `disconnect` no longer labels a socket
+    `peer_closed` when the Gateway opened the close (`closeInitiated`), and
+    every Gateway-started pre-hello ending states its own cause at the close
+    site: `closeFailedConnection` takes the ending, `superseded` for an identity
+    socket the newcomer displaces, `device_revoked` for a socket `disconnectDevice`
+    closes before it had introduced itself, and the ws library's own frame
+    refusal (an oversized or malformed frame, `WS_ERR_*`) is
+    `rejected/hello/invalid_frame` instead of an abandoned handshake. The stale
+    comment in `disconnect` and the plan's "Kept on purpose" bullet were
+    reworded. Three new cases: a pre-hello supersession (per-identity cap 1), a
+    pre-hello revocation, and an oversized pre-hello frame; reverting the source
+    makes all three report `peer_closed`.
+  - **Nit, fixed — `pingOutstandingSince` was only compared with null.** The
+    timestamp now dates the liveness signal in the silence record's message as
+    `unansweredPingMs=25000`, or `none` when the client's own pings were what
+    stopped; both shapes are asserted.
+  - **Confirmed, no new test needed — the receive-only C-4 phone.** `pings a
+    pong-only client on every tick, never retires it and never reports it
+    silent` already runs that shape (answers every Gateway ping, sends nothing
+    else after hello) for 200 virtual seconds, past the 60 s silence threshold,
+    and asserts no `connection.inbound-silent`, no `connection.inbound-resumed`
+    and zero path lookups.
+  - **Rejected: none.** Both items were addressed.
+- Third-round evidence: `npm run build` clean; `npx tsc --noEmit -p .` clean; the
+  same 11-file focused set passes **108/108** (three new cases plus the two
+  `unansweredPingMs` assertions). The reviewer's own repros pass against the
+  rebuilt dist: `supersede-before-hello.mjs` prints `reason=superseded` and
+  `oversize-before-hello.mjs` prints `rejected/hello/invalid_frame`; the round-2
+  repros still print no false silence and `reason=hello_timeout`. The negative
+  control (source reverted, tests kept) and the receive-only run are retained in
+  the internal workspace under `files/hardening/o-2-round3/`.
 - Deviations:
   - The record fields needed the writer's shape: `logger.ts` gained
     `phaseReached`, the four duration fields, `peerPath`, `peerRelay` and
@@ -1954,6 +1988,11 @@ a latency percentile.
     and `unaccountedMs` lines now share. `Connection` gained `remoteAddress`
     (the Tailscale join; never logged) and the upgrade trace, both handed to
     `admit` by `handleUpgrade`.
+  - The silence record's message gained `unansweredPingMs`, the age of the
+    Gateway's unanswered ping at detection (`none` when the client's own pings
+    were the liveness signal). The pre-hello frame refusal is told from a peer
+    departure by the ws receiver's `WS_ERR_*` error code, not by its message
+    text: a path failure carries a socket error code or none.
   - `helloMs` on an abandoned upgrade is the time the attempt spent in the hello
     phase before the socket went away (0 only when the handshake never
     completed), not a completed round trip.

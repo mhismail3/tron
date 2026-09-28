@@ -22,11 +22,13 @@ import { GatewayServer, HTTP_MAXIMUM_CONNECTIONS_PER_ADDRESS, HTTP_MAXIMUM_REQUE
 //    admission instead of the abandoned credential wait.
 // 5. A handshake refused after authentication (a bad key or version, or
 //    extension negotiation) writes no upgrade record at all.
-// 6. A first frame that is not JSON is recorded as an abandoned handshake
+// 6. A first frame that is not JSON, or a frame the WebSocket library itself
+//    refuses (an oversized payload), is recorded as an abandoned handshake
 //    instead of a refusal at hello.
-// 7. A close the Gateway itself starts — the hello deadline, or shutdown before
-//    hello — is recorded as the peer leaving (`reason=peer_closed`), so grouping
-//    by `reason` counts Gateway-side retirements as peer departures.
+// 7. A close the Gateway itself starts — the hello deadline, shutdown before
+//    hello, a revocation or a supersession of a pre-hello socket — is recorded
+//    as the peer leaving (`reason=peer_closed`), so grouping by `reason` counts
+//    Gateway-side retirements as peer departures.
 
 const cleanups: Array<() => Promise<void>> = [];
 afterEach(async () => {
@@ -62,7 +64,7 @@ async function fixture(maximumHttpRequests = 128) {
   const gateway = new GatewayServer({
     host: "127.0.0.1", port, maxFrameBytes: 16_384, maximumHttpRequests,
     devices, uploads: {} as any, sessions: { acquireBlob, unsubscribeClient: vi.fn() } as any,
-    auth: { detachClient: vi.fn() } as any,
+    auth: { detachClient: vi.fn(), cancelOwner: vi.fn() } as any,
     service: { info: () => ({ protocolVersion: 5 }), releaseClient: vi.fn() } as any,
     logger: logger as any,
     // Never the host's Tailscale CLI: only silence records read the path.
@@ -213,6 +215,39 @@ describe("HTTP pending-work ownership", () => {
     expect(record.level).toBe("warning");
     expect(record.fields).toMatchObject({ outcome: "rejected", phaseReached: "hello", reason: "invalid_frame" });
     expect(record.fields).toHaveProperty("connectionId");
+  });
+
+  it("records a frame the WebSocket library refuses before hello as a refusal at hello", async () => {
+    const f = await fixture();
+    vi.spyOn(f.devices, "authenticateAndAdmit").mockImplementation(async (_token, admit) => admit({ kind: "local" }));
+    const peer = new WebSocket(`ws://127.0.0.1:${f.port}/v1/socket`, { headers: { authorization: "Bearer fixture" } });
+    peer.on("error", () => {});
+    await bounded(once(peer, "open"), "upgrade open");
+    // Over the 16 KiB frame bound: the ws library refuses the frame itself and
+    // closes with 1009, which is a hello-phase refusal, not a peer departure.
+    peer.send("x".repeat(20_000));
+    const record = await loggedRecord(f, "http.upgrade");
+    expect(record.level).toBe("warning");
+    expect(record.fields).toMatchObject({ outcome: "rejected", phaseReached: "hello", reason: "invalid_frame" });
+    expect(record.message).toContain("Max payload size exceeded");
+    expect(record.fields).toHaveProperty("connectionId");
+  });
+
+  it("records a pre-hello socket the Gateway revokes as the Gateway's ending", async () => {
+    const f = await fixture();
+    const phone = await f.devices.pair((await f.devices.ensureEnrollment()).code, "Phone");
+    const peer = new WebSocket(`ws://127.0.0.1:${f.port}/v1/socket`, { headers: { authorization: `Bearer ${phone.token}` } });
+    peer.on("error", () => {});
+    await bounded(once(peer, "open"), "upgrade open");
+    const closed = once(peer, "close");
+    // The device is revoked while its socket has not introduced itself: the
+    // Gateway ends the socket, so the record must name that, not the peer.
+    f.gateway.disconnectDevice(phone.deviceId);
+    await bounded(closed, "revoked socket close");
+    const record = await loggedRecord(f, "http.upgrade");
+    expect(record.level).toBe("warning");
+    expect(record.fields).toMatchObject({ outcome: "abandoned", phaseReached: "handshake", reason: "device_revoked" });
+    expect(record.fields).not.toHaveProperty("peerClientId");
   });
 
   it("records a hello that arrived but was refused as rejected at the hello phase", async () => {
