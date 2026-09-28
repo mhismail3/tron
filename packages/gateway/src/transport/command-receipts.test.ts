@@ -38,7 +38,8 @@ afterEach(async () => {
  * explicit `prune(0)` reclaims it. A prune that changes the directory discards
  * the cached totals, which is how a concurrent admission comes to rescan the
  * inventory. The seeder store is separate so its capacity and lanes never
- * affect the case that uses the seed. */async function seededBackdatedReceipt(root: string, commandId: string): Promise<void> {
+ * affect the case that uses the seed. */
+async function seededBackdatedReceipt(root: string, commandId: string): Promise<void> {
   const seeder = new CommandReceiptStore(root);
   await seeder.execute("seed", "session.prompt", commandId, async () => ({ accepted: true }));
   const [path] = await receiptFiles(root);
