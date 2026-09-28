@@ -253,6 +253,10 @@ export interface ResourceSample {
   durableWrites: number;
   durableWriteMs: number;
   outboundBytes: number;
+  /** Frames a newer frame's own state superseded before they were written, and
+   * the bytes they would have cost: the state G-4 kept off a slow link. */
+  outboundCoalescedFrames: number;
+  outboundCoalescedBytes: number;
 }
 
 /**
@@ -267,6 +271,9 @@ export interface ResourceRecorder {
    * request was waiting on it. */
   recordCatalogWalk(durationMs: number, files: number, requestPath?: boolean): void;
   recordOutboundBytes(bytes: number): void;
+  /** One superseded frame dropped in a connection's outbound queue, with the
+   * encoded bytes it would have sent: the state G-4 kept off a slow link. */
+  recordOutboundCoalesced(bytes: number): void;
   /** One runtime that became live, counted where it is published: a load and an
    * eviction inside one window are otherwise invisible to a set comparison. */
   recordRuntimeLoaded(): void;
@@ -331,6 +338,8 @@ export class ResourceSampler implements ResourceRecorder {
   private catalogWalkMs = 0;
   private catalogWalkFiles = 0;
   private outboundBytes = 0;
+  private outboundCoalescedFrames = 0;
+  private outboundCoalescedBytes = 0;
   private loadedRuntimes = 0;
   private evictedRuntimes = 0;
   /** The steps of the previous window; a step counts as a change only against
@@ -389,6 +398,11 @@ export class ResourceSampler implements ResourceRecorder {
 
   recordOutboundBytes(bytes: number): void {
     if (Number.isFinite(bytes) && bytes > 0) this.outboundBytes += bytes;
+  }
+
+  recordOutboundCoalesced(bytes: number): void {
+    this.outboundCoalescedFrames += 1;
+    if (Number.isFinite(bytes) && bytes > 0) this.outboundCoalescedBytes += bytes;
   }
 
   recordRuntimeLoaded(): void {
@@ -468,6 +482,8 @@ export class ResourceSampler implements ResourceRecorder {
       durableWrites: nonNegative(durable.count),
       durableWriteMs: nonNegative(durable.ms),
       outboundBytes: this.outboundBytes,
+      outboundCoalescedFrames: this.outboundCoalescedFrames,
+      outboundCoalescedBytes: this.outboundCoalescedBytes,
     };
     this.topics.clear();
     this.loadedRuntimes = 0;
@@ -479,6 +495,8 @@ export class ResourceSampler implements ResourceRecorder {
     this.catalogWalkMs = 0;
     this.catalogWalkFiles = 0;
     this.outboundBytes = 0;
+    this.outboundCoalescedFrames = 0;
+    this.outboundCoalescedBytes = 0;
     return counters;
   }
 
@@ -592,6 +610,8 @@ export function formatResourceSample(sample: ResourceSample): string {
     `durableWrites=${sample.durableWrites}`,
     `durableWriteMs=${roundMs(sample.durableWriteMs)}`,
     `outboundBytes=${sample.outboundBytes}`,
+    `outboundCoalescedFrames=${sample.outboundCoalescedFrames}`,
+    `outboundCoalescedBytes=${sample.outboundCoalescedBytes}`,
     `topics=${formatTopics(sample.topics)}`,
     `runtimes=${formatRuntimes(sample.runtimes)}`,
   ];

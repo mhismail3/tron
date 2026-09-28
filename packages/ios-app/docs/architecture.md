@@ -596,7 +596,7 @@ work. Reconnect identity comes from the mounted presentation generation, never m
 selection. During an attempt, iOS quarantines that session's events, discards those covered by the new
 baseline, validates contiguity, and publishes the baseline plus drained suffix in one MainActor turn
 before completing all waiters. Retry and fresh-install invalidation stay in the same owner; one bounded
-three-attempt loop replaces recursive resynchronization. A synchronization-quarantine overflow uses the
+three-attempt loop replaces recursive resynchronization. A synchronization-quarantine overflow, or a Gateway outbound queue that superseded unsent sequenced state for this session, uses the
 ownership-scoped `session.rebaseline` event, whose fitted snapshot is installed as a fresh authoritative baseline
 without another open handshake; stale/revoked owners ignore it and no fitted baseline retains the
 `transport.resyncRequired` fallback. Same-runtime snapshots and rebaselines must preserve both the
