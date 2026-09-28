@@ -223,6 +223,23 @@ const sessions = new RuntimeRegistry({
       event: "sessions.archive.auto-unarchived", source: "sessions", outcome: diagnostic.outcome, reason: diagnostic.trigger,
     }),
   sessionAutomationReserved: (sessionId) => automationSchedulerForArchive?.hasSessionRun(sessionId) ?? false,
+  // Load and eviction are transitions at info: the byte budget's decisions have
+  // to be attributable to one session from the log alone, and the reason has to
+  // separate a budget eviction from an idle or requested one.
+  runtimeLifecycleRecord: (record) => logger.log("info",
+    `Session runtime ${record.event === "runtime.loaded" ? "loaded" : "evicted"} (${record.reason})`, {
+      event: record.event,
+      source: "sessions",
+      sessionId: record.sessionId,
+      reason: record.reason,
+      counts: {
+        transcriptBytes: record.transcriptBytes,
+        estimatedHeapBytes: record.estimatedHeapBytes,
+        // The budget is pressure rather than a gate, so a load it could not fit
+        // is served and flagged here instead.
+        ...(record.overBudget === true ? { overBudget: 1 } : {}),
+      },
+    }),
   compactionDiagnostic: (diagnostic) => logger.log(
     diagnostic.outcome === "failure" ? "error" : "info",
     `Session compaction ${diagnostic.outcome}`,

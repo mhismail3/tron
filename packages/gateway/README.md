@@ -2159,6 +2159,32 @@ own provider/resource admission limits and are not counted as parent runtimes.
 The registry integration suite qualifies 128 simultaneous synthetic parent runs
 across eight projects through child-file churn and repeated client reentry.
 
+Admission also holds a byte budget, `LIVE_RUNTIME_BYTE_BUDGET` (1.5 GiB) in
+`packages/gateway/src/sessions/runtime-registry.ts`, because the runtime count
+alone let loaded sessions push the heap toward its limit. Each live runtime is
+charged `LIVE_RUNTIME_HEAP_ESTIMATE_FACTOR` (3) times its canonical JSONL bytes,
+measured at admission from the same one-`stat`-per-runtime inventory the
+resource sample already reads. The budget is eviction pressure, not an
+admission gate: when the live charge plus the opening session's charge exceeds
+it, the largest reloadable idle runtime is retired first (the one whose
+retirement reclaims the most), under the protections above, and retiring
+continues until that projected total fits. Nothing is retired when retiring
+could not help — the opening session's own charge is larger than the whole
+budget, or the excess is larger than every eligible runtime together — and an
+admission the retired set still cannot fit is served anyway, with its
+`runtime.loaded` record carrying `overBudget: true`. The runtime count and the
+explicit heap limit below stay the backstop; this budget never refuses an open,
+and refusal under the real heap limit is not its decision. The projected total
+counts the starts already reserved for, except the requested session's own
+reservation, which the opening charge already is: two opens of one session at
+once therefore retire nothing for it, and a start that adds no bytes (a session
+that has not written a transcript yet) retires nothing either. The launcher
+passes `--max-old-space-size=4096` to the Gateway's Node process
+(`packages/mac-app/scripts/tron-gateway-launcher.c`), and the budget is sized
+below that limit. `runtime.loaded` and `runtime.evicted` record each transition
+with the session, its reason, its transcript bytes and the charge, as named
+`counts`.
+
 Catalog acquisition generations share one physical predecessor and coalesce its
 successor after settlement, including failure. Invalidations cannot multiply
 concurrent discovery work. A live persisted `RuntimeSlot` proves membership for
