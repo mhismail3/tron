@@ -119,3 +119,19 @@ Append entries in this format when closing a plan (see [the plan protocol](READM
   - Gateway vitest needs Homebrew or nvm Node, and `scripts/ios-gateway-e2e-test` needs a plain Node 22.22.0, because the signed payload Node rejects unsigned native addons.
 - Knowledge moved to: `packages/gateway/README.md` (archive contract, run-unarchive rule, disposal drains, mutation idle admission), `packages/gateway/docs/observability.md` (archive events), `packages/gateway/docs/session-search.md` (`archived` label), `packages/ios-app/docs/architecture.md` and `development.md` (dashboard archive flow, container, journeys).
 - Follow-up (not in this plan): the Proposed `2026-09-26-switch-session-receipts.md`, and a later general dashboard sync-hardening pass, including the ~2 s `session.list` on the user's Mac.
+
+## 2026-09-26 → 2026-09-27 · Switch-session invocation receipts · Completed
+
+- Plan: `2026-09-26-switch-session-receipts.md`, deleted in commit `fix(sessions): settle a session-replacing command in its origin`.
+- Outcome: an extension command that calls `ctx.switchSession`, `ctx.newSession` or `ctx.fork` is now settled in the session it started in, at Pi's committed replacement boundary. The replacement opens, the origin records the command `completed`, and no work, marker or pending state leaks. By the user's choice (S-1 option 1), handler code after the call runs unowned in the replacement.
+- Key commits: `2759b2cae` (S-1 findings and options), `049bee820` (option 1 chosen), and the closing fix commit named above.
+- Deviations:
+  - The defect was not specific to the `preserve` rebind: `newSession` and `fork` failed identically.
+  - Two S-1 symptoms were consequences, not separate defects. The missing terminal and snapshot came from a `publishSnapshot` that threw after the `accepted` receipt landed in the replacement. The "stranded client" was an artifact of the archive fixture, which had not wired `sessionRekeyed`; production does, and the fixture now does too.
+  - Receipt and marker-clear writes now capture their session when requested, because a retry after a rebind would otherwise land in the replacement.
+- Lessons:
+  - A write that reads live identity at execution time is wrong across a rebind; bind the identity when the write is requested.
+  - Ablate each mechanism: a live-invocation guard and a pending-state clear looked necessary but protected nothing observable and were removed. The two identity captures were proven by an injected retry that succeeds only after the rebind.
+  - A test fixture that composes the Gateway must mirror `gateway-main.ts` wiring, or it reports production defects that do not exist.
+- Knowledge moved to: `packages/gateway/README.md` (receipt ownership across a command-driven replacement).
+

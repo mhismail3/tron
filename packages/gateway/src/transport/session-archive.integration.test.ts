@@ -137,6 +137,8 @@ async function fixture(options: {
       sessionSummaryChanged: () => {},
       // Mirrors gateway-main: the registry announcement is what reaches clients.
       sessionListChanged: () => { listChanged(); server?.notifySessionListChanged(); },
+      // Mirrors gateway-main: a rebind carries the connection's subscription.
+      sessionRekeyed: (previousId: string, nextId: string) => server?.rekeySession(previousId, nextId),
       archiveDiagnostic,
     });
     await registry.initialize();
@@ -1696,10 +1698,9 @@ describe("session archive over the real Gateway", () => {
 
     // The rebind R-5 owns: exactly one live identity, the switched one, and the
     // target stayed archived with both of its records byte-identical. The
-    // switched session's own projection is separately broken by a pre-existing
-    // receipt defect (F-7 in the plan), which is out of this row's scope and
-    // would otherwise mask these assertions.
+    // switched session opens; the command's receipts stay with its origin.
     expect([...registry.slots.keys()]).toEqual([target.id]);
+    await openSession(client, target.id);
     expect(await attentionRecord(f.root, target.id)).toEqual(attentionBefore);
     expect(await archivedRecord(f.root, target.id)).toEqual(archiveBefore);
     expect(await listedIds(client, "only")).toEqual([target.id]);
@@ -1711,4 +1712,182 @@ describe("session archive over the real Gateway", () => {
       attentionAfterSwitch: await attentionRecord(f.root, target.id),
     };
   });
+});
+
+/** Invocation receipts one canonical session file actually holds. Pi writes a
+ * new session's file only once it has content, so an unwritten file holds none. */
+async function invocationReceiptsIn(file: string): Promise<Array<{ receiptKind: string; lifecycle?: string; sessionId: string; name?: string }>> {
+  const text = await readFile(file, "utf8").catch((error: NodeJS.ErrnoException) => {
+    if (error.code === "ENOENT") return "";
+    throw error;
+  });
+  return text.trim().split("\n").filter(Boolean).map((line) => JSON.parse(line))
+    .filter((entry) => entry.type === "custom" && entry.customType === "tron.chat-invocation.v1")
+    .map((entry) => entry.data);
+}
+
+/** A command that replaces the live session, optionally failing after it. */
+const replacingCommandExtension = (replace: string, afterReplace = "") => () => `
+        export default function (pi) {
+          pi.registerCommand("replace", { handler: async (args, ctx) => {
+            ${replace}
+            ${afterReplace}
+          }});
+        }
+      `;
+
+/** Refuses every switch, the way a guarding extension would. */
+const refuseSwitchExtension = () => `
+        export default function (pi) {
+          pi.on("session_before_switch", async () => ({ cancel: true }));
+        }
+      `;
+
+describe("command-driven session replacement over the real Gateway", () => {
+  // Failure modes: the replacement target is unopenable; the origin never
+  // records the command's terminal and later reports outcomeUnknown; the
+  // replacement file carries orphan receipts for a command it never ran; the
+  // command's work, runtime marker or pending state leaks; a client subscribed
+  // to the origin never receives the replacement snapshot; a refused switch
+  // hands the command off anyway; a handler failing after the switch writes a
+  // failure into the replacement.
+  const replace = async (
+    kind: "switch" | "new" | "fork",
+    options: { afterReplace?: string } = {},
+  ) => {
+    const call = {
+      switch: "await ctx.switchSession(args.trim());",
+      new: "await ctx.newSession();",
+      fork: "await ctx.fork(ctx.sessionManager.getLeafId(), { position: \"at\" });",
+    }[kind];
+    const f = await fixture({ extensions: [{ name: "replace.ts", source: replacingCommandExtension(call, options.afterReplace) }] });
+    const client = await f.connect();
+    const target = f.coldSession("replacement-target");
+    const origin = f.coldSession("replacement-origin");
+    await openSession(client, origin.id);
+    const registry = f.current().registry as unknown as { slots: Map<string, { sessionFile?: string }> };
+    const response = await client.request(`replace-${kind}`, "session.prompt", {
+      commandId: `replace-${kind}-command`, sessionId: origin.id, text: kind === "switch" ? `/replace ${target.file}` : "/replace",
+    });
+    expect(response.ok, JSON.stringify(response)).toBe(true);
+    await until(() => !registry.slots.has(origin.id) && registry.slots.size === 1, "replacement landed");
+    const replacementId = [...registry.slots.keys()][0]!;
+    const replacementFile = registry.slots.get(replacementId)!.sessionFile!;
+    // Settlement: no drain blocker remains for either identity.
+    await until(() => f.current().registry.administrativeDrainSnapshot().blockerCount === 0, "command work settled");
+    return { f, client, origin, replacementId, replacementFile, operationId: response.result.operationId as string };
+  };
+
+  const assertSettledInOrigin = async (
+    r: Awaited<ReturnType<typeof replace>>,
+    // Pi writes a new, empty session to disk only once it has content.
+    replacementPersisted = true,
+  ) => {
+    const originReceipts = await invocationReceiptsIn(r.origin.file);
+    expect(originReceipts.map((receipt) => [receipt.receiptKind, receipt.lifecycle, receipt.sessionId]))
+      .toEqual([["start", "staged", r.origin.id], ["terminal", "completed", r.origin.id]]);
+    // A fork copies the origin's history, including this command's start under
+    // the origin's identity; nothing may be written under the replacement's.
+    expect((await invocationReceiptsIn(r.replacementFile)).filter((receipt) => receipt.sessionId === r.replacementId)).toEqual([]);
+    const markers = join(r.f.root, "gateway", "runtime-markers");
+    const markerFiles = await import("node:fs/promises").then((fs) => fs.readdir(markers).catch(() => [] as string[]));
+    expect(markerFiles.filter((name) => name.startsWith(r.origin.id))).toEqual([]);
+    // The origin's subscriber follows the identity change.
+    await until(() => snapshotFrames(r.client, r.replacementId).length > 0, "replacement snapshot delivered");
+    // The command is settled: the replacement is idle and no row for it (a
+    // fork inherits one) is projected as still running.
+    const replacementSnapshot = snapshotFrames(r.client, r.replacementId).at(-1)!.payload as {
+      transcript: Array<{ semantic?: { operationId?: string; lifecycle?: string } }>;
+    };
+    expect(replacementSnapshot.transcript.filter((item) => item.semantic?.operationId === r.operationId
+      && ["running", "waitingForInput"].includes(item.semantic.lifecycle ?? ""))).toEqual([]);
+    expect((await list(r.client, "exclude")).sessions.find((row) => row.id === r.replacementId)?.phase).toBe("idle");
+    await openSession(r.client, r.replacementId);
+    // Durable after restart: both sessions open, and the origin reports the
+    // command completed rather than recovering it as an unknown outcome.
+    await r.f.restart();
+    const client = await r.f.connect();
+    const originOpen = await client.request("origin-after-restart", "session.open", { sessionId: r.origin.id });
+    expect(originOpen.ok, JSON.stringify(originOpen)).toBe(true);
+    expect(JSON.stringify(originOpen.result)).not.toContain("outcomeUnknown");
+    const replacementOpen = await client.request("replacement-after-restart", "session.open", { sessionId: r.replacementId });
+    expect(replacementOpen.ok ? "opened" : replacementOpen.error.code).toBe(replacementPersisted ? "opened" : "not_found");
+  };
+
+  it("settles a switching command in its origin", async () => {
+    await assertSettledInOrigin(await replace("switch"));
+  }, 30_000);
+
+  it("settles a new-session command in its origin", async () => {
+    await assertSettledInOrigin(await replace("new"), false);
+  }, 30_000);
+
+  it("settles a forking command in its origin", async () => {
+    await assertSettledInOrigin(await replace("fork"));
+  }, 30_000);
+
+  it("keeps a failure after the switch out of the replacement", async () => {
+    const r = await replace("switch", { afterReplace: "throw new Error(\"after the switch\");" });
+    await assertSettledInOrigin(r);
+  }, 30_000);
+
+  it("keeps a handoff write that must retry in its origin", async () => {
+    // Both origin writes start while the origin is bound; forcing them to fail
+    // until the rebind has committed makes each succeed only on a retry after
+    // the identity changed, which must still target the origin.
+    const { RunMarkerStore } = await import("../sessions/run-markers.js");
+    let rebound = false;
+    const append = SessionManager.prototype.appendCustomEntry;
+    vi.spyOn(SessionManager.prototype, "appendCustomEntry").mockImplementation(function (this: SessionManager, customType, data) {
+      if (!rebound && (data as { receiptKind?: string })?.receiptKind === "terminal") throw new Error("injected transient append failure");
+      return append.call(this, customType, data);
+    });
+    const clear = RunMarkerStore.prototype.clear;
+    vi.spyOn(RunMarkerStore.prototype, "clear").mockImplementation(function (this: InstanceType<typeof RunMarkerStore>, ...args) {
+      if (!rebound) return Promise.reject(new Error("injected transient marker failure"));
+      return clear.apply(this, args);
+    });
+    const f = await fixture({ extensions: [{ name: "replace.ts", source: replacingCommandExtension("await ctx.switchSession(args.trim());") }] });
+    const client = await f.connect();
+    const target = f.coldSession("retry-target");
+    const origin = f.coldSession("retry-origin");
+    await openSession(client, origin.id);
+    const registry = f.current().registry as unknown as { slots: Map<string, unknown> };
+    const response = await client.request("retry", "session.prompt", {
+      commandId: "retry-command", sessionId: origin.id, text: `/replace ${target.file}`,
+    });
+    expect(response.ok, JSON.stringify(response)).toBe(true);
+    await until(() => registry.slots.has(target.id), "replacement landed");
+    rebound = true;
+    await until(() => f.current().registry.administrativeDrainSnapshot().blockerCount === 0, "command work settled");
+    expect((await invocationReceiptsIn(origin.file)).map((receipt) => [receipt.receiptKind, receipt.lifecycle, receipt.sessionId]))
+      .toEqual([["start", "staged", origin.id], ["terminal", "completed", origin.id]]);
+    expect(await invocationReceiptsIn(target.file)).toEqual([]);
+    const markerFiles = await import("node:fs/promises").then((fs) => fs.readdir(join(f.root, "gateway", "runtime-markers")).catch(() => [] as string[]));
+    expect(markerFiles.filter((name) => name.startsWith(origin.id))).toEqual([]);
+    await openSession(client, target.id);
+  }, 30_000);
+
+  it("leaves a refused switch owned and settled by its origin", async () => {
+    const f = await fixture({ extensions: [
+      { name: "replace.ts", source: replacingCommandExtension("await ctx.switchSession(args.trim());") },
+      { name: "refuse.ts", source: refuseSwitchExtension },
+    ] });
+    const client = await f.connect();
+    const target = f.coldSession("refused-target");
+    const origin = f.coldSession("refused-origin");
+    await openSession(client, origin.id);
+    const response = await client.request("refused", "session.prompt", {
+      commandId: "refused-command", sessionId: origin.id, text: `/replace ${target.file}`,
+    });
+    expect(response.ok, JSON.stringify(response)).toBe(true);
+    await until(async () => (await invocationReceiptsIn(origin.file)).some((receipt) => receipt.receiptKind === "terminal"), "refused command settled");
+    const registry = f.current().registry as unknown as { slots: Map<string, unknown> };
+    expect([...registry.slots.keys()]).toEqual([origin.id]);
+    expect((await invocationReceiptsIn(origin.file)).map((receipt) => [receipt.receiptKind, receipt.lifecycle]))
+      .toEqual([["start", "staged"], ["transition", "accepted"], ["terminal", "completed"]]);
+    expect(await invocationReceiptsIn(target.file)).toEqual([]);
+    await until(() => f.current().registry.administrativeDrainSnapshot().blockerCount === 0, "refused command work settled");
+    await openSession(client, origin.id);
+  }, 30_000);
 });

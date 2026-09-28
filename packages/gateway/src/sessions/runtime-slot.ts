@@ -295,6 +295,11 @@ const MAX_EXTENSION_EVENT_LINES = 256;
 
 export type SessionAttentionRebindDisposition = "migrate" | "preserve" | "reset" | "discard";
 
+interface CommandReplacement {
+  /** Set once Pi commits the replacement and the command is settled in its origin. */
+  settlement?: Promise<void>;
+}
+
 export interface CanonicalAssistantCompletion {
   id: string;
   completedAt: string;
@@ -532,6 +537,10 @@ export class RuntimeSlot {
   private readonly completionWorkOwners = new Map<string, string>();
   private attentionBarrier: Promise<void> | undefined;
   private rebindAttentionDisposition: SessionAttentionRebindDisposition = "migrate";
+  /** The session replacement a running extension command requested. */
+  private commandReplacement: CommandReplacement | undefined;
+  /** Commands settled in their origin at a replacement; bounded. */
+  private readonly handedOffInvocations = new Set<string>();
   /** Disposable runtime-only bridge from canonical entry IDs to mounted turn IDs. */
   private readonly presentationIDs = new Map<string, string>();
   private readonly presentationIDOrder: string[] = [];
@@ -1511,8 +1520,7 @@ export class RuntimeSlot {
       sessionManager: this.sessionManager,
       sessionStartEvent: { type: "session_start", reason: "resume" },
     });
-    this.runtime.setBeforeSessionInvalidate(() => this.dependencies.browserLiveViews?.retireSession(this.id));
-    this.runtime.setRebindSession(async () => this.bindSession());
+    this.installRuntimeHooks();
     await this.bindSession();
   }
 
@@ -1534,11 +1542,11 @@ export class RuntimeSlot {
       waitForIdle: () => this.runtime.session.waitForIdle(),
       newSession: (options) => {
         this.assertAutomationMayNotReplaceSession();
-        return this.withRebindAttentionDisposition("reset", () => this.runtime.newSession(options));
+        return this.replaceFromCommand("reset", () => this.runtime.newSession(options));
       },
       fork: (entryId, options) => {
         this.assertAutomationMayNotReplaceSession();
-        return this.withRebindAttentionDisposition("reset", () => this.runtime.fork(entryId, options));
+        return this.replaceFromCommand("reset", () => this.runtime.fork(entryId, options));
       },
       navigateTree: async (targetId, options) => {
         this.assertAutomationMayNotReplaceSession();
@@ -1548,7 +1556,7 @@ export class RuntimeSlot {
       },
       switchSession: (sessionPath, options) => {
         this.assertAutomationMayNotReplaceSession();
-        return this.withRebindAttentionDisposition("preserve", () => this.runtime.switchSession(sessionPath, options));
+        return this.replaceFromCommand("preserve", () => this.runtime.switchSession(sessionPath, options));
       },
       reload: async () => {
         this.assertAutomationMayNotReplaceSession();
@@ -1574,6 +1582,67 @@ export class RuntimeSlot {
     const session = this.runtime.session;
     await session.resourceLoader.reload(this.effectiveResourceReloadOptions());
     await session.reload({ beforeSessionStart: () => this.rotateSemanticHost() });
+  }
+
+  /** Pi's replacement hooks for each runtime this slot constructs. */
+  private installRuntimeHooks(): void {
+    this.runtime.setBeforeSessionInvalidate(() => {
+      this.handOffReplacedCommand();
+      this.dependencies.browserLiveViews?.retireSession(this.id);
+    });
+    this.runtime.setRebindSession(async () => this.bindSession());
+  }
+
+  /** A command that replaces its own session ends in that session. Pi commits
+   * the replacement at `beforeSessionInvalidate`, after `session_before_switch`
+   * can no longer refuse it and while the origin is still bound; the command's
+   * terminal receipt and marker are settled there, so no receipt for it is ever
+   * written under the replacement identity. Handler code after the call runs
+   * unowned in the replacement, as Pi's stale-context model implies. */
+  private async replaceFromCommand<T>(
+    disposition: SessionAttentionRebindDisposition,
+    operation: () => Promise<T>,
+  ): Promise<T> {
+    const replacement: CommandReplacement = {};
+    this.commandReplacement = replacement;
+    try {
+      return await this.withRebindAttentionDisposition(disposition, operation);
+    } finally {
+      if (this.commandReplacement === replacement) this.commandReplacement = undefined;
+      await replacement.settlement?.catch((error) => this.emit("session.diagnostic", safeJson({
+        code: "command-handoff-settlement-failed",
+        message: error instanceof Error ? error.message : String(error),
+      })));
+    }
+  }
+
+  private handOffReplacedCommand(): void {
+    const replacement = this.commandReplacement;
+    const command = this.pendingExtensionCommand;
+    const operationId = command?.id;
+    const invocation = command?.invocationId ? this.invocations.get(command.invocationId) : undefined;
+    if (!replacement || replacement.settlement || !operationId || !invocation) return;
+    // Only the durable facts move here, while the origin is still bound: its
+    // terminal receipt and its marker. The live command state still settles
+    // through the command's own completion, now under the replacement identity,
+    // which is why every later receipt for it is refused.
+    this.handedOffInvocations.add(invocation.invocationId);
+    while (this.handedOffInvocations.size > 32) this.handedOffInvocations.delete(this.handedOffInvocations.values().next().value!);
+    const terminal = this.persistCanonicalCustomEntry(INVOCATION_RECEIPT_TYPE, receiptJSON(makeInvocationReceipt({
+      version: 1,
+      receiptId: `terminal:${invocation.invocationId}`,
+      receiptKind: "terminal",
+      invocationId: invocation.invocationId,
+      operationId,
+      sessionId: this.id,
+      source: invocation.source,
+      ...(invocation.name ? { name: invocation.name } : {}),
+      lifecycle: "completed",
+      origin: invocation.origin,
+      sequence: this.revision + 1,
+      createdAt: new Date().toISOString(),
+    })), `terminal:${invocation.invocationId}`, this.operationWork.get(operationId));
+    replacement.settlement = Promise.all([terminal, this.clearMarkerOwnership(operationId)]).then(() => {});
   }
 
   private async withRebindAttentionDisposition<T>(
@@ -1686,8 +1755,7 @@ export class RuntimeSlot {
       sessionManager: previousManager,
       sessionStartEvent: { type: "session_start", reason: "resume" },
     });
-    this.runtime.setBeforeSessionInvalidate(() => this.dependencies.browserLiveViews?.retireSession(this.id));
-    this.runtime.setRebindSession(async () => this.bindSession());
+    this.installRuntimeHooks();
     await this.bindSession();
   }
 
@@ -2671,12 +2739,15 @@ export class RuntimeSlot {
     identity: string,
     owner?: GatewayWorkHandle,
   ): Promise<void> {
+    // A receipt belongs to the session bound when it was requested. Retries run
+    // after a delay and must not follow a rebind into the replacement's file.
+    const manager = this.sessionManager;
     return this.trackOwnershipWrite(
       () => this.retryDurableWrite(`canonical:${customType}:${identity}`, async () => {
         this.persistVerifiedCustomEntry({
           describe: "canonical receipt",
           existing: () => {
-            const entry = this.sessionManager.getBranch().find((candidate) => {
+            const entry = manager.getBranch().find((candidate) => {
               if (candidate.type !== "custom" || candidate.customType !== customType) return false;
               const value = candidate.data as { receiptId?: unknown; targetEntryId?: unknown };
               return value?.receiptId === identity || value?.targetEntryId === identity;
@@ -2686,7 +2757,7 @@ export class RuntimeSlot {
               ? "matching"
               : "contradictory";
           },
-          append: () => { this.sessionManager.appendCustomEntry(customType, data); },
+          append: () => { manager.appendCustomEntry(customType, data); },
         });
       }),
       owner,
@@ -2694,6 +2765,7 @@ export class RuntimeSlot {
   }
 
   private persistInvocationReceipt(receipt: ReturnType<typeof makeInvocationReceipt>, owner?: GatewayWorkHandle): Promise<void> {
+    if (this.handedOffInvocations.has(receipt.invocationId)) return Promise.resolve();
     return this.persistCanonicalCustomEntry(INVOCATION_RECEIPT_TYPE, receiptJSON(receipt), receipt.receiptId, owner);
   }
 
@@ -2782,8 +2854,11 @@ export class RuntimeSlot {
 
   private clearMarkerOwnership(operationId?: string, existingOwner?: GatewayWorkHandle): Promise<void> {
     const key = operationId ?? "all";
+    // Markers are keyed by the session that admitted the work; a retry after a
+    // rebind still clears the origin's marker (see the command handoff).
+    const sessionId = this.id;
     return this.trackOwnershipWrite(
-      () => this.retryDurableWrite(`marker:clear:${key}`, () => this.dependencies.markers.clear(this.id, operationId)),
+      () => this.retryDurableWrite(`marker:clear:${key}`, () => this.dependencies.markers.clear(sessionId, operationId)),
       existingOwner ?? (operationId ? this.operationWork.get(operationId) : undefined),
     );
   }

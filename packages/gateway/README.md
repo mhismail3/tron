@@ -11,6 +11,20 @@ resource arguments are bounded but preserve tabs and multiline text. A missing
 terminal record after an accepted start is `outcomeUnknown` and is never
 automatically replayed.
 
+An invocation's receipts all belong to the session it started in. An extension
+command that replaces its own session (`ctx.switchSession`, `ctx.newSession`,
+`ctx.fork`) is settled there when Pi commits the replacement: at
+`beforeSessionInvalidate`, after `session_before_switch` can no longer refuse it
+and while the origin is still bound, the Gateway writes its `completed` terminal
+receipt and clears its runtime marker in the origin. Nothing more is written for
+it under the replacement identity. Handler code after the call runs unowned in
+the replacement, as Pi's stale-context model implies, so a later failure surfaces
+as an extension error there. A replacement that fails after that boundary still
+records the command `completed`. Receipt and marker writes target the session
+bound when they were requested, and a retry never follows a rebind. The
+command-driven replacement cases in
+`src/transport/session-archive.integration.test.ts` cover all three calls.
+
 Transcript order is canonical branch order, never timestamp or activity recency.
 The v5 projection separates inbound context, agent output/invocations, ambient
 status, and hidden state. `custom_message` is model input; `custom`/`appendEntry`
