@@ -1,6 +1,7 @@
 import Foundation
 import ImageIO
 import Observation
+import UniformTypeIdentifiers
 import UIKit
 
 struct ChatMediaIdentity: Hashable, Sendable {
@@ -61,6 +62,64 @@ enum ChatMediaPolicy {
         let (count, overflow) = bytesPerRow.multipliedReportingOverflow(by: height)
         guard !overflow, count <= maximum else { return nil }
         return count
+    }
+}
+
+/// One app-wide ImageIO slot, including retired view generations. Cancellation
+/// cannot interrupt native decoding already in progress; replacements drop the
+/// candidate (and poll the latest frame later) rather than queue or overlap it.
+actor LiveImagePreparation {
+    static let shared = LiveImagePreparation()
+    private var preparing = false
+
+    func prepare(_ operation: @escaping @Sendable () throws -> UIImage) async throws -> UIImage? {
+        try Task.checkCancellation()
+        guard !preparing else { return nil }
+        preparing = true
+        defer { preparing = false }
+        let decoding = Task.detached(priority: .utility) {
+            try Task.checkCancellation()
+            let image = try operation()
+            try Task.checkCancellation()
+            return image
+        }
+        let image = try await withTaskCancellationHandler {
+            try await decoding.value
+        } onCancel: {
+            decoding.cancel()
+        }
+        try Task.checkCancellation()
+        return image
+    }
+}
+
+// The transport and bytes stay in Gateway; the bounded ImageIO decode
+// belongs with the chat media policy that bounds it.
+extension GatewayClient.LiveFrame {
+    func decode() async throws -> UIImage? {
+        try await LiveImagePreparation.shared.prepare { try self.decodeImage() }
+    }
+
+    private func decodeImage() throws -> UIImage {
+        try Task.checkCancellation()
+        guard let source = CGImageSourceCreateWithData(data as CFData, [kCGImageSourceShouldCache: false] as CFDictionary),
+              CGImageSourceGetType(source) as String? == UTType.jpeg.identifier,
+              CGImageSourceGetCount(source) == 1,
+              let properties = CGImageSourceCopyPropertiesAtIndex(source, 0, nil) as? [CFString: Any],
+              (properties[kCGImagePropertyPixelWidth] as? NSNumber)?.intValue == width,
+              (properties[kCGImagePropertyPixelHeight] as? NSNumber)?.intValue == height else {
+            throw GatewayClient.LiveError.invalidResponse
+        }
+        try Task.checkCancellation()
+        guard let image = CGImageSourceCreateThumbnailAtIndex(source, 0, [
+            kCGImageSourceCreateThumbnailFromImageAlways: true,
+            kCGImageSourceThumbnailMaxPixelSize: Self.maximumEdge,
+            kCGImageSourceShouldCacheImmediately: true,
+        ] as CFDictionary), image.width == width, image.height == height,
+              ChatMediaPolicy.decodedByteCount(bytesPerRow: image.bytesPerRow, height: image.height,
+                maximum: Self.maximumDecodedBytes) != nil else { throw GatewayClient.LiveError.invalidResponse }
+        try Task.checkCancellation()
+        return UIImage(cgImage: image)
     }
 }
 
