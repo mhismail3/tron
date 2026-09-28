@@ -136,6 +136,27 @@ final class GatewayProfileStore {
         cachedDocument = replacement
     }
 
+    /// Replace the LAN endpoints and pin a stored profile holds with what the
+    /// last pairing response or hello advertised (E-3b). The hello path calls
+    /// this on every connection: the Mac answers with the lane it serves now,
+    /// so an address that moved and a lane that was switched off both correct
+    /// the profile before the next attempt, and an unchanged answer writes
+    /// nothing.
+    func adoptLanAdvertising(
+        endpoints: [GatewayLanEndpoint],
+        pin: String?,
+        for profileID: String
+    ) throws {
+        try requireHealthyMetadata()
+        guard let stored = cachedDocument.profiles.first(where: { $0.id == profileID }) else {
+            throw GatewayProfileStoreError.unknownProfile
+        }
+        var updated = stored
+        updated.adoptLanAdvertising(endpoints, pin: pin)
+        guard updated != stored else { return }
+        try update(updated)
+    }
+
     func setEnabled(_ enabled: Bool, for profile: GatewayProfile) throws {
         try requireHealthyMetadata()
         let current = cachedDocument

@@ -96,6 +96,32 @@ struct GatewayProfileStoreTests {
         #expect(throws: GatewayProfileStoreError.self) { try store.setEnabled(false, for: second) }
     }
 
+    @Test("a hello's LAN advertisement replaces what the profile stored")
+    func lanAdvertisingReplacement() throws {
+        let first = profile(id: "first", label: "First")
+        let metadata = RecordingProfileMetadata(document: .init(profiles: [first], selectedProfileID: first.id))
+        let store = GatewayProfileStore(metadata: metadata, tokens: RecordingTokenStore(values: [first.id: "token"]))
+        let endpoint = try #require(GatewayLanEndpoint(host: "192.168.1.24", port: 9_847))
+        let pin = Data(repeating: 5, count: 32).base64EncodedString()
+        #expect(throws: GatewayProfileStoreError.self) {
+            try store.adoptLanAdvertising(endpoints: [endpoint], pin: pin, for: "unknown")
+        }
+
+        try store.adoptLanAdvertising(endpoints: [endpoint], pin: pin, for: first.id)
+        #expect(store.selected?.lanEndpoints == [endpoint])
+        #expect(store.selected?.lanPin == pin)
+        let writes = metadata.saveCount
+
+        // The Mac's latest answer is the whole truth: an unchanged hello writes
+        // nothing, and a lane that was switched off clears both values instead
+        // of leaving a stale address to dial.
+        try store.adoptLanAdvertising(endpoints: [endpoint], pin: pin, for: first.id)
+        #expect(metadata.saveCount == writes)
+        try store.adoptLanAdvertising(endpoints: [], pin: nil, for: first.id)
+        #expect(store.selected?.lanEndpoints == [])
+        #expect(store.selected?.lanPin == nil)
+    }
+
     @Test("transient load failures are observable and never overwrite storage")
     func loadFailureDoesNotInventEmptyStore() {
         let metadata = RecordingProfileMetadata(document: nil)
@@ -126,6 +152,9 @@ struct GatewayProfileStoreTests {
         #expect(throws: GatewayProfileStoreError.self) { try store.remove(first) }
         #expect(throws: GatewayProfileStoreError.self) { try store.select(second) }
         #expect(throws: GatewayProfileStoreError.self) { try store.setEnabled(false, for: second) }
+        #expect(throws: GatewayProfileStoreError.self) {
+            try store.adoptLanAdvertising(endpoints: [], pin: nil, for: first.id)
+        }
         #expect(metadata.saveCount == 0)
         #expect(metadata.document == original)
         #expect(tokens.values == [first.id: "first-token", second.id: "second-token"])

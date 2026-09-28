@@ -317,6 +317,38 @@ struct AppModelLifecycleTests {
         }
     }
 
+    @Test("a hello's LAN advertisement replaces what the paired profile stored")
+    func helloAdoptsLanAdvertising() async throws {
+        try await withFixture(socketCount: 1) { fixture in
+            let pin = "JEmgCK6cjn6zQe6FLvuOu2GErCFbEldD4cViMU8odVc="
+            let connecting = Task {
+                try await fixture.model.connectHostedGateway(
+                    profile: fixture.initialProfile,
+                    token: "token"
+                )
+            }
+            defer { connecting.cancel() }
+            try await fixture.sockets[0].waitUntilSent(count: 1)
+            await fixture.sockets[0].enqueue(helloFrame(
+                endpoints: [(host: "fd00::4", port: 9_847)],
+                pin: pin
+            ))
+            _ = try await connecting.value
+
+            // A hosted connect installs the transport only; the projection the
+            // real lifecycle runs under every connect is invoked here.
+            let connectionID = try #require(await fixture.client.activeConnectionID())
+            await fixture.model.lifecycleRefreshAll(
+                admission: .init(generation: 0, connectionID: connectionID)
+            )
+
+            let stored = try #require(fixture.store.selected)
+            #expect(stored.lanEndpoints.map(\.host) == ["fd00::4"])
+            #expect(stored.lanEndpoints.map(\.port) == [9_847])
+            #expect(stored.lanPin == pin)
+        }
+    }
+
     @Test("revoking the current device uses the same awaited lifecycle boundary")
     func currentDeviceRevokeOwnsShutdown() async throws {
         try await withFixture(socketCount: 1) { fixture in
@@ -537,8 +569,18 @@ struct AppModelLifecycleTests {
         ]))
     }
 
-    private func helloFrame() -> Data {
-        Data(#"{"type":"hello","gatewayVersion":"1.0.0","piVersion":"1.0.0","protocolVersion":6,"minProtocolVersion":6,"machineId":"machine","machineName":"Mac","gatewayChannel":"stable","capabilities":["sessions.v1"]}"#.utf8)
+    private func helloFrame(
+        endpoints: [(host: String, port: Int)] = [],
+        pin: String? = nil
+    ) -> Data {
+        var frame: [String: Any] = [
+            "type": "hello", "gatewayVersion": "1.0.0", "piVersion": "1.0.0",
+            "protocolVersion": 6, "minProtocolVersion": 6, "machineId": "machine",
+            "machineName": "Mac", "gatewayChannel": "stable", "capabilities": ["sessions.v1"],
+            "lanEndpoints": endpoints.map { ["host": $0.host, "port": $0.port] },
+        ]
+        if let pin { frame["lanPin"] = pin }
+        return try! JSONSerialization.data(withJSONObject: frame)
     }
 
     private func profile(id: String, host: String) -> GatewayProfile {

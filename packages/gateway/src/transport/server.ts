@@ -22,7 +22,7 @@ import { SessionSyncBarrier, type BufferedSessionEncoding, type BufferedSessionE
 import type { BrowserLiveViewRegistry } from "../display/browser-live-view.js";
 import { bytes, RequestSpan, runInRequestSpan, stage, wait } from "./request-span.js";
 import { TailscalePeerPaths, type PeerPathLookup, type PeerPathReader } from "./tailscale-peer.js";
-import { LanEndpoint, httpListenerOptions, type LanEndpointConfig, type LanListenerLimits } from "./lan-endpoint.js";
+import { LanEndpoint, httpListenerOptions, type LanAdvertisement, type LanEndpointConfig, type LanListenerLimits } from "./lan-endpoint.js";
 import { isTailscaleAddress } from "../config.js";
 
 // Retain only recent former IDs while an active subscription is rekeyed. Older
@@ -1539,7 +1539,7 @@ export class GatewayServer {
         const body = parsed as Record<string, unknown>;
         if (typeof body.code !== "string" || typeof body.deviceName !== "string") throw new GatewayError("invalid_request", "Pairing requires code and deviceName");
         const result = await this.options.devices.pair(body.code.trim(), body.deviceName);
-        return sendJson(response, 200, { ...result, ...this.options.service.info() as Record<string, JsonValue> });
+        return sendJson(response, 200, { ...result, ...this.options.service.info() as Record<string, JsonValue>, ...this.lanAdvertising() });
       }
 
       let handler: Promise<void> | undefined;
@@ -1591,6 +1591,21 @@ export class GatewayServer {
       response.once("finish", () => request.destroy());
     }
     sendJson(response, status, { error: failure });
+  }
+
+  /** The LAN lane's advertisement (E-3b): where a paired phone may race a
+   * second leg and which certificate key it must find there. It is added to
+   * the pairing response and hello alone — the two places a paired device
+   * learns about this Mac — and never to `/health` or any other route that
+   * anything on the network can reach. A Gateway composed without a lane
+   * advertises nothing, which a phone reads as "no LAN leg". */
+  private lanAdvertising(): Record<string, JsonValue> {
+    const advertisement: LanAdvertisement | undefined = this.lanEndpoint?.advertisement();
+    if (advertisement === undefined) return {};
+    return {
+      lanEndpoints: advertisement.endpoints.map((endpoint) => ({ host: endpoint.host, port: endpoint.port })),
+      ...(advertisement.pin === undefined ? {} : { lanPin: advertisement.pin }),
+    };
   }
 
   private async handleAuthenticatedHttp(
@@ -2140,8 +2155,12 @@ export class GatewayServer {
       );
       clearTimeout(connection.helloTimer);
       // `connectionId` lets the peer log the key of this connection's records.
+      // The LAN advertisement rides on hello (E-3b): a paired device re-learns
+      // the lane's endpoint and pin on every connection, so a Mac that moved or
+      // rotated its certificate is corrected before the next race.
       this.send(connection, {
-        type: "hello", ...this.options.service.info() as Record<string, JsonValue>, connectionId: connection.id,
+        type: "hello", ...this.options.service.info() as Record<string, JsonValue>,
+        ...this.lanAdvertising(), connectionId: connection.id,
       });
       return;
     }
