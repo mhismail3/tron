@@ -2063,6 +2063,99 @@ struct AppModelReconnectTests {
         }
     }
 
+    @Test("a slow mounted restoration keeps the connected label and shows the chat's catch-up treatment")
+    func slowRestorationKeepsConnectedLabel() async throws {
+        let clock = ManualClock()
+        try await withFixture(
+            sockets: [ScriptedGatewaySocket(), ScriptedGatewaySocket()],
+            clock: clock, units: SequenceReconnectUnits([])
+        ) { fixture in
+            let model = fixture.model
+            let first = fixture.sockets[0]
+            let replacement = fixture.sockets[1]
+            let profile = try #require(model.profiles.selected)
+            await first.enqueue(helloFrame())
+            try await model.connectHostedGateway(profile: profile, token: "token")
+            let snapshot = try SessionScenarioBuilder(seed: 61_204).openingTail(targetEncodedBytes: 4_096)
+            model.installHostedSubscribedSnapshot(snapshot)
+            model.sessions = [startupSummary(snapshot.sessionId)]
+            let target = try #require(model.mountedPresentationTarget)
+
+            await model.enteredBackground().value
+            await model.becameActive()?.value
+            try await replacement.waitUntilSent(count: 1)
+            await replacement.enqueue(helloFrame())
+            // The replacement socket is live and this restoration's
+            // `session.open` is never answered: the slow server work of the
+            // incident. Held until this test answers it.
+            var index = 1
+            var openID: String?
+            while openID == nil {
+                try await replacement.waitUntilSent(count: index + 1)
+                let request = try requestFrame(await replacement.sentFrames()[index])
+                index += 1
+                switch request.method {
+                case "session.open": openID = request.id
+                case "session.list", "notification.inbox.list": break // Optional owners stay pending.
+                default:
+                    Issue.record("Unexpected request before mounted restoration: \(request.method)")
+                    throw CancellationError()
+                }
+            }
+            #expect(model.connectionState == .connected)
+            #expect(model.dashboardServerState(for: profile.id).label == "Connected")
+            #expect(model.isReconcilingForeground)
+            #expect(!model.noticeCenter.notices.contains { $0.replacement?.key == .sessionCatchUp })
+
+            // The chat's own catch-up treatment appears once the restoration
+            // outlasts its grace; the label never moves off the live socket.
+            clock.advance(by: .seconds(3))
+            for _ in 0..<400 {
+                if model.noticeCenter.notices.contains(where: { $0.replacement?.key == .sessionCatchUp }) { break }
+                try await Task.sleep(for: .milliseconds(5))
+            }
+            let notice = try #require(model.noticeCenter.notices.first { $0.replacement?.key == .sessionCatchUp })
+            #expect(notice.title == SessionPresentationStore.sessionCatchUpNotice)
+            #expect(model.connectionState == .connected)
+            #expect(model.dashboardServerState(for: profile.id).label == "Connected")
+            #expect(model.mountedPresentationTarget == target)
+
+            // The restoration completing retires the treatment; the socket
+            // that admitted it is still the connection.
+            let recovered = try #require(openID)
+            await replacement.enqueue(successResponse(id: recovered, result: .object([
+                "session": try JSONValue.encode(snapshot),
+                "syncToken": .string("slow-restoration-sync"),
+                "subscriptionToken": .string("slow-restoration-subscription"),
+            ])))
+            var syncID: String?
+            while syncID == nil {
+                try await replacement.waitUntilSent(count: index + 1)
+                let request = try requestFrame(await replacement.sentFrames()[index])
+                index += 1
+                switch request.method {
+                case "session.sync": syncID = request.id
+                case "session.list", "notification.inbox.list": break // Optional owners stay pending.
+                default:
+                    Issue.record("Unexpected request after mounted restoration: \(request.method)")
+                    throw CancellationError()
+                }
+            }
+            await replacement.enqueue(successResponse(id: try #require(syncID), result: .object(["synchronized": .bool(true)])))
+            for _ in 0..<400 {
+                if !model.isReconcilingForeground, !model.noticeCenter.notices.contains(where: { $0.replacement?.key == .sessionCatchUp }) {
+                    break
+                }
+                try await Task.sleep(for: .milliseconds(5))
+            }
+            #expect(!model.isReconcilingForeground)
+            #expect(!model.noticeCenter.notices.contains { $0.replacement?.key == .sessionCatchUp })
+            #expect(model.connectionState == .connected)
+            #expect(model.dashboardServerState(for: profile.id).label == "Connected")
+            #expect(model.mountedPresentationTarget == target)
+        }
+    }
+
     @Test("a socket drop during a slow mounted restoration starts the next attempt")
     func slowRestorationDoesNotParkRecovery() async throws {
         let clock = ManualClock()
@@ -2089,6 +2182,9 @@ struct AppModelReconnectTests {
             await sockets[1].enqueue(helloFrame())
             coordinator.requestReconnect(immediate: true)
             try await projection.waitUntilRestoreStarted()
+            // A live socket is Connected while its restoration runs, however
+            // slow that restoration is (C-2).
+            #expect(coordinator.connectionState == .connected)
 
             // The socket the handshake established now drops while restoration is
             // still running. The loop already ended at that handshake, so the

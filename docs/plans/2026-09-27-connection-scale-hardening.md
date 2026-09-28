@@ -580,7 +580,7 @@ rows are in priority order.
 | G-1d | Ready | Replace the catalog wording in `connection-resilience.md` with the index contract (D-3) | G-1c | |
 | G-3 | Done | No audience, no projection: build and serialize snapshots only for subscribers | O-5, O-6a | orchestrator-dispatched deepseek-worker, 2026-09-28 (branch `hardening/g-3`; review round 1 addressed; CPU comparison and O-5's cross-check owed to the orchestrator) |
 | G-3a | Ready | Streaming progress for a session with no subscriber is still projected (`projectMessage` plus `safeJson` of the full message, up to once per 150 ms each); see G-3 handoff and review nit 8 | G-3 | |
-| C-2 | Claimed | "Connected" follows the transport (D-2); chat restoration shows its own loading state | C-1 | orchestrator-dispatched deepseek-worker, 2026-09-28 |
+| C-2 | Done | "Connected" follows the transport (D-2); chat restoration shows its own loading state | C-1 | orchestrator-dispatched deepseek-worker, 2026-09-28 |
 | C-5 | Done | Back off an unreachable non-selected Gateway profile; record pool attempts and episodes | O-4 | orchestrator-dispatched deepseek-worker, 2026-09-28 |
 | G-10 | Done | Durable-write audit: no process-wide serialization of fsyncs, no fsync on reads | O-5 | orchestrator-dispatched deepseek-worker, 2026-09-28 |
 | G-10a | Done | Connection owner: a read (e.g. knowledge.raindrop.read) must not fsync — skip an unchanged provider observation in ConnectionOwner.recordProviderObservation, preserving stateRevision/updatedAt semantics | G-10 | orchestrator-dispatched deepseek-worker, 2026-09-28 |
@@ -8056,3 +8056,82 @@ wait).
 - Gateway gate after merging `hardening/integration`: the six transport
   integration files 131/131, `runtime-registry.integration.test.ts` 257/257,
   `npx tsc --noEmit -p .` clean.
+
+### C-2 · Done · 2026-09-28 · orchestrator-dispatched deepseek-worker (branch `hardening/c-2`)
+
+- Result: a live socket is never labelled **Reconnecting** and a mounted
+  restoration reports itself through the chat's own catch-up treatment instead.
+- Changes: `packages/ios-app/Sources/State/GatewayLifecycleCoordinator.swift`
+  (one assertion-bearing test only; C-1 had already removed the post-handshake
+  `.reconnecting` assignments, and the C-2 label invariant is now protected by
+  tests), `packages/ios-app/Sources/State/SessionPresentationStore.swift` (the
+  published `isRestoringMountedPresentation` restoration state, its grace and
+  the catch-up treatment it retires when interrupted),
+  `packages/ios-app/Tests/Gateway/AppModelReconnectTests.swift`,
+  `packages/ios-app/Tests/UI/MountedRestorationLabelHostedTests.swift` (new),
+  `packages/ios-app/docs/architecture.md`.
+- Result detail: `SessionPresentationStore` now owns restoration as its own
+  loading state. `reconnectMountedPresentation()` publishes
+  `isRestoringMountedPresentation` for the restoration it runs, and a
+  restoration that outlasts `mountedRestorationTreatmentGrace` (2 s, the same
+  shape as the outage copy's delay) shows the chat's existing catch-up notice
+  (`sessionCatchUpNotice`, "Live session view is catching up; the run continues
+  on your Mac."). A restoration that completes inside the grace shows nothing.
+  Success and failure keep the outcomes the synchronization owner already
+  publishes (success removes the notice, failure replaces it with "The
+  conversation could not catch up…", and Manage Session keeps the Retry
+  Conversation surface for a failed mounted sync while connected); only an
+  interrupted restoration — the socket that admitted it is gone — retires the
+  catch-up notice. A newer restoration supersedes an older one's cleanup by
+  owner generation, so a late finish cannot clear the state the chat is showing.
+- Failure modes written first (C-2's list, mapped): a slow `session.open` after
+  a replacement handshake (the label and the treatment in
+  `slowRestorationKeepsConnectedLabel` and the hosted test); the socket dying
+  during a restoration (`slowRestorationDoesNotParkRecovery` now also asserts the
+  live-socket `.connected` before the drop and `.reconnecting` at once after it);
+  restoration failing while the socket lives (existing
+  `mountedRestoreFailureKeepsTransport`, `AppModelEventTests.resyncFailureHasScopedRecovery`
+  for the retry surface); profile switch and background during restoration
+  (existing `AppModelLifecycleTests` / `enteredBackground` cancellation of the
+  deferred projection, which is also what makes `Task.isCancelled` name an
+  interrupted restoration).
+- Evidence: `scripts/tron-ios-test build` succeeds;
+  `scripts/tron-ios-test run --only-testing TronMobileTests/AppModelReconnectTests`
+  passes 46/46 (the file's 45 plus the new case);
+  `SessionPresentationStore.swift` and the tests are byte-for-byte the sources
+  that produced both runs, with the negative-control edit reverted;
+  `scripts/tron-ios-test run --only-testing TronMobileTests/MountedRestorationLabelHostedTests`
+  passes 1/1 in 0.081 s with its `mounted-restoration-connected-label` capture in
+  the run's `TestResults.xcresult`.
+- Checks: the hosted case mounts the production `GatewayConnectionStatusBadge`
+  over the production `AppModel` while the replacement's `session.open` is
+  unanswered, asserts the socket is live (`client.activeConnectionID()`), and
+  asserts the badge's own input (the production
+  `dashboardServerState(for:)`) reads **Connected** at every step — before, during
+  and after the restoration — plus the catch-up notice while it runs and its
+  absence once the answered restoration completes. SwiftUI paints `Text` without
+  `UILabel` in this version, so the rendered label is the capture, not an
+  assertion; the assertion is on the exact state the badge draws.
+- Deviations: `slowRestorationKeepsConnectedLabel` drives the real AppModel
+  through `enteredBackground()` → `becameActive()` → replacement hello with the
+  `session.open` held, and advances the injected `ManualClock` past the grace
+  rather than waiting 2 s of wall clock. No new UI: the treatment is the chat's
+  existing `sessionCatchUp` notice, and the state is published by its owning
+  store. C-1's `GatewayLifecycleCoordinator` test needed one assertion added; no
+  coordinator source change was left to make, because C-1's merge already ends
+  the replacement attempt at event activation.
+- Negative control (the catch-up treatment post removed, everything else
+  unchanged): the hosted case fails 1/1 in 3.4 s and the AppModel case fails on
+  the missing notice in 2.5 s while its label assertions still pass, which is
+  what C-1 already fixed; the edit was then reverted, rebuilt and re-run green.
+  Neighbour suites in one run (retained at
+  `~/Library/Developer/Tron/ios/test-runs/20260928T210956Z-run.9NShry`):
+  `SessionPresentationStoreTests`, `AppModelEventTests`, `AppModelCatalogSyncTests`,
+  `AppModelLifecycleTests`, `AppModelReconnectTests`,
+  `MountedRestorationLabelHostedTests` — 182 tests, 182 passed, 0 failed. One
+  earlier attempt was refused because another worktree held the shared default
+  lane (T-3); nothing was taken by force.
+- For the next agent: C-3 follows in the same zone (backoff and the split
+  transport-open deadline); do not merge `hardening/integration` into this
+  branch without re-running the two suites above, since the plan file is the
+  only expected conflict.

@@ -303,6 +303,17 @@ final class SessionPresentationStore {
     private var pendingSynchronizationLeases: [String: SessionSynchronizationCoordinator.Lease] = [:]
     @ObservationIgnored private var eventProcessingTask: Task<Void, Never>?
     private var eventProcessingGeneration = 0
+    /// Replacement and foreground restoration of the mounted chat is its own
+    /// loading state, owned here (C-2): the socket that admitted it is live, so
+    /// the connection label stays Connected while the retained transcript is
+    /// reconciled, and the chat shows its catch-up treatment instead.
+    private(set) var isRestoringMountedPresentation = false
+    @ObservationIgnored private var mountedRestorationTreatmentTask: Task<Void, Never>?
+    private var mountedRestorationOwner = 0
+    private var mountedRestorationShowsCatchUpTreatment = false
+    // A restoration that finishes inside the grace shows no treatment at all: a
+    // prompt reconnect must not flash a catch-up notice over the chat.
+    private static let mountedRestorationTreatmentGrace: Duration = .seconds(2)
 
     private(set) var context: JSONValue?
     private(set) var sessionTree: [SessionTreeNode] = []
@@ -1557,10 +1568,51 @@ final class SessionPresentationStore {
         guard let target = mountedTarget else { return true }
         if let recovery = automaticSynchronization, recovery.failed,
            recovery.target == target, recovery.connectionGeneration == connectionGeneration { return false }
-        return await synchronize(
+        let owner = beginMountedRestoration()
+        let restored = await synchronize(
             target.sessionID,
             presentationGeneration: target.generation
         )
+        // Success and failure let the synchronization owner replace the notice
+        // with its own outcome; an interrupted restoration is not a failure the
+        // chat can retry, because the transport that owned it is gone.
+        finishMountedRestoration(owner: owner, interrupted: !restored && Task.isCancelled)
+        return restored
+    }
+
+    /// One mounted restoration owns the state and the treatment it publishes; a
+    /// newer restoration supersedes an older one's cleanup instead of clearing
+    /// the loading state the chat is showing.
+    private func beginMountedRestoration() -> Int {
+        mountedRestorationOwner &+= 1
+        let owner = mountedRestorationOwner
+        isRestoringMountedPresentation = true
+        mountedRestorationTreatmentTask?.cancel()
+        let clock = self.clock
+        mountedRestorationTreatmentTask = Task { @MainActor [weak self] in
+            do { try await clock.sleep(Self.mountedRestorationTreatmentGrace) } catch { return }
+            guard let self, self.mountedRestorationOwner == owner,
+                  self.isRestoringMountedPresentation else { return }
+            self.mountedRestorationShowsCatchUpTreatment = true
+            self.delegate?.sessionPresentationStorePostNotice(
+                Self.sessionCatchUpNotice,
+                replacing: .sessionCatchUp,
+                role: .info,
+                scope: self.noticeScope
+            )
+        }
+        return owner
+    }
+
+    private func finishMountedRestoration(owner: Int, interrupted: Bool) {
+        guard mountedRestorationOwner == owner else { return }
+        isRestoringMountedPresentation = false
+        mountedRestorationTreatmentTask?.cancel()
+        mountedRestorationTreatmentTask = nil
+        guard mountedRestorationShowsCatchUpTreatment else { return }
+        mountedRestorationShowsCatchUpTreatment = false
+        guard interrupted else { return }
+        delegate?.sessionPresentationStoreRemoveNotice(.sessionCatchUp, scope: noticeScope)
     }
 
     func loadContext(sessionID: String) async {
