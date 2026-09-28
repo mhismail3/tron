@@ -12,8 +12,9 @@ track it separately. It predates the archive work.
 
 - Canonical JSONL stays canonical. There is no second receipt journal and no
   compatibility reader for already-split receipts unless the user approves one.
-- Choosing who owns receipts across an identity change is an architecture
-  decision. Present the options to the user before implementing.
+- Receipt ownership across an identity change is decided: the user chose
+  S-1 option 1 on 2026-09-27. A command's receipts stay in the session where
+  it started, and it is settled there at Pi's handoff boundary.
 
 ## Context
 
@@ -42,7 +43,7 @@ Measured 2026-09-26:
 | ID | Status | Scope | Depends on | Owner |
 | --- | --- | --- | --- | --- |
 | S-1 | Done | Options for receipt ownership across a `preserve` rebind: stamp continuations with the origin session, settle the invocation before the switch, or re-key receipts. Present them to the user | none | session 01a0e513, 2026-09-27 |
-| S-2 | Blocked | Awaiting the user's choice among the S-1 options. Then implement it for every command-driven identity change (`switchSession`, `newSession`, `fork`), settle the command's work and marker, and deliver the identity change to clients subscribed to the origin, with real end-to-end tests that open both sessions | S-1 | |
+| S-2 | Ready | Implement S-1 option 1 (settle the command in the origin at Pi's handoff boundary) for every command-driven identity change (`switchSession`, `newSession`, `fork`), settle the command's work and marker, and deliver the identity change to clients subscribed to the origin, with real end-to-end tests that open both sessions | S-1 | |
 
 ## Findings
 
@@ -82,7 +83,7 @@ fixture and temporary instrumentation (not committed).
   session is still valid, then disposes it. Post-replacement work is meant to
   use the `withSession` replacement context; the old `ctx` is stale.
 
-**Options for receipt ownership** (presented to the user):
+**Options for receipt ownership** (presented to the user; option 1 chosen):
 
 1. **Settle in the origin at the handoff (recommended).** At Pi's
    `beforeSessionInvalidate` boundary, write the command's terminal
