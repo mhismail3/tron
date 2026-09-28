@@ -585,7 +585,7 @@ rows are in priority order.
 | G-10a | Done | Connection owner: a read (e.g. knowledge.raindrop.read) must not fsync — skip an unchanged provider observation in ConnectionOwner.recordProviderObservation, preserving stateRevision/updatedAt semantics | G-10 | orchestrator-dispatched deepseek-worker, 2026-09-28 |
 | C-3 | Ready | Faster retry (D-4): about 5 s transport-open deadline, immediate retry on path change | C-1 | |
 | C-4 | Done | Truer liveness (D-4): any inbound frame proves liveness | O-4 | orchestrator-dispatched deepseek-worker, 2026-09-28 |
-| C-6 | Claimed | Cancel frame for disposable reads; a retried `session.open` joins the in-flight one | O-3 | orchestrator-dispatched deepseek-worker, 2026-09-28 |
+| C-6 | Done | Cancel frame for disposable reads; a retried `session.open` joins the in-flight one | O-3 | orchestrator-dispatched deepseek-worker, 2026-09-28 (the O-6a slow-open confirmation and the qualification run are the orchestrator's) |
 | G-12 | Ready | Server-side deadlines, concurrency caps and heap-pressure shedding with typed retry hints | O-3, O-5 | |
 | G-2 | Ready | Cold open in bounded time from the index and a single-file fence | G-1c | |
 | G-7 | Done | Reconnect diet: send only what changed | O-1, O-6a | orchestrator-dispatched deepseek-worker, 2026-09-28; both review rounds addressed, R-1/R-4 own the real-reconnect measurement |
@@ -7853,6 +7853,95 @@ wait).
   evidence of a lane/lease mismatch, and check `TRON_IOS_TEST_LEASE_LOCK` when a
   command is refused (74) with "inherited iOS test lease covers".
 
+
+### C-6 · Done · 2026-09-28 · orchestrator-dispatched deepseek-worker (branch `hardening/c-6`)
+
+- Commits: `14d9ba665` (gateway transport: cancel frame, joined opens), `e31d21592` (iOS: cancel frame + `rpc.cancelled`), `02038e7f4` (records, docs, plan row), `57ac20dce` (cancellation stage naming), on `hardening/c-6` merged with `hardening/integration` at `d3aecb11e`.
+- Result: protocol 6 gains `{type:"cancel",id}` (no response). The Gateway aborts
+  that request's controller, a cancelled request writes one `rpc.cancelled`
+  record instead of `rpc.completed` (debug under `SLOW_RPC_WARNING_MS`, warning
+  at or above it) carrying `stage` (innermost open stage or wait) plus the span
+  breakdown, and a second `session.open` for the same connection and session
+  joins the attempt already in flight: one invocation answers both requests with
+  the same result. The shared attempt is abandoned only when its last waiting
+  request leaves, and a cancel for an already-answered, already-cancelled or
+  never-admitted id changes nothing. The phone sends the frame for the nine
+  disposable reads in `GatewayDisposableReadPolicy` when a request times out or
+  is cancelled after it may have been sent, and logs `rpc.cancelled`; mutations
+  and prompts are never cancelled.
+- Evidence: `cd packages/gateway && npx vitest run
+  src/transport/sync-protocol.integration.test.ts` — 5/5 pass. The new case
+  (`disposable read cancellation`) proves, in order: the retry joins (one
+  `session.open` invocation for two requests), cancelling the first leaves the
+  shared attempt running (`aborts == []`), cancelling the last waiter aborts it
+  (one fake-service abort), neither cancelled request is answered, the records
+  carry `stage=session.open.attempt` / `stage=session.open.join`, an unknown-id
+  cancel and a cancel after a delivered response add no record, and the next
+  open for that session starts fresh work and answers normally (no leaked
+  reservation or barrier). The join itself is also asserted in the existing
+  overlapping-open case (`startedCounts == 1`, identical result payloads).
+  Merge gate green on the merged branch: `npx vitest run
+  src/transport/session-archive.integration.test.ts
+  src/transport/server-capacity.integration.test.ts
+  src/transport/sync-protocol.integration.test.ts
+  src/transport/stall-diagnostics.test.ts
+  src/transport/server-heartbeat.integration.test.ts
+  src/transport/server-http-lifecycle.integration.test.ts` — 132/132;
+  `npx vitest run src/sessions/runtime-registry.integration.test.ts` — 257/257;
+  `npx vitest run src/transport/server-frame.test.ts
+  src/transport/request-span.test.ts src/transport/logger.test.ts` — 32/32;
+  `npx tsc --noEmit -p .` clean. iOS: `scripts/tron-ios-test run --only-testing
+  TronMobileTests/GatewayClientTransportTests` — 54/54 pass, including "a
+  timed-out disposable read sends a cancel frame, a mutation does not" (asserts
+  the exact `{"type":"cancel","id":…}` frame, that no frame follows a
+  `session.prompt` timeout, and one `rpc.cancelled` record); retained result
+  bundle `~/Library/Developer/Tron/ios/test-runs/20260928T194314Z-run.MOPcKv/`
+  (`20260928T200449Z-run.RGHCPR/` for the 55-test review-response run).
+- Deviations: `rpc.cancelled` replaced `rpc.completed` for a cancelled request
+  rather than joining it: one abandoned read is one record, and O-3's span
+  breakdown rides on it. Cancelling a `session.open` that another request still
+  waits for keeps the synchronization the attempt installed (the waiter delivers
+  that exact result); if the last waiter leaves without a delivered answer, the
+  request that owns the barrier releases it, so an abandoned open cannot make the
+  retry fail as `conflict`. The registry's shared runtime start is deliberately
+  not aborted with the wait: a retry (or another connection) joins the load
+  already in progress, which is the "shared work continues while a waiter
+  remains" half of the task; `packages/gateway/docs/observability.md` gains the
+  `rpc.cancelled` row and the `stage` field, the protocol section of
+  `packages/gateway/README.md` the frame, and the phone's `rpc.cancelled` row
+  sits in the iOS AppLog table.
+- Failure modes written first: cancel after the response was sent (no-op, no
+  record), cancel of an unknown id (no-op), join while the first open is
+  committing its subscription (the joiner waits for the attempt and replays its
+  payload), connection close with joined waiters (all requests abort, the shared
+  attempt aborts with the retired socket, the flight is released).
+- Review response (round 3, all findings): `57ac20dce`, `3c7d5386a` (Gateway),
+  `a502094f7` (iOS). A cancelled open hands its barrier to the shared attempt
+  whenever a waiter remains instead of releasing it under the retry, so a retry
+  that outlives its first request still gets the answer and synchronizes it. A
+  cancel for an answered `session.open` whose barrier the client never
+  synchronized revokes that barrier, unless another delivered response carries
+  the same token (each barrier tracks the request IDs that delivered its token),
+  so a retry in that window is answered instead of conflicting. `cancel`
+  obeys only `DISPOSABLE_READ_METHODS` (the phone's nine reads, named in the
+  README); a mutation, prompt or `session.sync` cancel is ignored. The phone
+  queues its cancel behind the request's own send, so it cannot name a request
+  the Gateway never admitted. Accepted deviation (finding 4): the registry's
+  shared runtime start, catalog load and attention reconciliation keep running
+  after the last waiter leaves, so a retry or another connection joins that work
+  instead of starting a second one. Evidence: the extended
+  `sync-protocol.integration.test.ts` case (join, revoke-only-unclaimed-barrier,
+  cancel-a-non-disposable-read, both-delivered-responses) fails on each reverted
+  fix (retry answered `conflict`, barrier never revoked, prompt never answered);
+  `GatewayClientTransportTests` 55/55, with its new ordering case failing (3
+  send invocations, cancel frame first) when the Swift fix is reverted. Merge
+  gate green on this branch merged with `hardening/integration` at `3d90561d4`.
+- Open: the `Done when`'s O-6a slow-open case is the orchestrator's qualification
+  run; this branch proves the mechanism it depends on (no duplicate-open failure,
+  no request-path work after the last waiter cancels) in the integration case
+  above.
+
+
 ### E-3a · Done · 2026-09-28 · orchestrator-dispatched deepseek-worker (branch `hardening/e-3a`)
 
 - Result: the Gateway can serve a second, TLS-only listener on the Mac's private
@@ -7900,3 +7989,5 @@ wait).
   wildcard `--host` would collide (fail-closed, `bind_failed`); the qualification
   scripts that start a fixture Gateway need `--lan-endpoint on` before E-3c's
   race cases can exercise the lane.
+||||||| 3d90561d4
+
