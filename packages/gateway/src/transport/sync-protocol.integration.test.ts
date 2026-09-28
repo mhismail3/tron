@@ -663,7 +663,7 @@ describe("outbound queue coalescing across a synchronization barrier", () => {
     let releaseOpen!: () => void;
     const openGate = new Promise<void>((resolve) => { releaseOpen = resolve; });
     const service = {
-      info: () => ({ gatewayVersion: "test", piVersion: "test", protocolVersion: 5, minProtocolVersion: 5, machineId: "machine", machineName: "test", capabilities: [] }),
+      info: () => ({ gatewayVersion: "test", piVersion: "test", protocolVersion: 6, minProtocolVersion: 6, machineId: "machine", machineName: "test", capabilities: [] }),
       terminalBelongsToSession: () => false,
       releaseClient: vi.fn(),
       invoke: async (context: ClientContext, method: string, params: ClientRequest) => {
@@ -703,7 +703,7 @@ describe("outbound queue coalescing across a synchronization barrier", () => {
     const frames: Array<{ type?: string }> = [];
     socket.on("message", (raw) => frames.push(JSON.parse(raw.toString())));
     await new Promise<void>((resolve) => socket.once("open", () => resolve()));
-    socket.send(JSON.stringify({ type: "hello", protocolVersion: 5 }));
+    socket.send(JSON.stringify({ type: "hello", protocolVersion: 6 }));
     while (!frames.some((frame) => frame.type === "hello")) await new Promise((resolve) => setTimeout(resolve, 1));
 
     const connection = [...(gateway as unknown as {

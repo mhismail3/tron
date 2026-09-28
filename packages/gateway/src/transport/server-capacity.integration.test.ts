@@ -1097,7 +1097,7 @@ describe("WebSocket connection and outbound capacity", () => {
       host: "127.0.0.1", port, maxFrameBytes: 512 * 1_024, maximumOutboundBytes,
       devices, uploads: {} as never, sessions: { unsubscribeClient: vi.fn() } as never,
       auth: { detachClient: vi.fn() } as never, service: {
-        info: () => ({ protocolVersion: 5 }), releaseClient: vi.fn(),
+        info: () => ({ protocolVersion: 6 }), releaseClient: vi.fn(),
         terminalBelongsToSession: () => false, invoke: async () => ({ ok: true }),
       } as never,
       logger: logger as never, resourceSampler: sampler,
@@ -1116,7 +1116,7 @@ describe("WebSocket connection and outbound capacity", () => {
       socket.once("open", () => resolve());
       socket.once("error", reject);
     }), "coalescing socket open");
-    socket.send(JSON.stringify({ type: "hello", protocolVersion: 5 }));
+    socket.send(JSON.stringify({ type: "hello", protocolVersion: 6 }));
     await bounded(waitUntil(() => frames.some((frame) => frame.type === "hello")), "coalescing hello");
     const connection = connections(gateway)[0]!;
     // Hold every application write: the link is as slow as the peer's socket
