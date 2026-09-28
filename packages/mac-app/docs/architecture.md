@@ -243,7 +243,17 @@ is not a fix because its callback still occupies that queue. The isolated real
 AppKit subprocess in `MenuBarTerminationTests` verifies successful termination,
 cancel/retry, and watchdog failures for direct-task and dispatch-queue negative
 controls without starting Tron services. `ServerStatusPoller` probes the Tron Gateway protocol and combines
-health with registration state. Menu controls can pause, resume, restart,
+health with registration state. Its 30 s cycle pings every time — that ping is
+the liveness probe that decides Running — but it pays for the fail-closed
+Stable admission only when the runtime fence changes: launchd's live pid plus
+that process's start identity, and the payload selection stamps. A restart
+under the same payload therefore re-admits, and a selection or manifest change
+re-validates the immutable tree and its fingerprint. The poll also reuses one
+live Tailscale resolution for a bounded window (about five minutes) and refreshes
+the owner-only cache when the address changed, so it no longer makes Tailscale
+reload its network extension every 30 s; every explicit user action (pairing,
+restart, log and feedback capture, menu presentation) still resolves live and
+runs the full admission. Menu controls can pause, resume, restart,
 inspect bounded persisted Gateway logs, show a fresh pairing invitation, and
 uninstall. Log and feedback capture resolve a validated
 Tailscale host from live state or the bounded owner-only Tailscale cache and pass

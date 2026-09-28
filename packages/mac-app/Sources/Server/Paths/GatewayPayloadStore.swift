@@ -232,6 +232,45 @@ struct GatewayPayloadValidationResult: Equatable, Sendable {
     let manifest: GatewayPayloadManifest
 }
 
+/// File identity of one payload input: device, inode, mtime and bytes. It is a
+/// change fence for two owners, not a payload cache and not a second selection
+/// store: the native capture peer proves its connection still runs the exact
+/// selected payload, and the Stable status poll re-proves the selection before
+/// it may reuse an admission.
+struct PayloadSelectionStamp: Equatable, Sendable {
+    let exists: Bool
+    let device: Int32
+    let inode: UInt64
+    let modified: Int64
+    let nanos: Int64
+    let bytes: Data
+
+    /// Returns `nil` when the file exists but cannot be stamped safely (not a
+    /// regular file, empty, oversized, a symlink, or replaced while read). An
+    /// absent file is `exists == false`, which is a stable value of its own.
+    static func read(_ url: URL) -> Self? {
+        let fd = open(url.path, O_RDONLY | O_NOFOLLOW | O_NONBLOCK | O_CLOEXEC)
+        if fd < 0, errno == ENOENT {
+            return Self(exists: false, device: 0, inode: 0, modified: 0, nanos: 0, bytes: Data())
+        }
+        guard fd >= 0 else { return nil }
+        defer { _ = Darwin.close(fd) }
+        var before = stat(), after = stat(), named = stat()
+        guard fstat(fd, &before) == 0, before.st_mode & S_IFMT == S_IFREG,
+              before.st_size > 0, before.st_size <= GatewayPayloadStore.maxManifestBytes else { return nil }
+        var bytes = [UInt8](repeating: 0, count: Int(before.st_size))
+        guard Darwin.read(fd, &bytes, bytes.count) == bytes.count,
+              fstat(fd, &after) == 0, lstat(url.path, &named) == 0,
+              before.st_dev == after.st_dev, before.st_ino == after.st_ino, before.st_size == after.st_size,
+              before.st_mtimespec.tv_sec == after.st_mtimespec.tv_sec,
+              before.st_mtimespec.tv_nsec == after.st_mtimespec.tv_nsec,
+              named.st_dev == after.st_dev, named.st_ino == after.st_ino else { return nil }
+        return Self(exists: true, device: before.st_dev, inode: before.st_ino,
+                    modified: Int64(before.st_mtimespec.tv_sec), nanos: Int64(before.st_mtimespec.tv_nsec),
+                    bytes: Data(bytes))
+    }
+}
+
 /// The launcher and the app share this fail-closed policy: an external
 /// selection wins only after bounded prevalidation; otherwise the bundled
 /// payload is the safe fallback. Deployment performs complete fingerprint
