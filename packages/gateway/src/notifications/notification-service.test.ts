@@ -105,6 +105,27 @@ describe("NotificationGrantStore and NotificationService", () => {
     expect((await store.snapshot()).grants[0]?.previewsEnabled).toBe(true);
   });
 
+  it("advertises a changed registration revision when the relay disables a grant", async () => {
+    const { service } = await fixture(["invalid_token"]);
+    await service.upsertGrant({ ...grant, notifyWhenAskPresented: true });
+    const acknowledged = service.registrationRevision;
+    expect(await service.registrationIsCurrent({ ...grant, notifyWhenAskPresented: true })).toBe(true);
+
+    // The relay rejects the delivery on this same runtime and the Gateway
+    // disables the grant. Nothing else announces that, so the revision the
+    // phone compares against is what makes the next registration re-send.
+    await expect(service.enqueue({ sessionId: "session-one", sourceId: "tool-one", kind: "explicit", message: "text" })).resolves.toBe("queued");
+    await vi.waitFor(async () => expect((await service.status(grant.deviceId)).deviceRegistered).toBe(false));
+    expect(service.registrationRevision).not.toBe(acknowledged);
+    expect(await service.registrationIsCurrent({ ...grant, notifyWhenAskPresented: true })).toBe(false);
+
+    // The re-sent registration is admitted and answers the rotation
+    // requirement the phone must act on; the disabled grant stays disabled
+    // until the phone transfers a replacement capability.
+    const readmitted = await service.upsertGrant({ ...grant, notifyWhenAskPresented: true });
+    expect(readmitted.requiresGrantRotation).toBe(true);
+  });
+
   it("uses agent text only for a grant whose user enabled previews", async () => {
     const { service, relay } = await fixture();
     await service.upsertGrant({ ...grant, previewsEnabled: true });

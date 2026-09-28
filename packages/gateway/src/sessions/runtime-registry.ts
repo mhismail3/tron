@@ -317,6 +317,14 @@ interface CatalogPageSeed {
 
 interface CatalogPageSource {
   readonly generation: string;
+  /** Conditional-read token for this exact projection. It covers the whole
+   * projection, not just structural membership: the page-source generation
+   * plus this Gateway runtime's epoch. Every row field that can change without
+   * moving `listRevision` (a live summary, a cold row's attention projection,
+   * archive state) moves the projection generation inside the token, and the
+   * epoch fences a restart whose revisions begin again at zero. A client may
+   * therefore revalidate a retained token on a replacement connection (G-7). */
+  readonly projectionToken: string;
   readonly listRevision: number;
   readonly count: number;
   readonly compactByteEstimate: number;
@@ -2640,7 +2648,9 @@ export class RuntimeRegistry {
       // summary/attention revision fields. String payloads are counted above.
       + 160, 0);
     return Object.freeze({
-      generation, listRevision, count: seeds.length, compactByteEstimate,
+      generation,
+      projectionToken: `${this.workRegistry.runtimeEpoch}:${generation}`,
+      listRevision, count: seeds.length, compactByteEstimate,
       ...(archivedCount === undefined ? {} : { archivedCount }),
       page: async (offset: number, limit: number) => seeds.slice(offset, offset + limit).map((seed) => ({
         id: seed.id,

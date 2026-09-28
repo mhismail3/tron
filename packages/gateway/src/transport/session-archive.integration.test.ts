@@ -314,8 +314,9 @@ const list = async (client: Client, archived: "exclude" | "only", extra: Record<
   const response = await client.request(`list-${archived}-${Math.random().toString(36).slice(2, 8)}`, "session.list", { scope: "user", archived, ...extra });
   expect(response.ok, JSON.stringify(response)).toBe(true);
   return response.result as {
-    sessions: Array<{ id: string; archivedAt?: string; phase?: string; updatedAt?: string }>;
+    sessions: Array<{ id: string; archivedAt?: string; phase?: string; updatedAt?: string; isUnread?: boolean; attentionRevision?: number }>;
     listRevision: number;
+    projectionToken: string;
     notModified?: boolean;
     archivedCount?: number;
     nextCursor?: string;
@@ -519,57 +520,84 @@ describe("session archive over the real Gateway", () => {
     };
   });
 
-  archiveCase("answers an unchanged catalog revision without rows and re-reads after membership moves", async () => {
+  archiveCase("answers an unchanged projection token without rows and re-reads after the projection moves", async () => {
     const f = await fixture();
     const client = await f.connect();
+    const phone = await f.connect();
     const session = await f.rawSession("revision", "revision-session");
     const other = await f.rawSession("revision-other", "revision-other-session");
     const third = await f.rawSession("revision-third", "revision-third-session");
     const first = await list(client, "exclude");
     expect(first.sessions.map((row) => row.id)).toEqual(expect.arrayContaining([session.id, other.id, third.id]));
-    const revision = first.listRevision;
+    const token = first.projectionToken;
+    expect(token).toContain(":");
 
-    // An equal revision is a complete revalidation of the client's rows, so the
+    // An equal token is a complete revalidation of the client's rows, so the
     // answer carries neither rows nor a count.
-    const unchanged = await list(client, "exclude", { listRevision: revision });
-    expect(unchanged).toMatchObject({ notModified: true, listRevision: revision, sessions: [] });
+    const unchanged = await list(client, "exclude", { projectionToken: token });
+    expect(unchanged).toMatchObject({ notModified: true, projectionToken: token, sessions: [] });
+    expect(unchanged.listRevision).toBe(first.listRevision);
     expect(unchanged.nextCursor).toBeUndefined();
     expect(unchanged.archivedCount).toBeUndefined();
 
-    // A client holding a superseded revision must still receive the rows.
+    // A cold row's attention moves `catalogProjectionGeneration` only: the
+    // structural revision is unchanged, so a token that covered membership
+    // alone would falsely revalidate rows this client no longer holds.
+    const attention = await phone.request(`attention-${session.id}`, "session.attention.set", {
+      commandId: "revision-attention-command", sessionId: session.id, unread: true,
+    });
+    expect(attention.ok, JSON.stringify(attention)).toBe(true);
+    const afterAttention = await list(client, "exclude", { projectionToken: token });
+    expect(afterAttention.notModified).toBeUndefined();
+    expect(afterAttention.listRevision).toBe(first.listRevision);
+    expect(afterAttention.projectionToken).not.toBe(token);
+    expect(afterAttention.sessions.find((row) => row.id === session.id)?.isUnread).toBe(true);
+
+    // A client holding a superseded token must still receive the rows.
+    const attentionToken = afterAttention.projectionToken;
     await openSession(client, session.id);
     await archiveSession(client, session.id, "revision-archive-command");
-    const afterArchive = await list(client, "exclude", { listRevision: revision });
+    const afterArchive = await list(client, "exclude", { projectionToken: attentionToken });
     expect(afterArchive.notModified).toBeUndefined();
     expect(afterArchive.sessions.map((row) => row.id)).not.toContain(session.id);
-    expect(afterArchive.listRevision).not.toBe(revision);
-    const archivedRevision = afterArchive.listRevision;
-    const revalidated = await list(client, "exclude", { listRevision: archivedRevision });
-    expect(revalidated).toMatchObject({ notModified: true, listRevision: archivedRevision });
+    const archivedToken = afterArchive.projectionToken;
+    const revalidated = await list(client, "exclude", { projectionToken: archivedToken });
+    expect(revalidated).toMatchObject({ notModified: true, projectionToken: archivedToken });
 
     // The conditional answer belongs to the first page only: a cursored page is
-    // already bound to the revision its lease admitted.
+    // already bound to the projection its lease admitted.
     const paged = await list(client, "exclude", { limit: 1 });
     expect(paged.nextCursor).toBeDefined();
     const continued = await client.request("revision-cursor", "session.list", {
-      scope: "user", archived: "exclude", limit: 1, cursor: paged.nextCursor, listRevision: paged.listRevision,
+      scope: "user", archived: "exclude", limit: 1, cursor: paged.nextCursor, projectionToken: paged.projectionToken,
     });
     expect(continued.ok, JSON.stringify(continued)).toBe(true);
     const continuedResult = continued.result as { sessions: unknown[]; notModified?: boolean };
     expect(continuedResult.notModified).toBeUndefined();
     expect(continuedResult.sessions).toHaveLength(1);
 
-    // An unparsable revision is a client error, never a silent full read.
+    // An empty token is a client error, never a silent full read.
     const malformed = await client.request("revision-malformed", "session.list", {
-      scope: "user", archived: "exclude", listRevision: "later",
+      scope: "user", archived: "exclude", projectionToken: "",
     });
     expect(malformed).toMatchObject({ ok: false, error: { code: "invalid_request" } });
+
+    // A restart starts a new runtime epoch while every revision begins again at
+    // zero, so a token retained across it can never revalidate those rows.
+    await f.restart();
+    const replacement = await f.connect();
+    const restarted = await list(replacement, "exclude", { projectionToken: archivedToken });
+    expect(restarted.notModified).toBeUndefined();
+    expect(restarted.sessions.length).toBeGreaterThan(0);
     return {
-      revision,
-      archivedRevision,
-      revalidatedRevision: revalidated.listRevision,
+      token,
+      attentionToken,
+      archivedToken,
+      afterAttentionRevision: afterAttention.listRevision,
+      firstRevision: first.listRevision,
+      restartedToken: restarted.projectionToken,
       continuedRowCount: continuedResult.sessions.length,
-      malformedRevisionCode: (malformed as { error: { code: string } }).error.code,
+      malformedTokenCode: (malformed as { error: { code: string } }).error.code,
     };
   });
 

@@ -336,6 +336,13 @@ export class GatewayService {
       machineName: config.machineName,
       gatewayChannel: this.updateService.channel,
       ...runtimeIdentity(),
+      // A reconnecting phone compares this against the registration it
+      // acknowledged: the value changes whenever this Gateway's stored grants
+      // do, including when the relay disables a grant at runtime, which no
+      // event announces (G-7).
+      ...(this.dependencies.notifications
+        ? { pushRegistrationRevision: this.dependencies.notifications.registrationRevision }
+        : {}),
       capabilities: [
         ...(process.env.TRON_GATEWAY_SUPERVISED === "1" ? ["restart-supervised.v1"] : []),
         "sessions.v1",
@@ -648,10 +655,18 @@ export class GatewayService {
         });
       case "push.registration.upsert":
         if (client.isLocal) throw new GatewayError("auth_required", "Only an authenticated mobile device can register push delivery");
-        return this.mutation(client, method, params, () => this.withMobileIdentityLane(client.identity, async () => {
+        // Identical registrations are naturally idempotent and write nothing at
+        // all, so they are answered before the receipt owner opens one. The
+        // identity lane spans the check and the admitted mutation, so the
+        // device's own registration operations keep their order.
+        return this.withMobileIdentityLane(client.identity, async () => {
           const allowed = new Set(["commandId", "installationId", "grantId", "secret", "previewsEnabled", "relayOrigin", "notifyWhenAskPresented"]);
           if (Object.keys(params).some((key) => !allowed.has(key))) throw new GatewayError("invalid_request", "Push registration contains unknown fields");
           const notifications = this.requireNotifications();
+          // `commandId` stays required here so an unchanged registration is
+          // still addressed by the same command identity a retried request
+          // repeats.
+          void string(params.commandId, "commandId", { min: 8, max: 160 });
           const input = {
             deviceId: client.identity,
             installationId: string(params.installationId, "installationId", { min: 8, max: 160 }),
@@ -664,8 +679,11 @@ export class GatewayService {
           if (!await this.dependencies.devices.hasDevice(client.identity)) {
             throw new GatewayError("unauthenticated", "The authenticated mobile device is no longer paired");
           }
-          return safeJson(await notifications.upsertGrant(input));
-        }));
+          if (await notifications.registrationIsCurrent(input)) {
+            return safeJson(await notifications.status(client.identity));
+          }
+          return this.mutation(client, method, params, async () => safeJson(await notifications.upsertGrant(input)));
+        });
       case "push.registration.remove":
         if (client.isLocal) throw new GatewayError("auth_required", "Only an authenticated mobile device can remove its push registration");
         return this.mutation(client, method, params, () => this.withMobileIdentityLane(client.identity, async () => {
@@ -909,12 +927,10 @@ export class GatewayService {
         const cursor = optionalString(params.cursor, "cursor", 96);
         const limit = params.limit === undefined ? 100 : integer(params.limit, "limit", 1, 500);
         // Conditional first page (G-7): a client that already holds this exact
-        // catalog revision revalidates it without a row projection. A cursor
-        // traversal is already bound to the revision its first page admitted,
+        // projection revalidates it without a row projection. A cursor
+        // traversal is already bound to the projection its first page admitted,
         // so only an uncursored request may name one.
-        const clientListRevision = params.listRevision === undefined
-          ? undefined
-          : integer(params.listRevision, "listRevision", 0, Number.MAX_SAFE_INTEGER);
+        const clientProjectionToken = optionalString(params.projectionToken, "projectionToken", 512);
         this.requireObserverAdmission(client);
         if (cursor !== undefined) {
           const page = await this.sessionListPages.nextPage(client.id, scope, cursor, limit, archived);
@@ -928,15 +944,20 @@ export class GatewayService {
           this.dependencies.sessions.pageSource(scope, archived),
           client.signal,
         );
-        if (clientListRevision !== undefined && clientListRevision === source.listRevision) {
+        if (clientProjectionToken !== undefined && clientProjectionToken === source.projectionToken) {
           if (client.isRevoked()) {
             this.sessionListPages.releaseClient(client.id);
             throw new GatewayError("unauthenticated", "This device is no longer authorized");
           }
-          // Structural identity, archive membership and the visible archived
-          // count all move with the catalog revision, so an equal revision
-          // means the client's rows are still exactly this projection.
-          return safeJson({ sessions: [], listRevision: source.listRevision, notModified: true });
+          // The token covers structural identity, archive membership, the
+          // visible archived count and every mutable row overlay, so an equal
+          // token means the client's rows are still exactly this projection.
+          return safeJson({
+            sessions: [],
+            listRevision: source.listRevision,
+            projectionToken: source.projectionToken,
+            notModified: true,
+          });
         }
         const page = await this.sessionListPages.firstPage(client.id, scope, source, limit, archived);
         if (client.isRevoked()) {
