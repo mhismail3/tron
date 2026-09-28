@@ -244,11 +244,11 @@ const sessions = new RuntimeRegistry({
       },
     }),
   capacityShedRecord: (record) => logger.log("warning",
-    `Shed ${record.method} under heap pressure (${Math.round(record.heapUsedBytes / 1_048_576)} MiB of ${Math.round(record.heapLimitBytes / 1_048_576)} MiB)`, {
+    `Shed a cold load (${record.admission}) under heap pressure (${Math.round(record.heapUsedBytes / 1_048_576)} MiB of ${Math.round(record.heapLimitBytes / 1_048_576)} MiB)`, {
       event: "gateway.shed",
       source: "sessions",
       reason: record.reason,
-      method: record.method,
+      admission: record.admission,
       counts: {
         heapUsedBytes: record.heapUsedBytes,
         heapLimitBytes: record.heapLimitBytes,

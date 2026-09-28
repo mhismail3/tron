@@ -15,18 +15,29 @@ export class QueuedWorkGate {
   }
 
   async run<T>(signal: AbortSignal | undefined, work: () => Promise<T>): Promise<T> {
-    while (this.active >= this.maximum) await this.waitForTurn(signal);
-    this.active += 1;
+    if (this.active >= this.maximum) {
+      // A queued caller is handed the place that releases, so it does not count
+      // itself in again: the place it holds was already counted.
+      await this.waitForTurn(signal);
+    } else {
+      this.active += 1;
+    }
     try {
       return await work();
     } finally {
-      this.active -= 1;
-      this.waiters.shift()?.();
+      const next = this.waiters.shift();
+      // The released place is handed to the next waiter directly, so a caller
+      // arriving in between cannot take a place a queued waiter was already
+      // promised: without that, one waiter is passed over again and again under
+      // sustained load.
+      if (next === undefined) this.active -= 1;
+      else next();
     }
   }
 
-  /** One FIFO place in the queue. An abort removes the waiter, so a place that
-   * is released next is never handed to a requester that already left. */
+  /** One FIFO place in the queue, resolved only by being handed the released
+   * place. An abort removes the waiter, so a place that is released next is
+   * never handed to a requester that already left. */
   private waitForTurn(signal: AbortSignal | undefined): Promise<void> {
     if (signal?.aborted) return Promise.reject(signal.reason);
     return new Promise<void>((resolve, reject) => {

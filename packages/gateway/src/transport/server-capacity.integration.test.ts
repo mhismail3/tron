@@ -7,7 +7,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { DeviceStore } from "../security/device-store.js";
 import { CommandReceiptStore } from "./command-receipts.js";
 import { GatewayService } from "./gateway-service.js";
-import { GatewayServer, OrderedOutboundQueue, SUPERSEDED_CLOSE_CODE, type OutboundFrame } from "./server.js";
+import { DISPOSABLE_READ_DEADLINES_MS, GatewayServer, OrderedOutboundQueue, SUPERSEDED_CLOSE_CODE, type OutboundFrame } from "./server.js";
 import { ResourceSampler } from "./stall-diagnostics.js";
 
 const cleanups: Array<() => Promise<void>> = [];
@@ -1572,7 +1572,9 @@ describe("WebSocket connection and outbound capacity", () => {
     const subscriptions = new Set<string>();
     // A held read is the load that made it slow: its deadline is what ends the
     // request, not the work behind it. The fixture cannot wait a production
-    // bound, so the table is overridden the way the other named bounds are.
+    // bound, so the table is overridden the way the other named bounds are —
+    // over the production table's own keys, so a read the Gateway deliberately
+    // leaves out of it stays out of this case too.
     const held = (method: string): { promise: Promise<void>; release: () => void } => {
       const existing = gates.get(method);
       if (existing) return existing;
@@ -1584,7 +1586,7 @@ describe("WebSocket connection and outbound capacity", () => {
     gateway = new GatewayServer({
       host: "127.0.0.1", port, maxFrameBytes: 1_048_576,
       devices, logger: logger as any, uploads: {} as any,
-      disposableReadDeadlinesMs: new Map([["session.open", 80], ["session.list", 80]]),
+      disposableReadDeadlinesMs: new Map([...DISPOSABLE_READ_DEADLINES_MS.keys()].map((method) => [method, 80])),
       sessions: {
         subscribe: (_client: string, session: string) => subscriptions.add(session),
         unsubscribe: (_client: string, session: string) => subscriptions.delete(session),
@@ -1641,14 +1643,23 @@ describe("WebSocket connection and outbound capacity", () => {
     // An admitted mutation has no entry in the table: it is never shed, and its
     // response is the work's own answer.
     socket.send(JSON.stringify({ type: "request", id: "held-command", method: "accepted-command", params: {} }));
+    // A read the table deliberately leaves out is never shed either: a
+    // remote-ranked `session.search` spends up to Jev's 20 s on an evaluation the
+    // user paid for, so shedding it would have the phone pay for it twice.
+    socket.send(JSON.stringify({ type: "request", id: "held-search", method: "session.search", params: { query: "x", remoteRanking: true } }));
     // Longer than the deadline: a mutation that were in the table would have
     // been shed by now.
     await new Promise((resolve) => setTimeout(resolve, 300));
     expect(frames.some((frame) => frame.id === "held-command")).toBe(false);
+    expect(frames.some((frame) => frame.id === "held-search")).toBe(false);
     expect(logger.log.mock.calls.some((call) => call[2]?.event === "gateway.shed" && call[2]?.method === "accepted-command")).toBe(false);
+    expect(logger.log.mock.calls.some((call) => call[2]?.event === "gateway.shed" && call[2]?.method === "session.search")).toBe(false);
     gates.get("accepted-command")?.release();
+    gates.get("session.search")?.release();
     await waitUntil(() => frames.some((frame) => frame.id === "held-command"));
     expect(frames.find((frame) => frame.id === "held-command")).toMatchObject({ ok: true, result: { method: "accepted-command" } });
+    await waitUntil(() => frames.some((frame) => frame.id === "held-search"));
+    expect(frames.find((frame) => frame.id === "held-search")).toMatchObject({ ok: true, result: { method: "session.search" } });
 
     gates.get("session.open")?.release();
     socket.send(JSON.stringify({ type: "request", id: "retry-open", method: "session.open", params: { sessionId: "session" } }));

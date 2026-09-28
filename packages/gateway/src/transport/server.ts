@@ -90,15 +90,26 @@ const SESSION_OPEN_DEADLINE_MS = 10_000;
 const SHED_RETRY_AFTER_MS = 1_000;
 /**
  * Server-side deadline per disposable read (`G-12`): one table, so a read that
- * has no entry has no deadline. An admitted mutation or prompt is deliberately
- * absent — its owner settles it durably whatever the client does with its wait.
+ * has no entry has no deadline. Every entry is a `DISPOSABLE_READ_METHODS`
+ * member — those still keep their cancel policy — and an admitted mutation or
+ * prompt is deliberately absent: its owner settles it durably whatever the
+ * client does with its wait.
+ *
+ * Four disposable reads are absent because their own owners allow longer than
+ * any bound a client would tolerate, and shedding below the owner's own bound
+ * would throw away an answer the owner is about to produce: `session.search`
+ * spends up to Jev's 20 s on a remote-ranked evaluation the user paid for, and
+ * `provider.usage` answers a typed "timed out" snapshot after up to 10 s per
+ * fetch. A read outside this table is never shed, so the phone's single retry
+ * after a shed hint can never buy a second paid search.
  */
-export const DISPOSABLE_READ_DEADLINES_MS: ReadonlyMap<string, number> = new Map(
-  [...DISPOSABLE_READ_METHODS].map((method): [string, number] => [
-    method,
-    method === "session.open" ? SESSION_OPEN_DEADLINE_MS : DISPOSABLE_READ_DEADLINE_MS,
-  ]),
-);
+export const DISPOSABLE_READ_DEADLINES_MS: ReadonlyMap<string, number> = new Map([
+  ["session.open", SESSION_OPEN_DEADLINE_MS],
+  ["session.list", DISPOSABLE_READ_DEADLINE_MS],
+  ["session.transcript", DISPOSABLE_READ_DEADLINE_MS],
+  ["session.history.list", DISPOSABLE_READ_DEADLINE_MS],
+  ["session.history.entry", DISPOSABLE_READ_DEADLINE_MS],
+]);
 /** An upgrade that reaches hello within this bound is debug detail; every
  * abandoned or rejected upgrade, and any slower one, warns. */
 const UPGRADE_SLOW_WARNING_MS = 1_000;
@@ -2275,6 +2286,10 @@ export class GatewayServer {
     // The deadline is armed at admission, so it bounds the whole request path
     // and not only the work the handler happens to be in (`G-12`).
     const deadlineTimer = this.armDisposableReadDeadline(frame.method, inFlightRpc);
+    // The deadline owns this request only until a response is attempted: a timer
+    // that fires while an answer's own catch-up is still being written must not
+    // relabel an answered request as shed.
+    const clearDeadline = (): void => { if (deadlineTimer !== undefined) clearTimeout(deadlineTimer); };
     const params = frame.params && typeof frame.params === "object" && !Array.isArray(frame.params)
       ? frame.params as Record<string, unknown>
       : {};
@@ -2556,6 +2571,7 @@ export class GatewayServer {
         this.markSessionOpenDelivered(connection, requestId, requestId);
       }
       responseAttempted = true;
+      clearDeadline();
       if (responseSentIntact) rpcOutcome = "success";
       if (responseSentIntact && connection.revoked && connection.revokeResponseRequestId === frame.id) {
         connection.revokeResponseQueued = true;
@@ -2677,6 +2693,7 @@ export class GatewayServer {
       }
       if (!responseAttempted && inFlightRpc.cancelledStage === undefined) {
         responseAttempted = true;
+        clearDeadline();
         const responseSent = runInRequestSpan(requestSpan, () => this.send(connection, { type: "response", id: frame.id, ok: false, error: publicError(error) }));
         if (responseSent && connection.revoked && connection.revokeResponseRequestId === frame.id) {
           connection.revokeResponseQueued = true;
@@ -2684,7 +2701,7 @@ export class GatewayServer {
         }
       }
     } finally {
-      if (deadlineTimer !== undefined) clearTimeout(deadlineTimer);
+      clearDeadline();
       const otherOpenWaiters = (sessionOpenFlight?.waiters ?? 1) > 1;
       // An open keeps the synchronization it installed only when an answer for
       // it is out: this request's own delivered response, or a shared attempt a
@@ -2762,6 +2779,7 @@ export class GatewayServer {
     };
     connection.requestControllers.set(requestId, inFlightRpc);
     const deadlineTimer = this.armDisposableReadDeadline(frame.method as string, inFlightRpc);
+    const clearDeadline = (): void => { if (deadlineTimer !== undefined) clearTimeout(deadlineTimer); };
     const params = frame.params && typeof frame.params === "object" && !Array.isArray(frame.params)
       ? frame.params as Record<string, unknown>
       : {};
@@ -2786,6 +2804,7 @@ export class GatewayServer {
         flight.answered = true;
         this.markSessionOpenDelivered(connection, flight.requestId, requestId);
         rpcOutcome = "success";
+        clearDeadline();
       }
     } catch (error) {
       // A shed join still owes its own answer: unlike a cancel, nobody stopped
@@ -2805,7 +2824,7 @@ export class GatewayServer {
         runInRequestSpan(requestSpan, () => this.send(connection, { type: "response", id: requestId, ok: false, error: publicError(error) }));
       }
     } finally {
-      if (deadlineTimer !== undefined) clearTimeout(deadlineTimer);
+      clearDeadline();
       connection.inFlight.delete(requestId);
       connection.requestControllers.delete(requestId);
       this.releaseSessionOpenFlight(connection, flight);

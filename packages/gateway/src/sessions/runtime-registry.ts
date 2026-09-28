@@ -204,13 +204,35 @@ interface PublishedRuntimeBytes {
   estimatedHeapBytes: number;
 }
 
+/** One admission the heap-pressure gate refused (`G-12`): a cold runtime load
+ * any owner asked `acquire` for (`open`, the same reason its `runtime.loaded`
+ * record carries), or a JSONL import. `acquire` serves reads, leases and
+ * automation alike, so the registry cannot name the RPC that asked for a cold
+ * load; it names the admission it refused instead of claiming one caller. */
+export type ColdLoadAdmission = "open" | "import";
+
+/** One cold start shared by every requester that joined it (`C-6`), with the
+ * waiters still holding it. The start is one shared entry, so the signal that
+ * drops a queued load belongs to the last waiter rather than to the requester
+ * that happened to arrive first. */
+interface PendingColdLoad {
+  /** The shared start, set before the record is published in
+   * `pendingSlotStarts`, so a joiner never sees a half-built record. */
+  operation: Promise<RuntimeSlot>;
+  /** Aborted when the last waiter leaves, which is what drops the load still
+   * queued behind the concurrency cap. */
+  readonly controller: AbortController;
+  waiters: number;
+}
+
 /** One admission refused because the process heap was already past
  * `HEAP_REFUSAL_SHARE` of its limit (`G-12`). The Gateway logs one
  * `gateway.shed` for it with the same reason and counts the transport's own
  * deadline sheds carry, so a triage run sees every shed admission in one event. */
 export interface CapacityShedRecord {
   reason: "heap";
-  method: "session.open";
+  /** Which admission was refused; see `ColdLoadAdmission`. */
+  admission: ColdLoadAdmission;
   heapUsedBytes: number;
   heapLimitBytes: number;
   retryAfterMs: number;
@@ -554,7 +576,7 @@ export class RuntimeRegistry {
    * authority. */
   private catalogProjectionGeneration = 0;
   private readonly catalogPageSources = new Map<string, WeakRef<CatalogPageSource>>();
-  private readonly pendingSlotStarts = new Map<string, Promise<RuntimeSlot>>();
+  private readonly pendingSlotStarts = new Map<string, PendingColdLoad>();
   private reservedSlotStarts = 0;
   /** Heap the byte budget has charged to session starts that are not published
    * yet, keyed by the session being opened. The byte pass counts them in the
@@ -2859,7 +2881,7 @@ export class RuntimeRegistry {
 
   private async acquireMissing(sessionId: string, signal?: AbortSignal): Promise<RuntimeSlot> {
     const alreadyStarting = this.pendingSlotStarts.get(sessionId);
-    if (alreadyStarting) return alreadyStarting;
+    if (alreadyStarting) return this.joinColdLoad(alreadyStarting, signal);
     const existing = this.slots.get(sessionId);
     const { acquisition, entry } = await stage(
       "session.open.catalog",
@@ -2906,23 +2928,52 @@ export class RuntimeRegistry {
       }
       if (raced) this.requireUnambiguousSessionId(sessionId, acquisition.ambiguousIDs);
       const pending = this.pendingSlotStarts.get(sessionId);
-      if (pending) return { operation: pending };
+      if (pending) return { operation: this.joinColdLoad(pending, signal) };
       this.assertSlotAdmissionOpen();
       this.requireLiveSlotCapacity();
       this.reservedSlotStarts += 1;
       this.reservedRuntimeBytes.set(sessionId, incomingBytes);
+      const controller = new AbortController();
       const operation = this.startAcquiredSlot(
         sessionId,
         entry,
         acquisition,
         selectedAcquisitionGeneration,
         transcriptBytes,
-        signal,
+        controller.signal,
       );
-      this.pendingSlotStarts.set(sessionId, operation);
-      return { operation };
+      const coldLoad: PendingColdLoad = { operation, controller, waiters: 0 };
+      this.pendingSlotStarts.set(sessionId, coldLoad);
+      return { operation: this.joinColdLoad(coldLoad, signal) };
     });
     return selected.operation;
+  }
+
+  /**
+   * Wait for the cold start already running for a session (`C-6`, `G-12`). The
+   * start is shared, so one requester leaving must not end it for the others: a
+   * phone reconnecting on a new socket joins the load the retiring connection
+   * is still waiting for, and the queued load is dropped only when the last
+   * waiter leaves. Per-requester abandonment stays at the caller's own
+   * `abortableRead`; this only counts who is still waiting.
+   */
+  private joinColdLoad(pending: PendingColdLoad, signal: AbortSignal | undefined): Promise<RuntimeSlot> {
+    pending.waiters += 1;
+    if (signal !== undefined) {
+      const leave = (): void => {
+        pending.waiters -= 1;
+        if (pending.waiters <= 0) pending.controller.abort(signal.reason);
+      };
+      if (signal.aborted) leave();
+      else {
+        signal.addEventListener("abort", leave, { once: true });
+        // The listener outlives the start only until it settles, so a requester
+        // that leaves after the load finished cannot end a later one.
+        const settled = (): void => signal.removeEventListener("abort", leave);
+        pending.operation.then(settled, settled);
+      }
+    }
+    return pending.operation;
   }
 
   private async startAcquiredSlot(
@@ -2984,7 +3035,9 @@ export class RuntimeRegistry {
       if (selectedAcquisitionGeneration !== this.catalogAcquisitionInvalidationGeneration) {
         throw new GatewayError("busy", "Session catalog changed while opening the session", true, undefined, "catalog_changed");
       }
-      await this.admitColdLoadUnderHeapPressure();
+      // The refusal names a cold load rather than the RPC that asked for it:
+      // `acquire` serves reads, leases and automation alike (`G-12`).
+      await this.admitColdLoadUnderHeapPressure("open");
       slot = await this.coldLoadGate.run(signal, () => stage(
         "session.open.runtime",
         () => RuntimeSlot.create(
@@ -3036,7 +3089,11 @@ export class RuntimeRegistry {
       // bytes this admission has to fit beside the runtimes already loaded.
       const incomingBytes = estimateRuntimeHeapBytes(await sessionFileBytes(path));
       await this.makeRoomForRuntimeBytes({ incomingBytes });
-      await this.admitColdLoadUnderHeapPressure();
+      // An import is the one mutation that is a cold load, and the heap bound
+      // refuses it here, before the fork it would otherwise have to settle:
+      // nothing has been written yet, so the retry hint is the whole recovery
+      // (`G-12`).
+      await this.admitColdLoadUnderHeapPressure("import");
       // The import's own copy is a cold load like an open, so it takes one of
       // the same places (`G-12`). It has no requester signal: an admitted import
       // is a mutation whose owner settles it.
@@ -3398,18 +3455,21 @@ export class RuntimeRegistry {
    * largest first — the largest reclaims the most — until the share is back
    * under it or no runtime is eligible. Above `HEAP_REFUSAL_SHARE` after that,
    * the load is refused with a retryable `busy`, its retry hint, and one
-   * `gateway.shed` record: past that point this load is what would take the
-   * process to the limit the memory criterion measures. A protected runtime is
-   * never retired, so a heap made of protected runtimes refuses instead of
-   * pretending it made room.
+   * `gateway.shed` record naming the admission: past that point this load is
+   * what would take the process to the limit the memory criterion measures. A
+   * protected runtime is never retired, so a heap made of protected runtimes
+   * refuses instead of pretending it made room.
    */
-  private async admitColdLoadUnderHeapPressure(): Promise<void> {
-    if (this.heapShare() > HEAP_EVICTION_SHARE) await this.retireIdleRuntimesForHeap();
+  private async admitColdLoadUnderHeapPressure(admission: ColdLoadAdmission): Promise<void> {
+    const reclaimedBytes = this.projectedHeapShare(0) > HEAP_EVICTION_SHARE
+      ? await this.retireIdleRuntimesForHeap()
+      : 0;
     const sample = this.readHeapSample();
-    if (!(sample.limitBytes > 0) || sample.usedBytes / sample.limitBytes <= HEAP_REFUSAL_SHARE) return;
+    if (!(sample.limitBytes > 0)
+      || (sample.usedBytes - reclaimedBytes) / sample.limitBytes <= HEAP_REFUSAL_SHARE) return;
     this.options.capacityShedRecord?.({
       reason: "heap",
-      method: "session.open",
+      admission,
       heapUsedBytes: Math.max(0, Math.round(sample.usedBytes)),
       heapLimitBytes: sample.limitBytes,
       retryAfterMs: HEAP_REFUSAL_RETRY_AFTER_MS,
@@ -3423,31 +3483,44 @@ export class RuntimeRegistry {
   }
 
   /** Retire idle runtimes largest first while the heap is over
-   * `HEAP_EVICTION_SHARE`. The eligible set is what terminates the pass: every
-   * runtime in the inventory is considered once, and a protected one is
-   * skipped. */
-  private async retireIdleRuntimesForHeap(): Promise<void> {
+   * `HEAP_EVICTION_SHARE`, and answer how many estimated bytes the pass gave
+   * back. The eligible set is what terminates the pass: every runtime in the
+   * inventory is considered once, and a protected one is skipped. Progress is
+   * measured from the registry's own accounting — `process.memoryUsage()` does
+   * not fall until V8 collects, so a sampled heap alone would keep every
+   * candidate over the share and retire the whole live set for one load. */
+  private async retireIdleRuntimesForHeap(): Promise<number> {
     const candidates = [...await this.resourceInventory()].sort((left, right) => right.bytes - left.bytes);
+    let reclaimedBytes = 0;
     for (const candidate of candidates) {
-      if (this.heapShare() <= HEAP_EVICTION_SHARE) return;
+      if (this.projectedHeapShare(reclaimedBytes) <= HEAP_EVICTION_SHARE) return reclaimedBytes;
       const slot = this.slots.get(candidate.sessionId);
       if (slot === undefined) continue;
-      await this.retireIdleRuntime({
+      // The charge the eviction will record, read before the retirement clears
+      // it; the byte pass refreshed every live charge from its own stat in the
+      // same admission, so this is the size the pass is reclaiming.
+      const reclaimed = this.publishedRuntimeBytes.get(candidate.sessionId)?.estimatedHeapBytes
+        ?? estimateRuntimeHeapBytes(candidate.bytes);
+      const retired = await this.retireIdleRuntime({
         sessionId: candidate.sessionId,
         slot,
         reason: "heap",
-        eligible: () => this.heapShare() > HEAP_EVICTION_SHARE
+        eligible: () => this.projectedHeapShare(reclaimedBytes) > HEAP_EVICTION_SHARE
           && this.isIdleEvictionEligible(candidate.sessionId, slot, Infinity),
       });
+      if (retired) reclaimedBytes += reclaimed;
     }
+    return reclaimedBytes;
   }
 
-  /** The live heap share the pressure gate is applied to. A process that cannot
-   * state its limit has no measurable pressure and is never refused. */
-  private heapShare(): number {
+  /** The heap share this admission expects once `reclaimedBytes` of accounted
+   * runtimes are given back. The eviction pass and the refusal behind it both
+   * read this, so neither waits for a garbage collection the process cannot
+   * schedule (`G-12`). */
+  private projectedHeapShare(reclaimedBytes: number): number {
     const sample = this.readHeapSample();
     if (!(sample.limitBytes > 0) || !Number.isFinite(sample.usedBytes)) return 0;
-    return sample.usedBytes / sample.limitBytes;
+    return Math.max(0, sample.usedBytes - reclaimedBytes) / sample.limitBytes;
   }
 
   private requireLiveSlotCapacity(): void {

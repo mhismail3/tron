@@ -96,6 +96,10 @@ export interface LogMetadata {
   /** The part of `durationMs` the stage breakdown did not cover. */
   unaccountedMs?: number;
   phaseReached?: string;
+  /** The admission a capacity shed refused (`gateway.shed` with `reason=heap`):
+   * a cold runtime load (`open`) or a JSONL import. A deadline shed names its
+   * `method` instead. */
+  admission?: string;
   acceptToUpgradeMs?: number;
   authMs?: number;
   handshakeMs?: number;
