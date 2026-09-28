@@ -28,7 +28,7 @@ describe("two-phase session synchronization protocol", () => {
     const failNext = { value: false };
     const oversizedNext = { value: false };
     const service = {
-      info: () => ({ gatewayVersion: "test", piVersion: "test", protocolVersion: 5, minProtocolVersion: 5, machineId: "machine", machineName: "test", capabilities: [] }),
+      info: () => ({ gatewayVersion: "test", piVersion: "test", protocolVersion: 6, minProtocolVersion: 6, machineId: "machine", machineName: "test", capabilities: [] }),
       terminalBelongsToSession: () => false,
       releaseClient: vi.fn(),
       releaseSessionProcessTranscripts: vi.fn(),
@@ -99,7 +99,7 @@ describe("two-phase session synchronization protocol", () => {
     const frames: any[] = [];
     socket.on("message", (raw) => frames.push(JSON.parse(raw.toString())));
     await new Promise<void>((resolve) => socket.once("open", () => resolve()));
-    socket.send(JSON.stringify({ type: "hello", protocolVersion: 5 }));
+    socket.send(JSON.stringify({ type: "hello", protocolVersion: 6 }));
     while (!frames.some((frame) => frame.type === "hello")) await new Promise((resolve) => setTimeout(resolve, 1));
 
     const request = (id: string, method: string, sessionId: string, extra: Record<string, unknown> = {}) => {
@@ -182,7 +182,7 @@ describe("two-phase session synchronization protocol", () => {
     const mobileFrames: any[] = [];
     mobile.on("message", (raw) => mobileFrames.push(JSON.parse(raw.toString())));
     await new Promise<void>((resolve) => mobile.once("open", () => resolve()));
-    mobile.send(JSON.stringify({ type: "hello", protocolVersion: 5, clientRole: "mobile" }));
+    mobile.send(JSON.stringify({ type: "hello", protocolVersion: 6, clientRole: "mobile" }));
     while (!mobileFrames.some((frame) => frame.type === "hello")) await new Promise((resolve) => setTimeout(resolve, 1));
     const mobileOpenSync = async (prefix: string, sessionId: string) => {
       const expectedCount = (startedCounts.get(sessionId) ?? 0) + 1;
@@ -271,7 +271,7 @@ describe("synchronization catch-up overflow recovery", () => {
     const openCounts = new Map<string, number>();
     const recoveryStarted = new Promise<void>((resolve) => { recoveryStartedResolve = resolve; });
     const service = {
-      info: () => ({ gatewayVersion: "test", piVersion: "test", protocolVersion: 5, minProtocolVersion: 5, machineId: "machine", machineName: "test", capabilities: [] }),
+      info: () => ({ gatewayVersion: "test", piVersion: "test", protocolVersion: 6, minProtocolVersion: 6, machineId: "machine", machineName: "test", capabilities: [] }),
       terminalBelongsToSession: () => false,
       releaseClient: vi.fn(),
       recoverySnapshot: async (sessionId: string) => {
@@ -346,7 +346,7 @@ describe("synchronization catch-up overflow recovery", () => {
     const frames: any[] = [];
     socket.on("message", (raw) => frames.push(JSON.parse(raw.toString())));
     await new Promise<void>((resolve) => socket.once("open", () => resolve()));
-    socket.send(JSON.stringify({ type: "hello", protocolVersion: 5 }));
+    socket.send(JSON.stringify({ type: "hello", protocolVersion: 6 }));
     while (!frames.some((frame) => frame.type === "hello")) await new Promise((resolve) => setTimeout(resolve, 1));
 
     const openAndSync = async (idPrefix: string, sessionId: string) => {
@@ -473,7 +473,7 @@ describe("connection-wide synchronization ownership", () => {
     let pendingOpenStartedResolve: (() => void) | undefined;
     const pendingOpenStarted = new Promise<void>((resolve) => { pendingOpenStartedResolve = resolve; });
     const service = {
-      info: () => ({ gatewayVersion: "test", piVersion: "test", protocolVersion: 5, minProtocolVersion: 5, machineId: "machine", machineName: "test", capabilities: [] }),
+      info: () => ({ gatewayVersion: "test", piVersion: "test", protocolVersion: 6, minProtocolVersion: 6, machineId: "machine", machineName: "test", capabilities: [] }),
       terminalBelongsToSession: (terminalId: string, sessionId: string) => terminalId === "terminal-before" && sessionId === "before",
       releaseClient: vi.fn(),
       releaseSessionProcessTranscripts: vi.fn(),
@@ -523,7 +523,7 @@ describe("connection-wide synchronization ownership", () => {
     const frames: any[] = [];
     socket.on("message", (raw) => frames.push(JSON.parse(raw.toString())));
     await new Promise<void>((resolve) => socket.once("open", () => resolve()));
-    socket.send(JSON.stringify({ type: "hello", protocolVersion: 5 }));
+    socket.send(JSON.stringify({ type: "hello", protocolVersion: 6 }));
     const waitFor = async (predicate: () => boolean) => {
       const deadline = Date.now() + 5_000;
       while (!predicate()) {
@@ -632,6 +632,142 @@ describe("connection-wide synchronization ownership", () => {
     await request("sync-pending", "session.sync", "pending", { syncToken: openedPending.result.syncToken });
     await waitFor(() => frames.slice(pendingStart).some((frame) => frame.topic === "session.progress" && frame.sessionId === "pending-after"));
     expect(frames.slice(pendingStart).filter((frame) => frame.topic === "session.progress" && frame.sessionId === "pending-after")).toHaveLength(1);
+    socket.close();
+  });
+});
+
+describe("outbound queue coalescing across a synchronization barrier", () => {
+  it("releases the quarantined suffix as one rebaseline instead of filling the queue with it", async () => {
+    const root = await mkdtemp(join(tmpdir(), "tron-sync-coalesce-"));
+    const devices = new DeviceStore(root, "machine");
+    await devices.initialize();
+    const token = JSON.parse(await (await import("node:fs/promises")).readFile(join(root, "gateway", "local-auth.json"), "utf8")).bearerToken;
+    const probe = createServer();
+    await new Promise<void>((resolve) => probe.listen(0, "127.0.0.1", resolve));
+    const address = probe.address();
+    if (!address || typeof address === "string") throw new Error("probe did not bind");
+    const port = address.port;
+    await new Promise<void>((resolve) => probe.close(() => resolve()));
+
+    interface ClientContext {
+      beginSynchronization(sessionId: string): string;
+      establishSynchronization(sessionId: string, snapshot: unknown): void;
+      completeSynchronization(sessionId: string, syncToken: string): void;
+    }
+    interface ClientRequest {
+      sessionId: string;
+      syncToken?: string;
+    }
+    let beganOpen!: () => void;
+    const openBegan = new Promise<void>((resolve) => { beganOpen = resolve; });
+    let releaseOpen!: () => void;
+    const openGate = new Promise<void>((resolve) => { releaseOpen = resolve; });
+    const service = {
+      info: () => ({ gatewayVersion: "test", piVersion: "test", protocolVersion: 6, minProtocolVersion: 6, machineId: "machine", machineName: "test", capabilities: [] }),
+      terminalBelongsToSession: () => false,
+      releaseClient: vi.fn(),
+      invoke: async (context: ClientContext, method: string, params: ClientRequest) => {
+        const sessionId = params.sessionId;
+        if (method === "session.open") {
+          const syncToken = context.beginSynchronization(sessionId);
+          beganOpen();
+          await openGate;
+          const snapshot = { sessionId, runtimeGeneration: "generation-barrier", eventSequence: 1, revision: 1 };
+          context.establishSynchronization(sessionId, snapshot);
+          return { session: snapshot, syncToken, subscriptionToken: syncToken };
+        }
+        if (method === "session.sync") {
+          context.completeSynchronization(sessionId, params.syncToken!);
+          return { synchronized: true };
+        }
+        throw new Error(`unexpected method ${method}`);
+      },
+    };
+    const logger = { log: vi.fn() };
+    const gateway = new GatewayServer({
+      host: "127.0.0.1",
+      port,
+      maxFrameBytes: 512 * 1_024,
+      maximumOutboundBytes: 48 * 1_024,
+      devices,
+      uploads: {} as never,
+      sessions: { subscribe: vi.fn(), unsubscribeClient: vi.fn(), unsubscribe: vi.fn() } as never,
+      auth: { detachClient: vi.fn(), cancelOwner: vi.fn() } as never,
+      service: service as never,
+      logger: logger as never,
+    });
+    await gateway.listen();
+    cleanups.push(async () => { await gateway.close(); });
+
+    const socket = new WebSocket(`ws://127.0.0.1:${port}/v1/socket`, { headers: { authorization: `Bearer ${token}` } });
+    const frames: Array<{ type?: string }> = [];
+    socket.on("message", (raw) => frames.push(JSON.parse(raw.toString())));
+    await new Promise<void>((resolve) => socket.once("open", () => resolve()));
+    socket.send(JSON.stringify({ type: "hello", protocolVersion: 6 }));
+    while (!frames.some((frame) => frame.type === "hello")) await new Promise((resolve) => setTimeout(resolve, 1));
+
+    const connection = [...(gateway as unknown as {
+      clients: Map<string, {
+        outbound: OrderedOutboundQueue;
+        socket: WebSocket;
+        synchronizations: Map<string, unknown>;
+        synchronizationBytes: number;
+      }>;
+    }).clients.values()][0]!;
+    // Hold every application write, so the baseline response and its
+    // synchronization suffix stay in the queue the way a slow link leaves them.
+    const held: Array<{ encoded: string; done: (error?: Error) => void }> = [];
+    vi.spyOn(connection.socket, "send").mockImplementation(((encoded: string, done?: (error?: Error) => void) => {
+      held.push({ encoded, done: done ?? (() => {}) });
+    }) as never);
+    const release = () => { for (let index = 0; index < held.length; index += 1) held[index]!.done(); };
+    const snapshot = (eventSequence: number) => ({
+      runtimeGeneration: "generation-barrier", eventSequence, revision: eventSequence,
+      data: "x".repeat(24 * 1_024),
+    });
+
+    socket.send(JSON.stringify({ type: "request", id: "barrier-open", method: "session.open", params: { sessionId: "barrier-session" } }));
+    await openBegan;
+    // While the barrier is pending, this session's state is quarantined, not
+    // queued: only the hello frame has been accepted so far.
+    gateway.broadcastSession("barrier-session", "session.snapshot", snapshot(2));
+    gateway.broadcastSession("barrier-session", "session.snapshot", snapshot(3));
+    gateway.broadcastSession("barrier-session", "session.snapshot", snapshot(4));
+    gateway.broadcastSession("barrier-session", "session.progress", { runtimeGeneration: "generation-barrier", eventSequence: 5, revision: 5, data: {} });
+    expect(connection.outbound.snapshot()).toMatchObject({ queuedFrames: 0, acceptedFrames: 1 });
+    expect(connection.synchronizations.has("barrier-session")).toBe(true);
+
+    releaseOpen();
+    await vi.waitFor(() => expect(held).toHaveLength(1)); // the open response
+    const opened = JSON.parse(held[0]!.encoded) as { id: string; result: { syncToken: string } };
+    expect(opened.id).toBe("barrier-open");
+    socket.send(JSON.stringify({ type: "request", id: "barrier-sync", method: "session.sync", params: { sessionId: "barrier-session", syncToken: opened.result.syncToken } }));
+    await vi.waitFor(() => expect(connection.synchronizations.has("barrier-session")).toBe(false));
+    // Three quarantined 24 KiB snapshots exceed this connection's 48 KiB queue
+    // once the responses ahead of them are counted; the suffix is released as
+    // the one frame that carries the sequences it covers, and a later snapshot
+    // then supersedes even that.
+    gateway.broadcastSession("barrier-session", "session.snapshot", snapshot(6));
+    expect(connection.outbound.snapshot()).toMatchObject({ queuedFrames: 3, acceptedFrames: 4, oldestTopic: "response" });
+    expect(connection.synchronizationBytes).toBe(0);
+    expect(logger.log.mock.calls.some((call) => call[2]?.event === "connection.outbound-capacity")).toBe(false);
+    release();
+
+    // Both responses precede the synchronization suffix, and the suffix is the
+    // gap-tolerant form of the newest state: the phone installs it as fresh
+    // authority instead of resynchronizing across the superseded sequences.
+    expect(held).toHaveLength(3);
+    const delivered = held.map((write) => JSON.parse(write.encoded) as {
+      id?: string;
+      topic?: string;
+      sessionId?: string;
+      payload: { eventSequence?: number; subscriptionToken?: string; snapshot?: { sessionId: string; eventSequence: number } };
+    });
+    expect(delivered[0]!.id).toBe("barrier-open");
+    expect(delivered[1]!.id).toBe("barrier-sync");
+    expect(delivered[2]).toMatchObject({ topic: "session.rebaseline", sessionId: "barrier-session" });
+    expect(delivered[2]!.payload.subscriptionToken).toBe(opened.result.syncToken);
+    expect(delivered[2]!.payload.snapshot).toMatchObject({ eventSequence: 6 });
     socket.close();
   });
 });

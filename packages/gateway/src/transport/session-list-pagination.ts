@@ -5,6 +5,10 @@ import type { SessionArchiveFilter, SessionSummary } from "../protocol/types.js"
 export interface SessionListPage {
   sessions: SessionSummary[];
   listRevision: number;
+  /** The projection token this page's rows belong to. A first page that named
+   * a retained token is answered `notModified` by the service instead of a
+   * page, so only ordinary pages carry it to the client. */
+  projectionToken: string;
   nextCursor?: string;
   /** Visible archived sessions for the requesting scope. Present only on the
    * first `exclude` page. */
@@ -13,6 +17,7 @@ export interface SessionListPage {
 
 export interface SessionListPageSource {
   readonly generation: string;
+  readonly projectionToken: string;
   readonly listRevision: number;
   readonly count: number;
   readonly compactByteEstimate: number;
@@ -97,7 +102,7 @@ export class SessionListPaginationStore {
     const page = await this.hydratePage(source, 0, limit);
     const count = source.archivedCount === undefined ? {} : { archivedCount: source.archivedCount };
     if (source.count <= limit) {
-      return { sessions: page, listRevision: source.listRevision, ...count };
+      return { sessions: page, listRevision: source.listRevision, projectionToken: source.projectionToken, ...count };
     }
 
     this.prune();
@@ -115,7 +120,7 @@ export class SessionListPaginationStore {
     do { id = randomBytes(6).toString("hex"); } while (this.leases.has(id));
     const lease: SessionListLease = { id, clientID, scope, archived, generationKey: source.generation, sessionCount: source.count, byteCount, listRevision: source.listRevision, expiresAt: now + (this.options.leaseTTLms ?? 30_000), lastAccess: now };
     this.leases.set(id, lease);
-    return { sessions: page, listRevision: source.listRevision, nextCursor: this.cursor(lease, page.length), ...count };
+    return { sessions: page, listRevision: source.listRevision, projectionToken: source.projectionToken, nextCursor: this.cursor(lease, page.length), ...count };
   }
 
   async nextPage(
@@ -149,14 +154,15 @@ export class SessionListPaginationStore {
     const nextOffset = parsed.offset + sessions.length;
     if (nextOffset >= lease.sessionCount) this.leases.delete(lease.id);
     this.pruneGenerations();
-    return { sessions, listRevision: lease.listRevision, ...(nextOffset < lease.sessionCount ? { nextCursor: this.cursor(lease, nextOffset) } : {}) };
+    return { sessions, listRevision: lease.listRevision, projectionToken: generation.source.projectionToken, ...(nextOffset < lease.sessionCount ? { nextCursor: this.cursor(lease, nextOffset) } : {}) };
   }
 
   private validateSource(source: SessionListPageSource, limit: number): void {
     const maximumSessions = Math.min(this.options.maxSessionsPerLease ?? 25_000, this.options.maxTotalSessions ?? 50_000);
     const maximumBytes = Math.min(this.options.maxBytesPerLease ?? 4 * 1_024 * 1_024, this.options.maxTotalBytes ?? 8 * 1_024 * 1_024);
     if (!Number.isSafeInteger(limit) || limit <= 0
-      || !source.generation || !Number.isSafeInteger(source.listRevision) || source.listRevision < 0
+      || !source.generation || !source.projectionToken || Buffer.byteLength(source.projectionToken) > 512
+      || !Number.isSafeInteger(source.listRevision) || source.listRevision < 0
       || !Number.isSafeInteger(source.count) || source.count < 0 || source.count > maximumSessions
       || !Number.isSafeInteger(source.compactByteEstimate) || source.compactByteEstimate < 0 || source.compactByteEstimate > maximumBytes) {
       throw new GatewayError("busy", "The session catalog is too large for one bounded traversal", true);

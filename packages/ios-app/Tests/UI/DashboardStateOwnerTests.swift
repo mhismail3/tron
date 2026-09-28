@@ -170,14 +170,14 @@ struct DashboardStateOwnerTests {
         ) == Set([secondRemote.id]))
 
         let matchingInfo = GatewayInfo(
-            gatewayVersion: "1", piVersion: "1", protocolVersion: 5, minProtocolVersion: 5,
+            gatewayVersion: "1", piVersion: "1", protocolVersion: 6, minProtocolVersion: 6,
             machineId: other.machineId, machineGroupID: other.machineGroupID,
             machineName: "Other", capabilities: []
         )
         #expect(DashboardGatewayConnectionPool.admitsIdentity(matchingInfo, for: other))
         #expect(!DashboardGatewayConnectionPool.admitsIdentity(
             GatewayInfo(
-                gatewayVersion: "1", piVersion: "1", protocolVersion: 5, minProtocolVersion: 5,
+                gatewayVersion: "1", piVersion: "1", protocolVersion: 6, minProtocolVersion: 6,
                 machineId: "wrong", machineGroupID: other.machineGroupID,
                 machineName: "Other", capabilities: []
             ),
@@ -202,7 +202,7 @@ struct DashboardStateOwnerTests {
             let pool = DashboardGatewayConnectionPool(clientFactory: {
                 GatewayClient(socketFactory: socketFactory.factory)
             })
-            await socket.enqueue(Data(#"{"type":"hello","gatewayVersion":"1","piVersion":"1","protocolVersion":5,"minProtocolVersion":5,"machineId":"remote-runtime","machineGroupID":"remote-machine","machineName":"Remote","gatewayChannel":"stable","capabilities":[]}"#.utf8))
+            await socket.enqueue(Data(#"{"type":"hello","gatewayVersion":"1","piVersion":"1","protocolVersion":6,"minProtocolVersion":6,"machineId":"remote-runtime","machineGroupID":"remote-machine","machineName":"Remote","gatewayChannel":"stable","capabilities":[]}"#.utf8))
 
             pool.reconcile(
                 profiles: [selected, remote],
@@ -263,7 +263,7 @@ struct DashboardStateOwnerTests {
                 clock: clock.clock
             )
             pool.delegate = recorder
-            await socket.enqueue(Data(#"{"type":"hello","gatewayVersion":"1","piVersion":"1","protocolVersion":5,"minProtocolVersion":5,"machineId":"remote-runtime","machineGroupID":"remote-machine","machineName":"Remote","gatewayChannel":"stable","capabilities":[]}"#.utf8))
+            await socket.enqueue(Data(#"{"type":"hello","gatewayVersion":"1","piVersion":"1","protocolVersion":6,"minProtocolVersion":6,"machineId":"remote-runtime","machineGroupID":"remote-machine","machineName":"Remote","gatewayChannel":"stable","capabilities":[]}"#.utf8))
             pool.reconcile(
                 profiles: [selected, remote],
                 selectedProfileID: selected.id,
@@ -327,7 +327,7 @@ struct DashboardStateOwnerTests {
                 GatewayClient(socketFactory: ScriptedGatewaySocketFactory(socket: socket).factory)
             })
             pool.delegate = recorder
-            await socket.enqueue(Data(#"{"type":"hello","gatewayVersion":"1","piVersion":"1","protocolVersion":5,"minProtocolVersion":5,"machineId":"remote-runtime","machineGroupID":"remote-machine","machineName":"Remote","gatewayChannel":"stable","capabilities":[]}"#.utf8))
+            await socket.enqueue(Data(#"{"type":"hello","gatewayVersion":"1","piVersion":"1","protocolVersion":6,"minProtocolVersion":6,"machineId":"remote-runtime","machineGroupID":"remote-machine","machineName":"Remote","gatewayChannel":"stable","capabilities":[]}"#.utf8))
             pool.reconcile(
                 profiles: [selected, remote],
                 selectedProfileID: selected.id,
@@ -408,7 +408,7 @@ struct DashboardStateOwnerTests {
                 GatewayClient(socketFactory: ScriptedGatewaySocketFactory(socket: socket).factory)
             })
             pool.delegate = recorder
-            await socket.enqueue(Data(#"{"type":"hello","gatewayVersion":"1","piVersion":"1","protocolVersion":5,"minProtocolVersion":5,"machineId":"remote-runtime","machineGroupID":"remote-machine","machineName":"Remote","gatewayChannel":"stable","capabilities":[]}"#.utf8))
+            await socket.enqueue(Data(#"{"type":"hello","gatewayVersion":"1","piVersion":"1","protocolVersion":6,"minProtocolVersion":6,"machineId":"remote-runtime","machineGroupID":"remote-machine","machineName":"Remote","gatewayChannel":"stable","capabilities":[]}"#.utf8))
             pool.reconcile(
                 profiles: [selected, remote],
                 selectedProfileID: selected.id,
@@ -485,7 +485,7 @@ struct DashboardStateOwnerTests {
                 clientFactory: { GatewayClient(socketFactory: socketFactory.factory) }
             )
             pool.delegate = recorder
-            let hello = Data(#"{"type":"hello","gatewayVersion":"1","piVersion":"1","protocolVersion":5,"minProtocolVersion":5,"machineId":"remote-runtime","machineGroupID":"remote-machine","machineName":"Remote","gatewayChannel":"stable","capabilities":[]}"#.utf8)
+            let hello = Data(#"{"type":"hello","gatewayVersion":"1","piVersion":"1","protocolVersion":6,"minProtocolVersion":6,"machineId":"remote-runtime","machineGroupID":"remote-machine","machineName":"Remote","gatewayChannel":"stable","capabilities":[]}"#.utf8)
             await oldSocket.enqueue(hello)
             pool.reconcile(
                 profiles: [selected, remote], selectedProfileID: selected.id,
@@ -523,6 +523,76 @@ struct DashboardStateOwnerTests {
     }
 
     @MainActor
+    @Test("a secondary reconnect answered unchanged republishes its catalog authority")
+    func secondaryReconnectUnchangedRepublishesAuthority() async throws {
+        try await withTestWatchdog { @MainActor in
+            let selected = GatewayProfile(
+                id: "selected", label: "Selected", host: "selected.test", port: 9_847,
+                machineId: "selected-runtime", machineGroupID: "selected-machine", deviceId: "device"
+            )
+            let remote = GatewayProfile(
+                id: "remote", label: "Remote", host: "remote.test", port: 9_847,
+                machineId: "remote-runtime", machineGroupID: "remote-machine", deviceId: "device"
+            )
+            let oldSocket = ScriptedGatewaySocket()
+            let replacement = ScriptedGatewaySocket()
+            let socketFactory = ScriptedGatewaySocketFactory(sockets: [oldSocket, replacement])
+            let recorder = DashboardPoolRecorder()
+            let pool = DashboardGatewayConnectionPool(
+                clientFactory: { GatewayClient(socketFactory: socketFactory.factory) }
+            )
+            pool.delegate = recorder
+            let hello = Data(#"{"type":"hello","gatewayVersion":"1","piVersion":"1","protocolVersion":6,"minProtocolVersion":6,"machineId":"remote-runtime","machineGroupID":"remote-machine","machineName":"Remote","gatewayChannel":"stable","capabilities":[]}"#.utf8)
+            await oldSocket.enqueue(hello)
+            pool.reconcile(
+                profiles: [selected, remote], selectedProfileID: selected.id,
+                token: { $0.id == remote.id ? "token" : nil }
+            )
+            try await oldSocket.waitUntilSent(count: 2)
+            let initial = try Self.requestFrame(await oldSocket.sentFrames()[1])
+            await oldSocket.enqueue(Self.catalogResponse(
+                id: initial.id, sessions: [summary(revision: 1)], listRevision: 1,
+                projectionToken: "epoch-one:1"
+            ))
+            try await Self.waitUntil {
+                recorder.updates.last?.sessions.first?.summaryRevision == 1
+                    && recorder.updates.last?.state == .connected
+            }
+
+            // The epoch retires. The profile leaves the dashboard and the
+            // container can no longer read its rows, which the pool reports as
+            // an authoritative-catalog change.
+            await replacement.enqueue(hello)
+            await oldSocket.enqueue(Self.stoppingEvent())
+
+            // The replacement connection names the retained token, and the
+            // Gateway answers unchanged: no rows, no new membership. The rows
+            // stay exactly as they were, but the state and the container's
+            // authority must still be republished for this replacement epoch.
+            try await replacement.waitUntilSent(count: 2)
+            let publicationsAfterRetirement = recorder.authoritativeCatalogPublications.count
+            let reconnectedFrame = try JSONDecoder.gateway.decode(
+                JSONValue.self, from: await replacement.sentFrames()[1]
+            ).objectValue
+            #expect(reconnectedFrame?["method"]?.stringValue == "session.list")
+            #expect(reconnectedFrame?["params"]?.objectValue?["projectionToken"]?.stringValue == "epoch-one:1")
+            let reconnectedID = try #require(reconnectedFrame?["id"]?.stringValue)
+            await replacement.enqueue(Self.catalogResponse(
+                id: reconnectedID, sessions: [], listRevision: 1,
+                projectionToken: "epoch-one:1", notModified: true
+            ))
+            try await Self.waitUntil {
+                recorder.authoritativeCatalogPublications.count > publicationsAfterRetirement
+                    && recorder.updates.last?.state == .connected
+            }
+            #expect(recorder.updates.last?.sessions.first?.summaryRevision == 1)
+
+            pool.retire()
+            await pool.waitForRetirement()
+        }
+    }
+
+    @MainActor
     @Test("a dashboard connection retries transient failures past the removed attempt allowance")
     func secondaryReconnectHasNoAttemptBudget() async throws {
         try await withTestWatchdog { @MainActor in
@@ -535,7 +605,7 @@ struct DashboardStateOwnerTests {
                 clientFactory: { GatewayClient(socketFactory: factory.factory, clock: clock.clock) },
                 clock: clock.clock
             )
-            let hello = Data(#"{"type":"hello","gatewayVersion":"1","piVersion":"1","protocolVersion":5,"minProtocolVersion":5,"machineId":"remote-runtime","machineGroupID":"remote-machine","machineName":"Remote","gatewayChannel":"stable","capabilities":[]}"#.utf8)
+            let hello = Data(#"{"type":"hello","gatewayVersion":"1","piVersion":"1","protocolVersion":6,"minProtocolVersion":6,"machineId":"remote-runtime","machineGroupID":"remote-machine","machineName":"Remote","gatewayChannel":"stable","capabilities":[]}"#.utf8)
             await sockets[11].enqueue(hello)
             for socket in sockets[0...10] {
                 await socket.failNextSend(GatewayFailure(
@@ -852,7 +922,7 @@ struct DashboardStateOwnerTests {
                 clientFactory: { GatewayClient(socketFactory: factory.factory, clock: clock.clock) },
                 clock: clock.clock
             )
-            let hello = Data(#"{"type":"hello","gatewayVersion":"1","piVersion":"1","protocolVersion":5,"minProtocolVersion":5,"machineId":"remote-runtime","machineGroupID":"remote-machine","machineName":"Remote","gatewayChannel":"stable","capabilities":[]}"#.utf8)
+            let hello = Data(#"{"type":"hello","gatewayVersion":"1","piVersion":"1","protocolVersion":6,"minProtocolVersion":6,"machineId":"remote-runtime","machineGroupID":"remote-machine","machineName":"Remote","gatewayChannel":"stable","capabilities":[]}"#.utf8)
             await sockets[0].enqueue(hello)
             for socket in sockets[1...] {
                 await socket.failNextSend(GatewayFailure(
@@ -1007,7 +1077,7 @@ struct DashboardStateOwnerTests {
             await failing.failNextSend(GatewayFailure(
                 code: "timeout", message: "synthetic transport-open failure", retryable: true, details: nil
             ))
-            await connecting.enqueue(Data(#"{"type":"hello","gatewayVersion":"1","piVersion":"1","protocolVersion":5,"minProtocolVersion":5,"machineId":"remote-runtime","machineGroupID":"remote-machine","machineName":"Remote","gatewayChannel":"stable","connectionId":"5bf6a9a2-0000-4000-8000-0000000000c5","capabilities":[]}"#.utf8))
+            await connecting.enqueue(Data(#"{"type":"hello","gatewayVersion":"1","piVersion":"1","protocolVersion":6,"minProtocolVersion":6,"machineId":"remote-runtime","machineGroupID":"remote-machine","machineName":"Remote","gatewayChannel":"stable","connectionId":"5bf6a9a2-0000-4000-8000-0000000000c5","capabilities":[]}"#.utf8))
             pool.reconcile(profiles: [profile], selectedProfileID: nil, token: { _ in "token" })
 
             let failed = try await Self.waitForRecords(log, event: "gateway.attempt", count: 1)
@@ -1187,8 +1257,8 @@ struct DashboardStateOwnerTests {
             let pool = DashboardGatewayConnectionPool(clientFactory: {
                 GatewayClient(socketFactory: factory.factory)
             })
-            let helloA = Data(#"{"type":"hello","gatewayVersion":"1","piVersion":"1","protocolVersion":5,"minProtocolVersion":5,"machineId":"machine-a","machineGroupID":"group-a","machineName":"A","gatewayChannel":"stable","capabilities":[]}"#.utf8)
-            let helloB = Data(#"{"type":"hello","gatewayVersion":"1","piVersion":"1","protocolVersion":5,"minProtocolVersion":5,"machineId":"machine-b","machineGroupID":"group-b","machineName":"B","gatewayChannel":"stable","capabilities":[]}"#.utf8)
+            let helloA = Data(#"{"type":"hello","gatewayVersion":"1","piVersion":"1","protocolVersion":6,"minProtocolVersion":6,"machineId":"machine-a","machineGroupID":"group-a","machineName":"A","gatewayChannel":"stable","capabilities":[]}"#.utf8)
+            let helloB = Data(#"{"type":"hello","gatewayVersion":"1","piVersion":"1","protocolVersion":6,"minProtocolVersion":6,"machineId":"machine-b","machineGroupID":"group-b","machineName":"B","gatewayChannel":"stable","capabilities":[]}"#.utf8)
             await aOld.enqueue(helloA)
             pool.reconcile(profiles: [profileA], selectedProfileID: nil, token: { _ in "token-a" })
             try await aOld.waitUntilSent(count: 2)
@@ -1229,7 +1299,7 @@ struct DashboardStateOwnerTests {
                 GatewayClient(socketFactory: ScriptedGatewaySocketFactory(socket: socket).factory, clock: clock.clock)
             }
             let ownedClients = clients
-            let helloA = Data(#"{"type":"hello","gatewayVersion":"1","piVersion":"1","protocolVersion":5,"minProtocolVersion":5,"machineId":"machine-a","machineGroupID":"group-a","machineName":"A","gatewayChannel":"stable","capabilities":[]}"#.utf8)
+            let helloA = Data(#"{"type":"hello","gatewayVersion":"1","piVersion":"1","protocolVersion":6,"minProtocolVersion":6,"machineId":"machine-a","machineGroupID":"group-a","machineName":"A","gatewayChannel":"stable","capabilities":[]}"#.utf8)
             // Give the second injected client unsettled physical close work so
             // the two retirement boundaries can be released independently.
             await second.enqueue(helloA)
@@ -1316,14 +1386,21 @@ struct DashboardStateOwnerTests {
         id: String,
         sessions: [SessionSummary],
         listRevision: Int,
+        projectionToken: String? = nil,
         nextCursor: String? = nil,
-        archivedCount: Int? = nil
+        archivedCount: Int? = nil,
+        notModified: Bool = false
     ) -> Data {
         let encoded = try! JSONEncoder.gateway.encode(sessions)
         let rawSessions = try! JSONSerialization.jsonObject(with: encoded)
-        var result: [String: Any] = ["sessions": rawSessions, "listRevision": listRevision]
+        var result: [String: Any] = [
+            "sessions": rawSessions,
+            "listRevision": listRevision,
+            "projectionToken": projectionToken ?? "epoch-1:\(listRevision)",
+        ]
         if let nextCursor { result["nextCursor"] = nextCursor }
         if let archivedCount { result["archivedCount"] = archivedCount }
+        if notModified { result["notModified"] = true }
         return try! JSONSerialization.data(withJSONObject: [
             "type": "response", "id": id, "ok": true, "result": result,
         ])
@@ -1548,8 +1625,8 @@ struct DashboardStateOwnerTests {
         var owner = SessionCatalogCoordinator()
         let first = owner.beginLoad()
         let second = owner.beginLoad()
-        let firstPublished = owner.publishAuthoritative([summary(revision: 1)], admission: first)
-        let secondPublished = owner.publishAuthoritative([summary(revision: 2)], admission: second)
+        let firstPublished = owner.publishAuthoritative([summary(revision: 1)], admission: first, projectionToken: "epoch-1:1")
+        let secondPublished = owner.publishAuthoritative([summary(revision: 2)], admission: second, projectionToken: "epoch-1:1")
         #expect(!firstPublished)
         #expect(secondPublished)
         #expect(owner.sessions.first?.summaryRevision == 2)
@@ -1574,11 +1651,41 @@ struct DashboardStateOwnerTests {
         #expect(owner.admits(replacement, key: replacementKey))
     }
 
+    @Test("a retained projection token survives a reconnect and drops on a profile switch")
+    func projectionTokenScope() {
+        var owner = SessionCatalogCoordinator()
+        let load = owner.beginLoad()
+        let published = owner.publishAuthoritative(
+            [summary(revision: 1)],
+            admission: load,
+            projectionToken: "gateway-epoch:4:0:user:exclude:0"
+        )
+        #expect(published)
+        #expect(owner.projectionToken == "gateway-epoch:4:0:user:exclude:0")
+
+        // The token carries the Gateway runtime epoch, so a replacement
+        // connection can revalidate the held rows instead of reloading them.
+        owner.markDisconnected()
+        #expect(owner.projectionToken == "gateway-epoch:4:0:user:exclude:0")
+        let reconnect = owner.beginLoad(key: SessionCatalogLoadKey(
+            profileID: "remote", lifecycleGeneration: 2, connectionID: 9
+        ))
+        let confirmed = owner.confirmUnchanged(admission: reconnect)
+        #expect(confirmed)
+        #expect(owner.freshness == .live)
+        #expect(owner.sessions.map(\.id) == ["session"])
+
+        // A profile switch retires the projection, so its rows can never be
+        // claimed against another Gateway's catalog.
+        owner.invalidateLoads()
+        #expect(owner.projectionToken == nil)
+    }
+
     @Test("newer live summaries survive an older authoritative catalog page")
     func liveSummaryOverlay() {
         var owner = SessionCatalogCoordinator()
         let first = owner.beginLoad()
-        let firstPublished = owner.publishAuthoritative([summary(revision: 1)], admission: first)
+        let firstPublished = owner.publishAuthoritative([summary(revision: 1)], admission: first, projectionToken: "epoch-1:1")
         let updated = owner.apply(update(
             revision: 3,
             phase: .running,
@@ -1592,7 +1699,7 @@ struct DashboardStateOwnerTests {
         #expect(stale == .stale)
 
         let refresh = owner.beginLoad()
-        let refreshed = owner.publishAuthoritative([summary(revision: 2)], admission: refresh)
+        let refreshed = owner.publishAuthoritative([summary(revision: 2)], admission: refresh, projectionToken: "epoch-1:1")
         #expect(refreshed)
         #expect(owner.sessions.first?.summaryRevision == 3)
         #expect(owner.sessions.first?.phase == .running)
@@ -1609,7 +1716,7 @@ struct DashboardStateOwnerTests {
         #expect(owner.sessions.isEmpty)
 
         let load = owner.beginLoad()
-        let published = owner.publishAuthoritative([summary(revision: 1)], admission: load)
+        let published = owner.publishAuthoritative([summary(revision: 1)], admission: load, projectionToken: "epoch-1:1")
         #expect(published)
         #expect(owner.sessions.first?.phase == .idle)
     }
@@ -1639,7 +1746,7 @@ struct DashboardStateOwnerTests {
     func attentionProjection() {
         var owner = SessionCatalogCoordinator()
         let load = owner.beginLoad()
-        let published = owner.publishAuthoritative([summary(revision: 1)], admission: load)
+        let published = owner.publishAuthoritative([summary(revision: 1)], admission: load, projectionToken: "epoch-1:1")
         #expect(published)
         let appliedAttention = owner.applyAttention(
             sessionID: "session",
@@ -1674,7 +1781,7 @@ struct DashboardStateOwnerTests {
         let load = owner.beginLoad()
         let published = owner.publishAuthoritative([
             summary(revision: 1, phase: .running, waitingForUser: true),
-        ], admission: load)
+        ], admission: load, projectionToken: "epoch-1:1")
         #expect(published)
         #expect(owner.activity(for: "session") == .waitingForUser)
 
@@ -1707,7 +1814,7 @@ struct DashboardStateOwnerTests {
                 foregroundPhase: .idle,
                 hasActiveSubagents: true
             ),
-        ], admission: load)
+        ], admission: load, projectionToken: "epoch-1:1")
 
         #expect(published)
         #expect(owner.activity(for: "session") == .subagentsWorking)
@@ -1732,7 +1839,7 @@ struct DashboardStateOwnerTests {
         let load = owner.beginLoad()
         let published = owner.publishAuthoritative([
             summary(revision: 1, phase: .running),
-        ], admission: load)
+        ], admission: load, projectionToken: "epoch-1:1")
         #expect(published)
         #expect(owner.freshness == .live)
         #expect(owner.activity(for: "session") == .active)
@@ -1744,7 +1851,8 @@ struct DashboardStateOwnerTests {
         #expect(owner.activity(for: "session") == .resuming)
         let disconnectedPublish = owner.publishAuthoritative(
             [summary(revision: 2, phase: .running)],
-            admission: pendingBeforeDisconnect
+            admission: pendingBeforeDisconnect,
+            projectionToken: "epoch-1:1"
         )
         #expect(!disconnectedPublish)
 
@@ -1755,7 +1863,8 @@ struct DashboardStateOwnerTests {
         #expect(owner.activity(for: "session") == .resuming)
         let cachedPublish = owner.publishAuthoritative(
             [summary(revision: 3)],
-            admission: pendingBeforeCache
+            admission: pendingBeforeCache,
+            projectionToken: "epoch-1:1"
         )
         #expect(!cachedPublish)
 
@@ -1768,7 +1877,7 @@ struct DashboardStateOwnerTests {
     func removal() {
         var owner = SessionCatalogCoordinator()
         let load = owner.beginLoad()
-        let published = owner.publishAuthoritative([summary(revision: 1)], admission: load)
+        let published = owner.publishAuthoritative([summary(revision: 1)], admission: load, projectionToken: "epoch-1:1")
         let updated = owner.apply(update(revision: 2, phase: .running))
         #expect(published)
         #expect(updated == .updated)
@@ -1777,7 +1886,8 @@ struct DashboardStateOwnerTests {
         #expect(owner.sessions.isEmpty)
         let removedPublish = owner.publishAuthoritative(
             [summary(revision: 3)],
-            admission: pendingBeforeRemoval
+            admission: pendingBeforeRemoval,
+            projectionToken: "epoch-1:1"
         )
         #expect(!removedPublish)
         let unknown = owner.apply(update(revision: 2, phase: .idle))
@@ -1791,7 +1901,8 @@ struct DashboardStateOwnerTests {
         owner.replaceForFacade([summary(revision: 1)])
         let replacedPublish = owner.publishAuthoritative(
             [summary(revision: 2)],
-            admission: beforeReplacement
+            admission: beforeReplacement,
+            projectionToken: "epoch-1:1"
         )
         #expect(!replacedPublish)
 
@@ -1799,7 +1910,8 @@ struct DashboardStateOwnerTests {
         owner.clear()
         let clearedPublish = owner.publishAuthoritative(
             [summary(revision: 3)],
-            admission: beforeClear
+            admission: beforeClear,
+            projectionToken: "epoch-1:1"
         )
         #expect(!clearedPublish)
         #expect(owner.sessions.isEmpty)
@@ -1810,7 +1922,7 @@ struct DashboardStateOwnerTests {
     func catalogIndexIntegrity() {
         var owner = SessionCatalogCoordinator()
         let load = owner.beginLoad()
-        let published = owner.publishAuthoritative([summary(revision: 1)], admission: load)
+        let published = owner.publishAuthoritative([summary(revision: 1)], admission: load, projectionToken: "epoch-1:1")
         #expect(published)
         #expect(owner.hasConsistentIndex())
         let updated = owner.apply(update(revision: 2, phase: .running))
@@ -1828,7 +1940,7 @@ struct DashboardStateOwnerTests {
     func archivedRowsLeaveUntilAPageReturnsThem() {
         var owner = SessionCatalogCoordinator()
         let load = owner.beginLoad()
-        let published = owner.publishAuthoritative([summary(revision: 1)], admission: load, archivedCount: 1)
+        let published = owner.publishAuthoritative([summary(revision: 1)], admission: load, projectionToken: "epoch-1:1", archivedCount: 1)
         #expect(published)
         #expect(owner.archivedCount == 1)
 
@@ -1843,7 +1955,7 @@ struct DashboardStateOwnerTests {
 
         // Only an authoritative exclude page proves the row is visible again.
         let refreshed = owner.beginLoad()
-        let republished = owner.publishAuthoritative([summary(revision: 3)], admission: refreshed, archivedCount: 0)
+        let republished = owner.publishAuthoritative([summary(revision: 3)], admission: refreshed, projectionToken: "epoch-1:1", archivedCount: 0)
         #expect(republished)
         #expect(owner.sessions.map(\.id) == ["session"])
         let visibleUpdate = owner.apply(update(revision: 4, phase: .idle))
@@ -1856,7 +1968,7 @@ struct DashboardStateOwnerTests {
     func archivedCountRetention() {
         var owner = SessionCatalogCoordinator()
         let load = owner.beginLoad()
-        let published = owner.publishAuthoritative([], admission: load, archivedCount: 3)
+        let published = owner.publishAuthoritative([], admission: load, projectionToken: "epoch-1:1", archivedCount: 3)
         #expect(published)
         #expect(owner.archivedCount == 3)
 
@@ -1965,7 +2077,7 @@ struct DashboardStateOwnerTests {
                 GatewayClient(socketFactory: ScriptedGatewaySocketFactory(socket: socket).factory)
             })
             pool.delegate = recorder
-            await socket.enqueue(Data(#"{"type":"hello","gatewayVersion":"1","piVersion":"1","protocolVersion":5,"minProtocolVersion":5,"machineId":"remote-runtime","machineGroupID":"remote-machine","machineName":"Remote","gatewayChannel":"stable","capabilities":["session-archive.v1"]}"#.utf8))
+            await socket.enqueue(Data(#"{"type":"hello","gatewayVersion":"1","piVersion":"1","protocolVersion":6,"minProtocolVersion":6,"machineId":"remote-runtime","machineGroupID":"remote-machine","machineName":"Remote","gatewayChannel":"stable","capabilities":["session-archive.v1"]}"#.utf8))
             pool.reconcile(
                 profiles: [selected, remote],
                 selectedProfileID: selected.id,

@@ -10,6 +10,9 @@
   republishes the fence's uptime, reuses only an admission whose ping identity
   still matches, realigns the windowed Tailscale ping to the poll alone, and the
   row returns to Claimed until the app-level cadence measurement runs
+
+- **Last updated:** 2026-09-28, G-7 (final review round addressed: an unchanged catalog answer rebuilds the row projection, a cleared automation marker moves the catalog token)
+
 - **Last updated:** 2026-09-28, G-3 review round 2 addressed: the `unaudiencedSnapshotBuilds` warning and its test are now stated as a tripwire for a lost slot guard or a divergence between the registry's subscription record and the transport's, not for a closing socket
 
 - **Last updated:** 2026-09-28, C-4 (second review round addressed)
@@ -26,6 +29,14 @@
 - **Last updated:** 2026-09-28, G-10 second review round (receipt totals kept across a rebuild, connection-owner row added)
 
 - **Last updated:** 2026-09-28, G-8 background work audit: third review round corrected the re-admission fence, the socket promise and the discovery-open ceiling
+
+- **Last updated:** 2026-09-28, G-1b catalog watcher (review round 2: spurious whole-folder passes, true `catalog.changed` bound, O-6a evidence)
+
+- **Last updated:** 2026-09-28, E-2c blocked and review-addressed: the profiler refuses a host-wide `time-profiler` trace whose export is projected over its 2 GiB budget and names the trace's size, so no traced scenario's export is projected above 2 GiB; a device capture is not held to that ratio, the shorter-window half and a passing `--scenario all` run remain
+
+- **Last updated:** 2026-09-28, T-2 review round 1 addressed: the kill is another worktree's run on the same default-lane simulator, and T-3 tracks the lease that did not serialize them
+
+- **Last updated:** 2026-09-28, G-4 done: the outbound queue drops a superseded session summary revision and supersedes the session state a newer snapshot re-states with the one `session.rebaseline` that covers it, fencing one-shot frames a snapshot cannot restore (`gateway.resources` gains `outboundCoalescedFrames`/`outboundCoalescedBytes`, `connection.outbound-capacity` names `oldestTopic`/`nextTopic`); a phone-side `SessionPresentationStore` case feeds the coalesced frame sequence and proves it installs without a resynchronization
 - **Goal:** A clean, efficient and predictable Gateway and phone connection: the phone stays connected and loads any session promptly whenever the network path is up, however many sessions run and however large the history grows, and every disconnect or slow operation is attributable to one cause from the logs in one step.
 
 ## Goal and constraints
@@ -549,19 +560,19 @@ rows are in priority order.
 | P-0 | Done | Fold the phone reconnect tuning plan into this plan (D-1) and close it through history; done on `main` at activation | none | |
 | O-1 | Done | Correlation key across phone and Gateway on every connection record | none | orchestrator-dispatched worker, 2026-09-28 |
 | O-6a | Blocked | Multi-session qualification scenario with a generated catalog; record the `main` baseline | none | orchestrator-dispatched worker, 2026-09-28 (second review response) |
-| E-2 | Blocked | Bound the iOS profiler's memory or hand the row to the simulator-lifecycle plan | none | orchestrator-dispatched worker, 2026-09-28 |
+| E-2 | Done | Bound the iOS profiler's memory or hand the row to the simulator-lifecycle plan | none | orchestrator-dispatched worker, 2026-09-28 |
 | E-2b | Done | Record `time-profiler` with `xctrace record --attach <pid>` if a real traced run proves it samples the simulator app; re-measure export and parser peaks (see E-2 handoff) | E-2 | orchestrator-dispatched deepseek-worker, 2026-09-28 |
-| E-2c | Claimed | Bound the `time-profiler` export under 2 GB for `--scenario all` (see E-2b handoff: simulator-device recording, or a size refusal plus shorter windows) | E-2b | orchestrator-dispatched deepseek-worker, 2026-09-28 |
+| E-2c | Done | Bound the `time-profiler` export under 2 GB for `--scenario all` (see E-2b handoff: simulator-device recording, or a size refusal plus shorter windows) | E-2b | orchestrator-dispatched deepseek-worker, 2026-09-28; the export of a host-wide recording is now refused above its budget (measured on real traces), the shorter-window half and a passing `--scenario all` run remain (see handoff) |
 | O-2 | Done | Gateway transport records: upgrade phases, inbound silence with Tailscale peer path | O-1 | orchestrator-dispatched deepseek-worker, 2026-09-28 |
 | O-3 | Done | Request span: one `rpc.completed` per slow RPC with every stage, wait and count | O-1 | orchestrator-dispatched deepseek-worker, 2026-09-28 |
 | O-4 | Done | Phone connection records that survive an export, stall watchdog, exact scene records | O-1 | orchestrator-dispatched deepseek-worker, 2026-09-28; review rounds 1–4 addressed; focused suites and the iOS Gateway E2E blackhole runs pass |
 | O-6b | Blocked | Impairment in the qualification scenario: blackhole, bandwidth cap, Gateway restart | O-6a | orchestrator-dispatched deepseek-worker, 2026-09-28 (fifth review response) |
 | O-5 | Done | Gateway resource sampler and event-loop histogram | O-3 | orchestrator-dispatched deepseek-worker, 2026-09-28 |
 | O-7 | Done | Incident triage tool: phone export plus Gateway log in, episodes by cause out | O-1, O-2, O-4 | orchestrator-dispatched deepseek-worker, 2026-09-28; review rounds 1-4 addressed (attribution, older-export records and attempts, Tailscale capture, scene splits, recovery-handshake and attempt ownership, relay-window coverage). Blocked because the incident export does not reproduce all four Context causes: cause 4 has no `gateway-stall` episode of its own (its only candidate is a slow span on a socket already closed), the run reads 121 episodes against Context's 77 reconnect episodes, `phone-stall=2` where one wrong-label cause was counted, and `gateway-capacity=0` because the only capacity event predates the export (see the handoff) |
-| C-1 | Ready | Projection work never blocks or parks reconnect; parked episodes self-resume | O-4, O-6b | |
+| C-1 | Claimed | Projection work never blocks or parks reconnect; parked episodes self-resume | O-4, O-6b | orchestrator-dispatched deepseek-worker, 2026-09-28 |
 | G-1a | Done | Catalog owner and in-memory index fed by Gateway-owned changes | O-3, O-6a | orchestrator-dispatched deepseek-worker, 2026-09-28 |
-| G-1b | Claimed | Filesystem watcher and background reconciliation for external writers | G-1a | orchestrator-dispatched deepseek-worker, 2026-09-28 |
-| G-1c | Ready | Move every catalog reader to the index; delete request-path walks and the full-parse fallback | G-1b | |
+| G-1b | Done | Filesystem watcher and background reconciliation for external writers | G-1a | orchestrator-dispatched deepseek-worker, 2026-09-28 (the O-6a confirmation of the Done-when is owed by the orchestrator) |
+| G-1c | Claimed | Move every catalog reader to the index; delete request-path walks and the full-parse fallback | G-1b | orchestrator-dispatched deepseek-worker, 2026-09-28 |
 | G-1d | Ready | Replace the catalog wording in `connection-resilience.md` with the index contract (D-3) | G-1c | |
 | G-3 | Done | No audience, no projection: build and serialize snapshots only for subscribers | O-5, O-6a | orchestrator-dispatched deepseek-worker, 2026-09-28 (branch `hardening/g-3`; review round 1 addressed; CPU comparison and O-5's cross-check owed to the orchestrator) |
 | G-3a | Ready | Streaming progress for a session with no subscriber is still projected (`projectMessage` plus `safeJson` of the full message, up to once per 150 ms each); see G-3 handoff and review nit 8 | G-3 | |
@@ -571,14 +582,14 @@ rows are in priority order.
 | G-10a | Done | Connection owner: a read (e.g. knowledge.raindrop.read) must not fsync — skip an unchanged provider observation in ConnectionOwner.recordProviderObservation, preserving stateRevision/updatedAt semantics | G-10 | orchestrator-dispatched deepseek-worker, 2026-09-28 |
 | C-3 | Ready | Faster retry (D-4): about 5 s transport-open deadline, immediate retry on path change | C-1 | |
 | C-4 | Done | Truer liveness (D-4): any inbound frame proves liveness | O-4 | orchestrator-dispatched deepseek-worker, 2026-09-28 |
-| C-6 | Ready | Cancel frame for disposable reads; a retried `session.open` joins the in-flight one | O-3 | |
+| C-6 | Claimed | Cancel frame for disposable reads; a retried `session.open` joins the in-flight one | O-3 | orchestrator-dispatched deepseek-worker, 2026-09-28 |
 | G-12 | Ready | Server-side deadlines, concurrency caps and heap-pressure shedding with typed retry hints | O-3, O-5 | |
 | G-2 | Ready | Cold open in bounded time from the index and a single-file fence | G-1c | |
-| G-7 | Claimed | Reconnect diet: send only what changed | O-1, O-6a | orchestrator-dispatched deepseek-worker, 2026-09-28 |
+| G-7 | Done | Reconnect diet: send only what changed | O-1, O-6a | orchestrator-dispatched deepseek-worker, 2026-09-28; both review rounds addressed, R-1/R-4 own the real-reconnect measurement |
 | G-11 | Ready | Event-loop budget: find and bound every synchronous task over 50 ms | O-5, O-6a | |
 | G-9 | Ready | One background-work scheduler that yields to requests; measure the libuv pool size | O-5, G-1b | |
-| G-4 | Claimed | Outbound queue coalescing of superseded snapshots and keyed events | G-3 | orchestrator-dispatched deepseek-worker, 2026-09-28 |
-| G-5 | Claimed | Byte budget for live runtimes and an explicit heap limit | O-5 | orchestrator-dispatched deepseek-worker, 2026-09-28 |
+| G-4 | Done | Outbound queue coalescing of superseded snapshots (one covering `session.rebaseline`) and summary revisions by key | G-3 | orchestrator-dispatched deepseek-worker, 2026-09-28 (branch `hardening/g-4`; review round 1 addressed: a superseded sequence is covered by the `session.rebaseline` that replaces it; round 2: only state the snapshot fully re-states and only its own runtime generation, a one-shot frame is a fence; round 3 after merging `hardening/integration`: the replacement path's client is asserted on the authority it installs, covered `session.snapshot`/`session.rebaseline` alike, and the round's fixtures speak protocol 6); the O-6b bandwidth-stream before/after numbers are owed to the orchestrator's quiet-host runs |
+| G-5 | Done | Byte budget for live runtimes and an explicit heap limit | O-5 | orchestrator-dispatched deepseek-worker, 2026-09-28 |
 | E-3a | Ready | LAN endpoint (D-5), Gateway side: pinned TLS listener bound to the private LAN address | O-1, O-2 | |
 | E-3b | Ready | LAN endpoint: advertise endpoints and pin in pairing and hello | E-3a | |
 | E-3c | Ready | LAN endpoint, phone side: pin validation, staggered race, seamless fallback | E-3b, C-3 | |
@@ -589,9 +600,10 @@ rows are in priority order.
 | G-8d | Ready | Bound the 750 ms ambient artifact discovery pass by change and make its 1,024-entry truncation impossible or visible; see G-8 handoff | G-8a | |
 | G-8b | Claimed | Bound the Mac app status poll's child processes and per-poll payload re-hash (user/security decision in "Decisions still open"); see G-8 handoff | G-8 | orchestrator-dispatched deepseek-worker, 2026-09-28; review round 1 addressed; back to Claimed because the app-level cadence measurement the row asks for is still owed (see handoff) |
 | G-8c | Ready | Bound the session-search warm-up (persisted index vs bounded slices in G-9's scheduler: user decision); see G-8 handoff | G-9 | |
-| E-1 | Claimed | Document Tailscale flap diagnosis and user-side checks; the evaluation day confirms | O-2, O-7 | orchestrator-dispatched deepseek-worker, 2026-09-28 |
+| E-1 | Done | Document Tailscale flap diagnosis and user-side checks; the evaluation day confirms | O-2, O-7 | orchestrator-dispatched deepseek-worker, 2026-09-28 |
 | T-1 | Ready | Pre-existing test race: registry extension-artifact discovery tests treat an awaited `discoverExtensionArtifacts()` as a barrier; wait for a pass that settles (three tests, one a false green) | G-1a (Registry zone) | |
-| T-2 | Claimed | `GatewayConnectionEpisodeRecorderTests/blockedMainActorIsMeasuredAndReported` (O-4) was killed once ("Test crashed with signal kill") when run with four other suites on integration, then passed 3/3; find whether the 5 s main-thread block trips a hosted-test watchdog and bound the block so the test cannot be killed while still proving the stall record | O-4 | orchestrator-dispatched deepseek-worker, 2026-09-28 |
+| T-2 | Done | `GatewayConnectionEpisodeRecorderTests/blockedMainActorIsMeasuredAndReported` (O-4) was killed once ("Test crashed with signal kill") when run with four other suites on integration, then passed 3/3; find whether the 5 s main-thread block trips a hosted-test watchdog and bound the block so the test cannot be killed while still proving the stall record | O-4 | orchestrator-dispatched deepseek-worker, 2026-09-28; no hosted-test watchdog exists (a 5 + 10 + 20 s block probe passed); the kill came from another worktree's run on the same default-lane simulator (`E816D194…`), not from the block — see the T-2 handoff and T-3; the block is now the named `mainStallTestBlock` (5 s) in both phases |
+| T-3 | Claimed | Default-lane iOS runs must serialize on `~/.tron/internal/ios-test/lease.lock`, but runs from three worktrees held the one owned simulator (`E816D194…`) at the same time and killed each other's host app (see the T-2 handoff); establish whether the lease was bypassed — a descendant of a leased command inherits `TRON_IOS_TEST_LOCK_HELD=1`, which skips the locker in `scripts/tron-ios-test` entirely — or whether one run used a different lock path, then make one lane's lease serialize every run on its simulator. One-step signal: two runs' `owner.json`/`summary.json` windows overlap on one simulator (every run of 2026-09-28 in the results root is checked this way: 3 of 87 runs overlap, all three cross-worktree, all in the default lane, and in each pair the later run survived while the one already running failed) | none | orchestrator-dispatched deepseek-worker, 2026-09-28 |
 | C-7 | Ready | Dashboard-pool event consumption stops after a failed initial connect (see the C-5 handoff): a successful reconnect brings the socket back but nothing consumes `client.events`, so a background profile stops receiving summaries, `system.stopping` and `transport.disconnected` until its entry is recreated | C-2 | |
 
 ### Phase 2 — Release and one evaluation day
@@ -1123,7 +1135,8 @@ needed), **Checks**, **Docs**, **Done when**, **User action**.
 - **Checks:** G-1a's `session-catalog.test.ts` (in
   `packages/gateway/src/sessions/`), extended with a temporary directory.
 - **Done when:** in O-6a, child-file appends reach the index within 1 s without
-  any request-path walk.
+  any request-path walk. (The in-memory half is covered by this row's cases; the
+  O-6a confirmation is owed by the orchestrator, which owns the probe.)
 - **User action:** none; ships in the release (R-2).
 
 ### G-1c — Readers use the index; delete the walks
@@ -1309,7 +1322,9 @@ needed), **Checks**, **Docs**, **Done when**, **User action**.
 - **Checks:** `packages/ios-app/Tests/Gateway/AppModelReconnectTests.swift`,
   `packages/gateway/src/transport/session-archive.integration.test.ts` for list
   behaviour.
-- **Done when:** requests and bytes per reconnect meet the recorded target.
+- **Done when:** requests and bytes per reconnect meet the recorded target
+  (the target list and the delivered request set are fixed by this task's
+  checks; R-1 and R-4 own the real-reconnect request/byte measurement).
 - **User action:** none; ships in the release (R-2).
 
 ### G-11 — Event-loop budget
@@ -1353,12 +1368,19 @@ needed), **Checks**, **Docs**, **Done when**, **User action**.
 - **Goal:** a slow link never fills the queue with superseded state.
 - **Owning files:** `packages/gateway/src/transport/server.ts`
   (`OrderedOutboundQueue`, send paths).
-- **Do:** per connection, a newer `session.snapshot` for a session replaces an
-  unsent older one; keyed events (summaries per session, process activity per
-  process) replace unsent predecessors with the same key. Order relative to
-  other events and synchronization barriers is preserved. The 8 MiB cap stays
-  as the backstop; `connection.outbound-capacity` names the topics of the
-  oldest and next frames.
+- **Do:** per connection, a newer `session.summary` replaces the unsent summary
+  of its session, and a newer `session.snapshot` supersedes the unsent sequenced
+  state of its own runtime generation that its own state fully re-states, up to
+  its own `eventSequence`, sent as the `session.rebaseline` that covers them and
+  carries the connection's installed `subscriptionToken`; a superseded sequence
+  is never left uncovered, and a sequenced frame whose effect installing a
+  snapshot does not perform (a failure receipt, a revision bump, an editor
+  directive), or one of another runtime generation, is a fence the queue never
+  drops across. Order
+  relative to other events and synchronization barriers is preserved and the
+  frame `ws` is already writing is never recalled. The 8 MiB cap stays as the
+  backstop; `connection.outbound-capacity` names the topics of the oldest and
+  next frames.
 - **Failure modes to write first:** snapshot superseded while its sequence is
   pending in a barrier; replacement larger than the cap; coalescing a frame
   already being written; interleaved progress and snapshot frames.
@@ -1378,7 +1400,11 @@ needed), **Checks**, **Docs**, **Done when**, **User action**.
      factor from the data.
   2. Byte budget `LIVE_RUNTIME_BYTE_BUDGET` (initial 1.5 GB) for admission and
      pressure eviction, largest idle runtime first; protected runtimes stay
-     protected. Record `runtime.loaded` and `runtime.evicted` with bytes.
+     protected. Record `runtime.loaded` and `runtime.evicted` with bytes. As
+     implemented, the budget is **eviction pressure only**: an admission it
+     cannot fit is served over budget and named on its `runtime.loaded` record
+     (G-12 owns refusal under the real heap limit), and nothing is retired when
+     retiring could not help — see the G-5 entry below.
   3. Set `--max-old-space-size` explicitly (initial 4,096 MB) with the budget
      below it.
 - **Checks:** `packages/gateway/src/sessions/runtime-registry.integration.test.ts`.
@@ -2311,6 +2337,125 @@ Read the numbers as one sample per case.
   retained evidence folder renamed the Python `simattach.sh` to `simattach.py`,
   added the host positive-control probe (`e2b-probe.py`), and describes
   `verdict.py`.
+
+### E-2c · Blocked · 2026-09-28 · orchestrator-dispatched deepseek-worker
+
+- Result: the refusal half is implemented on this branch. `scripts/tron_profile_attribution.py`
+  refuses a host-wide `time-profiler` trace whose `xcrun xctrace export` cannot
+  stay inside a 2 GiB budget (`EXPORT_PEAK_BUDGET_BYTES`), names the trace's own
+  size and its projected tree peak, and starts no export; `attribution.json` and
+  `attribution.md` carry the trace's bytes, projected peak and budget. Only
+  host-wide recordings are checked: `attribute()` takes `host_wide`, which
+  `scripts/tron-profile-ios` sets from the template's recording target and
+  `scripts/tron-profile-device` passes false, because a capture of one attached
+  process has no measured export-to-trace-size ratio. The default scenario
+  windows were **not** shortened: measured on real default traces, the recorded
+  span — not the window length — is what the budget binds, so shortening the
+  defaults would degrade every untraced report to serve the traced path. The row
+  stays Blocked because "under 2 GB for `--scenario all`" is not demonstrated as
+  a passing run: the retained product-scenario traces were recorded with
+  `--iterations 3` and project 5.5-6.6 GiB, and at the inferred cost of one
+  warm-up plus one measured window `--iterations 1` still projects 2.8-3.3 GiB
+  and is refused, so a passing traced product run needs a window short enough to
+  change what the scenario measures. A real `--scenario all` traced run also needs the lane's
+  DevicePerformance build plus ten scenarios, which did not fit this task's
+  budget on a host at load average 15-40 with the lane leased elsewhere.
+  Simulator-device recording was not re-probed: E-2b established it never starts
+  (180 s without returning, then the recorder's 300 s abort).
+- Evidence:
+  - Accepted (real trace, real CLI):
+    `python3 scripts/tron_profile_attribution.py <75.3 MiB control-cpu
+    --iterations 5 trace> --template time-profiler --pid 33246 --windows
+    .../windows.jsonl` exits 0 in 44 s; tree-RSS peak 1,308 MiB (xctrace child
+    1,277 MiB) measured with `files/hardening/e-2/peak.py`; `attribution.json`
+    holds `export {traceBytes 78,976,785, projectedPeakBytes 1,579,535,700,
+    budgetBytes 2,147,483,648}` with 233 measured samples over 5 windows;
+    artifacts `~/.tron/workspace/files/hardening/e-2c/control-cpu-accepted-attribution.{json,md}`.
+  - Refused (real trace): the same CLI on E-2's 338.7 MiB idle-dashboard trace
+    exits 2 in 0.3 s with a 6 MiB peak (no export started): "refusing to export
+    idle-dashboard.trace: the trace is 339 MiB and its xctrace export is
+    projected at 6.6 GiB, over the 2.0 GiB budget (20 bytes of tree peak per
+    trace byte measured on host-wide recordings); record a shorter trace (a
+    smaller --window-seconds or --iterations) on a quieter host".
+  - Scoping (real trace): the 131.7 MiB streaming-reply trace is refused as
+    host-wide (exit 2) and exported with the CLI's `--device-capture` (exit 0,
+    98 s, tree peak 2,434 MiB) into a document with no `export` block; that
+    2.38 GiB measured peak also confirms the refusal of that trace was right.
+  - Calibration (whole-tree peak per trace byte, host-wide Time Profiler, all
+    from `peak.py`): 55.5 MiB -> 998 MiB (18.0), four runs of 75.3 MiB ->
+    1,308-1,370 MiB (17.4-18.2), 131.7 MiB -> 2,434 MiB (18.5), 338.7 MiB ->
+    4,637 MiB (13.7). The constant 20 rounds the worst up with ~8% headroom; the
+    parser's own peak never overlapped the export's, so the tree is what the
+    budget has to cover. (E-2's and E-2b's handoffs label the last trace 342 MB
+    and the first 57 MB; these are the same traces in MiB.)
+  - Why a refusal is the only bound (each tested here):
+    `--xpath '.../table[@schema="time-profile"]/row[position()<5]'` returned 0
+    rows and still peaked at 1,231 MiB, so the export child builds the whole
+    table whatever `--xpath` selects; `ulimit -v` and `ulimit -d` are rejected
+    by the shell and `resource.setrlimit(RLIMIT_AS)` fails on macOS, so the
+    child cannot be capped either.
+  - What sizes the trace (toc duration + the run's `windows.jsonl`), all
+    `--iterations 3` except control-cpu (5): idle-dashboard 4x30 s -> 131.0 s /
+    338.7 MiB (2.59 MiB/s); streaming-reply 4x12 s -> 106.8 s / 302.8 MiB
+    (2.83); tool-loop 4x15 s -> 80.6 s / 282.9 MiB (3.51); control-cpu 6x2 s ->
+    13.6 s / 55.5 MiB (4.09). Host-wide rate 2.6-4.4 MiB/s (a fresh 15 s
+    host-wide recording was 62.8 MiB at 3.8 MiB/s,
+    `~/.tron/workspace/files/hardening/e-2c/host-trace-rate.json`). The budget
+    admits a 102 MiB trace, i.e. a 25-40 s recorded span; `--iterations 1`
+    records the discarded warm-up window as well, so the default windows do not
+    fit even then (inferred from those traces' spans: 2.8-3.3 GiB projected),
+    while the 2 s control windows do (55.5 MiB measured).
+  - `python3 scripts/test-tron-profile-attribution.py` 12/12 (failure mode 10:
+    the budget boundary refuses one byte over and accepts at it, no export is
+    started on a refused trace, the refusal names the trace's size, and a
+    device capture over the budget still exports without an `export` block);
+    `python3 scripts/test-tron-profile-ios.py` 7/7.
+- Changes: `fix(ios): refuse a time-profiler export that cannot fit the profiler's memory budget (E-2c)`
+  — `scripts/tron_profile_attribution.py`, `scripts/tron-profile-ios`,
+  `scripts/tron-profile-device`, `scripts/test-tron-profile-attribution.py`,
+  `packages/ios-app/docs/development.md` and this plan; the review response
+  below adds `fix(ios): scope the profiler export budget to host-wide recordings (E-2c)`
+  over the same files.
+- Tasks added: none.
+- Kept on purpose: `--all-processes` recording, `attribution.TEMPLATES`, the
+  default scenario windows and `--iterations` default 5 (see Result); the
+  owning doc's "keep traced runs short (1-3)" advice is replaced by the budget
+  the refusal enforces.
+- Deviations: no simulator run and no new trace recorded. The measurements use
+  real existing traces and the real CLI, the same route E-2 used; the recorded
+  rate is from a fresh host-wide recording taken for this task. The device
+  capture's exemption was measured on a real trace through the CLI's
+  `--device-capture`, not through `tron-profile device`, which needs a phone.
+- For the next agent: to close the row, run `scripts/tron-profile ios
+  --no-build --scenario all --trace time-profiler --iterations 1` on a quiet
+  host after the lane's build, expecting the six product scenarios to be
+  refused at their default windows (a refusal keeps the trace and costs only
+  that scenario's simulator time) and the four 2 s control scenarios to fit.
+  Then decide whether a traced product window short enough to fit
+  (`--window-seconds <n>`, so warm-up plus one window plus setup stay under a
+  ~25-40 s recorded span) is still a measurement worth taking, or whether the
+  row's goal moves to a simulator-device recording that samples the app alone;
+  the measurements say the recorded span, not the window, is the budget's
+  driver.
+- Review response (the follow-up commit on this branch): the sizing evidence is
+  relabeled as `--iterations 3` (four window lines, warm-up included) and the
+  "`--iterations 1` fits" claim is replaced by the inferred warm-up-inclusive
+  numbers (finding 1); the doc's example command is now the fitting control
+  self-test, its "1-3" advice is replaced by the budget it is bounded by, and
+  the refusal's remedy names `--window-seconds`/`--iterations` instead of
+  `--iterations 1`; the check is scoped to host-wide recordings through
+  `attribute(..., host_wide=)`, with `tron-profile device` exempt, the CLI given
+  `--device-capture` for a re-summarized device trace, and the device section of
+  the owning doc saying so (finding 2, measured on a real trace); the constant is
+  20 on the measured whole-tree peak with the comment's wording corrected and its
+  bound stated as observed (finding 3); the header line says "no traced
+  scenario's export is projected above 2 GiB" (finding 4); the test keeps the
+  refusal-before-export, the boundary and the size in the message and drops the
+  constant-and-remedy literals, with the device exemption added (finding 5); the
+  message, docs, handoff and evidence README use MiB/GiB only (finding 6); the
+  post-recording timing is stated where a user decides `--iterations` and
+  `--window-seconds` (finding 7); and this handoff's `Changes` line names the
+  files both commits touch (finding 8).
 
 ### O-3 · Done · 2026-09-28 · worker session (branch `hardening/o-3`)
 
@@ -4490,6 +4635,284 @@ events; widen them to name the pool owner in the same change.
   on ambient opens that excludes routed re-opens and assumes the pass keeps the
   750 ms cadence (finding 5, nit); the retained artifact's figure matches.
 
+### G-7 · Done · 2026-09-28 · orchestrator-dispatched deepseek-worker (branch `hardening/g-7`)
+
+- Final review round (1 major, 2 minors, 3 nits) fixed; three of the four nits
+  are comments or a documented one-time request. `hardening/integration` was
+  merged in first and both behaviours kept where it conflicted with C-5.
+- **Finding 1 (major) — an unchanged answer left the phone's snapshot stale.**
+  `confirmUnchanged` makes the projection live again, but the reconnect's own
+  revision advance happens before the answer lands, so the dashboard snapshot
+  the view holds was taken while the projection was retired: every non-idle row
+  read "resuming" and a waiting-for-user row lost its badge until its next
+  summary, and an expanded archived container kept the server unavailable.
+  Both `.unchanged` branches now do what a page read does when the answer
+  revives a retired projection: `AppModel` runs `installSelectedDashboardCatalog()`
+  and advances `archiveProjectionRevision`; the pool republishes the profile's
+  state and its authoritative catalog. Neither touches the rows. Covered by
+  `AppModelReconnectTests` "a reconnect whose catalog read is unchanged still
+  rebuilds the dashboard's row projection" (row waiting for the user, both
+  revisions, rows retained) and `DashboardStateOwnerTests` "a secondary
+  reconnect answered unchanged republishes its catalog authority" (the retained
+  token is named, and state plus authority come back for the replacement epoch).
+- **Finding 2 (minor) — a cleared automation marker did not move the token.**
+  `clearAutomationMarker` (the user's acknowledge-recovery action) and
+  `reconcileStoredAutomationMarkers` dropped the session from the recovered-marker
+  set without moving `catalogProjectionGeneration`, and a cold row reads its
+  `phase` from that set alone, so the row went `interrupted`→`idle` with an equal
+  token: every reconnect then answered `notModified` and the phone kept showing
+  `interrupted`. Both now go through `noteRecoveredMarkerCleared`, which advances
+  the generation and calls `sessionListChanged()` — the shape the cold-attention
+  path already used. Covered by `session-archive.integration.test.ts` "moves the
+  projection token when an acknowledged recovery clears a cold row's marker"
+  (marker restored by a real restart, phase read before and after, token moved,
+  `listChanged` observed).
+- **Finding 3 (minor) — merge readiness.** `hardening/integration` merged;
+  conflicts in this plan, `scripts/test-tron-profile.py` and
+  `scripts/tron-profile-gateway-driver.mjs` resolved as the union (both
+  behaviours). The v6 re-sweep found the two leftover `hello` fixtures the review
+  named in `DashboardStateOwnerTests.swift` (lines 855 and 1010) and both
+  `test-tron-profile.py` sites; nothing else in the merged tree still speaks v5.
+  `AppModel.swift` and `DashboardGatewayConnectionPool.swift` auto-merged and keep
+  C-5's pool work and this task's `.unchanged` branch.
+- **Nit 4 — false comments.** Both comments claimed the identity lane spanned the
+  identical-registration check. It does not: the check is read-only, runs outside
+  `withMobileIdentityLane`, and is therefore not ordered with that device's lane
+  operations, so an identical upsert racing a remove or revoke is answered from
+  the snapshot the check read. Both comments now say that, and the duplicated
+  block in `gateway-service.ts` is gone.
+- **Nit 5 — the one-time re-send.** The acknowledgement records the revision the
+  handshake advertised before the transfer, so a transfer that itself wrote the
+  grant (first registration or rotation) is re-sent once by the next reconcile.
+  Recorded in the target list
+  (`~/.tron/workspace/files/hardening/g-7-reconnect-request-inventory.md`) and in
+  `packages/ios-app/docs/development.md` instead of changing the upsert answer
+  shape.
+- **Nit 6 — a failed acknowledgement save blocked the removal.**
+  `removeRegistration` returned before sending `push.registration.remove` when
+  persisting the cleared acknowledgement failed, so a user who turned
+  notifications off could stay registered. The in-memory document still drops the
+  acknowledgement (a claim this phone could not persist is not trusted), the
+  failure is still reported as `pending`/`stoppedPersistence`, and the removal is
+  sent. Covered by `PushNotificationCoordinatorTests` "a failed acknowledgement
+  save still tells the Gateway to remove the grant".
+- Evidence: `npm run build` clean; `npx vitest run` passes on
+  `session-archive.integration.test.ts` (41/41, including the new case),
+  `notification-service.test.ts`, `gateway-notification-rpc.test.ts`,
+  `gateway-restart.test.ts` (62), `session-list-pagination.test.ts` (12) and
+  `automation-executor.test.ts` (8); `python3 scripts/test-gateway-protocol-contract.py`
+  passes 3/3 and `python3 scripts/test-tron-profile.py` passes 45/45 after the
+  merge. `scripts/tron-ios-test build --lane G7F` succeeded and `scripts/tron-ios-test run`
+  passes for `AppModelReconnectTests`, `PushNotificationCoordinatorTests` and
+  `DashboardStateOwnerTests` (130 tests).
+- Negative controls: with `noteRecoveredMarkerCleared` reverted to a bare
+  `interrupted.delete`, the new session-archive case fails on the first
+  `listChanged` assertion and would then answer `notModified`; with the
+  `AppModel` `.unchanged` side effects removed, the reconnect case fails on the
+  archive revision and the row's activity; with the pool's `.unchanged`
+  republication removed, the pool case times out waiting for the replacement
+  epoch's authority.
+- Changes: one merge commit for `hardening/integration` that also lands this
+  review round, branch `hardening/g-7` (the merge is kept whole because the
+  conflict resolutions and the fixes sit in the same files).
+
+### G-7 · Done · 2026-09-28 · orchestrator-dispatched deepseek-worker (branch `hardening/g-7`)
+
+- Review response: the review round after the first handoff entry below found a
+  blocker and two major gaps. This entry records what the fixes actually are;
+  the claims below about a connection-scoped revision, the no-op answer's shape
+  and the kept command receipt are superseded by it.
+- **Finding 1 (blocker) — the conditional answer covered only structural
+  membership.** `session.list` now takes and returns a projection token:
+  `RuntimeRegistry` publishes `projectionToken` = the Gateway runtime epoch plus
+  the page-source generation (structural `listRevision`, `catalogProjectionGeneration`,
+  scope, archive filter, archive revision), the pagination store carries it on
+  every page, and an uncursored read that names the current token is answered
+  `notModified` with no rows. The case the review reproduced — another client
+  marks a cold row unread, which moves only `catalogProjectionGeneration`, then a
+  conditional read returned `notModified` with no rows while the plain read
+  showed `isUnread: true` — is now a case in
+  `session-archive.integration.test.ts`: "answers an unchanged projection token
+  without rows and re-reads after the projection moves". Its artifact records
+  `firstRevision: 0`/`afterAttentionRevision: 0` with
+  `token: <epoch>:0:0:...` and `attentionToken: <epoch>:0:1:...`, plus a restart
+  whose token carries a new epoch. The same fix covers the phone's
+  malformed-summary and metadata re-check recovery paths, which re-read through
+  this conditional path.
+- **Finding 2 (major) — the push acknowledgement could not see a runtime grant
+  disable.** The Gateway now advertises `pushRegistrationRevision` in `hello`
+  and `system.info`: a digest over the grants it stores (identity, installation,
+  activity, disabled reason, relay origin) plus the relay origin they are valid
+  for, refreshed on every notification-document write and stable across a
+  restart that changed nothing. The phone stores it as
+  `PushGrant.acknowledgedRegistrationRevision` and skips the registration only
+  while it and `machineId:runtimeEpoch` both still match, so a relay rejection
+  that disabled the grant (`notification-service.ts` `recordOutcome`) makes the
+  next reconcile re-send and act on `requiresGrantRotation`. Tested at both
+  layers: `notification-service.test.ts` "advertises a changed registration
+  revision when the relay disables a grant" (the revision moves, the grant is no
+  longer current, the re-send answers `requiresGrantRotation: true`) and
+  `PushNotificationCoordinatorTests` "an acknowledged registration is not re-sent
+  while the Gateway's grant revision is unchanged" (unchanged revision sends
+  nothing; a moved revision re-sends and discards the disabled grant; a changed
+  runtime identity re-sends).
+- **Finding 3 (major) — the plan row's Done-when and the connection-scoped
+  revision.** Decided with the supervisor: the token is runtime-scoped, so the
+  phone keeps it across a reconnect and a replacement connection revalidates the
+  rows it holds instead of reloading them ("reconnect resumes; it does not
+  reload"). A profile switch still drops it (`invalidateLoads()`), pinned by
+  `DashboardStateOwnerTests` "a retained projection token survives a reconnect
+  and drops on a profile switch". The real-reconnect request and byte
+  measurement is R-1's and R-4's, recorded in the row's Done-when.
+- **Finding 4 (minor) — a lost removal answer.** `removeRegistration` clears and
+  persists the acknowledgement before sending `push.registration.remove`, so a
+  user who re-allows notifications re-registers instead of trusting an
+  acknowledgement for a grant the Gateway may already have removed
+  (`PushNotificationCoordinatorTests` "a lost removal response leaves no
+  acknowledgement that a removed grant is current").
+- **Finding 5 (minor) — the identical registration's command receipt.** Per the
+  supervisor, G-7's Do item 2 is literal: an identical registration is answered
+  before the receipt owner opens one, so it writes neither a receipt nor the
+  document. An unchanged registration is naturally idempotent, so a retried
+  request repeating the same `commandId` gets the same stored status;
+  `gateway-notification-rpc.test.ts` "answers an identical registration without
+  opening a command receipt" spies the receipt owner and asserts it is never
+  entered. An admitted registration keeps its previous order — the per-device
+  lane wraps the operation inside its receipt, so an accepted mutation is owned
+  by the work registry before it waits for the lane (`gateway-restart.test.ts`
+  "owns mobile mutations before they wait in the per-device lane"). G-7a was
+  removed: it only held this decision.
+- **Finding 6 (nit) — a late transfer completion.** `transfer` now takes the
+  runtime identity and revision from the admitted context and passes them to
+  `acknowledgeRegistration`, so a completion that lands after a reconnect
+  records the runtime that answered rather than whatever is current.
+- **Finding 7 (nit) — the version bump's search-and-replace mangled history.**
+  The two "additive field ... leave protocol version 6 unchanged" sentences now
+  say the additive field required no protocol version change, and the v5 update
+  helper claim names what actually rejects a strictly v6 candidate (a payload
+  manifest validated against the version the helper speaks, and the
+  protocol-range probe).
+- **Finding 8 (nit):** the diff outside the listed owning files is unchanged from
+  the first entry's justification (the catalog loader's owners, plus the release
+  rule that the protocol bump touches every fixture pinning the version).
+- Evidence: `npm run build` clean; `npx vitest run` passes on six focused files:
+  `session-archive.integration.test.ts`, `session-list-pagination.test.ts` and
+  `server-revocation.integration.test.ts` (66 tests) and
+  `notification-service.test.ts`, `gateway-notification-rpc.test.ts` and
+  `gateway-restart.test.ts` (60 tests); the session-archive report at
+  `packages/gateway/test-results/session-archive.integration.json` carries the
+  new case's evidence. `scripts/tron-ios-test build --lane G7R2` succeeded and
+  `scripts/tron-ios-test run --lane G7R2` for `AppModelReconnectTests`,
+  `PushNotificationCoordinatorTests`, `DashboardStateOwnerTests` and
+  `AppModelCatalogSyncTests` passes 151/151.
+- Changes: `f8574146d` and `d38f0ec71` (Gateway), `ce4c3fb12` (phone), plus the
+  docs and this entry, branch `hardening/g-7`.
+
+### G-7 · Done · 2026-09-28 · orchestrator-dispatched deepseek-worker (branch `hardening/g-7`)
+
+- (Superseded in part by the review-response entry above: the token is
+  runtime-scoped rather than connection-scoped, the no-op registration answer
+  carries the advertised revision, and an identical registration skips its
+  command receipt. The findings and their fixes are recorded there.)
+- Result: a reconnect sends the push registration only when the registration
+  changed for this Gateway runtime, and revalidates its session catalog instead
+  of reloading rows whenever the connection's own traversal already published
+  the Gateway's current `listRevision`. The Gateway answers both no-ops without
+  a durable write. Protocol bumped to 6 (this is the first Phase 1 task to change
+  a message shape: `session.list` gained the optional `listRevision` parameter
+  and the `notModified` response).
+- Rolled-up request inventory and the recorded target list (Do item 1):
+  `~/.tron/workspace/files/hardening/g-7-reconnect-request-inventory.md`. The
+  2026-09-27 phone export is not in the repository, so R-4 owns the real-export
+  comparison; the inventory is a code audit of every connect-time owner plus the
+  O-6a mobile client's method surface. Target per reconnect: **1** first
+  `session.list` page (0 rows when the same connection revalidates), **0**
+  `push.registration.upsert` on the same Gateway runtime, **2**
+  `notification.inbox.list` (one per filter), **1** each of `provider.list`,
+  `model.list`, `settings.get`, `device.list` per (target, connection), **0–1**
+  `system.info`, and one `session.open`/`session.sync`/`session.commands` trio
+  only when a chat is mounted.
+- Do item 2 (push registration): the phone persists
+  `PushGrant.acknowledgedRuntime` = `machineId:runtimeEpoch` of the Gateway
+  runtime that confirmed the exact grant, and `registerCurrent` returns ready
+  without a request while the stored grant still matches the APNs token hash,
+  route and relay origin and that identity is unchanged. A Gateway restart, a
+  changed token/route/origin, a rotated grant, or a Gateway that advertises no
+  `runtimeEpoch` always re-sends. The Gateway's `NotificationService.upsertGrant`
+  now returns `undefined` from `NotificationGrantStore.update` (no credential
+  document rewrite at all: grants, delivery receipts and revocation tombstones
+  are untouched) when the request describes the stored grant and the retention
+  pass changed nothing.
+- Do item 4 (conditional `session.list`): an uncursored read may name
+  `listRevision`. An equal revision is answered
+  `{sessions: [], listRevision, notModified: true}` with no row projection,
+  because the registry revision owns structural identity, archive membership
+  (`archiveChanged` advances it) and the visible archived count. A cursored page
+  is always bound to its lease's revision, and any other revision receives rows.
+  The phone revalidates a retained revision only on the connection whose
+  traversal admitted it: `SessionCatalogCoordinator.beginLoad` drops the revision
+  when the load key changes, and any local membership change
+  (`invalidateLoads`) drops it too. That is deliberate, not a shortfall: the
+  Gateway broadcasts `session.summary` and never replays it, so a replacement
+  connection's row fields converge only through a page read.
+- Do item 3 (one owner each for `model.list`/`provider.list` per connection):
+  already structurally satisfied, no code change. `AppModel.scheduleMountedOptionalReads`
+  is the connect/foreground optional-read owner and is guarded by
+  `mountedOptionalRefreshLifecycleGeneration`/`ConnectionID`, so the second
+  caller (`lifecycleRestoreMountedPresentation`) cannot re-read in the same
+  connection; a mounted chat open reads the session-scoped target, which is a
+  different projection, and Settings/Onboarding keep the explicit user action.
+  Verified by inspection; no new test asserts the count (the existing reconnect
+  test asserts the request *set*).
+- Evidence:
+  - `--no-build`-free focused Gateway runs on Homebrew Node: `npm run build`
+    clean; `npx vitest run src/transport/session-archive.integration.test.ts`
+    passes **40/40** (11.7 s) including the new
+    "answers an unchanged catalog revision without rows and re-reads after
+    membership moves"; `npx vitest run src/notifications/notification-service.test.ts`
+    passes **37/37** (3.5 s) including "answers an identical registration
+    without rewriting the credential document". Both write their usual
+    `test-results/*.json` artifacts.
+  - `scripts/tron-ios-test build` succeeded, then
+    `scripts/tron-ios-test run --only-testing TronMobileTests/AppModelReconnectTests`
+    passed **37 tests in 1 suite** (0.27 s; run
+    `~/Library/Developer/Tron/ios/test-runs/20260928T144407Z-run.cP95vO`),
+    including the new "a catalog read revalidates its retained revision and a
+    reconnect reloads rows".
+  - Negative controls (the test fails with the production change reverted, so it
+    targets a real bug rather than reasserting the code): with
+    `notification-service.ts` stashed the new registration test fails on the
+    byte-identical document assertion; with `gateway-service.ts` stashed the new
+    list test fails on the missing `notModified` answer.
+  - `python3 scripts/test-gateway-protocol-contract.py` passes 3/3 after the
+    bump. Its artifact fixtures now derive the expected version from
+    `config/GatewayProtocol.json` instead of a literal, so the next bump cannot
+    leave them asserting a stale contract.
+- Changes: `fd14c2712` (reconnect diet + protocol bump in the same series;
+  bump commit `c16e4b279`), branch `hardening/g-7`.
+- Tasks added: G-7a (removed by the review response above, which decided it).
+- Kept on purpose: the command receipt (idempotency evidence) on a no-op
+  `push.registration.upsert`. The plan's "no receipt write" is read as the
+  notification service's own durable state — the credential document and its
+  receipt/revocation overlays — because `transport/command-receipts.ts` is not a
+  G-7 owning file and the architecture invariant requires a bounded idempotency
+  receipt for every mutation. The review response above replaced this reading:
+  the plan's wording is literal and an identical registration now skips its
+  receipt too.
+- Deviations (superseded by the review response above): the push registration
+  no-op answer kept the existing `NotificationStatus` shape and the retained
+  value was connection-scoped. The message-shape change that owns the version
+  bump is the `session.list` conditional read, and the no-op answer does add the
+  advertised revision to `hello`/`system.info` (not to the status shape).
+- For the next agent: R-4 compares the recorded target list with a real
+  evaluation-day reconnect and should also measure the bytes (the `session.list`
+  page is the largest single item, so the `notModified` answer is the byte win).
+  The archived-session container (`AppModel.loadArchivedSessions`, `archived:
+  "only"`) still reads rows unconditionally; it is a small follow-up if R-4 shows
+  it matters. `SessionCatalogCoordinator.confirmUnchanged` requires the retained
+  revision to match, so a `notModified` answer for a revision the client did not
+  retain is rejected as `invalid_response` instead of being trusted.
+
 ### G-3 · Claimed · 2026-09-28 · orchestrator-dispatched deepseek-worker (branch `hardening/g-3`)
 
 - Result: a session snapshot is now built, serialized and broadcast only when
@@ -5135,6 +5558,198 @@ events; widen them to name the pool owner in the same change.
   leg reaches a pong miss or a capacity close inside 30 s is part of that
   baseline; the leg is not tuned for it.
 
+### G-5 · Done · 2026-09-28 · orchestrator-dispatched deepseek-worker (branch `hardening/g-5`)
+
+- Result: live runtimes are bounded by bytes as well as by count.
+  `LIVE_RUNTIME_BYTE_BUDGET` (1.5 GiB) in
+  `packages/gateway/src/sessions/runtime-registry.ts` charges each live runtime
+  `LIVE_RUNTIME_HEAP_ESTIMATE_FACTOR` (3) times its canonical transcript bytes,
+  measured at admission from the same one-`stat`-per-runtime inventory the
+  resource sample reads (`resourceInventory`, now documented as shared by the
+  sampler and the budget, and skipping a slot that is already disposed). The
+  budget is **eviction pressure, not an admission gate**: an admission that does
+  not fit retires idle runtimes **largest first** (the largest reclaims the most),
+  under the existing protections (subscriber, run, lease, blocked ownership) and
+  only when the runtime can be reloaded, until the projected total fits. Nothing
+  is retired when retiring could not help — the opening charge is larger than the
+  whole budget, or the excess is larger than every eligible runtime together —
+  and an admission the retired set still cannot fit is served anyway, with its
+  `runtime.loaded` record carrying `overBudget: true`. The projected total counts
+  the starts already reserved for except the requested session's own reservation,
+  which the opening charge already is; a start already pending for the requested
+  session retires nothing at all. No admission is ever refused on this budget
+  (G-12 owns refusal under the real heap limit); the runtime count and the
+  explicit heap limit stay the backstop. Each transition writes one record from
+  the registry: `runtime.loaded` at publication and `runtime.evicted` where the
+  slot stops being live, both with `sessionId`, a `reason` (`open` | `create` |
+  `automation` | `import` | `oversize` for a load; `bytes` | `idle` | `capacity`
+  | `closed` | `disposed` | `deleted` | `shutdown` for an eviction),
+  `transcriptBytes` and the `estimatedHeapBytes` the budget charged, as named
+  `counts`, and `overBudget` on an over-budget load (the log line carries it in
+  `counts` as `overBudget = 1`).
+  `packages/mac-app/scripts/tron-gateway-launcher.c` passes
+  `--max-old-space-size=4096` before the entrypoint, so the budget is under an
+  explicit limit instead of Node's default.
+- Failure modes written before the code (all covered by
+  `packages/gateway/src/sessions/runtime-registry.integration.test.ts`): (1) a
+  live runtime that grew past the budget is never reclaimed, because admission
+  checks only the runtime count; (2) the smallest idle runtime is retired when
+  the largest would have been enough, so extra sessions lose their state; (3) an
+  opening session whose bytes fit nowhere is refused on the budget, so a loaded
+  session it cannot reclaim makes every later open of a non-empty transcript
+  unopenable; (4) a protected runtime (an audience) is retired under byte
+  pressure; (5) the transitions are counted but never named, so no record says
+  which session was loaded or evicted, what the budget charged it or why it went
+  away; (6) two opens of one session at once charge it twice, so the pass evicts
+  idle runtimes for room the first open had already taken; (7) a transcript
+  larger than the whole budget evicts every idle runtime and can then never
+  open; (8) an eviction is recorded for nothing, because retiring every eligible
+  runtime still could not make the admission fit; (9) an evicted runtime
+  reports the size it was loaded with instead of the bytes it gave back; (10) a
+  slot disposed outside the registry is recorded as an extension-requested
+  close.
+- Tests (seven added, one existing; all in the owning integration file):
+  largest-first retirement and the over-budget admission use a **real**
+  transcript grown with a sparse `truncate` (the previous mocks fed the budget
+  sizes production never supplies), the small session is acquired first so a
+  smallest-first, iteration-order or least-recently-used pass all fail, the
+  same-session race is driven through a `resourceInventory` spy plus a held
+  `RuntimeSlot.create` mock so the second pass runs while the first open's
+  reservation exists, and the live set is asserted through the public
+  `resourceInventory()` instead of a private `slots` cast. Each new test was
+  shown failing on the source without its fix:
+  - same-session double charge: `AssertionError: expected true to be false //
+    Object.is equality` on the previous registry source (the second pass retired
+    the 470 MiB idle runtime).
+  - nothing retired when retiring cannot help: the same `expected true to be
+    false` on `idleSlot.isDisposed` with the eligible-set check removed.
+  - the eviction's reclaimed bytes: `AssertionError: expected 645 to be
+    838860800 // Object.is equality` with the pass's charge refresh removed.
+  - `disposed` not `closed`: the reason mismatch for a slot disposed outside the
+    registry.
+- Evidence:
+  - `npx vitest run src/sessions/runtime-registry.integration.test.ts -t
+    "budget"` passes 9/9 (six budget cases) in ~2 s on the changed tree, and the
+    whole owning file passes 257/257 in 51 s.
+  - `npx tsc --noEmit` is clean on the changed tree.
+  - Launcher: the compiled launcher plus
+    `packages/mac-app/scripts/test-tron-gateway-launcher.sh` (fixture asserts
+    `$1 = --max-old-space-size=4096` before the entrypoint, exit 13 otherwise)
+    pass end to end with the pinned Node 22.22.0 on `PATH`, so the flag reaches
+    the child argv in every launch case. It stays the check for the launcher half
+    of this task.
+- Checks: `runtime-registry.integration.test.ts` (the row's named owner) covers
+  the budget, the largest-first order, the protected-runtime case, the
+  over-budget admission and its record, the same-session double charge, the
+  no-pointless-eviction case, the charged-zero admission and the records.
+- Docs: `packages/gateway/README.md` (Session invariants) states the budget as
+  eviction pressure, the factor, the largest-first order, the cases that retire
+  nothing, the admitted-over-budget load, the same-session reservation
+  exclusion, the explicit `--max-old-space-size` and the records;
+  `packages/gateway/docs/observability.md` has rows for `runtime.loaded` and
+  `runtime.evicted` with their levels, triggers, `reason` values, `overBudget`,
+  `counts` and rationale.
+- Volume: the two records are per transition (one per session load and one per
+  eviction — tens a day on a normal day, a few hundred worst case), far inside
+  the 1 MB/day budget; the per-minute `gateway.resources` volume is unchanged.
+- Review round 2 (2026-09-28, changes-required, 2 major + 3 minor + 2 nits;
+  all addressed):
+  - **Same-session double charge.** The second open's byte pass charged the
+    requested session twice — its reservation and its opening charge. The
+    projected total now leaves out the requested session's own reservation, and
+    a pass whose requested session already has a start pending retires nothing;
+    the mutation test above pins it.
+  - **The budget refuses an open.** Removed by orchestrator decision: the budget
+    is eviction pressure, G-12 owns refusal under the real heap limit. Nothing
+    is retired when retiring cannot help, an admission it cannot fit is served
+    and its `runtime.loaded` record carries `overBudget: true`, and the whole
+    refusal path (`requireRuntimeByteBudget`, `byteBudgetFits`) is deleted with
+    its `busy` message. README, observability rows and this entry say so.
+  - **Pointless eviction.** Before retiring anything, the pass sums the eligible
+    candidates and retires nothing when the excess is larger than that sum; the
+    eligibility closure re-checks that room is still needed (`projectedBytes() >
+    LIVE_RUNTIME_BYTE_BUDGET`), like `evictIdle`'s `needsCapacity()`. Only the
+    eligible-set check has a negative control; the closure's re-check is
+    defensive (it can only be reached through a concurrent pass) and has no test
+    of its own.
+  - **Bytes the eviction actually reclaimed.** The pass refreshes
+    `publishedRuntimeBytes` from its own stat, so a runtime that grew after its
+    load is recorded with what it gave back (the records test asserts 800 MiB,
+    not the few KB it was loaded with).
+  - **Dead budget calls.** The `create` and automation paths no longer call the
+    byte pass or a budget check with `incomingBytes: 0`; a session with no
+    transcript adds no bytes, so the pass is only reached by an admission with a
+    real charge (open, import), and the rule lives in the pass's comment.
+  - **Attribution nits.** The slot cleared on the next open after some other
+    owner disposed it is recorded as `disposed` instead of claiming `closed`. The
+    rekey double count went away with the pass's covered set: no pass adds the
+    charge of a runtime published after its inventory read, because the budget no
+    longer refuses on that snapshot.
+  - **Handoff evidence.** The garbled budget-message failure text is replaced by
+    the real negative-control outputs above.
+- Review round 1 (2026-09-28, changes-required → fixed; superseded where round 2
+  removed what it protected): (1) the publication race was closed by the
+  per-runtime charge and its mutex add-back, with the concurrent-publication
+  case — round 2 deleted the refusal that made the gated snapshot necessary, and
+  with it that case; (2) the oversize admission is passed through
+  before any eviction, with the oversize case; (4) a zero-charge admission is
+  passed through too — the supervisor chose A1 + B1 (preserve the product; the
+  explicit heap limit is the hard backstop; name the oversize load). (5) the
+  tests now use real sizes and public accessors. (6) `resourceInventory` skips a
+  disposed slot and the pass excludes the requested session, which also makes
+  the old `break`/`continue` check unreachable and it was deleted rather than
+  replaced. (7) the records carry `reason` and put their bytes in `counts`.
+  (8) the `runtime-slot.ts` edit (an out-of-scope extra `await stat()` in the
+  Slot conflict zone) is reverted; the registry owns the eviction record from
+  its own charge. (9) the pass is wrapped in the `session.runtime-budget` stage.
+  (10) the private `slots` cast is gone; the assertion uses
+  `resourceInventory()`, not `activeSessionIds()`, which reports only busy slots
+  and cannot name two idle-or-live runtimes.
+- "Done when" (a sequence of large idle sessions in O-6a never exceeds the
+  budget): O-6a confirmation and the factor measurement are owed by the
+  orchestrator with the quiet-host runs; factor 3 is provisional. The budget is
+  enforced on the admission path and proven by the integration cases above; if a
+  quiet-host O-6a run shows the real heap-per-transcript-byte figure is off, the
+  factor is the one number to move.
+- Kept on purpose: the budget is a named constant next to its only user rather
+  than a config surface (the plan names `LIVE_RUNTIME_BYTE_BUDGET`; a deployment
+  override would be speculative); the count still caps the runtime number while
+  the budget caps bytes, so both checks stay where each belongs; `resourceInventory`
+  stayed the one place that stats live runtimes, so the sampler and the budget
+  cannot disagree about a runtime's size; `importFromJsonl` is charged the source
+  transcript's bytes, which is what the fork copies.
+- Deviations: `runtime-registry.ts` kept the retirement body of `evictIdle` as a
+  new private `retireIdleRuntime` so the byte pass reuses the same commit logic
+  (mutex check, slot eligibility fence, bookkeeping) instead of a second copy,
+  and now threads an eviction `reason` through it; `gateway-main.ts` gained the
+  log wiring. No new files. `runtime-slot.ts` is untouched by the final change.
+- Withdrawn: the `runtimeEvicted(sessionId, transcriptBytes)` dependency on
+  `RuntimeSlot` — the record moved to the registry with finding 8. The slot no
+  longer stats its transcript at disposal; the registry records the size the
+  budget charged at publication, refreshed by the byte pass from the stat it read
+  before an eviction it makes (documented in the observability row).
+- For the next agent: G-12 (heap-pressure shedding) owns refusal under the real
+  heap limit, which this task deliberately does not do: the byte budget retires
+  idle runtimes and admits an over-budget load with `overBudget` on its
+  `runtime.loaded` record. G-12 should reuse `LIVE_RUNTIME_BYTE_BUDGET`, the
+  projected total and the `busy` shape the runtime count uses rather than a
+  second budget; the pass is `acquireMissing` and `importFromJsonl` only.
+- Open risks (residual, for the orchestrator's review): (a) the estimate is
+  linear in transcript bytes, so a session whose heap is dominated by something
+  other than its transcript (a huge single entry, an image-heavy compaction)
+  can be charged less than it holds; (b) with the refusal gone, nothing holds the
+  live set under the budget when every eligible runtime is protected, so an
+  over-budget set persists until an idle runtime becomes eligible — the
+  `overBudget` load record is what makes that visible; (c) a real
+  oversize transcript cannot be built in the fixture without a >512 MiB
+  parseable file, so the `oversize` load reason is proven by inspection of the
+  same condition the oversize case exercises, and an O-6a run with a real 2 GB
+  catalog is where it would be seen; (d) `makeRoomForRuntimeBytes` reaches the
+  whole live set with one `stat` per runtime per admission (bounded by the
+  runtime count, 128), which is the same cost `gateway.resources` already pays
+  once a minute.
+
+
 ### G-10a · Done · 2026-09-28 · orchestrator-dispatched deepseek-worker (branch `hardening/g-10a`)
 
 - Result: the last read-triggered durable write left the read path.
@@ -5238,6 +5853,274 @@ events; widen them to name the pool owner in the same change.
   keeping: `stateRevision` on an instance is not a liveness heartbeat anywhere in
   the Gateway or iOS (iOS only validates `stateRevision >= 0`), and
   `markRuntimeReady` is MCP-only, so no other owner depends on this write.
+
+### G-4 · Done · 2026-09-28 · orchestrator-dispatched deepseek-worker (branch `hardening/g-4`)
+
+- Result: a connection's outbound queue is bounded by the state still worth
+  sending, not by how long the link took, and the client can still accept what
+  arrives. `OrderedOutboundQueue` carries a per-frame wire `topic` plus either a
+  coalescing `key` (a `session.summary`, which states its own revision and
+  carries no sequence) or the `sessionId` and per-session `eventSequence` of a
+  sequenced frame. A newer summary removes the newest unsent summary of its
+  session. A newer `session.snapshot` supersedes **every** unsent sequenced
+  frame of its session up to its own `eventSequence` — snapshots, progress,
+  process activity, messages — and only together with the frame that covers
+  them: the survivor is re-encoded as `session.rebaseline` carrying the whole
+  snapshot and the connection's installed `subscriptionToken`, which
+  `SessionRebaselineAdmission` installs as fresh authority across the dropped
+  sequences. A snapshot for a session this connection holds no token for, or a
+  sequenced frame with no replacement, supersedes nothing, so the queue never
+  creates a sequence gap it cannot cover. The replacement takes the survivor's
+  place at the queue's tail, so what a client receives is a subsequence of what
+  was enqueued in enqueue order, and the frame `ws` is already writing is never
+  recalled. Dropped frames release their payload and byte reservation at the
+  completed-frame boundary and are decremented from `acceptedFrames`, so the
+  `connection.closed`/`connection.write-error` completed/accepted counts keep
+  describing frames the connection owed its peer. The 8 MiB/4,096-frame backstop
+  is unchanged, and `connection.outbound-capacity` names `oldestTopic` (the
+  frame the socket was writing or waiting on) and `nextTopic`/`nextBytes` (the
+  frame that did not fit). `gateway.resources` gained
+  `outboundCoalescedFrames`/`outboundCoalescedBytes`, reported where each
+  superseded frame is dropped.
+- Review round 1 (construction: `changes-required`) addressed:
+  - Blocker — the first version dropped sequenced frames and left an
+    `eventSequence` gap, which `SessionSnapshotEventAdmission`/
+    `SessionPresentationStore.admitEnvelope` reject with a resynchronization;
+    the tests asserted the gap (`[1, 2, 8]`, `progress 5, snapshot 6`) instead of
+    what the client accepts. The orchestrator chose the rebaseline-carrying
+    construction above over narrowing G-4 to unsequenced frames; the queue now
+    sends the survivor as `session.rebaseline`, and only with the installed
+    token.
+  - Blocker — process activity was keyed by `processId`, so a later activity for
+    the same process dropped a frame whose `removedProcessIds` no later frame
+    carries. `session.processActivity` is no longer keyed at all; a mixed
+    frame's removals survive, and the seq-1-per-activity fixture that hid this is
+    gone.
+  - Major — the row's only "Done when" item had no evidence. The transport-owner
+    cases below are the evidence this row owns; the orchestrator's O-6b
+    `bandwidth-stream` before/after numbers (0 `connection.outbound-capacity`
+    records on the capped leg, `outboundCoalescedFrames` > 0 in the capped
+    window) are owed by the orchestrator's quiet-host runs, not by this branch.
+  - Minors — invariant 4 and the outbound paragraph of `packages/gateway/README.md`
+    now state the coverage rule; `connection.closed`/`connection.write-error`
+    counters exclude superseded frames (`packages/gateway/docs/observability.md`); `outboundBytes`
+    is documented as bytes accepted into a connection queue (bytes actually
+    handed to a socket are accepted minus `outboundCoalescedBytes`); the new test
+    blocks carry no `any` casts; the "8 MiB backstop" comment in the capacity
+    fixture now names the connection's own backstop (64 KiB there).
+- Failure modes written before the code (queue level): a superseded frame whose
+  sequence is pending behind a synchronization barrier; a replacement larger
+  than the remaining budget and a replacement larger than the cap; coalescing a
+  frame already being written; interleaved progress and snapshot frames; a frame
+  that supersedes nothing queued (backstop must still fire); a sequenced frame
+  with no covering replacement; a session's frames never dropped by another
+  session's snapshot.
+- Evidence:
+  - `npx vitest run src/transport/server-capacity.integration.test.ts
+    src/transport/sync-protocol.integration.test.ts` passes 36/36 (focused run
+    of the two named check files). Queue level: the newest unsent summary is
+    replaced and the frame being written never is; a snapshot supersedes its
+    session's unsent sequenced frames only when it carries a rebaseline and
+    never another session's; a replacement that only fits because the state it
+    supersedes is dropped is accepted; the backstop still fires for state
+    nothing supersedes; a replacement larger than the queue fails closed.
+  - Real-broadcast evidence with a held socket (the shape O-6b's cap produces):
+    6 × 24 KiB `session.snapshot` broadcasts plus a progress frame and a process
+    activity against a 64 KiB `maximumOutboundBytes` deliver exactly
+    `[session.snapshot(seq 1), session.rebaseline(snapshot seq 8)]` — the
+    in-flight frame is never recalled, the survivor carries
+    `subscriptionToken: "token"` and the snapshot whose `eventSequence` covers
+    every dropped sequence, `queuedFrames: 2`, no
+    `connection.outbound-capacity` record, the socket still OPEN, and 6 frames /
+    ~5 × 24 KiB coalesced. Without coalescing the fourth 24 KiB snapshot closes
+    the peer.
+  - Keyed/summary case: only the unsent superseded summary revision is dropped
+    (`outboundCoalescedFrames: 2` for two supersessions of one session);
+    sequenced frames no queued snapshot covers, including the removal-carrying
+    activity, are all delivered in order.
+  - Backstop case: three distinct sessions' 24 KiB snapshots against the same
+    64 KiB cap still produce one `connection.outbound-capacity` record with
+    `oldestTopic=session.snapshot nextTopic=session.snapshot nextBytes=…`, a 1013
+    close, `closeInitiated`, and no further admission.
+  - Barrier case (`sync-protocol.integration.test.ts`): with the open response
+    held, three quarantined 24 KiB snapshots and a progress frame flush after
+    response + ack; the queue holds the two responses plus the one
+    `session.rebaseline` instead of overflowing the 48 KiB cap,
+    `synchronizationBytes` is 0, no capacity record is written, and the suffix
+    arrives as the rebaseline carrying `opened.result.syncToken` and snapshot
+    `eventSequence: 6`.
+  - Phone side (`packages/ios-app/Tests/Gateway/SessionPresentationStoreTests.swift`,
+    "a coalesced session rebaseline installs the state a gap would
+    resynchronize"): the store is fed exactly the frames the coalescing queue
+    emits — the in-flight `session.snapshot` then the `session.rebaseline` with
+    the live token and the survivor snapshot six sequences later. It installs
+    the survivor (the branches that cannot reconcile keep the previous authority
+    and schedule a resynchronization instead of assigning it), and a second
+    store fed the same state one exact-next frame at a time reaches the same
+    authoritative snapshot, the same `visibleTranscript` and the same
+    `mountedTranscriptCoverage`, and the control that sends the same newer
+    snapshot as the plain exact-next topic installs nothing at all — that gap is
+    what the rebaseline form replaces. (`scripts/tron-ios-test run
+    --only-testing TronMobileTests/SessionPresentationStoreTests`: 66/66.)
+  - Negative control (`~/.tron/workspace/files/hardening/g-4/negative-control.txt`):
+    the coalescing identity removed from `outboundFrameIdentity`, then restored;
+    both new integration cases fail with `queuedFrames: 0` — the queue retired on
+    its backstop, which is the capacity close G-4 prevents.
+  - `npm run build` clean; `python3 scripts/check-documentation-policy.py` and
+    `scripts/personal-info-guard.sh` pass.
+- Review round 2 (construction: `changes-required`) addressed:
+  - Blocker — the rebaseline dropped every unsent sequenced frame of its session,
+    including frames whose effect no snapshot installation performs: the phone's
+    `session.operationFailed` receipt (`ComposerDraftCoordinator.failOperation`
+    restores the draft and retires the submission), `session.extensionError`,
+    the `session.closed` notice, the `session.resourcesChanged`/
+    `structureChanged`/`contextChanged` revision bumps that reload commands, and
+    extension editor directives. The queue now supersedes only topics a snapshot
+    restates (`SNAPSHOT_STATED_TOPICS` in `server.ts`) and only the run of that
+    session's frames after the newest fence: dropping stops at the first frame
+    whose effect installing a snapshot does not perform, and that frame and
+    everything behind it are delivered in order.
+  - Minor — the sequence comparison ignored `runtimeGeneration`, so a
+    generation-2 snapshot could drop generation-1 frames and leave a gap the
+    phone resynchronizes over. Frame identity now carries
+    `runtimeGeneration` (read from the payload) and only frames of the
+    snapshot's own generation are superseded; frames of another generation are
+    fences.
+  - Minor — `recordOutboundBytes` counted the original snapshot's bytes, not the
+    `session.rebaseline` the queue queued. `OrderedOutboundQueue` now reports the
+    bytes it accepts (new `accepted` callback), so accepted minus coalesced is
+    exactly what reached the socket; the per-connection rebaseline encode is
+    stated in `packages/gateway/README.md` (only the connection's installed
+    `subscriptionToken` differs).
+  - Nit — the observability row, the `outboundCoalesced*` doc comment and the
+    `gateway.resources` row no longer say "same key" (supersession is by session
+    and sequence).
+  - Evidence: `server-capacity.integration.test.ts` 34/34, the round's focused
+    set (`server-capacity` + `sync-protocol.integration` + `stall-diagnostics` +
+    `server-compression` + `server-live-view` + `session-sync`) 84/84 and
+    `server-connection-memory` + `server-heartbeat` + `server-revocation` +
+    `server-frame` 37/37; `npm run build` clean. New cases: "keeps a one-shot
+    receipt and everything behind it when its snapshot covers the run after it"
+    (a stalled link broadcasting snapshot 1, progress 2,
+    `session.operationFailed` 3, progress 4, snapshot 5 delivers
+    `session.snapshot:1`, `session.progress:2`, `session.operationFailed:3`,
+    `rebaseline:5` with the receipt's own `data.message`, `outboundCoalescedFrames: 1`,
+    and accepted minus coalesced equal to the bytes handed to the socket) and
+    "supersedes only the frames of the surviving snapshot's own runtime
+    generation" (delivers `session.snapshot:1`, `session.progress:2`,
+    `session.toolProgress:3`, `session.snapshot:4`). Negative controls, each run
+    alone and reverted: disabling the fence drops the receipt (`queuedFrames` 4 →
+    2 and the delivered-frame assertion fails); disabling the generation check
+    delivers `[session.snapshot:1, rebaseline:4]`; recording the original
+    snapshot's bytes for the rebaseline fails the byte identity (99936 accepted
+    against 49926 handed to the socket). Phone side: `SessionPresentationStoreTests`
+    67/67 with "a coalesced rebaseline still carries the one-shot receipt its
+    snapshot cannot restore" (the receipt's
+    `sessionPresentationStoreDidFailOperation` fires, the rebaseline installs the
+    same authority, visible transcript and coverage as the exact-next path, and
+    the control without the receipt installs the same authority with no failure).
+- Review round 3 (orchestrator merge check, after merging
+  `hardening/integration`) addressed:
+  - Blocker (reproduced, 3/3) — `session-archive.integration.test.ts` ›
+    "settles a forking command in its origin" failed with a `running`
+    `tron.chat-invocation.v1` entry. Mechanism, measured at the enqueue: the
+    forking replacement's first snapshot (seq 3) is already being written when
+    the replacement publishes seq 4 and seq 5, so the queue supersedes the
+    unsent seq 4 and delivers the survivor — snapshot seq 5, the settled state —
+    as the `session.rebaseline` that covers the dropped sequence, exactly the
+    round-1 construction. The case read only `session.snapshot` frames, so it
+    asserted on the *stale* seq 3 and could not see the state the client
+    installs. Fix at the reading owner, not by relaxing it: a new
+    `deliveredAuthorityFrames` helper returns the authoritative state the client
+    received however the queue delivered it (its own `session.snapshot`, or the
+    snapshot nested in the `session.rebaseline` covering the superseded
+    sequence), and both the delivery wait and the "no running invocation"
+    assertion now use it. The assertion is unchanged and still bites: with it
+    reading the *oldest* delivered authority instead of the newest, the case
+    fails on the same `running` entry, and with the coalescing disabled
+    (`G4_DEBUG_NO_COALESCE`) the same case passes over plain snapshots 3/4/5 —
+    no sequence gap is hidden, because the covered form is what makes the
+    dropped sequence admissible to the client at all. Measured at that point in
+    the case: with coalescing the client holds 1 plain snapshot (seq 3, still
+    running) and 2 authority states, the second the rebaseline's settled seq 5;
+    without it, 3 plain snapshots (seq 3/4/5).
+  - Blocker — the round's new fixtures still spoke protocol 5 after `G-7`
+    bumped the lockstep protocol to 6, so their hello was refused and six cases
+    timed out. `server-capacity.integration.test.ts`'s `info()`/hello and
+    `sync-protocol.integration.test.ts`'s `info()`/hello now advertise and send
+    6; both files pass.
+  - Evidence: the round's seven required files green in one run on the merged
+    branch (`npx vitest run` of all seven, default timeouts): 388/388 —
+    `session-archive.integration` 41, `server-capacity.integration` 34,
+    `sync-protocol.integration` 4, `stall-diagnostics` 22,
+    `server-heartbeat.integration` 10, `server-http-lifecycle.integration` 20,
+    `runtime-registry.integration` 257. During the round the last two files
+    timed out on single cases under this host's load (load average 20-57 from
+    parallel workers) at vitest's 5 s default, against the Gateway's own 5 s
+    hello deadline and against 5 s of pinned-runtime work; both are byte-for-byte
+    `hardening/integration` files and pass unmodified once the host is quiet, so
+    that was the host, not G-4. `npm run build` clean.
+- Changes: `perf(gateway): coalesce superseded outbound frames (G-4)` and its
+  review-round commits on `hardening/g-4`.
+- "Done when" items: (1) "O-6b's bandwidth-cap case never closes a socket for
+  capacity" — proved at the transport owner with a real Gateway, a real socket
+  and the broadcast paths, where the same bytes close the peer without
+  coalescing and do not with it; the O-6b `bandwidth-stream` qualification run
+  itself is the orchestrator's quiet-host measurement (the fixture-level
+  signals are `connection.outbound-capacity` = 0 for the capped mobile
+  connection and `outboundCoalescedFrames`/`outboundCoalescedBytes` > 0 in the
+  capped window's `gateway.resources` record). (2) The queue stays bounded and
+  the record names topics — met by the cases above.
+- Kept on purpose: the 8 MiB/4,096-frame backstop, the one-frame-at-a-time
+  writer, the per-broadcast prepared encoding, the barrier quarantine (coalescing
+  never touches quarantined events; it acts only on the queue), the revocation
+  fence and the `whenIdle` close path, and the Gateway's own overflow
+  `session.rebaseline` (which carries no `payload.eventSequence` and is therefore
+  never superseded). Frames of the session state a snapshot re-states (progress,
+  tool progress, process/extension activity, compaction, an earlier rebaseline)
+  are dropped only by a newer snapshot of the same runtime generation that covers
+  their sequence; one-shot frames (failure receipts, resource/structure/context
+  revision bumps, extension editor directives, close/error notices) are fences,
+  and the queue keeps them and everything behind them in order, which is what
+  makes a dropped delta reconstructible and a dropped effect impossible.
+- Deviations:
+  - `OrderedOutboundQueue.enqueue` takes `OutboundFrame`
+    (`{encoded, bytes, topic, key?, sessionId?, sequence?, runtimeGeneration?,
+    rebaseline?}`); the
+    queue's unit cases use `queuedFrame()`/`sequencedFrame()` helpers.
+  - `outboundFrameIdentity(connection, value, prepared, maximumBytes)` needs the
+    connection for the installed `subscriptionToken` and re-encodes the survivor
+    through `prepareOutboundFrame` inside `stage("frame.serialize")`, so the
+    rebaseline's bytes are measured where they are serialized. The per-topic
+    `gateway.resources` block still attributes the frame to the topic that
+    published it, not to the wire topic of the superseded survivor.
+  - `OrderedOutboundQueue` gained an `accepted(bytes)` callback, so the
+    `outboundBytes` counter is recorded where the queue accepts a frame instead
+    of in `sendOutcome`; the value is the bytes actually queued, which for a
+    coalescing replacement is the rebaseline's own.
+  - `server-capacity.integration.test.ts`'s fanout case was renamed and its
+    expectation changed: it used to require that every `session.summary`
+    revision reaches every client in global order. G-4 supersedes that
+    expectation (the plan names summaries as coalescing candidates), and the
+    phone's catalog admission is revision-monotonic per session
+    (`DashboardStateOwners.apply` returns `.stale` when
+    `summaryRevision <= current`, so a dropped intermediate revision leaves no
+    stale row). The case asserts the properties that remain: what a client
+    receives is a subsequence of the broadcast order, each session's revisions
+    never go backwards, every session's last revision (8) is delivered, and the
+    fence response still follows every frame.
+- Tasks added: none. R-1/R-4 should still watch for a phone-side consequence,
+  but the gap this row used to create is gone: a superseded sequence now arrives
+  covered by a rebaseline the phone installs.
+- For the next agent: the `bandwidth-stream` O-6b case is the acceptance run
+  for this row; read `connection.outbound-capacity` counts and
+  `outboundCoalesced*` from the fixture's `gateway.jsonl`. The coalescing
+  identity lives in `outboundFrameIdentity` in
+  `packages/gateway/src/transport/server.ts`: a new whole-state topic added
+  later needs one row in `SNAPSHOT_STATED_TOPICS`, not a second queue feature,
+  and anything sequenced is superseded only through a replacement that covers
+  it. A new sequenced topic whose effect installing a snapshot does not perform
+  needs no change: the queue fences it by default.
 
 ### Orchestrator · 2026-09-28 · G-3 merged
 
@@ -6250,7 +7133,6 @@ wait).
   `gateway-stall` episode is the correct reading, not a defect. Episode count
   (121 vs 77) is the tool splitting outages at background blips by design.
   R-4 confirms on the evaluation day's O-1-keyed exports.
-
 ### G-8b · Claimed · 2026-09-28 · orchestrator-dispatched deepseek-worker (branch `hardening/g-8b`)
 
 - Result: the Mac app status poll no longer pays the fail-closed Stable
@@ -6398,3 +7280,495 @@ wait).
   `xcodebuild build-for-testing` and `test-without-building` reproduce the
   focused run cheaply. G-8d remains the other half of the ambient discovery
   cost.
+
+### G-1b · Blocked · 2026-09-28 · orchestrator-dispatched deepseek-worker (branch `hardening/g-1b`)
+
+- Result: the catalog owner now watches its folder and reconciles as its
+  backstop. `SessionCatalog.start()` starts a recursive `fs.watch` (FSEvents on
+  macOS) on the canonical sessions root plus a `CATALOG_RECONCILE_INTERVAL_MS`
+  (30-minute) pass; a path event is a hint, debounced
+  `CATALOG_EVENT_DEBOUNCE_MS` (250 ms), that re-reads one file's durable tail and
+  publishes one row through the same lane every Gateway-owned change uses. A
+  watcher that was observing and stopped is replaced and the folder's own cut is
+  re-read; a root that cannot be watched yet is retried
+  (`CATALOG_WATCH_RETRY_MS`, 5 s) while the index keeps serving the rows it has.
+  The row's Done-when is met in memory (the integration case below); the O-6a
+  confirmation of it is owed by the orchestrator, which has the probe and the
+  request-path walk counts.
+- Evidence, mechanism (real watcher, real catalog, real Gateway wiring):
+  - `npx vitest run src/sessions/runtime-registry.integration.test.ts -t
+    "publishes an external append"` **1 passed, 616 ms**: against a live
+    `RuntimeRegistry` (the code path the fixture Gateway runs), a child
+    transcript created and then appended to by a writer the Gateway does not own
+    reaches its catalog row (`delegated`, then `messageCount` 1 and the file's
+    exact size) in ≤ 1 s, and the O-5 sampler's `recordCatalogWalk` recorded no
+    catalog structure walk in that window.
+  - `npx vitest run src/sessions/session-catalog.test.ts` **19 passed / 19 in
+    6.5 s**, twice; `session-catalog.test.ts` + `catalog-metadata-index.test.ts`
+    + `catalog-discovery.test.ts` **40 passed / 40 in 6.7 s**. The case "advances
+    a row for an external append within a second without walking the catalog"
+    runs the production watcher with the interval backstop disabled
+    (`reconcileIntervalMs: 0`), so only the watcher can publish the append.
+  - `src/sessions/runtime-registry.integration.test.ts` full file **248 tests: 1
+    failed** — the known load flake "keeps a large streamed write visible
+    through snapshot recovery and canonical handoff" (5081 ms against its 5 s
+    `waitUntil`; passes alone in 4.65 s, and alone on the pre-G-1b code in
+    4.67 s, so its ~0.3 s margin is the cause, not this change). `-t "catalog"`
+    35/35, `-t "index"` 8/8. `npx tsc --noEmit -p .` clean;
+    `python3 scripts/check-documentation-policy.py` and
+    `scripts/personal-info-guard.sh` pass.
+- Blocked on the O-6a half of "Done when" ("in O-6a, child-file appends reach
+  the index within 1 s without any request-path walk"). Three bounded
+  `scripts/tron-profile gateway --scenario multi-session --iterations 1
+  --catalog-files 200 --catalog-mib 32 --no-build` runs were made (2 × 30 s and
+  1 × 120 s mixed windows; last run
+  `20260928T144239Z-multi-session-fcce82`, `finished in 3.3 min`, no
+  "uncommitted tracked changes" warning). Review round 1 established that those
+  runs were made on the wrong tree and that their method cannot measure the bound
+  at all, so they are kept here only as history: the run's own `report.json`
+  source block names the `hardening/integration` worktree path, branch
+  `hardening/integration`, revision `b18919961`, whose
+  `src/sessions/session-catalog.ts` and 07:13 `dist` contain no
+  `watchCatalogFolder` (`grep -c` = 0 in both). The measured fixture Gateway
+  therefore had no watcher, and a frozen durable document was that tree's
+  expected behaviour. The "one `catalog.reconciled` per two starts" reading was
+  wrong for the same reason: the priming Gateway stopped 3.5 s after it started,
+  before its reconcile finished, and the single `200 added` in 8274 ms belongs to
+  the second, measured start. The sampler read only the durable document, which
+  is written at most every `CATALOG_PERSIST_MAX_WAIT_MS` (60 s), so no run of
+  that shape can show a 1 s bound. The "unexplained persist-cadence signal" and
+  the proposed T-2 row that rested on it are withdrawn, and the corrected
+  procedure is recorded in the round-1 entry below; no T-2 row was added.
+- Changes: `packages/gateway/src/sessions/session-catalog.ts` (the watcher, the
+  cadences, `catalog.changed` / `catalog.watcher-reset` reports);
+  `packages/gateway/src/sessions/catalog-discovery.ts` (exports
+  `isIgnoredCatalogDirectory` so the watcher and the walk apply one path rule);
+  `packages/gateway/src/sessions/runtime-registry.ts` (two option
+  pass-throughs in the `SessionCatalog` construction and the startup comment
+  only — the minimal call site G-3's parallel work can rebase over);
+  `packages/gateway/src/gateway-main.ts` (the two records);
+  `packages/gateway/docs/observability.md` (`catalog.reconciled`'s "when" and
+  rows for the two new events);
+  `packages/gateway/src/sessions/session-catalog.test.ts`;
+  `packages/gateway/src/sessions/runtime-registry.integration.test.ts` (one
+  case).
+- Failure modes written before the watcher (numbered 9-16 in the test file): an
+  event the platform never delivered (the next interval pass publishes the row);
+  a file replaced with a new inode at the same path (identity and counts come
+  from the replacement, not the old tail); a child transcript before its parent
+  (one delegated row, and the parent does not double it); the root moved or
+  unavailable (one outage record, last-good rows served, watched once it exists);
+  a burst of events (one debounced read per path, no walk, no read left armed);
+  a watcher that stopped (one `catalog.watcher-reset`, a replacement watcher, a
+  whole-folder reconcile); an event the platform could not name (the index is
+  re-derived once); an event for a path discovery ignores or a file that is not a
+  transcript (no row, no read). Review round 1 added modes 17-22, listed with its
+  findings in the entry below.
+- Kept on purpose: the read phase's batch bound is the index's existing one
+  (`CatalogMetadataIndex.reconcile` reads `RECONCILE_CONCURRENCY` = 16 candidates
+  per awaited batch, ≤ the plan's 50, covered by G-1a's "reads reconciled files
+  in one bounded batch at a time"), so this row adds the cadence that drives it
+  rather than a second batching layer over the same reads; G-9 moves the pass
+  into the scheduler. `catalog.reconciled` keeps its existing shape and owner.
+- Deviations: the watcher backend is an injectable option (`watchCatalog`,
+  defaulting to the recursive `fs.watch`) because several failure modes cannot be
+  forced on a real FSEvents stream (a dropped event, a start failure, a watcher
+  that stops, a burst of events, an unnamed event); every case the real backend
+  can produce uses the production watcher. An overflow is not a separate reset
+  reason: `fs.watch` does not surface FSEvents' must-scan flag, so a dropped
+  event is the interval's job (`catalog.reconciled`'s counts are the signal) and
+  an unnamed event re-reads the whole folder once. The reconciler was not
+  changed, so the durable document keeps its one writer.
+- For the next agent: G-1c switches `list`, `pageSource`, acquisition, attention,
+  automation targets and storage maintenance onto `SessionCatalog.rows()`; the
+  watcher already keeps those rows current for external writers, so the request
+  path's walks can be deleted without a new feed. G-9 owns moving the interval
+  pass and the watcher restart into the scheduler. Note for the orchestrator's
+  own runs: `--no-build` requires `npm run build` in `packages/gateway` first.
+
+### G-1b · Blocked (review round 1) · 2026-09-28 · orchestrator-dispatched deepseek-worker
+
+- Result: an independent reviewer found the O-6a evidence had been gathered on
+  the integration tree, which contains no watcher, plus four real gaps that only
+  the production FSEvents backend shows. Every finding was addressed; none was
+  rejected. The wrong diagnosis and the row proposed from it are withdrawn, the
+  watcher now covers folder events and deletions, and its restarts are spaced
+  instead of immediate. The row stays **Blocked**: the two O-6a runs now made on
+  this build are recorded below, and the in-memory half of the measurement is
+  still owed because the observer it needs is not usable in this scenario.
+- Finding 1 (blocker, reproduced): the O-6a run
+  `20260928T144239Z-multi-session-fcce82` ran against
+  the `hardening/integration` worktree at `b18919961`, where
+  `src/sessions/session-catalog.ts` and its 07:13 `dist` have no
+  `watchCatalogFolder` (0 matches in both), so no watcher existed and the frozen
+  durable document proved nothing; the priming Gateway stopped 3.5 s after it
+  started, before its reconcile finished. The "unexplained persist-cadence
+  signal" narrative and the proposed T-2 row are deleted from the entry above,
+  which now records the real cause and the method's own limit (a durable document
+  capped at `CATALOG_PERSIST_MAX_WAIT_MS` = 60 s cannot show a 1 s bound). The
+  corrected procedure is in the Blocked note above; the re-run itself is owed,
+  and the attempts made here are recorded below.
+- Finding 2 (major): a non-transcript event path was dropped, so a folder moved
+  into the root and a folder renamed inside it were invisible for up to 30
+  minutes, and the root's own move produced no record and no reconcile at all.
+  `watchEvent` now resolves such a path against the folder: a directory has its
+  own `.jsonl` files re-read (debounced per path, with one whole-folder pass when
+  a folder holds more than `CATALOG_EVENT_DIRECTORY_LIMIT` = 64 transcripts,
+  which also bounds the per-path map), an absent path debounces one whole-folder
+  cut, an existing non-transcript file stays a no-row event, and the root's own
+  name with the root gone is the watcher's outage rather than a cut — no cut of a
+  missing folder is membership evidence. The folder's own name *with the folder
+  there* is ignored instead: macOS reports it once when the watch attaches, and
+  treating it as a reason to re-read the whole folder cost one spurious
+  full-folder pass per attach (the first version of this fix did exactly that,
+  and the real-backend case below caught it). A real-trace probe confirmed that macOS
+  reports the root's own rename as `change "sessions"`, that a folder moved in
+  reports only `rename <folder>`, and that inner events stop until the root is
+  back. New real-backend cases: "publishes a folder moved into the root and the
+  folder an in-root move renamed" and "keeps its rows while the root itself is
+  away, and a later cut republishes them" (modes 17 and 18); the second asserts
+  that a pass over the folder that is not there publishes nothing and that the
+  rows survive an append the watcher could not see.
+- Finding 2b (major, found by the tests this round added): absence evidence had
+  to be gated on the folder still being there. A root that is moved away takes
+  every path inside it with it, so (a) the finding 3 rule would have dropped the
+  rows one event at a time for a folder that is merely elsewhere, and (b) the
+  periodic pass (and the startup pass) would have published a "complete" cut of
+  zero candidates and emptied the durable document. `SessionCatalog` now has one
+  `catalogRootIsDirectory()` check used by all three: `refreshPath` refuses
+  absence evidence without it, `reconcileIndex` reports `incomplete` and
+  publishes nothing, and the watcher's root event is an outage. Cases: "keeps its
+  rows while the root itself is away, and a later cut republishes them" (real
+  backend; mode 18) and "records one outage for the root's own event when the
+  folder is gone" (mode 22, the injectable backend, because the platform cannot
+  be made to deliver that event on demand).
+- Finding 3 (major): rows came only from commit-point hooks, so the watcher
+  published files the Gateway had not committed and nothing removed them when the
+  Gateway rolled them back (`rm(importedPath)` after a failed import,
+  `removeUncommittedForkArtifacts`). `refreshPath` now treats `lstat` ENOENT on
+  the exact path as removal: the row is dropped and the document rewritten. Other
+  errors still keep the row, so this deliberately extends G-1a's rule: an absent
+  exact path *is* membership evidence, while an unreadable path is not. Case:
+  "drops the row for a canonical file deleted outside the Gateway" (mode 19),
+  which also asserts the durable document lost the row, and "keeps a row for a
+  path it can see but cannot read" for the other half of the rule.
+- Finding 4 (minor): the `catalog-index.failure` false alarm falls out of
+  finding 3 — an absent path is not read at all, so `append` and `summaryFor` are
+  never called for a file that is gone. Mode 19 asserts both spies were not
+  called.
+- Finding 5 (minor): the per-path debounce had no ceiling, so a path written
+  more often than the quiet spell was re-armed forever. It is capped by
+  `CATALOG_EVENT_MAX_WAIT_MS` (1 s) the way persistence is, so a continuously
+  appended transcript is re-read about once a second. Case: "re-reads a path whose
+  events never stop arriving" (mode 20).
+- Finding 6 (minor): `ensureWatching` re-checks `this.watcher` after the
+  `catalogRoot()` await (two concurrent callers could each attach a watcher and
+  double every event); `onReset` is bound to its own handle, so a reset from an
+  already-replaced watcher cannot stop its successor; a stop schedules the
+  replacement on the retry cadence instead of attaching in place; and
+  `watchOutageReported` is cleared only once a replacement has survived one retry
+  interval, so a watcher that dies at every attach produces one record and a
+  bounded restart rate. Case: "spaces the restart of a watcher that dies right
+  after every attach" (mode 21); the error case now asserts the replacement is not
+  immediate.
+- Finding 7 (minor): the reset message and the observability row claimed every
+  reset is followed by a whole-folder reconcile, which was false for
+  `unavailable`. The owner now reconciles once when a replacement attaches after
+  a reported outage, on top of the one reconcile the first stop of an outage
+  makes over a readable folder, so the gap the outage opened is read even when
+  the attach is what restored the folder. The message and the doc row say that.
+- Finding 8 (minor): `catalog.changed` fired on every single-row publish,
+  including every Gateway-owned persist, into the shared 4,000-record / 2 MB debug
+  buffer. It is now the watcher's change stream only — a Gateway-owned change is
+  attributable to the commit that made it — with `outcome` extended by `removed`
+  for the finding 3 deletion, and the doc row states the scope and the bound (up
+  to about four records per path a second, one per quiet spell, with the ceiling
+  only bounding how long a read waits when events never stop). That also
+  makes it the in-memory signal the O-6a re-run needs. The `catalog.changed` case
+  now asserts a Gateway-owned `refresh()` reports nothing and that a watcher
+  deletion reports `removed`.
+- Finding 9 (minor): the burst case emitted one event per path, so coalescing was
+  never exercised. "coalesces a burst of events into one read per path" now sends
+  40 events for each of 25 paths (1,000 events) and asserts exactly one
+  `summaryFor` per path, no `scan`, and no duplicate IDs (mode 13).
+- Finding 10 (nit): the assertions on a private timer map are gone — the burst
+  case counts reads through the source instead — and the integration case reads
+  the catalog owner through a documented `catalogOwner()` helper beside
+  `settleCatalog()`. No public reader exists before G-1c, and the index's rows
+  *are* the observable effect that case asserts.
+- Finding 11 (nit): the plan header carried six `Last updated` lines; it is one
+  line again.
+- Changes in this round: `packages/gateway/src/sessions/session-catalog.ts` (the
+  folder-event path, the deletion rule, the per-path ceiling, the watcher
+  lifecycle and the watcher-only change stream);
+  `packages/gateway/src/sessions/session-catalog.test.ts` (modes 17-21, the
+  rewritten burst and ignore cases, the `catalog.changed` case);
+  `packages/gateway/src/sessions/runtime-registry.integration.test.ts` (the
+  `catalogOwner()` helper); `packages/gateway/src/gateway-main.ts` and
+  `packages/gateway/docs/observability.md` (message and rows).
+- Checks: `npx vitest run src/sessions/session-catalog.test.ts` **26 passed / 26
+  in 9.4 s and again in 11.1 s** (was 19); `npx vitest run
+  src/sessions/runtime-registry.integration.test.ts -t "catalog"` **36 passed**;
+  `-t "publishes an external append"` **1 passed**;
+  `src/sessions/catalog-metadata-index.test.ts` +
+  `src/sessions/catalog-discovery.test.ts` **21 passed**; `npx tsc --noEmit -p .`
+  clean. The real-backend cases run the production watcher; the injectable
+  backend is used only for events FSEvents cannot be made to produce (modes 9,
+  13-16, 21, 22).
+- Residual risk for the orchestrator: none known for the watcher itself. The
+  pre-existing hazard a missing root used to create for the startup and periodic
+  passes (a "complete" cut of zero candidates emptying the durable document) is
+  closed by finding 2b's guard, which is why an outage now needs no special case
+  to stay safe. `catalog.reconciled` reports such a pass as `incomplete`, so an
+  operator sees it.
+- O-6a on this build (new evidence, three attempts): the build here is
+  `33b25f3ab` in this worktree (`npm run build`, `dist` carries the watcher), and
+  the runs' own `report.json` source blocks say so (`"worktree"` = this
+  worktree, `"dirty": false`), with the fixture's `driver-config` naming this
+  worktree's `packages/gateway` — the attribution problem finding 1 found is
+  gone.
+  - `20260928T152251Z-multi-session-0efe51` and
+    `20260928T152602Z-multi-session-5c6047` (`--catalog-files 200 --catalog-mib
+    32 --mixed-seconds 60`, `finished in 2.2 min` and `1.8 min`, exit 0): the
+    watcher build runs the scenario at scale. The second run's fixture log holds
+    exactly one `catalog.reconciled` (200 added, 1648 ms, at startup), no
+    `catalog.watcher-reset` and no `catalog-index.failure`, so no outage and no
+    failed index read occurred across ~90 s of continuous external appends. Its
+    probe counted `no_subscriber.catalog.walks` 15 and `catalog.walks` 49 for the
+    mixed window: those are the pre-G-1c request path's own walks (the criterion
+    G-1c's Done-when measures), not walks the appends caused — the append-caused
+    count is 0, which the integration case asserts directly.
+  - Two further attempts (`20260928T152836Z-multi-session-9e118c` and
+    `20260928T153500Z-multi-session-3afd47`) tried to read the in-memory
+    `catalog.changed` stream with an observer that pairs like the phone and polls
+    `system.logs.export`. Neither produced a sample: both runs failed at the
+    scenario driver, and their `fixture/gateway.jsonl` error mix is catalog churn
+    in name only:
+
+    | `rpc.error` | `9e118c` | `3afd47` |
+    |---|---|---|
+    | `session.sync` conflict, "Session synchronization is no longer owned by this token" | 244 | 242 |
+    | `session.presentation.set` conflict | 11 | 10 |
+    | `session.open` conflict | 2 | 2 |
+    | `session.open` busy / `catalog_changed` | 1 | 0 |
+
+    Both drivers died on that `session.sync` conflict
+    (`driver-iteration-1.log`), for one client ID that matches every record. The
+    two runs without the observer, on the same build
+    (`0efe51`, `5c6047`), logged **0** `rpc.error`. So the extra paired mobile
+    client is what took session synchronization ownership away from the driver;
+    `catalog_changed` churn is 1 record out of 258 and 0 out of 254, and is not
+    what failed either run. The observer's own connection was also the one that
+    sent nothing (16.5 s in `9e118c`, 27.7 s in `3afd47`) and was closed at
+    outbound-queue capacity in both: a sixth mobile-role connection that never
+    pings and exports ~1 MB of diagnostics every 15 s.
+  - What the owed re-run needs instead: the in-memory signal has to come from the
+    fixture process itself. `scripts/tron-profile-gateway-probe.mjs` is already
+    preloaded there and already counts catalog walks in-process; the natural
+    instrument is one more counter it can read without any extra connection
+    (a row-publish tally or the newest `catalog.changed` timestamps), recorded
+    with the appender's write times. Until that exists the row stays on the
+    orchestrator's owed confirmation, and the durable-document sampler from the
+    earlier entry stays retired: it cannot show a 1 s bound.
+- Not addressed, deliberately: `watchRetryMs` remains a plain `setTimeout`; G-9
+  owns moving the watcher restart into the scheduler, and the retry is now the
+  only restart path, so a failing watcher restarts at most once per interval.
+
+### G-1b · Done (review round 2) · 2026-09-28 · orchestrator-dispatched deepseek-worker
+
+- Result: the one major was a real production cost and is fixed, with a
+  production-FSEvents failing-first case and its negative control; both minors
+  and the two documentation/evidence corrections are in. The row is **Done** on
+  the orchestrator's decision — the O-6a confirmation of the Done-when is owed by
+  the orchestrator, which owns the probe file.
+- Finding 1 (major): an absent non-transcript path no longer reconciles the whole
+  folder. `resolveAbsentEvent` re-reads only the indexed rows at or under the
+  path (`indexedBeneath`) through the same per-path debounce and does nothing
+  when no row matches, so an atomic write's temporary name, a scratch file and
+  the Gateway's own quarantine rename cost no walk; `transcriptsBeneath` walks by
+  hand instead of `readdir({recursive: true})`, skipping the ignored folders and
+  stopping at `CATALOG_EVENT_DIRECTORY_LIMIT`; `debounceUnnamedEvent` is capped
+  by `CATALOG_EVENT_MAX_WAIT_MS` like the per-path debounce.
+  - Failing-first, production FSEvents backend: "costs no whole-folder pass for a
+    non-transcript name that is gone" (tmp rename, scratch create/delete,
+    quarantine rename and removal) and "drops the rows under a folder removed
+    with its transcripts, without a whole-folder pass" (`rm -rf` of a run
+    folder). Negative control: with `8a52a73b2`'s `session-catalog.ts` and these
+    tests, the first sees **2** `scan` calls and the second **1**, both green
+    with the fix. Modes 22-23 added to the test file's list.
+  - "re-derives the whole index once a second for unnameable events that never
+    stop" (mode 23) is the ceiling's failing-first case: with the old
+    `debounceUnnamedEvent` the 5 s `waitFor` times out (the quiet spell is
+    re-armed every 100 ms), and it passes with the ceiling.
+- Finding 2 (minor): the `catalog.changed` bound is corrected in all three
+  places — the doc row, the cadence comment and the round-1 entry above — to the
+  real one: up to about four records per path a second, one per quiet spell,
+  with `CATALOG_EVENT_MAX_WAIT_MS` bounding only how long a read waits when
+  events never stop. No throttle was added: the true rate is now stated rather
+  than capped by a second mechanism over the same reads.
+- Finding 3 (minor): the round-1 entry's failed-run evidence was replaced with
+  the measured mix (244/242 `session.sync` conflicts, 11/10 presentation, 2/2
+  open, 1/0 busy `catalog_changed`), the driver logs that died on the `sync`
+  conflict, the two no-observer runs' **0** `rpc.error`, and the observer
+  connection's own silent/capacity closes. The stale "complete and merge-ready"
+  line in the base entry is replaced.
+- Finding 4 (Done-status blocker, no code change): `npm run build` and `npx tsc
+  --noEmit -p .` are clean at HEAD; the in-memory append-to-row bound stays
+  covered by the integration case and the interval-disabled watcher case. The
+  O-6a probe (`scripts/tron-profile-gateway-probe.mjs`) is outside this row's
+  owning files, so the orchestrator owes that confirmation.
+- Finding 5 (nit): the dead "Bounded batches" loop and its descriptor comment in
+  the burst case are deleted; the 25 writes are one `Promise.all`.
+- Durable-document persist cadence (evaluated, **no G-1e row**): a watcher row
+  reaches the durable document at most every `CATALOG_PERSIST_DEBOUNCE_MS` (5 s)
+  and at latest `CATALOG_PERSIST_MAX_WAIT_MS` (60 s) after it changes, but the
+  canonical JSONL stays authoritative and every startup reconciles against the
+  folder's own cut (`reconcileIndex` re-derives each candidate; `persistNow`
+  skips an unchanged generation), so a stale document is repaired, not lost. That
+  makes the cadence a property of the acceleration document, not a defect — the
+  only reader that suffered from it was the retired durable-document sampler.
+- Checks: `npx vitest run src/sessions/session-catalog.test.ts` **28 passed /
+  28 in 10.9 s** (was 26); `session-catalog.test.ts` +
+  `catalog-metadata-index.test.ts` + `catalog-discovery.test.ts` **50 passed /
+  50**; `npx vitest run src/sessions/runtime-registry.integration.test.ts -t
+  "catalog"` **36 passed**; `npx tsc --noEmit -p .` clean; `npm run build`
+  clean in 38 s. Negative controls run as above and then reverted.
+- For the orchestrator: `npm run build` has now been run in this worktree, so its
+  `dist` carries the watcher's current source for an O-6a run. Merging `hardening/integration` into this branch
+  conflicts only in this plan file (integration has newer rows/entries);
+  integration's `session-catalog.ts` is unchanged from the merge base, so the
+  source merge is clean.
+
+### Orchestrator · 2026-09-28 · E-2 and E-2c closed
+
+- Result: the iOS profiler can no longer take 10 GB: the parser is bounded
+  (E-2), host `--attach` cannot sample simulator processes (E-2b), and a
+  host-wide time-profiler trace whose export would exceed 2 GiB is refused
+  before export with its size and the remedy (E-2c). A traced product scenario
+  must use a short `--window-seconds` to fit; that is the accepted cost. E-2
+  and E-2c set to Done.
+
+### E-1 · Done · 2026-09-28 · orchestrator-dispatched deepseek-worker (branch `hardening/e-1`)
+
+- Result: `packages/gateway/docs/connection-resilience.md` gains a "Tailscale
+  flaps" section: the Gateway records a flap leaves (`connection.inbound-silent`
+  at `peerPath=relay`/`offline` with `peerRelay`, paired with
+  `connection.inbound-resumed` and its `silentMs` when the socket survives the
+  flap and unpaired when it does not, joined by the O-1 key), the
+  triage tool's reading (`scripts/tron-triage` reports the `path` cause from the
+  Gateway's silent record, from an attempt's `transport-open` timeout that never
+  reached the Mac, or — with `--tailscale-window --tailscale-peer NODEKEY` for
+  logs predating those records — from the covering relay window, while a window
+  that closed before the outage ended stays `[context]`), the incident's worked
+  example, and the user-side checks (iPhone Tailscale app and settings, Wi-Fi
+  private address, router client steering). Docs only: no code, record or test
+  changed, so no observability row is owed.
+- Evidence: `python3 scripts/test-tron-triage.py` passes 51/51 in 4.8 s
+  (`TRON_TRIAGE_TEST_REPORT`); the run and its table are retained at
+  `~/.tron/workspace/files/hardening/e-1/e1-triage-report.json{,.txt}`; the cases
+  behind the documented shapes are `test_relay_silence_joined_by_key_is_the_path`
+  (Gateway `peerPath=relay` evidence, `silentMs=68000`),
+  `test_relay_window_classifies_a_path_episode` (`relay path window` cause
+  evidence) and `test_a_relay_window_that_closed_before_the_episode_ended_is_context`
+  (the "does not cover this episode" context wording). The worked example's
+  numbers are Context's measurements and O-7's real incident-export run (14
+  `path` episodes with the capture against 5 without; both silent gaps `unknown`
+  with their windows named as context). `scripts/tron-triage` also run read-only
+  against `~/.tron/logs/device-exports/…2026-09-28T07-37-42-420Z.jsonl` (kept,
+  device id elided, at
+  `~/.tron/workspace/files/hardening/e-1/device-export-tailscale-run.txt`): 24
+  episodes, `path=0`, and with `--tailscale-window` the header reads `captured,
+  12 path line(s)` with no window covering an episode — the context behavior the
+  section describes. `python3 scripts/check-documentation-policy.py` (46 authored
+  files) and `scripts/personal-info-guard.sh` pass.
+- Changes: `docs(gateway): document Tailscale flap diagnosis (E-1)`;
+  `docs(gateway): correct Tailscale flap timing (E-1 review round 1)`.
+- Tasks added: none.
+- Kept on purpose: the existing `connection.inbound-silent` row in the
+  diagnostics table keeps its shape and gains the pointer to the new section
+  (round 1 changed only its closing "repeated …" clause); the records
+  themselves, their observability row and the triage tool are O-2's and O-7's
+  and were not re-documented.
+- Deviations: none.
+- For the next agent: R-4 counts the evaluation day's flaps with
+  `scripts/tron-triage … --tailscale-window --tailscale-peer NODEKEY` (the
+  section says what to read); E-3 is what removes the effect at home.
+- Review round 1 (changes required; all findings addressed in the follow-up
+  commit): the flap section now states the phone drops the socket within about
+  18 s of the path going quiet and the Gateway only after three missed 25 s
+  heartbeats, names the disconnecting shape (unpaired
+  `connection.inbound-silent`, then the phone's close as `connection.closed` or
+  the Gateway's `connection.heartbeat-timeout` at ~75–100 s, with the phone's
+  liveness `ping_timeout`), gives the silent record's 12–37 s detection window,
+  says "repeated silences at `peerPath=relay`/`offline`" in the diagnostics row,
+  and replaces the stale-app→`relay` claim with the disabled-extension symptom
+  (`transport-open` timeouts, no Gateway `http.upgrade`). Minor: deleted the
+  paired-record claim from `observability.md`'s budget paragraph (a silence that
+  ends in the socket's close leaves only its silent record) and dropped the
+  "keeps its wording" line above. Checks re-run: `test-tron-triage.py` 51/51
+  (14.2 s), `check-documentation-policy.py` (46 files), `personal-info-guard.sh`
+  — pass. The disconnecting shape is read from the code and the contract
+  constants (phone liveness retirement, the 25 s heartbeat tick and the close
+  path), not reproduced: O-2's blackhole test uses a client that never gives up.
+
+### T-2 · Done · 2026-09-28 · orchestrator-dispatched deepseek-worker (branch `hardening/t-2`)
+
+- Result: no hosted-test watchdog kills a synchronously blocked main thread. A
+  probe test that blocked it 5 s, then 10 s, then 20 s in one test passed after
+  35 s, and the only watchdog in this tree is the repo's own `withTestWatchdog`
+  (`packages/ios-app/Tests/Support/TestWatchdog.swift`), which this test does not
+  use and whose expiry is the "Test exceeded its 5.0 seconds watchdog" text seen
+  in other suites. The kill came from another worktree's run launching the same
+  host app on the same simulator: `20260928T160853Z-run.0UFrCv` (worktree
+  `tron-hardening`, default lane) recorded `owner.json` at 1790611733 and ran its
+  tests 1790611737.6–1790611779.1, and `20260928T160908Z-run.Y9hYTh` (worktree
+  `tron-hardening-g-7`, default lane, same simulator) started its tests at
+  1790611753.8 inside that window. The killed attempt is the stall test's, which
+  starts ~10.8 s into its suites and so lands within a second of the second app's
+  launch. The test's block is the named constant `mainStallTestBlock` (5 s) in
+  both phases.
+- Evidence: combined set (5 suites, 161 tests) green 5× before the change
+  (`20260928T170751Z-run.KpSLNJ`, `20260928T171235Z-run.d1TwFp`,
+  `20260928T171323Z-run.yMiBKP`, `20260928T171429Z-run.T3Ig4q`,
+  `20260928T171524Z-run.dKkmIF`; stall test 8.02 s) and green twice on the final
+  block (`20260928T182458Z-run.tPLyAI`, `20260928T182539Z-run.DhgWVH`: 5/5 in the
+  suite, stall test 10.52 s; the intermediate 4 s form also ran 4× green —
+  `20260928T173926Z-run.QJjdCa`, `20260928T174026Z-run.TuYhxq`,
+  `20260928T174123Z-run.KvlTxr`, `20260928T174222Z-run.Ri2Zsd`). Probe:
+  `20260928T171741Z-run.FF4ms5`. The killed run is
+  `~/Library/Developer/Tron/ios/test-runs/20260928T160853Z-run.0UFrCv`
+  (`summary.json`: "Test crashed with signal kill.", 160 passed of 161;
+  `test.log`: the run restarts at 09:09:37.574). Two more pairs have the same
+  shape: g-7's `20260928T160029Z-run.9dbW2W` (tests 1790611233.8–1790611262.0,
+  "Test crashed with signal kill before establishing connection") with c-4's
+  `20260928T160033Z-run.13mFm5` (1790611236.9–1790611241.9), and g-7's
+  `20260928T164851Z-run.Yqb7gv` (1790614134.9–1790614194.9, includes "Test
+  crashed with signal kill.") with g-4's `20260928T164907Z-run.EmmlGW`
+  (1790614150.0–1790614154.6). All six runs name lane `default` and simulator
+  `E816D194…`, and the locker refuses a second holder of one lock path (checked
+  by hand: exit 73), so at least one run in each pair never took the lane's
+  lease. Those three pairs are the only overlaps in all 87 recorded runs of
+  2026-09-28, and in each pair the later run survived while the one already
+  running failed. T-2's own post-change runs do not overlap any other run's
+  window.
+- Changes: the commit on this branch touches only
+  `packages/ios-app/Tests/Support/GatewayConnectionEpisodeRecorderTests.swift`
+  besides this plan.
+- Tasks added: T-3 (after T-2: default-lane runs across worktrees shared one
+  simulator despite the lease).
+- Kept on purpose: the production ping and production clocks (the test exists to
+  prove the off-main-actor watchdog measures a real block), and the assertion
+  that the record's `durationMs` is at least `blockedMs - 2 × watchdogInterval`.
+- Deviations: the second phase's block grows 2.5 s → 5 s while the first keeps
+  its 5 s, so the test blocks 10 s instead of 7.5 s. A 2.5 s block gives a
+  would-be surviving watchdog only a ~50% chance of a tick inside the window it
+  needs, so that negative control could pass vacuously; at the same constant it
+  always lands one. The first phase keeps the third interval on purpose: two
+  intervals are the derivation (`mainStallBound` + the tick grid + the loop's
+  first wake-up) and the third is the margin the literal 5 s always had, because
+  that wake-up delay is not interval-bounded under CPU starvation.
+- For the next agent: the lease that should have serialized these runs is T-3's.
+  Until it is fixed, a lone "Test crashed with signal kill" (or "…before
+  establishing connection") is contention first: compare the run's
+  `owner.json`/`summary.json` window with every other run's on the same
+  simulator before blaming the code under test.

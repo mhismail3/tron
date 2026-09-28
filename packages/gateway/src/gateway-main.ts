@@ -223,6 +223,23 @@ const sessions = new RuntimeRegistry({
       event: "sessions.archive.auto-unarchived", source: "sessions", outcome: diagnostic.outcome, reason: diagnostic.trigger,
     }),
   sessionAutomationReserved: (sessionId) => automationSchedulerForArchive?.hasSessionRun(sessionId) ?? false,
+  // Load and eviction are transitions at info: the byte budget's decisions have
+  // to be attributable to one session from the log alone, and the reason has to
+  // separate a budget eviction from an idle or requested one.
+  runtimeLifecycleRecord: (record) => logger.log("info",
+    `Session runtime ${record.event === "runtime.loaded" ? "loaded" : "evicted"} (${record.reason})`, {
+      event: record.event,
+      source: "sessions",
+      sessionId: record.sessionId,
+      reason: record.reason,
+      counts: {
+        transcriptBytes: record.transcriptBytes,
+        estimatedHeapBytes: record.estimatedHeapBytes,
+        // The budget is pressure rather than a gate, so a load it could not fit
+        // is served and flagged here instead.
+        ...(record.overBudget === true ? { overBudget: 1 } : {}),
+      },
+    }),
   compactionDiagnostic: (diagnostic) => logger.log(
     diagnostic.outcome === "failure" ? "error" : "info",
     `Session compaction ${diagnostic.outcome}`,
@@ -254,6 +271,19 @@ const sessions = new RuntimeRegistry({
     outcome === "reconciled" ? "info" : "warning",
     `Session catalog ${outcome}: ${added} added, ${removed} removed, ${modified} modified, ${unproven} unproven over ${files} files in ${durationMs}ms`,
     { event: "catalog.reconciled", source: "sessions", outcome, durationMs, counts: { files, added, removed, modified, unproven } },
+  ),
+  // One row the watcher changed for one file, outside any request span. Debug:
+  // the detail belongs in a diagnostic export's buffer, not in the persisted
+  // volume budget, and a Gateway-owned change is not reported here.
+  catalogChanged: ({ sessionId, outcome, durationMs }) => logger.log(
+    "debug",
+    `Catalog row ${outcome} for ${sessionId} in ${durationMs}ms`,
+    { event: "catalog.changed", source: "sessions", sessionId, outcome, durationMs },
+  ),
+  catalogWatcherReset: ({ reason }) => logger.log(
+    "warning",
+    `Catalog folder watcher reset (${reason}); the index is re-derived from canonical files once a watcher is attached`,
+    { event: "catalog.watcher-reset", source: "sessions", reason },
   ),
   runtimeDisposeTimeout: (graceMs) => logger.log(
     "warning",

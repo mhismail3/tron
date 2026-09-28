@@ -130,7 +130,7 @@ final class RealGatewayPiBoundaryTests: XCTestCase {
             defer { rawSession.invalidateAndCancel() }
             let raw = rawSession.webSocketTask(with: probeRequest)
             raw.resume()
-            let hello = try JSONEncoder.gateway.encode(["type": JSONValue.string("hello"), "protocolVersion": .number(5)])
+            let hello = try JSONEncoder.gateway.encode(["type": JSONValue.string("hello"), "protocolVersion": .number(6)])
             try await raw.send(.data(hello))
             _ = try await raw.receive()
             try await control("close", port: port, token: proxyToken, closeCode: 1013)
@@ -144,7 +144,7 @@ final class RealGatewayPiBoundaryTests: XCTestCase {
             // bytes, so GatewayFramePolicy checks the inflated frame. A frame at
             // the ceiling must decode through the production socket.
             let socket = GatewaySocketFactory.urlSession.makeConnection(probeRequest)
-            let hello = try JSONEncoder.gateway.encode(["type": JSONValue.string("hello"), "protocolVersion": .number(5)])
+            let hello = try JSONEncoder.gateway.encode(["type": JSONValue.string("hello"), "protocolVersion": .number(6)])
             try await socket.send(hello)
             _ = try await socket.receive()
             try await control("inject-frame", port: port, token: proxyToken, bytes: GatewayFramePolicy.maximumInboundBytes)

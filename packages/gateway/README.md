@@ -1,6 +1,6 @@
 # Tron Gateway
 
-## Protocol v5 chat semantics
+## Protocol v6 chat semantics
 
 The Gateway is the sole live owner of invocation, operation, and activity
 identity. Canonical Pi JSONL remains authoritative; Gateway-owned bounded
@@ -26,18 +26,20 @@ command-driven replacement cases in
 `src/transport/session-archive.integration.test.ts` cover all three calls.
 
 Transcript order is canonical branch order, never timestamp or activity recency.
-The v5 projection separates inbound context, agent output/invocations, ambient
+The v6 projection separates inbound context, agent output/invocations, ambient
 status, and hidden state. `custom_message` is model input; `custom`/`appendEntry`
 is extension state. Producer attribution is only exact at a Gateway callback
 boundary, receipt, trusted adapter, or registered tool ownership; unknown remains
 unknown. Every projection is bounded by count and byte limits and malformed
 recognized data fails closed for authoritative resynchronization.
 
-Protocol v5 deliberately has no v4 runtime path. The deployed v4 update helper
-cannot promote a candidate whose required range is strictly v5, so that one-time
-major transition must use the Mac app's manual local Release reinstall runbook:
-install the Mac app containing the v5 Gateway payload while preserving
-`~/.tron`, verify the registered Gateway, and only then install a v5-only iOS
+Protocol v6 deliberately has no v5 runtime path. The deployed v5 update helper
+validates a candidate payload manifest against the protocol version it speaks
+and refuses a candidate whose advertised protocol range does not contain it, so
+it cannot promote a strictly v6 candidate. That one-time major transition must
+use the Mac app's manual local Release reinstall runbook:
+install the Mac app containing the v6 Gateway payload while preserving
+`~/.tron`, verify the registered Gateway, and only then install a v6-only iOS
 client. The repository protocol manifest is projected into Gateway payload,
 Mac app, and iOS app metadata; launch/build/install validators require one exact
 range. A replacement launcher's bundled payload is the migration bootstrap when
@@ -45,7 +47,7 @@ a previously selected external payload advertises an older range. Same-major
 promotion and rollback treat that rejected external pointer as bounded history
 and use the validated signed bundle as their recovery authority; they never
 require the incompatible payload to become admissible again. Do not widen the
-advertised minimum or allow a mixed v4/v5 pair merely to bypass that handoff.
+advertised minimum or allow a mixed v5/v6 pair merely to bypass that handoff.
 Ordinary same-major updates continue through the owned Gateway update flow.
 
 Tron Gateway is the minimal always-running Mac service behind the Tron iPhone
@@ -642,7 +644,7 @@ from an automation-originated turn to prevent self-replication. Paired Gateway c
  clients may manage automations across that Gateway; this is not a new
  per-session authorization boundary.
 
-Authenticated push RPCs are `push.registration.upsert`, `push.registration.remove`, and `push.registration.status`; authenticated notification-resource RPCs are `notification.inbox.list` (keyset `cursor`, `filter`, `limit`), `notification.inbox.read` (one inbox ID or APNs request ID), and `notification.inbox.readAll` (a required `through` cut). Upsert derives `deviceId` from the connection and accepts only an opaque installation ID, endpoint-scoped grant ID/secret, the exact public relay origin that issued it, and preview/policy booleans; preview disclosure defaults off. Status returns the Gateway-owned relay origin and a bounded rotation requirement. A mobile grant issued by another origin, missing legacy origin identity, or rejected by the relay is never reactivated in place: iOS rotates it through App Attest and transfers the replacement capability. Upsert, removal, and `device.revoke` enter one bounded lane per target device before command-receipt execution, so cross-method invocation order is authoritative while different devices remain concurrent. Revocation disables local push authority before removing the paired bearer; a later admitted upsert revalidates that the device remains paired, and remote revocation retains a bounded tombstone. A grant ID awaiting revocation cannot be admitted as active again: upsert requires rotated endpoint authority, and restart retires any legacy active projection that overlaps a durable tombstone. Thus a delayed revoke can address only the old capability, never a newly active grant. The ask-notification policy is rechecked inside the same serialized admission transaction that appends the intent, so a concurrent policy disable can no longer admit and deliver an ask notification after the outer read. The public relay origin is read from the canonical maintainer-owned `config/PushService.xcconfig`, embedded into both signed products, and must be an exact public HTTPS origin. It is never accepted from tools, RPC, user settings, or runtime environment. Missing development configuration leaves notification delivery unavailable without affecting Gateway readiness; official packaging fails closed.
+Authenticated push RPCs are `push.registration.upsert`, `push.registration.remove`, and `push.registration.status`; authenticated notification-resource RPCs are `notification.inbox.list` (keyset `cursor`, `filter`, `limit`), `notification.inbox.read` (one inbox ID or APNs request ID), and `notification.inbox.readAll` (a required `through` cut). Upsert derives `deviceId` from the connection and accepts only an opaque installation ID, endpoint-scoped grant ID/secret, the exact public relay origin that issued it, and preview/policy booleans; preview disclosure defaults off. A registration identical to the stored grant is answered with the same status and writes nothing at all: no command receipt, no credential document, and no delivery-receipt or revocation overlay. Every other upsert keeps its command receipt and is admitted durably as before. `hello` and `system.info` carry `pushRegistrationRevision`, a digest of the grants this Gateway stores and the relay origin they are valid for; it changes whenever a grant is added, rotated, disabled at runtime or retired, so a phone that acknowledged an earlier value re-sends its registration and learns the rotation requirement. Status returns the Gateway-owned relay origin and a bounded rotation requirement. A mobile grant issued by another origin, missing legacy origin identity, or rejected by the relay is never reactivated in place: iOS rotates it through App Attest and transfers the replacement capability. Upsert, removal, and `device.revoke` enter one bounded lane per target device before command-receipt execution, so cross-method invocation order is authoritative while different devices remain concurrent. Revocation disables local push authority before removing the paired bearer; a later admitted upsert revalidates that the device remains paired, and remote revocation retains a bounded tombstone. A grant ID awaiting revocation cannot be admitted as active again: upsert requires rotated endpoint authority, and restart retires any legacy active projection that overlaps a durable tombstone. Thus a delayed revoke can address only the old capability, never a newly active grant. The ask-notification policy is rechecked inside the same serialized admission transaction that appends the intent, so a concurrent policy disable can no longer admit and deliver an ask notification after the outer read. The public relay origin is read from the canonical maintainer-owned `config/PushService.xcconfig`, embedded into both signed products, and must be an exact public HTTPS origin. It is never accepted from tools, RPC, user settings, or runtime environment. Missing development configuration leaves notification delivery unavailable without affecting Gateway readiness; official packaging fails closed.
 
 Outbound relay requests use one fixed `/v3/notifications` route, no redirects, a twenty-second deadline that exceeds the relay's bounded APNs deadline, a 2 KiB request and 16 KiB response boundary, and a lowercase-hex HMAC over method, path, timestamp, stable request ID, and the exact body's lowercase-hex SHA-256. Restart recovery retries transient outcomes with the same request ID. When the relay specifically reports that this ID still owns an active provider attempt, the Gateway polls it through the same bounded retry schedule; the relay ledger returns the eventual terminal result without creating a second APNs request. Unclassified ambiguous outcomes remain terminal and are never blindly replayed. Exact relay `invalid_signature` and `installation_unavailable` errors invalidate that grant without persisting or logging response bodies; mobile registration then rotates the capability instead of retrying an identity that cannot reach APNs. Quotas apply across the installation, canonical session, and target grant.
 
@@ -680,7 +682,7 @@ Files are 0600. It never accepts a client filesystem path, reads session content
 - `POST /v1/sessions/:sessionId/live-views/:id` — open a disposable viewer with `{generation}`
 - `GET /v1/sessions/:sessionId/live-views/:id/frame` — latest JPEG or a body-free waiting/unchanged response
 - `DELETE /v1/sessions/:sessionId/live-views/:id` — close the exact viewer; last native viewer requests joined suspension, never browser automation shutdown
-- `GET /v1/socket` — authenticated protocol version 5 WebSocket
+- `GET /v1/socket` — authenticated protocol version 6 WebSocket
 
 Bearer admission is linearized with the paired-device document under the
 DeviceStore mutex: the credential check and synchronous HTTP/upgrade registration
@@ -914,7 +916,7 @@ Authorized device names are projected from one Gateway-owned record: a validated
 Every WebSocket starts with:
 
 ```json
-{"type":"hello","protocolVersion":5}
+{"type":"hello","protocolVersion":6}
 ```
 
 The hello, pairing response, and authenticated `system.info` identify the runtime
@@ -973,7 +975,7 @@ a ten-minute receipt window because newer revisions supersede them. Pending,
 malformed, oversized, or identity-mismatched evidence remains outcome-unknown, is
 never pruned, and can never authorize replay. Receipt execution serializes identical command keys only;
 unrelated commands and sessions remain concurrent.
-Outbound WebSocket admission keeps the 1 MiB encoded-frame ceiling, a 32,768-value JSON node ceiling, and an 8 MiB / 4,096-frame per-connection aggregate queue ceiling. Byte size alone does not prove native decoder admission: many small browser-result records can exceed the structural limit. Transcript pages reserve 24,000 nodes and snapshots 30,000, leaving room for enclosing metadata. Aggregate structural pressure compacts disposable detail into explicit previews before publication, without changing canonical JSONL, row ordinals, or transcript cursors. The shared `gateway-json-limits.json` fixture pins the native/sender contract. This is the common bounded projection contract for local and mobile clients, not separate audience-specific schemas. Final response rejection stays correlated as `response_too_large`; rejected events request resynchronization. A rejected response does not undo an accepted command: confirmed mutations must preserve outcome uncertainty rather than treat projection failure as definitive execution failure. Node-limit diagnostics report a bounded lower count (`nodeCountAtLeast`) and maximum, never payload content. A connection-local ordered writer hands exactly one frame to the WebSocket implementation at a time; enqueue acceptance is the response/event ordering boundary, so a response remains ahead of its synchronization suffix while concurrent startup catalogs cannot manufacture `bufferedAmount` pressure. A broadcast prepares one immutable encoding per operation and reuses it for eligible connections, while each barrier and queue retains its existing connection-local byte admission and failure isolation. The queue includes its active frame and releases each completed payload at the same boundary as its byte reservation; array compaction must never retain unaccounted completed payloads. Count or byte overflow closes only that peer with `1013`. Admission and disposable observers retire immediately, including asynchronous subscription installation that returns after the retirement cut. A one-second forced-close deadline releases a stalled peer; it still consumes connection capacity until physical close. Asynchronous write failures are logged and terminate that exact connection. Each socket also owns abort controllers for in-flight requests: retirement releases disposable `session.list` waits immediately while the coalesced canonical materialization may finish for another caller; accepted prompts and durable mutations never inherit socket cancellation. `server-capacity.integration.test.ts` covers continuously busy payload retention, tiny-frame bursts, stalled overload closure, unrelated-peer responsiveness, and accepted-command settlement.
+Outbound WebSocket admission keeps the 1 MiB encoded-frame ceiling, a 32,768-value JSON node ceiling, and an 8 MiB / 4,096-frame per-connection aggregate queue ceiling. Byte size alone does not prove native decoder admission: many small browser-result records can exceed the structural limit. Transcript pages reserve 24,000 nodes and snapshots 30,000, leaving room for enclosing metadata. Aggregate structural pressure compacts disposable detail into explicit previews before publication, without changing canonical JSONL, row ordinals, or transcript cursors. The shared `gateway-json-limits.json` fixture pins the native/sender contract. This is the common bounded projection contract for local and mobile clients, not separate audience-specific schemas. Final response rejection stays correlated as `response_too_large`; rejected events request resynchronization. A rejected response does not undo an accepted command: confirmed mutations must preserve outcome uncertainty rather than treat projection failure as definitive execution failure. Node-limit diagnostics report a bounded lower count (`nodeCountAtLeast`) and maximum, never payload content. A connection-local ordered writer hands exactly one frame to the WebSocket implementation at a time; enqueue acceptance is the response/event ordering boundary, so a response remains ahead of its synchronization suffix while concurrent startup catalogs cannot manufacture `bufferedAmount` pressure. A frame whose state a newer frame replaces is dropped while it is still unsent, so a slow link queues current state instead of every superseded revision of it. A newer `session.summary` replaces the unsent revision of that session; a newer `session.snapshot` supersedes the unsent sequenced state of its own runtime generation that its own state fully re-states, up to its own `eventSequence`, and only together with the frame that covers them: the surviving snapshot is encoded as the `session.rebaseline` carrying the whole snapshot and the connection's installed `subscriptionToken`, which the phone admits as fresh authority across the sequences the queue dropped instead of resynchronizing. Installing a snapshot restores state, not every effect: a sequenced frame whose effect no snapshot installation performs (a failure receipt that retires a submission and restores its draft, a resource/structure/context revision bump that reloads commands, an editor directive) is a fence, and the queue drops neither it nor anything behind it, so no replacement has to restore what it cannot. Frames of another runtime generation are fences too, because a replacement runtime restarts `eventSequence` at zero. Without that installed token a snapshot supersedes nothing, the frame already entering `ws` is never recalled, and what a client receives stays a subsequence of what was enqueued in enqueue order. A dropped frame is released with its byte reservation and is no longer outstanding, so the `connection.closed`/`connection.write-error` frame counts still describe frames the connection owed its peer, and `gateway.resources` reports the dropped frames and bytes as `outboundCoalescedFrames`/`outboundCoalescedBytes`. A broadcast prepares one immutable encoding per operation and reuses it for eligible connections, while each barrier and queue retains its existing connection-local byte admission and failure isolation; the coalescing `session.rebaseline` is the one frame encoded per connection, because it carries that connection's installed `subscriptionToken` and nothing else differs. The queue reports the bytes it accepted, so the frame that is actually queued is the one counted. The queue includes its active frame and releases each completed payload at the same boundary as its byte reservation; array compaction must never retain unaccounted completed payloads. Count or byte overflow closes only that peer with `1013`, and the record names the topic of the frame it was waiting on and the one that did not fit. Admission and disposable observers retire immediately, including asynchronous subscription installation that returns after the retirement cut. A one-second forced-close deadline releases a stalled peer; it still consumes connection capacity until physical close. Asynchronous write failures are logged and terminate that exact connection. Each socket also owns abort controllers for in-flight requests: retirement releases disposable `session.list` waits immediately while the coalesced canonical materialization may finish for another caller; accepted prompts and durable mutations never inherit socket cancellation. `server-capacity.integration.test.ts` covers continuously busy payload retention, tiny-frame bursts, superseded-frame replacement and the unchanged backstop, stalled overload closure, unrelated-peer responsiveness, and accepted-command settlement; `sync-protocol.integration.test.ts` covers a superseded frame whose sequence was still quarantined behind a synchronization barrier.
 Paired devices that offer `permessage-deflate` get compressed frames with context takeover; local-credential clients stay uncompressed. Every frame, queue and inbound bound above applies to uncompressed bytes. The [frame compression](docs/connection-resilience.md#frame-compression) section owns the settings, measurements and the phone's decoded-size boundary.
 The gateway runs a 25-second heartbeat and terminates a socket only after three
 consecutive ticks received no frame from it, so half-open Tailscale/iOS paths
@@ -1666,6 +1668,18 @@ observes newer canonical truth. Both full scans and reconciled durable-index cut
 publish membership through the same structural revision owner, including the first
 cut after restart. Additions and removals advance `listRevision`; unchanged cuts
 reuse it, and already-leased traversals keep their original rows and revision.
+An uncursored `session.list` may name the client's retained projection token:
+an equal token is answered with `notModified: true` and no rows. The token is the
+Gateway runtime epoch plus the page-source generation, so it covers structural
+identity, archive membership, the visible archived count and every mutable row
+overlay — a live summary, a cold row's attention projection and archive state
+each move it. A first-party client may therefore revalidate a retained token on
+any connection, including a replacement one, and still holds that exact
+projection. The epoch is per Gateway process, so a restarted Gateway whose
+revisions begin again at zero can never confirm a pre-restart token rows do not
+match. Any other token, a cursored page that received one, or an absent
+parameter receives ordinary rows; a cursor traversal already belongs to the
+projection its first page admitted.
 Clients still fail closed and restart from a nil cursor
 when interoperating with an older Gateway that changes revisions between pages. Model-list
 cursors bind their offset to an exact whole-catalog SHA-256 fingerprint and a 30-second immutable
@@ -1716,7 +1730,7 @@ durable attention replacement, clears manual unread, and publishes no transient
 unread summary. Successful `session.open` returns its current completion revision,
 and first-party clients acknowledge it only after installing the snapshot and
 retry transient acknowledgement failure against that same absolute revision.
-Protocol-v5 clients require the complete attention and presentation contract;
+Protocol-v6 clients require the complete attention and presentation contract;
 they do not attach to an earlier Gateway that lacks the method or revisioned
 response.
 Delete removes attention metadata, true identity replacement moves it without
@@ -1786,7 +1800,7 @@ drops archived rows from every page of that traversal and returns
 newest-archived first. Archived rows carry `archivedAt` and are otherwise
 unchanged, and a list cursor is bound to the filter that created it. The
 `session-archive.v1` capability advertises the method and the filter; the
-additive field and parameter leave protocol version 5 unchanged.
+additive field and parameter required no protocol version change.
 
 `session.open` carries a
 byte-bounded authoritative transcript tail with `transcriptStart` and
@@ -1814,7 +1828,7 @@ large active runs therefore remain openable; no canonical Pi content is modified
 discarded. Canonical non-image upload
 envelopes retain their runtime-owned readable paths, but the mobile transcript
 projection replaces those tags with bounded name/type/size metadata on an
-ordinary text part and never sends the Mac path to clients. Protocol-v5 clients therefore receive the safe filename instead of the
+ordinary text part and never sends the Mac path to clients. Protocol-v6 clients therefore receive the safe filename instead of the
 Mac path for a new content discriminant. A page carries and echoes the next projected entry as its branch anchor plus the current runtime
 generation and leaf identity. Raw canonical parent links may pass through filtered session-info,
 hidden custom, or extension-receipt entries and therefore never define projected-row adjacency.
@@ -1829,8 +1843,8 @@ Tron operating context, with each section, tool line, rule, skill, and instructi
 attributed to Pi, a Tron module, a package, a local file, or an MCP connection. Pi does
 not expose its section map, so the Gateway splits the rendered text; file-backed
 bodies are matched exactly, every byte stays in one section, and a prompt without Pi's
-structure is returned verbatim as one `prompt` section. The additive field leaves
-protocol version 5 unchanged; `systemPrompt` remains Pi's base prompt. The resource
+structure is returned verbatim as one `prompt` section. The additive field
+required no protocol version change; `systemPrompt` remains Pi's base prompt. The resource
 projection includes display-safe extension, prompt, skill, context-file, and tool
 metadata while canonical resource files and runtime loaders remain authoritative.
 Extension entries also expose the public loader handler event names and bounded
@@ -1899,7 +1913,7 @@ Each row includes the runtime loader's source, scope, origin, and path when avai
 `session.commandDetail` read requires one exact current `source:name` identity and returns
 that selected prompt, skill, or extension source document only; content is UTF-8 bounded
 to 96 KiB with original byte count and explicit truncation metadata, so catalog loading
-never reads or copies every resource body. Protocol-v5 `session.prompt` accepts one typed
+never reads or copies every resource body. Protocol-v6 `session.prompt` accepts one typed
 `resourceInvocation` with source, canonical name, and visible arguments. The Gateway revalidates
 exact live `(source,name)` identity and extension-command precedence before constructing Pi's
 normalized leading invocation. Pending and queued projections retain the same typed resource;
@@ -2145,6 +2159,32 @@ own provider/resource admission limits and are not counted as parent runtimes.
 The registry integration suite qualifies 128 simultaneous synthetic parent runs
 across eight projects through child-file churn and repeated client reentry.
 
+Admission also holds a byte budget, `LIVE_RUNTIME_BYTE_BUDGET` (1.5 GiB) in
+`packages/gateway/src/sessions/runtime-registry.ts`, because the runtime count
+alone let loaded sessions push the heap toward its limit. Each live runtime is
+charged `LIVE_RUNTIME_HEAP_ESTIMATE_FACTOR` (3) times its canonical JSONL bytes,
+measured at admission from the same one-`stat`-per-runtime inventory the
+resource sample already reads. The budget is eviction pressure, not an
+admission gate: when the live charge plus the opening session's charge exceeds
+it, the largest reloadable idle runtime is retired first (the one whose
+retirement reclaims the most), under the protections above, and retiring
+continues until that projected total fits. Nothing is retired when retiring
+could not help — the opening session's own charge is larger than the whole
+budget, or the excess is larger than every eligible runtime together — and an
+admission the retired set still cannot fit is served anyway, with its
+`runtime.loaded` record carrying `overBudget: true`. The runtime count and the
+explicit heap limit below stay the backstop; this budget never refuses an open,
+and refusal under the real heap limit is not its decision. The projected total
+counts the starts already reserved for, except the requested session's own
+reservation, which the opening charge already is: two opens of one session at
+once therefore retire nothing for it, and a start that adds no bytes (a session
+that has not written a transcript yet) retires nothing either. The launcher
+passes `--max-old-space-size=4096` to the Gateway's Node process
+(`packages/mac-app/scripts/tron-gateway-launcher.c`), and the budget is sized
+below that limit. `runtime.loaded` and `runtime.evicted` record each transition
+with the session, its reason, its transcript bytes and the charge, as named
+`counts`.
+
 Catalog acquisition generations share one physical predecessor and coalesce its
 successor after settlement, including failure. Invalidations cannot multiply
 concurrent discovery work. A live persisted `RuntimeSlot` proves membership for
@@ -2168,7 +2208,13 @@ interpreting unavailable membership as an empty catalog.
    The client acknowledges the exact
    baseline with `session.sync`, after which only later sequenced events are released.
    While the barrier owns a session's catch-up it is the only delivery path, so every
-   in-window event reaches the client exactly once and in sequence. A bounded barrier
+   in-window event reaches the client exactly once and in sequence, except where the
+   connection's outbound queue supersedes unsent state: a dropped sequence is always
+   covered by the `session.rebaseline` that replaced it, so the client can
+   still accept what follows. Only state that replacement fully re-states may be
+   dropped; a frame whose effect installing a snapshot does not perform (a failure
+   receipt, a revision bump, an editor directive) is a fence, and it and every frame
+   behind it arrive in order. A bounded barrier
    overflow converges the client with a fresh authoritative `session.rebaseline`
    snapshot instead of a resync dead end; only an unavailable session falls back to
    `transport.resyncRequired`.

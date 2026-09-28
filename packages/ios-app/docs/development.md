@@ -533,8 +533,7 @@ Read the numbers with these limits:
 the cost is. Add it to the scenario that showed the cost:
 
 ```bash
-scripts/tron-profile ios --self-test --trace time-profiler   # proves attribution too
-scripts/tron-profile ios --scenario streaming-reply --trace time-profiler --iterations 2
+scripts/tron-profile ios --self-test --trace time-profiler   # proves attribution too; the 2 s control windows fit the trace budget
 ```
 
 The profiler records an Instruments trace (`xcrun xctrace`) of the hosted test
@@ -554,18 +553,48 @@ missing symbols are visible. The optimized products keep their symbol tables,
 so app and test frames resolve by name; heavy inlining attributes inlined work
 to its caller. Exports are streamed row by row (a host-wide export of a loaded
 Mac is large) and each repeated value is kept once, so the parser's memory
-grows with distinct values, not with references (1.7 GB for a 342 MB
+grows with distinct values, not with references (1.6 GiB for a 339 MiB
 host-wide trace with 1 M samples). `xcrun xctrace export` itself needs several
-GB for such a trace, which is one more reason to keep traced runs short;
+GiB for such a trace and cannot be bounded: it builds the whole table in memory
+before it applies `--xpath` (a row predicate does not lower its peak) and
+macOS caps no child's address space (`ulimit -v`/`-d` are rejected and
+`resource.setrlimit(RLIMIT_AS)` fails). The profiler therefore refuses to
+export a host-wide trace whose whole tree (`xctrace export` plus the parser)
+is projected over its 2 GiB budget (`EXPORT_PEAK_BUDGET_BYTES` and
+`EXPORT_PEAK_BYTES_PER_TRACE_BYTE` in `scripts/tron_profile_attribution.py`;
+the ratio has not exceeded 18.5 peak bytes per trace byte over the measured
+recordings, and 20 leaves headroom), naming the trace's size and keeping the
+trace; `attribution.json` and `attribution.md` carry the trace's size and its
+projected peak beside the budget. The budget admits a trace of about 100 MiB,
+which at the measured host-wide rate of 2.6-4.4 MiB/s is a recorded span of
+roughly 25-40 s. XCTest records its discarded warm-up iteration as well as the
+measured ones, so the default windows do not fit: `--iterations 1` on the
+retained default-scenario traces (recorded with `--iterations 3`) still
+records about two full windows plus setup and would project 2.8-3.3 GiB
+(inferred from those traces' spans, not measured on a fresh traced run). The
+2 s control windows do fit (control-cpu's 5-iteration trace measured 55.5 MiB,
+projected 1.1 GiB). A traced product scenario needs a shorter window for the
+traced run (`--iterations 1 --window-seconds <n>`, so that two windows plus
+setup stay inside that span), and that choice comes before the run: the check
+needs the trace, so a refused scenario has already spent its simulator time.
 `scripts/test-tron-profile-attribution.py` covers the export parsing failure
-modes.
+modes and the budget.
+
+A device capture (`scripts/tron-profile device`) is not held to that budget:
+it records one attached process, not `--all-processes`, and its
+export-to-trace-size ratio is unmeasured, so its `attribution.json` carries no
+`export` block. Re-summarizing one with `scripts/tron_profile_attribution.py`
+needs its `--device-capture`, since the template name alone does not say that
+the recording covered a single process.
 
 A traced report is marked (`context.trace` and a warning): Instruments
 overhead distorts every resource metric in it, and `compare` refuses it.
 Measure with untraced runs; trace only to attribute. `--self-test --trace
 time-profiler` additionally requires the CPU variant's `controlExtraCPUWorkload`
 among the top five self-time symbols inside the windows and absent outside
-them. Keep `--iterations` small (1–3): the trace grows with window length.
+them. A traced run's `--iterations` and `--window-seconds` together decide its
+trace size; the budget above is the bound, and it is checked after the
+recording, so choose both before starting a traced run.
 
 Templates and what was verified (Xcode 26.6, iOS 26.5 simulator runtime):
 
@@ -631,8 +660,11 @@ before editing. Add **SwiftUI** to inspect body/update/layout cost and the
    (whole window, filtered to the attached process) under
    `~/Library/Developer/Tron/profiles/device/`; for Power Profiler it
    summarizes whatever power, energy or thermal tables the trace exports.
-   Device runs are user-owned; agents run this only when the user asks. The
-   device capture path has not been exercised on hardware yet.
+   Unlike the host-wide scenario recordings above, a device capture records
+   one attached process, so the export budget does not apply to it and its
+   `attribution.json` carries no `export` block. Device runs are user-owned;
+   agents run this only when the user asks. The device capture path has not
+   been exercised on hardware yet.
 3. Stop the capture, retain the `.trace` and the bounded exported Logs file
 locally, fix one owner, and repeat the same interaction under the same device,
 thermal, cache, and Gateway conditions. Keep a focused regression test and
@@ -2207,7 +2239,19 @@ challenge/proof each time. It preserves the APNs token and Keychain document; un
 only an assertion 401 or the exact typed `DCError.Code.invalidKey` may rotate one key
 and admit one fresh attestation. Fresh-attestation rejection, nonretryable 4xx,
 malformed data, persistence failure, and exhaustion stop without churn. Chat and
-Gateway connectivity never wait on registration.
+Gateway connectivity never wait on registration. A transfer the Gateway confirms
+also records `machineId:runtimeEpoch` of that Gateway runtime and the
+`pushRegistrationRevision` it advertised in the persisted grant, so a reconnect
+sends no registration while both still match: the revision is derived from the
+grants the Gateway stores, so a grant the relay disabled at runtime (which no
+event announces) moves it and the reconnect re-sends. A different Gateway or
+payload, a changed token/route/relay origin, a fresh grant, or a Gateway that
+advertises no revision always re-sends, and the Gateway answers an unchanged
+registration without writing its credential document or a command receipt.
+One transfer is counted as one more send: the transfer that itself wrote the
+grant (a first registration or a rotation) acknowledges the revision its own
+handshake advertised, which that write then moves, so the next reconcile
+re-sends once and is answered from the now-unchanged grant.
 
 `TronMobileDevelopment.entitlements`, `TronMobileLocalDevice.entitlements`, and
 `TronMobileRelease.entitlements` explicitly carry their APNs and App Attest

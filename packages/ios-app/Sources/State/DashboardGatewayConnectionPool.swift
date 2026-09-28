@@ -1121,7 +1121,10 @@ final class DashboardGatewayConnectionPool {
         let admission = current.catalog.beginLoad(key: key)
         entries[profileID] = current
         do {
-            let loaded = try await SessionCatalogLoader.load(client: seed.client) {
+            let loaded = try await SessionCatalogLoader.load(
+                client: seed.client,
+                sinceToken: current.catalog.projectionToken
+            ) {
                 self.admitsRefresh(
                     profileID: profileID,
                     generation: generation,
@@ -1138,11 +1141,12 @@ final class DashboardGatewayConnectionPool {
                 return .retained
             }
             switch loaded {
-            case let .loaded(rows, _, _, archivedCount):
+            case let .loaded(rows, _, _, projectionToken, archivedCount):
                 let sourced = rows.map { $0.withGatewaySource(id: profileID, label: seed.profile.label) }
                 guard admitted.catalog.publishAuthoritative(
                     sourced,
                     admission: admission,
+                    projectionToken: projectionToken,
                     archivedCount: archivedCount
                 ) else { return .retained }
                 admitted.state = .connected
@@ -1151,6 +1155,24 @@ final class DashboardGatewayConnectionPool {
                 entries[profileID] = admitted
                 publish(profileID: profileID)
                 publishAuthoritativeCatalog(profileID: profileID)
+                return .published
+            case .unchanged:
+                // The rows are confirmed, not republished. A retired epoch had
+                // marked this catalog disconnected, and both the archived
+                // container and the profile's own state read from the signals
+                // a published catalog sends, so a confirmation that revives a
+                // retired projection republishes them — the rows it sends are
+                // the ones it already held.
+                let wasLive = admitted.catalog.freshness == .live
+                guard admitted.catalog.confirmUnchanged(admission: admission) else { return .retained }
+                admitted.state = .connected
+                admitted.refreshRetryAttempt = 0
+                admitted.refreshFailedAttempts = 0
+                entries[profileID] = admitted
+                if !wasLive {
+                    publish(profileID: profileID)
+                    publishAuthoritativeCatalog(profileID: profileID)
+                }
                 return .published
             case .revisionMoved, .invalid:
                 return .retained

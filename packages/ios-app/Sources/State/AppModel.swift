@@ -2300,7 +2300,10 @@ final class AppModel {
     ) async -> CatalogTraversalResult {
         let admission = sessionCatalog.beginLoad(key: key)
         do {
-            let loaded = try await SessionCatalogLoader.load(client: client) {
+            let loaded = try await SessionCatalogLoader.load(
+                client: client,
+                sinceToken: sessionCatalog.projectionToken
+            ) {
                 self.admitsCatalogRefresh(key: key, requestGeneration: requestGeneration)
                     && self.sessionCatalog.admits(admission, key: key)
             }
@@ -2309,10 +2312,11 @@ final class AppModel {
                 return CatalogTraversalResult(outcome: .retained, genuineFailure: false)
             }
             switch loaded {
-            case let .loaded(rows, pageCount, revision, archivedCount):
+            case let .loaded(rows, pageCount, revision, projectionToken, archivedCount):
                 guard sessionCatalog.publishAuthoritative(
                     rows,
                     admission: admission,
+                    projectionToken: projectionToken,
                     archivedCount: archivedCount
                 ) else {
                     return CatalogTraversalResult(outcome: .retained, genuineFailure: false)
@@ -2327,6 +2331,30 @@ final class AppModel {
                     outcome: .published,
                     genuineFailure: false,
                     pageCount: pageCount,
+                    revision: revision
+                )
+            case let .unchanged(revision):
+                // The Gateway confirmed these rows. Nothing is republished, so
+                // selection, scroll and chat identity are untouched; the
+                // traversal still counts as a complete authoritative read.
+                // A confirmation that revives a retired projection must still
+                // rebuild the dashboard's row snapshot: the view derives a
+                // row's activity from the catalog's liveness, so a snapshot
+                // taken while the projection was retired has every non-idle
+                // row reading "resuming". A page read rebuilds it, and this
+                // answer does the same without touching the rows themselves.
+                let wasLive = sessionCatalog.freshness == .live
+                guard sessionCatalog.confirmUnchanged(admission: admission) else {
+                    return CatalogTraversalResult(outcome: .retained, genuineFailure: false)
+                }
+                if !wasLive {
+                    installSelectedDashboardCatalog()
+                    archiveProjectionRevision &+= 1
+                }
+                return CatalogTraversalResult(
+                    outcome: .published,
+                    genuineFailure: false,
+                    pageCount: 0,
                     revision: revision
                 )
             case let .revisionMoved(pageCount, revision):

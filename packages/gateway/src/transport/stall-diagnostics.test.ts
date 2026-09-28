@@ -175,6 +175,8 @@ describe("ResourceSampler", () => {
     sampler.recordCatalogWalk(120.4, 3_000);
     sampler.recordCatalogWalk(9, 4, true);
     sampler.recordOutboundBytes(700);
+    sampler.recordOutboundCoalesced(400);
+    sampler.recordOutboundCoalesced(0);
     sampler.recordSnapshotBuild(1);
     sampler.recordSnapshotBuild(0);
     sampler.recordRuntimeLoaded();
@@ -184,13 +186,13 @@ describe("ResourceSampler", () => {
     expect(first).toMatchObject({
       catalogWalks: 2, requestPathCatalogWalks: 1, catalogWalkMs: 129.4, catalogWalkFiles: 3_004, outboundBytes: 700,
       snapshotBuilds: 2, unaudiencedSnapshotBuilds: 1, durableWrites: 3, durableWriteMs: 12,
-      runtimesLoaded: 1, runtimesEvicted: 1,
+      runtimesLoaded: 1, runtimesEvicted: 1, outboundCoalescedFrames: 2, outboundCoalescedBytes: 400,
     });
     const second = await sampler.sample();
     expect(second.topics.size).toBe(0);
     expect(second).toMatchObject({
       catalogWalks: 0, requestPathCatalogWalks: 0, catalogWalkMs: 0, catalogWalkFiles: 0, outboundBytes: 0, snapshotBuilds: 0,
-      unaudiencedSnapshotBuilds: 0, runtimesLoaded: 0, runtimesEvicted: 0,
+      unaudiencedSnapshotBuilds: 0, runtimesLoaded: 0, runtimesEvicted: 0, outboundCoalescedFrames: 0, outboundCoalescedBytes: 0,
     });
   });
 
@@ -456,7 +458,7 @@ it("attaches stall evidence to a delayed-heartbeat record", async () => {
   const log = vi.fn();
   const gateway = new GatewayServer({
     host: "127.0.0.1", port: 0, maxFrameBytes: 16_384, devices: {} as never, uploads: {} as never, sessions: {} as never,
-    auth: {} as never, service: { info: () => ({ protocolVersion: 5 }) } as never, logger: { log } as never, stallSampler: sampler,
+    auth: {} as never, service: { info: () => ({ protocolVersion: 6 }) } as never, logger: { log } as never, stallSampler: sampler,
   });
   const interval = GATEWAY_CONNECTION_POLICY.heartbeatIntervalMs;
   // An on-time heartbeat closes a window without a record.
@@ -481,8 +483,10 @@ it("attaches stall evidence to a delayed-heartbeat record", async () => {
 });
 
 /** The least a connection has to be for `broadcastSession` to deliver a frame
- * and for shutdown to retire it. */
-function subscribedClient(sessionId: string | undefined) {
+ * and for shutdown to retire it. Its queue reports the bytes it accepts the way
+ * `OrderedOutboundQueue` does, which is where the sampler's outbound bytes are
+ * recorded. */
+function subscribedClient(sessionId: string | undefined, accepted: (bytes: number) => void = () => {}) {
   return {
     id: "client-1",
     ready: true,
@@ -497,7 +501,7 @@ function subscribedClient(sessionId: string | undefined) {
     pendingSessionOpens: new Map(),
     rekeyedSessionIds: new Map(),
     subscriptionTokens: new Map(sessionId === undefined ? [] : [[sessionId, "subscription-token"]]),
-    outbound: { enqueue: () => true },
+    outbound: { enqueue: (frame: { bytes: number }) => { accepted(frame.bytes); return true; } },
   };
 }
 
@@ -506,7 +510,7 @@ function resourceServer(log: ReturnType<typeof vi.fn>, sampler: ResourceSampler)
     host: "127.0.0.1", port: 0, maxFrameBytes: 16_384, devices: {} as never, uploads: {} as never,
     sessions: { unsubscribeClient: vi.fn() } as never,
     auth: { detachClient: vi.fn() } as never,
-    service: { info: () => ({ protocolVersion: 5 }), releaseClient: vi.fn() } as never,
+    service: { info: () => ({ protocolVersion: 6 }), releaseClient: vi.fn() } as never,
     logger: { log } as never, resourceSampler: sampler,
   });
 }
@@ -536,7 +540,7 @@ it("records the resource window through the transport's timer", async () => {
     eventLoopDelay: () => ({ p50Ms: 1, p99Ms: 2, maxMs: 3 }),
   });
   const gateway = resourceServer(log, sampler);
-  const client = subscribedClient("session-1");
+  const client = subscribedClient("session-1", (bytes) => sampler.recordOutboundBytes(bytes));
   (gateway as unknown as { clients: Map<string, unknown> }).clients.set("client-1", client);
   // One snapshot build for a subscriber. A frame for a session with nobody
   // subscribed to it is never prepared and is covered by "warns when a snapshot
@@ -549,6 +553,9 @@ it("records the resource window through the transport's timer", async () => {
   expect(first[1]).toContain("durableWrites=2");
   expect(first[1]).toMatch(/topics=session\.snapshot:1\/\d+B\/1/u);
   expect(Number(/outboundBytes=(\d+)/u.exec(first[1] as string)![1])).toBeGreaterThan(0);
+  // A quiet connection supersedes nothing, so this window's coalescing pair is
+  // present and zero rather than absent.
+  expect(first[1]).toContain("outboundCoalescedFrames=0 outboundCoalescedBytes=0");
   // The next window crosses the heap bound: the same record promotes to warning.
   heapUsed = 7_000;
   await vi.advanceTimersByTimeAsync(RESOURCE_SAMPLE_INTERVAL_MS);
