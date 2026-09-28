@@ -2,7 +2,7 @@
 
 - **Started:** 2026-09-23
 - **Status:** Active
-- **Last updated:** 2026-09-27, MS-3a done; MS-3b claimed
+- **Last updated:** 2026-09-28, MS-3b done; MS-5 is next, MS-4 waits for the simplification program
 - **Goal:** Give the iOS app compiler-enforced layers, so its structure stays clean, one-directional and easy for agents to work in, and cannot silently regress into cycles.
 
 Follow the [plan protocol](README.md#protocol) to claim tasks and hand off.
@@ -84,9 +84,9 @@ directly, and unit tests reach the app through `@testable import TronMobile`.
 | MS-1 | Done | Map the dependency graph of Models, Gateway, Support, State and UI/Theme; propose module boundaries with no cycles | none | module-split session, 2026-09-26 |
 | MS-2 | Done | First real slice of `TronMobileCore`, an XcodeGen framework target with `SWIFT_PACKAGE_NAME` set so `package` access works: move a few leaf types from Models, Gateway or Support into it (kept, not a throwaway spike); prove all five configurations build, the share extension, `@testable` tests, both test plans and the source-policy scripts; record baseline and after timings. Device install and **Product → Profile** are checked by the user or supervisor | MS-1, D1, D2 | module-split session, 2026-09-26 |
 | MS-3a | Done | Inside the one app module, relocate declarations so Models, Gateway and Support reference nothing in State, Notifications, Auth, UI or App and import no UI framework (see MS-3 scope); no framework change yet | MS-2 | module-split session, 2026-09-27 |
-| MS-3b | Claimed | Move Models, Gateway and Support into `TronMobileCore` with `package` access, a Core privacy manifest and a no-UI-import guard; record timings | MS-3a | module-split session, 2026-09-27 |
+| MS-3b | Done | Move Models, Gateway and Support into `TronMobileCore` with `package` access, a Core privacy manifest and a no-UI-import guard; record timings | MS-3a | module-split session, 2026-09-27 |
 | MS-4 | Needs scoping | Extract `Notifications`, then `State` (with `Auth`), then `UI`, one per task, each with timings, after the simplification program has cleaned up State and Chat (D1); split UI by folder where its boundaries are clean | MS-3b, simplification S-IOS-STATE and S-IOS-CHAT work | |
-| MS-5 | Needs scoping | Move the share extension onto `Core` instead of compiling `SharedContent.swift` itself | MS-3b | |
+| MS-5 | Ready | Move the share extension onto `TronMobileCore` instead of compiling `Core/Support/SharedContent.swift` itself; then drop the extension's `SWIFT_PACKAGE_NAME` | MS-3b | |
 
 ## Task details
 
@@ -271,3 +271,35 @@ Supervisor decisions, from the MS-1 findings:
 - For MS-3b: `State/ChatMediaLoader.swift` reads `GatewayClient.LiveFrame` members and UI/Chat extends
   `ChatTranscriptGeometry`, so both need `package` access. Nothing in the repository enforces the new boundary
   until MS-3b's framework and import check exist.
+
+### MS-3b · Done · 2026-09-28 · module-split session (supervisor, with deepseek-worker batches 1 and 2)
+
+- Result: `Sources/Models`, `Sources/Gateway` and `Sources/Support` are gone; all 53 files live in `Core/` and
+  build as `TronMobileCore`. Access is compiler-driven `package` (never `public`); structs the app constructs have
+  explicit `package init`s matching the memberwise ones, including `nil` defaults. Unit tests use
+  `@testable import TronMobileCore`, so test-only members stay internal; a tightening pass removed 72 markers only
+  tests needed (the compiler re-demanded 5). The Objective-C blur bridge moved to `Sources/UI/Chat` beside its
+  only user. Core ships `Core/PrivacyInfo.xcprivacy` (it reads UserDefaults), checked by `PrivacyManifestTests`
+  in source and in the built framework. `packages/ios-app/scripts/test-source-policy.sh` fails if Core imports
+  SwiftUI, UIKit, Observation or UserNotifications. The share extension still compiles
+  `Core/Support/SharedContent.swift` and so shares `SWIFT_PACKAGE_NAME` until MS-5.
+- Evidence (verified): all five configurations build (Development simulator, Test, and LocalDevice,
+  DevicePerformance and Release for a generic device without signing), each with
+  `Frameworks/TronMobileCore.framework`, its manifest and the share extension. Full unit suite: 1,762 Swift
+  Testing tests in 147 suites plus 101 XCTest, 0 failures. Source, build-matrix, documentation and
+  protocol-contract checks pass; the artifact validator fails only on the unsigned build. An audit script
+  confirmed that, apart from six one-line declarations expanded to hold their inits, every moved line differs
+  only by `package`, and files outside Core gained only import lines. Negative controls: a Core reference to
+  `AppModel`, a SwiftUI import in Core, and removing `package` from a used type each fail.
+- UI tests: `TronAccessibilityUITests` pass. `TronSmokeUITests.testOnboardingPreservesPagedSheetAndPairingJourney`
+  and `testPairingValidationIsAccessibleAndDoesNotLeaveOnboarding` fail identically on `main` before this work
+  (checked back to back), so they are pre-existing and outside this plan.
+- Deviations: a first single-worker attempt ran 5 hours and was discarded after its scripts damaged product code
+  (a tool card's values replaced with placeholders). The work then ran in audited batches; after two worker
+  batches the supervisor finished the rest with a deterministic fixer driven by compiler diagnostics. The first
+  pass built only the Test configuration; the non-`HOSTED_TEST` paths (Development, LocalDevice, Release) needed
+  a second pass, so always build Development as well as Test. Build timings were not measured: the Mac ran
+  other sessions' builds throughout (load averages 13–38), which would make them meaningless; measure at a quiet
+  time with the MS-1 recipe before MS-4.
+- For the next agent: new Core API follows "Module layout" in `packages/ios-app/docs/development.md`.
+  Tests use `@testable import TronMobileCore` rather than widening Core access for them.
