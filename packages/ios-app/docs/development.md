@@ -556,9 +556,20 @@ to its caller. Exports are streamed row by row (a host-wide export of a loaded
 Mac is large) and each repeated value is kept once, so the parser's memory
 grows with distinct values, not with references (1.7 GB for a 342 MB
 host-wide trace with 1 M samples). `xcrun xctrace export` itself needs several
-GB for such a trace, which is one more reason to keep traced runs short;
+GB for such a trace and cannot be bounded: it builds the whole table in memory
+before it applies `--xpath` (a row predicate does not lower its peak) and
+macOS caps no child's address space (`ulimit -v`/`-d` are rejected and
+`resource.setrlimit(RLIMIT_AS)` fails). The profiler therefore refuses to
+export a trace whose export is projected over its 2 GiB budget
+(`EXPORT_PEAK_BUDGET_BYTES` in `scripts/tron_profile_attribution.py`, from the
+measured 18 bytes of export peak per trace byte), naming the trace's size and
+keeping the trace; `attribution.json` and `attribution.md` carry the trace's
+size and its projected peak beside the budget. Measured default scenarios:
+`--iterations 1` fits (a 30 s window plus its setup records ~90-100 MB), the
+default 5 iterations do not (a 12 s window's trace already reached 303 MB),
+which is the other reason to keep traced runs short.
 `scripts/test-tron-profile-attribution.py` covers the export parsing failure
-modes.
+modes and the refusal.
 
 A traced report is marked (`context.trace` and a warning): Instruments
 overhead distorts every resource metric in it, and `compare` refuses it.

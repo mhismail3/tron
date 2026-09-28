@@ -14,7 +14,11 @@ symbolicate are named as unresolved addresses per image, never dropped.
 
 Exports are streamed: a host-wide Time Profiler export of a loaded Mac runs to
 gigabytes, so rows are read one at a time and every value carrying an `id` is
-kept once, however often later rows repeat it by reference.
+kept once, however often later rows repeat it by reference. The profiler's
+whole memory budget for one traced scenario is `EXPORT_PEAK_BUDGET_BYTES`:
+`xctrace export` builds its result in memory before it applies `--xpath` and
+macOS caps no child's address space, so a trace too large to export inside
+that budget is refused before any export starts.
 """
 
 from __future__ import annotations
@@ -44,6 +48,20 @@ TOP_SYMBOLS = 25
 TOP_THREADS = 15
 TOP_VIEWS = 30
 EXPORT_TIMEOUT_SECONDS = 900
+# The profiler's memory budget for one traced scenario: the `xctrace export`
+# child and this parser together must stay under it (E-2 measured 4,599 MB +
+# 1,672 MB before the parser fix). xctrace's export child cannot be bounded --
+# it builds the whole table in memory even when `--xpath` selects few rows (a
+# row predicate does not lower its 1.2 GB peak on a 77 MB trace) and macOS
+# caps no child address space (`ulimit -v` and `ulimit -d` are rejected, and
+# `resource.setrlimit(RLIMIT_AS)` fails) -- so an over-budget trace is refused
+# instead of exported, which is the only guarantee this profiler can give.
+EXPORT_PEAK_BUDGET_BYTES = 2 * 1024 ** 3
+# Measured export peak per trace byte on this Mac's host-wide Time Profiler
+# recordings: 57 MB -> 978 MB, 77 MB -> 1,280 MB (E-2c) and 342 MB -> 4,599 MB
+# (E-2). Rounded up from the worst of the three, because the peak follows how
+# busy the Mac is while recording and never falls below this ratio.
+EXPORT_PEAK_BYTES_PER_TRACE_BYTE = 18
 
 # Scenario template name -> (recording target, xctrace --template or None for
 # the blank template, extra --instrument names).
@@ -169,6 +187,37 @@ def text(element: ElementTree.Element | None) -> str | None:
     if element is None:
         return None
     return element.get("fmt") or element.text
+
+
+def trace_size_bytes(trace: Path) -> int:
+    """Bytes the recording occupies on disk (a `.trace` is a bundle/directory)."""
+    if not trace.is_dir():
+        return trace.stat().st_size
+    return sum(path.stat().st_size for path in trace.rglob("*") if path.is_file())
+
+
+def projected_export_peak_bytes(trace_bytes: int) -> int:
+    """The peak `xcrun xctrace export` is expected to reach for this trace."""
+    return trace_bytes * EXPORT_PEAK_BYTES_PER_TRACE_BYTE
+
+
+def checked_export_budget(trace: Path) -> dict[str, int]:
+    """Refuse a trace whose export cannot stay inside the profiler's budget.
+
+    Returns the numbers carried by the attribution document. `xctrace export`
+    reads the whole trace table into memory before it writes or filters
+    anything (see the constants above), so this check is what keeps a traced
+    scenario bounded, and it must run before the first export starts.
+    """
+    size = trace_size_bytes(trace)
+    projected = projected_export_peak_bytes(size)
+    if projected > EXPORT_PEAK_BUDGET_BYTES:
+        raise AttributionError(
+            f"refusing to export {trace.name}: the trace is {size / 1048576:.0f} MB and its xctrace export is "
+            f"projected at {projected / 1024 ** 3:.1f} GiB, over the {EXPORT_PEAK_BUDGET_BYTES / 1024 ** 3:.1f} GiB "
+            f"budget ({EXPORT_PEAK_BYTES_PER_TRACE_BYTE} bytes of export peak per trace byte measured); record a "
+            f"shorter trace (fewer or shorter measured windows, or --iterations 1) on a quieter host")
+    return {"traceBytes": size, "projectedPeakBytes": projected, "budgetBytes": EXPORT_PEAK_BUDGET_BYTES}
 
 
 def run_bounded(command: list[str], timeout: float) -> subprocess.CompletedProcess[bytes]:
@@ -519,6 +568,7 @@ def attribute(trace: Path, template: str, pid: int | None, windows_epoch: list[t
     `discarded_epoch` are windows XCTest ran but did not report (warm-up);
     their samples are counted apart, neither measured nor "outside".
     """
+    budget = checked_export_budget(trace)
     toc = export_toc(trace)
     schemas = toc_schemas(toc)
     warnings: list[str] = []
@@ -529,6 +579,7 @@ def attribute(trace: Path, template: str, pid: int | None, windows_epoch: list[t
     document: dict[str, Any] = {
         "schema": SCHEMA,
         "trace": str(trace),
+        "export": budget,
         "template": template,
         "pid": pid,
         "windows": [
@@ -574,6 +625,10 @@ def markdown(document: dict[str, Any], top: int = 15) -> str:
              f"- Trace: `{document['trace']}`",
              f"- Scope: {document['scope']}"
              + (f" ({len(document['windows'])} windows)" if document["windows"] else "")]
+    if "export" in document:
+        export = document["export"]
+        lines.append(f"- Export budget: {export['traceBytes'] / 1048576:.1f} MB trace, projected peak "
+                     f"{export['projectedPeakBytes'] / 1024 ** 3:.2f} GiB of {export['budgetBytes'] / 1024 ** 3:.2f} GiB")
     for warning in document["warnings"]:
         lines.append(f"- Warning: {warning}")
     profile = document.get("time_profile")

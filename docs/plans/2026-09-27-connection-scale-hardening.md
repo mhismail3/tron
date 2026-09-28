@@ -2,7 +2,7 @@
 
 - **Started:** 2026-09-27
 - **Status:** Active (Phase 1 runs on `hardening/integration`; that branch's copy of this plan is authoritative until R-1)
-- **Last updated:** 2026-09-28, G-3 review round 2 addressed: the `unaudiencedSnapshotBuilds` warning and its test are now stated as a tripwire for a lost slot guard or a divergence between the registry's subscription record and the transport's, not for a closing socket
+- **Last updated:** 2026-09-28, E-2c blocked: the profiler now refuses a `time-profiler` export projected over its 2 GiB budget and names the trace's size, so no traced scenario can take gigabytes; the shorter-window half and a passing `--scenario all` run remain
 - **Goal:** A clean, efficient and predictable Gateway and phone connection: the phone stays connected and loads any session promptly whenever the network path is up, however many sessions run and however large the history grows, and every disconnect or slow operation is attributable to one cause from the logs in one step.
 
 ## Goal and constraints
@@ -528,7 +528,7 @@ rows are in priority order.
 | O-6a | Blocked | Multi-session qualification scenario with a generated catalog; record the `main` baseline | none | orchestrator-dispatched worker, 2026-09-28 (second review response) |
 | E-2 | Blocked | Bound the iOS profiler's memory or hand the row to the simulator-lifecycle plan | none | orchestrator-dispatched worker, 2026-09-28 |
 | E-2b | Done | Record `time-profiler` with `xctrace record --attach <pid>` if a real traced run proves it samples the simulator app; re-measure export and parser peaks (see E-2 handoff) | E-2 | orchestrator-dispatched deepseek-worker, 2026-09-28 |
-| E-2c | Claimed | Bound the `time-profiler` export under 2 GB for `--scenario all` (see E-2b handoff: simulator-device recording, or a size refusal plus shorter windows) | E-2b | orchestrator-dispatched deepseek-worker, 2026-09-28 |
+| E-2c | Blocked | Bound the `time-profiler` export under 2 GB for `--scenario all` (see E-2b handoff: simulator-device recording, or a size refusal plus shorter windows) | E-2b | orchestrator-dispatched deepseek-worker, 2026-09-28; the export is now refused above its budget (measured on real traces), the shorter-window half and a passing `--scenario all` run remain (see handoff) |
 | O-2 | Done | Gateway transport records: upgrade phases, inbound silence with Tailscale peer path | O-1 | orchestrator-dispatched deepseek-worker, 2026-09-28 |
 | O-3 | Done | Request span: one `rpc.completed` per slow RPC with every stage, wait and count | O-1 | orchestrator-dispatched deepseek-worker, 2026-09-28 |
 | O-4 | Done | Phone connection records that survive an export, stall watchdog, exact scene records | O-1 | orchestrator-dispatched deepseek-worker, 2026-09-28; review rounds 1–4 addressed; focused suites and the iOS Gateway E2E blackhole runs pass |
@@ -2280,6 +2280,77 @@ Read the numbers as one sample per case.
   retained evidence folder renamed the Python `simattach.sh` to `simattach.py`,
   added the host positive-control probe (`e2b-probe.py`), and describes
   `verdict.py`.
+
+### E-2c · Blocked · 2026-09-28 · orchestrator-dispatched deepseek-worker
+
+- Result: the refusal half is implemented on this branch. `scripts/tron_profile_attribution.py`
+  refuses any `time-profiler` trace whose `xcrun xctrace export` cannot stay
+  inside a 2 GiB budget (`EXPORT_PEAK_BUDGET_BYTES`), names the trace's own size
+  and its projected peak, and starts no export; `attribution.json` and
+  `attribution.md` carry the trace's bytes, projected peak and budget. The
+  default scenario windows were **not** shortened: measured on real default
+  traces, the recorded span — not the window length — is what the budget binds,
+  so shortening the defaults would degrade every untraced report to serve the
+  traced path. The row stays Blocked because "under 2 GB for `--scenario all`"
+  is not demonstrated as a passing run: at the default `--iterations 5` every
+  default scenario's trace already projects 2.4-6.1 GiB and is refused
+  (correctly and bounded), and a real `--scenario all` traced run needs the
+  lane's DevicePerformance build plus ten scenarios, which did not fit this
+  task's budget on a host at load average 40 with the lane leased elsewhere.
+  Simulator-device recording was not re-probed: E-2b established it never
+  starts (180 s without returning, then the recorder's 300 s abort).
+- Evidence:
+  - Accepted (real trace, real CLI):
+    `python3 scripts/tron_profile_attribution.py <77 MB control-cpu default
+    trace> --template time-profiler --pid 33246 --windows .../windows.jsonl`
+    exits 0; tree-RSS peak 1,347 MB (xctrace child 1,325 MB) measured with
+    `files/hardening/e-2/peak.py`; `attribution.json` holds
+    `export {traceBytes 78,976,785, projectedPeakBytes 1,421,582,130,
+    budgetBytes 2,147,483,648}` with 233 measured samples over 5 windows;
+    artifacts `~/.tron/workspace/files/hardening/e-2c/control-cpu-accepted-attribution.{json,md}`.
+  - Refused (real trace): the same CLI on E-2's 342 MB idle-dashboard trace
+    exits 2 in 0.65 s with a ~0 MB peak (no export started): "refusing to export
+    idle-dashboard.trace: the trace is 339 MB and its xctrace export is
+    projected at 6.0 GiB, over the 2.0 GiB budget (18 bytes of export peak per
+    trace byte measured); record a shorter trace (fewer or shorter measured
+    windows, or --iterations 1) on a quieter host".
+  - Calibration (export peak per trace byte, host-wide Time Profiler): 57 MB ->
+    978 MB (E-2), 77 MB -> 1,280 / 1,325 / 1,332 MB (three runs here), 342 MB ->
+    4,599 MB (E-2). The constant is the worst ratio rounded up.
+  - Why a refusal is the only bound (each tested here):
+    `--xpath '.../table[@schema="time-profile"]/row[position()<5]'` returned 0
+    rows and still peaked at 1,231 MB, so the export child builds the whole
+    table whatever `--xpath` selects; `ulimit -v` and `ulimit -d` are rejected
+    by the shell and `resource.setrlimit(RLIMIT_AS)` fails on macOS, so the
+    child cannot be capped either.
+  - What sizes the trace (toc duration + the run's `windows.jsonl`):
+    idle-dashboard 4x30 s -> 131.0 s trace / 339 MB; streaming-reply 4x12 s ->
+    106.8 s / 303 MB (59 s of it between windows); tool-loop 4x15 s -> 80.6 s /
+    283 MB; control-cpu 5x2 s -> 13.6 s / 55 MB. Host-wide rate 2.6-4.4 MB/s; a
+    fresh 15 s host-wide recording here was 62.8 MB at 3.8 MB/s
+    (`~/.tron/workspace/files/hardening/e-2c/host-trace-rate.json`). `--iterations 1`
+    therefore fits (one 30 s window plus setup ~90-100 MB) and the default five
+    do not.
+  - `python3 scripts/test-tron-profile-attribution.py` 11/11 (new failure mode
+    10: an oversize trace is refused before any export, an in-budget trace is
+    accepted with its numbers, and the refusal names the trace's size);
+    `python3 scripts/test-tron-profile-ios.py` 7/7.
+- Changes: `fix(ios): refuse a time-profiler export that cannot fit the profiler's memory budget (E-2c)`.
+- Tasks added: none.
+- Kept on purpose: `--all-processes` recording, `attribution.TEMPLATES`, the
+  default scenario windows and `--iterations` default 5 (see Result);
+  `packages/ios-app/docs/development.md`'s "keep traced runs short (1-3)" is now
+  enforced by the refusal instead of by advice.
+- Deviations: no simulator run and no new trace recorded. The measurements use
+  real existing traces and the real CLI, the same route E-2 used; the recorded
+  rate is from a fresh host-wide recording taken for this task.
+- For the next agent: to close the row, run `scripts/tron-profile ios
+  --no-build --scenario all --trace time-profiler --iterations 1` on a quiet
+  host after the lane's build; if a scenario is refused, shorten that scenario's
+  window (or record fewer iterations) until it fits, and re-verify that
+  `attribution.json` still ranks the scenario's work — the measurements say the
+  recorded span, not the window, is the budget's driver, so prefer fewer
+  recorded iterations over shorter windows if both are acceptable.
 
 ### O-3 · Done · 2026-09-28 · worker session (branch `hardening/o-3`)
 
