@@ -543,23 +543,23 @@ rows are in priority order.
 | O-4 | Done | Phone connection records that survive an export, stall watchdog, exact scene records | O-1 | orchestrator-dispatched deepseek-worker, 2026-09-28; review rounds 1–4 addressed; focused suites and the iOS Gateway E2E blackhole runs pass |
 | O-6b | Claimed | Impairment in the qualification scenario: blackhole, bandwidth cap, Gateway restart | O-6a | orchestrator-dispatched deepseek-worker, 2026-09-28 |
 | O-5 | Done | Gateway resource sampler and event-loop histogram | O-3 | orchestrator-dispatched deepseek-worker, 2026-09-28 |
-| O-7 | Ready | Incident triage tool: phone export plus Gateway log in, episodes by cause out | O-1, O-2, O-4 | |
+| O-7 | Claimed | Incident triage tool: phone export plus Gateway log in, episodes by cause out | O-1, O-2, O-4 | orchestrator-dispatched deepseek-worker, 2026-09-28 |
 | C-1 | Ready | Projection work never blocks or parks reconnect; parked episodes self-resume | O-4, O-6b | |
 | G-1a | Done | Catalog owner and in-memory index fed by Gateway-owned changes | O-3, O-6a | orchestrator-dispatched deepseek-worker, 2026-09-28 |
-| G-1b | Ready | Filesystem watcher and background reconciliation for external writers | G-1a | |
+| G-1b | Claimed | Filesystem watcher and background reconciliation for external writers | G-1a | orchestrator-dispatched deepseek-worker, 2026-09-28 |
 | G-1c | Ready | Move every catalog reader to the index; delete request-path walks and the full-parse fallback | G-1b | |
 | G-1d | Ready | Replace the catalog wording in `connection-resilience.md` with the index contract (D-3) | G-1c | |
-| G-3 | Ready | No audience, no projection: build and serialize snapshots only for subscribers | O-5, O-6a | |
+| G-3 | Claimed | No audience, no projection: build and serialize snapshots only for subscribers | O-5, O-6a | orchestrator-dispatched deepseek-worker, 2026-09-28 |
 | C-2 | Ready | "Connected" follows the transport (D-2); chat restoration shows its own loading state | C-1 | |
 | C-5 | Claimed | Back off an unreachable non-selected Gateway profile; record pool attempts and episodes | O-4 | orchestrator-dispatched deepseek-worker, 2026-09-28 |
 | G-10 | Done | Durable-write audit: no process-wide serialization of fsyncs, no fsync on reads | O-5 | orchestrator-dispatched deepseek-worker, 2026-09-28 |
-| G-10a | Ready | Connection owner: a read (e.g. knowledge.raindrop.read) must not fsync — skip or debounce an unchanged provider observation in ConnectionOwner.recordProviderObservation, preserving stateRevision/updatedAt semantics | G-10 | |
+| G-10a | Claimed | Connection owner: a read (e.g. knowledge.raindrop.read) must not fsync — skip or debounce an unchanged provider observation in ConnectionOwner.recordProviderObservation, preserving stateRevision/updatedAt semantics | G-10 | orchestrator-dispatched deepseek-worker, 2026-09-28 |
 | C-3 | Ready | Faster retry (D-4): about 5 s transport-open deadline, immediate retry on path change | C-1 | |
 | C-4 | Claimed | Truer liveness (D-4): any inbound frame proves liveness | O-4 | orchestrator-dispatched deepseek-worker, 2026-09-28 |
 | C-6 | Ready | Cancel frame for disposable reads; a retried `session.open` joins the in-flight one | O-3 | |
 | G-12 | Ready | Server-side deadlines, concurrency caps and heap-pressure shedding with typed retry hints | O-3, O-5 | |
 | G-2 | Ready | Cold open in bounded time from the index and a single-file fence | G-1c | |
-| G-7 | Ready | Reconnect diet: send only what changed | O-1, O-6a | |
+| G-7 | Claimed | Reconnect diet: send only what changed | O-1, O-6a | orchestrator-dispatched deepseek-worker, 2026-09-28 |
 | G-11 | Ready | Event-loop budget: find and bound every synchronous task over 50 ms | O-5, O-6a | |
 | G-9 | Ready | One background-work scheduler that yields to requests; measure the libuv pool size | O-5, G-1b | |
 | G-4 | Ready | Outbound queue coalescing of superseded snapshots and keyed events | G-3 | |
