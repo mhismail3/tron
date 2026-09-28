@@ -16,6 +16,13 @@ async function waitUntil(predicate: () => boolean): Promise<void> {
   }
 }
 
+/** Wait for the catalog owner's first published cut: a read that lands before
+ * it refuses retryably, and no reader walks the folder (G-1c). */
+async function awaitCatalogCut(registry: RuntimeRegistry): Promise<void> {
+  await (registry as unknown as { sessionCatalog: { whenPublished(): Promise<void> } })
+    .sessionCatalog.whenPublished();
+}
+
 describe.sequential("Gateway session context windows", () => {
   const roots: string[] = [];
   const registries: RuntimeRegistry[] = [];
@@ -53,6 +60,7 @@ describe.sequential("Gateway session context windows", () => {
     const registry = new RuntimeRegistry(options);
     registries.push(registry);
     await registry.initialize();
+    await awaitCatalogCut(registry);
     const slot = await registry.create(cwd);
     return { registry, slot, faux, cwd, settingsPath, settings, options };
   }
@@ -90,6 +98,7 @@ describe.sequential("Gateway session context windows", () => {
     const cold = new RuntimeRegistry(options);
     registries.push(cold);
     await cold.initialize();
+    await awaitCatalogCut(cold);
     const resumed = await cold.acquire(id);
     expect(resumed.snapshot().contextWindowPolicy).toMatchObject({ source: "session", effective: 900_000, default: 500_000 });
     await expect(resumed.setContextWindow("context-test", "large", null, resumed.snapshot().revision, generation)).rejects.toMatchObject({ code: "conflict" });
