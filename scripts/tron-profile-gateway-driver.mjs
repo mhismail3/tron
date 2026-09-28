@@ -399,6 +399,9 @@ class RecordingClient {
     this.label = "setup";
     this.lastFrameAt = 0;
     this.closedUnexpectedly = null;
+    // Set by close(): permanent, so a reconnect still in flight cannot leave a
+    // socket open behind a finished run.
+    this.retired = false;
     // Stable across reconnects, as the phone's client identity is.
     this.clientId = randomUUID();
   }
@@ -538,9 +541,12 @@ class RecordingClient {
   /** Close and reopen the socket like a phone reconnect; the open window,
    * listeners and client identity carry over. */
   async reconnect() {
-    await this.close();
-    // close() gives up waiting after 3 s and terminates; retire the old socket
-    // and its unanswered requests now rather than when its close event lands.
+    await this.disconnect();
+    // A client retired by close() while this reconnect was in flight must not
+    // open another socket: an abandoned lane would keep the driver alive.
+    if (this.retired) throw new Error(`${this.name} reconnected after it was closed`);
+    // disconnect() gives up waiting after 3 s and terminates; retire the old
+    // socket and its unanswered requests now rather than when its close event lands.
     this.socket = null;
     for (const { reject } of this.pending.values()) reject(new Error(`${this.name} reconnected`));
     this.pending.clear();
@@ -553,6 +559,7 @@ class RecordingClient {
     this.awaitingPong = null;
     this.tcp = null;
     await this.connect();
+    if (this.retired) await this.disconnect();
     if (window) {
       window.socketRead0 = this.tcp.bytesRead;
       window.socketWritten0 = this.tcp.bytesWritten;
@@ -584,14 +591,28 @@ class RecordingClient {
     return window;
   }
 
-  async close() {
+  /** Drop the open socket, whatever state it is in, and stop the pings. */
+  async disconnect() {
     this.closing = true;
     clearInterval(this.pingTimer);
-    if (this.socket && this.socket.readyState === 1) {
-      this.socket.close(1000, "profile complete");
-      await withDeadline(new Promise((resolveClose) => this.socket.once("close", resolveClose)), 3_000, `${this.name} close`)
-        .catch(() => this.socket.terminate());
+    const socket = this.socket;
+    if (!socket) return;
+    if (socket.readyState === 1) {
+      socket.close(1000, "profile complete");
+      await withDeadline(new Promise((resolveClose) => socket.once("close", resolveClose)), 3_000, `${this.name} close`)
+        .catch(() => socket.terminate());
+    } else {
+      // Connecting, closing or already closed: terminate so no socket handle is
+      // left behind (an abandoned lane can leave the client in any state).
+      socket.terminate();
     }
+  }
+
+  /** Close for good. Retired is permanent, so a lane's reconnect can no longer
+   * open a socket and the driver process can exit while it unwinds. */
+  async close() {
+    this.retired = true;
+    await this.disconnect();
   }
 }
 
@@ -767,10 +788,11 @@ function settled(observer, recorders, sessionId, deadlineMs) {
 // to child transcripts.
 
 const APPENDED_TEXT = prose(generator(11), 900);
-// The prober's warm and large lanes use their own devices: the Gateway admits
-// one session.open per connection, so a minutes-long large cold open must not
-// starve the warm and cold samples.
-const MULTI_DEVICES = ["mobile", "dashboard", "driver", "warm", "large"];
+// The prober's warm and large lanes and the dashboard's reconnect lane use
+// their own devices: the Gateway admits one session.open per connection, so a
+// minutes-long large cold open must not starve the warm and cold samples, and a
+// minutes-long list must not starve the reconnect sample.
+const MULTI_DEVICES = ["mobile", "dashboard", "dashboard-reconnect", "driver", "warm", "large"];
 // A retryable Gateway error (for example `busy` when the catalog changed while
 // a session opened) would surface on the phone as a failed open; the profile
 // retries after a short pause, counts it, and times the operation to success.
@@ -852,21 +874,39 @@ async function probeSnapshot() {
   }
 }
 
-async function measuredWindow(label, connected, recorded, body) {
+/**
+ * One measured window. `body(start)` starts the workload; when `fixedSeconds`
+ * is set it must only start the lanes and return, and the window closes at
+ * `start + fixedSeconds` whether or not their operations have finished.
+ * In-flight operations then get `tailGraceSeconds` to finish outside the
+ * window: their latency still counts, and whatever is left is censored by
+ * `abandonInflight` so one slow operation can neither stretch the window nor
+ * the run.
+ */
+async function measuredWindow(label, connected, recorded, body, options = {}) {
+  const { fixedSeconds = null, tailGraceSeconds = null, abandonInflight = null } = options;
   for (const client of connected) client.beginWindow(label);
   const probeBefore = await probeSnapshot();
   const before = await sampleGatewayUsage();
   const start = now();
-  await body(start);
+  let lanes = null;
+  if (fixedSeconds === null) {
+    await body(start);
+  } else {
+    lanes = body(start);
+    await sleep(Math.max(0, start + fixedSeconds * 1000 - now()));
+  }
+  // The window closes before any sample is read: frames, bytes, CPU time and
+  // catalog walks of work that outlives the deadline belong to the tail.
   const end = now();
-  const after = await sampleGatewayUsage();
-  const probeAfter = await probeSnapshot();
   const clients = {};
   for (const client of connected) {
     const window = client.endWindow();
     if (recorded.includes(client.name)) clients[client.name] = window;
   }
-  return {
+  const after = await sampleGatewayUsage();
+  const probeAfter = await probeSnapshot();
+  const window = {
     label, windowSeconds: (end - start) / 1000, gateway: usageDelta(before, after), clients,
     probe: {
       catalogWalks: probeAfter.catalogWalks - probeBefore.catalogWalks,
@@ -876,6 +916,19 @@ async function measuredWindow(label, connected, recorded, body) {
       rssPeakBytes: probeAfter.rssPeakBytes,
     },
   };
+  if (lanes !== null) {
+    const tailStart = now();
+    let expired = false;
+    // A lane that fails before the tail expires stays fatal; one that only
+    // settles afterwards is consumed here and changes nothing.
+    await Promise.race([lanes,
+      sleep(tailGraceSeconds * 1000).then(() => { expired = true; })]);
+    window.tail = {
+      seconds: (now() - tailStart) / 1000, outcome: expired ? "abandoned" : "complete",
+      abandoned: expired && abandonInflight ? abandonInflight() : [],
+    };
+  }
+  return window;
 }
 
 async function multi() {
@@ -920,11 +973,30 @@ async function multi() {
       sessionList: [], sessionOpenWarm: [], sessionOpenCold: [], sessionOpenColdLarge: [], promptAdmission: [],
       reconnectReadyMobile: [], reconnectReadyDashboard: [],
     };
+    // Operations a lane is still waiting on. The mixed window's tail expires
+    // with one of them in flight on a slow fixture, so each one is censored
+    // (its elapsed time is the sample) instead of holding the run open.
+    const inflight = new Set();
     const timed = async (kind, operation) => {
-      const started = now();
-      const value = await operation();
-      samples[kind].push(now() - started);
-      return value;
+      const entry = { kind, startedAt: now(), censored: false };
+      inflight.add(entry);
+      try {
+        const value = await operation();
+        if (!entry.censored) samples[kind].push(now() - entry.startedAt);
+        return value;
+      } finally {
+        inflight.delete(entry);
+      }
+    };
+    const abandonInflight = () => {
+      const abandoned = [];
+      for (const entry of inflight) {
+        entry.censored = true;
+        const elapsedMs = now() - entry.startedAt;
+        samples[entry.kind].push(elapsedMs);
+        abandoned.push({ kind: entry.kind, elapsedMs: Math.round(elapsedMs) });
+      }
+      return abandoned;
     };
     const driver = await connect("driver", tokens.driver);
     const phases = new Map();
@@ -937,7 +1009,6 @@ async function multi() {
     let started = now();
     await dashboard.request("session.list", { limit: 500, scope: "user" }, measured);
     result.startupListMs = now() - started;
-    appender = startAppender(config.appendTargets, config.appendIntervalMs, config.label);
 
     // Eight long tool loops; the driver unsubscribes after each prompt, so the
     // runs continue with no session subscriber (accepted prompts outlive them).
@@ -959,6 +1030,12 @@ async function multi() {
     }
     await sleep(config.settleBeforeMs);
 
+    // The subagent-like writers start with the measured windows, not with the
+    // setup: on `main` every append re-scans the whole catalog, and the eight
+    // cold opens that bring the steady state up must not queue behind that
+    // backlog (they are a precondition, not a measurement).
+    appender = startAppender(config.appendTargets, config.appendIntervalMs, config.label);
+
     result.noSubscriber = await measuredWindow("no-subscriber", [driver, dashboard], ["dashboard"],
       () => sleep(config.noSubscriberSeconds * 1000));
 
@@ -969,21 +1046,30 @@ async function multi() {
     await sleep(config.settleBeforeMs);
 
     const reconnectMs = config.reconnectIntervalSeconds * 1000;
+    // The first reconnect must land inside the window whatever `--mixed-seconds`
+    // is (the dashboard's 50 s offset is longer than the shortest window), and
+    // the mobile's stays earlier so the two clients never reconnect together.
+    const dashboardReconnectOffsetMs = Math.min(config.dashboardReconnectOffsetSeconds, config.mixedSeconds / 2) * 1000;
     const pause = (intervalMs, cycleStart, deadline) => sleep(Math.max(0, Math.min(intervalMs - (now() - cycleStart), deadline - now())));
+    // Lists and reconnects run on separate devices. The Gateway admits one
+    // session.open per connection, so the open lanes already work this way; a
+    // single `session.list` can also outlast the whole mixed window on `main`,
+    // and the dashboard's scheduled reconnect must not be starved by it.
     const dashboardLoop = async (start, deadline) => {
-      let reconnectAt = start + config.dashboardReconnectOffsetSeconds * 1000;
       while (now() < deadline) {
         const cycleStart = now();
-        if (cycleStart >= reconnectAt) {
-          reconnectAt += reconnectMs;
-          await timed("reconnectReadyDashboard", async () => {
-            await dashboard.reconnect();
-            await retrying(dashboard, "session.list", { limit: 500, scope: "user" });
-          });
-        } else {
-          await timed("sessionList", () => retrying(dashboard, "session.list", { limit: 500, scope: "user" }));
-        }
+        await timed("sessionList", () => retrying(dashboard, "session.list", { limit: 500, scope: "user" }));
         await pause(config.listIntervalMs, cycleStart, deadline);
+      }
+    };
+    const reconnecting = await connect("dashboard-reconnect", tokens["dashboard-reconnect"]);
+    const dashboardReconnectLane = async (start, deadline) => {
+      for (let reconnectAt = start + dashboardReconnectOffsetMs; reconnectAt < deadline; reconnectAt += reconnectMs) {
+        await sleep(Math.max(0, reconnectAt - now()));
+        await timed("reconnectReadyDashboard", async () => {
+          await reconnecting.reconnect();
+          await retrying(reconnecting, "session.list", { limit: 500, scope: "user" });
+        });
       }
     };
     const mobileLoop = async (start, deadline) => {
@@ -1026,12 +1112,19 @@ async function multi() {
         await pause(config.proberIntervalMs, cycleStart, deadline);
       }
     };
-    result.mixed = await measuredWindow("mixed", [driver, dashboard, mobile, warm, large], ["mobile", "dashboard"], async (start) => {
-      const deadline = start + config.mixedSeconds * 1000;
-      // Every lane starts at once; operations in flight at the deadline finish inside the window.
-      await Promise.all([dashboardLoop(start, deadline), mobileLoop(start, deadline), largeLane(start, deadline),
-        warmLane(start, deadline), coldLane(start, deadline)]);
-    });
+    // The mixed window is fixed-length: it closes at `mixedSeconds` even when a
+    // lane is mid-operation, so window totals (frames, bytes, CPU time, catalog
+    // walks) do not scale with the fixture's latency and two runs can agree.
+    result.mixed = await measuredWindow("mixed", [driver, dashboard, mobile, warm, large, reconnecting],
+      ["mobile", "dashboard"],
+      async (start) => {
+        const deadline = start + config.mixedSeconds * 1000;
+        // Every lane starts at once; operations still in flight at the deadline
+        // finish in the window's bounded tail.
+        await Promise.all([dashboardLoop(start, deadline), dashboardReconnectLane(start, deadline),
+          mobileLoop(start, deadline), largeLane(start, deadline), warmLane(start, deadline),
+          coldLane(start, deadline)]);
+      }, { fixedSeconds: config.mixedSeconds, tailGraceSeconds: config.tailGraceMs / 1000, abandonInflight });
     result.samples = samples;
     result.runningPhases = config.running.map(({ sessionId }) => phases.get(sessionId) ?? null);
     result.mobileOutcome = chat.outcome();
@@ -1045,6 +1138,10 @@ async function multi() {
     for (const chat of chats) clearInterval(chat.renewal);
     if (appender) await appender.stop().catch(() => {});
     for (const client of clients) await client.close();
+    // A lane abandoned by the mixed window's tail can restore a mounted chat
+    // while its socket closes; nothing may keep the driver process alive after
+    // every client is closed.
+    for (const chat of chats) clearInterval(chat.renewal);
     await new Promise((resolveFlush) => timelineStream.end(resolveFlush));
   }
 }

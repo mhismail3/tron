@@ -112,7 +112,8 @@ SCENARIOS = {
     )
 }
 # `all` means the wire-traffic scenarios; the multi-session qualification run
-# (2 GiB of generated catalog, about 13 minutes) runs only when named.
+# (2 GiB of generated catalog, a fixed 120 s mixed window per iteration with a
+# bounded tail) runs only when named.
 WIRE_SCENARIOS = ("stream-reply", "tool-loop", "idle", "dashboard-observer")
 
 # Multi-session qualification workload (plan: connection and scale hardening,
@@ -135,6 +136,10 @@ MULTI = {
     "mobileReconnectOffsetSeconds": 20,
     "dashboardReconnectOffsetSeconds": 50,
     "settleBeforeMs": 3000,
+    # The mixed window closes on the deadline whatever is in flight; an
+    # operation still running gets this fixed tail before it is censored (its
+    # elapsed time still counts). Half again the phone's 30 s deadline.
+    "tailGraceMs": 45_000,
     # Measured requests may be slow on purpose; the phone's own 30 s deadline
     # is reported as a count instead of failing the run.
     "measuredDeadlineMs": 180_000,
@@ -437,7 +442,9 @@ class FixtureGateway:
             command += ["--cpu-prof", f"--cpu-prof-dir={self.cpu_profile_dir}"]
         command.append(str(ENTRY))
         self.log_path = self.evidence / "gateway.stdout.log"
-        with self.log_path.open("wb") as output:
+        # Append: a multi-session run starts one fixture per phase and the
+        # retained evidence must keep the priming run and every iteration.
+        with self.log_path.open("ab") as output:
             # Own session: a terminal Ctrl-C reaches this orchestrator, which
             # then stops the fixture deliberately instead of racing it.
             self.process = subprocess.Popen(command, cwd=self.workspace, env=environment, stdin=subprocess.DEVNULL,
@@ -469,23 +476,35 @@ class FixtureGateway:
             return False
 
     def stop(self) -> None:
-        """Stop the owned child (verified by PID and command) and its group."""
+        """Stop the owned child (verified by PID and command) and its group.
+
+        A first Ctrl-C arrives as Interrupted at any point below, so the group
+        kill runs in `finally`: an interrupted wait must not leave the Gateway
+        running without its parent."""
         process = self.process
-        if process is not None and process.poll() is None:
-            if not self.command_matches():
-                raise ProfileFailure(f"refusing to signal PID {process.pid}: not the owned fixture Gateway", EXIT_FIXTURE)
-            process.send_signal(signal.SIGTERM)
-            try:
-                process.wait(timeout=20)
-            except subprocess.TimeoutExpired:
-                log(f"fixture Gateway {process.pid} ignored SIGTERM for 20 s; killing it")
-                process.kill()
-                process.wait(timeout=10)
-        if process is not None:
+        if process is None:
+            return
+        # Ownership is proved before anything is signalled: a process that is
+        # not this fixture is never touched, not even by the group kill below.
+        if process.poll() is None and not self.command_matches():
+            raise ProfileFailure(f"refusing to signal PID {process.pid}: not the owned fixture Gateway", EXIT_FIXTURE)
+        try:
+            if process.poll() is None:
+                process.send_signal(signal.SIGTERM)
+                try:
+                    process.wait(timeout=20)
+                except subprocess.TimeoutExpired:
+                    log(f"fixture Gateway {process.pid} ignored SIGTERM for 20 s; killing it")
+                    process.kill()
+                    process.wait(timeout=10)
+        finally:
             # The group id is the fixture's own PID (start_new_session); only
-            # its descendants can still hold it.
+            # its descendants can still hold it. This runs even when an
+            # interrupt aborted a wait above, so no child is left running.
             with contextlib.suppress(ProcessLookupError, PermissionError):
                 os.killpg(process.pid, signal.SIGKILL)
+            with contextlib.suppress(BaseException):
+                process.wait(timeout=10)
 
     def retain_logs(self) -> None:
         source = self.tron_home / "logs/gateway.jsonl"
@@ -712,7 +731,7 @@ def run_scenario(scenario: Scenario, args: argparse.Namespace, results_dir: Path
                     # A child that could not be stopped keeps its home; the
                     # failure names it instead of deleting state under it.
                     if fixture.process is None or fixture.process.poll() is not None:
-                        fixture.remove()
+                        removal_to_completion(fixture.remove)
         effective_prompt = prompt if prompt is not None else scenario.prompt
         problems, validation_warnings = validate(result, scenario, args.iterations, effective_prompt)
         if problems:
@@ -741,14 +760,7 @@ def run_scenario(scenario: Scenario, args: argparse.Namespace, results_dir: Path
         report_samples(run_dir, scenario, result, context)
         return run_dir
     except (ProfileFailure, Interrupted) as failure:
-        # A run directory without report.json always says why.
-        interrupted = isinstance(failure, Interrupted)
-        (run_dir / "failure.json").write_text(json.dumps({
-            "schema": "tron.profile-gateway-failure.v1", "scenario": scenario.name,
-            "error": f"interrupted by signal {failure.signal_number}" if interrupted else str(failure),
-            "exit": EXIT_INTERRUPTED if interrupted else failure.code,
-            "evidence": None if interrupted or not failure.evidence else str(failure.evidence),
-        }, indent=2) + "\n")
+        write_failure(run_dir, scenario, failure)
         raise
 
 
@@ -782,6 +794,36 @@ def host_guard(catalog_bytes: int) -> dict:
     if problems:
         raise ProfileFailure("host not ready for the multi-session run: " + "; ".join(problems), EXIT_HOST)
     return {"memory_pressure_level": int(level), "swap_used_bytes": swap, "temp_free_bytes": free}
+
+
+def removal_to_completion(*actions) -> None:
+    """Run removal actions to completion.
+
+    A first Ctrl-C arrives as Interrupted wherever the handler fires, so each
+    action is resumed past an interrupt and the interrupt is re-raised only
+    once every action finished: a half-deleted catalog or fixture home is never
+    left behind, and the caller still exits 130."""
+    deferred: Interrupted | None = None
+    for action in actions:
+        while True:
+            try:
+                action()
+                break
+            except Interrupted as interrupted:
+                deferred = deferred or interrupted
+    if deferred is not None:
+        raise deferred
+
+
+def write_failure(run_dir: Path, scenario: Scenario, failure: ProfileFailure | Interrupted) -> None:
+    """A run directory without report.json always says why."""
+    interrupted = isinstance(failure, Interrupted)
+    (run_dir / "failure.json").write_text(json.dumps({
+        "schema": "tron.profile-gateway-failure.v1", "scenario": scenario.name,
+        "error": f"interrupted by signal {failure.signal_number}" if interrupted else str(failure),
+        "exit": EXIT_INTERRUPTED if interrupted else failure.code,
+        "evidence": None if interrupted or not failure.evidence else str(failure.evidence),
+    }, indent=2) + "\n")
 
 
 def percentile(values: list[float], rank: float) -> float:
@@ -831,6 +873,13 @@ def validate_multi(results: list[dict]) -> tuple[list[str], list[str]]:
             problems.append(f"{label}: {len(stopped)} of {len(result['runningPhases'])} tool loops were not running at the end")
         if result["mobileOutcome"]["sequenceGaps"]:
             warnings.append(f"{label}: {result['mobileOutcome']['sequenceGaps']} mounted-chat sequence gap(s)")
+        tail = (result.get("mixed") or {}).get("tail") or {}
+        abandoned = tail.get("abandoned") or []
+        if abandoned:
+            kinds = ", ".join(sorted({item["kind"] for item in abandoned}))
+            warnings.append(f"{label}: {len(abandoned)} operation(s) ({kinds}) were still in flight when the mixed "
+                            f"window's {tail['seconds']:.0f} s tail expired; their censored latency counts in the "
+                            "samples and in requests.over_phone_deadline")
         slow = sum(1 for values in result["samples"].values() for value in values if value > PHONE_REQUEST_DEADLINE_MS)
         if slow:
             warnings.append(f"{label}: {slow} measured operation(s) exceeded the phone's 30 s request deadline")
@@ -859,6 +908,9 @@ def multi_samples(results: list[dict]) -> tuple[dict, list[str]]:
     add("requests.over_phone_deadline", "count",
         [sum(1 for values in result["samples"].values() for value in values if value > PHONE_REQUEST_DEADLINE_MS)
          for result in results], "measured operations slower than the phone's 30 s request deadline")
+    add("requests.censored_tail", "count",
+        [len(((result.get("mixed") or {}).get("tail") or {}).get("abandoned") or []) for result in results],
+        "operations still in flight when the mixed window's fixed tail expired (censored into the samples above)")
     add("requests.busy_retries", "count", [sum(result["busyRetries"].values()) for result in results],
         "retryable Gateway errors (a failed attempt on the phone) retried by the profile")
     for namespace, window in (("", "mixed"), ("no_subscriber.", "noSubscriber")):
@@ -932,9 +984,12 @@ def run_multi_session(args: argparse.Namespace, results_dir: Path) -> Path:
                     fixture.stop()
                 finally:
                     fixture.retain_logs()
-                    fixture.remove_catalog()
+                    # The generated catalog never outlives the run; a child that
+                    # could not be stopped keeps its home as evidence.
+                    removals = [fixture.remove_catalog]
                     if fixture.process is None or fixture.process.poll() is not None:
-                        fixture.remove()
+                        removals.append(fixture.remove)
+                    removal_to_completion(*removals)
         if fixture.root.exists():
             raise ProfileFailure(f"fixture home {fixture.root} was not removed", EXIT_FIXTURE, fixture.root)
         problems, warnings = validate_multi(results)
@@ -960,6 +1015,8 @@ def run_multi_session(args: argparse.Namespace, results_dir: Path) -> Path:
                 "appended_entries": result["appendedEntries"],
                 "busy_retries": result["busyRetries"],
                 "heap_limit_bytes": result["mixed"]["probe"]["heapLimitBytes"],
+                "mixed_window_seconds": result["mixed"]["windowSeconds"],
+                "mixed_tail": result["mixed"].get("tail"),
             } for result in results],
             "gateway_event_loop_delay_records": len(event_loop_stalls(evidence / "gateway.jsonl")),
             "probe": "scripts/tron-profile-gateway-probe.mjs preloaded into the fixture only (10 ms delay timer, 1 s "
@@ -974,13 +1031,7 @@ def run_multi_session(args: argparse.Namespace, results_dir: Path) -> Path:
         log(f"{scenario.name}: finished in {run_seconds / 60:.1f} min")
         return run_dir
     except (ProfileFailure, Interrupted) as failure:
-        interrupted = isinstance(failure, Interrupted)
-        (run_dir / "failure.json").write_text(json.dumps({
-            "schema": "tron.profile-gateway-failure.v1", "scenario": scenario.name,
-            "error": f"interrupted by signal {failure.signal_number}" if interrupted else str(failure),
-            "exit": EXIT_INTERRUPTED if interrupted else failure.code,
-            "evidence": None if interrupted or not failure.evidence else str(failure.evidence),
-        }, indent=2) + "\n")
+        write_failure(run_dir, scenario, failure)
         raise
 
 

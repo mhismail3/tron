@@ -11,6 +11,8 @@ The Gateway multi-session scenario adds failure modes its own run cannot
 reveal: a catalog generator whose output drifts between runs or misplaces
 forks and subagent runs relative to the Gateway's delegated-session layout; a
 generated catalog (gigabytes) left behind by an interrupted or failed run; a
+fixture child that survives `stop()` and must keep its home while the catalog
+still goes; a removal the first Ctrl-C interrupts half-way; a
 fixture probe whose walk counter never sees the Gateway's ES-module `opendir`
 (reporting zero walks) or that loads outside a fixture Gateway; and a
 percentile or missing-sample bug that reports a latency the run never measured.
@@ -292,6 +294,7 @@ class MultiSessionCatalog(unittest.TestCase):
 
 
 INTERRUPT_HARNESS = """
+import os
 import sys
 from importlib.machinery import SourceFileLoader
 from importlib.util import module_from_spec, spec_from_loader
@@ -306,6 +309,29 @@ if mode == "fail-after-catalog":
     def start(self, deadline_seconds=90):
         raise profiler.ProfileFailure("injected fixture start failure", profiler.EXIT_FIXTURE)
     profiler.FixtureGateway.start = start
+elif mode == "fixture-survives":
+    class LiveFixture:
+        # A fixture child that is still running: poll() never reports it gone.
+        pid = os.getpid()
+
+        @staticmethod
+        def poll():
+            return None
+
+    def start(self, deadline_seconds=90):
+        # The cleanup decision needs a live child, not a Gateway, so no process
+        # is started here and the test can leak none.
+        self.process = LiveFixture()
+
+    def stop(self):
+        raise profiler.ProfileFailure("refusing to signal PID: not the owned fixture Gateway", profiler.EXIT_FIXTURE)
+
+    def run_multi_driver(fixture, run_dir, phase, label, workload):
+        raise profiler.ProfileFailure("injected driver failure", profiler.EXIT_MEASUREMENT)
+
+    profiler.FixtureGateway.start = start
+    profiler.FixtureGateway.stop = stop
+    profiler.run_multi_driver = run_multi_driver
 profiler.install_interrupt_handlers()
 args = profiler.parse(["--scenario", "multi-session", "--iterations", "1", "--catalog-files", sys.argv[4],
                        "--catalog-mib", sys.argv[5]])
@@ -323,6 +349,7 @@ class MultiSessionCleanup(unittest.TestCase):
     """The generated catalog never outlives the run on a failure or interruption."""
 
     def setUp(self) -> None:
+        self.profiler = load_gateway_profiler()
         self.temporary = tempfile.TemporaryDirectory()
         self.root = Path(self.temporary.name)
         self.tmp = self.root / "tmp"
@@ -366,6 +393,51 @@ class MultiSessionCleanup(unittest.TestCase):
                 process.wait()
         self.assertEqual(process.returncode, 130, stderr)
         self.assert_removed()
+
+    def test_a_fixture_that_cannot_be_stopped_keeps_its_home_but_not_the_catalog(self) -> None:
+        process = self.harness("fixture-survives", "200", "64")
+        _, stderr = process.communicate(timeout=300)
+        self.assertEqual(process.returncode, 5, stderr)
+        homes = [path for path in self.tmp.iterdir() if path.name.startswith("tron-profile-gateway-")]
+        self.assertEqual(len(homes), 1, "the surviving fixture home is kept as evidence")
+        self.assertEqual([path.name for path in self.tmp.iterdir()], [home.name for home in homes])
+        self.assertTrue((homes[0] / self.profiler.FIXTURE_MARKER).is_file())
+        self.assertFalse((homes[0] / "agent/sessions").exists(), "the generated catalog is still deleted")
+        self.assertEqual(len(list((self.root / "results").glob("*/failure.json"))), 1)
+
+
+class InterruptibleRemoval(unittest.TestCase):
+    """A first Ctrl-C during cleanup must not leave a partial removal behind."""
+
+    def setUp(self) -> None:
+        self.profiler = load_gateway_profiler()
+
+    def test_a_removal_interrupted_by_a_signal_is_resumed_and_the_signal_reraised(self) -> None:
+        attempts: list[int] = []
+
+        def action() -> None:
+            attempts.append(len(attempts))
+            if len(attempts) == 1:
+                raise self.profiler.Interrupted(signal.SIGINT)
+
+        with self.assertRaises(self.profiler.Interrupted):
+            self.profiler.removal_to_completion(action)
+        self.assertEqual(len(attempts), 2, "the interrupted removal resumed to completion")
+
+    def test_every_action_finishes_before_the_interrupt_is_reraised(self) -> None:
+        order: list[str] = []
+
+        def catalog() -> None:
+            order.append("catalog")
+            if order.count("catalog") == 1:
+                raise self.profiler.Interrupted(signal.SIGTERM)
+
+        def home() -> None:
+            order.append("home")
+
+        with self.assertRaises(self.profiler.Interrupted):
+            self.profiler.removal_to_completion(catalog, home)
+        self.assertEqual(order, ["catalog", "catalog", "home"])
 
 
 PROBE_CLIENT = """

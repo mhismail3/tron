@@ -2409,26 +2409,41 @@ cannot hold the catalog, and it takes the same per-host profile lock.
   fixture Gateway, so every session is cold again, and starts eight faux-model
   tool loops from seeded sessions whose transcript page is full; the driver
   unsubscribes after each prompt. Four subagent-like writers append one entry
-  each to child transcripts every 500 ms throughout.
+  each to child transcripts every 500 ms from the first measured window on (on
+  `main` every append re-scans the whole catalog, so starting them with the
+  setup would let an unmeasured precondition queue behind that backlog).
 - **No-subscriber window (30 s):** the eight loops run; only an unsubscribed
   dashboard and the driver are connected. Its metrics carry the
   `no_subscriber.` prefix.
 - **Mixed window (`--mixed-seconds`, 120):** the mobile client is mounted on a
   running session; the dashboard lists (`session.list`, `user`, 500) every 5 s;
-  three prober lanes, each its own device because the Gateway admits one
-  `session.open` per connection, start together: cold opens of the large
-  sessions (largest first, as many as the window allows), a warm open of a
-  running session every 5 s, and a cold open of a 1 MiB session followed by a
-  prompt every 5 s. Mobile and dashboard reconnect every 60 s (offset 20 s and 50 s)
-  and time reconnect-to-ready (mounted chat restored, or list returned). A
-  retryable Gateway error is retried after 250 ms and counted
-  (`requests.busy_retries`); on the phone it would be a failed attempt.
+  lanes that can starve each other each get their own device, start together and
+  report: cold opens of the large sessions (largest first, as many as the window
+  allows), a warm open of a running session every 5 s, a cold open of a 1 MiB
+  session followed by a prompt every 5 s, and a dashboard-fidelity reconnect
+  every 60 s at offset 50 s. The mobile reconnects on the mobile client every
+  60 s at offset 20 s and times reconnect-to-ready (mounted chat restored); the
+  dashboard-fidelity lane times its own (list returned). A retryable Gateway
+  error is retried after 250 ms and counted (`requests.busy_retries`); on the
+  phone it would be a failed attempt. Only the mobile and dashboard clients are
+  recorded: the prober and reconnect lanes' own wire traffic is not.
+- **Fixed window edges:** the mixed window closes at `--mixed-seconds` whatever
+  is still in flight, so its frames, bytes, CPU time and catalog walks do not
+  scale with the fixture's latency and two runs can be compared. An operation
+  still running then gets a fixed 45 s tail (`tailGraceMs`); its latency still
+  lands in the samples. Whatever the tail outlasts is censored: its elapsed
+  time becomes the sample (so it counts in `requests.over_phone_deadline`) and
+  `requests.censored_tail` counts it. The no-subscriber window is fixed by its
+  sleep alone. A lane whose device is retired by a reconnect keeps its own
+  scheduled work: the reconnect lane cannot be starved by a list that outlasts
+  the window.
 
 Per iteration it reports `latency.<operation>.p50|p99|max` (nearest rank, so
 p99 is the maximum below 100 samples) for `session_list`,
 `session_open_warm|cold|cold_large`, `prompt_admission` and
 `reconnect_ready_mobile|dashboard`; `requests.over_phone_deadline` (slower than
-the phone's 30 s); the `wire.*` metrics above; fixture CPU
+the phone's 30 s, including censored tail operations); `requests.censored_tail`;
+the `wire.*` metrics above; fixture CPU
 (`gateway.cpu.percent`, 100% is one core); and, from
 `scripts/tron-profile-gateway-probe.mjs`, `catalog.walks`,
 `gateway.event_loop.delay_p99|max`, `gateway.heap.peak`,
@@ -2439,9 +2454,11 @@ structure walk), runs `monitorEventLoopDelay` at 10 ms resolution, samples
 memory once a second and writes one small snapshot per window edge on SIGUSR2.
 It is a stand-in until the Gateway's own request spans and resource sampler
 report these numbers; `catalog.walks` counts every walk, not only those on the
-request path. Operations still in flight at a window's end finish inside it,
-so a slow Gateway lengthens the run: the `main` baseline, whose lists and cold
-opens take up to minutes, runs about 20 minutes; the target Gateway about 13.
+request path. Window edges are fixed and the tail is bounded, so a slow Gateway
+censors operations instead of lengthening the run: an iteration's measured part
+is `--mixed-seconds` plus at most the 45 s tail, and the run's total is set by
+what the host makes of the per-iteration fixture start and the eight setup
+opens. A full 2 GiB run therefore wants a quiet host.
 
 ## Session subagent activity
 

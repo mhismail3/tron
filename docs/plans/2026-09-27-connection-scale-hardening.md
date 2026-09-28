@@ -1567,13 +1567,21 @@ The `main` baseline is filled by O-6a and O-6b at the start of Phase 1, the
 release candidate by R-1, and the evaluation day by R-4 (real logs; "n/a" where
 the day cannot measure a synthetic case).
 
-| Metric | `main` baseline | Release candidate (R-1) | Evaluation day (R-4) |
+The `main` column is **provisional**. O-6a recorded it on a host at 1-minute
+load 20–55 (the report warned "host busy") with the pre-fix variable-length
+mixed windows (205–230 s), so every window total scales with how long the
+fixture took, not with the Gateway's work. The overrun is fixed — the mixed
+window now closes at 120 s and in-flight operations get a bounded 45 s tail —
+but the quiet-host repeat that replaces this column is still outstanding, so
+read it as the shape of `main`, not as a target.
+
+| Metric | `main` baseline (provisional) | Release candidate (R-1) | Evaluation day (R-4) |
 | --- | --- | --- | --- |
 | `session.list` p99 | 46.5 s (p50 27.5 s) | | |
 | warm / cold `session.open` p99 | 3.3 s / 140 s (1 MiB); 25.7 s for 100–200 MiB | | |
 | prompt admission p99 | 631 ms | | |
 | event-loop delay p99 / max | 125 ms / 6.3 s (no subscriber: 263 ms / 5.7 s) | | |
-| request-path catalog walks | 37 walks per 2-minute mixed window, all causes (probe) | | |
+| request-path catalog walks | 37 walks per mixed window (~219 s), all causes (probe) | | |
 | snapshots built without an audience | | | |
 | Gateway CPU, 8 running, no subscriber | 57% of one core | | n/a |
 | Gateway heap peak (% of limit) / RSS peak | 1.98 GiB (49%) / 2.00 GiB | | |
@@ -1659,7 +1667,8 @@ the day cannot measure a synthetic case).
   starts a fresh fixture Gateway per iteration and reports latency
   percentiles, event-loop delay, heap, RSS, CPU and catalog walks under eight
   running tool loops. The `main` baseline is in Findings (medians of three
-  iterations of run `20260928T083106Z-multi-session-491859`).
+  iterations of run `20260928T083106Z-multi-session-491859`, recorded with the
+  pre-fix variable-length windows, so the column is provisional).
 - Failure modes written before the isolated tests: the generator drifts
   between runs of one seed (baselines would compare different catalogs); forks
   or subagent runs land outside the Gateway's delegated layout (the user list
@@ -1677,13 +1686,12 @@ the day cannot measure a synthetic case).
   `session.list` walks). Full runs: `20260928T083106Z-multi-session-491859`
   (19.9 min, exit 0, catalog digest `b1f20a87…` from seed 2027) and the
   consecutive `20260928T085100Z-multi-session-2406dc` (13.2 min, exit 0, same
-  digest). `scripts/tron-profile compare` of the two: every Findings metric
-  (list, warm and large open, prompt admission and reconnect p99; event-loop
-  p99 and max; CPU percent with and without subscriber; heap and RSS peaks;
-  walks) is `unchanged` within the noise bound except cold `session.open`
-  p99 (140 s to 29 s); 26 other verdicts are window totals (CPU time, wire
-  frames and bytes) that moved because run A's windows overran longer
-  (219 s against 150 s median). After
+  digest). `scripts/tron-profile compare` of the two exits 3: one regression,
+  `wire.dashboard.hello.bytes` (run A 1180 B median against run B 2360 B), which
+  is the fixed 1.18 KB hello exchange counted once or twice depending on whether
+  the longer window caught the dashboard's scheduled reconnect; 26 improvements
+  are window totals (CPU time, wire frames and bytes) that scale with the window
+  length; cold `session.open` p99 improved (140 s to 29 s). After
   every run, success or interruption (an interrupted run was also observed
   live), no `tron-profile-gateway-*` directory remained in the temporary
   directory. Reports live under `~/Library/Developer/Tron/profiles/gateway/`.
@@ -1722,3 +1730,64 @@ the day cannot measure a synthetic case).
   reconnect-to-ready already exists (`latency.reconnect_ready_*`, mobile p99
   0.58 s, dashboard p99 28.9 s on `main`). Run baselines when the host load
   is low; the report warns when it is not.
+
+### O-6a · Blocked · 2026-09-28 · orchestrator-dispatched worker (review fixes)
+
+- Result: the review's findings are fixed inside the scenario's own files.
+  - The mixed window closes at `--mixed-seconds` whatever is still in flight. It
+    used to wait for the slowest operation, so its length (205–230 s) and every
+    window total (frames, bytes, CPU time, catalog walks) scaled with the
+    fixture's latency. In-flight operations now get a fixed 45 s tail
+    (`tailGraceMs`): their latency still lands in the samples, and whatever the
+    tail outlasts is censored — its elapsed time becomes the sample,
+    `requests.censored_tail` counts it, and it counts in
+    `requests.over_phone_deadline` (an operation abandoned by the tail has been
+    running for at least the tail).
+  - The dashboard's reconnect runs on its own device. A single `session.list`
+    can outlast the whole window on `main`, so the scheduled reconnect was
+    starved and the run was rejected with "no reconnectReadyDashboard samples".
+    The reconnect lane's own wire traffic is not recorded, as the prober lanes'
+    is not, so `wire.dashboard.hello.*` is no longer a window metric (the mobile
+    reconnect still reports it). The first reconnect also lands inside the
+    window for any `--mixed-seconds`, not only for 120 s.
+  - A lane abandoned by the tail can no longer keep the driver process alive: a
+    closed client is retired, so a reconnect in flight cannot leave a socket
+    open (the first fixed-window run hung on exactly that and never exited).
+  - A first Ctrl-C can no longer skip the fixture group kill, and a removal it
+    interrupts is resumed and its signal re-raised only after every removal
+    finished, so neither a half-deleted catalog nor a half-deleted home is left.
+  - The retained `gateway.stdout.log` appends, so it keeps the priming run and
+    every iteration; `failure.json` is written by one helper.
+  - The subagent-like writers start with the first measured window instead of
+    with the setup. On `main` every append re-scans the whole catalog, so the
+    eight setup opens queued behind that backlog (35–180 s each observed) and
+    two full runs failed there; the appends still cover every measured window.
+- Evidence: `python3 scripts/test-tron-profile.py` passes 21 tests (3 new: a
+  fixture that survives `stop()` keeps its home while the catalog is still
+  deleted; an interrupted removal resumes and re-raises afterwards; every
+  removal action finishes before the re-raise). A short smoke run
+  (`scripts/tron-profile gateway --scenario multi-session --iterations 1
+  --catalog-files 200 --catalog-mib 32 --mixed-seconds 30 --no-build`) completes
+  with exit 0: `window.seconds` 30.00 s, `no_subscriber.window.seconds` 30.00 s,
+  every latency kind sampled, and no `tron-profile-gateway-*` directory left in
+  the temporary directory. Of the full 2 GiB runs, iteration 1 of
+  `20260928T103121Z-multi-session-52660d` completed with a 120.01 s window, a
+  complete tail and every kind sampled; the two consecutive full runs were not
+  finished because the host stayed at 1-minute load 22–70 from other sessions'
+  builds.
+- Blocked on: "two consecutive runs on a quiet host agree within the report's
+  noise bound". The window overrun that made that impossible is fixed. To
+  unblock, on an idle host run twice, consecutively:
+  `scripts/tron-profile gateway --scenario multi-session` (the measured part of
+  an iteration is now `--mixed-seconds` plus at most the 45 s tail plus the 30 s
+  no-subscriber window; the rest is the host's fixture start and setup opens),
+  then `scripts/tron-profile compare <run-1> <run-2>`. The bound is that
+  command's exit 0 with its default floor: a metric may move by up to 3%, three
+  robust standard deviations, or one unit without a verdict. Refresh the
+  provisional `main` column in Findings from those two runs.
+- For the next agent: the probe (event-loop delay, heap, RSS, walks) is a
+  stand-in; once O-3 spans and the O-5 sampler report the same numbers, delete or
+  reduce `scripts/tron-profile-gateway-probe.mjs` and read request path walks
+  from spans. O-6b adds its cases to `multi-session`. Once O-1 is merged, the
+  driver's hello needs O-1's `diagnostics {clientId, attemptId, epoch}` to stay
+  phone-faithful (`GatewayClient.establishConnection`).
