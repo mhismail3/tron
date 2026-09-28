@@ -5547,7 +5547,10 @@ describe.sequential("RuntimeRegistry with the pinned agent runtime", () => {
     const slot = await fixture.registry.acquire(fixture.manager.getSessionId());
     const projectRoot = join(fixture.cwd, ".pi", "subagents", "async-subagent-runs");
     await mkdir(projectRoot, { recursive: true });
-    fixture.manager.appendMessage({
+    // The slot attributes the artifact through this session's canonical JSONL.
+    const manager = (slot as unknown as { runtime: { session: { sessionManager: SessionManager } } })
+      .runtime.session.sessionManager;
+    manager.appendMessage({
       role: "toolResult",
       toolCallId,
       toolName: "subagent",
@@ -5606,25 +5609,84 @@ describe.sequential("RuntimeRegistry with the pinned agent runtime", () => {
     const slot = await fixture.registry.acquire(fixture.manager.getSessionId());
     const routed = vi.spyOn(slot, "discoverExtensionArtifact");
 
-    await discoverExtensionArtifactsUntil(fixture.registry);
-    expect(stopped.map((counts) => ({ entries: counts.entries, statusReads: counts.statusReads })))
-      .toEqual([{ entries: 1_025, statusReads: 1_024 }]);
-    const firstPass = new Set(routed.mock.calls.map(([asyncDir]) => asyncDir));
-    expect(firstPass.size).toBe(1_024);
+    await discoverExtensionArtifactsUntil(fixture.registry, () => stopped.length >= 2);
+    // The first pass stops at the read budget after 1,025 entries and reads
+    // 1,024 of them; the next reaches the end of the root, reading only the 76
+    // entries the first could not, and reports the candidates its per-root
+    // routing budget cut off instead of dropping them silently. No artifact here
+    // belongs to a live slot, so none is routed.
+    expect(stopped).toEqual([
+      { entries: 1_025, statusReads: 1_024, work: 0, dropped: 0 },
+      { entries: artifactCount, statusReads: artifactCount - 1_024, work: 0, dropped: artifactCount - 1_024 },
+    ]);
+    expect(routed.mock.calls).toEqual([]);
 
-    // The artifacts the stopped pass could not reach are the ones it did not
-    // route. Give them the newest evidence, so a later pass has to examine
-    // exactly those entries to project the whole root; an unchanged artifact
-    // spends no read budget, so the walk now reaches the end of the root.
-    const unexamined = runDirectories.filter((run) => !firstPass.has(run.asyncDir));
-    expect(unexamined).toHaveLength(artifactCount - 1_024);
-    for (const run of unexamined) await writeStatus(run, startedAt + 60_000);
+    // The unchanged root repeats the same stop, and a repeat inside its episode
+    // is not recorded again.
     await discoverExtensionArtifactsUntil(fixture.registry);
+    expect(stopped).toHaveLength(2);
+    await rm(delegated.root, { recursive: true, force: true });
+  });
 
-    expect(new Set(routed.mock.calls.map(([asyncDir]) => asyncDir)).size).toBe(artifactCount);
-    // Only the entries whose status.json changed were read again, so the second
-    // pass reached the end of the root: no further stop was reported.
-    expect(stopped).toHaveLength(1);
+  it("does not reopen an unchanged ambient artifact for a live slot", async () => {
+    // A root shaped like the production provider root on 2026-09-28: 2,498 run
+    // directories, 556 finished status.json files and one live slot, which read
+    // every one of them on every 750 ms pass.
+    const delegated = await delegatedFixtureRoot("ambient-steady-state");
+    const startedAt = Date.now();
+    const runsRoot = join(delegated.delegatedRoot, "async-subagent-runs");
+    await mkdir(runsRoot, { recursive: true });
+    const finished = Array.from({ length: 556 }, (_unused, index) => `finished-${String(index).padStart(4, "0")}`);
+    const empty = Array.from({ length: 2_498 - 556 }, (_unused, index) => `empty-${String(index).padStart(4, "0")}`);
+    await Promise.all([...empty, ...finished].map((name) => mkdir(join(runsRoot, name), { recursive: true })));
+    const finishedStatus = (runId: string) => JSON.stringify({
+      lifecycleArtifactVersion: 3, runId, state: "complete",
+      startedAt: startedAt - 120_000, lastUpdate: startedAt - 120_000, endedAt: startedAt - 120_000,
+    });
+    await Promise.all(finished.map((name) => writeFile(join(runsRoot, name, "status.json"), finishedStatus(name))));
+    const fixture = await coldFixture("ambient-steady-state", { delegatedRoot: delegated.delegatedRoot });
+    const slot = await fixture.registry.acquire(fixture.manager.getSessionId());
+    vi.spyOn(slot as unknown as { extensionToolOrigin: (name: string) => { source: string } | undefined }, "extensionToolOrigin")
+      .mockReturnValue({ source: "pi-subagents" });
+    const finishedRunId = "owned-finished-run";
+    const liveRunId = "owned-live-run";
+    const finishedDir = join(runsRoot, finishedRunId);
+    const liveDir = join(runsRoot, liveRunId);
+    for (const runId of [finishedRunId, liveRunId]) await mkdir(join(runsRoot, runId), { recursive: true });
+    await writeFile(join(finishedDir, "status.json"), finishedStatus(finishedRunId));
+    await writeFile(join(liveDir, "status.json"), JSON.stringify({
+      lifecycleArtifactVersion: 3, runId: liveRunId, state: "running",
+      startedAt: startedAt - 60_000, lastUpdate: startedAt - 1_000,
+    }));
+    const manager = (slot as unknown as { runtime: { session: { sessionManager: SessionManager } } }).runtime.session.sessionManager;
+    for (const [runId, asyncDir] of [[finishedRunId, finishedDir], [liveRunId, liveDir]] as const) {
+      manager.appendMessage({
+        role: "toolResult", toolCallId: `${runId}-tool`, toolName: "subagent",
+        content: [{ type: "text", text: "launched" }],
+        details: { runId, asyncDir, state: "running" }, isError: false, timestamp: Date.now(),
+      });
+    }
+    const routed = vi.spyOn(slot, "discoverExtensionArtifact");
+
+    // Only the two runs this slot can attribute are offered; the finished runs of
+    // other sessions are examined by the walk but never reopened.
+    await discoverExtensionArtifactsUntil(fixture.registry, () => routed.mock.calls.length >= 2);
+    expect(new Set(routed.mock.calls.map(([asyncDir]) => asyncDir))).toEqual(new Set([finishedDir, liveDir]));
+
+    // A pass over the unchanged root offers the finished artifact to nobody: it
+    // already reached this slot, and the live one is refreshed by its exact
+    // binding. Everything else stays unopened.
+    routed.mockClear();
+    await discoverExtensionArtifactsUntil(fixture.registry);
+    expect(new Set(routed.mock.calls.map(([asyncDir]) => asyncDir))).toEqual(new Set([liveDir]));
+
+    // A changed artifact is offered again, even when its exact binding is terminal.
+    await writeFile(join(finishedDir, "status.json"), JSON.stringify({
+      lifecycleArtifactVersion: 3, runId: finishedRunId, state: "complete",
+      startedAt: startedAt - 120_000, lastUpdate: startedAt + 1_000, endedAt: startedAt + 1_000,
+    }));
+    await discoverExtensionArtifactsUntil(fixture.registry, () => routed.mock.calls.some(([asyncDir]) => asyncDir === finishedDir));
+    expect(routed.mock.calls.some(([asyncDir]) => asyncDir === finishedDir)).toBe(true);
     await rm(delegated.root, { recursive: true, force: true });
   });
 
@@ -5669,7 +5731,15 @@ describe.sequential("RuntimeRegistry with the pinned agent runtime", () => {
       }
     })();
     try {
-      for (let pass = 0; pass < 600; pass += 1) await discoverExtensionArtifactsUntil(fixture.registry);
+      // Several hundred real passes inside a replace storm; the bound is wall
+      // clock so a loaded host cannot turn the storm itself into a timeout.
+      const until = Date.now() + 8_000;
+      let passes = 0;
+      while (Date.now() < until) {
+        await discoverExtensionArtifactsUntil(fixture.registry);
+        passes += 1;
+      }
+      expect(passes).toBeGreaterThan(100);
     } finally {
       replacing = false;
       await replacer;

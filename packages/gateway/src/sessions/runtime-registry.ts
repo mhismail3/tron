@@ -127,17 +127,24 @@ const MAX_EXTENSION_TEMP_ENTRIES = 1_024;
 // Ambient enumeration shares these global pass bounds. Exact-owned artifact
 // reconciliation above is intentionally outside this ambient budget.
 const MAX_EXTENSION_ROOT_ENTRIES = 4_096;
-/** One truncation record a minute is enough: the counts move slowly and the pass
- * runs every 750 ms, so an undeduplicated record would repeat 80 times. */
-const EXTENSION_DISCOVERY_TRUNCATION_REPORT_MS = 60_000;
+/** A lasting stop is reported when its episode starts and then at most hourly:
+ * the counts move slowly and the pass runs every 750 ms, so an undeduplicated
+ * record would repeat 80 times a minute. */
+const EXTENSION_DISCOVERY_TRUNCATION_REPORT_MS = 60 * 60 * 1_000;
+/** An ambient decision keeps its entry for this many passes after it was last
+ * seen. A pass that stops at a budget still ages the entries it did not reach,
+ * so a deleted run leaves the cache while the root stays over the cap. */
+const AMBIENT_ARTIFACT_FACT_PASSES = 4;
 
 /** What one discovery pass spent before it stopped. `entries` is root entries
  * walked, `statusReads` the artifacts it read because their status.json
- * identity changed, and `work` the exact refreshes and routed candidates. */
+ * identity changed, `work` the exact refreshes and routed candidates, and
+ * `dropped` the candidates its per-root routing budget cut off. */
 export interface ExtensionArtifactDiscoveryCounts {
   entries: number;
   statusReads: number;
   work: number;
+  dropped: number;
 }
 // A Pi append can land inside the summary's read window; the summary is retried
 // rather than published with a size its counts do not describe.
@@ -542,7 +549,17 @@ export class RuntimeRegistry {
   private artifactDiscoveryTimer?: NodeJS.Timeout;
   private artifactDiscoveryInFlight = false;
   private artifactDiscoveryPass = 0;
-  private artifactDiscoveryTruncationReportedAt = 0;
+  /** When the current run of stopped passes began (0 after a pass reached the
+   * end of its roots), when the current run of passes that dropped candidates
+   * began, and when a stop was last reported. */
+  private artifactDiscoveryStoppedSince = 0;
+  private artifactDiscoveryDroppedSince = 0;
+  private artifactDiscoveryStopReportedAt = 0;
+  /** The status.json identity each live slot last received for one run
+   * directory. A slot that already received this exact artifact cannot change
+   * its projection by reading it again, and a run it holds an exact binding for
+   * is refreshed by the exact-binding lane every pass. */
+  private readonly ambientArtifactRoutes = new Map<string, Map<string, { identity: string; pass: number }>>();
   /** Ambient artifact decisions keyed by run directory. The identity is the stat
    * of the same status.json a read would have opened, so an unchanged artifact
    * costs one stat and no open, read or parse; `pass` lets a complete pass drop
@@ -3625,7 +3642,19 @@ export class RuntimeRegistry {
     } finally {
       this.artifactDiscoveryInFlight = false;
     }
-    if (truncated) this.reportArtifactDiscoveryTruncation(truncated);
+    if (truncated) {
+      const now = Date.now();
+      // Two episodes are tracked so a pass that only drops candidates the
+      // routing budget cut off still reports once: the end of either episode is
+      // not a record of its own, and a lasting one repeats hourly.
+      if (this.artifactDiscoveryStoppedSince === 0) this.artifactDiscoveryStoppedSince = now;
+      if (truncated.dropped === 0) this.artifactDiscoveryDroppedSince = 0;
+      else if (this.artifactDiscoveryDroppedSince === 0) this.artifactDiscoveryDroppedSince = now;
+      this.reportArtifactDiscoveryTruncation(truncated);
+    } else {
+      this.artifactDiscoveryStoppedSince = 0;
+      this.artifactDiscoveryDroppedSince = 0;
+    }
   }
 
   /** One discovery pass. It returns this pass's counts when it stopped at a
@@ -3634,7 +3663,7 @@ export class RuntimeRegistry {
    * unchanged artifact spends no read budget it reaches the entries this pass
    * did not examine. */
   private async runArtifactDiscoveryPass(): Promise<ExtensionArtifactDiscoveryCounts | undefined> {
-    const counts: ExtensionArtifactDiscoveryCounts = { entries: 0, statusReads: 0, work: 0 };
+    const counts: ExtensionArtifactDiscoveryCounts = { entries: 0, statusReads: 0, work: 0, dropped: 0 };
     const slots = [...this.slots.values()];
     const exact = new Set<string>();
     for (const slot of slots) {
@@ -3684,6 +3713,11 @@ export class RuntimeRegistry {
     // routed before it returns.
     let walkStopped = false;
     let routedOut = false;
+    let dropped = 0;
+    const attributed = new Map<string, ReadonlySet<string>>();
+    for (const slot of slots) {
+      attributed.set(slot.id, slot.extensionAmbientArtifactAttribution());
+    }
     for (let rootIndex = 0; rootIndex < rootList.length; rootIndex += 1) {
       if (counts.work >= MAX_EXTENSION_DISCOVERY_WORK
         || counts.entries >= MAX_EXTENSION_ROOT_ENTRIES
@@ -3697,7 +3731,7 @@ export class RuntimeRegistry {
       const rootBudget = Math.max(1, Math.floor(
         (MAX_EXTENSION_DISCOVERY_WORK - counts.work) / (rootsRemaining * routedSlots),
       ));
-      const candidates: Array<{ asyncDir: string; active: boolean; timestamp: number }> = [];
+      const candidates: Array<{ asyncDir: string; runId: string; identity: string; active: boolean; timestamp: number }> = [];
       try {
         const entries = await opendir(root);
         for await (const entry of entries) {
@@ -3708,7 +3742,7 @@ export class RuntimeRegistry {
           }
           if (!entry.isDirectory()) continue;
           const asyncDir = join(root, entry.name);
-          let fact: { active: boolean; timestamp: number } | "budget" | undefined;
+          let fact: { identity: string; active: boolean; timestamp: number } | "budget" | undefined;
           try {
             const metadata = await stat(join(asyncDir, "status.json"));
             if (metadata.isFile()) fact = await this.ambientArtifactFact(asyncDir, metadata, pass, counts);
@@ -3717,29 +3751,50 @@ export class RuntimeRegistry {
             walkStopped = true;
             break;
           }
-          if (fact) candidates.push({ asyncDir, active: fact.active, timestamp: fact.timestamp });
+          if (fact) candidates.push({ asyncDir, runId: entry.name, ...fact });
         }
       } catch { continue; }
       // Terminal evidence releases accepted work; live exact bindings were
       // already refreshed above and do not outrank it in ambient discovery.
       candidates.sort((left, right) => Number(right.active) - Number(left.active)
         || right.timestamp - left.timestamp || left.asyncDir.localeCompare(right.asyncDir));
-      // Route only the amount this pass can safely project to live slots.
-      for (const candidate of candidates.slice(0, rootBudget)) {
+      // Offer only the amount this pass can safely project to live slots; a
+      // candidate cut off here is reported instead of silently lost.
+      const offerable = candidates.slice(0, rootBudget);
+      dropped += candidates.length - offerable.length;
+      for (const candidate of offerable) {
         for (const slot of slots) {
+          const known = attributed.get(slot.id);
+          // A candidate this slot cannot attribute, or whose exact artifact
+          // identity it already received, cannot change its projection: the
+          // exact-binding lane above keeps a live run current (G-8d).
+          if (!known || (!known.has(candidate.runId) && !known.has(candidate.asyncDir))) continue;
+          let routed = this.ambientArtifactRoutes.get(slot.id);
+          if (!routed) {
+            routed = new Map();
+            this.ambientArtifactRoutes.set(slot.id, routed);
+          }
+          const previous = routed.get(candidate.asyncDir);
+          if (previous?.identity === candidate.identity) {
+            previous.pass = pass;
+            continue;
+          }
           if (counts.work >= MAX_EXTENSION_DISCOVERY_WORK) {
             routedOut = true;
             break;
           }
           counts.work += 1;
+          routed.set(candidate.asyncDir, { identity: candidate.identity, pass });
           await slot.discoverExtensionArtifact(candidate.asyncDir);
         }
         if (routedOut) break;
       }
       if (walkStopped || routedOut) break;
     }
-    if (walkStopped || routedOut) return counts;
+    counts.dropped = dropped;
     this.pruneAmbientArtifactFacts(pass);
+    this.pruneAmbientArtifactRoutes(pass);
+    if (walkStopped || routedOut || dropped > 0) return counts;
     return undefined;
   }
 
@@ -3752,7 +3807,7 @@ export class RuntimeRegistry {
     metadata: { dev: number; ino: number; size: number; mtimeMs: number },
     pass: number,
     counts: ExtensionArtifactDiscoveryCounts,
-  ): Promise<{ active: boolean; timestamp: number } | "budget" | undefined> {
+  ): Promise<{ identity: string; active: boolean; timestamp: number } | "budget" | undefined> {
     const identity = `${metadata.dev}:${metadata.ino}:${metadata.size}:${metadata.mtimeMs}`;
     const known = this.ambientArtifactFacts.get(asyncDir);
     if (known && known.identity === identity) {
@@ -3817,19 +3872,38 @@ export class RuntimeRegistry {
     }
   }
 
-  /** Drop the decisions of directories a complete pass did not see, so the cache
-   * follows the artifact root instead of growing with every run it ever held. */
+  /** Drop the decisions of directories no pass saw within the last few passes,
+   * so the cache follows the artifact root instead of growing with every run it
+   * ever held. A pass that stopped at a budget ages the entries past its stop
+   * too; dropping one early costs a single re-read. */
   private pruneAmbientArtifactFacts(pass: number): void {
     for (const [asyncDir, fact] of this.ambientArtifactFacts) {
-      if (fact.pass !== pass) this.ambientArtifactFacts.delete(asyncDir);
+      if (pass - fact.pass >= AMBIENT_ARTIFACT_FACT_PASSES) this.ambientArtifactFacts.delete(asyncDir);
+    }
+  }
+
+  /** Drop the routing records of closed slots and of directories no pass offered
+   * within the last few passes, so the records follow the live slots. */
+  private pruneAmbientArtifactRoutes(pass: number): void {
+    for (const [slotId, routed] of this.ambientArtifactRoutes) {
+      if (!this.slots.has(slotId)) {
+        this.ambientArtifactRoutes.delete(slotId);
+        continue;
+      }
+      for (const [asyncDir, record] of routed) {
+        if (pass - record.pass >= AMBIENT_ARTIFACT_FACT_PASSES) routed.delete(asyncDir);
+      }
     }
   }
 
   private reportArtifactDiscoveryTruncation(counts: ExtensionArtifactDiscoveryCounts): void {
     if (!this.options.artifactDiscoveryTruncated) return;
     const now = Date.now();
-    if (now - this.artifactDiscoveryTruncationReportedAt < EXTENSION_DISCOVERY_TRUNCATION_REPORT_MS) return;
-    this.artifactDiscoveryTruncationReportedAt = now;
+    // A stop already reported within the running episode repeats at most hourly.
+    const episodeStart = Math.max(this.artifactDiscoveryStoppedSince, this.artifactDiscoveryDroppedSince);
+    if (this.artifactDiscoveryStopReportedAt >= episodeStart
+      && now - this.artifactDiscoveryStopReportedAt < EXTENSION_DISCOVERY_TRUNCATION_REPORT_MS) return;
+    this.artifactDiscoveryStopReportedAt = now;
     this.options.artifactDiscoveryTruncated(counts);
   }
 

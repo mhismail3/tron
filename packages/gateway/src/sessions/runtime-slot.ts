@@ -4288,6 +4288,34 @@ export class RuntimeSlot {
     }
   }
 
+  /** Run identities and exact directories ambient discovery can attribute to
+   * this slot. Every route this slot can accept requires one of them: a
+   * canonical JSONL fact, a live ownership binding or a projected activity row
+   * names the run, and the artifact's declared directory must agree with the
+   * directory it was found in. A directory none of them names can only be
+   * rejected, so the registry skips it instead of reopening its `status.json` on
+   * every pass (G-8d). Run identities never contain a path separator, so one set
+   * can hold both keys. */
+  extensionAmbientArtifactAttribution(): ReadonlySet<string> {
+    const attributed = new Set<string>();
+    const addDirectory = (asyncDir: string): void => {
+      attributed.add(resolve(asyncDir));
+      try { attributed.add(realpathSync(asyncDir)); } catch { /* a directory that is gone stays attributable lexically */ }
+    };
+    for (const [runId, binding] of this.extensionRunOwnership) {
+      attributed.add(runId);
+      if (binding.asyncDir) addDirectory(binding.asyncDir);
+    }
+    for (const [runId, fact] of this.canonicalExtensionRunFacts()) {
+      attributed.add(runId);
+      if (fact.asyncDir) addDirectory(fact.asyncDir);
+    }
+    for (const activity of this.extensionActivities.values()) {
+      if (activity.runId) attributed.add(activity.runId);
+    }
+    return attributed;
+  }
+
   /** Exact directories already bound by a live tool result outrank ambient
    * discovery, especially while administrative drain needs terminal evidence. */
   ownedExtensionArtifactDirectories(): string[] {

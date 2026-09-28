@@ -9359,62 +9359,67 @@ wait).
 
 ### G-8a · G-8d · T-1 · Done · 2026-09-28 · orchestrator-dispatched deepseek-worker (branch `hardening/g-8a`)
 
-- Result: the 750 ms ambient discovery pass reads a run's `status.json` only
-  when the identity of that file changed, so an unchanged artifact costs one
-  `stat` and no `open`/read/parse and the walk reaches the entries the old
-  1,024-entry read budget used to hide; a pass that still stops at a budget
-  reports `extension.discovery-truncated` with its counts. Both lanes that read
-  an artifact now retry a read that lost an atomic replace before reporting it:
-  the discovery lane with a bounded immediate retry (the producer's next replace
-  is a whole status-update cadence away) and the watcher lane without treating a
-  pending debounce as an exhausted retry. The registry test helper runs a pass it
-  starts itself instead of awaiting a call that can be a silent no-op.
+- Result: the 750 ms ambient discovery pass reads a run's `status.json` only when
+  the identity of that file changed, and offers a candidate to a slot only when
+  that slot can attribute the run — a canonical JSONL fact, an ownership binding
+  or a projected activity (`RuntimeSlot.extensionAmbientArtifactAttribution`) — so
+  an unchanged artifact a slot already received costs one `stat` and no routed
+  `open`/read/parse. A pass that still stops at a budget reports
+  `extension.discovery-truncated` with its counts (`dropped` included) when the
+  stop starts, when it begins dropping candidates the per-root budget cut, and
+  otherwise at most hourly; the fact and routing caches age out after four unseen
+  passes even when a pass stops early, so the 4,096-entry cap no longer fixes the
+  same cached decisions forever. Both lanes that read an artifact still retry a
+  read that lost an atomic replace before reporting it, and the registry test
+  helper runs a pass it starts itself instead of awaiting a call that can be a
+  silent no-op.
 - Evidence:
-  - G-8d check: `npx vitest run src/sessions/runtime-registry.integration.test.ts
-    -t "examines every ambient artifact within a bounded number of passes"`.
-    Before the fix the report never fires (the stop was silent) and the coverage
-    assertion fails `expected 1024 to be 1100`; after it the first pass reports
-    `entries 1_025, statusReads 1_024` and a second pass examines the whole
-    1,100-artifact root and reports nothing further.
-  - G-8a check (the row's negative control): `-t "retries a status.json read
-    that raced an atomic replacement"` atomically replaces `status.json`
-    (`write a temp file, rename it over the target`, ~1 ms apart) across 600 real
-    registry discovery passes. On the pre-fix source it fails **4/4** runs with
-    the `artifact-replacement-in-progress` warning; after the fix it passes
-    **8/8** with the running projection intact. (An earlier version replaced
-    every 1 ms, where the retry span ≈ 4 reads is comparable to a replace: the
-    storm then also re-races the retries, which is the same reason the old code
-    warned.)
-  - Owning suite `npx vitest run src/sessions/runtime-registry.integration.test.ts`
-    **239 passed / 239 in 53.0 s** after merging `hardening/integration`
-    (`c70ccb4df`); merge gate `npx vitest run
-    src/transport/session-archive.integration.test.ts
+  - G-8d change gate: `npx vitest run src/sessions/runtime-registry.integration.test.ts
+    -t "does not reopen an unchanged ambient artifact"` — a production-shaped root
+    (2,498 run directories, 556 finished `status.json`, one live slot) routes only
+    the artifacts that slot can attribute, the next unchanged pass routes only the
+    live exact binding, and a changed finished artifact is offered again. Reads per
+    steady-state pass: **556 → 0** for artifacts no live slot can attribute (the
+    review measured 556 on this branch and 233 on `hardening/integration`).
+  - G-8d bound and report: `-t "examines every ambient artifact within a bounded
+    number of passes"` — pass 1 `{entries 1_025, statusReads 1_024, work 0,
+    dropped 0}`, pass 2 `{entries 1_100, statusReads 76, work 0, dropped 76}`: the
+    walk reaches the whole root, reads only the entries it had not, and counts the
+    candidates its routing budget cut; a third unchanged pass records nothing
+    further, and no artifact is routed.
+  - G-8a check (the row's negative control): `-t "retries a status.json read that
+    raced an atomic replacement"` atomically replaces `status.json` across real
+    discovery passes bounded by wall clock. On the pre-fix source it fails **4/4**
+    runs with the `artifact-replacement-in-progress` warning; after the fix it
+    passes with the running projection intact.
+  - Owning suite `npx vitest run src/sessions/runtime-registry.integration.test.ts`,
+    merge gate `npx vitest run src/transport/session-archive.integration.test.ts
     src/transport/server-capacity.integration.test.ts
     src/transport/sync-protocol.integration.test.ts
     src/transport/stall-diagnostics.test.ts
     src/transport/server-heartbeat.integration.test.ts
-    src/transport/server-http-lifecycle.integration.test.ts`
-    **132 passed / 132**, `npx tsc --noEmit -p .` clean, `python3
-    scripts/check-documentation-policy.py` and `scripts/personal-info-guard.sh`
-    pass.
+    src/transport/server-http-lifecycle.integration.test.ts`, `npx tsc --noEmit -p .`,
+    `python3 scripts/check-documentation-policy.py` and
+    `scripts/personal-info-guard.sh` — see the commit for the recorded results.
 - Changes: `packages/gateway/src/sessions/runtime-registry.ts` (identity-gated
-  ambient read, `ExtensionArtifactDiscoveryCounts`, truncation report, pruned
-  fact cache), `packages/gateway/src/sessions/runtime-slot.ts` (bounded
-  discovery-lane retry, watcher-lane retry when a debounce already owns the
-  read), `packages/gateway/src/gateway-main.ts` (the record),
-  `packages/gateway/docs/observability.md` (`extension.discovery-truncated`,
-  and the `extension.artifact-rejected` row now says the read is retried first),
-  and the registry integration tests.
-- Deviation: the row named only the discovery lane; the required atomic-replace
+  ambient read, per-slot artifact-identity routing gate, `dropped` count, aged
+  fact/route caches, start-and-hourly truncation report), `runtime-slot.ts`
+  (`extensionAmbientArtifactAttribution`, bounded discovery-lane retry, watcher-lane
+  retry when a debounce already owns the read), `gateway-main.ts` (the record),
+  `packages/gateway/docs/observability.md`, and the registry integration tests.
+- Deviations: the row named only the discovery lane; the required atomic-replace
   check shows the watcher lane was the source of the warnings under a replace
-  storm, because a pending `fs.watch` debounce made its retry unreachable. Both
-  lanes are fixed for one reason each.
-- Residual: the routed read inside each live slot still re-reads an unchanged
-  artifact once per pass per slot; the ambient read is what this row bounded.
-  The `artifact-replacement-in-progress` reason still covers an unclassified read
-  error and a `status.json` that has not been written yet.
-- For the next agent: nothing owed. The O-6a/O-5 confirmation of the file-open
-  volume drop is the orchestrator's quiet-host run.
+  storm, because a pending `fs.watch` debounce made its retry unreachable. The
+  ambient lane now needs the slot to attribute the run, and the
+  `reconciles an exact-owned active artifact` fixture appended its canonical tool
+  result to the fixture manager, which the live slot never reads; the fixture now
+  appends to the slot's own session manager, as every other canonical-fact fixture
+  here does.
+- Residual: a candidate a slot can attribute but cannot yet project is offered
+  every pass until its artifact changes (bounded by that session's own runs); a
+  terminal artifact's sidecar refresh rests on the exact-binding lane, as the
+  review specified. The `artifact-replacement-in-progress` reason still covers an
+  unclassified read error and a `status.json` that has not been written yet.
 
 ### G-1d · Done · 2026-09-28 · orchestrator-dispatched deepseek-worker (branch `hardening/g-1d`)
 
