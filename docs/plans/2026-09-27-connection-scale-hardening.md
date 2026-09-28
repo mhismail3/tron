@@ -4441,7 +4441,9 @@ events; widen them to name the pool owner in the same change.
     phone-stall=2, gateway-capacity=0`. Adding `--tailscale-window
     --tailscale-peer NODEKEY` (the real `/usr/bin/log show`, 253 path lines for
     that peer, 4.6 s) moves 19 more episodes to `path`: `unknown=71, path=22,
-    phone-background=23, gateway-stall=3, phone-stall=2`. The four Context causes
+    phone-background=23, gateway-stall=3, phone-stall=2`. The capture is bounded
+    by what the unified log still holds: a later run captured 218 lines and read
+    18 `path` episodes, with the same Context windows. The four Context causes
     against the tool's output:
 
     | Context cause | The tool on the incident export |
