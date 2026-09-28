@@ -8,17 +8,20 @@ enum StableProbe: Equatable, Sendable {
     case refused(selected: GatewayPayloadValidationResult?)
 }
 
-/// Reuses one fail-closed Stable probe while the runtime fence is unchanged.
+/// Reuses one admitted probe while the runtime fence and the authenticated ping
+/// identity are unchanged.
 ///
 /// The probe reads both payload trees (≈1.2 GB on this Mac) and spawns `lsof`
 /// plus two `ps` display reads, so the 30 s poll must not pay it per cycle. The
 /// per-cycle authenticated ping stays: it is the liveness probe that decides
-/// Running. A fence that cannot be read always re-probes, so reuse can never
-/// outlive a lost proof.
+/// Running. A fence that cannot be read always re-probes, and a refusal is
+/// never reused, so one transient `lsof` failure or an update restart landing
+/// between the ping and the fence read cannot pin "needs repair" for the
+/// process's lifetime.
 actor StableProbeCache {
     private let runtimeFence: @Sendable () async -> StableGatewayObserver.RuntimeFence?
     private let fullProbe: @Sendable (ServerPingInfo) async -> StableProbe
-    private var entry: (fence: StableGatewayObserver.RuntimeFence, probe: StableProbe)?
+    private var entry: (fence: StableGatewayObserver.RuntimeFence, admission: StableGatewayObserver.Admission)?
 
     init(
         runtimeFence: @escaping @Sendable () async -> StableGatewayObserver.RuntimeFence?,
@@ -30,10 +33,34 @@ actor StableProbeCache {
 
     func probe(info: ServerPingInfo) async -> StableProbe {
         guard let fence = await runtimeFence() else { return await fullProbe(info) }
-        if let entry, entry.fence == fence { return entry.probe }
+        // The ping identity is the only per-cycle link between whoever answered
+        // and the admitted runtime now that `lsof` is skipped between polls, so
+        // a changed identity re-admits.
+        if let entry, entry.fence == fence, entry.admission.info == info {
+            return .admitted(Self.republished(entry.admission, uptime: fence.process.elapsedTime))
+        }
         let probe = await fullProbe(info)
-        entry = (fence, probe)
+        switch probe {
+        case .admitted(let admission): entry = (fence, admission)
+        case .refused: entry = nil
+        }
         return probe
+    }
+
+    /// The cached admission carries the uptime of the probe that admitted it,
+    /// which may be days old. The fence re-reads the process's elapsed time
+    /// every cycle, so publish that instead: a reused admission would otherwise
+    /// freeze the menu's uptime and snap it backwards on each poll.
+    private static func republished(
+        _ admission: StableGatewayObserver.Admission,
+        uptime: String
+    ) -> StableGatewayObserver.Admission {
+        StableGatewayObserver.Admission(
+            processID: admission.processID,
+            uptime: uptime,
+            payload: admission.payload,
+            info: admission.info
+        )
     }
 }
 
@@ -70,6 +97,9 @@ struct ServerStatusPoller: Sendable {
         let setup = self.setup
         let interval = self.interval
         let runtimeFence = self.runtimeFence
+        // The poll reuses one live Tailscale resolution for a bounded window;
+        // explicit user actions keep `pingServer`, which resolves live.
+        let pingServer = setup.statusPollPingServer ?? setup.pingServer
         return AsyncStream(bufferingPolicy: .bufferingNewest(1)) { continuation in
             let task = Task {
                 let probeCache = StableProbeCache(
@@ -77,7 +107,9 @@ struct ServerStatusPoller: Sendable {
                     fullProbe: { info in await ServerStatusPoller.fullProbe(setup: setup, info: info) }
                 )
                 while !Task.isCancelled {
-                    let snapshot = await ServerStatusPoller.singleSnapshot(setup: setup, probeCache: probeCache)
+                    let snapshot = await ServerStatusPoller.singleSnapshot(
+                        setup: setup, probeCache: probeCache, pingServer: pingServer
+                    )
                     guard !Task.isCancelled else { break }
                     continuation.yield(snapshot)
                     do {
@@ -102,8 +134,14 @@ struct ServerStatusPoller: Sendable {
     }
 
     /// One cycle of the poll. `probeCache` may reuse an admission while the
-    /// runtime fence is unchanged; explicit user actions pass none.
-    static func singleSnapshot(setup: EnvironmentSetup, probeCache: StableProbeCache?) async -> ServerStatusSnapshot {
+    /// runtime fence is unchanged; explicit user actions pass none. `pingServer`
+    /// is the cycle's transport ping: the poll passes its bounded-resolution
+    /// ping, and a nil value (explicit user actions) resolves live.
+    static func singleSnapshot(
+        setup: EnvironmentSetup,
+        probeCache: StableProbeCache?,
+        pingServer: (@Sendable (String?) async -> ServerPingResult)? = nil
+    ) async -> ServerStatusSnapshot {
         guard !Task.isCancelled else { return ServerStatusSnapshot(state: .checking) }
         let token = setup.readBearerToken()
         if setup.profile == .debug {
@@ -124,7 +162,7 @@ struct ServerStatusPoller: Sendable {
             }
         }
 
-        let result = await setup.pingServer(token)
+        let result = await (pingServer ?? setup.pingServer)(token)
         guard !Task.isCancelled else { return ServerStatusSnapshot(state: .checking) }
         switch result {
         case .success(let info):

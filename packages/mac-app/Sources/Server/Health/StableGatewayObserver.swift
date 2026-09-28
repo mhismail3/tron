@@ -80,38 +80,45 @@ enum StableGatewayObserver {
     /// full fail-closed check again.
     struct RuntimeFence: Equatable, Sendable {
         let process: LaunchAgentProcessFence
-        /// `nil` when the selection pointer cannot be stamped safely.
-        let selection: PayloadSelectionStamp?
+        let selection: PayloadSelectionStamp
         /// The active payload's manifest: the selected payload's when a readable
         /// selection names one, otherwise the bundled fallback's.
-        let manifest: PayloadSelectionStamp?
+        let manifest: PayloadSelectionStamp
 
-        /// Returns `nil` when launchd owns no such process, so a caller that
-        /// cannot prove the runtime runs the full check instead of reusing.
+        /// Returns `nil` when launchd owns no such process, or when a file the
+        /// fence must stamp exists but cannot be read safely. Such a fence would
+        /// compare equal to the next unreadable one, so a caller that cannot
+        /// prove the runtime runs the full check instead of reusing.
         static func read(
             label: String,
             store: GatewayPayloadStore,
-            bundledPayloadRoot: URL
+            bundledPayloadRoot: URL,
+            processFence: @Sendable (String) async -> LaunchAgentProcessFence? = {
+                await LaunchAgentRuntimeReader.readProcessFence(label: $0)
+            }
         ) async -> Self? {
-            guard let process = await LaunchAgentRuntimeReader.readProcessFence(label: label) else { return nil }
-            let selection = PayloadSelectionStamp.read(store.currentManifestURL)
-            return Self(
-                process: process,
-                selection: selection,
-                manifest: manifestStamp(selection: selection, store: store, bundledPayloadRoot: bundledPayloadRoot)
-            )
+            guard let process = await processFence(label),
+                  let selection = PayloadSelectionStamp.read(store.currentManifestURL),
+                  let manifest = manifestStamp(
+                      selection: selection, store: store, bundledPayloadRoot: bundledPayloadRoot
+                  ) else { return nil }
+            return Self(process: process, selection: selection, manifest: manifest)
         }
 
+        /// `nil` when a manifest the fence must stamp exists but cannot be read
+        /// safely. An absent selected manifest falls back to the bundled one,
+        /// matching `activePayload`'s resolution of the active payload.
         private static func manifestStamp(
-            selection: PayloadSelectionStamp?,
+            selection: PayloadSelectionStamp,
             store: GatewayPayloadStore,
             bundledPayloadRoot: URL
         ) -> PayloadSelectionStamp? {
-            if let version = selection.flatMap({ selectedVersion($0) }),
-               let stamp = PayloadSelectionStamp.read(store.versionRoot(version).appendingPathComponent("manifest.json")) {
-                return stamp
-            }
-            return PayloadSelectionStamp.read(bundledPayloadRoot.appendingPathComponent("manifest.json"))
+            let bundled = PayloadSelectionStamp.read(bundledPayloadRoot.appendingPathComponent("manifest.json"))
+            guard let version = selectedVersion(selection) else { return bundled }
+            guard let selected = PayloadSelectionStamp.read(
+                store.versionRoot(version).appendingPathComponent("manifest.json")
+            ) else { return nil }
+            return selected.exists ? selected : bundled
         }
 
         /// A path hint for the manifest leg only. The strict selection checks

@@ -92,8 +92,16 @@ struct EnvironmentSetup: Sendable {
     /// bar tone + wizard recovery copy depend on this distinction.
     /// Honors the supplied bearer token. `nil` means the token could not be
     /// read locally; authenticated servers should classify that as
-    /// `.unauthorized`.
+    /// `.unauthorized`. Every explicit user action (pairing, restart, health
+    /// wait, menu presentation) pings through this and so resolves Tailscale
+    /// live.
     var pingServer: @Sendable (String?) async -> ServerPingResult
+
+    /// The status poll's per-cycle ping. It differs from `pingServer` only in
+    /// transport resolution: it reuses one live Tailscale resolution for a
+    /// bounded window, so the 30 s poll does not make Tailscale reload its
+    /// network extension. `nil` falls back to `pingServer`.
+    var statusPollPingServer: (@Sendable (String?) async -> ServerPingResult)?
 
     /// Requests the Gateway-owned drain restart. This is deliberately separate
     /// from LaunchAgent registration: launchd remains the process supervisor.
@@ -169,8 +177,9 @@ struct EnvironmentSetup: Sendable {
                 cache: { GatewayNetworkCacheReader.tailscaleIP(at: cache) }
             )
         }
-        // The status poll reuses one live Tailscale resolution for a bounded
-        // window; every explicit lifecycle action above resolves live instead.
+        // Only the status poll reuses one Tailscale resolution for a bounded
+        // window; every explicit lifecycle action resolves live through
+        // `resolveHost`.
         let tailscaleHost = TailscaleHostResolution(
             probe: { await TailscaleProbe.probe() },
             readCached: { GatewayNetworkCacheReader.tailscaleIP(at: cache) },
@@ -263,6 +272,10 @@ struct EnvironmentSetup: Sendable {
             },
             validateGatewayPayload: { ExistingInstallDetector.validateGatewayPayload() },
             pingServer: { token in
+                guard let host = await resolveHost() else { return .unreachable }
+                return await Self.ping(host: host, port: profile.port, token: token)
+            },
+            statusPollPingServer: { token in
                 guard let host = await tailscaleHost.host() else { return .unreachable }
                 let result = await Self.ping(host: host, port: profile.port, token: token)
                 guard Self.failedAddressLookup(result) else { return result }

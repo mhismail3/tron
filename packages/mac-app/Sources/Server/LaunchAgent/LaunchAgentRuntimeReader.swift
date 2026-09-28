@@ -46,6 +46,14 @@ struct LaunchAgentRuntimeInfo: Equatable, Sendable {
 struct LaunchAgentProcessFence: Equatable, Sendable {
     let pid: Int
     let startIdentity: String
+    /// The process's elapsed time as of this read. Display only: it stays
+    /// outside `==` so a ticking clock cannot force a re-probe, and the status
+    /// poll republishes it every cycle so the menu's uptime cannot freeze.
+    let elapsedTime: String
+
+    static func == (lhs: Self, rhs: Self) -> Bool {
+        lhs.pid == rhs.pid && lhs.startIdentity == rhs.startIdentity
+    }
 }
 
 /// Read-only launchd/ps observation shared with the native peer boundary.
@@ -89,13 +97,13 @@ enum LaunchAgentRuntimeReader {
     }
 
     /// Reads only what the runtime fence needs: launchd's pid and one `ps`
-    /// start-identity read. The display reads `read(label:)` adds (elapsed time
-    /// and command) stay out of a fence cycle.
+    /// read carrying both the start identity and the elapsed time. The display
+    /// reads `read(label:)` adds (command) stay out of a fence cycle.
     static func readProcessFence(label: String) async -> LaunchAgentProcessFence? {
         let result = await launchctlPrint(label: label)
         guard result.exitCode == 0, let pid = parsePID(from: result.stdout),
-              let startIdentity = await ServerProcessProbe.processStartIdentity(pid: pid) else { return nil }
-        return LaunchAgentProcessFence(pid: pid, startIdentity: startIdentity)
+              let read = await ServerProcessProbe.processFenceRead(pid: pid) else { return nil }
+        return LaunchAgentProcessFence(pid: pid, startIdentity: read.startIdentity, elapsedTime: read.elapsedTime)
     }
 
     private static func launchctlPrint(label: String) async -> ProcessResult {

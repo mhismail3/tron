@@ -248,7 +248,12 @@ the liveness probe that decides Running — but it pays for the fail-closed
 Stable admission only when the runtime fence changes: launchd's live pid plus
 that process's start identity, and the payload selection stamps. A restart
 under the same payload therefore re-admits, and a selection or manifest change
-re-validates the immutable tree and its fingerprint. The poll also reuses one
+re-validates the immutable tree and its fingerprint. Only an admission is
+reused: a refusal is re-proved on the next cycle, and a fence that cannot stamp
+the selection pointer or the active manifest re-probes, so one transient
+listener read or an update restart cannot pin "needs repair". The reuse also
+republishes the fence's own elapsed time, so a long-lived reuse cannot freeze
+the menu's uptime. The poll reuses one
 live Tailscale resolution for a bounded window (about five minutes) and refreshes
 the owner-only cache when the address changed, so it no longer makes Tailscale
 reload its network extension every 30 s; every explicit user action (pairing,

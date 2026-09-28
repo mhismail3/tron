@@ -1,3 +1,4 @@
+import Darwin
 import Foundation
 import Testing
 @testable import TronMac
@@ -150,6 +151,98 @@ struct StableGatewayObserverTests {
         var wrongPort = runtime
         wrongPort.processCommand = "\(root.path)/runtime/node-arm64 \(root.path)/app/dist/index.js --host tailscale --port 9848"
         #expect(!validates(runtime: wrongPort))
+    }
+
+    @Test("the runtime fence follows an atomic selection and manifest replacement")
+    func runtimeFenceFollowsDeployment() async throws {
+        let fixture = try makeFenceFixture()
+        defer { try? FileManager.default.removeItem(at: fixture.root) }
+
+        try select("v1", in: fixture.store)
+        let first = await readFence(fixture)
+        try select("v2", in: fixture.store)
+        let second = await readFence(fixture)
+        // An absent selection pointer is the deployment's own fallback, exactly
+        // as `activePayload` resolves the active payload.
+        try FileManager.default.removeItem(at: fixture.store.currentManifestURL)
+        let fallback = await readFence(fixture)
+
+        #expect(first != nil && second != nil)
+        #expect(first != second)
+        #expect(first?.manifest.bytes == Data("manifest-1".utf8))
+        #expect(second?.manifest.bytes == Data("manifest-2".utf8))
+        #expect(fallback?.manifest.bytes == Data("bundled-manifest".utf8))
+    }
+
+    @Test("a selection or manifest that exists but cannot be stamped makes the fence unreadable")
+    func runtimeFenceIsUnreadableWhenAStampCannotBeRead() async throws {
+        let fixture = try makeFenceFixture()
+        defer { try? FileManager.default.removeItem(at: fixture.root) }
+
+        try select("v1", in: fixture.store)
+        // Empty is a file the fence must stamp but cannot trust.
+        try Data().write(to: fixture.store.currentManifestURL)
+        #expect(await readFence(fixture) == nil)
+
+        try select("v1", in: fixture.store)
+        try Data().write(to: fixture.store.versionRoot("v1").appendingPathComponent("manifest.json"))
+        #expect(await readFence(fixture) == nil)
+    }
+
+    @Test("one ps read yields the fence's start identity and elapsed time")
+    func processFenceReadYieldsBothValues() async {
+        let read = await ServerProcessProbe.processFenceRead(pid: Int(getpid()))
+        #expect(read?.startIdentity.isEmpty == false)
+        #expect(read?.elapsedTime.isEmpty == false)
+    }
+
+    private struct FenceFixture {
+        let root: URL
+        let store: GatewayPayloadStore
+        let bundled: URL
+    }
+
+    /// A temporary payload store with two deployable versions and a bundled
+    /// fallback. The fence is a change detector over real files, so its tests
+    /// must run the production read instead of a hand-built fence.
+    private func makeFenceFixture() throws -> FenceFixture {
+        let root = URL(fileURLWithPath: NSTemporaryDirectory(), isDirectory: true)
+            .appendingPathComponent("StableRuntimeFence-\(UUID().uuidString)", isDirectory: true)
+        let bundled = root.appendingPathComponent("bundled", isDirectory: true)
+        try FileManager.default.createDirectory(at: bundled, withIntermediateDirectories: true)
+        try Data("bundled-manifest".utf8).write(to: bundled.appendingPathComponent("manifest.json"))
+        let store = GatewayPayloadStore(home: root, channel: "stable")
+        for (version, manifest) in [("v1", "manifest-1"), ("v2", "manifest-2")] {
+            let versionRoot = store.versionRoot(version)
+            try FileManager.default.createDirectory(at: versionRoot, withIntermediateDirectories: true)
+            try Data(manifest.utf8).write(to: versionRoot.appendingPathComponent("manifest.json"))
+        }
+        return FenceFixture(root: root, store: store, bundled: bundled)
+    }
+
+    /// Replaces the selection pointer the way deployment does.
+    private func select(_ version: String, in store: GatewayPayloadStore) throws {
+        let temporary = store.channelRoot.appendingPathComponent("current.json.deploy")
+        let json = Data(
+            #"{"schema":1,"kind":"tron-gateway-selection","channel":"stable","version":"\#(version)","payloadFingerprint":"\#(fingerprint)"}"#.utf8
+        )
+        try json.write(to: temporary)
+        guard rename(temporary.path, store.currentManifestURL.path) == 0 else {
+            throw CocoaError(.fileWriteUnknown)
+        }
+    }
+
+    private func readFence(_ fixture: FenceFixture) async -> StableGatewayObserver.RuntimeFence? {
+        await StableGatewayObserver.RuntimeFence.read(
+            label: "com.tron.server",
+            store: fixture.store,
+            bundledPayloadRoot: fixture.bundled,
+            processFence: { _ in
+                LaunchAgentProcessFence(
+                    pid: 81, startIdentity: "Mon Sep 28 10:00:00 2026", elapsedTime: "00:10"
+                )
+            }
+        )
     }
 
     private func validates(
