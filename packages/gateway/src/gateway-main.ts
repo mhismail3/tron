@@ -37,6 +37,7 @@ import { GatewayAutomationExecutor } from "./automations/automation-executor.js"
 import { GatewayScheduleToolOperations } from "./automations/automation-tool-operations.js";
 import { BrowserLiveViewRegistry } from "./display/browser-live-view.js";
 import { KnowledgeStore } from "./knowledge/knowledge-store.js";
+import { KnowledgeChangeCoalescer } from "./knowledge/knowledge-change.js";
 import { KnowledgeService, ModelRuntimeKnowledgeModel } from "./knowledge/knowledge-service.js";
 import { KnowledgeObservationService, ModelRuntimeObservationModel, modelForConfig } from "./knowledge/knowledge-observation.js";
 import { MacKeychainConnectorCredentialStore } from "./knowledge/connector-credentials.js";
@@ -266,9 +267,13 @@ try {
   logger.log("warning", "Optional session search index is unavailable; chat remains available", { event: "session-search.index-unavailable", source: "search", error });
 }
 startupCheckpoint("session-search-index");
+const knowledgeChanges = new KnowledgeChangeCoalescer(change => transport?.broadcast("knowledge.changed", {
+  stateRevision: change.stateRevision,
+  ...(change.recordIds ? { recordIds: change.recordIds } : {}),
+}));
 const knowledgeStore = new KnowledgeStore(
   sessions.knowledgeWorkspace(),
-  () => transport?.broadcast("knowledge.changed", {}),
+  change => knowledgeChanges.record(change),
   async (connectionId) => connections.resolveInstance(connectionId).catch(() => undefined),
 );
 const knowledgeConnector = new KnowledgeConnectorExtension(knowledgeStore, {

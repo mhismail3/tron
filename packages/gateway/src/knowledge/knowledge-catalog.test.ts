@@ -224,7 +224,7 @@ describe("Knowledge canonical catalog", () => {
         await Promise.all(batch.map(record => writeRecord(f.root, record)));
         for (const record of batch) {
           records.set(record.id, { latestRevisionId: record.revisionId, revisionIds: [record.revisionId], kind: record.kind, scope: record.scope,
-            sortAt: Date.parse(record.createdAt), searchFields: [["observation", record.content.items[0]!.text.toLowerCase()], ["session", "session-fixture"]], recordRefs: [], objectHashes: [] });
+            createdAt: record.createdAt, updatedAt: record.updatedAt, sortAt: Date.parse(record.createdAt), searchFields: [["observation", record.content.items[0]!.text.toLowerCase()], ["session", "session-fixture"]], recordRefs: [], objectHashes: [] });
           catalog.setRevisions(record.id, [record.revisionId]);
           coverage.set(`cut-${record.id}`, { schemaVersion: 1, id: `cut-${record.id}`, revisionId: record.revisionId, range: record.content.range,
             disposition: "observed", groupRevisionIds: [record.revisionId], recordedAt: record.createdAt });

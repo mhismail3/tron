@@ -11,9 +11,12 @@ import { readSecureJson, SecureJsonFileError } from "../util/secure-json.js";
 import {
   DEFAULT_KNOWLEDGE_CONFIG, KNOWLEDGE_SCHEMA_VERSION, OBSERVATION_ATTENTION_DISPOSITIONS, OBSERVATION_COVERAGE_DISPOSITIONS, knowledgeScopeEligible, normalizeKnowledgeSourceUrl,
   type KnowledgeConfig, type KnowledgeEvidenceRef, type KnowledgeListRequest,
-  type KnowledgeListResponse, type KnowledgeObjectRef, type KnowledgeRecallRequest,
+  type KnowledgeListResponse, type KnowledgeObjectRef, type KnowledgePreviewBatchRequest,
+  type KnowledgePreviewBatchResponse, type KnowledgeRecallRequest,
   type KnowledgeRecallResponse, type KnowledgeRecord, type KnowledgeRecordDraft,
   type KnowledgeSearchRequest, type KnowledgeSearchResponse, type KnowledgeSearchHit,
+  type KnowledgeSourceRow, type KnowledgeSourceRowListResponse, type KnowledgeSourceRowSearchResponse,
+  type SourceAdmission, type SourceContent,
   type KnowledgeNoteMutationRequest, type KnowledgeCoverageDismissRequest,
   type KnowledgeConnectorState, type ObservationCoverage, type ObservationCoverageDisposition, type ObservationRange, type KnowledgeCoveragePage, type KnowledgeCoverageSummary, validateKnowledgeConfig,
   validateKnowledgeRecord, validateObjectRef, assertKnowledgeId, assertKnowledgeProjectId,
@@ -30,7 +33,11 @@ const RECORD_MAX_BYTES = 2 * 1_048_576;
 const OBJECT_MAX_BYTES = 8_000_000;
 const RECEIPT_LIMIT = 256;
 const OBJECT_HASH = /^[a-f0-9]{64}$/;
-export const CATALOG_STORAGE_VERSION = 2 as const;
+export const CATALOG_STORAGE_VERSION = 3 as const;
+export const KNOWLEDGE_PREVIEW_BATCH_ITEMS = 16;
+export const KNOWLEDGE_PREVIEW_BATCH_BYTES = 4_000_000;
+export const KNOWLEDGE_PREVIEW_MAX_BYTES = 512_000;
+const ROW_SUMMARY_CHARS = 280;
 const CATALOG_PAGE_BYTES = 750_000;
 const CATALOG_PAGE_NODES = 24_000;
 
@@ -48,10 +55,24 @@ class KnowledgePageBudget {
 }
 
 type LegacyRecordHead = { latestRevisionId: string; revisionIds: string[] };
+/** Bounded source presentation fields. Readable source text and raw bytes stay
+ * in the immutable record bodies, so a Library page is drawn from heads alone. */
+type SourceRowFields = {
+  title: string; uri?: string; originalUri?: string; mediaType?: string;
+  captureDisposition: SourceContent["captureDisposition"];
+  sourceSavedAt?: string; sourcePublishedAt?: string;
+  preview?: KnowledgeObjectRef; summary?: string;
+};
 type RecordHead = LegacyRecordHead & {
   kind: KnowledgeRecord["kind"]; scope: KnowledgeRecord["scope"];
   sortAt: number; searchFields: Array<[string, string]>;
+  createdAt: string; updatedAt: string;
   recordRefs: string[]; objectHashes: string[]; sourceIdentities?: string[];
+  /** Mirrors the record body so list/search can partition and render a page
+   * without reading it. Derived data: `headFor` is its only writer. */
+  admission?: SourceAdmission;
+  sessionId?: string; branchId?: string;
+  sourceRow?: SourceRowFields;
 };
 type Suppression = { excluded: boolean; forgotten: boolean; reason?: string; updatedAt: string };
 type ScopeExclusion = { sessionId?: string; branchId?: string; projectId?: string; excluded: boolean; reason?: string; updatedAt: string };
@@ -120,6 +141,9 @@ export interface CoverageUpdateInput {
 export interface KnowledgeMutationResult { record: KnowledgeRecord; stateRevision: number; }
 export interface KnowledgeForgetResult { forgotten: true; recordId: string; stateRevision: number; }
 export interface KnowledgeReconcileResult { removedObjects: string[]; pendingObjects: string[]; stateRevision: number; }
+/** Committed-change notification. `recordIds` lets a client refresh only the
+ * rows a mutation touched instead of replaying its first page. */
+export interface KnowledgeChange { stateRevision: number; recordIds?: string[] }
 
 function conflict(message: string): GatewayError { return new GatewayError("conflict", message); }
 function mergeSourceAttribution(existing: KnowledgeRecord & { kind: "source" }, incoming: KnowledgeRecordDraft & { kind: "source" }): KnowledgeRecordDraft & { kind: "source" } {
@@ -165,6 +189,54 @@ function catalogState(control: CatalogControl, catalog?: KnowledgeCatalog): Know
     sourceIdentities: catalog?.table<string>("sourceIdentities") ?? new Map(),
   };
 }
+/** sha256 of the Gateway's `JSON.stringify({title, text})`. A stored summary is
+ * current evidence interpretation only while its digest still matches. */
+export function sourceEvidenceDigest(title: string, text: string): string {
+  return createHash("sha256").update(JSON.stringify({ title, text })).digest("hex");
+}
+function httpUrl(value: string | undefined): string | undefined {
+  if (!value) return undefined;
+  try {
+    const url = new URL(value);
+    return (url.protocol === "http:" || url.protocol === "https:") && !url.username && !url.password ? value : undefined;
+  } catch { return undefined; }
+}
+/** The user-facing original link: the requested URI recorded for this exact
+ * saved-item identity, else the canonical capture URI. */
+function originalSourceUri(content: SourceContent): string | undefined {
+  const identity = content.identity;
+  const requested = identity
+    ? [...(content.origins ?? [])].reverse().find(origin => origin.uri !== undefined && origin.uri !== content.uri
+      && origin.identity?.provider === identity.provider && origin.identity.accountId === identity.accountId && origin.identity.itemId === identity.itemId)?.uri
+    : undefined;
+  return httpUrl(requested) ?? httpUrl(content.uri);
+}
+/** The single owner of a Library row's presentation fields. A client renders
+ * these directly instead of re-deriving them from a full record. */
+function sourceRowFields(record: KnowledgeRecord & { kind: "source" }): SourceRowFields {
+  const content = record.content;
+  const summary = content.summary?.text.trim();
+  const current = content.summary && summary && content.summary.evidenceDigest === sourceEvidenceDigest(content.title, content.text ?? "") ? summary : undefined;
+  const originalUri = originalSourceUri(content);
+  return {
+    title: content.title,
+    ...(content.uri ? { uri: content.uri } : {}),
+    ...(originalUri ? { originalUri } : {}),
+    ...(content.mediaType ? { mediaType: content.mediaType } : {}),
+    captureDisposition: content.captureDisposition,
+    ...(content.sourceSavedAt ? { sourceSavedAt: content.sourceSavedAt } : {}),
+    // Earlier Raindrop intake misfiled its bookmark-save time as publication
+    // time; never repeat that claim from a stored field.
+    ...(content.sourcePublishedAt && content.identity?.provider.toLowerCase() !== "raindrop" ? { sourcePublishedAt: content.sourcePublishedAt } : {}),
+    ...(content.preview ? { preview: content.preview } : {}),
+    ...(current ? { summary: current.slice(0, ROW_SUMMARY_CHARS) } : {}),
+  };
+}
+function headScopeFields(record: KnowledgeRecord): { sessionId?: string; branchId?: string } {
+  const sessionId = record.kind === "observation" ? record.content.range.sessionId : record.provenance.sessionId;
+  const branchId = record.kind === "observation" ? record.content.range.branchId : record.provenance.branchId;
+  return { ...(sessionId ? { sessionId } : {}), ...(branchId ? { branchId } : {}) };
+}
 function headFor(record: KnowledgeRecord, revisions: string[], retainedObjects: string[] = []): RecordHead {
   const date = record.kind === "observation" ? record.content.items[0]?.observedAt ?? record.createdAt : record.updatedAt;
   const evidence = [...record.provenance.evidence,
@@ -172,11 +244,66 @@ function headFor(record: KnowledgeRecord, revisions: string[], retainedObjects: 
     ...(record.kind === "note" ? [...(record.content.fields ?? []).flatMap(field => field.evidence), ...(record.content.contraryEvidence ?? [])] : []),
   ];
   return { latestRevisionId: record.revisionId, revisionIds: revisions, kind: record.kind, scope: record.scope,
-    sortAt: Date.parse(date), searchFields: searchableFields(record).map(([field, value]) => [field, value.toLocaleLowerCase()]),
+    createdAt: record.createdAt, updatedAt: record.updatedAt, sortAt: Date.parse(date), searchFields: searchableFields(record).map(([field, value]) => [field, value.toLocaleLowerCase()]),
     recordRefs: [...new Set([...record.relations.map(relation => relation.recordId), ...evidence.flatMap(ref => ref.recordId ? [ref.recordId] : [])])],
     objectHashes: [...new Set([...retainedObjects, ...recordObjectHashes(record)])],
     ...(recordSourceIdentityKeys(record).length > 0 ? { sourceIdentities: recordSourceIdentityKeys(record) } : {}),
+    ...(record.kind === "source" && record.content.admission ? { admission: record.content.admission.status } : {}),
+    ...headScopeFields(record),
+    ...(record.kind === "source" ? { sourceRow: sourceRowFields(record) } : {}),
   };
+}
+/** Cursor identity for one page of Library rows. Every input that changes which
+ * rows a page contains belongs to it. */
+function sourceRowScope(request: Pick<KnowledgeListRequest, "scope" | "includeArchived" | "includePending" | "sourceAdmission">): string {
+  return JSON.stringify(["sourceRow", request.scope ?? null, request.includeArchived === true, request.includePending === true, request.sourceAdmission ?? null]);
+}
+type SearchPosition = { score: number; sortAt: number; id: string };
+function searchScope(request: KnowledgeSearchRequest): string {
+  return JSON.stringify(["records", request.query, request.kind ?? null, request.scope ?? null, request.includeArchived === true, request.includePending === true, request.sourceAdmission ?? null]);
+}
+function sourceRowSearchScope(request: KnowledgeSearchRequest): string {
+  return JSON.stringify(["sourceRow", request.query, request.scope ?? null, request.includeArchived === true, request.includePending === true, request.sourceAdmission ?? null]);
+}
+/** Admission lives in the head, so the library partition is one SQL predicate
+ * for both the paged and the identity-refresh paths. */
+function admissionFilter(request: Pick<KnowledgeListRequest, "includeArchived" | "includePending" | "sourceAdmission">): { clauses: string[]; parameters: SQLInputValue[] } {
+  const clauses: string[] = []; const parameters: SQLInputValue[] = [];
+  if (request.includeArchived !== true) clauses.push("json_extract(value, '$.admission') IS NOT 'archived'");
+  if (request.includePending !== true) clauses.push("json_extract(value, '$.admission') IS NOT 'pending'");
+  if (request.sourceAdmission !== undefined) { clauses.push("json_extract(value, '$.admission') = ?"); parameters.push(request.sourceAdmission); }
+  return { clauses, parameters };
+}
+function searchScoreSQL(terms: string[]): string {
+  return `(SELECT coalesce(sum(${terms.map(() => "(instr(json_extract(field.value, '$[1]'), ?) > 0)").join(" + ")}), 0) FROM json_each(entries.value, '$.searchFields') AS field)`;
+}
+/** Ordering-preserving keyset for a scored search page. The score is carried
+ * exactly as the statement's own ordering key computed it. */
+function readSearchCursor(cursor: string, scope: string, stateRevision: number): { score: number; sortAt: number; id: string } {
+  let value: Record<string, unknown>;
+  try {
+    if (cursor.length > 2_000) throw new Error();
+    value = JSON.parse(Buffer.from(cursor, "base64url").toString("utf8")) as Record<string, unknown>;
+    if (value.v !== 1 || value.scope !== scope || !Number.isFinite(value.score) || !Number.isFinite(value.sortAt) || typeof value.id !== "string") throw new Error();
+    safeId(value.id, "cursor record");
+  } catch { throw invalid("Knowledge cursor is invalid for this query; reload the first page"); }
+  // Results are ordered by the exact corpus revision that produced them; a
+  // stale page would silently skip or repeat rows.
+  if (value.stateRevision !== stateRevision) throw conflict("Search results changed; reload the first page");
+  return { score: value.score as number, sortAt: value.sortAt as number, id: value.id };
+}
+function searchCursor(scope: string, stateRevision: number, position: { score: number; sortAt: number; id: string }): string {
+  return Buffer.from(JSON.stringify({ v: 1, scope, stateRevision, ...position })).toString("base64url");
+}
+/** Score a stored head exactly as the SQL ordering expression scores it: one
+ * point per (search field, term) pair the term appears in. */
+function headScore(head: RecordHead, terms: string[]): number {
+  let score = 0;
+  for (const [, value] of head.searchFields) score += terms.reduce((sum, term) => sum + (value.includes(term) ? 1 : 0), 0);
+  return score;
+}
+function sourceRow(id: string, head: RecordHead & { sourceRow: SourceRowFields }): KnowledgeSourceRow {
+  return { id, revisionId: head.latestRevisionId, scope: head.scope, createdAt: head.createdAt, updatedAt: head.updatedAt, ...head.sourceRow, ...(head.admission ? { admission: head.admission } : {}) };
 }
 function cleanupKey(item: PendingRecordCleanup): string { return JSON.stringify([item.recordId, item.revisionId]); }
 function sourceIdentityKey(identity: { provider: string; accountId: string; itemId: string }): string {
@@ -374,7 +501,9 @@ export class KnowledgeStore {
   private static readonly workspaceLocks = new WeakMap<TronWorkspace, AsyncMutex>();
   private readonly mutex: AsyncMutex;
   private readonly connectorContext = new AsyncLocalStorage<string | undefined>();
-  constructor(private readonly workspace: TronWorkspace, private readonly onChanged?: () => void, private readonly connectorEnvelope?: KnowledgeConnectorEnvelopeResolver) {
+  /** Command-scoped summary generations that are already in flight. */
+  private readonly summaryInFlight = new Map<string, Promise<KnowledgeMutationResult>>();
+  constructor(private readonly workspace: TronWorkspace, private readonly onChanged?: (change: KnowledgeChange) => void, private readonly connectorEnvelope?: KnowledgeConnectorEnvelopeResolver) {
     this.mutex = KnowledgeStore.workspaceLocks.get(workspace) ?? new AsyncMutex(); KnowledgeStore.workspaceLocks.set(workspace, this.mutex);
   }
 
@@ -430,21 +559,31 @@ export class KnowledgeStore {
     }
     if (manifest.storageVersion !== CATALOG_STORAGE_VERSION || manifest.schemaVersion !== KNOWLEDGE_SCHEMA_VERSION
       || typeof manifest.catalogID !== "string" || !/^[0-9a-f-]{36}$/.test(manifest.catalogID)) {
-      throw new KnowledgeStoreError(manifest.storageVersion > CATALOG_STORAGE_VERSION ? "newer" : "invalid", "Unsupported Knowledge catalog manifest");
+      if (typeof manifest.storageVersion === "number" && manifest.storageVersion > CATALOG_STORAGE_VERSION) throw new KnowledgeStoreError("newer", "Unsupported Knowledge catalog manifest");
+      if (manifest.storageVersion !== CATALOG_STORAGE_VERSION) throw new KnowledgeStoreError("invalid", "Knowledge catalog requires its one-time row-projection upgrade before use");
+      throw new KnowledgeStoreError("invalid", "Unsupported Knowledge catalog manifest");
     }
-    const path = join(paths.root, `catalog-${manifest.catalogID}.sqlite`);
+    const { catalog, control } = await this.openCatalog(paths, manifest.catalogID, !writable);
+    return { state: catalogState(control, catalog), present: true };
+  }
+
+  /** Open and validate one manifest's catalog file. Ordinary reads never
+   * migrate: an older manifest failed above, and only `upgradeStorage` rebuilds
+   * an existing corpus. Callers own the returned catalog's close. */
+  private async openCatalog(paths: StorePaths, catalogID: string, readOnly: boolean): Promise<{ catalog: KnowledgeCatalog; control: CatalogControl }> {
+    const path = join(paths.root, `catalog-${catalogID}.sqlite`);
     const before = await this.catalogFile(path);
     await this.catalogFile(`${path}-journal`, true);
     let catalog: KnowledgeCatalog | undefined;
     try {
-      catalog = new KnowledgeCatalog(path, !writable);
+      catalog = new KnowledgeCatalog(path, readOnly);
       const after = await this.catalogFile(path);
       if (before!.ino !== after!.ino || before!.dev !== after!.dev) throw new KnowledgeStoreError("unsafe", "Knowledge catalog changed while opening");
       const control = catalog.control<CatalogControl>();
-      if (control.catalogID !== manifest.catalogID || control.schemaVersion !== KNOWLEDGE_SCHEMA_VERSION || !Number.isSafeInteger(control.stateRevision) || control.stateRevision < 0) throw new KnowledgeStoreError("invalid", "Invalid Knowledge catalog control");
+      if (control.catalogID !== catalogID || control.schemaVersion !== KNOWLEDGE_SCHEMA_VERSION || !Number.isSafeInteger(control.stateRevision) || control.stateRevision < 0) throw new KnowledgeStoreError("invalid", "Invalid Knowledge catalog control");
       validateKnowledgeConfig(control.config);
       for (const [key, value] of Object.entries(control.connectors ?? {})) { if (!/^[A-Za-z0-9._:-]{1,160}$/.test(key)) throw new KnowledgeStoreError("invalid", "Invalid connector state key"); if (value) validateConnectorState(value, value.connector); }
-      return { state: catalogState(control, catalog), present: true };
+      return { catalog, control };
     } catch (error) {
       catalog?.close();
       if (error instanceof KnowledgeStoreError) throw error;
@@ -479,6 +618,33 @@ export class KnowledgeStore {
     });
   }
 
+  /** Mutex-free read projection. The action receives one committed catalog
+   * snapshot, taken before its first await; the connection closes as soon as
+   * the action settles. A reader therefore never holds a lock a mutation would
+   * have to wait for, and never observes a mixed snapshot. Callers that read
+   * revision bodies use `readRecordOrRemoved`, which reports a body a concurrent
+   * forget removed as unavailable instead of as a damaged corpus. */
+  private async readState<T>(action: (state: KnowledgeState, paths: StorePaths, present: boolean) => T | Promise<T>): Promise<T> {
+    const paths = await this.paths(false);
+    const loaded = await this.load(paths, false);
+    try { return await action(loaded.state, paths, loaded.present); }
+    finally { loaded.state.catalog?.close(); }
+  }
+
+  /** Revision bodies are immutable, and a forget deletes the head in its
+   * tombstone transaction before its files. A reader holding an older snapshot
+   * can therefore meet a revision that is no longer committed; that is removal.
+   * A revision its own snapshot still commits is a damaged corpus and fails. */
+  private async readRecordOrRemoved(paths: StorePaths, state: KnowledgeState, id: string, revision: string): Promise<KnowledgeRecord | undefined> {
+    try { return await this.readRecord(paths, id, revision); }
+    catch (error) {
+      if (!(error instanceof KnowledgeStoreError) || !error.message.startsWith("Record revision is missing")) throw error;
+      const committed = await this.readState(fresh => fresh.records.get(id)?.revisionIds.includes(revision) ?? false);
+      if (committed) throw error;
+      return undefined;
+    }
+  }
+
   /** Explicit startup upgrade, before observation recovery/admission. Ordinary
    * reads never migrate. The old manifest stays authoritative until all exact
    * committed revisions have been validated and the new catalog is durable.
@@ -490,11 +656,38 @@ export class KnowledgeStore {
       const read = await readSecureJson<unknown>(paths.state, LEGACY_MIGRATION_MAX_BYTES);
       if (!read.present) throw new KnowledgeStoreError("invalid", "Initialized knowledge state is missing");
       if (!read.value || typeof read.value !== "object" || Array.isArray(read.value)) throw new KnowledgeStoreError("invalid", "Invalid Knowledge state manifest");
-      if ((read.value as { storageVersion?: unknown }).storageVersion !== undefined) {
-        const loaded = await this.load(paths, false); loaded.state.catalog?.close(); return;
-      }
-      await this.createCatalog(paths, validateState(read.value));
+      const manifest = read.value as { storageVersion?: unknown; schemaVersion?: unknown; catalogID?: unknown };
+      if (manifest.storageVersion === CATALOG_STORAGE_VERSION) { const loaded = await this.load(paths, false); loaded.state.catalog?.close(); return; }
+      if (manifest.storageVersion === undefined) { await this.createCatalog(paths, validateState(read.value)); return; }
+      if (manifest.storageVersion !== 2) throw new KnowledgeStoreError(typeof manifest.storageVersion === "number" && manifest.storageVersion > CATALOG_STORAGE_VERSION ? "newer" : "invalid", "Unsupported Knowledge catalog manifest");
+      if (manifest.schemaVersion !== KNOWLEDGE_SCHEMA_VERSION || typeof manifest.catalogID !== "string" || !/^[0-9a-f-]{36}$/.test(manifest.catalogID)) throw new KnowledgeStoreError("invalid", "Unsupported Knowledge catalog manifest");
+      await this.rebuildCatalogHeads(paths, manifest.catalogID);
     });
+  }
+
+  /** One-time upgrade from the pre-row-projection catalog. Heads are derived
+   * data, so rebuilding them from the latest committed revision of every record
+   * is idempotent; the manifest that admits them is written last and a failure
+   * leaves the previous manifest authoritative. */
+  private async rebuildCatalogHeads(paths: StorePaths, catalogID: string): Promise<void> {
+    const { catalog } = await this.openCatalog(paths, catalogID, false);
+    let prepared = false;
+    try {
+      catalog.begin();
+      const records = catalog.table<RecordHead>("records");
+      for (const [id, head] of [...records.entries()]) {
+        const latest = await this.readRecord(paths, id, head.latestRevisionId);
+        records.set(id, headFor(latest, head.revisionIds, head.objectHashes));
+      }
+      catalog.commit();
+      prepared = true;
+    } finally {
+      catalog.close();
+      if (!prepared) return;
+    }
+    const durable = await open(join(paths.root, `catalog-${catalogID}.sqlite`), constants.O_RDONLY | constants.O_NOFOLLOW);
+    try { await durable.sync(); } finally { await durable.close(); }
+    await durableAtomicWriteJson(paths.state, { schemaVersion: KNOWLEDGE_SCHEMA_VERSION, storageVersion: CATALOG_STORAGE_VERSION, catalogID }, 0o600);
   }
   private async createCatalog(paths: StorePaths, legacy: LegacyKnowledgeState): Promise<void> {
     const catalogID = randomUUID();
@@ -622,14 +815,25 @@ export class KnowledgeStore {
     }
     return { stored: { kind: "value", value: result }, recordIds: [] };
   }
+  /** Command-ID replay fence, shared by the serialized mutation path and the
+   * summary pre-check that must not call a model before it discovers a
+   * committed replay. */
+  private async replayReceipt(paths: StorePaths, state: KnowledgeState, key: string, operation: string, hash: string): Promise<{ found: boolean; result?: unknown }> {
+    const prior = state.receipts.get(key);
+    if (!prior) return { found: false };
+    if (prior.operation !== operation || prior.requestHash !== hash) throw conflict("Command ID was already used for a different knowledge mutation");
+    if (prior.invalidated) throw conflict("Knowledge mutation result was forgotten");
+    return { found: true, result: await this.receiptResult(paths, state, prior.result) };
+  }
   private async mutate<T>(operation: string, commandId: string, request: unknown, action: (state: KnowledgeState, paths: StorePaths) => Promise<T>, afterCommit?: (state: KnowledgeState, paths: StorePaths, result: T) => Promise<void>, signal?: AbortSignal): Promise<T> {
     if (!/^[A-Za-z0-9._:-]{8,160}$/.test(commandId)) throw invalid("Mutating requests require a stable commandId");
     return this.mutex.run(async () => {
       if (signal?.aborted) throw new GatewayError("busy", "Knowledge mutation was cancelled", true);
       const paths = await this.paths(true); const { state } = await this.load(paths, true);
       try {
-        const key = `${operation}\0${commandId}`; const hash = requestHash(operation, request); const prior = state.receipts.get(key);
-        if (prior) { if (prior.operation !== operation || prior.requestHash !== hash) throw conflict("Command ID was already used for a different knowledge mutation"); if (prior.invalidated) throw conflict("Knowledge mutation result was forgotten"); return await this.receiptResult(paths, state, prior.result) as T; }
+        const key = `${operation}\0${commandId}`; const hash = requestHash(operation, request);
+        const replayed = await this.replayReceipt(paths, state, key, operation, hash);
+        if (replayed.found) return replayed.result as T;
         if (signal?.aborted) throw new GatewayError("busy", "Knowledge mutation was cancelled", true);
         // This is mutation admission. Once action starts it can durably write
         // record bodies: cancellation must not abandon their catalog/receipt
@@ -645,7 +849,7 @@ export class KnowledgeStore {
         // Publish only after the authoritative commit, across RPC, agent tools,
         // connectors and autonomous observations. Receipt replays bypass this.
         // A disposable notification must never turn a committed write into failure.
-        try { this.onChanged?.(); } catch { /* Reconnect reads canonical state. */ }
+        try { this.onChanged?.({ stateRevision: state.stateRevision, recordIds: stored.recordIds }); } catch { /* Reconnect reads canonical state. */ }
         // The tombstone/head transaction commits before physical cleanup. A
         // failed cleanup is durable pending work, never a resurrected record.
         if (afterCommit) {
@@ -660,7 +864,7 @@ export class KnowledgeStore {
 
   async status(): Promise<import("./knowledge-contract.js").KnowledgeStatus> {
     try {
-      return await this.inspect(async (state, _paths, present) => {
+      return await this.readState((state, _paths, present) => {
         if (!present) return { available: true, state: "uninitialized", recordCount: 0, coverageCount: 0, coverage: coverageSummary([]), suppressedCount: 0, pendingCleanupCount: 0, config: structuredClone(DEFAULT_KNOWLEDGE_CONFIG), observationConfigured: false };
         const counts = state.catalog!.coverageCounts();
         const coverage = { observedCount: counts.observed ?? 0, emptyCount: counts.empty ?? 0, excludedCount: counts.excluded ?? 0,
@@ -675,7 +879,7 @@ export class KnowledgeStore {
       return { available: false, state: kind, recordCount: 0, coverageCount: 0, coverage: coverageSummary([]), suppressedCount: 0, pendingCleanupCount: 0, config: structuredClone(DEFAULT_KNOWLEDGE_CONFIG), observationConfigured: false, detail: error instanceof Error ? error.message : String(error) };
     }
   }
-  async config(): Promise<KnowledgeConfig> { return this.inspect(async state => state.config); }
+  async config(): Promise<KnowledgeConfig> { return this.readState(state => state.config); }
   async configure(commandId: string, config: KnowledgeConfig): Promise<KnowledgeConfig> {
     try { validateKnowledgeConfig(config); } catch (error) { throw invalid(error instanceof Error ? error.message : "Invalid knowledge config"); }
     return this.mutate("knowledge.config", commandId, config, async state => { if (config.revision !== state.config.revision) throw conflict("Knowledge configuration revision is stale"); const next = structuredClone(config); next.revision += 1; state.config = next; return next; });
@@ -686,7 +890,7 @@ export class KnowledgeStore {
   }
 
   async connectorState(connector: "raindrop" | "x", connectionId?: string): Promise<KnowledgeConnectorState | undefined> {
-    return this.inspect(async state => {
+    return this.readState(async state => {
       const contextConnectionId = this.connectorContext.getStore();
       const key = connectionId ?? contextConnectionId;
       if (this.connectorEnvelope && !key) throw conflict("Connector state requires an admitted connection instance");
@@ -708,10 +912,11 @@ export class KnowledgeStore {
     for (const [value, label] of [[identity.provider, "provider"], [identity.accountId, "accountId"], [identity.itemId, "itemId"]] as const) {
       if (typeof value !== "string" || value.length < 1 || value.length > 512) throw invalid(`Source ${label} identity is invalid`);
     }
-    return this.inspect(async (state, paths) => {
+    return this.readState(async (state, paths) => {
       const recordId = state.sourceIdentities.get(sourceIdentityKey(identity));
-      if (!recordId) return undefined;
-      const record = await this.currentRecord(state, paths, recordId);
+      const head = recordId ? state.records.get(recordId) : undefined;
+      if (!head) return undefined;
+      const record = await this.readRecordOrRemoved(paths, state, recordId!, head.latestRevisionId);
       if (!record || record.kind !== "source") return undefined;
       const matches = recordSourceIdentityKeys(record).includes(sourceIdentityKey(identity));
       return matches ? record : undefined;
@@ -746,7 +951,7 @@ export class KnowledgeStore {
   }
 
   async list(request: KnowledgeListRequest = {}): Promise<KnowledgeListResponse> {
-    return this.inspect(async (state, paths) => {
+    return this.readState(async (state, paths) => {
       const limit = this.pageLimit(state, request.limit ?? 50);
       // Every visibility input belongs to cursor identity. A cursor from the
       // retained view must never be replayed against pending or archived
@@ -762,7 +967,8 @@ export class KnowledgeStore {
       const records: KnowledgeRecord[] = []; const budget = new KnowledgePageBudget(); let nextCursor: string | undefined;
       let last: { id: string; sortAt: number } | undefined;
       for (const { key: id, value: head } of state.catalog?.scan<RecordHead>("records", filter.clauses.join(" AND "), filter.parameters, "json_extract(value, '$.sortAt') DESC, key") ?? []) {
-        const record = await this.readRecord(paths, id, head.latestRevisionId);
+        const record = await this.readRecordOrRemoved(paths, state, id, head.latestRevisionId);
+        if (!record) continue;
         if (this.recordHardErased(state, record) || (!request.includeSuppressed && this.recordExcluded(state, record)) || (!request.includeArchived && this.recordArchived(record)) || (!request.includePending && this.recordPending(record))) continue;
         if (request.sourceAdmission !== undefined && (record.kind !== "source" || record.content.admission?.status !== request.sourceAdmission)) continue;
         if (records.length >= limit || !budget.admit(record)) { nextCursor = listCursor(scope, last!); break; }
@@ -784,13 +990,14 @@ export class KnowledgeStore {
   }
   async read(id: string, revision?: string, includeSuppressed = false, includeArchived = false, includePending = false): Promise<KnowledgeRecord | null> {
     safeId(id, "record id"); if (revision !== undefined) safeId(revision, "knowledge revision");
-    return this.inspect(async (state, paths) => {
+    return this.readState(async (state, paths) => {
       const head = state.records.get(id);
       if (!head) return null;
       const selected = revision ?? head.latestRevisionId;
       if (!head.revisionIds.includes(selected)) throw new KnowledgeStoreError("invalid", "Requested revision is not committed for this record");
-      const record = await this.readRecord(paths, id, selected);
-      const latest = await this.readRecord(paths, id, head.latestRevisionId);
+      const record = await this.readRecordOrRemoved(paths, state, id, selected);
+      const latest = await this.readRecordOrRemoved(paths, state, id, head.latestRevisionId);
+      if (!record || !latest) return null;
       // Visibility is governed by the current head even when an audit caller
       // asks for an older immutable revision.
       if (this.recordHardErased(state, record) || this.recordHardErased(state, latest)) return null;
@@ -800,37 +1007,132 @@ export class KnowledgeStore {
       return record;
     });
   }
+  /** One scored search page: the statement's own ordering key plus the keyset
+   * that continues it. A scored page binds the query, filters, projection and
+   * the exact state revision, because it cannot be resumed across a corpus
+   * change without skipping or repeating rows. */
+  private searchPage(request: KnowledgeSearchRequest, terms: string[], filter: { clauses: string[]; parameters: SQLInputValue[] }, scope: string, stateRevision: number): { clauses: string[]; parameters: SQLInputValue[]; order: string; continuation: (position: SearchPosition) => string } {
+    const score = searchScoreSQL(terms);
+    const clauses = [...filter.clauses, `${score} > 0`];
+    const where = [...filter.parameters, ...terms];
+    if (request.cursor !== undefined) {
+      const cursor = readSearchCursor(request.cursor, scope, stateRevision);
+      clauses.push(`(${score} < ? OR (${score} = ? AND (json_extract(value, '$.sortAt') < ? OR (json_extract(value, '$.sortAt') = ? AND key > json_quote(?)))))`);
+      where.push(...terms, cursor.score, cursor.score, cursor.sortAt, cursor.sortAt, cursor.id);
+    }
+    // The statement binds ORDER BY placeholders after every WHERE placeholder.
+    return { clauses, parameters: [...where, ...terms], order: `${score} DESC, json_extract(value, '$.sortAt') DESC, key`, continuation: position => searchCursor(scope, stateRevision, position) };
+  }
+
+  /** The library partition and privacy fence, all from catalog heads: rows are
+   * sources only, and a head carries exactly the fields `recordExcluded` and
+   * `recordHardErased` read for a non-observation record. */
+  private rowFilter(request: Pick<KnowledgeListRequest, "kind" | "scope" | "includeArchived" | "includePending" | "sourceAdmission">): { clauses: string[]; parameters: SQLInputValue[] } {
+    const base = this.catalogFilter(request); const admission = admissionFilter(request);
+    return { clauses: [...base.clauses, ...admission.clauses], parameters: [...base.parameters, ...admission.parameters] };
+  }
+  private headVisible(state: KnowledgeState, id: string, head: RecordHead): boolean {
+    const suppression = state.suppressions.get(id);
+    if (suppression?.excluded || suppression?.forgotten) return false;
+    if (head.recordRefs.some(reference => state.suppressions.get(reference)?.forgotten)) return false;
+    if (head.sessionId && state.config.eligibility.excludedSessionIds.includes(head.sessionId)) return false;
+    const keys = [
+      ...(head.sessionId ? [`session:${head.sessionId}`] : []),
+      ...(head.sessionId && head.branchId ? [`branch:${head.sessionId}:${head.branchId}`] : []),
+    ];
+    return !keys.some(key => state.scopeExclusions.get(key)?.excluded);
+  }
+
+  /** Library rows. Every field comes from the catalog head, so a page of any
+   * size reads no record body and no source text. `ids` refreshes only the rows
+   * a change named, in the requested order. */
+  async listSourceRows(request: KnowledgeListRequest): Promise<KnowledgeSourceRowListResponse> {
+    if (request.kind !== "source") throw invalid("The row projection is available for sources only");
+    if (request.includeSuppressed === true) throw invalid("The row projection always excludes suppressed records");
+    const ids = request.ids;
+    if (ids) {
+      if (request.cursor !== undefined) throw invalid("A row identity refresh has no cursor");
+      if (ids.length < 1 || ids.length > 64 || new Set(ids).size !== ids.length) throw invalid("A row identity refresh is bounded to 64 distinct ids");
+      try { for (const id of ids) assertKnowledgeId(id, "row id"); } catch { throw invalid("A row identity refresh requires valid record ids"); }
+    }
+    return this.readState((state, _paths, present) => {
+      if (!present) return { rows: [], stateRevision: 0 };
+      const limit = this.pageLimit(state, request.limit ?? 50);
+      const filter = this.rowFilter(request);
+      const clauses = [...filter.clauses]; const parameters = [...filter.parameters];
+      let nextCursor: string | undefined; let last: { sortAt: number; id: string } | undefined;
+      const scope = sourceRowScope(request);
+      if (ids) { clauses.push("key IN (SELECT json_quote(value) FROM json_each(?))"); parameters.push(JSON.stringify(ids)); }
+      else if (request.cursor !== undefined) {
+        const cursor = readListCursor(request.cursor, scope);
+        clauses.push("json_extract(value, '$.sortAt') <= ? AND (json_extract(value, '$.sortAt') < ? OR key > json_quote(?))");
+        parameters.push(cursor.sortAt, cursor.sortAt, cursor.id);
+      }
+      const rows: KnowledgeSourceRow[] = []; const budget = new KnowledgePageBudget();
+      for (const { key: id, value: head } of state.catalog?.scan<RecordHead>("records", clauses.join(" AND "), parameters, "json_extract(value, '$.sortAt') DESC, key") ?? []) {
+        if (head.kind !== "source" || !head.sourceRow || !this.headVisible(state, id, head)) continue;
+        const row = sourceRow(id, head as RecordHead & { sourceRow: SourceRowFields });
+        if (!ids && (rows.length >= limit || !budget.admit(row))) { nextCursor = listCursor(scope, last!); break; }
+        rows.push(row); last = { sortAt: head.sortAt, id };
+      }
+      if (!ids) return { rows, stateRevision: state.stateRevision, ...(nextCursor ? { nextCursor } : {}) };
+      // A single SQL scan cannot preserve a requested identity order.
+      const byId = new Map(rows.map(row => [row.id, row]));
+      return { rows: ids.map(id => byId.get(id)).filter((row): row is KnowledgeSourceRow => row !== undefined), stateRevision: state.stateRevision };
+    });
+  }
+
   async search(request: KnowledgeSearchRequest): Promise<KnowledgeSearchResponse> {
     if (typeof request.query !== "string" || request.query.trim().length === 0 || request.query.length > 512) throw invalid("Search query must be non-empty and bounded");
-    return this.inspect(async (state, paths) => {
+    return this.readState(async (state, paths) => {
       const terms = request.query.toLocaleLowerCase().split(/\s+/).filter(Boolean);
       const hits: KnowledgeSearchHit[] = []; const budget = new KnowledgePageBudget();
       const filter = this.catalogFilter(request); const limit = this.pageLimit(state, request.limit ?? 50);
-      // Keep lexical substring semantics, including negation/exact values. SQL
-      // scans canonical search fields, not thousands of immutable body files;
-      // only selected, privacy-admitted hits are loaded into the response.
-      const scoreSQL = `(SELECT coalesce(sum(${terms.map(() => "(instr(json_extract(field.value, '$[1]'), ?) > 0)").join(" + ")}), 0) FROM json_each(entries.value, '$.searchFields') AS field)`;
-      filter.clauses.push(`${scoreSQL} > 0`); filter.parameters.push(...terms, ...terms);
-      for (const { key: id } of state.catalog?.scan<RecordHead>("records", filter.clauses.join(" AND "), filter.parameters, `${scoreSQL} DESC, json_extract(value, '$.sortAt') DESC, key`) ?? []) {
-        const record = await this.currentRecord(state, paths, id);
+      const page = this.searchPage(request, terms, filter, searchScope(request), state.stateRevision);
+      let last: SearchPosition | undefined; let exhausted = true;
+      for (const { key: id, value: head } of state.catalog?.scan<RecordHead>("records", page.clauses.join(" AND "), page.parameters, page.order) ?? []) {
+        const record = await this.readRecordOrRemoved(paths, state, id, head.latestRevisionId);
         if (!record || this.recordExcluded(state, record) || (!request.includeArchived && this.recordArchived(record)) || (!request.includePending && this.recordPending(record))) continue;
         if (request.sourceAdmission !== undefined && (record.kind !== "source" || record.content.admission?.status !== request.sourceAdmission)) continue;
-        if (hits.length >= limit) break;
+        if (hits.length >= limit) { exhausted = false; break; }
         const matchedFields: string[] = []; let score = 0;
-        for (const [field, value] of searchableFields(record)) {
-          const lower = value.toLocaleLowerCase(); const count = terms.reduce((sum, term) => sum + (lower.includes(term) ? 1 : 0), 0);
+        for (const [field, value] of head.searchFields) {
+          const count = terms.reduce((sum, term) => sum + (value.includes(term) ? 1 : 0), 0);
           if (count) { matchedFields.push(field); score += count; }
         }
         const hit = { record, score, matchedFields };
-        if (!budget.admit(hit)) break;
-        hits.push(hit);
+        if (!budget.admit(hit)) { exhausted = false; break; }
+        hits.push(hit); last = { score, sortAt: head.sortAt, id };
       }
-      return { hits, stateRevision: state.stateRevision, indexState: "canonical" };
+      return { hits, stateRevision: state.stateRevision, indexState: "canonical", ...(exhausted || !last ? {} : { nextCursor: page.continuation(last) }) };
     });
   }
+
+  /** Library rows for a search. Scoring, ordering and continuation use the
+   * stored search fields, so a page never reads a record body. */
+  async searchSourceRows(request: KnowledgeSearchRequest): Promise<KnowledgeSourceRowSearchResponse> {
+    if (request.kind !== "source") throw invalid("The row projection is available for sources only");
+    if (typeof request.query !== "string" || request.query.trim().length === 0 || request.query.length > 512) throw invalid("Search query must be non-empty and bounded");
+    return this.readState((state, _paths, present) => {
+      if (!present) return { rows: [], stateRevision: 0 };
+      const terms = request.query.toLocaleLowerCase().split(/\s+/).filter(Boolean);
+      const filter = this.rowFilter(request); const limit = this.pageLimit(state, request.limit ?? 50);
+      const page = this.searchPage(request, terms, filter, sourceRowSearchScope(request), state.stateRevision);
+      const rows: KnowledgeSourceRow[] = [];
+      let last: SearchPosition | undefined; let exhausted = true;
+      for (const { key: id, value: head } of state.catalog?.scan<RecordHead>("records", page.clauses.join(" AND "), page.parameters, page.order) ?? []) {
+        if (head.kind !== "source" || !head.sourceRow || !this.headVisible(state, id, head)) continue;
+        if (rows.length >= limit) { exhausted = false; break; }
+        rows.push(sourceRow(id, head as RecordHead & { sourceRow: SourceRowFields }));
+        last = { score: headScore(head, terms), sortAt: head.sortAt, id };
+      }
+      return { rows, stateRevision: state.stateRevision, ...(exhausted || !last ? {} : { nextCursor: page.continuation(last) }) };
+    });
+  }
+
   async recall(request: KnowledgeRecallRequest): Promise<KnowledgeRecallResponse> {
     if (request.query !== undefined && (typeof request.query !== "string" || request.query.length > 512)) throw invalid("Recall query must be bounded");
-    return this.inspect(async (state, paths) => {
+    return this.readState(async (state, paths) => {
       const terms = request.query?.toLocaleLowerCase().split(/\s+/).filter(Boolean) ?? [];
       const filter = this.catalogFilter(request); const limit = this.pageLimit(state, request.limit ?? 20);
       if (terms.length) {
@@ -838,8 +1140,8 @@ export class KnowledgeStore {
         filter.parameters.push(...terms);
       }
       const records: KnowledgeRecord[] = []; const budget = new KnowledgePageBudget();
-      for (const { key: id } of state.catalog?.scan<RecordHead>("records", filter.clauses.join(" AND "), filter.parameters, "json_extract(value, '$.sortAt') DESC, key") ?? []) {
-        const record = await this.currentRecord(state, paths, id);
+      for (const { key: id, value: head } of state.catalog?.scan<RecordHead>("records", filter.clauses.join(" AND "), filter.parameters, "json_extract(value, '$.sortAt') DESC, key") ?? []) {
+        const record = await this.readRecordOrRemoved(paths, state, id, head.latestRevisionId);
         if (!record || this.recordExcluded(state, record) || (!request.includeArchived && this.recordArchived(record)) || (!request.includePending && this.recordPending(record))) continue;
         if (record.kind === "observation" && request.sessionId && record.content.range.sessionId !== request.sessionId) continue;
         if (record.kind === "observation" && request.entryId && !record.content.range.entryIds.includes(request.entryId)) continue;
@@ -857,13 +1159,14 @@ export class KnowledgeStore {
   async synthesisRevisions(sessionId: string, revisionIds: string[]): Promise<KnowledgeRecord[]> {
     safeId(sessionId, "session id");
     if (revisionIds.length === 0 || revisionIds.length > 100 || new Set(revisionIds).size !== revisionIds.length) throw invalid("Synthesis requires distinct source revisions");
-    return this.inspect(async (state, paths) => {
+    return this.readState(async (state, paths) => {
       const records: KnowledgeRecord[] = [];
       for (const revision of revisionIds) {
         safeId(revision, "knowledge revision");
         const id = state.catalog?.revisionOwner(revision);
         if (!id) throw conflict("Synthesis source revision is unavailable");
-        const record = await this.readRecord(paths, id, revision);
+        const record = await this.readRecordOrRemoved(paths, state, id, revision);
+        if (!record) throw conflict("Synthesis source revision is unavailable");
         if (record.kind === "observation" && record.content.range.sessionId !== sessionId) throw conflict("Synthesis observation is outside the requested session");
         if (record.kind !== "observation" && record.provenance.sessionId !== undefined && record.provenance.sessionId !== sessionId) throw conflict("Synthesis record is outside the requested session");
         if (this.recordExcluded(state, record) || this.recordArchived(record) || this.recordPending(record)) throw conflict("Synthesis source is unavailable or excluded");
@@ -879,13 +1182,14 @@ export class KnowledgeStore {
   async observationRevisions(sessionId: string, revisionIds: string[]): Promise<KnowledgeRecord[]> {
     safeId(sessionId, "session id");
     if (revisionIds.length > 100) throw invalid("Observation revisions must be bounded");
-    return this.inspect(async (state, paths) => {
+    return this.readState(async (state, paths) => {
       const records: KnowledgeRecord[] = [];
       for (const revision of new Set(revisionIds)) {
         safeId(revision, "knowledge revision");
         const id = state.catalog?.revisionOwner(revision);
         if (!id) continue;
-        const record = await this.readRecord(paths, id, revision);
+        const record = await this.readRecordOrRemoved(paths, state, id, revision);
+        if (!record) continue;
         if (record.kind === "observation" && record.content.range.sessionId === sessionId && !this.recordExcluded(state, record)) records.push(record);
       }
       return records;
@@ -943,6 +1247,7 @@ export class KnowledgeStore {
   async createNote(request: KnowledgeNoteMutationRequest & { recordId?: never }): Promise<KnowledgeMutationResult> { return this.mutate("knowledge.note.create", request.commandId, request, async (state, paths) => this.putRecord(state, paths, request.record)); }
   async updateNote(request: KnowledgeNoteMutationRequest & { recordId: string }): Promise<KnowledgeMutationResult> { return this.mutate("knowledge.note.update", request.commandId, request, async (state, paths) => { const current = await this.currentRecord(state, paths, request.recordId); if (!current || current.kind !== "note") throw conflict("Knowledge note does not exist"); if (request.expectedRevision !== current.revisionId) throw conflict("Knowledge note revision is stale"); return this.putRecord(state, paths, { ...request.record, id: request.recordId, createdAt: current.createdAt }, request.expectedRevision); }); }
   private async currentRecord(state: KnowledgeState, paths: StorePaths, id: string): Promise<KnowledgeRecord | null> { const head = state.records.get(id); return head ? this.readRecord(paths, id, head.latestRevisionId) : null; }
+  private async currentRecordForRead(state: KnowledgeState, paths: StorePaths, id: string): Promise<KnowledgeRecord | null> { const head = state.records.get(id); return head ? await this.readRecordOrRemoved(paths, state, id, head.latestRevisionId) ?? null : null; }
   private async putRecord(state: KnowledgeState, paths: StorePaths, draft: KnowledgeRecordDraft, expectedRevision?: string): Promise<KnowledgeMutationResult> {
     const id = draft.id ?? recordId(); safeId(id, "record id"); const existing = state.records.get(id); if (state.suppressions.get(id)?.forgotten) throw conflict("Knowledge record was forgotten and cannot be recreated");
     const current = existing ? await this.currentRecord(state, paths, id) : null; if (expectedRevision !== undefined && current?.revisionId !== expectedRevision) throw conflict("Knowledge record revision is stale"); if (expectedRevision === undefined && current) throw conflict("Knowledge record already exists; supply its expected revision");
@@ -970,7 +1275,7 @@ export class KnowledgeStore {
    * remains stored for audit until forgotten, but excluded scope is not usable
    * evidence and must be filtered before presentation or model boundaries. */
   async scopeExcluded(scope: { sessionId?: string; branchId?: string; projectId?: string }): Promise<boolean> {
-    return this.inspect(async state => {
+    return this.readState(state => {
       const keys = [
         ...(scope.sessionId ? [`session:${scope.sessionId}`] : []),
         ...(scope.sessionId && scope.branchId ? [`branch:${scope.sessionId}:${scope.branchId}`] : []),
@@ -1039,19 +1344,44 @@ export class KnowledgeStore {
    * checked inside the serialized mutation, so late cancellation/config or
    * privacy changes cannot publish stale generated content. */
   async generateSourceSummary(commandId: string, sourceId: string, expectedRevision: string, expectedConfigRevision: number, generate: (source: KnowledgeRecord & { kind: "source" }) => Promise<import("./knowledge-contract.js").SourceSummary>, signal?: AbortSignal): Promise<KnowledgeMutationResult> {
-    // Keep model dispatch inside the receipt-owned mutation: a replayed command
-    // returns its committed result without charging the configured model again.
-    return this.mutate("knowledge.source.summarize", commandId, { sourceId, expectedRevision, expectedConfigRevision }, async (state, paths) => {
+    const operation = "knowledge.source.summarize";
+    const request = { sourceId, expectedRevision, expectedConfigRevision };
+    // One process-wide in-flight owner per command, so a duplicate call shares
+    // its result instead of charging the configured model twice. The request is
+    // part of the key: a different request reusing the command ID still reaches
+    // the receipt fence and conflicts there.
+    const receiptKey = `${operation}\0${commandId}`;
+    const inFlightKey = `${receiptKey}\0${requestHash(operation, request)}`;
+    const inFlight = this.summaryInFlight.get(inFlightKey);
+    if (inFlight) return inFlight;
+    const run = this.runSourceSummary(operation, commandId, receiptKey, request, generate, signal);
+    this.summaryInFlight.set(inFlightKey, run);
+    try { return await run; } finally { this.summaryInFlight.delete(inFlightKey); }
+  }
+
+  /** The model call runs outside the store mutex: a long generation must not
+   * stall reads or unrelated mutations. Both the preflight and the commit
+   * revalidate the exact source revision, config revision and privacy fence. */
+  private async runSourceSummary(operation: string, commandId: string, key: string, request: { sourceId: string; expectedRevision: string; expectedConfigRevision: number }, generate: (source: KnowledgeRecord & { kind: "source" }) => Promise<import("./knowledge-contract.js").SourceSummary>, signal?: AbortSignal): Promise<KnowledgeMutationResult> {
+    const replayed = await this.readState(async (state, paths) => this.replayReceipt(paths, state, key, operation, requestHash(operation, request)));
+    if (replayed.found) return replayed.result as KnowledgeMutationResult;
+    if (signal?.aborted) throw new GatewayError("busy", "Source summary was cancelled", true);
+    const current = await this.readState(async (state, paths) => {
+      if (state.config.revision !== request.expectedConfigRevision) throw conflict("Knowledge configuration changed while the summary was generated");
+      const found = await this.currentRecordForRead(state, paths, request.sourceId);
+      if (!found || found.kind !== "source" || found.revisionId !== request.expectedRevision || this.recordExcluded(state, found)) throw conflict("Source changed or became unavailable while the summary was generated");
+      if (!found.content.text?.trim()) throw new GatewayError("unsupported", "A readable source extraction is required to generate a summary");
+      return found;
+    });
+    const summary = await generate(current);
+    if (signal?.aborted) throw new GatewayError("busy", "Source summary was cancelled", true);
+    return this.mutate(operation, commandId, request, async (state, paths) => {
       if (signal?.aborted) throw new GatewayError("busy", "Source summary was cancelled", true);
-      if (state.config.revision !== expectedConfigRevision) throw conflict("Knowledge configuration changed while the summary was generated");
-      const current = await this.currentRecord(state, paths, sourceId);
-      if (!current || current.kind !== "source" || current.revisionId !== expectedRevision || this.recordExcluded(state, current)) throw conflict("Source changed or became unavailable while the summary was generated");
-      if (!current.content.text?.trim()) throw new GatewayError("unsupported", "A readable source extraction is required to generate a summary");
-      const summary = await generate(current);
-      if (signal?.aborted) throw new GatewayError("busy", "Source summary was cancelled", true);
-      if (state.config.revision !== expectedConfigRevision) throw conflict("Knowledge configuration changed while the summary was generated");
-      if (summary.sourceRevisionId !== current.revisionId) throw conflict("Source summary evidence revision is stale");
-      return this.putRecord(state, paths, { kind: "source", id: current.id, createdAt: current.createdAt, scope: current.scope, provenance: current.provenance, relations: current.relations, ...(current.temporal ? { temporal: current.temporal } : {}), content: { ...current.content, summary } }, current.revisionId);
+      if (state.config.revision !== request.expectedConfigRevision) throw conflict("Knowledge configuration changed while the summary was generated");
+      const latest = await this.currentRecord(state, paths, request.sourceId);
+      if (!latest || latest.kind !== "source" || latest.revisionId !== request.expectedRevision || this.recordExcluded(state, latest)) throw conflict("Source changed or became unavailable while the summary was generated");
+      if (summary.sourceRevisionId !== latest.revisionId) throw conflict("Source summary evidence revision is stale");
+      return this.putRecord(state, paths, { kind: "source", id: latest.id, createdAt: latest.createdAt, scope: latest.scope, provenance: latest.provenance, relations: latest.relations, ...(latest.temporal ? { temporal: latest.temporal } : {}), content: { ...latest.content, summary } }, latest.revisionId);
     }, undefined, signal);
   }
   async synthesize(commandId: string, sessionId: string, sourceRevisionIds: string[], text: string, expectedConfigRevision: number, signal?: AbortSignal): Promise<KnowledgeMutationResult> {
@@ -1198,33 +1528,81 @@ export class KnowledgeStore {
     });
   }
   private async assertObject(paths: StorePaths, ref: KnowledgeObjectRef): Promise<void> { validateObjectRef(ref); const bytes = await readSecureBytes(join(paths.objects, ref.hash), OBJECT_MAX_BYTES); if (!bytes || bytes.byteLength !== ref.bytes || createHash("sha256").update(bytes).digest("hex") !== ref.hash) throw conflict("Referenced knowledge object bytes are not durably captured"); }
-  private async exactObjectAuthority(paths: StorePaths, state: KnowledgeState, ref: KnowledgeObjectRef, recordId: string, revisionId: string, includeArchived = false): Promise<boolean> {
+  /** The one object-authorization predicate: the exact committed revision of a
+   * record whose current head is visible must itself reference this object. Do
+   * not fall back to a corpus scan or an evidence hash, since either can
+   * authorize an object after its source was excluded or replaced. */
+  private async authorizedObjectPath(paths: StorePaths, state: KnowledgeState, ref: KnowledgeObjectRef, recordId: string, revisionId: string, includeArchived: boolean): Promise<string | undefined> {
     const head = state.records.get(recordId);
-    if (!head || !head.revisionIds.includes(revisionId)) return false;
-    const record = await this.readRecord(paths, recordId, revisionId);
-    const latest = await this.readRecord(paths, recordId, head.latestRevisionId);
-    if (this.recordExcluded(state, latest) || (!includeArchived && this.recordArchived(latest)) || this.recordPending(latest)) return false;
-    // The caller's exact revision is the authority. Do not fall back to a
-    // corpus scan or an evidence hash, since either can authorize an object
-    // after its source has been excluded or replaced.
+    if (!head || !head.revisionIds.includes(revisionId)) return undefined;
+    const record = await this.readRecordOrRemoved(paths, state, recordId, revisionId);
+    if (!record) return undefined;
+    const latest = await this.readRecordOrRemoved(paths, state, recordId, head.latestRevisionId);
+    if (!latest) return undefined;
+    if (this.recordExcluded(state, latest) || (!includeArchived && this.recordArchived(latest)) || this.recordPending(latest)) return undefined;
     return recordObjectRefs(record).some(candidate => candidate.hash === ref.hash
-      && candidate.bytes === ref.bytes && candidate.mediaType === ref.mediaType);
+      && candidate.bytes === ref.bytes && candidate.mediaType === ref.mediaType) ? join(paths.objects, ref.hash) : undefined;
   }
 
   async readObject(ref: KnowledgeObjectRef, authority: { recordId: string; revisionId: string; includeArchived?: boolean }): Promise<Uint8Array | null> {
     validateObjectRef(ref);
     assertKnowledgeId(authority.recordId, "object authority record id");
     assertKnowledgeId(authority.revisionId, "object authority revision");
-    const admittedPath = await this.inspect(async (state, paths, present) =>
-      present && await this.exactObjectAuthority(paths, state, ref, authority.recordId, authority.revisionId, authority.includeArchived === true) ? join(paths.objects, ref.hash) : null);
+    const admittedPath = await this.readState(async (state, paths, present) =>
+      present ? await this.authorizedObjectPath(paths, state, ref, authority.recordId, authority.revisionId, authority.includeArchived === true) : undefined);
     if (!admittedPath) return null;
-    // Release the catalog while reading bytes, then recheck exact authority.
-    // A concurrent forget/exclusion must win over the initial admission.
+    // The catalog is closed while bytes are read. A concurrent forget/exclusion
+    // must win over the initial admission, so authority is rechecked against a
+    // fresh snapshot rather than the one that admitted it.
     const bytes = await readSecureBytes(admittedPath, OBJECT_MAX_BYTES);
     if (!bytes) return null;
     if (bytes.byteLength !== ref.bytes || createHash("sha256").update(bytes).digest("hex") !== ref.hash) throw new KnowledgeStoreError("invalid", "Knowledge object failed hash or size verification");
-    return this.inspect(async (state, paths, present) =>
-      present && await this.exactObjectAuthority(paths, state, ref, authority.recordId, authority.revisionId, authority.includeArchived === true) ? bytes : null);
+    return this.readState(async (state, paths, present) =>
+      present ? await this.authorizedObjectPath(paths, state, ref, authority.recordId, authority.revisionId, authority.includeArchived === true) ? bytes : null : null);
+  }
+
+  /** One bounded batch of exact preview references for the library grid. Each
+   * item is authorized independently, so one missing or over-budget preview
+   * never fails the page, and each is rechecked after its bytes are read. */
+  async readPreviewsBatch(request: KnowledgePreviewBatchRequest): Promise<KnowledgePreviewBatchResponse> {
+    const items = request.items;
+    if (!Array.isArray(items) || items.length < 1 || items.length > KNOWLEDGE_PREVIEW_BATCH_ITEMS) throw invalid(`A preview batch is bounded to ${KNOWLEDGE_PREVIEW_BATCH_ITEMS} items`);
+    const seen = new Set<string>();
+    for (const item of items) {
+      if (!item || typeof item !== "object") throw invalid("A preview batch item is invalid");
+      try { validateObjectRef({ hash: item.hash, mediaType: item.mediaType, bytes: item.bytes }); assertKnowledgeId(item.recordId, "preview record id"); assertKnowledgeId(item.revisionId, "preview revision"); }
+      catch { throw invalid("A preview batch item requires an exact committed preview reference"); }
+      const key = `${item.recordId}\u0000${item.revisionId}\u0000${item.hash}`;
+      if (seen.has(key)) throw invalid("Preview batch items must be distinct");
+      seen.add(key);
+    }
+    const includeArchived = request.includeArchived === true;
+    const admitted = await this.readState(async (state, paths, present) => present
+      ? await Promise.all(items.map(async item => {
+        const head = state.records.get(item.recordId);
+        if (!head || !head.revisionIds.includes(item.revisionId)) return undefined;
+        const record = await this.readRecordOrRemoved(paths, state, item.recordId, item.revisionId);
+        const preview = record?.kind === "source" ? record.content.preview : undefined;
+        if (!preview || preview.hash !== item.hash || preview.bytes !== item.bytes || preview.mediaType !== item.mediaType) return undefined;
+        return await this.authorizedObjectPath(paths, state, { hash: item.hash, mediaType: item.mediaType, bytes: item.bytes }, item.recordId, item.revisionId, includeArchived);
+      }))
+      : items.map(() => undefined));
+    const results: KnowledgePreviewBatchResponse["items"] = [];
+    let total = 0;
+    for (const [index, item] of items.entries()) {
+      const path = admitted[index];
+      if (!path) { results.push({ recordId: item.recordId, hash: item.hash, unavailable: "forbidden" }); continue; }
+      if (item.bytes > KNOWLEDGE_PREVIEW_MAX_BYTES || total + item.bytes > KNOWLEDGE_PREVIEW_BATCH_BYTES) { results.push({ recordId: item.recordId, hash: item.hash, unavailable: "too-large" }); continue; }
+      const bytes = await readSecureBytes(path, KNOWLEDGE_PREVIEW_MAX_BYTES);
+      if (!bytes) { results.push({ recordId: item.recordId, hash: item.hash, unavailable: "missing" }); continue; }
+      if (bytes.byteLength !== item.bytes || createHash("sha256").update(bytes).digest("hex") !== item.hash) throw new KnowledgeStoreError("invalid", "Knowledge preview failed hash or size verification");
+      // A concurrent forget or exclusion must not be outrun by the read.
+      const still = await this.readState(async (state, paths, present) => present ? await this.authorizedObjectPath(paths, state, { hash: item.hash, mediaType: item.mediaType, bytes: item.bytes }, item.recordId, item.revisionId, includeArchived) !== undefined : false);
+      if (!still) { results.push({ recordId: item.recordId, hash: item.hash, unavailable: "forbidden" }); continue; }
+      total += bytes.byteLength;
+      results.push({ recordId: item.recordId, hash: item.hash, base64: Buffer.from(bytes).toString("base64") });
+    }
+    return { items: results };
   }
   async reconcile(): Promise<KnowledgeReconcileResult> {
     return this.mutex.run(async () => {
@@ -1253,7 +1631,7 @@ export class KnowledgeStore {
     });
   }
   async coverage(id: string): Promise<ObservationCoverage | null> {
-    safeId(id, "coverage id"); return this.inspect(async state => state.coverage.get(id) ?? null);
+    safeId(id, "coverage id"); return this.readState(state => state.coverage.get(id) ?? null);
   }
 
   /** Coverage pages seek through the canonical date index. A missing cursor
@@ -1268,7 +1646,7 @@ export class KnowledgeStore {
       || dispositions.some(disposition => !OBSERVATION_COVERAGE_DISPOSITIONS.includes(disposition)))) {
       throw invalid("Invalid observation coverage disposition filter");
     }
-    return this.inspect(async state => {
+    return this.readState(state => {
       const anchor = cursor ? state.coverage.get(cursor) : undefined;
       if (cursor && !anchor) throw invalid("Observation coverage cursor is unavailable; reload coverage");
       const conditions: string[] = []; const parameters: SQLInputValue[] = [];
@@ -1290,7 +1668,7 @@ export class KnowledgeStore {
   /** Pending/failed cuts are recovery inputs, not a second journal. */
   async pendingObservationCoverage(limit = 100): Promise<ObservationCoverage[]> {
     if (!Number.isSafeInteger(limit) || limit < 1 || limit > 100) throw new KnowledgeStoreError("invalid", "Invalid observation recovery limit");
-    return this.inspect(async state => (state.catalog?.rows<ObservationCoverage>("coverage",
+    return this.readState(state => (state.catalog?.rows<ObservationCoverage>("coverage",
       "json_extract(value, '$.disposition') IN ('pending', 'failed')", [], "json_extract(value, '$.recordedAt'), key", limit) ?? [])
       .map(({ value }) => { validateCoverage(value); return value; }));
   }
@@ -1302,7 +1680,7 @@ export class KnowledgeStore {
     if (branchId !== undefined) safeId(branchId, "branch id");
     if (projectId !== undefined) assertKnowledgeProjectId(projectId, "project id");
     if (entryIds && entryIds.length > 10_000) throw invalid("Observation coverage input is unbounded");
-    return this.inspect(async state => (state.catalog?.rows<ObservationCoverage>("coverage",
+    return this.readState(state => (state.catalog?.rows<ObservationCoverage>("coverage",
       "json_extract(value, '$.range.sessionId') = ? AND json_extract(value, '$.range.branchId') IS ? AND json_extract(value, '$.range.projectId') IS ? AND json_extract(value, '$.disposition') IN ('observed', 'empty', 'excluded', 'unavailable')"
         + (entryIds ? " AND json_extract(value, '$.range.fromEntryId') IN (SELECT value FROM json_each(?))" : ""),
       [sessionId, branchId ?? null, projectId ?? null, ...(entryIds ? [JSON.stringify(entryIds)] : [])], "key") ?? [])
