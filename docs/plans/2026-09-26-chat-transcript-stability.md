@@ -2,7 +2,7 @@
 
 - **Started:** 2026-09-26
 - **Status:** Active
-- **Last updated:** 2026-09-26, CT-2
+- **Last updated:** 2026-09-28, CT-24
 - **Goal:** The chat transcript stays on screen and pinned by construction, so the scroll repairs that compensate for SwiftUI's lazy-stack estimates can be deleted rather than extended.
 
 ## Goal and constraints
@@ -110,7 +110,7 @@ breaks context-menu previews.
 | CT-26 | Ready | Hot-path foundation, on `main`: one stable transcript actions object and synthesized-Equatable per-row inputs (no closures into row hosts); `ChatView` observation split (projection driver, composer, installed-commit observer as their own views); one `ChatPhysicalRowIndex` per install owning row order; observation granularity (delete `displayedSemanticIDCount`, guard entrance-set writes, pass per-row entrance state down, evidence bookkeeping not observed); equality fast paths and per-install precomputation; render-count budgets in `scripts/tron-profile ios` scenarios; hosted probes mounted only under a hosted probe | none | |
 | CT-27 | Claimed | Row stability foundation, on `main`: entrance clip keeps one view structure; growth host owns height only while streaming; `ThinkingBlock` and display-card disclosure and prompt replacement move from measure-to-state loops to custom `Layout`s; display disclosure state store-owned; inline display loads per identity with reserved heights and retry; canonical-prompt branch switch removed; notification pill single structure; row-owned sheet routes hoisted; a row-stability E2E fixture with a per-mount resize counter | none | chat scroll session (worker lanes), 2026-09-28 |
 | CT-28 | Ready | Record-only invariant monitor in the product (pinned bottom band uncovered for more than 2 frames, detached anchor moved without input, opening revealed uncovered), deduplicated, reaching device exports and surviving relaunch; delete the noisy tail-edge trace records; write the missing send-choreography device checklist in `development.md` | CT-25 | |
-| CT-24 | Claimed | Field-shape fixtures: the two 2026-09-28 device incidents as hosted journeys, (a) foreground resync that installs new rows under tall newest replies, (b) a send in a transcript whose newest replies are very tall, followed by several assistant rows; with an orientation-independent blank oracle (window coordinates), and proof that today's path goes blank in both | none | chat scroll session, 2026-09-28 |
+| CT-24 | Done | Field-shape fixtures: the two 2026-09-28 device incidents as hosted journeys, (a) foreground resync that installs new rows under tall newest replies, (b) a send in a transcript whose newest replies are very tall, followed by several assistant rows; with an orientation-independent blank oracle (window coordinates), and proof that today's path goes blank in both | none | chat scroll session, 2026-09-28 |
 | CT-23 | Claimed | Origin-anchored transcript spike: the transcript's scroll view is flipped so its content origin is the visual bottom, rows are counter-flipped and ordered newest first; judged by every yardstick plus the risk probes in Task details | CT-24 | chat scroll session, 2026-09-28 |
 | CT-22 | Claimed | Exact tail prototype (keep the SwiftUI `ScrollView`, rows and animations): measure two ways of making the pinned bottom exact on a throwaway branch. (a) Previously measured rows keep their last measured height when they leave the viewport. (b) The newest rows render in an eager stack below a `LazyVStack` of older history, so the bottom and everything near it are measured, never estimated; the boundary moves in coarse steps so rows rarely change parent. Judged by the CT-2 fixtures, the parity gate, the harness and CT-10's scale numbers | CT-20 | chat scroll investigation session, 2026-09-27 |
 | CT-16 | Needs scoping | Build the container beside today's `LazyVStack` transcript behind a single development switch; no row, composer or animation code changes. Split into rows by CT-15 | CT-15, CT-20 | |
@@ -866,3 +866,52 @@ pass only through eager-only repairs, stop and report.
   CT-23 against CT-25's gates.
 - CT-24 completes inside CT-25: its fixtures (`fc703f16e` on the CT-23 branch)
   move to `main` with CT-25, and CT-24 closes with its repro runs there.
+
+### CT-24 · Done · 2026-09-28 · chat scroll session (CT-25 stage A)
+
+- Result: both 2026-09-28 device field shapes are hosted journeys and both
+  reproduce the blank on today's pinned `LazyVStack` path, three runs of three.
+  Shape (a) opens a 250-row history whose newest six replies are ~1,620 pt tall
+  and replaces the authoritative snapshot with one carrying four more very tall
+  replies — the reconnect resync that went blank on the phone. Shape (b) submits
+  a prompt with the keyboard-sized viewport in place and publishes five
+  assistant replies of uneven tall heights (1,900/1,620/1,140/1,330/670 pt) over
+  60 boundaries without further input. Both sample the window-coordinate blank
+  oracle (`onScreenRows`) and print one `CT24-METRICS` line.
+- Evidence (`~/Library/Developer/Tron/ios/test-runs/`, lane ct25, products built
+  from this worktree's own source state, three consecutive invocations
+  `20260928T234000Z-run.0kvZhI`, `20260928T234056Z-run.93woFZ`,
+  `20260928T234203Z-run.xuwAjE`; 4 tests, 14 s of tests, 37 s wall each):
+
+  ```
+  CT24-METRICS shape=resync-under-tall-newest samples=90 blankBoundaries=79/90 blankAfterSettle=78 longestBlankRun=79 blankPhases=p1:79 maxEstimateRatio=96.7 estimateOpen=102398.0 estimateMax=156683.0 measuredRowsAtMax=1 measuredHeightAtMax=1619.7 tallestRowHeight=1619.7
+  CT24-METRICS shape=send-under-tall-newest   samples=68 blankBoundaries=29/68 blankAfterSettle=29 longestBlankRun=21 blankPhases=p1:29 maxEstimateRatio=206.7 estimateOpen=177661.0 estimateMax=236234.0 measuredRowsAtMax=1 measuredHeightAtMax=1143.0 tallestRowHeight=1859.0
+  CT24-METRICS shape=resync-under-tall-newest samples=90 blankBoundaries=77/90 blankAfterSettle=77 longestBlankRun=77 blankPhases=p1:77 maxEstimateRatio=103.0 estimateOpen=102398.0 estimateMax=166810.0 measuredRowsAtMax=1 measuredHeightAtMax=1619.7 tallestRowHeight=1619.7
+  CT24-METRICS shape=send-under-tall-newest   samples=68 blankBoundaries=24/68 blankAfterSettle=24 longestBlankRun=15 blankPhases=p1:24 maxEstimateRatio=205.5 estimateOpen=177661.0 estimateMax=234928.0 measuredRowsAtMax=1 measuredHeightAtMax=1143.0 tallestRowHeight=1859.0
+  CT24-METRICS shape=resync-under-tall-newest samples=90 blankBoundaries=77/90 blankAfterSettle=77 longestBlankRun=77 blankPhases=p1:77 maxEstimateRatio=103.0 estimateOpen=102398.0 estimateMax=166810.0 measuredRowsAtMax=1 measuredHeightAtMax=1619.7 tallestRowHeight=1619.7
+  CT24-METRICS shape=send-under-tall-newest   samples=68 blankBoundaries=12/68 blankAfterSettle=12 longestBlankRun=12 blankPhases=p1:12 maxEstimateRatio=111.4 estimateOpen=177661.0 estimateMax=215490.0 measuredRowsAtMax=1 measuredHeightAtMax=1905.7 tallestRowHeight=1905.7
+  ```
+
+  Both shapes reproduce a blank in 3 of 3 runs, so no shape was adjusted. The
+  resync shape blanks the whole 80-boundary phase after the install (`p1:77` of
+  80; the first two boundaries of a phase are its transition landing); the send
+  shape blanks 12-29 of its 60-boundary growth phase. `measuredRowsAtMax=1`
+  beside `maxEstimateRatio` 97-207x is the field incident's mechanism in the
+  harness: the published estimate rests on a single measured 1,143-1,906 pt row.
+  The same invocation's CT-2 shapes read 1-44/72 (many tall replies) and
+  20-120/340 (keyboard cycles with sends) blank boundaries.
+- Changes: the fixtures and their oracle landed in `904faeae2`
+  (`packages/ios-app/Tests/UI/ChatViewScrollHarnessTests.swift`, cherry-picked
+  from `fc703f16e` on the CT-23 branch); this entry.
+- Deviations: the fixtures measure; they do not gate. CT-25 stage A turns their
+  blank counts and bottom-band coverage into failing gates with an explicit
+  expected-failure switch, and the estimate-only fields (`maxEstimateRatio`,
+  `reDerivations`, `tailDisplacements`, `repairCommands`) stay until CT-23 lands.
+  The `tailDistance` fields read 0.0 in the resync shape even while 79 of 90
+  boundaries were blank — the scroll-space tail measurement is exactly what
+  CT-25 stage A replaces.
+- For the next agent: run both shapes with
+  `TRON_IOS_TEST_LANE=ct25 TRON_IOS_TEST_TIER=ui-validation scripts/tron-ios-test run
+  --only-testing 'TronMobileTests/ChatViewScrollHarnessTests/ct24ResyncUnderVeryTallNewestReplies()'
+  --only-testing 'TronMobileTests/ChatViewScrollHarnessTests/ct24SendUnderVeryTallNewestReplies()'`
+  (14 s of tests on top of a built lane).
