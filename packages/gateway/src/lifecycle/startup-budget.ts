@@ -1,13 +1,15 @@
 /**
- * G-13's startup budget: process start to the record that says the Gateway is
- * serving (`gateway.listening`, the end of `startupCheckpoint`'s steps).
+ * G-13's startup budget: this process's own start, process start to the record
+ * that says it is serving (`gateway.listening`, the end of `startupCheckpoint`'s
+ * steps).
  *
- * Set from the measured `gateway.startup-step` records: about 1 s on a quiet
- * host and 4.0–4.6 s on the qualification catalog under load. A restart's
- * clients retry about 2 s and again about 5.4 s after their own socket closes
- * (the phone's `ReconnectDelayPolicy`), so a start slower than this budget
- * costs a whole backoff step and misses the restart criterion of every client
- * reconnecting within 10 s.
+ * It is deliberately not the whole wait a restarting client sees: a client
+ * counts from its own socket's close, which comes before this process's
+ * predecessor has finished shutting down. `scripts/tron-profile-gateway` reads
+ * this record (its `durationMs` and `counts.budgetMs`, so the constant lives
+ * here only) and judges the restart case's criterion on its own close →
+ * listening span. Set from the measured `gateway.startup-step` records: about 1 s
+ * on a quiet host and 4.0–4.6 s on the qualification catalog under load.
  */
 export const STARTUP_LISTEN_BUDGET_MS = 5_000;
 

@@ -27,8 +27,10 @@ describe("startupBudget", () => {
 
   it("judges the whole start, not the last step", () => {
     // A start whose steps sum well over the budget still misses it when the
-    // step that ends the sequence is short: the budget is process start to
-    // listening, and a restart's clients wait for the whole span.
+    // step that ends the sequence is short: the budget is this process's start
+    // to listening, so the whole sequence is judged, not its last step. (A
+    // restarting client waits longer still: the profiler adds the predecessor's
+    // shutdown to this span before it judges G-13's criterion.)
     const budget = startupBudget(7_000, [
       { step: "modules", durationMs: 4_000 },
       { step: "session-registry", durationMs: 2_900 },

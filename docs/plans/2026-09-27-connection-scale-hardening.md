@@ -4,6 +4,11 @@
 - **Status:** Active (Phase 1 runs on `hardening/integration`; that branch's copy of this plan is authoritative until R-1)
 - **Last updated:** 2026-09-28, G-11 Done: the Slot's publish-time full-transcript summary walk is now an incremental fold (largest run 86.9 ms → 4.8 ms); the dominant remaining stretches are session-search (G-8c) and catalog/registry (G-1c), both in flight, and the combined O-6a max/p99 is re-measured after they merge (see the handoff)
 
+- **Last updated:** 2026-09-28, G-13 review response 1: the row is Blocked, not
+  Done — no run has met the restart criterion — the startup budget's stated
+  reason is corrected and the case is judged on the clients' own close →
+  listening span, read from the Gateway's own record (see the handoff)
+
 - **Last updated:** 2026-09-28, E-3a done: the pinned LAN listener binds a
   private address, rebinds or disables when that address changes, shares the
   transport's admission and refuses pairing (see the handoff)
@@ -616,7 +621,7 @@ rows are in priority order.
 | E-3b | Claimed | LAN endpoint: advertise endpoints and pin in pairing and hello | E-3a | orchestrator-dispatched deepseek-worker, 2026-09-28 |
 | E-3c | Ready | LAN endpoint, phone side: pin validation, staggered race, seamless fallback | E-3b, C-3 | |
 | E-3d | Ready | LAN endpoint on by default in the release once E-3c's E2E cases pass; the setting is the kill switch | E-3c | |
-| G-13 | Done | Restart and reconnect storm: startup budget and a qualification case | G-1c, O-6b | orchestrator-dispatched deepseek-worker, 2026-09-28 (branch `hardening/g-13`): `gateway.startup-budget` (5 s, with the slowest step) and `impairment.restart.startup_ms`, read from the new process's own records; the case now reports G-13's criterion with its numbers. Quiet-host confirmation is the orchestrator's; two proposed rows in the handoff |
+| G-13 | Blocked | Restart and reconnect storm: startup budget and a qualification case | G-1c, O-6b | orchestrator-dispatched deepseek-worker, 2026-09-28 (branch `hardening/g-13`): `gateway.startup-budget` (5 s, with the slowest step) and `impairment.restart.startup_ms`/`.close_to_listening_ms`, read from the new process's own record; the case reports G-13's criterion with its numbers. Blocked, not Done: the criterion is a "Done when" and no run has met it — the measured misses are host-bound plus two named causes (the old process's 2 s `work-settle` grace and the storm upgrades serialized by `DeviceStore`'s credential mutex), which need rows of their own or a quiet-host R-1 run; see the handoff |
 | G-8 | Done | Background work audit: delete or bound each unowned or repeating job | O-5 | orchestrator-dispatched deepseek-worker, 2026-09-28 |
 | G-8a | Claimed | Discovery lane retries an atomically replaced `status.json` (bounded, like the watcher lane) so a replace is not `extension.artifact-rejected`; see G-8 handoff | G-1c | orchestrator-dispatched deepseek-worker, 2026-09-28 |
 | G-8d | Claimed | Bound the 750 ms ambient artifact discovery pass by change and make its 1,024-entry truncation impossible or visible; see G-8 handoff | G-8a | orchestrator-dispatched deepseek-worker, 2026-09-28 |
@@ -9157,7 +9162,7 @@ wait).
   covered only by the route-change cases above; no profile-switch test holds the
   notice timer pending.
 
-### G-13 · Done · 2026-09-28 · orchestrator-dispatched deepseek-worker (branch `hardening/g-13`)
+### G-13 · Blocked · 2026-09-28 · orchestrator-dispatched deepseek-worker (branch `hardening/g-13`)
 
 - Result: the Gateway names its startup budget and the restart case reads and
   judges it, with G-13's criterion reported beside the numbers.
@@ -9220,3 +9225,41 @@ wait).
      after `connectUntilReady` succeeds.
 - Left: the quiet-host run of the full qualification, and R-1's exit-criterion
   row for the restart.
+
+#### G-13 review response 1 (changes-required) — 2026-09-28
+
+- Status corrected: the entry above claimed Done, but the task's "Done when"
+  (every client reconnecting within 10 s, no request over 1 s) was not met by
+  its own after run (slowest reconnects 13.2, 12.2, 12.0, 11.8 and 13.1 s), and
+  the change measures and reports the restart rather than moving it. G-13 is
+  **Blocked** until the two causes above have rows or a quiet-host R-1 run
+  meets the criterion; nothing here claims the criterion.
+- The startup budget no longer claims to bound the clients' wait. The
+  Gateway's `gateway.startup-budget` record is this process's own start
+  (unchanged constant, 5 s, corrected reason: the clients count from their own
+  socket's close, before the predecessor is down). The profiler now judges the
+  span they do wait: the predecessor's `gateway.stopped` start (timestamp less
+  `durationMs`) to the new `gateway.listening`, budget
+  `RESTART_CLOSE_TO_LISTENING_BUDGET_MS` (4 s; the third retry comes 5.4 s after
+  the close, as early as 4.3 s with its ±20% jitter). The before run above shows
+  why the old check could not see that: its 4,605 ms start (logged "budget met")
+  came with a 15,187 ms slowest reconnect. The rewritten fixture case asserts the
+  clients' span (7,120 ms of close → listening beside a 5,660 ms start).
+- The profiler reads the Gateway's own `gateway.startup-budget` record instead
+  of re-summing rounded step records, so the budget constant has one owner; the
+  reader walks the log's segments newest-first, so a 5 MB rotation inside the
+  restart neither loses the record nor splits it. `fixture.startup` is read
+  directly (no test-only `getattr`).
+- Docs: `gateway.startup-budget` in `packages/gateway/README.md` and the new
+  `impairment.restart.close_to_listening_ms` in its impairment list, plus that
+  the restart criterion is reported rather than enforced; the
+  `packages/gateway/docs/observability.md` row's reason corrected.
+- Evidence: `python3 scripts/test-tron-profile.py ImpairmentCases
+  MultiSessionSamples
+  MultiDriverImpairment.test_the_restart_case_reports_the_new_startups_budget`
+  13/13 (13.8 s); the two rewritten profiler cases fail against the reviewed
+  revision (stash check) and pass after; `npx vitest run
+  src/lifecycle/startup-budget.test.ts` and the merge-gate set on the
+  integration merge (see the commit).
+- Deviations: no code change aims at the two causes above, so the criterion is
+  still not demonstrated; the quiet-host run remains the orchestrator's.

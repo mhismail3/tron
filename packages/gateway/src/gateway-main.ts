@@ -678,9 +678,11 @@ await transport.listen(async () => {
   await sessions.recoverKnowledgeObservation();
   startupCheckpoint("knowledge-observation-recovery");
 });
-// G-13's startup budget: process start to serving. The restart case reads the
-// same steps from the fixture's Gateway log, so a restart that missed the budget
-// is attributable from either side.
+// G-13's startup budget: this process's own start, process start to serving.
+// The restart case reads this record (its durationMs, counts.budgetMs and
+// slowest step) from the fixture's Gateway log, so the start is attributable
+// from either side; it judges the criterion on its own close → listening span,
+// which also covers this process's predecessor's shutdown.
 {
   const budget = startupBudget(performance.now(), startupSteps);
   logger.log(
