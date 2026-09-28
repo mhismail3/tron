@@ -525,6 +525,13 @@ catalog are owned by [`docs/observability.md`](docs/observability.md).
   `{name, code, message, stack}` with one level of `cause`.
 - `gateway.startup-step` records each interval between startup checkpoints,
   adding to process start through listener readiness without double counting.
+  `gateway.startup-budget` then judges process start to listening against
+  `STARTUP_LISTEN_BUDGET_MS` (5 s) the moment the Gateway serves and names the
+  slowest step. That number is this process's own start, not the whole wait a
+  restarting client sees — the client counts from its own socket's close, before
+  the predecessor is down — so `scripts/tron-profile-gateway` reads the record
+  (and its `budgetMs`) for the start while judging the restart case's criterion
+  on its own close → listening span.
   `gateway.shutdown-step` names and times every awaited shutdown operation so a
   forced exit can be attributed to its owner.
 
@@ -2709,7 +2716,11 @@ cannot hold the catalog, and it takes the same per-host profile lock.
   for capacity);
   `impairment.restart.reconnect_ms_max` (G-13: ≤ 10 s), `.downtime_ms`,
   `.failed_attempts`, `.requests`, `.downtime_requests`, `.requests_over_1s`
-  (G-13: zero) and `.request_ms_p99`. Volume and throughput metrics are read as
+  (G-13: zero), `.request_ms_p99`, `.startup_ms` (the new Gateway's own process
+  start to listening, from its `gateway.startup-budget` record) and
+  `.close_to_listening_ms` (the span a restarting client waits: its socket's
+  close to that listening, the predecessor's shutdown included). Volume and
+  throughput metrics are read as
   "higher is better"; the cap and the leg length are configuration and live in
   the report context (`impairment.bandwidth_mbps`,
   `impairment.bandwidth_stream_mbps`, `workload`), with each case's attempts,
@@ -2721,7 +2732,11 @@ cannot hold the catalog, and it takes the same per-host profile lock.
   streaming leg held fewer than two mounted streams, did not fill 0.9 of its cap,
   or showed no backlog (no round trip longer than the same run's uncapped one,
   no miss and no close), or when any connected client is left down — and an
-  unexpected close, the phone's socket included, fails the run.
+  unexpected close, the phone's socket included, fails the run. G-13's restart
+  criterion (every client reconnecting within 10 s, no storm request over 1 s,
+  and the new Gateway listening inside the clients' own close → listening
+  budget) is reported as a warning with its numbers instead of rejecting the
+  run: a busy host slows the start itself.
 
 Per iteration it reports `latency.<operation>.p50|p99|max` (nearest rank, so
 p99 is the maximum below 100 samples) for `session_list`,

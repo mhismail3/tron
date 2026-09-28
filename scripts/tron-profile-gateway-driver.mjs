@@ -1546,6 +1546,10 @@ async function restartLeg(config, clients, retryMethod, measuredNames) {
   return {
     requestedAtMs, restoredAtMs: restored.restoredAtMs, restoredPid: restored.pid,
     downtimeMs: restored.restoredAtMs - requestedAtMs,
+    // The restart's start, read by the profiler from the fixture's log: the new
+    // Gateway's own process start to listening, and the clients' socket close to
+    // that listening; null when the log held no complete start.
+    startup: restored.startup ?? null,
     clients: measured, clientsAll: results, requests,
   };
 }

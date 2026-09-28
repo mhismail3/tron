@@ -219,6 +219,18 @@ MINIMUM_BANDWIDTH_LINK_USE = 0.5
 # what the streams produce, so the link must stay full for the leg or the queue
 # never grew and the leg measured the workload instead of the Gateway.
 MINIMUM_BANDWIDTH_STREAM_LINK_USE = 0.9
+# G-13's restart criterion, reported rather than enforced (see
+# restart_criterion_warnings): every client reconnects within 10 s of its own
+# socket's close and no request the new Gateway served during the storm exceeds
+# 1 s. What a restarting client waits is that close to the new Gateway
+# listening, which starts before the old process finishes shutting down: the
+# driver's and phone's retry schedule is 0, 2, 5.4 and 11.2 s after the close
+# with ±20% jitter, so the third attempt can come as early as 4.3 s and the
+# budget is 4 s. The new process's own start is the Gateway's
+# `gateway.startup-budget` record, which this script reads rather than copies.
+RESTART_RECONNECT_TARGET_MS = 10_000
+RESTART_REQUEST_TARGET_MS = 1_000
+RESTART_CLOSE_TO_LISTENING_BUDGET_MS = 4_000
 # Host guard: a qualification run on a swapping or pressured host measures the
 # host, not the Gateway (plan O-6a).
 HOST_SWAP_LIMIT_BYTES = 4 * 1024 ** 3
@@ -417,6 +429,102 @@ RESTART_LOCK_RETRY_SECONDS = 5
 RUNTIME_LOCK_CONFLICT = "owns a canonical session directory"
 
 
+# The Gateway's log segments: `gateway.jsonl` shifts to `.1` … `.7` at 5 MB
+# (packages/gateway/src/transport/logger.ts), so the records of one restart can
+# be split across a rotation.
+LOG_SEGMENT_COUNT = 8
+
+
+def epoch_ms(timestamp: object) -> float | None:
+    """One record's ISO `timestamp` in epoch milliseconds. The Gateway stamps
+    every record from its one wall clock, so two of them subtract exactly. None
+    when the record has no parsable stamp."""
+    if not isinstance(timestamp, str):
+        return None
+    try:
+        return datetime.fromisoformat(timestamp.replace("Z", "+00:00")).timestamp() * 1000
+    except ValueError:
+        return None
+
+
+def startup_from_log(log_path: Path) -> dict | None:
+    """The restarted Gateway's own start, read from the records it wrote.
+
+    Two spans the case reports, both from the log:
+
+    - `listeningMs` is the new process's own start, process start to serving,
+      taken from the `gateway.startup-budget` record it writes the moment it
+      serves (its `durationMs`, with the record's own `budgetMs` as its budget:
+      this script keeps no second copy of that constant).
+    - `closeToListeningMs` is what a restarting client waits: the predecessor's
+      `gateway.stopped` start (its timestamp less its `durationMs`) to that
+      listening. It is the longer span, because the old process shuts down
+      before the new one starts, and it is the one the criterion judges.
+
+    The last `gateway.started` opens the window, so a predecessor's steps are
+    never this start's, and reading the segments from the newest back covers a
+    rotation inside the restart. None when the log holds no complete start (no
+    budget record after the last `gateway.started`): the case reports a missing
+    budget rather than a guess."""
+    segments = [log_path] + [Path(f"{log_path}.{index}") for index in range(1, LOG_SEGMENT_COUNT)]
+    records: list[dict] = []
+    for segment in segments:
+        try:
+            text = segment.read_text(encoding="utf-8", errors="replace")
+        except OSError:
+            continue
+        older = []
+        for line in text.splitlines():
+            try:
+                older.append(json.loads(line))
+            except ValueError:
+                continue
+        records[0:0] = older
+        start = last_start(records)
+        if start is not None and any(record.get("event") == "gateway.startup-budget"
+                                     for record in records[start + 1:]):
+            break
+    start = last_start(records)
+    if start is None:
+        return None
+    served = records[start + 1:]
+    budget = next((record for record in served if record.get("event") == "gateway.startup-budget"), None)
+    listening = next((record for record in served if record.get("event") == "gateway.listening"), None)
+    if budget is None:
+        return None
+    listening_ms = budget.get("durationMs")
+    if not isinstance(listening_ms, (int, float)):
+        listening_ms = None
+    if listening_ms is None:
+        return None
+    counts = budget.get("counts") if isinstance(budget.get("counts"), dict) else {}
+    budget_ms = counts.get("budgetMs")
+    step_ms = counts.get("stepMs")
+    closed = next((record for record in reversed(records[:start])
+                   if record.get("event") == "gateway.stopped" and isinstance(record.get("durationMs"), (int, float))),
+                  None)
+    close_to_listening_ms = None
+    close_at = epoch_ms((closed or {}).get("timestamp"))
+    listening_at = epoch_ms((listening or budget).get("timestamp"))
+    if close_at is not None and listening_at is not None:
+        close_to_listening_ms = listening_at - (close_at - float(closed["durationMs"]))
+    return {
+        "listeningMs": float(listening_ms),
+        "budgetMs": float(budget_ms) if isinstance(budget_ms, (int, float)) else None,
+        "closeToListeningMs": None if close_to_listening_ms is None else float(close_to_listening_ms),
+        "slowestStep": budget.get("step") if isinstance(budget.get("step"), str) else "none",
+        "slowestStepMs": float(step_ms) if isinstance(step_ms, (int, float)) else None,
+    }
+
+
+def last_start(records: list[dict]) -> int | None:
+    """Index of the newest `gateway.started`, or None when the log has none."""
+    for index in range(len(records) - 1, -1, -1):
+        if records[index].get("event") == "gateway.started":
+            return index
+    return None
+
+
 class FixtureGateway:
     """One owned fixture: temporary home, faux-model agent dir, Gateway child."""
 
@@ -436,6 +544,9 @@ class FixtureGateway:
         self.probe_output = self.root / "probe.json"
         self.process: subprocess.Popen[bytes] | None = None
         self.port = 0
+        # The last restart's start, filled by restart(): the new process's own
+        # start and the span its clients waited.
+        self.startup: dict | None = None
 
     def prepare(self) -> None:
         for directory in (self.home, self.workspace, self.tron_home / "gateway", self.agent_dir / "extensions"):
@@ -572,17 +683,25 @@ class FixtureGateway:
         the same start budget instead of failing the run for the previous
         owner's cleanup."""
         port = self.port
+        # The Gateway's own log, appended across this run's processes: the records
+        # of this restart, and of the predecessor whose shutdown the restarting
+        # clients are waiting out, are both in its tail.
+        startup_log = self.tron_home / "logs/gateway.jsonl"
         self.stop()
         deadline = time.monotonic() + RESTART_START_DEADLINE_SECONDS
         while True:
             try:
                 self.start(deadline_seconds=max(30, deadline - time.monotonic()), port=port)
-                return
+                break
             except ProfileFailure:
                 if time.monotonic() > deadline or not self.log_tail_has(RUNTIME_LOCK_CONFLICT):
                     raise
                 log(f"{port}: the previous Gateway's runtime lock is still held; waiting for it to go stale")
                 time.sleep(RESTART_LOCK_RETRY_SECONDS)
+        # The new process's start and the span its clients waited, from the
+        # records it just wrote: the restart case reports them and
+        # restart_criterion_warnings judges the criterion on them.
+        self.startup = startup_from_log(startup_log)
 
     def log_tail_has(self, text: str, limit: int = 4_000) -> bool:
         """Whether this fixture's retained log ends with `text`: a startup
@@ -995,7 +1114,9 @@ def wait_with_restart(driver: subprocess.Popen[bytes], fixture: FixtureGateway, 
             log(f"{label}: restarting the fixture Gateway for the restart case")
             fixture.restart()
             done_path.write_text(json.dumps({"restoredAtMs": int(time.time() * 1000),
-                                             "pid": fixture.process.pid}) + "\n")
+                                             "pid": fixture.process.pid,
+                                             # None when its log holds no complete start.
+                                             "startup": fixture.startup}) + "\n")
         time.sleep(0.2)
 
 
@@ -1233,14 +1354,61 @@ def log_event_count(log_path: Path, event: str, windows: list[tuple[int, int]] |
         if record.get("event") != event:
             continue
         if windows is not None:
-            try:
-                at_ms = int(datetime.fromisoformat(record["timestamp"].replace("Z", "+00:00")).timestamp() * 1000)
-            except (KeyError, TypeError, ValueError):
-                continue
-            if not any(start <= at_ms <= end for start, end in windows):
+            at_ms = epoch_ms(record.get("timestamp"))
+            if at_ms is None or not any(start <= at_ms <= end for start, end in windows):
                 continue
         total += 1
     return total
+
+
+def restart_criterion_warnings(results: list[dict]) -> list[str]:
+    """G-13's restart criterion, reported with its numbers rather than enforced.
+
+    The criterion is every client reconnecting within 10 s of its own socket's
+    close with no storm request over 1 s, and the Gateway serving again inside
+    `RESTART_CLOSE_TO_LISTENING_BUDGET_MS` of that close — the span the
+    restarting clients actually wait, which starts before the old process has
+    finished shutting down. A busy host slows the start itself — a loaded host
+    spends most of it loading the module graph — so rejecting the run here would
+    reject the host, not the Gateway; validate_impairment owns what a case
+    proved it measured."""
+    warnings: list[str] = []
+    for result in results:
+        leg = (result.get("impairment") or {}).get("restart")
+        if not leg:
+            continue
+        label = result["label"]
+        clients = [entry for entry in leg.get("clientsAll") or [] if entry.get("reconnectMs") is not None]
+        if clients:
+            slowest = max(clients, key=lambda entry: entry["reconnectMs"])
+            if slowest["reconnectMs"] > RESTART_RECONNECT_TARGET_MS:
+                warnings.append(f"{label}: the restart case's slowest client ({slowest['name']}) reconnected in "
+                                f"{round(slowest['reconnectMs'])} ms, over G-13's {RESTART_RECONNECT_TARGET_MS // 1000} s "
+                                "criterion")
+        slow = [request for request in leg.get("requests") or []
+                if not request.get("duringDowntime") and request.get("ms") is not None
+                and request["ms"] > RESTART_REQUEST_TARGET_MS]
+        if slow:
+            warnings.append(f"{label}: the restart storm served {len(slow)} request(s) over "
+                            f"{RESTART_REQUEST_TARGET_MS} ms (slowest {round(max(request['ms'] for request in slow))} ms), "
+                            "over G-13's target of zero")
+        startup = leg.get("startup") or {}
+        if not startup:
+            warnings.append(f"{label}: the restart case reported no startup budget: the new Gateway's own "
+                            "gateway.startup-budget record was not read")
+            continue
+        close_ms = startup.get("closeToListeningMs")
+        if close_ms is None:
+            warnings.append(f"{label}: the restart case could not measure the clients' wait: the predecessor left "
+                            "no gateway.stopped record (a killed Gateway), so the new process's own "
+                            f"{round(startup['listeningMs'])} ms start is all that is known")
+        elif close_ms > RESTART_CLOSE_TO_LISTENING_BUDGET_MS:
+            warnings.append(f"{label}: the new Gateway was listening {round(close_ms)} ms after the clients' sockets "
+                            f"closed, over its {RESTART_CLOSE_TO_LISTENING_BUDGET_MS} ms budget to keep a restart inside "
+                            f"G-13's criterion (its own process start was {round(startup['listeningMs'])} ms of the "
+                            f"{round(startup['budgetMs'] or 0)} ms it records; slowest step {startup.get('slowestStep')} "
+                            f"at {round(startup.get('slowestStepMs') or 0)} ms)")
+    return warnings
 
 
 def impairment_samples(results: list[dict]) -> dict:
@@ -1350,6 +1518,18 @@ def impairment_samples(results: list[dict]) -> dict:
             [percentile([request["ms"] for request in leg["requests"] if not request["duringDowntime"]], 99)
              for leg in restart],
             "p99 of a storm request (nearest rank: the maximum below 100 samples)")
+        startup = [leg["startup"] for leg in restart if (leg.get("startup") or {}).get("listeningMs") is not None]
+        if startup:
+            add("impairment.restart.startup_ms", "ms", [entry["listeningMs"] for entry in startup],
+                "the new Gateway's process start to listening, from its own gateway.startup-budget record "
+                "(that record's counts.budgetMs is the budget for this number)", better="lower")
+            close = [entry["closeToListeningMs"] for entry in startup
+                     if entry.get("closeToListeningMs") is not None]
+            if close:
+                add("impairment.restart.close_to_listening_ms", "ms", close,
+                    "a restarting client's socket close to the new Gateway listening: the span that includes the old "
+                    f"process's shutdown, judged against G-13's {RESTART_CLOSE_TO_LISTENING_BUDGET_MS} ms budget",
+                    better="lower")
     return metrics
 
 
@@ -1417,6 +1597,9 @@ def run_multi_session(args: argparse.Namespace, results_dir: Path) -> Path:
             raise ProfileFailure(f"fixture home {fixture.root} was not removed", EXIT_FIXTURE, fixture.root)
         problems, warnings = validate_multi(results)
         problems += validate_impairment(results)
+        # G-13's criterion is a target, not a validity gate: its miss is reported
+        # with the numbers beside the host-busy warnings.
+        warnings += restart_criterion_warnings(results)
         if problems:
             raise ProfileFailure("measurement rejected: " + "; ".join(problems), EXIT_MEASUREMENT, run_dir)
         metrics, sample_warnings = multi_samples(results)

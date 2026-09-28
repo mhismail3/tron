@@ -5,6 +5,11 @@
 - **Last updated:** 2026-09-28, G-2 Done: a 100–200 MiB cold `session.open` is the parse (45–56%, `session.open.manager`) plus the SDK runtime create (22–28%) and the bounded snapshot projection (19–24%) — the three named candidates (registry mutex, idle eviction, fork-boundary reads) are 3–13 ms (`session.open.catalog`) or absent; the whole-branch receipt index maps the snapshot projection allocated for nothing are gone (≈19 ms per snapshot at 100 k entries, measured) and the O-6a prime now retries the fresh fixture's `catalog_not_ready` (see the handoff)
 - **Last updated:** 2026-09-28, G-11 Done: the Slot's publish-time full-transcript summary walk is now an incremental fold (largest run 86.9 ms → 4.8 ms); the dominant remaining stretches are session-search (G-8c) and catalog/registry (G-1c), both in flight, and the combined O-6a max/p99 is re-measured after they merge (see the handoff)
 
+- **Last updated:** 2026-09-28, G-13 review response 1: the row is Blocked, not
+  Done — no run has met the restart criterion — the startup budget's stated
+  reason is corrected and the case is judged on the clients' own close →
+  listening span, read from the Gateway's own record (see the handoff)
+
 - **Last updated:** 2026-09-28, E-3b done: pairing and hello advertise the
   lane's bound endpoint and pin (base64 SHA-256 of the certificate's public key
   as its raw X9.63 point, frozen in `protocol-fixtures/lan-endpoint-pin.json`),
@@ -623,7 +628,7 @@ rows are in priority order.
 | E-3b | Done | LAN endpoint: advertise endpoints and pin in pairing and hello | E-3a | orchestrator-dispatched deepseek-worker, 2026-09-28 |
 | E-3c | Ready | LAN endpoint, phone side: pin validation, staggered race, seamless fallback | E-3b, C-3 | |
 | E-3d | Ready | LAN endpoint on by default in the release once E-3c's E2E cases pass; the setting is the kill switch | E-3c | |
-| G-13 | Claimed | Restart and reconnect storm: startup budget and a qualification case | G-1c, O-6b | orchestrator-dispatched deepseek-worker, 2026-09-28 |
+| G-13 | Blocked | Restart and reconnect storm: startup budget and a qualification case | G-1c, O-6b | orchestrator-dispatched deepseek-worker, 2026-09-28 (branch `hardening/g-13`): `gateway.startup-budget` (5 s, with the slowest step) and `impairment.restart.startup_ms`/`.close_to_listening_ms`, read from the new process's own record; the case reports G-13's criterion with its numbers. Blocked, not Done: the criterion is a "Done when" and no run has met it — the measured misses are host-bound plus two named causes (the old process's 2 s `work-settle` grace and the storm upgrades serialized by `DeviceStore`'s credential mutex), which need rows of their own or a quiet-host R-1 run; see the handoff |
 | G-8 | Done | Background work audit: delete or bound each unowned or repeating job | O-5 | orchestrator-dispatched deepseek-worker, 2026-09-28 |
 | G-8a | Claimed | Discovery lane retries an atomically replaced `status.json` (bounded, like the watcher lane) so a replace is not `extension.artifact-rejected`; see G-8 handoff | G-1c | orchestrator-dispatched deepseek-worker, 2026-09-28 |
 | G-8d | Claimed | Bound the 750 ms ambient artifact discovery pass by change and make its 1,024-entry truncation impossible or visible; see G-8 handoff | G-8a | orchestrator-dispatched deepseek-worker, 2026-09-28 |
@@ -9261,6 +9266,121 @@ wait).
   `--catalog-files 100 --catalog-mib 2048 --iterations 3` and read
   `latency.session_open_cold_large.p99`; on a host above load 20 a 200 MiB open
   moves by seconds, so compare runs at similar load only.
+
+### G-13 · Blocked · 2026-09-28 · orchestrator-dispatched deepseek-worker (branch `hardening/g-13`)
+
+- Result: the Gateway names its startup budget and the restart case reads and
+  judges it, with G-13's criterion reported beside the numbers.
+  - **Budget.** `gateway.startup-budget` is recorded the moment the Gateway
+    serves: process start to listening against `STARTUP_LISTEN_BUDGET_MS`
+    (5 s; `packages/gateway/src/lifecycle/startup-budget.ts`), info inside the
+    budget and warning past it, with the step that owns most of the time. The
+    constant is set from the measured `gateway.startup-step` records (about 1 s
+    quiet, 4.0–4.6 s on the qualification catalog under load), and the reason is
+    the phone's own retry schedule: its clients retry about 2 s and again about
+    5.4 s after their socket closes, so a slower start costs a whole backoff step.
+  - **Case.** `FixtureGateway.restart` reads the new process's own
+    `gateway.startup-step` records from the offset the restart began at and the
+    profiler reports `impairment.restart.startup_ms`; the driver carries the
+    budget into the leg. `restart_criterion_warnings` states a missed criterion
+    with its numbers — slowest reconnect over 10 s, a served storm request over
+    1 s, a start over budget, or no budget read at all — and deliberately does not
+    reject the run: a busy host slows the start itself, and `validate_impairment`
+    already owns what a case proved it measured.
+- Evidence (short runs, 200-file/32 MiB catalog, `--cases restart --no-build`;
+  this host at 1-minute load 26–50, so the host is the storm's dominant cost):
+  - Before (integration + G-1c/G-1b/G-9), report
+    `20260928T214555Z-multi-session-b3c70e`: downtime 7,168 ms, slowest reconnect
+    **15,187 ms**, 1 storm request over 1 s, p99 1,160 ms. The new process's own
+    records: `modules` 4,460 ms of a 4,605 ms start; the old process's shutdown
+    2,165 ms of which `work-settle` was 1,999 ms (the 2 s cleanup grace expiring
+    with 8 owned operations outstanding).
+  - After, report `20260928T220215Z-multi-session-941b6c`: `startup_ms` 6,257
+    (steps named: `modules` 5,529 ms), slowest reconnect 13,215 ms, **0 storm
+    requests over 1 s** (p99 849 ms). Its warnings state exactly both misses. The
+    reconnect misses on this host because the start is host-bound — 5.5 s of the
+    6.3 s is the module graph under load, against 0.38 s on the user's quiet
+    machine — so the clients' third attempt (about 5.7 s) meets a Gateway that is
+    still importing and pays the 5.8 s backoff. The same run's own records show
+    the contrast: its priming starts were 1,235 ms and 1,029 ms (info, budget
+    met), the restart 6,258 ms (warning) during the host's load spike, and the
+    production record is in that run's `fixture/gateway.jsonl`. Quiet-host
+    confirmation is the orchestrator's, like the rest of the plan's measured rows.
+  - Checks: `npx vitest run src/lifecycle/startup-budget.test.ts` 4/4;
+    `python3 scripts/test-tron-profile.py ImpairmentCases MultiSessionSamples`
+    12/12; `python3 scripts/test-tron-profile.py
+    MultiDriverImpairment.test_the_restart_case_reports_the_new_startups_budget`
+    1/1; build and `tsc --noEmit` clean.
+- Changes: `packages/gateway/src/lifecycle/startup-budget.ts` (+ test),
+  `packages/gateway/src/gateway-main.ts`,
+  `packages/gateway/docs/observability.md`, `scripts/tron-profile-gateway`,
+  `scripts/tron-profile-gateway-driver.mjs`, `scripts/test-tron-profile.py`.
+- Deviations: the case reports the criterion rather than failing the run, so one
+  host's slowness cannot reject the whole qualification (the run only rejects a
+  case that measured nothing). The reconnect target is not demonstrated here.
+- Proposed rows for the orchestrator (not touched by this task):
+  1. A restart with running sessions pays the old process's whole 2 s
+     `work-settle` cleanup grace before it exits, so the new process starts 2 s
+     later (measured 1,999 ms of a 2,165 ms shutdown, 8 owned operations). A
+     shorter restart-mode grace is a shutdown-semantics decision, not a startup
+     budget one.
+  2. Each storm reconnect spends 0.7–1.2 s in the upgrade's `auth` stage on this
+     host (six upgrades serialized by `DeviceStore`'s credential mutex, one
+     devices-file read each), which is what the driver's ready sequence waits on
+     after `connectUntilReady` succeeds.
+- Left: the quiet-host run of the full qualification, and R-1's exit-criterion
+  row for the restart.
+
+#### G-13 review response 1 (changes-required) — 2026-09-28
+
+- Status corrected: the entry above claimed Done, but the task's "Done when"
+  (every client reconnecting within 10 s, no request over 1 s) was not met by
+  its own after run (slowest reconnects 13.2, 12.2, 12.0, 11.8 and 13.1 s), and
+  the change measures and reports the restart rather than moving it. G-13 is
+  **Blocked** until the two causes above have rows or a quiet-host R-1 run
+  meets the criterion; nothing here claims the criterion.
+- The startup budget no longer claims to bound the clients' wait. The
+  Gateway's `gateway.startup-budget` record is this process's own start
+  (unchanged constant, 5 s, corrected reason: the clients count from their own
+  socket's close, before the predecessor is down). The profiler now judges the
+  span they do wait: the predecessor's `gateway.stopped` start (timestamp less
+  `durationMs`) to the new `gateway.listening`, budget
+  `RESTART_CLOSE_TO_LISTENING_BUDGET_MS` (4 s; the third retry comes 5.4 s after
+  the close, as early as 4.3 s with its ±20% jitter). The before run above shows
+  why the old check could not see that: its 4,605 ms start (logged "budget met")
+  came with a 15,187 ms slowest reconnect. The rewritten fixture case asserts the
+  clients' span (7,120 ms of close → listening beside a 5,660 ms start).
+- The profiler reads the Gateway's own `gateway.startup-budget` record instead
+  of re-summing rounded step records, so the budget constant has one owner; the
+  reader walks the log's segments newest-first, so a 5 MB rotation inside the
+  restart neither loses the record nor splits it. `fixture.startup` is read
+  directly (no test-only `getattr`).
+- Docs: `gateway.startup-budget` in `packages/gateway/README.md` and the new
+  `impairment.restart.close_to_listening_ms` in its impairment list, plus that
+  the restart criterion is reported rather than enforced; the
+  `packages/gateway/docs/observability.md` row's reason corrected.
+- End-to-end (this host, 1-minute load 25.3, so still not the quiet run the
+  row wants): `scripts/tron-profile gateway --scenario multi-session --cases
+  restart --iterations 1 --catalog-files 200 --catalog-mib 32 --no-build`, run
+  `.../profiles/gateway/20260928T223130Z-multi-session-f3a999`. The reader took
+  the real record (`startup_ms` 4,598, the record's own `budgetMs` 5,000,
+  `modules` 4,011 ms) and the report carries
+  `impairment.restart.close_to_listening_ms` 6,987 against `reconnect_ms_max`
+  12,911 and one request over 1 s. The Gateway logged that start as "budget
+  met" — the reviewed warning would have stayed silent on exactly this storm;
+  the case now says: "the new Gateway was listening 6987 ms after the clients'
+  sockets closed, over its 4000 ms budget ... (its own process start was
+  4598 ms of the 5000 ms it records; slowest step modules at 4011 ms)".
+- Evidence: `python3 scripts/test-tron-profile.py ImpairmentCases
+  MultiSessionSamples
+  MultiDriverImpairment.test_the_restart_case_counts_the_storm_from_the_restore
+  MultiDriverImpairment.test_the_restart_case_reports_the_new_startups_budget
+  MultiDriverImpairment.test_a_capped_legs_close_keeps_every_other_leg_and_the_restart`
+  15/15 (44 s); the two rewritten profiler cases fail against the reviewed
+  revision (stash check) and pass after; the merge gate on this branch with
+  `hardening/integration` merged (132 + 241 tests) and `tsc --noEmit` clean.
+- Deviations: no code change aims at the two causes above, so the criterion is
+  still not demonstrated; the quiet-host run remains the orchestrator's.
 
 ### E-3b · Done · 2026-09-28 · orchestrator-dispatched deepseek-worker (branch `hardening/e-3b`)
 
