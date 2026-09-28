@@ -106,7 +106,7 @@ struct TronMobileApp: App {
                 SceneRootView(model: hostedModel, colorScheme: nil)
                     .environment(hostedModel)
                     .tronPresentation()
-                    .task { await hostedModel.start(sceneIsActive: true) }
+                    .task { await hostedModel.start(scenePhase: .active) }
             }
         }
     }
@@ -144,7 +144,7 @@ struct TronMobileApp: App {
                     pathDiagnostics.setSceneActive(scenePhase == .active)
                     configurePushNotifications()
                     await RetiredNotificationBadge.clear()
-                    await model.start(sceneIsActive: scenePhase == .active)
+                    await model.start(scenePhase: appScenePhase(scenePhase))
                     await reconcilePushNotifications()
                 }
                 .onChange(of: model.connectionState) { old, new in
@@ -190,17 +190,18 @@ struct TronMobileApp: App {
                     }
                 }
                 .onChange(of: scenePhase) { _, phase in
-                    if phase == .active {
+                    switch appScenePhase(phase) {
+                    case .active:
                         pathDiagnostics.setSceneActive(true)
                         Task {
                             await RetiredNotificationBadge.clear()
                             await reconcilePushNotifications()
                         }
                         model.becameActive()
-                    } else if phase == .inactive {
+                    case .inactive:
                         pathDiagnostics.setSceneActive(false)
                         model.becameInactive()
-                    } else if phase == .background {
+                    case .background:
                         pathDiagnostics.setSceneActive(false)
                         backgroundCheckpoints.retain(model.enteredBackground())
                     }
@@ -218,6 +219,16 @@ struct TronMobileApp: App {
         }
         appDelegate.installNotificationTapHandler { tap in
             model.requestPushNavigation(tap)
+        }
+    }
+
+    @MainActor
+    private func appScenePhase(_ phase: ScenePhase) -> AppModel.AppScenePhase {
+        switch phase {
+        case .active: .active
+        case .inactive: .inactive
+        case .background: .background
+        @unknown default: .inactive
         }
     }
 

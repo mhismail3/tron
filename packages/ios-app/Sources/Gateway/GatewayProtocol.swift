@@ -36,8 +36,28 @@ struct GatewayFailure: Codable, Error, Hashable, Sendable, LocalizedError {
     let message: String
     let retryable: Bool
     let details: JSONValue?
+    /// Whether this failure is the Gateway's own answer: the decoded error of a
+    /// response the Gateway sent, rather than a code the phone's transport
+    /// minted locally for a request that never got an answer. The wire failure
+    /// has no such field, so the client stamps it where it decodes an answer;
+    /// `session.open.failure` reports `gatewayCode` only from a stamped failure.
+    var answeredByGateway: Bool? = nil
+
+    /// Phone-local provenance, so it is not a wire key: a response frame cannot
+    /// stamp or clear it, and an encoded failure never carries it. The client is
+    /// the only writer (see `stampedAsGatewayAnswer`).
+    private enum CodingKeys: String, CodingKey {
+        case code, message, retryable, details
+    }
 
     var errorDescription: String? { message }
+
+    /// The same failure stamped as the Gateway's own answer.
+    var stampedAsGatewayAnswer: GatewayFailure {
+        var stamped = self
+        stamped.answeredByGateway = true
+        return stamped
+    }
 }
 
 enum PreparedSessionEventData: Sendable, Equatable {

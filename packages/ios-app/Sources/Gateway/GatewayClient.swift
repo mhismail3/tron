@@ -1742,7 +1742,10 @@ actor GatewayClient {
                 recordRPCDiagnostic(request: waiter, outcome: .success)
                 waiter.continuation.resume(returning: response.result ?? .null)
             } else {
-                let error = response.error ?? GatewayFailure(
+                // The response frame is the Gateway's own answer, so its error is
+                // stamped; the fallback below is the phone's own reading of a
+                // malformed frame and stays unstamped.
+                let error = response.error?.stampedAsGatewayAnswer ?? GatewayFailure(
                     code: "invalid_response",
                     message: "Gateway returned an invalid error.",
                     retryable: false,

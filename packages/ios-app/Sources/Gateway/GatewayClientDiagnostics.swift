@@ -199,6 +199,16 @@ enum GatewayDiagnosticFailure {
         return normalizedCode(failure.code)
     }
 
+    /// The Gateway's own error code when the Gateway answered. A typed failure
+    /// (for example `conflict`, `busy` or `forbidden`) must never be reported as
+    /// `transport`, which is reserved for a failure that never reached the
+    /// Gateway. Bounded so a malformed code cannot inflate a record.
+    static func answerCode(_ error: Error) -> String {
+        guard let failure = error as? GatewayFailure,
+              !failure.code.isEmpty, failure.code.utf8.count <= 64 else { return code(error) }
+        return failure.code
+    }
+
     static func normalizedCode(_ code: String) -> String {
         switch code {
         case "timeout", "unauthenticated", "forbidden", "busy", "disconnected", "event_overflow", "invalid_response",

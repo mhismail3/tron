@@ -79,6 +79,9 @@ final class GatewayLifecycleCoordinator {
     private let pairingCommit: GatewayPairingCommit
     private let pairingCommitWithoutSelection: GatewayPairingCommit?
     private let profileTokenLookup: GatewayProfileTokenLookup
+    /// Phone connection records: one `gateway.attempt` per attempt, one
+    /// `connection.episode` per outage, plus the stall/main-actor watchdogs.
+    @ObservationIgnored let recorder: GatewayConnectionEpisodeRecorder
 
     weak var delegate: (any GatewayLifecycleProjectionDelegate)?
 
@@ -98,6 +101,13 @@ final class GatewayLifecycleCoordinator {
     private var transitionTask: Task<Void, Never>?
     private var reconnectTask: Task<Void, Never>?
     private var committedConnectionTask: Task<Void, Never>?
+    /// The loop whose transport attempt is in flight, or `nil` while none is.
+    /// It is an identity, not a flag: a cancelled predecessor must not clear the
+    /// marker its replacement set.
+    @ObservationIgnored private var reconnectAttemptInFlightLoop: String?
+    /// The loop `reconnectTask` currently owns, so only the live loop's marker
+    /// is consulted and a retired loop cannot park the watchdog at `nil`.
+    @ObservationIgnored private var reconnectLoopID: String?
     /// Covers initial connect as well as replacement entrypoints. Path and
     /// foreground hints may accelerate this owner, never create a peer socket.
     private var connectionAdmissionTask: Task<Void, Never>?
@@ -131,7 +141,10 @@ final class GatewayLifecycleCoordinator {
         pairer: GatewayPairer,
         pairingCommit: @escaping GatewayPairingCommit,
         pairingCommitWithoutSelection: GatewayPairingCommit? = nil,
-        profileTokenLookup: @escaping GatewayProfileTokenLookup
+        profileTokenLookup: @escaping GatewayProfileTokenLookup,
+        appLog: AppLog = .shared,
+        networkInterfaces: @escaping @Sendable () -> String? = { GatewayNetworkPathSnapshot.shared.current },
+        watchdogClock: MonotonicClock = .continuous
     ) {
         self.client = client
         self.profiles = profiles
@@ -143,6 +156,36 @@ final class GatewayLifecycleCoordinator {
         self.pairingCommit = pairingCommit
         self.pairingCommitWithoutSelection = pairingCommitWithoutSelection
         self.profileTokenLookup = profileTokenLookup
+        self.recorder = GatewayConnectionEpisodeRecorder(
+            clock: clock,
+            appLog: appLog,
+            // Watchdog ticks never ride the injected lifecycle clock: a test
+            // that drives the timeline manually must not have to service them.
+            watchdogClock: watchdogClock,
+            networkInterfaces: networkInterfaces
+        )
+        // `self` must be unwrapped first: folding `self?.reconnectStallGuard`
+        // into one optional would turn the 'recovery is progressing' nil into
+        // `other` and report a stall whenever an episode is open.
+        self.recorder.stallGuard = { [weak self] in
+            guard let self else { return nil }
+            return self.reconnectStallGuard
+        }
+    }
+
+    /// Why no attempt is in flight or scheduled, for the stall watchdog. `nil`
+    /// means recovery is progressing: an attempt is running or waiting in its
+    /// bounded backoff. `reconnectTaskBusy` is the live loop existing but not
+    /// attempting, which is where projection work can park recovery.
+    var reconnectStallGuard: GatewayReconnectStallGuard? {
+        if reconnectLoopID != nil, reconnectAttemptInFlightLoop == reconnectLoopID { return nil }
+        if reconnectTask != nil, reconnectCanBeAccelerated { return nil }
+        if !networkPathSatisfied { return .pathUnsatisfied }
+        if nonRetryableRecoveryFailure { return .nonRetryable }
+        if connectionAdmissionTask != nil { return .connectionAdmissionTask }
+        if committedConnectionTask != nil { return .committedConnectionTask }
+        if reconnectTask != nil { return .reconnectTaskBusy }
+        return .other
     }
 
     var admission: Admission? {
@@ -214,7 +257,6 @@ final class GatewayLifecycleCoordinator {
     @discardableResult
     func becameActive() -> Task<Void, Never>? {
         guard phase.admitsWork else { return nil }
-        delegate?.lifecycleRecordDiagnostic(event: "scene.foreground", message: "scene=foreground")
         sceneIsBackgrounded = false
         if let backgroundRetirementTask {
             let generation = phase.generation
@@ -266,11 +308,39 @@ final class GatewayLifecycleCoordinator {
         return task
     }
 
+    /// A transport-only recovery request from a caller that saw one request fail
+    /// but did not move the scene (the workspace browser's transient retry). It
+    /// mirrors `becameActive()`'s non-scene branch exactly: it revives a parked
+    /// `offline`/`reconnecting`/`restarting` route and does nothing else. A
+    /// rejected credential is not retried, a live socket is not replaced, and
+    /// foreground reconciliation never runs, so a failed read cannot change
+    /// reconnect behaviour.
+    @discardableResult
+    func requestTransportRecovery() -> Task<Void, Never>? {
+        guard phase.admitsWork, !sceneIsBackgrounded else { return nil }
+        // A background retirement barrier owns the next socket; a read failure
+        // must not start a peer while the old epoch is still retiring.
+        guard backgroundRetirementTask == nil,
+              connectionAdmissionTask == nil,
+              committedConnectionTask == nil else { return nil }
+        switch connectionState {
+        case .offline, .reconnecting, .restarting:
+            guard !nonRetryableRecoveryFailure else { return nil }
+            requestReconnect(immediate: true, replaceExisting: true)
+            return reconnectTask
+        case .unpaired, .unauthorized, .connecting, .connected:
+            return nil
+        }
+    }
+
     /// A suspended app cannot service the shared event stream reliably. Retire
     /// the transport epoch before suspension, discard its queued deliveries, and
     /// let the next active scene perform one authoritative reconnect.
     func enteredBackground() {
-        delegate?.lifecycleRecordDiagnostic(event: "scene.background", message: "scene=background")
+        // A backgrounded app parks recovery; the episode it was explaining ends
+        // here, so no episode record ever spans a suspension. The episode keeps
+        // its own profile: a selection change is not this transition.
+        recorder.endEpisode(.background)
         let backgroundConnectionID = connectionID
         foregroundReconciliationGeneration &+= 1
         let task = foregroundReconciliationTask
@@ -280,6 +350,8 @@ final class GatewayLifecycleCoordinator {
         reconnectTask = nil
         reconnectAttemptGeneration &+= 1
         reconnectCanBeAccelerated = false
+        reconnectLoopID = nil
+        reconnectAttemptInFlightLoop = nil
         reconnect?.cancel()
         let committed = committedConnectionTask
         committedConnectionTask = nil
@@ -433,8 +505,21 @@ final class GatewayLifecycleCoordinator {
         countsAsTransportFailure: Bool = true
     ) async {
         guard admitsEvent(connectionID: deliveredConnectionID) else { return }
+        let code = GatewayDiagnosticFailure.normalizedCode(reason)
+        // Every admitted loss opens the episode, whether or not it counts as a
+        // transport failure: a Gateway restart is a loss too, and the gap from it
+        // to the first reconnect has to be measurable. A restart whose first
+        // reconnect succeeds would otherwise leave no episode at all. The
+        // episode carries the loss's own code as its cause, so a disconnect
+        // whose first reconnect succeeds still names what ended the connection
+        // instead of reporting `causes=none`.
+        recorder.noteDisconnected(
+            profileID: profiles.selected?.id,
+            lifecycleGeneration: phase.generation,
+            foreground: !sceneIsBackgrounded,
+            cause: countsAsTransportFailure ? code : "restart"
+        )
         if countsAsTransportFailure {
-            let code = GatewayDiagnosticFailure.normalizedCode(reason)
             connectionFailureClassifier.failedAttempt(nil, code: code)
             delegate?.lifecycleConnectionFailurePresentationDidChange()
             delegate?.lifecycleRecordDiagnostic(event: "reconnect.failure", message: "code=\(code)")
@@ -708,10 +793,17 @@ final class GatewayLifecycleCoordinator {
         connectionAdmissionGeneration &+= 1
         reconnectAttemptGeneration &+= 1
         reconnectCanBeAccelerated = false
+        reconnectLoopID = nil
+        reconnectAttemptInFlightLoop = nil
         foregroundReconciliationTask = nil
         deferredProjectionTask = nil
         backgroundRetirementTask = nil
         foregroundReconciliationGeneration &+= 1
+        // A profile switch, pairing or teardown stops the episode this lifecycle
+        // was explaining; the new generation will open its own if it fails. The
+        // episode keeps its own profile and generation: the transition that
+        // ended it is not necessarily the one it was about.
+        recorder.endEpisode(.stopped)
         reconnect?.cancel()
         committedConnection?.cancel()
         initialConnection?.cancel()
@@ -803,12 +895,16 @@ final class GatewayLifecycleCoordinator {
         let failurePresentationGeneration = connectionFailureClassifier.beginAttempt()
         activatedConnectionID = nil
         connectionState = .connecting
+        let attemptStartedAt = clock.now()
         let diagnosticSequence = await client.latestDiagnosticSequence()
         guard admits(admission),
               connectionAdmissionGeneration == connectAttemptGeneration,
               connectionState == .connecting else { return }
         var establishedConnectionID: Int?
         var reconciliationAdmission: Admission?
+        // True once the handshake succeeded: a later failure in the same
+        // attempt is that connection dropping under projection.
+        var handshakeRecorded = false
         do {
             let connection = try await client.connectForLifecycle(profile: profile, token: token)
             establishedConnectionID = connection.id
@@ -827,6 +923,12 @@ final class GatewayLifecycleCoordinator {
             nonRetryableRecoveryFailure = false
             connectionState = .connected
             connectionFailureClassifier.reset()
+            recordAttempt(
+                attemptID: "initial", retry: 0, startedAt: attemptStartedAt, delayBeforeMs: 0,
+                stageReached: "connected", reason: nil, succeeded: true,
+                gatewayConnectionID: connection.gatewayConnectionID, connectionID: connection.id
+            )
+            handshakeRecorded = true
             restartWatchdogTask?.cancel()
             restartWatchdogTask = nil
             restartRequested = false
@@ -907,6 +1009,18 @@ final class GatewayLifecycleCoordinator {
             if let pairingAttemptID, (try? requirePairingAttempt(pairingAttemptID)) == nil { return }
             if let failure = error as? GatewayFailure, failure.code == "unauthenticated" {
                 connectionState = .unauthorized
+                recordAttempt(
+                    attemptID: Self.attemptID("initial", afterHandshake: handshakeRecorded),
+                    retry: 0, startedAt: attemptStartedAt, delayBeforeMs: 0,
+                    stageReached: Self.attemptStage(
+                        diagnostic: nil, establishedConnection: establishedConnectionID != nil,
+                        code: GatewayDiagnosticFailure.answerCode(error),
+                        afterHandshake: handshakeRecorded
+                    ),
+                    reason: GatewayDiagnosticFailure.answerCode(error), succeeded: false,
+                    connectionID: establishedConnectionID
+                )
+                recorder.endEpisode(.stopped)
                 delegate?.lifecycleSurface(failure)
             } else if error is CancellationError {
                 if pairingAttemptID != nil {
@@ -919,6 +1033,18 @@ final class GatewayLifecycleCoordinator {
             } else if GatewayRecoveryFailurePolicy.isNonRetryable(error) {
                 nonRetryableRecoveryFailure = true
                 connectionState = .offline(error.localizedDescription)
+                recordAttempt(
+                    attemptID: Self.attemptID("initial", afterHandshake: handshakeRecorded),
+                    retry: 0, startedAt: attemptStartedAt, delayBeforeMs: 0,
+                    stageReached: Self.attemptStage(
+                        diagnostic: nil, establishedConnection: establishedConnectionID != nil,
+                        code: GatewayDiagnosticFailure.answerCode(error),
+                        afterHandshake: handshakeRecorded
+                    ),
+                    reason: GatewayDiagnosticFailure.answerCode(error), succeeded: false,
+                    connectionID: establishedConnectionID
+                )
+                recorder.endEpisode(.stopped)
                 delegate?.lifecycleRecordDiagnostic(
                     event: "reconnect.stopped",
                     message: "code=\(GatewayDiagnosticFailure.code(error)) nonRetryable=true"
@@ -934,6 +1060,18 @@ final class GatewayLifecycleCoordinator {
                 guard admits(admission),
                       connectionAdmissionGeneration == connectAttemptGeneration,
                       connectionState == .reconnecting else { return }
+                recordAttempt(
+                    attemptID: Self.attemptID("initial", afterHandshake: handshakeRecorded),
+                    retry: 0, startedAt: attemptStartedAt, delayBeforeMs: 0,
+                    stageReached: Self.attemptStage(
+                        diagnostic: diagnostic, establishedConnection: establishedConnectionID != nil,
+                        code: GatewayDiagnosticFailure.answerCode(error),
+                        afterHandshake: handshakeRecorded
+                    ),
+                    reason: GatewayDiagnosticFailure.answerCode(error), succeeded: false,
+                    connectionID: establishedConnectionID,
+                    diagnostic: diagnostic
+                )
                 if connectionFailureClassifier.failedAttempt(
                     diagnostic,
                     code: GatewayDiagnosticFailure.code(error),
@@ -978,6 +1116,8 @@ final class GatewayLifecycleCoordinator {
         reconnectTask = nil
         reconnectAttemptGeneration &+= 1
         reconnectCanBeAccelerated = false
+        reconnectLoopID = nil
+        reconnectAttemptInFlightLoop = nil
         task?.cancel()
     }
 
@@ -1000,6 +1140,72 @@ final class GatewayLifecycleCoordinator {
         ) else { return }
         reconnectTask = nil
         reconnectCanBeAccelerated = false
+        reconnectLoopID = nil
+        reconnectAttemptInFlightLoop = nil
+    }
+
+    /// The furthest handshake stage an attempt reached. The client's own
+    /// handshake diagnostic is authoritative when it has one; otherwise an
+    /// epoch means the hello was accepted, and only this client's own transport
+    /// codes mean the attempt never got past opening the socket.
+    private static func attemptStage(
+        diagnostic: GatewayConnectionDiagnostic?,
+        establishedConnection: Bool,
+        code: String,
+        afterHandshake: Bool = false
+    ) -> String {
+        if afterHandshake { return GatewayConnectionEpisodeRecorder.postConnectStage }
+        if let diagnostic { return diagnostic.stage.rawValue }
+        if establishedConnection { return GatewayConnectionDiagnosticStage.helloReceive.rawValue }
+        switch code {
+        case "timeout", "transport", "disconnected", "possibly_sent":
+            return GatewayConnectionDiagnosticStage.transportOpen.rawValue
+        case "cancelled":
+            return "admission"
+        default:
+            return GatewayConnectionDiagnosticStage.helloSend.rawValue
+        }
+    }
+
+    /// One attempt can fail twice in one iteration: the handshake succeeds and
+    /// the connection then drops under projection. That failure is recorded
+    /// against the attempt it belongs to, with a post-connect ID and stage, so
+    /// one attempt is never read as two.
+    private static func attemptID(_ attemptID: String, afterHandshake: Bool) -> String {
+        afterHandshake
+            ? GatewayConnectionEpisodeRecorder.postConnectAttemptID(attemptID)
+            : attemptID
+    }
+
+    /// One `gateway.attempt` record, plus the episode bookkeeping it implies.
+    private func recordAttempt(
+        attemptID: String,
+        retry: Int,
+        startedAt: ContinuousClock.Instant,
+        delayBeforeMs: Int,
+        stageReached: String,
+        reason: String?,
+        succeeded: Bool,
+        gatewayConnectionID: String? = nil,
+        connectionID: Int?,
+        diagnostic: GatewayConnectionDiagnostic? = nil
+    ) {
+        recorder.recordAttempt(GatewayConnectionAttempt(
+            profileID: profiles.selected?.id,
+            lifecycleGeneration: phase.generation,
+            connectionID: connectionID,
+            attemptID: attemptID,
+            retry: retry,
+            stageReached: stageReached,
+            reason: reason,
+            interfaces: diagnostic?.handshake?.networkInterfaces,
+            pathSatisfied: networkPathSatisfied,
+            foreground: !sceneIsBackgrounded,
+            delayBeforeMs: delayBeforeMs,
+            startedAt: startedAt,
+            gatewayConnectionID: gatewayConnectionID,
+            succeeded: succeeded
+        ))
     }
 
     private func scheduleReconnect(immediate: Bool = false) {
@@ -1014,6 +1220,7 @@ final class GatewayLifecycleCoordinator {
         let reconnectSchedule = self.reconnectSchedule!
         reconnectCanBeAccelerated = !immediate
         let loopID = UUID().uuidString
+        reconnectLoopID = loopID
         let initialDelay: Duration = immediate ? .zero : .seconds(delayPolicy.initialSeconds)
         let scheduledAt = clock.now()
         delegate?.lifecycleRecordDiagnostic(
@@ -1021,6 +1228,15 @@ final class GatewayLifecycleCoordinator {
             message: "immediate=\(immediate) attempt=\(attemptGeneration) lifecycle=\(lifecycleGeneration) loop=\(loopID) scheduledDelayMs=\(diagnosticMilliseconds(initialDelay)) cause=\(restartRequested ? "restart" : "connection-unavailable")"
         )
         reconnectTask = Task { [weak self] in
+            // Whatever ends this loop — success, a state mismatch that returns
+            // early, a path park or cancellation — a later drop must not read a
+            // dead loop's marker as an attempt in flight. The identity check
+            // keeps a replaced loop from clearing its successor's marker.
+            defer {
+                if let self, self.reconnectAttemptInFlightLoop == loopID {
+                    self.reconnectAttemptInFlightLoop = nil
+                }
+            }
             var retry = 0
             var delayStartedAt = scheduledAt
             do {
@@ -1050,6 +1266,10 @@ final class GatewayLifecycleCoordinator {
                     self.connectionState = self.restartRequested ? .restarting : .reconnecting
                     retry += 1
                     let startedAt = clock.now()
+                    // The loop is inside one transport attempt until this
+                    // attempt ends; the stall watchdog reads this identity to
+                    // tell a running attempt from a parked loop.
+                    self.reconnectAttemptInFlightLoop = loopID
                     self.delegate?.lifecycleRecordDiagnostic(
                         event: "reconnect.attempt",
                         message: "attempt=\(attemptGeneration) loop=\(loopID) retry=\(retry) actualDelayMs=\(diagnosticMilliseconds(delayStartedAt.duration(to: startedAt))) state=\(self.restartRequested ? "restarting" : "reconnecting")"
@@ -1063,6 +1283,10 @@ final class GatewayLifecycleCoordinator {
                     ), self.connectionState == connectionStateAtAttempt else { return }
                     var establishedConnectionID: Int?
                     var reconciliationAggregateAdmission: Admission?
+                    // True once this attempt's handshake succeeded: a later
+                    // failure in the same iteration is that connection dropping
+                    // under projection, not a second attempt.
+                    var handshakeRecorded = false
                     guard let profile = self.profiles.selected,
                           let token = self.profileTokenLookup(profile) else {
                         self.connectionState = .unpaired
@@ -1116,6 +1340,20 @@ final class GatewayLifecycleCoordinator {
                         self.hasResolvedLaunchState = true
                         self.delegate?.lifecycleRecordDiagnostic(event: "reconnect.connected",
                             message: "attempt=\(attemptGeneration) loop=\(loopID) retry=\(retry) connectionID=\(connection.id) gatewayConnectionId=\(connection.gatewayConnectionID ?? "unknown") handshakeMs=\(diagnosticMilliseconds(startedAt.duration(to: clock.now())))")
+                        self.recordAttempt(
+                            attemptID: loopID, retry: retry, startedAt: startedAt,
+                            delayBeforeMs: diagnosticMilliseconds(delayStartedAt.duration(to: startedAt)),
+                            stageReached: "connected", reason: nil, succeeded: true,
+                            gatewayConnectionID: connection.gatewayConnectionID,
+                            connectionID: connection.id
+                        )
+                        handshakeRecorded = true
+                        // The transport attempt ended at the handshake. From
+                        // here the loop is projection, not an attempt in
+                        // flight: if the socket drops now, naming
+                        // `reconnectTaskBusy` is the whole point of the guard
+                        // (C-1 fixes what a parked loop should do instead).
+                        self.reconnectAttemptInFlightLoop = nil
                         reconciliationAggregateAdmission = admission
                         self.delegate?.lifecycleBeginReconciliationAggregate(admission: admission)
                         self.delegate?.lifecycleInvalidateSessionConnectionOwnership()
@@ -1235,6 +1473,18 @@ final class GatewayLifecycleCoordinator {
                         self.restartWatchdogTask = nil
                         self.restartRequested = false
                         self.connectionState = .unauthorized
+                        self.recordAttempt(
+                            attemptID: Self.attemptID(loopID, afterHandshake: handshakeRecorded),
+                            retry: retry, startedAt: startedAt,
+                            delayBeforeMs: diagnosticMilliseconds(delayStartedAt.duration(to: startedAt)),
+                            stageReached: Self.attemptStage(
+                                diagnostic: nil, establishedConnection: establishedConnectionID != nil,
+                                code: "unauthenticated", afterHandshake: handshakeRecorded
+                            ),
+                            reason: "unauthenticated", succeeded: false,
+                            connectionID: establishedConnectionID
+                        )
+                        self.recorder.endEpisode(.stopped)
                         self.delegate?.lifecycleRecordDiagnostic(event: "reconnect.failure",
                             message: "attempt=\(attemptGeneration) loop=\(loopID) retry=\(retry) code=unauthenticated durationMs=\(diagnosticMilliseconds(startedAt.duration(to: clock.now())))")
                         self.delegate?.lifecycleSurface(failure)
@@ -1287,6 +1537,19 @@ final class GatewayLifecycleCoordinator {
                         self.restartRequested = false
                         self.nonRetryableRecoveryFailure = true
                         self.connectionState = .offline(failure.localizedDescription)
+                        self.recordAttempt(
+                            attemptID: Self.attemptID(loopID, afterHandshake: handshakeRecorded),
+                            retry: retry, startedAt: startedAt,
+                            delayBeforeMs: diagnosticMilliseconds(delayStartedAt.duration(to: startedAt)),
+                            stageReached: Self.attemptStage(
+                                diagnostic: nil, establishedConnection: establishedConnectionID != nil,
+                                code: GatewayDiagnosticFailure.answerCode(failure),
+                                afterHandshake: handshakeRecorded
+                            ),
+                            reason: GatewayDiagnosticFailure.answerCode(failure), succeeded: false,
+                            connectionID: establishedConnectionID
+                        )
+                        self.recorder.endEpisode(.stopped)
                         self.delegate?.lifecycleRecordDiagnostic(
                             event: "reconnect.stopped",
                             message: "attempt=\(attemptGeneration) loop=\(loopID) retry=\(retry) code=\(GatewayDiagnosticFailure.code(failure)) nonRetryable=true"
@@ -1323,6 +1586,22 @@ final class GatewayLifecycleCoordinator {
                             lifecycleGeneration: lifecycleGeneration,
                             attemptGeneration: attemptGeneration
                         ), self.connectionState == failedState else { return }
+                        self.recordAttempt(
+                            attemptID: Self.attemptID(loopID, afterHandshake: handshakeRecorded),
+                            retry: retry, startedAt: startedAt,
+                            delayBeforeMs: diagnosticMilliseconds(delayStartedAt.duration(to: startedAt)),
+                            stageReached: Self.attemptStage(
+                                diagnostic: diagnostic, establishedConnection: establishedConnectionID != nil,
+                                code: GatewayDiagnosticFailure.answerCode(error),
+                                afterHandshake: handshakeRecorded
+                            ),
+                            reason: GatewayDiagnosticFailure.answerCode(error), succeeded: false,
+                            connectionID: establishedConnectionID,
+                            diagnostic: diagnostic
+                        )
+                        // The attempt is over; the loop now waits in its bounded
+                        // backoff, which the stall watchdog reads as progressing.
+                        self.reconnectAttemptInFlightLoop = nil
                         if self.connectionFailureClassifier.failedAttempt(
                             diagnostic,
                             code: GatewayDiagnosticFailure.code(error),

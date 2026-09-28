@@ -628,4 +628,36 @@ struct GatewayProtocolContractTests {
         #expect(!AppModel.supportsSafeGatewayRestart(capabilities: ["sessions.v1", "restart-drain.v1"]))
         #expect(AppModel.supportsSafeGatewayRestart(capabilities: ["sessions.v1", "restart-drain.v1", "restart-supervised.v1"]))
     }
+
+    @Test("Gateway-answer provenance is local and cannot travel on the wire")
+    func failureProvenanceStaysOffTheWire() throws {
+        // `answeredByGateway` says the phone decoded this code from a Gateway
+        // error response. A response frame that carried the marker would let a
+        // Gateway (or a stale frame) claim provenance the phone never saw, and
+        // `session.open.failure` reports `gatewayCode` only from a stamped
+        // failure, so the wire must not be able to set or clear it.
+        let frame = try JSONSerialization.data(withJSONObject: [
+            "type": "response", "id": "open-1", "ok": false,
+            "error": [
+                "code": "conflict", "message": "Session is open elsewhere.",
+                "retryable": false, "answeredByGateway": true,
+            ],
+        ])
+        let response = try JSONDecoder.gateway.decode(GatewayResponse.self, from: frame)
+        let failure = try #require(response.error)
+        #expect(failure.code == "conflict")
+        #expect(failure.answeredByGateway == nil)
+
+        let stamped = failure.stampedAsGatewayAnswer
+        #expect(stamped.answeredByGateway == true)
+        let encoded = try JSONEncoder.gateway.encode(stamped)
+        let object = try #require(
+            try JSONSerialization.jsonObject(with: encoded) as? [String: Any]
+        )
+        #expect(object["answeredByGateway"] == nil)
+        #expect(object["code"] as? String == "conflict")
+        // The local stamp still discriminates a decoded answer from a phone-side
+        // literal of the same failure.
+        #expect(stamped != failure)
+    }
 }

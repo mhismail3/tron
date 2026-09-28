@@ -652,6 +652,116 @@ struct AppModelReconnectTests {
         }
     }
 
+    @Test("a workspace retry cannot retry a credential the Gateway already rejected")
+    func transientTransportRetryLeavesUnauthorized() async throws {
+        let clock = ManualClock()
+        let sockets = [ScriptedGatewaySocket(), ScriptedGatewaySocket()]
+        let logURL = FileManager.default.temporaryDirectory
+            .appending(path: "transient-unauthorized-\(UUID().uuidString).jsonl")
+        defer {
+            try? FileManager.default.removeItem(at: logURL)
+            try? FileManager.default.removeItem(at: logURL.appendingPathExtension("1"))
+        }
+        let appLog = AppLog(fileURL: logURL)
+        try await withFixture(
+            sockets: sockets, clock: clock, units: SequenceReconnectUnits([0]), appLog: appLog
+        ) { fixture in
+            let start = Task { await fixture.model.start() }
+            try await sockets[0].waitUntilSent(count: 1)
+            await sockets[0].failPendingReceivers(GatewayFailure(
+                code: "unauthenticated", message: "Pair this Gateway again.",
+                retryable: false, details: nil
+            ))
+            try await sockets[0].waitUntilClosed()
+            await start.value
+            #expect(fixture.model.connectionState == .unauthorized)
+
+            // The browser's transient-error retry is neither a scene activation
+            // nor an explicit Retry: it may revive a parked route, and a
+            // credential the Gateway rejected is not a parked route. It must
+            // leave the state, the attempts and the schedule untouched instead
+            // of retrying the token and flickering the unauthorized surface.
+            let sleepersBefore = clock.activeSleeperCount()
+            fixture.model.recoverTransientTransportFailure()
+            for _ in 0..<20 { await Task.yield() }
+            #expect(fixture.model.connectionState == .unauthorized)
+            #expect(fixture.socketFactory.requests.count == 1)
+            #expect(clock.activeSleeperCount() == sleepersBefore)
+            #expect(await recordCount(in: appLog, event: "gateway.attempt") == 1)
+        }
+    }
+
+    @Test("a workspace retry cannot replace a live connection")
+    func transientTransportRetryLeavesConnectedTransport() async throws {
+        let clock = ManualClock()
+        let sockets = [ScriptedGatewaySocket(), ScriptedGatewaySocket()]
+        let logURL = FileManager.default.temporaryDirectory
+            .appending(path: "transient-connected-\(UUID().uuidString).jsonl")
+        defer {
+            try? FileManager.default.removeItem(at: logURL)
+            try? FileManager.default.removeItem(at: logURL.appendingPathExtension("1"))
+        }
+        let appLog = AppLog(fileURL: logURL)
+        try await withFixture(
+            sockets: sockets, clock: clock, units: SequenceReconnectUnits([0]), appLog: appLog
+        ) { fixture in
+            await sockets[0].enqueue(helloFrame())
+            let start = Task { await fixture.model.start() }
+            defer { start.cancel() }
+            await start.value
+            #expect(fixture.model.connectionState == .connected)
+            #expect(await recordCount(in: appLog, event: "gateway.attempt") == 1)
+
+            // A failed read on a live connection is not a lost connection: the
+            // retry must not replace the socket, publish `.reconnecting`, write a
+            // scene record for a scene that did not move, or count an attempt.
+            let sleepersBefore = clock.activeSleeperCount()
+            fixture.model.recoverTransientTransportFailure()
+            for _ in 0..<20 { await Task.yield() }
+            #expect(fixture.model.connectionState == .connected)
+            #expect(fixture.socketFactory.requests.count == 1)
+            #expect(clock.activeSleeperCount() == sleepersBefore)
+            #expect(await appLog.snapshot().filter { $0.event.hasPrefix("scene.") }.isEmpty)
+            #expect(await recordCount(in: appLog, event: "gateway.attempt") == 1)
+        }
+    }
+
+    @Test("a workspace retry revives a parked retry without waiting out its backoff")
+    func transientTransportRetryRevivesParkedRetry() async throws {
+        let clock = ManualClock()
+        let sockets = [ScriptedGatewaySocket(), ScriptedGatewaySocket()]
+        let logURL = FileManager.default.temporaryDirectory
+            .appending(path: "transient-parked-\(UUID().uuidString).jsonl")
+        defer {
+            try? FileManager.default.removeItem(at: logURL)
+            try? FileManager.default.removeItem(at: logURL.appendingPathExtension("1"))
+        }
+        let appLog = AppLog(fileURL: logURL)
+        try await withFixture(
+            sockets: sockets, clock: clock, units: SequenceReconnectUnits([0]), appLog: appLog
+        ) { fixture in
+            let start = Task { await fixture.model.start() }
+            defer { start.cancel() }
+            try await failHandshake(sockets[0])
+            try await clock.waitUntilSleeping(count: 1)
+            await start.value
+            #expect(fixture.model.connectionState == .reconnecting)
+            #expect(fixture.socketFactory.requests.count == 1)
+
+            // A parked route is exactly what the browser's transient-error
+            // retry exists for: the read failed, the scene did not move, and the
+            // lifecycle owns a route waiting out its backoff. The retry must
+            // connect now, without advancing the clock and without recording a
+            // scene transition.
+            fixture.model.recoverTransientTransportFailure()
+            try await sockets[1].waitUntilSent(count: 1)
+            #expect(fixture.socketFactory.requests.count == 2)
+            #expect(clock.activeSleeperCount() == 0)
+            #expect(clock.recordedSleeps() == [.seconds(1.6)])
+            #expect(await appLog.snapshot().filter { $0.event.hasPrefix("scene.") }.isEmpty)
+        }
+    }
+
     @Test("ordinary short successful foreground visits do not become an artificial outage")
     func healthyForegroundVisitsDoNotExhaustRecovery() async throws {
         let suiteName = "GatewayHealthyForegroundTests.\(UUID().uuidString)"
@@ -1231,6 +1341,258 @@ struct AppModelReconnectTests {
         ))
     }
 
+    @Test("every reconnect attempt and one episode reach the always-on app log")
+    func reconnectAttemptsAndEpisodeAreRecorded() async throws {
+        let clock = ManualClock()
+        let sockets = (0..<4).map { _ in ScriptedGatewaySocket() }
+        let logURL = FileManager.default.temporaryDirectory
+            .appending(path: "reconnect-records-\(UUID().uuidString).jsonl")
+        defer {
+            try? FileManager.default.removeItem(at: logURL)
+            try? FileManager.default.removeItem(at: logURL.appendingPathExtension("1"))
+        }
+        let appLog = AppLog(fileURL: logURL)
+        try await withFixture(
+            sockets: sockets, clock: clock,
+            units: SequenceReconnectUnits(Array(repeating: 0.5, count: 8)), appLog: appLog
+        ) { fixture in
+            let start = Task { await fixture.model.start() }
+            defer { start.cancel() }
+            try await failHandshake(sockets[0])
+            try await clock.waitUntilSleeping(count: 1)
+            await start.value
+
+            for index in 1...2 {
+                clock.advance(by: .seconds(60))
+                try await sockets[index].waitUntilSent(count: 1)
+                try await failHandshake(sockets[index])
+                try await sockets[index].waitUntilClosed()
+                try await clock.waitUntilSleeping(count: 1)
+            }
+            await sockets[3].enqueue(helloFrame())
+            clock.advance(by: .seconds(60))
+            try await sockets[3].waitUntilSent(count: 1)
+            while fixture.model.connectionState != .connected {
+                try Task.checkCancellation()
+                await Task.yield()
+            }
+
+            let attempts = try await waitForRecords(in: appLog, event: "gateway.attempt", count: 4)
+            // The initial connect plus the loop's three retries: the first three
+            // fail and the fourth connects.
+            #expect(attempts.map(\.outcome) == ["failure", "failure", "failure", "success"])
+            #expect(attempts[0].message.contains("attemptId=initial"))
+            #expect(attempts[1].message.contains("retry=1"))
+            #expect(attempts[2].message.contains("retry=2"))
+            #expect(attempts[3].message.contains("retry=3"))
+            #expect(attempts[3].message.contains("stageReached=connected"))
+            let episodes = try await waitForRecords(in: appLog, event: "connection.episode", count: 1)
+            #expect(episodes.count == 1)
+            #expect(episodes[0].message.contains("endedBy=connected"))
+            #expect(episodes[0].message.contains("attempts=4"))
+            // Every attempt started on the 60 s the test's clock advanced between
+            // them, so the largest gap is that advance.
+            #expect(episodes[0].message.contains("maxGapBetweenAttemptsMs=60000"))
+        }
+    }
+
+    @Test("an attempt in flight or waiting in its backoff is never reported as a stall")
+    func backoffIsNotAStall() async throws {
+        let clock = ManualClock()
+        let watchdog = ManualClock()
+        let logURL = FileManager.default.temporaryDirectory
+            .appending(path: "reconnect-stall-\(UUID().uuidString).jsonl")
+        defer {
+            try? FileManager.default.removeItem(at: logURL)
+            try? FileManager.default.removeItem(at: logURL.appendingPathExtension("1"))
+        }
+        let appLog = AppLog(fileURL: logURL)
+        try await withRecordedCoordinator(
+            sockets: (0..<2).map { _ in ScriptedGatewaySocket() },
+            clock: clock, watchdogClock: watchdog.clock, appLog: appLog
+        ) { coordinator, client, sockets in
+            await sockets[0].enqueue(helloFrame())
+            await coordinator.start()
+            #expect(coordinator.connectionState == .connected)
+            // The socket retires under the app: an episode opens and the loop
+            // parks in its bounded backoff, then attempts, which are both
+            // progress, not a stall.
+            await coordinator.noteDisconnected(connectionID: await client.activeConnectionID())
+            coordinator.requestReconnect()
+            // The stall bound is measured on the lifecycle clock and polled on
+            // the watchdog clock, so both advance: 30 s of bound time pass with
+            // the episode open and nothing may be reported. Each tick is awaited
+            // before the next advance, so every check sees the whole advance.
+            for _ in 0..<6 {
+                clock.advance(by: .seconds(5))
+                try await watchdog.waitUntilSleeping(
+                    count: 1, duration: GatewayConnectionEpisodeRecorder.watchdogInterval
+                )
+                watchdog.advance(by: GatewayConnectionEpisodeRecorder.watchdogInterval)
+            }
+            try await watchdog.waitUntilSleeping(
+                count: 1, duration: GatewayConnectionEpisodeRecorder.watchdogInterval
+            )
+            #expect(await recordCount(in: appLog, event: "reconnect.stalled") == 0)
+            coordinator.enteredBackground()
+            let episodes = try await waitForRecords(in: appLog, event: "connection.episode", count: 1)
+            #expect(episodes.count == 1)
+            #expect(episodes[0].message.contains("endedBy=background"))
+        }
+    }
+
+    @Test("a stalled episode names the guard that is holding recovery")
+    func unsatisfiedPathIsNamedAsTheGuard() async throws {
+        let clock = ManualClock()
+        let watchdog = ManualClock()
+        let logURL = FileManager.default.temporaryDirectory
+            .appending(path: "reconnect-guard-\(UUID().uuidString).jsonl")
+        defer {
+            try? FileManager.default.removeItem(at: logURL)
+            try? FileManager.default.removeItem(at: logURL.appendingPathExtension("1"))
+        }
+        let appLog = AppLog(fileURL: logURL)
+        try await withRecordedCoordinator(
+            sockets: (0..<2).map { _ in ScriptedGatewaySocket() },
+            clock: clock, watchdogClock: watchdog.clock, appLog: appLog
+        ) { coordinator, client, sockets in
+            await sockets[0].enqueue(helloFrame())
+            await coordinator.start()
+            #expect(coordinator.connectionState == .connected)
+            await coordinator.noteDisconnected(connectionID: await client.activeConnectionID())
+            coordinator.requestReconnect()
+            // The route goes away: recovery is parked with no attempt in flight
+            // or scheduled, so the guard must name the path, not `other`.
+            coordinator.notePathHint(satisfied: false)
+            // A tick that records when the guard began holding, then the bound
+            // passing on the lifecycle clock, then the tick that reports it.
+            // Each tick is awaited before the clock moves, so neither check can
+            // see the wrong side of the bound.
+            try await watchdog.waitUntilSleeping(
+                count: 1, duration: GatewayConnectionEpisodeRecorder.watchdogInterval
+            )
+            watchdog.advance(by: GatewayConnectionEpisodeRecorder.watchdogInterval)
+            try await watchdog.waitUntilSleeping(
+                count: 1, duration: GatewayConnectionEpisodeRecorder.watchdogInterval
+            )
+            clock.advance(by: .seconds(21))
+            watchdog.advance(by: GatewayConnectionEpisodeRecorder.watchdogInterval)
+            let stalls = try await waitForRecords(in: appLog, event: "reconnect.stalled", count: 1)
+            #expect(stalls.count == 1)
+            #expect(stalls.first?.message.contains("guard=pathUnsatisfied") == true)
+            #expect(stalls.first?.message.contains("foreground=true") == true)
+            #expect(stalls.first?.outcome == "stalled")
+        }
+    }
+
+    /// A lifecycle coordinator whose attempts and episodes go to a test AppLog
+    /// and whose watchdogs tick on their own clock, so a test can advance the
+    /// watchdog grid without advancing the lifecycle timeline.
+    private func withRecordedCoordinator(
+        sockets: [ScriptedGatewaySocket],
+        clock: ManualClock,
+        watchdogClock: MonotonicClock,
+        appLog: AppLog,
+        projection: GatewayLifecycleProjectionDelegate = NoopGatewayLifecycleProjection(),
+        operation: @escaping @MainActor @Sendable (
+            GatewayLifecycleCoordinator, GatewayClient, [ScriptedGatewaySocket]
+        ) async throws -> Void
+    ) async throws {
+        let suiteName = "GatewayConnectionRecordTests.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+        let profile = GatewayProfile(
+            id: "gateway", label: "Mac", host: "gateway.test", port: 9_847,
+            machineId: "machine", deviceId: "device"
+        )
+        defaults.set(try JSONEncoder.gateway.encode([profile]), forKey: "gatewayProfiles.v1")
+        defaults.set(profile.id, forKey: "selectedGateway.v1")
+        let factory = ScriptedGatewaySocketFactory(sockets: sockets)
+        let client = GatewayClient(socketFactory: factory.factory)
+        let coordinator = GatewayLifecycleCoordinator(
+            client: client, profiles: GatewayProfileStore(defaults: defaults), clock: clock.clock,
+            reconnectDelayPolicy: .standard, uuidSource: .random, pairer: GatewayPairer(),
+            pairingCommit: { _, _ in }, profileTokenLookup: { _ in "token" },
+            appLog: appLog, watchdogClock: watchdogClock
+        )
+        coordinator.delegate = projection
+        do {
+            try await withTestWatchdog {
+                try await operation(coordinator, client, sockets)
+            }
+        } catch {
+            await coordinator.teardown()
+            await client.close()
+            throw error
+        }
+        await coordinator.teardown()
+        await client.close()
+    }
+
+    @Test("a loop parked in projection is named as reconnectTaskBusy when the socket drops")
+    func projectionParkedLoopIsNamedAsBusy() async throws {
+        let clock = ManualClock()
+        let watchdog = ManualClock()
+        let logURL = FileManager.default.temporaryDirectory
+            .appending(path: "reconnect-parked-\(UUID().uuidString).jsonl")
+        defer {
+            try? FileManager.default.removeItem(at: logURL)
+            try? FileManager.default.removeItem(at: logURL.appendingPathExtension("1"))
+        }
+        let appLog = AppLog(fileURL: logURL)
+        let projection = BlockedRefreshProjection()
+        try await withRecordedCoordinator(
+            sockets: (0..<2).map { _ in ScriptedGatewaySocket() },
+            clock: clock, watchdogClock: watchdog.clock, appLog: appLog, projection: projection
+        ) { coordinator, client, sockets in
+            await sockets[0].enqueue(helloFrame())
+            await coordinator.start()
+            #expect(coordinator.connectionState == .connected)
+
+            // The replacement's handshake succeeds and its projection refresh
+            // never returns, which is how a reconnect loop parks in projection.
+            await sockets[1].enqueue(helloFrame())
+            coordinator.requestReconnect(immediate: true)
+            try await projection.waitUntilRefreshStarted()
+            // The socket the handshake established now drops. No attempt is in
+            // flight, so the episode must name the loop that is holding
+            // recovery instead of reading its handshake as progress forever.
+            await coordinator.noteDisconnected(connectionID: await client.activeConnectionID())
+
+            try await watchdog.waitUntilSleeping(
+                count: 1, duration: GatewayConnectionEpisodeRecorder.watchdogInterval
+            )
+            watchdog.advance(by: GatewayConnectionEpisodeRecorder.watchdogInterval)
+            try await watchdog.waitUntilSleeping(
+                count: 1, duration: GatewayConnectionEpisodeRecorder.watchdogInterval
+            )
+            clock.advance(by: .seconds(21))
+            watchdog.advance(by: GatewayConnectionEpisodeRecorder.watchdogInterval)
+            let stalls = try await waitForRecords(in: appLog, event: "reconnect.stalled", count: 1)
+            #expect(stalls.count == 1)
+            #expect(stalls.first?.message.contains("guard=reconnectTaskBusy") == true)
+            // Let the parked loop unwind before the fixture tears the lifecycle
+            // down.
+            projection.releaseRefresh()
+        }
+    }
+
+    private func recordCount(in log: AppLog, event: String) async -> Int {
+        await log.snapshot().filter { $0.event == event }.count
+    }
+
+    private func waitForRecords(
+        in log: AppLog, event: String, count: Int
+    ) async throws -> [AppLogRecord] {
+        for _ in 0..<600 {
+            let values = await log.snapshot().filter { $0.event == event }
+            if values.count >= count { return values }
+            try await Task.sleep(for: .milliseconds(5))
+        }
+        Issue.record("timed out waiting for \(count) \(event) record(s)")
+        return await log.snapshot().filter { $0.event == event }
+    }
+
     private func withStartupCoordinator(
         cacheGate: TestReadGate? = nil,
         sockets: [ScriptedGatewaySocket]? = nil,
@@ -1279,9 +1641,10 @@ struct AppModelReconnectTests {
         clock: ManualClock,
         units: SequenceReconnectUnits,
         recoveryClock: ManualClock? = nil,
+        appLog: AppLog = .shared,
         operation: @escaping @MainActor @Sendable (ReconnectFixture) async throws -> Void
     ) async throws {
-        let fixture = makeFixture(sockets: sockets, clock: clock, units: units, recoveryClock: recoveryClock)
+        let fixture = makeFixture(sockets: sockets, clock: clock, units: units, recoveryClock: recoveryClock, appLog: appLog)
         do {
             try await withTestWatchdog {
                 try await operation(fixture)
@@ -1297,7 +1660,8 @@ struct AppModelReconnectTests {
         sockets: [ScriptedGatewaySocket],
         clock: ManualClock,
         units: SequenceReconnectUnits,
-        recoveryClock: ManualClock? = nil
+        recoveryClock: ManualClock? = nil,
+        appLog: AppLog = .shared
     ) -> ReconnectFixture {
         let suiteName = "AppModelReconnectTests.\(UUID().uuidString)"
         let defaults = UserDefaults(suiteName: suiteName)!
@@ -1323,7 +1687,8 @@ struct AppModelReconnectTests {
             clock: clock.clock,
             recoveryDisplayClock: recoveryClock?.clock ?? .continuous,
             reconnectDelayPolicy: ReconnectDelayPolicy(nextUnitInterval: units.next),
-            profileTokenLookup: { _ in "token" }
+            profileTokenLookup: { _ in "token" },
+            appLog: appLog
         )
         return ReconnectFixture(
             suiteName: suiteName,
@@ -1429,6 +1794,49 @@ private final class FailFirstMountedRestoreProjection: GatewayLifecycleProjectio
         restoreCount += 1
         return restoreCount > 1
     }
+    func lifecycleReattachTerminals(admission: GatewayLifecycleCoordinator.Admission) async {}
+    func lifecycleReconcileForeground(admission: GatewayLifecycleCoordinator.Admission) async throws {}
+    func lifecycleRetireProjection(final: Bool) async {}
+    func lifecycleSurface(_ error: Error) {}
+}
+
+/// A projection owner whose authoritative refresh never returns until the test
+/// releases it: the shape of a reconnect loop parked in projection work. The
+/// initial connect's own refresh completes, so the test begins from a connected
+/// lifecycle; the replacement's refresh is the one that parks.
+@MainActor
+private final class BlockedRefreshProjection: GatewayLifecycleProjectionDelegate {
+    private var refreshStartedContinuation: CheckedContinuation<Void, Never>?
+    private var refreshContinuation: CheckedContinuation<Void, Never>?
+    private var refreshCount = 0
+    private var parked = false
+
+    func waitUntilRefreshStarted() async {
+        if parked { return }
+        await withCheckedContinuation { refreshStartedContinuation = $0 }
+    }
+
+    func releaseRefresh() {
+        refreshContinuation?.resume()
+        refreshContinuation = nil
+    }
+
+    func lifecycleLoadCache(profileID: String, admission: GatewayLifecycleCoordinator.Admission) async {}
+    func lifecycleInvalidateSessionConnectionOwnership() {}
+    func lifecycleBeginReconciliationAggregate(admission: GatewayLifecycleCoordinator.Admission) {}
+    func lifecycleCompleteReconciliationAggregate(
+        admission: GatewayLifecycleCoordinator.Admission,
+        succeeded: Bool
+    ) {}
+    func lifecycleRefreshAll(admission: GatewayLifecycleCoordinator.Admission) async {
+        refreshCount += 1
+        guard refreshCount > 1 else { return }
+        parked = true
+        refreshStartedContinuation?.resume()
+        refreshStartedContinuation = nil
+        await withCheckedContinuation { refreshContinuation = $0 }
+    }
+    func lifecycleRestoreMountedPresentation(admission: GatewayLifecycleCoordinator.Admission) async -> Bool { true }
     func lifecycleReattachTerminals(admission: GatewayLifecycleCoordinator.Admission) async {}
     func lifecycleReconcileForeground(admission: GatewayLifecycleCoordinator.Admission) async throws {}
     func lifecycleRetireProjection(final: Bool) async {}

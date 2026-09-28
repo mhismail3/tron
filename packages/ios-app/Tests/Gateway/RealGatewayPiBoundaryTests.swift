@@ -350,6 +350,339 @@ final class RealGatewayPiBoundaryTests: XCTestCase {
             proxyToken: proxyToken,
             sessionID: created.sessionId
         )
+        let blackholeRecords = try await Self.exerciseBlackholedReconnect(
+            profile: profile,
+            token: token,
+            port: port,
+            proxyToken: proxyToken
+        )
+        let foregroundRecords = try await Self.exerciseForegroundBlackholedReconnect(
+            profile: profile,
+            token: token,
+            port: port,
+            proxyToken: proxyToken
+        )
+        let attachment = XCTAttachment(string: (blackholeRecords + foregroundRecords).map { record in
+            "\(record.timestamp) \(record.level) \(record.event) durationMs=\(record.durationMs ?? -1) outcome=\(record.outcome ?? "-") \(record.message)"
+        }.joined(separator: "\n"))
+        attachment.name = "phone-connection-records"
+        attachment.lifetime = .keepAlways
+        add(attachment)
+    }
+
+    /// The O-6b shape: the socket is already live in the foreground, the route is
+    /// blackholed under it, and the phone itself sees the loss through its
+    /// liveness probe. The episode is therefore opened at the loss, before the
+    /// first recovery attempt, which is the silent gap this leg exists to
+    /// measure. The app stays foregrounded throughout: no scene transition opens
+    /// or ends anything.
+    @MainActor
+    private static func exerciseForegroundBlackholedReconnect(
+        profile: GatewayProfile,
+        token: String,
+        port: Int,
+        proxyToken: String
+    ) async throws -> [AppLogRecord] {
+        let memoryTokens = MemoryGatewayTokenStore()
+        let profiles = GatewayProfileStore(metadata: MemoryProfileMetadataStore(), tokens: memoryTokens)
+        try profiles.save(profile, token: token)
+        let logURL = FileManager.default.temporaryDirectory
+            .appending(path: "o-4-foreground-blackhole-\(UUID().uuidString).jsonl")
+        defer {
+            try? FileManager.default.removeItem(at: logURL)
+            try? FileManager.default.removeItem(at: logURL.appendingPathExtension("1"))
+        }
+        let appLog = AppLog(fileURL: logURL)
+        let client = GatewayClient()
+        let lifecycle = GatewayLifecycleCoordinator(
+            client: client,
+            profiles: profiles,
+            clock: .continuous,
+            reconnectDelayPolicy: .standard,
+            uuidSource: .random,
+            pairer: GatewayPairer(),
+            pairingCommit: { _, _ in },
+            profileTokenLookup: { try? memoryTokens.read(profileID: $0.id) },
+            appLog: appLog
+        )
+        do {
+            lifecycle.notePathHint(satisfied: true)
+            await lifecycle.start()
+            guard lifecycle.connectionState == .connected else {
+                throw BoundaryFailure.invalidFixture("The lifecycle did not connect before the foreground blackhole")
+            }
+            guard try await Self.waitForAttemptCount(1, in: appLog, deadline: .seconds(15)) else {
+                throw BoundaryFailure.invalidFixture("The initial attempt was not recorded")
+            }
+            let attemptsBeforeBlackhole = await Self.recordCount(in: appLog, event: "gateway.attempt")
+
+            // The phone's own projection of a transport loss, as AppModel does in
+            // production: the loss opens the episode and asks for one immediate
+            // attempt. The client's liveness probe is what detects a blackholed
+            // socket, because the proxy fabricates no pong.
+            let lossSeen = LossInstant()
+            let observer = Task {
+                for await delivery in client.events where delivery.event.topic == "transport.disconnected" {
+                    let reason = delivery.event.payload.objectValue?["reason"]?.stringValue ?? "disconnected"
+                    let connectionID = delivery.connectionID
+                    await lossSeen.record(code: reason)
+                    await lifecycle.noteDisconnected(
+                        connectionID: connectionID,
+                        reason: reason
+                    )
+                    lifecycle.requestReconnect(immediate: true)
+                }
+            }
+            defer { observer.cancel() }
+
+            try await Self.control("blackhole", port: port, token: proxyToken)
+            guard try await Self.waitForAttemptCount(
+                attemptsBeforeBlackhole + 1, in: appLog, deadline: .seconds(60)
+            ) else {
+                throw BoundaryFailure.timedOut("The phone did not see the foreground loss and attempt recovery")
+            }
+            try await Self.control("pass", port: port, token: proxyToken)
+            guard let admission = lifecycle.generationAdmission,
+                  await lifecycle.waitForConnected(
+                    until: ContinuousClock().now + .seconds(60),
+                    admission: admission
+                  ) else {
+                throw BoundaryFailure.timedOut("The lifecycle did not reconnect after the foreground blackhole")
+            }
+            let records = try await Self.waitForEpisode(
+                in: appLog, deadline: ContinuousClock().now + .seconds(20)
+            )
+            let attempts = Array(
+                records.filter { $0.event == "gateway.attempt" }
+                    .dropFirst(attemptsBeforeBlackhole)
+            )
+            let resolved = records.filter {
+                $0.event == "connection.episode" && $0.message.contains("endedBy=connected")
+            }
+            XCTAssertEqual(resolved.count, 1, "One foreground outage resolves in one episode record")
+            XCTAssertGreaterThanOrEqual(attempts.count, 2, "Every attempt of the outage must be on the timeline")
+            XCTAssertEqual(attempts.filter { $0.outcome == "success" }.count, 1)
+            let episode = try XCTUnwrap(resolved.first)
+            XCTAssertTrue(episode.message.contains("attempts=\(attempts.count)"))
+            // The loss the phone saw opens the episode; the first recovery attempt
+            // starts about a millisecond later, so both bounds below are coarse on
+            // purpose: an episode dated by that attempt would satisfy them too.
+            // They catch a start before the loss or after the attempt's end.
+            let observedLoss = await lossSeen.instant
+            let lossAt = try XCTUnwrap(observedLoss, "The phone must record the loss it saw")
+            let observedLossCode = await lossSeen.lossCode
+            let lossCode = try XCTUnwrap(
+                observedLossCode,
+                "The phone must record the loss code it saw"
+            )
+            let startedAt = try XCTUnwrap(
+                Self.episodeDate("startedAt", in: episode.message),
+                "The episode must report its start"
+            )
+            XCTAssertGreaterThanOrEqual(startedAt, lossAt.addingTimeInterval(-1))
+            let firstAttemptAt = try XCTUnwrap(GatewayTimestamp.parse(attempts[0].timestamp))
+            XCTAssertLessThanOrEqual(startedAt, firstAttemptAt)
+            // Only the loss opens the episode with a cause, and only
+            // `noteDisconnected` contributes the loss's own code; the codes after
+            // it come from the failed attempts. An episode opened by the first
+            // failed attempt instead of by the loss would not name it first, which
+            // is the evidence this leg exists for.
+            let causes = try XCTUnwrap(
+                Self.episodeCauses(in: episode.message),
+                "The episode must report its causes"
+            )
+            XCTAssertEqual(causes.first, GatewayDiagnosticFailure.normalizedCode(lossCode))
+            let outage = records
+            await lifecycle.teardown()
+            await client.close()
+            return outage
+        } catch {
+            await lifecycle.teardown()
+            await client.close()
+            throw error
+        }
+    }
+
+    /// The wall-clock instant of one `connection.episode` field, parsed so the
+    /// assertion compares instants rather than ISO text.
+    private static func episodeDate(_ key: String, in message: String) -> Date? {
+        guard let range = message.range(of: "\(key)=") else { return nil }
+        let value = message[range.upperBound...].prefix { !$0.isWhitespace }
+        return GatewayTimestamp.parse(String(value))
+    }
+
+    /// The comma-separated `causes` of one `connection.episode` record, so an
+    /// assertion can name the loss that opened it.
+    private static func episodeCauses(in message: String) -> [String]? {
+        guard let range = message.range(of: "causes=") else { return nil }
+        let value = message[range.upperBound...].prefix { !$0.isWhitespace }
+        return value.split(separator: ",").map(String.init)
+    }
+
+    /// The instant and code the phone observed for a transport loss, for the
+    /// assertions that the episode is dated at that loss and names it first.
+    private actor LossInstant {
+        private var value: Date?
+        private var code: String?
+
+        var instant: Date? { value }
+        var lossCode: String? { code }
+
+        func record(code: String) {
+            if value == nil {
+                value = Date()
+                self.code = code
+            }
+        }
+    }
+
+    /// A fault-proxy blackhole with the app foregrounded, then a restore. The
+    /// export must explain the outage: one `gateway.attempt` record per attempt
+    /// of the outage (including the one that recovered) and one
+    /// `connection.episode` that resolved it, with the gaps between the
+    /// attempts. Returns the outage's own records so the caller can attach them
+    /// for inspection.
+    @MainActor
+    private static func exerciseBlackholedReconnect(
+        profile: GatewayProfile,
+        token: String,
+        port: Int,
+        proxyToken: String
+    ) async throws -> [AppLogRecord] {
+        let memoryTokens = MemoryGatewayTokenStore()
+        let profiles = GatewayProfileStore(metadata: MemoryProfileMetadataStore(), tokens: memoryTokens)
+        try profiles.save(profile, token: token)
+        let logURL = FileManager.default.temporaryDirectory
+            .appending(path: "o-4-blackhole-\(UUID().uuidString).jsonl")
+        defer {
+            try? FileManager.default.removeItem(at: logURL)
+            try? FileManager.default.removeItem(at: logURL.appendingPathExtension("1"))
+        }
+        let appLog = AppLog(fileURL: logURL)
+        let client = GatewayClient()
+        let lifecycle = GatewayLifecycleCoordinator(
+            client: client,
+            profiles: profiles,
+            clock: .continuous,
+            reconnectDelayPolicy: .standard,
+            uuidSource: .random,
+            pairer: GatewayPairer(),
+            pairingCommit: { _, _ in },
+            profileTokenLookup: { try? memoryTokens.read(profileID: $0.id) },
+            appLog: appLog
+        )
+        do {
+            lifecycle.notePathHint(satisfied: true)
+            await lifecycle.start()
+            guard lifecycle.connectionState == .connected else {
+                throw BoundaryFailure.invalidFixture("The lifecycle did not connect before the blackhole")
+            }
+            guard try await Self.waitForAttemptCount(1, in: appLog, deadline: .seconds(15)) else {
+                throw BoundaryFailure.invalidFixture("The initial attempt was not recorded")
+            }
+            // The connect before the blackhole is also a `gateway.attempt`; only
+            // what is written after this point belongs to the outage.
+            let attemptsBeforeBlackhole = await Self.recordCount(in: appLog, event: "gateway.attempt")
+
+            // Retire the live socket beneath a blackholed route, so recovery
+            // has to attempt the Gateway while nothing gets through.
+            try await Self.control("blackhole", port: port, token: proxyToken)
+            lifecycle.enteredBackground()
+            let activation = lifecycle.becameActive()
+            guard try await Self.waitForAttemptCount(
+                attemptsBeforeBlackhole + 1, in: appLog, deadline: .seconds(60)
+            ) else {
+                throw BoundaryFailure.timedOut("No reconnect attempt was recorded during the blackhole")
+            }
+            try await Self.control("pass", port: port, token: proxyToken)
+            await activation?.value
+            guard let admission = lifecycle.generationAdmission,
+                  await lifecycle.waitForConnected(
+                    until: ContinuousClock().now + .seconds(60),
+                    admission: admission
+                  ) else {
+                throw BoundaryFailure.timedOut("The lifecycle did not reconnect after the blackhole")
+            }
+
+            // The scene retirement parked recovery and ended the episode the loss
+            // had opened, so this outage's attempts belong to the episode that
+            // ended `connected`.
+            let records = try await Self.waitForEpisode(
+                in: appLog, deadline: ContinuousClock().now + .seconds(20)
+            )
+            let attempts = Array(
+                records.filter { $0.event == "gateway.attempt" }
+                    .dropFirst(attemptsBeforeBlackhole)
+            )
+            let episodes = records.filter { $0.event == "connection.episode" }
+            XCTAssertGreaterThanOrEqual(attempts.count, 2, "Every attempt of the outage must be on the timeline")
+            XCTAssertEqual(attempts.filter { $0.outcome == "success" }.count, 1)
+            XCTAssertTrue(attempts.contains { $0.message.contains("stageReached=connected") })
+            XCTAssertTrue(attempts.contains { $0.outcome == "failure" && $0.message.contains("stageReached=") })
+            let resolved = episodes.filter { $0.message.contains("endedBy=connected") }
+            XCTAssertEqual(resolved.count, 1, "One outage resolves in one episode record")
+            let episode = try XCTUnwrap(resolved.first)
+            XCTAssertTrue(episode.message.contains("attempts=\(attempts.count)"))
+            // A blackholed attempt lasts a whole transport deadline, and a gap
+            // between attempt starts contains it, so the gap cannot be smaller.
+            let longestBlackholedAttemptMs = attempts
+                .filter { $0.outcome == "failure" }
+                .compactMap(\.durationMs)
+                .max() ?? 0
+            XCTAssertGreaterThan(longestBlackholedAttemptMs, 0, "The blackholed attempt must report its duration")
+            let maximumGapMs = try XCTUnwrap(
+                Self.integerField("maxGapBetweenAttemptsMs", in: episode.message),
+                "The episode must report its largest gap"
+            )
+            XCTAssertGreaterThanOrEqual(maximumGapMs, longestBlackholedAttemptMs)
+            // Bind the records before teardown: a live client with a standard
+            // reconnect loop must not be left inside the test process.
+            let outage = records
+            await lifecycle.teardown()
+            await client.close()
+            return outage
+        } catch {
+            await lifecycle.teardown()
+            await client.close()
+            throw error
+        }
+    }
+
+    private static func recordCount(in appLog: AppLog, event: String) async -> Int {
+        await appLog.snapshot().filter { $0.event == event }.count
+    }
+
+    private static func waitForAttemptCount(
+        _ count: Int, in appLog: AppLog, deadline: Duration
+    ) async throws -> Bool {
+        let until = ContinuousClock().now + deadline
+        while ContinuousClock().now < until {
+            if await recordCount(in: appLog, event: "gateway.attempt") >= count { return true }
+            try await Task.sleep(for: .milliseconds(100))
+        }
+        return false
+    }
+
+    /// Waits for the episode a restored blackhole produces, then returns the
+    /// outage's attempt and episode records.
+    private static func waitForEpisode(
+        in appLog: AppLog, deadline: ContinuousClock.Instant
+    ) async throws -> [AppLogRecord] {
+        while ContinuousClock().now < deadline {
+            let records = await appLog.snapshot().filter {
+                $0.event == "gateway.attempt" || $0.event == "connection.episode"
+            }
+            if records.contains(where: { $0.event == "connection.episode" }) { return records }
+            try await Task.sleep(for: .milliseconds(100))
+        }
+        throw BoundaryFailure.timedOut("No connection.episode record was written")
+    }
+
+    /// The integer value of one `key=value` field in a record message, so an
+    /// assertion can compare the number rather than the field's presence.
+    private static func integerField(_ key: String, in message: String) -> Int? {
+        guard let range = message.range(of: "\(key)=") else { return nil }
+        return Int(message[range.upperBound...].prefix { $0.isNumber })
     }
 
     @MainActor
@@ -459,6 +792,16 @@ final class RealGatewayPiBoundaryTests: XCTestCase {
     }
 
     private func control(_ mode: String, port: Int, token: String, commandID: String? = nil, status: Int? = nil, closeCode: Int? = nil, bytes: Int? = nil) async throws {
+        try await Self.control(
+            mode, port: port, token: token, commandID: commandID, status: status,
+            closeCode: closeCode, bytes: bytes
+        )
+    }
+
+    /// The isolated fault proxy's control plane. It is static so the blackhole
+    /// helper can drive the proxy without carrying the test case into a
+    /// main-actor function.
+    private static func control(_ mode: String, port: Int, token: String, commandID: String? = nil, status: Int? = nil, closeCode: Int? = nil, bytes: Int? = nil) async throws {
         let url = URL(string: "http://127.0.0.1:\(port)/_fixture/control")!
         var request = URLRequest(url: url, timeoutInterval: 10)
         request.httpMethod = "POST"

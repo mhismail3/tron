@@ -283,6 +283,12 @@ final class SessionPresentationStore {
     private let synchronization = SessionSynchronizationCoordinator()
     private var deferredEffectsByTarget: [SessionPresentationIdentity: [ReducerEffect]] = [:]
     private var terminalSynchronizationFailures: [SessionPresentationIdentity: GatewayFailure] = [:]
+    /// The Gateway's own code for the failure that ended the last opening
+    /// synchronization of a session. `open` rewords that failure as
+    /// `sync_failed`, so `session.open.failure` reads this to report what the
+    /// Gateway actually answered (O-4 Do 7). Recording only: the thrown failure
+    /// keeps the presentation owner's wording.
+    private var openingFailureGatewayCodes: [String: String] = [:]
     private struct AutomaticSynchronization {
         let lease: SessionSynchronizationCoordinator.Lease
         let target: SessionPresentationIdentity
@@ -404,6 +410,13 @@ final class SessionPresentationStore {
     func presentationGeneration(for sessionID: String) -> Int? {
         guard target?.sessionID == sessionID else { return nil }
         return target?.generation
+    }
+
+    /// The Gateway's own code for the failure that ended this session's last
+    /// opening synchronization, or nil when the phone never reached the Gateway
+    /// or the failure did not come from an opening synchronization.
+    func openingFailureGatewayCode(sessionID: String) -> String? {
+        openingFailureGatewayCodes[sessionID]
     }
 
     func presentationTarget(for sessionID: String) -> SessionPresentationIdentity? {
@@ -569,6 +582,9 @@ final class SessionPresentationStore {
         )
         pendingTarget = requested
         terminalSynchronizationFailures[requested] = nil
+        // A new opening owns the answer: an earlier opening's Gateway code must
+        // not be read as this one's.
+        openingFailureGatewayCodes[sessionID] = nil
         transcriptLoadTarget = nil
         loadingEarlierTranscript = false
         transcriptLoadState = .idle
@@ -2014,6 +2030,13 @@ final class SessionPresentationStore {
         var result = PerformanceResult.failure
         var metrics = PerformanceMetrics.none
         defer { performanceSignposts.end(interval, result: result, metrics: metrics) }
+        // This presentation attempt owns the answer: a code kept from the
+        // attempt that asked for a retry must not be read as the one that ended
+        // the open. A reconnect attempt is not an opening and never reports a
+        // `gatewayCode`, so it neither stores nor clears one.
+        if case .presentation = lease.intent {
+            openingFailureGatewayCodes[sessionID] = nil
+        }
         let attemptConnectionGeneration = connectionGeneration
         var provisionalToken: String?
         do {
@@ -2295,6 +2318,16 @@ final class SessionPresentationStore {
                 sessionID: sessionID
             ) else {
                 return .failed(showCatchUpNotice: false)
+            }
+            // `open` rewords this failure, so keep the code the Gateway itself
+            // answered for the opening synchronization's own record. A locally
+            // minted failure (`disconnected`, `timeout`, `closed`, …) has no
+            // Gateway answer to report, so it is not stored and the record
+            // reads `gatewayCode=none`.
+            if case .presentation = lease.intent,
+               let failure = error as? GatewayFailure,
+               failure.answeredByGateway == true {
+                openingFailureGatewayCodes[sessionID] = failure.code
             }
             if let failure = error as? GatewayFailure,
                failure.code == "busy",

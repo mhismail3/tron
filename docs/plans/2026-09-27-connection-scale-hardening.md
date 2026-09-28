@@ -3,6 +3,8 @@
 - **Started:** 2026-09-27
 - **Status:** Active (Phase 1 runs on `hardening/integration`; that branch's copy of this plan is authoritative until R-1)
 - **Last updated:** 2026-09-28, O-6a blocked on a quiet-host repeat (second review response landed)
+
+- **Last updated:** 2026-09-28, O-4 (review round 4 addressed)
 - **Goal:** A clean, efficient and predictable Gateway and phone connection: the phone stays connected and loads any session promptly whenever the network path is up, however many sessions run and however large the history grows, and every disconnect or slow operation is attributable to one cause from the logs in one step.
 
 ## Goal and constraints
@@ -519,7 +521,7 @@ rows are in priority order.
 | E-2c | Ready | Bound the `time-profiler` export under 2 GB for `--scenario all` (see E-2b handoff: simulator-device recording, or a size refusal plus shorter windows) | E-2b | |
 | O-2 | Claimed | Gateway transport records: upgrade phases, inbound silence with Tailscale peer path | O-1 | orchestrator-dispatched deepseek-worker, 2026-09-28 |
 | O-3 | Done | Request span: one `rpc.completed` per slow RPC with every stage, wait and count | O-1 | orchestrator-dispatched deepseek-worker, 2026-09-28 |
-| O-4 | Claimed | Phone connection records that survive an export, stall watchdog, exact scene records | O-1 | orchestrator-dispatched deepseek-worker, 2026-09-28 |
+| O-4 | Done | Phone connection records that survive an export, stall watchdog, exact scene records | O-1 | orchestrator-dispatched deepseek-worker, 2026-09-28; review rounds 1–4 addressed; focused suites and the iOS Gateway E2E blackhole runs pass |
 | O-6b | Claimed | Impairment in the qualification scenario: blackhole, bandwidth cap, Gateway restart | O-6a | orchestrator-dispatched deepseek-worker, 2026-09-28 |
 | O-5 | Done | Gateway resource sampler and event-loop histogram | O-3 | orchestrator-dispatched deepseek-worker, 2026-09-28 |
 | O-7 | Ready | Incident triage tool: phone export plus Gateway log in, episodes by cause out | O-1, O-2, O-4 | |
@@ -2556,3 +2558,465 @@ a latency percentile.
   the `gateway.resources-failed` "already reported" flag is shared by a skipped
   tick and a thrown error, so an in-flight sample that later throws is not
   logged.
+
+### O-4 · Done (review rounds 1, 2, 3 and 4 addressed) · 2026-09-28 · orchestrator-dispatched deepseek-worker (branch `hardening/o-4`)
+
+- Result: the code, tests and docs are written and committed. The first commit
+  ran no check (the shared owned iOS test simulator was leased for the whole
+  session by the E-2b worker), so nothing in it was compiled here. Round 1 of
+  review then built and ran it (see the review response at the end of this
+  entry) and returned changes-required; every finding is addressed, and both
+  "Done when" items now have evidence: the focused suites pass and the iOS
+  Gateway E2E blackhole run wrote one episode that explains every attempt with
+  its gaps.
+- Evidence (first commit, before any review): the first commit ran
+  `python3 scripts/check-documentation-policy.py` (46 authored files) and
+  `scripts/personal-info-guard.sh`, both passing; no test command could run in
+  that session, because the shared owned simulator was leased for 25+ minutes by
+  the E-2b worker and the environment rules forbid booting another or bypassing
+  the lease. Round 1 then built and ran everything below, so that gap is closed.
+- Evidence (round 1, follow-up commit `2bc68ad21`):
+  `scripts/tron-ios-test build` succeeds; `scripts/tron-ios-test run` passes
+  `TronMobileTests/AppModelReconnectTests`, `AppModelLifecycleTests`,
+  `GatewayConnectionEpisodeRecorderTests` and `AppLogTests` (50 tests, 4
+  suites), `AppModelPerformanceSignpostTests` (23), `SessionPresentationStoreTests`,
+  `SessionMutationServiceTests` and `AppModelWorkspaceTests` (75), and
+  `PushNotificationCoordinatorTests`/`WorkspaceBrowserOwnerTests`. Negative
+  control: with the folded `stallGuard` closure restored, the new coordinator
+  test fails (`reconnect.stalled` count 1) and the fix makes it pass.
+  `scripts/ios-gateway-e2e-test prepare|build|run` passes
+  `RealGatewayPiBoundaryTests` (round 1: 1 test, 0 failures, 28.6 s; round 2
+  added the foreground leg and ran 1 test, 0 failures, 44.6 s).
+  `python3 scripts/check-documentation-policy.py` and
+  `scripts/personal-info-guard.sh` pass.
+- Changes: `feat(ios): phone connection records, stall watchdogs and exact scene
+  records (O-4)` and `fix(ios): address the O-4 review round 1 findings`
+  (`2bc68ad21`) on `hardening/o-4`.
+- Failure modes written before the code (in the header of the new recorder test
+  file): the stall watchdog ticks while backgrounded; an episode record spans a
+  background transition; a second recorder on the same always-on log mixes its
+  attempts into this episode or breaks attempt-before-episode order; a blocked
+  main actor is never recorded or is recorded again after the episode ended; an
+  attempt record loses an export field.
+- What the change does, file by file:
+  - New `GatewayConnectionEpisodeRecorder.swift` in
+    `packages/ios-app/Sources/State/`: one `gateway.attempt` per finished
+    attempt (`profile`, `attemptId`, `retry`, `stageReached`, `reason`,
+    `interfaces`, `pathSatisfied`, `delayBeforeMs`, `foreground`,
+    `gatewayConnectionId`, plus `durationMs`/`outcome`), one
+    `connection.episode` when the outage ends (`startedAt`, `endedAt`,
+    `attempts`, `causes`, `foregroundMs`, `maxGapBetweenAttemptsMs`, `endedBy` =
+    `connected`/`background`/`stopped`), the `reconnect.stalled` watchdog
+    (`RECONNECT_STALL_BOUND` = `reconnectStallBound`, 20 s, naming
+    `pathUnsatisfied`, `connectionAdmissionTask`, `committedConnectionTask`,
+    `reconnectTaskBusy`, `nonRetryable` or `other`), and `app.main-stall`
+    (`MAIN_STALL_BOUND` = `mainStallBound`, 2 s, measured by a 1 s ping from off
+    the main actor). Records from one episode are chained through one task so an
+    attempt is always written before its episode. Recording only; it schedules
+    nothing.
+  - `GatewayLifecycleCoordinator.swift` feeds it: attempt records for the
+    initial connect and every reconnect-loop attempt, `noteDisconnected` opens
+    an episode at the loss, `enteredBackground` ends it (`background`),
+    unauthenticated/non-retryable failures and `beginTransition` end it
+    (`stopped`), and `reconnectStallGuard` answers which guard is holding.
+    The two `scene.foreground`/`scene.background` delegate diagnostics are
+    removed: scene transitions now have one owner.
+  - `AppModel.swift`: the scene owner records `scene.resign-active`,
+    `scene.foreground`, `scene.background` and `scene.active`, once each, with
+    the transition's own timestamp (`sceneAt`); `operation.*` intervals still
+    open at background are signed `outcome=backgrounded`; and
+    `session.open.failure` now reports the Gateway's own code.
+  - `PerformanceSignposts.swift`/`AppLog.swift`: `endOpenIntervalsAtBackground()`
+    on `PerformanceSignposting` and its implementation (a default no-op keeps
+    other recorders unchanged). An interval the scene retired is signed once, as
+    `backgrounded`; a shorter one keeps its own single record at its end.
+  - `GatewayClientDiagnostics.swift`: `GatewayDiagnosticFailure.answerCode`,
+    which keeps a typed failure's own code (`conflict`, `busy`, `forbidden`)
+    instead of collapsing it to `transport`.
+- Diagnosis of the reported artifact (Do item 5): SwiftUI delivers `.inactive`
+  on the way *into* the foreground as well as on the way out, and AppModel
+  recorded `.inactive` as `app.backgrounded`; the resume then wrote
+  `app.foregrounded` at `.active`, so an export showed a background immediately
+  before a resume (the write was also asynchronous, so its log timestamp could
+  trail the transition). The fix records the four real transitions once, at the
+  moment they happen, with the scene's own timestamp; at a resume the pair is
+  now `scene.foreground` then `scene.active`.
+- Deviations:
+  - The watchdogs tick on a separate injected `watchdogClock`
+    (`packages/ios-app/Sources/State/GatewayConnectionEpisodeRecorder.swift`),
+    which the coordinator passes as `.continuous`, while every bound is measured
+    on the lifecycle clock. A watchdog tick on the manual test clock would be a
+    sleeper in every existing reconnect test's `ManualClock`, which several of
+    them count exactly (`recordedSleeps()`, `activeSleeperCount()`).
+  - Cancelled attempts (scene retirement or a profile switch cancels the task)
+    are not recorded as attempts: they reached no stage and their episode
+    already ends with `endedBy=background`/`stopped`.
+  - `GatewayReconnectSchedule` was left unchanged; `reconnectCanBeAccelerated`
+    already means "waiting in a delay", which is what the guard needs.
+  - Six edits sit outside the named owning files. `PerformanceSignposts.swift`
+    gained the `endOpenIntervalsAtBackground()` requirement and
+    `PerformanceInterval.trackedID`; the protocol it belongs to can only be
+    declared there, and `AppLog.swift` (a named owning file) implements it.
+    `GatewayClientDiagnostics.swift` gained `GatewayDiagnosticFailure.answerCode`,
+    which only that enum can declare, and round 3 added the
+    `GatewayFailure.answeredByGateway` marker to `GatewayProtocol.swift`, which
+    only that type can declare. `SessionPresentationStore.swift` reads that
+    marker to record `gatewayCode` only from an answer the Gateway sent, and
+    clears the stored code only for the presentation attempt that owns it.
+    `AppModel.swift` keeps the scene recorder it
+    already owned. `TronMobileApp.swift` passes the scene phase the launch
+    observed instead of a boolean, and `WorkspaceBrowser.swift` routes a
+    transient-error retry to the lifecycle's transport-recovery request instead
+    of a scene activation; both are the call sites of the AppModel API this task
+    changed. `GatewayReconnectScheduleTests.swift` was not
+    extended: the stall watchdog is owned by the new recorder, so its failure
+    modes are covered by the new
+    `GatewayConnectionEpisodeRecorderTests.swift` on a manual clock instead.
+  - `gateway.attempt` records only the selected profile's lifecycle attempts.
+    The task's field list says the `profile` is "selected or pool", but
+    `DashboardGatewayConnectionPool.swift` is the C-5 zone and not an owning
+    file. The orchestrator decided on review round 1 that O-4 keeps this
+    deviation and that C-5 widens the pool using the same recorder type (the
+    exact API is in the "For C-5" note); the observability row and this entry say
+    so.
+  - Do item 7 (rounds 2 and 3): a Gateway `conflict` on the open transaction is
+    reworded to `sync_failed` by `SessionPresentationStore.swift` before
+    `session.open.failure` is written. The record now reports both: `code` keeps
+    the phone-side wording (`transport` only when the failure never reached the
+    Gateway, which was the network-fault misreading Do item 7 exists to remove)
+    and `gatewayCode` carries what the Gateway itself answered, read from the
+    presentation owner that rewords it. Round 3 narrowed `gatewayCode` to the
+    Gateway's own answers only: the client stamps the failure it decodes from a
+    Gateway error response (`GatewayFailure.answeredByGateway`), and a code the
+    phone minted locally (`disconnected`, `timeout`, `closed`, `replaced`,
+    `backgrounded`, `invalid_response`, …) reads `gatewayCode=none`. The
+    orchestrator decided this on review round 2; the public failure mapping is
+    unchanged.
+  - `Tests/Gateway/RealGatewayPiBoundaryTests.swift` carries the two blackhole
+    E2E legs (a forced scene cycle and a foreground blackhole of a live socket);
+    O-1 extended the same file for its correlation join.
+- For the next agent (the remaining work is C-5's, not O-4's):
+  1. O-4 is Done. The E2E evidence, run on 2026-09-28 with
+     `scripts/ios-gateway-e2e-test prepare` then `build` then `run` (plain Node
+     22.22.0, after `npm run build` in `packages/gateway`), is the
+     `phone-connection-records` attachment of `RealGatewayPiBoundaryTests`
+     (1 test, 0 failures, 44.6 s; round 2, run `20260928T111132Z-run.rCfJ0r`).
+     Both blackhole legs are retained at
+     `~/.tron/workspace/files/hardening/o-4-blackhole-phone-connection-records.txt`:
+     the scene-cycle leg's forward attempt, blackholed failure
+     (`stageReached=hello-receive reason=transport durationMs=5042`), recovery
+     attempt (`delayBeforeMs=1770`) and one `connection.episode ... attempts=2
+     causes=transport maxGapBetweenAttemptsMs=6812 endedBy=connected`; and the
+     foreground leg's episode opened at the loss the phone saw
+     (`startedAt=2026-09-28T11:12:15.838Z`), the first attempt recorded 5.0 s
+     later, and one `connection.episode ... attempts=2
+     causes=pong_timeout,transport maxGapBetweenAttemptsMs=7021
+     endedBy=connected`. The foreground leg's own silent gap is about 1 ms (its
+     retry is `immediate:`), so that leg evidences the episode's start and first
+     cause, not a non-zero silent gap before the first attempt; the scene-cycle
+     leg's `delayBeforeMs=1770` is what shows one.
+  2. C-5 owns the pool's records; its API is in the "For C-5" note below.
+  3. If the recorder tests pass but the coordinator-level expectations move
+     (for example an extra `gateway.attempt` for a cold start), check
+     `attemptStage` in `GatewayLifecycleCoordinator.swift` first: it derives the
+     stage from the client's handshake diagnostic when the failure path already
+     has one.
+
+**Review response (round 1, follow-up commit on this branch).** An independent
+review built the branch, fixed two compile errors in a throwaway copy, and ran
+the focused tests; it returned changes-required. Every finding is addressed:
+
+- Blocker: `recorder.stallGuard` folded `self?.reconnectStallGuard` into one
+  optional, so a progressing episode answered `other` and any 20 s stretch
+  logged `reconnect.stalled`. It now unwraps `self` first. Verified by
+  regression: with the folded closure restored, the new
+  `AppModelReconnectTests.backoffIsNotAStall` fails; with the fix it passes, and
+  `unsatisfiedPathIsNamedAsTheGuard` reproduces `guard=pathUnsatisfied`. The
+  coordinator therefore accepts an injected `watchdogClock` (production keeps
+  `.continuous`), so a coordinator-level test can advance the bound without
+  waking the lifecycle timeline.
+- Blocker: the test target did not compile (`exerciseBlackholedReconnect` passed
+  `self` into a `@MainActor` method; the recorder test listed `startedAt` after
+  `gatewayConnectionID`). The blackhole helper is now a `@MainActor static`
+  function returning the records, the attachment is added by the caller, and the
+  recorder test arguments are in declaration order.
+- Blocker: `reconnectAttemptsAndEpisodeAreRecorded` expected three attempts; the
+  code records the initial connect plus three loop retries. The test now expects
+  four, the fourth connecting, and the episode's actual
+  `maxGapBetweenAttemptsMs=60000`.
+- Major: the blackhole assertions counted the pre-blackhole connect and never
+  checked the gaps. They now count only records written after the blackhole
+  begins, require one `endedBy=connected` episode, and assert the reported
+  maximum gap is at least the blackholed attempt's own duration.
+- Major: pool-profile attempts stay unrecorded. The orchestrator decided O-4
+  keeps the selected profile's lifecycle only; the observability row says so and
+  this stays under Deviations. C-5 will reuse the recorder from
+  `DashboardGatewayConnectionPool.swift`; the API it must call is in the
+  "For C-5" note below. The misleading two-recorder test now names the property
+  production exhibits (two recorders on one always-on log stay attributable and
+  ordered) instead of claiming a two-profile failure mode.
+- Major: `openEpisode` dated the episode's wall-clock start with `Date()` at the
+  open, up to a transport deadline after the monotonic start. It now derives the
+  wall-clock start from the monotonic instant, so `startedAt + durationMs`
+  matches `endedAt`.
+- Minor: both watchdogs are one task that keeps the recorder weakly and is
+  cancelled in `deinit`, so a recorder freed with an episode open leaves nothing
+  ticking.
+- Minor: the in-flight marker is now the loop identity, cleared when that loop's
+  attempt ends (before its backoff) and when the loop retires, so a replaced
+  loop cannot clear its successor's marker or park the watchdog at `nil`.
+- Minor: `beginTransition` and `enteredBackground` end the episode with its own
+  profile and generation rather than the current selection.
+- Minor: a Gateway restart (`system.stopping`, `countsAsTransportFailure: false`)
+  opens an episode too, with `causes=restart`, so a restart whose first
+  reconnect succeeds is still on the timeline.
+- Minor: a connection that drops under projection after a successful handshake
+  is recorded against that attempt as `<attemptId>#postConnect` with
+  `stageReached=postConnect`, so one attempt cannot be read as two.
+- Minor: `recordAttempt` now passes the attempt's handshake diagnostic on the
+  failure paths that already have one, so `interfaces` is the attempt's own.
+- Minor: Do items 6 and 7 have tests now
+  (`AppLogTests.backgroundedIntervalIsSignedOnce`,
+  `AppModelPerformanceSignpostTests.sessionOpenConflictReportsItsOwnCode`).
+  `endOpenIntervalsAtBackground` only suppresses intervals it actually signed, so
+  a short interval that later runs long still writes its one record; the dead
+  `PerformanceResult.backgrounded` case and its branch are deleted.
+  `GatewayClientDiagnostics.swift` is now listed among the files outside the
+  named set (Deviations).
+- Minor: the scene recorder is seeded from the real launch phase
+  (`AppModel.start(scenePhase:)`), so a cold or backgrounded launch cannot report
+  `from=active`; the workspace-browser transient-error retry calls
+  `becameActive(recordsSceneTransition: false)` instead of writing a scene
+  record for a scene that did not move; `WorkspaceBrowser`'s two call sites are
+  the whole change.
+- Nits: new bookkeeping properties are `@ObservationIgnored`; the duplicate
+  `setProxyMode` is deleted in favour of the existing `control`, which is now
+  static so the static blackhole helper can drive the proxy; `app.main-stall`
+  is a warning (bound hit) rather than an error and the row says so; recorder
+  test 1 no longer depends on two watchdogs sleeping (there is one).
+- Nits rejected. `maxGapBetweenAttemptsMs` keeps its start-to-start meaning: the
+  same review's blackhole assertion requires a gap that contains the blackholed
+  attempt's own duration, which an idle-only gap cannot provide, and the row
+  defines the field as the largest gap between the episode's start or two
+  consecutive attempt starts. `silentForMs` on `reconnect.stalled` is where
+  silence is measured. The SwiftUI `.inactive`-on-resume explanation stays
+  labelled as inferred (nothing here reproduced it); the mapping is written so
+  it is correct whether or not the platform delivers that phase.
+
+**Review response (round 2, follow-up commit on this branch).** An independent
+review built the branch, ran the focused suites (102 tests, all passing) and a
+Swift 6 repro, and returned changes-required: `app.main-stall` could not detect
+the failure it exists for, and the stall watchdog was blind to a loop parked in
+projection. Both are fixed, with a real main-actor block test and a coordinator
+test, and every other finding is addressed:
+
+- Blocker (main-stall): the watchdog task was created from a `@MainActor` owner,
+  so it ran on the main actor and its own wake-up queued behind the block it was
+  measuring — it took its start time after the block ended and timed a hop of
+  microseconds. The loop now runs in a `nonisolated static` function reached
+  through a closure with no main-actor access (closure isolation is inferred from
+  the body and travels with the closure even when it is typed `@Sendable`, so
+  `Task.detached` alone was not enough — measured, not assumed). The gate test is
+  replaced by one that blocks the main actor synchronously for 5 s with the
+  production ping and clocks: it passes with the block it served (the assertion
+  allows one watchdog interval and the detached loop's first wake-up, about 1 s
+  each, of the 5 s block — about 3 s recorded) and fails with no record at all
+  before the fix.
+- Major (parked loop): the in-flight marker was cleared only in the generic
+  failure catch, so a loop parked in projection read as "progressing" forever,
+  and the bare state-mismatch `return`s left a dead loop's marker matching
+  `reconnectLoopID`. The marker is now cleared as soon as the handshake is
+  recorded and by a task-level `defer` when the loop exits for any reason, with
+  the identity check that keeps a replaced loop from clearing its successor's
+  marker. New test: a delegate whose `lifecycleRefreshAll` never returns, a drop
+  under it, and `guard=reconnectTaskBusy` on `reconnect.stalled`.
+- Minor: a post-connect failure is now dated at the drop and is not counted in
+  the episode's `attempts` (it belongs to the attempt the previous episode
+  already counted), with a recorder test for both.
+- Minor: a transport loss now passes its own code as the episode's cause, so a
+  disconnect whose first reconnect succeeds no longer writes `causes=none`.
+- Minor: the E2E blackhole helper tears its lifecycle and client down on the
+  success path, and it gained a foreground-blackhole leg (the O-6b shape: a live
+  socket blackholed in the foreground, the loss seen by the phone through its
+  liveness probe, the episode opened at that loss).
+- Minor: the launch seed is taken before `start`'s first await and only while no
+  scene transition has been recorded, so a transition during startup is not
+  overwritten.
+- Minor: `becameActive(recordsSceneTransition:)` is gone; the workspace browser's
+  transient-error retry routes to `AppModel.recoverTransientTransportFailure()`,
+  a lifecycle reconnect request, so no scene activation is minted for a scene
+  that did not move.
+- Minor: every interval open at background is marked; one that was shorter than
+  the threshold then and passes it when its owner unwinds is signed
+  `backgrounded` (warning) instead of the background cancellation's `failure` at
+  error level, with a test.
+- Minor: `session.open.failure` carries `gatewayCode` beside the reworded `code`,
+  per the orchestrator's round-2 decision, and the test asserts both.
+- Nits: the unrun-check paragraph is now attributed to the first commit; the pool
+  deviation appears once; `TronMobileApp.swift` and `WorkspaceBrowser.swift` are
+  in the deviations list; the `connection.episode` row says an episode can end
+  with no attempt; and the two escaped `\(UUID().uuidString)` literals in
+  `AppModelReconnectTests.swift` interpolate again, so the log path and
+  UserDefaults suite are unique per test.
+
+**Review response (round 3, follow-up commit on this branch).** An independent
+review built the branch, ran the focused suites, compiled a Swift 6 main-stall
+repro and checked every round-2 finding against the code; it returned
+changes-required for one regression this branch introduced, plus two minor
+findings, a minor test-evidence gap and three nits. Every one is addressed:
+
+- Major: the workspace browser's transient-error retry had been routed to
+  `lifecycle.requestReconnect(immediate: true, replaceExisting: true)`, which
+  O-4's "Do not: change reconnect behaviour" forbids: in `.unauthorized` it
+  flipped to `.reconnecting` and retried a token the Gateway had already
+  rejected, and in `.connected` it replaced the live socket and published
+  `.reconnecting`. The lifecycle now owns `requestTransportRecovery()`, which
+  mirrors `becameActive()`'s non-scene branch exactly — reconnect only from
+  `.offline`/`.reconnecting`/`.restarting`, nothing otherwise, no scene side
+  effects, no foreground reconciliation, no retry of a rejected credential and no
+  peer socket while a background retirement barrier runs — and
+  `AppModel.recoverTransientTransportFailure()` calls it. Two focused tests
+  (`transientTransportRetryLeavesUnauthorized`,
+  `transientTransportRetryLeavesConnectedTransport`) assert the state, the
+  attempt count, the socket count, the sleeper count and the absence of a scene
+  record.
+- Minor: the launch scene seed can no longer be overwritten by the phase the
+  launch sampled, because every observed transition spends the seed, including
+  one that matches the phase already recorded (which is the `becameActive()`
+  before `start()` case).
+- Minor: `gatewayCode` now carries only codes the Gateway itself answered. The
+  client stamps a failure it decodes from a Gateway error response
+  (`GatewayFailure.answeredByGateway`) at the transport boundary, the
+  presentation store records the code only from a stamped failure, and it clears
+  the stored code at the start of each opening attempt, so a retried `busy`
+  cannot outlive its retry. `sessionOpenLocalFailureReportsNoGatewayCode` covers
+  the local case and the existing `sessionOpenConflictReportsItsOwnCode` covers
+  the Gateway's answer. A denylist of local codes was rejected: it would leave
+  the same hole for every other phone-minted code (`retired`, `cancelled`,
+  `possibly_sent`), while the stamp is set where the answer is decoded.
+- Minor: the foreground blackhole leg now asserts the evidence that
+  discriminates — the episode's first cause is the loss code the phone saw, which
+  only `noteDisconnected` contributes — and the comment on its two coarse time
+  bounds says they cannot separate "opened at the loss" from "opened by the
+  first attempt".
+- Nit: the main-stall test waits a bounded 500 ms after the episode ends before
+  counting, so a watchdog that was never stopped would have landed its record.
+- Nit: the O-4 entry's 2,988 ms figure is corrected (the test asserts at least
+  `blocked − 2 × watchdogInterval` for a 5 s block, so 2,988 ms would fail it);
+  and the `connection.episode` row says a post-connect failure is not a further
+  attempt. (This round's claim that the off-owning-file sentence "now counts the
+  files it names" was wrong: round 4 corrected the count to the six files and
+  added `SessionPresentationStore.swift`.)
+- Nit: the `lastProgressAt` comment names what is actually fed to it (the
+  episode's open, attempt starts and the post-connect drop).
+
+Evidence for this round: `scripts/tron-ios-test build` succeeds;
+`scripts/tron-ios-test run` passes 304 tests in 12 suites (`AppModelReconnectTests`, `AppModelPerformanceSignpostTests`,
+`AppModelLifecycleTests`, `GatewayConnectionEpisodeRecorderTests`,
+`SessionPresentationStoreTests`, `ComposerDraftCoordinatorTests`,
+`GatewayProtocolContractTests`, `GatewayClientTransportTests`,
+`BoundedHTTPDataTransportTests`, `GatewayPairingTransportTests`,
+`AppModelWorkspaceTests`, `AppLogTests`). Negative controls, run on this branch:
+with `AppModel.recoverTransientTransportFailure()` restored to
+`requestReconnect(immediate: true, replaceExisting: true)`, the two reconnect
+tests fail exactly as the review predicted (`.unauthorized` → `.reconnecting`
+with a second socket request; `.connected` → `.reconnecting` with a replaced
+socket and a scheduled sleeper); with the presentation store's stamp gate
+removed, `sessionOpenLocalFailureReportsNoGatewayCode` fails. Both files were
+restored byte-for-byte before the passing run. The runs are retained under
+`$HOME/Library/Developer/Tron/ios/test-runs/`: the passing round-3 run is
+`20260928T115631Z-run.o3j4Ws`, the two negative controls are
+`20260928T115442Z-run.4M4NoV` (2 failed) and `20260928T115532Z-run.zEOTyx`
+(1 failed). Not run in this round: the iOS Gateway E2E
+(`scripts/ios-gateway-e2e-test`), whose fixture directory is shared per user with
+parallel workers; `RealGatewayPiBoundaryTests` does compile in the test build.
+The round-4 review ran it on `ade1d4432` and it passed (1 test, 0 failures,
+44.4 s; round 4's own record is below).
+`python3 scripts/check-documentation-policy.py` and
+`scripts/personal-info-guard.sh` pass.
+
+**Review response (round 4, follow-up commit on this branch).** An independent
+review of round 3 found no blockers or majors: one minor test gap, three nits
+and one cleanup side effect it reported itself. Every finding is addressed:
+
+- Minor: the two round-3 reconnect tests only asserted that the retry does
+  nothing, so a `requestTransportRecovery()` that always returned `nil` would
+  have passed them and every other suite. New
+  `AppModelReconnectTests.transientTransportRetryRevivesParkedRetry` parks the
+  lifecycle in `.reconnecting` behind its backoff sleeper, calls
+  `AppModel.recoverTransientTransportFailure()`, and requires an immediate
+  second socket request with no clock advance, no remaining sleeper, no extra
+  recorded sleeper and no scene record. Negative control: with
+  `requestTransportRecovery()` replaced by `return nil`, that test fails on its
+  own (the second request never arrives) and the other 35 reconnect tests still
+  pass.
+- Nit: the launch seed had no test, including the round-3 flag-before-guard fix.
+  New `AppModelLifecycleTests.launchSeedDoesNotOverwriteAnObservedTransition`
+  activates the scene, then runs `start(scenePhase: .inactive)`, then resigns
+  active, and requires the `scene.resign-active` record. Negative control: with
+  the seed spent only when the transition changed the phase (the round-2 shape),
+  the stale `.inactive` sample suppresses that record and only this test fails.
+- Nit: `GatewayFailure.answeredByGateway` was a `Codable` property, so a wire
+  frame could stamp or clear phone-local provenance, and a stamped failure
+  stopped comparing equal to an otherwise identical wire literal. It is out of
+  `CodingKeys` now: `GatewayResponse` decoding cannot read it and an encoded
+  failure never carries it, matching the neighbouring not-Codable provenance
+  types. The presentation store's per-attempt clear is scoped to `.presentation`
+  like its set, so a `.reconnect` attempt neither stores nor clears a
+  Gateway-answer code. New
+  `GatewayProtocolContractTests.failureProvenanceStaysOffTheWire` decodes a
+  response whose error frame carries `answeredByGateway: true`, requires the
+  decoded marker to be `nil`, requires the stamped encoding to omit the key, and
+  requires the local stamp to still distinguish a decoded answer from a literal.
+  Negative control: with the synthesized keys restored, the wire marker is read
+  as `true`, the encoded failure carries the key and the stamp stops
+  discriminating; only this test fails.
+  The clear-scope half is inspected, not reproduced: the only reader is
+  `AppModel.openSessionPresentation`'s failure record, every presentation attempt
+  clears then maybe sets the code, and a `.reconnect` attempt cannot write it.
+- Nit (plan text): the off-owning-file sentence now counts the six files it
+  names and includes `SessionPresentationStore.swift`; the missing space in
+  "12 suites (" is fixed; the round-3 claim that the sentence "now counts the
+  files it names" is corrected in place; and the round-3 evidence paragraph,
+  which recorded the iOS Gateway E2E as not run, now points at the run below.
+
+Evidence for this round: `scripts/tron-ios-test build` succeeds and
+`scripts/tron-ios-test run` passes 200 tests in 6 suites (`AppModelReconnectTests`,
+`AppModelLifecycleTests`, `GatewayProtocolContractTests`,
+`SessionPresentationStoreTests`, `AppModelPerformanceSignpostTests`,
+`GatewayClientTransportTests`), retained as
+`$HOME/Library/Developer/Tron/ios/test-runs/20260928T125540Z-run.xsKDAH` (an
+earlier identical pass before the last test-text trim is
+`20260928T125222Z-run.nPYGdf`). The
+three negative controls above are retained as
+`20260928T124502Z-run.SCxZk3` (1 of 36 failed),
+`20260928T124614Z-run.hdxuF2` (1 of 9 failed) and
+`20260928T124842Z-run.MUA7h9` (1 of 17 failed); each source file was restored
+byte-for-byte (verified by `shasum -a 256 -c`) before the passing run. The iOS
+Gateway E2E was attempted again in this round with private fixture directories
+(`TRON_IOS_E2E_STATE_DIR=/tmp/o4rev5-e2e`,
+`TRON_IOS_E2E_DERIVED_DATA=/tmp/o4rev5-e2e-dd`): `prepare` built the Gateway but
+the fixture exited immediately because the shared dependency tree's `node-pty`
+prebuild cannot be loaded in the pinned Node (`ERR_DLOPEN_FAILED`,
+`prebuilds/darwin-arm64/pty.node` Team ID mismatch; the same failure reproduces
+with a bare `require('node-pty')` from `packages/gateway`). That fixture was
+stopped with `scripts/ios-gateway-e2e-test stop` (no shared state deleted), and
+the round-4 review's own E2E pass on `ade1d4432` (1 test, 0 failures, 44.4 s)
+remains the run-of-record for this task. `python3
+scripts/check-documentation-policy.py` and `scripts/personal-info-guard.sh` pass.
+
+**For C-5.** Reuse `GatewayConnectionEpisodeRecorder`
+(`packages/ios-app/Sources/State/GatewayConnectionEpisodeRecorder.swift`) from
+`DashboardGatewayConnectionPool.swift`, one recorder per pool entry, and call:
+`noteDisconnected(profileID:lifecycleGeneration:foreground:cause:)` when an
+entry's connection is lost; `recordAttempt(GatewayConnectionAttempt(...))` with
+`profileID` set to the pool profile, `lifecycleGeneration` set to the entry's
+generation, `attemptID` set to the loop ID, and the attempt's own
+`startedAt`/`delayBeforeMs`/`stageReached`/`reason`/`interfaces`/`succeeded`;
+`endEpisode(.background)` / `.stopped` / `.connected` at the entry's terminal
+transitions; and `stallGuard = { ... }` mapping the pool's own holding condition
+onto `pathUnsatisfied`/`nonRetryable`/`reconnectTaskBusy`/`other`, returning
+`nil` while an attempt is in flight or waiting in its backoff. Pass the pool's
+`clock` and an `appLog`; leave `watchdogClock` at its default unless a test needs
+its own grid. The observability rows already list `profile` and both record
+events; widen them to name the pool owner in the same change.

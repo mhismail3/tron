@@ -162,7 +162,7 @@ struct PushNotificationCoordinatorTests {
         let defaults = UserDefaults(suiteName: suiteName)!
         defer { defaults.removePersistentDomain(forName: suiteName) }
         let model = AppModel(profiles: GatewayProfileStore(defaults: defaults))
-        await model.start(sceneIsActive: false)
+        await model.start(scenePhase: .background)
         let tap = PushNotificationTap(sessionID: "session-1", machineID: "machine-1")
         model.requestPushNavigation(tap)
         #expect(model.pushNavigationRequest?.tap == tap)
@@ -214,7 +214,7 @@ struct PushNotificationCoordinatorTests {
             try await withTestWatchdog {
                 await socket.enqueue(pushHelloFrame())
                 try await model.connectHostedGateway(profile: profile, token: "token")
-                await model.start(sceneIsActive: true)
+                await model.start(scenePhase: .active)
 
                 let route = try await model.navigationRoute(for: PushNotificationTap(
                     sessionID: "session-from-push",
@@ -273,7 +273,7 @@ struct PushNotificationCoordinatorTests {
             try await withTestWatchdog {
                 await oldSocket.enqueue(pushHelloFrame())
                 try await model.connectHostedGateway(profile: profile, token: "token")
-                await model.start(sceneIsActive: true)
+                await model.start(scenePhase: .active)
                 await model.enteredBackground().value
                 try await oldSocket.waitUntilClosed()
                 #expect(await oldSocket.closed())

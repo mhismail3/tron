@@ -1042,11 +1042,106 @@ struct AppModelPerformanceSignpostTests {
         }
     }
 
+    @Test("an answered open failure is reported with its own code, never transport")
+    func sessionOpenConflictReportsItsOwnCode() async throws {
+        try await withTestWatchdog {
+            let logURL = FileManager.default.temporaryDirectory
+                .appending(path: "session-open-conflict-\(UUID().uuidString).jsonl")
+            defer {
+                try? FileManager.default.removeItem(at: logURL)
+                try? FileManager.default.removeItem(at: logURL.appendingPathExtension("1"))
+            }
+            let appLog = AppLog(fileURL: logURL)
+            let harness = try await makeHarness(appLog: appLog)
+            let responder = Task {
+                let open = try await request(in: harness.socket, frameIndex: 1)
+                #expect(open.method == "session.open")
+                await harness.socket.enqueue(
+                    errorResponse(id: open.id, code: "conflict", retryable: false)
+                )
+            }
+            defer { responder.cancel() }
+            var thrown = "none"
+            do {
+                _ = try await harness.model.openSessionPresentation("session")
+            } catch {
+                thrown = "\(type(of: error)) \(error)"
+            }
+            try await valueOfOwnedTask(responder)
+            // The Gateway answered with `conflict`. The presentation store owns
+            // the wording of an open failure and rewords a typed open/sync
+            // failure as its own `sync_failed` before this record, so what this
+            // call site owns is that both are reported: the phone-side wording in
+            // `code` (before this change these read `code=transport`, which looks
+            // like a network fault that never reached the Gateway) and
+            // `gatewayCode` for what the Gateway itself answered.
+            let records = await operationRecords(in: appLog, event: "session.open.failure")
+            #expect(records.count == 1)
+            #expect(records.first?.message.contains("code=sync_failed") == true)
+            #expect(records.first?.message.contains("gatewayCode=conflict") == true)
+            #expect(records.first?.message.contains("code=transport") == false)
+            #expect(records.first?.level == "warning")
+            #expect(thrown.contains("sync_failed"))
+            await harness.close()
+        }
+    }
+
+    @Test("a locally minted open failure reports no Gateway code")
+    func sessionOpenLocalFailureReportsNoGatewayCode() async throws {
+        try await withTestWatchdog {
+            let logURL = FileManager.default.temporaryDirectory
+                .appending(path: "session-open-local-\(UUID().uuidString).jsonl")
+            defer {
+                try? FileManager.default.removeItem(at: logURL)
+                try? FileManager.default.removeItem(at: logURL.appendingPathExtension("1"))
+            }
+            let appLog = AppLog(fileURL: logURL)
+            let harness = try await makeHarness(appLog: appLog)
+            // The Gateway answers every open with a body the store cannot admit.
+            // The failure code is therefore the phone's own `invalid_response`,
+            // minted from the answer without the Gateway naming a code, so there
+            // is no Gateway code to report. A locally minted `disconnected` or
+            // `timeout` is the same case: the phone never reached the Gateway.
+            let responder = Task {
+                for index in 1...3 {
+                    let open = try await request(in: harness.socket, frameIndex: index)
+                    #expect(open.method == "session.open")
+                    await harness.socket.enqueue(successResponse(
+                        id: open.id,
+                        result: .object(["session": .object([:])])
+                    ))
+                }
+            }
+            defer { responder.cancel() }
+            do {
+                _ = try await harness.model.openSessionPresentation("session")
+                Issue.record("a malformed projection unexpectedly opened")
+            } catch {
+                // The store's own retry budget ends the open with its failure.
+            }
+            try await valueOfOwnedTask(responder)
+            let records = await operationRecords(in: appLog, event: "session.open.failure")
+            #expect(records.count == 1)
+            #expect(records.allSatisfy { $0.message.contains("gatewayCode=none") })
+            await harness.close()
+        }
+    }
+
+    private func operationRecords(in log: AppLog, event: String) async -> [AppLogRecord] {
+        for _ in 0..<600 {
+            let values = await log.snapshot().filter { $0.event == event }
+            if values.count >= 1 { return values }
+            try? await Task.sleep(for: .milliseconds(5))
+        }
+        return await log.snapshot().filter { $0.event == event }
+    }
+
     private struct Harness: @unchecked Sendable {
         let socket: ScriptedGatewaySocket
         let client: GatewayClient
         let model: AppModel
         let signposts: RecordingPerformanceSignposts
+        let appLog: AppLog
         let gatewayIDs: SequenceUUIDSource
         let appModelIDs: SequenceUUIDSource
         let defaults: UserDefaults
@@ -1067,7 +1162,10 @@ struct AppModelPerformanceSignpostTests {
         let params: JSONValue?
     }
 
-    private func makeHarness(clock: MonotonicClock = .continuous) async throws -> Harness {
+    private func makeHarness(
+        clock: MonotonicClock = .continuous,
+        appLog: AppLog = .shared
+    ) async throws -> Harness {
         let socket = ScriptedGatewaySocket()
         let signposts = RecordingPerformanceSignposts()
         // Keep request and model identities deterministic and bounded. The
@@ -1103,7 +1201,8 @@ struct AppModelPerformanceSignpostTests {
             cache: SnapshotCache(root: cacheRoot),
             clock: clock,
             uuidSource: appModelIDs.source,
-            performanceSignposts: signposts
+            performanceSignposts: signposts,
+            appLog: appLog
         )
         await socket.enqueue(helloFrame())
         do {
@@ -1119,6 +1218,7 @@ struct AppModelPerformanceSignpostTests {
             client: client,
             model: model,
             signposts: signposts,
+            appLog: appLog,
             gatewayIDs: gatewayIDs,
             appModelIDs: appModelIDs,
             defaults: defaults,
