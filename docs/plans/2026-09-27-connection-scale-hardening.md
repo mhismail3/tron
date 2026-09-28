@@ -7891,7 +7891,8 @@ wait).
   timed-out disposable read sends a cancel frame, a mutation does not" (asserts
   the exact `{"type":"cancel","id":…}` frame, that no frame follows a
   `session.prompt` timeout, and one `rpc.cancelled` record); retained result
-  bundle `~/.tron/internal/ios/test-runs/20260928T194314Z-run.MOPcKv/`.
+  bundle `~/Library/Developer/Tron/ios/test-runs/20260928T194314Z-run.MOPcKv/`
+  (`20260928T200449Z-run.RGHCPR/` for the 55-test review-response run).
 - Deviations: `rpc.cancelled` replaced `rpc.completed` for a cancelled request
   rather than joining it: one abandoned read is one record, and O-3's span
   breakdown rides on it. Cancelling a `session.open` that another request still
