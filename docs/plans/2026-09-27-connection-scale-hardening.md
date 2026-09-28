@@ -18,6 +18,8 @@
 - **Last updated:** 2026-09-28, G-10 second review round (receipt totals kept across a rebuild, connection-owner row added)
 
 - **Last updated:** 2026-09-28, G-8 background work audit: third review round corrected the re-admission fence, the socket promise and the discovery-open ceiling
+
+- **Last updated:** 2026-09-28, G-1b catalog watcher (review round 2: spurious whole-folder passes, true `catalog.changed` bound, O-6a evidence)
 - **Goal:** A clean, efficient and predictable Gateway and phone connection: the phone stays connected and loads any session promptly whenever the network path is up, however many sessions run and however large the history grows, and every disconnect or slow operation is attributable to one cause from the logs in one step.
 
 ## Goal and constraints
@@ -552,7 +554,7 @@ rows are in priority order.
 | O-7 | Done | Incident triage tool: phone export plus Gateway log in, episodes by cause out | O-1, O-2, O-4 | orchestrator-dispatched deepseek-worker, 2026-09-28; review rounds 1-4 addressed (attribution, older-export records and attempts, Tailscale capture, scene splits, recovery-handshake and attempt ownership, relay-window coverage). Blocked because the incident export does not reproduce all four Context causes: cause 4 has no `gateway-stall` episode of its own (its only candidate is a slow span on a socket already closed), the run reads 121 episodes against Context's 77 reconnect episodes, `phone-stall=2` where one wrong-label cause was counted, and `gateway-capacity=0` because the only capacity event predates the export (see the handoff) |
 | C-1 | Ready | Projection work never blocks or parks reconnect; parked episodes self-resume | O-4, O-6b | |
 | G-1a | Done | Catalog owner and in-memory index fed by Gateway-owned changes | O-3, O-6a | orchestrator-dispatched deepseek-worker, 2026-09-28 |
-| G-1b | Claimed | Filesystem watcher and background reconciliation for external writers | G-1a | orchestrator-dispatched deepseek-worker, 2026-09-28 |
+| G-1b | Done | Filesystem watcher and background reconciliation for external writers | G-1a | orchestrator-dispatched deepseek-worker, 2026-09-28 (the O-6a confirmation of the Done-when is owed by the orchestrator) |
 | G-1c | Ready | Move every catalog reader to the index; delete request-path walks and the full-parse fallback | G-1b | |
 | G-1d | Ready | Replace the catalog wording in `connection-resilience.md` with the index contract (D-3) | G-1c | |
 | G-3 | Done | No audience, no projection: build and serialize snapshots only for subscribers | O-5, O-6a | orchestrator-dispatched deepseek-worker, 2026-09-28 (branch `hardening/g-3`; review round 1 addressed; CPU comparison and O-5's cross-check owed to the orchestrator) |
@@ -1115,7 +1117,8 @@ needed), **Checks**, **Docs**, **Done when**, **User action**.
 - **Checks:** G-1a's `session-catalog.test.ts` (in
   `packages/gateway/src/sessions/`), extended with a temporary directory.
 - **Done when:** in O-6a, child-file appends reach the index within 1 s without
-  any request-path walk.
+  any request-path walk. (The in-memory half is covered by this row's cases; the
+  O-6a confirmation is owed by the orchestrator, which owns the probe.)
 - **User action:** none; ships in the release (R-2).
 
 ### G-1c — Readers use the index; delete the walks
@@ -6242,3 +6245,361 @@ wait).
   `gateway-stall` episode is the correct reading, not a defect. Episode count
   (121 vs 77) is the tool splitting outages at background blips by design.
   R-4 confirms on the evaluation day's O-1-keyed exports.
+
+### G-1b · Blocked · 2026-09-28 · orchestrator-dispatched deepseek-worker (branch `hardening/g-1b`)
+
+- Result: the catalog owner now watches its folder and reconciles as its
+  backstop. `SessionCatalog.start()` starts a recursive `fs.watch` (FSEvents on
+  macOS) on the canonical sessions root plus a `CATALOG_RECONCILE_INTERVAL_MS`
+  (30-minute) pass; a path event is a hint, debounced
+  `CATALOG_EVENT_DEBOUNCE_MS` (250 ms), that re-reads one file's durable tail and
+  publishes one row through the same lane every Gateway-owned change uses. A
+  watcher that was observing and stopped is replaced and the folder's own cut is
+  re-read; a root that cannot be watched yet is retried
+  (`CATALOG_WATCH_RETRY_MS`, 5 s) while the index keeps serving the rows it has.
+  The row's Done-when is met in memory (the integration case below); the O-6a
+  confirmation of it is owed by the orchestrator, which has the probe and the
+  request-path walk counts.
+- Evidence, mechanism (real watcher, real catalog, real Gateway wiring):
+  - `npx vitest run src/sessions/runtime-registry.integration.test.ts -t
+    "publishes an external append"` **1 passed, 616 ms**: against a live
+    `RuntimeRegistry` (the code path the fixture Gateway runs), a child
+    transcript created and then appended to by a writer the Gateway does not own
+    reaches its catalog row (`delegated`, then `messageCount` 1 and the file's
+    exact size) in ≤ 1 s, and the O-5 sampler's `recordCatalogWalk` recorded no
+    catalog structure walk in that window.
+  - `npx vitest run src/sessions/session-catalog.test.ts` **19 passed / 19 in
+    6.5 s**, twice; `session-catalog.test.ts` + `catalog-metadata-index.test.ts`
+    + `catalog-discovery.test.ts` **40 passed / 40 in 6.7 s**. The case "advances
+    a row for an external append within a second without walking the catalog"
+    runs the production watcher with the interval backstop disabled
+    (`reconcileIntervalMs: 0`), so only the watcher can publish the append.
+  - `src/sessions/runtime-registry.integration.test.ts` full file **248 tests: 1
+    failed** — the known load flake "keeps a large streamed write visible
+    through snapshot recovery and canonical handoff" (5081 ms against its 5 s
+    `waitUntil`; passes alone in 4.65 s, and alone on the pre-G-1b code in
+    4.67 s, so its ~0.3 s margin is the cause, not this change). `-t "catalog"`
+    35/35, `-t "index"` 8/8. `npx tsc --noEmit -p .` clean;
+    `python3 scripts/check-documentation-policy.py` and
+    `scripts/personal-info-guard.sh` pass.
+- Blocked on the O-6a half of "Done when" ("in O-6a, child-file appends reach
+  the index within 1 s without any request-path walk"). Three bounded
+  `scripts/tron-profile gateway --scenario multi-session --iterations 1
+  --catalog-files 200 --catalog-mib 32 --no-build` runs were made (2 × 30 s and
+  1 × 120 s mixed windows; last run
+  `20260928T144239Z-multi-session-fcce82`, `finished in 3.3 min`, no
+  "uncommitted tracked changes" warning). Review round 1 established that those
+  runs were made on the wrong tree and that their method cannot measure the bound
+  at all, so they are kept here only as history: the run's own `report.json`
+  source block names the `hardening/integration` worktree path, branch
+  `hardening/integration`, revision `b18919961`, whose
+  `src/sessions/session-catalog.ts` and 07:13 `dist` contain no
+  `watchCatalogFolder` (`grep -c` = 0 in both). The measured fixture Gateway
+  therefore had no watcher, and a frozen durable document was that tree's
+  expected behaviour. The "one `catalog.reconciled` per two starts" reading was
+  wrong for the same reason: the priming Gateway stopped 3.5 s after it started,
+  before its reconcile finished, and the single `200 added` in 8274 ms belongs to
+  the second, measured start. The sampler read only the durable document, which
+  is written at most every `CATALOG_PERSIST_MAX_WAIT_MS` (60 s), so no run of
+  that shape can show a 1 s bound. The "unexplained persist-cadence signal" and
+  the proposed T-2 row that rested on it are withdrawn, and the corrected
+  procedure is recorded in the round-1 entry below; no T-2 row was added.
+- Changes: `packages/gateway/src/sessions/session-catalog.ts` (the watcher, the
+  cadences, `catalog.changed` / `catalog.watcher-reset` reports);
+  `packages/gateway/src/sessions/catalog-discovery.ts` (exports
+  `isIgnoredCatalogDirectory` so the watcher and the walk apply one path rule);
+  `packages/gateway/src/sessions/runtime-registry.ts` (two option
+  pass-throughs in the `SessionCatalog` construction and the startup comment
+  only — the minimal call site G-3's parallel work can rebase over);
+  `packages/gateway/src/gateway-main.ts` (the two records);
+  `packages/gateway/docs/observability.md` (`catalog.reconciled`'s "when" and
+  rows for the two new events);
+  `packages/gateway/src/sessions/session-catalog.test.ts`;
+  `packages/gateway/src/sessions/runtime-registry.integration.test.ts` (one
+  case).
+- Failure modes written before the watcher (numbered 9-16 in the test file): an
+  event the platform never delivered (the next interval pass publishes the row);
+  a file replaced with a new inode at the same path (identity and counts come
+  from the replacement, not the old tail); a child transcript before its parent
+  (one delegated row, and the parent does not double it); the root moved or
+  unavailable (one outage record, last-good rows served, watched once it exists);
+  a burst of events (one debounced read per path, no walk, no read left armed);
+  a watcher that stopped (one `catalog.watcher-reset`, a replacement watcher, a
+  whole-folder reconcile); an event the platform could not name (the index is
+  re-derived once); an event for a path discovery ignores or a file that is not a
+  transcript (no row, no read). Review round 1 added modes 17-22, listed with its
+  findings in the entry below.
+- Kept on purpose: the read phase's batch bound is the index's existing one
+  (`CatalogMetadataIndex.reconcile` reads `RECONCILE_CONCURRENCY` = 16 candidates
+  per awaited batch, ≤ the plan's 50, covered by G-1a's "reads reconciled files
+  in one bounded batch at a time"), so this row adds the cadence that drives it
+  rather than a second batching layer over the same reads; G-9 moves the pass
+  into the scheduler. `catalog.reconciled` keeps its existing shape and owner.
+- Deviations: the watcher backend is an injectable option (`watchCatalog`,
+  defaulting to the recursive `fs.watch`) because several failure modes cannot be
+  forced on a real FSEvents stream (a dropped event, a start failure, a watcher
+  that stops, a burst of events, an unnamed event); every case the real backend
+  can produce uses the production watcher. An overflow is not a separate reset
+  reason: `fs.watch` does not surface FSEvents' must-scan flag, so a dropped
+  event is the interval's job (`catalog.reconciled`'s counts are the signal) and
+  an unnamed event re-reads the whole folder once. The reconciler was not
+  changed, so the durable document keeps its one writer.
+- For the next agent: G-1c switches `list`, `pageSource`, acquisition, attention,
+  automation targets and storage maintenance onto `SessionCatalog.rows()`; the
+  watcher already keeps those rows current for external writers, so the request
+  path's walks can be deleted without a new feed. G-9 owns moving the interval
+  pass and the watcher restart into the scheduler. Note for the orchestrator's
+  own runs: `--no-build` requires `npm run build` in `packages/gateway` first.
+
+### G-1b · Blocked (review round 1) · 2026-09-28 · orchestrator-dispatched deepseek-worker
+
+- Result: an independent reviewer found the O-6a evidence had been gathered on
+  the integration tree, which contains no watcher, plus four real gaps that only
+  the production FSEvents backend shows. Every finding was addressed; none was
+  rejected. The wrong diagnosis and the row proposed from it are withdrawn, the
+  watcher now covers folder events and deletions, and its restarts are spaced
+  instead of immediate. The row stays **Blocked**: the two O-6a runs now made on
+  this build are recorded below, and the in-memory half of the measurement is
+  still owed because the observer it needs is not usable in this scenario.
+- Finding 1 (blocker, reproduced): the O-6a run
+  `20260928T144239Z-multi-session-fcce82` ran against
+  the `hardening/integration` worktree at `b18919961`, where
+  `src/sessions/session-catalog.ts` and its 07:13 `dist` have no
+  `watchCatalogFolder` (0 matches in both), so no watcher existed and the frozen
+  durable document proved nothing; the priming Gateway stopped 3.5 s after it
+  started, before its reconcile finished. The "unexplained persist-cadence
+  signal" narrative and the proposed T-2 row are deleted from the entry above,
+  which now records the real cause and the method's own limit (a durable document
+  capped at `CATALOG_PERSIST_MAX_WAIT_MS` = 60 s cannot show a 1 s bound). The
+  corrected procedure is in the Blocked note above; the re-run itself is owed,
+  and the attempts made here are recorded below.
+- Finding 2 (major): a non-transcript event path was dropped, so a folder moved
+  into the root and a folder renamed inside it were invisible for up to 30
+  minutes, and the root's own move produced no record and no reconcile at all.
+  `watchEvent` now resolves such a path against the folder: a directory has its
+  own `.jsonl` files re-read (debounced per path, with one whole-folder pass when
+  a folder holds more than `CATALOG_EVENT_DIRECTORY_LIMIT` = 64 transcripts,
+  which also bounds the per-path map), an absent path debounces one whole-folder
+  cut, an existing non-transcript file stays a no-row event, and the root's own
+  name with the root gone is the watcher's outage rather than a cut — no cut of a
+  missing folder is membership evidence. The folder's own name *with the folder
+  there* is ignored instead: macOS reports it once when the watch attaches, and
+  treating it as a reason to re-read the whole folder cost one spurious
+  full-folder pass per attach (the first version of this fix did exactly that,
+  and the real-backend case below caught it). A real-trace probe confirmed that macOS
+  reports the root's own rename as `change "sessions"`, that a folder moved in
+  reports only `rename <folder>`, and that inner events stop until the root is
+  back. New real-backend cases: "publishes a folder moved into the root and the
+  folder an in-root move renamed" and "keeps its rows while the root itself is
+  away, and a later cut republishes them" (modes 17 and 18); the second asserts
+  that a pass over the folder that is not there publishes nothing and that the
+  rows survive an append the watcher could not see.
+- Finding 2b (major, found by the tests this round added): absence evidence had
+  to be gated on the folder still being there. A root that is moved away takes
+  every path inside it with it, so (a) the finding 3 rule would have dropped the
+  rows one event at a time for a folder that is merely elsewhere, and (b) the
+  periodic pass (and the startup pass) would have published a "complete" cut of
+  zero candidates and emptied the durable document. `SessionCatalog` now has one
+  `catalogRootIsDirectory()` check used by all three: `refreshPath` refuses
+  absence evidence without it, `reconcileIndex` reports `incomplete` and
+  publishes nothing, and the watcher's root event is an outage. Cases: "keeps its
+  rows while the root itself is away, and a later cut republishes them" (real
+  backend; mode 18) and "records one outage for the root's own event when the
+  folder is gone" (mode 22, the injectable backend, because the platform cannot
+  be made to deliver that event on demand).
+- Finding 3 (major): rows came only from commit-point hooks, so the watcher
+  published files the Gateway had not committed and nothing removed them when the
+  Gateway rolled them back (`rm(importedPath)` after a failed import,
+  `removeUncommittedForkArtifacts`). `refreshPath` now treats `lstat` ENOENT on
+  the exact path as removal: the row is dropped and the document rewritten. Other
+  errors still keep the row, so this deliberately extends G-1a's rule: an absent
+  exact path *is* membership evidence, while an unreadable path is not. Case:
+  "drops the row for a canonical file deleted outside the Gateway" (mode 19),
+  which also asserts the durable document lost the row, and "keeps a row for a
+  path it can see but cannot read" for the other half of the rule.
+- Finding 4 (minor): the `catalog-index.failure` false alarm falls out of
+  finding 3 — an absent path is not read at all, so `append` and `summaryFor` are
+  never called for a file that is gone. Mode 19 asserts both spies were not
+  called.
+- Finding 5 (minor): the per-path debounce had no ceiling, so a path written
+  more often than the quiet spell was re-armed forever. It is capped by
+  `CATALOG_EVENT_MAX_WAIT_MS` (1 s) the way persistence is, so a continuously
+  appended transcript is re-read about once a second. Case: "re-reads a path whose
+  events never stop arriving" (mode 20).
+- Finding 6 (minor): `ensureWatching` re-checks `this.watcher` after the
+  `catalogRoot()` await (two concurrent callers could each attach a watcher and
+  double every event); `onReset` is bound to its own handle, so a reset from an
+  already-replaced watcher cannot stop its successor; a stop schedules the
+  replacement on the retry cadence instead of attaching in place; and
+  `watchOutageReported` is cleared only once a replacement has survived one retry
+  interval, so a watcher that dies at every attach produces one record and a
+  bounded restart rate. Case: "spaces the restart of a watcher that dies right
+  after every attach" (mode 21); the error case now asserts the replacement is not
+  immediate.
+- Finding 7 (minor): the reset message and the observability row claimed every
+  reset is followed by a whole-folder reconcile, which was false for
+  `unavailable`. The owner now reconciles once when a replacement attaches after
+  a reported outage, on top of the one reconcile the first stop of an outage
+  makes over a readable folder, so the gap the outage opened is read even when
+  the attach is what restored the folder. The message and the doc row say that.
+- Finding 8 (minor): `catalog.changed` fired on every single-row publish,
+  including every Gateway-owned persist, into the shared 4,000-record / 2 MB debug
+  buffer. It is now the watcher's change stream only — a Gateway-owned change is
+  attributable to the commit that made it — with `outcome` extended by `removed`
+  for the finding 3 deletion, and the doc row states the scope and the bound (up
+  to about four records per path a second, one per quiet spell, with the ceiling
+  only bounding how long a read waits when events never stop). That also
+  makes it the in-memory signal the O-6a re-run needs. The `catalog.changed` case
+  now asserts a Gateway-owned `refresh()` reports nothing and that a watcher
+  deletion reports `removed`.
+- Finding 9 (minor): the burst case emitted one event per path, so coalescing was
+  never exercised. "coalesces a burst of events into one read per path" now sends
+  40 events for each of 25 paths (1,000 events) and asserts exactly one
+  `summaryFor` per path, no `scan`, and no duplicate IDs (mode 13).
+- Finding 10 (nit): the assertions on a private timer map are gone — the burst
+  case counts reads through the source instead — and the integration case reads
+  the catalog owner through a documented `catalogOwner()` helper beside
+  `settleCatalog()`. No public reader exists before G-1c, and the index's rows
+  *are* the observable effect that case asserts.
+- Finding 11 (nit): the plan header carried six `Last updated` lines; it is one
+  line again.
+- Changes in this round: `packages/gateway/src/sessions/session-catalog.ts` (the
+  folder-event path, the deletion rule, the per-path ceiling, the watcher
+  lifecycle and the watcher-only change stream);
+  `packages/gateway/src/sessions/session-catalog.test.ts` (modes 17-21, the
+  rewritten burst and ignore cases, the `catalog.changed` case);
+  `packages/gateway/src/sessions/runtime-registry.integration.test.ts` (the
+  `catalogOwner()` helper); `packages/gateway/src/gateway-main.ts` and
+  `packages/gateway/docs/observability.md` (message and rows).
+- Checks: `npx vitest run src/sessions/session-catalog.test.ts` **26 passed / 26
+  in 9.4 s and again in 11.1 s** (was 19); `npx vitest run
+  src/sessions/runtime-registry.integration.test.ts -t "catalog"` **36 passed**;
+  `-t "publishes an external append"` **1 passed**;
+  `src/sessions/catalog-metadata-index.test.ts` +
+  `src/sessions/catalog-discovery.test.ts` **21 passed**; `npx tsc --noEmit -p .`
+  clean. The real-backend cases run the production watcher; the injectable
+  backend is used only for events FSEvents cannot be made to produce (modes 9,
+  13-16, 21, 22).
+- Residual risk for the orchestrator: none known for the watcher itself. The
+  pre-existing hazard a missing root used to create for the startup and periodic
+  passes (a "complete" cut of zero candidates emptying the durable document) is
+  closed by finding 2b's guard, which is why an outage now needs no special case
+  to stay safe. `catalog.reconciled` reports such a pass as `incomplete`, so an
+  operator sees it.
+- O-6a on this build (new evidence, three attempts): the build here is
+  `33b25f3ab` in this worktree (`npm run build`, `dist` carries the watcher), and
+  the runs' own `report.json` source blocks say so (`"worktree"` = this
+  worktree, `"dirty": false`), with the fixture's `driver-config` naming this
+  worktree's `packages/gateway` — the attribution problem finding 1 found is
+  gone.
+  - `20260928T152251Z-multi-session-0efe51` and
+    `20260928T152602Z-multi-session-5c6047` (`--catalog-files 200 --catalog-mib
+    32 --mixed-seconds 60`, `finished in 2.2 min` and `1.8 min`, exit 0): the
+    watcher build runs the scenario at scale. The second run's fixture log holds
+    exactly one `catalog.reconciled` (200 added, 1648 ms, at startup), no
+    `catalog.watcher-reset` and no `catalog-index.failure`, so no outage and no
+    failed index read occurred across ~90 s of continuous external appends. Its
+    probe counted `no_subscriber.catalog.walks` 15 and `catalog.walks` 49 for the
+    mixed window: those are the pre-G-1c request path's own walks (the criterion
+    G-1c's Done-when measures), not walks the appends caused — the append-caused
+    count is 0, which the integration case asserts directly.
+  - Two further attempts (`20260928T152836Z-multi-session-9e118c` and
+    `20260928T153500Z-multi-session-3afd47`) tried to read the in-memory
+    `catalog.changed` stream with an observer that pairs like the phone and polls
+    `system.logs.export`. Neither produced a sample: both runs failed at the
+    scenario driver, and their `fixture/gateway.jsonl` error mix is catalog churn
+    in name only:
+
+    | `rpc.error` | `9e118c` | `3afd47` |
+    |---|---|---|
+    | `session.sync` conflict, "Session synchronization is no longer owned by this token" | 244 | 242 |
+    | `session.presentation.set` conflict | 11 | 10 |
+    | `session.open` conflict | 2 | 2 |
+    | `session.open` busy / `catalog_changed` | 1 | 0 |
+
+    Both drivers died on that `session.sync` conflict
+    (`driver-iteration-1.log`), for one client ID that matches every record. The
+    two runs without the observer, on the same build
+    (`0efe51`, `5c6047`), logged **0** `rpc.error`. So the extra paired mobile
+    client is what took session synchronization ownership away from the driver;
+    `catalog_changed` churn is 1 record out of 258 and 0 out of 254, and is not
+    what failed either run. The observer's own connection was also the one that
+    sent nothing (16.5 s in `9e118c`, 27.7 s in `3afd47`) and was closed at
+    outbound-queue capacity in both: a sixth mobile-role connection that never
+    pings and exports ~1 MB of diagnostics every 15 s.
+  - What the owed re-run needs instead: the in-memory signal has to come from the
+    fixture process itself. `scripts/tron-profile-gateway-probe.mjs` is already
+    preloaded there and already counts catalog walks in-process; the natural
+    instrument is one more counter it can read without any extra connection
+    (a row-publish tally or the newest `catalog.changed` timestamps), recorded
+    with the appender's write times. Until that exists the row stays on the
+    orchestrator's owed confirmation, and the durable-document sampler from the
+    earlier entry stays retired: it cannot show a 1 s bound.
+- Not addressed, deliberately: `watchRetryMs` remains a plain `setTimeout`; G-9
+  owns moving the watcher restart into the scheduler, and the retry is now the
+  only restart path, so a failing watcher restarts at most once per interval.
+
+### G-1b · Done (review round 2) · 2026-09-28 · orchestrator-dispatched deepseek-worker
+
+- Result: the one major was a real production cost and is fixed, with a
+  production-FSEvents failing-first case and its negative control; both minors
+  and the two documentation/evidence corrections are in. The row is **Done** on
+  the orchestrator's decision — the O-6a confirmation of the Done-when is owed by
+  the orchestrator, which owns the probe file.
+- Finding 1 (major): an absent non-transcript path no longer reconciles the whole
+  folder. `resolveAbsentEvent` re-reads only the indexed rows at or under the
+  path (`indexedBeneath`) through the same per-path debounce and does nothing
+  when no row matches, so an atomic write's temporary name, a scratch file and
+  the Gateway's own quarantine rename cost no walk; `transcriptsBeneath` walks by
+  hand instead of `readdir({recursive: true})`, skipping the ignored folders and
+  stopping at `CATALOG_EVENT_DIRECTORY_LIMIT`; `debounceUnnamedEvent` is capped
+  by `CATALOG_EVENT_MAX_WAIT_MS` like the per-path debounce.
+  - Failing-first, production FSEvents backend: "costs no whole-folder pass for a
+    non-transcript name that is gone" (tmp rename, scratch create/delete,
+    quarantine rename and removal) and "drops the rows under a folder removed
+    with its transcripts, without a whole-folder pass" (`rm -rf` of a run
+    folder). Negative control: with `8a52a73b2`'s `session-catalog.ts` and these
+    tests, the first sees **2** `scan` calls and the second **1**, both green
+    with the fix. Modes 22-23 added to the test file's list.
+  - "re-derives the whole index once a second for unnameable events that never
+    stop" (mode 23) is the ceiling's failing-first case: with the old
+    `debounceUnnamedEvent` the 5 s `waitFor` times out (the quiet spell is
+    re-armed every 100 ms), and it passes with the ceiling.
+- Finding 2 (minor): the `catalog.changed` bound is corrected in all three
+  places — the doc row, the cadence comment and the round-1 entry above — to the
+  real one: up to about four records per path a second, one per quiet spell,
+  with `CATALOG_EVENT_MAX_WAIT_MS` bounding only how long a read waits when
+  events never stop. No throttle was added: the true rate is now stated rather
+  than capped by a second mechanism over the same reads.
+- Finding 3 (minor): the round-1 entry's failed-run evidence was replaced with
+  the measured mix (244/242 `session.sync` conflicts, 11/10 presentation, 2/2
+  open, 1/0 busy `catalog_changed`), the driver logs that died on the `sync`
+  conflict, the two no-observer runs' **0** `rpc.error`, and the observer
+  connection's own silent/capacity closes. The stale "complete and merge-ready"
+  line in the base entry is replaced.
+- Finding 4 (Done-status blocker, no code change): `npm run build` and `npx tsc
+  --noEmit -p .` are clean at HEAD; the in-memory append-to-row bound stays
+  covered by the integration case and the interval-disabled watcher case. The
+  O-6a probe (`scripts/tron-profile-gateway-probe.mjs`) is outside this row's
+  owning files, so the orchestrator owes that confirmation.
+- Finding 5 (nit): the dead "Bounded batches" loop and its descriptor comment in
+  the burst case are deleted; the 25 writes are one `Promise.all`.
+- Durable-document persist cadence (evaluated, **no G-1e row**): a watcher row
+  reaches the durable document at most every `CATALOG_PERSIST_DEBOUNCE_MS` (5 s)
+  and at latest `CATALOG_PERSIST_MAX_WAIT_MS` (60 s) after it changes, but the
+  canonical JSONL stays authoritative and every startup reconciles against the
+  folder's own cut (`reconcileIndex` re-derives each candidate; `persistNow`
+  skips an unchanged generation), so a stale document is repaired, not lost. That
+  makes the cadence a property of the acceleration document, not a defect — the
+  only reader that suffered from it was the retired durable-document sampler.
+- Checks: `npx vitest run src/sessions/session-catalog.test.ts` **28 passed /
+  28 in 10.9 s** (was 26); `session-catalog.test.ts` +
+  `catalog-metadata-index.test.ts` + `catalog-discovery.test.ts` **50 passed /
+  50**; `npx vitest run src/sessions/runtime-registry.integration.test.ts -t
+  "catalog"` **36 passed**; `npx tsc --noEmit -p .` clean; `npm run build`
+  clean in 38 s. Negative controls run as above and then reverted.
+- For the orchestrator: `npm run build` has now been run in this worktree, so its
+  `dist` carries the watcher's current source for an O-6a run. Merging `hardening/integration` into this branch
+  conflicts only in this plan file (integration has newer rows/entries);
+  integration's `session-catalog.ts` is unchanged from the merge base, so the
+  source merge is clean.

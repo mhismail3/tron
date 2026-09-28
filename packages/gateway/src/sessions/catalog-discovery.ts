@@ -58,8 +58,10 @@ function sortCatalogPaths(paths: Iterable<string>): string[] {
 }
 
 /** pi-subagents reserves only the immediate workspace diagnostics directory;
- * deeper project directories with the same basename remain canonical. */
-function isIgnoredCatalogDirectory(directory: string, canonicalRoot: string): boolean {
+ * deeper project directories with the same basename remain canonical. The
+ * folder watcher applies the same rule to an event's path, so what discovery
+ * walks and what the index tracks cannot disagree. */
+export function isIgnoredCatalogDirectory(directory: string, canonicalRoot: string): boolean {
   const fromRoot = relative(canonicalRoot, resolve(directory));
   if (fromRoot === ".." || fromRoot.startsWith(`..${sep}`) || isAbsolute(fromRoot)) return true;
   const parts = fromRoot.split(sep);

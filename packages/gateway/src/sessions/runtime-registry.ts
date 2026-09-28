@@ -88,8 +88,10 @@ import {
   SessionCatalog,
   SUBAGENT_RUN_DIRECTORY,
   delegatedSessionParentPath,
+  type SessionCatalogChange,
   type SessionCatalogReconcileOutcome,
   type SessionCatalogSource,
+  type SessionCatalogWatcherReset,
 } from "./session-catalog.js";
 import { resolveForkBoundaryAnchor, type ForkBoundaryAnchor } from "./fork-boundary.js";
 import type { KnowledgeService } from "../knowledge/knowledge-service.js";
@@ -513,6 +515,12 @@ export class RuntimeRegistry {
       /** One catalog reconcile, with the files it covered and the rows it
        * changed. An incomplete or failed pass is reported instead of silent. */
       catalogReconciled?: (reconciled: SessionCatalogReconcileOutcome) => void;
+      /** One catalog row the folder watcher changed for one file: a change no
+       * request or commit explains. */
+      catalogChanged?: (change: SessionCatalogChange) => void;
+      /** The folder watcher stopped observing the catalog folder, so the index
+       * is re-derived from the folder's own cut once a watcher is attached. */
+      catalogWatcherReset?: (reset: SessionCatalogWatcherReset) => void;
       /** A runtime whose extension shutdown overran its disposal grace and was
        * forced. Outside any request span. */
       runtimeDisposeTimeout?: (graceMs: number) => void;
@@ -552,6 +560,8 @@ export class RuntimeRegistry {
       index: this.catalogMetadataIndex,
       source: this.sessionCatalogSource(),
       ...(options.catalogReconciled ? { onReconciled: options.catalogReconciled } : {}),
+      ...(options.catalogChanged ? { onChanged: options.catalogChanged } : {}),
+      ...(options.catalogWatcherReset ? { onWatcherReset: options.catalogWatcherReset } : {}),
     });
     this.workRegistry = options.workRegistry ?? new GatewayWorkRegistry();
     this.drainId = `idle-${createHash("sha256").update(this.workRegistry.runtimeEpoch).digest("hex").slice(0, 16)}`;
@@ -608,8 +618,9 @@ export class RuntimeRegistry {
     await this.attention.initialize();
     await this.archive.initialize();
     await this.recentModels.initialize();
-    // The catalog owner loads its durable rows and reconciles once behind the
-    // listener: G-1b replaces that cadence with the folder watcher.
+    // The catalog owner loads its durable rows, reconciles once, and watches
+    // the folder for external writers; the periodic pass is the backstop for
+    // any event the watcher could not see (G-9 moves both into the scheduler).
     this.sessionCatalog.start();
     const markerEvidence = await this.markers.evidence();
     // Recovery can open and parse large session files. Do not hold listener
