@@ -524,7 +524,7 @@ class TailscaleWindowTests(TriageFixture):
     timestamps carry no UTC offset.
     """
 
-    def magicsock_lines(self, relay_at, direct_at, peer="6wPGm"):
+    def magicsock_lines(self, relay_at, direct_at, peer="fakeNodeKey"):
         return (
             "Timestamp               Ty Process[PID:TID]\n"
             f"{local_compact(relay_at)} Df io.tailscale.ipn.macsys.network-extension[3443:48f6] "
@@ -550,7 +550,7 @@ class TailscaleWindowTests(TriageFixture):
                                     peer="other")
         self.log_show(text)
         start = tron_triage.parse_timestamp("2026-09-27T20:00:00.000Z")
-        capture = tron_triage.capture_tailscale_window(start, start.replace(hour=23), "6wPGm")
+        capture = tron_triage.capture_tailscale_window(start, start.replace(hour=23), "fakeNodeKey")
         self.assertTrue(capture.captured, capture.reason)
         self.assertEqual(capture.lines, [])
 

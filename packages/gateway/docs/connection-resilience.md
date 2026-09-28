@@ -217,10 +217,16 @@ keeps today's uncompressed frames.
    join decides an episode: when the key joins any record, only key-joined
    records and Gateway-wide records (a delayed event loop, host resources)
    count as evidence, so a neighbour connection's slow span is never read as
-   this episode's cause. A cause is only as good as its evidence line: an
-   `unknown` episode lists what the records did contain, and an `unknown` for a
-   foreground silent gap is the measured silent recovery gap until C-1 removes
-   it.
+   this episode's cause. A connection the Gateway opened during the episode is
+   the recovery's, not the one the outage lost, so its work is not this
+   episode's cause or key either. A published outage is reported as one episode
+   per scene phase: the app parks recovery in the background and resumes it on
+   the foreground without publishing a new state, so the foreground stretches
+   carry the path, label and gap evidence and only the time really spent in the
+   background reads `phone-background`. A cause is only as good as its evidence
+   line: an `unknown` episode lists what the records did contain, and an
+   `unknown` for a foreground silent gap is the measured silent recovery gap
+   until C-1 removes it.
 4. Use existing local Mac status/health observations to distinguish a responsive
    Gateway from an unreachable mobile path. An OS network path of `satisfied`
    proves neither Tailscale tunnel health nor reachability of the selected Mac.

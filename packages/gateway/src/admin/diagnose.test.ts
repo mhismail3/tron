@@ -10,7 +10,7 @@ afterEach(async () => {
 });
 
 const LAUNCHD_LOG_LINE = '2026-09-24 05:27:54.996 Df launchd[1:22b8ea] [gui/501 [100002]:] service inactive: com.tron.server';
-const MAGICSOCK_LOG_LINE = "2026-09-24 05:46:26.851 Df io.tailscale.ipn.macsys.network-extension[3443:48f5] magicsock: disco: node [6wPGm] d:8767 now using 192.0.2.23:41641 mtu=1360";
+const MAGICSOCK_LOG_LINE = "2026-09-24 05:46:26.851 Df io.tailscale.ipn.macsys.network-extension[3443:48f5] magicsock: disco: node [fakeNodeKey] d:8767 now using 192.0.2.23:41641 mtu=1360";
 const EXTENSION_NOISE_LINE = "2026-09-24 05:46:26.850 Df io.tailscale.ipn.macsys.network-extension[3443:48f5] activating connection: mach=false";
 const TAILSCALE_STATUS = JSON.stringify({
   BackendState: "Running",
