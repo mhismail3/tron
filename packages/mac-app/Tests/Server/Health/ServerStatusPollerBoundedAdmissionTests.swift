@@ -340,6 +340,10 @@ struct ServerStatusPollerBoundedAdmissionTests {
         #expect(await boundedPings.count >= 2)
         #expect(await livePings.count == 0)
         #expect(await probes.count == 1)
+
+        // An explicit action on the same poller resolves live instead.
+        _ = await poller.explicitSnapshot()
+        #expect(await livePings.count == 1)
     }
 
     @Test("an explicit user action never reuses the cached admission")

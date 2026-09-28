@@ -7206,9 +7206,14 @@ wait).
     neighbouring suites on the Debug test host. Review round 2 re-ran
     `build-for-testing` then `test-without-building -only-testing:`
     `ServerStatusPollerBoundedAdmissionTests`, `StableGatewayObserverTests`,
-    `ServerStatusPollerTests` and `TailscaleHostResolutionTests` →
-    `Test run with 32 tests in 4 suites passed`, `TEST EXECUTE SUCCEEDED`.
-    Review round 1 re-ran:
+    `ServerStatusPollerTests`, `TailscaleHostResolutionTests` and
+    `MenuBarControllerTests` on the tree with `hardening/integration` already
+    merged → `Test run with 34 tests in 5 suites passed`,
+    `TEST EXECUTE SUCCEEDED`. Negative controls were executed, not inferred:
+    with the record step removed the new poll-cycle test saw the cycle after the
+    explicit refusal report `.running` from the cache, and with the bundled
+    stamp frozen the fence test saw the fence stay equal while the bundled
+    manifest was replaced. Review round 1 re-ran:
     `xcodebuild build-for-testing … -derivedDataPath build/DerivedData` (3m13s,
     TEST BUILD SUCCEEDED; the first attempt failed on an unwrapped optional and
     the re-run succeeded) then `test-without-building -only-testing:` the six
