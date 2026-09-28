@@ -1,6 +1,7 @@
 import SwiftTerm
 import SwiftUI
 import UIKit
+import TronMobileCore
 
 @MainActor
 @Observable

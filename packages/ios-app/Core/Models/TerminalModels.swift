@@ -1,22 +1,27 @@
 import Foundation
 import TronMobileCore
 
-struct TerminalSummary: Codable, Hashable, Identifiable, Sendable {
-    let id: String
-    let sessionId: String
+package struct TerminalSummary: Codable, Hashable, Identifiable, Sendable {
+    package let id: String
+    package let sessionId: String
     let cwd: String
-    let createdAt: String
-    let exitedAt: String?
+    package let createdAt: String
+    package let exitedAt: String?
     let exitCode: Int?
-    let sequence: Int
+    package let sequence: Int
 }
 
-struct TerminalChunk: Codable, Hashable, Sendable {
-    let sequence: Int
-    let data: String
+package struct TerminalChunk: Codable, Hashable, Sendable {
+    package let sequence: Int
+    package let data: String
+
+    package init(sequence: Int, data: String) {
+        self.sequence = sequence
+        self.data = data
+    }
 }
 
-enum TerminalInventoryPolicy {
+package enum TerminalInventoryPolicy {
     private struct Response: Encodable {
         let terminals: [TerminalSummary]
     }
@@ -28,7 +33,7 @@ enum TerminalInventoryPolicy {
     static let maximumTimestampBytes = 64
     static let maximumEncodedResponseBytes = 768 * 1_024
 
-    static func admit(
+    package static func admit(
         _ terminals: [TerminalSummary],
         requestedSessionID: String
     ) throws -> [TerminalSummary] {

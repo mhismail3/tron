@@ -1,4 +1,5 @@
 import SwiftUI
+import TronMobileCore
 
 /// Portrait label for one model in the picker's Recent and Latest rails.
 /// `TronCardRail` owns the glass surface and press behavior; this view owns

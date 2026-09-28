@@ -1,23 +1,39 @@
 import Foundation
 import TronMobileCore
 
-struct AppLogRecord: Codable, Equatable, Sendable {
-    let timestamp: String
-    let level: String
-    let event: String
-    let source: String
-    let message: String
+package struct AppLogRecord: Codable, Equatable, Sendable {
+    package let timestamp: String
+    package let level: String
+    package let event: String
+    package let source: String
+    package let message: String
     let process: String
-    let requestID: String?
-    let durationMs: Int?
-    let outcome: String?
-    let code: String?
-    let profileID: String?
-    let connectionID: Int?
-    let lifecycleGeneration: Int?
+    package let requestID: String?
+    package let durationMs: Int?
+    package let outcome: String?
+    package let code: String?
+    package let profileID: String?
+    package let connectionID: Int?
+    package let lifecycleGeneration: Int?
+
+    package init(timestamp: String, level: String, event: String, source: String, message: String, process: String, requestID: String?, durationMs: Int?, outcome: String?, code: String?, profileID: String?, connectionID: Int?, lifecycleGeneration: Int?) {
+        self.timestamp = timestamp
+        self.level = level
+        self.event = event
+        self.source = source
+        self.message = message
+        self.process = process
+        self.requestID = requestID
+        self.durationMs = durationMs
+        self.outcome = outcome
+        self.code = code
+        self.profileID = profileID
+        self.connectionID = connectionID
+        self.lifecycleGeneration = lifecycleGeneration
+    }
 }
 
-actor AppLog {
+package actor AppLog {
     // This bounded always-on buffer feeds the user's chosen 10 MB on-disk cap.
     static let maximumRecords = 2_000
     static let maximumBufferBytes = 512 * 1_024
@@ -31,7 +47,7 @@ actor AppLog {
         return formatter
     }()
 
-    static let shared = AppLog()
+    package static let shared = AppLog()
 
     private let fileURL: URL
     private let maximumSegmentBytes: Int
@@ -53,7 +69,7 @@ actor AppLog {
         self.maximumSegmentBytes = max(1, maximumSegmentBytes)
     }
 
-    func recordCausal(
+    package func recordCausal(
         name: String, outcome: String? = nil, durationMilliseconds: Int? = nil,
         count: Int? = nil, profileID: String? = nil, connectionID: Int? = nil,
         lifecycleGeneration: Int? = nil, requestID: String? = nil, level: String? = nil,
@@ -90,12 +106,12 @@ actor AppLog {
         ))
     }
 
-    func snapshot() -> [AppLogRecord] {
+    package func snapshot() -> [AppLogRecord] {
         restoreIfNeeded()
         return (0..<recordCount).compactMap { recordSlots[(recordStart + $0) % Self.maximumRecords] }
     }
 
-    func flush() {
+    package func flush() {
         restoreIfNeeded()
         guard !bufferedLines.isEmpty else { return }
         let lines = bufferedLines
@@ -215,22 +231,22 @@ actor AppLog {
     }
 }
 
-final class AppLogSignposts: PerformanceSignposting, @unchecked Sendable {
+package final class AppLogSignposts: PerformanceSignposting, @unchecked Sendable {
     private let base: any PerformanceSignposting
     private let log: AppLog
 
-    init(base: any PerformanceSignposting, log: AppLog) {
+    package init(base: any PerformanceSignposting, log: AppLog) {
         self.base = base
         self.log = log
     }
 
-    func begin(_ operation: PerformanceOperation) -> PerformanceInterval {
+    package func begin(_ operation: PerformanceOperation) -> PerformanceInterval {
         let interval = base.begin(operation)
         return PerformanceInterval(operation: operation, state: interval.state,
             measuredStart: ContinuousClock().now)
     }
 
-    func end(_ interval: PerformanceInterval, result: PerformanceResult, metrics: PerformanceMetrics) {
+    package func end(_ interval: PerformanceInterval, result: PerformanceResult, metrics: PerformanceMetrics) {
         base.end(interval, result: result, metrics: metrics)
         guard let started = interval.measuredStart else { return }
         let duration = diagnosticMilliseconds(started.duration(to: ContinuousClock().now))

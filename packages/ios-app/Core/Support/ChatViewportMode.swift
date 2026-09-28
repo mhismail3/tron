@@ -1,4 +1,4 @@
-enum ChatViewportIntent: Equatable, Sendable {
+package enum ChatViewportIntent: Equatable, Sendable {
     case userTookOver
     case userReturnedToTail
     case catchUpRequested
@@ -9,11 +9,11 @@ enum ChatViewportIntent: Equatable, Sendable {
     case presentationReset(retainingViewport: Bool)
 }
 
-enum ChatViewportMode: Equatable, Sendable {
+package enum ChatViewportMode: Equatable, Sendable {
     case pinned
     case anchored
 
-    mutating func reduce(_ intent: ChatViewportIntent) {
+    package mutating func reduce(_ intent: ChatViewportIntent) {
         switch intent {
         case .userTookOver:
             self = .anchored

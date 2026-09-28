@@ -4,19 +4,19 @@ import TronMobileCore
 extension GatewayClient {
     /// A disposable viewer owns its original request/credential and transport.
     /// Cleanup must not consult the subsequently selected Gateway profile.
-    actor LiveLease {
+    package actor LiveLease {
         let leaseId: String
         let descriptor: LiveViewDescriptor
         private let request: URLRequest
         private let transport: BoundedHTTPDataTransport
         private var closeTask: Task<Void, Never>?
 
-        struct Wire: Decodable {
+        package struct Wire: Decodable {
             let leaseId: String
             let descriptor: LiveViewDescriptor
         }
 
-        init(wire: Wire, request: URLRequest, transport: BoundedHTTPDataTransport) throws {
+        package init(wire: Wire, request: URLRequest, transport: BoundedHTTPDataTransport) throws {
             guard UUID(uuidString: wire.leaseId) != nil, wire.descriptor.isValid else { throw LiveError.invalidResponse }
             leaseId = wire.leaseId
             descriptor = wire.descriptor
@@ -30,7 +30,7 @@ extension GatewayClient {
             self.transport = transport
         }
 
-        func frame(after sequence: Int) async throws -> LiveUpdate {
+        package func frame(after sequence: Int) async throws -> LiveUpdate {
             try Task.checkCancellation()
             guard closeTask == nil else { throw CancellationError() }
             var request = request
@@ -70,7 +70,7 @@ extension GatewayClient {
 
         /// Join cancellation-independent teardown. The caller may already be
         /// cancelled; cancelling DELETE with it would abandon the remote lease.
-        func close() async {
+        package func close() async {
             if let closeTask { await closeTask.value; return }
             var closing = request
             closing.httpMethod = "DELETE"
@@ -85,12 +85,12 @@ extension GatewayClient {
         }
     }
 
-    enum LiveError: Error, Equatable, Sendable {
+    package enum LiveError: Error, Equatable, Sendable {
         case ended, invalidResponse, permissionRequired, sourceUnavailable, captureBusy
         case captureUnavailable, firstFrameTimeout, temporarilyUnavailable, connectionInterrupted
 
         var isTransient: Bool { self == .temporarilyUnavailable || self == .connectionInterrupted }
-        var message: String {
+        package var message: String {
             switch self {
             case .ended: "This live view has ended. Select the source again to view it."
             case .invalidResponse: "The live preview received an invalid frame or response."
@@ -103,7 +103,7 @@ extension GatewayClient {
             }
         }
 
-        static func classify(_ error: any Error) -> Self {
+        package static func classify(_ error: any Error) -> Self {
             if let failure = error as? Self { return failure }
             if let error = error as? URLError,
                [.timedOut, .networkConnectionLost, .notConnectedToInternet, .cannotConnectToHost, .dnsLookupFailed].contains(error.code) {
@@ -142,19 +142,19 @@ extension GatewayClient {
             }
         }
     }
-    enum LiveUpdate: Sendable { case waiting, unchanged, frame(LiveFrame) }
+    package enum LiveUpdate: Sendable { case waiting, unchanged, frame(LiveFrame) }
 
-    struct LiveFrame: Sendable {
+    package struct LiveFrame: Sendable {
         static let maximumEncodedBytes = 2 * 1_024 * 1_024
         static let maximumPixels = 4_000_000
-        static let maximumEdge = 2_560
-        static let maximumDecodedBytes = 16_000_000
-        let data: Data
-        let width: Int
-        let height: Int
-        let sequence: Int
+        package static let maximumEdge = 2_560
+        package static let maximumDecodedBytes = 16_000_000
+        package let data: Data
+        package let width: Int
+        package let height: Int
+        package let sequence: Int
 
-        init(data: Data, response: HTTPURLResponse) throws {
+        package init(data: Data, response: HTTPURLResponse) throws {
             guard !data.isEmpty, data.count <= Self.maximumEncodedBytes,
                   response.value(forHTTPHeaderField: "Content-Type")?.lowercased() == "image/jpeg",
                   let width = Int(response.value(forHTTPHeaderField: "X-Tron-Live-Width") ?? ""),

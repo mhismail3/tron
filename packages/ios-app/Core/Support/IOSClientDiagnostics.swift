@@ -6,20 +6,20 @@ import TronMobileCore
 // conversion they report. The Gateway-side facts they describe are declared in
 // Gateway/GatewayClientDiagnostics.swift.
 
-struct GatewayLogRecord: Identifiable, Hashable, Codable, Sendable {
-    let timestamp: String
-    let level: String
-    let message: String
-    let event: String?
-    let source: String?
-    let method: String?
-    let requestID: String?
-    let code: String?
-    let outcome: String?
-    let reason: String?
-    let durationMs: Int?
+package struct GatewayLogRecord: Identifiable, Hashable, Codable, Sendable {
+    package let timestamp: String
+    package let level: String
+    package let message: String
+    package let event: String?
+    package let source: String?
+    package let method: String?
+    package let requestID: String?
+    package let code: String?
+    package let outcome: String?
+    package let reason: String?
+    package let durationMs: Int?
 
-    init(timestamp: String, level: String, message: String, event: String? = nil, source: String? = nil,
+    package init(timestamp: String, level: String, message: String, event: String? = nil, source: String? = nil,
          method: String? = nil, requestID: String? = nil, code: String? = nil, outcome: String? = nil, reason: String? = nil, durationMs: Int? = nil) {
         self.timestamp = timestamp
         self.level = level
@@ -30,37 +30,38 @@ struct GatewayLogRecord: Identifiable, Hashable, Codable, Sendable {
         self.outcome = outcome; self.reason = reason; self.durationMs = durationMs
     }
 
-    var id: String { "\(timestamp)-\(level)-\(event ?? "")-\(requestID ?? "")-\(message)" }
+    package var id: String { "\(timestamp)-\(level)-\(event ?? "")-\(requestID ?? "")-\(message)" }
 }
 
-struct GatewayProfileLogRecord: Hashable, Identifiable, Codable, Sendable {
-    let profileID: String
-    let profileLabel: String
-    let record: GatewayLogRecord
+package struct GatewayProfileLogRecord: Hashable, Identifiable, Codable, Sendable {
+    package let profileID: String
+    package let profileLabel: String
+    package let record: GatewayLogRecord
     // Local, validated correlation only; remote Gateway log records have none.
     let incidentID: String?
 
-    init(profileID: String, profileLabel: String, record: GatewayLogRecord, incidentID: String? = nil) {
+    package init(profileID: String, profileLabel: String, record: GatewayLogRecord, incidentID: String? = nil) {
         self.profileID = profileID
         self.profileLabel = profileLabel
         self.record = record
         self.incidentID = incidentID
     }
 
-    var id: String { "\(profileID):\(record.id)" }
+    package var id: String { "\(profileID):\(record.id)" }
 }
 
-func gatewayLogRecordIsNewer(_ lhs: GatewayProfileLogRecord, than rhs: GatewayProfileLogRecord) -> Bool {
+package func gatewayLogRecordIsNewer(_ lhs: GatewayProfileLogRecord, than rhs: GatewayProfileLogRecord) -> Bool {
     if GatewayTimestamp.isNewer(lhs.record.timestamp, than: rhs.record.timestamp) { return true }
     if GatewayTimestamp.isNewer(rhs.record.timestamp, than: lhs.record.timestamp) { return false }
     return lhs.id > rhs.id
 }
 
-struct IOSClientDiagnosticBuffer: Sendable {
+package struct IOSClientDiagnosticBuffer: Sendable {
+    package init() {}
     static let maximumRecords = 200
-    private(set) var records: [GatewayProfileLogRecord] = []
+    package private(set) var records: [GatewayProfileLogRecord] = []
 
-    mutating func mergePersisted(_ values: [GatewayProfileLogRecord]) {
+    package mutating func mergePersisted(_ values: [GatewayProfileLogRecord]) {
         let retained = values.map { value in
             GatewayProfileLogRecord(profileID: value.profileID, profileLabel: "iOS client · Retained",
                 record: GatewayLogRecord(timestamp: value.record.timestamp, level: value.record.level,
@@ -71,7 +72,7 @@ struct IOSClientDiagnosticBuffer: Sendable {
         )
     }
 
-    mutating func recordLifecycle(
+    package mutating func recordLifecycle(
         event: String,
         message: String,
         profileID: String?,
@@ -93,7 +94,7 @@ struct IOSClientDiagnosticBuffer: Sendable {
         if records.count > Self.maximumRecords { records.removeLast(records.count - Self.maximumRecords) }
     }
 
-    mutating func recordCatalog(
+    package mutating func recordCatalog(
         trigger: String,
         outcome: String,
         profileID: String?,
@@ -144,7 +145,7 @@ struct IOSClientDiagnosticBuffer: Sendable {
         if records.count > Self.maximumRecords { records.removeLast(records.count - Self.maximumRecords) }
     }
 
-    mutating func record(
+    package mutating func record(
         _ failure: GatewayFailure,
         profileID: String?,
         profileLabel: String?,
@@ -172,7 +173,7 @@ struct IOSClientDiagnosticBuffer: Sendable {
         }
     }
 
-    static func logRecord(_ diagnostic: GatewayRPCDiagnostic) -> GatewayProfileLogRecord {
+    package static func logRecord(_ diagnostic: GatewayRPCDiagnostic) -> GatewayProfileLogRecord {
         let ownerID = boundedUTF8(diagnostic.profileID ?? "ios-client", maximumBytes: 256)
         let ownerLabel = boundedUTF8(
             diagnostic.profileLabel.map { "\($0) · iOS client" } ?? "iOS client",
@@ -199,7 +200,7 @@ struct IOSClientDiagnosticBuffer: Sendable {
         )
     }
 
-    static func logRecord(_ diagnostic: GatewayConnectionDiagnostic) -> GatewayProfileLogRecord {
+    package static func logRecord(_ diagnostic: GatewayConnectionDiagnostic) -> GatewayProfileLogRecord {
         let ownerID = boundedUTF8(diagnostic.profileID ?? "ios-client", maximumBytes: 256)
         let ownerLabel = boundedUTF8(
             diagnostic.profileLabel.map { "\($0) · iOS client" } ?? "iOS client",
@@ -270,7 +271,7 @@ struct IOSClientDiagnosticBuffer: Sendable {
         )
     }
 
-    static func logRecord(_ diagnostic: GatewayEventConsumerDiagnostic) -> GatewayProfileLogRecord {
+    package static func logRecord(_ diagnostic: GatewayEventConsumerDiagnostic) -> GatewayProfileLogRecord {
         let message = [
             "category=\(boundedUTF8(diagnostic.category, maximumBytes: 64))",
             "phase=\(diagnostic.phase.rawValue)",
@@ -293,7 +294,7 @@ struct IOSClientDiagnosticBuffer: Sendable {
         )
     }
 
-    static func redactedMessage(_ value: String) -> String {
+    package static func redactedMessage(_ value: String) -> String {
         var result = boundedUTF8(value, maximumBytes: 4_096)
         for pattern in [
             #"(?i)\bBearer\h+[A-Za-z0-9._~+/=-]+"#,
@@ -317,7 +318,7 @@ struct IOSClientDiagnosticBuffer: Sendable {
     }
 }
 
-actor IOSClientDiagnosticStore {
+package actor IOSClientDiagnosticStore {
     static let maximumRecords = 96
     static let maximumBytes = 96 * 1_024
     static let maximumAge: TimeInterval = 7 * 24 * 60 * 60
@@ -325,12 +326,12 @@ actor IOSClientDiagnosticStore {
     private let key = "tron.diagnostics.incidents.v1"
     private nonisolated let mailbox = IOSDiagnosticMailbox()
 
-    nonisolated func record(_ value: GatewayProfileLogRecord) {
+    package nonisolated func record(_ value: GatewayProfileLogRecord) {
         guard let safe = Self.sanitize(value, now: .now) else { return }
         mailbox.enqueue([safe]) { await self.drainPending() }
     }
 
-    nonisolated func record(_ values: [GatewayProfileLogRecord]) {
+    package nonisolated func record(_ values: [GatewayProfileLogRecord]) {
         let now = Date.now
         let safe = values.compactMap { Self.sanitize($0, now: now) }
             .sorted { gatewayLogRecordIsNewer($0, than: $1) }
@@ -341,13 +342,13 @@ actor IOSClientDiagnosticStore {
         while let records = mailbox.take() { save(records) }
     }
 
-    nonisolated func flush() async {
+    package nonisolated func flush() async {
         await mailbox.currentWriter()?.value
     }
 
     init(defaults: UserDefaults) { self.defaults = defaults }
 
-    func load(now: Date = .now) -> [GatewayProfileLogRecord] {
+    package func load(now: Date = .now) -> [GatewayProfileLogRecord] {
         guard let data = defaults.data(forKey: key), data.count <= Self.maximumBytes,
               let values = try? JSONDecoder.gateway.decode([GatewayProfileLogRecord].self, from: data) else { return [] }
         return Self.retainFirstIncidentAndLatest(values.compactMap { Self.sanitize($0, now: now) })
@@ -435,7 +436,7 @@ actor IOSClientDiagnosticStore {
     }
 }
 
-func diagnosticMilliseconds(_ duration: Duration) -> Int {
+package func diagnosticMilliseconds(_ duration: Duration) -> Int {
     let parts = duration.components
     guard parts.seconds >= 0 else { return 0 }
     let (whole, overflow) = parts.seconds.multipliedReportingOverflow(by: 1_000)

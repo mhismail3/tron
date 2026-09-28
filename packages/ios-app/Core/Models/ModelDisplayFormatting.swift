@@ -1,7 +1,7 @@
 import Foundation
 import TronMobileCore
 
-enum ModelDisplayFormatting {
+package enum ModelDisplayFormatting {
     private static let providerAliases: [String: String] = [
         "amazon-bedrock": "Amazon Bedrock",
         "anthropic": "Anthropic",
@@ -59,7 +59,7 @@ enum ModelDisplayFormatting {
         "xai": "xAI"
     ]
 
-    static func provider(_ value: String) -> String {
+    package static func provider(_ value: String) -> String {
         let clean = value.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !clean.isEmpty else { return "Unknown provider" }
         let normalized = normalizeKey(clean)
@@ -74,7 +74,7 @@ enum ModelDisplayFormatting {
         return words(in: clean).map(formatWord).joined(separator: " ")
     }
 
-    static func reference(provider: String, model: String) -> String {
+    package static func reference(provider: String, model: String) -> String {
         "\(Self.provider(provider)) / \(Self.model(model))"
     }
 
@@ -119,14 +119,14 @@ enum ModelDisplayFormatting {
 /// The one spelling of model release-date syntax. Gateway payloads, the
 /// "Pinned release" identity line, and the Latest rail all read it here so the
 /// wire format cannot drift between them.
-enum ModelReleaseDate {
+package enum ModelReleaseDate {
     static func admits(_ value: String) -> Bool {
         value.range(of: #"^\d{4}-\d{2}-\d{2}$"#, options: .regularExpression) != nil
     }
 
     /// The date pinned by a date-suffixed model ID, e.g.
     /// `claude-opus-4-5-20251101` becomes `2025-11-01`. Nil without a suffix.
-    static func pinnedReleaseDate(inID id: String) -> String? {
+    package static func pinnedReleaseDate(inID id: String) -> String? {
         guard let match = id.range(of: #"-(\d{8})$"#, options: .regularExpression) else { return nil }
         let digits = id[match].dropFirst()
         return "\(digits.prefix(4))-\(digits.dropFirst(4).prefix(2))-\(digits.suffix(2))"
@@ -139,29 +139,29 @@ enum ModelReleaseDate {
 }
 
 extension ModelRef {
-    var displayProviderName: String { ModelDisplayFormatting.provider(provider) }
-    var displayName: String { ModelDisplayFormatting.model(id) }
-    var displayDescription: String {
+    package var displayProviderName: String { ModelDisplayFormatting.provider(provider) }
+    package var displayName: String { ModelDisplayFormatting.model(id) }
+    package var displayDescription: String {
         ModelDisplayFormatting.reference(provider: provider, model: id)
     }
 }
 
 extension ProviderSummary {
-    var displayName: String {
+    package var displayName: String {
         ModelDisplayFormatting.provider(name.isEmpty ? id : name)
     }
 }
 
 extension ModelSummary {
-    var pickerIdentity: String { ModelDisplayFormatting.pickerIdentity(for: self) }
+    package var pickerIdentity: String { ModelDisplayFormatting.pickerIdentity(for: self) }
     /// The release date the picker may order by. A malformed or absent Gateway
     /// value keeps the model out of the Latest rail instead of failing the
     /// catalog read; the raw value stays canonical.
-    var admittedReleaseDate: String? {
+    package var admittedReleaseDate: String? {
         releaseDate.flatMap { ModelReleaseDate.admits($0) ? $0 : nil }
     }
-    var displayProviderName: String { ModelDisplayFormatting.provider(provider) }
-    var displayName: String {
+    package var displayProviderName: String { ModelDisplayFormatting.provider(provider) }
+    package var displayName: String {
         ModelDisplayFormatting.model(name.isEmpty ? id : name)
     }
     var displayDescription: String {
@@ -170,17 +170,17 @@ extension ModelSummary {
 }
 
 /// Compact facts for the model picker's rail cards.
-enum ModelCardFacts {
+package enum ModelCardFacts {
     /// `$input / $output` per million tokens. Whole dollars drop decimals;
     /// fractional prices keep cents so sub-dollar rates stay distinguishable.
-    static func priceLabel(_ price: ModelTokenPrice?) -> String? {
+    package static func priceLabel(_ price: ModelTokenPrice?) -> String? {
         guard let price else { return nil }
         return "\(dollars(price.input)) / \(dollars(price.output))"
     }
 
     /// Compact window size. Rounds down so a label never claims more context
     /// than the model accepts (1,048,576 is "1M", not "1.1M").
-    static func contextLabel(_ tokens: Int) -> String? {
+    package static func contextLabel(_ tokens: Int) -> String? {
         guard tokens > 0 else { return nil }
         if tokens >= 1_000_000 {
             let tenths = tokens / 100_000
@@ -192,7 +192,7 @@ enum ModelCardFacts {
 
     /// `YYYY-MM-DD` as "Sep 2026". Fixed English month names keep the label
     /// identical to the Gateway's wire date on every device locale.
-    static func releaseLabel(_ date: String?) -> String? {
+    package static func releaseLabel(_ date: String?) -> String? {
         guard let date, ModelReleaseDate.admits(date),
               let month = Int(date.dropFirst(5).prefix(2)), (1...12).contains(month) else { return nil }
         return "\(monthNames[month - 1]) \(date.prefix(4))"
@@ -200,7 +200,7 @@ enum ModelCardFacts {
 
     /// The provider-row facts line: context, price, release, omitting any
     /// the Gateway did not supply.
-    static func rowSummary(_ model: ModelSummary) -> String? {
+    package static func rowSummary(_ model: ModelSummary) -> String? {
         let parts = [
             contextLabel(model.contextWindow).map { "\($0) context" },
             priceLabel(model.cost),

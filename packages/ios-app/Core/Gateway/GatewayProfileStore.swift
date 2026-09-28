@@ -2,37 +2,42 @@ import Foundation
 import TronMobileCore
 import Security
 
-struct GatewayProfileDocument: Codable, Equatable, Sendable {
+package struct GatewayProfileDocument: Codable, Equatable, Sendable {
     let profiles: [GatewayProfile]
     let selectedProfileID: String?
+
+    package init(profiles: [GatewayProfile], selectedProfileID: String?) {
+        self.profiles = profiles
+        self.selectedProfileID = selectedProfileID
+    }
 }
 
-protocol GatewayProfileMetadataStoring {
+package protocol GatewayProfileMetadataStoring {
     func load() throws -> GatewayProfileDocument?
     func save(_ document: GatewayProfileDocument) throws
 }
 
-protocol GatewayTokenStoring {
+package protocol GatewayTokenStoring {
     func save(_ token: String, profileID: String) throws
     func read(profileID: String) throws -> String?
     func delete(profileID: String) throws
 }
 
 @MainActor
-final class GatewayProfileStore {
+package final class GatewayProfileStore {
     private let metadata: any GatewayProfileMetadataStoring
     private let tokens: any GatewayTokenStoring
     private(set) var loadError: Error?
     private var cachedDocument: GatewayProfileDocument
 
-    convenience init(defaults: UserDefaults = .standard) {
+    package convenience init(defaults: UserDefaults = .standard) {
         self.init(
             metadata: UserDefaultsGatewayProfileMetadataStore(defaults: defaults),
             tokens: KeychainGatewayTokenStore()
         )
     }
 
-    init(metadata: any GatewayProfileMetadataStoring, tokens: any GatewayTokenStoring) {
+    package init(metadata: any GatewayProfileMetadataStoring, tokens: any GatewayTokenStoring) {
         self.metadata = metadata
         self.tokens = tokens
         let loaded: GatewayProfileDocument?
@@ -56,9 +61,9 @@ final class GatewayProfileStore {
         }
     }
 
-    var profiles: [GatewayProfile] { cachedDocument.profiles }
+    package var profiles: [GatewayProfile] { cachedDocument.profiles }
 
-    var selected: GatewayProfile? {
+    package var selected: GatewayProfile? {
         cachedDocument.profiles.first { $0.id == cachedDocument.selectedProfileID } ?? cachedDocument.profiles.first
     }
 
@@ -77,7 +82,7 @@ final class GatewayProfileStore {
         }
     }
 
-    func save(_ profile: GatewayProfile, token: String, selecting: Bool = true) throws {
+    package func save(_ profile: GatewayProfile, token: String, selecting: Bool = true) throws {
         try requireHealthyMetadata()
         guard profile.hasValidEndpoint else { throw GatewayProfileStoreError.invalidEndpoint }
         let previousDocument = cachedDocument
@@ -107,7 +112,7 @@ final class GatewayProfileStore {
         cachedDocument = replacement
     }
 
-    func select(_ profile: GatewayProfile) throws {
+    package func select(_ profile: GatewayProfile) throws {
         try requireHealthyMetadata()
         let current = cachedDocument
         guard current.profiles.contains(where: { $0.id == profile.id }) else {
@@ -124,7 +129,7 @@ final class GatewayProfileStore {
         cachedDocument = replacement
     }
 
-    func update(_ profile: GatewayProfile) throws {
+    package func update(_ profile: GatewayProfile) throws {
         try requireHealthyMetadata()
         guard profile.hasValidEndpoint else { throw GatewayProfileStoreError.invalidEndpoint }
         let current = cachedDocument
@@ -137,7 +142,7 @@ final class GatewayProfileStore {
         cachedDocument = replacement
     }
 
-    func setEnabled(_ enabled: Bool, for profile: GatewayProfile) throws {
+    package func setEnabled(_ enabled: Bool, for profile: GatewayProfile) throws {
         try requireHealthyMetadata()
         let current = cachedDocument
         guard current.profiles.contains(where: { $0.id == profile.id }) else {
@@ -157,7 +162,7 @@ final class GatewayProfileStore {
         cachedDocument = replacement
     }
 
-    func remove(_ profile: GatewayProfile) throws {
+    package func remove(_ profile: GatewayProfile) throws {
         try requireHealthyMetadata()
         let current = cachedDocument
         let values = current.profiles.filter { $0.id != profile.id }
@@ -179,7 +184,7 @@ final class GatewayProfileStore {
         cachedDocument = replacement
     }
 
-    func token(for profile: GatewayProfile) -> String? {
+    package func token(for profile: GatewayProfile) -> String? {
         try? tokens.read(profileID: profile.id)
     }
 

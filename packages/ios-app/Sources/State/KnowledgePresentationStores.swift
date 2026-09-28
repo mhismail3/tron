@@ -1,5 +1,6 @@
 import Foundation
 import Observation
+import TronMobileCore
 
 // The knowledge surface's bounded presentation stores. The wire projections
 // they present stay in Models; only the stores that own a read generation,

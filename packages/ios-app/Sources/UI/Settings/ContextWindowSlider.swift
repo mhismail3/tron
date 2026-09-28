@@ -1,4 +1,5 @@
 import SwiftUI
+import TronMobileCore
 
 /// Detents are navigation aids, not new model limits or a quantized slider.
 struct ContextWindowSliderScale {

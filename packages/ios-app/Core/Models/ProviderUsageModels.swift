@@ -3,8 +3,8 @@ import TronMobileCore
 
 /// Additive provider account-usage capability. This is intentionally separate
 /// from session context usage and from any local credential projection.
-enum ProviderUsageCapability {
-    static let name = "provider-usage.v1"
+package enum ProviderUsageCapability {
+    package static let name = "provider-usage.v1"
     static let maximumSnapshots = 16
     static let maximumWindows = 16
     static let maximumBalances = 4
@@ -15,17 +15,17 @@ enum ProviderUsageCapability {
     }
 }
 
-struct ProviderUsageRequest: Codable, Hashable, Sendable {
+package struct ProviderUsageRequest: Codable, Hashable, Sendable {
     let sessionId: String?
     let providerId: String?
 
-    init(sessionId: String? = nil, providerId: String? = nil) {
+    package init(sessionId: String? = nil, providerId: String? = nil) {
         self.sessionId = sessionId
         self.providerId = providerId
     }
 }
 
-enum ProviderUsageStatus: String, Codable, Hashable, Sendable {
+package enum ProviderUsageStatus: String, Codable, Hashable, Sendable {
     case available
     case unsupported
     case unconfigured
@@ -39,16 +39,16 @@ enum ProviderUsageScope: String, Codable, Hashable, Sendable {
     case key
 }
 
-struct UsageWindow: Codable, Hashable, Sendable, Identifiable {
-    let id: String
-    let label: String
-    let usedPercent: Double?
-    let used: Double?
-    let limit: Double?
-    let remaining: Double?
-    let unit: String?
-    let resetsAt: String?
-    let windowSeconds: Int?
+package struct UsageWindow: Codable, Hashable, Sendable, Identifiable {
+    package let id: String
+    package let label: String
+    package let usedPercent: Double?
+    package let used: Double?
+    package let limit: Double?
+    package let remaining: Double?
+    package let unit: String?
+    package let resetsAt: String?
+    package let windowSeconds: Int?
 
     init(
         id: String, label: String, usedPercent: Double? = nil, used: Double? = nil,
@@ -64,7 +64,7 @@ struct UsageWindow: Codable, Hashable, Sendable, Identifiable {
         case id, label, usedPercent, used, limit, remaining, unit, resetsAt, windowSeconds
     }
 
-    init(from decoder: Decoder) throws {
+    package init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         id = try Self.string(c, .id, required: true)
         label = try Self.string(c, .label, required: true)
@@ -120,11 +120,11 @@ struct UsageWindow: Codable, Hashable, Sendable, Identifiable {
     }
 }
 
-struct UsageBalance: Codable, Hashable, Sendable, Identifiable {
-    let id: String
-    let label: String
-    let amount: Double
-    let currency: String
+package struct UsageBalance: Codable, Hashable, Sendable, Identifiable {
+    package let id: String
+    package let label: String
+    package let amount: Double
+    package let currency: String
 
     init(id: String, label: String, amount: Double, currency: String) {
         self.id = id; self.label = label; self.amount = amount; self.currency = currency
@@ -132,7 +132,7 @@ struct UsageBalance: Codable, Hashable, Sendable, Identifiable {
 
     private enum CodingKeys: String, CodingKey { case id, label, amount, currency }
 
-    init(from decoder: Decoder) throws {
+    package init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         id = try c.decode(String.self, forKey: .id)
         label = try c.decode(String.self, forKey: .label)
@@ -147,18 +147,18 @@ struct UsageBalance: Codable, Hashable, Sendable, Identifiable {
     }
 }
 
-struct ProviderUsageSnapshot: Codable, Hashable, Sendable, Identifiable {
-    let providerId: String
-    var id: String { providerId }
-    let status: ProviderUsageStatus
+package struct ProviderUsageSnapshot: Codable, Hashable, Sendable, Identifiable {
+    package let providerId: String
+    package var id: String { providerId }
+    package let status: ProviderUsageStatus
     let source: String?
     let scope: ProviderUsageScope?
-    let updatedAt: String?
-    let retryAt: String?
-    let stale: Bool
+    package let updatedAt: String?
+    package let retryAt: String?
+    package let stale: Bool
     let message: String?
-    let windows: [UsageWindow]
-    let balances: [UsageBalance]
+    package let windows: [UsageWindow]
+    package let balances: [UsageBalance]
 
     init(
         providerId: String, status: ProviderUsageStatus, source: String? = nil,
@@ -175,7 +175,7 @@ struct ProviderUsageSnapshot: Codable, Hashable, Sendable, Identifiable {
         case providerId, status, source, scope, updatedAt, retryAt, stale, message, windows, balances
     }
 
-    init(from decoder: Decoder) throws {
+    package init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         providerId = try c.decode(String.self, forKey: .providerId)
         status = try c.decode(ProviderUsageStatus.self, forKey: .status)
@@ -215,14 +215,14 @@ struct ProviderUsageSnapshot: Codable, Hashable, Sendable, Identifiable {
     }
 }
 
-struct ProviderUsageResponse: Codable, Sendable {
-    let providers: [ProviderUsageSnapshot]
+package struct ProviderUsageResponse: Codable, Sendable {
+    package let providers: [ProviderUsageSnapshot]
 
     init(providers: [ProviderUsageSnapshot]) {
         self.providers = providers
     }
 
-    init(from decoder: Decoder) throws {
+    package init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         providers = try c.decode([ProviderUsageSnapshot].self, forKey: .providers)
         guard providers.count <= ProviderUsageCapability.maximumSnapshots,
@@ -234,8 +234,8 @@ struct ProviderUsageResponse: Codable, Sendable {
     private enum CodingKeys: String, CodingKey { case providers }
 }
 
-enum ProviderUsageOrdering {
-    static func sorted(_ providers: [ProviderSummary]) -> [ProviderSummary] {
+package enum ProviderUsageOrdering {
+    package static func sorted(_ providers: [ProviderSummary]) -> [ProviderSummary] {
         providers.sorted {
             if $0.configured != $1.configured { return $0.configured && !$1.configured }
             let name = $0.displayName.localizedCaseInsensitiveCompare($1.displayName)

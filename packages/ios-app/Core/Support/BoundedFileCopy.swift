@@ -1,11 +1,11 @@
 import Foundation
 
-enum BoundedFileCopyError: Error {
+package enum BoundedFileCopyError: Error {
     case changedSize
 }
 
-enum BoundedFileCopy {
-    static func copy(
+package enum BoundedFileCopy {
+    package static func copy(
         from source: URL,
         to destination: URL,
         expectedSize: Int

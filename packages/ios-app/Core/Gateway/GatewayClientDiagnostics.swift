@@ -6,7 +6,7 @@ import TronMobileCore
 // The service that serves them to the UI, and the client-side store that
 // retains them, live above this layer.
 
-enum GatewayConnectionDiagnosticStage: String, Sendable {
+package enum GatewayConnectionDiagnosticStage: String, Sendable {
     case queuePressure = "queue-pressure"
     /// The WebSocket never opened: the path did not reach the Mac.
     case transportOpen = "transport-open"
@@ -16,7 +16,7 @@ enum GatewayConnectionDiagnosticStage: String, Sendable {
     case transport
 }
 
-enum GatewayConnectionDiagnosticOutcome: String, Sendable {
+package enum GatewayConnectionDiagnosticOutcome: String, Sendable {
     case success
     case failure
 }
@@ -38,7 +38,7 @@ enum GatewayConnectionDiagnosticReason: String, Sendable {
     case decodeLimit = "decode_limit"
 }
 
-struct GatewayConnectionDiagnostic: Sendable {
+package struct GatewayConnectionDiagnostic: Sendable {
     let sequence: Int
     let clientID: String?
     let attemptID: String?
@@ -46,8 +46,8 @@ struct GatewayConnectionDiagnostic: Sendable {
     let timestamp: String
     let profileID: String?
     let profileLabel: String?
-    let stage: GatewayConnectionDiagnosticStage
-    let outcome: GatewayConnectionDiagnosticOutcome
+    package let stage: GatewayConnectionDiagnosticStage
+    package let outcome: GatewayConnectionDiagnosticOutcome
     let durationMilliseconds: Int
     let reason: GatewayConnectionDiagnosticReason?
     let platformCode: Int?
@@ -80,7 +80,7 @@ struct GatewayConnectionDiagnostic: Sendable {
     let decodeActual: Int?
     let decodeMaximum: Int?
     let decodeCodingPath: String?
-    let handshake: GatewayHandshakeDiagnostic?
+    package let handshake: GatewayHandshakeDiagnostic?
 
     init(
         sequence: Int,
@@ -177,7 +177,7 @@ enum GatewayRPCDiagnosticOutcome: String, Sendable {
     case applicationFailure
 }
 
-struct GatewayRPCDiagnostic: Sendable {
+package struct GatewayRPCDiagnostic: Sendable {
     let method: String
     let requestID: String
     let outcome: GatewayRPCDiagnosticOutcome
@@ -189,14 +189,14 @@ struct GatewayRPCDiagnostic: Sendable {
     let incidentID: String?
 }
 
-enum GatewayDiagnosticFailure {
-    static func code(_ error: Error) -> String {
+package enum GatewayDiagnosticFailure {
+    package static func code(_ error: Error) -> String {
         if error is CancellationError { return "cancelled" }
         guard let failure = error as? GatewayFailure else { return "transport" }
         return normalizedCode(failure.code)
     }
 
-    static func normalizedCode(_ code: String) -> String {
+    package static func normalizedCode(_ code: String) -> String {
         switch code {
         case "timeout", "unauthenticated", "forbidden", "busy", "disconnected", "event_overflow", "invalid_response",
              "protocol_mismatch", "identity_mismatch", "invalid_profile", "not_paired", "pong_timeout", "ping_timeout",
@@ -206,19 +206,30 @@ enum GatewayDiagnosticFailure {
     }
 }
 
-enum GatewayEventConsumerPhase: String, Sendable {
+package enum GatewayEventConsumerPhase: String, Sendable {
     case wholeHandler = "whole-handler"
     case reduction
     case synchronizationReadWait = "synchronization"
 }
 
-struct GatewayEventConsumerDiagnostic: Sendable, Equatable {
-    let category: String
-    let phase: GatewayEventConsumerPhase
-    let count: Int
-    let slowCount: Int
-    let maximumDuration: Duration
-    let totalDuration: Duration
-    let firstObservedAt: Date
+package struct GatewayEventConsumerDiagnostic: Sendable, Equatable {
+    package let category: String
+    package let phase: GatewayEventConsumerPhase
+    package let count: Int
+    package let slowCount: Int
+    package let maximumDuration: Duration
+    package let totalDuration: Duration
+    package let firstObservedAt: Date
     let lastObservedAt: Date
+
+    package init(category: String, phase: GatewayEventConsumerPhase, count: Int, slowCount: Int, maximumDuration: Duration, totalDuration: Duration, firstObservedAt: Date, lastObservedAt: Date) {
+        self.category = category
+        self.phase = phase
+        self.count = count
+        self.slowCount = slowCount
+        self.maximumDuration = maximumDuration
+        self.totalDuration = totalDuration
+        self.firstObservedAt = firstObservedAt
+        self.lastObservedAt = lastObservedAt
+    }
 }

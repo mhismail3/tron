@@ -6,13 +6,13 @@ import Foundation
 // that produce them stay in UI/Chat; the viewport mode state machine is in
 // ChatViewportMode.swift.
 
-enum ChatScrollAnimation: Equatable, Sendable {
+package enum ChatScrollAnimation: Equatable, Sendable {
     case disabled
     case smooth(duration: Double)
 }
 
-struct ChatScrollCommand: Equatable, Sendable {
-    enum Origin: Equatable, Sendable {
+package struct ChatScrollCommand: Equatable, Sendable {
+    package enum Origin: Equatable, Sendable {
         case presentation
         case catchUp
         case layout
@@ -28,7 +28,7 @@ struct ChatScrollCommand: Equatable, Sendable {
         case targetFreeRebase
     }
 
-    enum Destination: Equatable, Sendable {
+    package enum Destination: Equatable, Sendable {
         case tail
         /// Exact lazy row realization target. The coordinator retains the
         /// lease until both this row and the physical tail publish evidence.
@@ -37,20 +37,28 @@ struct ChatScrollCommand: Equatable, Sendable {
         case offsetY(CGFloat)
     }
 
-    let token: Int
-    let presentation: Int
-    let origin: Origin
-    let destination: Destination
-    let animation: ChatScrollAnimation
+    package let token: Int
+    package let presentation: Int
+    package let origin: Origin
+    package let destination: Destination
+    package let animation: ChatScrollAnimation
+
+    package init(token: Int, presentation: Int, origin: Origin, destination: Destination, animation: ChatScrollAnimation) {
+        self.token = token
+        self.presentation = presentation
+        self.origin = origin
+        self.destination = destination
+        self.animation = animation
+    }
 }
 
-enum ChatLayoutMutation: Hashable, Sendable {
+package enum ChatLayoutMutation: Hashable, Sendable {
     case keyboard
     case submission
     case transcriptGrowth
 }
 
-enum ChatPhysicalTailClassification: Equatable, Sendable {
+package enum ChatPhysicalTailClassification: Equatable, Sendable {
     case aligned
     case belowViewport
     case aboveViewport
@@ -58,17 +66,17 @@ enum ChatPhysicalTailClassification: Equatable, Sendable {
     case stale
 }
 
-struct ChatTranscriptGeometry: Equatable {
-    let offsetY: CGFloat
-    let contentHeight: CGFloat
-    let containerHeight: CGFloat
-    let bottomInset: CGFloat
+package struct ChatTranscriptGeometry: Equatable {
+    package let offsetY: CGFloat
+    package let contentHeight: CGFloat
+    package let containerHeight: CGFloat
+    package let bottomInset: CGFloat
     /// Native visible content edges in the scroll content coordinate space.
     /// Synthetic tests may omit them and use the legacy-field fallback.
-    let visibleTopY: CGFloat?
+    package let visibleTopY: CGFloat?
     let visibleBottomY: CGFloat?
 
-    init(
+    package init(
         offsetY: CGFloat,
         contentHeight: CGFloat,
         containerHeight: CGFloat,
@@ -84,11 +92,11 @@ struct ChatTranscriptGeometry: Equatable {
         self.visibleBottomY = visibleBottomY
     }
 
-    static let zero = ChatTranscriptGeometry(offsetY: 0, contentHeight: 0, containerHeight: 0)
+    package static let zero = ChatTranscriptGeometry(offsetY: 0, contentHeight: 0, containerHeight: 0)
     // Zero-height content is a valid empty pinned presentation. The mounted
     // tail marker supplies the physical proof once SwiftUI has laid it out.
-    var isValid: Bool { contentHeight >= 0 && containerHeight > 0 }
-    var distanceFromBottom: CGFloat {
+    package var isValid: Bool { contentHeight >= 0 && containerHeight > 0 }
+    package var distanceFromBottom: CGFloat {
         // `visibleRect` is SwiftUI's native, atomically derived content-space
         // viewport. Do not reconstruct it from offset/container/inset fields,
         // which can settle in different LazyVStack/keyboard layout frames.
@@ -104,7 +112,7 @@ struct ChatTranscriptGeometry: Equatable {
     /// A marker frame, rather than clamped distance, is authoritative for
     /// short content. Under-sized content is bottom-aligned by the native
     /// anchor, so blank space after its edge is expected rather than drift.
-    var isPastBottomEdge: Bool {
+    package var isPastBottomEdge: Bool {
         guard isValid else { return false }
         let contentBottom = contentHeight + bottomInset
         guard contentBottom.isFinite, offsetY.isFinite else { return false }
@@ -126,26 +134,26 @@ struct ChatTranscriptGeometry: Equatable {
         }
         return offsetY > maximumOffset + 2
     }
-    var hasScrollableOverflow: Bool {
+    package var hasScrollableOverflow: Bool {
         let contentBottom = contentHeight + bottomInset
         return isValid && contentBottom.isFinite && contentBottom > containerHeight + 2
     }
     /// Native short-content alignment is legal only for a plausible viewport;
     /// current marker evidence, not a fabricated minimum height, proves its tail.
-    var isNativeUnderflow: Bool { !hasScrollableOverflow && isPlausibleOpeningViewport }
-    var isAtBottom: Bool { isValid && !isPastBottomEdge && distanceFromBottom <= 80 }
+    package var isNativeUnderflow: Bool { !hasScrollableOverflow && isPlausibleOpeningViewport }
+    package var isAtBottom: Bool { isValid && !isPastBottomEdge && distanceFromBottom <= 80 }
     var isAtExactBottom: Bool { isValid && !isPastBottomEdge && distanceFromBottom <= 2 }
     /// Physical scroll settling commonly stops a few points above the computed
     /// edge because content insets and pixel rounding update in separate frames.
     /// This tighter-than-"near bottom" boundary is user-equivalent to reaching
     /// the tail and is used to dismiss catch-up without requiring a tap.
-    var isAtCatchUpBoundary: Bool {
+    package var isAtCatchUpBoundary: Bool {
         isValid && !isPastBottomEdge && distanceFromBottom <= Self.catchUpDistance
     }
 
     /// Opening accepts short content at the native bottom anchor. For overflow
     /// content the visible tail edge still rejects a transient overshoot.
-    var isPlausibleOpeningViewport: Bool {
+    package var isPlausibleOpeningViewport: Bool {
         guard isValid else { return false }
         let contentBottom = contentHeight + bottomInset
         guard contentBottom.isFinite, offsetY.isFinite else { return false }
@@ -167,7 +175,7 @@ struct ChatTranscriptGeometry: Equatable {
     /// A direct native viewport move changes the content offset or visible
     /// content rect without changing the measured layout. Keyboard, composer,
     /// and row-size changes are structural and cannot impersonate user intent.
-    func hasIndependentViewportMovement(from previous: Self) -> Bool {
+    package func hasIndependentViewportMovement(from previous: Self) -> Bool {
         guard !hasStructuralChange(from: previous) else { return false }
         if abs(offsetY - previous.offsetY) > 0.5 { return true }
         if let current = visibleTopY, let prior = previous.visibleTopY,
@@ -177,13 +185,13 @@ struct ChatTranscriptGeometry: Equatable {
         return false
     }
 
-    func hasStructuralChange(from previous: Self) -> Bool {
+    package func hasStructuralChange(from previous: Self) -> Bool {
         abs(containerHeight - previous.containerHeight) > 0.5
             || abs(bottomInset - previous.bottomInset) > 0.5
             || abs(contentHeight - previous.contentHeight) > 0.5
     }
 
-    var isPlausibleBottomRubberBand: Bool {
+    package var isPlausibleBottomRubberBand: Bool {
         guard isPastBottomEdge, hasScrollableOverflow else { return false }
         let legalBottom = max(0, contentHeight + bottomInset - containerHeight)
         let overscroll = max(0, offsetY - legalBottom)
@@ -199,7 +207,7 @@ struct ChatTranscriptGeometry: Equatable {
     /// inset change is never admitted; a viewport whose visible rect lies
     /// entirely past the content edge is admitted regardless of tolerance,
     /// because no rubber band produces it.
-    var isBeyondLegalContentBottom: Bool {
+    package var isBeyondLegalContentBottom: Bool {
         guard isPastBottomEdge else { return false }
         if let visibleTopY, let visibleBottomY,
            visibleTopY.isFinite, visibleBottomY.isFinite,
@@ -211,7 +219,7 @@ struct ChatTranscriptGeometry: Equatable {
 
     /// Distance the viewport sits past the legal content bottom, in points. It
     /// is the diagnostic scalar for one past-end correction, never a threshold.
-    var distanceBeyondLegalContentBottom: CGFloat {
+    package var distanceBeyondLegalContentBottom: CGFloat {
         guard isBeyondLegalContentBottom else { return 0 }
         let legalBottom = max(0, contentHeight + bottomInset - containerHeight)
         let offsetExcess = offsetY - legalBottom

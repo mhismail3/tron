@@ -1,6 +1,7 @@
 import Foundation
 import Testing
 @testable import TronMobile
+@testable import TronMobileCore
 
 @Suite("Chat interaction trace")
 struct ChatInteractionTraceTests {

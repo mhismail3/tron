@@ -1,11 +1,11 @@
 import Foundation
 
-enum SessionSourceControlMode: String, Codable, CaseIterable, Equatable, Sendable {
+package enum SessionSourceControlMode: String, Codable, CaseIterable, Equatable, Sendable {
     case existingCheckout
     case newBranchWorktree
     case existingBranchWorktree
 
-    var title: String {
+    package var title: String {
         switch self {
         case .existingCheckout: "Use Existing Checkout"
         case .newBranchWorktree: "New Worktree · New Branch"
@@ -13,7 +13,7 @@ enum SessionSourceControlMode: String, Codable, CaseIterable, Equatable, Sendabl
         }
     }
 
-    var summary: String {
+    package var summary: String {
         switch self {
         case .existingCheckout: "Use the selected checkout at its current commit."
         case .newBranchWorktree: "Create an isolated worktree and branch from the selected commit."
@@ -26,14 +26,14 @@ enum SessionSourceControlMode: String, Codable, CaseIterable, Equatable, Sendabl
     }
 }
 
-struct SessionSourceControlSelection: Codable, Equatable, Sendable {
-    var mode: SessionSourceControlMode
-    var branch: String?
-    var base: String?
+package struct SessionSourceControlSelection: Codable, Equatable, Sendable {
+    package var mode: SessionSourceControlMode
+    package var branch: String?
+    package var base: String?
 
-    static let existing = Self(mode: .existingCheckout, branch: nil, base: nil)
+    package static let existing = Self(mode: .existingCheckout, branch: nil, base: nil)
 
-    var displayName: String {
+    package var displayName: String {
         switch mode {
         case .existingCheckout: "Use Existing"
         case .newBranchWorktree: "New Worktree"
@@ -41,7 +41,7 @@ struct SessionSourceControlSelection: Codable, Equatable, Sendable {
         }
     }
 
-    var displayDescription: String {
+    package var displayDescription: String {
         switch mode {
         case .existingCheckout:
             return mode.summary
@@ -56,7 +56,7 @@ struct SessionSourceControlSelection: Codable, Equatable, Sendable {
         }
     }
 
-    func isAdmissible(for inspection: GitInspection?) -> Bool {
+    package func isAdmissible(for inspection: GitInspection?) -> Bool {
         guard mode != .existingCheckout else { return true }
         guard let inspection, inspection.isRepository else { return false }
         guard let branch, Self.isValidBranchField(branch) else { return false }
@@ -75,24 +75,48 @@ struct SessionSourceControlSelection: Codable, Equatable, Sendable {
         let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
         return !trimmed.isEmpty && trimmed.utf8.count <= 255 && !trimmed.contains(where: { $0.isWhitespace })
     }
+
+    package init(mode: SessionSourceControlMode, branch: String? = nil, base: String? = nil) {
+        self.mode = mode
+        self.branch = branch
+        self.base = base
+    }
 }
 
-struct GitInspection: Equatable, Sendable {
-    let isRepository: Bool
-    let branch: String?
-    let isDirty: Bool
-    var branches: [Branch] = []
-    var commits: [Commit] = []
+package struct GitInspection: Equatable, Sendable {
+    package let isRepository: Bool
+    package let branch: String?
+    package let isDirty: Bool
+    package var branches: [Branch] = []
+    package var commits: [Commit] = []
 
-    struct Branch: Equatable, Sendable, Identifiable {
-        let name: String
-        let checkedOut: Bool
-        var id: String { name }
+    package struct Branch: Equatable, Sendable, Identifiable {
+        package let name: String
+        package let checkedOut: Bool
+
+        package init(name: String, checkedOut: Bool) {
+            self.name = name
+            self.checkedOut = checkedOut
+        }
+        package var id: String { name }
     }
 
-    struct Commit: Equatable, Sendable, Identifiable {
-        let oid: String
-        let subject: String
-        var id: String { oid }
+    package struct Commit: Equatable, Sendable, Identifiable {
+        package let oid: String
+        package let subject: String
+
+        package init(oid: String, subject: String) {
+            self.oid = oid
+            self.subject = subject
+        }
+        package var id: String { oid }
+    }
+
+    package init(isRepository: Bool, branch: String?, isDirty: Bool, branches: [Branch] = [], commits: [Commit] = []) {
+        self.isRepository = isRepository
+        self.branch = branch
+        self.isDirty = isDirty
+        self.branches = branches
+        self.commits = commits
     }
 }

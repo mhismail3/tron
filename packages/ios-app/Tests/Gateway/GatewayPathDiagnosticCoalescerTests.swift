@@ -1,5 +1,6 @@
 import Testing
 @testable import TronMobile
+@testable import TronMobileCore
 
 struct GatewayPathDiagnosticCoalescerTests {
     @Test("OS callback bursts admit only one scheduled delivery and keep the latest observation")

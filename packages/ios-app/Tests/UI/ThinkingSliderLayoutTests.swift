@@ -1,6 +1,7 @@
 import SwiftUI
 import XCTest
 @testable import TronMobile
+@testable import TronMobileCore
 
 /// The source capsule is a fixture; the editor, track and morph host are real.
 /// These native captures are not physical-device gesture or haptic validation.

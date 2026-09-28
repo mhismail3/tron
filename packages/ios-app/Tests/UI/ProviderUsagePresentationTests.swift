@@ -1,6 +1,7 @@
 import Foundation
 import Testing
 @testable import TronMobile
+@testable import TronMobileCore
 
 @Suite("Provider account usage")
 struct ProviderUsagePresentationTests {

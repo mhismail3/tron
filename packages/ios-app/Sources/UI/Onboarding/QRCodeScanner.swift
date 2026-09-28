@@ -1,4 +1,5 @@
 import SwiftUI
+import TronMobileCore
 @preconcurrency import AVFoundation
 
 struct QRCodeScanner: UIViewControllerRepresentable {

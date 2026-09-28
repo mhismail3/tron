@@ -1,5 +1,6 @@
 import Testing
 @testable import TronMobile
+@testable import TronMobileCore
 
 @Suite("Provider usage read lifecycle")
 @MainActor

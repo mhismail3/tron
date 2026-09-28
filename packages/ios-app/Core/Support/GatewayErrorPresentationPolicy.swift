@@ -1,13 +1,13 @@
 import Foundation
 import TronMobileCore
 
-enum GatewayErrorPresentationPolicy {
-    enum Disposition: Equatable {
+package enum GatewayErrorPresentationPolicy {
+    package enum Disposition: Equatable {
         case silent
         case present
     }
 
-    static func disposition(for error: Error) -> Disposition {
+    package static func disposition(for error: Error) -> Disposition {
         if error is CancellationError || error is GatewayDefinitelyNotSentError || error is GatewayPossiblySentError {
             return .silent
         }

@@ -53,7 +53,7 @@ enum GatewayUploadPolicy {
     static let maximumResponseBytes = 64 * 1_024
 }
 
-struct GatewayEventBufferPolicy: Sendable {
+package struct GatewayEventBufferPolicy: Sendable {
     let maximumEvents: Int
     let maximumBytes: Int
 
@@ -65,8 +65,12 @@ struct GatewayEventBufferPolicy: Sendable {
 /// A snapshot of the Gateway transport epoch, including the disconnected state.
 /// Optional reads use this value so a request captured while offline cannot
 /// attach itself to a later connection.
-struct GatewayConnectionAdmission: Equatable, Sendable {
+package struct GatewayConnectionAdmission: Equatable, Sendable {
     let connectionID: Int?
+
+    package init(connectionID: Int?) {
+        self.connectionID = connectionID
+    }
 }
 
 enum GatewayEventAdmissionReason: String, Sendable, Equatable {
@@ -76,7 +80,7 @@ enum GatewayEventAdmissionReason: String, Sendable, Equatable {
     case retiredEpoch = "retired_epoch"
 }
 
-enum GatewayDiagnosticTopicAdmission {
+package enum GatewayDiagnosticTopicAdmission {
     static let recognizedTopics: Set<String> = [
         "session.snapshot", "session.rebaseline", "session.summary", "session.listChanged",
         "session.message", "session.progress", "session.toolProgress", "session.extensionActivity",
@@ -90,7 +94,7 @@ enum GatewayDiagnosticTopicAdmission {
         "models.customChanged", "models.recentChanged", "devices.changed", "terminal.output", "terminal.exit"
     ]
 
-    static func admit(_ topic: String) -> String {
+    package static func admit(_ topic: String) -> String {
         recognizedTopics.contains(topic) ? topic : "other"
     }
 }
@@ -402,31 +406,31 @@ private extension Int {
     func saturatingIncremented() -> Int { self == Int.max ? self : self + 1 }
 }
 
-struct GatewayEventStream: AsyncSequence, Sendable {
-    typealias Element = GatewayEventDelivery
+package struct GatewayEventStream: AsyncSequence, Sendable {
+    package typealias Element = GatewayEventDelivery
 
     fileprivate let hub: GatewayEventHub
 
-    struct AsyncIterator: AsyncIteratorProtocol {
+    package struct AsyncIterator: AsyncIteratorProtocol {
         fileprivate let hub: GatewayEventHub
 
-        mutating func next() async -> GatewayEventDelivery? {
+        package mutating func next() async -> GatewayEventDelivery? {
             await hub.next()
         }
     }
 
-    func makeAsyncIterator() -> AsyncIterator {
+    package func makeAsyncIterator() -> AsyncIterator {
         AsyncIterator(hub: hub)
     }
 
 }
 
-enum GatewayResponseDecoding {
+package enum GatewayResponseDecoding {
     private static let maximumMethodCharacters = 160
     private static let maximumPathCharacters = 512
     private static let maximumPathComponents = 64
 
-    static func decode<Response: Decodable>(
+    package static func decode<Response: Decodable>(
         _ value: JSONValue,
         as responseType: Response.Type,
         method: String
@@ -490,7 +494,7 @@ enum GatewayResponseDecoding {
     }
 }
 
-actor GatewayClient {
+package actor GatewayClient {
     #if HOSTED_TEST
     // A run-local gate exercises the real actor-hop race without production hooks.
     @TaskLocal static var hostedEventAdmissionGate: (@Sendable () async -> (@Sendable (GatewayEventAdmission) -> Void))?
@@ -526,7 +530,7 @@ actor GatewayClient {
         var info: GatewayInfo?
     }
 
-    nonisolated let events: GatewayEventStream
+    package nonisolated let events: GatewayEventStream
     private let eventHub: GatewayEventHub
     private let socketFactory: GatewaySocketFactory
     private let clock: MonotonicClock
@@ -550,34 +554,34 @@ actor GatewayClient {
     private var firstDiagnosticSequenceByEpisode: [String: Int] = [:]
     private let diagnosticStore: IOSClientDiagnosticStore?
     private var appLog: AppLog?
-    nonisolated let diagnosticOwnerID = UUID().uuidString
+    package nonisolated let diagnosticOwnerID = UUID().uuidString
     private var generation = 0
     private var profile: GatewayProfile?
     private var token: String?
 
-    var info: GatewayInfo? { connection?.info }
+    package var info: GatewayInfo? { connection?.info }
 
-    func activeConnectionID() -> Int? { connection?.id }
+    package func activeConnectionID() -> Int? { connection?.id }
 
-    func activeConnectionAdmission() -> GatewayConnectionAdmission {
+    package func activeConnectionAdmission() -> GatewayConnectionAdmission {
         GatewayConnectionAdmission(connectionID: connection?.id)
     }
 
-    func diagnostics() -> [GatewayConnectionDiagnostic] { connectionDiagnostics }
+    package func diagnostics() -> [GatewayConnectionDiagnostic] { connectionDiagnostics }
 
-    func latestDiagnosticSequence() -> Int { diagnosticSequence }
+    package func latestDiagnosticSequence() -> Int { diagnosticSequence }
 
-    func latestHandshakeDiagnostic(after sequence: Int) -> GatewayConnectionDiagnostic? {
+    package func latestHandshakeDiagnostic(after sequence: Int) -> GatewayConnectionDiagnostic? {
         connectionDiagnostics.first { $0.sequence > sequence && $0.handshake != nil }
     }
 
-    func installAppLog(_ log: AppLog?) {
+    package func installAppLog(_ log: AppLog?) {
         appLog = log
     }
 
     /// Joins projection-level records to the request diagnostic already owned
     /// by this actor without copying request lifecycle state into AppModel.
-    func sessionListRequestID(correlation: String) -> String? { latestRequestIDByCorrelation[correlation] }
+    package func sessionListRequestID(correlation: String) -> String? { latestRequestIDByCorrelation[correlation] }
 
     private func recordRPCDiagnostic(
         request: PendingRequest,
@@ -729,7 +733,7 @@ actor GatewayClient {
         diagnosticStore?.record(IOSClientDiagnosticBuffer.logRecord(diagnostic))
     }
 
-    init(
+    package init(
         socketFactory: GatewaySocketFactory = .urlSession,
         clock: MonotonicClock = .continuous,
         uuidSource: UUIDSource = .random,
@@ -771,11 +775,11 @@ actor GatewayClient {
         }
     }
 
-    func connect(profile: GatewayProfile, token: String) async throws -> GatewayInfo {
+    package func connect(profile: GatewayProfile, token: String) async throws -> GatewayInfo {
         try await establish(profile: profile, token: token, activateEvents: true, isReconnect: false).info
     }
 
-    func connectForLifecycle(profile: GatewayProfile, token: String) async throws -> GatewayConnectionIdentity {
+    package func connectForLifecycle(profile: GatewayProfile, token: String) async throws -> GatewayConnectionIdentity {
         try await establish(profile: profile, token: token, activateEvents: false, isReconnect: false)
     }
 
@@ -941,7 +945,7 @@ actor GatewayClient {
         return try await reconnectForLifecycle(profile: profile, token: token, activateEvents: true).info
     }
 
-    func reconnectForLifecycle(
+    package func reconnectForLifecycle(
         profile: GatewayProfile,
         token: String,
         activateEvents: Bool = false,
@@ -956,7 +960,7 @@ actor GatewayClient {
         )
     }
 
-    func activateEvents(connectionID: Int) throws {
+    package func activateEvents(connectionID: Int) throws {
         try activateEventDelivery(connectionID: connectionID)
     }
 
@@ -973,7 +977,7 @@ actor GatewayClient {
     /// Retires only the transport epoch while preserving the selected profile
     /// credentials for the next foreground reconnect. Background suspension is
     /// an intentional transport boundary, not a live subscription interval.
-    func retireForBackground() async {
+    package func retireForBackground() async {
         generation &+= 1
         let retiredConnectionID = connection?.id
         await detachConnection(
@@ -982,7 +986,7 @@ actor GatewayClient {
         if let retiredConnectionID { await eventHub.reset(connectionID: retiredConnectionID) }
     }
 
-    func closeIfCurrent(connectionID: Int) async {
+    package func closeIfCurrent(connectionID: Int) async {
         guard connection?.id == connectionID else { return }
         generation &+= 1
         await detachConnection(
@@ -992,7 +996,7 @@ actor GatewayClient {
         await eventHub.reset(connectionID: connectionID)
     }
 
-    func close() async {
+    package func close() async {
         generation &+= 1
         // Revoke credentials before suspension: an older close must never
         // erase the profile installed by a concurrent replacement connection.
@@ -1005,7 +1009,7 @@ actor GatewayClient {
         if let retiredConnectionID { await eventHub.reset(connectionID: retiredConnectionID) }
     }
 
-    func ensureResponsive(maximumSilence: Duration = .seconds(35)) async throws {
+    package func ensureResponsive(maximumSilence: Duration = .seconds(35)) async throws {
         guard let epoch = connection, let lastInboundAt = epoch.lastInboundAt else {
             throw GatewayFailure(code: "disconnected", message: "The Mac gateway is offline.", retryable: true, details: nil)
         }
@@ -1018,7 +1022,7 @@ actor GatewayClient {
         )
     }
 
-    func request<P: Encodable, R: Decodable>(
+    package func request<P: Encodable, R: Decodable>(
         _ method: String,
         _ params: P,
         as responseType: R.Type = R.self,
@@ -1032,7 +1036,7 @@ actor GatewayClient {
         return try GatewayResponseDecoding.decode(value, as: responseType, method: method)
     }
 
-    func requestValue<P: Encodable>(
+    package func requestValue<P: Encodable>(
         _ method: String,
         _ params: P,
         timeout: Duration = .seconds(30),
@@ -1047,7 +1051,7 @@ actor GatewayClient {
         )
     }
 
-    func request<P: Encodable, R: Decodable>(
+    package func request<P: Encodable, R: Decodable>(
         _ method: String,
         _ params: P,
         as responseType: R.Type = R.self,
@@ -1063,7 +1067,7 @@ actor GatewayClient {
         return try GatewayResponseDecoding.decode(value, as: responseType, method: method)
     }
 
-    func request<P: Encodable, R: Decodable>(
+    package func request<P: Encodable, R: Decodable>(
         _ method: String,
         _ params: P,
         as responseType: R.Type = R.self,
@@ -1079,7 +1083,7 @@ actor GatewayClient {
         return try GatewayResponseDecoding.decode(value, as: responseType, method: method)
     }
 
-    func requestValue<P: Encodable>(
+    package func requestValue<P: Encodable>(
         _ method: String,
         _ params: P,
         timeout: Duration = .seconds(30),
@@ -1093,7 +1097,7 @@ actor GatewayClient {
         )
     }
 
-    func requestValue<P: Encodable>(
+    package func requestValue<P: Encodable>(
         _ method: String,
         _ params: P,
         timeout: Duration = .seconds(30),
@@ -1239,7 +1243,7 @@ actor GatewayClient {
         }
     }
 
-    func upload(name: String, mimeType: String, data: Data) async throws -> String {
+    package func upload(name: String, mimeType: String, data: Data) async throws -> String {
         try requireUploadSize(data.count)
         let context = try uploadContext(name: name, mimeType: mimeType)
         var request = context.request
@@ -1255,7 +1259,7 @@ actor GatewayClient {
         return try admitUploadResponse(responseData, http: http, context: context)
     }
 
-    func discardUpload(_ id: String) async throws {
+    package func discardUpload(_ id: String) async throws {
         guard UUID(uuidString: id) != nil else {
             throw GatewayFailure(
                 code: "invalid_request",
@@ -1296,7 +1300,7 @@ actor GatewayClient {
         )
     }
 
-    func upload(
+    package func upload(
         name: String,
         mimeType: String,
         fileURL: URL,
@@ -1316,7 +1320,7 @@ actor GatewayClient {
 
     private struct UploadContext {
         let profileID: String
-        let request: URLRequest
+        package let request: URLRequest
     }
 
     private func uploadContext(name: String, mimeType: String) throws -> UploadContext {
@@ -1377,7 +1381,7 @@ actor GatewayClient {
         }
     }
 
-    func blob(
+    package func blob(
         id: String,
         sessionID: String? = nil,
         profileID: String,
@@ -1400,7 +1404,7 @@ actor GatewayClient {
         return value
     }
 
-    func openLiveView(
+    package func openLiveView(
         kind: DisplayKind,
         viewId: String,
         generation: String,
@@ -1439,7 +1443,7 @@ actor GatewayClient {
         return lease
     }
 
-    func displayArtifactFile(
+    package func displayArtifactFile(
         id: String,
         sessionID: String,
         profileID: String,
@@ -1472,7 +1476,7 @@ actor GatewayClient {
         }
     }
 
-    func blobFile(id: String, maximumBytes: Int, expectedBytes: Int64? = nil) async throws -> URL {
+    package func blobFile(id: String, maximumBytes: Int, expectedBytes: Int64? = nil) async throws -> URL {
         guard let profile, let token, let connectionID = connection?.id else {
             throw GatewayFailure(code: "disconnected", message: "The Mac gateway is offline.", retryable: true, details: nil)
         }

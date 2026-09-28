@@ -5,14 +5,15 @@ import OSLog
 /// submission viewport failures. Records contain only closed event names,
 /// booleans, counts, generations, and geometry scalars—never protocol IDs,
 /// prompts, transcript text, paths, filenames, or model/provider names.
-final class ChatInteractionTrace: @unchecked Sendable {
-    static let maximumRecords = 256
+package final class ChatInteractionTrace: @unchecked Sendable {
+    package init() {}
+    package static let maximumRecords = 256
 
     /// Profile identity these records carry in the Logs surface, so the
     /// diagnostic export can select exactly the trace it must always carry.
-    static let diagnosticProfileID = "ios-client:chat-trace"
+    package static let diagnosticProfileID = "ios-client:chat-trace"
 
-    enum OpeningStage: String, Sendable {
+    package enum OpeningStage: String, Sendable {
         case attemptBegan = "attempt-began"
         case authorityOpened = "authority-opened"
         case projectionInstalled = "projection-installed"
@@ -27,7 +28,7 @@ final class ChatInteractionTrace: @unchecked Sendable {
         case retired
     }
 
-    enum OpeningFailureReason: String, Sendable {
+    package enum OpeningFailureReason: String, Sendable {
         case authority = "authority-missing"
         case projection = "projection-missing"
         case commandApplication = "command-not-applied"
@@ -42,7 +43,7 @@ final class ChatInteractionTrace: @unchecked Sendable {
         case unknown
     }
 
-    enum ProjectionChange: String, Sendable {
+    package enum ProjectionChange: String, Sendable {
         case first
         case sameSpine = "same-spine"
         case changedSpine = "changed-spine"
@@ -51,7 +52,7 @@ final class ChatInteractionTrace: @unchecked Sendable {
         case removed
     }
 
-    enum SubmissionStage: String, Sendable {
+    package enum SubmissionStage: String, Sendable {
         case began
         case lifecycleGrafted = "lifecycle-grafted"
         case projectionSubmitted = "projection-submitted"
@@ -61,13 +62,13 @@ final class ChatInteractionTrace: @unchecked Sendable {
         case checkpoint
     }
 
-    enum EntranceStage: String, Sendable {
+    package enum EntranceStage: String, Sendable {
         case admitted
         case admittedFallback = "admitted-fallback"
         case completed
     }
 
-    enum CommandStage: String, Sendable {
+    package enum CommandStage: String, Sendable {
         case issued
         case applied
         case rejected
@@ -75,7 +76,7 @@ final class ChatInteractionTrace: @unchecked Sendable {
         case released
     }
 
-    enum LeaseStage: String, Sendable {
+    package enum LeaseStage: String, Sendable {
         case queued
         case releaseRequested = "release-requested"
         case releaseReady = "release-ready"
@@ -87,7 +88,7 @@ final class ChatInteractionTrace: @unchecked Sendable {
         case repairExhausted = "repair-exhausted"
     }
 
-    enum LeaseReason: String, Sendable {
+    package enum LeaseReason: String, Sendable {
         case targetOwned = "target-owned"
         case displacement
         case incompleteEvidence = "incomplete-evidence"
@@ -100,7 +101,7 @@ final class ChatInteractionTrace: @unchecked Sendable {
         case attemptLimit = "attempt-limit"
     }
 
-    enum LayoutStage: String, Sendable {
+    package enum LayoutStage: String, Sendable {
         case joined
         case participantSettled = "participant-settled"
         case settled
@@ -108,19 +109,19 @@ final class ChatInteractionTrace: @unchecked Sendable {
         case overflow
     }
 
-    enum GeometryReason: String, Sendable {
+    package enum GeometryReason: String, Sendable {
         case meaningfulChange = "meaningful-change"
         case submissionBaseline = "submission-baseline"
         case submissionCheckpoint = "submission-checkpoint"
         case openingCheckpoint = "opening-checkpoint"
     }
 
-    enum TailEdgeStage: String, Sendable {
+    package enum TailEdgeStage: String, Sendable {
         case firstDisplacement = "first-displacement"
         case recovered
     }
 
-    enum Anomaly: String, Sendable {
+    package enum Anomaly: String, Sendable {
         case submissionLostTail = "submission-lost-tail"
         case submissionLostProjection = "submission-lost-projection"
         case openingLostProjection = "opening-lost-projection"
@@ -129,7 +130,7 @@ final class ChatInteractionTrace: @unchecked Sendable {
 
     /// Closed, content-free inputs explain a disabled control without logging
     /// the command, draft, provider error, or canonical session identity.
-    struct Availability: Equatable, Sendable {
+    package struct Availability: Equatable, Sendable {
         var connected: Bool
         var reconciling: Bool
         var mountedAuthority: Bool
@@ -146,12 +147,31 @@ final class ChatInteractionTrace: @unchecked Sendable {
         var sceneActive: Bool
         var viewportActive: Bool
         var publicationActive: Bool
+
+        package init(connected: Bool, reconciling: Bool, mountedAuthority: Bool, projectionAvailable: Bool, openingTask: Bool, transcriptReady: Bool, scrollAllowsSubmission: Bool, scrollCommand: Bool, submissionPending: Bool, uploading: Bool, sending: Bool, commandReady: Bool, attachmentsReady: Bool, sceneActive: Bool, viewportActive: Bool, publicationActive: Bool) {
+            self.connected = connected
+            self.reconciling = reconciling
+            self.mountedAuthority = mountedAuthority
+            self.projectionAvailable = projectionAvailable
+            self.openingTask = openingTask
+            self.transcriptReady = transcriptReady
+            self.scrollAllowsSubmission = scrollAllowsSubmission
+            self.scrollCommand = scrollCommand
+            self.submissionPending = submissionPending
+            self.uploading = uploading
+            self.sending = sending
+            self.commandReady = commandReady
+            self.attachmentsReady = attachmentsReady
+            self.sceneActive = sceneActive
+            self.viewportActive = viewportActive
+            self.publicationActive = publicationActive
+        }
     }
 
-    struct State: Equatable, Sendable {
+    package struct State: Equatable, Sendable {
         var presentationEpoch: Int?
         var layoutEpoch: Int?
-        var observedLayoutEpoch: Int?
+        package var observedLayoutEpoch: Int?
         var layoutGeneration: Int?
         var canonicalRows: Int?
         var runtimeRows: Int?
@@ -180,8 +200,8 @@ final class ChatInteractionTrace: @unchecked Sendable {
         var repairAttempts: Int?
         var layoutSettled: Bool?
         /// Local bounded identity ordinals, not IDs or reversible hashes.
-        var physicalRowToken: Int?
-        var semanticRowToken: Int?
+        package var physicalRowToken: Int?
+        package var semanticRowToken: Int?
         var pendingPhysicalRowToken: Int?
         var pendingSemanticRowToken: Int?
         var pendingLayoutSettled: Bool?
@@ -197,6 +217,50 @@ final class ChatInteractionTrace: @unchecked Sendable {
         var rowHeight: CGFloat?
 
         static let empty = State()
+
+        package init(presentationEpoch: Int? = nil, layoutEpoch: Int? = nil, observedLayoutEpoch: Int? = nil, layoutGeneration: Int? = nil, canonicalRows: Int? = nil, runtimeRows: Int? = nil, queueRows: Int? = nil, hasLifecycleRow: Bool? = nil, viewportMode: ChatViewportMode? = nil, isUserInteracting: Bool? = nil, isPositionedByUser: Bool? = nil, distanceFromBottom: CGFloat? = nil, offsetY: CGFloat? = nil, contentHeight: CGFloat? = nil, containerHeight: CGFloat? = nil, bottomInset: CGFloat? = nil, isPastBottomEdge: Bool? = nil, tailClassification: ChatPhysicalTailClassification? = nil, tailDisplacement: CGFloat? = nil, hasCommand: Bool? = nil, hasAppliedTarget: Bool? = nil, hasPendingRelease: Bool? = nil, geometryRevision: Int? = nil, semanticRevision: Int? = nil, markerRevision: Int? = nil, materializationRevision: Int? = nil, repairAttempts: Int? = nil, layoutSettled: Bool? = nil, physicalRowToken: Int? = nil, semanticRowToken: Int? = nil, pendingPhysicalRowToken: Int? = nil, pendingSemanticRowToken: Int? = nil, pendingLayoutSettled: Bool? = nil, requestedRowOffsetFromTerminal: Int? = nil, materializationRequiredRevision: Int? = nil, nativeTailEvidence: Bool? = nil, nativeRowEvidence: Bool? = nil, nativeRowEvidenceFresh: Bool? = nil, pendingRowEvidenceFresh: Bool? = nil, rowMinY: CGFloat? = nil, rowHeight: CGFloat? = nil) {
+            self.presentationEpoch = presentationEpoch
+            self.layoutEpoch = layoutEpoch
+            self.observedLayoutEpoch = observedLayoutEpoch
+            self.layoutGeneration = layoutGeneration
+            self.canonicalRows = canonicalRows
+            self.runtimeRows = runtimeRows
+            self.queueRows = queueRows
+            self.hasLifecycleRow = hasLifecycleRow
+            self.viewportMode = viewportMode
+            self.isUserInteracting = isUserInteracting
+            self.isPositionedByUser = isPositionedByUser
+            self.distanceFromBottom = distanceFromBottom
+            self.offsetY = offsetY
+            self.contentHeight = contentHeight
+            self.containerHeight = containerHeight
+            self.bottomInset = bottomInset
+            self.isPastBottomEdge = isPastBottomEdge
+            self.tailClassification = tailClassification
+            self.tailDisplacement = tailDisplacement
+            self.hasCommand = hasCommand
+            self.hasAppliedTarget = hasAppliedTarget
+            self.hasPendingRelease = hasPendingRelease
+            self.geometryRevision = geometryRevision
+            self.semanticRevision = semanticRevision
+            self.markerRevision = markerRevision
+            self.materializationRevision = materializationRevision
+            self.repairAttempts = repairAttempts
+            self.layoutSettled = layoutSettled
+            self.physicalRowToken = physicalRowToken
+            self.semanticRowToken = semanticRowToken
+            self.pendingPhysicalRowToken = pendingPhysicalRowToken
+            self.pendingSemanticRowToken = pendingSemanticRowToken
+            self.pendingLayoutSettled = pendingLayoutSettled
+            self.requestedRowOffsetFromTerminal = requestedRowOffsetFromTerminal
+            self.materializationRequiredRevision = materializationRequiredRevision
+            self.nativeTailEvidence = nativeTailEvidence
+            self.nativeRowEvidence = nativeRowEvidence
+            self.nativeRowEvidenceFresh = nativeRowEvidenceFresh
+            self.pendingRowEvidenceFresh = pendingRowEvidenceFresh
+            self.rowMinY = rowMinY
+            self.rowHeight = rowHeight
+        }
     }
 
     struct Record: Equatable, Sendable {
@@ -234,7 +298,7 @@ final class ChatInteractionTrace: @unchecked Sendable {
         category: "ChatInteractionTrace"
     )
 
-    func beginContext(retainedPresentation: Bool) -> Int {
+    package func beginContext(retainedPresentation: Bool) -> Int {
         lock.lock()
         nextContext &+= 1
         let context = nextContext
@@ -250,11 +314,11 @@ final class ChatInteractionTrace: @unchecked Sendable {
         return context
     }
 
-    func endContext(_ context: Int) {
+    package func endContext(_ context: Int) {
         append(context: context, level: "info", event: "context.end", details: "")
     }
 
-    func opening(
+    package func opening(
         _ stage: OpeningStage,
         context: Int,
         retainedPresentation: Bool? = nil,
@@ -273,7 +337,7 @@ final class ChatInteractionTrace: @unchecked Sendable {
         )
     }
 
-    func openingFailure(
+    package func openingFailure(
         _ reasons: [OpeningFailureReason],
         context: Int,
         state: State
@@ -288,7 +352,7 @@ final class ChatInteractionTrace: @unchecked Sendable {
         )
     }
 
-    func availability(
+    package func availability(
         _ value: Availability,
         context: Int,
         blockedAction: Bool = false,
@@ -317,7 +381,7 @@ final class ChatInteractionTrace: @unchecked Sendable {
         )
     }
 
-    func projection(
+    package func projection(
         _ change: ProjectionChange,
         context: Int,
         state: State
@@ -332,7 +396,7 @@ final class ChatInteractionTrace: @unchecked Sendable {
         )
     }
 
-    func submission(
+    package func submission(
         _ stage: SubmissionStage,
         context: Int,
         grafted: Bool? = nil,
@@ -355,13 +419,13 @@ final class ChatInteractionTrace: @unchecked Sendable {
         )
     }
 
-    func entrance(_ stage: EntranceStage, context: Int, state: State) {
+    package func entrance(_ stage: EntranceStage, context: Int, state: State) {
         var values: [String] = []
         appendState(state, to: &values)
         append(context: context, level: "info", event: "entrance.\(stage.rawValue)", details: values.joined(separator: " "))
     }
 
-    func viewportTransition(
+    package func viewportTransition(
         context: Int,
         from: ChatViewportMode,
         to: ChatViewportMode,
@@ -382,7 +446,7 @@ final class ChatInteractionTrace: @unchecked Sendable {
         )
     }
 
-    func geometry(_ reason: GeometryReason, context: Int, state: State) {
+    package func geometry(_ reason: GeometryReason, context: Int, state: State) {
         var values: [String] = []
         appendState(state, to: &values)
         append(
@@ -393,7 +457,7 @@ final class ChatInteractionTrace: @unchecked Sendable {
         )
     }
 
-    func command(
+    package func command(
         _ stage: CommandStage,
         context: Int,
         command: ChatScrollCommand,
@@ -414,7 +478,7 @@ final class ChatInteractionTrace: @unchecked Sendable {
         )
     }
 
-    func lease(
+    package func lease(
         _ stage: LeaseStage,
         context: Int,
         token: Int?,
@@ -432,7 +496,7 @@ final class ChatInteractionTrace: @unchecked Sendable {
         )
     }
 
-    func layout(
+    package func layout(
         _ stage: LayoutStage,
         context: Int,
         generation: Int?,
@@ -453,7 +517,7 @@ final class ChatInteractionTrace: @unchecked Sendable {
         )
     }
 
-    func anomaly(_ anomaly: Anomaly, context: Int, state: State) {
+    package func anomaly(_ anomaly: Anomaly, context: Int, state: State) {
         var values: [String] = []
         appendState(state, to: &values)
         append(
@@ -467,7 +531,7 @@ final class ChatInteractionTrace: @unchecked Sendable {
     /// Records classification edges from SwiftUI marker observations, not proof
     /// of a painted frame. The caller excludes user-owned scrolling; ordinary
     /// geometry stays thresholded while unexpected loss survives ring pressure.
-    func tailEdge(
+    package func tailEdge(
         _ stage: TailEdgeStage,
         context: Int,
         state: State,
@@ -492,7 +556,7 @@ final class ChatInteractionTrace: @unchecked Sendable {
     /// The pinned past-end safety net. No marker evidence and no repair budget
     /// are involved, so this record is the only evidence that an impossible
     /// pinned viewport was returned to the tail.
-    func tailPastEndRepair(context: Int, distanceBeyondBottom: CGFloat?, state: State) {
+    package func tailPastEndRepair(context: Int, distanceBeyondBottom: CGFloat?, state: State) {
         var values: [String] = []
         if let distanceBeyondBottom {
             values.append("pastEndBy=\(Self.scalar(distanceBeyondBottom))")
@@ -506,7 +570,7 @@ final class ChatInteractionTrace: @unchecked Sendable {
         )
     }
 
-    func diagnosticRecords(limit: Int) -> [GatewayProfileLogRecord] {
+    package func diagnosticRecords(limit: Int) -> [GatewayProfileLogRecord] {
         guard limit > 0 else { return [] }
         lock.lock()
         let snapshot = Array(records.suffix(limit).reversed())
@@ -660,7 +724,7 @@ final class ChatInteractionTrace: @unchecked Sendable {
     /// At most 64 short identities are retained in memory, never exported.
     /// Evicted identities get new ordinals rather than false continuity. Cost
     /// does not scale with transcript history or streamed text.
-    func identityToken(_ value: String?) -> Int? {
+    package func identityToken(_ value: String?) -> Int? {
         guard let value, !value.isEmpty, value.utf8.prefix(257).count <= 256 else { return nil }
         lock.lock()
         defer { lock.unlock() }
@@ -739,12 +803,12 @@ final class ChatInteractionTrace: @unchecked Sendable {
     }
 }
 
-enum ChatInteractionAnomalyPolicy {
-    static func lostProjection(expectedRows: Int, currentRows: Int) -> Bool {
+package enum ChatInteractionAnomalyPolicy {
+    package static func lostProjection(expectedRows: Int, currentRows: Int) -> Bool {
         expectedRows > 0 && currentRows == 0
     }
 
-    static func displacedPinnedViewport(
+    package static func displacedPinnedViewport(
         expectedPinned: Bool,
         currentMode: ChatViewportMode,
         isUserInteracting: Bool,
@@ -776,35 +840,36 @@ enum ChatInteractionAnomalyPolicy {
 /// Non-observable per-view bookkeeping keeps tracing from invalidating the
 /// transcript or participating in the layout race it is observing.
 @MainActor
-final class ChatInteractionTraceLedger {
-    private(set) var context: Int?
+package final class ChatInteractionTraceLedger {
+    package init() {}
+    package private(set) var context: Int?
     private var isActive = false
     private var nextSubmissionToken = 0
     private(set) var activeSubmissionToken: Int?
 
-    func installContext(_ context: Int) {
+    package func installContext(_ context: Int) {
         self.context = context
         isActive = true
     }
 
-    func ownsContext(_ context: Int) -> Bool { isActive && self.context == context }
+    package func ownsContext(_ context: Int) -> Bool { isActive && self.context == context }
 
-    func beginSubmission() -> Int {
+    package func beginSubmission() -> Int {
         nextSubmissionToken &+= 1
         activeSubmissionToken = nextSubmissionToken
         return nextSubmissionToken
     }
 
-    func ownsSubmission(_ token: Int) -> Bool {
+    package func ownsSubmission(_ token: Int) -> Bool {
         isActive && activeSubmissionToken == token
     }
 
-    func endSubmission(_ token: Int) {
+    package func endSubmission(_ token: Int) {
         guard activeSubmissionToken == token else { return }
         activeSubmissionToken = nil
     }
 
-    func retire() {
+    package func retire() {
         // Retain the ended context so late cancellation callbacks cannot create
         // a second owner after the view has disappeared.
         isActive = false

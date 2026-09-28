@@ -1,6 +1,7 @@
 import Foundation
 import Testing
 @testable import TronMobile
+@testable import TronMobileCore
 
 @MainActor
 struct GatewayReconnectScheduleTests {

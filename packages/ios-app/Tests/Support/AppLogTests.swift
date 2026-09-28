@@ -1,6 +1,7 @@
 import Foundation
 import Testing
 @testable import TronMobile
+@testable import TronMobileCore
 
 @Suite("Always-on AppLog")
 struct AppLogTests {

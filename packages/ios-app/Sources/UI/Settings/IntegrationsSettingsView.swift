@@ -1,4 +1,5 @@
 import SwiftUI
+import TronMobileCore
 
 /// Unified presentation over the Gateway connection owner. This view never
 /// stores an authority or credential: every instance action carries its opaque

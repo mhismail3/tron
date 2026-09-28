@@ -1,8 +1,8 @@
 import Foundation
 import TronMobileCore
 
-struct ReconnectDelayPolicy: Sendable {
-    static let standard = ReconnectDelayPolicy(
+package struct ReconnectDelayPolicy: Sendable {
+    package static let standard = ReconnectDelayPolicy(
         initialSeconds: 2,
         multiplier: 1.7,
         maximumSeconds: 15,
@@ -10,7 +10,7 @@ struct ReconnectDelayPolicy: Sendable {
         nextUnitInterval: { Double.random(in: 0...1) }
     )
 
-    let initialSeconds: Double
+    package let initialSeconds: Double
     let multiplier: Double
     let maximumSeconds: Double
     let jitterFraction: Double
@@ -34,7 +34,7 @@ struct ReconnectDelayPolicy: Sendable {
         self.nextUnitInterval = nextUnitInterval
     }
 
-    func delay(nominalSeconds: Double) -> Duration {
+    package func delay(nominalSeconds: Double) -> Duration {
         let nominal = min(max(nominalSeconds, 0), maximumSeconds)
         let lower = nominal * (1 - jitterFraction)
         let upper = min(nominal * (1 + jitterFraction), maximumSeconds)
@@ -48,7 +48,7 @@ struct ReconnectDelayPolicy: Sendable {
     }
 
     /// Reuses the connection backoff curve without taking ownership of a caller's retry budget.
-    func delay(forFailureAttempt attempt: Int) -> Duration {
+    package func delay(forFailureAttempt attempt: Int) -> Duration {
         var nominal = initialSeconds
         for _ in 1..<max(1, attempt) {
             guard nominal < maximumSeconds else { break }
@@ -60,20 +60,20 @@ struct ReconnectDelayPolicy: Sendable {
 
 /// Owns the one pending reconnect delay for one connection executor.
 @MainActor
-final class GatewayReconnectSchedule {
+package final class GatewayReconnectSchedule {
     private let clock: MonotonicClock
     private let delayPolicy: ReconnectDelayPolicy
     private var nominalDelay: Double
     private var pending: Task<Void, Never>?
     private var continuation: CheckedContinuation<Bool, Never>?
 
-    init(clock: MonotonicClock, delayPolicy: ReconnectDelayPolicy = .standard) {
+    package init(clock: MonotonicClock, delayPolicy: ReconnectDelayPolicy = .standard) {
         self.clock = clock
         self.delayPolicy = delayPolicy
         self.nominalDelay = delayPolicy.initialSeconds
     }
 
-    func afterFailure() async -> Bool {
+    package func afterFailure() async -> Bool {
         cancelPending(resume: false)
         let delay = delayPolicy.delay(nominalSeconds: nominalDelay)
         nominalDelay = delayPolicy.nextNominalSeconds(after: nominalDelay)
@@ -92,18 +92,18 @@ final class GatewayReconnectSchedule {
         }
     }
 
-    func accelerate() {
+    package func accelerate() {
         guard continuation != nil else { return }
         pending?.cancel()
         resume(true)
     }
 
-    func reset() {
+    package func reset() {
         cancelPending(resume: false)
         nominalDelay = delayPolicy.initialSeconds
     }
 
-    func cancel() {
+    package func cancel() {
         cancelPending(resume: false)
     }
 

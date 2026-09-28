@@ -1,6 +1,6 @@
 import Foundation
 
-struct SharedContent: Codable, Equatable {
+package struct SharedContent: Codable, Equatable {
     let text: String?
     let url: String?
     let timestamp: Date
@@ -8,12 +8,12 @@ struct SharedContent: Codable, Equatable {
 
 struct ShareMessagePayload: Equatable { let prompt: String }
 
-enum SharedContentFragment: Equatable {
+package enum SharedContentFragment: Equatable {
     case text(String)
     case url(String)
 }
 
-enum SharedContentAdmissionPolicy {
+package enum SharedContentAdmissionPolicy {
     static let maximumProviderCount = 32
     static let maximumFragmentBytes = 64 * 1_024
     static let maximumAggregateBytes = 128 * 1_024
@@ -47,7 +47,7 @@ enum SharedContentAdmissionPolicy {
         return true
     }
 
-    static func admitsPrompt(_ prompt: String) -> Bool {
+    package static func admitsPrompt(_ prompt: String) -> Bool {
         prompt.utf8.count <= maximumPromptBytes
     }
 }
@@ -60,7 +60,7 @@ private extension SharedContentFragment {
     }
 }
 
-enum SharedContentReducer {
+package enum SharedContentReducer {
     static func content(
         from fragments: [SharedContentFragment],
         timestamp: Date
@@ -101,7 +101,7 @@ protocol PendingShareStoring {
     func clear()
 }
 
-struct UserDefaultsPendingShareStore: PendingShareStoring {
+package struct UserDefaultsPendingShareStore: PendingShareStoring {
     static let suiteName = "group.com.tron.shared"
     private static let key = "pendingShare"
 

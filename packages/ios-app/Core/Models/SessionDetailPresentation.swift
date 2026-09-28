@@ -3,13 +3,13 @@ import TronMobileCore
 
 /// Disposable, independently observable facts for descendants of a frozen chat.
 /// Neither transport revisions nor ordinary assistant text belong in these values.
-struct SessionHistoryPresentation: Hashable, Sendable {
-    let sessionID: String
-    let phase: SessionPhase
-    let stats: SessionStats
-    let leafEntryId: String?
+package struct SessionHistoryPresentation: Hashable, Sendable {
+    package let sessionID: String
+    package let phase: SessionPhase
+    package let stats: SessionStats
+    package let leafEntryId: String?
 
-    init(_ snapshot: SessionSnapshot) {
+    package init(_ snapshot: SessionSnapshot) {
         sessionID = snapshot.sessionId
         phase = snapshot.phase
         stats = snapshot.stats
@@ -17,11 +17,11 @@ struct SessionHistoryPresentation: Hashable, Sendable {
     }
 }
 
-struct SessionProcessPresentation: Hashable, Sendable {
-    let sessionID: String
-    let activities: [SessionProcessActivity]
+package struct SessionProcessPresentation: Hashable, Sendable {
+    package let sessionID: String
+    package let activities: [SessionProcessActivity]
 
-    init(_ snapshot: SessionSnapshot, previous: Self? = nil) {
+    package init(_ snapshot: SessionSnapshot, previous: Self? = nil) {
         sessionID = snapshot.sessionId
         let previousActivities = previous?.sessionID == sessionID ? previous?.activities ?? [] : []
         activities = (snapshot.processActivities ?? []).map { process in
@@ -30,13 +30,13 @@ struct SessionProcessPresentation: Hashable, Sendable {
     }
 }
 
-struct SessionQueuePresentation: Hashable, Sendable {
-    let sessionID: String
-    let runtimeGeneration: String
-    let revision: Int
-    let items: [SessionSnapshot.QueuedMessage]
+package struct SessionQueuePresentation: Hashable, Sendable {
+    package let sessionID: String
+    package let runtimeGeneration: String
+    package let revision: Int
+    package let items: [SessionSnapshot.QueuedMessage]
 
-    init(_ snapshot: SessionSnapshot) {
+    package init(_ snapshot: SessionSnapshot) {
         sessionID = snapshot.sessionId
         runtimeGeneration = snapshot.runtimeGeneration
         revision = snapshot.queueRevision
@@ -44,17 +44,17 @@ struct SessionQueuePresentation: Hashable, Sendable {
     }
 }
 
-struct SessionToolDetailSource: Hashable, Sendable {
-    let sessionID: String
-    let runtimeGeneration: String
-    let phase: SessionPhase
-    let acceptsQueuedPrompts: Bool?
-    let activeToolSegmentId: String?
-    let executions: [ToolExecutionState]
-    let canonical: [TranscriptItem]
-    let streaming: TranscriptItem?
+package struct SessionToolDetailSource: Hashable, Sendable {
+    package let sessionID: String
+    package let runtimeGeneration: String
+    package let phase: SessionPhase
+    package let acceptsQueuedPrompts: Bool?
+    package let activeToolSegmentId: String?
+    package let executions: [ToolExecutionState]
+    package let canonical: [TranscriptItem]
+    package let streaming: TranscriptItem?
 
-    init(_ snapshot: SessionSnapshot) {
+    package init(_ snapshot: SessionSnapshot) {
         sessionID = snapshot.sessionId
         runtimeGeneration = snapshot.runtimeGeneration
         phase = snapshot.phase

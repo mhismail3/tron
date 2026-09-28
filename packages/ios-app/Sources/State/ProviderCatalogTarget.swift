@@ -1,3 +1,4 @@
+import TronMobileCore
 enum ProviderCatalogTarget: Hashable, Sendable {
     case global
     case session(id: String)

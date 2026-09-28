@@ -3,6 +3,7 @@ import SwiftUI
 import Testing
 import UIKit
 @testable import TronMobile
+@testable import TronMobileCore
 
 @MainActor
 @Suite("Attachment image preview layout", .serialized)

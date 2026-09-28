@@ -5,21 +5,21 @@ import TronMobileCore
 /// intent, shared outcome, and quarantined event suffix. This replaces token
 /// polling and keeps synchronization state from leaking across AppModel fields.
 @MainActor
-final class SessionSynchronizationCoordinator {
-    enum Intent: Equatable, Sendable {
+package final class SessionSynchronizationCoordinator {
+    package enum Intent: Equatable, Sendable {
         case presentation(generation: Int)
         case reconnect(presentationGeneration: Int)
     }
 
-    enum Role: Equatable, Sendable {
+    package enum Role: Equatable, Sendable {
         case leader
         case join
         case retryAfterCurrent
     }
 
-    typealias Cursor = GatewayEventCursor
+    package typealias Cursor = GatewayEventCursor
 
-    enum EventAdmission: Equatable, Sendable {
+    package enum EventAdmission: Equatable, Sendable {
         case deliver(GatewayEvent)
         case buffered
         case overflow(String)
@@ -61,15 +61,15 @@ final class SessionSynchronizationCoordinator {
         }
     }
 
-    struct Lease {
+    package struct Lease {
         let sessionID: String
-        let intent: Intent
-        let role: Role
+        package let intent: Intent
+        package let role: Role
         fileprivate let token: UUID
         fileprivate let outcome: SharedOutcome
 
-        func sharedValue() async -> Bool { await outcome.value() }
-        func sameOwner(as other: Lease) -> Bool { sessionID == other.sessionID && token == other.token }
+        package func sharedValue() async -> Bool { await outcome.value() }
+        package func sameOwner(as other: Lease) -> Bool { sessionID == other.sessionID && token == other.token }
     }
 
     private struct Synchronization {
@@ -87,12 +87,12 @@ final class SessionSynchronizationCoordinator {
     private var synchronizations: [String: Synchronization] = [:]
     private var freshInstallSessionIDs = Set<String>()
 
-    init(maximumBufferedEvents: Int = 1_024, maximumBufferedBytes: Int = 2 * 1_024 * 1_024) {
+    package init(maximumBufferedEvents: Int = 1_024, maximumBufferedBytes: Int = 2 * 1_024 * 1_024) {
         self.maximumBufferedEvents = maximumBufferedEvents
         self.maximumBufferedBytes = maximumBufferedBytes
     }
 
-    func acquire(sessionID: String, intent: Intent) -> Lease {
+    package func acquire(sessionID: String, intent: Intent) -> Lease {
         if let existing = synchronizations[sessionID] {
             return Lease(
                 sessionID: sessionID,
@@ -118,15 +118,15 @@ final class SessionSynchronizationCoordinator {
         )
     }
 
-    func owns(_ lease: Lease) -> Bool {
+    package func owns(_ lease: Lease) -> Bool {
         synchronizations[lease.sessionID]?.token == lease.token
     }
 
-    func intent(sessionID: String) -> Intent? {
+    package func intent(sessionID: String) -> Intent? {
         synchronizations[sessionID]?.intent
     }
 
-    func admit(_ event: GatewayEvent) -> EventAdmission {
+    package func admit(_ event: GatewayEvent) -> EventAdmission {
         guard let sessionID = event.sessionId,
               var synchronization = synchronizations[sessionID] else {
             return .deliver(event)
@@ -148,7 +148,7 @@ final class SessionSynchronizationCoordinator {
         return .buffered
     }
 
-    func drainBufferedEvents(for lease: Lease, baseline: Cursor?) -> [GatewayEvent]? {
+    package func drainBufferedEvents(for lease: Lease, baseline: Cursor?) -> [GatewayEvent]? {
         guard var synchronization = synchronizations[lease.sessionID],
               synchronization.token == lease.token else { return nil }
         guard !synchronization.overflowed else { return nil }
@@ -164,14 +164,14 @@ final class SessionSynchronizationCoordinator {
         }
     }
 
-    func markRetryRequired(sessionID: String) -> Bool {
+    package func markRetryRequired(sessionID: String) -> Bool {
         guard var synchronization = synchronizations[sessionID] else { return false }
         synchronization.requiresRetry = true
         synchronizations[sessionID] = synchronization
         return true
     }
 
-    func consumeRetryRequirement(for lease: Lease) -> Bool {
+    package func consumeRetryRequirement(for lease: Lease) -> Bool {
         guard var synchronization = synchronizations[lease.sessionID],
               synchronization.token == lease.token else { return false }
         let required = synchronization.requiresRetry
@@ -180,22 +180,22 @@ final class SessionSynchronizationCoordinator {
         return required
     }
 
-    func prepareLeaderAttempt(_ lease: Lease) {
+    package func prepareLeaderAttempt(_ lease: Lease) {
         guard owns(lease) else { return }
         if case .presentation = lease.intent {
             freshInstallSessionIDs.remove(lease.sessionID)
         }
     }
 
-    func requireFreshInstall(sessionID: String) {
+    package func requireFreshInstall(sessionID: String) {
         freshInstallSessionIDs.insert(sessionID)
     }
 
-    func consumeFreshInstallRequirement(sessionID: String) -> Bool {
+    package func consumeFreshInstallRequirement(sessionID: String) -> Bool {
         freshInstallSessionIDs.remove(sessionID) != nil
     }
 
-    func restartBuffer(for lease: Lease) {
+    package func restartBuffer(for lease: Lease) {
         guard var synchronization = synchronizations[lease.sessionID],
               synchronization.token == lease.token else { return }
         synchronization.events.removeAll(keepingCapacity: false)
@@ -205,21 +205,21 @@ final class SessionSynchronizationCoordinator {
         synchronizations[lease.sessionID] = synchronization
     }
 
-    func complete(_ lease: Lease, outcome: Bool) {
+    package func complete(_ lease: Lease, outcome: Bool) {
         guard let synchronization = synchronizations[lease.sessionID],
               synchronization.token == lease.token else { return }
         synchronizations.removeValue(forKey: lease.sessionID)
         synchronization.outcome.resolve(outcome)
     }
 
-    func reset() {
+    package func reset() {
         let active = synchronizations.values
         synchronizations.removeAll()
         freshInstallSessionIDs.removeAll()
         for synchronization in active { synchronization.outcome.resolve(false) }
     }
 
-    static func isContiguous(_ events: [GatewayEvent], after baseline: Cursor) -> Bool {
+    package static func isContiguous(_ events: [GatewayEvent], after baseline: Cursor) -> Bool {
         var cursor = baseline
         for event in events {
             guard event.isConsumableSessionReplay else { return false }

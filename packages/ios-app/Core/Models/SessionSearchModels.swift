@@ -1,44 +1,44 @@
 import Foundation
 import TronMobileCore
 
-struct SessionSearchAnchorRevision: Codable, Hashable, Sendable {
-    let indexRevision: String
-    let fileIdentity: String
-    let branchDigest: String
-    let leafEntryId: String?
-    let entryOrdinal: Int
-    let forkBoundary: SessionSearchForkBoundary?
+package struct SessionSearchAnchorRevision: Codable, Hashable, Sendable {
+    package let indexRevision: String
+    package let fileIdentity: String
+    package let branchDigest: String
+    package let leafEntryId: String?
+    package let entryOrdinal: Int
+    package let forkBoundary: SessionSearchForkBoundary?
 }
 
-struct SessionSearchForkBoundary: Codable, Hashable, Sendable {
-    let kind: String
-    let inheritedEntryId: String
-    let gapOrdinal: Int
+package struct SessionSearchForkBoundary: Codable, Hashable, Sendable {
+    package let kind: String
+    package let inheritedEntryId: String
+    package let gapOrdinal: Int
 }
 
-struct SessionSearchResult: Codable, Hashable, Sendable, Identifiable {
-    let sessionId: String
-    let gatewayProfileID: String?
+package struct SessionSearchResult: Codable, Hashable, Sendable, Identifiable {
+    package let sessionId: String
+    package let gatewayProfileID: String?
     /// The owning Gateway's archive projection for this session, read from its
     /// archive store when the search response is built. It is never part of the
     /// index, so archiving changes no indexed text. A Gateway without
     /// `session-archive.v1` omits it, like every other additive row field.
-    let archived: Bool
-    let title: String
-    let cwd: String
-    let updatedAt: String
-    let entryId: String
-    let parentEntryId: String?
-    let ordinal: Int
-    let passageKind: String
-    let snippet: String
-    let lexicalScore: Double
-    let semanticScore: Double?
-    let jevScore: Double?
-    let anchorRevision: SessionSearchAnchorRevision
-    var id: String { "\(gatewayProfileID ?? "unknown"):\(sessionId):\(entryId)" }
+    package let archived: Bool
+    package let title: String
+    package let cwd: String
+    package let updatedAt: String
+    package let entryId: String
+    package let parentEntryId: String?
+    package let ordinal: Int
+    package let passageKind: String
+    package let snippet: String
+    package let lexicalScore: Double
+    package let semanticScore: Double?
+    package let jevScore: Double?
+    package let anchorRevision: SessionSearchAnchorRevision
+    package var id: String { "\(gatewayProfileID ?? "unknown"):\(sessionId):\(entryId)" }
 
-    init(
+    package init(
         sessionId: String,
         gatewayProfileID: String?,
         archived: Bool = false,
@@ -72,7 +72,7 @@ struct SessionSearchResult: Codable, Hashable, Sendable, Identifiable {
         self.anchorRevision = anchorRevision
     }
 
-    init(from decoder: Decoder) throws {
+    package init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         sessionId = try container.decode(String.self, forKey: .sessionId)
         gatewayProfileID = try container.decodeIfPresent(String.self, forKey: .gatewayProfileID)
@@ -92,13 +92,13 @@ struct SessionSearchResult: Codable, Hashable, Sendable, Identifiable {
     }
 }
 
-struct SessionSearchProfileTarget: Sendable, Hashable {
-    let profileID: String
-    let label: String
-    let capabilities: Set<String>
-    let isSelected: Bool
+package struct SessionSearchProfileTarget: Sendable, Hashable {
+    package let profileID: String
+    package let label: String
+    package let capabilities: Set<String>
+    package let isSelected: Bool
 
-    init(profileID: String, label: String, capabilities: Set<String> = [], isSelected: Bool = false) {
+    package init(profileID: String, label: String, capabilities: Set<String> = [], isSelected: Bool = false) {
         self.profileID = profileID
         self.label = label
         self.capabilities = capabilities
@@ -106,39 +106,63 @@ struct SessionSearchProfileTarget: Sendable, Hashable {
     }
 }
 
-struct SessionSearchProfileStatus: Identifiable, Sendable {
-    let profileID: String
-    let label: String
-    let state: String
-    let response: SessionSearchResponse?
-    let message: String?
-    var id: String { profileID }
+package struct SessionSearchProfileStatus: Identifiable, Sendable {
+    package let profileID: String
+    package let label: String
+    package let state: String
+    package let response: SessionSearchResponse?
+    package let message: String?
+    package var id: String { profileID }
+
+    package init(profileID: String, label: String, state: String, response: SessionSearchResponse?, message: String?) {
+        self.profileID = profileID
+        self.label = label
+        self.state = state
+        self.response = response
+        self.message = message
+    }
 }
 
-struct SessionSearchSessionGroup: Identifiable, Sendable {
-    let profileID: String
-    let profileLabel: String
-    let sessionId: String
-    let title: String
-    let cwd: String
-    let updatedAt: String
-    let passages: [SessionSearchResult]
+package struct SessionSearchSessionGroup: Identifiable, Sendable {
+    package let profileID: String
+    package let profileLabel: String
+    package let sessionId: String
+    package let title: String
+    package let cwd: String
+    package let updatedAt: String
+    package let passages: [SessionSearchResult]
     let isLocalMatch: Bool
-    var id: String { "\(profileID):\(sessionId)" }
+    package var id: String { "\(profileID):\(sessionId)" }
 
     /// Every passage of a session carries the same Gateway archive projection,
     /// so the group label is the row's own state rather than a second read. A
     /// group assembled without passages cannot claim one.
-    var isArchived: Bool { passages.contains(where: \.archived) }
+    package var isArchived: Bool { passages.contains(where: \.archived) }
+
+    package init(profileID: String, profileLabel: String, sessionId: String, title: String, cwd: String, updatedAt: String, passages: [SessionSearchResult], isLocalMatch: Bool) {
+        self.profileID = profileID
+        self.profileLabel = profileLabel
+        self.sessionId = sessionId
+        self.title = title
+        self.cwd = cwd
+        self.updatedAt = updatedAt
+        self.passages = passages
+        self.isLocalMatch = isLocalMatch
+    }
 }
 
-struct SessionSearchAggregate: Sendable {
-    let groups: [SessionSearchSessionGroup]
-    let profiles: [SessionSearchProfileStatus]
+package struct SessionSearchAggregate: Sendable {
+    package let groups: [SessionSearchSessionGroup]
+    package let profiles: [SessionSearchProfileStatus]
+
+    package init(groups: [SessionSearchSessionGroup], profiles: [SessionSearchProfileStatus]) {
+        self.groups = groups
+        self.profiles = profiles
+    }
 }
 
-enum SessionSearchNavigationAdmission {
-    static func admits(
+package enum SessionSearchNavigationAdmission {
+    package static func admits(
         result: SessionSearchResult,
         anchor: SessionSearchAnchorResponse,
         expectedProfileID: String,
@@ -162,8 +186,8 @@ enum SessionSearchNavigationAdmission {
     }
 }
 
-enum SessionSearchGrouping {
-    static func merge(local: [SessionSearchSessionGroup], remote: [SessionSearchSessionGroup]) -> [SessionSearchSessionGroup] {
+package enum SessionSearchGrouping {
+    package static func merge(local: [SessionSearchSessionGroup], remote: [SessionSearchSessionGroup]) -> [SessionSearchSessionGroup] {
         var merged = Dictionary(uniqueKeysWithValues: local.map { ($0.id, $0) })
         for group in remote {
             if let existing = merged[group.id] {
@@ -176,25 +200,25 @@ enum SessionSearchGrouping {
     }
 }
 
-struct SessionSearchResponse: Codable, Sendable {
-    let query: String
-    let queryRevision: String
-    let corpusRevision: String
-    let indexRevision: String
-    let coverage: Coverage
-    let semantic: Semantic
-    let ranking: Ranking
-    let results: [SessionSearchResult]
+package struct SessionSearchResponse: Codable, Sendable {
+    package let query: String
+    package let queryRevision: String
+    package let corpusRevision: String
+    package let indexRevision: String
+    package let coverage: Coverage
+    package let semantic: Semantic
+    package let ranking: Ranking
+    package let results: [SessionSearchResult]
 
-    struct Coverage: Codable, Sendable {
-        let state: String
+    package struct Coverage: Codable, Sendable {
+        package let state: String
         let sessionsIndexed: Int
         let sessionsTotal: Int
         let passagesIndexed: Int
         let omittedSessions: Int
         let reason: String?
     }
-    struct Semantic: Codable, Sendable {
+    package struct Semantic: Codable, Sendable {
         let state: String
         let modelRevision: String?
         let language: String?
@@ -203,14 +227,25 @@ struct SessionSearchResponse: Codable, Sendable {
         let vectorsTotal: Int
         let reason: String?
     }
-    struct Ranking: Codable, Sendable {
-        let state: String
-        let jev: String?
+    package struct Ranking: Codable, Sendable {
+        package let state: String
+        package let jev: String?
+    }
+
+    package init(query: String, queryRevision: String, corpusRevision: String, indexRevision: String, coverage: Coverage, semantic: Semantic, ranking: Ranking, results: [SessionSearchResult]) {
+        self.query = query
+        self.queryRevision = queryRevision
+        self.corpusRevision = corpusRevision
+        self.indexRevision = indexRevision
+        self.coverage = coverage
+        self.semantic = semantic
+        self.ranking = ranking
+        self.results = results
     }
 }
 
-struct SessionSearchPolicy: Codable, Sendable {
-    let enabled: Bool
+package struct SessionSearchPolicy: Codable, Sendable {
+    package let enabled: Bool
     let perQueryMicroCents: Int
     let dailyMicroCents: Int
     let policyRevision: Int
@@ -232,16 +267,16 @@ struct SessionSearchAnchorRequest: Codable, Sendable {
     let expectedLeafEntryId: String?
 }
 
-struct SessionSearchAnchorResponse: Codable, Sendable {
+package struct SessionSearchAnchorResponse: Codable, Sendable {
     let sessionId: String
-    let entryId: String
-    let start: Int
-    let end: Int
-    let total: Int
-    let items: [TranscriptItem]
-    let runtimeGeneration: String?
-    let leafEntryId: String?
-    let targetOrdinal: Int?
+    package let entryId: String
+    package let start: Int
+    package let end: Int
+    package let total: Int
+    package let items: [TranscriptItem]
+    package let runtimeGeneration: String?
+    package let leafEntryId: String?
+    package let targetOrdinal: Int?
     let hasEarlier: Bool?
     let hasLater: Bool?
 

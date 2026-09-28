@@ -8,7 +8,7 @@ import Foundation
 /// `start`" monotone in time, so a bounded search finds the first differing
 /// instant without sampling every interval. `PresentationLabelChangeTests`
 /// verifies that property for the formatters that use it.
-enum PresentationLabelChange {
+package enum PresentationLabelChange {
     /// Returns the earliest representable instant after `start` whose label
     /// differs from the label at `start`. When the label does not change within
     /// `horizon`, returns `start + horizon`, where it is unchanged, so a caller
@@ -17,7 +17,7 @@ enum PresentationLabelChange {
     /// `lattice`, when supplied, is an instant whose whole-second offsets are
     /// the expected change instants. Probing them first keeps the common case to
     /// a few label evaluations; the result is still verified to be exact.
-    static func next(
+    package static func next(
         after start: Date,
         horizon: TimeInterval,
         lattice: Date? = nil,

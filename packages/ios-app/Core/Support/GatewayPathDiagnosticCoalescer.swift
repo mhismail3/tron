@@ -4,7 +4,7 @@ import TronMobileCore
 /// Admission happens on the producer queue before scheduling a MainActor
 /// callback. One pending delivery can carry a fresh reactivation value, but
 /// scene retirement clears any value captured while the old scene was active.
-final class GatewayPathDiagnosticCoalescer: @unchecked Sendable {
+package final class GatewayPathDiagnosticCoalescer: @unchecked Sendable {
     private let lock = NSLock()
     private let clock: MonotonicClock
     private var active = false
@@ -13,9 +13,9 @@ final class GatewayPathDiagnosticCoalescer: @unchecked Sendable {
     private var updates = 0
     private var scheduled = false
 
-    init(clock: MonotonicClock = .continuous) { self.clock = clock }
+    package init(clock: MonotonicClock = .continuous) { self.clock = clock }
 
-    func setActive(_ active: Bool) {
+    package func setActive(_ active: Bool) {
         lock.lock()
         defer { lock.unlock() }
         self.active = active
@@ -24,7 +24,7 @@ final class GatewayPathDiagnosticCoalescer: @unchecked Sendable {
         if !active { lastDelivered = nil }
     }
 
-    func offer(_ facts: String) -> Bool {
+    package func offer(_ facts: String) -> Bool {
         guard facts.utf8.count <= 256 else { return false }
         lock.lock()
         defer { lock.unlock() }
@@ -36,7 +36,7 @@ final class GatewayPathDiagnosticCoalescer: @unchecked Sendable {
         return true
     }
 
-    func take() -> String? {
+    package func take() -> String? {
         lock.lock()
         defer { lock.unlock() }
         scheduled = false

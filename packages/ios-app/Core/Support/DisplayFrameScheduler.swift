@@ -1,6 +1,6 @@
 import QuartzCore
 
-struct DisplayFrameScheduler: Sendable {
+package struct DisplayFrameScheduler: Sendable {
     private let waitForFrame: @MainActor @Sendable () async throws -> Void
 
     init(waitForFrame: @escaping @MainActor @Sendable () async throws -> Void) {
@@ -8,11 +8,11 @@ struct DisplayFrameScheduler: Sendable {
     }
 
     @MainActor
-    func nextFrame() async throws {
+    package func nextFrame() async throws {
         try await waitForFrame()
     }
 
-    static let displayLink = DisplayFrameScheduler {
+    package static let displayLink = DisplayFrameScheduler {
         try Task.checkCancellation()
         let waiter = DisplayFrameWaiter()
         try await withTaskCancellationHandler {

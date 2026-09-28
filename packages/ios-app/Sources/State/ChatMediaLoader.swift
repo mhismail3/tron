@@ -3,6 +3,7 @@ import ImageIO
 import Observation
 import UniformTypeIdentifiers
 import UIKit
+import TronMobileCore
 
 struct ChatMediaIdentity: Hashable, Sendable {
     let profileID: String

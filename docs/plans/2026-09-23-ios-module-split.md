@@ -74,7 +74,7 @@ Recounted 2026-09-26 (MS-1):
 | `packages/ios-app/Sources/App` | 9 | 1,536 |
 | `packages/ios-app/Sources/Auth` | 1 | 781 |
 
-The share extension already compiles `packages/ios-app/Sources/Support/SharedContent.swift`
+The share extension already compiles `packages/ios-app/Core/Support/SharedContent.swift`
 directly, and unit tests reach the app through `@testable import TronMobile`.
 
 ## Tasks
