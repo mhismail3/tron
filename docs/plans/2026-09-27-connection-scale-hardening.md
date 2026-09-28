@@ -616,7 +616,7 @@ rows are in priority order.
 | E-3b | Claimed | LAN endpoint: advertise endpoints and pin in pairing and hello | E-3a | orchestrator-dispatched deepseek-worker, 2026-09-28 |
 | E-3c | Ready | LAN endpoint, phone side: pin validation, staggered race, seamless fallback | E-3b, C-3 | |
 | E-3d | Ready | LAN endpoint on by default in the release once E-3c's E2E cases pass; the setting is the kill switch | E-3c | |
-| G-13 | Claimed | Restart and reconnect storm: startup budget and a qualification case | G-1c, O-6b | orchestrator-dispatched deepseek-worker, 2026-09-28 |
+| G-13 | Done | Restart and reconnect storm: startup budget and a qualification case | G-1c, O-6b | orchestrator-dispatched deepseek-worker, 2026-09-28 (branch `hardening/g-13`): `gateway.startup-budget` (5 s, with the slowest step) and `impairment.restart.startup_ms`, read from the new process's own records; the case now reports G-13's criterion with its numbers. Quiet-host confirmation is the orchestrator's; two proposed rows in the handoff |
 | G-8 | Done | Background work audit: delete or bound each unowned or repeating job | O-5 | orchestrator-dispatched deepseek-worker, 2026-09-28 |
 | G-8a | Claimed | Discovery lane retries an atomically replaced `status.json` (bounded, like the watcher lane) so a replace is not `extension.artifact-rejected`; see G-8 handoff | G-1c | orchestrator-dispatched deepseek-worker, 2026-09-28 |
 | G-8d | Claimed | Bound the 750 ms ambient artifact discovery pass by change and make its 1,024-entry truncation impossible or visible; see G-8 handoff | G-8a | orchestrator-dispatched deepseek-worker, 2026-09-28 |
@@ -9156,3 +9156,67 @@ wait).
 - Deviations: the plan's "profile switch during restoration" case is still
   covered only by the route-change cases above; no profile-switch test holds the
   notice timer pending.
+
+### G-13 · Done · 2026-09-28 · orchestrator-dispatched deepseek-worker (branch `hardening/g-13`)
+
+- Result: the Gateway names its startup budget and the restart case reads and
+  judges it, with G-13's criterion reported beside the numbers.
+  - **Budget.** `gateway.startup-budget` is recorded the moment the Gateway
+    serves: process start to listening against `STARTUP_LISTEN_BUDGET_MS`
+    (5 s; `packages/gateway/src/lifecycle/startup-budget.ts`), info inside the
+    budget and warning past it, with the step that owns most of the time. The
+    constant is set from the measured `gateway.startup-step` records (about 1 s
+    quiet, 4.0–4.6 s on the qualification catalog under load), and the reason is
+    the phone's own retry schedule: its clients retry about 2 s and again about
+    5.4 s after their socket closes, so a slower start costs a whole backoff step.
+  - **Case.** `FixtureGateway.restart` reads the new process's own
+    `gateway.startup-step` records from the offset the restart began at and the
+    profiler reports `impairment.restart.startup_ms`; the driver carries the
+    budget into the leg. `restart_criterion_warnings` states a missed criterion
+    with its numbers — slowest reconnect over 10 s, a served storm request over
+    1 s, a start over budget, or no budget read at all — and deliberately does not
+    reject the run: a busy host slows the start itself, and `validate_impairment`
+    already owns what a case proved it measured.
+- Evidence (short runs, 200-file/32 MiB catalog, `--cases restart --no-build`;
+  this host at 1-minute load 26–50, so the host is the storm's dominant cost):
+  - Before (integration + G-1c/G-1b/G-9), report
+    `20260928T214555Z-multi-session-b3c70e`: downtime 7,168 ms, slowest reconnect
+    **15,187 ms**, 1 storm request over 1 s, p99 1,160 ms. The new process's own
+    records: `modules` 4,460 ms of a 4,605 ms start; the old process's shutdown
+    2,165 ms of which `work-settle` was 1,999 ms (the 2 s cleanup grace expiring
+    with 8 owned operations outstanding).
+  - After, report `20260928T220215Z-multi-session-941b6c`: `startup_ms` 6,257
+    (steps named: `modules` 5,529 ms), slowest reconnect 13,215 ms, **0 storm
+    requests over 1 s** (p99 849 ms). Its warnings state exactly both misses. The
+    reconnect misses on this host because the start is host-bound — 5.5 s of the
+    6.3 s is the module graph under load, against 0.38 s on the user's quiet
+    machine — so the clients' third attempt (about 5.7 s) meets a Gateway that is
+    still importing and pays the 5.8 s backoff. The same run's own records show
+    the contrast: its priming starts were 1,235 ms and 1,029 ms (info, budget
+    met), the restart 6,258 ms (warning) during the host's load spike, and the
+    production record is in that run's `fixture/gateway.jsonl`. Quiet-host
+    confirmation is the orchestrator's, like the rest of the plan's measured rows.
+  - Checks: `npx vitest run src/lifecycle/startup-budget.test.ts` 4/4;
+    `python3 scripts/test-tron-profile.py ImpairmentCases MultiSessionSamples`
+    12/12; `python3 scripts/test-tron-profile.py
+    MultiDriverImpairment.test_the_restart_case_reports_the_new_startups_budget`
+    1/1; build and `tsc --noEmit` clean.
+- Changes: `packages/gateway/src/lifecycle/startup-budget.ts` (+ test),
+  `packages/gateway/src/gateway-main.ts`,
+  `packages/gateway/docs/observability.md`, `scripts/tron-profile-gateway`,
+  `scripts/tron-profile-gateway-driver.mjs`, `scripts/test-tron-profile.py`.
+- Deviations: the case reports the criterion rather than failing the run, so one
+  host's slowness cannot reject the whole qualification (the run only rejects a
+  case that measured nothing). The reconnect target is not demonstrated here.
+- Proposed rows for the orchestrator (not touched by this task):
+  1. A restart with running sessions pays the old process's whole 2 s
+     `work-settle` cleanup grace before it exits, so the new process starts 2 s
+     later (measured 1,999 ms of a 2,165 ms shutdown, 8 owned operations). A
+     shorter restart-mode grace is a shutdown-semantics decision, not a startup
+     budget one.
+  2. Each storm reconnect spends 0.7–1.2 s in the upgrade's `auth` stage on this
+     host (six upgrades serialized by `DeviceStore`'s credential mutex, one
+     devices-file read each), which is what the driver's ready sequence waits on
+     after `connectUntilReady` succeeds.
+- Left: the quiet-host run of the full qualification, and R-1's exit-criterion
+  row for the restart.
