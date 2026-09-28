@@ -671,20 +671,19 @@ export class KnowledgeStore {
    * leaves the previous manifest authoritative. */
   private async rebuildCatalogHeads(paths: StorePaths, catalogID: string): Promise<void> {
     const { catalog } = await this.openCatalog(paths, catalogID, false);
-    let prepared = false;
     try {
       catalog.begin();
       const records = catalog.table<RecordHead>("records");
-      for (const [id, head] of [...records.entries()]) {
-        const latest = await this.readRecord(paths, id, head.latestRevisionId);
-        records.set(id, headFor(latest, head.revisionIds, head.objectHashes));
+      // Read the previous shape raw: it predates the projection this rebuild
+      // derives, so it cannot satisfy the current head contract yet.
+      for (const row of catalog.rawEntries("records")) {
+        if (!row.value || typeof row.value !== "object") throw new KnowledgeStoreError("invalid", "Invalid Knowledge record head");
+        const legacy = row.value as LegacyRecordHead & { objectHashes?: string[] };
+        const latest = await this.readRecord(paths, row.key, legacy.latestRevisionId);
+        records.set(row.key, headFor(latest, legacy.revisionIds, legacy.objectHashes ?? []));
       }
       catalog.commit();
-      prepared = true;
-    } finally {
-      catalog.close();
-      if (!prepared) return;
-    }
+    } finally { catalog.close(); }
     const durable = await open(join(paths.root, `catalog-${catalogID}.sqlite`), constants.O_RDONLY | constants.O_NOFOLLOW);
     try { await durable.sync(); } finally { await durable.close(); }
     await durableAtomicWriteJson(paths.state, { schemaVersion: KNOWLEDGE_SCHEMA_VERSION, storageVersion: CATALOG_STORAGE_VERSION, catalogID }, 0o600);

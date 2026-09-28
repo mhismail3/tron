@@ -172,6 +172,14 @@ export class KnowledgeCatalog {
     }
   }
 
+  /** Raw rows for the explicit storage upgrade only. A pre-upgrade head does
+   * not satisfy the current head contract, and the caller's rebuild is exactly
+   * what makes it valid; ordinary reads go through the validated accessors. */
+  rawEntries(collection: CatalogCollection): Array<{ key: string; value: unknown }> {
+    return this.database.prepare("SELECT key, value FROM entries WHERE collection = ? ORDER BY key").all(collection)
+      .map(row => ({ key: JSON.parse(String(row.key)) as string, value: JSON.parse(String(row.value)) as unknown }));
+  }
+
   count(collection: CatalogCollection, where: string): number {
     return Number(this.database.prepare(`SELECT count(*) AS count FROM entries WHERE collection = '${collection}' AND (${where})`).get()!.count);
   }
