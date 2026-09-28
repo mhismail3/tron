@@ -8571,20 +8571,58 @@ wait).
   an endpoint composes the `wss` socket and `https` base the race dials
   (including a bracketed IPv6 ULA), a hello replaces what the store held (an
   unchanged answer writes nothing, an empty list clears both), and the phone
-  reproduces the shared fixture's pin. Retained run:
-  `~/Library/Developer/Tron/ios/test-runs/20260928T213843Z-run.aIjlev`.
+  reproduces the shared fixture's pin. Retained run: the 100-test run
+  `20260928T213833Z-run.x6hAyM` (`1e12290c8` with the URL-composition change
+  uncommitted); the review-fixes entry below cites a run at this branch's final
+  HEAD.
 - Deviations: the advertisement rides on `GatewayInfo` (the hello projection)
   instead of a new field on `GatewayConnectionIdentity`, so no E-3c-owned client
   file changed in this task. `GatewayProfileStore.adoptLanAdvertising` is the
-  seam E-3c calls after hello and is covered by tests here. No new log record:
+  seam the Phone lifecycle calls after a hello and is covered by tests here; the
+  call site itself was added in the review round below. No new log record:
   the advertisement is state on an existing frame, not a juncture, and a
   per-hello record would be hot-path volume.
 - For the next agent (E-3c): `profile.lanEndpoints`/`lanPin` are already
-  validated, so race those endpoints, compare the served certificate with
-  `GatewayLanPin.pin(forCertificateDER:)`, and call
-  `profiles.adoptLanAdvertising(endpoints:pin:for:)` after hello; a hello with no
-  `lanEndpoints` decodes as an empty list, which is the lane being off. Each
-  endpoint composes its own dial URLs (`socketURL`, `httpURL(path:queryItems:)`,
-  both TLS) because `URLComponents` refuses a bare IPv6 literal and a ULA-only
-  Mac advertises one. The lane binds the main listener's port on the private
-  address.
+  validated and kept current (each hello of the focused connection replaces
+  them), so race those endpoints and compare the served certificate with
+  `GatewayLanPin.pin(forCertificateDER:)`; a hello with no `lanEndpoints`
+  decodes as an empty list, which is the lane being off. Each endpoint composes
+  its own dial URLs (`socketURL`, `httpURL(path:queryItems:)`, both TLS) because
+  `URLComponents` refuses a bare IPv6 literal and a ULA-only Mac advertises one.
+  The lane binds the main listener's port on the private address.
+
+### E-3b · review fixes · 2026-09-28 · orchestrator-dispatched deepseek-worker (branch `hardening/e-3b`)
+
+- Result: an independent review's one major and two minors are fixed on the same
+  branch (no merge). (1) The hello now stores what it advertises: `AppModel`'s
+  `adoptConnectedGatewayLanAdvertising()` runs beside
+  `adoptConnectedGatewayIdentity()` in `lifecycleRefreshAll`, which the
+  lifecycle calls on every connect and reconnect, so the selected profile's
+  `lanEndpoints`/`lanPin` are replaced by the hello's advertisement before the
+  dashboard pool reconciles. No revision is bumped: nothing presents the
+  advertisement yet and the dial endpoint did not change. A phone paired before
+  this release now gets the lane on its next connection, and an address that
+  moved or a lane that was switched off corrects the profile instead of leaving
+  E-3c a stale endpoint. (2) `DashboardGatewayConnectionPool.reconcile` compares
+  a `DashboardPoolProfileIdentity` (host, port, label, machine identity, enabled
+  — plus the token it already compared) instead of whole-profile equality, so a
+  refreshed advertisement no longer stops and restarts a working background
+  connection; a changed dial identity still does. (3) The earlier entry's
+  evidence path named a sibling worktree's run and is replaced with this
+  worker's own; the run below is at this branch's final source.
+- Evidence: `scripts/tron-ios-test build` + `run` on
+  `TronMobileTests/GatewayClientTransportTests`, `GatewayPairingTransportTests`,
+  `GatewayProfileStoreTests`, `GatewayProtocolContractTests`,
+  `AppModelLifecycleTests` and `DashboardStateOwnerTests` 172/172, including the
+  two new cases below. Retained run:
+  `~/Library/Developer/Tron/ios/test-runs/20260928T220641Z-run.VlfXfG`. Each new
+  case fails on the pre-fix code for its own reason: with the comparison
+  reverted, the pooled entry dials a second socket and closes the first
+  (`DashboardStateOwnerTests.swift:295`); with the adoption call removed, the
+  stored profile keeps `[]`/`nil` (`AppModelLifecycleTests.swift:346`). No
+  Gateway source changed in this round, so the merge gate was not re-run.
+- Deviations: the adoption call lands in `AppModel.swift` (the zone table gives
+  it to E-3c) and the pool comparison in `DashboardGatewayConnectionPool.swift`
+  (C-5's file), because the plan's own E-3b "Do" and both docs already say the
+  phone replaces the advertisement on every hello; deferring either to E-3c
+  would have left the shipped branch contradicting both.
