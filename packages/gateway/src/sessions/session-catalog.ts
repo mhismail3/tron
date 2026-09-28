@@ -112,6 +112,17 @@ export interface SessionCatalogCandidate {
   mtimeMs: number;
 }
 
+/** The catalog owner's verified facts for one canonical file, keyed by session
+ * ID for derived readers. A derived index (session search) stamps its own rows
+ * with these facts and reuses a row only while the catalog still reports the
+ * same file, so the catalog stays the one owner of what a canonical file is and
+ * no derived reader proves it from the file itself. */
+export interface SessionCatalogIdentity {
+  fileIdentity: string;
+  size: number;
+  mtimeMs: number;
+}
+
 /** One complete structural cut of the canonical catalog. A scan is only a path
  * set: every row is rebuilt from its canonical file through the durable index,
  * so an incomplete cut is never membership evidence. */
@@ -300,6 +311,11 @@ export class SessionCatalog {
    * membership, and writing it would erase rows the next startup would then
    * have to re-parse every transcript to rebuild. */
   private canonicalCut = false;
+  /** True once one complete cut has been verified against the folder, so every
+   * published row's facts were checked against the file itself and not only
+   * loaded from the durable document. A derived reader must not treat a durable
+   * row as proof that a file did not change while the Gateway was down. */
+  private verifiedCut = false;
   private changeGeneration = 0;
   private durableGeneration = 0;
   private closed = false;
@@ -322,6 +338,23 @@ export class SessionCatalog {
 
   row(path: string): SessionCatalogRow | undefined {
     return this.indexed(resolve(path));
+  }
+
+  /** The verified identity of every published row, keyed by session ID, or
+   * undefined while no complete cut has been verified against the folder. A
+   * duplicated ID is omitted: a reader must not resolve it to either file. */
+  async searchIdentities(): Promise<ReadonlyMap<string, SessionCatalogIdentity> | undefined> {
+    // The startup durable load and its reconcile are already in this lane, so
+    // one await is a completed cut rather than a second pass.
+    await this.lane;
+    if (this.closed || !this.verifiedCut) return undefined;
+    const duplicates = this.duplicateSessionIds();
+    const identities = new Map<string, SessionCatalogIdentity>();
+    for (const row of this.rowsByPath.values()) {
+      if (row.delegated || duplicates.has(row.id)) continue;
+      identities.set(row.id, { fileIdentity: row.fileIdentity, size: row.size, mtimeMs: row.mtimeMs });
+    }
+    return identities;
   }
 
   /** Session IDs that more than one canonical file claims. A reader must not
@@ -777,6 +810,7 @@ export class SessionCatalog {
     const diff = this.publishRows(reconciled.rows, await this.catalogRoot(), removalFloor);
     if (this.closed) return;
     this.canonicalCut = true;
+    this.verifiedCut = true;
     if (diff.added + diff.removed + diff.modified > 0) this.markChanged();
     report("reconciled", files, diff, reconciled.unproven);
   }

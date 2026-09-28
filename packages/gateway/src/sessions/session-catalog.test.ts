@@ -301,6 +301,48 @@ describe("SessionCatalog", () => {
     expect([...catalog.duplicateSessionIds()]).toEqual(["id-dup"]);
   });
 
+  it("publishes search identities only after a verified cut, and omits a duplicated ID", async () => {
+    const { sessions, catalog } = await fixture();
+    // No cut yet: a derived index must parse rather than reuse a durable row no
+    // complete cut has re-verified against the folder.
+    await expect(catalog.searchIdentities()).resolves.toBeUndefined();
+
+    const written = join(sessions, "workspace", "a.jsonl");
+    await writeSession(written, "id-a", sessions, ["first prompt"]);
+    catalog.start();
+    await catalog.settled();
+
+    const facts = await stat(written);
+    const identities = await catalog.searchIdentities();
+    expect([...identities!.keys()]).toEqual(["id-a"]);
+    expect(identities!.get("id-a")).toEqual({
+      fileIdentity: `${facts.dev}:${facts.ino}`,
+      size: facts.size,
+      mtimeMs: facts.mtimeMs,
+    });
+    // An append the owner has not verified yet is not silently claimed: the
+    // row's facts move with the file only once a pass proved them.
+    await appendMessage(written, "second prompt", 1);
+    await catalog.refresh(written);
+    await catalog.settled();
+    const appended = await stat(written);
+    expect(await catalog.searchIdentities()).toEqual(new Map([["id-a", {
+      fileIdentity: `${appended.dev}:${appended.ino}`,
+      size: appended.size,
+      mtimeMs: appended.mtimeMs,
+    }]]));
+
+    // A second file claiming the same ID is omitted: a reader must not resolve
+    // it to either claimant.
+    await writeSession(join(sessions, "other", "b.jsonl"), "id-a", sessions, ["two"]);
+    await catalog.reconcile();
+    await catalog.settled();
+    expect((await catalog.searchIdentities())?.has("id-a")).toBe(false);
+    // The watcher stops with the test, so no pass recreates the temp root while
+    // the shared teardown removes it.
+    await catalog.dispose();
+  });
+
   it("replaces a published row instead of mutating it across an append and a rekey", async () => {
     const { sessions, catalog } = await fixture();
     const previous = join(sessions, "workspace", "previous.jsonl");
