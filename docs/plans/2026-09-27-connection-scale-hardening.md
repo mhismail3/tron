@@ -2,6 +2,12 @@
 
 - **Started:** 2026-09-27
 - **Status:** Active (Phase 1 runs on `hardening/integration`; that branch's copy of this plan is authoritative until R-1)
+- **Last updated:** 2026-09-28, G-8c done: the search index is persisted and
+  keyed by the catalog owner's verified file facts (fileIdentity, size, mtime),
+  a start parses only what the catalog proves changed, one document's postings
+  insert and invalidation are sliced off the event loop (565–821 ms and 491 ms
+  in G-11's profile → 42 ms and 0.1 ms measured)
+
 - **Last updated:** 2026-09-28, G-8b review round 2 addressed: the poller
   owns one admission cache shared with the explicit user actions, the explicit
   probe records its outcome, and the runtime fence stamps the bundled manifest
@@ -599,7 +605,7 @@ rows are in priority order.
 | G-8a | Ready | Discovery lane retries an atomically replaced `status.json` (bounded, like the watcher lane) so a replace is not `extension.artifact-rejected`; see G-8 handoff | G-1c | |
 | G-8d | Ready | Bound the 750 ms ambient artifact discovery pass by change and make its 1,024-entry truncation impossible or visible; see G-8 handoff | G-8a | |
 | G-8b | Done | Bound the Mac app status poll's child processes and per-poll payload re-hash (user/security decision in "Decisions still open"); see G-8 handoff | G-8 | orchestrator-dispatched deepseek-worker, 2026-09-28; review round 1 addressed; back to Claimed because the app-level cadence measurement the row asks for is still owed (see handoff) |
-| G-8c | Claimed | Bound the session-search warm-up (persisted index vs bounded slices in G-9's scheduler: user decision); see G-8 handoff | G-9 | orchestrator-dispatched deepseek-worker, 2026-09-28 |
+| G-8c | Done | Persisted session-search index keyed by the catalog's verified file facts, so a start re-reads only what changed; the semantic pass and the index's own writes are time/slice bounded (see handoff) | G-9, G-1c | orchestrator-dispatched deepseek-worker, 2026-09-28 |
 | E-1 | Done | Document Tailscale flap diagnosis and user-side checks; the evaluation day confirms | O-2, O-7 | orchestrator-dispatched deepseek-worker, 2026-09-28 |
 | T-1 | Ready | Pre-existing test race: registry extension-artifact discovery tests treat an awaited `discoverExtensionArtifacts()` as a barrier; wait for a pass that settles (three tests, one a false green) | G-1a (Registry zone) | |
 | T-2 | Done | `GatewayConnectionEpisodeRecorderTests/blockedMainActorIsMeasuredAndReported` (O-4) was killed once ("Test crashed with signal kill") when run with four other suites on integration, then passed 3/3; find whether the 5 s main-thread block trips a hosted-test watchdog and bound the block so the test cannot be killed while still proving the stall record | O-4 | orchestrator-dispatched deepseek-worker, 2026-09-28; no hosted-test watchdog exists (a 5 + 10 + 20 s block probe passed); the kill came from another worktree's run on the same default-lane simulator (`E816D194…`), not from the block — see the T-2 handoff and T-3; the block is now the named `mainStallTestBlock` (5 s) in both phases |
@@ -7936,3 +7942,93 @@ wait).
   run; this branch proves the mechanism it depends on (no duplicate-open failure,
   no request-path work after the last waiter cancels) in the integration case
   above.
+
+### G-8c · Done · 2026-09-28 · orchestrator-dispatched deepseek-worker (branch `hardening/g-8c`)
+
+- Result: the session-search index is persisted state keyed by the catalog
+  owner's verified file facts, so a start reuses every session the catalog still
+  reports unchanged and parses only what changed. G-11's profile findings are
+  fixed in the same change: one document's posting insert is sliced and the
+  summary-publication invalidator no longer runs SQLite work inline.
+- Scope decision (user, 2026-09-28): persisted index keyed by `fileIdentity`,
+  rebuildable from canonical JSONL, one owner. The reuse key is the catalog's
+  verified `{fileIdentity, size, mtimeMs}` triple — `dev:ino` alone does not
+  change on an append, so identity alone cannot prove a transcript unchanged.
+  A row is stamped with the facts observed **before** its transcript read, so a
+  stamp is never newer than the content it indexes (an unusable stamp only
+  causes an extra parse later).
+- Evidence for "Done when" (a start warms without a full-corpus parse, within a
+  stated bound, coverage digest unchanged):
+  - `npx vitest run src/sessions/session-search-service.test.ts` passes 14/14,
+    including "reuses the persisted index for an unchanged corpus and re-parses
+    only what changed": start 1 parses 2 of 2 (`indexPassStats()`
+    `{reused:0, parsed:2}`), start 2 over the same index reads **0** transcripts
+    (`{reused:2, parsed:0}`) and returns the **identical `corpusRevision` and
+    `coverage`**, and after one file's facts move, start 3 re-reads exactly that
+    session (`["two"]`, `{reused:1, parsed:1}`).
+    "parses the corpus when no catalog cut can prove a row unchanged" is the
+    negative control: with no verified cut, both starts parse (1 read each).
+  - `npx vitest run src/sessions/session-catalog.test.ts` passes 30/30, including
+    the new "publishes search identities only after a verified cut, and omits a
+    duplicated ID": before any cut the seam answers `undefined` (so nothing is
+    reused on the strength of a durable load), after a verified cut it names
+    `dev:ino`/size/mtime as the file reports them, follows an append, and omits
+    an ID two files claim.
+  - Stated bounds (named constants in `session-search-service.ts`): warm-up and
+    reindex slices hand the loop back every `SEARCH_SLICE_MS` (20 ms) of work;
+    the start waits at most `SEARCH_WARMUP_CATALOG_WAIT_MS` (30 s) for the
+    catalog's first verified cut and then parses whatever it cannot prove; the
+    optional semantic pass stops at `SEARCH_SEMANTIC_WARMUP_BUDGET_MS` (120 s)
+    with explicit `partial` coverage; the index insert yields every
+    `INDEX_WRITE_SLICE_MS` (20 ms).
+  - Before/after event-loop stretch, `npx vitest run
+    src/sessions/session-search-stall.test.ts` (report default
+    `$TMPDIR/tron-search-stall-report.json`, kept at
+    `~/.tron/workspace/files/hardening/g-8c-search-stall.json`): a 3,000-passage
+    document's insert holds the loop **41.6 ms** (G-11's profile: 565–821 ms per
+    document) and a summary publication's invalidation **0.07 ms** versus the
+    inline `SessionSearchIndex.remove` it used to run, measured at 619 ms on the
+    same fixture (G-11: 491 ms). The insert's remaining stretch is the two global
+    posting-byte aggregates (~49 ms); the per-session byte query became a row
+    read (`posting_bytes`).
+  - `npx tsc --noEmit -p .` clean; `npm run build` clean;
+    `python3 scripts/check-documentation-policy.py` and
+    `scripts/personal-info-guard.sh` pass.
+  - Merge gate on this branch after `hardening/integration` (C-6) was merged in:
+    132/132 in `session-archive.integration.test.ts`,
+    `server-capacity.integration.test.ts`, `sync-protocol.integration.test.ts`,
+    `stall-diagnostics.test.ts`, `server-heartbeat.integration.test.ts`,
+    `server-http-lifecycle.integration.test.ts`, and 257/257 in
+    `runtime-registry.integration.test.ts`.
+- Changes: `session-search-index.ts` (persisted rows + schema stamp, reuse
+  columns, `posting_bytes`, `sessionFacts()`, async sliced `replace`, sliced
+  budget pricing); `session-search-service.ts` (reuse pass, dirty marking
+  instead of inline `remove`, sliced warm-up, semantic budget, counters);
+  `session-catalog.ts` (`verifiedCut`, `searchIdentities()`);
+  `runtime-registry.ts` (one delegating read-only method);
+  `gateway-main.ts` (`session-search.warm` counts); new
+  `util/event-loop-yield.ts`; docs `session-search.md`, `observability.md`;
+  tests `session-search-index.test.ts`, `session-search-service.test.ts`,
+  `session-catalog.test.ts`, new `session-search-stall.test.ts`.
+  Superseded and deleted: `SessionSearchIndex.clear()` and the two tests that
+  asserted a per-process discard ("reopens a populated disposable index empty"),
+  plus the doc sentences that promised it.
+- Deviations: the registry is the Registry zone (G-9 in flight); the orchestrator
+  approved one additive read-only method block built on
+  `sessionCatalog.rows()`/`sessionIdentities()` rather than the
+  `catalogStructureEvidence` seam G-1c deletes, and will resolve the merge with
+  G-1c. The catalog gained `verifiedCut` + `searchIdentities()` (Catalog zone,
+  held by this row). The semantic pass still re-reads changed text to re-embed
+  (vectors are not persisted); it is now time-bounded, and persisting vectors is
+  the follow-up if the evaluation day shows semantic warmth matters.
+- Not met / left: no measurement against the real 225-session / 2.8 GB corpus on
+  a start that follows use (that needs the user's running Gateway or O-6a, both
+  out of scope here); the numbers above are the focused fixtures. The queued
+  `dirtyOverflow` path (over 256 changed sessions) leaves stale rows in place
+  until the next start; every candidate is re-validated against its canonical cut
+  before publication, so those rows under-report rather than misreport.
+- For the next agent: G-9 moves the warm-up and the dirty reindex into its
+  scheduler (`SEARCH_SLICE_MS` / `INDEX_WRITE_SLICE_MS` become that scheduler's
+  slice); the `posting_bytes` column and `sessionFacts()` are the seams to reuse.
+  A start after real use should show `counts.parsedSessions` far below the corpus
+  size in `session-search.warm`.

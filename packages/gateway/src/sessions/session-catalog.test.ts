@@ -323,6 +323,9 @@ describe("SessionCatalog", () => {
     await catalog.reconcile();
     await catalog.settled();
     expect((await catalog.searchIdentities())?.has("id-a")).toBe(false);
+    // The watcher stops with the test, so no pass recreates the temp root while
+    // the shared teardown removes it.
+    await catalog.dispose();
   });
 
   it("replaces a published row instead of mutating it across an append and a rekey", async () => {
