@@ -7910,6 +7910,27 @@ wait).
   committing its subscription (the joiner waits for the attempt and replays its
   payload), connection close with joined waiters (all requests abort, the shared
   attempt aborts with the retired socket, the flight is released).
+- Review response (round 3, all findings): `57ac20dce`, `3c7d5386a` (Gateway),
+  `a502094f7` (iOS). A cancelled open hands its barrier to the shared attempt
+  whenever a waiter remains instead of releasing it under the retry, so a retry
+  that outlives its first request still gets the answer and synchronizes it. A
+  cancel for an answered `session.open` whose barrier the client never
+  synchronized revokes that barrier, unless another delivered response carries
+  the same token (each barrier tracks the request IDs that delivered its token),
+  so a retry in that window is answered instead of conflicting. `cancel`
+  obeys only `DISPOSABLE_READ_METHODS` (the phone's nine reads, named in the
+  README); a mutation, prompt or `session.sync` cancel is ignored. The phone
+  queues its cancel behind the request's own send, so it cannot name a request
+  the Gateway never admitted. Accepted deviation (finding 4): the registry's
+  shared runtime start, catalog load and attention reconciliation keep running
+  after the last waiter leaves, so a retry or another connection joins that work
+  instead of starting a second one. Evidence: the extended
+  `sync-protocol.integration.test.ts` case (join, revoke-only-unclaimed-barrier,
+  cancel-a-non-disposable-read, both-delivered-responses) fails on each reverted
+  fix (retry answered `conflict`, barrier never revoked, prompt never answered);
+  `GatewayClientTransportTests` 55/55, with its new ordering case failing (3
+  send invocations, cancel frame first) when the Swift fix is reverted. Merge
+  gate green on this branch merged with `hardening/integration` at `3d90561d4`.
 - Open: the `Done when`'s O-6a slow-open case is the orchestrator's qualification
   run; this branch proves the mechanism it depends on (no duplicate-open failure,
   no request-path work after the last waiter cancels) in the integration case
