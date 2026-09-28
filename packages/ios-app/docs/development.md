@@ -297,7 +297,11 @@ element set plus those captures rather than label geometry.
 
 Compact in-progress UI uses `TronPulseLoadingIndicator`, an in-house SwiftUI
 Canvas pulse. Its rendered footprint is 20% larger than the requested nominal size to compensate for the faded outer wave. It is lifecycle-aware, stops with the view, and pauses for Reduce
-Motion or inactive scenes. The session-opening cover shows only a centered pulse at twice its former nominal size while retaining an accessibility label. Keep `ProgressView(value:total:)` for determinate
+Motion or inactive scenes. `ContinuousIndicatorLivenessTests` mounts the pulse (alone, in a
+compact pill and in an active dashboard row), `ProcessActivityOrb` and the usage loading line with
+every gate open and requires new frames, and requires one held frame when a gate is closed:
+a restructured Canvas can keep a correct first frame yet never redraw, which fixed-timestamp pixel
+tests cannot see. The session-opening cover shows only a centered pulse at twice its former nominal size while retaining an accessibility label. Keep `ProgressView(value:total:)` for determinate
 progress only; do not reintroduce stock indeterminate spinners in chat chips,
 dashboard activity rows, or shared loading states. Diff content owns an
 intrinsic horizontal code column so long lines scroll without competing with
