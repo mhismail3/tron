@@ -29,7 +29,7 @@ import { CatalogMetadataIndex } from "./catalog-metadata-index.js";
 import type { SessionCatalog, SessionCatalogReconcileOutcome } from "./session-catalog.js";
 import { INVOCATION_RECEIPT_TYPE, makeInvocationReceipt } from "./invocation-receipts.js";
 import { EXTENSION_ACTIVITY_RECEIPT_TYPE, MAX_EXTENSION_HISTORY_BYTES, type ExtensionActivityReceipt } from "./extension-activity-history.js";
-import { LIVE_RUNTIME_HEAP_ESTIMATE_FACTOR, RuntimeRegistry, type RuntimeLifecycleRecord } from "./runtime-registry.js";
+import { LIVE_RUNTIME_HEAP_ESTIMATE_FACTOR, RuntimeRegistry, type ExtensionArtifactDiscoveryCounts, type RuntimeLifecycleRecord } from "./runtime-registry.js";
 import { RuntimeSlot } from "./runtime-slot.js";
 import { invocationReceipts } from "./invocation-receipts.js";
 import { KnowledgeStore } from "../knowledge/knowledge-store.js";
@@ -83,16 +83,21 @@ function catalogHeaderReads(): { paths: () => string[]; restore: () => void } {
  * out the persist debounce. */
 /** Registry discovery is a bounded single owner: a call that arrives while a
  * pass is in flight returns without discovering anything, and the next scheduled
- * pass is up to 750 ms away. A test that asserts on an artifact must wait for a
- * pass that started after its own call instead of treating the awaited call as a
- * barrier; `settled` names the state that pass must publish (T-1). */
-async function discoverExtensionArtifactsUntil(registry: RuntimeRegistry, settled: () => boolean): Promise<void> {
+ * pass is up to 750 ms away. A test that asserts on an artifact must run a pass
+ * of its own instead of treating the awaited call as a barrier, so wait out any
+ * in-flight pass and then await one this call starts; `settled` names the state
+ * that pass must publish (T-1). */
+async function discoverExtensionArtifactsUntil(registry: RuntimeRegistry, settled: () => boolean = () => true): Promise<void> {
+  const state = registry as unknown as { artifactDiscoveryInFlight: boolean };
   const deadline = Date.now() + 5_000;
-  while (!settled()) {
-    if (Date.now() >= deadline) throw new Error("extension artifact discovery did not settle");
+  do {
+    while (state.artifactDiscoveryInFlight) {
+      if (Date.now() >= deadline) throw new Error("extension artifact discovery stayed in flight");
+      await new Promise((resolve) => setTimeout(resolve, 10));
+    }
     await (registry as unknown as { discoverExtensionArtifacts: () => Promise<void> }).discoverExtensionArtifacts();
-    await new Promise((resolve) => setTimeout(resolve, 10));
-  }
+  } while (!settled() && Date.now() < deadline);
+  if (!settled()) throw new Error("extension artifact discovery did not settle");
 }
 
 /** Initialize a registry and wait for the catalog owner's first published cut.
@@ -130,7 +135,11 @@ describe.sequential("RuntimeRegistry with the pinned agent runtime", () => {
     sessionListChanged?: () => void;
     catalogIndexFailure?: (stage: "save" | "rebuild" | "append", durationMs: number) => void;
     catalogReconciled?: (reconciled: SessionCatalogReconcileOutcome) => void;
+    artifactDiscoveryTruncated?: (counts: ExtensionArtifactDiscoveryCounts) => void;
     runtimeDisposeTimeout?: (graceMs: number) => void;
+    /** Admit one explicit delegated artifact root, as the production cutover
+     * does, so ambient discovery scans exactly that root. */
+    delegatedRoot?: string;
     beforeInitialize?: (sessionFile: string) => Promise<void>;
     notifications?: NotificationService;
     resources?: ResourceRecorder;
@@ -150,6 +159,7 @@ describe.sequential("RuntimeRegistry with the pinned agent runtime", () => {
     const runtimeFactory = vi.fn(async () => ModelRuntime.create({ modelsPath: null, refreshOnCreate: false }));
     const events: Array<{ topic: string; payload: any }> = [];
     const summaries: SessionSummaryUpdate[] = [];
+    const delegatedRoot = options.delegatedRoot;
     const registry = new RuntimeRegistry({
       agentDir,
       tronHome: join(root, "tron"),
@@ -158,6 +168,8 @@ describe.sequential("RuntimeRegistry with the pinned agent runtime", () => {
       catalogDiscoveryLimits: options.catalogDiscoveryLimits,
       workRegistry: options.workRegistry,
       modelRuntimeFactory: runtimeFactory,
+      ...(delegatedRoot ? { delegatedArtifactRoot: delegatedRoot } : {}),
+      ...(options.artifactDiscoveryTruncated ? { artifactDiscoveryTruncated: options.artifactDiscoveryTruncated } : {}),
       trust: new TrustService(agentDir),
       broadcast: (_sessionId, topic, payload) => events.push({ topic, payload }),
       sessionSummaryChanged: (summary) => summaries.push(summary),
@@ -175,6 +187,7 @@ describe.sequential("RuntimeRegistry with the pinned agent runtime", () => {
     await registry.recoverCanonicalAttention();
     return {
       root,
+      delegatedRoot,
       agentDir,
       cwd,
       manager,
@@ -184,6 +197,15 @@ describe.sequential("RuntimeRegistry with the pinned agent runtime", () => {
       summaries,
       sessionFile: manager.getSessionFile()!,
     };
+  }
+
+  /** An admitted provider root with the private mode and canonical path the
+   * slot's artifact policy requires; the caller removes `delegated.root`. */
+  async function delegatedFixtureRoot(label: string): Promise<{ root: string; delegatedRoot: string }> {
+    const root = await realpath(await mkdtemp(join(tmpdir(), `tron-delegated-${label}-`)));
+    const delegatedRoot = join(root, "delegated");
+    await mkdir(delegatedRoot, { recursive: true, mode: 0o700 });
+    return { root, delegatedRoot };
   }
 
   afterEach(async () => {
@@ -5287,7 +5309,7 @@ describe.sequential("RuntimeRegistry with the pinned agent runtime", () => {
     const recoveredSlot = await recoveredRegistry.acquire(slot.id);
     vi.spyOn(recoveredSlot as unknown as { extensionToolOrigin: (name: string) => { source: string } | undefined }, "extensionToolOrigin")
       .mockReturnValue({ source: "pi-subagents" });
-    await recoveredRegistry.discoverExtensionArtifacts();
+    await discoverExtensionArtifactsUntil(recoveredRegistry);
     await recoveredSlot.discoverExtensionArtifact(asyncDir);
     const coldForeign = recoveredSlot.snapshot().extensionActivities?.find((activity) => activity.runId === runId);
     expect(coldForeign?.status).not.toBe("completed");
@@ -5295,7 +5317,7 @@ describe.sequential("RuntimeRegistry with the pinned agent runtime", () => {
     expect(await receiptCount(recoveredSlot.sessionFile!)).toBe(0);
 
     await writeHeader(ownedHeader);
-    await recoveredRegistry.discoverExtensionArtifacts();
+    await discoverExtensionArtifactsUntil(recoveredRegistry);
     expect(recoveredSlot.snapshot().extensionActivities?.find((activity) => activity.toolCallId === toolCallId)).toMatchObject({
       status: "running", children: expect.arrayContaining([expect.objectContaining({ id: "step-a", status: "completed" })]),
     });
@@ -5551,6 +5573,110 @@ describe.sequential("RuntimeRegistry with the pinned agent runtime", () => {
     const discovered = vi.spyOn(slot, "discoverExtensionArtifact");
     await discoverExtensionArtifactsUntil(fixture.registry, () => discovered.mock.calls.length > 0);
     expect(discovered.mock.calls[0]?.[0]).toMatch(/async-subagent-runs[\\/]late-active-run$/u);
+  });
+
+  it("examines every ambient artifact within a bounded number of passes and reports a stopped pass", async () => {
+    const stopped: ExtensionArtifactDiscoveryCounts[] = [];
+    // The whole root exists before the registry does, so every pass — including
+    // the one `initialize` starts — walks the same artifact set: a pass that
+    // exhausts its read budget always reports the same counts.
+    const delegated = await delegatedFixtureRoot("ambient-change-gate");
+    // One pass reads at most MAX_EXTENSION_DISCOVERY_WORK (1,024) artifacts whose
+    // identity changed, so this root always stops a pass short of its last entries.
+    const artifactCount = 1_100;
+    const startedAt = Date.now();
+    const runsRoot = join(delegated.delegatedRoot, "async-subagent-runs");
+    const runDirectories = Array.from({ length: artifactCount }, (_unused, index) => ({
+      asyncDir: join(runsRoot, `run-${String(index).padStart(4, "0")}`),
+      runId: `run-${String(index).padStart(4, "0")}`,
+    }));
+    const writeStatus = async (run: { asyncDir: string; runId: string }, lastUpdate: number) => {
+      await writeFile(join(run.asyncDir, "status.json"), JSON.stringify({
+        lifecycleArtifactVersion: 3, runId: run.runId, state: "running", startedAt, lastUpdate,
+      }));
+    };
+    for (const run of runDirectories) {
+      await mkdir(run.asyncDir, { recursive: true });
+      await writeStatus(run, startedAt);
+    }
+    const fixture = await coldFixture("ambient-change-gate", {
+      delegatedRoot: delegated.delegatedRoot,
+      artifactDiscoveryTruncated: (counts) => stopped.push(counts),
+    });
+    const slot = await fixture.registry.acquire(fixture.manager.getSessionId());
+    const routed = vi.spyOn(slot, "discoverExtensionArtifact");
+
+    await discoverExtensionArtifactsUntil(fixture.registry);
+    expect(stopped.map((counts) => ({ entries: counts.entries, statusReads: counts.statusReads })))
+      .toEqual([{ entries: 1_025, statusReads: 1_024 }]);
+    const firstPass = new Set(routed.mock.calls.map(([asyncDir]) => asyncDir));
+    expect(firstPass.size).toBe(1_024);
+
+    // The artifacts the stopped pass could not reach are the ones it did not
+    // route. Give them the newest evidence, so a later pass has to examine
+    // exactly those entries to project the whole root; an unchanged artifact
+    // spends no read budget, so the walk now reaches the end of the root.
+    const unexamined = runDirectories.filter((run) => !firstPass.has(run.asyncDir));
+    expect(unexamined).toHaveLength(artifactCount - 1_024);
+    for (const run of unexamined) await writeStatus(run, startedAt + 60_000);
+    await discoverExtensionArtifactsUntil(fixture.registry);
+
+    expect(new Set(routed.mock.calls.map(([asyncDir]) => asyncDir)).size).toBe(artifactCount);
+    // Only the entries whose status.json changed were read again, so the second
+    // pass reached the end of the root: no further stop was reported.
+    expect(stopped).toHaveLength(1);
+    await rm(delegated.root, { recursive: true, force: true });
+  });
+
+  it("retries a status.json read that raced an atomic replacement instead of rejecting it", async () => {
+    const delegated = await delegatedFixtureRoot("artifact-atomic-replace");
+    const fixture = await coldFixture("artifact-atomic-replace", { delegatedRoot: delegated.delegatedRoot });
+    const runId = "atomic-replace-run";
+    const toolCallId = "atomic-replace-tool";
+    const asyncDir = join(delegated.delegatedRoot, "async-subagent-runs", runId);
+    await mkdir(asyncDir, { recursive: true });
+    const slot = await fixture.registry.acquire(fixture.manager.getSessionId());
+    vi.spyOn(slot as unknown as { extensionToolOrigin: (name: string) => { source: string } | undefined }, "extensionToolOrigin")
+      .mockReturnValue({ source: "pi-subagents" });
+    (slot as unknown as { runtime: { session: { sessionManager: SessionManager } } }).runtime.session.sessionManager.appendMessage({
+      role: "toolResult", toolCallId, toolName: "subagent", content: [{ type: "text", text: "launched" }],
+      details: { runId, asyncDir, state: "running" }, isError: false, timestamp: Date.now(),
+    });
+    const payload = JSON.stringify({
+      lifecycleArtifactVersion: 3, runId, state: "running",
+      startedAt: Date.now() - 1_000, lastUpdate: Date.now(),
+    });
+    const statusPath = join(asyncDir, "status.json");
+    await writeFile(statusPath, payload);
+    const warnings: Array<{ reason: string }> = [];
+    (slot as unknown as { dependencies: { extensionArtifactWarning?: (warning: { reason: string }) => void } })
+      .dependencies.extensionArtifactWarning = (warning) => warnings.push(warning);
+    await slot.discoverExtensionArtifact(asyncDir);
+    const projected = () => slot.snapshot().extensionActivities?.find((activity) => activity.toolCallId === toolCallId);
+    expect(projected()).toMatchObject({ status: "running" });
+
+    // A producer replaces an active run's status.json by an atomic rename, so a
+    // read can open one inode and stat another. The discovery lane owns no
+    // watcher for that window and used to report the first losing read as a
+    // rejected artifact.
+    const tempPath = join(asyncDir, "status.tmp");
+    let replacing = true;
+    const replacer = (async () => {
+      while (replacing) {
+        await writeFile(tempPath, payload);
+        await rename(tempPath, statusPath);
+        await new Promise((resolve) => setTimeout(resolve, 5));
+      }
+    })();
+    try {
+      for (let pass = 0; pass < 600; pass += 1) await discoverExtensionArtifactsUntil(fixture.registry);
+    } finally {
+      replacing = false;
+      await replacer;
+    }
+    expect(warnings.filter((warning) => warning.reason === "artifact-replacement-in-progress")).toEqual([]);
+    expect(projected()).toMatchObject({ status: "running", runId });
+    await rm(delegated.root, { recursive: true, force: true });
   });
 
   it("reconciles the launch owner after a supervisor reply references the same run", async () => {

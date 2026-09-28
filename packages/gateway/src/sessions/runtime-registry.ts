@@ -117,13 +117,28 @@ import {
  * reads one bounded file rather than maintaining an incremental mirror. */
 const MAX_READ_ONLY_SUBAGENT_SESSION_BYTES = 64 * 1_024 * 1_024;
 // MaximumLiveRuntimes is 16 and each slot retains at most 64 owned activity
-// bindings, so this covers every exact drain owner before ambient work.
+// bindings, so this covers every exact drain owner before ambient work. An
+// ambient pass spends the read budget only on artifacts whose status.json
+// identity changed, so unchanged directories are still walked and an artifact
+// past the budget is read by the next pass.
 const MAX_EXTENSION_DISCOVERY_WORK = 1_024;
 const MAX_EXTENSION_DISCOVERY_ROOTS = 64;
 const MAX_EXTENSION_TEMP_ENTRIES = 1_024;
 // Ambient enumeration shares these global pass bounds. Exact-owned artifact
 // reconciliation above is intentionally outside this ambient budget.
 const MAX_EXTENSION_ROOT_ENTRIES = 4_096;
+/** One truncation record a minute is enough: the counts move slowly and the pass
+ * runs every 750 ms, so an undeduplicated record would repeat 80 times. */
+const EXTENSION_DISCOVERY_TRUNCATION_REPORT_MS = 60_000;
+
+/** What one discovery pass spent before it stopped. `entries` is root entries
+ * walked, `statusReads` the artifacts it read because their status.json
+ * identity changed, and `work` the exact refreshes and routed candidates. */
+export interface ExtensionArtifactDiscoveryCounts {
+  entries: number;
+  statusReads: number;
+  work: number;
+}
 // A Pi append can land inside the summary's read window; the summary is retried
 // rather than published with a size its counts do not describe.
 const CATALOG_SUMMARY_ATTEMPTS = 3;
@@ -526,6 +541,18 @@ export class RuntimeRegistry {
   private evictionTimer?: NodeJS.Timeout;
   private artifactDiscoveryTimer?: NodeJS.Timeout;
   private artifactDiscoveryInFlight = false;
+  private artifactDiscoveryPass = 0;
+  private artifactDiscoveryTruncationReportedAt = 0;
+  /** Ambient artifact decisions keyed by run directory. The identity is the stat
+   * of the same status.json a read would have opened, so an unchanged artifact
+   * costs one stat and no open, read or parse; `pass` lets a complete pass drop
+   * the entries whose directories are gone. */
+  private readonly ambientArtifactFacts = new Map<string, {
+    identity: string;
+    active: boolean;
+    timestamp: number;
+    pass: number;
+  }>();
   private slotAdmissionsInFlight = 0;
   private administrativeDrainStarted = false;
   private readonly workRegistry: GatewayWorkRegistry;
@@ -594,6 +621,10 @@ export class RuntimeRegistry {
       notifications?: NotificationService;
       browserLiveViews?: BrowserLiveViewRegistry;
       workRegistry?: GatewayWorkRegistry;
+      /** A discovery pass that stopped at one of its budgets instead of the end
+       * of its roots, with the counts it spent. A directory past the stop is
+       * examined by a later pass; the report keeps the stop visible. */
+      artifactDiscoveryTruncated?: (counts: ExtensionArtifactDiscoveryCounts) => void;
       extensionArtifactWarning?: (warning: { reason: import("./extension-run-projection.js").ExtensionArtifactRejectionReason; owner: string }) => void;
       scheduleToolOperations?: ScheduleToolOperations;
       jev?: JevDecisionClient;
@@ -3588,128 +3619,218 @@ export class RuntimeRegistry {
   private async discoverExtensionArtifacts(): Promise<void> {
     if (this.artifactDiscoveryInFlight || this.shutdownState !== "active") return;
     this.artifactDiscoveryInFlight = true;
+    let truncated: ExtensionArtifactDiscoveryCounts | undefined;
     try {
-      let work = 0;
-      const slots = [...this.slots.values()];
-      const exact = new Set<string>();
-      for (const slot of slots) {
-        for (const asyncDir of slot.ownedExtensionArtifactDirectories()) {
-          const key = `${slot.id}\0${asyncDir}`;
-          if (!exact.add(key)) continue;
-          if (work >= MAX_EXTENSION_DISCOVERY_WORK) return;
-          work += 1;
-          await slot.discoverExtensionArtifact(asyncDir);
-        }
-      }
-
-      const roots = new Set<string>();
-      if (this.options.delegatedArtifactRoot) {
-        const providerRunsRoot = join(this.options.delegatedArtifactRoot, "async-subagent-runs");
-        try { if ((await stat(providerRunsRoot)).isDirectory()) roots.add(providerRunsRoot); } catch { /* provider root is created on first admitted run */ }
-      } else for (const slot of slots) {
-        if (roots.size >= MAX_EXTENSION_DISCOVERY_ROOTS) break;
-        const projectRoot = join(resolve(slot.cwd), ".pi", "subagents", "async-subagent-runs");
-        try { if ((await stat(projectRoot)).isDirectory()) roots.add(projectRoot); } catch { /* isolated pre-cutover fixture */ }
-      }
-      try {
-        let examined = 0;
-        // A configured provider root is the sole ambient source after the
-        // cutover. Temporary/project roots are only scanned by test fixtures
-        // that omit the explicit production root.
-        if (this.options.delegatedArtifactRoot) {
-          // The exact root was admitted above; do not inspect unrelated temp
-          // trees that could become a second delegated authority.
-        } else {
-        const entries = await opendir(tmpdir());
-        for await (const entry of entries) {
-          examined += 1;
-          if (examined > MAX_EXTENSION_TEMP_ENTRIES || roots.size >= MAX_EXTENSION_DISCOVERY_ROOTS) break;
-          if (!entry.isDirectory() || !entry.name.startsWith("pi-subagents-")) continue;
-          const root = join(tmpdir(), entry.name, "async-subagent-runs");
-          try { if ((await stat(root)).isDirectory()) roots.add(root); } catch { /* disappearing runtime root */ }
-        }
-        }
-      } catch { /* an unavailable artifact root leaves exact bindings authoritative */ }
-
-      const rootList = [...roots];
-      let ambientStructuralEntries = 0;
-      let ambientStatusReads = 0;
-      for (let rootIndex = 0; rootIndex < rootList.length
-        && work < MAX_EXTENSION_DISCOVERY_WORK
-        && ambientStructuralEntries < MAX_EXTENSION_ROOT_ENTRIES
-        && ambientStatusReads < MAX_EXTENSION_DISCOVERY_WORK; rootIndex += 1) {
-        const root = rootList[rootIndex]!;
-        const rootsRemaining = rootList.length - rootIndex;
-        const routedSlots = Math.max(1, slots.length);
-        const rootBudget = Math.max(1, Math.floor(
-          (MAX_EXTENSION_DISCOVERY_WORK - work) / (rootsRemaining * routedSlots),
-        ));
-        const candidates: Array<{ asyncDir: string; active: boolean; timestamp: number }> = [];
-        try {
-          const entries = await opendir(root);
-          for await (const entry of entries) {
-            ambientStructuralEntries += 1;
-            if (ambientStructuralEntries > MAX_EXTENSION_ROOT_ENTRIES) break;
-            if (!entry.isDirectory()) continue;
-            if (ambientStatusReads >= MAX_EXTENSION_DISCOVERY_WORK) break;
-            ambientStatusReads += 1;
-            const asyncDir = join(root, entry.name);
-            try {
-              const statusPath = join(asyncDir, "status.json");
-              const handle = await open(statusPath, "r");
-              let parsed: unknown;
-              try {
-                const metadata = await handle.stat();
-                if (!metadata.isFile()) continue;
-                const headerBuffer = Buffer.alloc(MAX_EXTENSION_LIFECYCLE_HEADER_BYTES);
-                const { bytesRead: headerBytesRead } = await handle.read(headerBuffer, 0, headerBuffer.length, 0);
-                const headerBytes = headerBuffer.subarray(0, headerBytesRead);
-                if (hasExtensionLifecycleProjectionProperty(headerBytes)) {
-                  const projection = inspectExtensionLifecycleProjection(
-                    parseExtensionLifecycleProjectionHeader(headerBytes),
-                  );
-                  if (!projection) continue;
-                  parsed = lifecycleProjectionArtifact(projection);
-                } else {
-                  // Legacy artifacts still require the old whole-document cap.
-                  // The bounded modern first property is the only permitted
-                  // route through a report-bearing file larger than that cap.
-                  if (metadata.size > MAX_EXTENSION_ARTIFACT_BYTES) continue;
-                  const buffer = Buffer.alloc(MAX_EXTENSION_ARTIFACT_BYTES + 1);
-                  const { bytesRead } = await handle.read(buffer, 0, buffer.length, 0);
-                  if (bytesRead > MAX_EXTENSION_ARTIFACT_BYTES) continue;
-                  parsed = JSON.parse(buffer.subarray(0, bytesRead).toString("utf8"));
-                }
-              } finally {
-                await handle.close();
-              }
-              const value = admitExtensionLifecycleArtifact(parsed, { exactOwnedLegacy: true });
-              if (!value) continue;
-              const state = value.state ?? value.status;
-              const active = state === "queued" || state === "running" || state === "pending"
-                || state === "detached" || state === "paused";
-              const timestamps = [value.lastUpdate, value.startedAt, value.endedAt]
-                .filter((item): item is number => typeof item === "number" && Number.isSafeInteger(item) && item >= 0);
-              candidates.push({ asyncDir, active, timestamp: Math.max(0, ...timestamps) });
-            } catch { /* replacement or malformed artifact */ }
-          }
-        } catch { continue; }
-        // Terminal evidence releases accepted work; live exact bindings were
-        // already refreshed above and do not outrank it in ambient discovery.
-        candidates.sort((left, right) => Number(right.active) - Number(left.active)
-          || right.timestamp - left.timestamp || left.asyncDir.localeCompare(right.asyncDir));
-        // Route only the amount this pass can safely project to live slots.
-        for (const candidate of candidates.slice(0, rootBudget)) {
-          for (const slot of slots) {
-            if (work >= MAX_EXTENSION_DISCOVERY_WORK) return;
-            work += 1;
-            await slot.discoverExtensionArtifact(candidate.asyncDir);
-          }
-        }
-      }
+      truncated = await this.runArtifactDiscoveryPass();
     } finally {
       this.artifactDiscoveryInFlight = false;
     }
+    if (truncated) this.reportArtifactDiscoveryTruncation(truncated);
+  }
+
+  /** One discovery pass. It returns this pass's counts when it stopped at a
+   * budget rather than at the end of its roots, so the stop is reported instead
+   * of silent. The next pass walks from the start again, and because an
+   * unchanged artifact spends no read budget it reaches the entries this pass
+   * did not examine. */
+  private async runArtifactDiscoveryPass(): Promise<ExtensionArtifactDiscoveryCounts | undefined> {
+    const counts: ExtensionArtifactDiscoveryCounts = { entries: 0, statusReads: 0, work: 0 };
+    const slots = [...this.slots.values()];
+    const exact = new Set<string>();
+    for (const slot of slots) {
+      for (const asyncDir of slot.ownedExtensionArtifactDirectories()) {
+        const key = `${slot.id}\0${asyncDir}`;
+        if (!exact.add(key)) continue;
+        if (counts.work >= MAX_EXTENSION_DISCOVERY_WORK) return counts;
+        counts.work += 1;
+        await slot.discoverExtensionArtifact(asyncDir);
+      }
+    }
+
+    const roots = new Set<string>();
+    if (this.options.delegatedArtifactRoot) {
+      const providerRunsRoot = join(this.options.delegatedArtifactRoot, "async-subagent-runs");
+      try { if ((await stat(providerRunsRoot)).isDirectory()) roots.add(providerRunsRoot); } catch { /* provider root is created on first admitted run */ }
+    } else for (const slot of slots) {
+      if (roots.size >= MAX_EXTENSION_DISCOVERY_ROOTS) break;
+      const projectRoot = join(resolve(slot.cwd), ".pi", "subagents", "async-subagent-runs");
+      try { if ((await stat(projectRoot)).isDirectory()) roots.add(projectRoot); } catch { /* isolated pre-cutover fixture */ }
+    }
+    try {
+      let examined = 0;
+      // A configured provider root is the sole ambient source after the
+      // cutover. Temporary/project roots are only scanned by test fixtures
+      // that omit the explicit production root.
+      if (this.options.delegatedArtifactRoot) {
+        // The exact root was admitted above; do not inspect unrelated temp
+        // trees that could become a second delegated authority.
+      } else {
+      const entries = await opendir(tmpdir());
+      for await (const entry of entries) {
+        examined += 1;
+        if (examined > MAX_EXTENSION_TEMP_ENTRIES || roots.size >= MAX_EXTENSION_DISCOVERY_ROOTS) break;
+        if (!entry.isDirectory() || !entry.name.startsWith("pi-subagents-")) continue;
+        const root = join(tmpdir(), entry.name, "async-subagent-runs");
+        try { if ((await stat(root)).isDirectory()) roots.add(root); } catch { /* disappearing runtime root */ }
+      }
+      }
+    } catch { /* an unavailable artifact root leaves exact bindings authoritative */ }
+
+    const rootList = [...roots];
+    this.artifactDiscoveryPass += 1;
+    const pass = this.artifactDiscoveryPass;
+    // `walkStopped` ends the walk at a budget and `routedOut` ends this pass's
+    // routing at the work budget; the entries this pass already read are still
+    // routed before it returns.
+    let walkStopped = false;
+    let routedOut = false;
+    for (let rootIndex = 0; rootIndex < rootList.length; rootIndex += 1) {
+      if (counts.work >= MAX_EXTENSION_DISCOVERY_WORK
+        || counts.entries >= MAX_EXTENSION_ROOT_ENTRIES
+        || counts.statusReads >= MAX_EXTENSION_DISCOVERY_WORK) {
+        walkStopped = true;
+        break;
+      }
+      const root = rootList[rootIndex]!;
+      const rootsRemaining = rootList.length - rootIndex;
+      const routedSlots = Math.max(1, slots.length);
+      const rootBudget = Math.max(1, Math.floor(
+        (MAX_EXTENSION_DISCOVERY_WORK - counts.work) / (rootsRemaining * routedSlots),
+      ));
+      const candidates: Array<{ asyncDir: string; active: boolean; timestamp: number }> = [];
+      try {
+        const entries = await opendir(root);
+        for await (const entry of entries) {
+          counts.entries += 1;
+          if (counts.entries > MAX_EXTENSION_ROOT_ENTRIES) {
+            walkStopped = true;
+            break;
+          }
+          if (!entry.isDirectory()) continue;
+          const asyncDir = join(root, entry.name);
+          let fact: { active: boolean; timestamp: number } | "budget" | undefined;
+          try {
+            const metadata = await stat(join(asyncDir, "status.json"));
+            if (metadata.isFile()) fact = await this.ambientArtifactFact(asyncDir, metadata, pass, counts);
+          } catch { /* a replaced or malformed artifact belongs to the next pass */ }
+          if (fact === "budget") {
+            walkStopped = true;
+            break;
+          }
+          if (fact) candidates.push({ asyncDir, active: fact.active, timestamp: fact.timestamp });
+        }
+      } catch { continue; }
+      // Terminal evidence releases accepted work; live exact bindings were
+      // already refreshed above and do not outrank it in ambient discovery.
+      candidates.sort((left, right) => Number(right.active) - Number(left.active)
+        || right.timestamp - left.timestamp || left.asyncDir.localeCompare(right.asyncDir));
+      // Route only the amount this pass can safely project to live slots.
+      for (const candidate of candidates.slice(0, rootBudget)) {
+        for (const slot of slots) {
+          if (counts.work >= MAX_EXTENSION_DISCOVERY_WORK) {
+            routedOut = true;
+            break;
+          }
+          counts.work += 1;
+          await slot.discoverExtensionArtifact(candidate.asyncDir);
+        }
+        if (routedOut) break;
+      }
+      if (walkStopped || routedOut) break;
+    }
+    if (walkStopped || routedOut) return counts;
+    this.pruneAmbientArtifactFacts(pass);
+    return undefined;
+  }
+
+  /** The ambient decision for one run directory, re-read only when the identity
+   * of its status.json changed. `"budget"` means this pass spent its read budget
+   * on changed artifacts, so the walk stops there instead of skipping the entry
+   * and calling the directory examined. */
+  private async ambientArtifactFact(
+    asyncDir: string,
+    metadata: { dev: number; ino: number; size: number; mtimeMs: number },
+    pass: number,
+    counts: ExtensionArtifactDiscoveryCounts,
+  ): Promise<{ active: boolean; timestamp: number } | "budget" | undefined> {
+    const identity = `${metadata.dev}:${metadata.ino}:${metadata.size}:${metadata.mtimeMs}`;
+    const known = this.ambientArtifactFacts.get(asyncDir);
+    if (known && known.identity === identity) {
+      known.pass = pass;
+      return known;
+    }
+    if (counts.statusReads >= MAX_EXTENSION_DISCOVERY_WORK) return "budget";
+    counts.statusReads += 1;
+    const decision = await this.readAmbientExtensionArtifact(asyncDir, metadata);
+    if (!decision) {
+      // A replacement that raced the read or a malformed artifact is not
+      // cached, so the next pass decides again.
+      this.ambientArtifactFacts.delete(asyncDir);
+      return undefined;
+    }
+    const fact = { identity, active: decision.active, timestamp: decision.timestamp, pass };
+    this.ambientArtifactFacts.set(asyncDir, fact);
+    return fact;
+  }
+
+  /** Read one ambient artifact's bounded lifecycle decision, verifying that the
+   * inode the read opened is the one the caller's stat identity named: a replace
+   * that raced the read waits for the next pass instead of being projected. */
+  private async readAmbientExtensionArtifact(
+    asyncDir: string,
+    expected: { dev: number; ino: number },
+  ): Promise<{ active: boolean; timestamp: number } | undefined> {
+    const handle = await open(join(asyncDir, "status.json"), "r");
+    try {
+      const metadata = await handle.stat();
+      if (!metadata.isFile() || metadata.dev !== expected.dev || metadata.ino !== expected.ino) return undefined;
+      const headerBuffer = Buffer.alloc(MAX_EXTENSION_LIFECYCLE_HEADER_BYTES);
+      const { bytesRead: headerBytesRead } = await handle.read(headerBuffer, 0, headerBuffer.length, 0);
+      const headerBytes = headerBuffer.subarray(0, headerBytesRead);
+      let parsed: unknown;
+      if (hasExtensionLifecycleProjectionProperty(headerBytes)) {
+        const projection = inspectExtensionLifecycleProjection(
+          parseExtensionLifecycleProjectionHeader(headerBytes),
+        );
+        if (!projection) return undefined;
+        parsed = lifecycleProjectionArtifact(projection);
+      } else {
+        // Legacy artifacts still require the old whole-document cap.
+        // The bounded modern first property is the only permitted
+        // route through a report-bearing file larger than that cap.
+        if (metadata.size > MAX_EXTENSION_ARTIFACT_BYTES) return undefined;
+        const buffer = Buffer.alloc(MAX_EXTENSION_ARTIFACT_BYTES + 1);
+        const { bytesRead } = await handle.read(buffer, 0, buffer.length, 0);
+        if (bytesRead > MAX_EXTENSION_ARTIFACT_BYTES) return undefined;
+        parsed = JSON.parse(buffer.subarray(0, bytesRead).toString("utf8"));
+      }
+      const value = admitExtensionLifecycleArtifact(parsed, { exactOwnedLegacy: true });
+      if (!value) return undefined;
+      const state = value.state ?? value.status;
+      const active = state === "queued" || state === "running" || state === "pending"
+        || state === "detached" || state === "paused";
+      const timestamps = [value.lastUpdate, value.startedAt, value.endedAt]
+        .filter((item): item is number => typeof item === "number" && Number.isSafeInteger(item) && item >= 0);
+      return { active, timestamp: Math.max(0, ...timestamps) };
+    } finally {
+      await handle.close();
+    }
+  }
+
+  /** Drop the decisions of directories a complete pass did not see, so the cache
+   * follows the artifact root instead of growing with every run it ever held. */
+  private pruneAmbientArtifactFacts(pass: number): void {
+    for (const [asyncDir, fact] of this.ambientArtifactFacts) {
+      if (fact.pass !== pass) this.ambientArtifactFacts.delete(asyncDir);
+    }
+  }
+
+  private reportArtifactDiscoveryTruncation(counts: ExtensionArtifactDiscoveryCounts): void {
+    if (!this.options.artifactDiscoveryTruncated) return;
+    const now = Date.now();
+    if (now - this.artifactDiscoveryTruncationReportedAt < EXTENSION_DISCOVERY_TRUNCATION_REPORT_MS) return;
+    this.artifactDiscoveryTruncationReportedAt = now;
+    this.options.artifactDiscoveryTruncated(counts);
   }
 
   private async evictIdle(forCapacity = false, requestedSessionID?: string): Promise<void> {

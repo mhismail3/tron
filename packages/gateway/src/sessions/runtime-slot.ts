@@ -292,6 +292,12 @@ function extensionArtifactReadFailureReason(error: unknown): ExtensionArtifactRe
 }
 
 const EXTENSION_ARTIFACT_MISSING_GRACE_MS = 30_000;
+/** A producer replaces status.json by an atomic rename, so a read can open the
+ * old inode and stat the new one. The discovery lane owns no watcher for that
+ * directory, so it re-reads a bounded number of times before reporting the
+ * replacement; the producer's next replace is a whole status-update cadence
+ * away, so an immediate retry lands in a settled window. */
+const EXTENSION_ARTIFACT_DISCOVERY_READ_RETRIES = 3;
 const MAX_EXTENSION_EVENT_TAIL_BYTES = 64 * 1_024;
 const MAX_EXTENSION_EVENT_LINES = 256;
 
@@ -4405,7 +4411,7 @@ export class RuntimeSlot {
         return;
       }
       diagnosticOwner = this.extensionArtifactOwnerForDirectory(realAsyncDir);
-      const rawValue = await this.readExtensionStatusArtifact(realAsyncDir);
+      const rawValue = await this.readExtensionStatusArtifactWithReplacementRetry(realAsyncDir);
       if (rawValue === undefined) {
         if (bound) this.observeMissingExtensionArtifact(bound[1].toolCallId);
         if (diagnosticOwner) this.warnExtensionArtifact("artifact-replacement-in-progress", diagnosticOwner);
@@ -4611,6 +4617,20 @@ export class RuntimeSlot {
     }
   }
 
+  /** The discovery lane's read of one owned artifact. A racing replacement is
+   * retried here rather than warned (G-8a); the watcher lane keeps its own
+   * per-directory retry budget, and the 60 s per-(owner, reason) dedup in
+   * `warnExtensionArtifact` still collapses a genuine replacement. */
+  private async readExtensionStatusArtifactWithReplacementRetry(
+    asyncDir: string,
+  ): Promise<Record<string, unknown> | undefined> {
+    let value = await this.readExtensionStatusArtifact(asyncDir);
+    for (let attempt = 0; value === undefined && attempt < EXTENSION_ARTIFACT_DISCOVERY_READ_RETRIES; attempt += 1) {
+      value = await this.readExtensionStatusArtifact(asyncDir);
+    }
+    return value;
+  }
+
   private stopExtensionActivityWatcher(toolCallId: string): void {
     this.extensionActivityReadGenerations.set(
       toolCallId,
@@ -4782,14 +4802,19 @@ export class RuntimeSlot {
       const rawValue = await this.readExtensionStatusArtifact(realAsyncDir);
       if (rawValue === undefined) {
         const tracked = this.extensionActivityWatchers.get(toolCallId);
-        if (tracked && tracked.asyncDir === realAsyncDir && tracked.readRetries < 3 && !tracked.timer) {
-          tracked.readRetries += 1;
-          tracked.timer = setTimeout(() => {
-            tracked.timer = undefined;
-            void this.refreshExtensionActivityFromArtifact(toolCallId, realAsyncDir);
-          }, tracked.readRetries * 100);
-          tracked.timer.unref();
-          return;
+        if (tracked && tracked.asyncDir === realAsyncDir) {
+          // A pending debounce or retry already owns this re-read, so a read that
+          // lost a replacement race waits for it instead of warning: the timer
+          // fires a few milliseconds later, inside the same replacement.
+          if (tracked.timer === undefined && tracked.readRetries < 3) {
+            tracked.readRetries += 1;
+            tracked.timer = setTimeout(() => {
+              tracked.timer = undefined;
+              void this.refreshExtensionActivityFromArtifact(toolCallId, realAsyncDir);
+            }, tracked.readRetries * 100);
+            tracked.timer.unref();
+          }
+          if (tracked.timer !== undefined) return;
         }
         this.observeMissingExtensionArtifact(toolCallId);
         this.warnExtensionArtifact("artifact-replacement-in-progress", `${previous.runId ?? "run"}\0${toolCallId}`);
