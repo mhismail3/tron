@@ -862,7 +862,12 @@ export class RuntimeRegistry {
             && resolve(info.path) === resolve(persistedPath)) === true;
         if (removed) this.slots.delete(sessionId);
         this.cancelIdleEviction(sessionId, slot);
-        this.subscribers.delete(sessionId);
+        // The transport owns subscription lifetime: it subscribes a client
+        // before it installs that client's synchronization barrier and
+        // unsubscribes it on close, revoke, or session close. A slot going away
+        // (idle eviction, an extension-requested shutdown) is not an
+        // unsubscribe, so a client still watching this session keeps its
+        // audience and receives snapshots again once the session is acquired.
         this.presentationPresence.removeSession(sessionId);
         this.interrupted.delete(sessionId);
         if (removedLiveOnlySession) {

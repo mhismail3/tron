@@ -54,6 +54,12 @@ async function waitUntil(predicate: () => boolean, timeoutMs = 5_000): Promise<v
   }
 }
 
+/** A snapshot is built and broadcast only for a subscriber, so a test that reads
+ * published snapshots has to be one. */
+function subscribeAudience(registry: RuntimeRegistry, sessionId: string): void {
+  registry.subscribe("test-audience", sessionId);
+}
+
 /** The catalog owner is the durable document's only writer, and it writes from
  * its own cut rather than from a reader's materialization. Settling it is what
  * makes the document current, without waiting out the persist debounce. */
@@ -999,6 +1005,7 @@ describe.sequential("RuntimeRegistry with the pinned agent runtime", () => {
     registries.push(registry);
     await registry.initialize();
     const slot = await registry.create(cwd);
+    subscribeAudience(registry, slot.id);
     const model = faux.getModel();
     await slot.setModel(model.provider, model.id);
     const state = ({ eventSequence: _sequence, ...rest }: any) => JSON.stringify(rest);
@@ -6534,6 +6541,7 @@ export default function (pi) {
     await registry.initialize();
     const slot = await registry.create(cwd);
     expect(slot.sessionFile?.startsWith(join(agentDir, "sessions"))).toBe(true);
+    subscribeAudience(registry, slot.id);
     const model = faux.getModel();
     await slot.setModel(model.provider, model.id);
     const internals = registry as unknown as {
@@ -6718,6 +6726,7 @@ export default function (pi) {
     registries.push(registry);
     await registry.initialize();
     const slot = await registry.acquire(manager.getSessionId());
+    subscribeAudience(registry, slot.id);
     const model = faux.getModel();
     await slot.setModel(model.provider, model.id);
     const before = events.length;
@@ -6854,6 +6863,7 @@ export default function (pi) {
     registries.push(registry);
     await registry.initialize();
     const slot = await registry.create(cwd);
+    subscribeAudience(registry, slot.id);
     const model = faux.getModel();
     await slot.setModel(model.provider, model.id);
     const promptReceipt = await slot.prompt("stream");
@@ -8004,6 +8014,7 @@ export default function (pi) {
     runtime.registerNativeProvider(faux.provider);
     fixture.runtimeFactory.mockResolvedValue(runtime);
     const slot = await fixture.registry.acquire(fixture.manager.getSessionId());
+    subscribeAudience(fixture.registry, slot.id);
     const model = faux.getModel();
     await slot.setModel(model.provider, model.id);
     try {
@@ -8094,6 +8105,7 @@ export default function (pi) {
     registries.push(registry);
     await registry.initialize();
     const slot = await registry.create(cwd);
+    subscribeAudience(registry, slot.id);
     const session = (slot as unknown as {
       runtime: { session: { navigateTree: (targetId: string, options: unknown) => Promise<{ cancelled: boolean }> } };
     }).runtime.session;
@@ -8109,6 +8121,9 @@ export default function (pi) {
     await expect(slot.navigate("target", { summarize: true })).rejects.toMatchObject({ code: "cancelled" });
     expect(slot.snapshot().operation).toBeUndefined();
     expect(slot.snapshot().retry).toBeUndefined();
+    // A snapshot is published only for a subscriber, so an empty recording would
+    // make the last assertion below pass without reading a publication at all.
+    expect(snapshots.length).toBeGreaterThan(0);
     expect(snapshots.at(-1)?.operation).toBeUndefined();
   });
 
@@ -8145,6 +8160,7 @@ export default function (pi) {
     registries.push(registry);
     await registry.initialize();
     const slot = await registry.create(cwd);
+    subscribeAudience(registry, slot.id);
     const model = faux.getModel();
     await slot.setModel(model.provider, model.id);
     await expect(slot.prompt("/skill:review configurations", [], undefined, {
@@ -8731,6 +8747,7 @@ export default function (pi) {
     registries.push(registry);
     await registry.initialize();
     const slot = await registry.create(cwd);
+    subscribeAudience(registry, slot.id);
     const runtime = (slot as unknown as {
       runtime: { session: { sessionManager: SessionManager } };
       onEvent: (event: unknown) => void;
@@ -8794,6 +8811,7 @@ export default function (pi) {
     registries.push(registry);
     await registry.initialize();
     const slot = await registry.create(cwd);
+    subscribeAudience(registry, slot.id);
     const internal = slot as unknown as {
       runtime: { session: { sessionManager: SessionManager } };
       pendingPrompt: { id: string; createdAt: string; text: string; attachmentCount: number };
@@ -9421,6 +9439,7 @@ export default function (pi) {
     registries.push(registry);
     await registry.initialize();
     const slot = await registry.create(cwd);
+    subscribeAudience(registry, slot.id);
     const model = faux.getModel();
     await slot.setModel(model.provider, model.id);
     const prompting = slot.prompt("run tools");
@@ -9654,6 +9673,7 @@ export default function (pi) {
     registries.push(registry);
     await registry.initialize();
     const slot = await registry.create(cwd);
+    subscribeAudience(registry, slot.id);
     const model = faux.getModel();
     await slot.setModel(model.provider, model.id);
     await slot.prompt("run tools around a visible barrier");
@@ -11106,11 +11126,12 @@ export default function (pi) {
     expect(registry.isSubscribed("race-client", sessionId)).toBe(true);
   });
 
-  /** Every counter the resource sampler takes, as the registry would report
-   * them; one object per fixture keeps the recorder shape in one place. */
+  /** Every counter the resource sampler takes from the registry, as the registry
+   * would report them; one object per fixture keeps the recorder shape in one
+   * place. `recordSnapshotBuild` is not here: it is the transport's own method on
+   * `ResourceSampler`, because only the transport counts recipient sockets. */
   function resourceRecorder() {
     return {
-      recordSnapshotBuild: vi.fn(),
       recordTopicFrame: vi.fn(),
       recordCatalogWalk: vi.fn(),
       recordOutboundBytes: vi.fn(),
@@ -11128,17 +11149,56 @@ export default function (pi) {
     expect(recorded.recordRuntimeLoaded).toHaveBeenCalledTimes(1);
     expect(recorded.recordRuntimeEvicted).not.toHaveBeenCalled();
 
+    const snapshot = vi.spyOn(slot, "snapshot");
     fixture.registry.subscribe("phone", slot.id);
+    const withSubscriber = fixture.events.length;
     slot.publishSnapshot();
-    expect(recorded.recordSnapshotBuild).toHaveBeenLastCalledWith(1);
+    expect(snapshot).toHaveBeenCalledTimes(1);
+    expect(fixture.events.slice(withSubscriber).some(({ topic }) => topic === "session.snapshot")).toBe(true);
 
     const inventory = await fixture.registry.resourceInventory();
     expect(inventory).toHaveLength(1);
     expect(inventory[0]).toMatchObject({ sessionId: slot.id, subscribers: 1 });
     expect((inventory[0] as { bytes: number }).bytes).toBeGreaterThan(0);
 
+    // The subscriber set is the slot's only audience fact: with nobody left to
+    // receive a snapshot a state change still reaches the dashboard as a summary
+    // and projects no transcript at all.
+    fixture.registry.unsubscribe("phone", slot.id);
+    const published = fixture.events.length;
+    const summaries = fixture.summaries.length;
+    await slot.rename("SYNTHETIC_RENAME_WITHOUT_AN_AUDIENCE");
+    expect(snapshot).toHaveBeenCalledTimes(1);
+    expect(fixture.events.slice(published).some(({ topic }) => topic === "session.snapshot")).toBe(false);
+    expect(fixture.summaries.length).toBeGreaterThan(summaries);
+    expect(fixture.summaries.at(-1)).toMatchObject({ sessionId: slot.id, name: "SYNTHETIC_RENAME_WITHOUT_AN_AUDIENCE" });
+
     await slot.dispose();
     expect(recorded.recordRuntimeEvicted).toHaveBeenCalledTimes(1);
+  });
+
+  // The transport owns subscription lifetime: it subscribes a client before
+  // installing that client's synchronization barrier and unsubscribes it on
+  // close, revoke or session close. An extension-requested shutdown is not an
+  // unsubscribe, so a client still watching the session keeps its audience and
+  // the re-acquired slot publishes snapshots to it again.
+  it("keeps a transported subscription across a closed slot and snapshots the re-acquired session", async () => {
+    const fixture = await coldFixture("closed-slot-subscription");
+    const sessionId = fixture.manager.getSessionId();
+    const slot = await fixture.registry.acquire(sessionId);
+    fixture.registry.subscribe("phone", sessionId);
+
+    (slot as unknown as { requestExtensionShutdown: () => void }).requestExtensionShutdown();
+    // `session.closed` is emitted in the same synchronous block as the slot's
+    // close hook, so observing it means the registry's close handling has run.
+    await waitUntil(() => fixture.events.some(({ topic }) => topic === "session.closed"));
+    await waitUntil(() => slot.isDisposed);
+    expect(fixture.registry.isSubscribed("phone", sessionId)).toBe(true);
+
+    const reacquired = await fixture.registry.acquire(sessionId);
+    const published = fixture.events.length;
+    reacquired.publishSnapshot();
+    expect(fixture.events.slice(published).some(({ topic }) => topic === "session.snapshot")).toBe(true);
   });
 
   // A start that is retired before the registry publishes it was never a live

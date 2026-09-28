@@ -385,12 +385,59 @@ describe("ResourceSampler", () => {
   });
 
   it("keeps the unaudienced snapshot count in the record, not a second line", async () => {
+    // Failure mode: the count of snapshot builds no ready socket could receive
+    // is the window's lost-audience evidence, so it has to sit in the one record
+    // that carries the window rather than on a line of its own.
     const sampler = resourceSampler();
     sampler.recordSnapshotBuild(0);
     sampler.recordSnapshotBuild(2);
-    const message = formatResourceSample(await sampler.sample());
+    const sample = await sampler.sample();
+    const message = formatResourceSample(sample);
     expect(message).toContain("snapshotBuilds=2");
     expect(message).toContain("unaudiencedSnapshotBuilds=1");
+  });
+
+  // The counter production actually drives: `broadcastSession` records every
+  // snapshot it is handed against the recipients that can receive it.
+  it("warns when a snapshot build finds no ready recipient", async () => {
+    // Failure mode: the slot's no-audience guard is lost, or the registry's
+    // subscriber record and the transport's diverge, so a snapshot is built for
+    // a session no ready socket holds a subscription token for. The transport
+    // delivers it to nobody, and without this count the window would report a
+    // quiet debug minute instead of the lost audience check.
+    const sampler = resourceSampler();
+    const gateway = resourceServer(vi.fn(), sampler);
+    // A ready connection subscribed only to another session is exactly the state
+    // a regressed slot guard produces when it builds for "session-1"; an empty
+    // `clients` map is the same zero-recipient shape.
+    const client = subscribedClient("session-2");
+    (gateway as unknown as { clients: Map<string, unknown> }).clients.set("client-1", client);
+    gateway.broadcastSession("session-1", "session.snapshot", { revision: 1 } as never);
+    const sample = await sampler.sample();
+    expect(sample.snapshotBuilds).toBe(1);
+    expect(sample.unaudiencedSnapshotBuilds).toBe(1);
+    expect(sample.topics.has("session.snapshot")).toBe(false);
+    expect(sampler.level(sample)).toEqual({ level: "warning", reason: "unaudiencedSnapshotBuilds=1 with no ready recipient" });
+    client.closeInitiated = true;
+    await gateway.close();
+    sampler.dispose();
+  });
+
+  it("keeps an audienced snapshot build at debug", async () => {
+    // Failure mode: the no-audience warning fires for a build that had a
+    // recipient, so a normal window writes a warning to disk every minute.
+    const sampler = resourceSampler();
+    const gateway = resourceServer(vi.fn(), sampler);
+    const client = subscribedClient("session-1");
+    (gateway as unknown as { clients: Map<string, unknown> }).clients.set("client-1", client);
+    gateway.broadcastSession("session-1", "session.snapshot", { revision: 1 } as never);
+    const sample = await sampler.sample();
+    expect(sample.snapshotBuilds).toBe(1);
+    expect(sample.unaudiencedSnapshotBuilds).toBe(0);
+    expect(sampler.level(sample)).toEqual({ level: "debug" });
+    client.closeInitiated = true;
+    await gateway.close();
+    sampler.dispose();
   });
 });
 
@@ -491,15 +538,16 @@ it("records the resource window through the transport's timer", async () => {
   const gateway = resourceServer(log, sampler);
   const client = subscribedClient("session-1");
   (gateway as unknown as { clients: Map<string, unknown> }).clients.set("client-1", client);
-  // One snapshot build for a subscriber and one for nobody.
+  // One snapshot build for a subscriber. A frame for a session with nobody
+  // subscribed to it is never prepared and is covered by "warns when a snapshot
+  // build finds no ready recipient".
   gateway.broadcastSession("session-1", "session.snapshot", { revision: 1 } as never);
-  gateway.broadcastSession("session-2", "session.snapshot", { revision: 1 } as never);
   await vi.advanceTimersByTimeAsync(RESOURCE_SAMPLE_INTERVAL_MS);
   const first = recordsWithEvent(log, "gateway.resources")[0]!;
   expect(first[0]).toBe("debug");
   expect(first[1]).toMatch(/windowMs=\d+/u);
   expect(first[1]).toContain("durableWrites=2");
-  expect(first[1]).toMatch(/topics=session\.snapshot:2\/\d+B\/1/u);
+  expect(first[1]).toMatch(/topics=session\.snapshot:1\/\d+B\/1/u);
   expect(Number(/outboundBytes=(\d+)/u.exec(first[1] as string)![1])).toBeGreaterThan(0);
   // The next window crosses the heap bound: the same record promotes to warning.
   heapUsed = 7_000;
