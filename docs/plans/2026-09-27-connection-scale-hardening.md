@@ -611,7 +611,7 @@ rows are in priority order.
 | C-3 | Claimed | Faster retry (D-4): about 5 s transport-open deadline, immediate retry on path change | C-1 | orchestrator-dispatched deepseek-worker, 2026-09-28 |
 | C-4 | Done | Truer liveness (D-4): any inbound frame proves liveness | O-4 | orchestrator-dispatched deepseek-worker, 2026-09-28 |
 | C-6 | Done | Cancel frame for disposable reads; a retried `session.open` joins the in-flight one | O-3 | orchestrator-dispatched deepseek-worker, 2026-09-28 (the O-6a slow-open confirmation and the qualification run are the orchestrator's) |
-| G-12 | Ready | Server-side deadlines, concurrency caps and heap-pressure shedding with typed retry hints | O-3, O-5 | |
+| G-12 | Claimed | Server-side deadlines, concurrency caps and heap-pressure shedding with typed retry hints | O-3, O-5 | orchestrator-dispatched deepseek-worker, 2026-09-28 |
 | G-2 | Claimed | Cold open in bounded time from the index and a single-file fence | G-1c | orchestrator-dispatched deepseek-worker, 2026-09-28 |
 | G-7 | Done | Reconnect diet: send only what changed | O-1, O-6a | orchestrator-dispatched deepseek-worker, 2026-09-28; both review rounds addressed, R-1/R-4 own the real-reconnect measurement |
 | G-11 | Done | Event-loop budget: find and bound every synchronous task over 50 ms | O-5, O-6a | orchestrator-dispatched deepseek-worker, 2026-09-28 (branch `hardening/g-11`): the Slot's publish-time full-transcript summary walk is now an incremental fold (largest CPU-profile run 86.9 ms → 4.8 ms); the dominant remaining stretches belong to in-flight G-8c (session-search) and G-1c (catalog/registry), so the combined O-6a max/p99 is re-measured by the orchestrator after they merge — see the handoff |
