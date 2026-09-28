@@ -54,6 +54,12 @@ async function waitUntil(predicate: () => boolean, timeoutMs = 5_000): Promise<v
   }
 }
 
+/** A snapshot is built and broadcast only for a subscriber, so a test that reads
+ * published snapshots has to be one. */
+function subscribeAudience(registry: RuntimeRegistry, sessionId: string): void {
+  registry.subscribe("test-audience", sessionId);
+}
+
 /** The catalog owner is the durable document's only writer, and it writes from
  * its own cut rather than from a reader's materialization. Settling it is what
  * makes the document current, without waiting out the persist debounce. */
@@ -999,6 +1005,7 @@ describe.sequential("RuntimeRegistry with the pinned agent runtime", () => {
     registries.push(registry);
     await registry.initialize();
     const slot = await registry.create(cwd);
+    subscribeAudience(registry, slot.id);
     const model = faux.getModel();
     await slot.setModel(model.provider, model.id);
     const state = ({ eventSequence: _sequence, ...rest }: any) => JSON.stringify(rest);
@@ -6534,6 +6541,7 @@ export default function (pi) {
     await registry.initialize();
     const slot = await registry.create(cwd);
     expect(slot.sessionFile?.startsWith(join(agentDir, "sessions"))).toBe(true);
+    subscribeAudience(registry, slot.id);
     const model = faux.getModel();
     await slot.setModel(model.provider, model.id);
     const internals = registry as unknown as {
@@ -6718,6 +6726,7 @@ export default function (pi) {
     registries.push(registry);
     await registry.initialize();
     const slot = await registry.acquire(manager.getSessionId());
+    subscribeAudience(registry, slot.id);
     const model = faux.getModel();
     await slot.setModel(model.provider, model.id);
     const before = events.length;
@@ -6854,6 +6863,7 @@ export default function (pi) {
     registries.push(registry);
     await registry.initialize();
     const slot = await registry.create(cwd);
+    subscribeAudience(registry, slot.id);
     const model = faux.getModel();
     await slot.setModel(model.provider, model.id);
     const promptReceipt = await slot.prompt("stream");
@@ -8004,6 +8014,7 @@ export default function (pi) {
     runtime.registerNativeProvider(faux.provider);
     fixture.runtimeFactory.mockResolvedValue(runtime);
     const slot = await fixture.registry.acquire(fixture.manager.getSessionId());
+    subscribeAudience(fixture.registry, slot.id);
     const model = faux.getModel();
     await slot.setModel(model.provider, model.id);
     try {
@@ -8145,6 +8156,7 @@ export default function (pi) {
     registries.push(registry);
     await registry.initialize();
     const slot = await registry.create(cwd);
+    subscribeAudience(registry, slot.id);
     const model = faux.getModel();
     await slot.setModel(model.provider, model.id);
     await expect(slot.prompt("/skill:review configurations", [], undefined, {
@@ -8731,6 +8743,7 @@ export default function (pi) {
     registries.push(registry);
     await registry.initialize();
     const slot = await registry.create(cwd);
+    subscribeAudience(registry, slot.id);
     const runtime = (slot as unknown as {
       runtime: { session: { sessionManager: SessionManager } };
       onEvent: (event: unknown) => void;
@@ -8794,6 +8807,7 @@ export default function (pi) {
     registries.push(registry);
     await registry.initialize();
     const slot = await registry.create(cwd);
+    subscribeAudience(registry, slot.id);
     const internal = slot as unknown as {
       runtime: { session: { sessionManager: SessionManager } };
       pendingPrompt: { id: string; createdAt: string; text: string; attachmentCount: number };
@@ -9421,6 +9435,7 @@ export default function (pi) {
     registries.push(registry);
     await registry.initialize();
     const slot = await registry.create(cwd);
+    subscribeAudience(registry, slot.id);
     const model = faux.getModel();
     await slot.setModel(model.provider, model.id);
     const prompting = slot.prompt("run tools");
@@ -9654,6 +9669,7 @@ export default function (pi) {
     registries.push(registry);
     await registry.initialize();
     const slot = await registry.create(cwd);
+    subscribeAudience(registry, slot.id);
     const model = faux.getModel();
     await slot.setModel(model.provider, model.id);
     await slot.prompt("run tools around a visible barrier");
@@ -11136,6 +11152,14 @@ export default function (pi) {
     expect(inventory).toHaveLength(1);
     expect(inventory[0]).toMatchObject({ sessionId: slot.id, subscribers: 1 });
     expect((inventory[0] as { bytes: number }).bytes).toBeGreaterThan(0);
+
+    // The subscriber set is the slot's only audience fact: with nobody left to
+    // receive a snapshot it publishes the summary and builds nothing.
+    fixture.registry.unsubscribe("phone", slot.id);
+    const published = fixture.events.length;
+    slot.publishSnapshot();
+    expect(recorded.recordSnapshotBuild).toHaveBeenCalledTimes(1);
+    expect(fixture.events.slice(published).some(({ topic }) => topic === "session.snapshot")).toBe(false);
 
     await slot.dispose();
     expect(recorded.recordRuntimeEvicted).toHaveBeenCalledTimes(1);

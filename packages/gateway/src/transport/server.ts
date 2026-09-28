@@ -921,14 +921,20 @@ export class GatewayServer {
   }
 
   broadcastSession(sessionId: string, topic: string, payload: JsonValue): void {
+    // No audience, no work: a frame nobody can receive is not prepared at all
+    // (encoded, measured, fitted to a compression context), so a state change
+    // for a session with no subscriber costs the summary and nothing else.
+    let recipients = 0;
+    for (const client of this.clients.values()) {
+      if (client.ready && client.subscriptionTokens.has(sessionId)) recipients += 1;
+    }
+    if (recipients === 0) return;
     const event: BufferedSessionEvent = { type: "event", topic, sessionId, payload };
     // Prepare once for this broadcast operation. Each connection still owns
     // admission, queue accounting, revocation, and write-failure isolation.
     const prepared = this.prepareBroadcastFrame(event);
-    let subscribers = 0;
     for (const client of this.clients.values()) {
       if (!client.ready || !client.subscriptionTokens.has(sessionId)) continue;
-      subscribers += 1;
       // While a synchronization quarantine owns this session's catch-up, its
       // barrier is the only delivery path: the event is flushed exactly once
       // after the acknowledgement. Sending it here as well would deliver every
@@ -937,19 +943,24 @@ export class GatewayServer {
       const deliverable = barrier ? barrier.offer(event, prepared ?? null) : event;
       if (deliverable) this.sendOutcome(client, deliverable, prepared ?? null);
     }
-    this.resourceSampler.recordTopicFrame(topic, prepared?.outputBytes ?? 0, subscribers);
+    this.resourceSampler.recordTopicFrame(topic, prepared?.outputBytes ?? 0, recipients);
   }
 
   broadcast(topic: string, payload: JsonValue): void {
+    // The same no-audience rule as `broadcastSession`: a global event with no
+    // ready client is not serialized.
+    let recipients = 0;
+    for (const client of this.clients.values()) {
+      if (client.ready) recipients += 1;
+    }
+    if (recipients === 0) return;
     const event = { type: "event" as const, topic, payload };
     const prepared = this.prepareBroadcastFrame(event);
-    let subscribers = 0;
     for (const client of this.clients.values()) {
       if (!client.ready) continue;
-      subscribers += 1;
       this.sendOutcome(client, event, prepared ?? null);
     }
-    this.resourceSampler.recordTopicFrame(topic, prepared?.outputBytes ?? 0, subscribers);
+    this.resourceSampler.recordTopicFrame(topic, prepared?.outputBytes ?? 0, recipients);
   }
 
   emitToClient(clientId: string, topic: string, payload: JsonValue): void {
