@@ -70,7 +70,7 @@ make_payload() {
   ln -s ../../app/node_modules/.bin/pi "$root/runtime/bin-arm64/pi"
   ln -s ../../app/node_modules/.bin/pi "$root/runtime/bin-x64/pi"
   fingerprint="$("$HASH" "$root")"
-  printf '{"schema":1,"kind":"tron-gateway-payload","channel":"stable","version":"%s","gatewayVersion":"fixture","protocolVersion":"5","minProtocolVersion":"5","nodeVersion":"fixture","sourceRevision":"0123456789abcdef0123456789abcdef01234567","runtimeEpoch":"%s","payloadFingerprint":"%s","dependencyTreeCoverage":"app/** and runtime/** regular files"}\n' "$version" "$epoch" "$fingerprint" > "$root/manifest.json"
+  printf '{"schema":1,"kind":"tron-gateway-payload","channel":"stable","version":"%s","gatewayVersion":"fixture","protocolVersion":"6","minProtocolVersion":"6","nodeVersion":"fixture","sourceRevision":"0123456789abcdef0123456789abcdef01234567","runtimeEpoch":"%s","payloadFingerprint":"%s","dependencyTreeCoverage":"app/** and runtime/** regular files"}\n' "$version" "$epoch" "$fingerprint" > "$root/manifest.json"
   chmod -R a-w "$root"
 }
 

@@ -456,7 +456,7 @@ it("attaches stall evidence to a delayed-heartbeat record", async () => {
   const log = vi.fn();
   const gateway = new GatewayServer({
     host: "127.0.0.1", port: 0, maxFrameBytes: 16_384, devices: {} as never, uploads: {} as never, sessions: {} as never,
-    auth: {} as never, service: { info: () => ({ protocolVersion: 5 }) } as never, logger: { log } as never, stallSampler: sampler,
+    auth: {} as never, service: { info: () => ({ protocolVersion: 6 }) } as never, logger: { log } as never, stallSampler: sampler,
   });
   const interval = GATEWAY_CONNECTION_POLICY.heartbeatIntervalMs;
   // An on-time heartbeat closes a window without a record.
@@ -506,7 +506,7 @@ function resourceServer(log: ReturnType<typeof vi.fn>, sampler: ResourceSampler)
     host: "127.0.0.1", port: 0, maxFrameBytes: 16_384, devices: {} as never, uploads: {} as never,
     sessions: { unsubscribeClient: vi.fn() } as never,
     auth: { detachClient: vi.fn() } as never,
-    service: { info: () => ({ protocolVersion: 5 }), releaseClient: vi.fn() } as never,
+    service: { info: () => ({ protocolVersion: 6 }), releaseClient: vi.fn() } as never,
     logger: { log } as never, resourceSampler: sampler,
   });
 }

@@ -319,6 +319,14 @@ interface CatalogPageSeed {
 
 interface CatalogPageSource {
   readonly generation: string;
+  /** Conditional-read token for this exact projection. It covers the whole
+   * projection, not just structural membership: the page-source generation
+   * plus this Gateway runtime's epoch. Every row field that can change without
+   * moving `listRevision` (a live summary, a cold row's attention projection,
+   * archive state) moves the projection generation inside the token, and the
+   * epoch fences a restart whose revisions begin again at zero. A client may
+   * therefore revalidate a retained token on a replacement connection (G-7). */
+  readonly projectionToken: string;
   readonly listRevision: number;
   readonly count: number;
   readonly compactByteEstimate: number;
@@ -1622,7 +1630,7 @@ export class RuntimeRegistry {
   async clearAutomationMarker(sessionId: string, operationId: string): Promise<void> {
     if (!operationId.startsWith("automation:")) throw new Error("Only automation markers may be cleared through this boundary");
     await this.markers.clear(sessionId, operationId);
-    if ((await this.markers.evidenceFor(sessionId)).length === 0) this.interrupted.delete(sessionId);
+    if ((await this.markers.evidenceFor(sessionId)).length === 0) this.noteRecoveredMarkerCleared(sessionId);
   }
 
   async reconcileStoredAutomationMarkers(
@@ -1637,8 +1645,19 @@ export class RuntimeRegistry {
           await this.markers.clear(sessionId, marker.operationId);
         }
       }
-      if ((await this.markers.evidenceFor(sessionId)).length === 0) this.interrupted.delete(sessionId);
+      if ((await this.markers.evidenceFor(sessionId)).length === 0) this.noteRecoveredMarkerCleared(sessionId);
     }
+  }
+
+  /** A recovered marker is a catalog overlay in one place only: a row with no
+   * live summary and no slot reads its `phase` from this set. Removing it moves
+   * that row from `interrupted` to `idle`, which is a projection change like
+   * any other, so the token has to move or a connected owner naming the old one
+   * would keep showing `interrupted` (G-7). */
+  private noteRecoveredMarkerCleared(sessionId: string): void {
+    if (!this.interrupted.delete(sessionId)) return;
+    this.catalogProjectionGeneration += 1;
+    this.options.sessionListChanged();
   }
 
   private async catalogStructureEvidence(): Promise<CatalogStructureEvidence> {
@@ -2656,7 +2675,9 @@ export class RuntimeRegistry {
       // summary/attention revision fields. String payloads are counted above.
       + 160, 0);
     return Object.freeze({
-      generation, listRevision, count: seeds.length, compactByteEstimate,
+      generation,
+      projectionToken: `${this.workRegistry.runtimeEpoch}:${generation}`,
+      listRevision, count: seeds.length, compactByteEstimate,
       ...(archivedCount === undefined ? {} : { archivedCount }),
       page: async (offset: number, limit: number) => seeds.slice(offset, offset + limit).map((seed) => ({
         id: seed.id,

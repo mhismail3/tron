@@ -1,6 +1,6 @@
 # Tron Gateway
 
-## Protocol v5 chat semantics
+## Protocol v6 chat semantics
 
 The Gateway is the sole live owner of invocation, operation, and activity
 identity. Canonical Pi JSONL remains authoritative; Gateway-owned bounded
@@ -26,18 +26,20 @@ command-driven replacement cases in
 `src/transport/session-archive.integration.test.ts` cover all three calls.
 
 Transcript order is canonical branch order, never timestamp or activity recency.
-The v5 projection separates inbound context, agent output/invocations, ambient
+The v6 projection separates inbound context, agent output/invocations, ambient
 status, and hidden state. `custom_message` is model input; `custom`/`appendEntry`
 is extension state. Producer attribution is only exact at a Gateway callback
 boundary, receipt, trusted adapter, or registered tool ownership; unknown remains
 unknown. Every projection is bounded by count and byte limits and malformed
 recognized data fails closed for authoritative resynchronization.
 
-Protocol v5 deliberately has no v4 runtime path. The deployed v4 update helper
-cannot promote a candidate whose required range is strictly v5, so that one-time
-major transition must use the Mac app's manual local Release reinstall runbook:
-install the Mac app containing the v5 Gateway payload while preserving
-`~/.tron`, verify the registered Gateway, and only then install a v5-only iOS
+Protocol v6 deliberately has no v5 runtime path. The deployed v5 update helper
+validates a candidate payload manifest against the protocol version it speaks
+and refuses a candidate whose advertised protocol range does not contain it, so
+it cannot promote a strictly v6 candidate. That one-time major transition must
+use the Mac app's manual local Release reinstall runbook:
+install the Mac app containing the v6 Gateway payload while preserving
+`~/.tron`, verify the registered Gateway, and only then install a v6-only iOS
 client. The repository protocol manifest is projected into Gateway payload,
 Mac app, and iOS app metadata; launch/build/install validators require one exact
 range. A replacement launcher's bundled payload is the migration bootstrap when
@@ -45,7 +47,7 @@ a previously selected external payload advertises an older range. Same-major
 promotion and rollback treat that rejected external pointer as bounded history
 and use the validated signed bundle as their recovery authority; they never
 require the incompatible payload to become admissible again. Do not widen the
-advertised minimum or allow a mixed v4/v5 pair merely to bypass that handoff.
+advertised minimum or allow a mixed v5/v6 pair merely to bypass that handoff.
 Ordinary same-major updates continue through the owned Gateway update flow.
 
 Tron Gateway is the minimal always-running Mac service behind the Tron iPhone
@@ -642,7 +644,7 @@ from an automation-originated turn to prevent self-replication. Paired Gateway c
  clients may manage automations across that Gateway; this is not a new
  per-session authorization boundary.
 
-Authenticated push RPCs are `push.registration.upsert`, `push.registration.remove`, and `push.registration.status`; authenticated notification-resource RPCs are `notification.inbox.list` (keyset `cursor`, `filter`, `limit`), `notification.inbox.read` (one inbox ID or APNs request ID), and `notification.inbox.readAll` (a required `through` cut). Upsert derives `deviceId` from the connection and accepts only an opaque installation ID, endpoint-scoped grant ID/secret, the exact public relay origin that issued it, and preview/policy booleans; preview disclosure defaults off. Status returns the Gateway-owned relay origin and a bounded rotation requirement. A mobile grant issued by another origin, missing legacy origin identity, or rejected by the relay is never reactivated in place: iOS rotates it through App Attest and transfers the replacement capability. Upsert, removal, and `device.revoke` enter one bounded lane per target device before command-receipt execution, so cross-method invocation order is authoritative while different devices remain concurrent. Revocation disables local push authority before removing the paired bearer; a later admitted upsert revalidates that the device remains paired, and remote revocation retains a bounded tombstone. A grant ID awaiting revocation cannot be admitted as active again: upsert requires rotated endpoint authority, and restart retires any legacy active projection that overlaps a durable tombstone. Thus a delayed revoke can address only the old capability, never a newly active grant. The ask-notification policy is rechecked inside the same serialized admission transaction that appends the intent, so a concurrent policy disable can no longer admit and deliver an ask notification after the outer read. The public relay origin is read from the canonical maintainer-owned `config/PushService.xcconfig`, embedded into both signed products, and must be an exact public HTTPS origin. It is never accepted from tools, RPC, user settings, or runtime environment. Missing development configuration leaves notification delivery unavailable without affecting Gateway readiness; official packaging fails closed.
+Authenticated push RPCs are `push.registration.upsert`, `push.registration.remove`, and `push.registration.status`; authenticated notification-resource RPCs are `notification.inbox.list` (keyset `cursor`, `filter`, `limit`), `notification.inbox.read` (one inbox ID or APNs request ID), and `notification.inbox.readAll` (a required `through` cut). Upsert derives `deviceId` from the connection and accepts only an opaque installation ID, endpoint-scoped grant ID/secret, the exact public relay origin that issued it, and preview/policy booleans; preview disclosure defaults off. A registration identical to the stored grant is answered with the same status and writes nothing at all: no command receipt, no credential document, and no delivery-receipt or revocation overlay. Every other upsert keeps its command receipt and is admitted durably as before. `hello` and `system.info` carry `pushRegistrationRevision`, a digest of the grants this Gateway stores and the relay origin they are valid for; it changes whenever a grant is added, rotated, disabled at runtime or retired, so a phone that acknowledged an earlier value re-sends its registration and learns the rotation requirement. Status returns the Gateway-owned relay origin and a bounded rotation requirement. A mobile grant issued by another origin, missing legacy origin identity, or rejected by the relay is never reactivated in place: iOS rotates it through App Attest and transfers the replacement capability. Upsert, removal, and `device.revoke` enter one bounded lane per target device before command-receipt execution, so cross-method invocation order is authoritative while different devices remain concurrent. Revocation disables local push authority before removing the paired bearer; a later admitted upsert revalidates that the device remains paired, and remote revocation retains a bounded tombstone. A grant ID awaiting revocation cannot be admitted as active again: upsert requires rotated endpoint authority, and restart retires any legacy active projection that overlaps a durable tombstone. Thus a delayed revoke can address only the old capability, never a newly active grant. The ask-notification policy is rechecked inside the same serialized admission transaction that appends the intent, so a concurrent policy disable can no longer admit and deliver an ask notification after the outer read. The public relay origin is read from the canonical maintainer-owned `config/PushService.xcconfig`, embedded into both signed products, and must be an exact public HTTPS origin. It is never accepted from tools, RPC, user settings, or runtime environment. Missing development configuration leaves notification delivery unavailable without affecting Gateway readiness; official packaging fails closed.
 
 Outbound relay requests use one fixed `/v3/notifications` route, no redirects, a twenty-second deadline that exceeds the relay's bounded APNs deadline, a 2 KiB request and 16 KiB response boundary, and a lowercase-hex HMAC over method, path, timestamp, stable request ID, and the exact body's lowercase-hex SHA-256. Restart recovery retries transient outcomes with the same request ID. When the relay specifically reports that this ID still owns an active provider attempt, the Gateway polls it through the same bounded retry schedule; the relay ledger returns the eventual terminal result without creating a second APNs request. Unclassified ambiguous outcomes remain terminal and are never blindly replayed. Exact relay `invalid_signature` and `installation_unavailable` errors invalidate that grant without persisting or logging response bodies; mobile registration then rotates the capability instead of retrying an identity that cannot reach APNs. Quotas apply across the installation, canonical session, and target grant.
 
@@ -680,7 +682,7 @@ Files are 0600. It never accepts a client filesystem path, reads session content
 - `POST /v1/sessions/:sessionId/live-views/:id` — open a disposable viewer with `{generation}`
 - `GET /v1/sessions/:sessionId/live-views/:id/frame` — latest JPEG or a body-free waiting/unchanged response
 - `DELETE /v1/sessions/:sessionId/live-views/:id` — close the exact viewer; last native viewer requests joined suspension, never browser automation shutdown
-- `GET /v1/socket` — authenticated protocol version 5 WebSocket
+- `GET /v1/socket` — authenticated protocol version 6 WebSocket
 
 Bearer admission is linearized with the paired-device document under the
 DeviceStore mutex: the credential check and synchronous HTTP/upgrade registration
@@ -914,7 +916,7 @@ Authorized device names are projected from one Gateway-owned record: a validated
 Every WebSocket starts with:
 
 ```json
-{"type":"hello","protocolVersion":5}
+{"type":"hello","protocolVersion":6}
 ```
 
 The hello, pairing response, and authenticated `system.info` identify the runtime
@@ -1666,6 +1668,18 @@ observes newer canonical truth. Both full scans and reconciled durable-index cut
 publish membership through the same structural revision owner, including the first
 cut after restart. Additions and removals advance `listRevision`; unchanged cuts
 reuse it, and already-leased traversals keep their original rows and revision.
+An uncursored `session.list` may name the client's retained projection token:
+an equal token is answered with `notModified: true` and no rows. The token is the
+Gateway runtime epoch plus the page-source generation, so it covers structural
+identity, archive membership, the visible archived count and every mutable row
+overlay — a live summary, a cold row's attention projection and archive state
+each move it. A first-party client may therefore revalidate a retained token on
+any connection, including a replacement one, and still holds that exact
+projection. The epoch is per Gateway process, so a restarted Gateway whose
+revisions begin again at zero can never confirm a pre-restart token rows do not
+match. Any other token, a cursored page that received one, or an absent
+parameter receives ordinary rows; a cursor traversal already belongs to the
+projection its first page admitted.
 Clients still fail closed and restart from a nil cursor
 when interoperating with an older Gateway that changes revisions between pages. Model-list
 cursors bind their offset to an exact whole-catalog SHA-256 fingerprint and a 30-second immutable
@@ -1716,7 +1730,7 @@ durable attention replacement, clears manual unread, and publishes no transient
 unread summary. Successful `session.open` returns its current completion revision,
 and first-party clients acknowledge it only after installing the snapshot and
 retry transient acknowledgement failure against that same absolute revision.
-Protocol-v5 clients require the complete attention and presentation contract;
+Protocol-v6 clients require the complete attention and presentation contract;
 they do not attach to an earlier Gateway that lacks the method or revisioned
 response.
 Delete removes attention metadata, true identity replacement moves it without
@@ -1786,7 +1800,7 @@ drops archived rows from every page of that traversal and returns
 newest-archived first. Archived rows carry `archivedAt` and are otherwise
 unchanged, and a list cursor is bound to the filter that created it. The
 `session-archive.v1` capability advertises the method and the filter; the
-additive field and parameter leave protocol version 5 unchanged.
+additive field and parameter required no protocol version change.
 
 `session.open` carries a
 byte-bounded authoritative transcript tail with `transcriptStart` and
@@ -1814,7 +1828,7 @@ large active runs therefore remain openable; no canonical Pi content is modified
 discarded. Canonical non-image upload
 envelopes retain their runtime-owned readable paths, but the mobile transcript
 projection replaces those tags with bounded name/type/size metadata on an
-ordinary text part and never sends the Mac path to clients. Protocol-v5 clients therefore receive the safe filename instead of the
+ordinary text part and never sends the Mac path to clients. Protocol-v6 clients therefore receive the safe filename instead of the
 Mac path for a new content discriminant. A page carries and echoes the next projected entry as its branch anchor plus the current runtime
 generation and leaf identity. Raw canonical parent links may pass through filtered session-info,
 hidden custom, or extension-receipt entries and therefore never define projected-row adjacency.
@@ -1829,8 +1843,8 @@ Tron operating context, with each section, tool line, rule, skill, and instructi
 attributed to Pi, a Tron module, a package, a local file, or an MCP connection. Pi does
 not expose its section map, so the Gateway splits the rendered text; file-backed
 bodies are matched exactly, every byte stays in one section, and a prompt without Pi's
-structure is returned verbatim as one `prompt` section. The additive field leaves
-protocol version 5 unchanged; `systemPrompt` remains Pi's base prompt. The resource
+structure is returned verbatim as one `prompt` section. The additive field
+required no protocol version change; `systemPrompt` remains Pi's base prompt. The resource
 projection includes display-safe extension, prompt, skill, context-file, and tool
 metadata while canonical resource files and runtime loaders remain authoritative.
 Extension entries also expose the public loader handler event names and bounded
@@ -1899,7 +1913,7 @@ Each row includes the runtime loader's source, scope, origin, and path when avai
 `session.commandDetail` read requires one exact current `source:name` identity and returns
 that selected prompt, skill, or extension source document only; content is UTF-8 bounded
 to 96 KiB with original byte count and explicit truncation metadata, so catalog loading
-never reads or copies every resource body. Protocol-v5 `session.prompt` accepts one typed
+never reads or copies every resource body. Protocol-v6 `session.prompt` accepts one typed
 `resourceInvocation` with source, canonical name, and visible arguments. The Gateway revalidates
 exact live `(source,name)` identity and extension-command precedence before constructing Pi's
 normalized leading invocation. Pending and queued projections retain the same typed resource;

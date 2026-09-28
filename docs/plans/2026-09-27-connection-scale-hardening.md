@@ -2,6 +2,8 @@
 
 - **Started:** 2026-09-27
 - **Status:** Active (Phase 1 runs on `hardening/integration`; that branch's copy of this plan is authoritative until R-1)
+- **Last updated:** 2026-09-28, G-7 (final review round addressed: an unchanged catalog answer rebuilds the row projection, a cleared automation marker moves the catalog token)
+
 - **Last updated:** 2026-09-28, G-3 review round 2 addressed: the `unaudiencedSnapshotBuilds` warning and its test are now stated as a tripwire for a lost slot guard or a divergence between the registry's subscription record and the transport's, not for a closing socket
 
 - **Last updated:** 2026-09-28, C-4 (second review round addressed)
@@ -568,7 +570,7 @@ rows are in priority order.
 | C-6 | Ready | Cancel frame for disposable reads; a retried `session.open` joins the in-flight one | O-3 | |
 | G-12 | Ready | Server-side deadlines, concurrency caps and heap-pressure shedding with typed retry hints | O-3, O-5 | |
 | G-2 | Ready | Cold open in bounded time from the index and a single-file fence | G-1c | |
-| G-7 | Claimed | Reconnect diet: send only what changed | O-1, O-6a | orchestrator-dispatched deepseek-worker, 2026-09-28 |
+| G-7 | Done | Reconnect diet: send only what changed | O-1, O-6a | orchestrator-dispatched deepseek-worker, 2026-09-28; both review rounds addressed, R-1/R-4 own the real-reconnect measurement |
 | G-11 | Ready | Event-loop budget: find and bound every synchronous task over 50 ms | O-5, O-6a | |
 | G-9 | Ready | One background-work scheduler that yields to requests; measure the libuv pool size | O-5, G-1b | |
 | G-4 | Claimed | Outbound queue coalescing of superseded snapshots and keyed events | G-3 | orchestrator-dispatched deepseek-worker, 2026-09-28 |
@@ -1304,7 +1306,9 @@ needed), **Checks**, **Docs**, **Done when**, **User action**.
 - **Checks:** `packages/ios-app/Tests/Gateway/AppModelReconnectTests.swift`,
   `packages/gateway/src/transport/session-archive.integration.test.ts` for list
   behaviour.
-- **Done when:** requests and bytes per reconnect meet the recorded target.
+- **Done when:** requests and bytes per reconnect meet the recorded target
+  (the target list and the delivered request set are fixed by this task's
+  checks; R-1 and R-4 own the real-reconnect request/byte measurement).
 - **User action:** none; ships in the release (R-2).
 
 ### G-11 — Event-loop budget
@@ -4484,6 +4488,284 @@ events; widen them to name the pool owner in the same change.
   (finding 4, nit). The ≈1,365 ambient opens a second is labelled an upper bound
   on ambient opens that excludes routed re-opens and assumes the pass keeps the
   750 ms cadence (finding 5, nit); the retained artifact's figure matches.
+
+### G-7 · Done · 2026-09-28 · orchestrator-dispatched deepseek-worker (branch `hardening/g-7`)
+
+- Final review round (1 major, 2 minors, 3 nits) fixed; three of the four nits
+  are comments or a documented one-time request. `hardening/integration` was
+  merged in first and both behaviours kept where it conflicted with C-5.
+- **Finding 1 (major) — an unchanged answer left the phone's snapshot stale.**
+  `confirmUnchanged` makes the projection live again, but the reconnect's own
+  revision advance happens before the answer lands, so the dashboard snapshot
+  the view holds was taken while the projection was retired: every non-idle row
+  read "resuming" and a waiting-for-user row lost its badge until its next
+  summary, and an expanded archived container kept the server unavailable.
+  Both `.unchanged` branches now do what a page read does when the answer
+  revives a retired projection: `AppModel` runs `installSelectedDashboardCatalog()`
+  and advances `archiveProjectionRevision`; the pool republishes the profile's
+  state and its authoritative catalog. Neither touches the rows. Covered by
+  `AppModelReconnectTests` "a reconnect whose catalog read is unchanged still
+  rebuilds the dashboard's row projection" (row waiting for the user, both
+  revisions, rows retained) and `DashboardStateOwnerTests` "a secondary
+  reconnect answered unchanged republishes its catalog authority" (the retained
+  token is named, and state plus authority come back for the replacement epoch).
+- **Finding 2 (minor) — a cleared automation marker did not move the token.**
+  `clearAutomationMarker` (the user's acknowledge-recovery action) and
+  `reconcileStoredAutomationMarkers` dropped the session from the recovered-marker
+  set without moving `catalogProjectionGeneration`, and a cold row reads its
+  `phase` from that set alone, so the row went `interrupted`→`idle` with an equal
+  token: every reconnect then answered `notModified` and the phone kept showing
+  `interrupted`. Both now go through `noteRecoveredMarkerCleared`, which advances
+  the generation and calls `sessionListChanged()` — the shape the cold-attention
+  path already used. Covered by `session-archive.integration.test.ts` "moves the
+  projection token when an acknowledged recovery clears a cold row's marker"
+  (marker restored by a real restart, phase read before and after, token moved,
+  `listChanged` observed).
+- **Finding 3 (minor) — merge readiness.** `hardening/integration` merged;
+  conflicts in this plan, `scripts/test-tron-profile.py` and
+  `scripts/tron-profile-gateway-driver.mjs` resolved as the union (both
+  behaviours). The v6 re-sweep found the two leftover `hello` fixtures the review
+  named in `DashboardStateOwnerTests.swift` (lines 855 and 1010) and both
+  `test-tron-profile.py` sites; nothing else in the merged tree still speaks v5.
+  `AppModel.swift` and `DashboardGatewayConnectionPool.swift` auto-merged and keep
+  C-5's pool work and this task's `.unchanged` branch.
+- **Nit 4 — false comments.** Both comments claimed the identity lane spanned the
+  identical-registration check. It does not: the check is read-only, runs outside
+  `withMobileIdentityLane`, and is therefore not ordered with that device's lane
+  operations, so an identical upsert racing a remove or revoke is answered from
+  the snapshot the check read. Both comments now say that, and the duplicated
+  block in `gateway-service.ts` is gone.
+- **Nit 5 — the one-time re-send.** The acknowledgement records the revision the
+  handshake advertised before the transfer, so a transfer that itself wrote the
+  grant (first registration or rotation) is re-sent once by the next reconcile.
+  Recorded in the target list
+  (`~/.tron/workspace/files/hardening/g-7-reconnect-request-inventory.md`) and in
+  `packages/ios-app/docs/development.md` instead of changing the upsert answer
+  shape.
+- **Nit 6 — a failed acknowledgement save blocked the removal.**
+  `removeRegistration` returned before sending `push.registration.remove` when
+  persisting the cleared acknowledgement failed, so a user who turned
+  notifications off could stay registered. The in-memory document still drops the
+  acknowledgement (a claim this phone could not persist is not trusted), the
+  failure is still reported as `pending`/`stoppedPersistence`, and the removal is
+  sent. Covered by `PushNotificationCoordinatorTests` "a failed acknowledgement
+  save still tells the Gateway to remove the grant".
+- Evidence: `npm run build` clean; `npx vitest run` passes on
+  `session-archive.integration.test.ts` (41/41, including the new case),
+  `notification-service.test.ts`, `gateway-notification-rpc.test.ts`,
+  `gateway-restart.test.ts` (62), `session-list-pagination.test.ts` (12) and
+  `automation-executor.test.ts` (8); `python3 scripts/test-gateway-protocol-contract.py`
+  passes 3/3 and `python3 scripts/test-tron-profile.py` passes 45/45 after the
+  merge. `scripts/tron-ios-test build --lane G7F` succeeded and `scripts/tron-ios-test run`
+  passes for `AppModelReconnectTests`, `PushNotificationCoordinatorTests` and
+  `DashboardStateOwnerTests` (130 tests).
+- Negative controls: with `noteRecoveredMarkerCleared` reverted to a bare
+  `interrupted.delete`, the new session-archive case fails on the first
+  `listChanged` assertion and would then answer `notModified`; with the
+  `AppModel` `.unchanged` side effects removed, the reconnect case fails on the
+  archive revision and the row's activity; with the pool's `.unchanged`
+  republication removed, the pool case times out waiting for the replacement
+  epoch's authority.
+- Changes: one merge commit for `hardening/integration` that also lands this
+  review round, branch `hardening/g-7` (the merge is kept whole because the
+  conflict resolutions and the fixes sit in the same files).
+
+### G-7 · Done · 2026-09-28 · orchestrator-dispatched deepseek-worker (branch `hardening/g-7`)
+
+- Review response: the review round after the first handoff entry below found a
+  blocker and two major gaps. This entry records what the fixes actually are;
+  the claims below about a connection-scoped revision, the no-op answer's shape
+  and the kept command receipt are superseded by it.
+- **Finding 1 (blocker) — the conditional answer covered only structural
+  membership.** `session.list` now takes and returns a projection token:
+  `RuntimeRegistry` publishes `projectionToken` = the Gateway runtime epoch plus
+  the page-source generation (structural `listRevision`, `catalogProjectionGeneration`,
+  scope, archive filter, archive revision), the pagination store carries it on
+  every page, and an uncursored read that names the current token is answered
+  `notModified` with no rows. The case the review reproduced — another client
+  marks a cold row unread, which moves only `catalogProjectionGeneration`, then a
+  conditional read returned `notModified` with no rows while the plain read
+  showed `isUnread: true` — is now a case in
+  `session-archive.integration.test.ts`: "answers an unchanged projection token
+  without rows and re-reads after the projection moves". Its artifact records
+  `firstRevision: 0`/`afterAttentionRevision: 0` with
+  `token: <epoch>:0:0:...` and `attentionToken: <epoch>:0:1:...`, plus a restart
+  whose token carries a new epoch. The same fix covers the phone's
+  malformed-summary and metadata re-check recovery paths, which re-read through
+  this conditional path.
+- **Finding 2 (major) — the push acknowledgement could not see a runtime grant
+  disable.** The Gateway now advertises `pushRegistrationRevision` in `hello`
+  and `system.info`: a digest over the grants it stores (identity, installation,
+  activity, disabled reason, relay origin) plus the relay origin they are valid
+  for, refreshed on every notification-document write and stable across a
+  restart that changed nothing. The phone stores it as
+  `PushGrant.acknowledgedRegistrationRevision` and skips the registration only
+  while it and `machineId:runtimeEpoch` both still match, so a relay rejection
+  that disabled the grant (`notification-service.ts` `recordOutcome`) makes the
+  next reconcile re-send and act on `requiresGrantRotation`. Tested at both
+  layers: `notification-service.test.ts` "advertises a changed registration
+  revision when the relay disables a grant" (the revision moves, the grant is no
+  longer current, the re-send answers `requiresGrantRotation: true`) and
+  `PushNotificationCoordinatorTests` "an acknowledged registration is not re-sent
+  while the Gateway's grant revision is unchanged" (unchanged revision sends
+  nothing; a moved revision re-sends and discards the disabled grant; a changed
+  runtime identity re-sends).
+- **Finding 3 (major) — the plan row's Done-when and the connection-scoped
+  revision.** Decided with the supervisor: the token is runtime-scoped, so the
+  phone keeps it across a reconnect and a replacement connection revalidates the
+  rows it holds instead of reloading them ("reconnect resumes; it does not
+  reload"). A profile switch still drops it (`invalidateLoads()`), pinned by
+  `DashboardStateOwnerTests` "a retained projection token survives a reconnect
+  and drops on a profile switch". The real-reconnect request and byte
+  measurement is R-1's and R-4's, recorded in the row's Done-when.
+- **Finding 4 (minor) — a lost removal answer.** `removeRegistration` clears and
+  persists the acknowledgement before sending `push.registration.remove`, so a
+  user who re-allows notifications re-registers instead of trusting an
+  acknowledgement for a grant the Gateway may already have removed
+  (`PushNotificationCoordinatorTests` "a lost removal response leaves no
+  acknowledgement that a removed grant is current").
+- **Finding 5 (minor) — the identical registration's command receipt.** Per the
+  supervisor, G-7's Do item 2 is literal: an identical registration is answered
+  before the receipt owner opens one, so it writes neither a receipt nor the
+  document. An unchanged registration is naturally idempotent, so a retried
+  request repeating the same `commandId` gets the same stored status;
+  `gateway-notification-rpc.test.ts` "answers an identical registration without
+  opening a command receipt" spies the receipt owner and asserts it is never
+  entered. An admitted registration keeps its previous order — the per-device
+  lane wraps the operation inside its receipt, so an accepted mutation is owned
+  by the work registry before it waits for the lane (`gateway-restart.test.ts`
+  "owns mobile mutations before they wait in the per-device lane"). G-7a was
+  removed: it only held this decision.
+- **Finding 6 (nit) — a late transfer completion.** `transfer` now takes the
+  runtime identity and revision from the admitted context and passes them to
+  `acknowledgeRegistration`, so a completion that lands after a reconnect
+  records the runtime that answered rather than whatever is current.
+- **Finding 7 (nit) — the version bump's search-and-replace mangled history.**
+  The two "additive field ... leave protocol version 6 unchanged" sentences now
+  say the additive field required no protocol version change, and the v5 update
+  helper claim names what actually rejects a strictly v6 candidate (a payload
+  manifest validated against the version the helper speaks, and the
+  protocol-range probe).
+- **Finding 8 (nit):** the diff outside the listed owning files is unchanged from
+  the first entry's justification (the catalog loader's owners, plus the release
+  rule that the protocol bump touches every fixture pinning the version).
+- Evidence: `npm run build` clean; `npx vitest run` passes on six focused files:
+  `session-archive.integration.test.ts`, `session-list-pagination.test.ts` and
+  `server-revocation.integration.test.ts` (66 tests) and
+  `notification-service.test.ts`, `gateway-notification-rpc.test.ts` and
+  `gateway-restart.test.ts` (60 tests); the session-archive report at
+  `packages/gateway/test-results/session-archive.integration.json` carries the
+  new case's evidence. `scripts/tron-ios-test build --lane G7R2` succeeded and
+  `scripts/tron-ios-test run --lane G7R2` for `AppModelReconnectTests`,
+  `PushNotificationCoordinatorTests`, `DashboardStateOwnerTests` and
+  `AppModelCatalogSyncTests` passes 151/151.
+- Changes: `f8574146d` and `d38f0ec71` (Gateway), `ce4c3fb12` (phone), plus the
+  docs and this entry, branch `hardening/g-7`.
+
+### G-7 · Done · 2026-09-28 · orchestrator-dispatched deepseek-worker (branch `hardening/g-7`)
+
+- (Superseded in part by the review-response entry above: the token is
+  runtime-scoped rather than connection-scoped, the no-op registration answer
+  carries the advertised revision, and an identical registration skips its
+  command receipt. The findings and their fixes are recorded there.)
+- Result: a reconnect sends the push registration only when the registration
+  changed for this Gateway runtime, and revalidates its session catalog instead
+  of reloading rows whenever the connection's own traversal already published
+  the Gateway's current `listRevision`. The Gateway answers both no-ops without
+  a durable write. Protocol bumped to 6 (this is the first Phase 1 task to change
+  a message shape: `session.list` gained the optional `listRevision` parameter
+  and the `notModified` response).
+- Rolled-up request inventory and the recorded target list (Do item 1):
+  `~/.tron/workspace/files/hardening/g-7-reconnect-request-inventory.md`. The
+  2026-09-27 phone export is not in the repository, so R-4 owns the real-export
+  comparison; the inventory is a code audit of every connect-time owner plus the
+  O-6a mobile client's method surface. Target per reconnect: **1** first
+  `session.list` page (0 rows when the same connection revalidates), **0**
+  `push.registration.upsert` on the same Gateway runtime, **2**
+  `notification.inbox.list` (one per filter), **1** each of `provider.list`,
+  `model.list`, `settings.get`, `device.list` per (target, connection), **0–1**
+  `system.info`, and one `session.open`/`session.sync`/`session.commands` trio
+  only when a chat is mounted.
+- Do item 2 (push registration): the phone persists
+  `PushGrant.acknowledgedRuntime` = `machineId:runtimeEpoch` of the Gateway
+  runtime that confirmed the exact grant, and `registerCurrent` returns ready
+  without a request while the stored grant still matches the APNs token hash,
+  route and relay origin and that identity is unchanged. A Gateway restart, a
+  changed token/route/origin, a rotated grant, or a Gateway that advertises no
+  `runtimeEpoch` always re-sends. The Gateway's `NotificationService.upsertGrant`
+  now returns `undefined` from `NotificationGrantStore.update` (no credential
+  document rewrite at all: grants, delivery receipts and revocation tombstones
+  are untouched) when the request describes the stored grant and the retention
+  pass changed nothing.
+- Do item 4 (conditional `session.list`): an uncursored read may name
+  `listRevision`. An equal revision is answered
+  `{sessions: [], listRevision, notModified: true}` with no row projection,
+  because the registry revision owns structural identity, archive membership
+  (`archiveChanged` advances it) and the visible archived count. A cursored page
+  is always bound to its lease's revision, and any other revision receives rows.
+  The phone revalidates a retained revision only on the connection whose
+  traversal admitted it: `SessionCatalogCoordinator.beginLoad` drops the revision
+  when the load key changes, and any local membership change
+  (`invalidateLoads`) drops it too. That is deliberate, not a shortfall: the
+  Gateway broadcasts `session.summary` and never replays it, so a replacement
+  connection's row fields converge only through a page read.
+- Do item 3 (one owner each for `model.list`/`provider.list` per connection):
+  already structurally satisfied, no code change. `AppModel.scheduleMountedOptionalReads`
+  is the connect/foreground optional-read owner and is guarded by
+  `mountedOptionalRefreshLifecycleGeneration`/`ConnectionID`, so the second
+  caller (`lifecycleRestoreMountedPresentation`) cannot re-read in the same
+  connection; a mounted chat open reads the session-scoped target, which is a
+  different projection, and Settings/Onboarding keep the explicit user action.
+  Verified by inspection; no new test asserts the count (the existing reconnect
+  test asserts the request *set*).
+- Evidence:
+  - `--no-build`-free focused Gateway runs on Homebrew Node: `npm run build`
+    clean; `npx vitest run src/transport/session-archive.integration.test.ts`
+    passes **40/40** (11.7 s) including the new
+    "answers an unchanged catalog revision without rows and re-reads after
+    membership moves"; `npx vitest run src/notifications/notification-service.test.ts`
+    passes **37/37** (3.5 s) including "answers an identical registration
+    without rewriting the credential document". Both write their usual
+    `test-results/*.json` artifacts.
+  - `scripts/tron-ios-test build` succeeded, then
+    `scripts/tron-ios-test run --only-testing TronMobileTests/AppModelReconnectTests`
+    passed **37 tests in 1 suite** (0.27 s; run
+    `~/Library/Developer/Tron/ios/test-runs/20260928T144407Z-run.cP95vO`),
+    including the new "a catalog read revalidates its retained revision and a
+    reconnect reloads rows".
+  - Negative controls (the test fails with the production change reverted, so it
+    targets a real bug rather than reasserting the code): with
+    `notification-service.ts` stashed the new registration test fails on the
+    byte-identical document assertion; with `gateway-service.ts` stashed the new
+    list test fails on the missing `notModified` answer.
+  - `python3 scripts/test-gateway-protocol-contract.py` passes 3/3 after the
+    bump. Its artifact fixtures now derive the expected version from
+    `config/GatewayProtocol.json` instead of a literal, so the next bump cannot
+    leave them asserting a stale contract.
+- Changes: `fd14c2712` (reconnect diet + protocol bump in the same series;
+  bump commit `c16e4b279`), branch `hardening/g-7`.
+- Tasks added: G-7a (removed by the review response above, which decided it).
+- Kept on purpose: the command receipt (idempotency evidence) on a no-op
+  `push.registration.upsert`. The plan's "no receipt write" is read as the
+  notification service's own durable state — the credential document and its
+  receipt/revocation overlays — because `transport/command-receipts.ts` is not a
+  G-7 owning file and the architecture invariant requires a bounded idempotency
+  receipt for every mutation. The review response above replaced this reading:
+  the plan's wording is literal and an identical registration now skips its
+  receipt too.
+- Deviations (superseded by the review response above): the push registration
+  no-op answer kept the existing `NotificationStatus` shape and the retained
+  value was connection-scoped. The message-shape change that owns the version
+  bump is the `session.list` conditional read, and the no-op answer does add the
+  advertised revision to `hello`/`system.info` (not to the status shape).
+- For the next agent: R-4 compares the recorded target list with a real
+  evaluation-day reconnect and should also measure the bytes (the `session.list`
+  page is the largest single item, so the `notModified` answer is the byte win).
+  The archived-session container (`AppModel.loadArchivedSessions`, `archived:
+  "only"`) still reads rows unconditionally; it is a small follow-up if R-4 shows
+  it matters. `SessionCatalogCoordinator.confirmUnchanged` requires the retained
+  revision to match, so a `notModified` answer for a revision the client did not
+  retain is rejected as `invalid_response` instead of being trusted.
 
 ### G-3 · Claimed · 2026-09-28 · orchestrator-dispatched deepseek-worker (branch `hardening/g-3`)
 

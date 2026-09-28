@@ -20,7 +20,9 @@ function summary(index: number, phase: SessionSummary["phase"] = "idle"): Sessio
 function pageSource(sessions: SessionSummary[], listRevision: number, generation = `generation-${listRevision}`) {
   const rows = sessions.slice();
   return {
-    generation, listRevision, count: rows.length, compactByteEstimate: rows.reduce((n, row) => n + 96 + row.id.length + row.cwd.length + row.firstMessage.length, 0),
+    generation,
+    projectionToken: `epoch-1:${generation}`,
+    listRevision, count: rows.length, compactByteEstimate: rows.reduce((n, row) => n + 96 + row.id.length + row.cwd.length + row.firstMessage.length, 0),
     page: async (offset: number, limit: number) => rows.slice(offset, offset + limit),
   };
 }
@@ -146,6 +148,7 @@ describe("SessionListPaginationStore", () => {
     const store = new SessionListPaginationStore({ secret: Buffer.alloc(32, 6) });
     const malformed = (rows: SessionSummary[]) => ({
       generation: `malformed-${rows.length}-${rows.map((row) => row.id).join("-")}`,
+      projectionToken: `epoch-1:malformed-${rows.length}`,
       listRevision: 1,
       count: 3,
       compactByteEstimate: 512,
@@ -185,7 +188,8 @@ describe("SessionListPaginationStore", () => {
     const store = new SessionListPaginationStore({ secret: Buffer.alloc(32, 10) });
     const rows = [summary(0), summary(1), summary(2)];
     const source = {
-      generation: "later-malformed", listRevision: 1, count: rows.length, compactByteEstimate: 512,
+      generation: "later-malformed", projectionToken: "epoch-1:later-malformed",
+      listRevision: 1, count: rows.length, compactByteEstimate: 512,
       page: async (offset: number, limit: number) => offset === 0 ? rows.slice(0, limit) : [],
     };
     const first = await store.firstPage("phone", "user", source, 1);
@@ -204,7 +208,7 @@ describe("session.list stable traversal", () => {
       hydrated += selected.length;
       return selected;
     });
-    const source = { generation: "25k", listRevision: 3, count: rows.length, compactByteEstimate: 1000, page };
+    const source = { generation: "25k", projectionToken: "epoch-1:25k", listRevision: 3, count: rows.length, compactByteEstimate: 1000, page };
     const first = await store.firstPage("phone", "user", source, 100);
     expect(first.sessions).toHaveLength(100);
     expect(hydrated).toBe(100);
@@ -233,7 +237,7 @@ describe("session.list stable traversal", () => {
     const firstCatalog = Array.from({ length: 1_000 }, (_, index) => summary(index));
     const secondCatalog = [summary(9_999, "running")];
     const source = (sessions: SessionSummary[], revision: number, generation: string) => ({
-      sessions, listRevision: revision, generation, count: sessions.length,
+      sessions, listRevision: revision, generation, projectionToken: `epoch-1:${generation}`, count: sessions.length,
       compactByteEstimate: sessions.reduce((total, row) => total + 96 + row.id.length + row.cwd.length + row.firstMessage.length, 0),
       page: async (offset: number, limit: number) => sessions.slice(offset, offset + limit),
     });
@@ -256,6 +260,6 @@ describe("session.list stable traversal", () => {
 
     const later = await service.invoke(client("phone"), "session.list", { scope: "user", limit: 500 });
     expect(pageSource).toHaveBeenCalledTimes(2);
-    expect(later).toEqual({ sessions: secondCatalog, listRevision: 8 });
+    expect(later).toEqual({ sessions: secondCatalog, listRevision: 8, projectionToken: "epoch-1:generation-8" });
   });
 });

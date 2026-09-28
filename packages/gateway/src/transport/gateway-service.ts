@@ -336,6 +336,13 @@ export class GatewayService {
       machineName: config.machineName,
       gatewayChannel: this.updateService.channel,
       ...runtimeIdentity(),
+      // A reconnecting phone compares this against the registration it
+      // acknowledged: the value changes whenever this Gateway's stored grants
+      // do, including when the relay disables a grant at runtime, which no
+      // event announces (G-7).
+      ...(this.dependencies.notifications
+        ? { pushRegistrationRevision: this.dependencies.notifications.registrationRevision }
+        : {}),
       capabilities: [
         ...(process.env.TRON_GATEWAY_SUPERVISED === "1" ? ["restart-supervised.v1"] : []),
         "sessions.v1",
@@ -648,19 +655,39 @@ export class GatewayService {
         });
       case "push.registration.upsert":
         if (client.isLocal) throw new GatewayError("auth_required", "Only an authenticated mobile device can register push delivery");
+        // Identical registrations are naturally idempotent and write nothing at
+        // all, so they are answered before the receipt owner opens one.
+        const allowed = new Set(["commandId", "installationId", "grantId", "secret", "previewsEnabled", "relayOrigin", "notifyWhenAskPresented"]);
+        if (Object.keys(params).some((key) => !allowed.has(key))) throw new GatewayError("invalid_request", "Push registration contains unknown fields");
+        const notifications = this.requireNotifications();
+        // `commandId` stays required here so an unchanged registration is still
+        // addressed by the same command identity a retried request repeats.
+        void string(params.commandId, "commandId", { min: 8, max: 160 });
+        const input = {
+          deviceId: client.identity,
+          installationId: string(params.installationId, "installationId", { min: 8, max: 160 }),
+          grantId: string(params.grantId, "grantId", { min: 8, max: 160 }),
+          secret: string(params.secret, "secret", { min: 43, max: 171 }),
+          previewsEnabled: params.previewsEnabled === undefined ? false : boolean(params.previewsEnabled, "previewsEnabled"),
+          relayOrigin: string(params.relayOrigin, "relayOrigin", { min: 1, max: 512 }),
+          ...(params.notifyWhenAskPresented === undefined ? {} : { notifyWhenAskPresented: boolean(params.notifyWhenAskPresented, "notifyWhenAskPresented") }),
+        };
+        // An identical registration is naturally idempotent and writes nothing,
+        // not even a command receipt, so it is answered before the receipt owner
+        // opens one. This check is read-only and runs outside the identity lane,
+        // so it is not ordered with this device's lane operations: an identical
+        // upsert racing a remove or a revoke is answered from the snapshot the
+        // check read rather than from behind that lane mutation. It cannot bring
+        // a grant back — it only decides to skip the write — and a grant the
+        // relay disabled is still visible because the status is read after the
+        // decision.
+        if (await notifications.registrationIsCurrent(input)) {
+          return safeJson(await notifications.status(client.identity));
+        }
+        // An admitted registration keeps the existing order: the per-device lane
+        // wraps the operation inside its receipt, so an accepted mutation is
+        // owned by the work registry before it waits for the lane.
         return this.mutation(client, method, params, () => this.withMobileIdentityLane(client.identity, async () => {
-          const allowed = new Set(["commandId", "installationId", "grantId", "secret", "previewsEnabled", "relayOrigin", "notifyWhenAskPresented"]);
-          if (Object.keys(params).some((key) => !allowed.has(key))) throw new GatewayError("invalid_request", "Push registration contains unknown fields");
-          const notifications = this.requireNotifications();
-          const input = {
-            deviceId: client.identity,
-            installationId: string(params.installationId, "installationId", { min: 8, max: 160 }),
-            grantId: string(params.grantId, "grantId", { min: 8, max: 160 }),
-            secret: string(params.secret, "secret", { min: 43, max: 171 }),
-            previewsEnabled: params.previewsEnabled === undefined ? false : boolean(params.previewsEnabled, "previewsEnabled"),
-            relayOrigin: string(params.relayOrigin, "relayOrigin", { min: 1, max: 512 }),
-            ...(params.notifyWhenAskPresented === undefined ? {} : { notifyWhenAskPresented: boolean(params.notifyWhenAskPresented, "notifyWhenAskPresented") }),
-          };
           if (!await this.dependencies.devices.hasDevice(client.identity)) {
             throw new GatewayError("unauthenticated", "The authenticated mobile device is no longer paired");
           }
@@ -908,6 +935,11 @@ export class GatewayService {
           : oneOf(params.archived, "archived", ["exclude", "only"] as const);
         const cursor = optionalString(params.cursor, "cursor", 96);
         const limit = params.limit === undefined ? 100 : integer(params.limit, "limit", 1, 500);
+        // Conditional first page (G-7): a client that already holds this exact
+        // projection revalidates it without a row projection. A cursor
+        // traversal is already bound to the projection its first page admitted,
+        // so only an uncursored request may name one.
+        const clientProjectionToken = optionalString(params.projectionToken, "projectionToken", 512);
         this.requireObserverAdmission(client);
         if (cursor !== undefined) {
           const page = await this.sessionListPages.nextPage(client.id, scope, cursor, limit, archived);
@@ -921,6 +953,21 @@ export class GatewayService {
           this.dependencies.sessions.pageSource(scope, archived),
           client.signal,
         );
+        if (clientProjectionToken !== undefined && clientProjectionToken === source.projectionToken) {
+          if (client.isRevoked()) {
+            this.sessionListPages.releaseClient(client.id);
+            throw new GatewayError("unauthenticated", "This device is no longer authorized");
+          }
+          // The token covers structural identity, archive membership, the
+          // visible archived count and every mutable row overlay, so an equal
+          // token means the client's rows are still exactly this projection.
+          return safeJson({
+            sessions: [],
+            listRevision: source.listRevision,
+            projectionToken: source.projectionToken,
+            notModified: true,
+          });
+        }
         const page = await this.sessionListPages.firstPage(client.id, scope, source, limit, archived);
         if (client.isRevoked()) {
           this.sessionListPages.releaseClient(client.id);
