@@ -559,7 +559,7 @@ rows are in priority order.
 | C-1 | Claimed | Projection work never blocks or parks reconnect; parked episodes self-resume | O-4, O-6b | orchestrator-dispatched deepseek-worker, 2026-09-28 |
 | G-1a | Done | Catalog owner and in-memory index fed by Gateway-owned changes | O-3, O-6a | orchestrator-dispatched deepseek-worker, 2026-09-28 |
 | G-1b | Done | Filesystem watcher and background reconciliation for external writers | G-1a | orchestrator-dispatched deepseek-worker, 2026-09-28 (the O-6a confirmation of the Done-when is owed by the orchestrator) |
-| G-1c | Done | Move every catalog reader to the index; delete request-path walks and the full-parse fallback | G-1b | owning suite 232/232, session-archive 41/41, catalog suites 91/91; O-5 counter case asserts zero request-path walks. O-6a p99 is the orchestrator's quiet-host run |
+| G-1c | Done | Move every catalog reader to the index; delete request-path walks and the full-parse fallback | G-1b | review round 5 blockers fixed (unproven cut, startup automations); owning suite 235/235, session-archive 41/41; O-6a p99 is the orchestrator's quiet-host run |
 | G-1d | Ready | Replace the catalog wording in `connection-resilience.md` with the index contract (D-3) | G-1c | |
 | G-3 | Done | No audience, no projection: build and serialize snapshots only for subscribers | O-5, O-6a | orchestrator-dispatched deepseek-worker, 2026-09-28 (branch `hardening/g-3`; review round 1 addressed; CPU comparison and O-5's cross-check owed to the orchestrator) |
 | G-3a | Ready | Streaming progress for a session with no subscriber is still projected (`projectMessage` plus `safeJson` of the full message, up to once per 150 ms each); see G-3 handoff and review nit 8 | G-3 | |
@@ -7595,4 +7595,46 @@ wait).
   `scripts/personal-info-guard.sh` pass.
 - Not owed by this row: the O-6a qualification smoke, `session.list` p99 and the
   G-1d doc wording.
+
+
+### G-1c · Done · 2026-09-28 · review round 5 (branch `hardening/g-1c`)
+
+- B1 (unproven file with no kept row was pruned as deleted): a pass that
+  cannot prove a file and has no row to keep is no longer a complete cut for
+  destructive callers — `hasReconciledCut()` stays false and the pass reports
+  `incomplete` with its unproven count — while the rows it *can* prove are still
+  published (an unreadable neighbour must not blind the reader). The IDs it read
+  are remembered (`unprovenSessionIds`), so `acquire`, `delete` and automation
+  admission refuse retryably instead of answering `not_found`; the owner
+  re-reads the folder once after `CATALOG_INCOMPLETE_RETRY_MS` (2 s, at most
+  three times) so a torn append costs seconds of refusal; `rebuild`'s own
+  unproven list is kept (it used to be dropped, hiding the signal).
+  Regression: "keeps the records of an unprovable session that has no stored
+  row" — archived session, durable document removed, transcript torn; the pass
+  reports incomplete, startup recovery keeps the archive record, maintenance
+  refuses retryably, `list` serves, `acquire`/`delete` refuse retryably, and
+  rolling the append back restores the listed session with its archived state.
+- B2 (startup automations failed on the unready catalog): `automations.initialize()`
+  runs right after `initialize()` returns, so `requirePersistedUserSession` and
+  `automationRecoveryEvidence` now wait for the owner's first pass
+  (`whenPublished()` raced with `whenReconciled()`), the scheduler treats a
+  `catalog_not_ready` recovery as a deferral (no `outcomeUnknown`, no marker
+  clear, a diagnostic instead), and `gateway-main` logs
+  `automation.recovery-deferred` and continues rather than aborting startup.
+  Regression: "admits an existing-session automation while the first cut runs"
+  (`it.each([false, true])`, 200 sessions) and a scheduler case that asserts a
+  deferred recovery commits nothing.
+- Minor 1 fixed (above). Minor 4 fixed earlier (the deleted `maximumRetainedBytes`
+  argument is gone; the Knowledge case is renamed to "after the owner's cut").
+  Minor 2 (closed-hook gap) is not fixed: the `closed` hook is synchronous, so
+  awaiting the row refresh there needs a hook-contract change — noted for the
+  next round rather than patched.
+- Residual of the B1 fix, stated for review: a session whose row cannot be built
+  from a torn transcript is absent from `list` until a pass proves it. Its
+  records, artifact ownership and Knowledge coverage survive, and no caller is
+  told it does not exist.
+- Checks: `npx tsc --noEmit -p .` and `npm run build` clean; owning suite
+  **235/235**; `npx vitest run src/sessions src/transport src/admin src/workspace`
+  **1216 passed / 1 failed / 1217**, the failure being `session-catalog.test.ts`'s
+  known `ENOTEMPTY` cleanup flake under directory load (29/29 alone).
 
