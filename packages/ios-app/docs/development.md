@@ -264,10 +264,13 @@ as a collapsible section. Both rails are the shared `TronCardRail`, so a rail an
 one styling owner. Picker cards use the same interactive tinted Liquid Glass as the New Session
 chips; glass lenses content just past its edge, so a faint echo of the rail title at a card's top
 edge is expected glass behavior rather than a layout overlap. Each `ModelRailCard` is a portrait
-card (168-point minimum height, so Dynamic Type grows it) showing provider, model name, context
+card (138-point minimum height, sized so both rails fit Manage Session's medium detent, which
+`testMediumDetentCapturesBothRails` captures; Dynamic Type still grows it) showing provider, model name, context
 window, input/output price per million tokens from the Gateway's optional `cost`, and the release
 month ("Sep 2026"); an absent fact is omitted, never shown as zero or as a placeholder date
-(`ModelCardFactsTests`). Recent, Latest, and provider headers share one 16-point header size. The whole card, including its empty
+(`ModelCardFactsTests`). Recent, Latest, and provider headers share one 16-point header size. The selected checkmark is an overlay outside
+the card's layout, so selecting a card moves nothing else (`ModelRailCardLayoutTests` compares
+rendered pixels). The whole card, including its empty
 space, is the tap target: the rail gives each plain button label the card's content shape.
 Recent order and membership belong to the Gateway's bounded recent-model history read through
 `model.recent` and refreshed by the `models.recentChanged` event; a ref that has left the

@@ -11,32 +11,34 @@ struct ModelRailCard: View {
 
     static let width: CGFloat = 138
     /// A minimum, so larger Dynamic Type grows the card instead of clipping it.
-    static let minimumHeight: CGFloat = 168
+    /// Sized so both rails fit a medium-detent Manage Session sheet.
+    static let minimumHeight: CGFloat = 138
+    private static let checkmarkSize: CGFloat = 16
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            HStack(alignment: .firstTextBaseline, spacing: 4) {
-                Text(model.displayProviderName)
-                    .font(TronTypography.sans(size: TronTypography.sizeCaption, weight: .semibold))
-                    .foregroundStyle(Color.tronTextSecondary)
-                    .lineLimit(1)
-                Spacer(minLength: 0)
-                if let selectionAccent {
-                    Image(systemName: "checkmark.circle.fill")
-                        .font(TronTypography.sans(size: TronTypography.sizeBody, weight: .semibold))
-                        .foregroundStyle(selectionAccent)
-                }
-            }
+            Text(model.displayProviderName)
+                .font(TronTypography.sans(size: TronTypography.sizeCaption, weight: .semibold))
+                .foregroundStyle(Color.tronTextSecondary)
+                .lineLimit(1)
+                // Room for the overlaid checkmark, reserved in both states.
+                .padding(.trailing, Self.checkmarkSize + 4)
             Text(model.displayName)
                 .font(TronTypography.sans(size: TronTypography.sizeBodyLG, weight: .semibold))
                 .foregroundStyle(Color.tronTextPrimary)
                 .lineLimit(3)
                 .fixedSize(horizontal: false, vertical: true)
-                .padding(.top, 4)
-            Spacer(minLength: 8)
-            VStack(alignment: .leading, spacing: 5) {
+                .padding(.top, 3)
+            Spacer(minLength: 6)
+            VStack(alignment: .leading, spacing: 3) {
                 if let context = ModelCardFacts.contextLabel(model.contextWindow) {
-                    fact(value: context, caption: "Context")
+                    (Text(context)
+                        .font(TronTypography.sans(size: TronTypography.sizeBody3, weight: .semibold))
+                        .foregroundStyle(Color.tronTextPrimary)
+                    + Text(" context")
+                        .font(TronTypography.sans(size: TronTypography.sizeCaption))
+                        .foregroundStyle(Color.tronTextSecondary))
+                        .lineLimit(1)
                 }
                 if let price = ModelCardFacts.priceLabel(model.cost) {
                     fact(value: price, caption: "In / out per 1M")
@@ -50,13 +52,23 @@ struct ModelRailCard: View {
             }
         }
         .padding(.horizontal, 12)
-        .padding(.vertical, 10)
+        .padding(.vertical, 8)
         .frame(width: Self.width, alignment: .topLeading)
         .frame(minHeight: Self.minimumHeight, alignment: .topLeading)
+        // An overlay never participates in layout, so selecting a card cannot
+        // move its name or facts (`ModelRailCardLayoutTests`).
+        .overlay(alignment: .topTrailing) {
+            if let selectionAccent {
+                Image(systemName: "checkmark.circle.fill")
+                    .font(.system(size: Self.checkmarkSize, weight: .semibold))
+                    .foregroundStyle(selectionAccent)
+                    .padding([.top, .trailing], 8)
+            }
+        }
     }
 
     private func fact(value: String, caption: String) -> some View {
-        VStack(alignment: .leading, spacing: 1) {
+        VStack(alignment: .leading, spacing: 0) {
             Text(value)
                 .font(TronTypography.sans(size: TronTypography.sizeBody3, weight: .semibold))
                 .foregroundStyle(Color.tronTextPrimary)

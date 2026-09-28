@@ -169,6 +169,25 @@ final class ModelPickerPresentationTests: XCTestCase {
         }
     }
 
+    /// Manage Session opens the picker at medium. Retained capture for checking
+    /// that both rails fit that detent; mounting alone cannot prove visibility.
+    func testMediumDetentCapturesBothRails() async throws {
+        resetSharedExpansion()
+        defer { resetSharedExpansion() }
+        let probe = ModelPickerHostedProbe()
+        var selection: ModelRef? = ModelRef(provider: "anthropic", id: "claude-opus-4-5")
+        try await withPicker(
+            selection: Binding(get: { selection }, set: { selection = $0 }),
+            probe: probe,
+            scheme: .dark,
+            detents: [.medium]
+        ) { controller in
+            XCTAssertTrue(probe.contains("picker.card.openai/gpt-5"))
+            try await Task.sleep(for: .milliseconds(300))
+            self.capture(controller, name: "model-picker-medium-detent")
+        }
+    }
+
     func testRailCardSelectionWritesTheModelRef() async throws {
         resetSharedExpansion()
         defer { resetSharedExpansion() }
@@ -219,6 +238,7 @@ final class ModelPickerPresentationTests: XCTestCase {
         scheme: ColorScheme = .light,
         models: [ModelSummary] = ModelPickerPresentationTests.catalog,
         recents: [RecentModelRef] = ModelPickerPresentationTests.recents,
+        detents: Set<PresentationDetent> = [.large],
         inspect: (UIViewController) async throws -> Void
     ) async throws {
         let suiteName = "model-picker-presentation.\(UUID().uuidString)"
@@ -242,7 +262,7 @@ final class ModelPickerPresentationTests: XCTestCase {
         .environment(model)
         .environment(\.modelPickerHostedProbe, probe)
         .preferredColorScheme(scheme)
-        try await withSheet(content, inspect: inspect)
+        try await withSheet(content, detents: detents, inspect: inspect)
     }
 
     // MARK: - Reading the mounted sheet
@@ -259,12 +279,13 @@ final class ModelPickerPresentationTests: XCTestCase {
 
     private func withSheet<Sheet: View>(
         _ sheet: Sheet,
+        detents: Set<PresentationDetent>,
         inspect: (UIViewController) async throws -> Void
     ) async throws {
         let scene = try XCTUnwrap(UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }.first)
         let previous = scene.windows.first(where: \.isKeyWindow)
         let appeared = expectation(description: "Sheet appeared")
-        let host = UIHostingController(rootView: ModelPickerSheetFixture(content: sheet.onAppear { appeared.fulfill() }))
+        let host = UIHostingController(rootView: ModelPickerSheetFixture(content: sheet.onAppear { appeared.fulfill() }, detents: detents))
         let window = UIWindow(windowScene: scene)
         window.frame = scene.coordinateSpace.bounds
         window.rootViewController = host
@@ -370,9 +391,12 @@ final class ModelPickerPresentationTests: XCTestCase {
 @MainActor
 private struct ModelPickerSheetFixture<Content: View>: View {
     let content: Content
+    var detents: Set<PresentationDetent> = [.large]
     @State private var presented = true
 
     var body: some View {
-        Color.tronBackground.sheet(isPresented: $presented) { content }
+        Color.tronBackground.sheet(isPresented: $presented) {
+            content.presentationDetents(detents)
+        }
     }
 }
