@@ -577,7 +577,7 @@ rows are in priority order.
 | G-7 | Done | Reconnect diet: send only what changed | O-1, O-6a | orchestrator-dispatched deepseek-worker, 2026-09-28; both review rounds addressed, R-1/R-4 own the real-reconnect measurement |
 | G-11 | Ready | Event-loop budget: find and bound every synchronous task over 50 ms | O-5, O-6a | |
 | G-9 | Ready | One background-work scheduler that yields to requests; measure the libuv pool size | O-5, G-1b | |
-| G-4 | Done | Outbound queue coalescing of superseded snapshots (one covering `session.rebaseline`) and summary revisions by key | G-3 | orchestrator-dispatched deepseek-worker, 2026-09-28 (branch `hardening/g-4`; review round 1 addressed: a superseded sequence is covered by the `session.rebaseline` that replaces it; round 2: only state the snapshot fully re-states and only its own runtime generation, a one-shot frame is a fence); the O-6b bandwidth-stream before/after numbers are owed to the orchestrator's quiet-host runs |
+| G-4 | Done | Outbound queue coalescing of superseded snapshots (one covering `session.rebaseline`) and summary revisions by key | G-3 | orchestrator-dispatched deepseek-worker, 2026-09-28 (branch `hardening/g-4`; review round 1 addressed: a superseded sequence is covered by the `session.rebaseline` that replaces it; round 2: only state the snapshot fully re-states and only its own runtime generation, a one-shot frame is a fence; round 3 after merging `hardening/integration`: the replacement path's client is asserted on the authority it installs, covered `session.snapshot`/`session.rebaseline` alike, and the round's fixtures speak protocol 6); the O-6b bandwidth-stream before/after numbers are owed to the orchestrator's quiet-host runs |
 | G-5 | Done | Byte budget for live runtimes and an explicit heap limit | O-5 | orchestrator-dispatched deepseek-worker, 2026-09-28 |
 | E-3a | Ready | LAN endpoint (D-5), Gateway side: pinned TLS listener bound to the private LAN address | O-1, O-2 | |
 | E-3b | Ready | LAN endpoint: advertise endpoints and pin in pairing and hello | E-3a | |
@@ -6007,6 +6007,47 @@ events; widen them to name the pool owner in the same change.
     `sessionPresentationStoreDidFailOperation` fires, the rebaseline installs the
     same authority, visible transcript and coverage as the exact-next path, and
     the control without the receipt installs the same authority with no failure).
+- Review round 3 (orchestrator merge check, after merging
+  `hardening/integration`) addressed:
+  - Blocker (reproduced, 3/3) — `session-archive.integration.test.ts` ›
+    "settles a forking command in its origin" failed with a `running`
+    `tron.chat-invocation.v1` entry. Mechanism, measured at the enqueue: the
+    forking replacement's first snapshot (seq 3) is already being written when
+    the replacement publishes seq 4 and seq 5, so the queue supersedes the
+    unsent seq 4 and delivers the survivor — snapshot seq 5, the settled state —
+    as the `session.rebaseline` that covers the dropped sequence, exactly the
+    round-1 construction. The case read only `session.snapshot` frames, so it
+    asserted on the *stale* seq 3 and could not see the state the client
+    installs. Fix at the reading owner, not by relaxing it: a new
+    `deliveredAuthorityFrames` helper returns the authoritative state the client
+    received however the queue delivered it (its own `session.snapshot`, or the
+    snapshot nested in the `session.rebaseline` covering the superseded
+    sequence), and both the delivery wait and the "no running invocation"
+    assertion now use it. The assertion is unchanged and still bites: with it
+    reading the *oldest* delivered authority instead of the newest, the case
+    fails on the same `running` entry, and with the coalescing disabled
+    (`G4_DEBUG_NO_COALESCE`) the same case passes over plain snapshots 3/4/5 —
+    no sequence gap is hidden, because the covered form is what makes the
+    dropped sequence admissible to the client at all. Measured at that point in
+    the case: with coalescing the client holds 1 plain snapshot (seq 3, still
+    running) and 2 authority states, the second the rebaseline's settled seq 5;
+    without it, 3 plain snapshots (seq 3/4/5).
+  - Blocker — the round's new fixtures still spoke protocol 5 after `G-7`
+    bumped the lockstep protocol to 6, so their hello was refused and six cases
+    timed out. `server-capacity.integration.test.ts`'s `info()`/hello and
+    `sync-protocol.integration.test.ts`'s `info()`/hello now advertise and send
+    6; both files pass.
+  - Evidence: the round's seven required files green in one run on the merged
+    branch (`npx vitest run` of all seven, default timeouts): 388/388 —
+    `session-archive.integration` 41, `server-capacity.integration` 34,
+    `sync-protocol.integration` 4, `stall-diagnostics` 22,
+    `server-heartbeat.integration` 10, `server-http-lifecycle.integration` 20,
+    `runtime-registry.integration` 257. During the round the last two files
+    timed out on single cases under this host's load (load average 20-57 from
+    parallel workers) at vitest's 5 s default, against the Gateway's own 5 s
+    hello deadline and against 5 s of pinned-runtime work; both are byte-for-byte
+    `hardening/integration` files and pass unmodified once the host is quiet, so
+    that was the host, not G-4. `npm run build` clean.
 - Changes: `perf(gateway): coalesce superseded outbound frames (G-4)` and its
   review-round commits on `hardening/g-4`.
 - "Done when" items: (1) "O-6b's bandwidth-cap case never closes a socket for
