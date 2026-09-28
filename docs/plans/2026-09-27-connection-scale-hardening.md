@@ -55,6 +55,7 @@
 
 - **Last updated:** 2026-09-28, E-2c blocked and review-addressed: the profiler refuses a host-wide `time-profiler` trace whose export is projected over its 2 GiB budget and names the trace's size, so no traced scenario's export is projected above 2 GiB; a device capture is not held to that ratio, the shorter-window half and a passing `--scenario all` run remain
 
+- **Last updated:** 2026-09-28, T-4 done: the killer is XCTest's per-test execution-time allowance (the runner's own restart, not another worktree's run), and the test it lands on was the process's heaviest because the URL redaction in `IOSClientDiagnosticBuffer.redactedMessage` was super-quadratic in a run of scheme characters (the export test 8.646-10.297 s -> 0.072 s, 0 redaction differences over 20,247 inputs)
 - **Last updated:** 2026-09-28, T-2 review round 1 addressed: the kill is another worktree's run on the same default-lane simulator, and T-3 tracks the lease that did not serialize them
 
 - **Last updated:** 2026-09-28, G-4 done: the outbound queue drops a superseded session summary revision and supersedes the session state a newer snapshot re-states with the one `session.rebaseline` that covers it, fencing one-shot frames a snapshot cannot restore (`gateway.resources` gains `outboundCoalescedFrames`/`outboundCoalescedBytes`, `connection.outbound-capacity` names `oldestTopic`/`nextTopic`); a phone-side `SessionPresentationStore` case feeds the coalesced frame sequence and proves it installs without a resynchronization
@@ -597,11 +598,11 @@ rows are in priority order.
 | G-1d | Claimed | Replace the catalog wording in `connection-resilience.md` with the index contract (D-3) | G-1c | orchestrator-dispatched deepseek-worker, 2026-09-28 |
 | G-3 | Done | No audience, no projection: build and serialize snapshots only for subscribers | O-5, O-6a | orchestrator-dispatched deepseek-worker, 2026-09-28 (branch `hardening/g-3`; review round 1 addressed; CPU comparison and O-5's cross-check owed to the orchestrator) |
 | G-3a | Ready | Streaming progress for a session with no subscriber is still projected (`projectMessage` plus `safeJson` of the full message, up to once per 150 ms each); see G-3 handoff and review nit 8 | G-3 | |
-| C-2 | Claimed | "Connected" follows the transport (D-2); chat restoration shows its own loading state | C-1 | orchestrator-dispatched deepseek-worker, 2026-09-28 |
+| C-2 | Done | "Connected" follows the transport (D-2); chat restoration shows its own loading state | C-1 | orchestrator-dispatched deepseek-worker, 2026-09-28 |
 | C-5 | Done | Back off an unreachable non-selected Gateway profile; record pool attempts and episodes | O-4 | orchestrator-dispatched deepseek-worker, 2026-09-28 |
 | G-10 | Done | Durable-write audit: no process-wide serialization of fsyncs, no fsync on reads | O-5 | orchestrator-dispatched deepseek-worker, 2026-09-28 |
 | G-10a | Done | Connection owner: a read (e.g. knowledge.raindrop.read) must not fsync — skip an unchanged provider observation in ConnectionOwner.recordProviderObservation, preserving stateRevision/updatedAt semantics | G-10 | orchestrator-dispatched deepseek-worker, 2026-09-28 |
-| C-3 | Ready | Faster retry (D-4): about 5 s transport-open deadline, immediate retry on path change | C-1 | |
+| C-3 | Claimed | Faster retry (D-4): about 5 s transport-open deadline, immediate retry on path change | C-1 | orchestrator-dispatched deepseek-worker, 2026-09-28 |
 | C-4 | Done | Truer liveness (D-4): any inbound frame proves liveness | O-4 | orchestrator-dispatched deepseek-worker, 2026-09-28 |
 | C-6 | Done | Cancel frame for disposable reads; a retried `session.open` joins the in-flight one | O-3 | orchestrator-dispatched deepseek-worker, 2026-09-28 (the O-6a slow-open confirmation and the qualification run are the orchestrator's) |
 | G-12 | Ready | Server-side deadlines, concurrency caps and heap-pressure shedding with typed retry hints | O-3, O-5 | |
@@ -625,7 +626,7 @@ rows are in priority order.
 | T-1 | Claimed | Pre-existing test race: registry extension-artifact discovery tests treat an awaited `discoverExtensionArtifacts()` as a barrier; wait for a pass that settles (three tests, one a false green) | G-1a (Registry zone) | orchestrator-dispatched deepseek-worker, 2026-09-28 |
 | T-2 | Done | `GatewayConnectionEpisodeRecorderTests/blockedMainActorIsMeasuredAndReported` (O-4) was killed once ("Test crashed with signal kill") when run with four other suites on integration, then passed 3/3; find whether the 5 s main-thread block trips a hosted-test watchdog and bound the block so the test cannot be killed while still proving the stall record | O-4 | orchestrator-dispatched deepseek-worker, 2026-09-28; no hosted-test watchdog exists (a 5 + 10 + 20 s block probe passed); the kill came from another worktree's run on the same default-lane simulator (`E816D194…`), not from the block — see the T-2 handoff and T-3; the block is now the named `mainStallTestBlock` (5 s) in both phases |
 | T-3 | Done | Default-lane iOS runs must serialize on `~/.tron/internal/ios-test/lease.lock`, but runs from three worktrees held the one owned simulator (`E816D194…`) at the same time and killed each other's host app (see the T-2 handoff); the lease was bypassed because `--lane NAME` was consumed by the lease holder and not passed to the command it started, so the command leased the named/other lane while provisioning the default lane's simulator (`ios-test-G7*` lanes: lease file, no marker); the lane now travels with the command and a command that inherits a lease for another lane is refused | none | orchestrator-dispatched deepseek-worker, 2026-09-28 |
-| T-4 | Claimed | `GatewayLogExportTests/byteEnvelopeReservesTheChatTrace` is SIGKILLed when it shares a test process with `GatewayConnectionEpisodeRecorderTests` (main-stall test blocks the main thread twice for 4 s); each passes alone (bundles `20260928T203739Z-run.InevV5`, `20260928T201219Z-run.jNGHmH`). Find the killer and make both robust in one process | T-2 | orchestrator-dispatched deepseek-worker, 2026-09-28 |
+| T-4 | Done | `GatewayLogExportTests/byteEnvelopeReservesTheChatTrace` is SIGKILLed when it shares a test process with `GatewayConnectionEpisodeRecorderTests` (main-stall test blocks the main thread twice for 4 s); each passes alone (bundles `20260928T203739Z-run.InevV5`, `20260928T201219Z-run.jNGHmH`). Find the killer and make both robust in one process | T-2 | orchestrator-dispatched deepseek-worker, 2026-09-28; the killer is XCTest's per-test execution-time allowance (XCTestCore reports `Restarting after unexpected exit, crash, or test timeout`) SIGKILLing the app (`Test crashed with signal kill`), and the test it lands on is the process's CPU-heaviest because `IOSClientDiagnosticBuffer.redactedMessage` matched URLs super-quadratically (3 ms at 512 characters, 654 ms at 4,096; the export test 8.646-10.297 s -> 0.072 s); see the T-4 handoff |
 | C-7 | Done | Dashboard-pool event consumption stops after a failed initial connect (see the C-5 handoff): a successful reconnect brings the socket back but nothing consumes `client.events`, so a background profile stops receiving summaries, `system.stopping` and `transport.disconnected` until its entry is recreated | C-2 | orchestrator-dispatched deepseek-worker, 2026-09-28 (branch `hardening/c-7`; the connection epoch now owns its event reader) |
 
 ### Phase 2 — Release and one evaluation day
@@ -8962,3 +8963,196 @@ wait).
   in the same window, so both columns see the same conditions. The worktree
   for the `main` runs is `main` plus the O-6a/O-6b profiler scripts (protocol
   5 driver). The provisional column stays until then.
+
+### T-4 · Done · 2026-09-28 · orchestrator-dispatched deepseek-worker (branch `hardening/t-4`)
+
+- Result: the killer is the test runner itself, not another worktree's run.
+  - No overlap: `20260928T203739Z-run.InevV5` (recorder + log export, crashed)
+    and `20260928T203326Z-run.VIQPj2` (five suites, crashed) had no other run
+    open on the simulator in either direction — checked against every
+    `summary.json` start/finish in `~/Library/Developer/Tron/ios/test-runs`
+    (2,380 runs). T-2's contention finding applies to
+    `20260928T160853Z-run.0UFrCv`, not to this pair.
+  - The simulator log for the crash window shows the host ending the test host
+    0.02 s after xcodebuild began a new test session:
+    `SpringBoard: Request received from CoreSimulatorBr.96766 to terminate
+    application com.tron.mobile.testhost: "Termination requested by simulator
+    host"` → `Executing termination request … Force Quit (0xFBFBFBFB)` → the app
+    is SIGKILLed, and XCTestCore reports `Test crashed with signal kill.` plus
+    `Restarting after unexpected exit, crash, or test timeout`.
+  - XCTestCore owns that restart string and the per-test allowance that causes
+    it (`Test Case '%@' exceeded execution time allowance of %@`,
+    `XCTestConfiguration.activeTestConfiguration.testTimeoutsEnabled`,
+    `com.apple.dt.xctest.timeoutQueue`). The kill lands ~30 s into whichever test
+    is running; here that is always `byteEnvelopeReservesTheChatTrace`, the
+    process's CPU-heaviest test, at 29.4/29.5/30.6 s of test time in the three
+    runs measured against their xcresult durations.
+  - That test spent 8.6-10.3 s in `GatewayLogExport.jsonLines`, and all of it in
+    one pattern: `IOSClientDiagnosticBuffer.redactedMessage`'s
+    `[A-Za-z][A-Za-z0-9+.-]*://[^\s"'<>]+` retries the greedy scheme run from
+    every start position, so one unbroken run of scheme characters costs
+    super-quadratic time before it can fail on a missing `://` — measured on the
+    host 3.257 ms at 512 characters, 18.4 at 1,024, 63.4 at 2,048, 653.7 at
+    4,096, once per field per row. Diagnostics carry exactly such runs (a base64
+    token, a hash, a parameter value), so this is a production cost, not a test
+    artifact: `AppModel.exportDiagnostics` redacts up to 1,000 rows on the main
+    actor.
+- Changes: `packages/ios-app/Sources/Support/IOSClientDiagnostics.swift` only.
+  `redactURLs` walks the scheme runs and offers the pattern only the windows a
+  match can start in (first letter of a run followed by `://` and a non-empty
+  body); the pattern still decides the match, so the three other patterns, the
+  redaction semantics and the byte bounds are unchanged.
+- Failure modes this isolated change covers (written before the code):
+  1. cost grows with the square of a long unbroken token/hash/base64 message;
+  2. a window anchored at the wrong start or end drops, shortens or duplicates a
+     redaction;
+  3. a whitespace or delimiter class divergence from the pattern changes what is
+     redacted;
+  4. a second URL later in one token is skipped by the match cursor.
+- Evidence:
+  - Equivalence: a standalone port of both forms over 20,247 inputs (44
+    hand-written shapes plus 20,200 random strings from an alphabet of scheme
+    characters, `://`, delimiters, quotes, angle brackets, `\v`, a combining
+    mark and non-ASCII) → 0 differences. Cost, same host under load and quiet:
+    1 KiB letter run 73.709 → 0.212 ms and 8.977 → 0.024 ms, 800-byte trace row
+    1.390 → 0.220 ms and 0.164 → 0.030 ms, 4 KiB letter run 1183.902 → 0.665 ms
+    and 130.893 → 0.088 ms.
+  - iOS: `GatewayLogExportTests` + `GatewayConnectionEpisodeRecorderTests` +
+    `GatewayDiagnosticsServiceTests` + `ChatInteractionTraceTests` 49/49 twice
+    (`20260928T212300Z-run.CNDzIZ`, `20260928T212334Z-run.6281OA`), 11.074 s and
+    10.997 s total, with `byteEnvelopeReservesTheChatTrace` at 0.072 s and
+    0.073 s (it was 8.646-10.297 s in every retained bundle). The same four
+    suites pass twice on the merged branch at this commit on lane CT22
+    (`20260928T213843Z-run.aIjlev`, `20260928T213916Z-run.CdUiY8`: 49/49, 10.961 s
+    and 11.102 s, byte-envelope 0.080 s and 0.074 s); the default lane was held
+    by another worktree's run, so the paired-on-default-lane re-run is the only
+    one not repeated after the merge.
+  - Flake context: the same pair passed on the shared default lane before the
+    fix (`20260928T211803Z-run.AA7EP2`, 21/21, byte-envelope 8.646 s), and on
+    lane CT22 (21/21 and 83/83). All six c-1 "signal kill" failures fall between
+    20:10 and 20:37 UTC, the hour when several worktrees were building and
+    running at once: three were this pair alone and three a five-suite set that
+    contains it. That is the contention that stretched a 9 s CPU-bound test past
+    the allowance; the fix removes the CPU-bound half of the exposure (the
+    remaining multi-second test is wall-clock `Thread.sleep`).
+  - Gateway gate after merging `hardening/integration`: the six transport
+    integration files 132/132, `runtime-registry.integration.test.ts` 258/258 on
+    a re-run (the first attempt read 257/258 from one unrelated flake),
+    `npx tsc --noEmit -p .` clean.
+- What is left (the next agent, not this one):
+  1. The recorder suite's `blockedMainActorIsMeasuredAndReported` is now the
+     process's only multi-second test (10 s of `Thread.sleep` wall clock, T-2's
+     `mainStallTestBlock` twice). Unlike the fixed export it does not grow with
+     host load, so no allowance change is owed.
+  2. Any other diagnostics-shaped surface that redacts long field values should
+     use `redactURLs` rather than the bare pattern; `IOSClientDiagnosticBuffer`
+     is the only caller today.
+
+### C-2 · Done · 2026-09-28 · orchestrator-dispatched deepseek-worker (branch `hardening/c-2`)
+
+- Result: a live socket is never labelled **Reconnecting** and a mounted
+  restoration reports itself through the chat's own catch-up treatment instead.
+- Changes: `packages/ios-app/Sources/State/GatewayLifecycleCoordinator.swift`
+  (one assertion-bearing test only; C-1 had already removed the post-handshake
+  `.reconnecting` assignments, and the C-2 label invariant is now protected by
+  tests), `packages/ios-app/Sources/State/SessionPresentationStore.swift` (the
+  restoring chat's identity, its grace and the catch-up treatment scoped to and
+  retired against it),
+  `packages/ios-app/Tests/Gateway/AppModelReconnectTests.swift`,
+  `packages/ios-app/Tests/UI/MountedRestorationLabelHostedTests.swift` (new),
+  `packages/ios-app/docs/architecture.md`.
+- Result detail: `SessionPresentationStore` now owns restoration as its own
+  loading state. `reconnectMountedPresentation()` captures the mounted chat it
+  is restoring, and a restoration that outlasts
+  `mountedRestorationTreatmentGrace` (2 s, the same
+  shape as the outage copy's delay) shows the chat's existing catch-up notice
+  (`sessionCatchUpNotice`, "Live session view is catching up; the run continues
+  on your Mac.") **in that chat's own scope**, and only while that chat is still
+  the mounted one with no open pending. A restoration that completes inside the
+  grace shows nothing.
+  Success and failure keep the outcomes the synchronization owner already
+  publishes (success removes the notice, failure replaces it with "The
+  conversation could not catch up…", and Manage Session keeps the Retry
+  Conversation surface for a failed mounted sync while connected); a restoration
+  that ends without such an outcome retires its own treatment, whether it was
+  cancelled, superseded by another chat or connection generation, or interrupted
+  by the transport's loss. A newer restoration supersedes an older one's cleanup by
+  owner generation, so a late finish cannot clear the state the chat is showing.
+- Failure modes written first (C-2's list, mapped): a slow `session.open` after
+  a replacement handshake (the label and the treatment in
+  `slowRestorationKeepsConnectedLabel` and the hosted test); the socket dying
+  during a restoration (`slowRestorationDoesNotParkRecovery` now also asserts the
+  live-socket `.connected` before the drop and `.reconnecting` at once after it);
+  restoration failing while the socket lives (existing
+  `mountedRestoreFailureKeepsTransport`, `AppModelEventTests.resyncFailureHasScopedRecovery`
+  for the retry surface); leaving the chat and opening another chat while the
+  notice timer is pending (`leavingChatInsideRestorationGraceDropsTheTreatment`,
+  `openingAnotherChatInsideRestorationGraceDropsTheTreatment`, added in review
+  round 1); profile switch and background during restoration
+  (existing `AppModelLifecycleTests` / `enteredBackground` cancellation of the
+  deferred projection).
+- Evidence: `scripts/tron-ios-test build` succeeds;
+  `scripts/tron-ios-test run --only-testing TronMobileTests/AppModelReconnectTests`
+  passes 46/46 (the file's 45 plus the new case);
+  `SessionPresentationStore.swift` and the tests are byte-for-byte the sources
+  that produced both runs, with the negative-control edit reverted;
+  `scripts/tron-ios-test run --only-testing TronMobileTests/MountedRestorationLabelHostedTests`
+  passes 1/1 in 0.081 s with its `mounted-restoration-connected-label` capture in
+  the run's `TestResults.xcresult`.
+- Checks: the hosted case mounts the production `GatewayConnectionStatusBadge`
+  over the production `AppModel` while the replacement's `session.open` is
+  unanswered, asserts the socket is live (`client.activeConnectionID()`), and
+  asserts the badge's own input (the production
+  `dashboardServerState(for:)`) reads **Connected** at every step — before, during
+  and after the restoration — plus the catch-up notice while it runs and its
+  absence once the answered restoration completes. SwiftUI paints `Text` without
+  `UILabel` in this version, so the rendered label is the capture, not an
+  assertion; the assertion is on the exact state the badge draws.
+- Deviations: `slowRestorationKeepsConnectedLabel` drives the real AppModel
+  through `enteredBackground()` → `becameActive()` → replacement hello with the
+  `session.open` held, and advances the injected `ManualClock` past the grace
+  rather than waiting 2 s of wall clock. No new UI: the treatment is the chat's
+  existing `sessionCatchUp` notice, and the state is published by its owning
+  store. C-1's `GatewayLifecycleCoordinator` test needed one assertion added; no
+  coordinator source change was left to make, because C-1's merge already ends
+  the replacement attempt at event activation.
+- Negative control (the catch-up treatment post removed, everything else
+  unchanged): the hosted case fails 1/1 in 3.4 s and the AppModel case fails on
+  the missing notice in 2.5 s while its label assertions still pass, which is
+  what C-1 already fixed; the edit was then reverted, rebuilt and re-run green.
+  Neighbour suites in one run (retained at
+  `~/Library/Developer/Tron/ios/test-runs/20260928T210956Z-run.9NShry`):
+  `SessionPresentationStoreTests`, `AppModelEventTests`, `AppModelCatalogSyncTests`,
+  `AppModelLifecycleTests`, `AppModelReconnectTests`,
+  `MountedRestorationLabelHostedTests` — 182 tests, 182 passed, 0 failed. One
+  earlier attempt was refused because another worktree held the shared default
+  lane (T-3); nothing was taken by force.
+- For the next agent: C-3 follows in the same zone (backoff and the split
+  transport-open deadline); do not merge `hardening/integration` into this
+  branch without re-running the two suites above, since the plan file is the
+  only expected conflict.
+
+#### C-2 review round 1 (changes-required) — 2026-09-28
+
+- Fixed: the grace timer posted the catch-up notice through `noticeScope`
+  (`pendingTarget ?? target`), so leaving the chat posted it app-wide and
+  opening another chat posted it into that chat, and nothing removed it when the
+  restoration ended without a latched failure; the published
+  `isRestoringMountedPresentation` had no reader. The timer now requires the
+  restoring chat to still be mounted with no open pending, posts with
+  `noticeScope(for: target)`, and `finishMountedRestoration(owner:restored:)`
+  removes the treatment in that captured scope unless the store latched a
+  failure for the same target. `isRestoringMountedPresentation` is deleted;
+  `packages/ios-app/docs/architecture.md` no longer names it.
+- Evidence: `scripts/tron-ios-test build --lane C2R` succeeds; one run of
+  `AppModelReconnectTests`, `MountedRestorationLabelHostedTests`,
+  `SessionPresentationStoreTests`, `AppModelEventTests`,
+  `AppModelCatalogSyncTests` and `AppModelLifecycleTests` passes 183 Swift
+  Testing tests in 5 suites plus the 1 XCTest, retained at
+  `~/Library/Developer/Tron/ios/test-runs/20260928T215653Z-run.2qXI8r`.
+  Negative control (the two guards reverted to the reviewed revision): both new
+  cases fail on the leaked `.sessionCatchUp` notice; the edit was reverted,
+  rebuilt and re-run green.
+- Deviations: the plan's "profile switch during restoration" case is still
+  covered only by the route-change cases above; no profile-switch test holds the
+  notice timer pending.
