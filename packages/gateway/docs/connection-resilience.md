@@ -134,16 +134,23 @@ owner of accepted commands; mobile reconnect never replays a prompt blindly.
   It counts its own failed attempts and a successful attempt is what clears
   them, so a secondary Mac that drops after connecting, a handshake the Gateway
   never answers and a 503 all keep backing off. Background and
-  unsatisfied network paths pause attempts. One pending delay is accelerated by
+  unsatisfied network paths pause attempts. One pending delay is cancelled by
   a foreground cycle, an explicit Retry, and a real path return — an unsatisfied
-  path becoming satisfied. A scene activation, or any other monitor update on a
+  path becoming satisfied — and a path return additionally restarts the backoff
+  curve, so the route that just came back is attempted at once instead of after
+  the wait the route that went away had grown (C-3). A scene activation, or any
+  other monitor update on a
   path that did not change, leaves the wait alone, so a repeated "network
   available" notice cannot cut the five-minute cap short. A path that goes away
   during a pool attempt ends that retry when its wait runs out instead of
   holding the entry, and the return then starts the next attempt at once. Only
   authentication, authorization, protocol, and identity
-  failures stop automatic recovery. Each handshake has the shared 15-second
-  deadline. Last-good projections and mutation receipts remain intact. After two
+  failures stop automatic recovery. The WebSocket open and the hello after it
+  have separate bounds: a socket that never opens gives up at the 5-second
+  `clientTransportOpenDeadline`, and only a socket that opened may spend the
+  15-second `clientHelloDeadline` on hello and authentication, so a down path is
+  named in 5 s while a slow Mac still gets its full hello budget. Last-good
+  projections and mutation receipts remain intact. After two
   consecutive failed handshakes whose `transport-open` record says
   `transportOpened=false`, the dashboard labels the server **No path to this Mac**
   and names the current interface when known. A handshake that opened a transport,

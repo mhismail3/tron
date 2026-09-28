@@ -61,7 +61,8 @@ const CONNECTION_CONTRACT = JSON.parse(readFileSync(join(dirname(fileURLToPath(i
 const CONNECTION = {
   pingIntervalMs: CONNECTION_CONTRACT.clientPingInterval.milliseconds,
   pongDeadlineMs: CONNECTION_CONTRACT.clientPongDeadline.milliseconds,
-  handshakeDeadlineMs: CONNECTION_CONTRACT.clientHandshakeDeadline.milliseconds,
+  transportOpenDeadlineMs: CONNECTION_CONTRACT.clientTransportOpenDeadline.milliseconds,
+  helloDeadlineMs: CONNECTION_CONTRACT.clientHelloDeadline.milliseconds,
   // `config.connection` is the same three values the profiler read from the
   // contract; the profiler's stub tests override them to drive a leg in
   // seconds. It is never a second source of the contract's numbers.
@@ -473,17 +474,18 @@ class RecordingClient {
     this.closing = false;
     this.awaitingPong = null;
     this.pingsOutstanding.length = 0;
-    // One deadline for the whole handshake (contract `clientHandshakeDeadline`):
-    // the phone bounds open plus hello together, not each on its own.
-    const handshakeDeadlineAt = now() + CONNECTION.handshakeDeadlineMs;
-    const remainingHandshakeMs = () => Math.max(0, handshakeDeadlineAt - now());
+    // Two bounds, not one shared deadline (contract `clientTransportOpenDeadline`
+    // then `clientHelloDeadline`): a socket that never opens gives up first, and
+    // only a socket that opened spends the hello budget (C-3).
+    const transportOpenDeadlineAt = now() + CONNECTION.transportOpenDeadlineMs;
+    const remainingTransportOpenMs = () => Math.max(0, transportOpenDeadlineAt - now());
     const socket = new WebSocket(`ws://127.0.0.1:${this.relay ? this.relay.port : config.port}/v1/socket`, {
       headers: { Authorization: `Bearer ${this.token}` },
       // URLSessionWebSocketTask's offer is exactly `permessage-deflate`; this
       // option set makes ws send the same parameterless offer.
       perMessageDeflate: { clientMaxWindowBits: false },
       autoPong: false,
-      handshakeTimeout: CONNECTION.handshakeDeadlineMs,
+      handshakeTimeout: CONNECTION.transportOpenDeadlineMs,
       maxPayload: 64 * 1024 * 1024,
     });
     this.socket = socket;
@@ -534,14 +536,16 @@ class RecordingClient {
       socket.once("open", resolveOpen);
       socket.once("error", rejectOpen);
       socket.once("unexpected-response", (_, response) => rejectOpen(new Error(`upgrade rejected with HTTP ${response.statusCode}`)));
-    }), remainingHandshakeMs(), `${this.name} WebSocket open`);
+    }), remainingTransportOpenMs(), `${this.name} WebSocket open`);
     if (this.offeredExtensions !== "permessage-deflate") {
       fail(`${this.name} offered ${JSON.stringify(this.offeredExtensions)}, not the phone's parameterless permessage-deflate`);
     }
     if (!this.tcp) fail(`${this.name}: the upgrade exposed no TCP socket to count wire bytes`);
+    const helloDeadlineAt = now() + CONNECTION.helloDeadlineMs;
+    const remainingHelloMs = () => Math.max(0, helloDeadlineAt - now());
     const hello = new Promise((resolveHello, rejectHello) => { this.helloWaiter = resolveHello; this.helloReject = rejectHello; });
     this.send({ type: "hello", protocolVersion: PROTOCOL_VERSION, clientId: this.clientId, clientRole: "mobile" });
-    this.info = await withDeadline(hello, remainingHandshakeMs(), `${this.name} hello`);
+    this.info = await withDeadline(hello, remainingHelloMs(), `${this.name} hello`);
     if (this.info.protocolVersion !== PROTOCOL_VERSION) fail(`${this.name}: Gateway protocol ${this.info.protocolVersion} is not ${PROTOCOL_VERSION}`);
     this.pingTimer = setInterval(() => this.clientPing(), CONNECTION.pingIntervalMs);
   }
@@ -1180,11 +1184,27 @@ function waitForClosure(client, timeoutMs) {
   }), timeoutMs, `${client.name} socket close`);
 }
 
+/** The phone's wait after a failed attempt. `pathReturn` (the blackhole leg's
+ * path-return signal) models C-3: a path change cancels the phone's pending
+ * backoff wait and starts an attempt at once, so a wait that spans the path's
+ * return ends there instead of running out first. A wait that ends before the
+ * return is unchanged, and once the path has returned the next wait is the fresh
+ * (base-interval) one. */
+async function phoneBackoffWait(ms, pathReturn) {
+  if (!pathReturn) { await sleep(ms); return; }
+  const wait = cancellableSleep(ms);
+  try {
+    await Promise.race([wait.done, pathReturn]);
+  } finally {
+    wait.cancel();
+  }
+}
+
 /** Connect, then run this client's ready sequence, until it succeeds. Each
  * failed attempt is recorded with the error that ended it, and the next one
  * waits the phone's own backoff, so the report shows what the outage cost
  * rather than only how long recovery took. */
-async function connectUntilReady(client, ready, deadlineMs, annotate = () => ({})) {
+async function connectUntilReady(client, ready, deadlineMs, annotate = () => ({}), backoff = null) {
   const attempts = [];
   for (let failures = 1; ; failures += 1) {
     const startedAt = now();
@@ -1201,7 +1221,7 @@ async function connectUntilReady(client, ready, deadlineMs, annotate = () => ({}
       attempts.push({ ms: now() - startedAt, failed: messageOf(error), ...annotations });
       await client.abandon();
       if (now() > deadlineMs) fail(`${client.name} did not recover within ${Math.round(deadlineMs - startedAt)} ms: ${messageOf(error)}`);
-      await sleep(phoneRetryDelayMs(failures));
+      await phoneBackoffWait(phoneRetryDelayMs(failures), backoff);
     }
   }
 }
@@ -1234,12 +1254,16 @@ async function blackholeLeg(config, { mobile, chat, retry }) {
   const outageEnd = outageStart + config.blackholeSeconds * 1000;
   // The path returns on its own clock, not when the attempt loop next looks:
   // an attempt still in flight when it returns waits out its own deadline, and
-  // that wait is part of the recovery this leg measures.
+  // that wait is part of the recovery this leg measures. The return also
+  // cancels the pending backoff wait, as a real path change does (C-3).
   let returnedAt = null;
+  let signalPathReturn;
+  const pathReturned = new Promise((resolvePathReturn) => { signalPathReturn = resolvePathReturn; });
   const returnTimer = setTimeout(() => {
     relay.blackhole(false);
     returnedAt = now();
     leg.pathReturnedAtMs = Date.now();
+    signalPathReturn();
   }, config.blackholeSeconds * 1000);
   returnTimer.unref?.();
   try {
@@ -1259,7 +1283,8 @@ async function blackholeLeg(config, { mobile, chat, retry }) {
     leg.attempts = await connectUntilReady(mobile,
       () => retry("mount", () => chat.remount(config.measuredDeadlineMs)),
       outageEnd + config.measuredDeadlineMs,
-      () => ({ duringOutage: returnedAt === null }));
+      () => ({ duringOutage: returnedAt === null }),
+      (ms) => phoneBackoffWait(ms, returnedAt === null ? pathReturned : null));
   } finally {
     clearTimeout(returnTimer);
   }

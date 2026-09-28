@@ -610,10 +610,18 @@ final class GatewayLifecycleCoordinator {
         case .unpaired, .unauthorized, .connecting, .connected: return
         }
         if reconnectTask != nil, reconnectCanBeAccelerated {
-            reconnectSchedule.accelerate()
+            // The satisfied notice is this owner's only path signal: cancel the
+            // pending wait so the loop attempts at once, and restart the curve
+            // so the route that just came back is not delayed by the wait the
+            // route that went away had grown (C-3). Failures that see no path
+            // notice keep the capped, jittered curve unchanged.
+            reconnectSchedule.restartForPathChange()
             return
         }
         guard reconnectTask == nil else { return }
+        // Nothing is waiting, so the restart only has to drop the curve the
+        // closed route had grown before the attempt that follows.
+        reconnectSchedule.reset()
         requestReconnect(immediate: true, replaceExisting: false)
     }
 

@@ -97,6 +97,19 @@ final class GatewayReconnectSchedule {
         resume(true)
     }
 
+    /// A path change re-routes the next attempt (C-3): cancel the pending wait
+    /// so the loop attempts at once, and restart the curve so the new path's
+    /// first retry is the base interval rather than the interval the old path's
+    /// failures had grown to. Repeated failures on an unchanged path keep the
+    /// capped, jittered curve `accelerate()` leaves alone.
+    func restartForPathChange() {
+        if continuation != nil {
+            pending?.cancel()
+            resume(true)
+        }
+        nominalDelay = delayPolicy.initialSeconds
+    }
+
     /// Replaces the curve this schedule follows from its next wait on, keeping
     /// the nominal delay already reached. An owner whose curve depends on how
     /// far a run of failures has gone (the dashboard pool escalates after a

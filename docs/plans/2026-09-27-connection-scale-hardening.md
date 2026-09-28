@@ -9156,3 +9156,51 @@ wait).
 - Deviations: the plan's "profile switch during restoration" case is still
   covered only by the route-change cases above; no profile-switch test holds the
   notice timer pending.
+
+### C-3 · Claimed · 2026-09-28 · orchestrator-dispatched deepseek-worker (branch `hardening/c-3`)
+
+- Failure modes written before the change (plan, C-3; each isolated test below
+  targets one of them):
+  1. a working path opening in 4–6 s: the transport-open bound must give up at
+     5 s without spending the hello budget, and a hello that answers after the
+     socket opened must still get its own 15 s;
+  2. a path flapping every second: each return cancels the pending wait and
+     attempts at once, and never puts two sockets on the wire;
+  3. an attempt in flight when the path changes: the change starts no second
+     attempt, and the in-flight attempt keeps its own deadline;
+  4. a path change after a long run of failures: the curve restarts at the base
+     interval, while repeated failures on an unchanged path keep the cap and
+     jitter.
+- Result: the transport open and the hello after it have separate bounds, and a
+  path return cancels a pending backoff wait and restarts the curve.
+  `clientTransportOpenDeadline` (5 s) replaces the first half of the shared
+  15-second `clientHandshakeDeadline`, which is now `clientHelloDeadline` and
+  bounds only the hello exchange on a socket that opened. The phone's retry
+  owner cancels a pending wait on a satisfied path notice and restarts the
+  backoff curve from its base interval, so the route that just returned is
+  attempted at once instead of after the wait the route that went away had
+  grown; repeated failures that see no path notice keep the capped, jittered
+  curve. The O-6b driver reads both bounds from the contract for its phone model
+  and cancels the modelled wait at the blackhole's path return.
+- Evidence: `scripts/tron-ios-test build --lane C3` succeeds;
+  `scripts/tron-ios-test run --lane C3` for `AppModelReconnectTests` (50/50,
+  including `pathReturnCancelsPendingBackoff` and
+  `pathNoticeDuringReconnectAttemptStartsNoSecondSocket`), `GatewayClientTransportTests`
+  (57/57, including the transport-open/hello boundary pair),
+  `GatewayProtocolContractTests` + `GatewayReconnectScheduleTests` (78/78 in the
+  combined run) and `GatewayDiagnosticsServiceTests`,
+  `GatewayConnectionEpisodeRecorderTests`, `AppModelLifecycleTests`,
+  `SessionPresentationStoreTests` (101/101) all pass; retained at
+  `~/Library/Developer/Tron/ios/test-runs/20260928T222729Z-run.0PtCq3` and its
+  neighbours.
+- Deviations: `handshakeDeadline`/`clientHandshakeDeadline` are renamed to the
+  hello bound because the split leaves them owning only the hello, and the name
+  is what the contract's reason text now says. `GatewayConnectionPolicy`,
+  `GatewayClient`, `GatewayLifecycleCoordinator`, `ReconnectDelayPolicy`
+  (`GatewayReconnectSchedule.restartForPathChange`), the fixture, the O-6b
+  driver, `scripts/tron-profile-gateway`, `scripts/test-tron-profile.py` and the
+  three docs change with it.
+- For the next agent: O-6b's blackhole p95 (target ≤ 5 s from the path's
+  return) is the orchestrator's quiet-host run; the driver's model bounds it at
+  one transport-open deadline plus one connect once the path returns, and the
+  relay still refuses to forward the attempt that was in flight.

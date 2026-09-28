@@ -19,9 +19,13 @@
     "milliseconds": 8000,
     "reason": "Allows a round trip after each client ping while detecting an unresponsive transport promptly."
   },
-  "clientHandshakeDeadline": {
+  "clientTransportOpenDeadline": {
+    "milliseconds": 5000,
+    "reason": "A path that cannot open the WebSocket in this time is down, not slow: the hello budget is never spent waiting for a connect."
+  },
+  "clientHelloDeadline": {
     "milliseconds": 15000,
-    "reason": "Gives the complete connection handshake one shared bound, including hello and authentication."
+    "reason": "Bounds the hello exchange and authentication after the socket opened, without treating a slow Mac as a dead path."
   },
   "perIdentitySocketCap": {
     "count": 4,

@@ -868,14 +868,17 @@ class MultiDriverImpairment(StubGatewayHarness, unittest.TestCase):
 
     # A connection fast enough for a pong miss to be counted inside a short
     # leg; the phone's own contract values are exercised by the default runs.
-    FAST_CONNECTION = {"pingIntervalMs": 300, "pongDeadlineMs": 200, "handshakeDeadlineMs": 8_000}
+    FAST_CONNECTION = {"pingIntervalMs": 300, "pongDeadlineMs": 200,
+                      "transportOpenDeadlineMs": 8_000, "helloDeadlineMs": 8_000}
 
     def test_the_blackhole_counts_its_attempts_and_recovers_to_a_ready_chat(self) -> None:
-        # The path returns 5 s into an 8 s attempt: the recovery must include
-        # the rest of that attempt, not only the connect that follows it.
+        # The path returns 5 s into an 8 s transport-open attempt: the recovery
+        # must include the rest of that attempt, not only the connect that
+        # follows it. The path's return cancels a pending backoff *wait* (C-3),
+        # never an attempt already on the wire, so this attempt still times out.
         status, output, result = self.run_impairment(["blackhole"], {
             "blackholeSeconds": 5, "blackholeSettleMs": 400,
-            "connection": dict(self.FAST_CONNECTION, handshakeDeadlineMs=8_000),
+            "connection": dict(self.FAST_CONNECTION),
             "measuredDeadlineMs": 30_000,
         })
         self.assertEqual(status, 0, output)
@@ -904,7 +907,8 @@ class MultiDriverImpairment(StubGatewayHarness, unittest.TestCase):
             "running": [{"sessionId": "stub-run-1"}, {"sessionId": "stub-run-2"}, {"sessionId": "stub-run-3"}],
             # Frequent pings with room for a pong despite the cap, so the leg's
             # round-trip metric has samples and the deadline is not the test.
-            "connection": {"pingIntervalMs": 300, "pongDeadlineMs": 2_000, "handshakeDeadlineMs": 8_000},
+            "connection": {"pingIntervalMs": 300, "pongDeadlineMs": 2_000,
+                                     "transportOpenDeadlineMs": 8_000, "helloDeadlineMs": 8_000},
         })
         self.assertEqual(status, 0, output)
         leg = result["impairment"]["bandwidth"]
@@ -929,7 +933,7 @@ class MultiDriverImpairment(StubGatewayHarness, unittest.TestCase):
         # leave the slow one out.
         status, output, result = self.run_impairment(["restart"], {
             "restartStormSeconds": 2, "restartDeadlineMs": 30_000,
-            "connection": dict(self.FAST_CONNECTION, handshakeDeadlineMs=2_000),
+            "connection": dict(self.FAST_CONNECTION, transportOpenDeadlineMs=2_000),
         }, restart_stub=True,
             stub_config={"delay_open_session_id": "stub-run-1", "delay_ms": 2_500})
         self.assertEqual(status, 0, output)
@@ -962,7 +966,7 @@ class MultiDriverImpairment(StubGatewayHarness, unittest.TestCase):
         # outcome, not left out because their start precedes the stamp.
         status, output, result = self.run_impairment(["restart"], {
             "restartStormSeconds": 2, "restartDeadlineMs": 30_000,
-            "connection": dict(self.FAST_CONNECTION, handshakeDeadlineMs=2_000),
+            "connection": dict(self.FAST_CONNECTION, transportOpenDeadlineMs=2_000),
         }, restart_stub=True, health_delay_seconds=4.0)
         self.assertEqual(status, 0, output)
         leg = result["impairment"]["restart"]
@@ -985,7 +989,8 @@ class MultiDriverImpairment(StubGatewayHarness, unittest.TestCase):
         status, output, result = self.run_impairment(["bandwidth-stream"], {
             "bandwidthStreamMbps": 0.5, "bandwidthStreamSeconds": 5, "bandwidthStreamSessions": 3,
             "running": [{"sessionId": f"stub-run-{index}"} for index in range(4)],
-            "connection": {"pingIntervalMs": 300, "pongDeadlineMs": 2_000, "handshakeDeadlineMs": 8_000},
+            "connection": {"pingIntervalMs": 300, "pongDeadlineMs": 2_000,
+                                     "transportOpenDeadlineMs": 8_000, "helloDeadlineMs": 8_000},
         })
         self.assertEqual(status, 0, output)
         leg = result["impairment"]["bandwidth-stream"]
@@ -1004,7 +1009,7 @@ class MultiDriverImpairment(StubGatewayHarness, unittest.TestCase):
         # this leg's backlog.
         status, output, result = self.run_impairment(["bandwidth"], {
             "bandwidthMbps": 0.05, "bandwidthLegSeconds": 3, "measuredDeadlineMs": 30_000,
-            "connection": dict(self.FAST_CONNECTION, handshakeDeadlineMs=8_000),
+            "connection": dict(self.FAST_CONNECTION),
         }, stub_config={"pongDelayMs": 1_500, "pongDelayFirstMobileConnection": True})
         self.assertEqual(status, 0, output)
         self.assertGreaterEqual(result.get("uncappedPingToPongMs") or 0, 1_400,
@@ -1020,7 +1025,7 @@ class MultiDriverImpairment(StubGatewayHarness, unittest.TestCase):
         # for a path whose round trip is 1.5 s.
         status, output, result = self.run_impairment(["bandwidth"], {
             "bandwidthMbps": 0.05, "bandwidthLegSeconds": 5, "measuredDeadlineMs": 30_000,
-            "connection": dict(self.FAST_CONNECTION, handshakeDeadlineMs=8_000),
+            "connection": dict(self.FAST_CONNECTION),
         }, stub_config={"pongDelayMs": 1_500})
         self.assertEqual(status, 0, output)
         leg = result["impairment"]["bandwidth"]
@@ -1039,7 +1044,8 @@ class MultiDriverImpairment(StubGatewayHarness, unittest.TestCase):
             "bandwidthStreamMbps": 0.5, "bandwidthStreamSeconds": 3, "bandwidthStreamSessions": 3,
             "restartStormSeconds": 2, "restartDeadlineMs": 30_000,
             "running": [{"sessionId": f"stub-run-{index}"} for index in range(4)],
-            "connection": {"pingIntervalMs": 300, "pongDeadlineMs": 2_000, "handshakeDeadlineMs": 8_000},
+            "connection": {"pingIntervalMs": 300, "pongDeadlineMs": 2_000,
+                                     "transportOpenDeadlineMs": 8_000, "helloDeadlineMs": 8_000},
         }, restart_stub=True, stub_config={"closeMobileOnOpenSession": "stub-run-1"})
         self.assertNotEqual(status, 0, "a close a capped leg counted must still reject the run")
         legs = result.get("impairment") or {}
@@ -1058,7 +1064,7 @@ class MultiDriverImpairment(StubGatewayHarness, unittest.TestCase):
         # run: `closing` left set by the blackhole's abandon would excuse it.
         status, output, result = self.run_impairment(["blackhole", "bandwidth"], {
             "blackholeSeconds": 2, "blackholeSettleMs": 400,
-            "connection": dict(self.FAST_CONNECTION, handshakeDeadlineMs=2_000),
+            "connection": dict(self.FAST_CONNECTION, transportOpenDeadlineMs=2_000),
             "bandwidthMbps": 0.05, "bandwidthLegSeconds": 3, "measuredDeadlineMs": 30_000,
         }, stub_config={"closeMobileOnOpen": 4})
         self.assertNotEqual(status, 0, "the unexpected close was excused")

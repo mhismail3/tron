@@ -115,14 +115,14 @@ export class RelayDirection {
  * A blackhole stops the relay forwarding and swallows new connections without
  * answering them: an established socket goes silent in both directions (the
  * Gateway sees silence, not a close) and an attempt made during the outage
- * hangs until the phone's own handshake deadline gives up. Held connections are
- * deliberately never forwarded when the path returns. That is a pessimistic
- * model, not the phone's behaviour: an attempt still inside its handshake
- * deadline has not been abandoned, and real TCP would retransmit and connect
- * within a second or two of the path returning. The model is kept because it
- * measures the worst case the case is about (the recovery of an attempt that
- * has to time out first), and it inflates the blackhole's recovery baseline by
- * the rest of that attempt's deadline.
+ * hangs until the phone's own transport-open deadline gives up. Held
+ * connections are deliberately never forwarded when the path returns. That is a
+ * pessimistic model, not the phone's behaviour: an attempt still inside its
+ * transport-open deadline has not been abandoned, and real TCP would retransmit
+ * and connect within a second or two of the path returning. The model is kept
+ * because it measures the worst case the case is about (the recovery of an
+ * attempt that has to time out first), and it inflates the blackhole's recovery
+ * baseline by the rest of that attempt's deadline.
  */
 export class PathRelay {
   constructor(gatewayPort, clock) {
