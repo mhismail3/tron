@@ -2,7 +2,7 @@
 
 - **Started:** 2026-09-27
 - **Status:** Active (Phase 1 runs on `hardening/integration`; that branch's copy of this plan is authoritative until R-1)
-- **Last updated:** 2026-09-28, O-4 (review round 3 addressed)
+- **Last updated:** 2026-09-28, O-4 (review round 4 addressed)
 - **Goal:** A clean, efficient and predictable Gateway and phone connection: the phone stays connected and loads any session promptly whenever the network path is up, however many sessions run and however large the history grows, and every disconnect or slow operation is attributable to one cause from the logs in one step.
 
 ## Goal and constraints
@@ -518,7 +518,7 @@ rows are in priority order.
 | E-2b | Claimed | Record `time-profiler` with `xctrace record --attach <pid>` if a real traced run proves it samples the simulator app; re-measure export and parser peaks (see E-2 handoff) | E-2 | orchestrator-dispatched deepseek-worker, 2026-09-28 |
 | O-2 | Ready | Gateway transport records: upgrade phases, inbound silence with Tailscale peer path | O-1 | |
 | O-3 | Claimed | Request span: one `rpc.completed` per slow RPC with every stage, wait and count | O-1 | orchestrator-dispatched deepseek-worker, 2026-09-28 |
-| O-4 | Done | Phone connection records that survive an export, stall watchdog, exact scene records | O-1 | orchestrator-dispatched deepseek-worker, 2026-09-28; review rounds 1, 2 and 3 addressed; focused suites and the iOS Gateway E2E blackhole runs pass |
+| O-4 | Done | Phone connection records that survive an export, stall watchdog, exact scene records | O-1 | orchestrator-dispatched deepseek-worker, 2026-09-28; review rounds 1–4 addressed; focused suites and the iOS Gateway E2E blackhole runs pass |
 | O-6b | Ready | Impairment in the qualification scenario: blackhole, bandwidth cap, Gateway restart | O-6a | |
 | O-5 | Ready | Gateway resource sampler and event-loop histogram | O-3 | |
 | O-7 | Ready | Incident triage tool: phone export plus Gateway log in, episodes by cause out | O-1, O-2, O-4 | |
@@ -1784,7 +1784,7 @@ the day cannot measure a synthetic case).
   `Table.resolve` became `Table.value`, since it only drops absent or
   `<sentinel/>` cells now (finding 4).
 
-### O-4 · Done (review rounds 1, 2 and 3 addressed) · 2026-09-28 · orchestrator-dispatched deepseek-worker (branch `hardening/o-4`)
+### O-4 · Done (review rounds 1, 2, 3 and 4 addressed) · 2026-09-28 · orchestrator-dispatched deepseek-worker (branch `hardening/o-4`)
 
 - Result: the code, tests and docs are written and committed. The first commit
   ran no check (the shared owned iOS test simulator was leased for the whole
@@ -1878,14 +1878,17 @@ the day cannot measure a synthetic case).
     already ends with `endedBy=background`/`stopped`.
   - `GatewayReconnectSchedule` was left unchanged; `reconnectCanBeAccelerated`
     already means "waiting in a delay", which is what the guard needs.
-  - Four edits sit outside the named owning files. `PerformanceSignposts.swift`
+  - Six edits sit outside the named owning files. `PerformanceSignposts.swift`
     gained the `endOpenIntervalsAtBackground()` requirement and
     `PerformanceInterval.trackedID`; the protocol it belongs to can only be
     declared there, and `AppLog.swift` (a named owning file) implements it.
     `GatewayClientDiagnostics.swift` gained `GatewayDiagnosticFailure.answerCode`,
     which only that enum can declare, and round 3 added the
     `GatewayFailure.answeredByGateway` marker to `GatewayProtocol.swift`, which
-    only that type can declare. `AppModel.swift` keeps the scene recorder it
+    only that type can declare. `SessionPresentationStore.swift` reads that
+    marker to record `gatewayCode` only from an answer the Gateway sent, and
+    clears the stored code only for the presentation attempt that owns it.
+    `AppModel.swift` keeps the scene recorder it
     already owned. `TronMobileApp.swift` passes the scene phase the launch
     observed instead of a boolean, and `WorkspaceBrowser.swift` routes a
     transient-error retry to the lifecycle's transport-recovery request instead
@@ -2125,14 +2128,15 @@ findings, a minor test-evidence gap and three nits. Every one is addressed:
   counting, so a watchdog that was never stopped would have landed its record.
 - Nit: the O-4 entry's 2,988 ms figure is corrected (the test asserts at least
   `blocked − 2 × watchdogInterval` for a 5 s block, so 2,988 ms would fail it);
-  the off-owning-file sentence now counts the files it names and includes
-  `GatewayProtocol.swift`; and the `connection.episode` row says a post-connect
-  failure is not a further attempt.
+  and the `connection.episode` row says a post-connect failure is not a further
+  attempt. (This round's claim that the off-owning-file sentence "now counts the
+  files it names" was wrong: round 4 corrected the count to the six files and
+  added `SessionPresentationStore.swift`.)
 - Nit: the `lastProgressAt` comment names what is actually fed to it (the
   episode's open, attempt starts and the post-connect drop).
 
 Evidence for this round: `scripts/tron-ios-test build` succeeds;
-`scripts/tron-ios-test run` passes 304 tests in 12 suites(`AppModelReconnectTests`, `AppModelPerformanceSignpostTests`,
+`scripts/tron-ios-test run` passes 304 tests in 12 suites (`AppModelReconnectTests`, `AppModelPerformanceSignpostTests`,
 `AppModelLifecycleTests`, `GatewayConnectionEpisodeRecorderTests`,
 `SessionPresentationStoreTests`, `ComposerDraftCoordinatorTests`,
 `GatewayProtocolContractTests`, `GatewayClientTransportTests`,
@@ -2148,11 +2152,83 @@ restored byte-for-byte before the passing run. The runs are retained under
 `$HOME/Library/Developer/Tron/ios/test-runs/`: the passing round-3 run is
 `20260928T115631Z-run.o3j4Ws`, the two negative controls are
 `20260928T115442Z-run.4M4NoV` (2 failed) and `20260928T115532Z-run.zEOTyx`
-(1 failed). Not run: the iOS Gateway E2E
+(1 failed). Not run in this round: the iOS Gateway E2E
 (`scripts/ios-gateway-e2e-test`), whose fixture directory is shared per user with
 parallel workers; `RealGatewayPiBoundaryTests` does compile in the test build.
+The round-4 review ran it on `ade1d4432` and it passed (1 test, 0 failures,
+44.4 s; round 4's own record is below).
 `python3 scripts/check-documentation-policy.py` and
 `scripts/personal-info-guard.sh` pass.
+
+**Review response (round 4, follow-up commit on this branch).** An independent
+review of round 3 found no blockers or majors: one minor test gap, three nits
+and one cleanup side effect it reported itself. Every finding is addressed:
+
+- Minor: the two round-3 reconnect tests only asserted that the retry does
+  nothing, so a `requestTransportRecovery()` that always returned `nil` would
+  have passed them and every other suite. New
+  `AppModelReconnectTests.transientTransportRetryRevivesParkedRetry` parks the
+  lifecycle in `.reconnecting` behind its backoff sleeper, calls
+  `AppModel.recoverTransientTransportFailure()`, and requires an immediate
+  second socket request with no clock advance, no remaining sleeper, no extra
+  recorded sleeper and no scene record. Negative control: with
+  `requestTransportRecovery()` replaced by `return nil`, that test fails on its
+  own (the second request never arrives) and the other 35 reconnect tests still
+  pass.
+- Nit: the launch seed had no test, including the round-3 flag-before-guard fix.
+  New `AppModelLifecycleTests.launchSeedDoesNotOverwriteAnObservedTransition`
+  activates the scene, then runs `start(scenePhase: .inactive)`, then resigns
+  active, and requires the `scene.resign-active` record. Negative control: with
+  the seed spent only when the transition changed the phase (the round-2 shape),
+  the stale `.inactive` sample suppresses that record and only this test fails.
+- Nit: `GatewayFailure.answeredByGateway` was a `Codable` property, so a wire
+  frame could stamp or clear phone-local provenance, and a stamped failure
+  stopped comparing equal to an otherwise identical wire literal. It is out of
+  `CodingKeys` now: `GatewayResponse` decoding cannot read it and an encoded
+  failure never carries it, matching the neighbouring not-Codable provenance
+  types. The presentation store's per-attempt clear is scoped to `.presentation`
+  like its set, so a `.reconnect` attempt neither stores nor clears a
+  Gateway-answer code. New
+  `GatewayProtocolContractTests.failureProvenanceStaysOffTheWire` decodes a
+  response whose error frame carries `answeredByGateway: true`, requires the
+  decoded marker to be `nil`, requires the stamped encoding to omit the key, and
+  requires the local stamp to still distinguish a decoded answer from a literal.
+  Negative control: with the synthesized keys restored, the wire marker is read
+  as `true`, the encoded failure carries the key and the stamp stops
+  discriminating; only this test fails.
+  The clear-scope half is inspected, not reproduced: the only reader is
+  `AppModel.openSessionPresentation`'s failure record, every presentation attempt
+  clears then maybe sets the code, and a `.reconnect` attempt cannot write it.
+- Nit (plan text): the off-owning-file sentence now counts the six files it
+  names and includes `SessionPresentationStore.swift`; the missing space in
+  "12 suites (" is fixed; the round-3 claim that the sentence "now counts the
+  files it names" is corrected in place; and the round-3 evidence paragraph,
+  which recorded the iOS Gateway E2E as not run, now points at the run below.
+
+Evidence for this round: `scripts/tron-ios-test build` succeeds and
+`scripts/tron-ios-test run` passes 200 tests in 6 suites (`AppModelReconnectTests`,
+`AppModelLifecycleTests`, `GatewayProtocolContractTests`,
+`SessionPresentationStoreTests`, `AppModelPerformanceSignpostTests`,
+`GatewayClientTransportTests`), retained as
+`$HOME/Library/Developer/Tron/ios/test-runs/20260928T125540Z-run.xsKDAH` (an
+earlier identical pass before the last test-text trim is
+`20260928T125222Z-run.nPYGdf`). The
+three negative controls above are retained as
+`20260928T124502Z-run.SCxZk3` (1 of 36 failed),
+`20260928T124614Z-run.hdxuF2` (1 of 9 failed) and
+`20260928T124842Z-run.MUA7h9` (1 of 17 failed); each source file was restored
+byte-for-byte (verified by `shasum -a 256 -c`) before the passing run. The iOS
+Gateway E2E was attempted again in this round with private fixture directories
+(`TRON_IOS_E2E_STATE_DIR=/tmp/o4rev5-e2e`,
+`TRON_IOS_E2E_DERIVED_DATA=/tmp/o4rev5-e2e-dd`): `prepare` built the Gateway but
+the fixture exited immediately because the shared dependency tree's `node-pty`
+prebuild cannot be loaded in the pinned Node (`ERR_DLOPEN_FAILED`,
+`prebuilds/darwin-arm64/pty.node` Team ID mismatch; the same failure reproduces
+with a bare `require('node-pty')` from `packages/gateway`). That fixture was
+stopped with `scripts/ios-gateway-e2e-test stop` (no shared state deleted), and
+the round-4 review's own E2E pass on `ade1d4432` (1 test, 0 failures, 44.4 s)
+remains the run-of-record for this task. `python3
+scripts/check-documentation-policy.py` and `scripts/personal-info-guard.sh` pass.
 
 **For C-5.** Reuse `GatewayConnectionEpisodeRecorder`
 (`packages/ios-app/Sources/State/GatewayConnectionEpisodeRecorder.swift`) from
