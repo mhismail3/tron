@@ -240,6 +240,69 @@ struct AppModelReconnectTests {
         }
     }
 
+    @Test("a reconnect whose catalog read is unchanged still rebuilds the dashboard's row projection")
+    func unchangedReconnectRebuildsRowProjection() async throws {
+        try await withFixture(
+            sockets: [ScriptedGatewaySocket(), ScriptedGatewaySocket()],
+            clock: ManualClock(), units: SequenceReconnectUnits([0])
+        ) { fixture in
+            let model = fixture.model
+            let first = fixture.sockets[0]
+            let replacement = fixture.sockets[1]
+            let profile = try #require(model.profiles.selected)
+            await first.enqueue(helloFrame())
+            try await model.connectHostedGateway(profile: profile, token: "token")
+
+            let initial = Task { await model.refreshSessions() }
+            let catalog = try await firstCatalogRequest(first, from: 1)
+            await first.enqueue(successResponse(id: catalog.id, result: .object([
+                "sessions": try JSONValue.encode([waitingSummary("waiting")]),
+                "nextCursor": .null,
+                "listRevision": .number(4),
+                "projectionToken": .string("epoch-one:4:0:user:exclude:0"),
+            ])))
+            #expect(await initial.value == .published)
+            #expect(model.dashboardActivity(for: "waiting") == .waitingForUser)
+
+            // The connection ends. The retained token survives it, the
+            // projection loses liveness, and the dashboard's snapshot is read
+            // in this state: a row that is not idle reads "resuming".
+            await model.handle(GatewayEvent(
+                type: "event", topic: "system.stopping", sessionId: nil, payload: .object([:])
+            ))
+            #expect(model.dashboardActivity(for: "waiting") == .resuming)
+            let presentationBefore = model.dashboardPresentationRevision
+            let archiveBefore = model.archiveProjectionRevision
+
+            // The replacement connection names the retained token and the
+            // Gateway answers unchanged, without rows. The rows are untouched,
+            // but the two projections the view watches must move, because the
+            // snapshot it holds was taken while the catalog was retired.
+            try await replacement.waitUntilSent(count: 1)
+            await replacement.enqueue(helloFrame())
+            let reconnected = try await firstCatalogRequest(replacement, from: 1)
+            #expect(reconnected.projectionToken == "epoch-one:4:0:user:exclude:0")
+            await replacement.enqueue(successResponse(id: reconnected.id, result: .object([
+                "sessions": .array([]),
+                "listRevision": .number(4),
+                "projectionToken": .string("epoch-one:4:0:user:exclude:0"),
+                "notModified": .bool(true),
+            ])))
+            // The response is consumed asynchronously, and the reconnect's own
+            // presentation restoration moves the dashboard revision for its own
+            // reason, so the archive projection — which only catalog authority
+            // moves — is the signal that the answer landed.
+            for _ in 0..<200 where model.archiveProjectionRevision == archiveBefore {
+                try await Task.sleep(for: .milliseconds(10))
+            }
+            #expect(model.sessions.map(\.id) == ["waiting"])
+            #expect(model.dashboardPresentationRevision > presentationBefore)
+            #expect(model.archiveProjectionRevision > archiveBefore)
+            #expect(model.dashboardActivity(for: "waiting") == .waitingForUser)
+            await model.teardown()
+        }
+    }
+
     /// Answers every non-catalog request until one `session.list` arrives, then
     /// returns it. Startup reads are independent owners, so the traversal's
     /// position in the frame stream is the only stable ordering.
@@ -1407,6 +1470,17 @@ struct AppModelReconnectTests {
             id: id, name: id, cwd: "/workspace", parentSessionId: nil,
             createdAt: "2026-01-01T00:00:00Z", updatedAt: "2026-01-01T00:00:01Z",
             messageCount: 0, firstMessage: id, phase: .idle, summaryRevision: 1
+        )
+    }
+
+    /// A row that is working and waiting for the user. Its phase is not idle,
+    /// so a retired projection reports it as "resuming" rather than "idle".
+    private func waitingSummary(_ id: String) -> SessionSummary {
+        SessionSummary(
+            id: id, name: id, cwd: "/workspace", parentSessionId: nil,
+            createdAt: "2026-01-01T00:00:00Z", updatedAt: "2026-01-01T00:00:01Z",
+            messageCount: 0, firstMessage: id, phase: .running, waitingForUser: true,
+            summaryRevision: 1
         )
     }
 

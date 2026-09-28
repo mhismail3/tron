@@ -190,6 +190,14 @@ export const RSS_INFO_STEP_SHARE = 0.1;
 /** An event-loop p99 over this bound in one minute misses the exit criterion. */
 export const EVENT_LOOP_P99_WARNING_MS = 100;
 
+/** A window that recorded a snapshot built although no ready socket held a
+ * subscription token for its session. The slot builds one only for a session
+ * with a subscriber, so such a build means an audience check was lost (a
+ * regressed slot guard, or a registry and transport subscription record that
+ * diverged) rather than an expected condition, which is why it is the one
+ * threshold here that has no value to compare against. */
+export const UNAUDIENCED_SNAPSHOT_WARNING = 0;
+
 /** Named entries in the message's topic and runtime detail; the rest are
  * counted, so the record stays one readable line. */
 const MAX_RESOURCE_DETAIL = 8;
@@ -228,7 +236,10 @@ export interface ResourceSample {
   runtimeBytes: number;
   runtimesLoaded: number;
   runtimesEvicted: number;
-  /** Snapshot builds, and the part of them with no subscriber at build time. */
+  /** Snapshot projections broadcast for a session, and the part of them built
+   * while no ready recipient could receive them (`UNAUDIENCED_SNAPSHOT_WARNING`).
+   * Topic frames count only frames that had a recipient, so this pair is where a
+   * projection that reached nobody stays visible. */
   snapshotBuilds: number;
   unaudiencedSnapshotBuilds: number;
   topics: ReadonlyMap<string, ResourceTopicTraffic>;
@@ -250,8 +261,6 @@ export interface ResourceSample {
  * discover what happened.
  */
 export interface ResourceRecorder {
-  /** One snapshot projected for a session, with its subscriber count. */
-  recordSnapshotBuild(subscribers: number): void;
   /** One serialized frame offered on a topic, and the recipients it had. */
   recordTopicFrame(topic: string, bytes: number, subscribers: number): void;
   /** One catalog walk, with the time it took, the files it read, and whether a
@@ -352,6 +361,12 @@ export class ResourceSampler implements ResourceRecorder {
     this.utilizationMark = this.eventLoopUtilization();
   }
 
+  /** One snapshot projection handed to the transport for a session, with the
+   * ready recipients it could reach. Deliberately not part of
+   * `ResourceRecorder`: only the transport knows the recipients, so only it
+   * calls this, and a build with none is a tripwire (a lost slot guard, or a
+   * divergence between the registry's subscriber record and the transport's)
+   * rather than an ordinary minute. */
   recordSnapshotBuild(subscribers: number): void {
     this.snapshotBuilds += 1;
     if (!(subscribers > 0)) this.unaudiencedSnapshotBuilds += 1;
@@ -491,7 +506,9 @@ export function resourceSteps(sample: ResourceSample): ResourceSteps {
 }
 
 /**
- * The level a sample is recorded at and why. Warning is a broken bound; info is
+ * The level a sample is recorded at and why. Warning is a broken bound — the
+ * heap share, the event-loop p99, or a snapshot built while no ready recipient
+ * could receive it (`UNAUDIENCED_SNAPSHOT_WARNING`); info is
  * a named step that moved since `previous` (the window before this one), heap
  * used moved `HEAP_USED_INFO_STEP_BYTES` or RSS moved `RSS_INFO_STEP_SHARE` from
  * the last window written at info or above (`anchoredHeapUsedBytes`,
@@ -513,6 +530,9 @@ export function resourceSampleLevel(
   }
   if (sample.eventLoopDelayP99Ms >= EVENT_LOOP_P99_WARNING_MS) {
     return { level: "warning", reason: `eventLoopDelayP99Ms=${Math.round(sample.eventLoopDelayP99Ms)} at or above ${EVENT_LOOP_P99_WARNING_MS}` };
+  }
+  if (sample.unaudiencedSnapshotBuilds > UNAUDIENCED_SNAPSHOT_WARNING) {
+    return { level: "warning", reason: `unaudiencedSnapshotBuilds=${sample.unaudiencedSnapshotBuilds} with no ready recipient` };
   }
   if (previous !== undefined) {
     const steps = resourceSteps(sample);

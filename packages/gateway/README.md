@@ -984,7 +984,19 @@ snapshot. `session.summary` is a bounded, per-session revisioned global projecti
 of aggregate phase, narrow foreground phase, active-subagent presence, pending-user-input state, name, activity time, message count, and first-message title. Full catalog rows additionally project immutable Automation creation identity only when the first canonical user entry is bound to a Gateway-boundary Automation invocation receipt; live generated sessions carry the same identity from their exact execution lease until persistence, while cold catalogs rederive it from JSONL without consulting or mirroring the Automation store. Fork headers take precedence and do not inherit this creation marker. Pi's pre-append `message_end` boundary invalidates cached canonical row facts and schedules their post-append publication, so a new session exposes its first-prompt title while the initial response is still running rather than waiting for a Gateway restart. First-message titles strip exact machine-authored skill envelopes and slash invocation tokens, preferring the user's arguments and otherwise a readable resource name; malformed envelopes remain literal rather than risking content loss. Cold catalog and live summary recency share the canonical user/assistant message-time boundary; settings, names, and extension metadata appends do not change that boundary. Live activity time overlays it with foreground agent events, detached extension lifecycle timestamps, and a ten-second heartbeat while either remains active; session open/close, idle lifecycle events, and rereading an old terminal artifact do not advance recency, so merely viewing a settled session cannot reorder history. Administrative receipt persistence does not make a row active. When detached subagents outlive the parent response, aggregate `phase` remains active while `foregroundPhase` is settled and `hasActiveSubagents` remains true, allowing shallow dashboard clients to present delegated work without opening the transcript. `waitingForUser` is orthogonal to those phases and transitions immediately with the first pending semantic interaction and final settlement, so dashboards can identify that only a user response can advance the session. The additive `activeSince` fact is fixed for one continuous Gateway-observed active period, so catalog ordering keeps active rows first and stable while `updatedAt` continues to advance for truthful freshness labels. Settled history remains reverse chronological by parsed instant rather than ISO text precision, and Gateway restart naturally falls back to canonical message time (header time only when there is no qualifying message). Focused `runtime-registry.integration.test.ts` regressions cover cold opens preserving settled recency, reusable user cuts and search admission during parallel child appends, isolation of an unfinished child tail, successor header-walk coalescing, and cold acquisition independent of mutable dashboard metadata. Summary updates reach every connected
 dashboard immediately without broadcasting full transcripts or changing the structural list revision. User-scoped catalog admission compares only non-delegated structural identities, so a concurrent child-session write cannot make an unchanged dashboard fail `session.list`; complete whole-tree header evidence still quarantines duplicate IDs, including a user ID claimed by a delegated file. Catalog folder enumeration uses bounded concurrency of 16 while retaining canonical-folder and inode checks, all traversal/materialization budgets, and ten-way metadata reads. Results are path-ordered so filesystem enumeration order cannot change discovery output. All-sessions/admin reads retain exact whole-catalog stability checks. The Gateway-owned catalog metadata index is an acceleration only: unchanged and append-only rows are reconciled with the same inode, header, newline, and tail-boundary checks using bounded parallel filesystem work; any failed admission falls back to canonical materialization rather than weakening authority. Catalog `messageCount` counts visible conversation rows, excluding Pi 0.87 `system` transcript deltas that carry provider context but are not chat rows. Index version 3 invalidates the disposable version-2 catalog cache and rebuilds counts from canonical JSONL on demand; no canonical session migration is needed. Clients subscribe
 to `session.snapshot`, progress, tool, queue, and extension events only for chats
-they actually open. Streaming progress republishes the cumulative live message, so
+they actually open. No client consumes a session's snapshot for a session it has
+not opened, so the Gateway builds and serializes one only for a session with a
+subscriber: the transport subscribes a client before it installs that client's
+synchronization barrier, so a pending barrier is always a subscriber, and a
+state change for an unsubscribed session publishes its `session.summary` with no
+transcript projection at all. The transport is the only writer of that
+subscriber record: a slot that closes without the client unsubscribing does not
+end the subscription, so a re-acquired session still reaches the client that was
+watching it. The transport also counts the recipients of every snapshot frame it
+is handed, and a projection no ready socket could receive is recorded as
+unaudienced and warns (`UNAUDIENCED_SNAPSHOT_WARNING`) rather than passing as an
+ordinary build. A client that subscribes later receives its snapshot through the
+ordinary open and synchronization path. Streaming progress republishes the cumulative live message, so
 updates are throttled to at most one frame, carrying the newest message, per
 150 ms window while they keep arriving (the first update after a quiet window
 stays immediate, and a snapshot publishes any pending frame ahead of itself),
@@ -2468,6 +2480,121 @@ cannot hold the catalog, and it takes the same per-host profile lock.
   are not in flight when the window closes are not started: the cold lane skips
   its prompt once the deadline has passed, so no sample is timed after the
   other lanes stopped.
+
+- **Impairment cases (`--cases`, default
+  `blackhole,bandwidth,bandwidth-stream,restart`):** they
+  run after the mixed window, on the clients it already connected, and measure
+  recovery rather than throughput. `--cases none` runs none. The mobile client's
+  path is a loopback TCP relay the driver shapes, so what a cap or a blackhole
+  applies to is the real byte stream — the Gateway's own socket buffers fill and
+  its capacity policy is exercised — and the bytes counted are the ones the link
+  carried, not a decompressed frame's size. Every client retries on the phone's
+  own backoff (2 s × 1.7, capped at 15 s, ±20% jitter).
+  - **blackhole** (`--blackhole-seconds`, default 90, longer than the Gateway's
+    75 s half-open hold): the relay stops forwarding in both directions, so an
+    established socket goes silent and an attempt made during the outage is held
+    with no answer until the phone's handshake deadline gives up. A held attempt
+    is deliberately never forwarded when the path returns; that is a pessimistic
+    model, not the phone's behaviour (an attempt still inside its deadline has
+    not been abandoned and real TCP would retransmit), and it inflates the
+    recovery baseline by the rest of that attempt. The mobile chat is
+    mounted on the shaped path and settles for one ping interval
+    (`blackholeSettleMs`) before the outage, so the client is between pings; it
+    keeps its socket open until one liveness window (18 s: its ping interval
+    plus its pong deadline) passes with no inbound frame, then abandons it, and
+    `silence_ms` measures that silence from the client's last inbound frame.
+    Because the phone says nothing to the Gateway when it gives up on a frozen
+    path, the Gateway keeps that socket half-open. The path returns on its own
+    timer, and the case times the recovery to a ready mounted chat from that
+    moment — an attempt still in flight then is part of the recovery.
+  - **bandwidth** (`--bandwidth-mbps`, default 2, for `--bandwidth-seconds`,
+    default 90): the relay holds one rate budget per direction and pauses the
+    sending socket when it is spent — until the receiving socket drains — so a
+    queued pong waits behind the data in flight on the Gateway's side of the
+    link. The workload keeps `bandwidthInFlight` (default 6) full bounded
+    transcript pages in flight at once, each on its own session (the Gateway
+    admits one `session.open` per session per connection), and reports the peak
+    it held (`.max_in_flight`) and the load that peak asked the Gateway to send,
+    in the decoder's bytes (`.offered_in_flight_bytes` — the unit the Gateway's
+    own 8 MiB outbound queue is bounded in) and in wire bytes
+    (`.offered_in_flight_wire_bytes`). A leg is rejected unless it filled at
+    least half its cap. What this leg *cannot* show at its default cap, stated
+    plainly: one page is about 39 kB of wire, so even six in flight are far
+    under one pong deadline of 2 Mbit/s (8 s × 250 kB/s = 2 MB of wire), and six
+    pages are under the 8 MiB per-connection backstop — at 2 Mbit/s neither a
+    pong deadline miss nor a capacity close is reachable. What it reports is the
+    mobile's longest ping-to-pong round trip (`.max_ping_to_pong_ms`, the delay
+    a pong deadline is set against) and the load it offered, and zero misses and
+    zero closes are read as "this cap never reached them", not as a pass. The
+    case that can reach them is `bandwidth-stream` below. Note what a pong waits
+    behind when they are reached: the queue's bytes compress on the wire (about
+    25-30× for this fixture's generated transcripts), and the Gateway's own
+    `autoPong` answer is not queued in its application queue at all, so what
+    delays a pong is the socket's own buffered bytes.
+  - **bandwidth-stream** (`--bandwidth-stream-mbps`, default 0.08, for
+    `--bandwidth-stream-seconds`, default 30): the mobile mounts several chats on
+    the phase's running sessions (up to `bandwidthStreamSessions`), which stream
+    superseding snapshots and keyed events, and the path is then capped *below
+    what they produce* — the measured seven streams of this fixture produced
+    295,621 B/s of decoded state and 11,901 B/s of wire, so the cap's 10,000 B/s
+    is below the workload and the relay, not the workload, bounds the leg — so
+    the Gateway's queue holds replaced state — the state G-4 coalesces — and
+    whatever waits behind it. This is the case that can show what the page leg's
+    default cap cannot: on code without G-4 the queue reaches its 8 MiB backstop
+    and the socket closes for capacity, and on code without C-4 the phone tears
+    down a link over a pong a busy path delayed. It reports the streams it held,
+    their decoded payload rate, `.delivered_bytes_per_second` and `.link_use`
+    (the cap must stay full: the leg is rejected below 0.9), its
+    `.max_ping_to_pong_ms`, `.pong_deadline_misses` and `.unexpected_closes`. The
+    streams are attached before the cap is applied: the phone mounts its chats
+    on a working path and the path then slows. A leg is rejected unless it held
+    at least two mounted streams, filled at least 0.9 of its cap, and showed a
+    backlog: its own round trip longer than the *same run's* uncapped round trip,
+    a missed deadline, or a close. The round trip is the leg's own window (the
+    client's lifetime maximum is not the leg's) and each pong is charged to the
+    ping it answers.
+  - **restart:** the driver asks the profiler — its parent, which owns the
+    fixture process — for a Gateway restart while every connected client is
+    live. The profiler stops the child and starts a fresh one on the same port,
+    and reports the epoch millisecond at which the new Gateway was healthy, plus
+    the downtime (request to healthy) as its own metric. Each client retries as
+    soon as its own socket closes, so the refused connects and the reconnects
+    include the downtime; the exit criterion's three clients (a mounted phone, a
+    listing dashboard, one more pair) are the measured ones and every other
+    client reconnects too, or the run is rejected. Every request a measured
+    client makes is kept: the requests the new Gateway served are the storm —
+    the ready sequence's own mounts and lists included, each timestamped
+    `sinceRestoreMs` against the moment the new Gateway was healthy — and the
+    ones that failed (refused while the Gateway was down, or on the socket it
+    closed) are marked `duringDowntime` and reported as `.downtime_requests`
+    instead of being dropped. The classification is by outcome, not by the
+    timestamp: the profiler stamps the restore after the new Gateway already
+    answered, and classifying by time would move its first, most contended
+    requests out of the storm. Each client's storm loop starts when that client
+    is ready rather than when the slowest one returns.
+- **Impairment metrics:** `impairment.blackhole.attempts_during_outage`,
+  `.silence_ms`, `.recovery_ready_ms` (C-3's target: p95 ≤ 5 s),
+  `.attempt_ms_max`; `impairment.bandwidth.link_use` (delivered rate ÷ cap),
+  `.delivered_bytes_per_second` and `.sent_bytes_per_second` (wire bytes each
+  way), `.operation_ms_p99`, `.max_ping_to_pong_ms`, `.max_in_flight`,
+  `.offered_in_flight_bytes`, `.offered_in_flight_wire_bytes`,
+  `.pong_deadline_misses` (C-4's target: zero), `.unexpected_closes` (G-4: zero
+  for capacity);
+  `impairment.restart.reconnect_ms_max` (G-13: ≤ 10 s), `.downtime_ms`,
+  `.failed_attempts`, `.requests`, `.downtime_requests`, `.requests_over_1s`
+  (G-13: zero) and `.request_ms_p99`. Volume and throughput metrics are read as
+  "higher is better"; the cap and the leg length are configuration and live in
+  the report context (`impairment.bandwidth_mbps`,
+  `impairment.bandwidth_stream_mbps`, `workload`), with each case's attempts,
+  loads and per-client details, and
+  `impairment.gateway_outbound_capacity_records` counts
+  `connection.outbound-capacity` records inside the bandwidth legs' own time
+  windows (both capped legs' windows). A run is rejected when a selected case
+  reported nothing, when a bandwidth leg never filled half its cap, when the
+  streaming leg held fewer than two mounted streams, did not fill 0.9 of its cap,
+  or showed no backlog (no round trip longer than the same run's uncapped one,
+  no miss and no close), or when any connected client is left down — and an
+  unexpected close, the phone's socket included, fails the run.
 
 Per iteration it reports `latency.<operation>.p50|p99|max` (nearest rank, so
 p99 is the maximum below 100 samples) for `session_list`,

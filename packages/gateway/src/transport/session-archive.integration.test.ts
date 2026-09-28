@@ -601,6 +601,42 @@ describe("session archive over the real Gateway", () => {
     };
   });
 
+  archiveCase("moves the projection token when an acknowledged recovery clears a cold row's marker", async () => {
+    const f = await fixture();
+    const session = f.coldSession("recovered-automation");
+    // A recovered automation run's marker is restored at startup, and a row
+    // with no live summary and no slot reads its phase from that set alone.
+    const { RunMarkerStore } = await import("../sessions/run-markers.js");
+    const operationId = "automation:10000000-0000-4000-8000-0000000000a9";
+    await new RunMarkerStore(f.root).mark(session.id, operationId);
+    const restarted = await f.restart();
+    const client = await f.connect();
+    const first = await list(client, "exclude");
+    const row = first.sessions.find((candidate) => candidate.id === session.id);
+    expect(row?.phase).toBe("interrupted");
+    const token = first.projectionToken;
+    expect((await list(client, "exclude", { projectionToken: token })).notModified).toBe(true);
+
+    // The user acknowledges the recovery. Nothing structural moves: the row
+    // changes phase, which only a token covering the whole row overlay can
+    // carry, so an owner naming the old token must be answered with rows.
+    const listChangesBefore = f.listChanged.mock.calls.length;
+    await restarted.registry.clearAutomationMarker(session.id, operationId);
+    expect(f.listChanged.mock.calls.length).toBeGreaterThan(listChangesBefore);
+    const after = await list(client, "exclude", { projectionToken: token });
+    expect(after.notModified).toBeUndefined();
+    expect(after.sessions.find((candidate) => candidate.id === session.id)?.phase).toBe("idle");
+    expect(after.projectionToken).not.toBe(token);
+    // The row it now serves revalidates in turn.
+    expect((await list(client, "exclude", { projectionToken: after.projectionToken })).notModified).toBe(true);
+    return {
+      phaseBefore: row?.phase,
+      phaseAfter: after.sessions.find((candidate) => candidate.id === session.id)?.phase,
+      tokenMoved: after.projectionToken !== token,
+      listChanges: f.listChanged.mock.calls.length - listChangesBefore,
+    };
+  });
+
   archiveCase("binds a list cursor to its archive filter and orders the archived list newest first", async () => {
     const f = await fixture();
     const client = await f.connect();

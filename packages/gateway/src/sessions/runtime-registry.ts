@@ -870,7 +870,12 @@ export class RuntimeRegistry {
             && resolve(info.path) === resolve(persistedPath)) === true;
         if (removed) this.slots.delete(sessionId);
         this.cancelIdleEviction(sessionId, slot);
-        this.subscribers.delete(sessionId);
+        // The transport owns subscription lifetime: it subscribes a client
+        // before it installs that client's synchronization barrier and
+        // unsubscribes it on close, revoke, or session close. A slot going away
+        // (idle eviction, an extension-requested shutdown) is not an
+        // unsubscribe, so a client still watching this session keeps its
+        // audience and receives snapshots again once the session is acquired.
         this.presentationPresence.removeSession(sessionId);
         this.interrupted.delete(sessionId);
         if (removedLiveOnlySession) {
@@ -1614,7 +1619,7 @@ export class RuntimeRegistry {
   async clearAutomationMarker(sessionId: string, operationId: string): Promise<void> {
     if (!operationId.startsWith("automation:")) throw new Error("Only automation markers may be cleared through this boundary");
     await this.markers.clear(sessionId, operationId);
-    if ((await this.markers.evidenceFor(sessionId)).length === 0) this.interrupted.delete(sessionId);
+    if ((await this.markers.evidenceFor(sessionId)).length === 0) this.noteRecoveredMarkerCleared(sessionId);
   }
 
   async reconcileStoredAutomationMarkers(
@@ -1629,8 +1634,19 @@ export class RuntimeRegistry {
           await this.markers.clear(sessionId, marker.operationId);
         }
       }
-      if ((await this.markers.evidenceFor(sessionId)).length === 0) this.interrupted.delete(sessionId);
+      if ((await this.markers.evidenceFor(sessionId)).length === 0) this.noteRecoveredMarkerCleared(sessionId);
     }
+  }
+
+  /** A recovered marker is a catalog overlay in one place only: a row with no
+   * live summary and no slot reads its `phase` from this set. Removing it moves
+   * that row from `interrupted` to `idle`, which is a projection change like
+   * any other, so the token has to move or a connected owner naming the old one
+   * would keep showing `interrupted` (G-7). */
+  private noteRecoveredMarkerCleared(sessionId: string): void {
+    if (!this.interrupted.delete(sessionId)) return;
+    this.catalogProjectionGeneration += 1;
+    this.options.sessionListChanged();
   }
 
   private async catalogStructureEvidence(): Promise<CatalogStructureEvidence> {

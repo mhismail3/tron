@@ -388,11 +388,13 @@ export class NotificationService {
 
   /** Answers whether this registration already describes the stored grant
    * without writing anything, so the RPC owner can answer an identical
-   * registration without opening a command receipt (G-7 Do item 2). The caller
-   * holds the device's identity lane across this check and any admitted
-   * mutation, so a lane operation cannot interleave; a relay outcome that
-   * disables the grant in between is still visible in the status the caller
-   * then reads. */
+   * registration without opening a command receipt (G-7 Do item 2). The read
+   * runs outside the device's identity lane, so it is not ordered with that
+   * device's lane operations: a remove or revoke racing an identical upsert is
+   * read as whichever the snapshot happened to hold. It is read-only and can
+   * never bring a grant back — it only decides to skip the write — and a relay
+   * outcome that disables the grant in between is still visible in the status
+   * the caller reads after the decision. */
   async registrationIsCurrent(input: PushRegistrationInput): Promise<boolean> {
     if (![input.deviceId, input.installationId, input.grantId].every(isID) || !isEndpointSecret(input.secret)) {
       throw new GatewayError("invalid_request", "Push registration credentials are malformed");

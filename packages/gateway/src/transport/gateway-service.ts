@@ -656,9 +656,7 @@ export class GatewayService {
       case "push.registration.upsert":
         if (client.isLocal) throw new GatewayError("auth_required", "Only an authenticated mobile device can register push delivery");
         // Identical registrations are naturally idempotent and write nothing at
-        // all, so they are answered before the receipt owner opens one. The
-        // identity lane spans the check and the admitted mutation, so the
-        // device's own registration operations keep their order.
+        // all, so they are answered before the receipt owner opens one.
         const allowed = new Set(["commandId", "installationId", "grantId", "secret", "previewsEnabled", "relayOrigin", "notifyWhenAskPresented"]);
         if (Object.keys(params).some((key) => !allowed.has(key))) throw new GatewayError("invalid_request", "Push registration contains unknown fields");
         const notifications = this.requireNotifications();
@@ -676,8 +674,13 @@ export class GatewayService {
         };
         // An identical registration is naturally idempotent and writes nothing,
         // not even a command receipt, so it is answered before the receipt owner
-        // opens one. The status is read after that decision, so a grant the relay
-        // disabled or a revocation that removed it in between is still visible.
+        // opens one. This check is read-only and runs outside the identity lane,
+        // so it is not ordered with this device's lane operations: an identical
+        // upsert racing a remove or a revoke is answered from the snapshot the
+        // check read rather than from behind that lane mutation. It cannot bring
+        // a grant back — it only decides to skip the write — and a grant the
+        // relay disabled is still visible because the status is read after the
+        // decision.
         if (await notifications.registrationIsCurrent(input)) {
           return safeJson(await notifications.status(client.identity));
         }

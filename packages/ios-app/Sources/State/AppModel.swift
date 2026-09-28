@@ -2337,8 +2337,19 @@ final class AppModel {
                 // The Gateway confirmed these rows. Nothing is republished, so
                 // selection, scroll and chat identity are untouched; the
                 // traversal still counts as a complete authoritative read.
+                // A confirmation that revives a retired projection must still
+                // rebuild the dashboard's row snapshot: the view derives a
+                // row's activity from the catalog's liveness, so a snapshot
+                // taken while the projection was retired has every non-idle
+                // row reading "resuming". A page read rebuilds it, and this
+                // answer does the same without touching the rows themselves.
+                let wasLive = sessionCatalog.freshness == .live
                 guard sessionCatalog.confirmUnchanged(admission: admission) else {
                     return CatalogTraversalResult(outcome: .retained, genuineFailure: false)
+                }
+                if !wasLive {
+                    installSelectedDashboardCatalog()
+                    archiveProjectionRevision &+= 1
                 }
                 return CatalogTraversalResult(
                     outcome: .published,
@@ -5368,7 +5379,9 @@ extension AppModel: GatewayLifecycleProjectionDelegate {
         }
 
         invalidateProfileScopedLoads()
-        dashboardConnections.retire()
+        // A profile switch, pairing or teardown retires the pool's projections
+        // because the transition stopped them, not because the scene did.
+        dashboardConnections.retire(endedBy: .stopped)
         notificationInbox.cancelRefreshes()
         await dashboardConnections.waitForRetirement()
         invalidateSessionConnectionOwnership()

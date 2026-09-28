@@ -261,7 +261,9 @@ struct IOSClientDiagnosticBuffer: Sendable {
             profileLabel: ownerLabel,
             record: GatewayLogRecord(
                 timestamp: boundedUTF8(diagnostic.timestamp, maximumBytes: 128),
-                level: diagnostic.outcome == .failure ? "warning" : "info",
+                level: diagnostic.outcome == .failure
+                    ? "warning"
+                    : diagnostic.outcome == .excused ? "debug" : "info",
                 message: fields.joined(separator: " "),
                 event: "gateway.connection",
                 source: "ios-client"

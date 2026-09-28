@@ -1000,13 +1000,16 @@ final class PushNotificationCoordinator {
             grant.acknowledgedRegistrationRevision = nil
             var cleared = document
             cleared.grants[profile.id] = grant
-            do {
-                try credentials.save(cleared)
-                document = cleared
-            } catch {
+            // The stored acknowledgement is only a hint that lets the next
+            // reconcile skip the registration, so a failed save is reported and
+            // never a reason to leave the Gateway holding a grant the user just
+            // turned off. The in-memory copy drops it either way: a claim this
+            // phone could not persist must not be trusted as current.
+            document = cleared
+            do { try credentials.save(cleared) }
+            catch {
                 readiness = .pending
                 diagnostic = .stoppedPersistence
-                return
             }
         }
         do {

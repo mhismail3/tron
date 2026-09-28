@@ -573,6 +573,59 @@ struct PushNotificationCoordinatorTests {
         #expect(coordinator.readiness == .denied)
     }
 
+    @MainActor
+    @Test("a failed acknowledgement save still tells the Gateway to remove the grant")
+    func failedAcknowledgementSaveStillRemovesGrant() async throws {
+        var acknowledged = matchingGrant(profileID: profile.id, token: "01")
+        acknowledged.acknowledgedRuntime = "machine-1:epoch-one"
+        acknowledged.acknowledgedRegistrationRevision = "grant-revision-one"
+        // The save that drops the acknowledgement fails, as a locked Keychain
+        // does. The acknowledgement is only a skip hint for the next
+        // reconcile, so the removal it was cleared for must still be sent: a
+        // user who turned notifications off must not stay registered because
+        // this phone could not persist its own bookkeeping.
+        let store = FailingSavePushCredentialStore(
+            initial: PushCredentialDocument(
+                appAttestKeyID: appAttestKey("key"), apnsToken: "01", grants: [profile.id: acknowledged]
+            ),
+            failuresRemaining: 1
+        )
+        let coordinator = PushNotificationCoordinator(
+            credentials: store,
+            notifications: PushNotificationSystem(
+                authorization: { .denied },
+                requestAuthorization: { false },
+                registerForRemoteNotifications: {}
+            ),
+            appAttest: supportedAttest,
+            configuration: PushProductConfiguration(origin: URL(string: "https://push.example.test")!)
+        )
+        let (client, socket) = try await connectedGateway(for: profile)
+        defer { Task { await client.close() } }
+
+        let denial = Task {
+            await coordinator.reconcile(
+                profile: profile, connected: true, gatewayRuntimeEpoch: "epoch-one",
+                pushRegistrationRevision: "grant-revision-one", client: client
+            )
+        }
+        // The removal is owed whatever happens to local bookkeeping, so the
+        // wait is bounded: an absent request is a named failure here instead of
+        // a watchdog expiry.
+        let removal = try await withTestWatchdog {
+            try await gatewayRequest(socket, method: "push.registration.remove", after: 1)
+        }
+        await socket.enqueue(try JSONEncoder.gateway.encode(JSONValue.object([
+            "type": .string("response"),
+            "id": .string(removal),
+            "ok": .bool(true),
+            "result": .object(["removed": .bool(true)]),
+        ])))
+        await denial.value
+        #expect(coordinator.readiness == .denied)
+        #expect(store.value?.grants[profile.id] == nil)
+    }
+
     /// Every `push.registration.upsert` this connection sent, in order.
     @MainActor
     private func upsertRequests(_ socket: ScriptedGatewaySocket) async throws -> [String] {
@@ -1298,6 +1351,31 @@ private final class MemoryPushCredentialStore: PushCredentialStoring, @unchecked
     var value: PushCredentialDocument? { lock.withLock { stored } }
     func load() throws -> PushCredentialDocument? { value }
     func save(_ document: PushCredentialDocument) throws { lock.withLock { stored = document } }
+}
+
+private final class FailingSavePushCredentialStore: PushCredentialStoring, @unchecked Sendable {
+    private let lock = NSLock()
+    private var stored: PushCredentialDocument?
+    private var failuresRemaining: Int
+
+    init(initial: PushCredentialDocument?, failuresRemaining: Int) {
+        stored = initial
+        self.failuresRemaining = failuresRemaining
+    }
+
+    var value: PushCredentialDocument? { lock.withLock { stored } }
+
+    func load() throws -> PushCredentialDocument? { value }
+
+    func save(_ document: PushCredentialDocument) throws {
+        try lock.withLock {
+            guard failuresRemaining == 0 else {
+                failuresRemaining -= 1
+                throw PushRegistrationError.persistence
+            }
+            stored = document
+        }
+    }
 }
 
 private final class CodableReloadPushCredentialStore: PushCredentialStoring, @unchecked Sendable {
