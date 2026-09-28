@@ -228,6 +228,57 @@ final class TronSmokeUITests: XCTestCase {
         XCTAssertFalse(sheet.waitForExistence(timeout: 2))
     }
 
+    /// Failure modes: attributed sections are dropped or reordered, a collapsed
+    /// section leaks its entries, opening a section does not reveal its purpose
+    /// and attributed sources, or an instruction file cannot be read in full.
+    @MainActor
+    func testAgentInstructionsSectionsExpandWithTheirSources() {
+        let app = XCUIApplication()
+        app.launchArguments = ["-tron-agent-instructions-fixture", "-AppleLanguages", "(en)", "-AppleLocale", "en_US"]
+        app.launch()
+        let order = ["preamble", "tools", "rules", "docs", "project_context", "skills", "cwd", "tron"]
+        let headers = order.map { app.buttons["agent-instructions-section-\($0)"] }
+        XCTAssertTrue(headers[0].waitForExistence(timeout: 10), app.debugDescription)
+        XCTAssertTrue(headers.allSatisfy(\.exists), app.debugDescription)
+        XCTAssertEqual(headers.map(\.frame.minY), headers.map(\.frame.minY).sorted(), "Sections must keep the model's reading order")
+        XCTAssertFalse(app.buttons["agent-instructions-entry-tools.1"].exists, "A collapsed section must not show its entries")
+        XCTAssertTrue(headers[7].label.contains("Each turn"), "The per-turn Tron context must be marked: \(headers[7].label)")
+        keepScreenshot(named: "agent-instructions-collapsed")
+
+        app.buttons["agent-instructions-section-tools"].tap()
+        let subagent = app.buttons["agent-instructions-entry-tools.1"]
+        XCTAssertTrue(subagent.waitForExistence(timeout: 3), app.debugDescription)
+        XCTAssertTrue(subagent.label.contains("subagent") && subagent.label.contains("Package"), subagent.label)
+        XCTAssertTrue(app.buttons["agent-instructions-entry-tools.2"].label.contains("Tron"))
+        app.buttons["agent-instructions-section-rules"].tap()
+        XCTAssertTrue(app.buttons["agent-instructions-entry-rules.1"].waitForExistence(timeout: 3))
+        XCTAssertTrue(app.buttons["agent-instructions-entry-rules.1"].label.contains("from subagent"))
+        keepScreenshot(named: "agent-instructions-tools-rules")
+
+        for id in ["tools", "rules"] {
+            app.buttons["agent-instructions-section-\(id)"].tap()
+            let gone = expectation(for: NSPredicate(format: "exists == false"),
+                                   evaluatedWith: app.buttons["agent-instructions-entry-\(id).1"])
+            wait(for: [gone], timeout: 3)
+        }
+        app.buttons["agent-instructions-section-tron"].tap()
+        let tronPurpose = app.staticTexts.containing(NSPredicate(format: "label BEGINSWITH %@", "Added by Tron at the start of every turn")).firstMatch
+        XCTAssertTrue(tronPurpose.waitForExistence(timeout: 3), app.debugDescription)
+        XCTAssertTrue(app.staticTexts["Tron module tron-core"].exists, app.debugDescription)
+        app.buttons["agent-instructions-section-project_context"].tap()
+        let agents = app.buttons["agent-instructions-entry-project_context.0"]
+        XCTAssertTrue(agents.waitForExistence(timeout: 3), app.debugDescription)
+        XCTAssertTrue(agents.label.contains("~/Workspace/project/AGENTS.md"), agents.label)
+        keepScreenshot(named: "agent-instructions-tron-project")
+
+        agents.tap()
+        let fileBody = app.descendants(matching: .any).matching(NSPredicate(
+            format: "label CONTAINS %@ OR value CONTAINS %@", "Code, tests, and docs ship together.", "Code, tests, and docs ship together."
+        )).firstMatch
+        XCTAssertTrue(fileBody.waitForExistence(timeout: 5), app.debugDescription)
+        keepScreenshot(named: "agent-instructions-file-reader")
+    }
+
     @MainActor
     func testExtensionWidgetsSheetKeepsContentReachableAtAccessibilityXXXL() {
         let app = XCUIApplication()

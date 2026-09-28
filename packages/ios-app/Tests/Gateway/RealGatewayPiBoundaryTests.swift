@@ -207,6 +207,7 @@ final class RealGatewayPiBoundaryTests: XCTestCase {
         let configured = try await synchronizedOpen(client: firstClient, sessionID: created.sessionId)
         XCTAssertEqual(configured.session.model?.provider, "tron-e2e")
         XCTAssertEqual(configured.session.model?.id, "e2e-model")
+        try await assertAgentInstructions(client: firstClient, sessionID: created.sessionId, workspace: workspace)
 
         let reconnectPrompt = "continue while disconnected"
         let commandID = UUID().uuidString
@@ -581,6 +582,36 @@ final class RealGatewayPiBoundaryTests: XCTestCase {
         let opened = try await synchronizedOpen(client: client, sessionID: sessionID)
         try await closeSubscription(client: client, sessionID: sessionID, token: opened.subscriptionToken)
         return opened.session
+    }
+
+    /// The Agent Instructions sheet decodes the real Gateway projection: the
+    /// workspace AGENTS.md is attributed to its file, Pi's own tools to Pi, and
+    /// the per-turn Tron context closes the exact prompt text.
+    private func assertAgentInstructions(client: GatewayClient, sessionID: String, workspace: String) async throws {
+        let context = try await client.requestValue("session.context", SessionParams(sessionId: sessionID), timeout: .seconds(15))
+        let instructions = try XCTUnwrap(AgentInstructionsProjection(context: context), "session.context must carry instructions")
+        let outline = instructions.sections.map { section in
+            "\(section.id) timing=\(section.perTurn ? "turn" : "session") chars=\(section.text.count) entries="
+                + section.entries.map { "\($0.name ?? "-")@\($0.source.kind)" }.joined(separator: ",")
+        }.joined(separator: "\n")
+        let attachment = XCTAttachment(string: outline)
+        attachment.name = "agent-instructions-outline"
+        attachment.lifetime = .keepAlways
+        add(attachment)
+
+        XCTAssertEqual(instructions.sections.first?.id, "preamble")
+        let tron = try XCTUnwrap(instructions.sections.last)
+        XCTAssertEqual(tron.id, "tron")
+        XCTAssertTrue(tron.perTurn)
+        XCTAssertTrue(tron.text.contains(workspace))
+        XCTAssertTrue(instructions.text.hasSuffix("\n\n" + tron.text))
+        let project = try XCTUnwrap(instructions.sections.first { $0.id == "project_context" })
+        XCTAssertEqual(project.entries.map(\.path), ["\(workspace)/AGENTS.md"])
+        XCTAssertEqual(project.entries.first?.text, "# E2E Project Rules\n\nKeep the boundary fixture honest.\n")
+        XCTAssertEqual(project.entries.first?.source.kind, "file")
+        let tools = try XCTUnwrap(instructions.sections.first { $0.id == "tools" })
+        XCTAssertEqual(tools.entries.first { $0.name == "bash" }?.source.kind, "pi")
+        XCTAssertEqual(tools.entries.first { $0.name == "ask_user" }?.source.name, "tron-ask-user")
     }
 
     private func synchronizedOpen(

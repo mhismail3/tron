@@ -250,6 +250,8 @@ start_fresh_fixture() {
   chmod 700 "$tron_home" "$tron_home/gateway" "$gateway_home" "$workspace"
   gateway_home="$(realpath "$gateway_home")"
   workspace="$(realpath "$workspace")"
+  # Project instructions the Agent Instructions projection must attribute.
+  printf '# E2E Project Rules\n\nKeep the boundary fixture honest.\n' >"$workspace/AGENTS.md"
   python3 - "$tron_home/gateway/gateway.json" <<'PY'
 import json, os, sys
 path = sys.argv[1]

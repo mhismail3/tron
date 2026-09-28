@@ -533,14 +533,13 @@ final class SessionSheetPresentationTests: XCTestCase {
         }
     }
 
-    func testInstructionsRetainThePreparedDocumentAcrossCoverAndUncover() async throws {
+    func testInstructionsReaderRetainsThePreparedDocumentAcrossCoverAndUncover() async throws {
         let instructions = "# Project Rules\n\n" + String(repeating: "Preserve **user data** and read the owning docs.\n\n", count: 400)
         try await withModel { model in
-            model.installHostedSecondaryProjection(
-                context: .object(["systemPrompt": .string(instructions)]), tree: [], commands: [], resources: nil
-            )
             let activity = DocumentSurfaceActivity()
-            try await self.withSheet(AgentInstructionsSheet(sessionID: "document-fixture")
+            try await self.withSheet(TronDocumentSheet(title: "Full Prompt") {
+                PreparedAgentInstructions(instructions: instructions)
+            }
                 .environment(model)
                 .environment(\.tronPresentationActivity, activity.value)) { controller in
                 let mounted = await self.waitForFirstView(of: UIScrollView.self, in: controller.view)

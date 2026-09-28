@@ -1596,8 +1596,10 @@ configuration and the fixture source is guarded accordingly.
 The hosted real-Gateway boundary test owns one narrow integration contract: the
 iOS pairing and transport clients connect to the selected Pi runtime, accepted
 work survives transport retirement, a new connection decodes canonical
-completion, extension interactions round-trip, and a parallel tool group settles
-once. Its foreground-reconnect case restarts the private Gateway while the
+completion, extension interactions round-trip, a parallel tool group settles
+once, and the Agent Instructions projection decodes with the fixture workspace
+`AGENTS.md`, Pi tools, and the per-turn Tron context attributed (retained as the
+`agent-instructions-outline` attachment). Its foreground-reconnect case restarts the private Gateway while the
 session is active, then verifies lifecycle auto-reconnect, one canonical copy of
 the accepted prompt, the session snapshot, and exactly one settled catalog row.
 It deliberately excludes SwiftUI, visual, settings, picker, navigation, and
@@ -1764,8 +1766,11 @@ catalog labels and existing compaction admission; `SessionPresentationStoreTests
 pending model selection and narrow authoritative projection. `SessionSettingPresentationTests`
 covers immediate pending choices, reset semantics, exact-request rollback, scope replacement,
 and shared Extra High labels without rewriting authored content. Project Resources must omit Context Files
-and `AGENTS.md` rows. Agent Instructions opens the full document directly with no summary
-or capabilities screen, using the same large-only adaptive teal document chrome as the workspace sheet:
+and `AGENTS.md` rows. Agent Instructions lists the Gateway's attributed sections collapsed in
+reading order (`TronSmokeUITests.testAgentInstructionsSectionsExpandWithTheirSources` taps sections open
+and closed on the `-tron-agent-instructions-fixture` host and retains screenshots),
+with View Full Prompt and instruction files opening the document reader, using the same large-only
+adaptive teal document chrome as the workspace sheet:
 custom top blur, icon-only Done, and no opaque bottom bar. Project Resources, Session History, and
 Subagent History titles and toolbar actions must use the inherited teal accent. Resource
 categories are ordered Skills, Subagents, Prompts, Tools, then Commands; package Provides groups use the same order, followed by Themes. Resource detail sheets show only the description and bounded body content; their toolbar info action opens the complete metadata and technical JSON without a second content read. Titles, Done actions, icons, and cards explicitly use the chat resource theme for prompts and skills rather than inheriting the overview tint: prompts are purple and skills cyan; extension and tool categories retain their existing colors. Project Resources and chat share the body renderer and info sheet. Completed empty reads show an empty-content message; unavailable session reads settle with a retry instead of an indefinite loading state. Tools and extensions without supported body reads retain their metadata behind Info. Skill chips use the same cyan as their picker, not the general information-blue palette. Subagent pills use their card accent for icons and text, with compact vertical padding. Started timestamps and terminal timestamps (history, immediately before elapsed duration with a small middle-dot separator on the same line) share monospace styling; missing terminal times stay absent. Session History toolbar and older/newer paging actions explicitly use the sheet teal for icons and text in both appearances. Session History entry details have no end-of-content or metadata footer; navigation controls appear only for multipart content. Verify package/inline extension names

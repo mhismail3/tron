@@ -100,6 +100,8 @@ struct TronMobileApp: App {
                     .tronSettingsVisualTheme(accent: .tronPurple)
             } else if ProcessInfo.processInfo.arguments.contains("-tron-extension-widgets-fixture") {
                 HostedExtensionWidgetsFixtureView()
+            } else if ProcessInfo.processInfo.arguments.contains("-tron-agent-instructions-fixture") {
+                HostedAgentInstructionsFixtureView()
             } else {
                 SceneRootView(model: hostedModel, colorScheme: nil)
                     .environment(hostedModel)

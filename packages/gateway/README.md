@@ -1782,7 +1782,15 @@ Requests may supply all three expected identities; the
 Gateway fails retryably if runtime replacement or tree navigation changed any boundary
 while the request was in flight. Oversized responses return
 a correlated protocol error instead of disconnecting the device. `session.context`
-and `session.resources` return runtime-native resource projections. The resource
+and `session.resources` return runtime-native resource projections. `session.context`
+also carries `instructions` (`src/sessions/agent-instructions.ts`): the exact system
+prompt the model receives for a turn, split into Pi's sections plus the per-turn
+Tron operating context, with each section, tool line, rule, skill, and instruction file
+attributed to Pi, a Tron module, a package, a local file, or an MCP connection. Pi does
+not expose its section map, so the Gateway splits the rendered text; file-backed
+bodies are matched exactly, every byte stays in one section, and a prompt without Pi's
+structure is returned verbatim as one `prompt` section. The additive field leaves
+protocol version 5 unchanged; `systemPrompt` remains Pi's base prompt. The resource
 projection includes display-safe extension, prompt, skill, context-file, and tool
 metadata while canonical resource files and runtime loaders remain authoritative.
 Extension entries also expose the public loader handler event names and bounded

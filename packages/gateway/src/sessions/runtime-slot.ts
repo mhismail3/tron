@@ -122,6 +122,8 @@ import { notifyTronAgentTerminal, type AgentTerminalOutcome } from "../notificat
 import type { ScheduleToolOperations } from "../automations/tron-schedule-extension.js";
 import type { DisplayArtifactStore } from "../display/display-artifact-store.js";
 import type { TronWorkspace } from "../workspace/tron-workspace.js";
+import { tronContext } from "../workspace/tron-core-extension.js";
+import { projectAgentInstructions, type AgentInstructions } from "./agent-instructions.js";
 import { admitToolDisplayProjection, displayArtifactIDs } from "../display/display-contract.js";
 import type { BrowserLiveViewRegistry } from "../display/browser-live-view.js";
 import { DirectBashProcessOwner } from "./direct-bash-process-owner.js";
@@ -7716,11 +7718,16 @@ export class RuntimeSlot {
     return content === undefined ? command : { ...command, ...boundCommandContent(content) };
   }
 
-  context(): JsonValue {
+  async context(): Promise<JsonValue> {
+    this.assertNoTrustReload();
+    const workspace = await this.dependencies.workspace.describe();
     this.assertNoTrustReload();
     const session = this.runtime.session;
     return safeJson({
+      // Older clients read Pi's base prompt; `instructions` is the complete
+      // attributed prompt the model receives, including the per-turn context.
       systemPrompt: session.systemPrompt,
+      instructions: this.agentInstructions(tronContext(workspace, this.cwd, session.getActiveToolNames())),
       contextUsage: session.getContextUsage(),
       stats: session.getSessionStats(),
       activeTools: session.getActiveToolNames(),
@@ -7728,6 +7735,24 @@ export class RuntimeSlot {
       commands: this.commands(),
       ...this.resourcesValue(),
       diagnostics: this.runtime.diagnostics,
+    });
+  }
+
+  private agentInstructions(turnContext: string): AgentInstructions {
+    const session = this.runtime.session;
+    const loader = session.resourceLoader;
+    const customPrompt = loader.getSystemPrompt();
+    const appendTexts = loader.getAppendSystemPrompt();
+    const appendPaths = loader.getAppendSystemPromptSources().map((source) => source.path);
+    return projectAgentInstructions({
+      prompt: session.systemPrompt,
+      tronContext: turnContext,
+      ...(customPrompt ? { customPrompt: { text: customPrompt, ...(loader.getSystemPromptSource() ? { path: loader.getSystemPromptSource()!.path } : {}) } } : {}),
+      // Paths pair with texts only when every append source is a file.
+      append: appendTexts.map((text, index) => ({ text, ...(appendPaths.length === appendTexts.length ? { path: appendPaths[index]! } : {}) })),
+      contextFiles: loader.getAgentsFiles().agentsFiles,
+      skills: loader.getSkills().skills,
+      tools: session.getAllTools(),
     });
   }
 

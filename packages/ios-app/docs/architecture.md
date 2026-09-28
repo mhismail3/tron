@@ -1969,7 +1969,7 @@ Hooks sheet. Resource
 read failures are fenced to the mounted session and render retryable error state.
 Instruction files such as `AGENTS.md`
 have no duplicate row or Context Files section there: their assembled guidance belongs in
-Agent Instructions, which opens the complete document directly. Canonical resource discovery
+Agent Instructions, which lists each file under Project Instructions. Canonical resource discovery
 is unchanged. Project Resources, Session History, and Subagent History use the originating Manage Session teal titles and
 toolbar actions to match their originating Session rows. Resource detail chrome instead
 matches its own category accent. Project Resource titles prefer authored labels, otherwise
@@ -2060,10 +2060,17 @@ performance measurements.
 Gateway produces that audit from a newline-terminated canonical byte cut captured briefly under the live runtime lane.
 The bounded file copy and HTML rendering continue outside that lane, so running, retrying, compacting, and Bash-active
 sessions remain exportable while later appends are deterministically excluded. JSONL does not linearize only the active branch.
-Agent Instructions presents only the complete assembled `systemPrompt` from the existing
-subscription-scoped context projection, rendered with the shared `TronMarkdownView` block renderer
-(headings, lists, tables, quotes, and code) in a selectable scroll surface. Its Markdown document is prepared by the shared detached detail-preparation owner, keyed to the exact assembled source, so a covered or reopened sheet reuses the completed document instead of re-parsing the prompt on the main thread. There is no intervening summary, accounting,
-capabilities inventory, or Read Full Instructions navigation step. It shares `TronDocumentSheet`
+Agent Instructions presents the Gateway's attributed `instructions` projection from the existing
+subscription-scoped context projection (`AgentInstructionsProjection`). Sections appear collapsed,
+numbered in the order the model reads them; opening one explains its purpose and names its source,
+and lists its attributed entries (tools, rules with their contributing tools, skills, and whole
+instruction files). The per-turn Tron operating context is marked **Each turn**. The splitting and
+attribution belong to the Gateway; the app only decodes and words them. Instruction files, long
+section bodies, and View Full Prompt open a nested document reader rendered with the shared
+`TronMarkdownView` block renderer (headings, lists, tables, quotes, and code) in a selectable scroll
+surface. That document is prepared by the shared detached detail-preparation owner, keyed to the exact
+source, so a covered or reopened reader reuses the completed document instead of re-parsing it on the
+main thread. Text a model provider adds to each request is outside the projection and is not shown. It shares `TronDocumentSheet`
 with file previews: large-only presentation, blue title and icon-only Done, hidden native
 navigation background and bottom toolbar, a continuous document background, and the custom
 top blur supplied by the scroll owner. Plain file-preview native document viewports extend through the bottom
