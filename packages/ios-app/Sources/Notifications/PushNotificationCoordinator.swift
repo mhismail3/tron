@@ -66,10 +66,11 @@ struct PushGrant: Codable, Equatable, Sendable {
     /// this exact grant, and the grant projection revision that runtime
     /// advertised. A reconnect re-sends the registration only while the stored
     /// grant matches the current device token, route and relay origin and both
-    /// of these still describe the connected Gateway: the revision is what
-    /// makes a grant the Gateway disabled at runtime (a relay rejection) or
-    /// retired at restart visible to the phone, and the identity keeps an
-    /// acknowledgement from crossing to a different Gateway or payload (G-7).
+    /// of these still describe the connected Gateway (G-7): the revision is
+    /// derived from the grants the Gateway stores, so it is what makes a grant
+    /// the Gateway disabled at runtime (a relay rejection) or retired on a
+    /// restart visible to the phone, and the identity keeps an acknowledgement
+    /// from crossing to a different Gateway or payload.
     var acknowledgedRuntime: String? = nil
     var acknowledgedRegistrationRevision: String? = nil
 }
