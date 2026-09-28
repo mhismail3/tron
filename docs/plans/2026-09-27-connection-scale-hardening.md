@@ -28,6 +28,8 @@
 
 - **Last updated:** 2026-09-28, G-10 second review round (receipt totals kept across a rebuild, connection-owner row added)
 
+- **Last updated:** 2026-09-28, G-9 background-work scheduler: catalog reconciliation, receipt pruning and attachment/display maintenance now share one scheduler that yields to requests; the libuv pool measurement was host-limited and the launcher is unchanged
+
 - **Last updated:** 2026-09-28, G-8 background work audit: third review round corrected the re-admission fence, the socket promise and the discovery-open ceiling
 
 - **Last updated:** 2026-09-28, G-1b catalog watcher (review round 2: spurious whole-folder passes, true `catalog.changed` bound, O-6a evidence)
@@ -582,12 +584,12 @@ rows are in priority order.
 | G-10a | Done | Connection owner: a read (e.g. knowledge.raindrop.read) must not fsync — skip an unchanged provider observation in ConnectionOwner.recordProviderObservation, preserving stateRevision/updatedAt semantics | G-10 | orchestrator-dispatched deepseek-worker, 2026-09-28 |
 | C-3 | Ready | Faster retry (D-4): about 5 s transport-open deadline, immediate retry on path change | C-1 | |
 | C-4 | Done | Truer liveness (D-4): any inbound frame proves liveness | O-4 | orchestrator-dispatched deepseek-worker, 2026-09-28 |
-| C-6 | Claimed | Cancel frame for disposable reads; a retried `session.open` joins the in-flight one | O-3 | orchestrator-dispatched deepseek-worker, 2026-09-28 |
+| C-6 | Done | Cancel frame for disposable reads; a retried `session.open` joins the in-flight one | O-3 | orchestrator-dispatched deepseek-worker, 2026-09-28 (the O-6a slow-open confirmation and the qualification run are the orchestrator's) |
 | G-12 | Ready | Server-side deadlines, concurrency caps and heap-pressure shedding with typed retry hints | O-3, O-5 | |
 | G-2 | Ready | Cold open in bounded time from the index and a single-file fence | G-1c | |
 | G-7 | Done | Reconnect diet: send only what changed | O-1, O-6a | orchestrator-dispatched deepseek-worker, 2026-09-28; both review rounds addressed, R-1/R-4 own the real-reconnect measurement |
 | G-11 | Claimed | Event-loop budget: find and bound every synchronous task over 50 ms | O-5, O-6a | orchestrator-dispatched deepseek-worker, 2026-09-28 |
-| G-9 | Claimed | One background-work scheduler that yields to requests; measure the libuv pool size | O-5, G-1b | orchestrator-dispatched deepseek-worker, 2026-09-28 |
+| G-9 | Done | One background-work scheduler that yields to requests; measure the libuv pool size | O-5, G-1b | orchestrator-dispatched deepseek-worker, 2026-09-28 (the libuv pool comparison and the O-6a latency confirmation are owed by the orchestrator's quiet-host run; the background `node_modules` clone in this worktree is private) |
 | G-4 | Done | Outbound queue coalescing of superseded snapshots (one covering `session.rebaseline`) and summary revisions by key | G-3 | orchestrator-dispatched deepseek-worker, 2026-09-28 (branch `hardening/g-4`; review round 1 addressed: a superseded sequence is covered by the `session.rebaseline` that replaces it; round 2: only state the snapshot fully re-states and only its own runtime generation, a one-shot frame is a fence; round 3 after merging `hardening/integration`: the replacement path's client is asserted on the authority it installs, covered `session.snapshot`/`session.rebaseline` alike, and the round's fixtures speak protocol 6); the O-6b bandwidth-stream before/after numbers are owed to the orchestrator's quiet-host runs |
 | G-5 | Done | Byte budget for live runtimes and an explicit heap limit | O-5 | orchestrator-dispatched deepseek-worker, 2026-09-28 |
 | E-3a | Claimed | LAN endpoint (D-5), Gateway side: pinned TLS listener bound to the private LAN address | O-1, O-2 | orchestrator-dispatched deepseek-worker, 2026-09-28 |
@@ -7849,3 +7851,162 @@ wait).
   `lease.lock` means a named-lane command ran in the default lane; treat it as
   evidence of a lane/lease mismatch, and check `TRON_IOS_TEST_LEASE_LOCK` when a
   command is refused (74) with "inherited iOS test lease covers".
+
+### C-6 · Done · 2026-09-28 · orchestrator-dispatched deepseek-worker (branch `hardening/c-6`)
+
+- Commits: `14d9ba665` (gateway transport: cancel frame, joined opens), `e31d21592` (iOS: cancel frame + `rpc.cancelled`), `02038e7f4` (records, docs, plan row), `57ac20dce` (cancellation stage naming), on `hardening/c-6` merged with `hardening/integration` at `d3aecb11e`.
+- Result: protocol 6 gains `{type:"cancel",id}` (no response). The Gateway aborts
+  that request's controller, a cancelled request writes one `rpc.cancelled`
+  record instead of `rpc.completed` (debug under `SLOW_RPC_WARNING_MS`, warning
+  at or above it) carrying `stage` (innermost open stage or wait) plus the span
+  breakdown, and a second `session.open` for the same connection and session
+  joins the attempt already in flight: one invocation answers both requests with
+  the same result. The shared attempt is abandoned only when its last waiting
+  request leaves, and a cancel for an already-answered, already-cancelled or
+  never-admitted id changes nothing. The phone sends the frame for the nine
+  disposable reads in `GatewayDisposableReadPolicy` when a request times out or
+  is cancelled after it may have been sent, and logs `rpc.cancelled`; mutations
+  and prompts are never cancelled.
+- Evidence: `cd packages/gateway && npx vitest run
+  src/transport/sync-protocol.integration.test.ts` — 5/5 pass. The new case
+  (`disposable read cancellation`) proves, in order: the retry joins (one
+  `session.open` invocation for two requests), cancelling the first leaves the
+  shared attempt running (`aborts == []`), cancelling the last waiter aborts it
+  (one fake-service abort), neither cancelled request is answered, the records
+  carry `stage=session.open.attempt` / `stage=session.open.join`, an unknown-id
+  cancel and a cancel after a delivered response add no record, and the next
+  open for that session starts fresh work and answers normally (no leaked
+  reservation or barrier). The join itself is also asserted in the existing
+  overlapping-open case (`startedCounts == 1`, identical result payloads).
+  Merge gate green on the merged branch: `npx vitest run
+  src/transport/session-archive.integration.test.ts
+  src/transport/server-capacity.integration.test.ts
+  src/transport/sync-protocol.integration.test.ts
+  src/transport/stall-diagnostics.test.ts
+  src/transport/server-heartbeat.integration.test.ts
+  src/transport/server-http-lifecycle.integration.test.ts` — 132/132;
+  `npx vitest run src/sessions/runtime-registry.integration.test.ts` — 257/257;
+  `npx vitest run src/transport/server-frame.test.ts
+  src/transport/request-span.test.ts src/transport/logger.test.ts` — 32/32;
+  `npx tsc --noEmit -p .` clean. iOS: `scripts/tron-ios-test run --only-testing
+  TronMobileTests/GatewayClientTransportTests` — 54/54 pass, including "a
+  timed-out disposable read sends a cancel frame, a mutation does not" (asserts
+  the exact `{"type":"cancel","id":…}` frame, that no frame follows a
+  `session.prompt` timeout, and one `rpc.cancelled` record); retained result
+  bundle `~/Library/Developer/Tron/ios/test-runs/20260928T194314Z-run.MOPcKv/`
+  (`20260928T200449Z-run.RGHCPR/` for the 55-test review-response run).
+- Deviations: `rpc.cancelled` replaced `rpc.completed` for a cancelled request
+  rather than joining it: one abandoned read is one record, and O-3's span
+  breakdown rides on it. Cancelling a `session.open` that another request still
+  waits for keeps the synchronization the attempt installed (the waiter delivers
+  that exact result); if the last waiter leaves without a delivered answer, the
+  request that owns the barrier releases it, so an abandoned open cannot make the
+  retry fail as `conflict`. The registry's shared runtime start is deliberately
+  not aborted with the wait: a retry (or another connection) joins the load
+  already in progress, which is the "shared work continues while a waiter
+  remains" half of the task; `packages/gateway/docs/observability.md` gains the
+  `rpc.cancelled` row and the `stage` field, the protocol section of
+  `packages/gateway/README.md` the frame, and the phone's `rpc.cancelled` row
+  sits in the iOS AppLog table.
+- Failure modes written first: cancel after the response was sent (no-op, no
+  record), cancel of an unknown id (no-op), join while the first open is
+  committing its subscription (the joiner waits for the attempt and replays its
+  payload), connection close with joined waiters (all requests abort, the shared
+  attempt aborts with the retired socket, the flight is released).
+- Review response (round 3, all findings): `57ac20dce`, `3c7d5386a` (Gateway),
+  `a502094f7` (iOS). A cancelled open hands its barrier to the shared attempt
+  whenever a waiter remains instead of releasing it under the retry, so a retry
+  that outlives its first request still gets the answer and synchronizes it. A
+  cancel for an answered `session.open` whose barrier the client never
+  synchronized revokes that barrier, unless another delivered response carries
+  the same token (each barrier tracks the request IDs that delivered its token),
+  so a retry in that window is answered instead of conflicting. `cancel`
+  obeys only `DISPOSABLE_READ_METHODS` (the phone's nine reads, named in the
+  README); a mutation, prompt or `session.sync` cancel is ignored. The phone
+  queues its cancel behind the request's own send, so it cannot name a request
+  the Gateway never admitted. Accepted deviation (finding 4): the registry's
+  shared runtime start, catalog load and attention reconciliation keep running
+  after the last waiter leaves, so a retry or another connection joins that work
+  instead of starting a second one. Evidence: the extended
+  `sync-protocol.integration.test.ts` case (join, revoke-only-unclaimed-barrier,
+  cancel-a-non-disposable-read, both-delivered-responses) fails on each reverted
+  fix (retry answered `conflict`, barrier never revoked, prompt never answered);
+  `GatewayClientTransportTests` 55/55, with its new ordering case failing (3
+  send invocations, cancel frame first) when the Swift fix is reverted. Merge
+  gate green on this branch merged with `hardening/integration` at `3d90561d4`.
+- Open: the `Done when`'s O-6a slow-open case is the orchestrator's qualification
+  run; this branch proves the mechanism it depends on (no duplicate-open failure,
+  no request-path work after the last waiter cancels) in the integration case
+  above.
+
+### G-9 · Done · 2026-09-28 · worker session (branch `hardening/g-9`)
+
+- Result: one `BackgroundWorkScheduler` (`packages/gateway/src/background-work.ts`)
+  runs registered jobs one slice at a time, yields with `setImmediate` between
+  slices, and starts nothing while a request is in flight or the loop's delay p99
+  is at or above `BACKGROUND_PAUSE_P99_MS` (50 ms), re-checking every
+  `BACKGROUND_PAUSE_RECHECK_MS` (100 ms). A rejecting slice is reported
+  (`background.slice` at warning) and never stops the scheduler or the jobs after
+  it. Moved under it: the session catalog's periodic reconcile (it registered
+  itself through `SessionCatalogOptions.backgroundWork`, defaulting to the
+  process-wide `backgroundWork` instance, so `runtime-registry.ts` was not
+  touched), command-receipt pruning, and the attachment/display-artifact
+  maintenance pass. Admission no longer prunes the receipt directory: only the
+  capacity boundary still forces one exact pass before it refuses. `gateway-main.ts`
+  starts the scheduler and owns both records; `activeRequestSpans()`
+  (`transport/request-span.ts`) is the in-flight-request signal.
+- Evidence:
+  - `npx vitest run src/background-work.test.ts` — 7/7 (the failure-mode list is
+    in the file header: a slice while a request is in flight, a slice at the p99
+    bound, two slices at once/no yield, a rejecting slice starving later jobs,
+    one `background.backlog` per starved spell rather than per re-check, and
+    `stop()` leaving a wake armed). Each case asserts the exact counts it
+    forbids: 0 slices against 1, an armed immediate against none, one backlog
+    record against two.
+  - `npx vitest run src/sessions/session-catalog.test.ts` — 29/29 (the periodic
+    pass now arrives from the scheduler: "repairs an event the platform never
+    delivered at the next interval pass"), `src/transport/command-receipts.test.ts`
+    — 27/27, `src/transport/request-span.test.ts` +
+    `src/transport/request-span.integration.test.ts` — 22/22.
+  - Merge gate on this branch merged with `hardening/integration` at `47630104f`:
+    the six-file transport set — 132/132; `src/sessions/runtime-registry.integration.test.ts`
+    — 257/257; `npx tsc --noEmit -p .` clean.
+  - Scheduler driven in a real Gateway (short O-6a smoke, `UV_THREADPOOL_SIZE=4`,
+    `scripts/tron-profile gateway --scenario multi-session --no-build --iterations
+    1 --catalog-files 300 --catalog-mib 200 --mixed-seconds 30 --cases none`):
+    the fixture Gateway logged `catalog.reconciled` (300 files in 38.0 s) and ran
+    to completion in 2.6 min. Report:
+    `~/Library/Developer/Tron/profiles/gateway/20260928T202515Z-multi-session-16b386/report.json`.
+- Not met, deliberately:
+  - **The libuv pool measurement (Do 3).** The smoke ran on a host at 1-minute
+    load 179 on 18 CPUs; the report's own warning is "host busy: 1-minute load
+    179.0 on 18 CPUs", with `session.list` p99 16.4 s, `session.open` cold p99
+    31.2 s, event-loop delay p99 403 ms and max 1,247 ms over a 30 s window —
+    two to three orders of magnitude above the exit criteria, so a 4-vs-8-vs-16
+    comparison would measure the host, not the pool. `UV_THREADPOOL_SIZE` is
+    unchanged in `packages/mac-app/scripts/tron-gateway-launcher.c`, because a
+    value set from that run would be an unmeasured change.
+  - **The "Done when" (O-6a latency targets hold while reconciliation runs).**
+    O-6a is Blocked on a quiet host, so no valid run exists; this branch proves
+    the mechanism (the schedule, the pause conditions, the records and the moved
+    jobs) and the smoke above proves it runs in a real Gateway. The confirmation
+    is owed by the orchestrator, which owns the probe, together with the pool
+    comparison (4/8/16 on one quiet host, comparing `latency.session_list.p99`,
+    `latency.prompt_admission.p99` and `gateway.event_loop.delay_p99`).
+- Deviations: the in-flight-request signal is the live `RequestSpan` count in
+  `packages/gateway/src/transport/request-span.ts` rather than a counter in
+  `transport/server.ts`: one span is exactly one admitted request (constructed at
+  admission, finished in the same `finally` that writes `rpc.completed` or
+  `rpc.cancelled`), and the transport zone is held by E-3a. The catalog takes the
+  scheduler as an injectable option defaulting to the process-wide instance, so
+  `runtime-registry.ts` needed no change while G-1c held it. Jobs are registered
+  by name; a second registration of one name replaces the first.
+- For the next agent: G-8c registers session-search indexing through
+  `backgroundWork.register({ name, intervalMs, slice })` (returned function
+  unregisters); the scheduler starts after the listener is serving, so a job
+  registered before that runs from its first due time. `background.slice` is
+  debug (memory only) and `background.backlog` warning; both have rows in
+  `packages/gateway/docs/observability.md` and the contract is in
+  `packages/gateway/README.md` ("Background work"). Nothing is running: the
+  profile fixture Gateway exited and the retained evidence stays under the run
+  directory above.
