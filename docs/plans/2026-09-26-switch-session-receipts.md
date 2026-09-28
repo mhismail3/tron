@@ -2,7 +2,7 @@
 
 - **Started:** 2026-09-26
 - **Status:** Active
-- **Last updated:** 2026-09-27, S-1
+- **Last updated:** 2026-09-27, S-2 claimed
 - **Goal:** A session reached through an extension command's `ctx.switchSession`, `ctx.newSession` or `ctx.fork` opens and projects normally, and the command's invocation receipts belong to exactly one session.
 
 ## Goal and constraints
@@ -43,7 +43,7 @@ Measured 2026-09-26:
 | ID | Status | Scope | Depends on | Owner |
 | --- | --- | --- | --- | --- |
 | S-1 | Done | Options for receipt ownership across a `preserve` rebind: stamp continuations with the origin session, settle the invocation before the switch, or re-key receipts. Present them to the user | none | session 01a0e513, 2026-09-27 |
-| S-2 | Ready | Implement S-1 option 1 (settle the command in the origin at Pi's handoff boundary) for every command-driven identity change (`switchSession`, `newSession`, `fork`), settle the command's work and marker, and deliver the identity change to clients subscribed to the origin, with real end-to-end tests that open both sessions | S-1 | |
+| S-2 | Claimed | Implement S-1 option 1 (settle the command in the origin at Pi's handoff boundary) for every command-driven identity change (`switchSession`, `newSession`, `fork`), settle the command's work and marker, and deliver the identity change to clients subscribed to the origin, with real end-to-end tests that open both sessions | S-1 || session 01a0e513, 2026-09-27 |
 
 ## Findings
 
