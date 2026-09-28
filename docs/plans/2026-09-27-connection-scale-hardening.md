@@ -559,7 +559,7 @@ rows are in priority order.
 | C-1 | Claimed | Projection work never blocks or parks reconnect; parked episodes self-resume | O-4, O-6b | orchestrator-dispatched deepseek-worker, 2026-09-28 |
 | G-1a | Done | Catalog owner and in-memory index fed by Gateway-owned changes | O-3, O-6a | orchestrator-dispatched deepseek-worker, 2026-09-28 |
 | G-1b | Done | Filesystem watcher and background reconciliation for external writers | G-1a | orchestrator-dispatched deepseek-worker, 2026-09-28 (the O-6a confirmation of the Done-when is owed by the orchestrator) |
-| G-1c | Claimed | Move every catalog reader to the index; delete request-path walks and the full-parse fallback | G-1b | orchestrator-dispatched deepseek-worker, 2026-09-28 |
+| G-1c | Claimed | Move every catalog reader to the index; delete request-path walks and the full-parse fallback | G-1b | WIP committed on `hardening/g-1c`; owning suite red (70/257) — resume list in the handoff entry |
 | G-1d | Ready | Replace the catalog wording in `connection-resilience.md` with the index contract (D-3) | G-1c | |
 | G-3 | Done | No audience, no projection: build and serialize snapshots only for subscribers | O-5, O-6a | orchestrator-dispatched deepseek-worker, 2026-09-28 (branch `hardening/g-3`; review round 1 addressed; CPU comparison and O-5's cross-check owed to the orchestrator) |
 | G-3a | Ready | Streaming progress for a session with no subscriber is still projected (`projectMessage` plus `safeJson` of the full message, up to once per 150 ms each); see G-3 handoff and review nit 8 | G-3 | |
@@ -7274,3 +7274,82 @@ wait).
   — pass. The disconnecting shape is read from the code and the contract
   constants (phone liveness retirement, the 25 s heartbeat tick and the close
   path), not reproduced: O-2's blackhole test uses a client that never gives up.
+
+### G-1c · Claimed · 2026-09-28 · orchestrator-dispatched deepseek-worker (branch `hardening/g-1c`)
+
+- Result: the source-level slice is implemented and compiles; the owning suite is
+  **red**, so this is a deliberate WIP commit for the resumed session, not a
+  mergeable one. Budget (90 min) ran out inside the test-rework slice.
+- Landed (runtime-registry.ts, -698/+165 lines):
+  - `catalogIndex(scope)` is the request path's only membership source: one
+    immutable in-memory cut of the owner's rows, user scope dropping `delegated`
+    rows, ambiguity from `duplicateSessionIds()` plus live-only collisions.
+  - `materializeCatalogSnapshot` (list/`catalog`/`pageSource`/search cut) and
+    `catalogAcquisition` (open, attention, automation, `workspaceForSession`,
+    `requirePersistedUserSession`, archive, delete) read that cut and do no I/O.
+  - `attentionEntryStillAdmitted` and the cold-open fence check the index plus
+    the target file's own stat and header only; `attentionLiveOnlyStillAdmitted`
+    asks the index; `sessionIDsForStorageMaintenance` returns indexed IDs plus
+    live slots; delete and archive take the index for membership and re-prove the
+    one file at their commit.
+  - Startup recovery (`recoverCanonicalAttention`, `recoverKnowledgeObservation`)
+    reconciles against the owner's rows.
+  - Readers join the owner's first cut (`awaitCatalogCut`, resolved by the
+    owner's first `catalog.reconciled`/`failed`/`incomplete` report) so a read
+    adds no walk of its own.
+  - Deleted: `validatedStructuralIndex`, `loadDurableCatalogIndex`,
+    `scanCatalogMaterialization`, `sharedCatalogStructureEvidence`,
+    `sharedCatalogSessionInfos`, `sessionInfos`, `withCatalogEvidence`,
+    `catalogIdentitiesForScope`, `catalogFactsDigest`,
+    `catalogEvidenceMatchesScope`, `hasRelevantUnstableFiles`, `sameStringSet`,
+    `dynamicAmbiguousSessionIDs`, `diskAmbiguousSessionIDs*`,
+    `catalogEvidenceMatchesIndexedUserScope`, `removeIndexedCatalogFile`,
+    `fallbackCatalogAcquisition`, `sdkCatalogIdentityFingerprint`,
+    `buildCatalogAcquisition(evidence)`, `publishCatalogAcquisition`,
+    `resolveCatalogAcquisition` and the acquisition promise/mutex/admission
+    cache, the cold-open final validation walk, and the `CatalogStructuralIndex`
+    and `CatalogAcquisitionAdmission` types with their digest fields.
+  - `catalogStructureEvidence()` is now the owner's scan seam only: the one
+    counted whole-folder walk.
+- Evidence: `npx tsc --noEmit -p .` clean; `npm run build` clean.
+  `catalog-discovery.test.ts` 2/2 and `session-catalog.test.ts` 29/29 pass
+  (the one run that paired them failed two `session-catalog.ts` cases under
+  parallel-file load; they pass alone, unchanged by this branch).
+- Red: `runtime-registry.integration.test.ts` **187 passed / 70 failed / 257**
+  (JSON report at `/tmp/g1c-full.json`). The failures are the rework this row
+  still owes, in five clusters:
+  1. ~20 cases spy on removed internals (`sessionInfos`,
+     `validatedStructuralIndex`, `fallbackCatalogAcquisition`,
+     `sharedCatalogStructureEvidence`). Their intent survives and each needs the
+     index-shaped assertion (read performs no walk; the owner's first cut is the
+     only walk).
+  2. Reader-path capacity/fallback/stability cases (`bounds recursive catalog
+     directories…`, `initializes storage without requiring catalog
+     presentation…`, `bounds discovered session count and bytes…`, `caps
+     canonical session path normalization concurrency`, the `fallback`/`unstable`
+     families) asserted `busy`/`catalog_changed` from a reader walk. Capacity and
+     instability are now the owner scan's and belong on `catalogReconciled`/
+     `reconcile()` expectations.
+  3. Cases that inject canonical files after `initialize()` need the
+     `settleCatalog` helper (now: force one owner `reconcile()` then `settled()`),
+     which is in this WIP.
+  4. `counts a walk a request waited on apart from background catalog walks`
+     must invert into this row's own evidence: a request-path walk count of
+     **0** while the owner's cut is joined.
+  5. Duplicate/delegated-topology semantics: `int8`-free cases such as
+     `recognizes only the exact delegated-session producer topology`, `keeps a
+     child mutation-protected when its parent ID is duplicated` and
+     `admits scaled short headers within the aggregate validation budget` show
+     the index cut currently publishes rows a whole-tree header pass would have
+     withheld (a `delegated`/`duplicate` mismatch to close in the cut, not in the
+     test).
+- Still owed after the suite is green: delete `CatalogDiscovery.sessionInfos`,
+  `buildCatalogSessionInfos` and the `maximumRetainedBytes` budget that only
+  those walks used, with `catalog-discovery.test.ts` and the integration case at
+  `runtime-registry.integration.test.ts:3483` pruned; the O-5 request-path-walk
+  counter evidence and the O-6a smoke (`--no-build`, `--mixed-seconds 30`); the
+  `session.list` p99 number (orchestrator's quiet-host run); and G-1d's doc
+  wording.
+- Deviations: readers join the owner's first cut rather than serving a
+  pre-reconcile durable cut ("marked stale in the span"); that keeps a restart's
+  first list correct and is recorded here for review.

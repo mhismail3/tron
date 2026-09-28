@@ -60,16 +60,17 @@ function subscribeAudience(registry: RuntimeRegistry, sessionId: string): void {
   registry.subscribe("test-audience", sessionId);
 }
 
-/** The catalog owner is the durable document's only writer, and it writes from
- * its own cut rather than from a reader's materialization. Settling it is what
- * makes the document current, without waiting out the persist debounce. */
+/** A test that writes canonical files itself is an external writer: the folder
+ * watcher observes it, but no reader polls for it. Forcing one owner reconcile
+ * is the deterministic equivalent of waiting the watcher out, and settling the
+ * owner then makes its rows and the durable document current without waiting
+ * out the persist debounce. */
 async function settleCatalog(registry: RuntimeRegistry): Promise<void> {
+  await catalogOwner(registry).reconcile();
   await catalogOwner(registry).settled();
 }
 
-/** The registry's catalog owner, the object under test for the index's rows.
- * G-1c switches the read paths onto it; until then no RPC publishes a row, so a
- * test that asserts one reads the owner itself. */
+/** The registry's catalog owner: the index every read path serves from (G-1c). */
 function catalogOwner(registry: RuntimeRegistry): SessionCatalog {
   return (registry as unknown as { sessionCatalog: SessionCatalog }).sessionCatalog;
 }
