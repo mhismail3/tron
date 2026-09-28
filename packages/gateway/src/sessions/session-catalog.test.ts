@@ -34,6 +34,9 @@ import {
 //    stale pass must not publish the removed row back.
 // 7. An append that lands between a summary's parse and its stamp: the row must
 //    not claim an offset past a message it never counted.
+// 8. Shutdown during a startup reconcile with a durable document present: the
+//    owner must stop the pass within one batch instead of waiting for every
+//    candidate to be verified, appended or parsed.
 
 const roots: string[] = [];
 
@@ -268,6 +271,52 @@ describe("SessionCatalog", () => {
     expect(await index.load(sessions)).toHaveLength(1);
   });
 
+  it("stops a startup reconcile within one batch when the owner is disposed", async () => {
+    const { sessions, index, source, indexPath } = await fixture();
+    const fileCount = 64;
+    for (let ordinal = 0; ordinal < fileCount; ordinal += 1) {
+      await writeSession(join(sessions, "workspace", `${ordinal}.jsonl`), `id-${ordinal}`, sessions, [`prompt ${ordinal}`]);
+    }
+    // A first owner leaves a durable document that covers every file, which is
+    // the ordinary restart: the next owner reads the document instead of the
+    // bodies.
+    const first = new SessionCatalog({ catalogRoot: () => sessions, index, source });
+    first.start();
+    await first.settled();
+    await first.dispose();
+    const document = await readFile(indexPath, "utf8");
+
+    // Every file grew outside the Gateway, so no durable row proves unchanged
+    // and the restarted owner owes each candidate at least a tail append and,
+    // once that cannot advance the row, a whole-body parse.
+    for (let ordinal = 0; ordinal < fileCount; ordinal += 1) {
+      await appendMessage(join(sessions, "workspace", `${ordinal}.jsonl`), "grown outside the owner", ordinal);
+    }
+    const append = vi.spyOn(index, "append").mockResolvedValue(undefined);
+    const realSummaryFor = source.summaryFor.bind(source);
+    const parses: string[] = [];
+    const summaryFor = vi.spyOn(source, "summaryFor").mockImplementation(async (path) => {
+      parses.push(path);
+      await new Promise((resolve) => setTimeout(resolve, 20));
+      return realSummaryFor(path);
+    });
+    try {
+      const restarted = new SessionCatalog({ catalogRoot: () => sessions, index, source });
+      restarted.start();
+      while (parses.length === 0) await new Promise((resolve) => setImmediate(resolve));
+      await restarted.dispose();
+      // One batch (RECONCILE_CONCURRENCY candidates) at most: a shutdown that
+      // waited for the other three batches would parse all 64 files.
+      expect(parses.length).toBeLessThanOrEqual(16);
+      // A stopped pass publishes nothing and owes no write, so the document the
+      // next startup reads is the one the first owner left.
+      expect(await readFile(indexPath, "utf8")).toBe(document);
+    } finally {
+      summaryFor.mockRestore();
+      append.mockRestore();
+    }
+  });
+
   it("does not publish a row back after a removal announced during its read", async () => {
     const { sessions, catalog, index, source } = await fixture();
     const removed = join(sessions, "workspace", "a.jsonl");
@@ -292,6 +341,9 @@ describe("SessionCatalog", () => {
     scan.mockRestore();
     expect(catalog.rows().map((row) => row.id)).toEqual(["id-b"]);
     expect((await index.load(sessions))?.map((row) => row.id)).toEqual(["id-b"]);
+    // The removal's own lane work consumed the marker, so deletions cannot
+    // accumulate in the owner's state for the life of the process.
+    expect((catalog as unknown as { removalGenerations: Map<string, number> }).removalGenerations.size).toBe(0);
 
     // The guard covers the pass that read before the removal; a later pass
     // proves membership from the folder again, and the file is still there.

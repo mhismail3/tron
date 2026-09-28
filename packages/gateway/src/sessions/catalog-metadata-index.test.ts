@@ -240,6 +240,57 @@ describe("CatalogMetadataIndex", () => {
     expect(maximumInFlight).toBe(16);
   });
 
+  it("stops a pass at the first file it cannot prove when its caller asks", async () => {
+    // Requirement: the pre-index acquisition path throws its whole cut away when
+    // one candidate is unprovable, so parsing the candidates after that one can
+    // only cost a cold list time. A caller that says "stop at the first unproven
+    // file" must end the pass there and still see every remaining candidate
+    // reported as unproven.
+    const f = await fixture();
+    const index = new CatalogMetadataIndex(f.gateway);
+    const files = [f.path];
+    for (let number = 1; number < 24; number += 1) {
+      const path = join(f.catalog, `session-${number}.jsonl`);
+      await writeFile(path, `${JSON.stringify({ type: "session", version: 3, id: `session-${number}`, timestamp: "2026-01-01T00:00:00.000Z", cwd: "/workspace" })}\n`);
+      files.push(path);
+    }
+    const rows = (await Promise.all(files.map((path, number) => index.entryFromSummary({
+      ...summary(path), id: number === 0 ? "session" : `session-${number}`,
+    })))).filter((row): row is NonNullable<typeof row> => row !== undefined);
+    await index.save(f.catalog, rows);
+    // Rewrite every session in place with the same byte length, so every
+    // candidate is stale and reaches the rebuild callback this test observes.
+    for (const path of files) {
+      const header = JSON.parse((await readFile(path, "utf8")).trim()) as Record<string, string>;
+      await writeFile(path, `${JSON.stringify({ ...header, timestamp: "2027-02-02T02:02:02.000Z" })}\n`);
+    }
+    const candidates = rows.map((row) => ({
+      path: row.path, id: row.id, cwd: row.cwd, fileIdentity: row.fileIdentity, size: row.size, mtimeMs: row.mtimeMs,
+    }));
+    const unprovable = candidates[1]!.path;
+    const rebuilt: string[] = [];
+    const reconciled = await index.reconcile(f.catalog, candidates, async (candidate) => {
+      rebuilt.push(candidate.path);
+      // The second candidate's file proves unreadable, like a transcript whose
+      // last line is still being written.
+      if (candidate.path === unprovable) return undefined;
+      return {
+        id: candidate.id,
+        path: candidate.path,
+        cwd: candidate.cwd,
+        firstMessage: "rewritten",
+        createdAt: "2026-01-01T00:00:00.000Z",
+        updatedAt: "2027-02-02T02:02:02.000Z",
+        messageCount: 0,
+      };
+    }, ({ unproven }) => unproven > 0);
+    // 16 is RECONCILE_CONCURRENCY: the batch that held the unprovable file ran,
+    // and the batch after it was never parsed.
+    expect(rebuilt).toHaveLength(16);
+    expect(reconciled?.rows).toHaveLength(15);
+    expect(reconciled?.unproven).toEqual([unprovable, ...candidates.slice(16).map((candidate) => candidate.path)]);
+  });
+
   it("updates exact summary fields from newline-complete appended bytes", async () => {
     const f = await fixture();
     const index = new CatalogMetadataIndex(f.gateway);

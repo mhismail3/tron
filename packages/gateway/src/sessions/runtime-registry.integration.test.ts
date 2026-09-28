@@ -54,6 +54,13 @@ async function waitUntil(predicate: () => boolean, timeoutMs = 5_000): Promise<v
   }
 }
 
+/** The catalog owner is the durable document's only writer, and it writes from
+ * its own cut rather than from a reader's materialization. Settling it is what
+ * makes the document current, without waiting out the persist debounce. */
+async function settleCatalog(registry: RuntimeRegistry): Promise<void> {
+  await (registry as unknown as { sessionCatalog: { settled: () => Promise<void> } }).sessionCatalog.settled();
+}
+
 describe.sequential("RuntimeRegistry with the pinned agent runtime", () => {
   const previousAgentDir = process.env.PI_CODING_AGENT_DIR;
   const registries: RuntimeRegistry[] = [];
@@ -339,7 +346,8 @@ describe.sequential("RuntimeRegistry with the pinned agent runtime", () => {
     // complete sidecar used by the restart half of this regression.
     await cold.list("all");
     const indexPath = join(fixture.root, "tron-cold", "gateway", "catalog-metadata-v2.json");
-    await waitUntil(() => existsSync(indexPath));
+    await settleCatalog(cold);
+    expect(existsSync(indexPath)).toBe(true);
     await cold.dispose();
     registries.splice(registries.indexOf(cold), 1);
 
@@ -1424,7 +1432,8 @@ describe.sequential("RuntimeRegistry with the pinned agent runtime", () => {
     fixture.manager.appendMessage(fauxAssistantMessage("initial canonical body"));
     await fixture.registry.catalog("all");
     const indexPath = join(fixture.root, "tron", "gateway", "catalog-metadata-v2.json");
-    await waitUntil(() => existsSync(indexPath));
+    await settleCatalog(fixture.registry);
+    expect(existsSync(indexPath)).toBe(true);
     await fixture.registry.dispose();
     const restarted = new RuntimeRegistry({
       agentDir: fixture.agentDir,
@@ -1438,6 +1447,9 @@ describe.sequential("RuntimeRegistry with the pinned agent runtime", () => {
     });
     registries.push(restarted);
     await restarted.initialize();
+    // The owner reconciles behind the listener. Settle it, so the only append
+    // left in this case's window belongs to the reader.
+    await settleCatalog(restarted);
     const internals = restarted as unknown as { sessionInfos: () => Promise<unknown[]> };
     const scanner = vi.spyOn(internals, "sessionInfos");
     const append = vi.spyOn(CatalogMetadataIndex.prototype, "append");
@@ -1447,14 +1459,10 @@ describe.sequential("RuntimeRegistry with the pinned agent runtime", () => {
       expect(scanner).not.toHaveBeenCalled();
       expect(unchanged.sessions.find((session) => session.id === fixture.manager.getSessionId())?.messageCount).toBe(2);
       expect(unchanged.sessions.find((session) => session.id === secondManager.getSessionId())?.messageCount).toBe(1);
-      await new Promise((resolve) => setTimeout(resolve, 50));
       fixture.manager.appendMessage(fauxAssistantMessage("external append after restart"));
-      // The catalog owner also reconciles behind the listener, so only the
-      // reader call's own appends are counted here.
-      const appendsBeforeRead = append.mock.calls.length;
       const updated = await restarted.catalog("all");
       expect(scanner).not.toHaveBeenCalled();
-      expect(append.mock.calls.length - appendsBeforeRead).toBe(1);
+      expect(append).toHaveBeenCalledTimes(1);
       expect(updated.sessions.find((session) => session.id === fixture.manager.getSessionId())?.messageCount).toBe(3);
       expect(updated.sessions.find((session) => session.id === secondManager.getSessionId())?.messageCount).toBe(1);
     } finally {
@@ -1464,11 +1472,34 @@ describe.sequential("RuntimeRegistry with the pinned agent runtime", () => {
     }
   });
 
+  it("writes the durable catalog document from its owner, not from a reader cut", async () => {
+    const fixture = await coldFixture("owner-only-index-writer");
+    // The owner's own cut is what reaches the document; nothing else may write
+    // it, because a reader materialization parses its own summaries for the
+    // in-memory cut and their counts and sizes are not the ones the owner
+    // stamped. Those rows would hand the next startup content it must distrust.
+    await settleCatalog(fixture.registry);
+    const indexPath = join(fixture.root, "tron", "gateway", "catalog-metadata-v2.json");
+    expect(existsSync(indexPath)).toBe(true);
+    // With no document to load, the next read takes the full canonical
+    // materialization path — the one that used to persist a second copy.
+    await rm(indexPath, { force: true });
+    (fixture.registry as unknown as { catalogStructuralIndex: unknown }).catalogStructuralIndex = undefined;
+    const save = vi.spyOn(CatalogMetadataIndex.prototype, "save");
+    try {
+      await fixture.registry.catalog("all");
+      expect(save).not.toHaveBeenCalled();
+    } finally {
+      save.mockRestore();
+    }
+  });
+
   it("keeps a live-owned index cut when the owner appends during reconciliation", async () => {
     const fixture = await coldFixture("live-index-append-race");
     await fixture.registry.catalog("all");
     const indexPath = join(fixture.root, "tron", "gateway", "catalog-metadata-v2.json");
-    await waitUntil(() => existsSync(indexPath));
+    await settleCatalog(fixture.registry);
+    expect(existsSync(indexPath)).toBe(true);
     await fixture.registry.acquire(fixture.manager.getSessionId());
     const internals = fixture.registry as unknown as {
       catalogStructuralIndex: unknown;
@@ -1499,7 +1530,8 @@ describe.sequential("RuntimeRegistry with the pinned agent runtime", () => {
     const fixture = await coldFixture("unowned-index-append-race");
     await fixture.registry.catalog("all");
     const indexPath = join(fixture.root, "tron", "gateway", "catalog-metadata-v2.json");
-    await waitUntil(() => existsSync(indexPath));
+    await settleCatalog(fixture.registry);
+    expect(existsSync(indexPath)).toBe(true);
     // A restart is how a reader reaches the durable index with no in-memory cut.
     // The append is injected inside reconciliation because no public caller can
     // schedule work between the index read and its post-read evidence cut.
@@ -1519,7 +1551,7 @@ describe.sequential("RuntimeRegistry with the pinned agent runtime", () => {
     // The catalog owner reconciles behind the listener. Settle it so the
     // injected append lands in the reader's reconciliation, which this case is
     // about, rather than in background maintenance.
-    await (restarted as unknown as { sessionCatalog: { settled: () => Promise<void> } }).sessionCatalog.settled();
+    await settleCatalog(restarted);
     const indexReconcile = CatalogMetadataIndex.prototype.reconcile;
     const reconcile = vi.spyOn(CatalogMetadataIndex.prototype, "reconcile");
     reconcile.mockImplementation(async function (this: CatalogMetadataIndex, ...args) {
@@ -1543,7 +1575,8 @@ describe.sequential("RuntimeRegistry with the pinned agent runtime", () => {
     const fixture = await coldFixture("inode-index-replacement-race");
     await fixture.registry.catalog("all");
     const indexPath = join(fixture.root, "tron", "gateway", "catalog-metadata-v2.json");
-    await waitUntil(() => existsSync(indexPath));
+    await settleCatalog(fixture.registry);
+    expect(existsSync(indexPath)).toBe(true);
     const internals = fixture.registry as unknown as {
       catalogStructuralIndex: unknown;
       sessionInfos: () => Promise<unknown[]>;
@@ -1576,16 +1609,15 @@ describe.sequential("RuntimeRegistry with the pinned agent runtime", () => {
     const fixture = await coldFixture("catalog-membership-revision");
     let registry = fixture.registry;
     const pagination = new SessionListPaginationStore();
-    const save = vi.spyOn(CatalogMetadataIndex.prototype, "save");
     try {
       const second = SessionManager.create(fixture.cwd, dirname(fixture.sessionFile));
       second.appendMessage(fauxAssistantMessage("second catalog member"));
       const originalIDs = [fixture.manager.getSessionId(), second.getSessionId()].sort();
       await registry.pageSource("all");
-      // Wait for the actual sidecar transaction, not an elapsed delay or a
-      // partially published file, before testing its cold reconstruction.
-      await waitUntil(() => save.mock.results.length > 0);
-      await Promise.all(save.mock.results.map((result) => result.value));
+      // Wait for the owner's sidecar transaction to complete, not for an elapsed
+      // delay or a partially published file, before testing its cold
+      // reconstruction.
+      await settleCatalog(registry);
       if (restart) {
         await registry.dispose();
         registries.splice(registries.indexOf(registry), 1);
@@ -1632,8 +1664,6 @@ describe.sequential("RuntimeRegistry with the pinned agent runtime", () => {
     } finally {
       pagination.releaseClient("old-reader");
       pagination.releaseClient("new-reader");
-      await Promise.all(save.mock.results.map((result) => result.value));
-      save.mockRestore();
       await registry.dispose();
       registries.splice(registries.indexOf(registry), 1);
       await rm(fixture.root, { recursive: true, force: true });
@@ -1645,7 +1675,8 @@ describe.sequential("RuntimeRegistry with the pinned agent runtime", () => {
     fixture.manager.appendMessage(fauxAssistantMessage("indexed canonical body"));
     await fixture.registry.catalog("all");
     const indexPath = join(fixture.root, "tron", "gateway", "catalog-metadata-v2.json");
-    await waitUntil(() => existsSync(indexPath));
+    await settleCatalog(fixture.registry);
+    expect(existsSync(indexPath)).toBe(true);
     await fixture.registry.dispose();
 
     const restarted = new RuntimeRegistry({
@@ -2439,12 +2470,13 @@ describe.sequential("RuntimeRegistry with the pinned agent runtime", () => {
       child.appendMessage(fauxAssistantMessage(`child registration ${index}`));
       children.push(child);
     }
-    // Force the canonical materialization path instead of relying on the
-    // asynchronous acceleration-index save racing this test. The invariant
-    // under test is the stable user cut while child files mutate during the
-    // real metadata pass.
+    // Force the canonical materialization path: the owner's document is settled
+    // and then removed, so this read cannot take the durable path. The invariant
+    // under test is the stable user cut while child files mutate during the real
+    // metadata pass.
     const indexPath = join(fixture.root, "tron", "gateway", "catalog-metadata-v2.json");
-    await waitUntil(() => existsSync(indexPath));
+    await settleCatalog(fixture.registry);
+    expect(existsSync(indexPath)).toBe(true);
     (fixture.registry as unknown as { catalogStructuralIndex: unknown }).catalogStructuralIndex = undefined;
     await rm(indexPath, { force: true });
     mutateDuringDiscovery = true;

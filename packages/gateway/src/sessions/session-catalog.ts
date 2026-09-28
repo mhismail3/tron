@@ -101,7 +101,8 @@ export interface SessionCatalogSource {
 export interface SessionCatalogOptions {
   /** Absolute canonical session folder; the durable document belongs to it. */
   catalogRoot: () => string;
-  /** The durable form. One document has one writer: the Gateway's registry. */
+  /** The durable form. One document has one writer — this owner — because a
+   * reader's rows carry counts and a size it parsed for its own cut. */
   index: CatalogMetadataIndex;
   source: SessionCatalogSource;
   /** One call per reconcile, for the catalog juncture's `catalog.reconciled`. */
@@ -238,12 +239,16 @@ export class SessionCatalog {
    * by its owner because an unreadable file proves neither absence nor presence.
    * The row is dropped in the lane, but the removal is recorded when it is
    * announced: a reconcile or refresh pass that read the file before this call
-   * must not publish the removed row when it finishes afterwards. */
+   * must not publish the removed row when it finishes afterwards. The record is
+   * cleared by the removal's own lane work: every pass that read before it has
+   * finished by then, and a pass that starts later captures an epoch at or above
+   * the removal, so the record cannot outlive its one use. */
   remove(path: string): void {
     if (this.closed) return;
     const key = resolve(path);
     this.removalGenerations.set(key, (this.removalGeneration += 1));
     void this.enqueue(async () => {
+      this.removalGenerations.delete(key);
       if (!this.rowsByPath.delete(key)) return;
       this.markChanged();
     });
@@ -282,12 +287,10 @@ export class SessionCatalog {
     if (this.closed) return;
     const startedAt = this.now();
     // This pass's read epoch, captured before its first read. Every later
-    // announcement of a removal is compared against it, and markers older than
-    // it can no longer gate a pass: this lane is serial.
+    // announcement of a removal is compared against it; a marker left by an
+    // earlier removal cannot gate this pass, because the lane is serial and its
+    // own work has already consumed it.
     const removalFloor = this.removalGeneration;
-    for (const [path, generation] of this.removalGenerations) {
-      if (generation <= removalFloor) this.removalGenerations.delete(path);
-    }
     const report = (outcome: SessionCatalogReconcileOutcome["outcome"], files: number, diff?: RowDiff, unproven = 0): void => {
       this.options.onReconciled?.({
         outcome,
@@ -332,6 +335,9 @@ export class SessionCatalog {
       this.options.catalogRoot(),
       scan.candidates,
       (candidate) => this.options.source.summaryFor(candidate.path),
+      // The index's own `closed` flag is set only after this owner has finished
+      // disposing, so shutdown has to tell the pass where to stop.
+      () => this.closed,
     );
     if (!reconciled) return this.rebuild(scan);
     const rows: CatalogMetadataIndexRow[] = [...reconciled.rows];

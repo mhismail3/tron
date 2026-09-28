@@ -81,7 +81,6 @@ import { projectTranscriptPage, type TranscriptPage } from "./projection.js";
 import {
   CatalogMetadataIndex,
   type CatalogMetadataIndexFailure,
-  type CatalogMetadataIndexRow,
   type CatalogMetadataIndexSummary,
 } from "./catalog-metadata-index.js";
 import { branchFromParsedSession } from "./session-branch.js";
@@ -2002,6 +2001,9 @@ export class RuntimeRegistry {
           messageCount: info.messageCount,
         };
       },
+      // This reader discards the whole cut when one candidate is unprovable, so
+      // there is nothing to gain from parsing the candidates after it.
+      ({ unproven }) => unproven > 0,
     ));
     if (!reconciled || reconciled.unproven.length > 0) return;
     const rows = reconciled.rows;
@@ -2050,35 +2052,6 @@ export class RuntimeRegistry {
     // to rebuild from the exact index rather than pairing stale membership
     // with the freshly published rows.
     this.catalogAcquisitionAdmission = undefined;
-  }
-
-  private async persistDurableCatalogIndex(
-    infos: readonly CatalogSessionInfo[],
-    structuralGeneration: number,
-    invalidationGeneration: number,
-  ): Promise<void> {
-    const rows: CatalogMetadataIndexRow[] = [];
-    for (const info of infos) {
-      const summary: CatalogMetadataIndexSummary = {
-        id: info.id,
-        path: info.path,
-        cwd: info.cwd,
-        ...(info.parentSessionPath ? { parentSessionPath: info.parentSessionPath } : {}),
-        ...(info.creationOrigin ? { creationOrigin: info.creationOrigin } : {}),
-        ...(info.name ? { name: info.name } : {}),
-        firstMessage: info.firstMessage,
-        createdAt: info.created.toISOString(),
-        updatedAt: info.modified.toISOString(),
-        messageCount: info.messageCount,
-      };
-      const row = await this.catalogMetadataIndex.entryFromSummary(summary);
-      if (!row) return;
-      if (info.fileIdentity !== undefined) row.fileIdentity = info.fileIdentity;
-      rows.push(row);
-    }
-    if (structuralGeneration !== this.catalogStructuralGeneration
-      || invalidationGeneration !== this.catalogAcquisitionInvalidationGeneration) return;
-    await this.catalogMetadataIndex.save(this.catalogDirectory(), rows).catch(() => {});
   }
 
   private async materializeCatalogSnapshot(scope: "user" | "all"): Promise<{
@@ -2163,17 +2136,10 @@ export class RuntimeRegistry {
       // evidence still owns duplicate-ID quarantine.
       this.updateCatalogIdentity(materialized.allInfos, ambiguousIDs, "user");
     }
-    if (indexIsExact) {
-      // Persistence is acceleration only. Failure leaves the canonical in-memory
-      // projection usable and is reported by the index owner without affecting
-      // authority or list success. An omitted delegated cut is never exact, so
-      // it cannot make delegated sessions disappear after restart.
-      void this.persistDurableCatalogIndex(
-        materialized.allInfos,
-        materialized.structuralGeneration,
-        materialized.invalidationGeneration,
-      ).catch(() => {});
-    }
+    // The durable document is the catalog owner's: this reader's rows come from
+    // a summary it parsed for the in-memory cut, which is not the count and size
+    // the owner stamped, so writing them here would put a second writer on one
+    // document (SessionCatalogOptions.index).
     return {
       infos: [...infos],
       ambiguousIDs,

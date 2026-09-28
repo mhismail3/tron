@@ -2668,11 +2668,14 @@ a latency percentile.
 - Finding 4 (major — shutdown waited on an unbounded rebuild, and one
   unprovable file failed the whole cut): `CatalogMetadataIndex.reconcile` now
   reports `{ rows, unproven }` per file instead of `undefined` for the whole cut
-  (only an unreadable document is still `undefined`), checks its own `closed`
-  between batches, and the owner retains its prior in-memory row for every
-  unproven path, so a file with a partial final line no longer drops out of the
-  index. `rebuild` checks `closed` between files. The pre-G-1a acquisition path
-  keeps its all-or-nothing admission by requiring `unproven.length === 0`.
+  (only an unreadable document is still `undefined`), asks a caller-supplied stop
+  check between batches and before each transcript parse (round 2 corrected this:
+  the check read the index's own `closed`, which is set only after the catalog
+  owner has already finished closing), and the owner retains its prior in-memory
+  row for every unproven path, so a file with a partial final line no longer
+  drops out of the index. `rebuild` checks the owner's `closed` between files,
+  and the pre-G-1a acquisition path keeps its all-or-nothing admission by
+  requiring `unproven.length === 0`.
   Updated/new cases: "reports a partial canonical final line per file without
   discarding its siblings", "reads reconciled files in one bounded batch at a
   time" (its 16-row batch gate still holds).
@@ -2725,3 +2728,75 @@ a latency percentile.
   count is the signal, and the durable document keeps every row it already had.
   G-10 owns the document's measured write volume, and G-1b owns the watcher and
   the `catalog.changed` record.
+
+### G-1a · Done (review round 2) · 2026-09-28 · orchestrator-dispatched deepseek-worker
+
+- Result: a second independent reviewer found one major defect that round 1 only
+  partly fixed, plus six minors and two nits; none was rejected. Shutdown now
+  stops a startup reconcile in the ordinary case (a usable durable document), the
+  durable document has one writer, and the shutdown stop and the reader-side stop
+  are the same caller-supplied check.
+- Finding 1 (major, reproduced — shutdown still waited for the whole startup
+  reconcile whenever the durable document was usable): the between-batch check
+  read `CatalogMetadataIndex.closed`, which `runtime-registry.ts`'s
+  `disposeSharedStores` sets only after `SessionCatalog.dispose()` has returned,
+  so it was always false while the catalog owner was closing; only the
+  no-document `rebuild` path stopped early. `CatalogMetadataIndex.reconcile` now
+  takes a caller-supplied `CatalogMetadataReconcileStop` (asked between batches
+  and before each transcript parse) and the owner passes `() => this.closed`. New
+  case: "stops a startup reconcile within one batch when the owner is disposed" —
+  64 files, a durable document and one whole-body parse per candidate: `dispose`
+  returns after one bounded batch (≤ RECONCILE_CONCURRENCY summary reads) and the
+  prior document is unchanged. With the pass-through removed the same case
+  observes all 64 parses (the reviewer's own probe measured 3,042 ms and 160
+  parses in the same shape).
+- Finding 2 (minor, inferred — a second writer could restore the undercount):
+  `persistDurableCatalogIndex` and its call in `materializeCatalogSnapshot` are
+  deleted. The owner is the document's only writer, which its own `persistNow`
+  always was; `SessionCatalogOptions.index`'s comment and
+  `packages/gateway/README.md`'s acceleration-file paragraph now say so, and the
+  integration fixtures that waited for the sidecar settle the owner instead
+  (`settleCatalog`). New case: "writes the durable catalog document from its
+  owner, not from a reader cut" (with a reader-path save re-added it observes
+  that write).
+- Finding 3 (minor — logger scope, no bounding test, redundant escaping): the
+  `counts` field and `boundedCounts` in `transport/logger.ts` stay as the
+  `catalog.reconciled` record's field contract; the orchestrator's dispatch of
+  this round accepts that scope, and this entry is the handoff for it. New case:
+  "bounds the named counters one record carries" covers the count cap, the name
+  shape, non-finite and negative values and the persisted round trip; the cap now
+  counts the counters the field accepts rather than the raw entry list, and the
+  redundant `boundedDiagnosticID` call is gone (the shape check already rejects
+  anything but letters and digits). Not closed: the level rule itself
+  (`reconciled` at info, otherwise warning) lives in `gateway-main.ts`, a
+  side-effecting process entry no test can import; the record's field values are
+  covered by `session-catalog.test.ts`'s `SessionCatalogReconcileOutcome` cases
+  and by the logger case above.
+- Finding 4 (minor): "reuses an on-disk catalog across a second registry without
+  a body scan and advances one appended row" settles the restarted owner right
+  after `initialize()`, as its two sibling cases do, and asserts the exact
+  `toHaveBeenCalledTimes(1)` append instead of a count taken inside the owner's
+  window.
+- Finding 5 (minor): the pre-G-1a acquisition path passes the same stop check as
+  `({ unproven }) => unproven > 0`, because it discards its whole cut when one
+  candidate is unprovable. New case: "stops a pass at the first file it cannot
+  prove when its caller asks" (24 candidates, one unprovable: 16 rebuilds, not
+  24).
+- Finding 6 (nit): a removal marker is now deleted by its own lane work instead
+  of being pruned when a reconcile starts, so the map no longer grows with every
+  deletion for the life of the process; "does not publish a row back after a
+  removal announced during its read" asserts the map is empty once that removal
+  has settled.
+- Finding 7 (nit): the `catalog.reconciled` row's "why" column no longer
+  describes this branch's own earlier state.
+- Evidence: `npx tsc --noEmit -p .` clean; `session-catalog.test.ts` 9/9,
+  `catalog-metadata-index.test.ts` 19/19, `transport/logger.test.ts` 14/14,
+  `runtime-registry.integration.test.ts` `-t "catalog|delete|index"` 44/44 plus
+  the round-2 cases; `python3 scripts/check-documentation-policy.py` and
+  `scripts/personal-info-guard.sh` pass.
+- Residual risk for the orchestrator: the durable document is now refreshed only
+  by the owner's own changes (5 s debounce, 60 s ceiling) and by its startup
+  reconcile, so a file written by an external writer (a Pi child, a copied file)
+  reaches the document only when the owner next reconciles; until G-1b's watcher
+  lands, a restart repairs those rows by re-reading their files. G-1b owns that
+  gap.

@@ -104,6 +104,9 @@ const MAX_STACK_BYTES = 4_000;
 const MAX_FIELD_CHARS = 160;
 /** A record names a handful of counters; more would make the field a payload. */
 const MAX_COUNT_FIELDS = 16;
+/** A counter name is a short identifier: the shape check below already rejects
+ * anything but letters and digits, so only its length needs bounding. */
+const MAX_COUNT_NAME_CHARS = 32;
 const PERSISTED_LEVELS: ReadonlySet<LogLevel> = new Set(["info", "warning", "error"]);
 
 /** The one redaction rule set. Every writer applies it at its write boundary,
@@ -127,13 +130,14 @@ export function boundedMessage(value: string): string {
   return boundedBytes(redact(value), MAX_MESSAGE_BYTES);
 }
 
-/** Named counters are fields a reader can aggregate, so their names are
- * diagnostic-escaped and their values are bounded integers. */
+/** Named counters are fields a reader can aggregate, so their names are short
+ * plain identifiers and their values are bounded integers. */
 function boundedCounts(value: Readonly<Record<string, number>>): Record<string, number> {
   const bounded: Record<string, number> = {};
-  for (const [name, count] of Object.entries(value).slice(0, MAX_COUNT_FIELDS)) {
+  for (const [name, count] of Object.entries(value)) {
+    if (Object.keys(bounded).length >= MAX_COUNT_FIELDS) break;
     if (!/^[A-Za-z][A-Za-z0-9]*$/u.test(name) || !Number.isFinite(count)) continue;
-    bounded[boundedDiagnosticID(name).slice(0, 32)] = Math.max(0, Math.min(Number.MAX_SAFE_INTEGER, Math.round(count)));
+    bounded[name.slice(0, MAX_COUNT_NAME_CHARS)] = Math.max(0, Math.min(Number.MAX_SAFE_INTEGER, Math.round(count)));
   }
   return bounded;
 }

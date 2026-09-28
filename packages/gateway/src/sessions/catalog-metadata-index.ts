@@ -113,6 +113,22 @@ export interface CatalogMetadataIndexReconciliation {
   unproven: string[];
 }
 
+/** What one reconcile has proven so far. A candidate whose row is missing from
+ * `rows` and from `unproven` has not been read yet. */
+export interface CatalogMetadataReconcileProgress {
+  proven: number;
+  unproven: number;
+}
+
+/** A caller's own reason to stop one reconcile pass. It is asked between
+ * batches and before each transcript parse. The owner passes its own shutdown
+ * flag — the index's `closed` is set only after the owner has finished closing,
+ * so it cannot report the owner's shutdown — and the pre-index acquisition path
+ * stops at the first file it cannot prove, because it discards the whole cut in
+ * that case and would otherwise parse every later candidate for nothing. A
+ * stopped pass reports the remaining candidates as unproven. */
+export type CatalogMetadataReconcileStop = (progress: CatalogMetadataReconcileProgress) => boolean;
+
 /** A handled index-write failure. The affected rows are left to be rebuilt from
  * canonical files, so nothing else records it; the index write is
  * fire-and-forget outside any request span, which is why its owner reports it. */
@@ -215,6 +231,7 @@ export class CatalogMetadataIndex {
     catalogRoot: string,
     candidates: readonly { path: string; id: string; cwd: string; fileIdentity: string; size: number; mtimeMs: number }[],
     rebuild: (candidate: { path: string; id: string; cwd: string; fileIdentity: string; size: number; mtimeMs: number }) => Promise<CatalogMetadataIndexSummary | undefined>,
+    stop?: CatalogMetadataReconcileStop,
   ): Promise<CatalogMetadataIndexReconciliation | undefined> {
     const document = await this.readDocument(catalogRoot);
     if (!document) {
@@ -229,11 +246,13 @@ export class CatalogMetadataIndex {
     // stability checks before its row is admitted.
     const rows: CatalogMetadataIndexRow[] = [];
     const unproven: string[] = [];
+    // A disposed index must not keep reading files it can no longer publish,
+    // and the caller may have its own reason to stop. Either way the remaining
+    // candidates stay unproven instead of holding this pass open.
+    const shouldStop = (): boolean => this.closed
+      || (stop?.({ proven: rows.length, unproven: unproven.length }) ?? false);
     for (let start = 0; start < candidates.length; start += RECONCILE_CONCURRENCY) {
-      // A disposed index must not keep reading files it can no longer publish:
-      // the owner's shutdown settles this pass, and the remaining candidates
-      // stay unproven instead of holding the lane open.
-      if (this.closed) {
+      if (shouldStop()) {
         unproven.push(...candidates.slice(start).map((candidate) => resolve(candidate.path)));
         break;
       }
@@ -246,6 +265,7 @@ export class CatalogMetadataIndex {
           const advanced = await this.append(old);
           if (advanced) return advanced;
         }
+        if (shouldStop()) return undefined;
         const summary = await rebuild(candidate);
         if (!summary) return undefined;
         const rebuilt = await this.entryFromSummary(summary);
