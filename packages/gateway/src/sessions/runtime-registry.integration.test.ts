@@ -11025,8 +11025,8 @@ export default function (pi) {
     expect(recorded.recordCatalogWalk.mock.calls.slice(0, backgroundWalks).every((call) => call[2] === false)).toBe(true);
 
     // The same walk with no request waiting on it is background work.
-    const interns = fixture.registry as unknown as { catalogStructureEvidence: () => Promise<unknown> };
-    await interns.catalogStructureEvidence();
+    const evidenceSeam = fixture.registry as unknown as { catalogStructureEvidence: () => Promise<unknown> };
+    await evidenceSeam.catalogStructureEvidence();
     expect(recorded.recordCatalogWalk).toHaveBeenLastCalledWith(expect.any(Number), expect.any(Number), false);
   });
 });

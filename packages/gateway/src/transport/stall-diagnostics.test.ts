@@ -175,10 +175,9 @@ describe("ResourceSampler", () => {
     expect(sampler.level(await sampler.sample())).toMatchObject({
       level: "info", reason: `heapUsedBytes=${HEAP_USED_INFO_STEP_BYTES + 1_000} entering band 1`,
     });
-    // A heap that grows within its band, like an RSS that moves 10% from the
-    // last window written, is not a change.
+    // A heap that grows within its band, like an RSS that has not moved 10% from
+    // the last window written, is not a change.
     heapUsed = HEAP_USED_INFO_STEP_BYTES + 2_000;
-    rss = 240_000;
     expect(sampler.level(await sampler.sample())).toEqual({ level: "debug" });
   });
 
@@ -193,7 +192,7 @@ describe("ResourceSampler", () => {
     for (let minute = 0; minute < 1_000; minute += 1) {
       rss = Math.round(rss * 1.0002);
       const decision = sampler.level(await sampler.sample());
-      if (decision.level !== "debug") promotions.push(decision.reason!);
+      if (decision.level !== "debug") promotions.push(String(decision.reason));
     }
     expect(promotions).toHaveLength(2);
     expect(promotions[0]).toContain("moved 10% from");
