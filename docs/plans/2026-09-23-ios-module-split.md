@@ -2,7 +2,7 @@
 
 - **Started:** 2026-09-23
 - **Status:** Active
-- **Last updated:** 2026-09-27, MS-3 scoped into MS-3a and MS-3b; both claimed
+- **Last updated:** 2026-09-27, MS-3a done; MS-3b claimed
 - **Goal:** Give the iOS app compiler-enforced layers, so its structure stays clean, one-directional and easy for agents to work in, and cannot silently regress into cycles.
 
 Follow the [plan protocol](README.md#protocol) to claim tasks and hand off.
@@ -83,7 +83,7 @@ directly, and unit tests reach the app through `@testable import TronMobile`.
 | --- | --- | --- | --- | --- |
 | MS-1 | Done | Map the dependency graph of Models, Gateway, Support, State and UI/Theme; propose module boundaries with no cycles | none | module-split session, 2026-09-26 |
 | MS-2 | Done | First real slice of `TronMobileCore`, an XcodeGen framework target with `SWIFT_PACKAGE_NAME` set so `package` access works: move a few leaf types from Models, Gateway or Support into it (kept, not a throwaway spike); prove all five configurations build, the share extension, `@testable` tests, both test plans and the source-policy scripts; record baseline and after timings. Device install and **Product → Profile** are checked by the user or supervisor | MS-1, D1, D2 | module-split session, 2026-09-26 |
-| MS-3a | Claimed | Inside the one app module, relocate declarations so Models, Gateway and Support reference nothing in State, Notifications, Auth, UI or App and import no UI framework (see MS-3 scope); no framework change yet | MS-2 | module-split session, 2026-09-27 |
+| MS-3a | Done | Inside the one app module, relocate declarations so Models, Gateway and Support reference nothing in State, Notifications, Auth, UI or App and import no UI framework (see MS-3 scope); no framework change yet | MS-2 | module-split session, 2026-09-27 |
 | MS-3b | Claimed | Move Models, Gateway and Support into `TronMobileCore` with `package` access, a Core privacy manifest and a no-UI-import guard; record timings | MS-3a | module-split session, 2026-09-27 |
 | MS-4 | Needs scoping | Extract `Notifications`, then `State` (with `Auth`), then `UI`, one per task, each with timings, after the simplification program has cleaned up State and Chat (D1); split UI by folder where its boundaries are clean | MS-3b, simplification S-IOS-STATE and S-IOS-CHAT work | |
 | MS-5 | Needs scoping | Move the share extension onto `Core` instead of compiling `SharedContent.swift` itself | MS-3b | |
@@ -127,7 +127,7 @@ except `App` and `Auth` sits in one cycle of 12 layers. Examples: Models throws 
    (`ChatLayoutMutation`, `ChatScrollCommand`, `ChatViewportIntent`, `ChatViewportMode`,
    `ChatPhysicalTailClassification`, `ChatTranscriptGeometry`). Moves out: `ComposerDraftStore.swift`,
    `IOSMetricKitDiagnostics.swift`, `GatewayLogExport.swift` and `SnapshotCache.swift` to State; the two
-   hosted-test probes to UI/Chat.
+   hosted-test probes to UI/Chat. (Done in MS-3a; see its handoff for where each item landed.)
 2. `Notifications` (3 files), depending only on `Core`.
 3. `State`, once `ChatSessionPresentation.swift`, `ReadOnlySubagentSessionStore.swift` and
    `SessionHistoryStore.swift` (used only by UI/Chat) move up, and three small UI/Chat value types
@@ -157,7 +157,7 @@ except `App` and `Auth` sits in one cycle of 12 layers. Examples: Models throws 
   UserDefaults needs its own privacy manifest, which `PrivacyManifestTests` would have to cover.
 - `App/Hosted*Fixture*.swift` (`HOSTED_TEST` only) reach 87 types in other layers, so those types become
   module API unless the fixtures move with their subjects.
-- Low-layer framework imports to resolve: `Gateway/LiveViewing.swift` returns `UIImage`,
+- Low-layer framework imports to resolve (all resolved in MS-3a): `Gateway/LiveViewing.swift` returned `UIImage`,
   `Models/KnowledgeModels.swift` declares `@Observable` stores, `Support/RetiredNotificationBadge.swift` uses
   UserNotifications.
 
@@ -241,3 +241,33 @@ Supervisor decisions, from the MS-1 findings:
   part of each MS task.
 - For the next agent: `packages/ios-app/scripts/presentation-source-policy.py` scans only `Sources/`, which is
   correct while `Core` holds no SwiftUI; the module that receives State must extend that scan.
+
+### MS-3a · Done · 2026-09-27 · module-split session (deepseek-worker, reviewed by the supervisor)
+
+- Result: six commits relocate declarations inside the single app module, with no target, access or behaviour
+  change. Models, Gateway and Support now reference only each other and import no SwiftUI, UIKit, Observation or
+  UserNotifications.
+  - Moved up: the Knowledge presentation stores to `State/KnowledgePresentationStores.swift`;
+    `RetiredNotificationBadge.swift` to Notifications; the live-frame JPEG decode and `LiveImagePreparation` to
+    `State/ChatMediaLoader.swift`, beside the media policy that bounds them (transport and bytes stay in
+    Gateway); `ComposerDraftStore`, `IOSMetricKitDiagnostics`, `GatewayLogExport` and `SnapshotCache` to State;
+    the two hosted-test probes to UI/Chat.
+  - Moved down, each into a file named for its concept: the Gateway client's diagnostic facts to
+    `Gateway/GatewayClientDiagnostics.swift`; the client diagnostic buffer and store to
+    `Support/IOSClientDiagnostics.swift`; the notification inbox wire contract to
+    `Models/NotificationInboxModels.swift`; the chat viewport values `ChatInteractionTrace` records to
+    `Support/ChatViewport.swift` and `Support/ChatViewportMode.swift` (the SwiftUI geometry reader stays in
+    UI/Chat as an extension); smaller types into existing Models, Gateway and State files.
+- Review: a moved-code diff (`git diff --color-moved`) shows only relocated code, a short ownership header on
+  each new file, and the qualified `GatewayClient.LiveError` in the moved decode; no logic changed.
+- Evidence (verified): on combined `main` the supervisor reran the dependency graph (Gateway → Models 23 and
+  Support 10, Models → Gateway 2 and Support 1, Support → Gateway 6, nothing else), the UI-import scan (empty),
+  the build and the full unit suite (1,753 Swift Testing tests in 144 suites plus 101 XCTest, 0 failures), and
+  the source, documentation and protocol-contract checks. The worker also ran the 8 accessibility UI tests and a
+  LocalDevice device build, both passing, and a negative control (a Support reference to a UI/Chat type shows as
+  an upward edge).
+- Deviation: moving `ChatHostedProbe.swift` updated one path literal in
+  `2026-09-26-chat-transcript-stability.md` (supervisor-approved; AGENTS.md makes the mover update references).
+- For MS-3b: `State/ChatMediaLoader.swift` reads `GatewayClient.LiveFrame` members and UI/Chat extends
+  `ChatTranscriptGeometry`, so both need `package` access. Nothing in the repository enforces the new boundary
+  until MS-3b's framework and import check exist.
