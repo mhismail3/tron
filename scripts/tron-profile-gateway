@@ -8,6 +8,12 @@ scenario with phone-faithful recording clients
 to scripts/tron_profile_report.py. The fixture process and its home belong to
 this invocation only; they are stopped and removed on success, failure,
 timeout, and interruption. The user's Gateway is never contacted.
+
+The multi-session scenario is the connection and scale qualification run: it
+generates a seeded catalog in the fixture home, starts a fresh fixture Gateway
+per iteration (with scripts/tron-profile-gateway-probe.mjs preloaded), and
+reports request latency percentiles, event-loop delay, memory, CPU and
+catalog walks under eight running sessions.
 """
 
 from __future__ import annotations
@@ -20,6 +26,7 @@ from datetime import datetime, timezone
 import fcntl
 import hashlib
 import json
+import math
 import os
 from pathlib import Path
 import re
@@ -39,6 +46,7 @@ GATEWAY = ROOT / "packages/gateway"
 ENTRY = GATEWAY / "dist/index.js"
 DRIVER = ROOT / "scripts/tron-profile-gateway-driver.mjs"
 EXTENSION = ROOT / "scripts/tron-profile-gateway-extension.ts"
+PROBE = ROOT / "scripts/tron-profile-gateway-probe.mjs"
 REPORT = ROOT / "scripts/tron_profile_report.py"
 PROCESS_OWNER = ROOT / "scripts/ios-test-process.py"
 sys.path.insert(0, str(ROOT / "scripts"))
@@ -50,6 +58,7 @@ EXIT_BUILD = 4
 EXIT_FIXTURE = 5
 EXIT_MEASUREMENT = 6
 EXIT_SELF_TEST = 7
+EXIT_HOST = 73
 EXIT_TIMEOUT = 75
 EXIT_INTERRUPTED = 130
 
@@ -96,7 +105,54 @@ SCENARIOS = {
                  "no activity for --window-seconds", ("mobile", "dashboard"), None, False),
         Scenario("dashboard-observer", "only a dashboard mobile client records while an unrecorded paired client "
                  "runs the tool-loop workload in another session", ("dashboard",), TOOL_PROMPT, True),
+        Scenario("multi-session", "qualification: seeded 3,000-file/2 GiB catalog, eight running tool loops, subagent-like "
+                 "writers; a no-subscriber window, then a mixed window with dashboard lists, warm/cold/large opens, "
+                 "prompts and reconnects every 60 s; fresh fixture Gateway per iteration", ("mobile", "dashboard"), None,
+                 False),
     )
+}
+# `all` means the wire-traffic scenarios; the multi-session qualification run
+# (2 GiB of generated catalog, about 13 minutes) runs only when named.
+WIRE_SCENARIOS = ("stream-reply", "tool-loop", "idle", "dashboard-observer")
+
+# Multi-session qualification workload (plan: connection and scale hardening,
+# O-6a). Each phase (the priming start and every iteration) gets its own
+# running and cold sessions from the generated catalog.
+MULTI = {
+    "catalogSeed": 2027,
+    "catalogFiles": 3000,
+    "catalogMiB": 2048,
+    "runningSessions": 8,
+    "coldSessionsPerPhase": 12,
+    "appendTargets": 4,
+    "appendIntervalMs": 500,
+    "noSubscriberSeconds": 30,
+    "mixedSeconds": 120,
+    "listIntervalMs": 5000,
+    "proberIntervalMs": 5000,
+    "reconnectIntervalSeconds": 60,
+    # Staggered so the two clients never reconnect in the same instant.
+    "mobileReconnectOffsetSeconds": 20,
+    "dashboardReconnectOffsetSeconds": 50,
+    "settleBeforeMs": 3000,
+    # Measured requests may be slow on purpose; the phone's own 30 s deadline
+    # is reported as a count instead of failing the run.
+    "measuredDeadlineMs": 180_000,
+    "runPrompt": "tron-profile tool-loop tools=100000 lines=24 chars=1500 seed=1",
+    "coldPrompt": "tron-profile stream-reply chars=600 thinking=200 seed=1",
+}
+PHONE_REQUEST_DEADLINE_MS = 30_000
+# Host guard: a qualification run on a swapping or pressured host measures the
+# host, not the Gateway (plan O-6a).
+HOST_SWAP_LIMIT_BYTES = 4 * 1024 ** 3
+LATENCY_KINDS = {
+    "sessionList": "session_list",
+    "sessionOpenWarm": "session_open_warm",
+    "sessionOpenCold": "session_open_cold",
+    "sessionOpenColdLarge": "session_open_cold_large",
+    "promptAdmission": "prompt_admission",
+    "reconnectReadyMobile": "reconnect_ready_mobile",
+    "reconnectReadyDashboard": "reconnect_ready_dashboard",
 }
 
 # Seeded history: every turn is user text, assistant thinking/text/tool call,
@@ -277,16 +333,20 @@ def scrubbed_environment() -> dict[str, str]:
 class FixtureGateway:
     """One owned fixture: temporary home, faux-model agent dir, Gateway child."""
 
-    def __init__(self, evidence: Path, tokens_per_second: float, cpu_profile_dir: Path | None) -> None:
+    def __init__(self, evidence: Path, tokens_per_second: float, cpu_profile_dir: Path | None,
+                 probe: bool = False) -> None:
         self.evidence = evidence
         self.tokens_per_second = tokens_per_second
         self.cpu_profile_dir = cpu_profile_dir
+        self.probe = probe
         self.root = Path(tempfile.mkdtemp(prefix="tron-profile-gateway-")).resolve()
         (self.root / FIXTURE_MARKER).write_text("tron.profile-gateway-fixture.v1\n")
         self.home = self.root / "home"
         self.workspace = self.home / "workspace"
         self.tron_home = self.root / "tron"
         self.agent_dir = self.root / "agent"
+        self.catalog = self.agent_dir / "sessions"
+        self.probe_output = self.root / "probe.json"
         self.process: subprocess.Popen[bytes] | None = None
         self.port = 0
 
@@ -323,6 +383,27 @@ class FixtureGateway:
             raise ProfileFailure("seeding canonical sessions failed", EXIT_FIXTURE, self.evidence / "seed.log")
         return json.loads((self.root / "seeded.json").read_text())["sessions"]
 
+    def generate_catalog(self, files: int, mebibytes: int, phases: int) -> dict:
+        """Write the multi-session scenario's seeded catalog into this fixture's
+        private agent directory; return its manifest."""
+        config = {
+            "gatewayDir": str(GATEWAY), "agentDir": str(self.agent_dir), "workspace": str(self.workspace),
+            "seed": MULTI["catalogSeed"], "files": files, "bytes": mebibytes * 1024 * 1024,
+            "runSessions": MULTI["runningSessions"] * phases, "coldSessions": MULTI["coldSessionsPerPhase"] * phases,
+            "appendTargets": MULTI["appendTargets"], "output": str(self.root / "catalog.json"),
+        }
+        config_path = self.root / "catalog-config.json"
+        config_path.write_text(json.dumps(config))
+        try:
+            result = subprocess.run(["node", str(DRIVER), "catalog", str(config_path)], env=scrubbed_environment(),
+                                    capture_output=True, text=True, timeout=900, check=False)
+        except subprocess.TimeoutExpired as error:
+            raise ProfileFailure("generating the multi-session catalog timed out", EXIT_TIMEOUT) from error
+        if result.returncode != 0:
+            (self.evidence / "catalog.log").write_text(result.stdout + result.stderr)
+            raise ProfileFailure("generating the multi-session catalog failed", EXIT_FIXTURE, self.evidence / "catalog.log")
+        return json.loads((self.root / "catalog.json").read_text())
+
     def command_matches(self) -> bool:
         if self.process is None or self.process.poll() is not None:
             return False
@@ -344,6 +425,13 @@ class FixtureGateway:
             "TRON_PROFILE_TOKENS_PER_SECOND": str(self.tokens_per_second),
         }
         command = ["node"]
+        if self.probe:
+            # Each process numbers its snapshots from 1; a predecessor's file
+            # would make the driver wait for a sequence that never comes.
+            self.probe_output.unlink(missing_ok=True)
+            environment["TRON_PROFILE_PROBE_OUTPUT"] = str(self.probe_output)
+            environment["TRON_PROFILE_PROBE_CATALOG"] = str(self.catalog)
+            command += ["--import", PROBE.as_uri()]
         if self.cpu_profile_dir is not None:
             self.cpu_profile_dir.mkdir(parents=True, exist_ok=True)
             command += ["--cpu-prof", f"--cpu-prof-dir={self.cpu_profile_dir}"]
@@ -409,6 +497,12 @@ class FixtureGateway:
         if (self.root / FIXTURE_MARKER).is_file() and self.root.name.startswith("tron-profile-gateway-"):
             shutil.rmtree(self.root, ignore_errors=True)
 
+    def remove_catalog(self) -> None:
+        """The generated catalog (up to gigabytes) never outlives the run, even
+        when a surviving process keeps the rest of the home as evidence."""
+        if (self.root / FIXTURE_MARKER).is_file():
+            shutil.rmtree(self.catalog, ignore_errors=True)
+
 
 # --- Scenario execution --------------------------------------------------------
 
@@ -453,7 +547,14 @@ def topic_metric_key(topic: str) -> str:
 
 
 def samples_from(result: dict, scenario: Scenario) -> tuple[dict, list[str]]:
-    iterations = result["iterations"]
+    return window_samples(result["iterations"], scenario.recorded,
+                          "measured window: prompt to settlement plus 1.5 s quiet, or the fixed idle window")
+
+
+def window_samples(iterations: list[dict], recorded: tuple[str, ...], window_description: str,
+                   namespace: str = "") -> tuple[dict, list[str]]:
+    """Wire and fixture CPU metrics of one measured window per iteration;
+    `namespace` prefixes every metric id (for a second window per iteration)."""
     metrics: dict[str, dict] = {}
     warnings: list[str] = []
 
@@ -461,11 +562,10 @@ def samples_from(result: dict, scenario: Scenario) -> tuple[dict, list[str]]:
         entry = {"unit": unit, "better": "lower", "values": values}
         if description:
             entry["description"] = description
-        metrics[metric_id] = entry
+        metrics[namespace + metric_id] = entry
 
-    add("window.seconds", "s", [item["windowSeconds"] for item in iterations],
-        "measured window: prompt to settlement plus 1.5 s quiet, or the fixed idle window")
-    for client in scenario.recorded:
+    add("window.seconds", "s", [item["windowSeconds"] for item in iterations], window_description)
+    for client in recorded:
         windows = [item["clients"][client] for item in iterations]
         prefix = f"wire.{client}"
         add(f"{prefix}.total.frames", "count", [w["frames"] for w in windows], "inbound WebSocket messages")
@@ -482,7 +582,7 @@ def samples_from(result: dict, scenario: Scenario) -> tuple[dict, list[str]]:
         add(f"{prefix}.pong_deadline_misses", "count", [w["pongDeadlineMisses"] for w in windows],
             "client pings unanswered within the phone's 8 s deadline (a phone would reconnect)")
         if any(w["pongDeadlineMisses"] for w in windows):
-            warnings.append(f"{client}: missed the 8 s pong deadline; a phone would have reconnected during the window")
+            warnings.append(f"{namespace}{client}: missed the 8 s pong deadline; a phone would have reconnected during the window")
         if all(w["socketBytesRead"] is not None for w in windows):
             add(f"{prefix}.socket_bytes_read", "B", [w["socketBytesRead"] for w in windows],
                 "TCP bytes read on the client socket (WebSocket framing and any negotiated compression)")
@@ -565,11 +665,15 @@ def event_loop_stalls(log_path: Path) -> list[int]:
 def report_samples(run_dir: Path, scenario: Scenario, result: dict, context: dict) -> None:
     metrics, warnings = samples_from(result, scenario)
     context["warnings"] = context.get("warnings", []) + warnings
+    write_samples_report(run_dir, scenario, metrics, context,
+                         [f"driver-result={run_dir / 'result.json'}"])
+
+
+def write_samples_report(run_dir: Path, scenario: Scenario, metrics: dict, context: dict, artifacts: list[str]) -> None:
     samples_path = run_dir / "samples.json"
     samples_path.write_text(json.dumps({"schema": report_module.SAMPLES_SCHEMA, "metrics": metrics, "context": context},
                                        indent=2) + "\n")
-    artifacts = [f"timeline={run_dir / 'timeline.jsonl'}", f"driver-result={run_dir / 'result.json'}",
-                 f"gateway-log={run_dir / 'fixture/gateway.jsonl'}"]
+    artifacts = [f"timeline={run_dir / 'timeline.jsonl'}", *artifacts, f"gateway-log={run_dir / 'fixture/gateway.jsonl'}"]
     if (run_dir / "cpu-profile").is_dir():
         artifacts.append(f"cpu-profile={run_dir / 'cpu-profile'}")
     command = [sys.executable, str(REPORT), "write", "--tool", "gateway", "--scenario", scenario.name,
@@ -593,7 +697,7 @@ def run_scenario(scenario: Scenario, args: argparse.Namespace, results_dir: Path
         try:
             fixture = FixtureGateway(evidence, args.tokens_per_second, run_dir / "cpu-profile" if args.cpu_profile else None)
             fixture.prepare()
-            warmup = args.warmup
+            warmup = 1 if args.warmup is None else args.warmup
             seeded = fixture.seed(warmup + args.iterations) if scenario.seeded else []
             fixture.start()
             log(f"{scenario.name}: fixture Gateway pid {fixture.process.pid} on 127.0.0.1:{fixture.port}")
@@ -638,6 +742,238 @@ def run_scenario(scenario: Scenario, args: argparse.Namespace, results_dir: Path
         return run_dir
     except (ProfileFailure, Interrupted) as failure:
         # A run directory without report.json always says why.
+        interrupted = isinstance(failure, Interrupted)
+        (run_dir / "failure.json").write_text(json.dumps({
+            "schema": "tron.profile-gateway-failure.v1", "scenario": scenario.name,
+            "error": f"interrupted by signal {failure.signal_number}" if interrupted else str(failure),
+            "exit": EXIT_INTERRUPTED if interrupted else failure.code,
+            "evidence": None if interrupted or not failure.evidence else str(failure.evidence),
+        }, indent=2) + "\n")
+        raise
+
+
+# --- Multi-session qualification ------------------------------------------------
+
+def swap_used_bytes(text: str) -> int | None:
+    """Parses `sysctl -n vm.swapusage` ("total = 2048.00M  used = 991.75M  free = …")."""
+    match = re.search(r"used = ([\d.]+)([KMGT])", text)
+    if not match:
+        return None
+    return round(float(match.group(1)) * 1024 ** "KMGT".index(match.group(2)) * 1024)
+
+
+def host_guard(catalog_bytes: int) -> dict:
+    """Refuse (exit 73) a host under memory pressure, swapping past the limit,
+    or without room for the catalog: the run would measure the host."""
+    def sysctl(name: str) -> str:
+        return subprocess.run(["sysctl", "-n", name], capture_output=True, text=True, timeout=10, check=False).stdout.strip()
+
+    level = sysctl("kern.memorystatus_vm_pressure_level")
+    swap = swap_used_bytes(sysctl("vm.swapusage"))
+    free = shutil.disk_usage(tempfile.gettempdir()).free
+    problems = []
+    if level != "1":
+        problems.append(f"memory pressure level is {level or 'unknown'}, not normal (1)")
+    if swap is None or swap > HOST_SWAP_LIMIT_BYTES:
+        problems.append(f"swap used {'unknown' if swap is None else f'{swap / 1024 ** 3:.1f} GiB'} exceeds "
+                        f"{HOST_SWAP_LIMIT_BYTES / 1024 ** 3:.0f} GiB")
+    if free < 2 * catalog_bytes + 1024 ** 3:
+        problems.append(f"{free / 1024 ** 3:.1f} GiB free in {tempfile.gettempdir()} cannot hold the catalog")
+    if problems:
+        raise ProfileFailure("host not ready for the multi-session run: " + "; ".join(problems), EXIT_HOST)
+    return {"memory_pressure_level": int(level), "swap_used_bytes": swap, "temp_free_bytes": free}
+
+
+def percentile(values: list[float], rank: float) -> float:
+    """Nearest-rank percentile: with fewer than 100 samples p99 is the maximum."""
+    ordered = sorted(values)
+    return ordered[max(0, min(len(ordered), math.ceil(rank / 100 * len(ordered))) - 1)]
+
+
+def run_multi_driver(fixture: FixtureGateway, run_dir: Path, phase: str, label: str, workload: dict) -> dict:
+    config = {
+        **MULTI, **workload, "gatewayDir": str(GATEWAY), "orchestrator": str(Path(__file__).resolve()),
+        "gatewayPid": fixture.process.pid, "port": fixture.port, "tronHome": str(fixture.tron_home),
+        "outputDir": str(run_dir), "phase": phase, "label": label, "devicesPath": str(fixture.root / "devices.json"),
+        "probeOutput": str(fixture.probe_output),
+    }
+    config_path = run_dir / f"driver-config-{label}.json"
+    config_path.write_text(json.dumps(config, indent=2) + "\n")
+    driver_log = run_dir / f"driver-{label}.log"
+    deadline = 900
+    with driver_log.open("wb") as handle:
+        driver = subprocess.Popen(["node", str(DRIVER), "multi", str(config_path)], env=scrubbed_environment(),
+                                  stdout=handle, stderr=subprocess.STDOUT, start_new_session=True)
+        try:
+            status = driver.wait(timeout=deadline)
+        except subprocess.TimeoutExpired as error:
+            raise ProfileFailure(f"{label}: driver exceeded its {deadline} s deadline", EXIT_TIMEOUT, driver_log) from error
+        finally:
+            if driver.poll() is None:
+                with contextlib.suppress(ProcessLookupError):
+                    os.killpg(driver.pid, signal.SIGKILL)
+                driver.wait(timeout=10)
+    if status != 0:
+        raise ProfileFailure(f"{label}: multi-session driver failed (exit {status})", EXIT_MEASUREMENT, driver_log)
+    return json.loads((run_dir / f"result-{label}.json").read_text())
+
+
+def validate_multi(results: list[dict]) -> tuple[list[str], list[str]]:
+    problems: list[str] = []
+    warnings: list[str] = []
+    for result in results:
+        label = result["label"]
+        for kind in LATENCY_KINDS:
+            if not result["samples"][kind]:
+                problems.append(f"{label}: no {kind} samples; the mixed window did not run its workload")
+        stopped = [phase for phase in result["runningPhases"] if phase in (None, "idle")]
+        if stopped:
+            problems.append(f"{label}: {len(stopped)} of {len(result['runningPhases'])} tool loops were not running at the end")
+        if result["mobileOutcome"]["sequenceGaps"]:
+            warnings.append(f"{label}: {result['mobileOutcome']['sequenceGaps']} mounted-chat sequence gap(s)")
+        slow = sum(1 for values in result["samples"].values() for value in values if value > PHONE_REQUEST_DEADLINE_MS)
+        if slow:
+            warnings.append(f"{label}: {slow} measured operation(s) exceeded the phone's 30 s request deadline")
+    return problems, warnings
+
+
+def multi_samples(results: list[dict]) -> tuple[dict, list[str]]:
+    metrics, warnings = window_samples([result["mixed"] for result in results], ("mobile", "dashboard"),
+                                       "mixed window: mounted mobile, listing dashboard, prober, reconnects")
+    quiet, quiet_warnings = window_samples([result["noSubscriber"] for result in results], ("dashboard",),
+                                           "no-subscriber window: eight running sessions, dashboard connected",
+                                           "no_subscriber.")
+    metrics.update(quiet)
+    warnings += quiet_warnings
+
+    def add(metric_id: str, unit: str, values: list[float], description: str | None = None) -> None:
+        metrics[metric_id] = {"unit": unit, "better": "lower", "values": values,
+                              **({"description": description} if description else {})}
+
+    for kind, key in LATENCY_KINDS.items():
+        per_iteration = [result["samples"][kind] for result in results]
+        add(f"latency.{key}.p50", "ms", [percentile(values, 50) for values in per_iteration])
+        add(f"latency.{key}.p99", "ms", [percentile(values, 99) for values in per_iteration],
+            "nearest-rank p99 of the iteration's samples (the maximum below 100 samples)")
+        add(f"latency.{key}.max", "ms", [max(values) for values in per_iteration])
+    add("requests.over_phone_deadline", "count",
+        [sum(1 for values in result["samples"].values() for value in values if value > PHONE_REQUEST_DEADLINE_MS)
+         for result in results], "measured operations slower than the phone's 30 s request deadline")
+    add("requests.busy_retries", "count", [sum(result["busyRetries"].values()) for result in results],
+        "retryable Gateway errors (a failed attempt on the phone) retried by the profile")
+    for namespace, window in (("", "mixed"), ("no_subscriber.", "noSubscriber")):
+        windows = [result[window] for result in results]
+        probes = [item["probe"] for item in windows]
+        add(f"{namespace}gateway.cpu.percent", "%",
+            [item["gateway"]["cpuTimeNs"] / 1e7 / item["windowSeconds"] for item in windows],
+            "fixture Gateway CPU time over window wall time (100% is one core)")
+        add(f"{namespace}catalog.walks", "count", [probe["catalogWalks"] for probe in probes],
+            "catalog structure walks (probe: opendir of the catalog root); pre-O-3 stand-in for request-path walks")
+        add(f"{namespace}gateway.event_loop.delay_p99", "ms", [probe["eventLoopDelay"]["p99Ms"] for probe in probes],
+            "probe monitorEventLoopDelay at 10 ms resolution, lateness only")
+        add(f"{namespace}gateway.event_loop.delay_max", "ms", [probe["eventLoopDelay"]["maxMs"] for probe in probes])
+        add(f"{namespace}gateway.heap.peak", "B", [probe["heapUsedPeakBytes"] for probe in probes],
+            "probe V8 used heap, sampled every second")
+        add(f"{namespace}gateway.heap.peak_percent_of_limit", "%",
+            [probe["heapUsedPeakBytes"] / probe["heapLimitBytes"] * 100 for probe in probes])
+        add(f"{namespace}gateway.rss.peak", "B", [probe["rssPeakBytes"] for probe in probes],
+            "probe resident set size, sampled every second")
+    return metrics, warnings
+
+
+def run_multi_session(args: argparse.Namespace, results_dir: Path) -> Path:
+    scenario = SCENARIOS["multi-session"]
+    run_dir = results_dir / f"{utc_stamp()}-{scenario.name}-{secrets.token_hex(3)}"
+    evidence = run_dir / "fixture"
+    evidence.mkdir(parents=True)
+    warmup = 0 if args.warmup is None else args.warmup
+    phases = warmup + args.iterations
+    mixed_seconds = args.mixed_seconds
+    started = time.monotonic()
+    log(f"{scenario.name}: {args.iterations} iteration(s) over a {args.catalog_files}-file, {args.catalog_mib} MiB "
+        f"catalog; results {run_dir}")
+    fixture: FixtureGateway | None = None
+    results: list[dict] = []
+    try:
+        try:
+            fixture = FixtureGateway(evidence, args.tokens_per_second,
+                                     run_dir / "cpu-profile" if args.cpu_profile else None, probe=True)
+            fixture.prepare()
+            manifest = fixture.generate_catalog(args.catalog_files, args.catalog_mib, phases)
+            catalog = {key: manifest[key] for key in ("seed", "files", "bytes", "sessions", "forks", "subagentRuns",
+                                                      "digest", "generationSeconds")}
+            catalog["largeBytes"] = [item["bytes"] for item in manifest["large"]]
+            (run_dir / "catalog.json").write_text(json.dumps(catalog, indent=2) + "\n")
+            log(f"{scenario.name}: generated {manifest['files']} files, {manifest['bytes'] / 1024 ** 2:.0f} MiB in "
+                f"{manifest['generationSeconds']:.1f} s")
+            # Priming start: pairing and the first catalog load build the
+            # durable index, as on a user's long-lived Gateway.
+            fixture.start(deadline_seconds=300)
+            prime = run_multi_driver(fixture, run_dir, "prime", "prime", {})
+            fixture.stop()
+            running, cold = MULTI["runningSessions"], MULTI["coldSessionsPerPhase"]
+            for index in range(phases):
+                label = f"warmup-{index + 1}" if index < warmup else f"iteration-{index - warmup + 1}"
+                fixture.start(deadline_seconds=300)
+                log(f"{scenario.name}: {label} on fixture Gateway pid {fixture.process.pid}")
+                result = run_multi_driver(fixture, run_dir, "iteration", label, {
+                    "mixedSeconds": mixed_seconds,
+                    "running": manifest["runPool"][index * running:(index + 1) * running],
+                    "cold": manifest["coldPool"][index * cold:(index + 1) * cold],
+                    "large": manifest["large"],
+                    "appendTargets": manifest["appendTargets"],
+                })
+                fixture.stop()
+                if index >= warmup:
+                    results.append(result)
+        finally:
+            if fixture is not None:
+                try:
+                    fixture.stop()
+                finally:
+                    fixture.retain_logs()
+                    fixture.remove_catalog()
+                    if fixture.process is None or fixture.process.poll() is not None:
+                        fixture.remove()
+        if fixture.root.exists():
+            raise ProfileFailure(f"fixture home {fixture.root} was not removed", EXIT_FIXTURE, fixture.root)
+        problems, warnings = validate_multi(results)
+        if problems:
+            raise ProfileFailure("measurement rejected: " + "; ".join(problems), EXIT_MEASUREMENT, run_dir)
+        metrics, sample_warnings = multi_samples(results)
+        run_seconds = time.monotonic() - started
+        context = {
+            "scenario": scenario.description,
+            "iterations": args.iterations,
+            "warmup_iterations": warmup,
+            "tokens_per_second": args.tokens_per_second,
+            "recorded_clients": list(scenario.recorded),
+            "catalog": catalog,
+            "workload": {**{key: value for key, value in MULTI.items() if key != "catalogSeed"}, "mixedSeconds": mixed_seconds},
+            "host": args.host_state,
+            "prime": prime,
+            "per_iteration": [{
+                "label": result["label"],
+                "samples": {kind: len(values) for kind, values in result["samples"].items()},
+                "startup_list_ms": result["startupListMs"],
+                "setup_prompt_ms": result["setupPromptMs"],
+                "appended_entries": result["appendedEntries"],
+                "busy_retries": result["busyRetries"],
+                "heap_limit_bytes": result["mixed"]["probe"]["heapLimitBytes"],
+            } for result in results],
+            "gateway_event_loop_delay_records": len(event_loop_stalls(evidence / "gateway.jsonl")),
+            "probe": "scripts/tron-profile-gateway-probe.mjs preloaded into the fixture only (10 ms delay timer, 1 s "
+                     "memory sampler, one file per window edge); a stand-in until O-3 spans and the O-5 sampler "
+                     "report these numbers",
+            "fixture_removed": True,
+            "run_seconds": round(run_seconds, 1),
+            "warnings": warnings + sample_warnings,
+        }
+        write_samples_report(run_dir, scenario, metrics, context,
+                             [f"driver-results={run_dir}", f"catalog={run_dir / 'catalog.json'}"])
+        log(f"{scenario.name}: finished in {run_seconds / 60:.1f} min")
+        return run_dir
+    except (ProfileFailure, Interrupted) as failure:
         interrupted = isinstance(failure, Interrupted)
         (run_dir / "failure.json").write_text(json.dumps({
             "schema": "tron.profile-gateway-failure.v1", "scenario": scenario.name,
@@ -706,7 +1042,8 @@ def self_test(args: argparse.Namespace, root: Path) -> int:
 # --- Entry point ---------------------------------------------------------------
 
 USAGE_EPILOG = """\
-Scenarios (--list for descriptions): stream-reply, tool-loop, idle, dashboard-observer, or all.
+Scenarios (--list for descriptions): stream-reply, tool-loop, idle, dashboard-observer, or all
+of those four; multi-session (the connection and scale qualification run) only by name.
 
 Each scenario run starts a fresh fixture Gateway and writes one report under
 <profile root>/gateway/<UTC>-<scenario>-<id>/ (profile root: $TRON_PROFILE_RESULTS_DIR
@@ -716,7 +1053,8 @@ Compare runs with 'scripts/tron-profile compare BASE CANDIDATE'.
 
 Exit status: 0 success; 2 invalid usage; 4 Gateway install/build failed; 5 fixture
 failed to start; 6 scenario or measurement rejected; 7 self-test failed; 75 a
-deadline expired; 130 interrupted. Failures print the evidence path.
+deadline expired; 73 host not ready for multi-session (memory pressure, swap, disk);
+130 interrupted. Failures print the evidence path.
 """
 
 
@@ -727,9 +1065,15 @@ def parse(argv: list[str]) -> argparse.Namespace:
     parser.add_argument("--list", action="store_true", help="list scenarios and exit")
     parser.add_argument("--scenario", action="append", default=[], metavar="NAME", help="scenario to run (repeatable, or 'all')")
     parser.add_argument("--iterations", type=int, default=3, help="measured iterations per scenario (default 3)")
-    parser.add_argument("--warmup", type=int, default=1,
-                        help="unmeasured warm-up iterations of the same workload (default 1)")
+    parser.add_argument("--warmup", type=int, default=None,
+                        help="unmeasured warm-up iterations of the same workload (default 1; multi-session 0)")
     parser.add_argument("--window-seconds", type=float, default=60.0, help="idle scenario window (default 60)")
+    parser.add_argument("--mixed-seconds", type=float, default=MULTI["mixedSeconds"],
+                        help=f"multi-session mixed window (default {MULTI['mixedSeconds']})")
+    parser.add_argument("--catalog-files", type=int, default=MULTI["catalogFiles"],
+                        help=f"multi-session generated JSONL files (default {MULTI['catalogFiles']})")
+    parser.add_argument("--catalog-mib", type=int, default=MULTI["catalogMiB"],
+                        help=f"multi-session generated catalog size in MiB (default {MULTI['catalogMiB']})")
     parser.add_argument("--tokens-per-second", type=float, default=80.0, help="faux model streaming rate (default 80)")
     parser.add_argument("--no-build", action="store_true", help="use the existing packages/gateway/dist build")
     parser.add_argument("--cpu-profile", action="store_true", help="also write a Node CPU profile of the fixture Gateway")
@@ -738,7 +1082,7 @@ def parse(argv: list[str]) -> argparse.Namespace:
     args = parser.parse_args(argv)
     names: list[str] = []
     for name in args.scenario:
-        for item in (SCENARIOS if name == "all" else [name]):
+        for item in (WIRE_SCENARIOS if name == "all" else [name]):
             if item not in SCENARIOS:
                 parser.error(f"unknown scenario {item!r}; choose from {', '.join(SCENARIOS)} or all")
             if item not in names:
@@ -748,8 +1092,14 @@ def parse(argv: list[str]) -> argparse.Namespace:
         parser.error("choose --scenario NAME, --self-test, or --list")
     if not 1 <= args.iterations <= 50:
         parser.error("--iterations must be between 1 and 50")
-    if not 0 <= args.warmup <= 5:
+    if args.warmup is not None and not 0 <= args.warmup <= 5:
         parser.error("--warmup must be between 0 and 5")
+    if not 30 <= args.mixed_seconds <= 1800:
+        parser.error("--mixed-seconds must be between 30 and 1800")
+    if not 100 <= args.catalog_files <= 20_000:
+        parser.error("--catalog-files must be between 100 and 20000")
+    if not 16 <= args.catalog_mib <= 16_384:
+        parser.error("--catalog-mib must be between 16 and 16384")
     if not 5 <= args.window_seconds <= 3600:
         parser.error("--window-seconds must be between 5 and 3600")
     if not 1 <= args.tokens_per_second <= 10_000:
@@ -778,6 +1128,18 @@ def profile_lock(directory: Path, wait_seconds: float):
         yield
 
 
+def install_interrupt_handlers() -> None:
+    """SIGINT, SIGTERM and SIGHUP raise Interrupted once, so every owner's
+    cleanup (fixture stop, catalog and home removal) runs to completion."""
+    def interrupt(signal_number: int, _frame: object) -> None:
+        for handled in (signal.SIGINT, signal.SIGTERM, signal.SIGHUP):
+            signal.signal(handled, signal.SIG_IGN)  # cleanup must finish
+        raise Interrupted(signal_number)
+
+    for handled in (signal.SIGINT, signal.SIGTERM, signal.SIGHUP):
+        signal.signal(handled, interrupt)
+
+
 def main(argv: list[str]) -> int:
     if argv[:1] == ["_rusage"]:
         # Internal: the driver samples fixture CPU counters at window edges.
@@ -789,16 +1151,13 @@ def main(argv: list[str]) -> int:
             print(f"{scenario.name:<20} {scenario.description}")
         return EXIT_OK
 
-    def interrupt(signal_number: int, _frame: object) -> None:
-        for handled in (signal.SIGINT, signal.SIGTERM, signal.SIGHUP):
-            signal.signal(handled, signal.SIG_IGN)  # cleanup must finish
-        raise Interrupted(signal_number)
-
-    for handled in (signal.SIGINT, signal.SIGTERM, signal.SIGHUP):
-        signal.signal(handled, interrupt)
+    install_interrupt_handlers()
     root = report_module.profile_root()
     try:
         with profile_lock(root / "gateway", args.lock_wait_seconds):
+            if "multi-session" in args.scenario:
+                # Checked after the lock wait, so it describes the host this run gets.
+                args.host_state = host_guard(args.catalog_mib * 1024 * 1024)
             adopt_pinned_node()
             if args.no_build:
                 if not ENTRY.is_file():
@@ -812,7 +1171,10 @@ def main(argv: list[str]) -> int:
             if args.self_test:
                 status = self_test(args, root)
             for name in args.scenario:
-                run_scenario(SCENARIOS[name], args, root / "gateway")
+                if name == "multi-session":
+                    run_multi_session(args, root / "gateway")
+                else:
+                    run_scenario(SCENARIOS[name], args, root / "gateway")
             return status
     except ProfileFailure as failure:
         print(f"error: {failure}", file=sys.stderr)

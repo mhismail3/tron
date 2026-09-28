@@ -3,12 +3,17 @@
 //
 //   node scripts/tron-profile-gateway-driver.mjs seed CONFIG.json
 //   node scripts/tron-profile-gateway-driver.mjs run CONFIG.json
+//   node scripts/tron-profile-gateway-driver.mjs catalog CONFIG.json
+//   node scripts/tron-profile-gateway-driver.mjs multi CONFIG.json
 //
 // `seed` writes deterministic canonical Pi session JSONL into the isolated
 // fixture before its Gateway starts. `run` pairs like the phone, connects the
 // recording clients, drives one scenario for N iterations and writes per-window
-// counts plus a per-frame timeline. The orchestrator owns metric naming,
-// the fixture process, and the report; this file only measures.
+// counts plus a per-frame timeline. `catalog` generates the multi-session
+// scenario's seeded catalog (sessions, forks, subagent runs) in the fixture's
+// private agent directory; `multi` drives one multi-session phase against a
+// freshly started fixture. The orchestrator owns metric naming, the fixture
+// process, and the report; this file only measures.
 //
 // Phone fidelity (packages/ios-app): GatewayClient.establishConnection sends
 // hello {protocolVersion, clientId, clientRole: "mobile"}; GatewayConnectionPolicy
@@ -18,11 +23,14 @@
 // SessionPresentationStore's session.open -> session.sync ->
 // session.presentation.set(visible) and renews that lease every 15 s.
 
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { execFile } from "node:child_process";
-import { mkdirSync, readFileSync, writeFileSync, createWriteStream } from "node:fs";
+import {
+  closeSync, createWriteStream, mkdirSync, openSync, readFileSync, readSync, fstatSync, writeFileSync, writeSync,
+} from "node:fs";
+import { appendFile } from "node:fs/promises";
 import { createRequire } from "node:module";
-import { join, resolve } from "node:path";
+import { dirname, join, relative, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 
 const CLIENT_PING_INTERVAL_MS = 10_000;
@@ -32,8 +40,8 @@ const REQUEST_TIMEOUT_MS = 30_000;
 const PROTOCOL_VERSION = 5;
 
 const [command, configPath] = process.argv.slice(2);
-if (!["seed", "run"].includes(command) || !configPath) {
-  process.stderr.write("usage: tron-profile-gateway-driver.mjs seed|run CONFIG.json\n");
+if (!["seed", "run", "catalog", "multi"].includes(command) || !configPath) {
+  process.stderr.write("usage: tron-profile-gateway-driver.mjs seed|run|catalog|multi CONFIG.json\n");
   process.exit(2);
 }
 const config = JSON.parse(readFileSync(configPath, "utf8"));
@@ -120,6 +128,258 @@ async function seed() {
   writeFileSync(config.output, `${JSON.stringify({ sessions }, null, 2)}\n`);
 }
 
+// --- Multi-session catalog -------------------------------------------------
+//
+// Shape of the catalog measured on 2026-09-27 (2,995 JSONL files: 225
+// sessions, 460 forks, the rest subagent runs), scaled to `files` and `bytes`.
+// Every byte derives from `seed`, so one seed always yields the same tree and
+// digest. Layout follows the Gateway's delegated-session contract
+// (RuntimeRegistry.delegatedTopologyParentPath):
+// <parent-stem>/forks/<fork>.jsonl and <parent-stem>/<producer>/run-N/session.jsonl.
+
+const MIB = 1024 * 1024;
+const CATALOG_SCHEMA = "tron.profile-gateway-catalog.v1";
+const CATALOG_SESSION_SHARE = 225 / 3000;
+const CATALOG_FORK_SHARE = 460 / 3000;
+const CATALOG_REFERENCE_BYTES = 2048 * MIB;
+// Five large sessions at the reference size, as the largest measured ones.
+const LARGE_SESSION_MIB = [100, 125, 150, 175, 200];
+const MINIMUM_FILE_BYTES = 4 * 1024;
+// Cold-open targets share one size so every iteration opens the same load.
+const COLD_SESSION_BYTES = MIB;
+const CATALOG_PROJECTS = 12;
+const SUBAGENT_PRODUCERS = ["worker", "reviewer", "scout", "planner"];
+const TOOL_RESULT_CHARS = [512, 1024, 2048, 4096, 8192, 16384];
+const CATALOG_EPOCH_MS = Date.parse("2026-06-01T00:00:00.000Z");
+const CATALOG_USAGE = '{"input":0,"output":0,"cacheRead":0,"cacheWrite":0,"totalTokens":0,'
+  + '"cost":{"input":0,"output":0,"cacheRead":0,"cacheWrite":0,"total":0}}';
+
+function seededHex(random, length) {
+  let text = "";
+  while (text.length < length) text += Math.floor(random() * 16).toString(16);
+  return text;
+}
+
+function seededSessionId(random) {
+  const hex = seededHex(random, 32);
+  return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-7${hex.slice(13, 16)}-8${hex.slice(17, 20)}-${hex.slice(20, 32)}`;
+}
+
+function gaussian(random) {
+  return Math.sqrt(-2 * Math.log(1 - random())) * Math.cos(2 * Math.PI * random());
+}
+
+/** JSON-encoded text pools; transcripts pick from them so generation stays I/O bound. */
+function textPools(seed) {
+  const random = generator(seed);
+  const pool = (count, min, max) => Array.from({ length: count },
+    () => JSON.stringify(prose(random, min + Math.floor(random() * (max - min + 1)))));
+  return {
+    user: pool(16, 120, 400),
+    thinking: pool(16, 160, 600),
+    text: pool(16, 200, 800),
+    tool: TOOL_RESULT_CHARS.map((chars) => pool(4, chars, chars)),
+    seeded: { user: pool(4, 240, 240), thinking: pool(4, 280, 280), text: pool(4, 480, 480), tool: pool(4, 470, 470) },
+  };
+}
+
+class TranscriptWriter {
+  /** `portable` rewrites fixture-specific paths so the digest names the
+   * catalog, not the temporary directory it was generated in. */
+  constructor(root, path, header, random, digest, portable) {
+    mkdirSync(dirname(path), { recursive: true, mode: 0o700 });
+    this.fd = openSync(path, "wx", 0o600);
+    this.random = random;
+    this.digest = digest;
+    this.nextId = 0;
+    this.leaf = null;
+    this.clock = Date.parse(header.timestamp);
+    const line = `${JSON.stringify(header)}\n`;
+    writeSync(this.fd, line);
+    digest.update(portable(`${relative(root, path)}\n${line}`));
+    this.bytes = line.length;
+    this.chunks = [];
+    this.pending = 0;
+  }
+
+  line(text) {
+    this.chunks.push(text, "\n");
+    this.bytes += text.length + 1; // pools and envelopes are ASCII
+    this.pending += text.length + 1;
+    if (this.pending >= 4 * MIB) this.flush();
+  }
+
+  flush() {
+    if (this.pending === 0) return;
+    const buffer = Buffer.from(this.chunks.join(""), "utf8");
+    let offset = 0;
+    while (offset < buffer.length) offset += writeSync(this.fd, buffer, offset);
+    this.digest.update(buffer);
+    this.chunks = [];
+    this.pending = 0;
+  }
+
+  entry(type, body) {
+    const id = (this.nextId++).toString(16).padStart(8, "0");
+    const timestamp = (this.clock += 1000);
+    const parent = this.leaf === null ? "null" : `"${this.leaf}"`;
+    this.line(`{"type":"${type}","id":"${id}","parentId":${parent},"timestamp":"${new Date(timestamp).toISOString()}",${body(timestamp, id)}}`);
+    this.leaf = id;
+  }
+
+  preamble(name) {
+    this.entry("model_change", () => '"provider":"tron-profile","modelId":"profile-model"');
+    this.entry("thinking_level_change", () => '"thinkingLevel":"low"');
+    if (name) this.entry("session_info", () => `"name":${JSON.stringify(name)}`);
+  }
+
+  /** One user prompt, a tool call, its result, and a final answer. */
+  turn(pools) {
+    const pick = (list) => list[Math.floor(this.random() * list.length)];
+    const assistant = (content, stopReason, timestamp) => `"message":{"role":"assistant","content":[${content}],`
+      + `"api":"faux","provider":"tron-profile","model":"profile-model","usage":${CATALOG_USAGE},`
+      + `"stopReason":"${stopReason}","timestamp":${timestamp}}`;
+    const toolPool = Array.isArray(pools.tool[0]) ? pick(pools.tool) : pools.tool;
+    this.entry("message", (timestamp) => `"message":{"role":"user","content":[{"type":"text","text":${pick(pools.user)}}],"timestamp":${timestamp}}`);
+    let callId;
+    this.entry("message", (timestamp, id) => {
+      callId = `call_${id}`;
+      return assistant(`{"type":"thinking","thinking":${pick(pools.thinking)}},{"type":"text","text":${pick(pools.text)}},`
+        + `{"type":"toolCall","id":"${callId}","name":"bash","arguments":{"command":"printf generated"}}`, "toolUse", timestamp);
+    });
+    this.entry("message", (timestamp) => `"message":{"role":"toolResult","toolCallId":"${callId}","toolName":"bash",`
+      + `"content":[{"type":"text","text":${pick(toolPool)}}],"isError":false,"timestamp":${timestamp}}`);
+    this.entry("message", (timestamp) => assistant(`{"type":"text","text":${pick(pools.text)}}`, "stop", timestamp));
+  }
+
+  close() {
+    this.flush();
+    closeSync(this.fd);
+  }
+}
+
+function catalogPlan() {
+  const files = config.files;
+  const scale = config.bytes / CATALOG_REFERENCE_BYTES;
+  const pools = config.runSessions + config.coldSessions;
+  const sessions = Math.max(Math.round(files * CATALOG_SESSION_SHARE), LARGE_SESSION_MIB.length + pools + CATALOG_PROJECTS);
+  const forks = Math.round(files * CATALOG_FORK_SHARE);
+  const subagents = files - sessions - forks;
+  if (subagents < config.appendTargets) fail(`${files} files cannot hold ${sessions} sessions, ${forks} forks and ${config.appendTargets} subagent runs`);
+  const largeBytes = LARGE_SESSION_MIB.map((mib) => Math.round(mib * MIB * scale));
+  const coldBytes = config.coldSessions * COLD_SESSION_BYTES;
+  // Run-pool sessions hold 160 seeded turns (about 350 KB), enough to fill the
+  // snapshot transcript page like the tool-loop scenario's seeded sessions.
+  const runBytes = config.runSessions * 350 * 1024;
+  const others = sessions - LARGE_SESSION_MIB.length - pools + forks + subagents;
+  const remaining = config.bytes - largeBytes.reduce((sum, value) => sum + value, 0) - coldBytes - runBytes;
+  if (remaining < others * MINIMUM_FILE_BYTES) fail(`${config.bytes} bytes cannot hold the fixed sessions and ${others} other files`);
+  return { sessions, forks, subagents, largeBytes, remaining };
+}
+
+function generateCatalog() {
+  const startedAt = performance.now();
+  const plan = catalogPlan();
+  const root = resolve(config.agentDir, "sessions");
+  const digest = createHash("sha256");
+  const workspace = resolve(config.workspace);
+  const encodedWorkspace = workspace.replace(/^[/\\]/, "").replace(/[/\\:]/g, "-");
+  const portable = (text) => text.split(root).join("<catalog>").split(workspace).join("<workspace>")
+    .split(encodedWorkspace).join("<workspace>");
+  const pools = textPools(config.seed);
+  const layout = generator(config.seed ^ 0x5eed);
+  const projects = Array.from({ length: CATALOG_PROJECTS }, (_, index) => {
+    const cwd = resolve(config.workspace, `project-${String(index + 1).padStart(2, "0")}`);
+    mkdirSync(cwd, { recursive: true, mode: 0o700 });
+    return { cwd, directory: join(root, `--${cwd.replace(/^[/\\]/, "").replace(/[/\\:]/g, "-")}--`) };
+  });
+  let index = 0;
+  let totalBytes = 0;
+  const write = (path, header, fill) => {
+    const random = generator(Math.imul(config.seed, 100_003) + index);
+    const writer = new TranscriptWriter(root, path, header, random, digest, portable);
+    fill(writer);
+    writer.close();
+    totalBytes += writer.bytes;
+    index += 1;
+    return { path, bytes: writer.bytes, leaf: writer.leaf };
+  };
+  const header = (random, cwd, parentSession) => {
+    const id = seededSessionId(random);
+    const timestamp = new Date(CATALOG_EPOCH_MS + index * 37 * 60_000).toISOString();
+    return { type: "session", version: 3, id, timestamp, cwd, ...(parentSession ? { parentSession } : {}) };
+  };
+  const fillTo = (bytes, turnPools = pools) => (writer) => {
+    writer.preamble(null);
+    do writer.turn(turnPools); while (writer.bytes < bytes);
+  };
+  const topLevel = (name, fill) => {
+    const project = projects[index % projects.length];
+    const value = header(layout, project.cwd);
+    const path = join(project.directory, `${value.timestamp.replace(/[:.]/g, "-")}_${value.id}.jsonl`);
+    const written = write(path, value, (writer) => { writer.preamble(name); fill(writer); });
+    return { sessionId: value.id, cwd: project.cwd, ...written };
+  };
+
+  const large = plan.largeBytes.map((bytes, position) => topLevel(`Large session ${position + 1}`,
+    (writer) => { do writer.turn(pools); while (writer.bytes < bytes); }));
+  const runPool = Array.from({ length: config.runSessions }, (_, position) => topLevel(`Running session ${position + 1}`,
+    (writer) => { for (let turn = 0; turn < 160; turn += 1) writer.turn(pools.seeded); }));
+  const coldPool = Array.from({ length: config.coldSessions }, (_, position) => topLevel(`Cold session ${position + 1}`,
+    (writer) => { do writer.turn(pools); while (writer.bytes < COLD_SESSION_BYTES); }));
+
+  // Remaining files share the remaining bytes by class weight and a seeded
+  // log-normal spread: sessions are larger than forks, subagent runs smaller.
+  const others = [
+    ...Array.from({ length: plan.sessions - large.length - runPool.length - coldPool.length }, () => ({ kind: "session", weight: 3 })),
+    ...Array.from({ length: plan.forks }, () => ({ kind: "fork", weight: 2 })),
+    ...Array.from({ length: plan.subagents }, () => ({ kind: "subagent", weight: 0.5 })),
+  ];
+  for (const item of others) item.weight *= Math.exp(0.8 * gaussian(layout));
+  const totalWeight = others.reduce((sum, item) => sum + item.weight, 0);
+  const parents = [...large];
+  const subagentRuns = [];
+  const runsByParent = new Map();
+  for (const item of others) {
+    const bytes = Math.max(MINIMUM_FILE_BYTES, Math.floor(plan.remaining * item.weight / totalWeight));
+    if (item.kind === "session") {
+      parents.push(topLevel(`Session ${parents.length + 1}`, (writer) => { do writer.turn(pools); while (writer.bytes < bytes); }));
+      continue;
+    }
+    const parent = parents[Math.floor(layout() * parents.length)];
+    const stem = parent.path.slice(0, -".jsonl".length);
+    const value = header(layout, parent.cwd, parent.path);
+    if (item.kind === "fork") {
+      write(join(stem, "forks", `${value.timestamp.replace(/[:.]/g, "-")}_${value.id}.jsonl`), value, fillTo(bytes));
+      continue;
+    }
+    const producer = SUBAGENT_PRODUCERS[Math.floor(layout() * SUBAGENT_PRODUCERS.length)];
+    const key = `${stem}/${producer}`;
+    const run = (runsByParent.get(key) ?? 0) + 1;
+    runsByParent.set(key, run);
+    const written = write(join(stem, producer, `run-${run}`, "session.jsonl"), value, fillTo(bytes));
+    subagentRuns.push({ sessionId: value.id, ...written });
+  }
+  const pick = ({ sessionId, path, bytes, cwd }) => ({ sessionId, path, bytes, cwd });
+  const manifest = {
+    schema: CATALOG_SCHEMA,
+    seed: config.seed,
+    root,
+    files: index,
+    bytes: totalBytes,
+    sessions: plan.sessions,
+    forks: plan.forks,
+    subagentRuns: plan.subagents,
+    digest: digest.digest("hex"),
+    generationSeconds: (performance.now() - startedAt) / 1000,
+    large: large.map(pick),
+    runPool: runPool.map(pick),
+    coldPool: coldPool.map(pick),
+    appendTargets: subagentRuns.slice(0, config.appendTargets).map(({ path }) => path),
+  };
+  writeFileSync(config.output, `${JSON.stringify(manifest, null, 2)}\n`);
+}
+
 function emptyWindow() {
   return {
     frames: 0, bytes: 0, largestFrame: 0, largestTopic: null, topics: {},
@@ -139,6 +399,8 @@ class RecordingClient {
     this.label = "setup";
     this.lastFrameAt = 0;
     this.closedUnexpectedly = null;
+    // Stable across reconnects, as the phone's client identity is.
+    this.clientId = randomUUID();
   }
 
   async connect() {
@@ -172,6 +434,8 @@ class RecordingClient {
     });
     socket.on("message", (data, isBinary) => this.onMessage(data, isBinary));
     socket.on("close", (code, reason) => {
+      // A socket retired by reconnect() may finish closing after its successor opened.
+      if (socket !== this.socket) return;
       if (!this.closing) this.closedUnexpectedly = `closed ${code} ${reason.toString()}`;
       for (const { reject } of this.pending.values()) reject(new Error(`${this.name} socket closed (${code})`));
       this.pending.clear();
@@ -186,7 +450,7 @@ class RecordingClient {
     }
     if (!this.tcp) fail(`${this.name}: the upgrade exposed no TCP socket to count wire bytes`);
     const hello = new Promise((resolveHello) => { this.helloWaiter = resolveHello; });
-    this.send({ type: "hello", protocolVersion: PROTOCOL_VERSION, clientId: randomUUID(), clientRole: "mobile" });
+    this.send({ type: "hello", protocolVersion: PROTOCOL_VERSION, clientId: this.clientId, clientRole: "mobile" });
     this.info = await withDeadline(hello, 15_000, `${this.name} hello`);
     if (this.info.protocolVersion !== PROTOCOL_VERSION) fail(`${this.name}: Gateway protocol ${this.info.protocolVersion} is not ${PROTOCOL_VERSION}`);
     this.pingTimer = setInterval(() => this.clientPing(), CLIENT_PING_INTERVAL_MS);
@@ -251,20 +515,48 @@ class RecordingClient {
       const waiter = this.pending.get(frame.id);
       if (!waiter) return;
       this.pending.delete(frame.id);
-      if (frame.ok === false) waiter.reject(new Error(`${waiter.method} failed: ${JSON.stringify(frame.error)}`));
+      if (frame.ok === false) {
+        waiter.reject(Object.assign(new Error(`${waiter.method} failed: ${JSON.stringify(frame.error)}`), { gatewayError: frame.error }));
+      }
       else waiter.resolve(frame.result);
       return;
     }
     for (const listener of this.listeners) listener(frame, topic);
   }
 
-  request(method, params = {}) {
+  request(method, params = {}, deadlineMs = REQUEST_TIMEOUT_MS) {
+    // A lease renewal can fire while reconnect() has no open socket.
+    if (this.socket?.readyState !== 1) return Promise.reject(new Error(`${this.name} ${method}: socket not open`));
     const id = randomUUID();
     const promise = new Promise((resolveRequest, rejectRequest) => {
       this.pending.set(id, { method, resolve: resolveRequest, reject: rejectRequest });
     });
     this.send({ type: "request", id, method, params });
-    return withDeadline(promise, REQUEST_TIMEOUT_MS, `${this.name} ${method}`);
+    return withDeadline(promise, deadlineMs, `${this.name} ${method}`);
+  }
+
+  /** Close and reopen the socket like a phone reconnect; the open window,
+   * listeners and client identity carry over. */
+  async reconnect() {
+    await this.close();
+    // close() gives up waiting after 3 s and terminates; retire the old socket
+    // and its unanswered requests now rather than when its close event lands.
+    this.socket = null;
+    for (const { reject } of this.pending.values()) reject(new Error(`${this.name} reconnected`));
+    this.pending.clear();
+    const window = this.window;
+    if (window && this.tcp) {
+      window.socketCarryRead += this.tcp.bytesRead - window.socketRead0;
+      window.socketCarryWritten += this.tcp.bytesWritten - window.socketWritten0;
+    }
+    this.closing = false;
+    this.awaitingPong = null;
+    this.tcp = null;
+    await this.connect();
+    if (window) {
+      window.socketRead0 = this.tcp.bytesRead;
+      window.socketWritten0 = this.tcp.bytesWritten;
+    }
   }
 
   beginWindow(label) {
@@ -272,6 +564,8 @@ class RecordingClient {
     this.window = emptyWindow();
     this.window.socketRead0 = this.tcp?.bytesRead ?? null;
     this.window.socketWritten0 = this.tcp?.bytesWritten ?? null;
+    this.window.socketCarryRead = 0;
+    this.window.socketCarryWritten = 0;
   }
 
   endWindow() {
@@ -279,10 +573,13 @@ class RecordingClient {
     this.window = null;
     const read = this.tcp?.bytesRead ?? null;
     const written = this.tcp?.bytesWritten ?? null;
-    window.socketBytesRead = read !== null && window.socketRead0 !== null ? read - window.socketRead0 : null;
-    window.socketBytesWritten = written !== null && window.socketWritten0 !== null ? written - window.socketWritten0 : null;
+    window.socketBytesRead = read !== null && window.socketRead0 !== null ? read - window.socketRead0 + window.socketCarryRead : null;
+    window.socketBytesWritten = written !== null && window.socketWritten0 !== null
+      ? written - window.socketWritten0 + window.socketCarryWritten : null;
     delete window.socketRead0;
     delete window.socketWritten0;
+    delete window.socketCarryRead;
+    delete window.socketCarryWritten;
     this.label = "between";
     return window;
   }
@@ -306,8 +603,8 @@ class MountedChat {
     this.revision = 0;
   }
 
-  async open() {
-    const opened = await this.client.request("session.open", { sessionId: this.sessionId });
+  async open(deadlineMs = REQUEST_TIMEOUT_MS) {
+    const opened = await this.client.request("session.open", { sessionId: this.sessionId }, deadlineMs);
     if (opened?.session?.sessionId !== this.sessionId) fail(`session.open returned ${opened?.session?.sessionId}`);
     this.token = opened.subscriptionToken;
     this.openSnapshot = opened.session;
@@ -334,17 +631,29 @@ class MountedChat {
       this.cursor = { generation: payload.runtimeGeneration, sequence: payload.eventSequence };
     };
     this.client.listeners.add(this.listener);
-    const synced = await this.client.request("session.sync", { sessionId: this.sessionId, syncToken: opened.syncToken });
+    const synced = await this.client.request("session.sync", { sessionId: this.sessionId, syncToken: opened.syncToken }, deadlineMs);
     if (synced?.synchronized !== true) fail("session.sync did not synchronize");
-    await this.setVisible(true);
+    await this.setVisible(true, deadlineMs);
     this.renewal = setInterval(() => { void this.setVisible(true).catch((error) => { this.renewalError = error; }); }, PRESENTATION_LEASE_RENEWAL_MS);
     return opened;
   }
 
-  setVisible(visible) {
+  setVisible(visible, deadlineMs = REQUEST_TIMEOUT_MS) {
     this.revision += 1;
     return this.client.request("session.presentation.set", {
       sessionId: this.sessionId, subscriptionToken: this.token, revision: this.revision, visible,
+    }, deadlineMs);
+  }
+
+  /** Restore the mounted chat on a new socket, as the phone does after a reconnect. */
+  remount(deadlineMs) {
+    clearInterval(this.renewal);
+    this.client.listeners.delete(this.listener);
+    const gaps = this.sequenceGaps ?? 0;
+    return this.open(deadlineMs).then((opened) => {
+      this.sequenceGaps += gaps;
+      this.renewalError = null; // a renewal cut off by the reconnect is not a failure
+      return opened;
     });
   }
 
@@ -445,6 +754,299 @@ function settled(observer, recorders, sessionId, deadlineMs) {
       }
     }, 50);
   }), deadlineMs, `session ${sessionId} to settle`);
+}
+
+// --- Multi-session phase -------------------------------------------------------
+//
+// One phase per fixture Gateway process: `prime` pairs the three devices and
+// lets the first catalog load build the durable index; each `iteration` then
+// starts eight long tool loops, measures a window with no session subscriber,
+// mounts the mobile chat, and measures a mixed window while the dashboard
+// lists, the prober opens warm, cold and large sessions and prompts cold ones,
+// both recorded clients reconnect on schedule, and subagent-like writers append
+// to child transcripts.
+
+const APPENDED_TEXT = prose(generator(11), 900);
+// The prober's warm and large lanes use their own devices: the Gateway admits
+// one session.open per connection, so a minutes-long large cold open must not
+// starve the warm and cold samples.
+const MULTI_DEVICES = ["mobile", "dashboard", "driver", "warm", "large"];
+// A retryable Gateway error (for example `busy` when the catalog changed while
+// a session opened) would surface on the phone as a failed open; the profile
+// retries after a short pause, counts it, and times the operation to success.
+const BUSY_RETRY_DELAY_MS = 250;
+const BUSY_RETRY_LIMIT = 40;
+
+async function retryingBusy(retries, method, operation) {
+  for (let attempt = 0; ; attempt += 1) {
+    try {
+      return await operation();
+    } catch (error) {
+      if (error?.gatewayError?.retryable !== true || attempt >= BUSY_RETRY_LIMIT) throw error;
+      retries[method] = (retries[method] ?? 0) + 1;
+      await sleep(BUSY_RETRY_DELAY_MS);
+    }
+  }
+}
+
+function lastEntryId(path) {
+  const fd = openSync(path, "r");
+  try {
+    const size = fstatSync(fd).size;
+    const length = Math.min(size, 256 * 1024);
+    const buffer = Buffer.alloc(length);
+    readSync(fd, buffer, 0, length, size - length);
+    const lines = buffer.toString("utf8").trimEnd().split("\n");
+    return JSON.parse(lines.at(-1)).id ?? fail(`${path} ends without an entry id`);
+  } finally {
+    closeSync(fd);
+  }
+}
+
+/** Subagent-like external writers: one entry per target every interval. */
+function startAppender(paths, intervalMs, label) {
+  const targets = paths.map((path) => ({ path, leaf: lastEntryId(path), next: 0 }));
+  const prefix = label.replace(/[^A-Za-z0-9]/g, "");
+  let appended = 0;
+  let failure = null;
+  let busy = null;
+  const timer = setInterval(() => {
+    if (busy) return;
+    busy = Promise.all(targets.map(async (target) => {
+      const id = `${prefix}${(target.next += 1).toString(16)}`;
+      const line = JSON.stringify({
+        type: "message", id, parentId: target.leaf, timestamp: new Date().toISOString(),
+        message: { role: "assistant", content: [{ type: "text", text: APPENDED_TEXT }], api: "faux", provider: "tron-profile",
+          model: "profile-model", usage: JSON.parse(CATALOG_USAGE), stopReason: "stop", timestamp: Date.now() },
+      });
+      await appendFile(target.path, `${line}\n`);
+      target.leaf = id;
+      appended += 1;
+    })).catch((error) => { failure ??= error; }).finally(() => { busy = null; });
+  }, intervalMs);
+  return {
+    async stop() {
+      clearInterval(timer);
+      await busy;
+      if (failure) throw failure;
+      return appended;
+    },
+  };
+}
+
+function readProbe() {
+  try { return JSON.parse(readFileSync(config.probeOutput, "utf8")); } catch { return null; }
+}
+
+/** Ask the fixture's probe for a snapshot; it answers once its event loop runs. */
+async function probeSnapshot() {
+  const previous = readProbe()?.sequence ?? 0;
+  process.kill(config.gatewayPid, "SIGUSR2");
+  // A blocked Gateway event loop answers late; that delay is the measurement.
+  const deadline = now() + config.measuredDeadlineMs;
+  for (;;) {
+    const snapshot = readProbe();
+    if (snapshot && snapshot.sequence > previous) return snapshot;
+    if (now() > deadline) fail(`the fixture probe did not answer SIGUSR2 within ${config.measuredDeadlineMs} ms`);
+    await sleep(25);
+  }
+}
+
+async function measuredWindow(label, connected, recorded, body) {
+  for (const client of connected) client.beginWindow(label);
+  const probeBefore = await probeSnapshot();
+  const before = await sampleGatewayUsage();
+  const start = now();
+  await body(start);
+  const end = now();
+  const after = await sampleGatewayUsage();
+  const probeAfter = await probeSnapshot();
+  const clients = {};
+  for (const client of connected) {
+    const window = client.endWindow();
+    if (recorded.includes(client.name)) clients[client.name] = window;
+  }
+  return {
+    label, windowSeconds: (end - start) / 1000, gateway: usageDelta(before, after), clients,
+    probe: {
+      catalogWalks: probeAfter.catalogWalks - probeBefore.catalogWalks,
+      eventLoopDelay: probeAfter.eventLoopDelay,
+      heapUsedPeakBytes: probeAfter.heapUsedPeakBytes,
+      heapLimitBytes: probeAfter.heapLimitBytes,
+      rssPeakBytes: probeAfter.rssPeakBytes,
+    },
+  };
+}
+
+async function multi() {
+  mkdirSync(config.outputDir, { recursive: true });
+  const timelineStream = createWriteStream(join(config.outputDir, "timeline.jsonl"), { flags: "a" });
+  const timeline = { write: (record) => timelineStream.write(`${JSON.stringify(record)}\n`) };
+  const clients = [];
+  const chats = [];
+  let appender = null;
+  const measured = config.measuredDeadlineMs;
+  const result = { schema: "tron.profile-gateway-multi.v1", phase: config.phase, label: config.label };
+  const resultPath = join(config.outputDir, `result-${config.label}.json`);
+  const connect = async (name, token) => {
+    const client = new RecordingClient(name, token, timeline);
+    client.label = config.label;
+    await client.connect();
+    clients.push(client);
+    return client;
+  };
+  try {
+    if (config.phase === "prime") {
+      const tokens = {};
+      let code = null;
+      for (const name of MULTI_DEVICES) {
+        const paired = await pair(`Tron profile ${name}`, code);
+        code = paired.code;
+        tokens[name] = paired.token;
+      }
+      writeFileSync(config.devicesPath, JSON.stringify(tokens), { mode: 0o600 });
+      const dashboard = await connect("dashboard", tokens.dashboard);
+      result.gateway = { version: dashboard.info.gatewayVersion, protocolVersion: dashboard.info.protocolVersion };
+      // The phone's dashboard list (user scope) builds the durable index.
+      const started = now();
+      const listed = await dashboard.request("session.list", { limit: 500, scope: "user" }, measured);
+      result.list = { ms: now() - started, rows: listed?.sessions?.length ?? null };
+      writeFileSync(resultPath, `${JSON.stringify(result, null, 2)}\n`);
+      return;
+    }
+
+    const tokens = JSON.parse(readFileSync(config.devicesPath, "utf8"));
+    const samples = {
+      sessionList: [], sessionOpenWarm: [], sessionOpenCold: [], sessionOpenColdLarge: [], promptAdmission: [],
+      reconnectReadyMobile: [], reconnectReadyDashboard: [],
+    };
+    const timed = async (kind, operation) => {
+      const started = now();
+      const value = await operation();
+      samples[kind].push(now() - started);
+      return value;
+    };
+    const driver = await connect("driver", tokens.driver);
+    const phases = new Map();
+    driver.listeners.add((frame) => {
+      if (frame.type === "event" && frame.topic === "session.summary" && frame.payload?.sessionId) {
+        phases.set(frame.payload.sessionId, frame.payload.phase);
+      }
+    });
+    const dashboard = await connect("dashboard", tokens.dashboard);
+    let started = now();
+    await dashboard.request("session.list", { limit: 500, scope: "user" }, measured);
+    result.startupListMs = now() - started;
+    appender = startAppender(config.appendTargets, config.appendIntervalMs, config.label);
+
+    // Eight long tool loops; the driver unsubscribes after each prompt, so the
+    // runs continue with no session subscriber (accepted prompts outlive them).
+    result.setupPromptMs = [];
+    const retries = {};
+    result.busyRetries = retries;
+    const retrying = (client, method, params) => retryingBusy(retries, method, () => client.request(method, params, measured));
+    const mutation = (client, method, params) => {
+      const commandId = randomUUID(); // one command, however often admission is retried
+      return retrying(client, method, { ...params, commandId });
+    };
+    for (const { sessionId } of config.running) {
+      const opened = await retrying(driver, "session.open", { sessionId });
+      await mutation(driver, "session.setModel", { sessionId, provider: "tron-profile", modelId: "profile-model" });
+      started = now();
+      await mutation(driver, "session.prompt", { sessionId, text: config.runPrompt });
+      result.setupPromptMs.push(now() - started);
+      await driver.request("session.close", { sessionId, subscriptionToken: opened.subscriptionToken }, measured);
+    }
+    await sleep(config.settleBeforeMs);
+
+    result.noSubscriber = await measuredWindow("no-subscriber", [driver, dashboard], ["dashboard"],
+      () => sleep(config.noSubscriberSeconds * 1000));
+
+    const mobile = await connect("mobile", tokens.mobile);
+    const chat = new MountedChat(mobile, config.running[0].sessionId);
+    chats.push(chat);
+    await retryingBusy(retries, "mount", () => chat.remount(measured));
+    await sleep(config.settleBeforeMs);
+
+    const reconnectMs = config.reconnectIntervalSeconds * 1000;
+    const pause = (intervalMs, cycleStart, deadline) => sleep(Math.max(0, Math.min(intervalMs - (now() - cycleStart), deadline - now())));
+    const dashboardLoop = async (start, deadline) => {
+      let reconnectAt = start + config.dashboardReconnectOffsetSeconds * 1000;
+      while (now() < deadline) {
+        const cycleStart = now();
+        if (cycleStart >= reconnectAt) {
+          reconnectAt += reconnectMs;
+          await timed("reconnectReadyDashboard", async () => {
+            await dashboard.reconnect();
+            await retrying(dashboard, "session.list", { limit: 500, scope: "user" });
+          });
+        } else {
+          await timed("sessionList", () => retrying(dashboard, "session.list", { limit: 500, scope: "user" }));
+        }
+        await pause(config.listIntervalMs, cycleStart, deadline);
+      }
+    };
+    const mobileLoop = async (start, deadline) => {
+      for (let reconnectAt = start + config.mobileReconnectOffsetSeconds * 1000; reconnectAt < deadline; reconnectAt += reconnectMs) {
+        await sleep(Math.max(0, reconnectAt - now()));
+        await timed("reconnectReadyMobile", async () => {
+          await mobile.reconnect();
+          await retryingBusy(retries, "mount", () => chat.remount(measured));
+        });
+      }
+    };
+    const warm = await connect("warm", tokens.warm);
+    const large = await connect("large", tokens.large);
+    const openClose = async (client, kind, sessionId) => {
+      const opened = await timed(kind, () => retrying(client, "session.open", { sessionId }));
+      await client.request("session.close", { sessionId, subscriptionToken: opened.subscriptionToken }, measured);
+    };
+    // Largest first, so the 200 MiB worst case is measured however few fit.
+    const largeLane = async (start, deadline) => {
+      for (const { sessionId } of [...config.large].reverse()) {
+        if (now() >= deadline) break;
+        await openClose(large, "sessionOpenColdLarge", sessionId);
+      }
+    };
+    const warmLane = async (start, deadline) => {
+      for (let turn = 0; now() < deadline; turn += 1) {
+        const cycleStart = now();
+        await openClose(warm, "sessionOpenWarm", config.running[turn % config.running.length].sessionId);
+        await pause(config.proberIntervalMs, cycleStart, deadline);
+      }
+    };
+    const coldLane = async (start, deadline) => {
+      for (const { sessionId } of config.cold) {
+        if (now() >= deadline) break;
+        const cycleStart = now();
+        const opened = await timed("sessionOpenCold", () => retrying(driver, "session.open", { sessionId }));
+        await mutation(driver, "session.setModel", { sessionId, provider: "tron-profile", modelId: "profile-model" });
+        await timed("promptAdmission", () => mutation(driver, "session.prompt", { sessionId, text: config.coldPrompt }));
+        await driver.request("session.close", { sessionId, subscriptionToken: opened.subscriptionToken }, measured);
+        await pause(config.proberIntervalMs, cycleStart, deadline);
+      }
+    };
+    result.mixed = await measuredWindow("mixed", [driver, dashboard, mobile, warm, large], ["mobile", "dashboard"], async (start) => {
+      const deadline = start + config.mixedSeconds * 1000;
+      // Every lane starts at once; operations in flight at the deadline finish inside the window.
+      await Promise.all([dashboardLoop(start, deadline), mobileLoop(start, deadline), largeLane(start, deadline),
+        warmLane(start, deadline), coldLane(start, deadline)]);
+    });
+    result.samples = samples;
+    result.runningPhases = config.running.map(({ sessionId }) => phases.get(sessionId) ?? null);
+    result.mobileOutcome = chat.outcome();
+    result.appendedEntries = await appender.stop();
+    appender = null;
+    for (const client of clients) {
+      if (client.closedUnexpectedly) fail(`${client.name} ${client.closedUnexpectedly}`);
+    }
+    writeFileSync(resultPath, `${JSON.stringify(result, null, 2)}\n`);
+  } finally {
+    for (const chat of chats) clearInterval(chat.renewal);
+    if (appender) await appender.stop().catch(() => {});
+    for (const client of clients) await client.close();
+    await new Promise((resolveFlush) => timelineStream.end(resolveFlush));
+  }
 }
 
 async function main() {
@@ -558,6 +1160,8 @@ async function main() {
 
 try {
   if (command === "seed") await seed();
+  else if (command === "catalog") generateCatalog();
+  else if (command === "multi") await multi();
   else await main();
 } catch (error) {
   process.stderr.write(`error: ${error instanceof Error ? error.stack ?? error.message : String(error)}\n`);

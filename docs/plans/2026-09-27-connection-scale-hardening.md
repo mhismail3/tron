@@ -2,7 +2,7 @@
 
 - **Started:** 2026-09-27
 - **Status:** Active (Phase 1 runs on `hardening/integration`; that branch's copy of this plan is authoritative until R-1)
-- **Last updated:** 2026-09-28, activated
+- **Last updated:** 2026-09-28, O-6a done
 - **Goal:** A clean, efficient and predictable Gateway and phone connection: the phone stays connected and loads any session promptly whenever the network path is up, however many sessions run and however large the history grows, and every disconnect or slow operation is attributable to one cause from the logs in one step.
 
 ## Goal and constraints
@@ -513,7 +513,7 @@ rows are in priority order.
 | --- | --- | --- | --- | --- |
 | P-0 | Done | Fold the phone reconnect tuning plan into this plan (D-1) and close it through history; done on `main` at activation | none | |
 | O-1 | Claimed | Correlation key across phone and Gateway on every connection record | none | orchestrator-dispatched worker, 2026-09-28 |
-| O-6a | Claimed | Multi-session qualification scenario with a generated catalog; record the `main` baseline | none | orchestrator-dispatched worker, 2026-09-28 |
+| O-6a | Done | Multi-session qualification scenario with a generated catalog; record the `main` baseline | none | orchestrator-dispatched worker, 2026-09-28 |
 | E-2 | Claimed | Bound the iOS profiler's memory or hand the row to the simulator-lifecycle plan | none | orchestrator-dispatched worker, 2026-09-28 |
 | O-2 | Ready | Gateway transport records: upgrade phases, inbound silence with Tailscale peer path | O-1 | |
 | O-3 | Ready | Request span: one `rpc.completed` per slow RPC with every stage, wait and count | O-1 | |
@@ -1569,14 +1569,14 @@ the day cannot measure a synthetic case).
 
 | Metric | `main` baseline | Release candidate (R-1) | Evaluation day (R-4) |
 | --- | --- | --- | --- |
-| `session.list` p99 | | | |
-| warm / cold `session.open` p99 | | | |
-| prompt admission p99 | | | |
-| event-loop delay p99 / max | | | |
-| request-path catalog walks | | | |
+| `session.list` p99 | 46.5 s (p50 27.5 s) | | |
+| warm / cold `session.open` p99 | 3.3 s / 140 s (1 MiB); 25.7 s for 100–200 MiB | | |
+| prompt admission p99 | 631 ms | | |
+| event-loop delay p99 / max | 125 ms / 6.3 s (no subscriber: 263 ms / 5.7 s) | | |
+| request-path catalog walks | 37 walks per 2-minute mixed window, all causes (probe) | | |
 | snapshots built without an audience | | | |
-| Gateway CPU, 8 running, no subscriber | | | n/a |
-| Gateway heap peak (% of limit) / RSS peak | | | |
+| Gateway CPU, 8 running, no subscriber | 57% of one core | | n/a |
+| Gateway heap peak (% of limit) / RSS peak | 1.98 GiB (49%) / 2.00 GiB | | |
 | reconnect after path return p95 | | | |
 | requests / bytes per reconnect | | | |
 | episodes by cause (triage) | n/a | n/a | |
@@ -1651,3 +1651,61 @@ the day cannot measure a synthetic case).
   coordination link now points here.
 - Evidence: `python3 scripts/check-documentation-policy.py` passes.
 - Changes: `plan(connection-scale-hardening): P-0 fold in phone reconnect tuning`.
+
+### O-6a · Done · 2026-09-28 · orchestrator-dispatched worker
+
+- Result: `scripts/tron-profile gateway --scenario multi-session` generates a
+  seeded 3,000-file/2 GiB catalog in the fixture's private agent directory,
+  starts a fresh fixture Gateway per iteration and reports latency
+  percentiles, event-loop delay, heap, RSS, CPU and catalog walks under eight
+  running tool loops. The `main` baseline is in Findings (medians of three
+  iterations of run `20260928T083106Z-multi-session-491859`).
+- Failure modes written before the isolated tests: the generator drifts
+  between runs of one seed (baselines would compare different catalogs); forks
+  or subagent runs land outside the Gateway's delegated layout (the user list
+  would count them as sessions); an interrupted or failed run leaves gigabytes
+  of catalog in the temporary directory; the probe's walk counter misses the
+  Gateway's ES-module `opendir` (reporting zero walks, a false pass for G-1c);
+  the probe loads outside a fixture; a percentile off by one or an operation
+  without samples is reported as a value.
+- Evidence: `python3 scripts/test-tron-profile.py` passes 18 tests (10 new:
+  determinism, layout, failure-after-generation and SIGINT-during-generation
+  cleanup, probe refusal, probe walk counting through an ES-module import,
+  nearest-rank percentiles, rejection of an iteration without samples). Probe
+  positive control on the real Gateway: every measured window counted walks
+  (37 per mixed window, 6 per no-subscriber window; the dashboard's
+  `session.list` walks). Full runs: `20260928T083106Z-multi-session-491859`
+  (19.9 min, exit 0, catalog digest `b1f20a87…` from seed 2027); a second
+  consecutive run for the noise check is recorded in the next entry. After
+  every run, success or interruption (an interrupted run was also observed
+  live), no `tron-profile-gateway-*` directory remained in the temporary
+  directory. Reports live under `~/Library/Developer/Tron/profiles/gateway/`.
+  The host was not quiet (1-minute load 20–50 from other sessions' builds);
+  treat latency spreads accordingly.
+- Changes: `scripts/tron-profile-gateway`,
+  `scripts/tron-profile-gateway-driver.mjs`, new
+  `scripts/tron-profile-gateway-probe.mjs` (approved by the orchestrator),
+  `scripts/test-tron-profile.py`, the wire-traffic profile section of
+  `packages/gateway/README.md`, `.github/workflows/ci.yml` (syntax check of
+  the probe).
+- Kept on purpose: `scripts/tron_profile_report.py` unchanged (the
+  multi-session metrics fit its schema); `all` still means the four
+  wire-traffic scenarios, so the 2 GiB run never starts implicitly.
+- Deviations: each iteration restarts the fixture Gateway so every session is
+  cold again (five large files cannot stay cold otherwise); a priming start
+  pairs and builds the durable index. Warm, cold-plus-prompt and large-open
+  probes run as three concurrent lanes on their own devices (the Gateway
+  admits one `session.open` per connection, and a single large open took
+  130 s on `main`). Retryable `busy` errors are retried and counted
+  (`requests.busy_retries`). Operations in flight at a window's end finish
+  inside it, so on `main` a default run takes about 20 minutes, over the
+  15-minute bound; it should fall to about 13 once lists and opens are fast.
+  `catalog.walks` counts every walk (probe), not only request-path ones.
+  "Snapshots built without an audience" is not measured by this scenario.
+- For the next agent: the probe (event-loop delay, heap, RSS, walks) is a
+  stand-in; once O-3 spans and the O-5 sampler report the same numbers,
+  delete or reduce `scripts/tron-profile-gateway-probe.mjs` and read request
+  path walks from spans. O-6b adds its cases to `multi-session`; its
+  reconnect-to-ready already exists (`latency.reconnect_ready_*`, mobile p99
+  0.58 s, dashboard p99 28.9 s on `main`). Run baselines when the host load
+  is low; the report warns when it is not.

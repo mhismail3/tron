@@ -6,20 +6,40 @@ a real regression passing, noise or an improvement failing a change, a missing
 or relabeled metric being read as zero, a malformed/truncated report being
 accepted, or a run recorded under an Instruments trace (whose metrics carry
 tracing overhead) deciding a comparison. The profiler lanes' own self-tests cover measurement end to end.
+
+The Gateway multi-session scenario adds failure modes its own run cannot
+reveal: a catalog generator whose output drifts between runs or misplaces
+forks and subagent runs relative to the Gateway's delegated-session layout; a
+generated catalog (gigabytes) left behind by an interrupted or failed run; a
+fixture probe whose walk counter never sees the Gateway's ES-module `opendir`
+(reporting zero walks) or that loads outside a fixture Gateway; and a
+percentile or missing-sample bug that reports a latency the run never measured.
 """
 
 from __future__ import annotations
 
+import hashlib
+from importlib.machinery import SourceFileLoader
+from importlib.util import module_from_spec, spec_from_loader
 import json
+import os
 from pathlib import Path
+import shutil
+import signal
 import subprocess
 import sys
 import tempfile
+import time
 import unittest
 
 ROOT = Path(__file__).resolve().parent.parent
 REPORT = ROOT / "scripts/tron_profile_report.py"
 FRONT_DOOR = ROOT / "scripts/tron-profile"
+GATEWAY_PROFILER = ROOT / "scripts/tron-profile-gateway"
+DRIVER = ROOT / "scripts/tron-profile-gateway-driver.mjs"
+PROBE = ROOT / "scripts/tron-profile-gateway-probe.mjs"
+# The generator and probe tests need Node (CI provides it); they fail without it.
+NODE = shutil.which("node") or "node"
 
 
 def samples(metrics: dict[str, tuple[str, str, list[float]]]) -> dict:
@@ -174,6 +194,243 @@ class InputAdmission(ReportFixture):
         result = subprocess.run([str(FRONT_DOOR), "status"], capture_output=True, text=True, env=self.environment, timeout=60)
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertIn("ios: latest idle-chat run second", result.stdout)
+
+
+def load_gateway_profiler():
+    sys.path.insert(0, str(ROOT / "scripts"))
+    loader = SourceFileLoader("tron_profile_gateway", str(GATEWAY_PROFILER))
+    module = module_from_spec(spec_from_loader(loader.name, loader))
+    sys.modules[loader.name] = module
+    loader.exec_module(module)
+    return module
+
+
+def tree_digest(root: Path, fixture: Path) -> str:
+    """Content digest with the generating fixture's absolute and encoded paths removed."""
+    encoded = str(fixture).lstrip("/").replace("/", "-").encode()
+    digest = hashlib.sha256()
+    for path in sorted(root.rglob("*"), key=lambda item: str(item).replace(str(fixture), "")):
+        if path.is_file():
+            name = str(path.relative_to(root)).encode().replace(encoded, b"")
+            content = path.read_bytes().replace(str(fixture).encode(), b"").replace(encoded, b"")
+            digest.update(name + b"\0" + content)
+    return digest.hexdigest()
+
+
+class MultiSessionCatalog(unittest.TestCase):
+    def setUp(self) -> None:
+        self.temporary = tempfile.TemporaryDirectory()
+        self.root = Path(self.temporary.name)
+
+    def tearDown(self) -> None:
+        self.temporary.cleanup()
+
+    def generate(self, name: str, seed: int = 2027, files: int = 240, mebibytes: int = 48) -> dict:
+        base = self.root / name
+        config = {
+            "gatewayDir": str(ROOT / "packages/gateway"), "agentDir": str(base / "agent"), "workspace": str(base / "workspace"),
+            "seed": seed, "files": files, "bytes": mebibytes * 1024 * 1024, "runSessions": 8, "coldSessions": 12,
+            "appendTargets": 4, "output": str(base / "catalog.json"),
+        }
+        base.mkdir()
+        (base / "config.json").write_text(json.dumps(config))
+        result = subprocess.run([NODE, str(DRIVER), "catalog", str(base / "config.json")], capture_output=True,
+                                text=True, timeout=300)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        return json.loads((base / "catalog.json").read_text())
+
+    def test_same_seed_generates_the_same_tree_and_another_seed_does_not(self) -> None:
+        first, second, other = self.generate("first"), self.generate("second"), self.generate("other", seed=7)
+        # Headers carry absolute paths under each fixture, so compare with the fixture prefix removed.
+        self.assertEqual(tree_digest(Path(first["root"]), self.root / "first"),
+                         tree_digest(Path(second["root"]), self.root / "second"))
+        self.assertEqual(first["digest"], second["digest"])
+        self.assertNotEqual(first["digest"], other["digest"])
+
+    def test_catalog_follows_the_gateway_delegated_session_layout(self) -> None:
+        manifest = self.generate("layout")
+        root = Path(manifest["root"])
+        files = sorted(root.rglob("*.jsonl"))
+        self.assertEqual(len(files), manifest["files"])
+        self.assertEqual(sum(path.stat().st_size for path in files), manifest["bytes"])
+        self.assertLess(abs(manifest["bytes"] / (48 * 1024 * 1024) - 1), 0.1)
+        kinds = {"session": 0, "fork": 0, "subagent": 0}
+        for path in files:
+            lines = path.read_text().splitlines()
+            header = json.loads(lines[0])
+            self.assertEqual(header["type"], "session", path)
+            relative = path.relative_to(root).parts
+            if len(relative) == 2:
+                kinds["session"] += 1
+                self.assertNotIn("parentSession", header)
+            elif relative[-2] == "forks":
+                kinds["fork"] += 1
+                self.assertEqual(header["parentSession"], str(path.parent.parent) + ".jsonl")
+            else:
+                kinds["subagent"] += 1
+                self.assertEqual(path.name, "session.jsonl")
+                self.assertRegex(relative[-2], r"^run-\d+$")
+                self.assertEqual(header["parentSession"], str(path.parent.parent.parent) + ".jsonl")
+            if "parentSession" in header:
+                self.assertTrue(Path(header["parentSession"]).is_file(), header["parentSession"])
+            # Pi's session tree: every entry's parent is the entry before it.
+            previous = None
+            for line in lines[1:]:
+                entry = json.loads(line)
+                self.assertEqual(entry["parentId"], previous, path)
+                previous = entry["id"]
+        self.assertEqual(kinds, {"session": manifest["sessions"], "fork": manifest["forks"],
+                                 "subagent": manifest["subagentRuns"]})
+        large = [item["bytes"] for item in manifest["large"]]
+        self.assertEqual(len(large), 5)
+        self.assertEqual(large, sorted(large))
+        self.assertGreater(min(large), max(item["bytes"] for item in manifest["coldPool"]))
+        self.assertEqual(len(manifest["runPool"]), 8)
+        self.assertEqual(len(manifest["coldPool"]), 12)
+        for target in manifest["appendTargets"]:
+            self.assertEqual(Path(target).name, "session.jsonl")
+
+
+INTERRUPT_HARNESS = """
+import sys
+from importlib.machinery import SourceFileLoader
+from importlib.util import module_from_spec, spec_from_loader
+from pathlib import Path
+sys.path.insert(0, sys.argv[1] + "/scripts")
+loader = SourceFileLoader("tron_profile_gateway", sys.argv[1] + "/scripts/tron-profile-gateway")
+profiler = module_from_spec(spec_from_loader(loader.name, loader))
+sys.modules[loader.name] = profiler
+loader.exec_module(profiler)
+mode, results = sys.argv[2], Path(sys.argv[3])
+if mode == "fail-after-catalog":
+    def start(self, deadline_seconds=90):
+        raise profiler.ProfileFailure("injected fixture start failure", profiler.EXIT_FIXTURE)
+    profiler.FixtureGateway.start = start
+profiler.install_interrupt_handlers()
+args = profiler.parse(["--scenario", "multi-session", "--iterations", "1", "--catalog-files", sys.argv[4],
+                       "--catalog-mib", sys.argv[5]])
+args.host_state = {}
+try:
+    profiler.run_multi_session(args, results)
+except profiler.Interrupted:
+    sys.exit(130)
+except profiler.ProfileFailure as failure:
+    sys.exit(failure.code)
+"""
+
+
+class MultiSessionCleanup(unittest.TestCase):
+    """The generated catalog never outlives the run on a failure or interruption."""
+
+    def setUp(self) -> None:
+        self.temporary = tempfile.TemporaryDirectory()
+        self.root = Path(self.temporary.name)
+        self.tmp = self.root / "tmp"
+        self.tmp.mkdir()
+        self.environment = {**os.environ, "TMPDIR": str(self.tmp),
+                            "PATH": f"{Path(NODE).parent}{os.pathsep}{os.environ.get('PATH', '')}"}
+
+    def tearDown(self) -> None:
+        self.temporary.cleanup()
+
+    def harness(self, mode: str, files: str, mebibytes: str) -> subprocess.Popen[str]:
+        return subprocess.Popen([sys.executable, "-c", INTERRUPT_HARNESS, str(ROOT), mode, str(self.root / "results"),
+                                 files, mebibytes], env=self.environment, stdout=subprocess.PIPE,
+                                stderr=subprocess.PIPE, text=True)
+
+    def assert_removed(self) -> None:
+        self.assertEqual([path.name for path in self.tmp.iterdir()], [])
+        failures = list((self.root / "results").glob("*/failure.json"))
+        self.assertEqual(len(failures), 1)
+
+    def test_failure_after_generation_removes_the_catalog_and_home(self) -> None:
+        process = self.harness("fail-after-catalog", "200", "64")
+        _, stderr = process.communicate(timeout=300)
+        self.assertEqual(process.returncode, 5, stderr)
+        self.assert_removed()
+
+    def test_interrupt_during_generation_stops_the_generator_and_removes_the_catalog(self) -> None:
+        process = self.harness("interrupt", "3000", "1024")
+        try:
+            deadline = time.monotonic() + 120
+            while not any(self.tmp.glob("tron-profile-gateway-*/agent/sessions/*/*.jsonl")):
+                if process.poll() is not None:
+                    self.fail(f"harness exited {process.returncode} before generating: {process.communicate()[1]}")
+                self.assertLess(time.monotonic(), deadline, "generation never started")
+                time.sleep(0.02)
+            process.send_signal(signal.SIGINT)
+            _, stderr = process.communicate(timeout=120)
+        finally:
+            if process.poll() is None:
+                process.kill()
+                process.wait()
+        self.assertEqual(process.returncode, 130, stderr)
+        self.assert_removed()
+
+
+PROBE_CLIENT = """
+import { opendir } from "node:fs/promises";
+import { readFileSync } from "node:fs";
+const [catalog, output] = process.argv.slice(2);
+for (const path of [catalog, catalog, `${catalog}/child`]) await (await opendir(path)).close();
+process.kill(process.pid, "SIGUSR2");
+await new Promise((resolve) => setTimeout(resolve, 200));
+process.stdout.write(readFileSync(output, "utf8"));
+"""
+
+
+class FixtureProbe(unittest.TestCase):
+    def setUp(self) -> None:
+        self.temporary = tempfile.TemporaryDirectory()
+        self.root = Path(self.temporary.name).resolve()
+        (self.root / "catalog/child").mkdir(parents=True)
+        (self.root / "client.mjs").write_text(PROBE_CLIENT)
+
+    def tearDown(self) -> None:
+        self.temporary.cleanup()
+
+    def run_probe(self) -> subprocess.CompletedProcess[str]:
+        output = self.root / "probe.json"
+        environment = {**os.environ, "TRON_PROFILE_PROBE_OUTPUT": str(output),
+                       "TRON_PROFILE_PROBE_CATALOG": str(self.root / "catalog")}
+        return subprocess.run([NODE, "--import", PROBE.as_uri(), str(self.root / "client.mjs"), str(self.root / "catalog"),
+                               str(output)], capture_output=True, text=True, env=environment, timeout=60)
+
+    def test_probe_refuses_to_load_outside_a_fixture(self) -> None:
+        result = self.run_probe()
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("loads only into a tron-profile fixture Gateway", result.stderr)
+
+    def test_probe_counts_catalog_root_walks_seen_by_es_module_importers(self) -> None:
+        (self.root / ".tron-profile-gateway-fixture").write_text("tron.profile-gateway-fixture.v1\n")
+        result = self.run_probe()
+        self.assertEqual(result.returncode, 0, result.stderr)
+        snapshot = json.loads(result.stdout)
+        self.assertEqual(snapshot["catalogWalks"], 2)
+        self.assertGreater(snapshot["heapUsedPeakBytes"], 0)
+        self.assertGreater(snapshot["heapLimitBytes"], snapshot["heapUsedPeakBytes"])
+
+
+class MultiSessionSamples(unittest.TestCase):
+    def setUp(self) -> None:
+        self.profiler = load_gateway_profiler()
+
+    def test_nearest_rank_percentiles(self) -> None:
+        values = [float(value) for value in range(100, 0, -1)]
+        self.assertEqual(self.profiler.percentile(values, 50), 50)
+        self.assertEqual(self.profiler.percentile(values, 99), 99)
+        self.assertEqual(self.profiler.percentile([3.0, 1.0, 2.0], 99), 3)
+        self.assertEqual(self.profiler.percentile([7.0], 50), 7)
+
+    def test_an_operation_without_samples_rejects_the_run_instead_of_reporting_it(self) -> None:
+        samples = {kind: [10.0] for kind in self.profiler.LATENCY_KINDS}
+        result = {"label": "iteration-1", "samples": samples, "runningPhases": ["running"] * 8,
+                  "mobileOutcome": {"sequenceGaps": 0}}
+        self.assertEqual(self.profiler.validate_multi([result]), ([], []))
+        samples["promptAdmission"] = []
+        stopped = {**result, "runningPhases": ["running"] * 7 + ["idle"]}
+        problems, _ = self.profiler.validate_multi([stopped])
+        self.assertEqual(len(problems), 2, problems)
 
 
 if __name__ == "__main__":
