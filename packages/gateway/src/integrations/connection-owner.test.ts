@@ -1,7 +1,8 @@
-import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { mkdtemp, readFile, rm, stat } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
+import { drainDurableWriteStats } from "../util/durable-json.js";
 import { ConnectionOwner } from "./connection-owner.js";
 
 describe("ConnectionOwner", () => {
@@ -48,6 +49,54 @@ describe("ConnectionOwner", () => {
       const after = await owner.snapshot();
       expect(after.instances.find(item => item.id === "account-one")?.health).toBe("disconnected");
       expect(after.instances.find(item => item.id === "account-two")?.health).toBe("ready");
+    } finally { await rm(home, { recursive: true, force: true }); }
+  });
+
+  it("skips an unchanged provider observation and persists every changed one", async () => {
+    const home = await mkdtemp(join(tmpdir(), "tron-connections-observation-"));
+    try {
+      const owner = new ConnectionOwner(home);
+      const setup = await owner.execute({ kind: "setup.begin", commandId: "observe-begin-0001", instanceId: "observed", definitionId: "knowledge.raindrop", method: "token" }) as { operationId: string };
+      await owner.execute({ kind: "setup.complete", commandId: "observe-complete-0001", operationId: setup.operationId, instanceId: "observed", providerAccountId: "42", scope: "0", credentialRef: "connector:raindrop:observed", policy: { enabled: true, allowWrites: false, paidAccessApproved: false, paidBudgetCents: 0, recurringApproved: false } });
+      const path = join(home, "state/integrations/connections.json");
+      const admission = { credentialAvailability: "available", providerIdentity: "admitted", providerDisplayName: "owner@example.test" } as const;
+      await owner.recordProviderObservation("observed", 1, admission);
+      const unchanged = await readFile(path, "utf8");
+      const unchangedMtimeMs = (await stat(path)).mtimeMs;
+      const unchangedRevision = (JSON.parse(unchanged) as { stateRevision: number }).stateRevision;
+      drainDurableWriteStats();
+      // An identical observation is already the projection: the read-triggered
+      // call must not rewrite the document, bump its revision, or fsync.
+      await owner.recordProviderObservation("observed", 1, admission);
+      expect(drainDurableWriteStats().count).toBe(0);
+      expect((await stat(path)).mtimeMs).toBe(unchangedMtimeMs);
+      expect(await readFile(path, "utf8")).toBe(unchanged);
+      expect((await owner.snapshot()).stateRevision).toBe(unchangedRevision);
+      // A renamed provider account changes only the display label; the
+      // projection must not keep the old name.
+      drainDurableWriteStats();
+      await owner.recordProviderObservation("observed", 1, { credentialAvailability: "available", providerIdentity: "admitted", providerDisplayName: "renamed@example.test" });
+      expect(drainDurableWriteStats().count).toBe(2);
+      const renamed = JSON.parse(await readFile(path, "utf8")) as { stateRevision: number; instances: Record<string, Record<string, unknown>> };
+      expect(renamed.stateRevision).toBe(unchangedRevision + 1);
+      expect(renamed.instances.observed).toMatchObject({ credentialAvailability: "available", providerIdentity: "admitted", providerDisplayName: "renamed@example.test", health: "ready" });
+      // A changed availability/identity is a state transition: it must land,
+      // with the derived health and without a stale display label.
+      drainDurableWriteStats();
+      await owner.recordProviderObservation("observed", 1, { credentialAvailability: "available", providerIdentity: "mismatch", providerDisplayName: "ignored@example.test" });
+      expect(drainDurableWriteStats().count).toBe(2);
+      const mismatched = JSON.parse(await readFile(path, "utf8")) as { stateRevision: number; instances: Record<string, Record<string, unknown>> };
+      expect(mismatched.stateRevision).toBe(unchangedRevision + 2);
+      expect(mismatched.instances.observed).toMatchObject({ credentialAvailability: "available", providerIdentity: "mismatch", health: "auth-error" });
+      expect(mismatched.instances.observed.providerDisplayName).toBeUndefined();
+      await owner.recordProviderObservation("observed", 1, { credentialAvailability: "unavailable", providerIdentity: "unknown" });
+      const unavailable = (await owner.snapshot()).instances.find(item => item.id === "observed");
+      expect(unavailable).toMatchObject({ credentialAvailability: "unavailable", providerIdentity: "unknown", health: "auth-error" });
+      expect(unavailable?.providerDisplayName).toBeUndefined();
+      // An identity change that keeps the derived health and availability the
+      // same is still a different admission state, not an unchanged one.
+      await owner.recordProviderObservation("observed", 1, { credentialAvailability: "unavailable", providerIdentity: "mismatch" });
+      expect((await owner.snapshot()).instances.find(item => item.id === "observed")).toMatchObject({ credentialAvailability: "unavailable", providerIdentity: "mismatch", health: "auth-error" });
     } finally { await rm(home, { recursive: true, force: true }); }
   });
 
