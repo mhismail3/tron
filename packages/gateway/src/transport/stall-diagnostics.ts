@@ -101,9 +101,9 @@ export const EVENT_LOOP_DELAY_RESOLUTION_MS = 20;
  * band of this size is a change the day's records have to show. */
 export const EVENT_LOOP_P99_INFO_STEP_MS = 20;
 
-/** The exit criterion's bound for one stalled turn. A window whose max reaches
- * this is a change the day's records have to show whatever its p99 was, so the
- * day's `max ≤ 250 ms` check has a persisted value to read. */
+/** The exit criterion's bound for one stalled turn. A window whose max moves to
+ * another band of this size is a change the day's records have to show whatever
+ * its p99 was, so the day's `max ≤ 250 ms` check has a persisted value to read. */
 export const EVENT_LOOP_MAX_INFO_STEP_MS = 250;
 
 /** Heap above this share of the V8 heap limit is the pressure the shedding work
