@@ -4388,3 +4388,21 @@ events; widen them to name the pool owner in the same change.
   (finding 4, nit). The ≈1,365 ambient opens a second is labelled an upper bound
   on ambient opens that excludes routed re-opens and assumes the pass keeps the
   750 ms cadence (finding 5, nit); the retained artifact's figure matches.
+
+### G-10a · Draft · 2026-09-28 · orchestrator-dispatched deepseek-worker (branch `hardening/g-10a`)
+
+- Failure modes written before the code (worker procedure step 4):
+  1. **An unchanged observation still writes.** A second, identical
+     `knowledge.raindrop.read` observation for the same setup revision must
+     leave the state document (`state/integrations/connections.json` under the
+     Tron home) byte-identical, with the same mtime and the same
+     `stateRevision`, and must add no fsync to the O-5 `durableWrites` counter.
+  2. **A changed observation is dropped, so a state transition is lost or a
+     projection goes stale.** An availability or identity change (`mismatch`,
+     `unavailable`, `unknown`) must still persist `credentialAvailability`,
+     `providerIdentity` and the derived `health` and remove
+     `providerDisplayName` before its response; a display-name-only change must
+     still refresh `providerDisplayName` (a renamed provider account must not
+     keep the old label).
+  Each case is written before the change, against the current code.
+- Result: pending implementation.
