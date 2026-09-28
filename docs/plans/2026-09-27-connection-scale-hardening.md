@@ -603,7 +603,7 @@ rows are in priority order.
 | E-1 | Done | Document Tailscale flap diagnosis and user-side checks; the evaluation day confirms | O-2, O-7 | orchestrator-dispatched deepseek-worker, 2026-09-28 |
 | T-1 | Ready | Pre-existing test race: registry extension-artifact discovery tests treat an awaited `discoverExtensionArtifacts()` as a barrier; wait for a pass that settles (three tests, one a false green) | G-1a (Registry zone) | |
 | T-2 | Done | `GatewayConnectionEpisodeRecorderTests/blockedMainActorIsMeasuredAndReported` (O-4) was killed once ("Test crashed with signal kill") when run with four other suites on integration, then passed 3/3; find whether the 5 s main-thread block trips a hosted-test watchdog and bound the block so the test cannot be killed while still proving the stall record | O-4 | orchestrator-dispatched deepseek-worker, 2026-09-28; no hosted-test watchdog exists (a 5 + 10 + 20 s block probe passed); the kill came from another worktree's run on the same default-lane simulator (`E816D194…`), not from the block — see the T-2 handoff and T-3; the block is now the named `mainStallTestBlock` (5 s) in both phases |
-| T-3 | Claimed | Default-lane iOS runs must serialize on `~/.tron/internal/ios-test/lease.lock`, but runs from three worktrees held the one owned simulator (`E816D194…`) at the same time and killed each other's host app (see the T-2 handoff); establish whether the lease was bypassed — a descendant of a leased command inherits `TRON_IOS_TEST_LOCK_HELD=1`, which skips the locker in `scripts/tron-ios-test` entirely — or whether one run used a different lock path, then make one lane's lease serialize every run on its simulator. One-step signal: two runs' `owner.json`/`summary.json` windows overlap on one simulator (every run of 2026-09-28 in the results root is checked this way: 3 of 87 runs overlap, all three cross-worktree, all in the default lane, and in each pair the later run survived while the one already running failed) | none | orchestrator-dispatched deepseek-worker, 2026-09-28 |
+| T-3 | Done | Default-lane iOS runs must serialize on `~/.tron/internal/ios-test/lease.lock`, but runs from three worktrees held the one owned simulator (`E816D194…`) at the same time and killed each other's host app (see the T-2 handoff); the lease was bypassed because `--lane NAME` was consumed by the lease holder and not passed to the command it started, so the command leased the named/other lane while provisioning the default lane's simulator (`ios-test-G7*` lanes: lease file, no marker); the lane now travels with the command and a command that inherits a lease for another lane is refused | none | orchestrator-dispatched deepseek-worker, 2026-09-28 |
 | C-7 | Ready | Dashboard-pool event consumption stops after a failed initial connect (see the C-5 handoff): a successful reconnect brings the socket back but nothing consumes `client.events`, so a background profile stops receiving summaries, `system.stopping` and `transport.disconnected` until its entry is recreated | C-2 | |
 
 ### Phase 2 — Release and one evaluation day
@@ -7777,3 +7777,75 @@ wait).
   establishing connection") is contention first: compare the run's
   `owner.json`/`summary.json` window with every other run's on the same
   simulator before blaming the code under test.
+
+### T-3 · Done · 2026-09-28 · orchestrator-dispatched deepseek-worker (branch `hardening/t-3`)
+
+- Result: the lease was bypassed by argument loss, not by the inherited
+  `TRON_IOS_TEST_LOCK_HELD`. `scripts/tron-ios-test` consumed `--lane NAME` when
+  selecting the lane and then re-executed itself through the lease holder as
+  `$0 $command ${selectors}`, without the lane. The child re-derives every lane
+  path from its own arguments, so it leased `<lane root>/ios-test-NAME/lease.lock`
+  and then provisioned, ran and released the **default** lane's simulator: a
+  named-lane run never serialized with the runs on the simulator it used. The
+  five `~/.tron/internal/ios-test-G7*` lanes left behind by one worktree hold a
+  `lease.lock` and no `simulator.json` at all, which is that signature; the
+  `G7R2` lease's release second (16:09:25 UTC) is 1 s after the overlapping run
+  `20260928T160908Z-run.Y9hYTh` finished its tests (16:09:23.8), and that run's
+  `owner.json` says `lane: default` although it was started with `--lane G7R2`.
+- Changes: `scripts/tron-ios-test` passes `--lane "$LANE_LABEL"` into the command
+  the holder starts, and refuses (74) a command whose inherited lease
+  (`TRON_IOS_TEST_LEASE_LOCK`, exported by `scripts/ios-test-lock.py` beside the
+  existing lease descriptor) is not this lane's own lock, so a descendant that
+  inherits `TRON_IOS_TEST_LOCK_HELD=1` can no longer run on another lane's
+  simulator. `packages/ios-app/docs/development.md` says both.
+- Follow-up after review round 1 (same branch, second commit): the guard compared
+  the two lock paths as strings, and the locker tidies `--lock` through
+  `pathlib`, so a state directory spelled with a trailing slash, `//` or `./`
+  (the common macOS `$TMPDIR` shape) was refused 74 for every leased command. It
+  now compares the files with `-ef`. The regression case
+  `RunnerFixture.test_a_state_directory_spelled_differently_is_still_this_lanes_lease`
+  covers all three spellings and fails 3/3 against the string comparison.
+- Evidence: pre-fix reproduction (2026-09-28 11:47 local, while a default-lane
+  `build` held `~/.tron/internal/ios-test/lease.lock`, pid 84994):
+  `scripts/tron-ios-test run --lane CT22 --only-testing …` leased
+  `ios-test-CT22/lease.lock` (pid 85645) while its child ran
+  `bash scripts/tron-ios-test run --only-testing:…` with no `--lane` and
+  provisioned `--marker ~/.tron/internal/ios-test/simulator.json --name`
+  `Tron iOS Tests`; the default marker's mtime moved 11:46:37 → 11:47:36 while
+  `ios-test-CT22/simulator.json` stayed at 01:09:39, and the run's `owner.json`
+  said `lane: default` (`20260928T184738Z-run.clWKCo`, exit 74 "test products are
+  missing", no products in the probe's derived-data dir). Post-fix, the same
+  command: child argv carries `--lane CT22`, provision uses
+  `--marker ~/.tron/internal/ios-test-CT22/simulator.json`, the CT22 marker moves
+  to 11:51:19 while the default marker stays at 11:47:36, `owner.json` says
+  `lane: CT22` (`20260928T185125Z-run.HJ8Zmj`), and both devices are `Shutdown`
+  afterwards. Logs: `~/.tron/workspace/files/hardening/t-3-evidence/`.
+- Evidence: `python3 scripts/test-ios-test-infrastructure.py
+  RunnerFixture.test_a_lane_named_on_the_command_line_is_the_lane_that_provisions
+  RunnerFixture.test_an_inherited_lease_that_covers_another_lane_is_refused
+  RunnerFixture.test_a_state_directory_spelled_differently_is_still_this_lanes_lease`
+  — 3/3 pass; each fails without its fix (with the lane not forwarded, the guard
+  refuses 74 naming both locks; the string comparison refuses all three
+  spellings). The existing `RunnerFixture` cases are the guard's positive
+  control: every normal `run` there goes through the holder and now proves its
+  inherited lease. Whole file after the follow-up: 89 tests, 179 s, OK.
+- Tasks added: none.
+- Deviations: the guard is a new env contract (`TRON_IOS_TEST_LEASE_LOCK`); it
+  was added because the row named `TRON_IOS_TEST_LOCK_HELD` inheritance as a
+  candidate bypass, and the guard closes that class as well as the found one.
+- Open: the same `--lane`-argument-loss shape is *not* present in the two other
+  re-exec sites (`scripts/ios-gateway-e2e-test`, `scripts/tron-profile-ios`
+  pass `"$0" "$@"` and use `TRON_IOS_TEST_STATE_DIR`). For pairs 1 and 3 of the
+  three recorded overlaps the named-lane artifact is missing (only `G7R`, `G7R2`,
+  `G7RV`, `G7F` and `G7N` exist, and none matches 16:00:29 or 16:48:51 UTC), so
+  the mechanism above is proven for pair 2 and sufficient for the class; the
+  guard now refuses that run whether the lane was lost by argument or by
+  inheritance.
+- Note for future reproductions: the first pre-fix reproduction above ran on the
+  shared default-lane simulator while another session's `build` held that lease,
+  so it moved the default marker's mtime. Use `RunnerFixture` or a throwaway
+  named lane instead.
+- For the next agent: a `~/.tron/internal/ios-test-NAME` directory holding only
+  `lease.lock` means a named-lane command ran in the default lane; treat it as
+  evidence of a lane/lease mismatch, and check `TRON_IOS_TEST_LEASE_LOCK` when a
+  command is refused (74) with "inherited iOS test lease covers".
