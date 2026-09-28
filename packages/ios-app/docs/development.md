@@ -557,6 +557,13 @@ Templates and what was verified (Xcode 26.6, iOS 26.5 simulator runtime):
 | `swiftui` | SwiftUI template on the simulator device (`--device <sim> --attach <pid>`) | Unverified: simulator-device recording never started here (see below) |
 | `points-of-interest` | `os_signpost` and Points of Interest on the simulator device | Unverified, same reason |
 
+`--all-processes` is the only working recording for `time-profiler` today: host
+`xcrun xctrace record --attach <pid>` fails with status 21 "Cannot find process
+for provided pid" for a simulator process, including one that has been up for an
+hour (the same command attaches to a plain host process and records only it), so
+the host kernel cannot be told to sample the test process alone. Every other
+process's samples therefore land in the trace and its export (below).
+
 A host-wide recording cannot read the simulator's own `logd`, so
 `time-profiler` attribution has no `com.tron.mobile` signposts; the summary says
 so instead of printing an empty table. Simulator-device recording (needed for

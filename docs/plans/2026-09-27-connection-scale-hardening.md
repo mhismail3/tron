@@ -515,7 +515,7 @@ rows are in priority order.
 | O-1 | Done | Correlation key across phone and Gateway on every connection record | none | orchestrator-dispatched worker, 2026-09-28 |
 | O-6a | Claimed | Multi-session qualification scenario with a generated catalog; record the `main` baseline | none | orchestrator-dispatched worker, 2026-09-28 |
 | E-2 | Blocked | Bound the iOS profiler's memory or hand the row to the simulator-lifecycle plan | none | orchestrator-dispatched worker, 2026-09-28 |
-| E-2b | Claimed | Record `time-profiler` with `xctrace record --attach <pid>` if a real traced run proves it samples the simulator app; re-measure export and parser peaks (see E-2 handoff) | E-2 | orchestrator-dispatched deepseek-worker, 2026-09-28 |
+| E-2b | Done | Record `time-profiler` with `xctrace record --attach <pid>` if a real traced run proves it samples the simulator app; re-measure export and parser peaks (see E-2 handoff) | E-2 | orchestrator-dispatched deepseek-worker, 2026-09-28 |
 | O-2 | Ready | Gateway transport records: upgrade phases, inbound silence with Tailscale peer path | O-1 | |
 | O-3 | Claimed | Request span: one `rpc.completed` per slow RPC with every stage, wait and count | O-1 | orchestrator-dispatched deepseek-worker, 2026-09-28 |
 | O-4 | Claimed | Phone connection records that survive an export, stall watchdog, exact scene records | O-1 | orchestrator-dispatched deepseek-worker, 2026-09-28 |
@@ -1783,3 +1783,56 @@ the day cannot measure a synthetic case).
   the module docstring says every id-carrying value is kept once (finding 3); and
   `Table.resolve` became `Table.value`, since it only drops absent or
   `<sentinel/>` cells now (finding 4).
+
+### E-2b · Done · 2026-09-28 · orchestrator-dispatched deepseek-worker
+
+- Result: host `xcrun xctrace record --attach <pid>` cannot sample a simulator
+  app process, so E-2's "otherwise" branch applies — `time-profiler` keeps
+  `--all-processes` and no source changed. The switch was implemented and run on
+  the real path (`--no-build --scenario control-cpu --trace time-profiler
+  --iterations 5`); xctrace exited 21 before recording with `Cannot find process
+  for provided pid: 98691`, the pid the hosted test reports for itself and the
+  same pid `--all-processes` samples and attributes in E-2's baseline. The same
+  host attach against a simulator process that had been up for an hour
+  (`SpringBoard`, pid 65793) fails identically, while it succeeds against a plain
+  host process and records that process alone (2,721 rows, 702 KB, one process,
+  1.7 s to export). The device form (`--device <udid> --attach SpringBoard`) did
+  not return within 180 s, matching the documented simulator-device failure, and
+  the recorder's bounded start would abort it anyway. E-2 stays Blocked: its
+  2 GB Done-when is not met, because with `--all-processes` kept the export still
+  peaks in gigabytes on the default scenarios.
+- Evidence: `~/.tron/workspace/files/hardening/e-2b/` — `README.md` holds the
+  commands, exit statuses and numbers, with `hosted-test-attach-xctrace.log`,
+  `hosted-test-process.json`, `attach-cpu.out/.err` (the failed traced run's
+  output and tree-RSS peaks: 532 MB, exit 74) and the `simattach.sh` /
+  `devattach.py` probes. Failed run retained at
+  `~/Library/Developer/Tron/profiles/ios/20260928T090007Z-control-cpu-trace-time-profiler-1d4470/`.
+  The kept `--all-processes` mode is unchanged: `python3
+  scripts/test-tron-profile-attribution.py` 10/10 and `python3
+  scripts/test-tron-profile-ios.py` 7/7 pass after the reverted switch.
+- Changes: `docs(ios): record that host attach cannot sample simulator processes
+  (E-2b)` — `packages/ios-app/docs/development.md` only.
+- Tasks added: none; E-2c proposed below.
+- Kept on purpose: `--all-processes` and its `samples_other_processes` field,
+  which is exactly what showed 73,865 other-process samples against 273 measured
+  ones in E-2's control-cpu baseline; it would be dead reporting only under
+  attach. The `swiftui` and `points-of-interest` device templates were not
+  touched: their failure is the same documented one, re-confirmed once here.
+- Deviations: the `--scenario all --trace time-profiler --iterations 1`
+  re-measure was not run. Its premise had already failed, and the simulator
+  lease was then needed by O-4, so the lane was released rather than held for an
+  `--all-processes` run whose export peak E-2 already measured (4,599 MB on the
+  342 MB idle-dashboard trace, `files/hardening/e-2/peaks.txt`). The build
+  products for this worktree were made before that release and are identity-
+  stamped for it (`~/Library/Developer/Tron/ios/profile-derived-data/`,
+  worktree key `tron-hardening-e-2b-0d0b09bd1a08`).
+- For the next agent: proposed row E-2c — bound the `time-profiler` export so
+  `--scenario all --trace time-profiler --iterations 1` fits the 2 GB budget:
+  first find why simulator-device recording never starts (`--device <sim>
+  --attach <pid>`, 180 s without returning, then the recorder's 300 s abort),
+  since a device recording would sample the app alone and would also restore
+  signposts and SwiftUI for every template; if that stays broken, have the
+  profiler refuse a trace whose export cannot stay inside the budget, with the
+  refusal's message naming the trace size, and shorten the default windows as
+  far as `attribution.json` still ranks the scenario's work. Do not re-try host
+  `--attach` — it cannot see simulator processes at all.
