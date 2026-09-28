@@ -520,7 +520,7 @@ rows are in priority order.
 | O-2 | Ready | Gateway transport records: upgrade phases, inbound silence with Tailscale peer path | O-1 | |
 | O-3 | Done | Request span: one `rpc.completed` per slow RPC with every stage, wait and count | O-1 | orchestrator-dispatched deepseek-worker, 2026-09-28 |
 | O-4 | Claimed | Phone connection records that survive an export, stall watchdog, exact scene records | O-1 | orchestrator-dispatched deepseek-worker, 2026-09-28 |
-| O-6b | Ready | Impairment in the qualification scenario: blackhole, bandwidth cap, Gateway restart | O-6a | |
+| O-6b | Claimed | Impairment in the qualification scenario: blackhole, bandwidth cap, Gateway restart | O-6a | orchestrator-dispatched deepseek-worker, 2026-09-28 |
 | O-5 | Claimed | Gateway resource sampler and event-loop histogram | O-3 | orchestrator-dispatched deepseek-worker, 2026-09-28 |
 | O-7 | Ready | Incident triage tool: phone export plus Gateway log in, episodes by cause out | O-1, O-2, O-4 | |
 | C-1 | Ready | Projection work never blocks or parks reconnect; parked episodes self-resume | O-4, O-6b | |
@@ -2264,3 +2264,22 @@ a latency percentile.
   and `scripts/tron-profile compare <run-1> <run-2>`; read a verdict on the
   window-volume metrics listed in Findings as spread, not regression.
 - For the next agent: unchanged from the previous entry.
+
+### Orchestrator · 2026-09-28 · O-6a merged while Blocked
+
+- Result: `hardening/o-6a` is merged into `hardening/integration` after its
+  third review approved the scenario code. The row stays Blocked only on the
+  two consecutive quiet-host baseline runs, which the orchestrator runs from
+  the `hardening/o-6a` worktree (`main` Gateway code) when no other hardening
+  work loads the host. Tasks that depend on O-6a use the merged scenario now.
+- Decision on the O-6a noise bound (review round 3): the two quiet-host runs
+  must agree (`scripts/tron-profile compare` with the default floor) on every
+  latency percentile, on the no-subscriber Gateway CPU (a fixed sleep window, so
+  not window volume) and on heap/RSS peaks. Closed-loop volume counts in the
+  mixed window (dashboard list frames and bytes, `catalog.walks`, mixed-window
+  CPU and wakeups) are exempt.
+- Owed with the baseline: O-3's slowest-`session.open` accounting check and
+  O-5's 5% cross-check, both from the same runs on the integration branch once
+  O-5 merges.
+- Also cleaned: stray `|||||||` merge-base marker lines that two earlier
+  handoff-log merges left in this file.
