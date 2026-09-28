@@ -143,7 +143,7 @@ describe("WebSocket connection and outbound capacity", () => {
       sessions: { unsubscribeClient: vi.fn() } as any,
       auth: { detachClient: vi.fn(), cancelOwner: vi.fn() } as any,
       service: {
-        info: () => ({ gatewayVersion: "test", piVersion: "test", protocolVersion: 5, minProtocolVersion: 5, machineId: "machine", machineName: "test", capabilities: [] }),
+        info: () => ({ gatewayVersion: "test", piVersion: "test", protocolVersion: 6, minProtocolVersion: 6, machineId: "machine", machineName: "test", capabilities: [] }),
         terminalBelongsToSession: () => false,
         releaseClient: vi.fn(),
         invoke: vi.fn(),
@@ -161,7 +161,7 @@ describe("WebSocket connection and outbound capacity", () => {
     });
     await new Promise<void>((resolve) => socket.once("open", () => resolve()));
     expect(socket.extensions).toBe(credential === "local" ? "" : "permessage-deflate");
-    socket.send(JSON.stringify({ type: "hello", protocolVersion: 5 }));
+    socket.send(JSON.stringify({ type: "hello", protocolVersion: 6 }));
     await waitUntil(() => logger.log.mock.calls.some((call) => call[2]?.event === "connection.opened"));
     const connection = [...(gateway as any).clients.values()][0];
     await waitUntil(() => connection.outbound.snapshot().completedFrames === 1); // hello
@@ -229,7 +229,7 @@ describe("WebSocket connection and outbound capacity", () => {
       maximumConnections: 2, devices, logger: logger as any, sessions: sessions as any,
       uploads: {} as any, auth: { detachClient: vi.fn() } as any,
       service: {
-        info: () => ({ protocolVersion: 5 }), invoke, releaseClient: vi.fn(),
+        info: () => ({ protocolVersion: 6 }), invoke, releaseClient: vi.fn(),
         terminalBelongsToSession: () => false,
       } as any,
     });
@@ -240,7 +240,7 @@ describe("WebSocket connection and outbound capacity", () => {
       const frames: any[] = [];
       peer.on("message", (raw) => frames.push(JSON.parse(raw.toString())));
       await bounded(new Promise<void>((resolve, reject) => { peer.once("open", resolve); peer.once("error", reject); }), "overload peer open");
-      peer.send(JSON.stringify({ type: "hello", protocolVersion: 5 }));
+      peer.send(JSON.stringify({ type: "hello", protocolVersion: 6 }));
       await bounded(waitUntil(() => frames.some((frame) => frame.type === "hello")), "overload peer hello");
       return { peer, frames };
     };
@@ -331,7 +331,7 @@ describe("WebSocket connection and outbound capacity", () => {
     const socket = new WebSocket(`ws://127.0.0.1:${port}/v1/socket`, { headers: { authorization: `Bearer ${paired.token}` } });
     socket.on("message", (raw) => frames.push(JSON.parse(raw.toString())));
     await new Promise<void>((resolve) => socket.once("open", () => resolve()));
-    socket.send(JSON.stringify({ type: "hello", protocolVersion: 5 }));
+    socket.send(JSON.stringify({ type: "hello", protocolVersion: 6 }));
     await waitUntil(() => frames.some((frame) => frame.type === "hello"));
     const response = new Promise<Record<string, unknown>>((resolve) => socket.on("message", (raw) => {
       const frame = JSON.parse(raw.toString()) as Record<string, unknown>;
@@ -403,7 +403,7 @@ describe("WebSocket connection and outbound capacity", () => {
     const frames: any[] = [];
     target.on("message", (raw) => frames.push(JSON.parse(raw.toString())));
     await bounded(new Promise<void>((resolve) => target?.once("open", () => resolve())), "stalled self-revoke open");
-    target.send(JSON.stringify({ type: "hello", protocolVersion: 5 }));
+    target.send(JSON.stringify({ type: "hello", protocolVersion: 6 }));
     await bounded(waitUntil(() => frames.some((frame) => frame.type === "hello")), "stalled self-revoke hello");
 
     // Keep one earlier frame permanently in the real connection-local queue.
@@ -458,7 +458,7 @@ describe("WebSocket connection and outbound capacity", () => {
     const port = await unusedPort();
     const logger = { log: vi.fn() };
     const service = {
-      info: () => ({ gatewayVersion: "test", piVersion: "test", protocolVersion: 5, minProtocolVersion: 5, machineId: "machine", machineName: "test", capabilities: [] }),
+      info: () => ({ gatewayVersion: "test", piVersion: "test", protocolVersion: 6, minProtocolVersion: 6, machineId: "machine", machineName: "test", capabilities: [] }),
       terminalBelongsToSession: () => false,
       releaseClient: vi.fn(),
       invoke: vi.fn(async (_client: unknown, method: string) => ({ method })),
@@ -484,8 +484,8 @@ describe("WebSocket connection and outbound capacity", () => {
       new Promise<void>((resolve) => target.once("open", () => resolve())),
       new Promise<void>((resolve) => local.once("open", () => resolve())),
     ]);
-    target.send(JSON.stringify({ type: "hello", protocolVersion: 5 }));
-    local.send(JSON.stringify({ type: "hello", protocolVersion: 5 }));
+    target.send(JSON.stringify({ type: "hello", protocolVersion: 6 }));
+    local.send(JSON.stringify({ type: "hello", protocolVersion: 6 }));
     await waitUntil(() => localFrames.some((frame) => frame.type === "hello")
       && logger.log.mock.calls.filter((call) => call[2]?.event === "connection.opened").length === 2);
 
@@ -600,7 +600,7 @@ describe("WebSocket connection and outbound capacity", () => {
       } as any,
       auth: { detachClient: vi.fn(), cancelOwner: vi.fn() } as any,
       service: {
-        info: () => ({ gatewayVersion: "test", piVersion: "test", protocolVersion: 5, minProtocolVersion: 5,
+        info: () => ({ gatewayVersion: "test", piVersion: "test", protocolVersion: 6, minProtocolVersion: 6,
           machineId: "machine", machineName: "test", capabilities: [] }),
         terminalBelongsToSession: () => false, releaseClient: vi.fn(),
         invoke: async (context: any, method: string, params: any) => {
@@ -625,7 +625,7 @@ describe("WebSocket connection and outbound capacity", () => {
     const frames: any[] = [];
     socket.on("message", raw => frames.push(JSON.parse(raw.toString())));
     await bounded(new Promise<void>(resolve => socket!.once("open", resolve)), "structural socket open");
-    socket.send(JSON.stringify({ type: "hello", protocolVersion: 5, clientRole }));
+    socket.send(JSON.stringify({ type: "hello", protocolVersion: 6, clientRole }));
     await waitUntil(() => frames.some(frame => frame.type === "hello"));
     socket.send(JSON.stringify({ type: "request", id: "dense", method: "test.dense", params: {} }));
     await waitUntil(() => frames.some(frame => frame.id === "dense"));
@@ -701,7 +701,7 @@ describe("WebSocket connection and outbound capacity", () => {
     // The largest identity the Gateway config admits: machineId <= 256 bytes and
     // machineName <= 1,024 bytes.
     const info = {
-      gatewayVersion: "test", piVersion: "test", protocolVersion: 5, minProtocolVersion: 5,
+      gatewayVersion: "test", piVersion: "test", protocolVersion: 6, minProtocolVersion: 6,
       machineId: "i".repeat(256), machineName: "n".repeat(1_024), capabilities: ["sessions.v1"],
     };
     gateway = new GatewayServer({
@@ -716,7 +716,7 @@ describe("WebSocket connection and outbound capacity", () => {
     const frames: any[] = [];
     socket.on("message", raw => frames.push(JSON.parse(raw.toString())));
     await bounded(new Promise<void>(resolve => socket!.once("open", resolve)), "hello socket open");
-    socket.send(JSON.stringify({ type: "hello", protocolVersion: 5 }));
+    socket.send(JSON.stringify({ type: "hello", protocolVersion: 6 }));
     await waitUntil(() => frames.some(frame => frame.type === "hello"));
     expect(frames.find(frame => frame.type === "hello")).toEqual({ type: "hello", ...info, connectionId: expect.any(String) });
   });
@@ -743,7 +743,7 @@ describe("WebSocket connection and outbound capacity", () => {
       host: "127.0.0.1", port, maxFrameBytes: 16_384, maximumConnections: 8, maximumConnectionsPerIdentity: 2,
       devices, uploads: {} as any, sessions: { unsubscribeClient: vi.fn() } as any,
       auth: { detachClient: vi.fn(), cancelOwner: vi.fn() } as any,
-      service: { info: () => ({ protocolVersion: 5 }), terminalBelongsToSession: () => false, releaseClient: vi.fn(), invoke: vi.fn() } as any,
+      service: { info: () => ({ protocolVersion: 6 }), terminalBelongsToSession: () => false, releaseClient: vi.fn(), invoke: vi.fn() } as any,
       logger: logger as any,
     });
     await gateway.listen();
@@ -754,7 +754,7 @@ describe("WebSocket connection and outbound capacity", () => {
       socket.on("message", (raw) => frames.push(JSON.parse(raw.toString())));
       socket.on("error", () => {});
       await bounded(new Promise<void>((resolve) => socket.once("open", () => resolve())), `${label} open`);
-      socket.send(JSON.stringify({ type: "hello", protocolVersion: 5, clientRole: "mobile", diagnostics }));
+      socket.send(JSON.stringify({ type: "hello", protocolVersion: 6, clientRole: "mobile", diagnostics }));
       await bounded(waitUntil(() => frames.some((frame) => frame.type === "hello")), `${label} hello`);
       const connectionId = frames.find((frame) => frame.type === "hello").connectionId as string;
       expect(connectionId).toMatch(/^[0-9a-f-]{36}$/u);
@@ -805,7 +805,7 @@ describe("WebSocket connection and outbound capacity", () => {
         maximumConnections: peerCount, maximumConnectionsPerIdentity: peerCount,
         devices, uploads: {} as any, sessions: { unsubscribeClient: vi.fn() } as any,
         auth: { detachClient: vi.fn() } as any,
-        service: { info: () => ({ protocolVersion: 5 }), releaseClient: vi.fn(), invoke: async () => ({ ready: true }) } as any,
+        service: { info: () => ({ protocolVersion: 6 }), releaseClient: vi.fn(), invoke: async () => ({ ready: true }) } as any,
         logger: { log: () => {} } as any,
       });
       (gateway as unknown as { server: import("node:http").Server }).server.on("connection", socket => physicalSockets.push(socket));
@@ -826,7 +826,7 @@ describe("WebSocket connection and outbound capacity", () => {
           const fence = new Promise<void>(resolve => { fenced = resolve; });
           socket.on("message", bytes => {
             const frame = JSON.parse(bytes.toString());
-            if (frame.type === "hello" && frame.protocolVersion === 5) ready();
+            if (frame.type === "hello" && frame.protocolVersion === 6) ready();
             if (frame.topic === "session.summary") {
               if (events.length >= 128) { socket.terminate(); return; }
               events.push([frame.payload.sessionId, frame.payload.summaryRevision]);
@@ -835,7 +835,7 @@ describe("WebSocket connection and outbound capacity", () => {
           });
           socket.on("error", () => {});
           await bounded(new Promise<void>(resolve => socket.once("open", resolve)), "fanout socket open");
-          socket.send(JSON.stringify({ type: "hello", protocolVersion: 5, clientRole: "mobile" }));
+          socket.send(JSON.stringify({ type: "hello", protocolVersion: 6, clientRole: "mobile" }));
           await bounded(hello, "fanout hello");
           return { socket, events, fence };
         }));
@@ -887,7 +887,7 @@ describe("WebSocket connection and outbound capacity", () => {
       sessions: { unsubscribeClient: vi.fn() } as any,
       auth: { detachClient: vi.fn(), cancelOwner: vi.fn() } as any,
       service: {
-        info: () => ({ protocolVersion: 5 }),
+        info: () => ({ protocolVersion: 6 }),
         terminalBelongsToSession: () => false,
         releaseClient: vi.fn(),
         invoke: async () => ({ ok: true }),
@@ -905,7 +905,7 @@ describe("WebSocket connection and outbound capacity", () => {
         socket.once("open", () => resolve());
         socket.once("unexpected-response", () => reject(new Error(`${label} was rejected`)));
       }), `${label} open`);
-      socket.send(JSON.stringify({ type: "hello", protocolVersion: 5, clientRole: "mobile" }));
+      socket.send(JSON.stringify({ type: "hello", protocolVersion: 6, clientRole: "mobile" }));
       await bounded(waitUntil(() => frames.some((frame) => frame.type === "hello")), `${label} hello`);
       return { socket, frames };
     };
@@ -947,7 +947,7 @@ describe("WebSocket connection and outbound capacity", () => {
       host: "127.0.0.1", port, maxFrameBytes: 16_384, maximumConnectionsPerIdentity: 1,
       devices, uploads: {} as any, sessions: { unsubscribeClient: vi.fn() } as any,
       auth: { detachClient: vi.fn(), cancelOwner: vi.fn() } as any,
-      service: { info: () => ({ protocolVersion: 5 }), terminalBelongsToSession: () => false, releaseClient: vi.fn(), invoke: vi.fn() } as any,
+      service: { info: () => ({ protocolVersion: 6 }), terminalBelongsToSession: () => false, releaseClient: vi.fn(), invoke: vi.fn() } as any,
       logger: logger as any,
     });
     await gateway.listen();
@@ -985,7 +985,7 @@ describe("WebSocket connection and outbound capacity", () => {
     const port = await unusedPort();
     const logger = { log: vi.fn() };
     const service = {
-      info: () => ({ gatewayVersion: "test", piVersion: "test", protocolVersion: 5, minProtocolVersion: 5, machineId: "machine", machineName: "test", capabilities: [] }),
+      info: () => ({ gatewayVersion: "test", piVersion: "test", protocolVersion: 6, minProtocolVersion: 6, machineId: "machine", machineName: "test", capabilities: [] }),
       terminalBelongsToSession: () => false,
       releaseClient: vi.fn(),
       invoke: vi.fn(),
@@ -1012,7 +1012,7 @@ describe("WebSocket connection and outbound capacity", () => {
     first.on("message", (raw) => frames.push(JSON.parse(raw.toString())));
     await new Promise<void>((resolve) => first.once("open", () => resolve()));
     expect(first.extensions).toBe(credential === "local" ? "" : "permessage-deflate");
-    first.send(JSON.stringify({ type: "hello", protocolVersion: 5, diagnostics: { clientId: "client-B", attemptId: "initial", epoch: "7" } }));
+    first.send(JSON.stringify({ type: "hello", protocolVersion: 6, diagnostics: { clientId: "client-B", attemptId: "initial", epoch: "7" } }));
     await waitUntil(() => frames.some((frame) => frame.type === "hello"));
 
     // Global capacity never displaces another identity's live connection.

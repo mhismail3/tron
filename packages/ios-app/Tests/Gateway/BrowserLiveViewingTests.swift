@@ -9,7 +9,7 @@ import UIKit
 struct BrowserLiveViewingTests {
     private static func hello(capability: Bool = true, kind: DisplayKind = .browserLive) -> Data {
         Data("""
-        {"type":"hello","gatewayVersion":"1.0.0","piVersion":"1.0.0","protocolVersion":5,"minProtocolVersion":5,"machineId":"machine","machineName":"Mac","gatewayChannel":"stable","capabilities":\(capability ? "[\"\(kind.liveViewCapability!)\"]" : "[]")}
+        {"type":"hello","gatewayVersion":"1.0.0","piVersion":"1.0.0","protocolVersion":6,"minProtocolVersion":6,"machineId":"machine","machineName":"Mac","gatewayChannel":"stable","capabilities":\(capability ? "[\"\(kind.liveViewCapability!)\"]" : "[]")}
         """.utf8)
     }
     private static func profile(_ id: String) -> GatewayProfile {
@@ -853,7 +853,7 @@ struct BrowserLiveMountedViewingTests {
 
     private static func hello(kind: DisplayKind = .browserLive) -> Data {
         Data("""
-        {"type":"hello","gatewayVersion":"1.0.0","piVersion":"1.0.0","protocolVersion":5,"minProtocolVersion":5,"machineId":"machine","machineName":"Mac","gatewayChannel":"stable","capabilities":["\(kind.liveViewCapability!)"]}
+        {"type":"hello","gatewayVersion":"1.0.0","piVersion":"1.0.0","protocolVersion":6,"minProtocolVersion":6,"machineId":"machine","machineName":"Mac","gatewayChannel":"stable","capabilities":["\(kind.liveViewCapability!)"]}
         """.utf8)
     }
 

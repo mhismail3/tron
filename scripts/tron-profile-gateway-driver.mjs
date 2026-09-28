@@ -37,7 +37,7 @@ const CLIENT_PING_INTERVAL_MS = 10_000;
 const CLIENT_PONG_DEADLINE_MS = 8_000;
 const PRESENTATION_LEASE_RENEWAL_MS = 15_000;
 const REQUEST_TIMEOUT_MS = 30_000;
-const PROTOCOL_VERSION = 5;
+const PROTOCOL_VERSION = 6;
 
 const [command, configPath] = process.argv.slice(2);
 if (!["seed", "run", "catalog", "multi"].includes(command) || !configPath) {

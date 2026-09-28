@@ -89,10 +89,10 @@ struct GatewayClientTransportTests {
             machineId: "machine", deviceId: "device"
         )
         let fixtures: [(GatewayProfile, String)] = [
-            (profile, #"{"type":"hello","gatewayVersion":"1","piVersion":"1","protocolVersion":5,"minProtocolVersion":5,"machineId":"machine","machineName":"Mac","capabilities":[]}"#),
-            (profile, #"{"type":"hello","gatewayVersion":"1","piVersion":"1","protocolVersion":5,"minProtocolVersion":5,"machineId":"machine","machineName":"Mac","gatewayChannel":"dev","capabilities":[]}"#),
-            (debug, #"{"type":"hello","gatewayVersion":"1","piVersion":"1","protocolVersion":5,"minProtocolVersion":5,"machineId":"machine","machineName":"Mac","gatewayChannel":"stable","capabilities":[]}"#),
-            (profile, #"{"type":"hello","gatewayVersion":"1","piVersion":"1","protocolVersion":5,"minProtocolVersion":5,"machineId":"machine","machineName":"Mac","gatewayChannel":"preview","capabilities":[]}"#),
+            (profile, #"{"type":"hello","gatewayVersion":"1","piVersion":"1","protocolVersion":6,"minProtocolVersion":6,"machineId":"machine","machineName":"Mac","capabilities":[]}"#),
+            (profile, #"{"type":"hello","gatewayVersion":"1","piVersion":"1","protocolVersion":6,"minProtocolVersion":6,"machineId":"machine","machineName":"Mac","gatewayChannel":"dev","capabilities":[]}"#),
+            (debug, #"{"type":"hello","gatewayVersion":"1","piVersion":"1","protocolVersion":6,"minProtocolVersion":6,"machineId":"machine","machineName":"Mac","gatewayChannel":"stable","capabilities":[]}"#),
+            (profile, #"{"type":"hello","gatewayVersion":"1","piVersion":"1","protocolVersion":6,"minProtocolVersion":6,"machineId":"machine","machineName":"Mac","gatewayChannel":"preview","capabilities":[]}"#),
         ]
         for (target, frame) in fixtures {
             let socket = ScriptedGatewaySocket()
@@ -1673,7 +1673,7 @@ struct GatewayClientTransportTests {
 
     private func helloFrame(connectionID: String? = nil) -> Data {
         let connection = connectionID.map { #","connectionId":"\#($0)""# } ?? ""
-        return Data(#"{"type":"hello","gatewayVersion":"1.0.0","piVersion":"1.0.0","protocolVersion":5,"minProtocolVersion":5,"machineId":"machine","machineName":"Mac","gatewayChannel":"stable","capabilities":["sessions.v1"]\#(connection)}"#.utf8)
+        return Data(#"{"type":"hello","gatewayVersion":"1.0.0","piVersion":"1.0.0","protocolVersion":6,"minProtocolVersion":6,"machineId":"machine","machineName":"Mac","gatewayChannel":"stable","capabilities":["sessions.v1"]\#(connection)}"#.utf8)
     }
 
     private func responseFrame(id: String, result: JSONValue) -> Data {

@@ -199,7 +199,7 @@ keeps today's uncompressed frames.
    `gatewayConnectionId` is the Gateway record's `connectionId`, and its
    `clientId`/`attemptId`/`epoch` are the Gateway's `peerClientId`,
    `peerAttemptId` and `peerEpoch`. Only logs from before the correlation key
-   shipped (protocol 5) have to be matched by time window instead.
+   shipped (protocol 5 and earlier) have to be matched by time window instead.
 3. Use existing local Mac status/health observations to distinguish a responsive
    Gateway from an unreachable mobile path. An OS network path of `satisfied`
    proves neither Tailscale tunnel health nor reachability of the selected Mac.

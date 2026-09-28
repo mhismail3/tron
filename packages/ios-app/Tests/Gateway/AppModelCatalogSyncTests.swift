@@ -1293,7 +1293,7 @@ struct AppModelCatalogSyncTests {
 
     private func helloFrame(capabilities: [String] = ["sessions.v1"]) -> Data {
         let listed = capabilities.map { "\"\($0)\"" }.joined(separator: ",")
-        return Data(#"{"type":"hello","gatewayVersion":"1.0.0","piVersion":"1.0.0","protocolVersion":5,"minProtocolVersion":5,"machineId":"machine","machineName":"Mac","gatewayChannel":"stable","capabilities":["#.utf8)
+        return Data(#"{"type":"hello","gatewayVersion":"1.0.0","piVersion":"1.0.0","protocolVersion":6,"minProtocolVersion":6,"machineId":"machine","machineName":"Mac","gatewayChannel":"stable","capabilities":["#.utf8)
             + Data(listed.utf8) + Data("]}".utf8)
     }
 

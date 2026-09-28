@@ -204,7 +204,7 @@ read-through path as a convergence fallback. Gateway latches the lease observati
 completion and uses that single disposition to commit completion/read-through atomically and suppress
 the automatic completion notification without creating an inbox row. Opening and mounted acknowledgements
 retry transient failures against one fixed presentation/connection owner and absolute revision;
-cancellation retires them. Protocol-v5 clients require the complete attention and presentation contract
+cancellation retires them. Protocol-v6 clients require the complete attention and presentation contract
 and do not attach to earlier Gateways. The local snapshot cache remains
 display-only, and projections written before attention fields existed decode as
 read rather than inventing unread state. The dashboard groups user
@@ -581,7 +581,7 @@ token are returned first. The snapshot and subscription token remain provisional
 unobservable until `session.sync` succeeds and the exact session/presentation intent is
 revalidated. iOS admits both tokens as nonempty, printable UTF-8 values of at most 200 bytes before installation; stale or failed opens close only the already bounded provisional subscription token. The same opaque token
 then becomes subscription ownership, and `session.close` only releases a subscription whose
-current token matches. Protocol-v5 peers always provide explicit ownership.
+current token matches. Protocol-v6 peers always provide explicit ownership.
 Control-character membership uses an explicit scalar closure: the optimized Xcode 27
 app miscompiles the bound `CharacterSet.contains` predicate and rejects valid tokens,
 blocking both acknowledgement and provisional cleanup. `synchronizationTokenAdmission`

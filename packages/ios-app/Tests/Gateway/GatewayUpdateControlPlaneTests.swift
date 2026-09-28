@@ -7,15 +7,15 @@ import Testing
 struct GatewayUpdateControlPlaneTests {
     @Test("GatewayInfo requires a bounded authenticated channel while runtime identity remains optional")
     func gatewayInfoChannelAdmission() throws {
-        let data = Data(#"{"gatewayVersion":"1","piVersion":"2","protocolVersion":5,"minProtocolVersion":5,"machineId":"machine","machineName":"Mac","gatewayChannel":"stable","capabilities":[]}"#.utf8)
+        let data = Data(#"{"gatewayVersion":"1","piVersion":"2","protocolVersion":6,"minProtocolVersion":6,"machineId":"machine","machineName":"Mac","gatewayChannel":"stable","capabilities":[]}"#.utf8)
         let info = try JSONDecoder.gateway.decode(GatewayInfo.self, from: data)
         #expect(info.machineGroupID == "machine")
         #expect(info.gatewayChannel == "stable")
         #expect(info.sourceRevision == nil)
         #expect(info.runtimeEpoch == nil)
         for malformed in [
-            #"{"gatewayVersion":"1","piVersion":"2","protocolVersion":5,"minProtocolVersion":5,"machineId":"machine","machineName":"Mac","capabilities":[]}"#,
-            #"{"gatewayVersion":"1","piVersion":"2","protocolVersion":5,"minProtocolVersion":5,"machineId":"machine","machineName":"Mac","gatewayChannel":"preview","capabilities":[]}"#,
+            #"{"gatewayVersion":"1","piVersion":"2","protocolVersion":6,"minProtocolVersion":6,"machineId":"machine","machineName":"Mac","capabilities":[]}"#,
+            #"{"gatewayVersion":"1","piVersion":"2","protocolVersion":6,"minProtocolVersion":6,"machineId":"machine","machineName":"Mac","gatewayChannel":"preview","capabilities":[]}"#,
         ] {
             #expect(throws: Error.self) {
                 _ = try JSONDecoder.gateway.decode(GatewayInfo.self, from: Data(malformed.utf8))
@@ -113,7 +113,7 @@ struct GatewayUpdateControlPlaneTests {
         #expect(GatewayUpdatePollingDecision.decide(debug, commandID: "debug-command") == .active)
 
         let capableInfo = GatewayInfo(
-            gatewayVersion: "1", piVersion: "1", protocolVersion: 5, minProtocolVersion: 5,
+            gatewayVersion: "1", piVersion: "1", protocolVersion: 6, minProtocolVersion: 6,
             machineId: "machine", machineName: "Mac", capabilities: ["gateway-update.v1"],
             gatewayChannel: "stable"
         )
@@ -583,8 +583,8 @@ struct GatewayUpdateControlPlaneTests {
             "type": .string("hello"),
             "gatewayVersion": .string("1.0.0"),
             "piVersion": .string("1.0.0"),
-            "protocolVersion": .number(5),
-            "minProtocolVersion": .number(5),
+            "protocolVersion": .number(6),
+            "minProtocolVersion": .number(6),
             "machineId": .string(machineID),
             "machineName": .string("Mac"),
             "gatewayChannel": .string("stable"),
