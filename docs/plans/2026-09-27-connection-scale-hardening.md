@@ -530,7 +530,7 @@ rows are in priority order.
 | G-1d | Ready | Replace the catalog wording in `connection-resilience.md` with the index contract (D-3) | G-1c | |
 | G-3 | Ready | No audience, no projection: build and serialize snapshots only for subscribers | O-5, O-6a | |
 | C-2 | Ready | "Connected" follows the transport (D-2); chat restoration shows its own loading state | C-1 | |
-| C-5 | Ready | Back off an unreachable non-selected Gateway profile | O-4 | |
+| C-5 | Ready | Back off an unreachable non-selected Gateway profile; record pool attempts and episodes | O-4 | |
 | G-10 | Ready | Durable-write audit: no process-wide serialization of fsyncs, no fsync on reads | O-5 | |
 | C-3 | Ready | Faster retry (D-4): about 5 s transport-open deadline, immediate retry on path change | C-1 | |
 | C-4 | Ready | Truer liveness (D-4): any inbound frame proves liveness | O-4 | |
@@ -929,6 +929,9 @@ needed), **Checks**, **Docs**, **Done when**, **User action**.
   failures, back off exponentially to `POOL_MAX_RETRY` (5 minutes); retry at
   once on foreground and path change; show the profile as unreachable. The
   selected profile's policy is unchanged.
+  Also record the pool's attempts and episodes with O-4's recorder
+  (`gateway.attempt` with `profile=pool`, one `connection.episode` per pool
+  profile), as the O-4 handoff describes; O-4 wired only the selected profile.
 - **Checks:** `packages/ios-app/Tests/UI/DashboardStateOwnerTests.swift` or the
   pool's existing test owner, on a manual clock.
 - **Done when:** a pool profile pointing at a closed port makes at most one
