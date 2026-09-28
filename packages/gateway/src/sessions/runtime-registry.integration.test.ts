@@ -26,6 +26,7 @@ import { RequestSpan, runInRequestSpan, stage } from "../transport/request-span.
 import type { ResourceRecorder } from "../transport/stall-diagnostics.js";
 import { CatalogDiscovery, DEFAULT_CATALOG_DISCOVERY_LIMITS, type CatalogSessionInfo } from "./catalog-discovery.js";
 import { CatalogMetadataIndex } from "./catalog-metadata-index.js";
+import type { SessionCatalog } from "./session-catalog.js";
 import { INVOCATION_RECEIPT_TYPE, makeInvocationReceipt } from "./invocation-receipts.js";
 import { EXTENSION_ACTIVITY_RECEIPT_TYPE, MAX_EXTENSION_HISTORY_BYTES, type ExtensionActivityReceipt } from "./extension-activity-history.js";
 import { RuntimeRegistry } from "./runtime-registry.js";
@@ -1448,9 +1449,12 @@ describe.sequential("RuntimeRegistry with the pinned agent runtime", () => {
       expect(unchanged.sessions.find((session) => session.id === secondManager.getSessionId())?.messageCount).toBe(1);
       await new Promise((resolve) => setTimeout(resolve, 50));
       fixture.manager.appendMessage(fauxAssistantMessage("external append after restart"));
+      // The catalog owner also reconciles behind the listener, so only the
+      // reader call's own appends are counted here.
+      const appendsBeforeRead = append.mock.calls.length;
       const updated = await restarted.catalog("all");
       expect(scanner).not.toHaveBeenCalled();
-      expect(append).toHaveBeenCalledTimes(1);
+      expect(append.mock.calls.length - appendsBeforeRead).toBe(1);
       expect(updated.sessions.find((session) => session.id === fixture.manager.getSessionId())?.messageCount).toBe(3);
       expect(updated.sessions.find((session) => session.id === secondManager.getSessionId())?.messageCount).toBe(1);
     } finally {
@@ -1512,6 +1516,10 @@ describe.sequential("RuntimeRegistry with the pinned agent runtime", () => {
     });
     registries.push(restarted);
     await restarted.initialize();
+    // The catalog owner reconciles behind the listener. Settle it so the
+    // injected append lands in the reader's reconciliation, which this case is
+    // about, rather than in background maintenance.
+    await (restarted as unknown as { sessionCatalog: { settled: () => Promise<void> } }).sessionCatalog.settled();
     const indexReconcile = CatalogMetadataIndex.prototype.reconcile;
     const reconcile = vi.spyOn(CatalogMetadataIndex.prototype, "reconcile");
     reconcile.mockImplementation(async function (this: CatalogMetadataIndex, ...args) {
@@ -3379,6 +3387,106 @@ describe.sequential("RuntimeRegistry with the pinned agent runtime", () => {
     expect(catalog.sessions[0]?.phase).toBe(latest.phase);
     expect(catalog.sessions[0]?.messageCount).toBe(latest.messageCount);
     expect(catalog.sessions[0]?.summaryRevision).toBe(latest.summaryRevision);
+  });
+
+  it("matches a full scan after create, rename, fork and delete in the catalog index", async () => {
+    const root = await mkdtemp(join(tmpdir(), "tron-catalog-index-mutations-"));
+    const agentDir = join(root, "agent");
+    const cwd = join(root, "workspace");
+    const sessions = join(agentDir, "sessions");
+    await Promise.all([mkdir(sessions, { recursive: true }), mkdir(cwd)]);
+    const runtime = await ModelRuntime.create({ modelsPath: null, refreshOnCreate: false });
+    const faux = fauxProvider({ provider: "tron-catalog-index", tokensPerSecond: 10_000 });
+    faux.setResponses([fauxAssistantMessage("catalog index ready"), fauxAssistantMessage("catalog index forked")]);
+    runtime.registerNativeProvider(faux.provider);
+    const registry = new RuntimeRegistry({
+      agentDir,
+      tronHome: join(root, "tron"),
+      idleRuntimeMs: 60_000,
+      modelRuntimeFactory: async () => runtime,
+      trust: new TrustService(agentDir),
+      broadcast: () => {},
+      sessionSummaryChanged: () => {},
+      sessionListChanged: () => {},
+    });
+    registries.push(registry);
+    await registry.initialize();
+    const catalog = (registry as unknown as { sessionCatalog: SessionCatalog }).sessionCatalog;
+    const catalogRoot = await realpath(sessions);
+    // The comparison is the Gateway's own full scan of the folder, never the
+    // index's scan source, so an index row is checked against the canonical file.
+    const discovery = new CatalogDiscovery({
+      limits: DEFAULT_CATALOG_DISCOVERY_LIMITS,
+      catalogDirectory: () => catalogRoot,
+      catalogCapacityExceeded: () => { throw new Error("catalog capacity exceeded"); },
+      isLiveRuntimeOwnedPath: () => false,
+      canonicalSessionPath: (path) => realpath(path).catch(() => path),
+      delegatedTopologyParentPath: () => undefined,
+    });
+    const compareToFullScan = async (label: string) => {
+      const scanned = await discovery.sessionInfos("all");
+      const rows = catalog.rows();
+      expect(rows.map((row) => row.path), `${label}: paths`).toEqual(scanned.map((session) => session.path));
+      expect(rows.map((row) => [
+        row.id,
+        resolve(row.cwd),
+        row.parentSessionPath === undefined ? undefined : resolve(row.parentSessionPath),
+        row.name,
+        row.firstMessage,
+        row.messageCount,
+        row.createdAt,
+        row.updatedAt,
+      ]), `${label}: metadata`).toEqual(scanned.map((session) => [
+        session.id,
+        resolve(session.cwd),
+        session.parentSessionPath === undefined ? undefined : resolve(session.parentSessionPath),
+        session.name,
+        session.firstMessage,
+        session.messageCount,
+        session.created.toISOString(),
+        session.modified.toISOString(),
+      ]));
+      for (const row of rows) {
+        const stats = await fsPromises.lstat(row.path);
+        expect([row.fileIdentity, row.size, row.eofOffset], `${label}: file facts`)
+          .toEqual([`${stats.dev}:${stats.ino}`, stats.size, stats.size]);
+      }
+    };
+
+    // create: a fresh session persists its first canonical entry.
+    const live = await registry.create(cwd);
+    const model = faux.getModel();
+    await live.setModel(model.provider, model.id);
+    await live.prompt("catalog index create");
+    await waitUntil(() => !live.isBusy);
+    await catalog.settled();
+    await compareToFullScan("create");
+    expect(catalog.rows().map((row) => row.id)).toContain(live.id);
+
+    // rename: the session name the dashboard shows.
+    await live.rename("catalog index renamed");
+    await catalog.settled();
+    await compareToFullScan("rename");
+    expect(catalog.row(await realpath(live.sessionFile!))?.name).toBe("catalog index renamed");
+
+    // fork: the replacement identity persists its own canonical file.
+    const forkedId = live.snapshot().runtimeGeneration;
+    const userEntry = live.history(forkedId).nodes.find((node) => node.role === "user");
+    expect(userEntry?.id).toBeTruthy();
+    const forked = await live.fork(userEntry!.id, "at");
+    // Pi reserves the forked session's path; its first entry persists the file.
+    await live.prompt("catalog index fork entry");
+    await waitUntil(() => !live.isBusy);
+    await catalog.settled();
+    await compareToFullScan("fork");
+    expect(catalog.rows().map((row) => row.id)).toContain(forked.sessionId);
+    expect([...catalog.duplicateSessionIds()]).toEqual([]);
+
+    // delete: the deleted session's canonical file is gone.
+    await registry.delete(forked.sessionId);
+    await catalog.settled();
+    await compareToFullScan("delete");
+    expect(catalog.rows().some((row) => row.id === forked.sessionId)).toBe(false);
   });
 
   it("fails closed when multiple canonical files claim one session ID", async () => {

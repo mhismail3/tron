@@ -150,6 +150,14 @@ export class CatalogMetadataIndex {
     await this.writeMutex.run(() => {});
   }
 
+  /** The durable rows, or undefined when the document is missing, corrupt or
+   * bound to another root. Its caller (the catalog owner) rebuilds from
+   * canonical files, so an unusable document is never membership evidence. */
+  async load(catalogRoot: string): Promise<CatalogMetadataIndexRow[] | undefined> {
+    const document = await this.readDocument(catalogRoot);
+    return document ? document.rows.map((row) => ({ ...row })) : undefined;
+  }
+
   async save(catalogRoot: string, rows: readonly CatalogMetadataIndexRow[]): Promise<boolean> {
     return this.writeMutex.run(async () => {
       // Checked inside the mutex: a write queued after disposal began, but

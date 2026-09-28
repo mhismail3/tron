@@ -524,7 +524,7 @@ rows are in priority order.
 | O-5 | Done | Gateway resource sampler and event-loop histogram | O-3 | orchestrator-dispatched deepseek-worker, 2026-09-28 |
 | O-7 | Ready | Incident triage tool: phone export plus Gateway log in, episodes by cause out | O-1, O-2, O-4 | |
 | C-1 | Ready | Projection work never blocks or parks reconnect; parked episodes self-resume | O-4, O-6b | |
-| G-1a | Claimed | Catalog owner and in-memory index fed by Gateway-owned changes | O-3, O-6a | orchestrator-dispatched deepseek-worker, 2026-09-28 |
+| G-1a | Done | Catalog owner and in-memory index fed by Gateway-owned changes | O-3, O-6a | orchestrator-dispatched deepseek-worker, 2026-09-28 |
 | G-1b | Ready | Filesystem watcher and background reconciliation for external writers | G-1a | |
 | G-1c | Ready | Move every catalog reader to the index; delete request-path walks and the full-parse fallback | G-1b | |
 | G-1d | Ready | Replace the catalog wording in `connection-resilience.md` with the index contract (D-3) | G-1c | |
@@ -2552,3 +2552,71 @@ a latency percentile.
   the `gateway.resources-failed` "already reported" flag is shared by a skipped
   tick and a thrown error, so an in-flight sample that later throws is not
   logged.
+
+### G-1a · Done · 2026-09-28 · orchestrator-dispatched deepseek-worker
+
+- Result: the catalog has one owner. `session-catalog.ts` holds one in-memory
+  row per canonical session file (the durable row plus the path-derived
+  `delegated` flag), loads the durable document and reconciles once behind the
+  listener, applies every Gateway-owned change at its commit point, and writes
+  the durable form on a `CATALOG_PERSIST_DEBOUNCE_MS` (5 s) debounce and at
+  shutdown. Readers are not switched: G-1c does that and deletes the old path.
+- Evidence: `npx vitest run src/sessions/session-catalog.test.ts` 4/4 in 2.2 s;
+  `npx vitest run src/sessions/catalog-metadata-index.test.ts
+  src/sessions/catalog-discovery.test.ts src/sessions/session-catalog.test.ts`
+  23/23 in 1.5 s; `npx vitest run src/sessions/runtime-registry.integration.test.ts`
+  244 passed / 3 failed in 62–77 s (the 3 failures are the two durable-index
+  counting tests updated here plus one load flake, below), and the new case
+  `-t "matches a full scan after create, rename, fork and delete in the catalog
+  index"` passes alone in 3.6 s. `npx tsc -p tsconfig.json --noEmit` clean.
+  The new integration case compares the index against the Gateway's own full
+  scan (`CatalogDiscovery.sessionInfos("all")`) after each of create, rename,
+  fork and delete: paths, id, cwd, parent path, name, first message, message
+  count, created/updated times, and `dev:ino`/size/end offset against a fresh
+  `lstat`, with no index rows for deleted files and no duplicated IDs.
+- Changes: new `session-catalog.ts` in `packages/gateway/src/sessions/`; the
+  catalog owner wired into `packages/gateway/src/sessions/runtime-registry.ts`
+  (constructor, startup, summary/rename/rekey/create/fork/delete hooks, shutdown
+  ordering) and `packages/gateway/src/gateway-main.ts` (the record);
+  `catalog-metadata-index.ts` gained the public durable read (`load`);
+  `packages/gateway/docs/observability.md` gained `catalog.reconciled`; the integration tests
+  noted above.
+- Failure modes written before the owner (`session-catalog.test.ts`, one test
+  each): a canonical file written while the index was not watching (a crash
+  between the file write and the index update) is repaired by startup
+  reconciliation; two files claiming one session ID stay two rows and the ID is
+  reported as duplicated rather than merged; a rekey or append while a reader
+  holds a row replaces the row instead of mutating it, so a held value cannot
+  change; a durable document that is corrupt, or saved for another root, leaves
+  the index to rebuild from canonical files instead of publishing foreign rows.
+- Kept on purpose: the delegated topology rule moved to the catalog owner
+  (`delegatedSessionParentPath` + `SUBAGENT_RUN_DIRECTORY`) so one owner
+  classifies its own rows; the registry keeps the header/parent comparison that
+  binds a projected parent. Every row still comes from
+  `CatalogMetadataIndex.entryFromSummary`/`append`/`reconcile`, so the durable
+  offset and tail boundary stay the write-proving evidence. The live slot
+  summary is never adopted as row metadata: it carries presentation activity
+  (dashboard `activeSince`, `latestDashboardActivityAt`) that canonical files do
+  not, so the index would stop matching a full scan.
+- Deviation (transitional dual owner): the owner deliberately reads and writes
+  the same durable document as the reader path until G-1c deletes that path, so
+  two writers can exchange a full-document snapshot. Both are full canonical
+  cuts, so the content is the same; G-1c removes the second writer. Two existing
+  durable-index counting tests were narrowed rather than deleted: "reuses an
+  on-disk catalog…" now counts only the reader call's `append`s, and "rejects an
+  unowned append that races durable-index reconciliation" settles the owner's
+  background reconcile before injecting its append, because both call the same
+  prototype method.
+- No catalog field changes for archive: archiving is a dashboard projection of
+  the same canonical membership and the row contract has no archive field, so
+  the plan's "archive" hook has nothing to apply.
+- For the next agent: G-1b owns the watcher, the per-path
+  `CATALOG_EVENT_DEBOUNCE_MS` (250 ms) and the `CATALOG_RECONCILE_INTERVAL_MS`
+  (30-minute) batched reconcile plus `catalog.watcher-reset`; the startup
+  reconcile call site is the one to extend. G-1c switches `list`, `pageSource`,
+  acquisition, attention, automation targets and storage maintenance onto
+  `SessionCatalog.rows()` and deletes the old per-request walks together with
+  the `CatalogMetadataIndex.reconcile` reader path. One flake to watch: the full
+  integration file run had `keeps a large streamed write visible through
+  snapshot recovery and canonical handoff` time out once at 5.1 s under the
+  full-file load; it passes alone (8.3 s) and is not reproducible in isolation.

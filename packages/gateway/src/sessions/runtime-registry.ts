@@ -85,6 +85,12 @@ import {
   type CatalogMetadataIndexSummary,
 } from "./catalog-metadata-index.js";
 import { branchFromParsedSession } from "./session-branch.js";
+import {
+  SessionCatalog,
+  SUBAGENT_RUN_DIRECTORY,
+  delegatedSessionParentPath,
+  type SessionCatalogSource,
+} from "./session-catalog.js";
 import { resolveForkBoundaryAnchor, type ForkBoundaryAnchor } from "./fork-boundary.js";
 import type { KnowledgeService } from "../knowledge/knowledge-service.js";
 import type { JevDecisionClient } from "../knowledge/jev-client.js";
@@ -116,7 +122,6 @@ const MAX_EXTENSION_TEMP_ENTRIES = 1_024;
 // Ambient enumeration shares these global pass bounds. Exact-owned artifact
 // reconciliation above is intentionally outside this ambient budget.
 const MAX_EXTENSION_ROOT_ENTRIES = 4_096;
-const SUBAGENT_RUN_DIRECTORY = /^run-\d+$/u;
 
 function assertProcessSessionRef(value: string): void {
   if (!value || Buffer.byteLength(value) > 256 || /[\\/\0]/u.test(value)) {
@@ -411,6 +416,9 @@ export class RuntimeRegistry {
   private readonly recentModels: RecentModelStore;
   private readonly presentationPresence = new SessionPresentationPresenceRegistry();
   private readonly catalogMetadataIndex: CatalogMetadataIndex;
+  /** The catalog owner: one row per canonical session file (G-1c switches the
+   * readers onto it; until then only the owner and its tests read it). */
+  private readonly sessionCatalog: SessionCatalog;
   private readonly configuredSessionDir: string | undefined;
   private interrupted = new Set<string>();
   private readonly subscribers = new Map<string, Set<string>>();
@@ -466,6 +474,7 @@ export class RuntimeRegistry {
   private exportsDisposed = false;
   private workspaceDisposed = false;
   private catalogIndexDisposed = false;
+  private sessionCatalogDisposed = false;
   private recentModelsDisposed = false;
 
   constructor(
@@ -498,6 +507,8 @@ export class RuntimeRegistry {
       /** Handled catalog-index write failures. The index write is fire-and-forget
        * outside any request span, so its owner records them. */
       catalogIndexFailure?: CatalogMetadataIndexFailure;
+      /** One catalog reconcile, with the files it covered and its duration. */
+      catalogReconciled?: (reconciled: { files: number; changed: number; durationMs: number }) => void;
       /** A runtime whose extension shutdown overran its disposal grace and was
        * forced. Outside any request span. */
       runtimeDisposeTimeout?: (graceMs: number) => void;
@@ -532,6 +543,12 @@ export class RuntimeRegistry {
     this.archive = new SessionArchiveStore(options.tronHome);
     this.recentModels = new RecentModelStore(options.tronHome);
     this.catalogMetadataIndex = new CatalogMetadataIndex(join(options.tronHome, "gateway"), options.catalogIndexFailure);
+    this.sessionCatalog = new SessionCatalog({
+      catalogRoot: () => this.catalogDirectory(),
+      index: this.catalogMetadataIndex,
+      source: this.sessionCatalogSource(),
+      ...(options.catalogReconciled ? { onReconciled: options.catalogReconciled } : {}),
+    });
     this.workRegistry = options.workRegistry ?? new GatewayWorkRegistry();
     this.drainId = `idle-${createHash("sha256").update(this.workRegistry.runtimeEpoch).digest("hex").slice(0, 16)}`;
     this.configuredSessionDir = SettingsManager.create(
@@ -587,6 +604,9 @@ export class RuntimeRegistry {
     await this.attention.initialize();
     await this.archive.initialize();
     await this.recentModels.initialize();
+    // The catalog owner loads its durable rows and reconciles once behind the
+    // listener: G-1b replaces that cadence with the folder watcher.
+    this.sessionCatalog.start();
     const markerEvidence = await this.markers.evidence();
     // Recovery can open and parse large session files. Do not hold listener
     // readiness on those full reads; recover them once the Gateway is serving.
@@ -801,9 +821,16 @@ export class RuntimeRegistry {
           this.restoreArchivedSession(summary.sessionId);
         }
         this.publishRevisionedSummary({ ...summary, ...this.attention.projection(summary.sessionId) });
+        // The slot's summary commit point: every Gateway-owned canonical append
+        // reaches the row here, without a reader walking the folder.
+        void this.sessionCatalog.refresh(this.slots.get(summary.sessionId)?.persistedSessionFile);
       },
-      changed: () => {
+      changed: (sessionId: string) => {
         this.invalidateCatalogAcquisition();
+        // A structural commit point (a rename or session-info entry): the row is
+        // re-derived from the file. Message appends reach the row through the
+        // summary commit point below.
+        void this.sessionCatalog.refresh(this.slots.get(sessionId)?.persistedSessionFile);
         this.revision += 1;
         this.options.sessionListChanged();
       },
@@ -903,6 +930,10 @@ export class RuntimeRegistry {
           await this.displayArtifacts.grant(artifactID, nextId, previousId);
         }
         await this.options.beforeSessionRekey?.(previousId, nextId);
+        // A rebind is the only identity change the Gateway owns: a reset
+        // identity (new session or fork) persists beneath a new path, and a
+        // migrate moves the row to the replacement's canonical file.
+        const previousCatalogPath = slot.persistedSessionFile;
         commitIdentity();
         if (this.slots.get(previousId) === slot) this.slots.delete(previousId);
         this.slots.set(nextId, slot);
@@ -934,6 +965,8 @@ export class RuntimeRegistry {
         try { this.searchInvalidator?.(previousId, nextId); } catch {}
         try { this.options.sessionRekeyed?.(previousId, nextId); } catch {}
         this.invalidateCatalogAcquisition();
+        void this.sessionCatalog.refresh(previousCatalogPath);
+        void this.sessionCatalog.refresh(slot.persistedSessionFile);
         this.revision += 1;
         this.options.sessionListChanged();
       }),
@@ -1602,6 +1635,43 @@ export class RuntimeRegistry {
     return evidence;
   }
 
+  /** The catalog owner's canonical readers. Its scan is this registry's counted
+   * background walk, and one file's row is read from that exact file: a live
+   * slot summary is a presentation overlay, never catalog authority. */
+  private sessionCatalogSource(): SessionCatalogSource {
+    return {
+      scan: async () => {
+        const evidence = await this.catalogStructureEvidence();
+        return {
+          complete: evidence.complete,
+          candidates: [...evidence.identitiesByPath].map(([path, identity]) => ({
+            path, id: identity.id, cwd: identity.cwd, fileIdentity: identity.fileIdentity,
+            size: identity.size, mtimeMs: identity.mtimeMs,
+          })),
+        };
+      },
+      summaryFor: (path) => this.canonicalCatalogSummary(path),
+    };
+  }
+
+  private async canonicalCatalogSummary(path: string): Promise<CatalogMetadataIndexSummary | undefined> {
+    const info = await buildCatalogSessionInfo(path);
+    if (!info) return undefined;
+    return {
+      id: info.id, path: info.path, cwd: info.cwd,
+      // The row's parent path is the same canonical form every other catalog
+      // comparison uses; a header may name its parent through a symlinked root.
+      ...(info.parentSessionPath
+        ? { parentSessionPath: await this.canonicalSessionPath(info.parentSessionPath) }
+        : {}),
+      ...(info.creationOrigin ? { creationOrigin: info.creationOrigin } : {}),
+      ...(info.name ? { name: info.name } : {}),
+      firstMessage: info.firstMessage,
+      createdAt: info.created.toISOString(), updatedAt: info.modified.toISOString(),
+      messageCount: info.messageCount,
+    };
+  }
+
   private async readCatalogHeader(
     path: string,
     maximumBytes: number,
@@ -2237,26 +2307,7 @@ export class RuntimeRegistry {
   }
 
   private delegatedTopologyParentPath(sessionPath: string, catalogRoot: string): string | undefined {
-    const resolvedPath = resolve(sessionPath);
-    const fromCatalog = relative(catalogRoot, resolvedPath);
-    if (fromCatalog === "" || fromCatalog === ".." || fromCatalog.startsWith(`..${sep}`)
-      || isAbsolute(fromCatalog) || !resolvedPath.endsWith(".jsonl")) return undefined;
-
-    const containingDirectory = dirname(resolvedPath);
-    let expectedParent: string | undefined;
-    if (basename(containingDirectory) === "forks" && basename(resolvedPath) !== ".jsonl") {
-      expectedParent = resolve(`${dirname(containingDirectory)}.jsonl`);
-    } else if (basename(resolvedPath) === "session.jsonl"
-      && SUBAGENT_RUN_DIRECTORY.test(basename(containingDirectory))) {
-      const producerDirectory = dirname(containingDirectory);
-      const producer = basename(producerDirectory);
-      if (producer && producer !== "forks") expectedParent = resolve(`${dirname(producerDirectory)}.jsonl`);
-    }
-    if (!expectedParent) return undefined;
-    const parentFromCatalog = relative(catalogRoot, expectedParent);
-    return parentFromCatalog !== "" && parentFromCatalog !== ".."
-      && !parentFromCatalog.startsWith(`..${sep}`) && !isAbsolute(parentFromCatalog)
-      ? expectedParent : undefined;
+    return delegatedSessionParentPath(sessionPath, catalogRoot);
   }
 
   /** The only delegated-session catalog contract. pi-subagents reserves
@@ -2264,8 +2315,7 @@ export class RuntimeRegistry {
    * <parent-stem>/<producer>/run-N/session.jsonl beneath the canonical catalog.
    * The topology remains mutation-protected without an extant or unambiguous
    * parent. An optional matching header binds the projected parent identity;
-   * a contradictory header fails closed and is omitted from catalog rows. */
-  private delegatedSessionTopologies(
+   * a contradictory header fails closed and is omitted from catalog rows. */  private delegatedSessionTopologies(
     sessions: ReadonlyArray<{
       id: string;
       path: string;
@@ -2711,6 +2761,7 @@ export class RuntimeRegistry {
         this.publishRuntime(sessionId, slot!);
         published = true;
         this.invalidateCatalogAdmission();
+        void this.sessionCatalog.refresh(slot!.persistedSessionFile);
         this.revision += 1;
         this.options.sessionListChanged();
         return { slot: slot!, release };
@@ -2763,6 +2814,9 @@ export class RuntimeRegistry {
         reserved = false;
         this.publishRuntime(manager.getSessionId(), slot!);
         this.invalidateCatalogAdmission();
+        // A fresh session is live before Pi writes its first canonical entry;
+        // the slot's own `changed` commit point adds the row when it does.
+        void this.sessionCatalog.refresh(slot!.persistedSessionFile);
         this.revision += 1;
         this.options.sessionListChanged();
       });
@@ -3238,6 +3292,7 @@ export class RuntimeRegistry {
           this.publishRuntime(importedId, slot);
           published = true;
           this.invalidateCatalogAcquisition();
+          void this.sessionCatalog.refresh(slot.persistedSessionFile);
           this.revision += 1;
           this.options.sessionListChanged();
           return slot;
@@ -3465,6 +3520,9 @@ export class RuntimeRegistry {
             entry.fileIdentity,
             acquisition.structureDigest,
           );
+          // The deletion is committed; the owner announces it because an
+          // unreadable path proves neither absence nor presence.
+          this.sessionCatalog.remove(entry.path);
           if (!(await this.removeIndexedCatalogFile(entry.path))) this.invalidateCatalogAcquisition();
         } else {
           this.invalidateCatalogAdmission();
@@ -4077,12 +4135,19 @@ export class RuntimeRegistry {
     if (!this.workspaceDisposed) {
       pending.push(this.workspace.dispose().then(() => { this.workspaceDisposed = true; }));
     }
-    // The catalog acceleration index is written fire-and-forget from catalog
-    // reads, so disposal must settle its exact in-flight write. Otherwise a
-    // temp file and rename can still land in the Gateway state directory after
-    // this owner reports shutdown.
-    if (!this.catalogIndexDisposed) {
-      pending.push(this.catalogMetadataIndex.dispose().then(() => { this.catalogIndexDisposed = true; }));
+    // The catalog owner applies its own Gateway-owned changes and writes the
+    // durable document; settle it before the document's writer refuses writes.
+    if (!this.sessionCatalogDisposed || !this.catalogIndexDisposed) {
+      pending.push((async () => {
+        if (!this.sessionCatalogDisposed) {
+          await this.sessionCatalog.dispose();
+          this.sessionCatalogDisposed = true;
+        }
+        if (!this.catalogIndexDisposed) {
+          await this.catalogMetadataIndex.dispose();
+          this.catalogIndexDisposed = true;
+        }
+      })());
     }
     // Model recency is recorded fire-and-forget from an admitted run, so a
     // preference write can equally outlive this owner.
