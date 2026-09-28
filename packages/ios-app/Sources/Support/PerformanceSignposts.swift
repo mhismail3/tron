@@ -23,9 +23,6 @@ enum PerformanceResult: Int, Sendable {
     case failure = 1
     case cancelled = 2
     case discarded = 3
-    /// The scene backgrounded while the operation was still open. It must not
-    /// be recorded as a failure: scene retirement did not fail the work.
-    case backgrounded = 4
 
     static func forFailure(_ error: Error) -> PerformanceResult {
         Task.isCancelled || error is CancellationError ? .cancelled : .failure

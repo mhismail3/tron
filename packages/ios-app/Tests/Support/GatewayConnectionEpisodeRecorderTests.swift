@@ -6,7 +6,9 @@ import Testing
 /// Failure modes this suite exists to catch, written before the code:
 /// 1. the reconnect-stall watchdog ticks while the app is backgrounded;
 /// 2. an episode record spans a background transition instead of ending at it;
-/// 3. two profiles attempting at once mix their attempts or their episodes;
+/// 3. a second recorder writing to the same always-on log (a second lifecycle,
+///    or the dashboard pool entry C-5 owns) mixes its attempts into this
+///    recorder's episode, or breaks attempt-before-episode order;
 /// 4. a blocked main actor in the foreground is never recorded, or is recorded
 ///    again after the episode ended;
 /// 5. an attempt record loses one of the fields the export needs.
@@ -82,8 +84,8 @@ struct GatewayConnectionEpisodeRecorderTests {
         recorder.recordAttempt(attempt(
             profileID: "gateway", lifecycleGeneration: 3, attemptID: "loop-9", retry: 2,
             stageReached: "connected", reason: nil, succeeded: true,
-            gatewayConnectionID: "88b1f0f0-0000-4000-8000-000000000001",
-            startedAt: clock.clock.now(), connectionID: 12
+            startedAt: clock.clock.now(), connectionID: 12,
+            gatewayConnectionID: "88b1f0f0-0000-4000-8000-000000000001"
         ))
 
         let attempts = try await waitForRecords(log, event: "gateway.attempt", count: 2)
@@ -105,7 +107,7 @@ struct GatewayConnectionEpisodeRecorderTests {
         #expect(episode.message.contains("attempts=2"))
         #expect(episode.message.contains("causes=timeout"))
         // The gap from the loss to the first attempt is 4 s; the gap between the
-        // two attempt starts is 7 s.
+        // two attempt starts is 7 s, and 7 s is the maximum.
         #expect(episode.message.contains("maxGapBetweenAttemptsMs=7000"))
         #expect(episode.message.contains("foregroundMs=11000"))
         #expect(episode.message.contains("endedBy=connected"))
@@ -113,11 +115,14 @@ struct GatewayConnectionEpisodeRecorderTests {
         #expect(episode.message.contains("endedAt="))
     }
 
-    @Test("two profiles attempting at once keep their own attempts and episodes")
-    func concurrentProfilesStaySeparated() async throws {
+    @Test("two recorders on one always-on log stay attributable and ordered")
+    func concurrentRecordersStaySeparated() async throws {
         let clock = ManualClock()
         let (log, cleanup) = makeAppLog()
         defer { cleanup() }
+        // Production shape: one recorder per lifecycle owner, all writing to the
+        // one always-on log. The second recorder here is the shape a second
+        // lifecycle (or the dashboard pool entry C-5 owns) would have.
         let first = GatewayConnectionEpisodeRecorder(
             clock: clock.clock, appLog: log, watchdogClock: clock.clock, mainStallPing: {}
         )
@@ -147,9 +152,12 @@ struct GatewayConnectionEpisodeRecorderTests {
         #expect(attempts.filter { $0.profileID == "gateway-a" }.count == 2)
         #expect(attempts.filter { $0.profileID == "gateway-b" }.count == 1)
         let episodes = try await waitForRecords(log, event: "connection.episode", count: 1)
+        // Only the recorder whose episode ended writes one, and it carries its
+        // own profile and causes; the other recorder's attempt never joins it.
         #expect(episodes.count == 1)
         #expect(episodes[0].profileID == "gateway-a")
         #expect(episodes[0].message.contains("causes=timeout"))
+        #expect(episodes[0].message.contains("attempts=2"))
         #expect(await recordCount(log, event: "connection.episode") == 1)
     }
 
@@ -170,10 +178,10 @@ struct GatewayConnectionEpisodeRecorderTests {
             startedAt: clock.clock.now()
         ))
         let monitor = Task {
-            // Both watchdogs tick on this clock: the stall checker and the
-            // main-actor monitor.
+            // Both watchdogs ride one task on this clock: the tick measures the
+            // main-stall ping and then checks the holding guard.
             try await clock.waitUntilSleeping(
-                count: 2, duration: GatewayConnectionEpisodeRecorder.watchdogInterval
+                count: 1, duration: GatewayConnectionEpisodeRecorder.watchdogInterval
             )
             clock.advance(by: GatewayConnectionEpisodeRecorder.watchdogInterval)
             await gate.waitUntilCalled()

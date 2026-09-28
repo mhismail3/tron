@@ -252,26 +252,32 @@ final class AppLogSignposts: PerformanceSignposting, @unchecked Sendable {
         guard let started = interval.measuredStart, !alreadySignedAtBackground else { return }
         let duration = diagnosticMilliseconds(started.duration(to: ContinuousClock().now))
         guard duration >= AppLog.slowOperationThresholdMilliseconds else { return }
-        let outcome = result == .success ? "success" : result == .backgrounded ? "backgrounded" : "failure"
         Task {
             await log.recordCausal(name: "operation.\(interval.operation)",
-                outcome: outcome, durationMilliseconds: duration,
+                outcome: result == .success ? "success" : "failure", durationMilliseconds: duration,
                 count: metrics.itemCount, level: result == .failure ? "error" : "warning")
         }
     }
 
     func endOpenIntervalsAtBackground() {
-        let open = lock.withLock { () -> [OpenInterval] in
-            let values = Array(openIntervals.values)
-            backgroundedIntervals.formUnion(openIntervals.keys)
-            openIntervals.removeAll()
-            return values
-        }
-        guard !open.isEmpty else { return }
         let now = ContinuousClock().now
-        for interval in open {
+        let signed = lock.withLock { () -> [OpenInterval] in
+            var signed: [OpenInterval] = []
+            for (id, interval) in openIntervals {
+                let duration = diagnosticMilliseconds(interval.startedAt.duration(to: now))
+                guard duration >= AppLog.slowOperationThresholdMilliseconds else { continue }
+                // Only an interval signed here is suppressed when its owner later
+                // ends it. A shorter one keeps running and writes its own single
+                // record past the threshold instead of writing nothing at all.
+                backgroundedIntervals.insert(id)
+                signed.append(interval)
+            }
+            openIntervals.removeAll()
+            return signed
+        }
+        guard !signed.isEmpty else { return }
+        for interval in signed {
             let duration = diagnosticMilliseconds(interval.startedAt.duration(to: now))
-            guard duration >= AppLog.slowOperationThresholdMilliseconds else { continue }
             Task {
                 await log.recordCausal(name: "operation.\(interval.operation)",
                     outcome: "backgrounded", durationMilliseconds: duration, level: "warning")

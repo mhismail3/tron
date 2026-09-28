@@ -155,7 +155,7 @@ struct PushNavigationLifecycleRaceTests {
         do {
             try await withTestWatchdog {
                 try await Task { @MainActor in
-                    let starting = Task { await model.start(sceneIsActive: true) }
+                    let starting = Task { await model.start(scenePhase: .active) }
                     defer { starting.cancel() }
                     try await sockets[0].waitUntilSent(count: 1)
 

@@ -1042,11 +1042,63 @@ struct AppModelPerformanceSignpostTests {
         }
     }
 
+    @Test("an answered open failure is reported with its own code, never transport")
+    func sessionOpenConflictReportsItsOwnCode() async throws {
+        try await withTestWatchdog {
+            let logURL = FileManager.default.temporaryDirectory
+                .appending(path: "session-open-conflict-\(UUID().uuidString).jsonl")
+            defer {
+                try? FileManager.default.removeItem(at: logURL)
+                try? FileManager.default.removeItem(at: logURL.appendingPathExtension("1"))
+            }
+            let appLog = AppLog(fileURL: logURL)
+            let harness = try await makeHarness(appLog: appLog)
+            let responder = Task {
+                let open = try await request(in: harness.socket, frameIndex: 1)
+                #expect(open.method == "session.open")
+                await harness.socket.enqueue(
+                    errorResponse(id: open.id, code: "conflict", retryable: false)
+                )
+            }
+            defer { responder.cancel() }
+            var thrown = "none"
+            do {
+                _ = try await harness.model.openSessionPresentation("session")
+            } catch {
+                thrown = "\(type(of: error)) \(error)"
+            }
+            try await valueOfOwnedTask(responder)
+            // The Gateway answered with `conflict`. The presentation store owns
+            // the wording of an open failure and rewords a typed open/sync
+            // failure as its own `sync_failed` before this record, so what this
+            // call site owns is that the failure's own code is reported: before
+            // this change these read `code=transport`, which looks like a
+            // network fault that never reached the Gateway.
+            let records = await operationRecords(in: appLog, event: "session.open.failure")
+            #expect(records.count == 1)
+            #expect(records.first?.message.contains("code=sync_failed") == true)
+            #expect(records.first?.message.contains("code=transport") == false)
+            #expect(records.first?.level == "warning")
+            #expect(thrown.contains("sync_failed"))
+            await harness.close()
+        }
+    }
+
+    private func operationRecords(in log: AppLog, event: String) async -> [AppLogRecord] {
+        for _ in 0..<600 {
+            let values = await log.snapshot().filter { $0.event == event }
+            if values.count >= 1 { return values }
+            try? await Task.sleep(for: .milliseconds(5))
+        }
+        return await log.snapshot().filter { $0.event == event }
+    }
+
     private struct Harness: @unchecked Sendable {
         let socket: ScriptedGatewaySocket
         let client: GatewayClient
         let model: AppModel
         let signposts: RecordingPerformanceSignposts
+        let appLog: AppLog
         let gatewayIDs: SequenceUUIDSource
         let appModelIDs: SequenceUUIDSource
         let defaults: UserDefaults
@@ -1067,7 +1119,10 @@ struct AppModelPerformanceSignpostTests {
         let params: JSONValue?
     }
 
-    private func makeHarness(clock: MonotonicClock = .continuous) async throws -> Harness {
+    private func makeHarness(
+        clock: MonotonicClock = .continuous,
+        appLog: AppLog = .shared
+    ) async throws -> Harness {
         let socket = ScriptedGatewaySocket()
         let signposts = RecordingPerformanceSignposts()
         // Keep request and model identities deterministic and bounded. The
@@ -1103,7 +1158,8 @@ struct AppModelPerformanceSignpostTests {
             cache: SnapshotCache(root: cacheRoot),
             clock: clock,
             uuidSource: appModelIDs.source,
-            performanceSignposts: signposts
+            performanceSignposts: signposts,
+            appLog: appLog
         )
         await socket.enqueue(helloFrame())
         do {
@@ -1119,6 +1175,7 @@ struct AppModelPerformanceSignpostTests {
             client: client,
             model: model,
             signposts: signposts,
+            appLog: appLog,
             gatewayIDs: gatewayIDs,
             appModelIDs: appModelIDs,
             defaults: defaults,

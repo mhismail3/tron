@@ -256,7 +256,10 @@ struct WorkspaceBrowser: View {
         await loadOwner.load(
             navigation: navigation,
             operation: { try await model.loadWorkspace(path: path) },
-            onTransientError: { model.becameActive() }
+            // A transient connection error is not a scene activation; asking
+            // the lifecycle to retry must not write a scene record for a scene
+            // that did not move.
+            onTransientError: { model.becameActive(recordsSceneTransition: false) }
         )
     }
 
@@ -268,7 +271,10 @@ struct WorkspaceBrowser: View {
             await loadOwner.createFolder(
                 operation: { try await model.createFolder(parent: parent, name: name) },
                 onSuccess: { cancelFolder() },
-                onTransientError: { model.becameActive() }
+                // A transient connection error is not a scene activation; asking
+            // the lifecycle to retry must not write a scene record for a scene
+            // that did not move.
+            onTransientError: { model.becameActive(recordsSceneTransition: false) }
             )
         }
     }

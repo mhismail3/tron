@@ -1670,7 +1670,7 @@ final class AppModel {
         surface(error)
     }
 
-    func start(sceneIsActive: Bool = true) async {
+    func start(scenePhase: AppScenePhase = .active) async {
         await client.installAppLog(appLog)
         let appVersion = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "unknown"
         let build = Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? "unknown"
@@ -1678,8 +1678,12 @@ final class AppModel {
             name: "app.started", outcome: "success",
             details: "appVersion=\(appVersion) build=\(build) os=\(ProcessInfo.processInfo.operatingSystemVersionString)"
         )
-        sceneAllowsCatalogRefresh = sceneIsActive
-        pushNavigationActivationReady = sceneIsActive
+        sceneAllowsCatalogRefresh = scenePhase.isActive
+        pushNavigationActivationReady = scenePhase.isActive
+        // The launch phase is the scene's real starting point: a cold launch into
+        // the background must not later report `from=active`, and a backgrounded
+        // launch must not be labelled a foreground transition.
+        recordedSceneTransition = scenePhase
         await lifecycle.start()
         didStart = true
         if sceneAllowsCatalogRefresh {
@@ -1698,13 +1702,13 @@ final class AppModel {
     }
 
     @discardableResult
-    func becameActive() -> Task<Void, Never>? {
+    func becameActive(recordsSceneTransition: Bool = true) -> Task<Void, Never>? {
         sceneAllowsCatalogRefresh = true
         pushNavigationActivationReady = false
         pushNavigationActivationGeneration &+= 1
         let activationGeneration = pushNavigationActivationGeneration
         noticeCenter.setBackgrounded(false)
-        recordSceneTransition(to: .active)
+        if recordsSceneTransition { recordSceneTransition(to: .active) }
         let requiresRetirementBarrier = lifecycle.routeActivationRequiresRetirementBarrier
         let lifecycleTask = lifecycle.becameActive()
         return Task { @MainActor [weak self] in
@@ -1723,14 +1727,21 @@ final class AppModel {
         }
     }
 
-    private enum SceneTransition: String {
-        case active, inactive, background
+    /// The app's scene phase. One type names the phase a scene record moved `from`
+    /// and the phase it moved to, including the launch phase, which the scene
+    /// reports through its first callback rather than through a transition.
+    enum AppScenePhase: String, Sendable {
+        case active
+        case inactive
+        case background
+
+        var isActive: Bool { self == .active }
     }
 
-    private var recordedSceneTransition: SceneTransition = .active
+    @ObservationIgnored private var recordedSceneTransition: AppScenePhase = .active
     /// Scene records are chained so their order in the log is the order the
     /// scene moved, not the order three tasks happened to reach the log actor.
-    private var sceneRecordTask: Task<Void, Never>?
+    @ObservationIgnored private var sceneRecordTask: Task<Void, Never>?
 
     /// Records the scene's own transitions once, at the instant each happened.
     /// `.inactive` arriving from `.background` is the scene re-entering the
@@ -1738,7 +1749,7 @@ final class AppModel {
     /// `app.backgrounded` is why exports showed a background immediately before
     /// a resume. The scene timestamp travels with the record because the log's
     /// own write time can trail the transition.
-    private func recordSceneTransition(to transition: SceneTransition, flush: Bool = false) {
+    private func recordSceneTransition(to transition: AppScenePhase, flush: Bool = false) {
         guard transition != recordedSceneTransition else { return }
         let previous = recordedSceneTransition
         recordedSceneTransition = transition

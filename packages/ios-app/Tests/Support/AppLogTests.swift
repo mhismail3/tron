@@ -89,4 +89,42 @@ struct AppLogTests {
         await log.flush()
         #expect(!FileManager.default.fileExists(atPath: url.path))
     }
+
+    @Test("an operation interval still open at background is signed once, as backgrounded")
+    func backgroundedIntervalIsSignedOnce() async throws {
+        let (log, _, directory) = try temporaryLog()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let signposts = AppLogSignposts(base: RecordingPerformanceSignposts(), log: log)
+
+        let retired = signposts.begin(.sessionOpen)
+        try await Task.sleep(for: .milliseconds(400))
+        signposts.endOpenIntervalsAtBackground()
+        let backgrounded = await signedOperationRecords(in: log, count: 1)
+        #expect(backgrounded.map(\.event) == ["operation.sessionOpen"])
+        #expect(backgrounded.first?.outcome == "backgrounded")
+        #expect(backgrounded.first?.level == "warning")
+        #expect((backgrounded.first?.durationMs ?? 0) >= 250)
+
+        // The owner ending a retired interval writes no second record.
+        signposts.end(retired, result: .failure, metrics: .none)
+        // An interval opened after the background is not one the scene retired;
+        // its own end still writes its single record past the threshold.
+        let later = signposts.begin(.cacheLoad)
+        try await Task.sleep(for: .milliseconds(400))
+        signposts.end(later, result: .failure, metrics: .none)
+        let records = await signedOperationRecords(in: log, count: 2)
+        #expect(records.map(\.event) == ["operation.sessionOpen", "operation.cacheLoad"])
+        #expect(records.map(\.outcome) == ["backgrounded", "failure"])
+        #expect(records[1].level == "error")
+    }
+
+    private func signedOperationRecords(in log: AppLog, count: Int) async -> [AppLogRecord] {
+        for _ in 0..<600 {
+            let values = await log.snapshot().filter { $0.event.hasPrefix("operation.") }
+            if values.count >= count { return values }
+            try? await Task.sleep(for: .milliseconds(5))
+        }
+        Issue.record("timed out waiting for \(count) operation record(s)")
+        return await log.snapshot().filter { $0.event.hasPrefix("operation.") }
+    }
 }
