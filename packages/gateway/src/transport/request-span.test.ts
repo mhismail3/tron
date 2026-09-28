@@ -3,7 +3,7 @@ import { bytes, count, currentRequestSpan, RequestSpan, runInRequestSpan, stage,
 
 /**
  * Isolated checks for the request span's own accounting. Failure modes written
- * before the code (plan O-3):
+ * before the code:
  *
  * 1. A wrapped stage never records: the slow stage is missing from `stages`
  *    and `unaccountedMs` stays as large as the stage.
@@ -159,19 +159,28 @@ describe("request span", () => {
   it("ignores records that arrive after the breakdown is published", async () => {
     const clock = pinnedClock();
     const span = new RequestSpan();
+    const held = gate();
+    // This continuation stays inside the span's async context and records after
+    // `breakdown` published it, so only the `finished` guard can drop it.
+    const late = runInRequestSpan(span, async () => {
+      await held.promise;
+      count("catalog.walk.files", 2);
+      bytes("frame.serialize", 4_096);
+      await stage("late.stage", () => { clock.advance(7); return Promise.resolve(); });
+    });
     await runInRequestSpan(span, () => span.stage("session.open.catalog", () => {
       clock.advance(5);
       return Promise.resolve();
     }));
     const published = span.breakdown(10)!;
+    held.release();
+    await late;
 
-    count("catalog.walk.files", 2);
-    bytes("frame.serialize", 4_096);
-    stage("late.stage", () => Promise.resolve());
-    await Promise.resolve();
-
-    expect(span.breakdown(100)!.stages).toBe(published.stages);
-    expect(published.stages).not.toContain("late.stage");
+    const republished = span.breakdown(100)!;
+    expect(republished.stages).toBe(published.stages);
+    expect(republished.stages).not.toContain("late.stage");
+    expect(republished.stages).not.toContain("frame.serialize");
+    expect(republished.stages).not.toContain("catalog.walk.files");
   });
 
   it("keeps independent request spans apart", async () => {

@@ -3038,7 +3038,7 @@ export class RuntimeSlot {
   /** Join live settlement and reconcile bounded canonical evidence before open. */
   async reconcileAttention(): Promise<void> {
     // Marker evidence and any pending settlement are disk work on the open path;
-    // the request span names them instead of leaving them unaccounted (O-3).
+    // the request span names them instead of leaving them unaccounted.
     return stage("attention.reconcile", () => this.reconcileAttentionBody());
   }
 

@@ -44,7 +44,7 @@ export interface LogRecord {
   code?: string;
   reason?: string;
   durationMs?: number;
-  /** The request span's compact stage breakdown (O-3), one bounded string. */
+  /** The request span's compact stage breakdown, one bounded string. */
   stages?: string;
   /** The part of `durationMs` no named stage accounted for. */
   unaccountedMs?: number;
@@ -92,7 +92,7 @@ const MAX_MESSAGE_BYTES = 2_000;
 /** A stage breakdown is read as one line beside the record it explains; past
  * this it stops naming stages rather than crowding the other fields. Wide
  * enough for a cold open's ~260-byte breakdown with room for a nested catalog
- * walk (O-3). */
+ * walk. */
 const MAX_STAGES_BYTES = 1_024;
 const MAX_ERROR_MESSAGE_BYTES = 1_000;
 const MAX_STACK_BYTES = 4_000;

@@ -99,9 +99,9 @@ export interface CatalogMetadataIndexSummary {
   messageCount: number;
 }
 
-/** A handled index-write failure. The owner falls back to a canonical scan, so
- * nothing else records it; the index write is fire-and-forget outside any
- * request span, which is why its owner reports it (O-3 review). */
+/** A handled index-write failure. The affected rows are left to be rebuilt from
+ * canonical files, so nothing else records it; the index write is
+ * fire-and-forget outside any request span, which is why its owner reports it. */
 export type CatalogMetadataIndexFailureStage = "save" | "rebuild" | "append";
 export type CatalogMetadataIndexFailure =
   (stage: CatalogMetadataIndexFailureStage, durationMs: number) => void;

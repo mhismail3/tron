@@ -3,7 +3,7 @@ import { AsyncLocalStorage } from "node:async_hooks";
 /**
  * One request's stage accounting. `rpc.completed` publishes the compact form so
  * a slow or failed request explains its own wall time without a log record per
- * stage (plan O-3).
+ * stage.
  *
  * The span is ambient for the code it covers: `stage`, `wait`, `count` and
  * `bytes` record on the span the caller runs under, and are no-ops outside one.

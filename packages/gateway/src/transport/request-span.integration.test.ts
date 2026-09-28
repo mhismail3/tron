@@ -1,7 +1,7 @@
 import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { existsSync, readFileSync } from "node:fs";
 import { createServer } from "node:http";
-import { homedir, tmpdir } from "node:os";
+import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import WebSocket from "ws";
 import { ModelRuntime, SessionManager } from "@earendil-works/pi-coding-agent";
@@ -26,10 +26,12 @@ import { GatewayServer } from "./server.js";
  * line, which is where the earlier allowlist dropped `stages` and
  * `unaccountedMs`.
  *
- * The 95% "Done when" bar belongs to O-6a's qualification workload and is still
- * owed there; this case asserts the breakdown is present and names the open,
- * and reports every open's accounted share to the artifact at `REPORT_PATH`.
- * Regenerate with `npx vitest run src/transport/request-span.integration.test.ts`.
+ * Every cold open's accounted share and exact breakdown is retained at
+ * `packages/gateway/test-results/request-span.integration.json`, gitignored and
+ * regenerated with `npx vitest run src/transport/request-span.integration.test.ts`.
+ * The 95% bar is asserted on the median of the three repeats, the honest
+ * measure on a shared host; the slowest open under the qualification workload
+ * is measured by that workload, not here.
  */
 
 const cleanups: Array<() => Promise<void>> = [];
@@ -43,10 +45,9 @@ const LARGE_SESSION_TEXT_BYTES = 128 * 1_024;
  * report. A loaded host can lose one open to an event-loop or GC pause between
  * two measured intervals, which is why the report keeps all of them. */
 const COLD_OPEN_SESSIONS = 3;
-/** Stable artifact path, so the measurement can be inspected and regenerated
- * with the same command; `TRON_O3_SPAN_REPORT` moves it. */
-const REPORT_PATH = process.env.TRON_O3_SPAN_REPORT
-  ?? join(homedir(), ".tron", "workspace", "files", "hardening", "o-3", "request-span-report.json");
+/** Retained, regenerable evidence for one run of this file, like the other
+ * integration cases: a stable gitignored path an operator can inspect. */
+const REPORT_PATH = join(process.cwd(), "test-results", "request-span.integration.json");
 
 interface SocketFrame {
   type?: string;
@@ -184,7 +185,8 @@ describe("cold session.open request span", () => {
     const reports: Array<Record<string, unknown>> = [];
     for (const [index, manager] of managers.entries()) {
       const requestId = `cold-open-${index}`;
-      const measuredBefore = completedOpens(logger).length;
+      const completionOf = (): LogRecord | undefined =>
+        completedOpens(logger).find((record) => record.requestID === requestId);
       socket.send(JSON.stringify({
         type: "request",
         id: requestId,
@@ -194,9 +196,11 @@ describe("cold session.open request span", () => {
       await waitUntil(() => frames.some((frame) => frame.id === requestId));
       const response = frames.find((frame) => frame.id === requestId);
       expect(response?.ok, JSON.stringify(response)).toBe(true);
-      await waitUntil(() => completedOpens(logger).length > measuredBefore);
+      // By request ID, not by position: another RPC's record must not be read
+      // as this open's breakdown.
+      await waitUntil(() => completionOf() !== undefined);
 
-      const completion = completedOpens(logger).at(-1)!;
+      const completion = completionOf()!;
       const stages = completion.stages;
       const unaccountedMs = completion.unaccountedMs;
       const durationMs = completion.durationMs!;
@@ -227,7 +231,6 @@ describe("cold session.open request span", () => {
     // A failed open is persisted, so it proves the writer keeps the breakdown in
     // the JSONL file itself; the successful opens above are debug on this host.
     const failedRequestId = "missing-open";
-    const persistedBefore = persistedRecords(logPath).length;
     socket.send(JSON.stringify({
       type: "request",
       id: failedRequestId,
@@ -236,10 +239,12 @@ describe("cold session.open request span", () => {
     }));
     await waitUntil(() => frames.some((frame) => frame.id === failedRequestId));
     expect(frames.find((frame) => frame.id === failedRequestId)?.ok).toBe(false);
-    await waitUntil(() => persistedRecords(logPath).length > persistedBefore);
+    await waitUntil(() => persistedRecords(logPath).some(
+      (record) => record.requestID === failedRequestId && record.event === "rpc.completed",
+    ));
     const persisted = persistedRecords(logPath)
-      .filter((record) => record.event === "rpc.completed" && record.outcome === "failure")
-      .at(-1)!;
+      .find((record) => record.requestID === failedRequestId && record.event === "rpc.completed")!;
+    expect(persisted.outcome).toBe("failure");
     expect(persisted.stages, "the persisted line must carry the breakdown").toBeDefined();
     expect(persisted.stages as string).not.toBe("");
     expect(persisted.unaccountedMs).toBeDefined();
@@ -266,10 +271,10 @@ describe("cold session.open request span", () => {
     };
     await mkdir(dirname(REPORT_PATH), { recursive: true });
     await writeFile(REPORT_PATH, `${JSON.stringify(report, null, 2)}\n`);
-    console.log(`TRON_O3_SPAN_REPORT ${REPORT_PATH} ${JSON.stringify(report)}`);
+    console.log(`request span report ${REPORT_PATH} ${JSON.stringify(report)}`);
     // A single event-loop or GC pause can land between two measured intervals on
-    // a loaded host, so the conservative bar is the median of the repeats. The
-    // plan's authority for the slowest open is O-6a's qualification workload.
+    // a loaded host, so the conservative bar is the median of the repeats; the
+    // slowest open is measured by the qualification workload.
     expect(report.medianAccountedShare as number).toBeGreaterThanOrEqual(0.95);
   }, 300_000);
 });

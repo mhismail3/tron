@@ -1460,7 +1460,7 @@ export class GatewayServer {
     const diagnosticID = diagnosticRequestID(requestId);
     const rpcStartedAt = performance.now();
     // One span per admitted request. Its breakdown rides on the rpc.completed
-    // record below, so a slow request names the work that held it (O-3).
+    // record below, so a slow request names the work that held it.
     const requestSpan = new RequestSpan();
     const params = frame.params && typeof frame.params === "object" && !Array.isArray(frame.params)
       ? frame.params as Record<string, unknown>

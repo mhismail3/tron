@@ -1001,14 +1001,14 @@ export class GatewayService {
         const canonicalSessionId = slot.id;
         const syncToken = client.beginSynchronization(canonicalSessionId);
         // The request span measures acquire, the snapshot build and the response
-        // serialization; a slow open needs no record of its own (O-3).
+        // serialization; a slow open needs no record of its own.
         const snapshot = slot.snapshot();
         if (snapshot.sessionId !== canonicalSessionId) {
           throw new GatewayError("conflict", "Session identity changed while opening", true);
         }
         client.establishSynchronization(canonicalSessionId, snapshot);
         // Sanitizing the response is real request work over the whole snapshot;
-        // the span names it instead of leaving it in `unaccountedMs` (O-3).
+        // the span names it instead of leaving it in `unaccountedMs`.
         return stage("response.encode", () => safeJson({
           session: snapshot,
           syncToken,

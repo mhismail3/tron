@@ -382,7 +382,7 @@ describe("CatalogMetadataIndex", () => {
   });
 
   // The index write is fire-and-forget outside any request span, so these
-  // handled failures have no breakdown to ride on (O-3 review).
+  // handled failures have no breakdown to ride on.
   it("reports save, append and rebuild failures to its owner", async () => {
     const f = await fixture();
     const failures: Array<{ stage: string; durationMs: number }> = [];

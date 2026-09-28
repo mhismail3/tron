@@ -22,7 +22,8 @@ import type { AutomationRecord, AutomationRun } from "../automations/types.js";
 import type { NotificationService } from "../notifications/notification-service.js";
 import type { ExtensionRunActivity, ExtensionToolOrigin, SessionSummaryUpdate } from "../protocol/types.js";
 import { GatewayWorkRegistry, type GatewayWorkHandle } from "./gateway-work-registry.js";
-import { CatalogDiscovery, DEFAULT_CATALOG_DISCOVERY_LIMITS } from "./catalog-discovery.js";
+import { RequestSpan, runInRequestSpan, stage } from "../transport/request-span.js";
+import { CatalogDiscovery, DEFAULT_CATALOG_DISCOVERY_LIMITS, type CatalogSessionInfo } from "./catalog-discovery.js";
 import { CatalogMetadataIndex } from "./catalog-metadata-index.js";
 import { INVOCATION_RECEIPT_TYPE, makeInvocationReceipt } from "./invocation-receipts.js";
 import { EXTENSION_ACTIVITY_RECEIPT_TYPE, MAX_EXTENSION_HISTORY_BYTES, type ExtensionActivityReceipt } from "./extension-activity-history.js";
@@ -195,6 +196,50 @@ describe.sequential("RuntimeRegistry with the pinned agent runtime", () => {
       phaseObserver: (phase) => phases.push(phase),
     });
     expect(phases).toEqual(["catalog-warming", "attention-recovery"]);
+  });
+
+  it("charges a queued request for the registry lane wait and keeps its admitted work on its own span", async () => {
+    const fixture = await coldFixture("span-lane-contention");
+    let now = 0;
+    const clock = vi.spyOn(nodePerformance, "now").mockImplementation(() => now);
+    try {
+      const lane = (fixture.registry as unknown as {
+        mutex: { run<T>(operation: () => Promise<T> | T): Promise<T> };
+      }).mutex;
+      const holder = new RequestSpan();
+      const waiter = new RequestSpan();
+      let entered!: () => void;
+      const admitted = new Promise<void>((resolve) => { entered = resolve; });
+      let release!: () => void;
+      const held = new Promise<void>((resolve) => { release = resolve; });
+      const holding = runInRequestSpan(holder, () => lane.run(async () => {
+        entered();
+        await held;
+        await stage("holder.work", () => { now += 10; return Promise.resolve(); });
+      }));
+      await admitted;
+      // Queued behind the holder: its own span has to carry both the wait for
+      // the lane and the work the lane then admits within its async context.
+      const waiting = runInRequestSpan(waiter, () => lane.run(async () => {
+        await stage("waiter.work", () => { now += 5; return Promise.resolve(); });
+      }));
+      now += 40;
+      release();
+      await Promise.all([holding, waiting]);
+
+      // The wait covers the holder's 40 ms hold plus the 10 ms of work it did
+      // before releasing; the holder was admitted immediately, so 0 ms is
+      // dropped rather than named.
+      expect(holder.breakdown(50)!.stages).toBe("holder.work=10ms");
+      const queued = waiter.breakdown(55)!;
+      expect(queued.stages).toBe("registry.mutex=50ms;waiter.work=5ms");
+      expect(queued.unaccountedMs).toBe(0);
+    } finally {
+      clock.mockRestore();
+      await fixture.registry.dispose();
+      registries.splice(registries.indexOf(fixture.registry), 1);
+      await rm(fixture.root, { recursive: true, force: true });
+    }
   });
 
   it("owns one exact live session for a workspace Automation operation", async () => {

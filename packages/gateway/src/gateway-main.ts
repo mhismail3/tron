@@ -237,10 +237,10 @@ const sessions = new RuntimeRegistry({
     { event: "extension.artifact-rejected", source: "sessions" },
   ),
   // Both of these are handled background failures outside any request span, so
-  // they keep their own warning record (O-3 review).
+  // they keep their own warning record.
   catalogIndexFailure: (stage, durationMs) => logger.log(
     "warning",
-    `Catalog metadata index ${stage} failed; the catalog falls back to a full scan`,
+    `Catalog metadata index ${stage} failed; the affected rows are rebuilt from canonical files`,
     { event: "catalog-index.failure", source: "sessions", step: stage, durationMs },
   ),
   runtimeDisposeTimeout: (graceMs) => logger.log(

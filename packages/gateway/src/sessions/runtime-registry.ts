@@ -32,7 +32,7 @@ import {
 } from "./session-presentation-presence.js";
 import { AsyncMutex } from "../util/async-mutex.js";
 import { abortableRead } from "../util/abortable-read.js";
-import { count, currentRequestSpan, stage } from "../transport/request-span.js";
+import { count, currentRequestSpan, stage, wait } from "../transport/request-span.js";
 import type { TrustService } from "../admin/trust-service.js";
 import { BlobStore } from "./blob-store.js";
 import {
@@ -495,10 +495,10 @@ export class RuntimeRegistry {
       compactionDiagnostic?: RuntimeSlotDependencies["compactionDiagnostic"];
       catalogDiscoveryLimits?: Partial<typeof DEFAULT_CATALOG_DISCOVERY_LIMITS>;
       /** Handled catalog-index write failures. The index write is fire-and-forget
-       * outside any request span, so its owner records them (O-3 review). */
+       * outside any request span, so its owner records them. */
       catalogIndexFailure?: CatalogMetadataIndexFailure;
       /** A runtime whose extension shutdown overran its disposal grace and was
-       * forced. Outside any request span (O-3 review). */
+       * forced. Outside any request span. */
       runtimeDisposeTimeout?: (graceMs: number) => void;
       machineId?: string;
       notifications?: NotificationService;
@@ -1817,13 +1817,14 @@ export class RuntimeRegistry {
     const active = this.catalogEvidencePromise;
     if (active) {
       if (!refresh && this.catalogEvidenceKey === generationKey) {
-        // Waiting for a walk another caller started is this request's cost too;
-        // the files are counted once, where the walk is created.
-        return await stage("catalog.walk", () => active);
+        // Joining a walk another caller started is this request's wait, not a
+        // walk of its own: `catalog.walk` counts walks performed, and the files
+        // are counted once, where the walk is created.
+        return await wait("catalog.walk-join", () => active);
       }
       // A post-read check must begin after its caller's read. Concurrent post-read
       // callers share the successor walk, rather than each starting another one.
-      try { await stage("catalog.walk", () => active); } catch { /* a fresh cut owns its own outcome */ }
+      try { await wait("catalog.walk-join", () => active); } catch { /* a fresh cut owns its own outcome */ }
       return this.sharedCatalogStructureEvidence();
     }
     const operation = stage("catalog.walk", async () => {
