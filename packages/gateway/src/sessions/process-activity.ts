@@ -13,7 +13,10 @@ import type {
   SessionProcessState,
 } from "../protocol/types.js";
 import { boundedHistoryPage, extensionActivityReceipts, extensionReceiptActivity } from "./extension-activity-history.js";
-import { PROCESS_ACTIVITY_RECENT_MS } from "./process-activity-recency.js";
+import {
+  PROCESS_ACTIVITY_RECENT_MS,
+  isActiveProcessLifecycle,
+} from "./process-activity-recency.js";
 
 export const PROCESS_ACTIVITY_CAPABILITY = "process-activity.v1";
 export const PROCESS_ACTIVITY_HISTORY_CAPABILITY = "process-history.v1";
@@ -130,8 +133,10 @@ export function subagentAbortRoute(
   currentOperationId: string | undefined,
   trustedControllerAvailable: boolean,
 ): SubagentAbortRoute | undefined {
+  // A settled paused row is resumable history with no live process behind it,
+  // so it never offers an abort route even though its state stays `paused`.
   if (!process || !binding || process.kind !== "subagent"
-    || !["queued", "running", "paused"].includes(process.lifecycle.state)
+    || !isActiveProcessLifecycle(process.lifecycle)
     || process.runId !== expectedRunId || binding.runId !== expectedRunId) return undefined;
   if (process.executionMode === "synchronous") {
     return currentOperationId
@@ -144,11 +149,18 @@ export function subagentAbortRoute(
   return undefined;
 }
 
+/** Options resolving one frame's settlement: the Gateway-observed instant of
+ * an exact paused run's process-terminal proof. */
+export interface SubagentProcessOptions {
+  pausedSettledAt?: string;
+}
+
 function childRows(
   sessionId: string,
   activity: ExtensionRunActivity,
   children: readonly ExtensionRunChild[],
   parentProcessId?: string,
+  pausedSettledAt?: string,
 ): SessionProcessActivity[] {
   const rows: SessionProcessActivity[] = [];
   const parentState = extensionState(activity.lifecycle?.state);
@@ -167,14 +179,21 @@ function childRows(
     const state = parentState === "unknown"
       ? "unknown"
       : parentIsTerminal && !terminalStates.has(reportedState) ? parentState : reportedState;
+    // A paused child of a settled paused run keeps `paused` but is presented as
+    // recent work settled at the Gateway-observed proof instant.
+    const settledAt = state === "paused" ? pausedSettledAt : undefined;
     const terminalAt = terminalStates.has(state)
       ? child.endedAt
         ?? (parentIsTerminal ? activity.lifecycle?.terminalAt ?? activity.completedAt : activity.lifecycle?.observedAt ?? activity.updatedAt)
-      : undefined;
+      : settledAt;
     const output = processOutput(child.output);
     // Child timing is producer-authored. Never substitute the aggregate
-    // parent's duration: parallel children have independent lifetimes.
-    const durationMs = boundedDurationMs(child.durationMs, child.startedAt, child.endedAt ?? terminalAt);
+    // parent's duration: parallel children have independent lifetimes. A
+    // settled paused child freezes at that same observation instant instead of
+    // continuing to sample its producer's still-counting elapsed time.
+    const durationMs = settledAt === undefined
+      ? boundedDurationMs(child.durationMs, child.startedAt, child.endedAt ?? terminalAt)
+      : boundedDurationMs(undefined, child.startedAt ?? activity.startedAt, terminalAt);
     const executable = exactChildId !== undefined && (
       !(child.children?.length)
       || child.childSessionRef !== undefined
@@ -212,6 +231,7 @@ function childRows(
       activity,
       child.children,
       executable && processId ? processId : parentProcessId,
+      pausedSettledAt,
     ));
   }
   return rows;
@@ -220,7 +240,9 @@ function childRows(
 /** One subagent lifecycle projection for both the delegated child rows and
  * the aggregated extension process. A terminal row always carries the
  * Gateway-authored five-minute recency deadline the process recency owner
- * schedules from, and never borrows a producer's terminal timestamp. */
+ * schedules from, and never borrows a producer's terminal timestamp. The same
+ * holds for a settled paused row: its proof instant is the Gateway's, not the
+ * producer's. */
 function subagentRowLifecycle(
   activity: ExtensionRunActivity,
   state: SessionProcessState,
@@ -245,6 +267,7 @@ function aggregateSubagentProcess(
   sessionId: string,
   activity: ExtensionRunActivity,
   mode: SessionProcessActivity["executionMode"],
+  pausedSettledAt?: string,
 ): SessionProcessActivity | undefined {
   if (!activity.runId || activity.mode?.toLowerCase() === "workflow") return undefined;
   const hasExecutionEvidence = activity.children.length > 0
@@ -257,9 +280,14 @@ function aggregateSubagentProcess(
   if (mode === "asynchronous" && !hasExecutionEvidence) return undefined;
   const processId = subagentProcessId(sessionId, activity.toolCallId, activity.runId);
   const state = extensionState(activity.lifecycle?.state ?? (activity.status === "running" ? "running" : activity.status === "failed" ? "failed" : "completed"));
-  const terminalAt = terminalStates.has(state) ? activity.lifecycle?.terminalAt ?? activity.completedAt : undefined;
+  const settledAt = state === "paused" ? pausedSettledAt : undefined;
+  const terminalAt = terminalStates.has(state)
+    ? activity.lifecycle?.terminalAt ?? activity.completedAt
+    : settledAt;
   const output = processOutput(activity.output);
-  const durationMs = boundedDurationMs(activity.durationMs, activity.startedAt, terminalAt);
+  const durationMs = settledAt === undefined
+    ? boundedDurationMs(activity.durationMs, activity.startedAt, terminalAt)
+    : boundedDurationMs(undefined, activity.startedAt, terminalAt);
   return {
     version: 1,
     processId,
@@ -282,14 +310,19 @@ function aggregateSubagentProcess(
   };
 }
 
-export function subagentProcessesFromActivity(sessionId: string, activity: ExtensionRunActivity): SessionProcessActivity[] {
+export function subagentProcessesFromActivity(
+  sessionId: string,
+  activity: ExtensionRunActivity,
+  options: SubagentProcessOptions = {},
+): SessionProcessActivity[] {
   const mode = subagentMode(activity.mode);
+  const pausedSettledAt = activity.lifecycle?.state === "paused" ? options.pausedSettledAt : undefined;
   // Extension ownership and a run ID alone do not prove a delegated process:
   // pi-subagents supervisor/control tools emit receipts too. Unknown execution
   // modes fail closed so Gateway never authors an invalid subagent DTO.
   if (mode === "unknown") return [];
   if (activity.children.length > 0) {
-    let rows = childRows(sessionId, activity, activity.children);
+    let rows = childRows(sessionId, activity, activity.children, undefined, pausedSettledAt);
     const state = extensionState(activity.lifecycle?.state ?? (activity.status === "running" ? "running" : activity.status === "failed" ? "failed" : "completed"));
     const hasActiveChild = rows.some((row) => row.lifecycle.state === "queued"
       || row.lifecycle.state === "running" || row.lifecycle.state === "paused");
@@ -301,7 +334,7 @@ export function subagentProcessesFromActivity(sessionId: string, activity: Exten
     const needsAggregate = state !== "unknown"
       && (terminalStates.has(state) ? rows.length === 0 : !hasActiveChild);
     if (needsAggregate) {
-      const aggregate = aggregateSubagentProcess(sessionId, activity, mode);
+      const aggregate = aggregateSubagentProcess(sessionId, activity, mode, pausedSettledAt);
       if (aggregate) {
         rows = rows.map((row) => row.parentProcessId ? row : { ...row, parentProcessId: aggregate.processId });
         return [aggregate, ...rows];
@@ -312,7 +345,7 @@ export function subagentProcessesFromActivity(sessionId: string, activity: Exten
   // A single run still has exact run identity and remains a valid row. A bare
   // workflow launcher acknowledgement stays hidden until its artifact reports
   // child execution evidence.
-  const aggregate = aggregateSubagentProcess(sessionId, activity, mode);
+  const aggregate = aggregateSubagentProcess(sessionId, activity, mode, pausedSettledAt);
   return aggregate ? [aggregate] : [];
 }
 

@@ -98,14 +98,14 @@ import {
 import type { ForkBoundaryAnchor } from "./fork-boundary.js";
 import { RunMarkerCompletionConflictError, type RunMarkerEvidence, type RunMarkerStore } from "./run-markers.js";
 import { attributeExtensions, attributedCommandOwner, attributedToolOwner, currentExtensionOwner, currentInvocationContext, trustedExtensionOriginKind, withInvocationContext } from "../extensions/owner-attribution.js";
-import { EXTENSION_LIFECYCLE_ARTIFACT_VERSION, MAX_EXTENSION_ARTIFACT_BYTES, MAX_EXTENSION_LIFECYCLE_HEADER_BYTES, admitExtensionRunActivity, boundExtensionActivities, extensionActivityId, extensionActivityStatusFromTool, extensionLifecycleState, extensionRunAsyncDir, extensionRunChildProducerId, hasExtensionLifecycleProjectionProperty, hasForegroundSubagentRunActivity, hasObservedPausedProcessTerminal, hasStructuredExtensionRunActivity, recoveredReplacementClaim, inspectExtensionLifecycleProjection, inspectExtensionLifecycleArtifact, lifecycleProjectionArtifact, normalizeExtensionArtifact, parseExtensionLifecycleProjectionHeader, projectExtensionRunActivity, terminalLifecycleStates, usesForegroundSubagentChildIdentity, type ExtensionArtifactRejectionReason, type ExtensionRunChildIdentityStrategy } from "./extension-run-projection.js";
+import { EXTENSION_LIFECYCLE_ARTIFACT_VERSION, MAX_EXTENSION_ARTIFACT_BYTES, MAX_EXTENSION_LIFECYCLE_HEADER_BYTES, admitExtensionRunActivity, boundExtensionActivities, extensionActivityId, extensionActivityStatusFromTool, extensionLifecycleState, extensionRunAsyncDir, extensionRunChildProducerId, hasExtensionLifecycleProjectionProperty, hasForegroundSubagentRunActivity, hasStructuredExtensionRunActivity, observedPausedProcessTerminalAt, recoveredReplacementClaim, inspectExtensionLifecycleProjection, inspectExtensionLifecycleArtifact, lifecycleProjectionArtifact, normalizeExtensionArtifact, parseExtensionLifecycleProjectionHeader, projectExtensionRunActivity, terminalLifecycleStates, usesForegroundSubagentChildIdentity, type ExtensionArtifactRejectionReason, type ExtensionRunChildIdentityStrategy } from "./extension-run-projection.js";
 import { EXTENSION_ACTIVITY_RECEIPT_TYPE, extensionActivityHistoryRevision, extensionActivityReceipts, extensionReceiptActivity, listExtensionActivityHistory, makeExtensionActivityReceipt } from "./extension-activity-history.js";
 import { CONTEXT_DELIVERY_RECEIPT_TYPE, makeContextDeliveryReceipt } from "./context-delivery-receipts.js";
 import { INVOCATION_RECEIPT_TYPE, invocationProjection, invocationReceipts, makeInvocationReceipt, receiptJSON, type InvocationProjection } from "./invocation-receipts.js";
 import { EXTENSION_NOTIFICATION_RECEIPT_TYPE, extensionNotificationJSON, makeExtensionNotificationReceipt } from "./extension-notification-receipts.js";
 import { admitPromptText, admitResourceInvocation, canonicalResourceName, parsePiLiteralCommand, userFacingPromptPreview } from "./resource-invocation.js";
 import { ExtensionActivityRecency, type ActivityExpiryFrame, type ActivityVisibility } from "./extension-activity-recency.js";
-import { ProcessActivityRecency, type ProcessActivityExpiryFrame } from "./process-activity-recency.js";
+import { ProcessActivityRecency, isActiveProcessLifecycle, type ProcessActivityExpiryFrame } from "./process-activity-recency.js";
 import { redactProcessText } from "./process-activity.js";
 import {
   boundProcessActivities,
@@ -596,7 +596,9 @@ export class RuntimeSlot {
     toolCallId: string;
     asyncDir?: string;
     terminal: boolean;
-    pausedProcessQuiescent?: boolean;
+    /** Gateway-observed instant of this run's paused process-terminal proof;
+     * absent while the run owns live processes or is not paused. */
+    pausedProcessQuiescentAt?: string;
   }>();
   private readonly extensionActivityWatchers = new Map<string, {
     watcher: FSWatcher;
@@ -1050,12 +1052,7 @@ export class RuntimeSlot {
       });
     }
     for (const activity of this.extensionActivities.values()) {
-      const state = activity.lifecycle?.state;
-      const ownership = activity.runId ? this.extensionRunOwnership.get(activity.runId) : undefined;
-      const pausedProcessIsQuiescent = state === "paused"
-        && ownership?.toolCallId === activity.toolCallId
-        && ownership.pausedProcessQuiescent === true;
-      if (state === "queued" || state === "running" || state === "paused" && !pausedProcessIsQuiescent) {
+      if (this.extensionActivityOwnsLiveWork(activity)) {
         facts.push({
           category: "detached-extension-run",
           key: activity.activityId ?? activity.toolCallId,
@@ -1216,11 +1213,30 @@ export class RuntimeSlot {
 
   /** User-visible detached activity only. Durable receipt persistence and other
    * administrative work can keep operational drain busy but must not leave a
-   * dashboard row stuck in the running phase. */
+   * dashboard row stuck in the running phase. A settled paused run owns no live
+   * process, so it stops being live work and a drain blocker. */
   private hasDetachedDashboardWork(): boolean {
-    return [...this.extensionActivities.values()].some((activity) => activity.lifecycle?.state === "queued"
-      || activity.lifecycle?.state === "running"
-      || activity.lifecycle?.state === "paused");
+    for (const activity of this.extensionActivities.values()) {
+      if (this.extensionActivityOwnsLiveWork(activity)) return true;
+    }
+    return false;
+  }
+
+  /** One liveness rule for detached extension work, shared by dashboard
+   * accounting and administrative drain. */
+  private extensionActivityOwnsLiveWork(activity: ExtensionRunActivity): boolean {
+    const state = activity.lifecycle?.state;
+    if (state === "queued" || state === "running") return true;
+    if (state !== "paused") return false;
+    return this.pausedProcessSettlementAt(activity) === undefined;
+  }
+
+  /** The Gateway-admitted settlement instant of one paused activity, recorded
+   * when its artifact frame proved every process had exited. */
+  private pausedProcessSettlementAt(activity: ExtensionRunActivity): string | undefined {
+    if (activity.lifecycle?.state !== "paused" || !activity.runId) return undefined;
+    const ownership = this.extensionRunOwnership.get(activity.runId);
+    return ownership?.toolCallId === activity.toolCallId ? ownership.pausedProcessQuiescentAt : undefined;
   }
 
   /** AgentSession can start an extension-triggered continuation while an older
@@ -2039,7 +2055,7 @@ export class RuntimeSlot {
       this.processActivities.set(candidate.processId, admitted.activity);
       const operationId = this.operation?.id;
       if (admitted.activity.executionMode === "synchronous"
-        && ["queued", "running", "paused"].includes(admitted.activity.lifecycle.state)
+        && isActiveProcessLifecycle(admitted.activity.lifecycle)
         && this.toolExecutions.get(toolCallId)?.status === "running"
         && operationId) {
         this.processOperationIDs.set(candidate.processId, operationId);
@@ -2094,7 +2110,12 @@ export class RuntimeSlot {
   }
 
   private syncSubagentProcesses(activity: ExtensionRunActivity): void {
-    const candidates = subagentProcessesFromActivity(this.id, activity);
+    const pausedSettledAt = this.pausedProcessSettlementAt(activity);
+    const candidates = subagentProcessesFromActivity(
+      this.id,
+      activity,
+      pausedSettledAt === undefined ? {} : { pausedSettledAt },
+    );
     const bindings = new Map(candidates.flatMap(process => {
       const binding = this.childSessionBindingFromActivity(process.processId, activity);
       return binding ? [[process.processId, binding] as const] : [];
@@ -4459,7 +4480,8 @@ export class RuntimeSlot {
       const facts = canonicalFacts ?? this.canonicalExtensionRunFacts();
       const recoveryClaim = recoveredReplacementClaim(raw);
       const sourceFact = facts.get(runId);
-      const processTerminal = hasObservedPausedProcessTerminal(raw, runId);
+      const pausedProcessSettledAt = observedPausedProcessTerminalAt(raw, runId);
+      const processTerminal = pausedProcessSettledAt !== undefined;
       const rawLastUpdate = raw.lastUpdate;
       const rawEndedAt = raw.endedAt;
       // Only the exact provider recovery receipt plus the original paused
@@ -4477,7 +4499,6 @@ export class RuntimeSlot {
         && rawEndedAt <= recoveryClaim.recoveredAt;
       const effectiveState = superseded ? "completed" : state;
       const effectiveCompletedAt = superseded ? completedAt ?? updatedAt : completedAt;
-      const pausedProcessIsQuiescent = hasObservedPausedProcessTerminal(raw, runId);
       // A terminal lifecycle event is authoritative; a late running artifact
       // enriches neither status nor ownership and must not resurrect the pill.
       if (ownership?.terminal && state === "running") return;
@@ -4523,11 +4544,14 @@ export class RuntimeSlot {
         : this.claimExtensionReceiptOwnership(activityKey);
       if (activity.status !== "running" && !terminalReceiptOwner) return;
       if (terminalReceiptOwner) claimedReceipt = { activityId: activityKey, owner: terminalReceiptOwner };
+      // Ownership facts are written before this frame's projection publishes:
+      // settled paused presentation, dashboard activity, and drain accounting
+      // all read them from the same frame.
       const ownershipAccepted = this.bindExtensionRunOwnership(runId, {
         toolCallId,
         asyncDir: realAsyncDir,
         terminal: activity.status !== "running" || Boolean(ownership?.terminal),
-        pausedProcessQuiescent: pausedProcessIsQuiescent,
+        ...(pausedProcessSettledAt ? { pausedProcessQuiescentAt: pausedProcessSettledAt } : {}),
       });
       if (!ownershipAccepted) {
         this.releaseExtensionReceiptOwnership(activityKey, terminalReceiptOwner);
@@ -4590,7 +4614,7 @@ export class RuntimeSlot {
 
   private bindExtensionRunOwnership(
     runId: string,
-    binding: { toolCallId: string; asyncDir?: string; terminal: boolean; pausedProcessQuiescent?: boolean },
+    binding: { toolCallId: string; asyncDir?: string; terminal: boolean; pausedProcessQuiescentAt?: string },
   ): boolean {
     const existing = this.extensionRunOwnership.get(runId);
     if (existing && existing.toolCallId !== binding.toolCallId) {
@@ -4602,8 +4626,11 @@ export class RuntimeSlot {
       toolCallId: binding.toolCallId,
       ...(asyncDir ? { asyncDir } : {}),
       terminal: Boolean(existing?.terminal || binding.terminal),
-      pausedProcessQuiescent: binding.pausedProcessQuiescent
-        ?? (existing?.toolCallId === binding.toolCallId && existing.pausedProcessQuiescent === true),
+      // Each admitted frame states the proof it observed: the bound instant is
+      // current, never a latch, so resumed live work clears it again.
+      ...(binding.pausedProcessQuiescentAt
+        ? { pausedProcessQuiescentAt: binding.pausedProcessQuiescentAt }
+        : {}),
     });
     return true;
   }
@@ -4800,7 +4827,8 @@ export class RuntimeSlot {
       const facts = this.canonicalExtensionRunFacts();
       const recoveryClaim = recoveredReplacementClaim(raw);
       const sourceFact = facts.get(runId);
-      const processTerminal = hasObservedPausedProcessTerminal(raw, runId);
+      const pausedProcessSettledAt = observedPausedProcessTerminalAt(raw, runId);
+      const processTerminal = pausedProcessSettledAt !== undefined;
       const rawLastUpdate = raw.lastUpdate;
       const rawEndedAt = raw.endedAt;
       const superseded = extensionLifecycleState(raw.state ?? raw.status) === "paused"
@@ -4814,7 +4842,6 @@ export class RuntimeSlot {
         && rawEndedAt <= recoveryClaim.recoveredAt;
       const effectiveArtifactState = superseded ? "completed" : artifactState;
       const effectiveCompletedAt = superseded ? completedAt ?? updatedAt : completedAt;
-      const pausedProcessIsQuiescent = hasObservedPausedProcessTerminal(raw, runId);
       const terminalStates = ["completed", "failed", "stopped", "rejected"];
       if (ownership.terminal && artifactState === "running" && !superseded) return;
       if (terminalStates.includes(previous.lifecycle?.state ?? "") && artifactState !== "running") {
@@ -4864,18 +4891,21 @@ export class RuntimeSlot {
         if (!claimedReceiptOwner) return;
         claimedReceiptActivityId = activityKey;
       }
+      // Ownership facts are written before this frame's projection publishes:
+      // settled paused presentation, dashboard activity, and drain accounting
+      // all read them from the same frame.
+      this.bindExtensionRunOwnership(runId, {
+        toolCallId,
+        asyncDir: realAsyncDir,
+        terminal: activity.status !== "running" || Boolean(ownership.terminal),
+        ...(pausedProcessSettledAt ? { pausedProcessQuiescentAt: pausedProcessSettledAt } : {}),
+      });
       this.extensionActivities.delete(toolCallId);
       this.extensionActivities.set(toolCallId, activity);
       this.upsertExtensionActivity(activity);
       const tool = this.toolExecutions.get(toolCallId);
       if (tool) this.toolExecutions.set(toolCallId, { ...tool, extensionActivity: activity });
       this.publishExtensionActivity(activity);
-      this.bindExtensionRunOwnership(runId, {
-        toolCallId,
-        asyncDir: realAsyncDir,
-        terminal: activity.status !== "running" || Boolean(ownership.terminal),
-        pausedProcessQuiescent: pausedProcessIsQuiescent,
-      });
       if (activity.status === "running") {
         const tracked = this.extensionActivityWatchers.get(toolCallId);
         if (this.activityNeedsChildSessionBinding(activity.children)
@@ -5123,8 +5153,6 @@ export class RuntimeSlot {
       toolCallId,
       ...(asyncDir === undefined ? {} : { asyncDir }),
       terminal: activity.status !== "running",
-      // Live tool frames do not carry the separately validated sidecar proof.
-      pausedProcessQuiescent: false,
     })) {
       this.releaseExtensionReceiptOwnership(activityKey, terminalReceiptOwner);
       return current;

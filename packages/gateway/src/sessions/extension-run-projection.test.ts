@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { ExtensionRunActivity } from "../protocol/types.js";
 import { subagentProcessesFromActivity } from "./process-activity.js";
-import { admitExtensionLifecycleArtifact, boundExtensionActivities, extensionActivityStatusFromTool, extensionLifecycleState, hasExtensionLifecycleProjectionProperty, hasForegroundSubagentRunActivity, hasObservedPausedProcessTerminal, hasStructuredExtensionRunActivity, recoveredReplacementClaim, inspectExtensionLifecycleArtifact, inspectExtensionLifecycleProjection, lifecycleProjectionArtifact, normalizeExtensionArtifact, parseExtensionLifecycleProjectionHeader, projectExtensionRunActivity, usesForegroundSubagentChildIdentity } from "./extension-run-projection.js";
+import { admitExtensionLifecycleArtifact, boundExtensionActivities, extensionActivityStatusFromTool, extensionLifecycleState, hasExtensionLifecycleProjectionProperty, hasForegroundSubagentRunActivity, hasStructuredExtensionRunActivity, observedPausedProcessTerminalAt, recoveredReplacementClaim, inspectExtensionLifecycleArtifact, inspectExtensionLifecycleProjection, lifecycleProjectionArtifact, normalizeExtensionArtifact, parseExtensionLifecycleProjectionHeader, projectExtensionRunActivity, usesForegroundSubagentChildIdentity } from "./extension-run-projection.js";
 
 const base = {
   id: "tool-call",
@@ -151,7 +151,7 @@ describe("projectExtensionRunActivity", () => {
     expect(recoveredReplacementClaim({ steering: { recent: [{ targets: [{ state: "recovered", replacementRunId: "../foreign", recoveredAt: 10 }] }] } })).toBeUndefined();
   });
 
-  it("admits only exact observed process-terminal proof for paused quiescence", () => {
+  it("admits only exact observed process-terminal proof for paused settlement", () => {
     const proof = {
       version: 1,
       state: "observed",
@@ -168,22 +168,31 @@ describe("projectExtensionRunActivity", () => {
       resumeDisposition: "resumable",
     };
     const paused = { state: "paused", processTerminal: proof };
-    expect(hasObservedPausedProcessTerminal(paused, "paused-run")).toBe(true);
-    expect(hasObservedPausedProcessTerminal({ ...paused, state: "running" }, "paused-run")).toBe(false);
-    expect(hasObservedPausedProcessTerminal(paused, "other-run")).toBe(false);
-    expect(hasObservedPausedProcessTerminal({ ...paused, processTerminal: { ...proof, state: "pending" } }, "paused-run")).toBe(false);
-    expect(hasObservedPausedProcessTerminal({
+    expect(observedPausedProcessTerminalAt(paused, "paused-run")).toBe("1970-01-01T00:00:00.300Z");
+    expect(observedPausedProcessTerminalAt({ ...paused, state: "running" }, "paused-run")).toBeUndefined();
+    expect(observedPausedProcessTerminalAt(paused, "other-run")).toBeUndefined();
+    expect(observedPausedProcessTerminalAt({ ...paused, processTerminal: { ...proof, state: "pending" } }, "paused-run")).toBeUndefined();
+    expect(observedPausedProcessTerminalAt({
       ...paused,
       processTerminal: { ...proof, instances: [{ ...proof.instances[0], processInstanceId: "other" }] },
-    }, "paused-run")).toBe(false);
-    expect(hasObservedPausedProcessTerminal({
+    }, "paused-run")).toBeUndefined();
+    expect(observedPausedProcessTerminalAt({
       ...paused,
       processTerminal: { ...proof, instances: [...proof.instances, {
         kind: "pi-writer", processInstanceId: "writer", closeObservedAt: 298,
         exitCode: 0, signal: null, attempt: 0,
         processTree: { state: "unknown", reason: "verification-failed" },
       }] },
-    }, "paused-run")).toBe(false);
+    }, "paused-run")).toBeUndefined();
+    // One multi-process proof: runner plus a verified writer process tree.
+    expect(observedPausedProcessTerminalAt({
+      ...paused,
+      processTerminal: { ...proof, instances: [...proof.instances, {
+        kind: "pi-writer", processInstanceId: "writer", closeObservedAt: 298,
+        exitCode: 0, signal: null, attempt: 0,
+        processTree: { state: "observed", mechanism: "posix-process-group", processGroupId: 4_242, verifiedAt: 298 },
+      }] },
+    }, "paused-run")).toBe("1970-01-01T00:00:00.300Z");
   });
 
   it("admits only explicit delegated-run conventions for ambient activity", () => {

@@ -103,6 +103,54 @@ describe("ProcessActivityRecency", () => {
     expect(recency.currentAndRecent().activities).toEqual([]);
   });
 
+  it("settles a paused row only with its Gateway proof and ages it out like terminal work", () => {
+    const clock = new Clock();
+    const recency = new ProcessActivityRecency(clock);
+    const paused = activity("paused");
+    // A paused run that has not proven its processes exited stays live work.
+    const windingDown = recency.upsert(paused).activity;
+    expect(windingDown).toMatchObject({ visibility: "active" });
+    expect(windingDown.lifecycle.terminalAt).toBeUndefined();
+    expect(windingDown.lifecycle.recentUntil).toBeUndefined();
+    expect(clock.delay).toBeUndefined();
+
+    const proofAt = new Date(clock.wall).toISOString();
+    const settled = recency.upsert({
+      ...paused,
+      lifecycle: {
+        ...paused.lifecycle,
+        sequence: 2,
+        terminalAt: proofAt,
+        recentUntil: new Date(clock.wall + PROCESS_ACTIVITY_RECENT_MS).toISOString(),
+      },
+      visibility: "recent",
+    });
+    expect(settled.accepted).toBe(true);
+    expect(settled.activity).toMatchObject({
+      visibility: "recent",
+      lifecycle: {
+        state: "paused",
+        terminalAt: proofAt,
+        recentUntil: "2026-01-01T00:05:00.000Z",
+      },
+    });
+    expect(clock.delay).toBe(PROCESS_ACTIVITY_RECENT_MS);
+
+    clock.advance(PROCESS_ACTIVITY_RECENT_MS - 1);
+    expect(recency.currentAndRecent().activities).toHaveLength(1);
+    clock.advance(1);
+    expect(recency.currentAndRecent().activities).toHaveLength(0);
+
+    // A late artifact re-reporting the same settled pause cannot resurrect it.
+    const late = recency.upsert({
+      ...paused,
+      lifecycle: { ...paused.lifecycle, sequence: 9, terminalAt: proofAt, recentUntil: new Date(clock.wall).toISOString() },
+      visibility: "recent",
+    });
+    expect(late.activity.visibility).toBe("historical");
+    expect(recency.currentAndRecent().activities).toEqual([]);
+  });
+
   it("publishes one expiry callback without deleting canonical history", () => {
     const clock = new Clock();
     const recency = new ProcessActivityRecency(clock);
