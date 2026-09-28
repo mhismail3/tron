@@ -228,28 +228,6 @@ enum ComposerAttachmentPolicy {
     }
 }
 
-struct ComposerResourceInvocation: Codable, Equatable, Hashable, Sendable {
-    enum Source: String, Codable, Sendable { case skill, prompt, `extension` }
-    static let maximumNameBytes = 512
-    static let maximumArgumentBytes = 5_000
-
-    let source: Source
-    let name: String
-    let arguments: String
-
-    var isExtensionCommand: Bool { source == .extension }
-    var isTransportValid: Bool {
-        !name.isEmpty
-            && name.utf8.count <= Self.maximumNameBytes
-            && !name.contains(where: \.isWhitespace)
-            && arguments.utf8.count <= Self.maximumArgumentBytes
-            && !arguments.unicodeScalars.contains(where: { scalar in
-                (scalar.value < 0x20 && ![0x09, 0x0a, 0x0d].contains(scalar.value))
-                    || scalar.value == 0x7f
-            })
-    }
-}
-
 struct ComposerSubmissionSnapshot: Equatable, Sendable {
     let target: SessionPresentationIdentity
     let textRevision: Int

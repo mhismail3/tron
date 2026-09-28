@@ -1,40 +1,5 @@
 import SwiftUI
 
-enum ChatScrollAnimation: Equatable, Sendable {
-    case disabled
-    case smooth(duration: Double)
-}
-
-struct ChatScrollCommand: Equatable, Sendable {
-    enum Origin: Equatable, Sendable {
-        case presentation
-        case catchUp
-        case layout
-        case prepend
-        case tailMaterialization
-        case physicalTailRepair
-        /// The bounded past-end safety net. It is admitted only from a
-        /// past-end condition that survives two display boundaries, never from
-        /// marker evidence or a held target lease.
-        case pastEndRepair
-    }
-
-    enum Destination: Equatable, Sendable {
-        case tail
-        /// Exact lazy row realization target. The coordinator retains the
-        /// lease until both this row and the physical tail publish evidence.
-        case materialize(String)
-        case openingTail(String)
-        case offsetY(CGFloat)
-    }
-
-    let token: Int
-    let presentation: Int
-    let origin: Origin
-    let destination: Destination
-    let animation: ChatScrollAnimation
-}
-
 struct ChatSemanticAnchor: Equatable, Sendable {
     let semanticID: String
     let renderedID: String

@@ -1319,3 +1319,18 @@ struct ChatTranscriptScrollView<Earlier: View, Opening: View>: View {
                 ? -ChatTranscriptLayoutConstants.tailAffordanceHeight : 0)
     }
 }
+
+/// The native viewport read belongs to the scroll view that observes SwiftUI
+/// geometry; the value and its bounds stay in Support/ChatViewport.swift.
+extension ChatTranscriptGeometry {
+    init(_ geometry: ScrollGeometry) {
+        self.init(
+            offsetY: geometry.contentOffset.y,
+            contentHeight: geometry.contentSize.height,
+            containerHeight: geometry.containerSize.height,
+            bottomInset: geometry.contentInsets.bottom,
+            visibleTopY: geometry.visibleRect.minY,
+            visibleBottomY: geometry.visibleRect.maxY
+        )
+    }
+}

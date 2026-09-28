@@ -164,36 +164,6 @@ struct DashboardActivityClock: TimelineSchedule {
     }
 }
 
-enum DashboardServerConnectionState: Hashable, Sendable {
-    case connecting
-    case reconnecting
-    case noPath(String?)
-    case restarting
-    case connected
-    case offline
-    case stale
-    case blocked
-    case identityMismatch
-    case needsVerification
-    case disabled
-
-    var label: String {
-        switch self {
-        case .connecting: "Connecting"
-        case .reconnecting: "Reconnecting"
-        case .noPath(let interface): GatewayNoPathPresentation(interface: interface).label
-        case .restarting: "Restarting"
-        case .connected: "Connected"
-        case .offline: "Offline"
-        case .stale: "Cached"
-        case .blocked: "Blocked (same Mac)"
-        case .identityMismatch: "Identity changed"
-        case .needsVerification: "Select to identify"
-        case .disabled: "Disabled"
-        }
-    }
-}
-
 enum DashboardProjectionRetentionPolicy {
     /// Background connection retirement is not deletion. Keep an existing
     /// bounded dashboard bucket while a profile is reconnecting, blocked, or

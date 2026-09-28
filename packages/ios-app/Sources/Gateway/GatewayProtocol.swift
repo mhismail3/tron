@@ -342,6 +342,18 @@ enum GatewayFramePolicy {
     }
 }
 
+enum GatewayTokenAdmissionPolicy {
+    static let maximumUTF8Bytes = 200
+
+    static func admit(_ token: String) -> Bool {
+        // Keep scalar membership explicit: Xcode 27's optimized app build
+        // miscompiles the bound CharacterSet.contains predicate and rejects
+        // valid tokens, preventing both sync acknowledgement and cleanup.
+        !token.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            && token.utf8.count <= maximumUTF8Bytes
+            && !token.unicodeScalars.contains(where: { CharacterSet.controlCharacters.contains($0) })
+    }
+}
 struct GatewayFrameDecoder: Sendable {
     let decode: @Sendable (Data) throws -> GatewayInboundFrame
 

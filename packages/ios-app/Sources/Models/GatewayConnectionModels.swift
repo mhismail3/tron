@@ -537,3 +537,51 @@ enum PairedDeviceCatalogPolicy {
         )
     }
 }
+
+enum DashboardServerConnectionState: Hashable, Sendable {
+    case connecting
+    case reconnecting
+    case noPath(String?)
+    case restarting
+    case connected
+    case offline
+    case stale
+    case blocked
+    case identityMismatch
+    case needsVerification
+    case disabled
+
+    var label: String {
+        switch self {
+        case .connecting: "Connecting"
+        case .reconnecting: "Reconnecting"
+        case .noPath(let interface): GatewayNoPathPresentation(interface: interface).label
+        case .restarting: "Restarting"
+        case .connected: "Connected"
+        case .offline: "Offline"
+        case .stale: "Cached"
+        case .blocked: "Blocked (same Mac)"
+        case .identityMismatch: "Identity changed"
+        case .needsVerification: "Select to identify"
+        case .disabled: "Disabled"
+        }
+    }
+}
+
+struct GatewayNoPathPresentation: Equatable, Sendable {
+    let interface: String?
+
+    var label: String {
+        guard let interface else { return "No path to this Mac" }
+        return "No path to this Mac over \(interface)"
+    }
+
+    static func interfaceLabel(from interfaces: String?) -> String? {
+        guard let interfaces else { return nil }
+        let names = interfaces.split(separator: ",").map(String.init)
+        if names.contains("wifi") { return "Wi-Fi" }
+        if names.contains("cellular") { return "Cellular" }
+        if names.contains("wiredEthernet") { return "Ethernet" }
+        return names.contains("other") ? "Network" : nil
+    }
+}

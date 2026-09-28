@@ -76,3 +76,23 @@ struct SessionSourceControlSelection: Codable, Equatable, Sendable {
         return !trimmed.isEmpty && trimmed.utf8.count <= 255 && !trimmed.contains(where: { $0.isWhitespace })
     }
 }
+
+struct GitInspection: Equatable, Sendable {
+    let isRepository: Bool
+    let branch: String?
+    let isDirty: Bool
+    var branches: [Branch] = []
+    var commits: [Commit] = []
+
+    struct Branch: Equatable, Sendable, Identifiable {
+        let name: String
+        let checkedOut: Bool
+        var id: String { name }
+    }
+
+    struct Commit: Equatable, Sendable, Identifiable {
+        let oid: String
+        let subject: String
+        var id: String { oid }
+    }
+}

@@ -2,12 +2,6 @@ import Observation
 import SwiftUI
 import UIKit
 
-enum ChatLayoutMutation: Hashable, Sendable {
-    case keyboard
-    case submission
-    case transcriptGrowth
-}
-
 struct ChatLayoutClock: Equatable, Sendable {
     enum Curve: Equatable, Sendable {
         case keyboard(Int)
