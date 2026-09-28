@@ -23,6 +23,36 @@ struct GatewayLanEndpoint: Codable, Hashable, Sendable {
     static func sanitized(_ advertised: [GatewayLanEndpoint]?) -> [GatewayLanEndpoint] {
         (advertised ?? []).compactMap { GatewayLanEndpoint(host: $0.host, port: $0.port) }
     }
+
+    /// The host as a URL authority. An IPv6 literal is bracketed here: it is
+    /// stored bare (a bracketed host is not a hostname), and `URLComponents`
+    /// refuses a bare literal outright, which would leave a Mac whose only
+    /// private address is a ULA with no LAN leg to dial.
+    var urlHost: String { host.contains(":") ? "[\(host)]" : host }
+
+    /// The lane serves TLS only (E-3a), so its socket is `wss` under the
+    /// certificate the profile pinned — not the plain `ws` an ordinary saved
+    /// endpoint uses.
+    var socketURL: URL? {
+        var components = URLComponents()
+        components.scheme = "wss"
+        components.host = urlHost
+        components.port = port
+        components.path = "/v1/socket"
+        return components.url
+    }
+
+    /// The base for this lane's authenticated HTTP routes while it wins the
+    /// race (E-3c).
+    func httpURL(path: String = "", queryItems: [URLQueryItem] = []) -> URL? {
+        var components = URLComponents()
+        components.scheme = "https"
+        components.host = urlHost
+        components.port = port
+        components.path = path
+        components.queryItems = queryItems.isEmpty ? nil : queryItems
+        return components.url
+    }
 }
 
 struct GatewayProfile: Codable, Hashable, Identifiable, Sendable {

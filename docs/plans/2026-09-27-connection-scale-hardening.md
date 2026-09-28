@@ -8565,12 +8565,14 @@ wait).
   `server-http-admission` + `server-startup` + `lan-endpoint` 18/18. Phone:
   `scripts/tron-ios-test run` on `TronMobileTests/GatewayClientTransportTests`,
   `GatewayPairingTransportTests`, `GatewayProfileStoreTests` and
-  `GatewayProtocolContractTests` 99/99, including the four new cases: hello
+  `GatewayProtocolContractTests` 100/100, including the five new cases: hello
   carries the advertisement into the connection identity and drops an entry the
   phone cannot dial, a pairing response gives the profile the endpoints and pin,
-  a hello replaces what the store held (an unchanged answer writes nothing, an
-  empty list clears both), and the phone reproduces the shared fixture's pin.
-  Retained run: `~/Library/Developer/Tron/ios/test-runs/20260928T213133Z-run.xaHYTq`.
+  an endpoint composes the `wss` socket and `https` base the race dials
+  (including a bracketed IPv6 ULA), a hello replaces what the store held (an
+  unchanged answer writes nothing, an empty list clears both), and the phone
+  reproduces the shared fixture's pin. Retained run:
+  `~/Library/Developer/Tron/ios/test-runs/20260928T213843Z-run.aIjlev`.
 - Deviations: the advertisement rides on `GatewayInfo` (the hello projection)
   instead of a new field on `GatewayConnectionIdentity`, so no E-3c-owned client
   file changed in this task. `GatewayProfileStore.adoptLanAdvertising` is the
@@ -8581,5 +8583,8 @@ wait).
   validated, so race those endpoints, compare the served certificate with
   `GatewayLanPin.pin(forCertificateDER:)`, and call
   `profiles.adoptLanAdvertising(endpoints:pin:for:)` after hello; a hello with no
-  `lanEndpoints` decodes as an empty list, which is the lane being off. The lane
-  binds the main listener's port on the private address.
+  `lanEndpoints` decodes as an empty list, which is the lane being off. Each
+  endpoint composes its own dial URLs (`socketURL`, `httpURL(path:queryItems:)`,
+  both TLS) because `URLComponents` refuses a bare IPv6 literal and a ULA-only
+  Mac advertises one. The lane binds the main listener's port on the private
+  address.
