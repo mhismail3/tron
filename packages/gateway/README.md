@@ -2317,6 +2317,7 @@ scripts/tron-profile gateway --list
 scripts/tron-profile gateway --self-test            # prove the recording path first
 scripts/tron-profile gateway --scenario stream-reply # or tool-loop, idle, dashboard-observer, all
 scripts/tron-profile gateway --scenario idle --window-seconds 60 --iterations 3 --no-build --cpu-profile
+scripts/tron-profile gateway --scenario multi-session # qualification run; wants an idle host
 ```
 
 Each scenario run builds the Gateway (`npm ci` only when the lockfile changed),
@@ -2397,6 +2398,81 @@ the report's noise bound in the expected ratio and the unsubscribed client never
 receives `session.progress`. Limits: the faux model bypasses provider network
 streams, Knowledge is unconfigured, the recording clients are Node `ws`, not
 `URLSessionWebSocketTask`, and the loopback socket has no radio cost.
+
+#### Multi-session qualification
+
+`--scenario multi-session` is the connection and scale qualification run and the
+standing check before a Gateway release or a change to the transport, catalog,
+registry or slot. `all` does not include it. It refuses to start (exit 73) when
+memory pressure is not normal, swap exceeds 4 GiB or the temporary volume
+cannot hold the catalog, and it takes the same per-host profile lock.
+
+- **Catalog:** `scripts/tron-profile-gateway-driver.mjs catalog` writes a
+  seeded catalog into the fixture's private agent directory: 3,000 JSONL files
+  and 2 GiB by default (`--catalog-files`, `--catalog-mib`), shaped like the
+  measured one (7.5% sessions, 15% forks at `<parent>/forks/`, the rest subagent
+  runs at `<parent>/<producer>/run-N/session.jsonl`), including five sessions of
+  100–200 MiB. One seed gives one content digest (in the report context). The
+  catalog is deleted on success, failure, deadline and interruption, even when
+  the rest of a fixture home is kept as evidence.
+- **Phases:** a priming start pairs the devices and loads the dashboard list
+  once (building the durable catalog index). Each iteration then starts a fresh
+  fixture Gateway, so every session is cold again, and starts eight faux-model
+  tool loops from seeded sessions whose transcript page is full; the driver
+  unsubscribes after each prompt. Four subagent-like writers append one entry
+  each to child transcripts every 500 ms from the first measured window on (on
+  `main` every append re-scans the whole catalog, so starting them with the
+  setup would let an unmeasured precondition queue behind that backlog).
+- **No-subscriber window (30 s):** the eight loops run; only an unsubscribed
+  dashboard and the driver are connected. Its metrics carry the
+  `no_subscriber.` prefix.
+- **Mixed window (`--mixed-seconds`, 120):** the mobile client is mounted on a
+  running session; the dashboard lists (`session.list`, `user`, 500) every 5 s;
+  lanes that can starve each other each get their own device, start together and
+  report: cold opens of the large sessions (largest first, as many as the window
+  allows), a warm open of a running session every 5 s, a cold open of a 1 MiB
+  session followed by a prompt every 5 s, and a dashboard-fidelity reconnect
+  every 60 s at offset 50 s. The mobile reconnects on the mobile client every
+  60 s at offset 20 s and times reconnect-to-ready (mounted chat restored); the
+  dashboard-fidelity lane times its own (list returned). A retryable Gateway
+  error is retried after 250 ms and counted (`requests.busy_retries`); on the
+  phone it would be a failed attempt. Only the mobile and dashboard clients are
+  recorded: the prober and reconnect lanes' own wire traffic is not.
+- **Fixed window edges:** the mixed window closes at `--mixed-seconds` whatever
+  is still in flight, so its frames, bytes, CPU time and catalog walks do not
+  scale with the fixture's latency and two runs can be compared. An operation
+  still running then gets a fixed 45 s tail (`tailGraceMs`); its latency still
+  lands in the samples. Whatever the tail outlasts is censored: its elapsed
+  time becomes the sample (so it counts in `requests.over_phone_deadline`) and
+  `requests.censored_tail` counts it. The no-subscriber window is fixed by its
+  sleep alone. Every lane that can starve another runs on its own device and
+  keeps its own schedule: a `session.list` that outlasts the window cannot
+  delay the reconnect lane's next reconnect of its own client. Operations that
+  are not in flight when the window closes are not started: the cold lane skips
+  its prompt once the deadline has passed, so no sample is timed after the
+  other lanes stopped.
+
+Per iteration it reports `latency.<operation>.p50|p99|max` (nearest rank, so
+p99 is the maximum below 100 samples) for `session_list`,
+`session_open_warm|cold|cold_large`, `prompt_admission` and
+`reconnect_ready_mobile|dashboard`; `requests.over_phone_deadline` (slower than
+the phone's 30 s, including censored tail operations); `requests.censored_tail`;
+the `wire.*` metrics above; fixture CPU
+(`gateway.cpu.percent`, 100% is one core); and, from
+`scripts/tron-profile-gateway-probe.mjs`, `catalog.walks`,
+`gateway.event_loop.delay_p99|max`, `gateway.heap.peak`,
+`gateway.heap.peak_percent_of_limit` and `gateway.rss.peak`. The probe is
+preloaded (`node --import`) only into this scenario's fixture and refuses to
+load anywhere else. It counts `opendir` of the catalog root (one per catalog
+structure walk), runs `monitorEventLoopDelay` at 10 ms resolution, samples
+memory once a second and writes one small snapshot per window edge on SIGUSR2.
+It is a stand-in until the Gateway's own request spans and resource sampler
+report these numbers; `catalog.walks` counts every walk, not only those on the
+request path. Window edges are fixed and the tail is bounded, so a slow Gateway
+censors operations instead of lengthening the run: an iteration's measured part
+is `--mixed-seconds` plus at most the 45 s tail, and the run's total is set by
+what the host makes of the per-iteration fixture start and the eight setup
+opens. A full 2 GiB run therefore wants a quiet host.
 
 ## Session subagent activity
 

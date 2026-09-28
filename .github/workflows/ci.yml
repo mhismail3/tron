@@ -75,6 +75,7 @@ jobs:
       - name: Check profiler JavaScript and TypeScript syntax
         run: |
           node --check scripts/tron-profile-gateway-driver.mjs
+          node --check scripts/tron-profile-gateway-probe.mjs
           node --experimental-strip-types --check scripts/tron-profile-gateway-extension.ts
       - name: Test iOS runner infrastructure without hardware
         run: |
