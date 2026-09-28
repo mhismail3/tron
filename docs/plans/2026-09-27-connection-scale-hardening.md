@@ -2,7 +2,7 @@
 
 - **Started:** 2026-09-27
 - **Status:** Active (Phase 1 runs on `hardening/integration`; that branch's copy of this plan is authoritative until R-1)
-- **Last updated:** 2026-09-28, G-8 background work audit: second review round corrected the poll's dominant cost and the ambient discovery scan
+- **Last updated:** 2026-09-28, G-8 background work audit: third review round corrected the re-admission fence, the socket promise and the discovery-open ceiling
 - **Goal:** A clean, efficient and predictable Gateway and phone connection: the phone stays connected and loads any session promptly whenever the network path is up, however many sessions run and however large the history grows, and every disconnect or slow operation is attributable to one cause from the logs in one step.
 
 ## Goal and constraints
@@ -122,13 +122,16 @@ worker thread (G-11, only if chunking cannot meet the bound), a host budget
 for agent child processes (G-14), viewing sessions without a runtime (G-6),
 whether session search keeps a persisted index keyed by `fileIdentity` (new
 durable state, new owner) or is rebuilt in bounded slices inside G-9's
-scheduler with incomplete coverage until it catches up (G-8c), and whether the
-Mac app may stop re-hashing an unchanged, already-admitted Gateway payload on
-every status poll (G-8b): the fail-closed checks that the payload tree is
-immutable and still matches its manifest fingerprint
+scheduler with incomplete coverage until it catches up (G-8c), and two halves of
+the Mac app status poll (G-8b): whether it may stop re-hashing an unchanged,
+already-admitted Gateway payload on every poll — the fail-closed checks that the
+payload tree is immutable and still matches its manifest fingerprint
 (`GatewayPayloadStore.swift:274–283`, `:381`) would then run when the selection
-fence or the pinged runtime identity changes and on explicit user actions, not
-once per 30 s poll.
+stamp or the process fence changes and on explicit user actions, not once per
+30 s poll — and whether it may, in the same window, also skip the `lsof`
+listener-ownership check and the two `ps` display reads, because that check is
+the admission's security evidence. Neither decision covers the live launchd pid
+plus start-identity read: that stays in the fence.
 
 ## Context
 
@@ -2697,8 +2700,14 @@ a latency percentile.
     (`display/browser-live-view.ts:256`), the automation scheduler's next-scan
     timer (`automations/automation-scheduler.ts:764`), and the two Mac observers
     the poll drives: the admission check above and `DebugGatewayObserver`'s
-    Tailscale probe on every debug snapshot (`DebugGatewayObserver.swift:64`),
-    which runs only in the debug profile. The two drain-only loops
+    Tailscale probe (`DebugGatewayObserver.swift:64`). The latter runs on the
+    installed Stable app's menu bar, not only in the debug profile: at install
+    (`MenuBarController.swift:52`), on every menu open (`:200`) and after a menu
+    action (`Actions/MenuBarActionHandler.swift:329`), observing the debug
+    Gateway whenever its `lifecycle.json` reports ready and re-hashing the debug
+    payload through `validateSelection` (`DebugGatewayObserver.swift:77`). It has
+    no timer of its own, so it still does not recur uninvited. The two
+    drain-only loops
     (`gateway-main.ts:485`, `:487`) run only while a restart drain waits. One
     `storage.maintenance-failed` record and no recurrence. This list is every
     Gateway `setInterval`, so the ambient artifact discovery pass below is the
@@ -2718,10 +2727,13 @@ a latency percentile.
     up to `rootBudget` candidates to every live slot (`:3789–3794`), where each
     routed read opens the file again (`RuntimeSlot.discoverExtensionArtifact`,
     `:4331` → `refreshSubagentActivityFromArtifact`). With 2,462 directories the
-    1,024 cap is always reached, so the pass attempts ≈1,365 opens a second
-    (≈118 million a day) around the clock, and the `break` at `:3741` stops the
-    `opendir` walk there: the remaining ~1,438 directories are never examined by
-    ambient discovery, in `readdir` order, and nothing logs or measures that
+    1,024 cap is always reached, so ambient opens are at most ≈1,365 a second
+    (≈118 million a day) around the clock — an upper bound, since it assumes no
+    pass overruns the 750 ms cadence (the in-flight guard skips an overlapping
+    pass) and it excludes the routed re-opens, up to 1,024 more per pass — and
+    the `break` at `:3741` stops the `opendir` walk there: the remaining ~1,438
+    directories are never examined by ambient discovery, in `readdir` order, and
+    nothing logs or measures that
     truncation. Cause and counts are read from the code and the host, not
     profiled (the Gateway is not sampled; rule 9). New row **G-8d**. For context
     the Gateway process had used 373 CPU-minutes over 11.7 h, including all
@@ -2759,40 +2771,64 @@ a latency percentile.
     log that the reason no longer appears; if residue remains, attribute it to
     the other two sources (unclassified read error, pre-first-write
     `status.json`) rather than assuming they are absent.
-  - **G-8b — Bound the Mac app status poll's children, its payload re-hash and
-    its socket.** Conflict zone: none of the Gateway zones; owns
+  - **G-8b — Bound the Mac app status poll's children and its payload
+    re-hash.** Conflict zone: none of the Gateway zones; owns
     `packages/mac-app/Sources/Server/Health/` (including
     `StableGatewayObserver.activePayload`),
     `packages/mac-app/Sources/Server/Paths/GatewayPayloadStore.swift`,
     `packages/mac-app/Sources/Server/LaunchAgent/LaunchAgentRuntimeReader.swift`,
-    `packages/mac-app/Sources/Server/ProcessControl/ServerProcessProbe.swift`
-    and `packages/mac-app/Sources/App/EnvironmentSetup.swift`. One 30 s poll
-    spawns five children (≈12,450 a day at the measured 34.7 s cadence): the
-    Tailscale CLI (≈2,490/day, each a network-extension reload) plus
-    `launchctl print`, two `ps` and `lsof` from the admission check, and opens a
-    fresh authenticated WebSocket (≈2,490 sockets/day). It also re-validates and
-    re-hashes both payload trees (588 MB + 588 MB, ≈1.2 GB read per cycle, ≈4.0 s
-    CPU, `sample`-measured), which is the poll's dominant cost. Bound all three:
-    reuse a resolved Tailscale address for a named
-    window through the existing `network.json` cache
-    (`readTailscaleIPFromSettings` / `cacheTailscaleIP`,
-    `EnvironmentSetup.swift:219–221`), not a second cache, with explicit user
-    actions keeping the live probe; and re-admit only when the pinged runtime
-    identity changes, using data the ping actually carries — `buildFingerprint`
-    and `runtimeEpoch` (`ServerPingInfo`, `OnboardingModels.swift:118–123`;
-    there is no pinged pid, so a pid check is a cheap `launchctl`/`ps` read or
-    the previous `Admission.processID`) — plus a cheap selection fence
-    (mtime/inode of `payloads/stable/current.json`, the resolved version root and
-    the bundled payload root) so a changed on-disk selection still runs the full
-    validation, and every explicit user action (pairing invite, menu-bar
-    refresh, restart wait) still re-validates. Gating the ≈1.2 GB re-hash behind
-    that fence is a **user/security decision** recorded in "Decisions still
-    open", because it makes the fail-closed immutable-tree and fingerprint check
-    (`GatewayPayloadStore.swift:274–283`, `:381`) run less often; take the other
-    two bounds regardless. Both windows change what the menu bar can report
-    during the window, so decide their length with the user. Evidence to keep:
-    every child process per cycle, per-cycle CPU time from `ps`/`sample`, and the
-    unified-log attach cadence, all before and after.
+    `packages/mac-app/Sources/Server/ProcessControl/ServerProcessProbe.swift`,
+    `packages/mac-app/Sources/NativeHost/NativeCapturePeer.swift` (to promote the
+    stamp below) and `packages/mac-app/Sources/App/EnvironmentSetup.swift`. One
+    30 s poll spawns five children (≈12,450 a day at the measured 34.7 s
+    cadence): the Tailscale CLI (≈2,490/day, each a network-extension reload)
+    plus `launchctl print`, two `ps` and `lsof` from the admission check, and
+    opens a fresh authenticated WebSocket (≈2,490 sockets/day). It also
+    re-validates and re-hashes both payload trees (588 MB + 588 MB, ≈1.2 GB read
+    per cycle, ≈4.0 s CPU, `sample`-measured), which is the poll's dominant cost.
+    Bound the children: reuse a resolved Tailscale address for a named window
+    through the existing `network.json` cache (`readTailscaleIPFromSettings` /
+    `cacheTailscaleIP`, `EnvironmentSetup.swift:219–221`), not a second cache,
+    with explicit user actions keeping the live probe; and re-admit only when a
+    runtime fence changes. The fence must be a **live launchd pid plus that
+    process's start identity** — `LaunchAgentRuntimeReader.read` already spawns
+    the `launchctl print` that yields the pid, and
+    `ServerProcessProbe.processStartIdentity` exists today only for
+    `DebugGatewayObserver.swift:113–114` — because `buildFingerprint` and
+    `runtimeEpoch` are **build identity, not process identity**: `uuidgen` mints
+    `runtimeEpoch` once per bundle
+    (`packages/mac-app/scripts/bundle-gateway.sh`, `:560`); the launcher copies
+    it from the manifest into the Gateway environment on every start
+    (`packages/mac-app/scripts/tron-gateway-launcher.c`, `:1124`); and
+    `ServerPingInfo` (`OnboardingModels.swift:118–123`) carries only build-level
+    fields. A restart under the same payload (launchd `KeepAlive` at
+    `packages/mac-app/Sources/Resources/Library/LaunchAgents/com.tron.server.plist`
+    `:23`, or a manual `launchctl` restart) keeps both pinged fields, and the
+    previous `Admission.processID` would check nothing, since it equals the pid
+    this poll has just read; without the process fence the poll would keep the
+    stale admission and publish its pid and uptime
+    (`ServerStatusPoller.swift:92–93`) while never re-running the
+    listener-equals-launchd-job check that is the admission's security evidence.
+    Fence the on-disk selection with the stamp that already exists rather than a
+    second one: promote `CaptureSelectionStamp` (`NativeCapturePeer.swift:27` —
+    device, inode, mtime and bytes of `payloads/stable/current.json` and the
+    manifest) to a shared, non-private type and reuse it, extending that one type
+    if the bundled fallback root needs the same leg. A changed selection or a
+    changed process runs the full validation, as do explicit user actions
+    (pairing invite, menu-bar refresh, restart wait). The per-cycle
+    authenticated ping stays: it is the liveness probe that decides Running, and
+    a cached answer would report a dead Gateway as healthy, so its ≈2,490
+    sockets/day are out of scope here. Gating the ≈1.2 GB re-hash behind the
+    fence is a **user/security decision** recorded in "Decisions still open",
+    because it makes the fail-closed immutable-tree and fingerprint check
+    (`GatewayPayloadStore.swift:274–283`, `:381`) run less often; deferring the
+    `lsof` listener-ownership check and the two `ps` display reads in the same
+    window is the second half of that decision, and if it is taken the process
+    fence above is what must hold. Both the cache and the fence windows change
+    what the menu bar can report during the window (its address, and the
+    admission's pid, uptime and payload verdict), so decide their length with the
+    user. Evidence to keep: every child process per cycle, per-cycle CPU time
+    from `ps`/`sample`, and the unified-log attach cadence, all before and after.
   - **G-8c — Bound the session-search warm-up; coordinate with G-9.** Conflict
     zones: **Catalog** and the G-9 scheduler files (holds both); depends on G-9
     (which moves session-search indexing into the scheduler) and G-1c (same
@@ -2850,10 +2886,10 @@ a latency percentile.
   re-hash per cycle is the dominant cost and `lsof` is one sampled frame — in
   the handoff, in the retained artifact and in G-8b, whose scope now owns
   `GatewayPayloadStore.swift` and `StableGatewayObserver.activePayload`, keys
-  re-admission on `buildFingerprint` + `runtimeEpoch` (there is no pinged pid)
-  plus a selection fence, and records the skip-the-re-hash decision (finding 1,
-  majors). The 750 ms ambient discovery pass is added as a measured recurring
-  job with its silent 1,024-entry truncation, and becomes row G-8d (finding 2,
+  re-admission on the pinged build identity plus a selection fence, and records
+  the skip-the-re-hash decision (finding 1, majors). The 750 ms ambient
+  discovery pass is added as a measured recurring job with its silent
+  1,024-entry truncation, and becomes row G-8d (finding 2,
   major). The item-1 cause is now labelled inferred, names the other two sources
   of the same reason string, and G-8a requires the atomic-replace check to fail
   on current code first and a post-fix log confirmation (finding 3, minor).
@@ -2865,3 +2901,24 @@ a latency percentile.
   were re-measured for this round (1,180 records as of 2026-09-28T13Z, matching
   the reviewer's read) and are stated beside the original snapshot rather than
   replacing it.
+- Third review response (this commit): G-8b's re-admission key is corrected,
+  because `runtimeEpoch` is build identity —
+  `packages/mac-app/scripts/bundle-gateway.sh` mints it once per bundle at
+  `:560`, `packages/mac-app/scripts/tron-gateway-launcher.c` copies it from the
+  manifest into every start at `:1124`, and `ServerPingInfo` carries no
+  per-process field — so a same-payload `KeepAlive` restart kept it. The row now
+  requires a live launchd pid plus start identity in the fence, deletes "or the
+  previous `Admission.processID`", and records skipping `lsof` and the two `ps`
+  display
+  reads between polls as the second half of the same user/security decision
+  (finding 1, major). The row's title and scope drop "its socket": the
+  per-cycle authenticated ping is the liveness probe and stays, so the row no
+  longer promises a bound it does not specify and no longer says "take the other
+  two bounds regardless" (finding 2, minor). `DebugGatewayObserver` is described
+  as the Stable menu bar's debug-Gateway observer at install, on menu open and
+  after actions, re-hashing the debug payload through `validateSelection`, not as
+  a debug-profile-only probe (finding 3, nit). The selection fence reuses and
+  promotes the existing `CaptureSelectionStamp` instead of adding a second one
+  (finding 4, nit). The ≈1,365 ambient opens a second is labelled an upper bound
+  on ambient opens that excludes routed re-opens and assumes the pass keeps the
+  750 ms cadence (finding 5, nit); the retained artifact's figure matches.
