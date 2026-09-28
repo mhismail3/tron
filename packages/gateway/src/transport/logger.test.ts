@@ -96,6 +96,31 @@ describe("GatewayLogger", () => {
     expect(requestID.length).toBe(160);
   });
 
+  it("bounds the named counters one record carries", () => {
+    const path = logPath();
+    const longName = `n${"x".repeat(200)}`;
+    const counts: Record<string, number> = {
+      files: 12, unproven: -3, added: 1.6, huge: Number.MAX_SAFE_INTEGER + 10,
+      "not a name": 1, "1leading": 2, missing: Number.NaN, infinite: Number.POSITIVE_INFINITY,
+      [longName]: 4,
+    };
+    // A record that names more counters than the field holds keeps the ones it
+    // accepted and drops the rest, rather than writing a payload.
+    for (let index = 0; index < 20; index += 1) counts[`field${index}`] = index;
+    const logger = new GatewayLogger(path);
+    logger.log("warning", "Session catalog reconciled", { event: "catalog.reconciled", counts });
+
+    // The persisted line and the restored tail are the same normalization.
+    const persisted = lines(path)[0]!.counts as Record<string, number>;
+    const restored = new GatewayLogger(path).recent(1)[0]!.counts as Record<string, number>;
+    expect(restored).toEqual(persisted);
+    expect(Object.keys(persisted)).toEqual([
+      "files", "unproven", "added", "huge", `n${"x".repeat(31)}`,
+      ...Array.from({ length: 11 }, (_, index) => `field${index}`),
+    ]);
+    expect(persisted).toMatchObject({ files: 12, unproven: 0, added: 2, huge: Number.MAX_SAFE_INTEGER });
+  });
+
   it("keeps a bounded lifecycle step name across restart", () => {
     const path = logPath();
     new GatewayLogger(path).log("info", "Gateway startup step session-registry took 8 ms", {

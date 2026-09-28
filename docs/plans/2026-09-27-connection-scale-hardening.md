@@ -529,7 +529,7 @@ rows are in priority order.
 | O-5 | Done | Gateway resource sampler and event-loop histogram | O-3 | orchestrator-dispatched deepseek-worker, 2026-09-28 |
 | O-7 | Ready | Incident triage tool: phone export plus Gateway log in, episodes by cause out | O-1, O-2, O-4 | |
 | C-1 | Ready | Projection work never blocks or parks reconnect; parked episodes self-resume | O-4, O-6b | |
-| G-1a | Claimed | Catalog owner and in-memory index fed by Gateway-owned changes | O-3, O-6a | orchestrator-dispatched deepseek-worker, 2026-09-28 |
+| G-1a | Done | Catalog owner and in-memory index fed by Gateway-owned changes | O-3, O-6a | orchestrator-dispatched deepseek-worker, 2026-09-28 |
 | G-1b | Ready | Filesystem watcher and background reconciliation for external writers | G-1a | |
 | G-1c | Ready | Move every catalog reader to the index; delete request-path walks and the full-parse fallback | G-1b | |
 | G-1d | Ready | Replace the catalog wording in `connection-resilience.md` with the index contract (D-3) | G-1c | |
@@ -3324,3 +3324,289 @@ events; widen them to name the pool owner in the same change.
   `files/hardening/t-1-investigation.md`.
 - Tasks added: T-1 (after G-1a, which holds the Registry zone and edits the
   same test file).
+
+### G-1a · Done · 2026-09-28 · orchestrator-dispatched deepseek-worker
+
+- Result: the catalog has one owner. `session-catalog.ts` holds one in-memory
+  row per canonical session file (the durable row plus the path-derived
+  `delegated` flag), loads the durable document and reconciles once behind the
+  listener, applies every Gateway-owned change at its commit point, and writes
+  the durable form on a `CATALOG_PERSIST_DEBOUNCE_MS` (5 s) debounce and at
+  shutdown. Readers are not switched: G-1c does that and deletes the old path.
+- Evidence: `npx vitest run src/sessions/session-catalog.test.ts` 4/4 in 2.2 s;
+  `npx vitest run src/sessions/catalog-metadata-index.test.ts
+  src/sessions/catalog-discovery.test.ts src/sessions/session-catalog.test.ts`
+  23/23 in 2.7 s; `npx vitest run src/sessions/runtime-registry.integration.test.ts`
+  **247 passed / 247 in 99 s** (the whole owner file, after the accounting
+  adjustments below). The new case `-t "matches a full scan after create, rename,
+  fork and delete in the catalog index"` passes alone in 3.6–6.2 s.
+  `npx tsc -p tsconfig.json --noEmit` clean; `check-documentation-policy.py` and
+  `personal-info-guard.sh` pass.
+  The new integration case compares the index against the Gateway's own full
+  scan (`CatalogDiscovery.sessionInfos("all")`) after each of create, rename,
+  fork and delete: paths, id, cwd, parent path, name, first message, message
+  count, created/updated times, and `dev:ino`/size/end offset against a fresh
+  `lstat`, with no index rows for deleted files and no duplicated IDs.
+- Changes: new `session-catalog.ts` in `packages/gateway/src/sessions/`; the
+  catalog owner wired into `packages/gateway/src/sessions/runtime-registry.ts`
+  (constructor, startup, summary/rename/rekey/create/fork/delete hooks, shutdown
+  ordering) and `packages/gateway/src/gateway-main.ts` (the record);
+  `catalog-metadata-index.ts` gained the public durable read (`load`);
+  `packages/gateway/docs/observability.md` gained `catalog.reconciled`; the integration tests
+  noted above.
+- Failure modes written before the owner (`session-catalog.test.ts`, one test
+  each): a canonical file written while the index was not watching (a crash
+  between the file write and the index update) is repaired by startup
+  reconciliation; two files claiming one session ID stay two rows and the ID is
+  reported as duplicated rather than merged; a rekey or append while a reader
+  holds a row replaces the row instead of mutating it, so a held value cannot
+  change; a durable document that is corrupt, or saved for another root, leaves
+  the index to rebuild from canonical files instead of publishing foreign rows.
+- Kept on purpose: the delegated topology rule moved to the catalog owner
+  (`delegatedSessionParentPath` + `SUBAGENT_RUN_DIRECTORY`) so one owner
+  classifies its own rows; the registry keeps the header/parent comparison that
+  binds a projected parent. Every row still comes from
+  `CatalogMetadataIndex.entryFromSummary`/`append`/`reconcile`, so the durable
+  offset and tail boundary stay the write-proving evidence. The live slot
+  summary is never adopted as row metadata: it carries presentation activity
+  (dashboard `activeSince`, `latestDashboardActivityAt`) that canonical files do
+  not, so the index would stop matching a full scan.
+- Deviation (transitional dual owner): the owner deliberately reads and writes
+  the same durable document as the reader path until G-1c deletes that path, so
+  two writers can exchange a full-document snapshot. Both write full canonical
+  cuts, so their content agrees once each has actually reconciled; the review
+  round below found that second half was unenforced, and G-1c removes the second
+  writer. Two existing counting tests were narrowed rather than deleted, both
+  because background maintenance now calls the same methods they count: "reuses
+  an on-disk catalog…" counts only the reader call's `append`s, and "rejects an
+  unowned append that races durable-index reconciliation" settles the owner's
+  background reconcile before injecting its append. O-3/O-5's "counts a walk a
+  request waited on apart from background catalog walks" was first widened to
+  `some` for the same reason; the review round below settled the owner instead
+  and restored `every`.
+- No catalog field changes for archive: archiving is a dashboard projection of
+  the same canonical membership and the row contract has no archive field, so
+  the plan's "archive" hook has nothing to apply.
+- Flake watch (not this change's, recorded for the orchestrator): one full-file
+  run timed out in `keeps a large streamed write visible through snapshot
+  recovery and canonical handoff` (5.1 s) under the whole-file load; it passes
+  alone (8.3 s) and the next full run was 247/247, so treat it as a load
+  flake until the separate registry investigation says otherwise.
+- For the next agent: G-1b owns the watcher, the per-path
+  `CATALOG_EVENT_DEBOUNCE_MS` (250 ms) and the `CATALOG_RECONCILE_INTERVAL_MS`
+  (30-minute) batched reconcile plus `catalog.watcher-reset`; the startup
+  reconcile call site is the one to extend. G-1c switches `list`, `pageSource`,
+  acquisition, attention, automation targets and storage maintenance onto
+  `SessionCatalog.rows()` and deletes the old per-request walks together with
+  the `CatalogMetadataIndex.reconcile` reader path. One flake to watch: the full
+  integration file run had `keeps a large streamed write visible through
+  snapshot recovery and canonical handoff` time out once at 5.1 s under the
+  full-file load; it passes alone (8.3 s) and is not reproducible in isolation.
+
+### G-1a · Done (review round 1) · 2026-09-28 · orchestrator-dispatched deepseek-worker
+
+- Result: an independent reviewer reproduced four defects the "matches a full
+  scan" case does not reach; all four majors and eight minors are addressed, and
+  none was rejected. The owner now writes the durable document only from a
+  canonical cut, cannot publish a removed row back, never stamps a row with a
+  size it did not count, stops a whole-catalog rebuild at shutdown, and reports
+  what one reconcile covered and changed.
+- Finding 1 (major, reproduced — shutdown wrote an empty or partial document):
+  `SessionCatalog` now has `canonicalCut` (set only by a completed load or
+  reconcile) beside the change/durable generations; `persistNow` writes only
+  when both a canonical cut exists and a change is owed. A shutdown before
+  `start()`, inside the load, or after a failed load with an incomplete scan
+  leaves the prior document untouched. New cases: "keeps the prior durable
+  document when shutdown precedes or interrupts the load" (dispose before start,
+  and with the load's rows in hand), "rebuilds from canonical files when the
+  durable document is corrupt or foreign" now restarts with the real source and
+  asserts it rebuilds `id-a` instead of passing on an empty catalog.
+- Finding 2 (major, reproduced — a removal could be published back): `remove()`
+  runs its map deletion in the lane, and it records a per-path removal
+  generation at the call. `reconcileIndex` captures its read epoch before its
+  first read and `refreshPath` before its own, and both refuse to publish a row
+  whose removal was announced after that epoch. New case: "does not publish a
+  row back after a removal announced during its read", which also asserts a
+  later pass proves membership from the folder again.
+- Finding 3 (major, reproduced — a row could claim an offset past uncounted
+  content): `CatalogMetadataIndexSummary` carries the `parsedSize` the counts
+  were parsed from; the registry's `canonicalCatalogSummary` stats before and
+  after the parse, retries while they differ, and `entryFromSummary` rejects a
+  summary whose size no longer matches the file. `refreshPath` retries the tail
+  append (bounded) before falling back to a whole-body parse, so a transient Pi
+  append costs one tail read. New cases: "does not stamp a row with an offset
+  past content it never counted" (owner level) and "refuses a summary the file
+  outgrew between its parse and its stamp" (index level).
+- Finding 4 (major — shutdown waited on an unbounded rebuild, and one
+  unprovable file failed the whole cut): `CatalogMetadataIndex.reconcile` now
+  reports `{ rows, unproven }` per file instead of `undefined` for the whole cut
+  (only an unreadable document is still `undefined`), asks a caller-supplied stop
+  check between batches and before each transcript parse (round 2 corrected this:
+  the check read the index's own `closed`, which is set only after the catalog
+  owner has already finished closing), and the owner retains its prior in-memory
+  row for every unproven path, so a file with a partial final line no longer
+  drops out of the index. `rebuild` checks the owner's `closed` between files,
+  and the pre-G-1a acquisition path keeps its all-or-nothing admission by
+  requiring `unproven.length === 0`.
+  Updated/new cases: "reports a partial canonical final line per file without
+  discarding its siblings", "reads reconciled files in one bounded batch at a
+  time" (its 16-row batch gate still holds).
+- Finding 5 (major, orchestrator-decision flagged): the timer is now a true
+  debounce — each real change resets the quiet spell — capped by
+  `CATALOG_PERSIST_MAX_WAIT_MS` (60 s) so a catalog that never goes quiet still
+  reaches the document. The spurious writes are gone with the dirty flag:
+  `publishRows` returns what actually changed, `publishRow` returns false for an
+  unchanged row, and `refreshPath` no longer reports "produced" for an unchanged
+  append copy. The plan's `CATALOG_PERSIST_DEBOUNCE_MS` (5 s) is unchanged. The
+  write volume is not measured here: G-10 owns the durable-write audit and its
+  `gateway.resources` counters, and this record reports its own counts.
+- Finding 6 (minor): `files` is now `scan.candidates.length` and
+  `{ added, removed, modified }` are counted from the published cut; `unproven`
+  counts files the pass could not prove; `incomplete` and `failed` passes report
+  instead of returning silently, at warning. The counts are record fields, which
+  is why `LogMetadata` gained a bounded generic `counts` map (the logger bounds
+  the number of entries, their names and their values). `observability.md`'s
+  `catalog.reconciled` row states the new levels, fields and reason.
+- Finding 7 (minor): the closed hook's `!persistedPathWasIndexed` branch now
+  also calls `sessionCatalog.refresh(persistedPath)` beside
+  `invalidateCatalogAcquisition()`.
+- Finding 8 (minor): "counts a walk a request waited on apart from background
+  catalog walks" settles the catalog owner before the request and asserts
+  `every` walk in the window is request-path (and every earlier one is not),
+  instead of accepting one flagged walk anywhere in the window.
+- Finding 9 (minor): the corrupt-document half of the startup test now starts a
+  real owner with the canonical source and asserts it rebuilds `id-a`; the
+  failure-mode list at the top of the file gained modes 5–7 for the new cases.
+- Finding 10 (nit): the `delegatedTopologyParentPath` pass-through is deleted
+  and its four call sites use `delegatedSessionParentPath` directly; the joined
+  `*/  private delegatedSessionTopologies(` line is split.
+- Finding 11 (nit): `catalogRoot()` caches only a successful `realpath`, so a
+  root that does not exist yet is re-resolved once it is created.
+- Finding 12 (nit, deferred as the review allowed): `catalog.changed` (debug) is
+  not emitted here. G-1b owns it: it adds the watcher that produces the change
+  stream the record describes, and G-1a's readers are not switched yet, so a
+  per-append debug record would have no consumer. This entry is the handoff.
+- Evidence: `npx tsc --noEmit -p .` clean. `npx vitest run
+  src/sessions/session-catalog.test.ts src/sessions/catalog-metadata-index.test.ts`
+  26/26; `src/sessions/catalog-discovery.test.ts` 2/2;
+  `src/transport/logger.test.ts` 13/13; `runtime-registry.integration.test.ts`
+  focused runs: `-t "catalog"` 34/34, `-t "index"` 8/8, `-t "delete"` 6/6,
+  `-t "dispose|shutdown|session close"` 6/6, and the five review cases 5/5.
+  `python3 scripts/check-documentation-policy.py` and
+  `scripts/personal-info-guard.sh` pass.
+- Residual risk for the orchestrator: a file this pass cannot prove and that has
+  no prior row (a new file whose last line is incomplete) is still absent from
+  the index until a later pass proves it; the reconcile record's `unproven`
+  count is the signal, and the durable document keeps every row it already had.
+  G-10 owns the document's measured write volume, and G-1b owns the watcher and
+  the `catalog.changed` record.
+
+### G-1a · Done (review round 2) · 2026-09-28 · orchestrator-dispatched deepseek-worker
+
+- Result: a second independent reviewer found one major defect that round 1 only
+  partly fixed, plus six minors and two nits; none was rejected. Shutdown now
+  stops a startup reconcile in the ordinary case (a usable durable document), the
+  durable document has one writer, and the shutdown stop and the reader-side stop
+  are the same caller-supplied check.
+- Finding 1 (major, reproduced — shutdown still waited for the whole startup
+  reconcile whenever the durable document was usable): the between-batch check
+  read `CatalogMetadataIndex.closed`, which `runtime-registry.ts`'s
+  `disposeSharedStores` sets only after `SessionCatalog.dispose()` has returned,
+  so it was always false while the catalog owner was closing; only the
+  no-document `rebuild` path stopped early. `CatalogMetadataIndex.reconcile` now
+  takes a caller-supplied `CatalogMetadataReconcileStop` (asked between batches
+  and before each transcript parse) and the owner passes `() => this.closed`. New
+  case: "stops a startup reconcile within one batch when the owner is disposed" —
+  64 files, a durable document and one whole-body parse per candidate: `dispose`
+  returns after one bounded batch (≤ RECONCILE_CONCURRENCY summary reads) and the
+  prior document is unchanged. With the pass-through removed the same case
+  observes all 64 parses (the reviewer's own probe measured 3,042 ms and 160
+  parses in the same shape).
+- Finding 2 (minor, inferred — a second writer could restore the undercount):
+  `persistDurableCatalogIndex` and its call in `materializeCatalogSnapshot` are
+  deleted. The owner is the document's only writer, which its own `persistNow`
+  always was; `SessionCatalogOptions.index`'s comment and
+  `packages/gateway/README.md`'s acceleration-file paragraph now say so, and the
+  integration fixtures that waited for the sidecar settle the owner instead
+  (`settleCatalog`). New case: "writes the durable catalog document from its
+  owner, not from a reader cut". Round 3 corrected that case: the deleted writer
+  was fire-and-forget, so the case now flushes the reader's deferred chain before
+  asserting instead of checking an immediate call count it could not observe.
+- Finding 3 (minor — logger scope, no bounding test, redundant escaping): the
+  `counts` field and `boundedCounts` in `transport/logger.ts` stay as the
+  `catalog.reconciled` record's field contract; the orchestrator accepted that
+  scope as an explicit decision when it dispatched round 3. New case:
+  "bounds the named counters one record carries" covers the count cap, the name
+  shape, non-finite and negative values and the persisted round trip; the cap now
+  counts the counters the field accepts rather than the raw entry list, and the
+  redundant `boundedDiagnosticID` call is gone (the shape check already rejects
+  anything but letters and digits). Not closed: the level rule itself
+  (`reconciled` at info, otherwise warning) lives in `gateway-main.ts`, a
+  side-effecting process entry no test can import; the record's field values are
+  covered by `session-catalog.test.ts`'s `SessionCatalogReconcileOutcome` cases
+  and by the logger case above.
+- Finding 4 (minor): "reuses an on-disk catalog across a second registry without
+  a body scan and advances one appended row" settles the restarted owner right
+  after `initialize()`, as its two sibling cases do, and asserts the exact
+  `toHaveBeenCalledTimes(1)` append instead of a count taken inside the owner's
+  window.
+- Finding 5 (minor): the pre-G-1a acquisition path passes the same stop check as
+  `({ unproven }) => unproven > 0`, because it discards its whole cut when one
+  candidate is unprovable. New case: "stops a pass at the first file it cannot
+  prove when its caller asks" (24 candidates, one unprovable: 16 rebuilds, not
+  24).
+- Finding 6 (nit): a removal marker is now deleted by its own lane work instead
+  of being pruned when a reconcile starts, so the map no longer grows with every
+  deletion for the life of the process; "does not publish a row back after a
+  removal announced during its read" asserts the map is empty once that removal
+  has settled.
+- Finding 7 (nit): the `catalog.reconciled` row's "why" column no longer
+  describes this branch's own earlier state.
+- Evidence: `npx tsc --noEmit -p .` clean; `session-catalog.test.ts` 9/9,
+  `catalog-metadata-index.test.ts` 19/19, `transport/logger.test.ts` 14/14,
+  `runtime-registry.integration.test.ts` `-t "catalog|delete|index"` 44/44 plus
+  the round-2 cases; `python3 scripts/check-documentation-policy.py` and
+  `scripts/personal-info-guard.sh` pass.
+- Residual risk for the orchestrator: the durable document is now refreshed only
+  by the owner's own changes (5 s debounce, 60 s ceiling) and by its startup
+  reconcile, so a file written by an external writer (a Pi child, a copied file)
+  reaches the document only when the owner next reconciles; until G-1b's watcher
+  lands, a restart repairs those rows by re-reading their files. G-1b owns that
+  gap.
+
+### G-1a · Done (review round 3) · 2026-09-28 · orchestrator-dispatched deepseek-worker
+
+- Result: a third review approved G-1a and reproduced the round-2 major fix and
+  the worker's negative control. It found one minor — a new case that could not
+  fail against the bug it names — plus two inaccurate sentences in the round-2
+  entry. Both are fixed here; no product code changed.
+- Finding 1 (minor, reproduced): "writes the durable catalog document from its
+  owner, not from a reader cut" asserted `expect(save).not.toHaveBeenCalled()`
+  the moment `catalog("all")` returned, but the deleted reader-path write was
+  fire-and-forget (`void this.persistDurableCatalogIndex(...)`) and reached
+  `save` only after awaiting one summary per row, so the assertion could not
+  observe it. The case now flushes that deferred chain before asserting (250 ms,
+  the bounded flush the reviewer's 200 ms probe used to surface one call) and
+  also asserts the read did not recreate the document it had removed.
+- Finding 1 negative control: with `b06aff0c8`'s `runtime-registry.ts` hunk
+  reversed in this worktree, the case fails with `Number of calls: 1` in three
+  runs of three (`expected "save" to not be called`); with the fix restored it
+  passes, alone and in the focused `-t "catalog|delete|index|durable|owner"`
+  run. The reversed patch was reverted before this entry.
+- Finding 2 (nit): the round-2 entry's claim that the case "observes that write"
+  with a reader-path save re-added was false for the real old path, and its
+  logger-scope sentence reported an orchestrator acceptance that had not been
+  given. Both sentences are corrected in place above.
+- Orchestrator decision (recorded at dispatch of this round, per the task's own
+  text): the `counts` field and `boundedCounts` scope widening in
+  `transport/logger.ts` is accepted as the `catalog.reconciled` field contract.
+  G-10 still owns the measured write volume and its resource counters.
+- Evidence: `npx tsc --noEmit -p .` clean; `runtime-registry.integration.test.ts
+  -t "catalog|delete|index|durable|owner"` 69/69; the changed case alone passes;
+  `python3 scripts/check-documentation-policy.py` and
+  `scripts/personal-info-guard.sh` pass.
+- Residual risk unchanged from round 2: the owner is the document's only writer,
+  so external writers (a Pi child, a copied file) reach it only at the owner's
+  next reconcile until G-1b's watcher lands, and a Gateway-owned append that does
+  not change the slot summary can leave a row's size and mtime behind until its
+  next summary change.

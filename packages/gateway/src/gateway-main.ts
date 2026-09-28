@@ -250,6 +250,11 @@ const sessions = new RuntimeRegistry({
     `Catalog metadata index ${stage} failed; the affected rows are rebuilt from canonical files`,
     { event: "catalog-index.failure", source: "sessions", step: stage, durationMs },
   ),
+  catalogReconciled: ({ outcome, files, added, removed, modified, unproven, durationMs }) => logger.log(
+    outcome === "reconciled" ? "info" : "warning",
+    `Session catalog ${outcome}: ${added} added, ${removed} removed, ${modified} modified, ${unproven} unproven over ${files} files in ${durationMs}ms`,
+    { event: "catalog.reconciled", source: "sessions", outcome, durationMs, counts: { files, added, removed, modified, unproven } },
+  ),
   runtimeDisposeTimeout: (graceMs) => logger.log(
     "warning",
     `Extension runtime shutdown overran its ${graceMs}ms disposal grace and was forced`,

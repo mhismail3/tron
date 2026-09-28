@@ -60,6 +60,9 @@ export interface LogRecord {
   peerRelay?: string;
   /** How long the socket had been silent when it spoke again. */
   silentMs?: number;
+  /** Named counters for one record (a reconcile's files and rows): the writer
+   * bounds how many, their names and their values. */
+  counts?: Record<string, number>;
   error?: LogError;
 }
 
@@ -91,6 +94,8 @@ export interface LogMetadata {
   peerPath?: string;
   peerRelay?: string;
   silentMs?: number;
+  /** Named integer counters, e.g. `{ files: 12, added: 1 }`. */
+  counts?: Readonly<Record<string, number>>;
   /** Any thrown value; the writer bounds and redacts it. */
   error?: unknown;
 }
@@ -124,6 +129,11 @@ const MAX_STAGES_BYTES = 1_024;
 const MAX_ERROR_MESSAGE_BYTES = 1_000;
 const MAX_STACK_BYTES = 4_000;
 const MAX_FIELD_CHARS = 160;
+/** A record names a handful of counters; more would make the field a payload. */
+const MAX_COUNT_FIELDS = 16;
+/** A counter name is a short identifier: the shape check below already rejects
+ * anything but letters and digits, so only its length needs bounding. */
+const MAX_COUNT_NAME_CHARS = 32;
 const PERSISTED_LEVELS: ReadonlySet<LogLevel> = new Set(["info", "warning", "error"]);
 
 /** The one redaction rule set. Every writer applies it at its write boundary,
@@ -145,6 +155,18 @@ function boundedBytes(value: string, maximum: number): string {
 
 export function boundedMessage(value: string): string {
   return boundedBytes(redact(value), MAX_MESSAGE_BYTES);
+}
+
+/** Named counters are fields a reader can aggregate, so their names are short
+ * plain identifiers and their values are bounded integers. */
+function boundedCounts(value: Readonly<Record<string, number>>): Record<string, number> {
+  const bounded: Record<string, number> = {};
+  for (const [name, count] of Object.entries(value)) {
+    if (Object.keys(bounded).length >= MAX_COUNT_FIELDS) break;
+    if (!/^[A-Za-z][A-Za-z0-9]*$/u.test(name) || !Number.isFinite(count)) continue;
+    bounded[name.slice(0, MAX_COUNT_NAME_CHARS)] = Math.max(0, Math.min(Number.MAX_SAFE_INTEGER, Math.round(count)));
+  }
+  return bounded;
 }
 
 function boundedDiagnosticID(value: string): string {
@@ -236,6 +258,7 @@ function normalizedFields(value: LogMetadata & { error?: unknown }, errorIsDescr
     ...(typeof value.peerPath === "string" ? { peerPath: boundedDiagnosticID(value.peerPath).slice(0, 32) } : {}),
     ...(typeof value.peerRelay === "string" ? { peerRelay: boundedDiagnosticID(value.peerRelay).slice(0, 32) } : {}),
     ...(silentMs !== undefined ? { silentMs } : {}),
+    ...(value.counts ? { counts: boundedCounts(value.counts) } : {}),
     ...(error ? { error } : {}),
   };
 }
