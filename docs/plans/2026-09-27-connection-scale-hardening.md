@@ -2059,10 +2059,12 @@ the day cannot measure a synthetic case).
   `recordRuntimeLoaded`, `recordRuntimeEvicted`); nothing is discovered by
   scanning. Levels: debug for a quiet minute; info when a window's value moves to
   another named step (event-loop p99 in `EVENT_LOOP_P99_INFO_STEP_MS` = 20 ms
-  bands and max in `EVENT_LOOP_MAX_INFO_STEP_MS` = 250 ms bands, heap used in
-  `HEAP_USED_INFO_STEP_BYTES` = 256 MiB bands, RSS moved `RSS_INFO_STEP_SHARE` =
-  10% from the last window written at info or above; the bands are compared with
-  the previous window) or when a runtime was published or evicted in it; warning
+  bands and max in `EVENT_LOOP_MAX_INFO_STEP_MS` = 250 ms bands, both compared
+  with the previous window; heap used moved `HEAP_USED_INFO_STEP_BYTES` = 256 MiB
+  and RSS moved `RSS_INFO_STEP_SHARE` = 10% from the window the anchor names, the
+  last one written at info or above or the first this process recorded, which
+  starts both anchors) or when a runtime was
+  published or evicted in it; warning
   past `HEAP_WARNING_SHARE` (0.70 of the V8 heap limit) or
   `EVENT_LOOP_P99_WARNING_MS` (100 ms). Counters are drained, bounded to eight
   named topics and eight named runtimes with `+N` for the rest, and every
@@ -2083,16 +2085,22 @@ the day cannot measure a synthetic case).
   fsync counters: (9) an fsync is not counted, (10) the window is not drained so
   every later sample repeats it, (11) removing a file that was already gone counts
   as an fsync that never happened, and (12) a failed sync is recorded as a write
-  that landed.
+  that landed. The third round added (13) work recorded while the runtime
+  inventory read hangs is reported in the window that closed before it, so a rate
+  read from `windowMs` is wrong exactly then, and (14) a heap step compared band
+  by band with the previous minute flaps at a band edge, writing a record every
+  minute for a steady heap that a garbage collection moves.
 - Evidence:
   - `npx vitest run src/transport/stall-diagnostics.test.ts src/util/durable-json.test.ts`
-    passes 21/21, and
+    passes 21/21 at the time of the first round and 24/24 after the third round's
+    two tests, and
     `npx vitest run src/sessions/runtime-registry.integration.test.ts -t "answers the resource sample"`
     passes.
   - `npx vitest run src/transport/server-frame.test.ts src/transport/sync-protocol.integration.test.ts`
     passes 11/11, `src/transport/server-live-view.integration.test.ts` +
     `src/transport/server-heartbeat.integration.test.ts` passes 11/11, and
-    `src/sessions/runtime-registry.integration.test.ts` passes 243/243 in 57 s.
+    `src/sessions/runtime-registry.integration.test.ts` passes 243/243 in 57 s
+    (246/246 after the registry tests of the later rounds).
     `npm run build` is clean.
   - Volume: the quiet minute is debug and stays in the 2 MB memory-only buffer
     (about 1,440 records, roughly 0.5 MB a day, none on disk; the buffer is shared
@@ -2105,12 +2113,22 @@ the day cannot measure a synthetic case).
     rather than under it, and the cap would have to change if a day spent every
     minute doing it. Recorded in `packages/gateway/docs/observability.md` with the
     new rows and the measured-volume paragraph.
+  - Third round: `npx vitest run src/transport/stall-diagnostics.test.ts` passes
+    17/17; the same file plus `src/util/durable-json.test.ts` passes 24/24;
+    `src/transport/server-frame.test.ts`, `sync-protocol.integration.test.ts`,
+    `server-heartbeat.integration.test.ts` and those two pass 40/40;
+    `src/sessions/runtime-registry.integration.test.ts` passes 246/246 in 57 s;
+    `npm run build` is clean. Both new tests fail on the previous commit (the
+    source stashed, the tests kept): the inventory-hang test read
+    `windowMs=0 outboundBytes=1007 catalogWalks=2 durableWrites=9` where the
+    window had closed with 1,000 bytes and 2 fsyncs, and the oscillation test
+    promoted 59 of 60 minutes, alternating 256 MiB bands.
 - Changes: the O-5 commits on `hardening/o-5`.
 - "Done when" (the 5% cross-check against O-6a's report): **owed to the
-  orchestrator**, not run here, and it is a condition of the exit criteria rather
-  than of this row: the orchestrator set the row to `Done` on 2026-09-28 once
+  orchestrator**, not run here. O-5's own "Done when" is that cross-check, so the
+  row's `Done` rests on the orchestrator's decision of 2026-09-28 to close it once
   every review finding was fixed, with the cross-check still owed after the
-  quiet-host O-6a run ("Done when" is answered, not deferred). O-6a's
+  quiet-host O-6a run: O-5 has not answered its "Done when" itself. O-6a's
   scenario is committed on `hardening/o-6a` (6be09c4ba) but that worktree carries
   uncommitted edits to `scripts/tron-profile-gateway`,
   `scripts/tron-profile-gateway-driver.mjs` and `scripts/test-tron-profile.py`,
@@ -2227,8 +2245,8 @@ the day cannot measure a synthetic case).
   they could not: the RSS step is anchored to the last window written at info or
   above, so slow growth still promotes (0.02% a minute over 1,000 minutes
   promotes twice, covered by a new test), and event-loop max moves in
-  `EVENT_LOOP_MAX_INFO_STEP_MS` = 250 ms bands, so a minute with a 240 ms turn is
-  saved even at a low p99. The heap step is absolute bytes
+  `EVENT_LOOP_MAX_INFO_STEP_MS` = 250 ms bands, so a minute whose max reaches
+  250 ms is saved even at a low p99. The heap step is absolute bytes
   (`HEAP_USED_INFO_STEP_BYTES` = 256 MiB) instead of a share of a multi-gigabyte
   limit, and the observability row plus its volume paragraph no longer imply the
   debug buffer keeps a day. A tick that finds the previous sample still in flight
@@ -2258,3 +2276,30 @@ the day cannot measure a synthetic case).
   SIM-8 relay is owed by the orchestrator too: the agreement is stated in the
   `gateway.resources` row and in the SIM-8 bullet above, but the
   simulator-lifecycle plan's own row still has to name host memory's owner.
+- Third review round (2026-09-28, independent reviewer): 3 findings, all fixed;
+  no finding is rejected. A window's counters and its fsync drain now close with
+  `windowMs`, before `readRuntimes()` is awaited (`ResourceSampler.sample()` and
+  `drainWindowCounters()`), so a sample whose inventory read hangs cannot report
+  the work done during the hang inside a window that already closed — the pair
+  that made a rate read from `windowMs` wrong exactly then. Work recorded while
+  the inventory hangs opens the next window, and a sample that fails after the
+  drain drops the counters it consumed instead of folding them into the next
+  window, which is the rule the histogram and `windowStartedAt` already followed.
+  The heap step is anchored like RSS — `HEAP_USED_INFO_STEP_BYTES` = 256 MiB of
+  movement from the last window written at info or above — instead of comparing
+  bands with the previous minute, so a steady heap that a garbage collection
+  swings 40 MiB around the 256 MiB edge no longer writes a record every minute
+  (that oscillation promoted 59 of 60 minutes on the previous commit). Two tests
+  were added, both shown failing on the previous commit; the existing step test
+  now expects the anchored reason. Plan wording corrected: the event-loop max
+  step is "a minute whose max reaches 250 ms" (240 ms is still band 0), and the
+  "Done when" entry says plainly that the 5% cross-check is O-5's own
+  "Done when" and is deferred by the orchestrator's decision rather than
+  answered.
+- Review nits still open, not in this round's scope:
+  `requestPathCatalogWalks`' wording says "the part a request waited on", but a
+  request that joins a walk started in the background also waits and is not
+  counted (its wait shows only in `rpc.completed` as `catalog.walk-join`); and
+  the `gateway.resources-failed` "already reported" flag is shared by a skipped
+  tick and a thrown error, so an in-flight sample that later throws is not
+  logged.
