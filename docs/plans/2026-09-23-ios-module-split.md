@@ -2,7 +2,7 @@
 
 - **Started:** 2026-09-23
 - **Status:** Active
-- **Last updated:** 2026-09-27, MS-2 verified on device; MS-3 is next
+- **Last updated:** 2026-09-27, MS-3 scoped into MS-3a and MS-3b; both claimed
 - **Goal:** Give the iOS app compiler-enforced layers, so its structure stays clean, one-directional and easy for agents to work in, and cannot silently regress into cycles.
 
 Follow the [plan protocol](README.md#protocol) to claim tasks and hand off.
@@ -83,9 +83,10 @@ directly, and unit tests reach the app through `@testable import TronMobile`.
 | --- | --- | --- | --- | --- |
 | MS-1 | Done | Map the dependency graph of Models, Gateway, Support, State and UI/Theme; propose module boundaries with no cycles | none | module-split session, 2026-09-26 |
 | MS-2 | Done | First real slice of `TronMobileCore`, an XcodeGen framework target with `SWIFT_PACKAGE_NAME` set so `package` access works: move a few leaf types from Models, Gateway or Support into it (kept, not a throwaway spike); prove all five configurations build, the share extension, `@testable` tests, both test plans and the source-policy scripts; record baseline and after timings. Device install and **Product → Profile** are checked by the user or supervisor | MS-1, D1, D2 | module-split session, 2026-09-26 |
-| MS-3 | Needs scoping | Extract the rest of `Core` into `TronMobileCore` (Models, Gateway, Auth and Support, with the MS-1 moves) and record timings | MS-2 | |
-| MS-4 | Needs scoping | Extract `Notifications`, then `State`, then `UI`, one per task, each with timings, after the simplification program has cleaned up State and Chat (D1); split UI by folder where its boundaries are clean | MS-3, simplification S-IOS-STATE and S-IOS-CHAT work | |
-| MS-5 | Needs scoping | Move the share extension onto `Core` instead of compiling `SharedContent.swift` itself | MS-3 | |
+| MS-3a | Claimed | Inside the one app module, relocate declarations so Models, Gateway and Support reference nothing in State, Notifications, Auth, UI or App and import no UI framework (see MS-3 scope); no framework change yet | MS-2 | module-split session, 2026-09-27 |
+| MS-3b | Claimed | Move Models, Gateway and Support into `TronMobileCore` with `package` access, a Core privacy manifest and a no-UI-import guard; record timings | MS-3a | module-split session, 2026-09-27 |
+| MS-4 | Needs scoping | Extract `Notifications`, then `State` (with `Auth`), then `UI`, one per task, each with timings, after the simplification program has cleaned up State and Chat (D1); split UI by folder where its boundaries are clean | MS-3b, simplification S-IOS-STATE and S-IOS-CHAT work | |
+| MS-5 | Needs scoping | Move the share extension onto `Core` instead of compiling `SharedContent.swift` itself | MS-3b | |
 
 ## Task details
 
@@ -173,6 +174,26 @@ except `App` and `Auth` sits in one cycle of 12 layers. Examples: Models throws 
   Gateway extension.
 - D3 Value check: resolved by the user on 2026-09-26. The goal is structure (see Goal and constraints), so
   timings guard against a slowdown instead of deciding whether the split is worth doing.
+
+## MS-3 scope (2026-09-27)
+
+Supervisor decisions, from the MS-1 findings:
+
+- **Core is Foundation-only.** It may import Foundation and system non-UI frameworks (CryptoKit, Network, OSLog,
+  Security and similar), never SwiftUI, UIKit, Observation or UserNotifications. A source-policy check enforces it.
+- **Auth stays in the app** and moves with State in MS-4: `ProviderOAuthBrowser` presents from a `UIWindowScene`,
+  and its only users are State and Onboarding.
+- **The three low-layer framework imports are resolved by ownership, not by importing UI into Core:**
+  `KnowledgeModels.swift`'s `@Observable` presentation stores move to State; `RetiredNotificationBadge` moves to
+  Notifications; `LiveViewing`'s `UIImage` decoding moves up to its State or UI consumer, while the transport and
+  bytes stay in Gateway.
+- **Declarations move to the file and directory that own their concept,** never into a catch-all file.
+- **Two steps.** MS-3a relocates declarations inside the single app module, so the compiler and the full suite
+  prove each move with no access or target change. MS-3b then moves the three directories into the framework,
+  which is mechanical once MS-3a leaves no upward reference. Models, Gateway and Support reference each other,
+  so they move in one commit.
+- **Core reads UserDefaults** (`GatewayProfileStore`, `SharedContent`), so the framework ships its own privacy
+  manifest and `PrivacyManifestTests` covers it.
 
 ## Handoff log
 
