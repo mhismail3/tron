@@ -8038,7 +8038,14 @@ wait).
   from pausing background work indefinitely; a reconcile pass yields to the same
   pause between bounded batches; a replaced job's unregister no longer deletes the
   replacement; both background records carry the job in `step`; and startup skips
-  `backgroundWork.start()` when a signal already set `stopping`. Evidence: the new
+  `backgroundWork.start()` when a signal already set `stopping`. Merge gate on
+  this branch merged with `hardening/integration` at `81ea9c8d4`: the six-file
+  transport set 132/132, `npx tsc --noEmit -p .` clean, and
+  `src/sessions/runtime-registry.integration.test.ts` 256/257 — the one failure
+  ("keeps a large streamed write visible through snapshot recovery and canonical
+  handoff", 5 s `isBusy` wait) reproduces on this branch with all six source files
+  reverted to the reviewed commit, so it is the host (1-minute load 32-53 on 18
+  CPUs), not these changes; the case passes alone in 4.2 s. Evidence: the new
   `src/transport/request-span.integration.test.ts` case fails when the parking is
   removed (assertion `requestsCompetingForLoop() === false` while a held
   `session.rename` waits); `src/background-work.test.ts` 9/9 and
