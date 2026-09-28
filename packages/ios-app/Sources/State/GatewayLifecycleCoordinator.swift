@@ -129,6 +129,10 @@ final class GatewayLifecycleCoordinator {
     private var connectionAdmissionGeneration = 0
     private var reconnectAttemptGeneration = 0
     private var reconnectCanBeAccelerated = false
+    /// A real path change that arrived while a transport attempt was on the wire.
+    /// The attempt keeps its own bound and no second socket is opened, so the
+    /// loop consumes this mark when that attempt ends and retries at once (C-3).
+    @ObservationIgnored private var reconnectPathChangedDuringAttempt = false
     private var restartRequested = false
     private var restartWatchdogTask: Task<Void, Never>?
     private var pairingAttempt: PairingAttempt?
@@ -147,6 +151,11 @@ final class GatewayLifecycleCoordinator {
     private var projectionFailureGeneration: Int?
     private var nonRetryableRecoveryFailure = false
     private var networkPathSatisfied = true
+    /// The monitored route's own identity — the interfaces the current path uses
+    /// — when the observer can read one. It is what separates a real path change
+    /// from a notice about the route the phone is already on; `nil` while no
+    /// caller has supplied one.
+    private var networkPathSignature: String?
     private var connectionFailureClassifier = GatewayConnectionFailureClassifier()
 
     var noPathPresentation: GatewayNoPathPresentation? { connectionFailureClassifier.noPath }
@@ -378,6 +387,7 @@ final class GatewayLifecycleCoordinator {
         reconnectTask = nil
         reconnectAttemptGeneration &+= 1
         reconnectCanBeAccelerated = false
+        reconnectPathChangedDuringAttempt = false
         reconnectLoopID = nil
         reconnectAttemptInFlightLoop = nil
         reconnect?.cancel()
@@ -591,8 +601,20 @@ final class GatewayLifecycleCoordinator {
     /// reachability or revoke a currently viable socket. A satisfied hint may
     /// revive a parked episode even when the missed callback left no task, and an
     /// unsatisfied one arms the bound that probes the path without a callback.
-    func notePathHint(satisfied: Bool) {
+    ///
+    /// `signature` is the current route's interface identity when the caller can
+    /// read one. A scene activation re-reads the monitor, and a status, flag or
+    /// cost-only update fires it without re-routing, so only the signature
+    /// changing (or the path going unsatisfied and back) is a path change; a
+    /// caller that supplies none is reporting the route it was already on. The
+    /// distinction is C-3's: the path that came back is attempted at once and
+    /// from the base interval, while repeated failures on an unchanged path keep
+    /// the capped, jittered curve.
+    func notePathHint(satisfied: Bool, signature: String? = nil) {
+        let pathChanged = networkPathSatisfied != satisfied
+            || (signature != nil && signature != networkPathSignature)
         networkPathSatisfied = satisfied
+        if let signature { networkPathSignature = signature }
         guard phase.admitsWork, !sceneIsBackgrounded else { return }
         guard satisfied else {
             if connectionID == nil {
@@ -610,18 +632,28 @@ final class GatewayLifecycleCoordinator {
         case .unpaired, .unauthorized, .connecting, .connected: return
         }
         if reconnectTask != nil, reconnectCanBeAccelerated {
-            // The satisfied notice is this owner's only path signal: cancel the
-            // pending wait so the loop attempts at once, and restart the curve
-            // so the route that just came back is not delayed by the wait the
-            // route that went away had grown (C-3). Failures that see no path
-            // notice keep the capped, jittered curve unchanged.
-            reconnectSchedule.restartForPathChange()
+            // The notice is this owner's only path signal: cancel the pending wait
+            // so the loop attempts at once. Only a real path change restarts the
+            // curve, so the route that just came back is not delayed by the wait
+            // the route that went away had grown (C-3).
+            if pathChanged { reconnectSchedule.restartForPathChange() } else { reconnectSchedule.accelerate() }
             return
         }
-        guard reconnectTask == nil else { return }
+        if reconnectTask != nil {
+            // An attempt is in flight: it keeps its own bound and this owner
+            // never puts a second socket on the wire beside it. A real path change
+            // is recorded for the loop instead, which consumes it when that
+            // attempt ends, so the retry is not left waiting the interval the
+            // closed route had grown (C-3).
+            if pathChanged {
+                reconnectPathChangedDuringAttempt = true
+                reconnectSchedule.restartForPathChange()
+            }
+            return
+        }
         // Nothing is waiting, so the restart only has to drop the curve the
         // closed route had grown before the attempt that follows.
-        reconnectSchedule.reset()
+        if pathChanged { reconnectSchedule.reset() }
         requestReconnect(immediate: true, replaceExisting: false)
     }
 
@@ -882,6 +914,7 @@ final class GatewayLifecycleCoordinator {
         connectionAdmissionGeneration &+= 1
         reconnectAttemptGeneration &+= 1
         reconnectCanBeAccelerated = false
+        reconnectPathChangedDuringAttempt = false
         reconnectLoopID = nil
         reconnectAttemptInFlightLoop = nil
         foregroundReconciliationTask = nil
@@ -1199,6 +1232,7 @@ final class GatewayLifecycleCoordinator {
         reconnectTask = nil
         reconnectAttemptGeneration &+= 1
         reconnectCanBeAccelerated = false
+        reconnectPathChangedDuringAttempt = false
         reconnectLoopID = nil
         reconnectAttemptInFlightLoop = nil
         task?.cancel()
@@ -1299,6 +1333,7 @@ final class GatewayLifecycleCoordinator {
         ) else { return }
         reconnectTask = nil
         reconnectCanBeAccelerated = false
+        reconnectPathChangedDuringAttempt = false
         reconnectLoopID = nil
         reconnectAttemptInFlightLoop = nil
     }
@@ -1386,6 +1421,7 @@ final class GatewayLifecycleCoordinator {
         let delayPolicy = reconnectDelayPolicy
         let reconnectSchedule = self.reconnectSchedule!
         reconnectCanBeAccelerated = !immediate
+        reconnectPathChangedDuringAttempt = false
         // A probe loop starts one attempt despite a stale unsatisfied hint; from
         // its second iteration the hint gates it again, so a path that is still
         // down parks recovery rather than spinning (C-1).
@@ -1675,6 +1711,18 @@ final class GatewayLifecycleCoordinator {
                         }
                         self.reconnectCanBeAccelerated = true
                         delayStartedAt = clock.now()
+                        if self.reconnectPathChangedDuringAttempt {
+                            // The route changed while this attempt was on the wire:
+                            // the loop consumes that change and attempts at once,
+                            // from the curve the notice already restarted, instead
+                            // of waiting the interval the closed route had grown.
+                            // The attempt record's own `actualDelayMs` is ~0 for
+                            // it, which is what this record reports.
+                            self.reconnectPathChangedDuringAttempt = false
+                            self.delegate?.lifecycleRecordDiagnostic(event: "reconnect.delay",
+                                message: "attempt=\(attemptGeneration) loop=\(loopID) retry=\(retry + 1) cause=pathChanged")
+                            continue
+                        }
                         self.delegate?.lifecycleRecordDiagnostic(event: "reconnect.delay",
                             message: "attempt=\(attemptGeneration) loop=\(loopID) retry=\(retry + 1)")
                         guard await reconnectSchedule.afterFailure(),

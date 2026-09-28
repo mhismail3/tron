@@ -485,7 +485,11 @@ class RecordingClient {
       // option set makes ws send the same parameterless offer.
       perMessageDeflate: { clientMaxWindowBits: false },
       autoPong: false,
-      handshakeTimeout: CONNECTION.transportOpenDeadlineMs,
+      // A backstop past the phone's own bound: the model's `withDeadline` below
+      // must be what ends an unopened attempt, so the `abandon()` that follows
+      // it (and excuses that socket's close) always runs first. The library's
+      // timer destroying the socket instead is reported as an unexpected close.
+      handshakeTimeout: CONNECTION.transportOpenDeadlineMs + 1_000,
       maxPayload: 64 * 1024 * 1024,
     });
     this.socket = socket;
@@ -1184,29 +1188,37 @@ function waitForClosure(client, timeoutMs) {
   }), timeoutMs, `${client.name} socket close`);
 }
 
-/** The phone's wait after a failed attempt. `pathReturn` (the blackhole leg's
- * path-return signal) models C-3: a path change cancels the phone's pending
- * backoff wait and starts an attempt at once, so a wait that spans the path's
- * return ends there instead of running out first. A wait that ends before the
- * return is unchanged, and once the path has returned the next wait is the fresh
- * (base-interval) one. */
-async function phoneBackoffWait(ms, pathReturn) {
-  if (!pathReturn) { await sleep(ms); return; }
+/** The phone's wait after a failed attempt. `signal` is the leg's path-return
+ * promise while the model has not raised a change yet, and `null` once it has:
+ * a path change cancels the phone's pending backoff wait and starts an attempt
+ * at once (C-3), so a wait that spans the return ends there instead of running
+ * out first. Returns true when the wait ended at the return rather than on its
+ * own timer. */
+async function phoneBackoffWait(ms, signal = null) {
+  if (!signal) { await sleep(ms); return false; }
   const wait = cancellableSleep(ms);
   try {
-    await Promise.race([wait.done, pathReturn]);
+    return await Promise.race([wait.done.then(() => false), signal.then(() => true)]);
   } finally {
     wait.cancel();
   }
 }
 
 /** Connect, then run this client's ready sequence, until it succeeds. Each
- * failed attempt is recorded with the error that ended it, and the next one
- * waits the phone's own backoff, so the report shows what the outage cost
- * rather than only how long recovery took. */
-async function connectUntilReady(client, ready, deadlineMs, annotate = () => ({}), backoff = null) {
+ * failed attempt is recorded with the error that ended it and the wait that
+ * preceded it, so the report shows what the outage cost — the phone's own
+ * backoff included — rather than only how long recovery took. `pathChange` is
+ * the leg's path return when the case has one, shaped like the phone's own path
+ * signal: it restarts the curve, ends a pending wait at once, and a change that
+ * arrives while an attempt is on the wire is consumed when that attempt fails
+ * (`GatewayLifecycleCoordinator.notePathHint(satisfied:signature:)`). */
+async function connectUntilReady(client, ready, deadlineMs, annotate = () => ({}), pathChange = null) {
   const attempts = [];
-  for (let failures = 1; ; failures += 1) {
+  // The phone's curve: `failures` is the run of failures since the last path
+  // change, 1 being the base interval. A path change restarts it (C-3).
+  let failures = 1;
+  let waitMs = null;
+  for (;;) {
     const startedAt = now();
     // Annotated when the attempt starts: an attempt that began during the
     // outage is an attempt the outage cost, even if it ends after the path
@@ -1215,13 +1227,29 @@ async function connectUntilReady(client, ready, deadlineMs, annotate = () => ({}
     try {
       await client.connect();
       await ready();
-      attempts.push({ ms: now() - startedAt, connected: true, ...annotations });
+      attempts.push({ ms: now() - startedAt, waitMs, connected: true, ...annotations });
       return attempts;
     } catch (error) {
-      attempts.push({ ms: now() - startedAt, failed: messageOf(error), ...annotations });
+      attempts.push({ ms: now() - startedAt, waitMs, failed: messageOf(error), ...annotations });
       await client.abandon();
       if (now() > deadlineMs) fail(`${client.name} did not recover within ${Math.round(deadlineMs - startedAt)} ms: ${messageOf(error)}`);
-      await phoneBackoffWait(phoneRetryDelayMs(failures), backoff);
+      const returnedAt = pathChange === null ? null : pathChange.returnedAt();
+      if (returnedAt !== null && returnedAt >= startedAt) {
+        // The path returned while this attempt was on the wire: the phone
+        // consumes that change and attempts at once, with the curve restarted,
+        // instead of waiting out the curve the closed path had grown.
+        failures = 1;
+        waitMs = 0;
+        continue;
+      }
+      // Still blackholed while the wait runs, so the return cancels it; a path
+      // that returned before this attempt leaves the wait alone, and that wait
+      // is the fresh base interval the change restarted the curve at.
+      const waitStartedAt = now();
+      const cancelled = returnedAt === null
+        && await phoneBackoffWait(phoneRetryDelayMs(failures), pathChange?.signal ?? null);
+      waitMs = cancelled ? 0 : now() - waitStartedAt;
+      failures = cancelled ? 1 : failures + 1;
     }
   }
 }
@@ -1254,8 +1282,10 @@ async function blackholeLeg(config, { mobile, chat, retry }) {
   const outageEnd = outageStart + config.blackholeSeconds * 1000;
   // The path returns on its own clock, not when the attempt loop next looks:
   // an attempt still in flight when it returns waits out its own deadline, and
-  // that wait is part of the recovery this leg measures. The return also
-  // cancels the pending backoff wait, as a real path change does (C-3).
+  // that wait is part of the recovery this leg measures. The return is the path
+  // change this case hands the phone (C-3), so it cancels a pending backoff
+  // wait and restarts the curve; a relay blackhole raises no path callback on a
+  // real phone, which is the model's premise, not the phone's behaviour.
   let returnedAt = null;
   let signalPathReturn;
   const pathReturned = new Promise((resolvePathReturn) => { signalPathReturn = resolvePathReturn; });
@@ -1284,7 +1314,7 @@ async function blackholeLeg(config, { mobile, chat, retry }) {
       () => retry("mount", () => chat.remount(config.measuredDeadlineMs)),
       outageEnd + config.measuredDeadlineMs,
       () => ({ duringOutage: returnedAt === null }),
-      (ms) => phoneBackoffWait(ms, returnedAt === null ? pathReturned : null));
+      { returnedAt: () => returnedAt, signal: pathReturned });
   } finally {
     clearTimeout(returnTimer);
   }

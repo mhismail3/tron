@@ -6,14 +6,16 @@ private final class GatewayPathDiagnosticsObserver {
     private let monitor = NWPathMonitor()
     private let delivery = GatewayPathDiagnosticCoalescer()
     private let record: @MainActor @Sendable (String) -> Void
-    private let pathHint: @MainActor @Sendable (Bool) -> Void
+    private let pathHint: @MainActor @Sendable (Bool, String?) -> Void
 
     init(model: AppModel) {
         record = { [weak model] in model?.lifecycleRecordDiagnostic(event: "path.changed", message: $0) }
-        pathHint = { [weak model] satisfied in model?.lifecycleNotePathHint(satisfied: satisfied) }
+        pathHint = { [weak model] satisfied, signature in
+            model?.lifecycleNotePathHint(satisfied: satisfied, signature: signature)
+        }
         monitor.pathUpdateHandler = { [delivery, record, pathHint] path in
             GatewayNetworkPathSnapshot.shared.update(interfaces: Self.interfaces(path))
-            Task { @MainActor in pathHint(path.status == .satisfied) }
+            Task { @MainActor in pathHint(path.status == .satisfied, Self.routeSignature(path)) }
             Self.offer(Self.facts(path), delivery: delivery, record: record)
         }
         monitor.start(queue: DispatchQueue(label: "tron.gateway.path-monitor"))
@@ -22,7 +24,9 @@ private final class GatewayPathDiagnosticsObserver {
     func setSceneActive(_ active: Bool) {
         delivery.setActive(active)
         if active {
-            pathHint(monitor.currentPath.status == .satisfied)
+            // The scene activation re-reads the same path: it forwards that
+            // reading's signature so it cannot pass as a route change (C-3).
+            pathHint(monitor.currentPath.status == .satisfied, Self.routeSignature(monitor.currentPath))
             Self.offer(Self.facts(monitor.currentPath), delivery: delivery, record: record)
         }
     }
@@ -55,6 +59,14 @@ private final class GatewayPathDiagnosticsObserver {
         ]
         let used = interfaces.filter { path.usesInterfaceType($0.0) }.map(\.1).joined(separator: ",")
         return used.isEmpty ? "unknown" : used
+    }
+
+    /// What the lifecycle reads as a route's identity: the interfaces this path
+    /// uses. A status, flag or cost-only update — and a scene activation
+    /// re-reading the same path — keeps this the same, so it cannot read as a
+    /// path change and restart a grown backoff (C-3).
+    private nonisolated static func routeSignature(_ path: NWPath) -> String {
+        interfaces(path)
     }
 
     deinit {

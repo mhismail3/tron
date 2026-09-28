@@ -4555,10 +4555,11 @@ final class AppModel {
         recordEventConsumer(category: "session", phase: phase, duration: duration)
     }
 
-    func lifecycleNotePathHint(satisfied: Bool) {
-        lifecycle.notePathHint(satisfied: satisfied)
+    func lifecycleNotePathHint(satisfied: Bool, signature: String? = nil) {
+        lifecycle.notePathHint(satisfied: satisfied, signature: signature)
         // Path facts are advisory projections for every admitted secondary;
-        // each pool entry applies its own profile/generation fence.
+        // each pool entry applies its own profile/generation fence. The pool's
+        // own gate is the satisfied/unsatisfied transition.
         let selectedID = profiles.selected?.id
         for profile in profiles.profiles where profile.id != selectedID {
             dashboardConnections.notePathHint(profileID: profile.id, satisfied: satisfied)

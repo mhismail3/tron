@@ -2633,9 +2633,14 @@ cannot hold the catalog, and it takes the same per-host profile lock.
     Because the phone says nothing to the Gateway when it gives up on a frozen
     path, the Gateway keeps that socket half-open. The path returns on its own
     timer, and the case times the recovery to a ready mounted chat from that
-    moment — an attempt still in flight then is part of the recovery. The path's
-    return also cancels a pending reconnect wait and restarts the phone's backoff
-    curve (C-3), so a wait that spans the return ends there.
+    moment — an attempt still in flight then is part of the recovery. The model
+    hands the phone that return as a path change (C-3): it cancels a pending
+    reconnect wait, restarts the backoff curve, and is consumed by an attempt
+    still on the wire when it arrives, which retries at once. A relay blackhole
+    changes nothing the phone's own path monitor can see, so on a device this
+    leg's recovery is the wait it happened to be in plus the attempt after it;
+    the modelled cancel is the path-change case C-3 is about (a route whose
+    interface set really changes), not something this leg observes on a device.
   - **bandwidth** (`--bandwidth-mbps`, default 2, for `--bandwidth-seconds`,
     default 90): the relay holds one rate budget per direction and pauses the
     sending socket when it is spent — until the receiving socket drains — so a

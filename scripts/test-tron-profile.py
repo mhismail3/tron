@@ -862,7 +862,9 @@ class MultiDriverImpairment(StubGatewayHarness, unittest.TestCase):
     returned, so the slow requests the storm is about are left out; a restart
     case that treats the Gateway's own close as a failure, that leaves a
     connected client down, that reports a reconnect without the downtime's
-    failed attempts, or that waits for the profiler's answer forever; and an
+    failed attempts, or that waits for the profiler's answer forever; a
+    blackhole model that retries back to back without the phone's backoff, or
+    that leaves the change it consumed out of the recovery it reports; and an
     unexpected close after an impairment leg going uncounted.
     """
 
@@ -875,7 +877,8 @@ class MultiDriverImpairment(StubGatewayHarness, unittest.TestCase):
         # The path returns 5 s into an 8 s transport-open attempt: the recovery
         # must include the rest of that attempt, not only the connect that
         # follows it. The path's return cancels a pending backoff *wait* (C-3),
-        # never an attempt already on the wire, so this attempt still times out.
+        # never an attempt already on the wire, so this attempt still times out,
+        # and its change is consumed by the attempt that follows it.
         status, output, result = self.run_impairment(["blackhole"], {
             "blackholeSeconds": 5, "blackholeSettleMs": 400,
             "connection": dict(self.FAST_CONNECTION),
@@ -900,6 +903,34 @@ class MultiDriverImpairment(StubGatewayHarness, unittest.TestCase):
                                "silence is measured from the last inbound frame, one liveness window long")
         self.assertLess(leg["silenceMs"], 2_000,
                         "the socket is abandoned one liveness window after the last inbound frame")
+
+    def test_the_blackhole_waits_the_phone_backoff_and_consumes_its_path_change(self) -> None:
+        # A blackhole long enough for the model to pay the phone's backoff: the
+        # return 6 s in lands inside the second transport-open attempt, so the
+        # recovery is that attempt's remainder plus an immediate retry, and the
+        # attempts behind it are spaced by the phone's own curve instead of
+        # running back to back (zero-gap retries would fit twice as many).
+        connection = dict(self.FAST_CONNECTION, transportOpenDeadlineMs=2_000, helloDeadlineMs=2_000)
+        status, output, result = self.run_impairment(["blackhole"], {
+            "blackholeSeconds": 6, "blackholeSettleMs": 400,
+            "connection": connection,
+            "measuredDeadlineMs": 30_000,
+        })
+        self.assertEqual(status, 0, output)
+        leg = result["impairment"]["blackhole"]
+        waits = [attempt.get("waitMs") for attempt in leg["attempts"] if attempt.get("duringOutage")]
+        self.assertTrue(any((wait or 0) >= 1_000 for wait in waits),
+                        f"no attempt during the outage waited the phone's backoff: {leg['attempts']}")
+        after_return = next((attempt for attempt in leg["attempts"] if not attempt.get("duringOutage")),
+                            None)
+        self.assertIsNotNone(after_return, f"no attempt followed the path's return: {leg['attempts']}")
+        self.assertEqual(after_return.get("waitMs"), 0,
+                         "the path change the return consumed must start that attempt at once, not after a "
+                         f"grown wait: {leg['attempts']}")
+        self.assertGreater(leg["recoveryReadyMs"], 0,
+                           "the in-flight attempt's remainder is part of the recovery")
+        self.assertLessEqual(leg["recoveryReadyMs"], connection["transportOpenDeadlineMs"],
+                             "recovery from the path's return stays inside the attempt that was in flight")
 
     def test_the_bandwidth_cap_meters_the_path_without_losing_the_socket(self) -> None:
         # Three sessions, so the leg has three page mounts in flight at once:

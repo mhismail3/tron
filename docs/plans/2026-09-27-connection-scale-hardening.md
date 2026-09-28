@@ -9285,7 +9285,7 @@ wait).
 - Evidence: `scripts/tron-ios-test build --lane C3` succeeds;
   `scripts/tron-ios-test run --lane C3` for `AppModelReconnectTests` (50/50,
   including `pathReturnCancelsPendingBackoff` and
-  `pathNoticeDuringReconnectAttemptStartsNoSecondSocket`), `GatewayClientTransportTests`
+  `pathChangeDuringReconnectAttemptStartsNoSecondSocket`), `GatewayClientTransportTests`
   (57/57, including the transport-open/hello boundary pair),
   `GatewayProtocolContractTests` + `GatewayReconnectScheduleTests`, the four
   neighbouring suites and E-3b's tests after merging `hardening/integration` —
@@ -9308,3 +9308,45 @@ wait).
   orchestrator's quiet-host run; the driver's model bounds the p95 at one
   transport-open deadline plus one connect once the path returns, and the relay
   still refuses to forward the attempt that was in flight.
+
+#### C-3 review round · 2026-09-28 · same branch, same worker
+
+An independent reviewer found the modelled phone's wait broken and two real
+recovery gaps; all three were fixed on the same branch.
+
+1. The driver handed `phoneBackoffWait` a *function* as its race value, so
+   `Promise.race` settled it immediately and every modelled wait was zero — the
+   recovery figure was a floor the phone never had. `connectUntilReady` now
+   takes the leg's path-change object (`returnedAt`/`signal`), `phoneBackoffWait`
+   returns whether the return cancelled it, an attempt record carries the
+   `waitMs` that preceded it, and a change that arrived while an attempt was on
+   the wire is consumed when it fails. The `ws` library's `handshakeTimeout` is
+   now a backstop 1 s past the phone's bound: the library destroying the socket
+   first reported the model's own timeout as an unexpected close.
+2. `GatewayLifecycleCoordinator.notePathHint` recorded nothing when a satisfied
+   notice arrived during an in-flight attempt, so the loop then waited the grown
+   curve (up to 15 s) after it. It now records the change, and the loop consumes
+   it after that attempt fails and retries at once from the restarted curve
+   (`reconnect.delay cause=pathChanged`; the next attempt's `actualDelayMs`≈0).
+3. Every satisfied notice — a scene activation, an interface-flag or VPN
+   update, and the monitor's own repeats — restarted the curve, which weakens
+   Do 3. The observer now forwards the monitored route's interface signature
+   (`TronMobileApp.routeSignature`, status-independent), and only a change of
+   that signature (or an unsatisfied→satisfied transition) restarts the curve;
+   a notice on the same route still cancels a pending wait. The dashboard pool
+   keeps its own transition gate.
+- Evidence (review round): `scripts/test-tron-profile.py -k test_the_blackhole`
+  2/2 (~30 s) — the 5 s/8 s leg recovers 3.5 s after the return with the
+  consumed change's attempt at `waitMs: 0`, and the new 6 s/2 s leg pays a
+  ~2.1 s base-interval wait before its second attempt and recovers 0.61 s after
+  the return; a zero-gap retry model fails the new leg's backoff assertion.
+  `scripts/tron-ios-test run --lane C3` for `AppModelReconnectTests`,
+  `GatewayReconnectScheduleTests`, `GatewayClientTransportTests` and
+  `GatewayProtocolContractTests`: 131 tests in 4 suites, 0 failures, retained at
+  `~/Library/Developer/Tron/ios/test-runs/20260928T230918Z-run.T7wXvI`.
+- Deviation: the modelled cancel assumes the phone sees a path change at the
+  relay's return. A relay blackhole raises no path callback — `NWPathMonitor`
+  still reports a satisfied path — so on a device the O-6b leg's recovery is the
+  wait it was in plus the attempt that follows, and the modelled p95 ≤ 5 s is
+  the path-change case C-3 targets. The gateway README now says so; the quiet
+  host run still owns the real numbers.
