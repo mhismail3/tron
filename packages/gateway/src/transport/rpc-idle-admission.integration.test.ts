@@ -142,7 +142,7 @@ async function fixture(options: { tokensPerSecond?: number } = {}): Promise<Fixt
     const frames: any[] = [];
     socket.on("message", (raw) => frames.push(JSON.parse(raw.toString())));
     await until(() => socket.readyState === WebSocket.OPEN, "socket open");
-    socket.send(JSON.stringify({ type: "hello", protocolVersion: 5 }));
+    socket.send(JSON.stringify({ type: "hello", protocolVersion: 6 }));
     await until(() => frames.some((frame) => frame.type === "hello"), "hello");
     return {
       frames,

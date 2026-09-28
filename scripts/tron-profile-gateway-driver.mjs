@@ -38,7 +38,7 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 
 const PRESENTATION_LEASE_RENEWAL_MS = 15_000;
 const REQUEST_TIMEOUT_MS = 30_000;
-const PROTOCOL_VERSION = 5;
+const PROTOCOL_VERSION = 6;
 // The phone's reconnect backoff (ReconnectDelayPolicy.standard): a failed
 // attempt is followed by 2 s x 1.7, capped at 15 s, with ±20% jitter.
 const PHONE_RETRY_INITIAL_SECONDS = 2;

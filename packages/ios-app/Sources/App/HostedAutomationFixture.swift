@@ -124,7 +124,7 @@ struct HostedAutomationFixtureView: View {
 
 private actor HostedAutomationSocket: GatewaySocketConnection {
     private let records: [GatewayAutomationRecord]
-    private var inbound = [Data(#"{"type":"hello","gatewayVersion":"fixture","piVersion":"fixture","protocolVersion":5,"minProtocolVersion":5,"machineId":"fixture-automation","machineName":"Studio server","gatewayChannel":"stable","capabilities":["automations.v2"]}"#.utf8)]
+    private var inbound = [Data(#"{"type":"hello","gatewayVersion":"fixture","piVersion":"fixture","protocolVersion":6,"minProtocolVersion":6,"machineId":"fixture-automation","machineName":"Studio server","gatewayChannel":"stable","capabilities":["automations.v2"]}"#.utf8)]
     private var receivers: [CheckedContinuation<Data, Error>] = []
     private var closed = false
 

@@ -59,6 +59,24 @@ owner of accepted commands; mobile reconnect never replays a prompt blindly.
   Both are read from the Gateway log alone and neither changes what the tick does.
   `server-heartbeat.integration.test.ts` pins each case against real sockets on a
   fake heartbeat clock.
+- **Phone liveness (C-4):** the phone pings every socket on the one shared
+  ten-second wakeup grid the energy plan fixed, and any inbound frame that
+  reaches the app after a ping was sent is proof of liveness for that ping:
+  messages, pongs and any other data all answer it. A probe's pong returns on
+  the downlink, behind whatever data the Gateway has already queued for the
+  phone, so a pong can miss its eight-second deadline on a link that is carrying
+  data. Such a probe retires the epoch only when nothing arrived after it was
+  sent, and the next grid tick re-arms the wait. Only a fully delivered frame
+  counts as that proof, so a frame whose last byte arrives later than that
+  deadline (about 1 MiB on a path below 1 Mbit/s) leaves a busy link with no
+  proof at all and the epoch is still retired as `pong_timeout`. Dead-link
+  detection stays within 18 seconds of the last inbound frame: no grid tick is
+  later than 10 seconds after it and the deadline is 8 seconds after the tick.
+  An excused probe leaves a debug-level `liveness` record with
+  `outcome=excused` in the phone's connection log, so a run that shows no
+  `pong_timeout` retirement can still tell an excused probe from a probe that
+  never missed its deadline.
+  `GatewayClientTransportTests` pins each case on a manual clock.
 - **Projection:** the wire ceiling remains 1 MiB, with a shared 32,768 JSON-value
   node ceiling for local and mobile clients. Transcript pages reserve 24,000
   nodes and snapshots 30,000; dense detail is compacted without editing canonical
@@ -108,9 +126,22 @@ owner of accepted commands; mobile reconnect never replays a prompt blindly.
   paths rather than duplicating HTTP counters.
 - **Mobile recovery:** while foregrounded with a satisfied network path, one
   reconnect owner retries transient failures indefinitely with a 2-second initial
-  delay, 1.7× progression, a 15-second cap, and 20% jitter. Background and
-  unsatisfied network paths pause attempts; foreground, path return, and explicit
-  Retry accelerate one pending delay. Only authentication, authorization, protocol, and identity
+  delay, 1.7× progression, a 15-second cap, and 20% jitter. A dashboard pool
+  entry follows the same progression without jitter, so a pool wait is
+  deterministic and its cap is a floor; once three of its consecutive attempts
+  have failed it escalates by ×4 from the delay it had reached to a five-minute
+  cap, so an unreachable secondary profile makes one attempt every five minutes.
+  It counts its own failed attempts and a successful attempt is what clears
+  them, so a secondary Mac that drops after connecting, a handshake the Gateway
+  never answers and a 503 all keep backing off. Background and
+  unsatisfied network paths pause attempts. One pending delay is accelerated by
+  a foreground cycle, an explicit Retry, and a real path return — an unsatisfied
+  path becoming satisfied. A scene activation, or any other monitor update on a
+  path that did not change, leaves the wait alone, so a repeated "network
+  available" notice cannot cut the five-minute cap short. A path that goes away
+  during a pool attempt ends that retry when its wait runs out instead of
+  holding the entry, and the return then starts the next attempt at once. Only
+  authentication, authorization, protocol, and identity
   failures stop automatic recovery. Each handshake has the shared 15-second
   deadline. Last-good projections and mutation receipts remain intact. After two
   consecutive failed handshakes whose `transport-open` record says
@@ -205,20 +236,59 @@ keeps today's uncompressed frames.
 
 ## Collect evidence before recovery
 
-1. Export iOS Logs. Keep its capture time, represented time range, app build,
-   source freshness, profile labels/aliases, and available Gateway identity.
-   Retained/offline records are not a live Gateway health check. If the initial
-   fault predates the represented range, it is missing evidence.
-2. Compare the same UTC interval with `<tronHome>/logs/gateway.jsonl` and its
-   bounded `.1` rotation. Join the two sides by the O-1 key: a phone record's
-   `gatewayConnectionId` is the Gateway record's `connectionId`, and its
-   `clientId`/`attemptId`/`epoch` are the Gateway's `peerClientId`,
-   `peerAttemptId` and `peerEpoch`. Only logs from before the correlation key
-   shipped (protocol 5) have to be matched by time window instead.
-3. Use existing local Mac status/health observations to distinguish a responsive
+1. Run `scripts/tron-triage PHONE-EXPORT...` first. It reads the export(s) and
+   `<tronHome>/logs` (`gateway.jsonl` with its rotations; `--gateway-logs DIR`
+   for another home) read-only and prints one row per outage with its cause and
+   the records behind it: `path`, `phone-background`, `phone-stall`,
+   `gateway-stall`, `gateway-capacity` or `unknown`, decided by the first
+   matching rule in `scripts/tron_triage.py`. `--json` prints the report and
+   `--out PATH` writes it; `--tailscale-window` captures the Tailscale network
+   extension's own log with `log show` over the export's range and uses it as
+   path evidence for logs written before O-2, and `--tailscale-peer NODEKEY`
+   restricts that read to the phone's Magicsock peer so another tailnet peer's
+   relay stretch is not read as the phone's. Start there, then read the
+   evidence lines it prints.
+2. Export iOS Logs if `tron-triage` was given no export yet. Keep its capture
+   time, represented time range, app build, source freshness, profile
+   labels/aliases, and available Gateway identity. Retained/offline records are
+   not a live Gateway health check. If the initial fault predates the
+   represented range, it is missing evidence.
+3. Compare the same UTC interval with `<tronHome>/logs/gateway.jsonl` and its
+   `gateway.jsonl.1`–`.7` rotations. The tool joins the two sides by the O-1
+   key: a phone record's `gatewayConnectionId` is the Gateway record's
+   `connectionId`, and its `clientId`/`attemptId`/`epoch` are the Gateway's
+   `peerClientId`, `peerAttemptId` and `peerEpoch`. Only logs from before the
+   correlation key shipped (protocol 5) have to be matched by time window
+   instead, and the report says which join each episode used (`joinedBy`). One
+   join decides an episode: when the key joins any record, only key-joined
+   records and Gateway-wide records (a delayed event loop, host resources)
+   count as evidence, so a neighbour connection's slow span is never read as
+   this episode's cause. A connection the Gateway opened during the episode is
+   the recovery's, not the one the outage lost, so it is neither this episode's
+   join key nor its cause; rule 4 also reads a socket that opened within the
+   handshake the reconnect had just completed before the loss, one the previous
+   stretch's own recovery opened a flicker earlier, and a socket the phone's own
+   unchanged connection id says never dropped, as the recovery's for the cause,
+   because the refresh the reconnect runs on any of them is not the Gateway
+   stalling on the connection the loss dropped. A published outage is reported as one
+   episode per scene phase: the app parks recovery in the background and resumes
+   it on the foreground without publishing a new state, so the foreground
+   stretches carry the path, label and gap evidence and only the time really
+   spent in the background reads `phone-background`. One attempt belongs to the
+   stretch it began in (its end timestamp less its `durationMs`), so a connect
+   that started in a background blip is not counted against the silent stretch
+   after it. A Tailscale relay window explains an episode only when the loss
+   falls inside the window and the episode ends inside it or within the app's
+   own recovery delay after it closes; a window that closed minutes earlier is
+   context, so a measured silent gap stays an `unknown` gap with its window
+   named beside it. A cause is only as good as its evidence
+   line: an `unknown` episode lists what the records did contain, and an
+   `unknown` for a foreground silent gap is the measured silent recovery gap
+   until C-1 removes it.
+4. Use existing local Mac status/health observations to distinguish a responsive
    Gateway from an unreachable mobile path. An OS network path of `satisfied`
    proves neither Tailscale tunnel health nor reachability of the selected Mac.
-4. Preserve the first fault and the source/payload revisions used to reproduce it.
+5. Preserve the first fault and the source/payload revisions used to reproduce it.
    Do not clear app data, Keychain, canonical sessions, or credentials. Gateway
    transitions remain explicit user/maintainer actions.
 
@@ -240,7 +310,7 @@ keeps today's uncompressed frames.
 | `http.upgrade` with `outcome=rejected` | The Gateway refused the upgrade; `reason` names which bound or phase did. `phaseReached=request` means before credentials (`warming_up`, `shutting_down`, `request_capacity`, `unexpected_path`, `unreadable_request`), `auth` means the credential or the readiness recheck (`unauthenticated`, `warming_up`, `shutting_down`, `authentication_timeout`) or capacity (`connection_capacity`), `handshake` means the WebSocket handshake itself was refused, `hello` means a hello arrived and was refused (`hello_required`, `protocol_mismatch`) or a frame was (`invalid_frame`: a first frame that is not JSON, or one the WebSocket library itself refuses as oversized or malformed). |
 | `http.upgrade` with `outcome=abandoned` and `phaseReached=auth` | The attempt ended while the credential was still being read: `reason=peer_closed` means the peer left, `shutting_down` means a Gateway shutdown destroyed the socket. A peer that left is not a refusal: check the phone's records at that instant before the Gateway's readiness. |
 | `http.upgrade` with `outcome=opened` and `authMs` or `helloMs` near or over `UPGRADE_SLOW_WARNING_MS` (1,000 ms) | The connection needed a second or more to become usable. The record is a warning whenever the attempt took at least 1,000 ms from the TCP accept (`acceptToUpgradeMs + authMs + handshakeMs + helloMs`), whatever the phase that was slow. `authMs` is the credential read (device-store mutex); `helloMs` runs from handshake completion to the Gateway processing the hello frame, so it includes the peer's own send delay and the network path, not only the Gateway's handling. Check `gateway.event-loop-delay` and `gateway.resources` around the same instant; the peer's hello key joins this record to its phone records. |
-| `connection.inbound-silent` | The socket stayed open, received no frame for at least 12 s, and liveness was expected: either a ping the Gateway sent went unanswered or the client pings on its own and went quiet. `peerPath=relay` or `offline` points at the Tailscale path (`peerRelay` names the relay carrying it, empty for a direct or offline peer); `direct` with a silent socket points at the phone or its process; `unknown` means there is no Tailscale answer for that address (loopback/LAN, no CLI, or a status timeout) and says nothing about the path. The paired `connection.inbound-resumed` gives the episode's `silentMs`. |
+| `connection.inbound-silent` | The socket stayed open, received no frame for at least 12 s, and liveness was expected: either a ping the Gateway sent went unanswered or the client pings on its own and went quiet. `peerPath=relay` or `offline` points at the Tailscale path (`peerRelay` names the relay carrying it, empty for a direct or offline peer); `direct` with a silent socket points at the phone or its process; `unknown` means there is no Tailscale answer for that address (loopback/LAN, no CLI, or a status timeout) and says nothing about the path. The paired `connection.inbound-resumed`, when the socket survives the episode, gives its `silentMs`. Repeated silences at `peerPath=relay`/`offline` are a Tailscale flap (see "Tailscale flaps"). |
 | `http.upgrade` with `reason=authentication_timeout` | A pending upgrade exceeded its authentication deadline, so the Gateway refused it (`outcome=rejected`, `phaseReached=auth`). The callback is fenced and its cancellable credential wait is retired. |
 | `closeCode` / `httpStatusCode` / `platformCode` | Separate facts, never interchangeable numbers. HTTP 401/403 stop automatic admission; 503 is retryable capacity/unavailability. URLSession may report 1005/1006 rather than expose the peer's exact close frame; that absence must remain explicit. |
 | `connection.projection-rejected` | A producer violated the projection contract. Narrow/reproduce that producer instead of reconnecting the whole service indefinitely. |
@@ -274,6 +344,87 @@ stall. A current low-RSS process likewise does not describe its historical peak.
   discarded and the previous sample stays, so the age — not the tick — bounds
   how stale these numbers can be. Judge a drop or a reconnect with that age in
   view, because a small `swapUsedBytes` can simply be an old sample.
+
+## Tailscale flaps
+
+A flap is Tailscale's path between the phone and this Mac dropping to relay-only
+(or offline) while the local network keeps working. Nothing in the Gateway is at
+fault: the socket at the Mac carries nothing in either direction until the path
+returns. How long the path stays quiet decides whether that socket survives it.
+The phone pings every 10 s and waits 8 s for the answer
+(`GatewayConnectionPolicy.clientPingInterval`/`clientPongDeadline`), and a probe
+whose deadline passes with no inbound frame since it was sent retires the
+connection, so the phone drops the socket within about 18 s of the path going
+quiet. The Gateway retires a socket only after three missed 25 s heartbeats
+(`GATEWAY_CONNECTION_POLICY.heartbeatIntervalMs`). A flap shorter than about
+18 s therefore ends with the socket still open and nothing but the records
+below; the worked example's 30–121 s flaps disconnect the phone.
+
+- **Gateway records.** One `connection.inbound-silent` (warning) per silence
+  episode per socket, written at the first heartbeat tick (every 25 s) that
+  finds no inbound frame for `INBOUND_SILENCE_WARNING_MS` (12 s) with liveness
+  expected: the record lands between 12 s and about 37 s after the last frame,
+  and a flap that ends sooner leaves no Gateway record at all. It names the
+  peer (`connectionId`, `peerClientId`, `peerAttemptId`, `peerEpoch`) and the
+  path (`peerPath=relay`/`offline`, `peerRelay` the relay carrying it). When the
+  socket survives the flap, its next inbound frame writes
+  `connection.inbound-resumed` (info) with the episode's `silentMs`, and that
+  pair is the whole flap. When the flap disconnects the phone, the silent record
+  stays unpaired: the phone has already retired its connection with a liveness
+  `ping_timeout` failure and is reconnecting, and the Mac ends the socket either
+  when the phone's close reaches it after the path returns (`connection.closed`
+  with a large `lastInboundAgeMs`) or, if no close arrives, on the
+  three-missed-heartbeat bound (`connection.heartbeat-timeout` at roughly
+  75–100 s of silence, followed by that socket's `connection.closed`) — the
+  worked example's "abnormal Gateway close with a long-silent phone". `direct`
+  with silence points at the phone or its process, and `unknown` says nothing
+  about the path.
+- **Triage output.** `scripts/tron-triage EXPORT` reports each outage as one
+  episode whose cause is `path` when the Gateway's `connection.inbound-silent`
+  for it carries `peerPath=relay`/`offline` (the resume record is not required),
+  or when an attempt's own `transport-open` timeout never reached the Mac. Add
+  `--tailscale-window` for a log written before those records: the tool reads
+  the Tailscale network extension's own log over the export's range and names
+  the covering window as cause evidence (`[cause] tailscale … path.change: relay
+  path window <start>..<end>`). A window that closed before the outage ended is
+  `[context]` ("does not cover this episode") and the episode keeps its measured
+  cause, so a silent recovery gap is not blamed on the path. Filter the read with
+  `--tailscale-peer NODEKEY`: the extension serves every tailnet peer, so
+  another peer's relay stretch could otherwise be read as the phone's. The
+  report carries the windows it read (`inputs.tailscaleWindow.relayWindows`), so
+  `--out` keeps them after the unified log has dropped the lines.
+- **Worked example** (2026-09-28, the incident these records were added for).
+  The phone and the Mac shared a LAN, yet Tailscale's direct path between them
+  dropped to relay-only about 14 times in 5.5 hours for 30–121 s each, with no
+  traffic in either direction. Every abnormal Gateway close with a long-silent
+  phone (01:35, 02:40, 03:24, 03:53, 04:56, 05:38, 05:46, 05:55, 05:58 UTC) and
+  every phone episode in the 01:27–01:35 cluster fell inside one of those
+  windows. On that incident's export the capture reported 14 `path` episodes,
+  each naming a relay window that covers it or the phone's own timeout, against
+  5 without it; the two silent recovery gaps (03:24:45–03:30:30,
+  04:56:31–04:58:46) stayed `unknown` because the windows overlapping them had
+  closed 248 s and 111 s earlier. The capture is bounded by what the unified log
+  still holds: the 01:27–01:36 windows had already aged out of it, so re-run it
+  soon after an incident or read the windows it retained.
+- **User-side checks** when flaps recur:
+  - iPhone Tailscale: keep the app current (App Store) and confirm its VPN
+    configuration is enabled and shows a **direct** connection to the Mac while
+    both are on the same Wi-Fi. With the extension disabled the phone has no
+    route to the Mac's Tailscale address, so it opens no socket at all: the
+    symptom is the phone's own `transport-open` timeouts with no matching
+    Gateway `http.upgrade`, which triage reports as `path`. An outdated app is
+    worth updating, but nothing here attributes a relay-only socket to one.
+  - Wi-Fi private address (iOS Settings → Wi-Fi → the network's info button →
+    Private Wi-Fi Address): a rotating address presents a new MAC to the router
+    and discards the state the direct path was using. Check whether a flap lines
+    up with a network change or an address rotation.
+  - Router client steering: band/mesh steering and fast roaming (802.11k/v/r)
+    move the phone between radios and access points. Check the router's client
+    or steering log for the phone at the same timestamps, and whether 2.4 GHz and
+    5 GHz share one SSID.
+  - Read both logs together: `peerPath`/`peerRelay` on the Gateway side and the
+    phone's own `gateway.attempt` records decide whether the path or the phone
+    was down.
 
 ## Regression expectations and remaining limits
 

@@ -18,6 +18,9 @@ enum GatewayConnectionDiagnosticStage: String, Sendable {
 enum GatewayConnectionDiagnosticOutcome: String, Sendable {
     case success
     case failure
+    /// A liveness probe that missed its deadline but was answered by an inbound
+    /// frame. It leaves a debug record and never retires an epoch.
+    case excused
 }
 
 enum GatewayConnectionDiagnosticReason: String, Sendable {

@@ -305,11 +305,17 @@ struct GatewayInfo: Codable, Hashable, Sendable {
     let sourceRevision: String?
     let buildFingerprint: String?
     let runtimeEpoch: String?
+    /// The Gateway runtime's advertised grant projection revision: it changes
+    /// whenever the grants this Gateway stores change, including when the relay
+    /// disables one at runtime. A reconnect re-sends its registration while
+    /// this differs from the revision that registration was acknowledged with.
+    let pushRegistrationRevision: String?
 
     init(gatewayVersion: String, piVersion: String, protocolVersion: Int, minProtocolVersion: Int,
          machineId: String, machineGroupID: String? = nil, machineName: String, capabilities: [String],
          gatewayChannel: String = "stable", sourceRevision: String? = nil,
-         buildFingerprint: String? = nil, runtimeEpoch: String? = nil) {
+         buildFingerprint: String? = nil, runtimeEpoch: String? = nil,
+         pushRegistrationRevision: String? = nil) {
         precondition(gatewayChannel == "stable" || gatewayChannel == "dev", "Gateway channel must be stable or dev")
         self.gatewayVersion = gatewayVersion
         self.piVersion = piVersion
@@ -323,9 +329,10 @@ struct GatewayInfo: Codable, Hashable, Sendable {
         self.sourceRevision = sourceRevision
         self.buildFingerprint = buildFingerprint
         self.runtimeEpoch = runtimeEpoch
+        self.pushRegistrationRevision = pushRegistrationRevision
     }
 
-    private enum CodingKeys: String, CodingKey { case gatewayVersion, piVersion, protocolVersion, minProtocolVersion, machineId, machineGroupID, machineName, capabilities, gatewayChannel, sourceRevision, buildFingerprint, runtimeEpoch }
+    private enum CodingKeys: String, CodingKey { case gatewayVersion, piVersion, protocolVersion, minProtocolVersion, machineId, machineGroupID, machineName, capabilities, gatewayChannel, sourceRevision, buildFingerprint, runtimeEpoch, pushRegistrationRevision }
 
     init(from decoder: Decoder) throws {
         let values = try decoder.container(keyedBy: CodingKeys.self)
@@ -341,7 +348,8 @@ struct GatewayInfo: Codable, Hashable, Sendable {
             gatewayChannel: try GatewayChannelPolicy.admit(values.decode(String.self, forKey: .gatewayChannel)),
             sourceRevision: try values.decodeIfPresent(String.self, forKey: .sourceRevision),
             buildFingerprint: try values.decodeIfPresent(String.self, forKey: .buildFingerprint),
-            runtimeEpoch: try values.decodeIfPresent(String.self, forKey: .runtimeEpoch)
+            runtimeEpoch: try values.decodeIfPresent(String.self, forKey: .runtimeEpoch),
+            pushRegistrationRevision: try values.decodeIfPresent(String.self, forKey: .pushRegistrationRevision)
         )
     }
 }

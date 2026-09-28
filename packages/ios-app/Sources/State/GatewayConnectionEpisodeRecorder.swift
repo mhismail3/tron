@@ -21,10 +21,19 @@ enum GatewayEpisodeEnd: String, Sendable {
     case stopped
 }
 
+/// Which owner made an attempt. Both write to the one always-on log, and a
+/// profile switch moves a profile between them, so the profile ID alone cannot
+/// say which one an attempt came from.
+enum GatewayConnectionAttemptOwner: String, Sendable {
+    case selected
+    case pool
+}
+
 /// One finished connection attempt, in exactly the fields `gateway.attempt`
 /// records. `stageReached` is the furthest handshake stage it reached;
 /// `delayBeforeMs` is the wait between scheduling it and starting it.
 struct GatewayConnectionAttempt: Sendable {
+    let owner: GatewayConnectionAttemptOwner
     let profileID: String?
     let lifecycleGeneration: Int
     let connectionID: Int?
@@ -154,6 +163,7 @@ final class GatewayConnectionEpisodeRecorder {
             lifecycleGeneration: attempt.lifecycleGeneration,
             details: [
                 "profile=\(attempt.profileID ?? "unknown")",
+                "owner=\(attempt.owner.rawValue)",
                 "attemptId=\(attempt.attemptID)",
                 "retry=\(max(0, attempt.retry))",
                 "stageReached=\(attempt.stageReached)",

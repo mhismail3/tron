@@ -472,18 +472,39 @@ enum SessionCatalogLoadBounds {
 }
 
 enum SessionCatalogLoadResult: Sendable {
-    case loaded(rows: [SessionSummary], pageCount: Int, revision: Int, archivedCount: Int?)
+    case loaded(rows: [SessionSummary], pageCount: Int, revision: Int, projectionToken: String, archivedCount: Int?)
+    /// The Gateway confirmed the caller's retained projection token, so the
+    /// held rows are still exactly its projection. No rows crossed the wire
+    /// (G-7).
+    case unchanged(revision: Int)
     case revisionMoved(pageCount: Int, revision: Int?)
     case retired
     case invalid(code: String, reason: String, pageCount: Int, revision: Int?)
 }
 
 enum SessionCatalogLoader {
-    private struct Params: Encodable { let cursor: String?; let limit: Int; let scope: String }
+    private struct Params: Encodable {
+        let cursor: String?
+        let limit: Int
+        let scope: String
+        /// Only the first page of a traversal may name the caller's retained
+        /// projection token; a cursored page is already bound to the projection
+        /// its lease admitted.
+        let projectionToken: String?
+    }
     private struct Response: Decodable {
         let sessions: [SessionSummary]
         let nextCursor: String?
+        /// Structural catalog revision of this page's traversal. Diagnostic:
+        /// the projection token below is what identifies the whole projection.
         let listRevision: Int
+        /// The projection every row of this page belongs to. The Gateway owns
+        /// it, so a client that holds an equal token holds this exact projection
+        /// including every mutable row overlay (G-7).
+        let projectionToken: String
+        /// Present only when the Gateway answered a conditional first page
+        /// without rows.
+        let notModified: Bool?
         /// Present on the first `exclude` page and nowhere else. Archived rows
         /// are not part of this projection, so the count is the only way the
         /// dashboard learns how many sessions are hidden.
@@ -493,6 +514,7 @@ enum SessionCatalogLoader {
     static func load(
         client: GatewayClient,
         scope: String = "user",
+        sinceToken: String? = nil,
         admitsPublication: @MainActor () -> Bool
     ) async throws -> SessionCatalogLoadResult {
         for revisionAttempt in 0..<2 {
@@ -500,20 +522,26 @@ enum SessionCatalogLoader {
             var cursor: String?
             var seenCursors = Set<String>()
             var seenSessionIDs = Set<String>()
-            var expectedRevision: Int?
+            var expectedToken: String?
+            var latestRevision: Int?
             var archivedCount: Int?
             var pageCount = 0
             var revisionChanged = false
             repeat {
                 guard pageCount < SessionCatalogLoadBounds.maximumPages else {
-                    return .invalid(code: "limit_exceeded", reason: "page-budget", pageCount: pageCount, revision: expectedRevision)
+                    return .invalid(code: "limit_exceeded", reason: "page-budget", pageCount: pageCount, revision: latestRevision)
                 }
                 let requestedCursor = cursor
                 let response: Response
                 do {
                     response = try await client.request(
                         "session.list",
-                        Params(cursor: cursor, limit: SessionCatalogLoadBounds.pageSize, scope: scope),
+                        Params(
+                            cursor: cursor,
+                            limit: SessionCatalogLoadBounds.pageSize,
+                            scope: scope,
+                            projectionToken: cursor == nil ? sinceToken : nil
+                        ),
                         correlation: SessionListCorrelation.dashboardCatalog
                     )
                 } catch let failure as GatewayFailure
@@ -523,12 +551,26 @@ enum SessionCatalogLoader {
                     break
                 }
                 guard await admitsPublication() else { return .retired }
+                if response.notModified == true {
+                    // Only a first page that named a retained token can be
+                    // unchanged, and such a client already holds every row.
+                    guard cursor == nil, pageCount == 0, let sinceToken,
+                          response.projectionToken == sinceToken,
+                          response.sessions.isEmpty, response.nextCursor == nil, response.archivedCount == nil else {
+                        return .invalid(code: "invalid_response", reason: "session-list-not-modified", pageCount: pageCount, revision: response.listRevision)
+                    }
+                    return .unchanged(revision: response.listRevision)
+                }
                 pageCount += 1
-                if let expectedRevision, expectedRevision != response.listRevision {
+                guard !response.projectionToken.isEmpty else {
+                    return .invalid(code: "invalid_response", reason: "session-list-token", pageCount: pageCount, revision: response.listRevision)
+                }
+                if let expectedToken, expectedToken != response.projectionToken {
                     revisionChanged = true
                     break
                 }
-                expectedRevision = response.listRevision
+                expectedToken = response.projectionToken
+                latestRevision = response.listRevision
                 guard response.sessions.count <= SessionCatalogLoadBounds.pageSize,
                       all.count <= SessionCatalogLoadBounds.maximumRows - response.sessions.count,
                       response.archivedCount.map({ $0 >= 0 && $0 <= SessionCatalogLoadBounds.maximumRows }) ?? true,
@@ -537,21 +579,24 @@ enum SessionCatalogLoader {
                       // the dashboard, so the projection is rejected instead.
                       response.sessions.allSatisfy({ $0.archivedAt == nil }),
                       response.sessions.allSatisfy({ seenSessionIDs.insert($0.id).inserted }) else {
-                    return .invalid(code: "invalid_response", reason: "session-list-page", pageCount: pageCount, revision: response.listRevision)
+                    return .invalid(code: "invalid_response", reason: "session-list-page", pageCount: pageCount, revision: latestRevision)
                 }
                 if archivedCount == nil { archivedCount = response.archivedCount }
                 all.append(contentsOf: response.sessions)
                 cursor = response.nextCursor
                 if let cursor, !seenCursors.insert(cursor).inserted {
-                    return .invalid(code: "invalid_response", reason: "repeated-cursor", pageCount: pageCount, revision: response.listRevision)
+                    return .invalid(code: "invalid_response", reason: "repeated-cursor", pageCount: pageCount, revision: latestRevision)
                 }
             } while cursor != nil
 
             if revisionChanged {
                 if revisionAttempt == 0 { continue }
-                return .revisionMoved(pageCount: pageCount, revision: expectedRevision)
+                return .revisionMoved(pageCount: pageCount, revision: latestRevision)
             }
-            return .loaded(rows: all, pageCount: pageCount, revision: expectedRevision ?? 0, archivedCount: archivedCount)
+            guard let token = expectedToken else {
+                return .invalid(code: "invalid_response", reason: "session-list-empty", pageCount: pageCount, revision: latestRevision)
+            }
+            return .loaded(rows: all, pageCount: pageCount, revision: latestRevision ?? 0, projectionToken: token, archivedCount: archivedCount)
         }
         return .revisionMoved(pageCount: 0, revision: nil)
     }
@@ -858,14 +903,25 @@ struct SessionCatalogCoordinator: Equatable {
     private var liveUpdates: [String: SessionSummaryUpdate] = [:]
     private var liveSessionIDs: Set<String> = []
     private var loadGeneration = 0
+    /// The projection token this projection was published from. A conditional
+    /// list read may claim it on any connection: it carries the Gateway runtime
+    /// epoch, so a restarted Gateway whose revisions begin again at zero can
+    /// never match one, and every mutable row overlay (a live summary, a cold
+    /// row's attention projection, archive state) moves it too (G-7).
+    private(set) var projectionToken: String?
 
     mutating func beginLoad(key: SessionCatalogLoadKey? = nil) -> LoadAdmission {
         loadGeneration &+= 1
         return LoadAdmission(generation: loadGeneration, key: key)
     }
 
+    private mutating func dropProjectionToken() {
+        projectionToken = nil
+    }
+
     mutating func invalidateLoads() {
         loadGeneration &+= 1
+        dropProjectionToken()
     }
 
     mutating func markLoadUnavailable() {
@@ -897,6 +953,7 @@ struct SessionCatalogCoordinator: Equatable {
     mutating func publishAuthoritative(
         _ authoritative: [SessionSummary],
         admission: LoadAdmission,
+        projectionToken: String,
         archivedCount: Int? = nil
     ) -> Bool {
         guard admits(admission, key: admission.key) else { return false }
@@ -910,6 +967,17 @@ struct SessionCatalogCoordinator: Equatable {
         rebuildIndex()
         liveSessionIDs = ids
         self.archivedCount = archivedCount
+        self.projectionToken = projectionToken
+        freshness = .live
+        return true
+    }
+
+    /// Confirms a retained projection as still current for the token a
+    /// conditional read named. Nothing is republished by contract: the rows,
+    /// the visible archived count and the local overlays are unchanged, so chat
+    /// identity, scroll and selection stay exactly as they are.
+    mutating func confirmUnchanged(admission: LoadAdmission) -> Bool {
+        guard admits(admission, key: admission.key), projectionToken != nil else { return false }
         freshness = .live
         return true
     }
@@ -1005,7 +1073,7 @@ struct SessionCatalogCoordinator: Equatable {
     }
 
     mutating func markDisconnected() {
-        invalidateLoads()
+        loadGeneration &+= 1
         liveUpdates.removeAll()
         liveSessionIDs.removeAll()
         freshness = .stale

@@ -74,7 +74,7 @@ final class ProfileDashboardRun: ProfileScenarioRun {
         let run = ProfileDashboardRun(fixture: fixture, activeSessions: activeSessions, interval: interval, appendsMessages: appendsMessages)
         do {
             let listed = try JSONValue.encode(run.sessions)
-            fixture.handle("session.list") { _ in .object(["sessions": listed, "listRevision": .number(1)]) }
+            fixture.handle("session.list") { _ in .object(["sessions": listed, "listRevision": .number(1), "projectionToken": .string("epoch-1:1")]) }
             try await fixture.connect()
             let outcome = await fixture.model.refreshSessions()
             guard outcome == .published else {

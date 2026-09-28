@@ -213,7 +213,7 @@ async function fixture(options: {
     const frames: any[] = [];
     socket.on("message", (raw) => frames.push(JSON.parse(raw.toString())));
     await until(() => socket.readyState === WebSocket.OPEN, "socket open");
-    socket.send(JSON.stringify({ type: "hello", protocolVersion: 5 }));
+    socket.send(JSON.stringify({ type: "hello", protocolVersion: 6 }));
     await until(() => frames.some((frame) => frame.type === "hello"), "hello");
     const send = (id: string, method: string, params: object) => socket.send(JSON.stringify({ type: "request", id, method, params }));
     return {
@@ -314,7 +314,10 @@ const list = async (client: Client, archived: "exclude" | "only", extra: Record<
   const response = await client.request(`list-${archived}-${Math.random().toString(36).slice(2, 8)}`, "session.list", { scope: "user", archived, ...extra });
   expect(response.ok, JSON.stringify(response)).toBe(true);
   return response.result as {
-    sessions: Array<{ id: string; archivedAt?: string; phase?: string; updatedAt?: string }>;
+    sessions: Array<{ id: string; archivedAt?: string; phase?: string; updatedAt?: string; isUnread?: boolean; attentionRevision?: number }>;
+    listRevision: number;
+    projectionToken: string;
+    notModified?: boolean;
     archivedCount?: number;
     nextCursor?: string;
   };
@@ -514,6 +517,123 @@ describe("session archive over the real Gateway", () => {
     return {
       archivedAt: first.result.archivedAt,
       archivedRows: (await list(client, "only")).sessions.length,
+    };
+  });
+
+  archiveCase("answers an unchanged projection token without rows and re-reads after the projection moves", async () => {
+    const f = await fixture();
+    const client = await f.connect();
+    const phone = await f.connect();
+    const session = await f.rawSession("revision", "revision-session");
+    const other = await f.rawSession("revision-other", "revision-other-session");
+    const third = await f.rawSession("revision-third", "revision-third-session");
+    const first = await list(client, "exclude");
+    expect(first.sessions.map((row) => row.id)).toEqual(expect.arrayContaining([session.id, other.id, third.id]));
+    const token = first.projectionToken;
+    expect(token).toContain(":");
+
+    // An equal token is a complete revalidation of the client's rows, so the
+    // answer carries neither rows nor a count.
+    const unchanged = await list(client, "exclude", { projectionToken: token });
+    expect(unchanged).toMatchObject({ notModified: true, projectionToken: token, sessions: [] });
+    expect(unchanged.listRevision).toBe(first.listRevision);
+    expect(unchanged.nextCursor).toBeUndefined();
+    expect(unchanged.archivedCount).toBeUndefined();
+
+    // A cold row's attention moves `catalogProjectionGeneration` only: the
+    // structural revision is unchanged, so a token that covered membership
+    // alone would falsely revalidate rows this client no longer holds.
+    const attention = await phone.request(`attention-${session.id}`, "session.attention.set", {
+      commandId: "revision-attention-command", sessionId: session.id, unread: true,
+    });
+    expect(attention.ok, JSON.stringify(attention)).toBe(true);
+    const afterAttention = await list(client, "exclude", { projectionToken: token });
+    expect(afterAttention.notModified).toBeUndefined();
+    expect(afterAttention.listRevision).toBe(first.listRevision);
+    expect(afterAttention.projectionToken).not.toBe(token);
+    expect(afterAttention.sessions.find((row) => row.id === session.id)?.isUnread).toBe(true);
+
+    // A client holding a superseded token must still receive the rows.
+    const attentionToken = afterAttention.projectionToken;
+    await openSession(client, session.id);
+    await archiveSession(client, session.id, "revision-archive-command");
+    const afterArchive = await list(client, "exclude", { projectionToken: attentionToken });
+    expect(afterArchive.notModified).toBeUndefined();
+    expect(afterArchive.sessions.map((row) => row.id)).not.toContain(session.id);
+    const archivedToken = afterArchive.projectionToken;
+    const revalidated = await list(client, "exclude", { projectionToken: archivedToken });
+    expect(revalidated).toMatchObject({ notModified: true, projectionToken: archivedToken });
+
+    // The conditional answer belongs to the first page only: a cursored page is
+    // already bound to the projection its lease admitted.
+    const paged = await list(client, "exclude", { limit: 1 });
+    expect(paged.nextCursor).toBeDefined();
+    const continued = await client.request("revision-cursor", "session.list", {
+      scope: "user", archived: "exclude", limit: 1, cursor: paged.nextCursor, projectionToken: paged.projectionToken,
+    });
+    expect(continued.ok, JSON.stringify(continued)).toBe(true);
+    const continuedResult = continued.result as { sessions: unknown[]; notModified?: boolean };
+    expect(continuedResult.notModified).toBeUndefined();
+    expect(continuedResult.sessions).toHaveLength(1);
+
+    // An empty token is a client error, never a silent full read.
+    const malformed = await client.request("revision-malformed", "session.list", {
+      scope: "user", archived: "exclude", projectionToken: "",
+    });
+    expect(malformed).toMatchObject({ ok: false, error: { code: "invalid_request" } });
+
+    // A restart starts a new runtime epoch while every revision begins again at
+    // zero, so a token retained across it can never revalidate those rows.
+    await f.restart();
+    const replacement = await f.connect();
+    const restarted = await list(replacement, "exclude", { projectionToken: archivedToken });
+    expect(restarted.notModified).toBeUndefined();
+    expect(restarted.sessions.length).toBeGreaterThan(0);
+    return {
+      token,
+      attentionToken,
+      archivedToken,
+      afterAttentionRevision: afterAttention.listRevision,
+      firstRevision: first.listRevision,
+      restartedToken: restarted.projectionToken,
+      continuedRowCount: continuedResult.sessions.length,
+      malformedTokenCode: (malformed as { error: { code: string } }).error.code,
+    };
+  });
+
+  archiveCase("moves the projection token when an acknowledged recovery clears a cold row's marker", async () => {
+    const f = await fixture();
+    const session = f.coldSession("recovered-automation");
+    // A recovered automation run's marker is restored at startup, and a row
+    // with no live summary and no slot reads its phase from that set alone.
+    const { RunMarkerStore } = await import("../sessions/run-markers.js");
+    const operationId = "automation:10000000-0000-4000-8000-0000000000a9";
+    await new RunMarkerStore(f.root).mark(session.id, operationId);
+    const restarted = await f.restart();
+    const client = await f.connect();
+    const first = await list(client, "exclude");
+    const row = first.sessions.find((candidate) => candidate.id === session.id);
+    expect(row?.phase).toBe("interrupted");
+    const token = first.projectionToken;
+    expect((await list(client, "exclude", { projectionToken: token })).notModified).toBe(true);
+
+    // The user acknowledges the recovery. Nothing structural moves: the row
+    // changes phase, which only a token covering the whole row overlay can
+    // carry, so an owner naming the old token must be answered with rows.
+    const listChangesBefore = f.listChanged.mock.calls.length;
+    await restarted.registry.clearAutomationMarker(session.id, operationId);
+    expect(f.listChanged.mock.calls.length).toBeGreaterThan(listChangesBefore);
+    const after = await list(client, "exclude", { projectionToken: token });
+    expect(after.notModified).toBeUndefined();
+    expect(after.sessions.find((candidate) => candidate.id === session.id)?.phase).toBe("idle");
+    expect(after.projectionToken).not.toBe(token);
+    // The row it now serves revalidates in turn.
+    expect((await list(client, "exclude", { projectionToken: after.projectionToken })).notModified).toBe(true);
+    return {
+      phaseBefore: row?.phase,
+      phaseAfter: after.sessions.find((candidate) => candidate.id === session.id)?.phase,
+      tokenMoved: after.projectionToken !== token,
+      listChanges: f.listChanged.mock.calls.length - listChangesBefore,
     };
   });
 

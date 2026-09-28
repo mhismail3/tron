@@ -198,6 +198,56 @@ function retainRevocationAuthority(document: NotificationDocument, now: number):
   return document;
 }
 
+export interface PushRegistrationInput {
+  deviceId: string;
+  installationId: string;
+  grantId: string;
+  secret: string;
+  previewsEnabled: boolean;
+  relayOrigin: string;
+  notifyWhenAskPresented?: boolean;
+}
+
+/** True when `previous` is exactly the grant this registration describes and the
+ * retention pass left the document byte-identical (`before`). Both the durable
+ * upsert and the receipt-free pre-check answer an identical registration with
+ * the stored status, so they share this one predicate. */
+function isUnchangedRegistration(
+  document: NotificationDocument,
+  before: string,
+  previous: PushGrant | undefined,
+  input: PushRegistrationInput,
+): boolean {
+  return previous !== undefined
+    && previous.grantId === input.grantId
+    && previous.installationId === input.installationId
+    && previous.secret === input.secret
+    && previous.relayOrigin === input.relayOrigin
+    && previous.previewsEnabled === input.previewsEnabled
+    && previous.active && previous.disabledReason === undefined
+    && (input.notifyWhenAskPresented === undefined || document.policy.notifyWhenAskPresented === input.notifyWhenAskPresented)
+    && before === JSON.stringify(document);
+}
+
+/** The grant projection a reconnecting phone compares against the registration
+ * it acknowledged: every grant's identity, activity, disabled reason and relay
+ * origin, plus the origin the grants are valid for. It is derived from the
+ * durable document alone, so it is stable across a Gateway restart that left
+ * the document unchanged, and any runtime change to a grant (including the
+ * relay disabling one) changes it (G-7). */
+function registrationRevision(grants: readonly PushGrant[], relayOrigin: string | undefined): string {
+  return createHash("sha256")
+    .update([
+      relayOrigin ?? "",
+      ...grants
+        .map((grant) => [grant.deviceId, grant.installationId, grant.grantId,
+          grant.active ? "active" : grant.disabledReason ?? "inactive", grant.relayOrigin ?? ""].join("\0"))
+        .sort(),
+    ].join("\n"))
+    .digest("hex")
+    .slice(0, 32);
+}
+
 /** Gateway-owned push authority. Extension code receives only enqueue(), never credentials or transport. */
 export class NotificationService {
   private timer: NodeJS.Timeout | undefined;
@@ -206,6 +256,7 @@ export class NotificationService {
   private pendingInboxChanged: NotificationInboxChanged | undefined;
   private readonly pendingInboxReadIds = new Set<string>();
   private inboxReadFlush: Promise<void> | undefined;
+  private advertisedGrantRevision = registrationRevision([], undefined);
   constructor(
     private readonly store: NotificationGrantStore,
     private readonly relay: PushRelayClient,
@@ -218,11 +269,24 @@ export class NotificationService {
   async initialize(): Promise<void> {
     await this.store.initialize();
     const now = this.now();
-    await this.store.update((document) => retainRevocationAuthority(prune(document, now), now));
+    await this.update((document) => retainRevocationAuthority(prune(document, now), now));
     this.timer = setInterval(() => void this.drain(), 2_000);
     this.timer.unref();
     void this.drain();
   }
+
+  /** Every notification-document write refreshes the advertised grant revision,
+   * which is what `hello`/`system.info` repeat so a reconnecting phone can tell
+   * whether the registration it holds still describes what this Gateway stores. */
+  private async update(transform: (document: NotificationDocument) => NotificationDocument | undefined): Promise<NotificationDocument> {
+    const document = await this.store.update(transform);
+    this.advertisedGrantRevision = registrationRevision(document.grants, this.relay.relayOrigin);
+    return document;
+  }
+
+  /** Advertised grant revision; it changes exactly when this Gateway's stored
+   * grants change. Read synchronously by the `system.info` projection. */
+  get registrationRevision(): string { return this.advertisedGrantRevision; }
 
   dispose(): void {
     if (this.timer) clearInterval(this.timer);
@@ -248,9 +312,7 @@ export class NotificationService {
     this.inboxChangedTimer.unref();
   }
 
-  async upsertGrant(input: {
-    deviceId: string; installationId: string; grantId: string; secret: string; previewsEnabled: boolean; relayOrigin: string; notifyWhenAskPresented?: boolean;
-  }): Promise<NotificationStatus> {
+  async upsertGrant(input: PushRegistrationInput): Promise<NotificationStatus> {
     if (![input.deviceId, input.installationId, input.grantId].every(isID) || !isEndpointSecret(input.secret)) {
       throw new GatewayError("invalid_request", "Push registration credentials are malformed");
     }
@@ -259,7 +321,15 @@ export class NotificationService {
     }
     const now = this.now();
     let rotated = false;
-    await this.store.update((document) => {
+    await this.update((document) => {
+      // The phone re-sends its registration whenever it reconnects. When the
+      // request describes the grant this document already holds, the answer is
+      // the same status and the write would be byte-identical: return
+      // undefined so neither the grant nor the receipt/revocation overlays are
+      // rewritten (G-10's durable-write audit charged this path two fsyncs per
+      // registration). The retention pass above still runs, so the fingerprint
+      // compared below is also what proves it expired nothing.
+      const before = JSON.stringify(document);
       retainRevocationAuthority(prune(document, now), now);
       if (document.revocations.some((item) => item.grantId === input.grantId)) {
         throw new GatewayError("conflict", "Push grant is awaiting revocation and must rotate before registration");
@@ -267,6 +337,9 @@ export class NotificationService {
       const anotherDevice = document.grants.find((grant) => grant.grantId === input.grantId && grant.deviceId !== input.deviceId);
       if (anotherDevice) throw new GatewayError("conflict", "Push grant is already bound to another device");
       const previous = document.grants.find((grant) => grant.deviceId === input.deviceId);
+      if (isUnchangedRegistration(document, before, previous, input)) {
+        return undefined;
+      }
       if (previous && previous.grantId === input.grantId
         && (previous.relayOrigin !== input.relayOrigin
           || (!previous.active && previous.disabledReason === "invalid_token"))) {
@@ -313,11 +386,38 @@ export class NotificationService {
     return this.status(input.deviceId);
   }
 
+  /** Answers whether this registration already describes the stored grant
+   * without writing anything, so the RPC owner can answer an identical
+   * registration without opening a command receipt (G-7 Do item 2). The read
+   * runs outside the device's identity lane, so it is not ordered with that
+   * device's lane operations: a remove or revoke racing an identical upsert is
+   * read as whichever the snapshot happened to hold. It is read-only and can
+   * never bring a grant back — it only decides to skip the write — and a relay
+   * outcome that disables the grant in between is still visible in the status
+   * the caller reads after the decision. */
+  async registrationIsCurrent(input: PushRegistrationInput): Promise<boolean> {
+    if (![input.deviceId, input.installationId, input.grantId].every(isID) || !isEndpointSecret(input.secret)) {
+      throw new GatewayError("invalid_request", "Push registration credentials are malformed");
+    }
+    if (!this.relay.relayOrigin || input.relayOrigin !== this.relay.relayOrigin) return false;
+    const document = await this.store.snapshot();
+    const before = JSON.stringify(document);
+    retainRevocationAuthority(prune(document, this.now()), this.now());
+    if (document.revocations.some((item) => item.grantId === input.grantId)) return false;
+    if (document.grants.some((grant) => grant.grantId === input.grantId && grant.deviceId !== input.deviceId)) return false;
+    return isUnchangedRegistration(
+      document,
+      before,
+      document.grants.find((grant) => grant.deviceId === input.deviceId),
+      input,
+    );
+  }
+
   async removeDevice(deviceId: string): Promise<boolean> {
     let removed = false;
     let inboxDidChange = false;
     const now = this.now();
-    const document = await this.store.update((current) => {
+    const document = await this.update((current) => {
       prune(current, now);
       const grants = current.grants.filter((grant) => grant.deviceId === deviceId);
       removed = grants.length > 0;
@@ -381,7 +481,7 @@ export class NotificationService {
     const requested = input.limit ?? 50;
     const limit = Number.isFinite(requested) ? Math.min(50, Math.max(1, Math.floor(requested))) : 50;
     let expiryChanged = false;
-    const document = await this.store.update((current) => {
+    const document = await this.update((current) => {
       const queuedBefore = current.inbox.filter((entry) => entry.outcome === "queued").length;
       prune(current, now);
       // Expiry is the only terminal transition prune applies to an inbox row,
@@ -416,7 +516,7 @@ export class NotificationService {
     const now = this.now();
     let changed = false;
     let resolvedId: string | undefined;
-    const document = await this.store.update((current) => {
+    const document = await this.update((current) => {
       prune(current, now);
       const entry = current.inbox.find((candidate) => input.id !== undefined
         ? candidate.id === input.id
@@ -441,7 +541,7 @@ export class NotificationService {
     const cut = parseInboxCursor(input.through);
     const now = this.now();
     let changed = 0;
-    const document = await this.store.update((current) => {
+    const document = await this.update((current) => {
       prune(current, now);
       for (const entry of current.inbox) {
         if (entry.readAt !== undefined) continue;
@@ -463,7 +563,7 @@ export class NotificationService {
       throw new GatewayError("invalid_request", "Notification session identity is malformed");
     }
     let matched = false;
-    const document = await this.store.update((current) => {
+    const document = await this.update((current) => {
       for (const entry of current.inbox) {
         if (entry.sessionId !== previousId) continue;
         entry.sessionId = nextId;
@@ -497,7 +597,7 @@ export class NotificationService {
   private async persistInboxReads(sessionId?: string): Promise<void> {
     const ids = new Set<string>();
     let changed = false;
-    const document = await this.store.update((current) => {
+    const document = await this.update((current) => {
       const unread = current.inbox.filter((entry) => entry.readAt === undefined);
       const retained = new Set(unread.map((entry) => entry.id));
       // Capture and mutation share the admission/settlement mutex. Only IDs
@@ -531,7 +631,7 @@ export class NotificationService {
     const now = this.now();
     const dedupeKey = notificationHash(`${input.kind}\0${input.sessionId}\0${input.sourceId}`);
     const sessionKey = notificationHash(`session\0${input.sessionId}`);
-    await this.store.update((current) => {
+    await this.update((current) => {
       prune(current, now);
       if (current.receipts.some((receipt) => receipt.dedupeKey === dedupeKey)
         || current.pending.some((intent) => intent.dedupeKey === dedupeKey)) return undefined;
@@ -568,7 +668,7 @@ export class NotificationService {
     const dedupeKey = notificationHash(`${input.kind}\0${input.sessionId}\0${input.sourceId}`);
     const sessionKey = notificationHash(`session\0${input.sessionId}`);
     let result: NotificationAdmissionStatus = "queued";
-    const document = await this.store.update((current) => {
+    const document = await this.update((current) => {
       retainRevocationAuthority(prune(current, now), now);
       // The outer policy read is only an early suppression optimization. The
       // admission transaction must recheck the canonical policy immediately
@@ -724,7 +824,7 @@ export class NotificationService {
     if (outcome === "invalid_grant") outcome = "invalid_token";
     const now = this.now();
     let inboxDidChange = false;
-    const document = await this.store.update((current) => {
+    const document = await this.update((current) => {
       prune(current, now);
       const intent = current.pending.find((candidate) => candidate.id === intentId);
       const target = intent?.targets.find((candidate) => candidate.grantId === grantId);
@@ -764,7 +864,7 @@ export class NotificationService {
     for (const item of document.revocations.filter((candidate) => Date.parse(candidate.nextAttemptAt) <= now).slice(0, 1)) {
       let revoked = false;
       try { revoked = await this.relay.revoke(item.grantId, item.secret, item.requestId) === "revoked"; } catch { /* retained */ }
-      await this.store.update((current) => {
+      await this.update((current) => {
         const candidate = current.revocations.find((entry) => entry.grantId === item.grantId);
         if (!candidate) return undefined;
         if (revoked) current.revocations = current.revocations.filter((entry) => entry.grantId !== item.grantId);

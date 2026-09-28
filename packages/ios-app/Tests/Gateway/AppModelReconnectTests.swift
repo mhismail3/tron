@@ -143,7 +143,8 @@ struct AppModelReconnectTests {
             let sessions = try JSONValue.encode([startupSummary("loaded")])
             let reply = Task {
                 await socket.enqueue(successResponse(id: catalogRequest.id, result: .object([
-                    "sessions": sessions, "nextCursor": .null, "listRevision": .number(1)
+                    "sessions": sessions, "nextCursor": .null, "listRevision": .number(1),
+                    "projectionToken": .string("epoch-1:1")
                 ])))
             }
             #expect(await fixture.model.refreshSessions() == .published)
@@ -153,6 +154,181 @@ struct AppModelReconnectTests {
             #expect(fixture.model.visibleNotices.isEmpty)
             #expect(fixture.socketFactory.requests.count == 1)
         }
+    }
+
+    @Test("a catalog read revalidates its retained projection token and a reconnect resumes")
+    func conditionalCatalogReadRevalidatesRetainedRevision() async throws {
+        try await withFixture(
+            sockets: [ScriptedGatewaySocket(), ScriptedGatewaySocket()],
+            clock: ManualClock(), units: SequenceReconnectUnits([0])
+        ) { fixture in
+            let model = fixture.model
+            let first = fixture.sockets[0]
+            let replacement = fixture.sockets[1]
+            let profile = try #require(model.profiles.selected)
+            await first.enqueue(helloFrame())
+            try await model.connectHostedGateway(profile: profile, token: "token")
+
+            // First authoritative read: one row at revision 4, with no token
+            // named because nothing has been retained yet.
+            let initial = Task { await model.refreshSessions() }
+            let catalog = try await firstCatalogRequest(first, from: 1)
+            #expect(catalog.projectionToken == nil)
+            await first.enqueue(successResponse(id: catalog.id, result: .object([
+                "sessions": try JSONValue.encode([startupSummary("loaded")]),
+                "nextCursor": .null,
+                "listRevision": .number(4),
+                "projectionToken": .string("epoch-one:4:0:user:exclude:0"),
+            ])))
+            #expect(await initial.value == .published)
+            #expect(model.sessions.map(\.id) == ["loaded"])
+
+            // The same connection asks again, naming the token it holds; the
+            // Gateway confirms it without rows and nothing is republished.
+            let revalidation = Task { await model.refreshSessions() }
+            let second = try await firstCatalogRequest(first, from: 2)
+            #expect(second.projectionToken == "epoch-one:4:0:user:exclude:0")
+            await first.enqueue(successResponse(id: second.id, result: .object([
+                "sessions": .array([]),
+                "listRevision": .number(4),
+                "projectionToken": .string("epoch-one:4:0:user:exclude:0"),
+                "notModified": .bool(true),
+            ])))
+            #expect(await revalidation.value == .published)
+            #expect(model.sessions.map(\.id) == ["loaded"])
+
+            // A replacement connection names the retained token too: the token
+            // carries the Gateway runtime epoch and every mutable row overlay,
+            // so it can only be confirmed when the same Gateway still holds
+            // this exact projection.
+            await model.handle(GatewayEvent(type: "event", topic: "system.stopping", sessionId: nil, payload: .object([:])))
+            try await replacement.waitUntilSent(count: 1)
+            await replacement.enqueue(helloFrame(runtimeEpoch: "debug-epoch-2"))
+            let reconnected = try await firstCatalogRequest(replacement, from: 1)
+            #expect(reconnected.projectionToken == "epoch-one:4:0:user:exclude:0")
+            // The projection moved while away, so the Gateway answers rows with
+            // the replacement token; the reconnect converges on them.
+            await replacement.enqueue(successResponse(id: reconnected.id, result: .object([
+                "sessions": try JSONValue.encode([
+                    startupSummary("loaded"),
+                    startupSummary("added-while-away"),
+                ]),
+                "nextCursor": .null,
+                "listRevision": .number(5),
+                "projectionToken": .string("epoch-one:5:2:user:exclude:1"),
+            ])))
+            for _ in 0..<200 where model.sessions.count != 2 || model.sessionCatalogIsLoading {
+                try await Task.sleep(for: .milliseconds(10))
+            }
+            #expect(model.sessions.map(\.id) == ["loaded", "added-while-away"])
+
+            // The reconnected read retains the replacement token, so the next
+            // revalidation is conditional again.
+            let settled = await replacement.sentFrames().count
+            let adopted = Task { await model.refreshSessions() }
+            let adoptedRequest = try await firstCatalogRequest(replacement, from: settled)
+            #expect(adoptedRequest.projectionToken == "epoch-one:5:2:user:exclude:1")
+            await replacement.enqueue(successResponse(id: adoptedRequest.id, result: .object([
+                "sessions": .array([]),
+                "listRevision": .number(5),
+                "projectionToken": .string("epoch-one:5:2:user:exclude:1"),
+                "notModified": .bool(true),
+            ])))
+            #expect(await adopted.value == .published)
+            #expect(model.sessions.map(\.id) == ["loaded", "added-while-away"])
+            await model.teardown()
+        }
+    }
+
+    @Test("a reconnect whose catalog read is unchanged still rebuilds the dashboard's row projection")
+    func unchangedReconnectRebuildsRowProjection() async throws {
+        try await withFixture(
+            sockets: [ScriptedGatewaySocket(), ScriptedGatewaySocket()],
+            clock: ManualClock(), units: SequenceReconnectUnits([0])
+        ) { fixture in
+            let model = fixture.model
+            let first = fixture.sockets[0]
+            let replacement = fixture.sockets[1]
+            let profile = try #require(model.profiles.selected)
+            await first.enqueue(helloFrame())
+            try await model.connectHostedGateway(profile: profile, token: "token")
+
+            let initial = Task { await model.refreshSessions() }
+            let catalog = try await firstCatalogRequest(first, from: 1)
+            await first.enqueue(successResponse(id: catalog.id, result: .object([
+                "sessions": try JSONValue.encode([waitingSummary("waiting")]),
+                "nextCursor": .null,
+                "listRevision": .number(4),
+                "projectionToken": .string("epoch-one:4:0:user:exclude:0"),
+            ])))
+            #expect(await initial.value == .published)
+            #expect(model.dashboardActivity(for: "waiting") == .waitingForUser)
+
+            // The connection ends. The retained token survives it, the
+            // projection loses liveness, and the dashboard's snapshot is read
+            // in this state: a row that is not idle reads "resuming".
+            await model.handle(GatewayEvent(
+                type: "event", topic: "system.stopping", sessionId: nil, payload: .object([:])
+            ))
+            #expect(model.dashboardActivity(for: "waiting") == .resuming)
+            let presentationBefore = model.dashboardPresentationRevision
+            let archiveBefore = model.archiveProjectionRevision
+
+            // The replacement connection names the retained token and the
+            // Gateway answers unchanged, without rows. The rows are untouched,
+            // but the two projections the view watches must move, because the
+            // snapshot it holds was taken while the catalog was retired.
+            try await replacement.waitUntilSent(count: 1)
+            await replacement.enqueue(helloFrame())
+            let reconnected = try await firstCatalogRequest(replacement, from: 1)
+            #expect(reconnected.projectionToken == "epoch-one:4:0:user:exclude:0")
+            await replacement.enqueue(successResponse(id: reconnected.id, result: .object([
+                "sessions": .array([]),
+                "listRevision": .number(4),
+                "projectionToken": .string("epoch-one:4:0:user:exclude:0"),
+                "notModified": .bool(true),
+            ])))
+            // The response is consumed asynchronously, and the reconnect's own
+            // presentation restoration moves the dashboard revision for its own
+            // reason, so the archive projection — which only catalog authority
+            // moves — is the signal that the answer landed.
+            for _ in 0..<200 where model.archiveProjectionRevision == archiveBefore {
+                try await Task.sleep(for: .milliseconds(10))
+            }
+            #expect(model.sessions.map(\.id) == ["waiting"])
+            #expect(model.dashboardPresentationRevision > presentationBefore)
+            #expect(model.archiveProjectionRevision > archiveBefore)
+            #expect(model.dashboardActivity(for: "waiting") == .waitingForUser)
+            await model.teardown()
+        }
+    }
+
+    /// Answers every non-catalog request until one `session.list` arrives, then
+    /// returns it. Startup reads are independent owners, so the traversal's
+    /// position in the frame stream is the only stable ordering.
+    private func firstCatalogRequest(
+        _ socket: ScriptedGatewaySocket,
+        from start: Int,
+        within attempts: Int = 40
+    ) async throws -> (id: String, projectionToken: String?) {
+        var index = start
+        for _ in 0..<attempts {
+            try await socket.waitUntilSent(count: index + 1)
+            let value = try JSONDecoder.gateway.decode(JSONValue.self, from: await socket.sentFrames()[index])
+            index += 1
+            let object = try #require(value.objectValue)
+            let method = object["method"]?.stringValue
+            let id = object["id"]?.stringValue
+            guard let id else { continue }
+            if method == "session.list" {
+                return (id: id, projectionToken: object["params"]?.objectValue?["projectionToken"]?.stringValue)
+            }
+            // Independent optional owners (providers, settings, devices,
+            // inbox) must not stall the traversal under test.
+            await socket.enqueue(successResponse(id: id, result: .object([:])))
+        }
+        Issue.record("No session.list request arrived")
+        return (id: "missing", projectionToken: nil)
     }
 
     @Test("replacement reconnect restores mounted authority before an optional catalog page responds",
@@ -206,7 +382,8 @@ struct AppModelReconnectTests {
                     if holdContinuation && catalogPages == 1 {
                         await replacement.enqueue(successResponse(id: request.id, result: .object([
                             "sessions": try JSONValue.encode([startupSummary(snapshot.sessionId)]),
-                            "listRevision": .number(1), "nextCursor": .string("next-page"),
+                            "listRevision": .number(1), "projectionToken": .string("epoch-1:1:0:user:exclude:0"),
+                            "nextCursor": .string("next-page"),
                         ])))
                     } else {
                         catalogID = request.id // Intentionally keep this page pending.
@@ -256,6 +433,7 @@ struct AppModelReconnectTests {
             let reply = Task {
                 await replacement.enqueue(successResponse(id: pendingCatalog, result: .object([
                     "sessions": try JSONValue.encode(remaining), "listRevision": .number(1),
+                    "projectionToken": .string("epoch-1:1:0:user:exclude:0"),
                 ])))
             }
             #expect(await model.refreshSessions() == .published)
@@ -1210,7 +1388,8 @@ struct AppModelReconnectTests {
             let result: JSONValue
             switch request.method {
             case "session.list":
-                result = .object(["sessions": .array([]), "nextCursor": .null, "listRevision": .number(2)])
+                result = .object(["sessions": .array([]), "nextCursor": .null, "listRevision": .number(2),
+                                  "projectionToken": .string("epoch-1:2:0:user:exclude:0")])
             case "provider.list": result = .object(["providers": .array([])])
             case "model.list": result = .object(["models": .array([]), "nextCursor": .null])
             case "settings.get": result = .object(["effective": .object([:])])
@@ -1294,6 +1473,17 @@ struct AppModelReconnectTests {
         )
     }
 
+    /// A row that is working and waiting for the user. Its phase is not idle,
+    /// so a retired projection reports it as "resuming" rather than "idle".
+    private func waitingSummary(_ id: String) -> SessionSummary {
+        SessionSummary(
+            id: id, name: id, cwd: "/workspace", parentSessionId: nil,
+            createdAt: "2026-01-01T00:00:00Z", updatedAt: "2026-01-01T00:00:01Z",
+            messageCount: 0, firstMessage: id, phase: .running, waitingForUser: true,
+            summaryRevision: 1
+        )
+    }
+
     private func helloFrame(
         runtimeEpoch: String? = nil,
         machineID: String = "machine",
@@ -1303,8 +1493,8 @@ struct AppModelReconnectTests {
             "type": .string("hello"),
             "gatewayVersion": .string("1.0.0"),
             "piVersion": .string("1.0.0"),
-            "protocolVersion": .number(5),
-            "minProtocolVersion": .number(5),
+            "protocolVersion": .number(6),
+            "minProtocolVersion": .number(6),
             "machineId": .string(machineID),
             "machineName": .string("Mac"),
             "capabilities": .array([.string("sessions.v1")]),
