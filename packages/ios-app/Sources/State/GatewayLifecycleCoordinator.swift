@@ -426,7 +426,13 @@ final class GatewayLifecycleCoordinator {
             previousConnectionState: previousConnectionState
         )
         defer {
-            if pairingAttempt?.id == attemptID { pairingAttempt = nil }
+            if pairingAttempt?.id == attemptID {
+                pairingAttempt = nil
+                // A pairing that ended without a socket (its connect failed on a
+                // known-down route) parks the stale hint like the other attempt
+                // owners do: foreground and disconnected is still on a timeline.
+                parkUnsatisfiedPathWhenIdle()
+            }
         }
         do {
             try await withTaskCancellationHandler {
@@ -954,6 +960,7 @@ final class GatewayLifecycleCoordinator {
         await task.value
         guard connectionAdmissionGeneration == admissionGeneration else { return }
         connectionAdmissionTask = nil
+        parkUnsatisfiedPathWhenIdle()
         guard admitsGeneration(admission.generation) else { return }
         hasResolvedLaunchState = true
     }
@@ -1173,6 +1180,7 @@ final class GatewayLifecycleCoordinator {
             if self.phase.generation == generation {
                 self.hasResolvedLaunchState = true
                 self.committedConnectionTask = nil
+                self.parkUnsatisfiedPathWhenIdle()
             }
         }
     }
@@ -1193,12 +1201,21 @@ final class GatewayLifecycleCoordinator {
     /// recovery scheduled instead of silent, so a missed callback cannot leave
     /// the phone quiet in the foreground (C-1), and the stall watchdog reads a
     /// parked episode as progressing rather than stalled. Parking owns the state
-    /// it publishes: a park that is refused (a stop the user must clear, or a
-    /// bound already armed) must not leave a recovery status behind that no
-    /// user action can leave.
+    /// it publishes: a park that is refused (a stop the user must clear, an
+    /// attempt already owns the timeline, or a bound already armed) must not
+    /// leave a recovery status behind that no user action can leave.
     private func parkRecovery(reason: String) {
         guard phase.admitsWork, !sceneIsBackgrounded, !nonRetryableRecoveryFailure,
               profiles.selected != nil, parkedRetryTask == nil else { return }
+        // An in-flight initial connect, committed replacement attempt or pairing
+        // owns the attempt: parking would publish `.reconnecting` over its
+        // `.connecting` and arm a bound that outlives its result (`connect`
+        // returns silently on a state mismatch, so a pairing would report
+        // success with no socket). Its own retryable-failure branch schedules
+        // recovery; whoever releases the attempt re-parks a stale unsatisfied
+        // hint (`parkUnsatisfiedPathWhenIdle`).
+        guard connectionAdmissionTask == nil, committedConnectionTask == nil,
+              pairingAttempt == nil else { return }
         // `.offline`, `.unpaired` and `.unauthorized` are stops with their own
         // surface (the first is the only one that offers Retry); a lost socket
         // whose status still reads connected is stale bookkeeping and is parked.
@@ -1233,6 +1250,18 @@ final class GatewayLifecycleCoordinator {
         parkedRetryGeneration &+= 1
         parkedRetryTask?.cancel()
         parkedRetryTask = nil
+    }
+
+    /// A connect that owns the attempt cannot park itself (`parkRecovery`
+    /// refuses an in-flight admission), and its retryable-failure branch runs
+    /// while it still owns it. Whoever releases the task parks a stale
+    /// unsatisfied hint here, so a route the initial connect could not reach
+    /// still has its bound instead of waiting for a callback that may never come
+    /// (C-1). A released attempt that left another attempt running is that
+    /// attempt's timeline, not this one's.
+    private func parkUnsatisfiedPathWhenIdle() {
+        guard connectionID == nil, !networkPathSatisfied, reconnectTask == nil else { return }
+        parkRecovery(reason: "pathUnsatisfied")
     }
 
     /// Every early return of `requestReconnect`/`scheduleReconnect` names the
@@ -1628,6 +1657,12 @@ final class GatewayLifecycleCoordinator {
                                 lifecycleGeneration: lifecycleGeneration,
                                 attemptGeneration: attemptGeneration
                             )
+                            // A probe attempt that failed on a known-down route
+                            // parks like the loop's own path check: the hint may
+                            // still be stale, and only the bound brings the next
+                            // attempt without a callback (C-1). Ending the loop
+                            // here without a park is the silent gap again.
+                            self.parkRecovery(reason: "pathUnsatisfied")
                             return
                         }
                         self.reconnectCanBeAccelerated = true

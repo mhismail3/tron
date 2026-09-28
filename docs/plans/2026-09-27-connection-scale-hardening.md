@@ -13,6 +13,8 @@
 
 - **Last updated:** 2026-09-28, G-7 (final review round addressed: an unchanged catalog answer rebuilds the row projection, a cleared automation marker moves the catalog token)
 
+- **Last updated:** 2026-09-28, C-1 final review round (a failed probe re-parks; a park cannot take over an in-flight connect or pairing)
+
 - **Last updated:** 2026-09-28, C-1 review round addressed and its E2E re-run passed (Done)
 
 - **Last updated:** 2026-09-28, G-3 review round 2 addressed: the `unaudiencedSnapshotBuilds` warning and its test are now stated as a tripwire for a lost slot guard or a divergence between the registry's subscription record and the transport's, not for a closing socket
@@ -7934,3 +7936,28 @@ wait).
      `packages/gateway/node_modules`: its `npm ci` empties the shared install. The
      lane is shared with `scripts/tron-ios-test`, so a `run` waits for whichever
      process holds the lease.
+
+### C-1 · 2026-09-28 · final review round (same lane)
+
+- Both findings fixed in one commit on top of the integration merge:
+  - The reconnect loop's retryable-failure path parks when the last hint still
+    reads unsatisfied, so the bound's (or a foreground's) failed probe re-parks
+    with a fresh bound instead of ending the episode silently.
+  - `parkRecovery` refuses while `connectionAdmissionTask`, `committedConnectionTask`
+    or `pairingAttempt` is in flight; each of those owners calls the new
+    `parkUnsatisfiedPathWhenIdle` when it releases the attempt, so the refusal
+    cannot become a silent gap of its own (pairing included, which the review's
+    prescribed guard alone would have missed).
+- Evidence: `AppModelReconnectTests` 45/45 (3 new: bound probe fails -> second
+  park, fresh bound, second attempt, zero `reconnect.stalled` over 20 s;
+  foreground probe fails -> same; a path hint cannot park over the initial
+  connect, state stays `.connecting` and no bound is armed), `AppModelPairingAttemptTests`
+  8/8 (1 new: a path hint cannot park over the pairing that owns the connect),
+  `AppModelLifecycleTests`, `GatewayConnectionEpisodeRecorderTests`,
+  `GatewayLogExportTests` 17/17 (one run had `byteEnvelopeReservesTheChatTrace`
+  killed by the simulator under load; it passes alone and in the repeat).
+- Negative controls: reverting each hunk failed its own tests (probe tests; the
+  two path-hint tests) and passed the other's, then the fix was restored.
+- Gateway gate after merging `hardening/integration`: the six transport
+  integration files 131/131, `runtime-registry.integration.test.ts` 257/257,
+  `npx tsc --noEmit -p .` clean.
