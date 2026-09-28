@@ -66,6 +66,17 @@ package struct SessionProcessLifecycle: Codable, Hashable, Sendable {
         self.terminalAt = terminalAt
         self.recentUntil = recentUntil
     }
+
+    /// Gateway-authored settlement. A paused run carries the instant the
+    /// Gateway observed its exact process exit as `terminalAt`, which makes it
+    /// resumable history that ages out like finished work instead of live work.
+    package var isSettled: Bool {
+        state.isTerminal || (state == .paused && terminalAt != nil)
+    }
+
+    /// Work the Gateway still observes: queued/running, or a paused run whose
+    /// process exit it has not proven yet.
+    package var isActiveWork: Bool { !isSettled && state.isActive }
 }
 
 /// Exact additive Gateway DTO. Optional fields remain optional so old history
@@ -415,9 +426,11 @@ package enum SessionProcessAdmissionPolicy {
               lifecycle.recentUntil.map(validTimestamp) ?? true else { return false }
         switch visibility {
         case .active:
-            return lifecycle.state.isActive && lifecycle.terminalAt == nil && lifecycle.recentUntil == nil
+            return lifecycle.isActiveWork && lifecycle.terminalAt == nil && lifecycle.recentUntil == nil
         case .recent, .historical:
-            guard lifecycle.state.isTerminal,
+            // Recent/historical presentation is settled work: a terminal row, or
+            // a paused row whose exact process exit the Gateway observed.
+            guard lifecycle.isSettled,
                   let terminal = lifecycle.terminalAt.flatMap(GatewayTimestamp.parse),
                   let expiry = lifecycle.recentUntil.flatMap(GatewayTimestamp.parse) else { return false }
             return abs(expiry.timeIntervalSince(terminal) - recentInterval) < 0.001

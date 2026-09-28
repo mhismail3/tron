@@ -198,33 +198,34 @@ struct SessionProcessModelsTests {
 
     @Test("subagent stop control mounts disabled before exact authority arrives")
     func stopControlVisibility() {
+        let running = makeProcess().lifecycle
         #expect(ReadOnlySubagentStopControlPolicy.isVisible(
-            lifecycleState: .running,
+            lifecycle: running,
             supportsAbort: true
         ))
         #expect(!ReadOnlySubagentStopControlPolicy.isEnabled(
-            lifecycleState: .running,
+            lifecycle: running,
             hasAbortAuthority: false,
             supportsAbort: true,
             isConnected: true,
             stopRequested: false
         ))
         #expect(ReadOnlySubagentStopControlPolicy.isEnabled(
-            lifecycleState: .running,
+            lifecycle: running,
             hasAbortAuthority: true,
             supportsAbort: true,
             isConnected: true,
             stopRequested: false
         ))
         #expect(!ReadOnlySubagentStopControlPolicy.isEnabled(
-            lifecycleState: .running,
+            lifecycle: running,
             hasAbortAuthority: true,
             supportsAbort: true,
             isConnected: false,
             stopRequested: false
         ))
         #expect(!ReadOnlySubagentStopControlPolicy.isEnabled(
-            lifecycleState: .running,
+            lifecycle: running,
             hasAbortAuthority: true,
             supportsAbort: true,
             isConnected: true,
@@ -237,12 +238,13 @@ struct SessionProcessModelsTests {
             .rejected,
             .interrupted,
         ] {
+            let lifecycle = makeProcess(state: terminal).lifecycle
             #expect(!ReadOnlySubagentStopControlPolicy.isVisible(
-                lifecycleState: terminal,
+                lifecycle: lifecycle,
                 supportsAbort: true
             ))
             #expect(!ReadOnlySubagentStopControlPolicy.isEnabled(
-                lifecycleState: terminal,
+                lifecycle: lifecycle,
                 hasAbortAuthority: true,
                 supportsAbort: true,
                 isConnected: true,
@@ -250,8 +252,97 @@ struct SessionProcessModelsTests {
             ))
         }
         #expect(!ReadOnlySubagentStopControlPolicy.isVisible(
-            lifecycleState: .running,
+            lifecycle: running,
             supportsAbort: false
+        ))
+    }
+
+    @Test("a settled paused row decodes as recent and leaves the running section")
+    func settledPausedRow() throws {
+        let settled = try JSONDecoder.gateway.decode(SessionProcessActivity.self, from: Data(#"""
+        {
+          "version":1,"processId":"process:subagent:paused","kind":"subagent","executionMode":"asynchronous","source":"delegatedAgent",
+          "lifecycle":{"version":1,"state":"paused","attention":"none","sequence":6,"observedAt":"2026-09-28T19:54:17Z","terminalAt":"2026-09-28T19:53:52Z","recentUntil":"2026-09-28T19:58:52Z"},
+          "visibility":"recent","startedAt":"2026-09-28T19:53:17Z","title":"worker","outputTruncated":false,"toolCallId":"call-1","runId":"run-1","durationMs":35000
+        }
+        """#.utf8))
+        #expect(SessionProcessAdmissionPolicy.admits(settled))
+        #expect(settled.lifecycle.state == .paused)
+        #expect(settled.lifecycle.isSettled)
+        #expect(!settled.lifecycle.isActiveWork)
+        let sections = SessionProcessProjection.sections([settled])
+        #expect(sections.active.isEmpty)
+        #expect(sections.recent.map(\.processId) == [settled.processId])
+
+        // The orb's active-process input, the same predicate the composer uses
+        // for admitted rows, excludes the settled row.
+        let admitted = SessionProcessAdmissionPolicy.admitted([settled])
+        let hasActiveSubagents = admitted.contains { $0.kind == .subagent && $0.visibility == .active }
+        #expect(!hasActiveSubagents)
+        #expect(UnifiedActivityButtonKind.select(
+            hasActiveSubagents: hasActiveSubagents,
+            hasExtensionContent: false,
+            hasRecentSubagents: true
+        ) == .recentSubagents)
+        #expect(SessionProcessButtonPolicy.recentExpiry(for: settled, retentionMinutes: 5) != nil)
+    }
+
+    @Test("a paused row without its process-exit proof stays active and reads as pausing")
+    func unsettledPausedRow() {
+        let pausing = makeProcess(state: .paused, visibility: .active, sequence: 2, durationMs: 4_200)
+        #expect(SessionProcessAdmissionPolicy.admits(pausing))
+        #expect(!pausing.lifecycle.isSettled)
+        #expect(pausing.lifecycle.isActiveWork)
+        #expect(SessionProcessProjection.sections([pausing]).active.map(\.processId) == [pausing.processId])
+        #expect(SessionProcessRowPresentation.statusText(for: pausing.lifecycle) == "Pausing…")
+        #expect(SessionProcessRowPresentation.statusSymbol(for: pausing.lifecycle) == nil)
+        #expect(SessionProcessRowPresentation.tone(for: pausing.lifecycle) == .inProgress)
+    }
+
+    @Test("a settled paused row freezes its duration and offers no stop control")
+    func settledPausedPresentation() throws {
+        let now = try #require(GatewayTimestamp.parse("2026-09-28T20:00:00Z"))
+        let settled = makeProcess(
+            state: .paused,
+            visibility: .recent,
+            sequence: 6,
+            terminalAt: "2026-09-28T19:53:52Z",
+            recentUntil: "2026-09-28T19:58:52Z",
+            startedAt: "2026-09-28T19:53:17Z",
+            durationMs: 35_000
+        )
+        #expect(SessionProcessAdmissionPolicy.admits(settled))
+        #expect(SessionProcessRowPresentation.elapsedMilliseconds(for: settled, at: now, uptime: 9_000) == 35_000)
+        #expect(SessionProcessRowPresentation.elapsedMilliseconds(
+            for: settled,
+            at: now.addingTimeInterval(3_600),
+            uptime: 12_000
+        ) == 35_000)
+        #expect(SessionProcessRowPresentation.statusText(for: settled.lifecycle) == "Paused")
+        #expect(SessionProcessRowPresentation.statusSymbol(for: settled.lifecycle) == "pause.fill")
+        #expect(SessionProcessRowPresentation.tone(for: settled.lifecycle) == .pausedSettled)
+        #expect(!ReadOnlySubagentStopControlPolicy.isVisible(lifecycle: settled.lifecycle, supportsAbort: true))
+        #expect(!ReadOnlySubagentStopControlPolicy.isEnabled(
+            lifecycle: settled.lifecycle,
+            hasAbortAuthority: true,
+            supportsAbort: true,
+            isConnected: true,
+            stopRequested: false
+        ))
+
+        // Admission still fails closed in both directions: a paused row may be
+        // recent only with its proof, and it is never admitted as active with one.
+        #expect(!SessionProcessAdmissionPolicy.admits(
+            makeProcess(state: .paused, visibility: .recent, sequence: 7)
+        ))
+        #expect(!SessionProcessAdmissionPolicy.admits(
+            makeProcess(
+                state: .paused,
+                visibility: .active,
+                sequence: 8,
+                terminalAt: "2026-09-28T19:53:52Z",
+                recentUntil: "2026-09-28T19:58:52Z"
+            )
         ))
     }
 

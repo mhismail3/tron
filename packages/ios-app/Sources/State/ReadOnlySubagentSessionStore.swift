@@ -323,7 +323,7 @@ final class ReadOnlySubagentSessionStore {
                         self.scheduleRecovery(for: .opening, generation: ownedGeneration)
                     } else if let failure = error as? GatewayFailure,
                        ["not_found", "unavailable"].contains(failure.code),
-                       self.liveActivity?.lifecycle.state.isActive == true {
+                       self.liveActivity?.lifecycle.isActiveWork == true {
                         // Missing ownership waits for the authoritative nil-to-ref
                         // activity transition. Once bound, transient file admission
                         // shares the same finite recovery episode as busy replies.
@@ -596,7 +596,7 @@ final class ReadOnlySubagentSessionStore {
 
     func updateLiveActivity(_ activity: SessionProcessActivity?) {
         guard let processID else { return }
-        let wasActive = liveActivity?.lifecycle.state.isActive == true
+        let wasActive = liveActivity?.lifecycle.isActiveWork == true
         let hadChildBinding = liveActivity?.childSessionRef != nil
         guard let activity else {
             liveActivity = nil
@@ -629,7 +629,7 @@ final class ReadOnlySubagentSessionStore {
         }
         guard selectedRunID == nil || activity.runId == selectedRunID else { return }
         liveActivity = activity
-        if wasActive != activity.lifecycle.state.isActive { rebuildPresentation() }
+        if wasActive != activity.lifecycle.isActiveWork { rebuildPresentation() }
         guard status == .waiting || status == .unavailable else { return }
         if activity.childSessionRef != nil && !hadChildBinding,
            let parentSessionID, let parentSubscriptionToken, let presentationGeneration {
@@ -638,7 +638,7 @@ final class ReadOnlySubagentSessionStore {
             startOpen(parentSessionID: parentSessionID, processID: processID,
                       presentationGeneration: presentationGeneration,
                       parentSubscriptionToken: parentSubscriptionToken, activity: activity)
-        } else if activity.childSessionRef == nil && !activity.lifecycle.state.isActive {
+        } else if activity.childSessionRef == nil && !activity.lifecycle.isActiveWork {
             status = .unavailable
         }
     }
@@ -690,7 +690,7 @@ final class ReadOnlySubagentSessionStore {
             items,
             transcriptStart: transcriptStart,
             transcriptTotal: transcriptTotal,
-            isActive: liveActivity?.lifecycle.state.isActive == true,
+            isActive: liveActivity?.lifecycle.isActiveWork == true,
             forkBoundary: forkBoundary
         )
         guard next.isValid else {

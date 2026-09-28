@@ -180,15 +180,14 @@ enum SessionProcessRowStyle {
     case activity
     case history
 
-    @MainActor func accent(for state: SessionProcessLifecycleState) -> Color {
-        let tone = SessionProcessRowPresentation.tone(for: state)
-        // History keeps its neutral terminal theme, but active work must be
-        // just as recognizable as it is in the activity sheet.
-        if self == .history, tone != .inProgress { return .tronSubagent }
-        return switch tone {
+    @MainActor func accent(for lifecycle: SessionProcessLifecycle) -> Color {
+        switch SessionProcessRowPresentation.tone(for: lifecycle) {
+        // Settled paused work is resumable history: it keeps one muted tone in
+        // both sheets instead of the in-progress running accent.
+        case .pausedSettled: .tronTextMuted
         case .inProgress: .tronAmber
-        case .succeeded: .tronSuccess
-        case .unsuccessful: .tronError
+        case .succeeded: self == .history ? .tronSubagent : .tronSuccess
+        case .unsuccessful: self == .history ? .tronSubagent : .tronError
         }
     }
 }
@@ -228,6 +227,11 @@ struct SessionProcessRow: View {
                 .lineLimit(2)
                 .frame(maxWidth: .infinity, alignment: .leading)
             HStack(alignment: .firstTextBaseline, spacing: 4) {
+                if let statusSymbol = SessionProcessRowPresentation.statusSymbol(for: process.lifecycle) {
+                    Image(systemName: statusSymbol)
+                        .font(TronTypography.secondaryCodeDescription)
+                        .foregroundStyle(cardAccent)
+                }
                 Text(statusText)
                     .font(TronTypography.secondaryCodeDescription)
                     .foregroundStyle(cardAccent)
@@ -345,15 +349,11 @@ struct SessionProcessRow: View {
         }
     }
 
-    private var cardAccent: Color { style.accent(for: process.lifecycle.state) }
+    private var cardAccent: Color { style.accent(for: process.lifecycle) }
 
     /// Explicit lifecycle text accompanies color, including for VoiceOver.
     private var statusText: String {
-        switch process.lifecycle.state {
-        case .running: "Live"
-        case .completed: "Completed"
-        default: process.lifecycle.state.displayName
-        }
+        SessionProcessRowPresentation.statusText(for: process.lifecycle)
     }
 
     private var startedText: String? {
@@ -378,7 +378,7 @@ struct SessionProcessRow: View {
     private var accessibilityValue: String { summaryParts.joined(separator: ", ") }
 
     private var accessibilityHint: String {
-        process.lifecycle.state.isActive
+        process.lifecycle.isActiveWork
             ? "Opens the live read-only subagent session"
             : "Opens the completed read-only subagent session"
     }
@@ -386,6 +386,7 @@ struct SessionProcessRow: View {
 
 enum SessionProcessRowTone: Equatable, Sendable {
     case inProgress
+    case pausedSettled
     case succeeded
     case unsuccessful
 }
@@ -395,12 +396,30 @@ enum SessionProcessRowPresentation {
     private static let maximumActionCharacters = 96
     private static let absentValues: Set<String> = ["null", "undefined"]
 
-    static func tone(for state: SessionProcessLifecycleState) -> SessionProcessRowTone {
-        switch state {
-        case .queued, .running, .paused: .inProgress
+    static func tone(for lifecycle: SessionProcessLifecycle) -> SessionProcessRowTone {
+        switch lifecycle.state {
+        case .queued, .running: .inProgress
+        // A paused run without its process-exit proof is still pausing; only a
+        // settled one is quiet resumable history.
+        case .paused: lifecycle.isSettled ? .pausedSettled : .inProgress
         case .completed: .succeeded
         case .failed, .stopped, .rejected, .interrupted, .unknown: .unsuccessful
         }
+    }
+
+    /// Explicit lifecycle text for the row heading and VoiceOver.
+    static func statusText(for lifecycle: SessionProcessLifecycle) -> String {
+        switch lifecycle.state {
+        case .running: "Live"
+        case .paused: lifecycle.isSettled ? "Paused" : "Pausing…"
+        case .completed: "Completed"
+        default: lifecycle.state.displayName
+        }
+    }
+
+    /// Only a settled paused row carries the pause glyph, next to its muted tag.
+    static func statusSymbol(for lifecycle: SessionProcessLifecycle) -> String? {
+        lifecycle.isSettled && lifecycle.state == .paused ? "pause.fill" : nil
     }
 
     static func durationText(_ milliseconds: Int) -> String {
@@ -426,7 +445,7 @@ enum SessionProcessRowPresentation {
         locale: Locale = .current,
         timeZone: TimeZone = .current
     ) -> String? {
-        guard !process.lifecycle.state.isActive else { return nil }
+        guard !process.lifecycle.isActiveWork else { return nil }
         return ToolInvocationTimestamp.text(for: process.lifecycle.terminalAt, relativeTo: now, locale: locale, timeZone: timeZone)
     }
 
@@ -503,20 +522,20 @@ enum SessionProcessRowPresentation {
 
 enum ReadOnlySubagentStopControlPolicy {
     static func isVisible(
-        lifecycleState: SessionProcessLifecycleState,
+        lifecycle: SessionProcessLifecycle,
         supportsAbort: Bool
     ) -> Bool {
-        lifecycleState.isActive && supportsAbort
+        lifecycle.isActiveWork && supportsAbort
     }
 
     static func isEnabled(
-        lifecycleState: SessionProcessLifecycleState,
+        lifecycle: SessionProcessLifecycle,
         hasAbortAuthority: Bool,
         supportsAbort: Bool,
         isConnected: Bool,
         stopRequested: Bool
     ) -> Bool {
-        lifecycleState.isActive
+        lifecycle.isActiveWork
             && hasAbortAuthority
             && supportsAbort
             && isConnected
@@ -643,19 +662,19 @@ struct ReadOnlySubagentSessionSheet: View {
     private var hasAbortAuthority: Bool {
         store?.leaseID != nil
             && store?.canAbort == true
-            && store?.liveActivity?.lifecycle.state.isActive == true
+            && store?.liveActivity?.lifecycle.isActiveWork == true
     }
 
     private var showsStopControl: Bool {
         ReadOnlySubagentStopControlPolicy.isVisible(
-            lifecycleState: currentActivity.lifecycle.state,
+            lifecycle: currentActivity.lifecycle,
             supportsAbort: supportsStop
         )
     }
 
     private var canStop: Bool {
         ReadOnlySubagentStopControlPolicy.isEnabled(
-            lifecycleState: currentActivity.lifecycle.state,
+            lifecycle: currentActivity.lifecycle,
             hasAbortAuthority: hasAbortAuthority,
             supportsAbort: supportsStop,
             isConnected: model.connectionState == .connected,
@@ -722,7 +741,7 @@ struct ReadOnlySubagentSessionSheet: View {
                     .padding(.bottom, ChatTranscriptLayoutConstants.rowSpacing)
                 }
                 if store.presentation.timeline.items.isEmpty {
-                    let isActive = store.liveActivity?.lifecycle.state.isActive == true
+                    let isActive = store.liveActivity?.lifecycle.isActiveWork == true
                     SessionProcessPlaceholder(
                         title: isActive ? "Transcript starting" : "No transcript recorded",
                         detail: isActive
