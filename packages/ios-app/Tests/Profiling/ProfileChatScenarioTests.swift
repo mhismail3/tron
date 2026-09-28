@@ -65,6 +65,7 @@ final class ProfileChatRun: ProfileScenarioRun {
     private var resynchronizationsBefore = 0
     private var expectedSequence: Int?
     private var lostMount: String?
+    private var repairsExhaustedBefore = 0
 
     private init(fixture: ProfileGatewayFixture, snapshot: SessionSnapshot, frames: [ProfileScriptedFrame]) {
         self.fixture = fixture
@@ -207,11 +208,15 @@ final class ProfileChatRun: ProfileScenarioRun {
         guard model.visibleNotices.isEmpty else {
             throw ProfileScenarioError.notReady("an in-app notice is on screen: \(model.visibleNotices.map(\.title))")
         }
+        if let divergence = renderCheck().divergence {
+            throw ProfileScenarioError.notReady("the opened chat is not pinned to its tail: \(divergence)")
+        }
     }
 
     func workload(window: Duration) async throws {
         let ledger = ProfileScenarioLedger.shared
         let resynchronizationsBefore = ledger.snapshot()["rpc.resynchronizations"] ?? 0
+        repairsExhaustedBefore = repairsExhausted()
         let start = ContinuousClock.now
         for frame in frames where frame.offset < window - Self.drainTail {
             try await profileSleep(until: frame.offset, from: start)
@@ -225,6 +230,38 @@ final class ProfileChatRun: ProfileScenarioRun {
         try await profileSleep(until: window, from: start)
         self.resynchronizationsBefore = resynchronizationsBefore
         expectedSequence = frames.last(where: { $0.offset < window - Self.drainTail && $0.eventSequence != nil })?.eventSequence
+    }
+
+    /// A pinned chat follows its tail. The transcript viewport must end at the
+    /// content bottom when the window ends: a chat that stopped following a
+    /// growing tail (the ChatScrollCoordinator's `chat.lease.repair-exhausted`
+    /// mode) leaves the new rows below the viewport, where SwiftUI does not
+    /// render them, and the window measures a fraction of the workload.
+    static let pinnedTailTolerance: CGFloat = 24
+
+    func renderCheck() -> ProfileRenderCheck {
+        let exhausted = repairsExhausted() - repairsExhaustedBefore
+        guard let view = host?.view,
+              let transcript = profileViews(UIScrollView.self, in: view).max(by: { $0.contentSize.height < $1.contentSize.height }) else {
+            return ProfileRenderCheck(counters: ["followed": 0], divergence: "no transcript scroll view is mounted")
+        }
+        let distance = transcript.contentSize.height + transcript.adjustedContentInset.bottom
+            - transcript.bounds.height - transcript.contentOffset.y
+        let followed = abs(distance) <= Self.pinnedTailTolerance
+        let detail = "tail_distance=\(Int(distance.rounded())) content_height=\(Int(transcript.contentSize.height)) "
+            + "repair_exhausted=\(exhausted)"
+        return ProfileRenderCheck(
+            counters: ["followed": followed ? 1 : 0],
+            divergence: followed ? nil : "the pinned transcript ended \(Int(distance.rounded())) pt from its tail (\(detail))",
+            detail: detail
+        )
+    }
+
+    /// Evidence only: the chat trace ring is bounded, so this counts the
+    /// retained warnings.
+    private func repairsExhausted() -> Int {
+        fixture.model.chatInteractionTrace.diagnosticRecords(limit: ChatInteractionTrace.maximumRecords)
+            .count { $0.record.event == "chat.lease.repair-exhausted" }
     }
 
     func verify() async throws {

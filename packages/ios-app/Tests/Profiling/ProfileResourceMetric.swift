@@ -5,9 +5,9 @@ import XCTest
 
 /// In-process resource counters for `scripts/tron-profile ios`.
 ///
-/// XCTest calls `willBeginMeasuring` at `startMeasuring()` and
-/// `didStopMeasuring` at `stopMeasuring()`, so every value below is the delta
-/// of the measured window of one iteration. The profiler reads the values back
+/// Every value below is the delta over the one window the iteration accepted
+/// (`ProfileMeasuredWindow`), which XCTest's `stopMeasuring()` hands to this
+/// metric through `didStopMeasuring`. The profiler reads the values back
 /// from the xcresult by their `com.tron.profile.` identifiers; the suffix is
 /// the report metric id. A counter the kernel does not provide in this process
 /// is omitted rather than reported as zero, so a report never contains a
@@ -15,29 +15,25 @@ import XCTest
 final class ProfileResourceMetric: NSObject, XCTMetric {
     static let identifierPrefix = "com.tron.profile."
 
-    private var start: ProfileResourceSample?
-    private var end: ProfileResourceSample?
-    private var scenarioStart: [String: Int] = [:]
-    private var scenarioEnd: [String: Int] = [:]
+    private var window: ProfileMeasuredWindow.Sample?
 
     func copy(with zone: NSZone? = nil) -> Any { ProfileResourceMetric() }
 
     func willBeginMeasuring() {
-        scenarioStart = ProfileScenarioLedger.shared.snapshot()
-        ProfileResourceSample.resetIntervalFootprint()
-        start = ProfileResourceSample.capture()
+        ProfileMeasuredWindow.shared.reset()
     }
 
     func didStopMeasuring() {
-        end = ProfileResourceSample.capture()
-        scenarioEnd = ProfileScenarioLedger.shared.snapshot()
+        window = ProfileMeasuredWindow.shared.takeAccepted()
     }
 
     func reportMeasurements(
         from startTime: XCTPerformanceMeasurementTimestamp,
         to endTime: XCTPerformanceMeasurementTimestamp
     ) throws -> [XCTPerformanceMeasurement] {
-        guard let start, let end else { return [] }
+        guard let window else { return [] }
+        let start = window.start, end = window.end
+        let scenarioStart = window.scenarioStart, scenarioEnd = window.scenarioEnd
         var values: [XCTPerformanceMeasurement] = [
             Self.measurement("time.wall", "Wall time", Double(end.wallNanoseconds &- start.wallNanoseconds), "ns"),
             Self.measurement("cpu.time", "Process CPU time", Double(end.processCPUNanoseconds &- start.processCPUNanoseconds), "ns"),
@@ -71,6 +67,10 @@ final class ProfileResourceMetric: NSObject, XCTMetric {
             let delta = (scenarioEnd[name] ?? 0) - (scenarioStart[name] ?? 0)
             values.append(Self.measurement("scenario.\(ProfileScenarioLedger.metricID(name))", "Scenario \(name)", Double(delta), ProfileScenarioLedger.unit(for: name)))
         }
+        for (name, value) in window.render.sorted(by: { $0.key < $1.key }) {
+            let id = "render.\(ProfileScenarioLedger.metricID(name))"
+            values.append(Self.measurement("scenario.\(id)", "Scenario \(id)", Double(value), "count"))
+        }
         return values
     }
 
@@ -82,6 +82,62 @@ final class ProfileResourceMetric: NSObject, XCTMetric {
             unitSymbol: unit,
             polarity: .prefersSmaller
         )
+    }
+}
+
+/// The measured window of the current iteration. The harness brackets each
+/// attempted window with `begin`/`end` and accepts it only after its render
+/// check passed, so a discarded window never reaches the metric.
+final class ProfileMeasuredWindow: Sendable {
+    struct Sample {
+        var start: ProfileResourceSample
+        var end: ProfileResourceSample
+        var scenarioStart: [String: Int]
+        var scenarioEnd: [String: Int]
+        var render: [String: Int]
+    }
+
+    private struct State {
+        var start: ProfileResourceSample?
+        var scenarioStart: [String: Int] = [:]
+        var ended: Sample?
+        var accepted: Sample?
+    }
+
+    static let shared = ProfileMeasuredWindow()
+
+    private let state = Mutex(State())
+
+    func reset() { state.withLock { $0 = State() } }
+
+    func begin() {
+        let scenarioStart = ProfileScenarioLedger.shared.snapshot()
+        ProfileResourceSample.resetIntervalFootprint()
+        let start = ProfileResourceSample.capture()
+        state.withLock { $0 = State(start: start, scenarioStart: scenarioStart) }
+    }
+
+    func end() {
+        let end = ProfileResourceSample.capture()
+        let scenarioEnd = ProfileScenarioLedger.shared.snapshot()
+        state.withLock { current in
+            guard let start = current.start else { return }
+            current.ended = Sample(start: start, end: end, scenarioStart: current.scenarioStart,
+                                   scenarioEnd: scenarioEnd, render: [:])
+        }
+    }
+
+    func accept(render: [String: Int]) {
+        state.withLock { current in
+            current.accepted = current.ended.map { var sample = $0; sample.render = render; return sample }
+        }
+    }
+
+    func takeAccepted() -> Sample? {
+        state.withLock { current in
+            defer { current = State() }
+            return current.accepted
+        }
     }
 }
 

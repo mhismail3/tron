@@ -141,6 +141,23 @@ final class ProfileDashboardRun: ProfileScenarioRun {
         finalRevisions = revisions
     }
 
+    /// The dashboard list must have its rows mounted when the window ends; a
+    /// list that showed a loading or empty state instead would measure the
+    /// summary deliveries without their row updates.
+    static let minimumMountedRows = 5
+
+    func renderCheck() -> ProfileRenderCheck {
+        let list = host?.view.flatMap { view in
+            profileViews(UICollectionView.self, in: view).max { $0.visibleCells.count < $1.visibleCells.count }
+        }
+        let rows = list?.visibleCells.count ?? 0
+        return ProfileRenderCheck(
+            counters: ["rows": rows],
+            divergence: rows >= Self.minimumMountedRows ? nil : "the dashboard list has \(rows) mounted rows",
+            detail: "content_height=\(Int(list?.contentSize.height ?? 0))"
+        )
+    }
+
     func verify() async throws {
         let model = fixture.model
         for (index, revision) in finalRevisions.enumerated() where revision > 1 {

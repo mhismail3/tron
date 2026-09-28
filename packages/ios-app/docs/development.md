@@ -443,7 +443,21 @@ expected event sequence, summary revisions or saved draft), otherwise the run
 fails with its evidence path and a screenshot of the surface. Chat readiness is
 the app's own first-ready-frame signpost; a setup that does not reach readiness
 (for example an opening whose layout did not settle on a loaded host) is rebuilt
-up to three times before measuring, and the report lists each retry as a warning. The tests in `Tests/Profiling/` skip unless the
+up to three times before measuring, and the report lists each retry as a warning.
+
+Every scenario also has a render check, read right after each window, so all
+reported iterations measured the same workload: a chat's transcript viewport
+still ends at its tail (`scenario.render.followed`; a pinned chat that stopped
+following the stream renders a fraction of it), the composer shows the typed
+text (`scenario.render.composer_text`), and a dashboard has its list rows
+mounted (`scenario.render.rows`). A window that fails its check is discarded
+and measured again on a fresh instance up to three times (listed as
+`render_retries` warnings); otherwise the run fails with the check's evidence
+and a screenshot. On the current app `streaming-reply` fails this check in
+most windows: when the prompt and reply rows enter together the chat's
+physical-tail repair lands above the tail, logs `chat.lease.repair-exhausted`
+and never follows the stream, so the profiler refuses the scenario instead of
+reporting a median over two workloads. The tests in `Tests/Profiling/` skip unless the
 profiler selects them, so ordinary unit runs are unaffected.
 
 | Scenario | Default window | Workload |

@@ -231,6 +231,10 @@ def build_samples(
             unit, description = METRICS[metric_id]
             if measurement["unit"] not in (None, unit):
                 raise ProfileError(f"{metric_id} arrived in unit {measurement['unit']!r}, expected {unit!r}")
+        elif metric_id.startswith("scenario.render."):
+            unit = measurement["unit"] or "count"
+            description = ("How the mounted surface rendered the workload at the end of the window (the scenario's "
+                           "render check); every reported iteration passed it.")
         elif metric_id.startswith("scenario."):
             unit = measurement["unit"] or "count"
             description = "Workload applied by the scenario's scripted transport or driver in the window."
@@ -766,6 +770,14 @@ class Profiler:
             context["warnings"].append(
                 f"{len(retries)} scenario setup(s) did not reach readiness and were rebuilt before measuring; "
                 "see setup_retries (usually a chat opening that did not settle on a loaded host)"
+            )
+        rerenders = [line for line in log.read_text(errors="replace").splitlines()
+                     if line.startswith("TRON_PROFILE_RENDER_RETRY ")]
+        if rerenders:
+            context["render_retries"] = rerenders
+            context["warnings"].append(
+                f"{len(rerenders)} measured window(s) failed the scenario's render check and were discarded and "
+                "measured again on a fresh instance; see render_retries"
             )
         try:
             samples = build_samples(extract_measurements(metrics_document, test), iterations, context)

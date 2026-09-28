@@ -36,6 +36,7 @@ enum ProfileScenarioError: Error, CustomStringConvertible {
     case timedOut(String)
     case notReady(String)
     case workloadDiverged(String)
+    case renderDiverged(String)
 
     var description: String {
         switch self {
@@ -43,8 +44,21 @@ enum ProfileScenarioError: Error, CustomStringConvertible {
         case .timedOut(let phase): "profiling phase exceeded its deadline: \(phase)"
         case .notReady(let detail): "scenario did not reach readiness: \(detail)"
         case .workloadDiverged(let detail): "scenario workload was not applied as scripted: \(detail)"
+        case .renderDiverged(let detail): "scenario surface did not render the workload in its scripted mode: \(detail)"
         }
     }
+}
+
+/// How the mounted surface rendered the window's workload, read right after
+/// the window. `counters` are reported as `scenario.render.*` for the accepted
+/// window; a non-nil `divergence` means the window measured a different
+/// workload (for example a pinned chat that stopped following the stream and
+/// so rendered a fraction of it), and the harness measures a fresh instance.
+struct ProfileRenderCheck {
+    var counters: [String: Int] = [:]
+    var divergence: String?
+    /// Evidence printed with the check (geometry, trace signals).
+    var detail = ""
 }
 
 /// One scenario instance: built and made ready outside the measured window,
@@ -55,6 +69,9 @@ protocol ProfileScenarioRun: AnyObject {
     func ready() async throws
     /// Applies the scripted workload for exactly `window`.
     func workload(window: Duration) async throws
+    /// Read immediately after the window, before `verify` waits for anything:
+    /// the rendering mode the window measured.
+    func renderCheck() -> ProfileRenderCheck
     /// After the window, proves the workload was applied as scripted.
     func verify() async throws
     func teardown() async
@@ -64,16 +81,21 @@ protocol ProfileScenarioRun: AnyObject {
 }
 
 extension ProfileScenarioRun {
+    func renderCheck() -> ProfileRenderCheck { ProfileRenderCheck() }
     func verify() async throws {}
     var surface: UIView? { nil }
 }
 
 extension XCTestCase {
     static var profileSetupAttempts: Int { 3 }
+    static var profileRenderAttempts: Int { 3 }
 
     /// Runs `iterations` fresh scenario instances under `ProfileResourceMetric`.
-    /// Setup and readiness happen before `startMeasuring`, teardown after
-    /// `stopMeasuring`, so each sample covers only the scripted window.
+    /// `ProfileMeasuredWindow` brackets only the scripted window of each
+    /// attempt, so setup, readiness, checks and teardown are never measured.
+    /// A window whose render check diverged is discarded and measured again
+    /// on a fresh instance, a bounded number of times, so every reported
+    /// iteration measured the same workload or the run fails.
     @MainActor
     func profileScenario(
         _ scenario: String,
@@ -93,71 +115,100 @@ extension XCTestCase {
         var iteration = 0
         measure(metrics: [ProfileResourceMetric()], options: options) {
             iteration += 1
-            // XCTest requires every invocation to start and stop measuring;
-            // after a failure, the remaining invocations measure nothing and
-            // the test fails with the first error.
-            guard failure == nil else {
-                startMeasuring()
-                stopMeasuring()
-                return
-            }
-            var run: (any ProfileScenarioRun)?
-            var measuring = false
-            do {
-                // Setup is outside the window, so a scenario that did not reach
-                // readiness (for example a chat opening that did not settle on a
-                // loaded host) is rebuilt from scratch a bounded number of times.
-                // Retries are printed; the profiler reports them as warnings.
-                var attempt = 0
-                var prepared: (any ProfileScenarioRun)?
-                while prepared == nil {
-                    attempt += 1
-                    do {
-                        prepared = try ProfileMainLoop.wait(readinessTimeout, phase: "\(scenario) setup") {
-                            let run = try await make(configuration.window)
-                            do { try await run.ready() } catch {
-                                self.attachSurface(of: run, name: "\(scenario)-not-ready-\(iteration)-\(attempt)")
-                                await run.teardown()
-                                throw error
-                            }
-                            return run
-                        }
-                    } catch let error as ProfileScenarioError {
-                        guard case .notReady = error, attempt < Self.profileSetupAttempts else { throw error }
-                        print("TRON_PROFILE_SETUP_RETRY name=\(scenario) iteration=\(iteration) attempt=\(attempt) reason=\(error)")
-                    }
-                }
-                let created = prepared!
-                run = created
-                let window = trace?.beginWindow()
-                startMeasuring()
-                measuring = true
-                try ProfileMainLoop.wait(configuration.window + .seconds(30), phase: "\(scenario) workload") {
-                    try await created.workload(window: configuration.window)
-                }
-                stopMeasuring()
-                measuring = false
-                if let window { try trace?.endWindow(window, iteration: iteration) }
+            // XCTest's start/stop only brackets the invocation; the metric
+            // reports the window this invocation accepted, if any. After a
+            // failure the remaining invocations accept nothing and the test
+            // fails with the first error.
+            startMeasuring()
+            defer { stopMeasuring() }
+            guard failure == nil else { return }
+            var renderAttempt = 0
+            while true {
+                renderAttempt += 1
+                var run: (any ProfileScenarioRun)?
+                var rerender = false
                 do {
-                    try ProfileMainLoop.wait(.seconds(30), phase: "\(scenario) verification") { try await created.verify() }
+                    let created = try prepareRun(scenario, iteration: iteration, readinessTimeout: readinessTimeout) {
+                        try await make(configuration.window)
+                    }
+                    run = created
+                    let windowStart = trace?.windowBound()
+                    ProfileMeasuredWindow.shared.begin()
+                    try ProfileMainLoop.wait(configuration.window + .seconds(30), phase: "\(scenario) workload") {
+                        try await created.workload(window: configuration.window)
+                    }
+                    ProfileMeasuredWindow.shared.end()
+                    let windowEnd = trace?.windowBound()
+                    let check = created.renderCheck()
+                    let counters = check.counters.sorted { $0.key < $1.key }.map { "\($0.key)=\($0.value)" }.joined(separator: " ")
+                    print("TRON_PROFILE_RENDER_CHECK name=\(scenario) iteration=\(iteration) attempt=\(renderAttempt) "
+                        + "status=\(check.divergence == nil ? "ok" : "diverged") \(counters) \(check.detail)")
+                    do {
+                        try ProfileMainLoop.wait(.seconds(30), phase: "\(scenario) verification") { try await created.verify() }
+                    } catch {
+                        attachSurface(of: created, name: "\(scenario)-window-end-failed-\(iteration)")
+                        throw error
+                    }
+                    if let divergence = check.divergence {
+                        attachSurface(of: created, name: "\(scenario)-render-diverged-\(iteration)-\(renderAttempt)")
+                        guard renderAttempt < Self.profileRenderAttempts else {
+                            throw ProfileScenarioError.renderDiverged(
+                                "iteration \(iteration) diverged in all \(renderAttempt) attempts; last: \(divergence)"
+                            )
+                        }
+                        print("TRON_PROFILE_RENDER_RETRY name=\(scenario) iteration=\(iteration) attempt=\(renderAttempt) reason=\(divergence)")
+                        rerender = true
+                    } else {
+                        ProfileMeasuredWindow.shared.accept(render: check.counters)
+                        if let windowStart, let windowEnd {
+                            try trace?.recordWindow(start: windowStart, end: windowEnd, iteration: iteration)
+                        }
+                        if iteration == 1 { attachSurface(of: created, name: "\(scenario)-window-end") }
+                    }
                 } catch {
-                    attachSurface(of: created, name: "\(scenario)-window-end-failed-\(iteration)")
-                    throw error
+                    failure = error
                 }
-                if iteration == 1 { attachSurface(of: created, name: "\(scenario)-window-end") }
-            } catch {
-                failure = error
-                if !measuring { startMeasuring() }
-                stopMeasuring()
-            }
-            if let run {
-                _ = try? ProfileMainLoop.wait(.seconds(30), phase: "\(scenario) teardown") { await run.teardown() }
+                if let run {
+                    _ = try? ProfileMainLoop.wait(.seconds(30), phase: "\(scenario) teardown") { await run.teardown() }
+                }
+                if !rerender { break }
             }
             print("TRON_PROFILE_ITERATION name=\(scenario) index=\(iteration) status=\(failure == nil ? "ok" : "failed")")
         }
         try trace?.finishMeasurement()
         if let failure {
             XCTFail("TRON_PROFILE_FAILURE scenario=\(scenario): \(failure)")
+        }
+    }
+
+    /// Setup is outside the window, so a scenario that did not reach
+    /// readiness (for example a chat opening that did not settle on a loaded
+    /// host) is rebuilt from scratch a bounded number of times. Retries are
+    /// printed; the profiler reports them as warnings.
+    @MainActor
+    private func prepareRun(
+        _ scenario: String,
+        iteration: Int,
+        readinessTimeout: Duration,
+        make: @escaping @MainActor () async throws -> any ProfileScenarioRun
+    ) throws -> any ProfileScenarioRun {
+        var attempt = 0
+        while true {
+            attempt += 1
+            do {
+                return try ProfileMainLoop.wait(readinessTimeout, phase: "\(scenario) setup") {
+                    let run = try await make()
+                    do { try await run.ready() } catch {
+                        self.attachSurface(of: run, name: "\(scenario)-not-ready-\(iteration)-\(attempt)")
+                        await run.teardown()
+                        throw error
+                    }
+                    return run
+                }
+            } catch let error as ProfileScenarioError {
+                guard case .notReady = error, attempt < Self.profileSetupAttempts else { throw error }
+                print("TRON_PROFILE_SETUP_RETRY name=\(scenario) iteration=\(iteration) attempt=\(attempt) reason=\(error)")
+            }
         }
     }
 }
@@ -225,12 +276,13 @@ final class ProfileTraceHandshake {
         print("TRON_PROFILE_TRACE_RECORDING")
     }
 
-    /// Taken just before `startMeasuring()`, so the window contains the metric's.
-    func beginWindow() -> Date { Date() }
+    /// Taken just outside `ProfileMeasuredWindow`'s bounds, so the traced
+    /// window contains the metric's.
+    func windowBound() -> Date { Date() }
 
-    /// Called after `stopMeasuring()`: the file write is outside the window.
-    func endWindow(_ start: Date, iteration: Int) throws {
-        let end = Date()
+    /// Called for an accepted window only, after it ended: a discarded
+    /// window is not attributed, and the file write is outside the window.
+    func recordWindow(start: Date, end: Date, iteration: Int) throws {
         let line = "{\"iteration\": \(iteration), \"start\": \(start.timeIntervalSince1970), \"end\": \(end.timeIntervalSince1970)}\n"
         let url = directory.appending(path: "windows.jsonl")
         if !FileManager.default.fileExists(atPath: url.path) {

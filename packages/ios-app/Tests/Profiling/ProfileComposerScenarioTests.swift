@@ -116,6 +116,20 @@ final class ProfileComposerRun: ProfileScenarioRun {
         try await profileSleep(until: window, from: start)
     }
 
+    /// The chat stays pinned and the composer's text view shows the typed
+    /// text: a composer that stopped mirroring the draft would measure
+    /// persistence without its rendering.
+    func renderCheck() -> ProfileRenderCheck {
+        var check = chat.renderCheck()
+        let typed = typed
+        let shown = chat.surface.map { profileViews(UITextView.self, in: $0).contains { $0.text == typed } } ?? false
+        check.counters["composerText"] = shown ? 1 : 0
+        if !shown, check.divergence == nil {
+            check.divergence = "the composer text view does not show the \(typed.count) typed characters"
+        }
+        return check
+    }
+
     /// The last word must have been persisted by the debounced save.
     func verify() async throws {
         let scope = ComposerDraftScope(profileID: chat.fixture.profile.id, sessionID: chat.snapshot.sessionId)
