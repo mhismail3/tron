@@ -9223,7 +9223,8 @@ wait).
     `c70ccb4df` (final merge `ec1c3f8f5`): the same six files plus
     `lan-endpoint.integration.test.ts` **144/144**, and
     `runtime-registry` + `projection` + `invocation-receipts` **322/322**;
-    `tsc --noEmit` clean. E-3b does not touch the measured cold-open path, so
+    `tsc --noEmit` clean. After the validation-once half landed, all ten files
+    together are **466/466**. E-3b does not touch the measured cold-open path, so
     the smoke numbers above stay as measured.
   - Negative control for the new case: reverting the single-validation
     refactor in `projectableTranscriptEntries` (back to parsing the receipt once
