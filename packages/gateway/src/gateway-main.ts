@@ -33,6 +33,7 @@ import { PushRelayClient } from "./notifications/relay-client.js";
 import { NotificationService } from "./notifications/notification-service.js";
 import { handledSignalExitCode, SUPERVISOR_RELAUNCH_EXIT_CODE } from "./lifecycle/supervisor-exit-policy.js";
 import { shutdownStep } from "./lifecycle/shutdown-step.js";
+import { STARTUP_LISTEN_BUDGET_MS, startupBudget, type StartupStepTiming } from "./lifecycle/startup-budget.js";
 import { configureAgentBinEnvironment, configureSupervisedNodeCommandEnvironment } from "./runtime/node-command-environment.js";
 import { AutomationStore } from "./automations/automation-store.js";
 import { AutomationScheduler } from "./automations/automation-scheduler.js";
@@ -124,9 +125,12 @@ const logger = new GatewayLogger(join(config.tronHome, "logs", "gateway.jsonl"),
  * `durationMs` is launchd and the launcher.
  */
 let startupCheckpointAt = 0;
+const startupSteps: StartupStepTiming[] = [];
 function startupCheckpoint(step: string, at = performance.now()): void {
-  logger.log("info", `Gateway startup step ${step} took ${Math.round(at - startupCheckpointAt)} ms`, {
-    event: "gateway.startup-step", source: "lifecycle", step, durationMs: at - startupCheckpointAt,
+  const durationMs = at - startupCheckpointAt;
+  startupSteps.push({ step, durationMs });
+  logger.log("info", `Gateway startup step ${step} took ${Math.round(durationMs)} ms`, {
+    event: "gateway.startup-step", source: "lifecycle", step, durationMs,
   });
   startupCheckpointAt = at;
 }
@@ -674,6 +678,20 @@ await transport.listen(async () => {
   await sessions.recoverKnowledgeObservation();
   startupCheckpoint("knowledge-observation-recovery");
 });
+// G-13's startup budget: process start to serving. The restart case reads the
+// same steps from the fixture's Gateway log, so a restart that missed the budget
+// is attributable from either side.
+{
+  const budget = startupBudget(performance.now(), startupSteps);
+  logger.log(
+    budget.withinBudget ? "info" : "warning",
+    `Gateway startup budget ${budget.withinBudget ? "met" : "missed"}: listening after ${Math.round(budget.listeningMs)} ms of ${STARTUP_LISTEN_BUDGET_MS} ms (slowest step ${budget.slowestStep} at ${budget.slowestStepMs} ms)`,
+    {
+      event: "gateway.startup-budget", source: "lifecycle", durationMs: budget.listeningMs, step: budget.slowestStep,
+      counts: { budgetMs: STARTUP_LISTEN_BUDGET_MS, stepMs: budget.slowestStepMs, overBudgetMs: budget.overBudgetMs },
+    },
+  );
+}
 // Serving already; these records account for post-listen recovery work.
 await sessions.recoverCanonicalAttention();
 startupCheckpoint("attention-recovery");

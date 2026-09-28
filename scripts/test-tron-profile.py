@@ -701,7 +701,7 @@ class StubGatewayHarness:
             stub.stdout.close()
 
     def restart_fixture(self, port: int, gap_seconds: float = 1.0, health_delay_seconds: float = 0.0,
-                        **extra: object) -> object:
+                        startup: dict | None = None, **extra: object) -> object:
         """The profiler's side of the restart handshake as `wait_with_restart`
         uses it: an owned child and a restart that replaces the stub Gateway on
         the same port after a real gap, so the clients meet a refused connect
@@ -709,12 +709,14 @@ class StubGatewayHarness:
         so a behaviour the test asked for survives the restart. `health_delay_
         seconds` stands in for the profiler's own health check: the new Gateway
         already serves requests while the answer (and so `restoredAtMs`) is
-        still seconds away."""
+        still seconds away. `startup` stands in for the new process's own
+        `gateway.startup-step` records the real fixture reads."""
         harness = self
 
         class RestartFixture:
             def __init__(self) -> None:
                 self.process = harness.stubs[-1]
+                self.startup = startup
 
             def restart(self) -> None:
                 harness.stop_stub(harness.stubs[-1])
@@ -977,6 +979,23 @@ class MultiDriverImpairment(StubGatewayHarness, unittest.TestCase):
                             for request in leg["requests"]),
                         f"a request is the downtime's by its outcome: {leg['requests']}")
         self.assertTrue(all(request["ms"] is not None for request in leg["requests"]))
+
+    def test_the_restart_case_reports_the_new_startups_budget(self) -> None:
+        # The driver drops nothing of the profiler's answer: the budget the
+        # profiler read from the new process reaches the result the qualification
+        # run judges. Negative control: with `startup` not forwarded the leg
+        # reports None and restart_criterion_warnings says the budget is missing.
+        budget = {"listeningMs": 1_200.0, "steps": {"modules": 1_000.0},
+                  "slowestStep": "modules", "slowestStepMs": 1_000.0}
+        status, output, result = self.run_impairment(["restart"], {
+            "restartStormSeconds": 2, "restartDeadlineMs": 30_000,
+            "running": [{"sessionId": "stub-run-1"}],
+        }, restart_stub=True, stub_config={"startup": budget})
+        self.assertEqual(status, 0, output)
+        leg = result["impairment"]["restart"]
+        self.assertEqual(leg.get("startup"), budget, "the driver dropped the new process's startup budget")
+        self.assertEqual(self.profiler.restart_criterion_warnings([
+            {"label": "impaired", "impairment": {"restart": leg}}]), [])
 
     def test_the_streaming_case_holds_its_streams_and_reports_the_cap(self) -> None:
         # The streaming case is only meaningful if it holds mounted chats whose
@@ -1292,6 +1311,88 @@ class ImpairmentCases(unittest.TestCase):
         self.assertEqual(len(self.profiler.validate_impairment([short])), 1,
                          "the three measured clients must all report")
 
+    def test_a_restart_that_misses_the_criterion_is_reported_with_its_numbers(self) -> None:
+        # G-13's criterion is a target, not a validity gate: a busy host slows the
+        # start itself (a loaded host spent 4.5 s of a 7.2 s restart loading the
+        # module graph), so the run keeps its report and says which item missed.
+        def restart(**overrides) -> dict:
+            clients = [{"name": name, "readyAtMs": 11, "reconnectMs": 1_400, "attempts": []}
+                       for name in ("mobile", "dashboard", "driver")]
+            leg = {"downtimeMs": 3_900, "restoredAtMs": 10, "clients": clients, "clientsAll": clients,
+                   "requests": [{"client": "mobile", "ms": 200, "duringDowntime": False}],
+                   "startup": {"listeningMs": 4_605.0, "steps": {"modules": 4_460.0},
+                               "slowestStep": "modules", "slowestStepMs": 4_460.0}}
+            leg.update(overrides)
+            return {"label": "iteration-1", "cases": ["restart"], "impairment": {"restart": leg}}
+
+        self.assertEqual(self.profiler.restart_criterion_warnings([restart()]), [],
+                         "a storm inside the criterion must report nothing")
+        slow = self.profiler.restart_criterion_warnings([restart(clientsAll=[
+            {"name": "mobile", "readyAtMs": 11, "reconnectMs": 15_187, "attempts": []}])])
+        self.assertEqual(len(slow), 1, slow)
+        self.assertIn("15", slow[0])
+        self.assertIn("mobile", slow[0])
+        late = self.profiler.restart_criterion_warnings([restart(
+            requests=[{"client": "mobile", "ms": 1_160, "duringDowntime": False},
+                      {"client": "driver", "ms": 130, "duringDowntime": False},
+                      {"client": "dashboard", "ms": 9_000, "duringDowntime": True}])])
+        self.assertEqual(len(late), 1, late)
+        self.assertIn("1 request(s) over 1000 ms", late[0])
+        self.assertIn("1160", late[0])
+        self.assertNotIn("9000", late[0], "a request the downtime refused is not the storm's")
+        over = self.profiler.restart_criterion_warnings([restart(
+            startup={"listeningMs": 7_168.0, "steps": {"modules": 4_460.0},
+                     "slowestStep": "modules", "slowestStepMs": 4_460.0})])
+        self.assertEqual(len(over), 1, over)
+        self.assertIn("7168", over[0])
+        self.assertIn("modules", over[0])
+        missing = self.profiler.restart_criterion_warnings([restart(startup=None)])
+        self.assertEqual(len(missing), 1, missing)
+        self.assertIn("no startup budget", missing[0])
+
+    def test_the_restart_budget_is_read_from_the_new_processes_own_records(self) -> None:
+        # The budget is the new process's, not the whole run's: the predecessor's
+        # records sit in the same appended log, so reading it from the restart's
+        # own byte offset is what keeps them out of the number.
+        predecessor = json.dumps({"event": "gateway.started", "durationMs": 400}) + "\n" + json.dumps(
+            {"event": "gateway.startup-step", "step": "modules", "durationMs": 900}) + "\n" + json.dumps(
+            {"event": "gateway.startup-step", "step": "listener-bind", "durationMs": 100}) + "\n" + json.dumps(
+            {"event": "gateway.listening"}) + "\n"
+        restarted = "".join([
+            json.dumps({"event": "gateway.started", "durationMs": 4_460}) + "\n",
+            json.dumps({"event": "gateway.startup-step", "step": "modules", "durationMs": 4_460}) + "\n",
+            json.dumps({"event": "gateway.startup-step", "step": "automation-recovery", "durationMs": 900}) + "\n",
+            json.dumps({"event": "gateway.startup-step", "step": "listener-bind", "durationMs": 300}) + "\n",
+            json.dumps({"event": "gateway.listening"}) + "\n",
+            json.dumps({"event": "gateway.startup-step", "step": "attention-recovery", "durationMs": 265}) + "\n",
+        ])
+        with tempfile.TemporaryDirectory() as temporary:
+            path = Path(temporary) / "gateway.jsonl"
+            path.write_text(predecessor + restarted)
+            budget = self.profiler.startup_from_log(path, len(predecessor.encode()))
+            self.assertEqual(budget["listeningMs"], 5_660.0, budget)
+            self.assertEqual(budget["slowestStep"], "modules")
+            self.assertEqual(budget["slowestStepMs"], 4_460.0)
+            self.assertNotIn("attention-recovery", budget["steps"],
+                             "the steps after listening belong to recovery, not the start")
+            whole = self.profiler.startup_from_log(path, 0)
+            self.assertEqual(whole["listeningMs"], 5_660.0,
+                             "the predecessor's steps are never this start's: its own gateway.started opens the window")
+            # A retried restart writes a second start into the same slice: the
+            # budget is the last start's, with no earlier start's steps mixed in.
+            retry = "".join([
+                json.dumps({"event": "gateway.started", "durationMs": 300}) + "\n",
+                json.dumps({"event": "gateway.startup-step", "step": "modules", "durationMs": 500}) + "\n",
+                json.dumps({"event": "gateway.listening"}) + "\n",
+            ])
+            path.write_text(predecessor + restarted + retry)
+            self.assertEqual(self.profiler.startup_from_log(path, 0)["listeningMs"], 500.0)
+            # A restart whose log holds no complete start reports a missing budget.
+            self.assertIsNone(self.profiler.startup_from_log(path, len((predecessor + restarted + retry).encode())))
+            (Path(temporary) / "empty.jsonl").write_text("")
+            self.assertIsNone(self.profiler.startup_from_log(Path(temporary) / "empty.jsonl", 0))
+            self.assertIsNone(self.profiler.startup_from_log(Path(temporary) / "absent.jsonl", 0))
+
     def test_a_restart_waits_out_a_previous_owners_runtime_lock(self) -> None:
         # A predecessor that had to be killed leaves its agent-directory runtime
         # lock until it is stale (60 s), and a child started inside that window
@@ -1301,6 +1402,8 @@ class ImpairmentCases(unittest.TestCase):
         fixture = profiler.FixtureGateway.__new__(profiler.FixtureGateway)
         with tempfile.TemporaryDirectory() as temporary:
             fixture.port = 51_234
+            fixture.tron_home = Path(temporary) / "tron"
+            fixture.tron_home.mkdir()
             fixture.log_path = Path(temporary) / "gateway.stdout.log"
             fixture.log_path.write_text(f"Gateway failed during startup: {profiler.RUNTIME_LOCK_CONFLICT}\n")
             calls: list = []
@@ -1347,6 +1450,8 @@ class ImpairmentCases(unittest.TestCase):
                                      "linkUse": 0.97, "maxPingToPongMs": 5_400.0,
                                      "pongDeadlineMisses": 0, "unexpectedCloses": 0},
                 "restart": {"downtimeMs": downtime, "restoredAtMs": 1,
+                            "startup": {"listeningMs": downtime / 2, "steps": {"modules": downtime / 3},
+                                        "slowestStep": "modules", "slowestStepMs": downtime / 3},
                             "clients": [{"name": "mobile", "reconnectMs": reconnect,
                                          "attempts": [{"ms": 30, "failed": "ECONNREFUSED"}, {"ms": 400, "connected": True}]}],
                             "clientsAll": [{"name": name, "reconnectMs": reconnect,
@@ -1387,6 +1492,8 @@ class ImpairmentCases(unittest.TestCase):
         self.assertEqual(metrics["impairment.restart.downtime_requests"]["values"], [1, 0])
         self.assertEqual(metrics["impairment.restart.failed_attempts"]["values"], [6, 6],
                          "one refused connect per client is counted; a connected attempt is not")
+        self.assertEqual(metrics["impairment.restart.startup_ms"]["values"], [1_950.0, 2_050.0],
+                         "the new Gateway's own start is reported, one value per iteration")
         self.assertNotIn("impairment.bandwidth.cap_bits_per_second", metrics,
                          "the cap is configuration: it belongs in the report context")
         self.assertNotIn("impairment.restart.clients_ready", metrics,
