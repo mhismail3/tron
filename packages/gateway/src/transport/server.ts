@@ -271,13 +271,24 @@ export interface OrderedOutboundQueueSnapshot {
   oldestTopic: string;
 }
 
-/** One encoded frame with the wire topic it carries and, when a newer frame of
- * the same state can replace it, the key that identifies that state (`G-4`). */
+/** One encoded frame with the wire topic it carries and, when a newer frame can
+ * replace it in an unsent queue, what identifies the state it carries (`G-4`). */
 export interface OutboundFrame {
   readonly encoded: string;
   readonly bytes: number;
   readonly topic: string;
+  /** Whole state a newer frame of the same kind replaces without covering a
+   * sequence: only a `session.summary`, which states its own revision. */
   readonly key?: string;
+  /** A sequenced session frame's session and its per-session `eventSequence`. */
+  readonly sessionId?: string;
+  readonly sequence?: number;
+  /** The gap-tolerant form of this frame. Superseding a sequenced frame is only
+   * allowed together with this: the client admits a `session.rebaseline` whose
+   * snapshot covers the sequences dropped with it
+   * (`SessionRebaselineAdmission`), where an exact-next snapshot would arrive
+   * as the gap the queue just made. */
+  readonly rebaseline?: () => OutboundFrame | undefined;
 }
 
 interface QueuedOutboundFrame {
@@ -285,6 +296,8 @@ interface QueuedOutboundFrame {
   bytes: number;
   topic: string;
   key?: string;
+  sessionId?: string;
+  sequence?: number;
 }
 
 type OutboundWrite = (encoded: string, completion: (error?: Error) => void) => void;
@@ -299,8 +312,9 @@ const UNKNOWN_OUTBOUND_TOPIC = "other";
  * A frame whose state a newer frame replaces queues once: the superseded frame
  * is dropped unsent and the newer one keeps its own place in the queue, so a
  * slow link is bounded by the state that is still worth sending rather than by
- * how long it took. The backstop below is unchanged and still closes a
- * connection that exceeds it.
+ * how long it took. Sequenced state is only superseded with the `rebaseline`
+ * replacement that covers the sequences dropped with it. The backstop below is
+ * unchanged and still closes a connection that exceeds it.
  */
 export class OrderedOutboundQueue {
   private readonly frames: Array<QueuedOutboundFrame | undefined> = [];
@@ -326,30 +340,53 @@ export class OrderedOutboundQueue {
 
   enqueue(frame: OutboundFrame): boolean {
     if (this.retired) return false;
-    const { encoded, bytes, topic, key } = frame;
     // The frame ws is already writing cannot be recalled, so replacement looks
     // only at frames still queued behind it. The newest frame of a state is
     // appended where it was enqueued, after everything already queued: a
     // delivered sequence is therefore always a subsequence of the enqueue
     // sequence, and no frame ever overtakes an earlier one.
-    const replacedIndex = key === undefined ? -1 : this.unsentFrameWithKey(key, this.writeActive ? this.head + 1 : this.head);
-    const replacedBytes = replacedIndex < 0 ? 0 : this.frames[replacedIndex]!.bytes;
-    if (this.frames.length - this.head + (replacedIndex < 0 ? 1 : 0) > this.maximumFrames
-      || bytes > this.maximumBytes || this.queuedBytes - replacedBytes > this.maximumBytes - bytes) {
+    const candidates = this.supersededIndices(frame);
+    const replacement = candidates.length > 0 && frame.sequence !== undefined ? frame.rebaseline?.() : undefined;
+    // A sequenced frame is dropped only together with the replacement that
+    // covers it; an unsequenced one carries its own revision and needs no
+    // cover. Without the replacement this queue keeps every frame, so nothing
+    // it delivers can leave a gap it created.
+    const superseded = frame.sequence === undefined || replacement !== undefined ? candidates : [];
+    const entry = replacement ?? frame;
+    const releasedBytes = superseded.reduce((total, index) => total + (this.frames[index]?.bytes ?? 0), 0);
+    if (this.frames.length - this.head - superseded.length + 1 > this.maximumFrames
+      || entry.bytes > this.maximumBytes
+      || this.queuedBytes - releasedBytes > this.maximumBytes - entry.bytes) {
       const snapshot = this.snapshot();
       this.retire();
-      this.overflow(snapshot, bytes, topic);
+      this.overflow(snapshot, entry.bytes, entry.topic);
       return false;
     }
-    if (replacedIndex >= 0) {
+    // `superseded` is ascending, so each earlier splice shifts the next index
+    // back by the frames already removed: drops are reported in queue order.
+    let removed = 0;
+    for (const index of superseded) {
+      const dropped = this.frames[index - removed];
+      if (dropped === undefined) continue;
       // Payload and byte reservation are released together, at the same
-      // boundary the completed-frame path uses.
-      this.frames.splice(replacedIndex, 1);
-      this.queuedBytes -= replacedBytes;
-      this.replaced(replacedBytes);
+      // boundary the completed-frame path uses. A dropped frame is no longer
+      // outstanding, so the close record's completed/accepted frame counts keep
+      // describing frames this connection still owed its peer.
+      this.frames.splice(index - removed, 1);
+      this.queuedBytes -= dropped.bytes;
+      this.acceptedFrames -= 1;
+      this.replaced(dropped.bytes);
+      removed += 1;
     }
-    this.frames.push({ encoded, bytes, topic, ...(key === undefined ? {} : { key }) });
-    this.queuedBytes += bytes;
+    this.frames.push({
+      encoded: entry.encoded,
+      bytes: entry.bytes,
+      topic: entry.topic,
+      ...(entry.key === undefined ? {} : { key: entry.key }),
+      ...(entry.sessionId === undefined ? {} : { sessionId: entry.sessionId }),
+      ...(entry.sequence === undefined ? {} : { sequence: entry.sequence }),
+    });
+    this.queuedBytes += entry.bytes;
     this.acceptedFrames += 1;
     this.frameHighWater = Math.max(this.frameHighWater, this.frames.length - this.head);
     this.byteHighWater = Math.max(this.byteHighWater, this.queuedBytes);
@@ -370,6 +407,29 @@ export class OrderedOutboundQueue {
       byteHighWater: this.byteHighWater,
       oldestTopic: this.frames[this.head]?.topic ?? UNKNOWN_OUTBOUND_TOPIC,
     };
+  }
+
+  /** The unsent frames a newer frame replaces: a sequenced frame covers every
+   * unsent frame of its session up to its own sequence, an unsequenced one the
+   * newest frame with its key. */
+  private supersededIndices(frame: OutboundFrame): number[] {
+    // The frame ws is already writing cannot be recalled.
+    const first = this.writeActive ? this.head + 1 : this.head;
+    if (frame.sessionId !== undefined && frame.sequence !== undefined) {
+      const superseded: number[] = [];
+      for (let index = first; index < this.frames.length; index += 1) {
+        const queued = this.frames[index];
+        if (queued === undefined
+          || queued.sessionId !== frame.sessionId
+          || queued.sequence === undefined
+          || queued.sequence > frame.sequence) continue;
+        superseded.push(index);
+      }
+      return superseded;
+    }
+    if (frame.key === undefined) return [];
+    const index = this.unsentFrameWithKey(frame.key, first);
+    return index < 0 ? [] : [index];
   }
 
   /** The newest unsent frame carrying `key`, searched from the tail: a frame
@@ -606,15 +666,30 @@ interface PreparedOutboundFrame extends BufferedSessionEncoding {
   readonly nodes?: number;
 }
 
+/** What `outboundFrameIdentity` adds to one encoded frame (`G-4`). */
+interface OutboundFrameIdentity {
+  readonly topic: string;
+  readonly key?: string;
+  readonly sessionId?: string;
+  readonly sequence?: number;
+  readonly rebaseline?: () => OutboundFrame | undefined;
+}
+
 /**
- * The wire topic of one outbound frame, and — for the state a newer frame can
- * replace in an unsent queue — that state's coalescing key (`G-4`). Only whole
- * current state is coalesced: a snapshot for a session, a session summary, and
- * one process's activity. An event that carries a deltas-only or multi-key
- * change (a progress frame, a process removal naming several processes) has no
- * key and is always delivered.
+ * The wire topic of one outbound frame, and — when a newer frame can replace it
+ * in an unsent queue — what identifies the state it carries (`G-4`). Only a
+ * `session.snapshot` supersedes sequenced state: it is the one frame that
+ * carries the whole current state of its session, so the newest of them can
+ * stand in for every sequence the queue dropped with it. A session summary is
+ * replaced by key alone, because it states its own revision and carries no
+ * sequence. A frame with neither is always delivered.
  */
-function outboundFrameIdentity(value: unknown, prepared: PreparedOutboundFrame): { topic: string; key?: string } {
+function outboundFrameIdentity(
+  connection: Connection,
+  value: unknown,
+  prepared: PreparedOutboundFrame,
+  maximumBytes: number,
+): OutboundFrameIdentity {
   // An oversized projection is sent as a compact resync notice instead: that
   // notice is its own frame and is never superseded by the projection it
   // replaced.
@@ -629,14 +704,42 @@ function outboundFrameIdentity(value: unknown, prepared: PreparedOutboundFrame):
     return summarySessionId === undefined ? { topic } : { topic, key: `session.summary:${summarySessionId}` };
   }
   if (sessionId === undefined) return { topic };
-  if (topic === "session.snapshot") return { topic, key: `session.snapshot:${sessionId}` };
-  if (topic === "session.processActivity") {
-    const data = typeof payload.data === "object" && payload.data !== null ? payload.data as Record<string, unknown> : {};
-    const activity = typeof data.activity === "object" && data.activity !== null ? data.activity as Record<string, unknown> : {};
-    const processId = typeof activity.processId === "string" ? activity.processId : undefined;
-    return processId === undefined ? { topic } : { topic, key: `session.processActivity:${sessionId}:${processId}` };
-  }
-  return { topic };
+  const sequence = typeof payload.eventSequence === "number" ? payload.eventSequence : undefined;
+  if (sequence === undefined) return { topic };
+  // Every sequenced session frame is droppable by a newer snapshot of its
+  // session, so each one states the session and sequence a superseding snapshot
+  // has to cover. A process activity that renames or removes processes is
+  // included: nothing can make an activity's own gap admissible, so it never
+  // supersedes, and it never carries a key.
+  if (topic !== "session.snapshot") return { topic, sessionId, sequence };
+  // Superseding a snapshot is only safe when the client can still accept what
+  // follows: the replacement is a `session.rebaseline`, which the phone admits
+  // as fresh authority even when its `eventSequence` jumps forward
+  // (`SessionRebaselineAdmission`). It needs the subscription credential the
+  // client installed, so a session this connection holds no token for
+  // supersedes nothing.
+  const subscriptionToken = connection.subscriptionTokens.get(sessionId);
+  if (subscriptionToken === undefined) return { topic, sessionId, sequence };
+  const rebaseline = (): OutboundFrame | undefined => {
+    const encoded = stage("frame.serialize", () => prepareOutboundFrame({
+      type: "event",
+      topic: "session.rebaseline",
+      sessionId,
+      payload: { reason: "superseded snapshot", subscriptionToken, snapshot: payload },
+    }, maximumBytes));
+    if (!encoded) return undefined;
+    bytes("frame.serialize", encoded.outputBytes);
+    return {
+      encoded: encoded.output,
+      bytes: encoded.outputBytes,
+      // A rebaseline too large to encode is still the frame the client needs to
+      // fail closed: the compact notice retires its subscription instead.
+      topic: encoded.fallback ? "transport.resyncRequired" : "session.rebaseline",
+      sessionId,
+      sequence,
+    };
+  };
+  return { topic, sessionId, sequence, rebaseline };
 }
 
 function prepareOutboundFrame(value: unknown, maximum: number): PreparedOutboundFrame | undefined {
@@ -2380,7 +2483,8 @@ export class GatewayServer {
       // response before its synchronization suffix without manufacturing
       // transport pressure from concurrent bounded RPC completions.
       if (!connection.outbound.enqueue({
-        encoded: frame.output, bytes: frame.outputBytes, ...outboundFrameIdentity(value, frame),
+        encoded: frame.output, bytes: frame.outputBytes,
+        ...outboundFrameIdentity(connection, value, frame, this.options.maxFrameBytes),
       })) return "failed";
       this.resourceSampler.recordOutboundBytes(frame.outputBytes);
       return frame.fallback ? "fallback" : "sent";

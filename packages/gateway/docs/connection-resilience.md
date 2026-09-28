@@ -8,11 +8,17 @@ owner of accepted commands; mobile reconnect never replays a prompt blindly.
 
 - **Gateway outbound queue:** at most 8 MiB and 4,096 encoded frames per connection,
   including the active write. Exactly one frame enters `ws` at a time. Completion
-  releases both its payload reference and byte reservation. A frame whose state a
-  newer frame replaces (a session snapshot, a session summary, one process's
-  activity) is dropped while still unsent, so a slow link carries current state
-  rather than every superseded revision of it; the frame already entering `ws` is
-  never recalled, and what a client receives stays in enqueue order. A peer
+  releases both its payload reference and byte reservation. A newer session
+  summary replaces the unsent summary of that session, and a newer session
+  snapshot supersedes every unsent sequenced frame of its session up to its own
+  `eventSequence`, so a slow link carries current state rather than every
+  superseded revision of it. A superseded sequence is never left uncovered: the
+  surviving snapshot is sent as the `session.rebaseline` carrying the whole
+  snapshot and the connection's installed `subscriptionToken`, which the phone
+  installs as fresh authority instead of resynchronizing, and a snapshot for a
+  session this connection holds no token for supersedes nothing. The frame
+  already entering `ws` is never recalled, what a client receives stays in
+  enqueue order, and a dropped frame is not counted as outstanding. A peer
   exceeding either limit loses request/subscription admission immediately; a
   one-second forced-close deadline bounds a stalled close handshake. Other peers
   and accepted domain commands continue independently.

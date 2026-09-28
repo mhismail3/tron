@@ -45,9 +45,24 @@ async function bounded<T>(promise: Promise<T>, label: string): Promise<T> {
 
 /** One encoded frame for the queue-level cases: a byte-counted payload with the
  * wire topic it carries and, when a newer frame of the same state can replace
- * it, that state's coalescing key. */
+ * it, that state's coalescing key (a `session.summary`). */
 function queuedFrame(encoded: string, topic = "test.frame", key?: string): OutboundFrame {
   return { encoded, bytes: Buffer.byteLength(encoded, "utf8"), topic, ...(key === undefined ? {} : { key }) };
+}
+
+/** One sequenced session frame for the queue-level cases, optionally with the
+ * gap-tolerant replacement a superseding snapshot has to carry. */
+function sequencedFrame(
+  encoded: string,
+  sessionId: string,
+  sequence: number,
+  topic = "session.snapshot",
+  rebaseline?: () => OutboundFrame | undefined,
+): OutboundFrame {
+  return {
+    encoded, bytes: Buffer.byteLength(encoded, "utf8"), topic, sessionId, sequence,
+    ...(rebaseline === undefined ? {} : { rebaseline }),
+  };
 }
 
 describe("WebSocket connection and outbound capacity", () => {
@@ -134,7 +149,7 @@ describe("WebSocket connection and outbound capacity", () => {
   // written cannot be recalled; a replacement larger than the remaining budget
   // must not evict the state it supersedes on its way to the backstop; and
   // replacement must not disturb the order of frames with other keys.
-  it("replaces the newest unsent frame of a key and never the frame being written", () => {
+  it("replaces the newest unsent summary and never the frame being written", () => {
     const writes: string[] = [];
     const completions: Array<(error?: Error) => void> = [];
     const overflow = vi.fn();
@@ -148,15 +163,17 @@ describe("WebSocket connection and outbound capacity", () => {
     );
 
     // Written and still in flight: it is past recall.
-    expect(queue.enqueue(queuedFrame("in-flight", "session.snapshot", "session.snapshot:s1"))).toBe(true);
+    expect(queue.enqueue(queuedFrame("in-flight", "session.summary", "session.summary:s1"))).toBe(true);
     // Unsent state, then a frame with another key, then two supersessions of it.
-    expect(queue.enqueue(queuedFrame("old", "session.snapshot", "session.snapshot:s1"))).toBe(true);
+    expect(queue.enqueue(queuedFrame("old", "session.summary", "session.summary:s1"))).toBe(true);
     expect(queue.enqueue(queuedFrame("progress", "session.progress"))).toBe(true);
-    expect(queue.enqueue(queuedFrame("newer", "session.snapshot", "session.snapshot:s1"))).toBe(true);
-    expect(queue.enqueue(queuedFrame("newest", "session.snapshot", "session.snapshot:s1"))).toBe(true);
+    expect(queue.enqueue(queuedFrame("newer", "session.summary", "session.summary:s1"))).toBe(true);
+    expect(queue.enqueue(queuedFrame("newest", "session.summary", "session.summary:s1"))).toBe(true);
 
     expect(writes).toEqual(["in-flight"]);
-    expect(queue.snapshot()).toMatchObject({ queuedFrames: 3, acceptedFrames: 5, writeActive: true, oldestTopic: "session.snapshot" });
+    // Five enqueues, two of them superseded before they were written: the
+    // counters describe the frames this connection still owes its peer.
+    expect(queue.snapshot()).toMatchObject({ queuedFrames: 3, acceptedFrames: 3, writeActive: true, oldestTopic: "session.summary" });
     expect(queue.snapshot().queuedBytes).toBe(Buffer.byteLength("in-flight") + Buffer.byteLength("progress") + Buffer.byteLength("newest"));
     expect(coalesced.mock.calls.map((call) => call[0])).toEqual([Buffer.byteLength("old"), Buffer.byteLength("newer")]);
     expect(overflow).not.toHaveBeenCalled();
@@ -171,18 +188,62 @@ describe("WebSocket connection and outbound capacity", () => {
     expect(queue.snapshot()).toMatchObject({ queuedFrames: 0, queuedBytes: 0 });
   });
 
+  it("supersedes every unsent sequenced frame a session snapshot covers, and only with a rebaseline", () => {
+    const writes: string[] = [];
+    const completions: Array<(error?: Error) => void> = [];
+    const overflow = vi.fn();
+    const coalesced = vi.fn();
+    const queue = new OrderedOutboundQueue(
+      4_096,
+      (encoded, done) => { writes.push(encoded); completions.push(done); },
+      overflow,
+      vi.fn(),
+      coalesced,
+    );
+
+    // In flight, past recall; then this session's unsent state, another
+    // session's state, and a frame with no sequence at all.
+    expect(queue.enqueue(sequencedFrame("in-flight", "s1", 1))).toBe(true);
+    expect(queue.enqueue(sequencedFrame("progress", "s1", 2, "session.progress"))).toBe(true);
+    expect(queue.enqueue(sequencedFrame("other", "s2", 2))).toBe(true);
+    expect(queue.enqueue(sequencedFrame("activity", "s1", 3, "session.processActivity"))).toBe(true);
+    expect(queue.enqueue(queuedFrame("notice"))).toBe(true);
+    // A sequenced frame with no replacement supersedes nothing: dropping its
+    // session's predecessors would leave the client a sequence it cannot accept.
+    expect(queue.enqueue(sequencedFrame("plain", "s1", 4))).toBe(true);
+    expect(queue.snapshot()).toMatchObject({ queuedFrames: 6, acceptedFrames: 6 });
+    expect(coalesced).not.toHaveBeenCalled();
+
+    const rebaseline = sequencedFrame("rebaseline", "s1", 5, "session.rebaseline");
+    expect(queue.enqueue(sequencedFrame("newest", "s1", 5, "session.snapshot", () => rebaseline))).toBe(true);
+    // Only this session's frames up to the surviving sequence are gone; the
+    // replacement is what the client is handed, in the position the survivor
+    // was enqueued in.
+    expect(queue.snapshot()).toMatchObject({ queuedFrames: 4, acceptedFrames: 4, oldestTopic: "session.snapshot" });
+    expect(coalesced.mock.calls.map((call) => call[0])).toEqual([
+      Buffer.byteLength("progress"), Buffer.byteLength("activity"), Buffer.byteLength("plain"),
+    ]);
+    completions.shift()!();
+    completions.shift()!();
+    completions.shift()!();
+    completions.shift()!();
+    expect(writes).toEqual(["in-flight", "other", "notice", "rebaseline"]);
+    expect(queue.snapshot()).toMatchObject({ queuedFrames: 0, queuedBytes: 0 });
+    expect(overflow).not.toHaveBeenCalled();
+  });
+
   it("accepts a replacement that fits the queue only because the state it supersedes is dropped", () => {
     const completions: Array<(error?: Error) => void> = [];
     const overflow = vi.fn();
     const queue = new OrderedOutboundQueue(1_000, (_encoded, done) => { completions.push(done); }, overflow, vi.fn());
 
     expect(queue.enqueue(queuedFrame("a".repeat(200)))).toBe(true); // in flight, past recall
-    expect(queue.enqueue(queuedFrame("s".repeat(600), "session.snapshot", "session.snapshot:s1"))).toBe(true);
+    expect(queue.enqueue(queuedFrame("s".repeat(600), "session.summary", "session.summary:s1"))).toBe(true);
     expect(queue.enqueue(queuedFrame("p".repeat(100), "session.progress"))).toBe(true);
     expect(queue.snapshot()).toMatchObject({ queuedFrames: 3, queuedBytes: 900 });
     // A 200-byte sibling of 900 queued bytes exceeds the backstop unless the
     // 600 bytes it supersedes are dropped first.
-    expect(queue.enqueue(queuedFrame("n".repeat(200), "session.snapshot", "session.snapshot:s1"))).toBe(true);
+    expect(queue.enqueue(queuedFrame("n".repeat(200), "session.summary", "session.summary:s1"))).toBe(true);
     expect(overflow).not.toHaveBeenCalled();
     expect(queue.snapshot()).toMatchObject({ queuedFrames: 3, queuedBytes: 500, maximumBytes: 1_000 });
     expect(completions.length).toBe(1);
@@ -193,13 +254,13 @@ describe("WebSocket connection and outbound capacity", () => {
     const queue = new OrderedOutboundQueue(1_000, () => {}, overflow, vi.fn());
 
     expect(queue.enqueue(queuedFrame("a".repeat(200)))).toBe(true);
-    expect(queue.enqueue(queuedFrame("s".repeat(600), "session.snapshot", "session.snapshot:s1"))).toBe(true);
+    expect(queue.enqueue(queuedFrame("s".repeat(600), "session.summary", "session.summary:s1"))).toBe(true);
     expect(queue.enqueue(queuedFrame("p".repeat(100), "session.progress"))).toBe(true);
-    // The same bytes as the coalescing case, but the new snapshot is another
+    // The same bytes as the coalescing case, but the new summary is another
     // session's: it replaces nothing, so the queue's 8 MiB-scale bound holds.
-    expect(queue.enqueue(queuedFrame("n".repeat(200), "session.snapshot", "session.snapshot:s2"))).toBe(false);
+    expect(queue.enqueue(queuedFrame("n".repeat(200), "session.summary", "session.summary:s2"))).toBe(false);
     expect(overflow).toHaveBeenCalledTimes(1);
-    expect(overflow.mock.calls[0]?.[2]).toBe("session.snapshot");
+    expect(overflow.mock.calls[0]?.[2]).toBe("session.summary");
   });
 
   it("fails closed on a replacement larger than the queue", () => {
@@ -207,14 +268,14 @@ describe("WebSocket connection and outbound capacity", () => {
     const overflow = vi.fn();
     const queue = new OrderedOutboundQueue(1_000, (encoded) => { writes.push(encoded); }, overflow, vi.fn());
 
-    expect(queue.enqueue(queuedFrame("old", "session.snapshot", "session.snapshot:s1"))).toBe(true);
+    expect(queue.enqueue(queuedFrame("old", "session.summary", "session.summary:s1"))).toBe(true);
     expect(queue.enqueue(queuedFrame("p".repeat(400), "session.progress"))).toBe(true);
-    expect(queue.enqueue(queuedFrame("x".repeat(1_100), "session.snapshot", "session.snapshot:s1"))).toBe(false);
+    expect(queue.enqueue(queuedFrame("x".repeat(1_100), "session.summary", "session.summary:s1"))).toBe(false);
     expect(overflow).toHaveBeenCalledTimes(1);
     // The record names what the socket was waiting on and what could not fit.
-    expect(overflow.mock.calls[0]?.[0]).toMatchObject({ queuedFrames: 2, queuedBytes: 403, oldestTopic: "session.snapshot", maximumBytes: 1_000 });
+    expect(overflow.mock.calls[0]?.[0]).toMatchObject({ queuedFrames: 2, queuedBytes: 403, oldestTopic: "session.summary", maximumBytes: 1_000 });
     expect(overflow.mock.calls[0]?.[1]).toBe(1_100);
-    expect(overflow.mock.calls[0]?.[2]).toBe("session.snapshot");
+    expect(overflow.mock.calls[0]?.[2]).toBe("session.summary");
     expect(queue.enqueue(queuedFrame("after"))).toBe(false);
   });
 
@@ -980,11 +1041,46 @@ describe("WebSocket connection and outbound capacity", () => {
 
   // G-4: the queue a slow link fills is bounded by the state still worth
   // sending, not by how long the link took. These cases drive real broadcast
-  // paths (superseding session snapshots and keyed events) into a real
-  // connection whose writes are held, which is the shape O-6b's bandwidth-cap
-  // case produces: without coalescing the same bytes reach the 8 MiB backstop
-  // and the peer is closed for capacity.
-  const stalledLink = async (maximumOutboundBytes: number, logger: { log: ReturnType<typeof vi.fn> }) => {
+  // paths (superseding session snapshots and summaries) into a real connection
+  // whose writes are held, which is the shape O-6b's bandwidth-cap case
+  // produces: without coalescing the same bytes reach the connection's own
+  // backstop (64 KiB in these fixtures) and the peer is closed for capacity.
+  interface StalledConnection {
+    outbound: OrderedOutboundQueue;
+    socket: WebSocket;
+    subscriptionTokens: Map<string, string>;
+  }
+
+  interface StalledLink {
+    gateway: GatewayServer;
+    socket: WebSocket;
+    connection: StalledConnection;
+    /** Every encoded frame this link was handed, in order. */
+    held: Array<{ encoded: string; done: (error?: Error) => void }>;
+    release: () => void;
+    sampler: ResourceSampler;
+  }
+
+  /** The Gateway's live connections, which the transport owns privately. */
+  const connections = (gateway: GatewayServer): StalledConnection[] =>
+    [...(gateway as unknown as { clients: Map<string, StalledConnection> }).clients.values()];
+
+  /** One delivered frame, decoded only for the fields these cases assert. */
+  const delivered = (held: StalledLink["held"]): Array<{
+    id?: string;
+    topic: string;
+    sessionId?: string;
+    payload: {
+      eventSequence?: number;
+      subscriptionToken?: string;
+      snapshot?: { sessionId: string; eventSequence: number; revision: number };
+      sessionId?: string;
+      summaryRevision?: number;
+      data?: { activity?: { processId: string; marker: string }; removedProcessIds?: string[] };
+    };
+  }> => held.map((write) => JSON.parse(write.encoded));
+
+  const stalledLink = async (maximumOutboundBytes: number, logger: { log: ReturnType<typeof vi.fn> }): Promise<StalledLink> => {
     const root = await mkdtemp(join(tmpdir(), "tron-server-coalesce-"));
     const devices = new DeviceStore(root, "machine");
     await devices.initialize();
@@ -997,16 +1093,16 @@ describe("WebSocket connection and outbound capacity", () => {
     });
     const gateway = new GatewayServer({
       host: "127.0.0.1", port, maxFrameBytes: 512 * 1_024, maximumOutboundBytes,
-      devices, uploads: {} as any, sessions: { unsubscribeClient: vi.fn() } as any,
-      auth: { detachClient: vi.fn() } as any, service: {
+      devices, uploads: {} as never, sessions: { unsubscribeClient: vi.fn() } as never,
+      auth: { detachClient: vi.fn() } as never, service: {
         info: () => ({ protocolVersion: 5 }), releaseClient: vi.fn(),
         terminalBelongsToSession: () => false, invoke: async () => ({ ok: true }),
-      } as any,
-      logger: logger as any, resourceSampler: sampler,
+      } as never,
+      logger: logger as never, resourceSampler: sampler,
     });
     await gateway.listen();
     const socket = new WebSocket(`ws://127.0.0.1:${port}/v1/socket`, { headers: { authorization: `Bearer ${token}` } });
-    const frames: any[] = [];
+    const frames: Array<{ type?: string }> = [];
     socket.on("message", (raw) => frames.push(JSON.parse(raw.toString())));
     socket.on("error", () => {});
     cleanups.push(async () => {
@@ -1020,14 +1116,10 @@ describe("WebSocket connection and outbound capacity", () => {
     }), "coalescing socket open");
     socket.send(JSON.stringify({ type: "hello", protocolVersion: 5 }));
     await bounded(waitUntil(() => frames.some((frame) => frame.type === "hello")), "coalescing hello");
-    const connection = [...(gateway as any).clients.values()][0] as {
-      outbound: OrderedOutboundQueue;
-      socket: WebSocket;
-      subscriptionTokens: Map<string, string>;
-    };
+    const connection = connections(gateway)[0]!;
     // Hold every application write: the link is as slow as the peer's socket
     // is, and the queue is where the Gateway's next frames wait.
-    const held: Array<{ encoded: string; done: (error?: Error) => void }> = [];
+    const held: StalledLink["held"] = [];
     vi.spyOn(connection.socket, "send").mockImplementation(((encoded: string, done?: (error?: Error) => void) => {
       held.push({ encoded, done: done ?? (() => {}) });
     }) as never);
@@ -1037,87 +1129,98 @@ describe("WebSocket connection and outbound capacity", () => {
     return { gateway, socket, connection, held, release, sampler };
   };
 
-  it("coalesces superseding snapshots on a stalled link instead of closing it for capacity", async () => {
+  it("replaces superseded session state with one rebaseline the client can admit", async () => {
     const logger = { log: vi.fn() };
     const maximumOutboundBytes = 64 * 1_024;
     const { gateway, socket, connection, release, sampler, held } = await stalledLink(maximumOutboundBytes, logger);
     connection.subscriptionTokens.set("coalesce-session", "token");
-    const snapshot = (sequence: number) => ({
-      runtimeGeneration: "generation", eventSequence: sequence, revision: sequence,
-      data: "x".repeat(24 * 1_024),
+    const snapshot = (eventSequence: number) => ({
+      runtimeGeneration: "generation", eventSequence, revision: eventSequence, data: "x".repeat(24 * 1_024),
+    });
+    const activity = (eventSequence: number, processId: string) => ({
+      runtimeGeneration: "generation", eventSequence, revision: eventSequence,
+      data: { activity: { processId, marker: `${processId}-v1` }, processRevision: eventSequence, overview: {} },
     });
 
-    gateway.broadcastSession("coalesce-session", "session.snapshot", snapshot(1) as never);
-    gateway.broadcastSession("coalesce-session", "session.progress", { runtimeGeneration: "generation", eventSequence: 2, data: {} } as never);
-    for (let sequence = 3; sequence <= 8; sequence += 1) {
-      gateway.broadcastSession("coalesce-session", "session.snapshot", snapshot(sequence) as never);
+    gateway.broadcastSession("coalesce-session", "session.snapshot", snapshot(1));
+    gateway.broadcastSession("coalesce-session", "session.progress", { runtimeGeneration: "generation", eventSequence: 2, data: {} });
+    gateway.broadcastSession("coalesce-session", "session.processActivity", activity(3, "p1"));
+    for (let eventSequence = 4; eventSequence <= 8; eventSequence += 1) {
+      gateway.broadcastSession("coalesce-session", "session.snapshot", snapshot(eventSequence));
     }
-    // Seven 24 KiB snapshots against a 64 KiB backstop: without coalescing the
-    // third would close this peer for capacity, and the record would name it.
+    // Seven 24 KiB snapshots, a progress frame and an activity against a 64 KiB
+    // backstop: without coalescing the fourth snapshot would close this peer for
+    // capacity. The in-flight snapshot stays, and the newest state survives as
+    // the one frame that carries every sequence the queue dropped with it.
     const afterBroadcasts = connection.outbound.snapshot();
-    expect(afterBroadcasts).toMatchObject({ queuedFrames: 3, completedFrames: 1, oldestTopic: "session.snapshot" });
+    expect(afterBroadcasts).toMatchObject({ queuedFrames: 2, acceptedFrames: 3, completedFrames: 1, oldestTopic: "session.snapshot" });
     expect(afterBroadcasts.queuedBytes).toBeLessThanOrEqual(maximumOutboundBytes);
     expect(socket.readyState).toBe(WebSocket.OPEN);
     expect(logger.log.mock.calls.some((call) => call[2]?.event === "connection.outbound-capacity")).toBe(false);
 
     release();
     await bounded(waitUntil(() => connection.outbound.snapshot().queuedFrames === 0), "coalesced frame drain");
-    // The delivered sequence is a subsequence of what was broadcast: the newest
-    // snapshot of the session survives in its own place, the frames the socket
-    // was already writing are never recalled, and nothing is reordered.
-    expect(held.map((write) => (JSON.parse(write.encoded) as { payload: { eventSequence: number } }).payload.eventSequence)).toEqual([1, 2, 8]);
+    expect(held).toHaveLength(2);
+    const [first, survivor] = delivered(held);
+    // The frame the socket was already writing is never recalled.
+    expect(first).toMatchObject({ topic: "session.snapshot", sessionId: "coalesce-session" });
+    expect(first!.payload.eventSequence).toBe(1);
+    // The survivor is the gap-tolerant form, carrying the subscription
+    // credential the phone installed: the sequences the queue dropped arrive
+    // covered instead of as a gap the phone has to resynchronize.
+    expect(survivor).toMatchObject({ topic: "session.rebaseline", sessionId: "coalesce-session" });
+    expect(survivor!.payload.subscriptionToken).toBe("token");
+    expect(survivor!.payload.snapshot).toMatchObject({ eventSequence: 8, revision: 8 });
     expect(socket.readyState).toBe(WebSocket.OPEN);
     const sample = await sampler.sample();
-    expect(sample).toMatchObject({ outboundCoalescedFrames: 5, snapshotBuilds: 7 });
-    expect(sample.outboundCoalescedBytes).toBe(5 * Buffer.byteLength(held[0]!.encoded));
+    // The progress frame, the activity and four superseded rebaselines: 6 frames.
+    expect(sample).toMatchObject({ outboundCoalescedFrames: 6, snapshotBuilds: 6 });
+    expect(sample.outboundCoalescedBytes).toBeGreaterThan(4 * Buffer.byteLength(JSON.stringify(snapshot(8))));
   });
 
-  it("supersedes unsent summaries and one process's activity by key, and delivers frames with no key", async () => {
+  it("supersedes unsent summaries by key and delivers sequenced frames no snapshot covers", async () => {
     const logger = { log: vi.fn() };
     const { gateway, connection, release, sampler, held } = await stalledLink(64 * 1_024, logger);
     connection.subscriptionTokens.set("keyed-session", "token");
     const summary = (sessionId: string, summaryRevision: number) => ({ sessionId, summaryRevision, phase: "idle" });
-    const activity = (processId: string, marker: string) => ({
-      runtimeGeneration: "generation", eventSequence: 1, revision: 1,
-      data: { activity: { processId, marker }, processRevision: 1, overview: {} },
+    const activity = (eventSequence: number, processId: string) => ({
+      runtimeGeneration: "generation", eventSequence, revision: eventSequence,
+      data: { activity: { processId, marker: `${processId}-v1` }, processRevision: eventSequence, overview: {} },
     });
-    const processActivity = (payload: unknown) => gateway.broadcastSession("keyed-session", "session.processActivity", payload as never);
-    const progress = (eventSequence: number) => {
-      gateway.broadcastSession("keyed-session", "session.progress", { runtimeGeneration: "generation", eventSequence, data: {} } as never);
-    };
 
-    gateway.broadcast("session.summary", summary("summary-a", 1) as never);
-    gateway.broadcast("session.summary", summary("summary-b", 1) as never);
-    processActivity(activity("p1", "p1-v1"));
-    gateway.broadcast("session.summary", summary("summary-a", 2) as never);
-    processActivity(activity("p1", "p1-v2"));
-    processActivity(activity("p2", "p2-v1"));
-    // A frame that only removes processes names none: it is not supersedable.
-    processActivity({ runtimeGeneration: "generation", eventSequence: 2, revision: 2, data: { removedProcessIds: ["p3"], processRevision: 2, overview: {} } });
-    progress(3);
-    gateway.broadcast("session.summary", summary("summary-a", 3) as never);
+    gateway.broadcastSession("keyed-session", "session.progress", { runtimeGeneration: "generation", eventSequence: 2, data: {} });
+    gateway.broadcast("session.summary", summary("summary-a", 1));
+    gateway.broadcast("session.summary", summary("summary-b", 1));
+    gateway.broadcastSession("keyed-session", "session.processActivity", activity(3, "p1"));
+    gateway.broadcast("session.summary", summary("summary-a", 2));
+    // One frame carries a tool call's removals beside its activity. It states no
+    // key, and nothing may drop it while no snapshot covers its sequence.
+    gateway.broadcastSession("keyed-session", "session.processActivity", {
+      runtimeGeneration: "generation", eventSequence: 4, revision: 4,
+      data: {
+        activity: { processId: "p2", marker: "p2-v1" },
+        removedProcessIds: ["gone-1", "gone-2"], processRevision: 4, overview: {},
+      },
+    });
+    gateway.broadcast("session.summary", summary("summary-a", 3));
 
     release();
     await bounded(waitUntil(() => connection.outbound.snapshot().queuedFrames === 0), "keyed frame drain");
-    const described = held.map((write) => {
-      const frame = JSON.parse(write.encoded) as { topic: string; sessionId?: string; payload: any };
+    // The revision of summary-a that was superseded while still unsent is gone;
+    // every sequenced frame keeps its place, because nothing queued here covers
+    // the sequences they carry.
+    const described = delivered(held).map((frame) => {
       if (frame.topic === "session.summary") return `summary:${frame.payload.sessionId}:${frame.payload.summaryRevision}`;
-      if (frame.topic === "session.processActivity") {
-        return frame.payload.data.activity === undefined ? `process-removal:${frame.sessionId}` : `process:${frame.payload.data.activity.processId}:${frame.payload.data.activity.marker}`;
-      }
-      return `${frame.topic}:${frame.sessionId}`;
+      const data = frame.payload.data ?? {};
+      if (data.removedProcessIds !== undefined) return `process-removal:${frame.topic}:${data.removedProcessIds.join(",")}`;
+      if (data.activity !== undefined) return `process:${frame.topic}:${data.activity.marker}`;
+      return `${frame.topic}:${frame.payload.eventSequence}`;
     });
-    // The first summary was already being written, so it is delivered although
-    // a newer revision of the same session exists; the two unsent revisions it
-    // and its successor left behind are dropped, as is the first activity of
-    // p1. Every frame with another key keeps its place.
     expect(described).toEqual([
-      "summary:summary-a:1",
+      "session.progress:2",
       "summary:summary-b:1",
-      "process:p1:p1-v2",
-      "process:p2:p2-v1",
-      "process-removal:keyed-session",
-      "session.progress:keyed-session",
+      "process:session.processActivity:p1-v1",
+      "process-removal:session.processActivity:gone-1,gone-2",
       "summary:summary-a:3",
     ]);
     const sample = await sampler.sample();
@@ -1134,7 +1237,7 @@ describe("WebSocket connection and outbound capacity", () => {
       connection.subscriptionTokens.set(sessionId, "token");
       gateway.broadcastSession(sessionId, "session.snapshot", {
         runtimeGeneration: "generation", eventSequence: 1, revision: 1, data: "x".repeat(24 * 1_024),
-      } as never);
+      });
     }
     // Three sessions' state is 72 KiB of the same bytes the coalescing case
     // dropped; nothing supersedes it, so the backstop closes the peer and the
