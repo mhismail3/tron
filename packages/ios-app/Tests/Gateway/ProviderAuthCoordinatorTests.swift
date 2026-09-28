@@ -91,6 +91,11 @@ struct ProviderAuthCoordinatorTests {
             #expect(sessionRequests.allSatisfy { $0.params?["sessionId"] == .string("session-a") })
             try await respondCatalog(sessionRequests, marker: "session", socket: harness.socket)
             #expect(await sessionLoad.value)
+            // The first completed catalog load warms the model picker's Recent
+            // rail with one `model.recent` read. A non-empty answer keeps that
+            // rail warm, so no later catalog load repeats the warm and the
+            // frame indices below stay stable.
+            try await respondToRecentModelsWarm(at: 5, socket: harness.socket)
             #expect(harness.owner.catalog(for: session)?.providers.first?.id == "session")
             #expect(harness.owner.catalog(for: .global) == nil)
 
@@ -105,17 +110,17 @@ struct ProviderAuthCoordinatorTests {
             #expect(harness.owner.catalog(for: .global)?.models.first?.id == "global-model")
 
             let older = Task { await harness.owner.refreshCatalog(target: .global) }
-            try await harness.socket.waitUntilSent(count: 7)
+            try await harness.socket.waitUntilSent(count: 8)
             let newer = Task { await harness.owner.refreshCatalog(target: .global) }
-            try await harness.socket.waitUntilSent(count: 9)
+            try await harness.socket.waitUntilSent(count: 10)
             try await respondCatalog(
-                requests(in: 7...8, socket: harness.socket),
+                requests(in: 8...9, socket: harness.socket),
                 marker: "newer",
                 socket: harness.socket
             )
             #expect(await newer.value)
             try await respondCatalog(
-                requests(in: 5...6, socket: harness.socket),
+                requests(in: 6...7, socket: harness.socket),
                 marker: "older",
                 socket: harness.socket
             )
@@ -342,7 +347,11 @@ struct ProviderAuthCoordinatorTests {
                 #expect(harness.owner.catalog(for: .global)?.providers.first?.id == "fresh")
                 #expect(harness.delegate.completionErrors.isEmpty)
                 #expect(harness.delegate.errors.isEmpty)
-                #expect(await harness.socket.sentFrames().count == 5)
+                // The successful catalog load warms the picker's Recent rail
+                // before the refresh returns, so the refresh is one frame more
+                // than its catalog pair.
+                try await respondToRecentModelsWarm(at: 5, socket: harness.socket)
+                #expect(await harness.socket.sentFrames().count == 6)
                 harness.owner.clearProfile()
                 await harness.client.close()
             } catch {
@@ -1634,6 +1643,27 @@ struct ProviderAuthCoordinatorTests {
                 Issue.record("Unexpected catalog method \(request.method)")
             }
         }
+    }
+
+    /// A successful catalog load warms the model picker's Recent rail with one
+    /// `model.recent` read, which this suite's exact frame indices have to
+    /// account for. The non-empty answer is the point: it leaves the rail warm,
+    /// so no later catalog load repeats the read.
+    private func respondToRecentModelsWarm(at index: Int, socket: ScriptedGatewaySocket) async throws {
+        try #require(
+            await socket.waitUntilSent(count: index + 1, within: .seconds(2)),
+            "the catalog's Recent-rail warm request was not sent"
+        )
+        let warm = try request(await socket.sentFrames()[index])
+        #expect(warm.method == "model.recent")
+        await socket.enqueue(response(
+            id: warm.id,
+            result: .object(["models": .array([.object([
+                "provider": .string("session"),
+                "id": .string("session-model"),
+                "lastUsedAt": .string("2026-09-28T00:00:00.000Z"),
+            ])])])
+        ))
     }
 
     private func modelRefreshResult(

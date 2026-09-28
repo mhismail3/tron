@@ -8,7 +8,10 @@ description: Audit and safely clean up merged or obsolete Tron branches, inactiv
 Keep feature-branch/worktree parallelism sustainable without losing work or
 interfering with another agent. Follow [shared rules](../../../AGENTS.md).
 This procedure concerns Git resources, not source cleanup, caches, session data,
-credentials, application installs, or Gateway lifecycle operations.
+credentials, application installs, or Gateway lifecycle operations. It also does
+not own simulator or lane lifetime: `scripts/tron-ios-test` releases, admits,
+sweeps and prunes those (see
+[iOS simulator lanes, runs and products](#ios-simulator-lanes-runs-and-products)).
 
 ## Authority and scope
 
@@ -140,10 +143,50 @@ attachments, status including ignored data, locks, and owner activity. If anythi
 changed, stop that candidate and re-plan. A check/delete sequence is not atomic;
 owner coordination is still required.
 
+### iOS simulator lanes, runs and products
+
+Simulator lifetime is the test tooling's, not housekeeping's. A command of
+`scripts/tron-ios-test`, `scripts/tron-profile ios` or
+`scripts/ios-gateway-e2e-test` releases the simulator it booted when that command
+ends - success, failure, timeout or signal - and every provisioning command
+first sweeps: orphaned owned lanes are shut down and lanes unused for 7 days are
+removed. The runner's sweep also prunes runs beyond the retention windows and
+the products of worktrees that no longer exist. A boot is admitted on the Mac's
+free memory and swap as well, so no lane can push the shared Mac into swap. Use
+those commands instead of `xcrun simctl`, `rm`, or process signals:
+
+- `scripts/tron-ios-test status --all` - read-only view of everything holding
+  the Mac's memory: every lane with its worktree, lease holder, uptime and disk,
+  booted devices no lane owns, the remembered Development simulator and
+  `Simulator.app`. Run it for the candidate's lane before and after a removal, to
+  attribute whatever is still booted.
+- `scripts/tron-ios-test lanes` - the lanes alone, with their worktree, state,
+  lease holder, last use and disk size.
+- `scripts/tron-ios-test clean` - this worktree's lane simulator, that lane's
+  runs and this worktree's products; never the shared results root. Run it from
+  that worktree.
+- `scripts/tron-ios-test lane-remove NAME` - one lane's simulator and state, plus
+  the products of its creating worktree once that worktree is gone.
+- `scripts/tron-ios-test prune` - disk only: old runs, and the products of
+  deleted worktrees; `reap` runs the whole sweep on demand.
+
+`status --all`, `lanes` and `prune` take no lease, so they are safe while other
+sessions test; `lane-remove` refuses (73) a lane a live process holds, and the
+sweep - including `reap` - skips such a lane and reclaims the rest. Run `clean`
+from the candidate worktree (it resolves that worktree's lane and products from
+where it runs) before its directory is removed; the other commands work from
+anywhere. Never stop a process, take a lease, or shut down or delete a simulator
+to unblock a removal - the owning session releases it - and never touch the
+Gateway's lifecycle for cleanup.
+
 For ordinary, unmanaged, released worktrees:
 
-1. Run that worktree's documented build cleaners, if any; do not clean output
-   owned outside it.
+1. Reclaim what the worktree's own tooling owns, never by hand: for an iOS
+   worktree follow
+   [iOS simulator lanes, runs and products](#ios-simulator-lanes-runs-and-products),
+   whose `clean` removes that worktree's lane simulator, its lane's runs and its
+   products. Run any other documented build cleaner of that worktree, and do not
+   clean output owned outside it.
 2. `packages/mac-app/scripts/bundle-gateway.sh` makes its generated Gateway
    payload read-only. Before removal, make only that payload writable, refusing
    links and paths outside the worktree:
@@ -198,6 +241,11 @@ owner. Confirm the primary checkout, protected refs, and unrelated local changes
 are unchanged. Attribute concurrent changes rather than trying to revert them.
 On partial failure, report exactly what succeeded and what remains; do not replay
 uncertain deletions or claim the whole workspace is clean.
+
+For an iOS worktree, confirm no lane it owned survives: `scripts/tron-ios-test
+lanes` no longer names that worktree (the default lane stays listed as
+`not-provisioned`), `status --all` shows nothing booted for it, and products left
+by the removed worktree are reclaimed by the next sweep's prune (or by `prune`).
 
 Finish with removed/retained/blocked counts, exact removed targets, integration
 proof, remaining reasons, and any owner action needed. Recommend this bounded

@@ -9,23 +9,29 @@ mutually exclusive and never mutate canonical admission.
 ## Knowledge Sources presentation
 
 The Sources library is a user-facing reading surface, not a storage inspector.
-Rows show a title, optional generated content summary, domain/type, and a bounded
-square preview when the Gateway captured a safe JPEG, PNG, or WebP page-preview
-or X Article cover image. Intake assessments are not presented as content summaries.
-Sources without a preview use a deterministic domain/title fallback.
-Routine capture and admission state is intentionally hidden from rows; actionable
-limitations appear in **More source details**.
+Rows are one fixed compact height: a title of at most two lines and one
+domain/type line in the standard settings-row subtext size, beside a bounded
+square preview centered on that text block. The preview is the Gateway-captured
+safe JPEG, PNG, or WebP page preview or X Article cover image; sources without
+one use a deterministic domain/title fallback. Summaries, intake assessments,
+and routine capture/admission state are not shown in rows.
 
-The **Entry Detail** sheet leads with one header container: preview, title,
-domain, and an **Open original** pill that opens the page in the in-app browser
-(`TronSafariView`, the same full-bleed `SFSafariViewController` sheet public
-webpage displays use). The original link is the source of truth. The Gateway
-keeps the captured bytes and readable extraction as a backup and as model input,
-but the sheet does not expose them as reading surfaces: a raw HTML object is not
-readable, and page extraction includes site chrome. Below the header, the
-Summary container shows any generated summary with its grounded tags and the
-source publication/save dates when the source system provides them.
-For redirected connector captures, **Open original** uses the requested URL
+The **Entry Detail** sheet leads with one compact header container: the title
+with a pill naming the original link's domain directly beneath it, and a square
+preview that spans exactly from the title's top to the pill's bottom. The pill opens the
+page in the in-app browser (`TronSafariView`, the same full-bleed
+`SFSafariViewController` sheet public webpage displays use). The original link
+is the source of truth. The Gateway keeps the captured bytes and readable
+extraction as a backup and as model input, but the sheet does not expose them as
+reading surfaces: a raw HTML object is not readable, and page extraction
+includes site chrome. Everything else is inline in the same sheet, with no
+secondary details sheet: the **Summary** group (a generated summary with its
+grounded tags, or a **Generate AI summary** button row), a **Details** table in
+the standard metadata-table layout (type, publication/save/capture dates,
+capture state, origin, media type, revision), saved notes, related entries that
+open at their current revision, links declared in the entry (in-app browser),
+and capture coverage when the capture is incomplete.
+For redirected connector captures, the original-link pill uses the requested URL
 recorded for that exact saved-item identity in origin provenance; the resolved
 page URI remains capture metadata. Unrelated referral origins are never used as
 the original link, and the same HTTP(S)-only URL safety policy still applies.
@@ -33,18 +39,13 @@ The Raindrop `created` timestamp is the originating save time, not a publication
 date. Historical Raindrop records with the old misfiled `created` timestamp are
 not mislabeled as publication dates; absent origin-save dates stay absent and
 Tron capture time is labeled separately.
-Metadata, saved notes, nested links, references, related records, and capture
-coverage live in a standard **Source Details** sheet opened from the **More
-source details** row.
-Full stored summaries are available in detail; row line limits keep the list compact.
 
-An absent content summary is shown honestly as **No content summary yet**.
 Opening a source never invokes model generation. **Generate AI summary** is an
 explicit per-source action using the configured Knowledge model and saved readable
 text only; it never fetches linked pages or implies complete thread/discussion
 coverage. The bounded result is persisted separately from the Jev intake assessment,
 with its source revision, evidence digest, generation time, and full/sampled coverage.
-A stale summary is withheld when its title/text evidence changes. Summaries and
+A stale summary is withheld when its title/text evidence changes, and the button becomes **Regenerate AI summary**. Summaries and
 grounded semantic/keyword tags are generated together and are interpretation, not
 replacements for immutable captured evidence. Partial or bounded excerpts are
 labeled sampled; linked pages are never inferred as covered.

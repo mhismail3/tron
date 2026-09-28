@@ -16,6 +16,9 @@ export PATH="$repo_root/.ci-tools/bin:$PATH:/opt/homebrew/bin"
 run_root="${TRON_IOS_E2E_STATE_DIR:-${TMPDIR:-/tmp}/tron-ios-gateway-e2e-$UID}"
 derived_data="${TRON_IOS_E2E_DERIVED_DATA:-${TMPDIR:-/tmp}/tron-ios-gateway-e2e-derived-$UID}"
 test_state_root="${TRON_IOS_TEST_STATE_DIR:-$HOME/.tron/internal/ios-test}"
+# The lane root is what scripts/tron-ios-test sweeps and reports, so this
+# harness names, releases and reclaims exactly the lane the runner uses.
+test_discovery_root="${TRON_IOS_TEST_DISCOVERY_ROOT:-$(dirname "$test_state_root")}"
 simulator_marker="$test_state_root/simulator.json"
 test_lock="$test_state_root/lease.lock"
 development_state="${TRON_IOS_SIMULATOR_STATE_DIR:-$HOME/.tron/internal/run}/ios-simulator-udid"
@@ -37,6 +40,9 @@ simulator_args=(
   --device-type "$TRON_CI_IOS_SIMULATOR_NAME"
   --name "$test_device_name"
   --development-state "$development_state"
+  --discovery-root "$test_discovery_root"
+  --default-state-dir "$test_state_root"
+  --worktree "$repo_root"
 )
 [[ "$run_root" != / && "$run_root" != "$HOME" && "$run_root" != "$repo_root" && ! -L "$run_root" ]] \
   || { echo "error: unsafe E2E fixture directory: $run_root" >&2; exit 1; }
@@ -73,9 +79,17 @@ Typical edit loop:
   scripts/ios-gateway-e2e-test run      # repeat; renews isolated Gateway/session state
 
 Environment:
-  TRON_IOS_TEST_STATE_DIR       shared repository-owned test-simulator state
+  TRON_IOS_TEST_STATE_DIR       shared repository-owned test-simulator state (the lane)
+  TRON_IOS_TEST_DISCOVERY_ROOT  lane root the shared sweep scans (default: the parent of the
+                                state directory)
+  TRON_IOS_TEST_DEVICE_NAME     device name of that lane
   TRON_IOS_E2E_STATE_DIR        persistent fixture directory
   TRON_IOS_E2E_DERIVED_DATA     persistent focused-test DerivedData
+
+The simulator lane is shared with scripts/tron-ios-test: this harness releases
+the lane's simulator when a command ends, sweeps orphaned lanes before it
+provisions, and keeps exit 73 when the shared provisioner refuses the boot
+because the Mac is short of memory.
 USAGE
 }
 
@@ -86,9 +100,18 @@ manifest_pi_version() {
 }
 
 provision_test_simulator() {
-  local simulator_id
-  simulator_id="$(python3 "$simulator_owner" provision "${simulator_args[@]}")" \
-    || die "owned test simulator provisioning failed"
+  local simulator_id status=0
+  simulator_id="$(python3 "$simulator_owner" provision "${simulator_args[@]}")" || status=$?
+  if ((status != 0)); then
+    # The shared provisioner's "not now" exit is the caller's to decide about,
+    # exactly as scripts/tron-ios-test keeps it: a lane a live process holds, or
+    # a Mac too short of memory to admit the boot.
+    if ((status == 73)); then
+      echo "error: owned test simulator is leased or this Mac refused the boot (73)" >&2
+      exit 73
+    fi
+    die "owned test simulator provisioning failed"
+  fi
   [[ "$simulator_id" =~ ^[0-9A-Fa-f-]{36}$ ]] || die "provisioner returned an invalid simulator UDID"
   printf '%s\n' "$simulator_id"
 }
@@ -242,6 +265,22 @@ prepare_fixture() {
   start_fresh_fixture
 }
 
+# Start a process this harness keeps past the command: the Gateway fixture and
+# the fault proxy outlive it on purpose, so they are not part of the command
+# tree the lease holder owns. The holder passes that tree the lease's descriptor
+# (so a killed holder cannot leave a live command whose simulator the sweep
+# would release), and a detached process must not inherit it, or the lane would
+# stay leased for as long as the Gateway runs and the next command would fail
+# 73. `exec` inside the subshell keeps `$!` the detached process's own pid, and
+# `nohup` keeps it ignoring the SIGHUP the holder forwards to the tree.
+detach() {
+  if [[ -n "${TRON_IOS_TEST_LEASE_FD:-}" ]]; then
+    ( eval "exec ${TRON_IOS_TEST_LEASE_FD}>&-" ; exec "$@" ) &
+  else
+    ( exec "$@" ) &
+  fi
+}
+
 start_fresh_fixture() {
   stop_gateway
   local tron_home="$run_root/tron" agent_dir="$run_root/agent" gateway_home="$run_root/home" workspace="$run_root/home/workspace" port code pi_version
@@ -279,7 +318,7 @@ PY
     PI_SUBAGENTS_TEMP_ROOT="$gateway_home/internal/subagents" \
     TRON_MACHINE_GROUP_ID=tron-ios-e2e \
     TRON_GATEWAY_HOST=127.0.0.1 TRON_GATEWAY_PORT="$port" \
-    nohup node "$gateway_dir/dist/index.js" >"$log_file" 2>&1 </dev/null &
+    detach nohup node "$gateway_dir/dist/index.js" >"$log_file" 2>&1 </dev/null
   spawned_pid="$!"
   echo "$spawned_pid" >"$pid_file"
 
@@ -313,7 +352,7 @@ PY
     TRON_E2E_TRON_HOME="$tron_home" TRON_E2E_AGENT_DIR="$agent_dir" \
     TRON_E2E_GATEWAY_LOG="$log_file" TRON_E2E_GATEWAY_PID_FILE="$pid_file" \
     TRON_E2E_PROXY_TOKEN="$proxy_token" TRON_E2E_PROXY_READY="$proxy_ready" \
-    nohup node "$proxy_script" >"$run_root/proxy.log" 2>&1 </dev/null &
+    detach nohup node "$proxy_script" >"$run_root/proxy.log" 2>&1 </dev/null
   proxy_pid="$!"
   echo "$proxy_pid" >"$proxy_pid_file"
   for _ in {1..100}; do
@@ -472,8 +511,22 @@ case "$command" in
 esac
 if [[ "$command" != status && "$command" != logs && "$command" != -h && "$command" != --help && "$command" != help \
       && "${TRON_IOS_TEST_LOCK_HELD:-0}" != 1 ]]; then
-  exec python3 "$lock_owner" --lock "$test_lock" -- "$0" "$@"
+  # The same lease, and the same release, as scripts/tron-ios-test: when this
+  # command ends, on success, failure, deadline or signal, the holder shuts down
+  # the lane's simulator - and never the remembered Development simulator.
+  exec python3 "$lock_owner" --lock "$test_lock" --marker "$simulator_marker" \
+    --development-state "$development_state" -- "$0" "$@"
 fi
+case "$command" in
+  prepare|build|run|iterate|all|stop|clean)
+    # The same sweep as scripts/tron-ios-test, before this command provisions
+    # anything: owned lanes booted with no live lease are reclaimed, and this
+    # command's own lane is leased above, so the sweep never touches it.
+    python3 "$simulator_owner" sweep \
+      --discovery-root "$test_discovery_root" --development-state "$development_state" \
+      || echo "warning: the orphaned-simulator sweep did not complete; continuing" >&2
+    ;;
+esac
 handle_signal() {
   local signal_number="$1"
   trap - INT TERM HUP

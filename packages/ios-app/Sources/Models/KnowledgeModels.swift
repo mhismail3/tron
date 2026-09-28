@@ -261,6 +261,11 @@ enum KnowledgeSourcePresentationPolicy {
         return "Web page"
     }
 
+    /// One compact library-row line: where the entry lives and what it is.
+    static func rowSubtitle(_ source: KnowledgeSourceContent) -> String {
+        [domain(source.uri), sourceType(source)].compactMap { $0 }.joined(separator: " · ")
+    }
+
     static func thumbnailLetters(_ source: KnowledgeSourceContent) -> String {
         let host = domain(source.uri) ?? source.title
         let letters = host.split(whereSeparator: { !$0.isLetter }).prefix(2).compactMap { $0.first.map(String.init) }.joined()
