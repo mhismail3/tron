@@ -2452,7 +2452,8 @@ cannot hold the catalog, and it takes the same per-host profile lock.
   its prompt once the deadline has passed, so no sample is timed after the
   other lanes stopped.
 
-- **Impairment cases (`--cases`, default `blackhole,bandwidth,restart`):** they
+- **Impairment cases (`--cases`, default
+  `blackhole,bandwidth,bandwidth-stream,restart`):** they
   run after the mixed window, on the clients it already connected, and measure
   recovery rather than throughput. `--cases none` runs none. The mobile client's
   path is a loopback TCP relay the driver shapes, so what a cap or a blackhole
@@ -2499,6 +2500,23 @@ cannot hold the catalog, and it takes the same per-host profile lock.
     the default 2 Mbit/s cap the leg therefore reports the round trip and any
     capacity close, but a pong deadline miss is out of reach; a lower cap (a
     slower path) is what makes one reachable.
+  - **bandwidth-stream** (`--bandwidth-stream-mbps`, default 0.3, for
+    `--bandwidth-stream-seconds`, default 30): the mobile mounts several chats on
+    the phase's running sessions (up to `bandwidthStreamSessions`), which stream
+    superseding snapshots and keyed events, and the path is then capped slower
+    than they produce, so the Gateway's queue holds replaced state — the state
+    G-4 coalesces — and a pong queued behind it. This is the case that can show
+    what the page leg's default cap cannot: on code without G-4 the queue
+    reaches its 8 MiB backstop and the socket closes for capacity, and on code
+    without C-4 the phone tears down a link over a pong a busy queue delayed. It
+    reports the streams it held, their decoded payload rate,
+    `.delivered_bytes_per_second` and `.link_use` (the streams of this fixture
+    produce a fraction of the cap, so link use is what the workload used, not a
+    target), `.max_ping_to_pong_ms`, `.pong_deadline_misses` and
+    `.unexpected_closes`. The streams are attached before the cap is applied:
+    the phone mounts its chats on a working path and the path then slows. A leg
+    is rejected unless it held at least two streams and showed a backlog — a
+    round trip well above the idle one, a missed deadline or a close.
   - **restart:** the driver asks the profiler — its parent, which owns the
     fixture process — for a Gateway restart while every connected client is
     live. The profiler stops the child and starts a fresh one on the same port,
@@ -2531,9 +2549,10 @@ cannot hold the catalog, and it takes the same per-host profile lock.
   attempts and per-client details, and
   `impairment.gateway_outbound_capacity_records` counts
   `connection.outbound-capacity` records inside the bandwidth legs' own time
-  windows. A run is rejected when a selected case reported nothing, when a
-  bandwidth leg never filled its cap or offered less than one pong deadline of
-  it in flight, or when any connected client is left down — and an unexpected
+  windows (both capped legs' windows). A run is rejected when a selected case
+  reported nothing, when a bandwidth leg never filled its cap or offered less
+  than one pong deadline of it in flight, when the streaming leg held fewer than
+  two streams or backed nothing up, or when any connected client is left down — and an unexpected
   close, the phone's socket included, fails the run.
 
 Per iteration it reports `latency.<operation>.p50|p99|max` (nearest rank, so

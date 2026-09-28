@@ -949,6 +949,24 @@ class MultiDriverImpairment(StubGatewayHarness, unittest.TestCase):
                         "a kept request must carry the negative offset that places it before the stamp")
         self.assertTrue(all(request["ms"] is not None for request in leg["requests"]))
 
+    def test_the_streaming_case_holds_its_streams_and_reports_the_cap(self) -> None:
+        # The streaming case is only meaningful if it holds mounted chats whose
+        # transcripts stream: the stub's sessions never stream, so this proves
+        # the leg holds the streams and reports what it saw, not a backlog.
+        status, output, result = self.run_impairment(["bandwidth-stream"], {
+            "bandwidthStreamMbps": 0.5, "bandwidthStreamSeconds": 5, "bandwidthStreamSessions": 3,
+            "running": [{"sessionId": f"stub-run-{index}"} for index in range(4)],
+            "connection": {"pingIntervalMs": 300, "pongDeadlineMs": 2_000, "handshakeDeadlineMs": 8_000},
+        })
+        self.assertEqual(status, 0, output)
+        leg = result["impairment"]["bandwidth-stream"]
+        self.assertGreaterEqual(leg["seconds"], 5, "the leg ran its full duration")
+        self.assertEqual(leg["streams"], 4, "the mounted chat and the three streams it opened")
+        self.assertGreater(leg["payloadBytes"], 0, "the streams carried nothing")
+        self.assertIsNotNone(leg["maxPingToPongMs"], "the ping-to-pong round trip was not reported")
+        self.assertEqual(leg["pongDeadlineMisses"], 0, "a stub that answers at once cannot lose a pong")
+        self.assertEqual(leg["unexpectedCloses"], 0, "the stub closed a socket on the capped path")
+
     def test_an_unexpected_close_after_a_blackhole_is_not_excused(self) -> None:
         # The stub closes the mobile's socket on its fourth open: the mount that
         # opens the bandwidth leg, after the blackhole's settle and recovery.
@@ -1075,10 +1093,11 @@ class ImpairmentCases(unittest.TestCase):
     def parse(self, *arguments: str):
         return self.profiler.parse(["--scenario", "multi-session", *arguments])
 
-    def test_cases_default_to_all_three_in_run_order(self) -> None:
-        self.assertEqual(self.parse().cases, ["blackhole", "bandwidth", "restart"])
+    def test_cases_default_to_all_of_them_in_run_order(self) -> None:
+        self.assertEqual(self.parse().cases, ["blackhole", "bandwidth", "bandwidth-stream", "restart"])
         self.assertEqual(self.parse("--cases", "restart,blackhole").cases, ["blackhole", "restart"],
                          "the cases run in their own order, not the caller's")
+        self.assertEqual(self.parse("--cases", "bandwidth-stream").cases, ["bandwidth-stream"])
         self.assertEqual(self.parse("--cases", "none").cases, [], "'none' runs no case")
 
     def test_an_unknown_case_or_an_out_of_range_bound_is_refused(self) -> None:
@@ -1088,6 +1107,10 @@ class ImpairmentCases(unittest.TestCase):
             self.parse("--blackhole-seconds", "1")
         with self.assertRaises(SystemExit):
             self.parse("--bandwidth-mbps", "0.1")
+        with self.assertRaises(SystemExit):
+            self.parse("--bandwidth-stream-mbps", "0.01")
+        with self.assertRaises(SystemExit):
+            self.parse("--bandwidth-stream-seconds", "1")
 
     def test_a_case_that_reported_nothing_rejects_the_run(self) -> None:
         result = {"label": "iteration-1", "cases": ["blackhole"], "impairment": {}}
@@ -1120,6 +1143,34 @@ class ImpairmentCases(unittest.TestCase):
         self.assertEqual(len(underfilled), 1, underfilled)
         self.assertIn("less than one pong deadline", underfilled[0])
         silent = self.profiler.validate_impairment([bandwidth(maxPingToPongMs=None)])
+        self.assertEqual(len(silent), 1, silent)
+
+    def test_a_streaming_case_that_held_no_stream_rejects_the_run(self) -> None:
+        # The streaming case is about a queue that fills with superseded state:
+        # a leg that held one idle chat, or whose cap never bounded the streams,
+        # reports zero misses and zero closes however the Gateway behaved.
+        def streamed(**overrides) -> dict:
+            leg = {"capBitsPerSecond": 300_000, "seconds": 30.0, "streams": 8, "deliveredBytes": 1_100_000,
+                   "deliveredBytesPerSecond": 36_000, "payloadBytes": 90_000_000,
+                   "payloadBytesPerSecond": 3_000_000, "linkUse": 0.96, "maxPingToPongMs": 5_400.0,
+                   "pongDeadlineMisses": 0, "unexpectedCloses": 0}
+            leg.update(overrides)
+            return {"label": "iteration-1", "cases": ["bandwidth-stream"], "impairment": {"bandwidth-stream": leg}}
+
+        # The measured smoke run: 8 streams, 0.3 Mbit/s, a 2.47 s round trip.
+        measured = {"capBitsPerSecond": 300_000, "seconds": 20.0, "streams": 8, "deliveredBytes": 238_973,
+                    "deliveredBytesPerSecond": 11_901, "payloadBytes": 5_935_982,
+                    "payloadBytesPerSecond": 295_621, "linkUse": 0.317, "maxPingToPongMs": 2_466.0,
+                    "pongDeadlineMisses": 0, "unexpectedCloses": 0}
+        self.assertEqual(self.profiler.validate_impairment([streamed(**measured)]), [])
+        self.assertEqual(self.profiler.validate_impairment([streamed(maxPingToPongMs=120.0, unexpectedCloses=1)]),
+                         [], "a close is a backlog signal even when the round trip is short")
+        idle = self.profiler.validate_impairment([streamed(streams=1, payloadBytes=0)])
+        self.assertEqual(len(idle), 1, idle)
+        no_backlog = self.profiler.validate_impairment([streamed(maxPingToPongMs=150.0)])
+        self.assertEqual(len(no_backlog), 1, no_backlog)
+        self.assertIn("never backed the link up", no_backlog[0])
+        silent = self.profiler.validate_impairment([streamed(maxPingToPongMs=None)])
         self.assertEqual(len(silent), 1, silent)
 
     def test_a_restart_that_leaves_a_client_down_rejects_the_run(self) -> None:
@@ -1186,7 +1237,7 @@ class ImpairmentCases(unittest.TestCase):
         # boundary values (a 1 s request, a zero-length bandwidth leg) are what
         # the metric definitions hinge on.
         def result(label: str, *, attempt: dict, reconnect: int, downtime: int, storm: list[dict]) -> dict:
-            return {"label": label, "cases": ["blackhole", "bandwidth", "restart"], "impairment": {
+            return {"label": label, "cases": ["blackhole", "bandwidth", "bandwidth-stream", "restart"], "impairment": {
                 "blackhole": {"silenceMs": 18_000, "attemptsDuringOutage": 5, "recoveryReadyMs": 120,
                               "attempts": [{"ms": 1_000, "connected": True}, attempt]},
                 "bandwidth": {"capBitsPerSecond": 2_000_000, "deliveredBytesPerSecond": 41_000,
@@ -1194,6 +1245,10 @@ class ImpairmentCases(unittest.TestCase):
                               "maxInFlight": 6, "offeredInFlightBytes": 7_200_000,
                               "offeredInFlightWireBytes": 234_000, "maxPingToPongMs": 700.0,
                               "pongDeadlineMisses": 0, "unexpectedCloses": 0},
+                "bandwidth-stream": {"capBitsPerSecond": 300_000, "seconds": 30.0, "streams": 8,
+                                     "deliveredBytesPerSecond": 36_500, "payloadBytesPerSecond": 3_000_000,
+                                     "linkUse": 0.97, "maxPingToPongMs": 5_400.0,
+                                     "pongDeadlineMisses": 0, "unexpectedCloses": 0},
                 "restart": {"downtimeMs": downtime, "restoredAtMs": 1,
                             "clients": [{"name": "mobile", "reconnectMs": reconnect,
                                          "attempts": [{"ms": 30, "failed": "ECONNREFUSED"}, {"ms": 400, "connected": True}]}],
@@ -1222,7 +1277,9 @@ class ImpairmentCases(unittest.TestCase):
         for metric_id in ("impairment.bandwidth.link_use", "impairment.bandwidth.delivered_bytes_per_second",
                           "impairment.bandwidth.sent_bytes_per_second", "impairment.restart.requests",
                           "impairment.bandwidth.offered_in_flight_bytes",
-                          "impairment.bandwidth.max_in_flight"):
+                          "impairment.bandwidth.max_in_flight",
+                          "impairment.bandwidth_stream.streams",
+                          "impairment.bandwidth_stream.link_use"):
             self.assertEqual(metrics[metric_id]["better"], "higher",
                              f"{metric_id} is a volume metric: more is not a regression")
         self.assertEqual(metrics["impairment.restart.requests_over_1s"]["values"], [1, 1],
@@ -1235,6 +1292,10 @@ class ImpairmentCases(unittest.TestCase):
         self.assertEqual(metrics["impairment.bandwidth.max_ping_to_pong_ms"]["values"], [700.0, 700.0])
         self.assertEqual(metrics["impairment.bandwidth.offered_in_flight_bytes"]["values"], [7_200_000, 7_200_000])
         self.assertEqual(metrics["impairment.bandwidth.max_in_flight"]["values"], [6, 6])
+        self.assertEqual(metrics["impairment.bandwidth_stream.streams"]["values"], [8, 8])
+        self.assertEqual(metrics["impairment.bandwidth_stream.max_ping_to_pong_ms"]["values"], [5_400.0, 5_400.0])
+        self.assertEqual(metrics["impairment.bandwidth_stream.pong_deadline_misses"]["values"], [0, 0])
+        self.assertEqual(metrics["impairment.bandwidth_stream.unexpected_closes"]["values"], [0, 0])
         self.assertEqual(metrics["impairment.restart.failed_attempts"]["values"], [6, 6],
                          "one refused connect per client is counted; a connected attempt is not")
         self.assertEqual(metrics["impairment.bandwidth.unexpected_closes"]["values"], [0, 0])

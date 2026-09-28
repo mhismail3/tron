@@ -2664,11 +2664,43 @@ Read the numbers as one sample per case.
 - Blocked on: unchanged — "the baseline for each case is in Findings", plus the
   full-length default run (`--bandwidth-seconds` 90, `--blackhole-seconds` 90)
   on a quiet host.
-- For the next agent (orchestrator decision needed): at the default 2 Mbit/s cap
-  this fixture cannot make a pong miss happen (compression ~25–30x against the
-  Gateway's 8 MiB per-connection queue backstop — see Findings), so C-4's
-  zero-miss target is not discriminating at that cap, and G-4's capacity close
-  needs a leg whose queued frames are superseded state rather than distinct
-  pages. Both need a case-default change (cap ~0.3 Mbit/s on the mobile's path)
-  or a second case; neither is taken here because the plan states the 2 Mbit/s
-  default.
+
+### O-6b · Blocked · 2026-09-28 · orchestrator-dispatched deepseek-worker (fourth review, decision taken)
+
+- Result: on the orchestrator's decision, the second capped case is added rather
+  than changing the plan's 2 Mbit/s page leg.
+  - **New case `bandwidth-stream`** (`--bandwidth-stream-mbps`, default 0.3;
+    `--bandwidth-stream-seconds`, default 30): the mobile mounts several chats
+    on the phase's running sessions, whose transcripts stream superseding
+    snapshots and keyed events, and the path is then capped slower than they
+    produce. The queue therefore holds replaced state — what G-4 coalesces — and
+    a pong queued behind it, which the page leg's 2 Mbit/s cap can never reach
+    (its one-page offer waits ~0.16 s against an 8 s deadline). The streams are
+    attached before the cap is applied. It reports the streams held, their
+    payload rate, delivered wire rate and `link_use`, `max_ping_to_pong_ms`,
+    `pong_deadline_misses` and `unexpected_closes`; both capped legs' windows are
+    what `gateway_outbound_capacity_records` counts.
+  - **Deviation (recorded):** the plan's O-6b "Do" names one cap (default
+    2 Mbit/s). It is kept, and this second case adds the low cap the
+    orchestrator asked for. The 0.3 Mbit/s constant carries its arithmetic in
+    the profiler: eight streams of this fixture produce about 296 kB/s decoded
+    (measured), the Gateway's queue is bounded at 8 MiB of encoded frames, those
+    compress about 25x on the wire here, so a full queue is about 320 kB of
+    wire = 8.5 s of a 0.3 Mbit/s path — past an 8 s pong deadline.
+  - **Smoke (short, `--cases bandwidth-stream --iterations 1 --catalog-files 100
+    --catalog-mib 24 --mixed-seconds 30 --bandwidth-stream-seconds 20
+    --no-build`, host at 1-minute load 25):** the case held **8 streams**,
+    carried 5.94 MB of decoded state in 20 s (295,621 B/s against a cap of
+    33,300 B/s of wire), delivered 11,901 B/s of wire (`link_use` 0.32), and the
+    mobile's longest ping-to-pong round trip was **2,466 ms** against the ~120 ms
+    this path answers at when idle — a nonzero backlog signal, which is what the
+    decision required. No pong miss and no capacity close: this fixture's
+    streams produce a fraction of the cap on average (bursts are what fills the
+    queue), and filling the 8 MiB backstop takes about 27 s of that production,
+    so the 30 s default may or may not reach it. Reported as measured, not tuned
+    to produce a miss. The same smoke was rejected by the mixed window for having
+    no `promptAdmission` samples on this 100-file catalog and loaded host, which
+    is why it has no baseline.
+- Blocked on: the same full-length default run; the streaming case's numbers for
+  the default 30 s leg, and whether it reaches a miss or a close there, are part
+  of it.

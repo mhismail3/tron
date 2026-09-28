@@ -447,6 +447,8 @@ class RecordingClient {
     // load: attributed to the method, never to whatever else the connection
     // streams at the same time.
     this.openResponseBytes = 0;
+    // Everything this client decoded, for the streaming leg's payload rate.
+    this.inboundDecodedBytes = 0;
     // Set when this client's path is a shaped loopback relay instead of a
     // direct connection (the impairment legs).
     this.relay = null;
@@ -576,6 +578,7 @@ class RecordingClient {
   onMessage(data, isBinary) {
     const buffer = Array.isArray(data) ? Buffer.concat(data) : Buffer.from(data);
     const bytes = buffer.length;
+    this.inboundDecodedBytes += bytes;
     let frame;
     try { frame = JSON.parse(buffer.toString("utf8")); } catch { frame = { type: isBinary ? "binary" : "invalid" }; }
     let topic;
@@ -1102,6 +1105,13 @@ async function measuredWindow(label, connected, recorded, body, options = {}) {
 //     queued behind data, no close for capacity) and the leg reports its own
 //     link use, the peak page load it offered and the mobile's longest
 //     ping-to-pong round trip.
+//   bandwidth-stream: the same mobile path, capped slower than the streams it
+//     holds. Several mounted chats on running sessions receive superseding
+//     snapshots and keyed events, so the Gateway's queue holds replaced state:
+//     on code without G-4's coalescing it reaches its backstop, and on code
+//     without C-4 a pong queued behind it misses its deadline. Reports the
+//     streams held, the cap use, the payload rate, the longest ping-to-pong
+//     round trip, pong misses and unexpected closes.
 //   restart: the profiler stops and restarts the fixture Gateway on the same
 //     port while these clients are connected. The driver asks for the restart
 //     (the fixture is the profiler's process), each client retries from the
@@ -1245,6 +1255,20 @@ async function blackholeLeg(config, { mobile, chat, retry }) {
   return leg;
 }
 
+/** The running sessions the streaming leg subscribes to: their transcripts are
+ * being written, so each subscription is sent superseding snapshots and keyed
+ * events. The mounted chat's own session is excluded (the Gateway admits one
+ * `session.open` per session per connection). */
+function streamTargets(config, mountedSessionId) {
+  const targets = [];
+  for (const entry of config.running ?? []) {
+    const sessionId = entry?.sessionId;
+    if (typeof sessionId !== "string" || sessionId === mountedSessionId || targets.includes(sessionId)) continue;
+    targets.push(sessionId);
+  }
+  return targets;
+}
+
 /** The sessions the bandwidth leg mounts concurrently. Its own chat's session
  * is excluded: the Gateway admits one session.open per session per connection,
  * so a second mount on it would be refused with a conflict. */
@@ -1262,6 +1286,65 @@ function pageTargets(config, mountedSessionId) {
     targets.push(sessionId);
   }
   return targets;
+}
+
+/** The second capped leg: the mobile holds several mounted chats whose
+ * transcripts are being written, so the Gateway streams superseding snapshots
+ * and keyed events for them. The cap is slower than the streams produce, so the
+ * Gateway's outbound queue holds seconds of state that a newer frame has
+ * already replaced — the state G-4 coalesces — and a pong queued behind it. On
+ * code without G-4 the queue reaches its 8 MiB backstop and the socket closes
+ * for capacity; on code without C-4 the phone tears the link down over a pong
+ * that a busy queue delayed. Both are reachable here where the page leg's cap
+ * cannot reach them (see `bandwidthStreamMbps`).
+ *
+ * The streams are attached before the cap is applied: the phone mounts its
+ * chats on a working path, and the path then slows to the cap for the leg. */
+async function bandwidthStreamLeg(config, { mobile, chat, retry }) {
+  const relay = await relayFor(config, mobile);
+  const missesBefore = mobile.pongDeadlineMisses;
+  const closesBefore = mobile.unexpectedCloses;
+  const downBefore = relay.downBytes;
+  const decodedBefore = mobile.inboundDecodedBytes;
+  const pongsBefore = mobile.pongsCounted;
+  const streams = [];
+  for (const sessionId of streamTargets(config, chat.sessionId).slice(0, config.bandwidthStreamSessions)) {
+    const streamChat = new MountedChat(mobile, sessionId);
+    try {
+      await retry("mount", () => streamChat.open(config.bandwidthStreamAttachDeadlineMs));
+      streams.push(streamChat);
+    } catch (error) {
+      // A session that will not mount is not this case's finding: the leg
+      // measures the streams it holds. A socket that died without being
+      // counted is a measurement bug, and is reported as one.
+      if (mobile.socket?.readyState !== 1 && !mobile.closedUnexpectedly) throw error;
+      await streamChat.close().catch(() => {});
+      if (mobile.closedUnexpectedly) break;
+    }
+  }
+  const capBitsPerSecond = Math.round(config.bandwidthStreamMbps * 1_000_000);
+  const startedAtMs = Date.now();
+  relay.cap(capBitsPerSecond);
+  const startedAt = now();
+  const legEnd = startedAt + config.bandwidthStreamSeconds * 1000;
+  while (now() < legEnd && !mobile.closedUnexpectedly) await sleep(100);
+  const seconds = (now() - startedAt) / 1000;
+  const deliveredBytes = relay.downBytes - downBefore;
+  const decodedBytes = mobile.inboundDecodedBytes - decodedBefore;
+  relay.cap(0);
+  for (const streamChat of streams) await streamChat.close().catch(() => {});
+  return {
+    // The mounted chat is a stream too: it is subscribed to a running session.
+    capBitsPerSecond, seconds, startedAtMs, endedAtMs: Date.now(), streams: streams.length + 1,
+    deliveredBytes, deliveredBytesPerSecond: deliveredBytes / seconds,
+    payloadBytes: decodedBytes, payloadBytesPerSecond: decodedBytes / seconds,
+    // Delivered wire bytes over what the cap allows: near 1 the cap, not the
+    // workload, bounded the leg.
+    linkUse: (deliveredBytes / seconds) / (capBitsPerSecond / 8),
+    maxPingToPongMs: mobile.pongsCounted > pongsBefore ? mobile.pongRoundTripMsMax : null,
+    pongDeadlineMisses: mobile.pongDeadlineMisses - missesBefore,
+    unexpectedCloses: mobile.unexpectedCloses - closesBefore,
+  };
 }
 
 async function bandwidthLeg(config, { mobile, chat, retry }) {
@@ -1440,6 +1523,7 @@ async function impairmentLegs(config, context) {
   for (const name of config.cases) {
     if (name === "blackhole") legs.blackhole = await blackholeLeg(config, context);
     else if (name === "bandwidth") legs.bandwidth = await bandwidthLeg(config, context);
+    else if (name === "bandwidth-stream") legs["bandwidth-stream"] = await bandwidthStreamLeg(config, context);
     else if (name === "restart") {
       // The restart's closes are the case; a client broken by any other means
       // before it is a real failure, and must not be hidden by the reset below.

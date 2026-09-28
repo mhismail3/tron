@@ -119,7 +119,7 @@ SCENARIOS = {
 WIRE_SCENARIOS = ("stream-reply", "tool-loop", "idle", "dashboard-observer")
 
 # The impairment cases the multi-session scenario can run, in run order.
-IMPAIRMENT_CASES = ("blackhole", "bandwidth", "restart")
+IMPAIRMENT_CASES = ("blackhole", "bandwidth", "bandwidth-stream", "restart")
 
 
 def connection_settings() -> dict[str, int]:
@@ -184,6 +184,26 @@ MULTI = {
     # something.
     "bandwidthLegSeconds": 90,
     "bandwidthInFlight": 6,
+    # The second capped case: the mobile holds several mounted chats on running
+    # sessions, which stream superseding snapshots and keyed events. The
+    # arithmetic for the cap: the streams produce roughly 0.53 snapshots/s per
+    # session, about 600 KB encoded each, so eight streams offer about 2.5 MB/s
+    # of encoded state; the Gateway's per-connection queue is bounded at 8 MiB of
+    # those bytes, so a queue that fills holds about 8 MiB / 25.6 (the measured
+    # wire compression of this fixture's content) = about 320 kB of wire. One
+    # pong deadline (8 s) of a 0.3 Mbit/s path (37,500 B/s) is 300 kB, so at
+    # 0.3 Mbit/s a full queue puts a pong behind more than its deadline, while
+    # the same rate leaves the *page* leg's one-page offer far below it. The cap
+    # is deliberately below the stream rate: the queue, not the workload, is
+    # then what the leg measures.
+    "bandwidthStreamMbps": 0.3,
+    "bandwidthStreamSeconds": 30,
+    # Seven more running sessions plus the mounted chat: every running session
+    # the phase has, so the streams out-produce the cap.
+    "bandwidthStreamSessions": 7,
+    # Attaching a stream is a full bounded page plus synchronization on a loaded
+    # fixture; the attach phase is not the measurement.
+    "bandwidthStreamAttachDeadlineMs": 120_000,
     "restartStormSeconds": 5,
     # The profiler's own restart budget: up to 30 s to stop the old Gateway plus
     # FixtureGateway.restart's 300 s start deadline, plus the storm.
@@ -203,6 +223,14 @@ MINIMUM_BANDWIDTH_LINK_USE = 0.5
 # fixture's generated transcripts), so this is not the same number as the bytes
 # that queue on the link; `offered_in_flight_wire_bytes` is reported beside it.
 MINIMUM_BANDWIDTH_OFFERED_FACTOR = 1.0
+# The streaming case is bounded by the streams, not by its cap: the running
+# sessions of this fixture produce about 296 kB/s of decoded state over eight
+# streams (measured), which is a fraction of the 0.3 Mbit/s cap, so the leg is
+# rejected on the backlog it actually showed rather than on cap use: a pong set
+# a quarter of the way to its deadline, a missed deadline, or a close are each
+# proof the queue held something. The idle round trip on this path is about
+# 0.1-0.2 s.
+MINIMUM_BANDWIDTH_STREAM_SIGNAL_MS = 1_000
 # Host guard: a qualification run on a swapping or pressured host measures the
 # host, not the Gateway (plan O-6a).
 HOST_SWAP_LIMIT_BYTES = 4 * 1024 ** 3
@@ -1003,6 +1031,11 @@ def driver_deadline_seconds(config: dict, restart_case: bool) -> float:
     if "bandwidth" in config["cases"]:
         # Each lane may still finish one operation past the leg's deadline.
         seconds += config["bandwidthLegSeconds"] + config["measuredDeadlineMs"] / 1000
+    if "bandwidth-stream" in config["cases"]:
+        # Every stream is attached before the capped window starts, each on its
+        # own attach deadline; then the leg is its own length.
+        seconds += (config["bandwidthStreamSessions"] + 1) * config["bandwidthStreamAttachDeadlineMs"] / 1000
+        seconds += config["bandwidthStreamSeconds"] + 60
     if restart_case:
         seconds += config["restartDeadlineMs"] / 1000 + config["restartStormSeconds"] + 60
     return seconds
@@ -1112,6 +1145,18 @@ def validate_impairment(results: list[dict]) -> list[str]:
                                     "proves nothing")
                 if leg.get("maxPingToPongMs") is None:
                     problems.append(f"{label}: the bandwidth case reported no ping-to-pong round trip")
+            elif name == "bandwidth-stream":
+                if leg.get("streams", 0) < 2 or not leg.get("payloadBytes"):
+                    problems.append(f"{label}: the streaming bandwidth case held "
+                                    f"{leg.get('streams', 0)} streaming chat(s), so it measured no queue")
+                backlog = leg.get("maxPingToPongMs")
+                if backlog is None:
+                    problems.append(f"{label}: the streaming bandwidth case reported no ping-to-pong round trip")
+                elif (backlog < MINIMUM_BANDWIDTH_STREAM_SIGNAL_MS and not leg.get("pongDeadlineMisses")
+                        and not leg.get("unexpectedCloses")):
+                    problems.append(f"{label}: the streaming bandwidth case's longest ping-to-pong round trip was "
+                                    f"{backlog:.0f} ms, with no pong miss and no close: the streams never backed "
+                                    "the link up, so the case proves nothing")
             elif name == "restart":
                 measured = leg.get("clients") or []
                 ready = leg.get("clientsAll") or []
@@ -1260,6 +1305,30 @@ def impairment_samples(results: list[dict]) -> dict:
             "pong deadlines missed while data flowed (C-4's target is zero)")
         add("impairment.bandwidth.unexpected_closes", "count", [leg["unexpectedCloses"] for leg in bandwidth],
             "sockets closed without the client asking (G-4's target is zero for capacity)")
+    streamed = legs("bandwidth-stream")
+    if streamed:
+        add("impairment.bandwidth_stream.link_use", "ratio", [leg["linkUse"] for leg in streamed],
+            "delivered wire bytes per second against the cap; the streams of this fixture produce a "
+            "fraction of a 0.3 Mbit/s cap, so this is how much of it the workload used, not a target",
+            better="higher")
+        add("impairment.bandwidth_stream.delivered_bytes_per_second", "B/s",
+            [leg["deliveredBytesPerSecond"] for leg in streamed],
+            "wire bytes the capped path carried toward the phone (superseding state most of them)",
+            better="higher")
+        add("impairment.bandwidth_stream.payload_bytes_per_second", "B/s",
+            [leg["payloadBytesPerSecond"] for leg in streamed],
+            "decoded bytes the streams produced per second, against the cap's own rate",
+            better="higher")
+        add("impairment.bandwidth_stream.max_ping_to_pong_ms", "ms", [leg["maxPingToPongMs"] for leg in streamed],
+            "the mobile's longest ping-to-pong round trip during the leg (C-4's deadline is 8 s)")
+        add("impairment.bandwidth_stream.streams", "count", [leg["streams"] for leg in streamed],
+            "mounted chats whose transcripts streamed into the capped path", better="higher")
+        add("impairment.bandwidth_stream.pong_deadline_misses", "count",
+            [leg["pongDeadlineMisses"] for leg in streamed],
+            "pong deadlines missed while the streams flowed (C-4's target is zero)")
+        add("impairment.bandwidth_stream.unexpected_closes", "count",
+            [leg["unexpectedCloses"] for leg in streamed],
+            "sockets closed without the client asking (G-4's target is zero for capacity)")
     restart = legs("restart")
     if restart:
         add("impairment.restart.reconnect_ms_max", "ms",
@@ -1329,6 +1398,8 @@ def run_multi_session(args: argparse.Namespace, results_dir: Path) -> Path:
                     "blackholeSeconds": args.blackhole_seconds,
                     "bandwidthMbps": args.bandwidth_mbps,
                     "bandwidthLegSeconds": args.bandwidth_seconds,
+                    "bandwidthStreamMbps": args.bandwidth_stream_mbps,
+                    "bandwidthStreamSeconds": args.bandwidth_stream_seconds,
                     "running": manifest["runPool"][index * running:(index + 1) * running],
                     "cold": manifest["coldPool"][index * cold:(index + 1) * cold],
                     "large": manifest["large"],
@@ -1368,18 +1439,22 @@ def run_multi_session(args: argparse.Namespace, results_dir: Path) -> Path:
                 "blackhole_seconds": args.blackhole_seconds,
                 "bandwidth_mbps": args.bandwidth_mbps,
                 "bandwidth_seconds": args.bandwidth_seconds,
+                "bandwidth_stream_mbps": args.bandwidth_stream_mbps,
+                "bandwidth_stream_seconds": args.bandwidth_stream_seconds,
                 "per_iteration": [{
                     "label": result["label"],
                     "blackhole": (result.get("impairment") or {}).get("blackhole"),
                     "bandwidth": (result.get("impairment") or {}).get("bandwidth"),
+                    "bandwidth-stream": (result.get("impairment") or {}).get("bandwidth-stream"),
                     "restart": (result.get("impairment") or {}).get("restart"),
                 } for result in results],
                 # Only the bandwidth legs' own windows: the same record from the priming
                 # phase or another iteration is not this leg's capacity evidence.
                 "gateway_outbound_capacity_records": log_event_count(
                     evidence / "gateway.jsonl", "connection.outbound-capacity",
-                    [(result["impairment"]["bandwidth"]["startedAtMs"], result["impairment"]["bandwidth"]["endedAtMs"])
-                     for result in results if (result.get("impairment") or {}).get("bandwidth")]),
+                    [(result["impairment"][name]["startedAtMs"], result["impairment"][name]["endedAtMs"])
+                     for result in results for name in ("bandwidth", "bandwidth-stream")
+                     if (result.get("impairment") or {}).get(name)]),
             },
             "host": args.host_state,
             "prime": prime,
@@ -1472,11 +1547,13 @@ USAGE_EPILOG = """\
 Scenarios (--list for descriptions): stream-reply, tool-loop, idle, dashboard-observer, or all
 of those four; multi-session (the connection and scale qualification run) only by name.
 
-The multi-session run's impairment cases (--cases, default blackhole,bandwidth,restart)
-run after each iteration's mixed window: a blackhole of --blackhole-seconds on the
-mobile path, a --bandwidth-mbps cap on it for --bandwidth-seconds with the link kept
-loaded, and a fixture Gateway restart with every connected client. Each reports its
-own impairment.* metrics; 'none' runs none.
+The multi-session run's impairment cases (--cases, default
+blackhole,bandwidth,bandwidth-stream,restart) run after each iteration's mixed window:
+a blackhole of --blackhole-seconds on the mobile path, a --bandwidth-mbps cap on it for
+--bandwidth-seconds with full transcript pages kept in flight, a --bandwidth-stream-mbps
+cap on it for --bandwidth-stream-seconds while several mounted chats stream superseding
+state, and a fixture Gateway restart with every connected client. Each reports its own
+impairment.* metrics; 'none' runs none.
 
 Each scenario run starts a fresh fixture Gateway and writes one report under
 <profile root>/gateway/<UTC>-<scenario>-<id>/ (profile root: $TRON_PROFILE_RESULTS_DIR
@@ -1518,6 +1595,13 @@ def parse(argv: list[str]) -> argparse.Namespace:
                         help="multi-session bandwidth leg length in seconds "
                              f"(default {MULTI['bandwidthLegSeconds']}); a shorter leg is a smoke run, "
                              "not a baseline")
+    parser.add_argument("--bandwidth-stream-mbps", type=float, default=MULTI["bandwidthStreamMbps"],
+                        help="multi-session streaming bandwidth cap (default "
+                             f"{MULTI['bandwidthStreamMbps']}); slower than the running sessions produce, "
+                             "which is what makes a queued pong and a capacity close reachable")
+    parser.add_argument("--bandwidth-stream-seconds", type=float, default=MULTI["bandwidthStreamSeconds"],
+                        help="multi-session streaming leg length in seconds "
+                             f"(default {MULTI['bandwidthStreamSeconds']})")
     parser.add_argument("--tokens-per-second", type=float, default=80.0, help="faux model streaming rate (default 80)")
     parser.add_argument("--no-build", action="store_true", help="use the existing packages/gateway/dist build")
     parser.add_argument("--cpu-profile", action="store_true", help="also write a Node CPU profile of the fixture Gateway")
@@ -1558,6 +1642,10 @@ def parse(argv: list[str]) -> argparse.Namespace:
         parser.error("--bandwidth-mbps must be between 0.5 and 1000")
     if not 5 <= args.bandwidth_seconds <= 3_600:
         parser.error("--bandwidth-seconds must be between 5 and 3600")
+    if not 0.1 <= args.bandwidth_stream_mbps <= 1_000:
+        parser.error("--bandwidth-stream-mbps must be between 0.1 and 1000")
+    if not 5 <= args.bandwidth_stream_seconds <= 3_600:
+        parser.error("--bandwidth-stream-seconds must be between 5 and 3600")
     if not 5 <= args.window_seconds <= 3600:
         parser.error("--window-seconds must be between 5 and 3600")
     if not 1 <= args.tokens_per_second <= 10_000:
