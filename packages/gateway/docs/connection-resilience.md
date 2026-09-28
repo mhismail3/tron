@@ -44,6 +44,20 @@ owner of accepted commands; mobile reconnect never replays a prompt blindly.
   Both are read from the Gateway log alone and neither changes what the tick does.
   `server-heartbeat.integration.test.ts` pins each case against real sockets on a
   fake heartbeat clock.
+- **Phone liveness (C-4):** the phone pings every socket on the one shared
+  ten-second wakeup grid the energy plan fixed, and any inbound frame that
+  reaches the app after a ping was sent is proof of liveness for that ping:
+  messages, pongs and any other data all answer it. A probe's pong returns on
+  the downlink, behind whatever data the Gateway has already queued for the
+  phone, so a pong can miss its eight-second deadline on a link that is carrying
+  data. Such a probe retires the epoch only when nothing arrived after it was
+  sent, and the next grid tick re-arms the wait. Only a fully delivered frame
+  counts as that proof, so a frame whose last byte arrives later than that
+  deadline (about 1 MiB on a path below 1 Mbit/s) leaves a busy link with no
+  proof at all and the epoch is still retired as `pong_timeout`. Dead-link
+  detection stays within 18 seconds of the last inbound frame: no grid tick is
+  later than 10 seconds after it and the deadline is 8 seconds after the tick.
+  `GatewayClientTransportTests` pins each case on a manual clock.
 - **Projection:** the wire ceiling remains 1 MiB, with a shared 32,768 JSON-value
   node ceiling for local and mobile clients. Transcript pages reserve 24,000
   nodes and snapshots 30,000; dense detail is compacted without editing canonical

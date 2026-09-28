@@ -1650,11 +1650,6 @@ actor GatewayClient {
                     try await GatewayClient.withTimeout(
                         clock: clock,
                         duration: GatewayConnectionPolicy.clientPongDeadline,
-                        onTimeout: { [weak self] in
-                            // Record and revoke at the epoch owner before close
-                            // wakes the receiver with a less-specific error.
-                            await self?.livenessFailed(timeout, epochID: epochID, startedAt: startedAt)
-                        },
                         timeoutFailure: timeout
                     ) {
                         try await socket.ping()
@@ -1662,8 +1657,11 @@ actor GatewayClient {
                     await self?.notePong(epochID: epochID)
                 } catch {
                     guard !Task.isCancelled else { return }
-                    await self?.livenessFailed(error, epochID: epochID, startedAt: startedAt)
-                    return
+                    // A probe whose pong was queued behind inbound data does
+                    // not end this wait unless its deadline passed in total
+                    // silence; otherwise the next grid tick re-arms it.
+                    let ended = await self?.livenessFailed(error, epochID: epochID, probeSentAt: startedAt) ?? true
+                    if ended { return }
                 }
             }
         }
@@ -1676,17 +1674,32 @@ actor GatewayClient {
         connection = epoch
     }
 
-    private func livenessFailed(_ error: Error, epochID: Int, startedAt: ContinuousClock.Instant) async {
-        guard ownsEpoch(epochID) else { return }
+    /// Settle one failed liveness probe and report whether the wait is over.
+    /// A pong can be queued behind the Gateway's own outbound data, so a probe
+    /// whose deadline passed is evidence of a dead link only when no inbound
+    /// frame of any kind arrived after that probe was sent: messages, pongs and
+    /// any other data all prove the link. The check and the retirement it
+    /// guards are one actor call, so a frame delivered while the deadline
+    /// settles cannot be split from the verdict. Only a `pong_timeout` is
+    /// excused this way; a genuine send failure still retires the epoch.
+    /// Returns true once the epoch was retired or is no longer current.
+    private func livenessFailed(_ error: Error, epochID: Int, probeSentAt: ContinuousClock.Instant) async -> Bool {
+        let failure = Self.transportFailure(error)
+        if failure.code == "pong_timeout", let epoch = connection, epoch.id == epochID,
+           let lastInboundAt = epoch.lastInboundAt, lastInboundAt > probeSentAt {
+            return false
+        }
+        guard ownsEpoch(epochID) else { return true }
         recordDiagnostic(
             stage: .liveness,
             outcome: .failure,
-            startedAt: startedAt,
-            reason: Self.diagnosticReason(for: Self.transportFailure(error).code),
+            startedAt: probeSentAt,
+            reason: Self.diagnosticReason(for: failure.code),
             error: error,
             connectionID: epochID
         )
-        await disconnectEpoch(epochID: epochID, failure: Self.transportFailure(error))
+        await disconnectEpoch(epochID: epochID, failure: failure)
+        return true
     }
 
     private func disconnectEpoch(epochID: Int, failure: GatewayFailure) async {

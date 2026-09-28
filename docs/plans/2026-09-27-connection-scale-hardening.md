@@ -555,7 +555,7 @@ rows are in priority order.
 | G-10 | Done | Durable-write audit: no process-wide serialization of fsyncs, no fsync on reads | O-5 | orchestrator-dispatched deepseek-worker, 2026-09-28 |
 | G-10a | Claimed | Connection owner: a read (e.g. knowledge.raindrop.read) must not fsync — skip or debounce an unchanged provider observation in ConnectionOwner.recordProviderObservation, preserving stateRevision/updatedAt semantics | G-10 | orchestrator-dispatched deepseek-worker, 2026-09-28 |
 | C-3 | Ready | Faster retry (D-4): about 5 s transport-open deadline, immediate retry on path change | C-1 | |
-| C-4 | Claimed | Truer liveness (D-4): any inbound frame proves liveness | O-4 | orchestrator-dispatched deepseek-worker, 2026-09-28 |
+| C-4 | Done | Truer liveness (D-4): any inbound frame proves liveness | O-4 | orchestrator-dispatched deepseek-worker, 2026-09-28 |
 | C-6 | Ready | Cancel frame for disposable reads; a retried `session.open` joins the in-flight one | O-3 | |
 | G-12 | Ready | Server-side deadlines, concurrency caps and heap-pressure shedding with typed retry hints | O-3, O-5 | |
 | G-2 | Ready | Cold open in bounded time from the index and a single-file fence | G-1c | |
@@ -1002,10 +1002,16 @@ needed), **Checks**, **Docs**, **Done when**, **User action**.
   `packages/gateway/src/transport/connection-policy.ts` (parity only).
 - **Do:**
   1. Track the last inbound frame time (messages, pongs, any data).
-  2. On each ping tick, send a ping only if nothing arrived for the ping
-     interval; declare the link dead only when that ping's pong misses its
-     deadline.
-  3. Dead-link detection stays within 18 s of the last inbound frame.
+  2. Send the ping on every tick of the shared ten-second wakeup grid T1-NET
+     fixed, and declare the link dead only when that ping's pong misses its
+     deadline and no inbound frame of any kind arrived after the ping was sent
+     (orchestrator deviation from this plan's first draft, "send a ping only if
+     nothing arrived": the grid is a user-approved energy decision C-4 must not
+     reverse, and D-4's queued-pong case is covered by the post-ping frame test
+     alone).
+  3. Dead-link detection stays within 18 s of the last inbound frame: the tick
+     is never later than one interval after it and the deadline is 8 s after the
+     tick.
 - **Failure modes to write first:** large frame in flight when a ping is due;
   data then total silence; pongs but no data; clock suspension across
   background.
@@ -4388,3 +4394,149 @@ events; widen them to name the pool owner in the same change.
   (finding 4, nit). The ≈1,365 ambient opens a second is labelled an upper bound
   on ambient opens that excludes routed re-opens and assumes the pass keeps the
   750 ms cadence (finding 5, nit); the retained artifact's figure matches.
+
+### C-4 · Done · 2026-09-28 · orchestrator-dispatched deepseek-worker (branch `hardening/c-4`)
+
+- Result: a probe whose pong is queued behind inbound data no longer retires the
+  epoch. Liveness pings stay on the one shared ten-second wakeup grid T1-NET
+  fixed, and a `pong_timeout` retires the epoch only when no inbound frame of any
+  kind arrived after that ping was sent. The test runs inside `livenessFailed`
+  before its first await, so a frame delivered while the deadline settles cannot
+  be split from the verdict; only `pong_timeout` is excused, an excused probe
+  re-arms the wait on the next grid tick, and a genuine send failure still retires
+  the epoch. Dead-link detection stays within 18 s of the last inbound frame: no
+  tick is later than one interval after it and the deadline is 8 s after the tick.
+  Only a fully delivered frame counts, so a frame whose last byte arrives past
+  that deadline (about 1 MiB below 1 Mbit/s) leaves a busy link with no proof at
+  all.
+- Evidence: `GatewayClientTransportTests` passes, 52 test functions and 0
+  failures, on the branch rebased onto `hardening/integration`
+  (`scripts/tron-ios-test run --only-testing TronMobileTests/GatewayClientTransportTests`,
+  result bundle `~/Library/Developer/Tron/ios/test-runs/20260928T145512Z-run.MQ7T8b`)
+  and over three consecutive runs of the same changed files before the rebase
+  (`…143958Z-run.57fiey`, `…144021Z-run.B8c5Wt`, `…144034Z-run.3gKjfH`). Each run
+  reports "52 tests in 1 suite" while the result summary counts 53 passing cases,
+  because `connectFailureRecordsTransportOpening` runs two argument cases. Three new
+  manual-clock cases: a pong queued behind a large inbound frame does not retire
+  the link and the wait returns to the next grid tick
+  (`inboundDataAnswersQueuedPong`); silence after data retires the link inside the
+  18 s bound (`silenceAfterDataRetiresWithinBound`); a late clock wake probes once
+  and returns to the grid (`lateClockWakeProbesOnce`). The T1-NET cases the draft
+  had replaced are restored unchanged (`socketsPingOnOneSharedGrid`,
+  `slowPongKeepsPingGrid`, `inboundTrafficDoesNotSuppressLivenessProbe`). Adjacent
+  owner suites pass: `AppModelReconnectTests`, `AppModelLifecycleTests`,
+  `AppModelTerminalLifecycleTests`, `SessionMutationServiceTests`,
+  `GatewayUpdateControlPlaneTests`, `GatewayDiagnosticsServiceTests` — 111 tests,
+  0 failures on the rebased branch (`20260928T145557Z-run.PYErZK`, and the same
+  set before the rebase as `20260928T144054Z-run.xEFEGC`);
+  `SettingsTrustCoordinatorTests`,
+  `SessionImportCoordinatorTests`, `CustomModelConfigurationCoordinatorTests`,
+  `PackageConfigurationCoordinatorTests`, `ProviderAuthCoordinatorTests` — 97
+  tests, 0 failures (`20260928T144534Z-run.2AKmot`). The Gateway needs no change
+  and its owner suites are green on the branch rebased onto
+  `hardening/integration`: `npx vitest run src/transport/connection-policy.test.ts
+  src/transport/server-heartbeat.integration.test.ts` — 2 files, 11 tests passed,
+  O-2's inbound-silence cases included. `python3
+  scripts/check-documentation-policy.py` and `scripts/personal-info-guard.sh`
+  pass.
+- **Real-harness confirmation, draft code.** `scripts/ios-gateway-e2e-test all`
+  passed (1 test, 0 failures, 0 skipped, 55.3 s; result bundle
+  `$TMPDIR/tron-ios-gateway-e2e-501/results/20260928T134641Z-run.qqg0Cq/FocusedE2E.xcresult`,
+  phone records attachment `phone-connection-records`) against a private fixture
+  Gateway through the fault proxy while the draft still probed on a quiet window:
+  exactly one `connection.episode` cause chain, `causes=pong_timeout,transport`,
+  for the blackhole leg (resolved `endedBy=connected` 6.9 s after the loss) and no
+  other `pong_timeout` in the run. The final probe schedule is `main`'s grid plus
+  the post-ping frame test, which only removes retirements, so that leg's path is
+  unchanged; the run itself was not repeated on the final form because the shared
+  simulator lease never came free before this handoff. Treat the leg as draft
+  evidence until the O-6b confirmation below covers the final form.
+- **O-6b confirmation is owed to the orchestrator.** O-6b's bandwidth-cap case is
+  still in a sibling worktree, so this branch proves the "zero pong-deadline
+  misses while data flows" claim with the manual-clock cases above. That run must
+  use a cap low enough that one frame takes longer than one ping interval to
+  arrive (the default 2 Mbit/s cap is too fast), and it must also show zero
+  `connection.heartbeat-timeout` over a streaming window longer than 75 s: the
+  55 s real-harness run cannot cover that window, and the Gateway retires a socket
+  that stops answering on its own heartbeat.
+- Why a quiet phone is still safe, measured not assumed: the Gateway pings any
+  client that initiated nothing in the last `heartbeatIntervalMs` (25 s), so a
+  phone that only receives is pinged on every tick. A macOS `URLSession`
+  `WebSocketTask` client that sent one frame and nothing else answered 8 of 8
+  server pings from a local `ws` server (1 s interval), so that transport answers
+  a server ping at the WebSocket layer; the probe scripts were temporary
+  (`/tmp/c4-probe/`), so the claim is recorded here and in
+  `connection-resilience.md` rather than kept as a repo test.
+- Changes: one commit on `hardening/c-4` on top of `hardening/integration`. The
+  four commits the review saw (`2a6335059..fb67f3a3f`) were collapsed: two of them
+  implemented the superseded quiet-window design, so keeping them would have left
+  a design the branch does not ship in its own history. The reviewed revision is
+  kept as the local tag `c4-review-work` for comparison.
+- Tasks added: none as a row; the O-6b confirmation stays with the orchestrator.
+- Kept on purpose: `withTimeout`'s `onTimeout` hook stays for the handshake
+  deadline, and the liveness probe does not pass it because its verdict has to
+  wait for the deadline to pass in silence — the loop asks the epoch owner whether
+  the wait continues instead. `MonotonicClock.gridOrigin` and `gridTick` stay for
+  every socket's liveness ping and for presentation-lease renewal.
+  `notePong` and the receive path keep `lastInboundAt` as the single liveness
+  clock; no new epoch state was added.
+- Deviations: C-4 does not suppress a ping when a frame arrived during the
+  interval, which the plan's C-4 "Do" item 2 originally asked for. The
+  orchestrator decided on 2026-09-28 that T1-NET's shared ten-second grid is a
+  user-approved energy decision C-4 must not reverse and that D-4 is met by the
+  post-ping frame test alone: the ping stays on the grid, a frame answers the
+  probe, and detection still lands within 18 s of the last inbound frame. The
+  "Do" text records the same deviation.
+
+### C-4 · Done · 2026-09-28 · orchestrator-dispatched deepseek-worker (review round 1 addressed)
+
+- The review's verdict was changes-required, with one blocker, two major and
+  several smaller findings. Its two design-level findings were decided by the
+  orchestrator; the rest are fixed in the entry above.
+  - **Blocker (Gateway inbound silence) and major (T1-NET reversal), decided
+    2026-09-28: do not reverse T1-NET.** The draft moved the liveness probe onto a
+    quiet window measured from the last inbound frame, which would have made O-2's
+    merged `connection.inbound-silent` plus `connection.inbound-resumed` fire
+    about twice per 25 s tick on a healthy streaming phone: the phone pings every
+    ten seconds only because of the shared grid, so a phone that only receives
+    would have looked silent. Liveness pings therefore stay on the grid, the phone
+    keeps pinging on its own, O-2's own-ping trigger stays valid, no edit lands in
+    `packages/gateway/src/transport/server.ts`, and no energy traces are needed
+    because the wakeup schedule did not change from `main`.
+    `MonotonicClock.gridTick`/`gridOrigin` and the lease-renewal alignment stay as
+    they were. D-4 is met by the post-ping frame test alone.
+  - **Major (C-4 was marked Done without the O-6b evidence):** the row stays Done
+    as O-2's does, with the owed run recorded in the entry above. That run now
+    also has to use a cap low enough that one frame takes longer than one ping
+    interval, and to show zero `connection.heartbeat-timeout` over a streaming
+    window longer than 75 s.
+  - **Minor (docs claimed more than the code guarantees):**
+    `connection-resilience.md`, `architecture.md` and `development.md` now say that
+    only a fully delivered frame is proof and name the slow-frame bound (about
+    1 MiB below 1 Mbit/s).
+  - **Minor (a receive-only phone depends on the Gateway heartbeat):** the premise
+    no longer holds, because the phone pings on the grid again. The part that
+    survives — a pong returns on the downlink behind the Gateway's own queued data
+    — is now stated in `connection-resilience.md`, and the 75 s streaming window
+    moved into the O-6b confirmation above.
+  - **Nit (check and retirement in two actor calls):** done. The "arrived since
+    the probe" test now runs inside `livenessFailed` before its first await and
+    applies only to `pong_timeout`; a probe it excuses keeps the wait running on
+    the grid instead of ending its task.
+  - **Nit (handoff contradicted itself):** the two numbers describe one run, not
+    two — `connectFailureRecordsTransportOpening` runs two argument cases, so the
+    test line says 52 tests while the result summary counts 53 passing cases. The
+    entry above says so and cites one bundle per run.
+  - **Nit ("a phone whose link carries inbound data sends no frame of its own"):**
+    reverted with the rest of that paragraph; the doc says again that a foreground
+    phone pings every ten seconds.
+  - The draft's own handoff called one 5 s watchdog expiry in
+    `inboundDataAnswersQueuedPong` a non-reproducing flake. It was a real defect in
+    the draft's tests, not host noise: the manual clock was advanced to the probe's
+    deadline before the probe had registered its deadline sleep, so the deadline
+    landed eight seconds later than the test expected. The new cases gate on that
+    registration before moving the clock; the breadcrumb is in the test comments.
+- Evidence: the runs in the entry above, including the Gateway owner suites on the
+  rebased branch, which prove O-2's inbound-silence behavior needs no edit.
+- Findings rejected: none; only the premise of the receive-only-phone finding no
+  longer applies.
