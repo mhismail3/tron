@@ -89,6 +89,7 @@ import {
   SessionCatalog,
   SUBAGENT_RUN_DIRECTORY,
   delegatedSessionParentPath,
+  type SessionCatalogReconcileOutcome,
   type SessionCatalogSource,
 } from "./session-catalog.js";
 import { resolveForkBoundaryAnchor, type ForkBoundaryAnchor } from "./fork-boundary.js";
@@ -122,6 +123,9 @@ const MAX_EXTENSION_TEMP_ENTRIES = 1_024;
 // Ambient enumeration shares these global pass bounds. Exact-owned artifact
 // reconciliation above is intentionally outside this ambient budget.
 const MAX_EXTENSION_ROOT_ENTRIES = 4_096;
+// A Pi append can land inside the summary's read window; the summary is retried
+// rather than published with a size its counts do not describe.
+const CATALOG_SUMMARY_ATTEMPTS = 3;
 
 function assertProcessSessionRef(value: string): void {
   if (!value || Buffer.byteLength(value) > 256 || /[\\/\0]/u.test(value)) {
@@ -507,8 +511,9 @@ export class RuntimeRegistry {
       /** Handled catalog-index write failures. The index write is fire-and-forget
        * outside any request span, so its owner records them. */
       catalogIndexFailure?: CatalogMetadataIndexFailure;
-      /** One catalog reconcile, with the files it covered and its duration. */
-      catalogReconciled?: (reconciled: { files: number; changed: number; durationMs: number }) => void;
+      /** One catalog reconcile, with the files it covered and the rows it
+       * changed. An incomplete or failed pass is reported instead of silent. */
+      catalogReconciled?: (reconciled: SessionCatalogReconcileOutcome) => void;
       /** A runtime whose extension shutdown overran its disposal grace and was
        * forced. Outside any request span. */
       runtimeDisposeTimeout?: (graceMs: number) => void;
@@ -872,8 +877,10 @@ export class RuntimeRegistry {
         } else if (removed && persistedPath !== undefined && !persistedPathWasIndexed) {
           // The slot may have created its canonical file after the cached disk
           // generation. Force the next catalog read to discover that file once
-          // runtime ownership is no longer available as the row projection.
+          // runtime ownership is no longer available as the row projection, and
+          // apply the change to the catalog owner at the same commit point.
           this.invalidateCatalogAcquisition();
+          void this.sessionCatalog.refresh(persistedPath);
         }
         // Persisted closure publishes a final idle summary before this hook and
         // retains its revision continuity; membership did not change.
@@ -1386,7 +1393,7 @@ export class RuntimeRegistry {
       catalogCapacityExceeded: () => this.catalogCapacityExceeded(),
       isLiveRuntimeOwnedPath: (path, sessionID) => this.isLiveRuntimeOwnedPath(path, sessionID),
       canonicalSessionPath: (path) => this.canonicalSessionPath(path),
-      delegatedTopologyParentPath: (path, root) => this.delegatedTopologyParentPath(path, root),
+      delegatedTopologyParentPath: delegatedSessionParentPath,
     };
     return new CatalogDiscovery(options);
   }
@@ -1655,21 +1662,32 @@ export class RuntimeRegistry {
   }
 
   private async canonicalCatalogSummary(path: string): Promise<CatalogMetadataIndexSummary | undefined> {
-    const info = await buildCatalogSessionInfo(path);
-    if (!info) return undefined;
-    return {
-      id: info.id, path: info.path, cwd: info.cwd,
-      // The row's parent path is the same canonical form every other catalog
-      // comparison uses; a header may name its parent through a symlinked root.
-      ...(info.parentSessionPath
-        ? { parentSessionPath: await this.canonicalSessionPath(info.parentSessionPath) }
-        : {}),
-      ...(info.creationOrigin ? { creationOrigin: info.creationOrigin } : {}),
-      ...(info.name ? { name: info.name } : {}),
-      firstMessage: info.firstMessage,
-      createdAt: info.created.toISOString(), updatedAt: info.modified.toISOString(),
-      messageCount: info.messageCount,
-    };
+    // Pi appends synchronously between this read's awaits, so a summary is only
+    // published with the size it actually parsed: the row's counts describe that
+    // prefix, and a later size would claim messages it never counted.
+    for (let attempt = 0; attempt < CATALOG_SUMMARY_ATTEMPTS; attempt += 1) {
+      const before = await lstat(path).catch(() => undefined);
+      if (!before?.isFile() || before.isSymbolicLink()) return undefined;
+      const info = await buildCatalogSessionInfo(path);
+      const after = await lstat(path).catch(() => undefined);
+      if (!info || !after?.isFile() || after.isSymbolicLink()) return undefined;
+      if (after.size !== before.size || after.mtimeMs !== before.mtimeMs) continue;
+      return {
+        id: info.id, path: info.path, cwd: info.cwd,
+        // The row's parent path is the same canonical form every other catalog
+        // comparison uses; a header may name its parent through a symlinked root.
+        ...(info.parentSessionPath
+          ? { parentSessionPath: await this.canonicalSessionPath(info.parentSessionPath) }
+          : {}),
+        ...(info.creationOrigin ? { creationOrigin: info.creationOrigin } : {}),
+        ...(info.name ? { name: info.name } : {}),
+        firstMessage: info.firstMessage,
+        createdAt: info.created.toISOString(), updatedAt: info.modified.toISOString(),
+        messageCount: info.messageCount,
+        parsedSize: after.size,
+      };
+    }
+    return undefined;
   }
 
   private async readCatalogHeader(
@@ -1965,8 +1983,10 @@ export class RuntimeRegistry {
       size: identity.size, mtimeMs: identity.mtimeMs,
     }));
     // reconcile admits and reads the durable document once. A missing/corrupt
-    // document deliberately falls through to the canonical first-cut scan.
-    const rows = await stage("catalog.reconcile", () => this.catalogMetadataIndex.reconcile(
+    // document deliberately falls through to the canonical first-cut scan, and so
+    // does a file this pass could not prove: the cut then omits a real canonical
+    // file, which the admission below must never accept.
+    const reconciled = await stage("catalog.reconcile", () => this.catalogMetadataIndex.reconcile(
       this.catalogDirectory(),
       candidates,
       async (candidate) => {
@@ -1983,7 +2003,8 @@ export class RuntimeRegistry {
         };
       },
     ));
-    if (!rows) return;
+    if (!reconciled || reconciled.unproven.length > 0) return;
+    const rows = reconciled.rows;
     count("catalog.reconcile.rows", rows.length);
     const after = await this.sharedCatalogStructureEvidence(true);
     const rowsMatchAfterFacts = rows.length === this.catalogIdentitiesForScope(after, scope).length
@@ -2206,7 +2227,7 @@ export class RuntimeRegistry {
     let root: string;
     try { root = realpathSync(this.catalogDirectory()); }
     catch { root = resolve(this.catalogDirectory()); }
-    return identities.filter(([path]) => this.delegatedTopologyParentPath(path, root) === undefined);
+    return identities.filter(([path]) => delegatedSessionParentPath(path, root) === undefined);
   }
 
   private catalogFactsDigest(evidence: CatalogStructureEvidence, scope: "user" | "all"): string {
@@ -2244,7 +2265,7 @@ export class RuntimeRegistry {
     try { catalogRoot = realpathSync(this.catalogDirectory()); }
     catch { catalogRoot = resolve(this.catalogDirectory()); }
     return [...evidence.unstableCanonicalPaths].some((path) =>
-      this.delegatedTopologyParentPath(path, catalogRoot) === undefined,
+      delegatedSessionParentPath(path, catalogRoot) === undefined,
     );
   }
 
@@ -2306,16 +2327,13 @@ export class RuntimeRegistry {
     });
   }
 
-  private delegatedTopologyParentPath(sessionPath: string, catalogRoot: string): string | undefined {
-    return delegatedSessionParentPath(sessionPath, catalogRoot);
-  }
-
   /** The only delegated-session catalog contract. pi-subagents reserves
    * <parent-stem>/forks/<fork-session>.jsonl and
    * <parent-stem>/<producer>/run-N/session.jsonl beneath the canonical catalog.
    * The topology remains mutation-protected without an extant or unambiguous
    * parent. An optional matching header binds the projected parent identity;
-   * a contradictory header fails closed and is omitted from catalog rows. */  private delegatedSessionTopologies(
+   * a contradictory header fails closed and is omitted from catalog rows. */
+  private delegatedSessionTopologies(
     sessions: ReadonlyArray<{
       id: string;
       path: string;
@@ -2329,7 +2347,7 @@ export class RuntimeRegistry {
     catch { catalogRoot = resolve(this.catalogDirectory()); }
     for (const session of sessions) {
       const sessionPath = resolve(session.path);
-      const expectedParentPath = this.delegatedTopologyParentPath(sessionPath, catalogRoot);
+      const expectedParentPath = delegatedSessionParentPath(sessionPath, catalogRoot);
       if (!expectedParentPath) continue;
       const contradictoryHeader = session.parentSessionPath !== undefined
         && resolve(session.parentSessionPath) !== expectedParentPath;

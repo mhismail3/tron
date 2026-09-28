@@ -2601,17 +2601,17 @@ a latency percentile.
   not, so the index would stop matching a full scan.
 - Deviation (transitional dual owner): the owner deliberately reads and writes
   the same durable document as the reader path until G-1c deletes that path, so
-  two writers can exchange a full-document snapshot. Both are full canonical
-  cuts, so the content is the same; G-1c removes the second writer. Three
-  existing counting tests were narrowed rather than deleted, all because
-  background maintenance now calls the same methods they count: "reuses an
-  on-disk catalog…" counts only the reader call's `append`s, "rejects an unowned
-  append that races durable-index reconciliation" settles the owner's background
-  reconcile before injecting its append, and O-3/O-5's "counts a walk a request
-  waited on apart from background catalog walks" identifies the request's walks
-  by their `requestPath` flag instead of by their position in the call list (the
-  owner's startup reconcile may interleave with the request; the counters
-  themselves are unchanged).
+  two writers can exchange a full-document snapshot. Both write full canonical
+  cuts, so their content agrees once each has actually reconciled; the review
+  round below found that second half was unenforced, and G-1c removes the second
+  writer. Two existing counting tests were narrowed rather than deleted, both
+  because background maintenance now calls the same methods they count: "reuses
+  an on-disk catalog…" counts only the reader call's `append`s, and "rejects an
+  unowned append that races durable-index reconciliation" settles the owner's
+  background reconcile before injecting its append. O-3/O-5's "counts a walk a
+  request waited on apart from background catalog walks" was first widened to
+  `some` for the same reason; the review round below settled the owner instead
+  and restored `every`.
 - No catalog field changes for archive: archiving is a dashboard projection of
   the same canonical membership and the row contract has no archive field, so
   the plan's "archive" hook has nothing to apply.
@@ -2630,3 +2630,98 @@ a latency percentile.
   integration file run had `keeps a large streamed write visible through
   snapshot recovery and canonical handoff` time out once at 5.1 s under the
   full-file load; it passes alone (8.3 s) and is not reproducible in isolation.
+
+### G-1a · Done (review round 1) · 2026-09-28 · orchestrator-dispatched deepseek-worker
+
+- Result: an independent reviewer reproduced four defects the "matches a full
+  scan" case does not reach; all four majors and eight minors are addressed, and
+  none was rejected. The owner now writes the durable document only from a
+  canonical cut, cannot publish a removed row back, never stamps a row with a
+  size it did not count, stops a whole-catalog rebuild at shutdown, and reports
+  what one reconcile covered and changed.
+- Finding 1 (major, reproduced — shutdown wrote an empty or partial document):
+  `SessionCatalog` now has `canonicalCut` (set only by a completed load or
+  reconcile) beside the change/durable generations; `persistNow` writes only
+  when both a canonical cut exists and a change is owed. A shutdown before
+  `start()`, inside the load, or after a failed load with an incomplete scan
+  leaves the prior document untouched. New cases: "keeps the prior durable
+  document when shutdown precedes or interrupts the load" (dispose before start,
+  and with the load's rows in hand), "rebuilds from canonical files when the
+  durable document is corrupt or foreign" now restarts with the real source and
+  asserts it rebuilds `id-a` instead of passing on an empty catalog.
+- Finding 2 (major, reproduced — a removal could be published back): `remove()`
+  runs its map deletion in the lane, and it records a per-path removal
+  generation at the call. `reconcileIndex` captures its read epoch before its
+  first read and `refreshPath` before its own, and both refuse to publish a row
+  whose removal was announced after that epoch. New case: "does not publish a
+  row back after a removal announced during its read", which also asserts a
+  later pass proves membership from the folder again.
+- Finding 3 (major, reproduced — a row could claim an offset past uncounted
+  content): `CatalogMetadataIndexSummary` carries the `parsedSize` the counts
+  were parsed from; the registry's `canonicalCatalogSummary` stats before and
+  after the parse, retries while they differ, and `entryFromSummary` rejects a
+  summary whose size no longer matches the file. `refreshPath` retries the tail
+  append (bounded) before falling back to a whole-body parse, so a transient Pi
+  append costs one tail read. New cases: "does not stamp a row with an offset
+  past content it never counted" (owner level) and "refuses a summary the file
+  outgrew between its parse and its stamp" (index level).
+- Finding 4 (major — shutdown waited on an unbounded rebuild, and one
+  unprovable file failed the whole cut): `CatalogMetadataIndex.reconcile` now
+  reports `{ rows, unproven }` per file instead of `undefined` for the whole cut
+  (only an unreadable document is still `undefined`), checks its own `closed`
+  between batches, and the owner retains its prior in-memory row for every
+  unproven path, so a file with a partial final line no longer drops out of the
+  index. `rebuild` checks `closed` between files. The pre-G-1a acquisition path
+  keeps its all-or-nothing admission by requiring `unproven.length === 0`.
+  Updated/new cases: "reports a partial canonical final line per file without
+  discarding its siblings", "reads reconciled files in one bounded batch at a
+  time" (its 16-row batch gate still holds).
+- Finding 5 (major, orchestrator-decision flagged): the timer is now a true
+  debounce — each real change resets the quiet spell — capped by
+  `CATALOG_PERSIST_MAX_WAIT_MS` (60 s) so a catalog that never goes quiet still
+  reaches the document. The spurious writes are gone with the dirty flag:
+  `publishRows` returns what actually changed, `publishRow` returns false for an
+  unchanged row, and `refreshPath` no longer reports "produced" for an unchanged
+  append copy. The plan's `CATALOG_PERSIST_DEBOUNCE_MS` (5 s) is unchanged. The
+  write volume is not measured here: G-10 owns the durable-write audit and its
+  `gateway.resources` counters, and this record reports its own counts.
+- Finding 6 (minor): `files` is now `scan.candidates.length` and
+  `{ added, removed, modified }` are counted from the published cut; `unproven`
+  counts files the pass could not prove; `incomplete` and `failed` passes report
+  instead of returning silently, at warning. The counts are record fields, which
+  is why `LogMetadata` gained a bounded generic `counts` map (the logger bounds
+  the number of entries, their names and their values). `observability.md`'s
+  `catalog.reconciled` row states the new levels, fields and reason.
+- Finding 7 (minor): the closed hook's `!persistedPathWasIndexed` branch now
+  also calls `sessionCatalog.refresh(persistedPath)` beside
+  `invalidateCatalogAcquisition()`.
+- Finding 8 (minor): "counts a walk a request waited on apart from background
+  catalog walks" settles the catalog owner before the request and asserts
+  `every` walk in the window is request-path (and every earlier one is not),
+  instead of accepting one flagged walk anywhere in the window.
+- Finding 9 (minor): the corrupt-document half of the startup test now starts a
+  real owner with the canonical source and asserts it rebuilds `id-a`; the
+  failure-mode list at the top of the file gained modes 5–7 for the new cases.
+- Finding 10 (nit): the `delegatedTopologyParentPath` pass-through is deleted
+  and its four call sites use `delegatedSessionParentPath` directly; the joined
+  `*/  private delegatedSessionTopologies(` line is split.
+- Finding 11 (nit): `catalogRoot()` caches only a successful `realpath`, so a
+  root that does not exist yet is re-resolved once it is created.
+- Finding 12 (nit, deferred as the review allowed): `catalog.changed` (debug) is
+  not emitted here. G-1b owns it: it adds the watcher that produces the change
+  stream the record describes, and G-1a's readers are not switched yet, so a
+  per-append debug record would have no consumer. This entry is the handoff.
+- Evidence: `npx tsc --noEmit -p .` clean. `npx vitest run
+  src/sessions/session-catalog.test.ts src/sessions/catalog-metadata-index.test.ts`
+  26/26; `src/sessions/catalog-discovery.test.ts` 2/2;
+  `src/transport/logger.test.ts` 13/13; `runtime-registry.integration.test.ts`
+  focused runs: `-t "catalog"` 34/34, `-t "index"` 8/8, `-t "delete"` 6/6,
+  `-t "dispose|shutdown|session close"` 6/6, and the five review cases 5/5.
+  `python3 scripts/check-documentation-policy.py` and
+  `scripts/personal-info-guard.sh` pass.
+- Residual risk for the orchestrator: a file this pass cannot prove and that has
+  no prior row (a new file whose last line is incomplete) is still absent from
+  the index until a later pass proves it; the reconcile record's `unproven`
+  count is the signal, and the durable document keeps every row it already had.
+  G-10 owns the document's measured write volume, and G-1b owns the watcher and
+  the `catalog.changed` record.

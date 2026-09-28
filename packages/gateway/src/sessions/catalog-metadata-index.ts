@@ -98,6 +98,19 @@ export interface CatalogMetadataIndexSummary {
   createdAt: string;
   updatedAt: string;
   messageCount: number;
+  /** The file size the counts above were parsed from. A source that can observe
+   * it sets it, and the index then refuses to stamp a row with a later size:
+   * an append between the parse and the stamp would make the row claim an
+   * offset past content it never counted. */
+  parsedSize?: number;
+}
+
+/** One reconcile's result. A candidate the pass could not prove is reported
+ * instead of failing the whole cut: the caller keeps its own prior row for that
+ * path, because an unprovable file proves neither presence nor absence. */
+export interface CatalogMetadataIndexReconciliation {
+  rows: CatalogMetadataIndexRow[];
+  unproven: string[];
 }
 
 /** A handled index-write failure. The affected rows are left to be rebuilt from
@@ -202,7 +215,7 @@ export class CatalogMetadataIndex {
     catalogRoot: string,
     candidates: readonly { path: string; id: string; cwd: string; fileIdentity: string; size: number; mtimeMs: number }[],
     rebuild: (candidate: { path: string; id: string; cwd: string; fileIdentity: string; size: number; mtimeMs: number }) => Promise<CatalogMetadataIndexSummary | undefined>,
-  ): Promise<CatalogMetadataIndexRow[] | undefined> {
+  ): Promise<CatalogMetadataIndexReconciliation | undefined> {
     const document = await this.readDocument(catalogRoot);
     if (!document) {
       return undefined;
@@ -215,7 +228,15 @@ export class CatalogMetadataIndex {
     // parallelism; each candidate still performs the same identity and
     // stability checks before its row is admitted.
     const rows: CatalogMetadataIndexRow[] = [];
+    const unproven: string[] = [];
     for (let start = 0; start < candidates.length; start += RECONCILE_CONCURRENCY) {
+      // A disposed index must not keep reading files it can no longer publish:
+      // the owner's shutdown settles this pass, and the remaining candidates
+      // stay unproven instead of holding the lane open.
+      if (this.closed) {
+        unproven.push(...candidates.slice(start).map((candidate) => resolve(candidate.path)));
+        break;
+      }
       const batch = candidates.slice(start, start + RECONCILE_CONCURRENCY);
       const results = await Promise.all(batch.map(async (candidate) => {
         const candidatePath = await realpath(candidate.path).catch(() => resolve(candidate.path));
@@ -234,13 +255,15 @@ export class CatalogMetadataIndex {
       }));
       for (let index = 0; index < results.length; index += 1) {
         const result = results[index];
-        if (!result) return undefined;
-        rows.push(result);
+        if (result) rows.push(result);
+        else unproven.push(resolve(batch[index]!.path));
       }
     }
-    // The candidate set is the exact structural evidence cut. Dropped rows
-    // therefore represent removed canonical paths, never stale index entries.
-    return rows;
+    // The candidate set is the exact structural evidence cut. A proven row is
+    // published; a candidate this pass could not prove is reported so its
+    // caller retains whatever row it already had, and a candidate that is
+    // absent from the cut is still a removed canonical path.
+    return { rows, unproven };
   }
 
   async append(row: CatalogMetadataIndexRow): Promise<CatalogMetadataIndexRow | undefined> {
@@ -311,6 +334,11 @@ export class CatalogMetadataIndex {
       if (!before.isFile() || `${before.dev}:${before.ino}` !== `${beforePath.dev}:${beforePath.ino}`) return undefined;
       const header = await this.headerMatches(handle, { ...summary, fileIdentity: `${before.dev}:${before.ino}` } as CatalogMetadataIndexRow);
       if (!header || before.size === 0) return undefined;
+      // The summary's counts only describe the bytes it parsed. A file that
+      // grew since then must not be stamped with the later size, or the row
+      // claims an offset past a message it never counted and every later
+      // append starts from there.
+      if (summary.parsedSize !== undefined && summary.parsedSize !== before.size) return undefined;
       const final = Buffer.alloc(1);
       const finalRead = await handle.read(final, 0, 1, before.size - 1);
       if (finalRead.bytesRead !== 1 || final[0] !== 0x0a) return undefined;

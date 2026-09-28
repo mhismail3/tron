@@ -11123,15 +11123,18 @@ export default function (pi) {
   it("counts a walk a request waited on apart from background catalog walks", async () => {
     const recorded = resourceRecorder();
     const fixture = await coldFixture("request-path-walk", { resources: recorded });
+    // Settle the catalog owner before the request: its own background reconcile
+    // must not interleave and be misattributed as request-path work, and then
+    // every walk in the request's window can be asserted, not just one.
+    await (fixture.registry as unknown as { sessionCatalog: { settled: () => Promise<void> } })
+      .sessionCatalog.settled();
     const backgroundWalks = recorded.recordCatalogWalk.mock.calls.length;
 
     await runInRequestSpan(new RequestSpan(), () => fixture.registry.delete(fixture.manager.getSessionId()));
 
     const requestWalks = recorded.recordCatalogWalk.mock.calls.slice(backgroundWalks);
-    // The catalog owner's own background reconcile can interleave with the
-    // request, so the request's walks are identified by their flag, not by
-    // their position in the call list.
-    expect(requestWalks.some((call) => call[2] === true)).toBe(true);
+    expect(requestWalks.length).toBeGreaterThan(0);
+    expect(requestWalks.every((call) => call[2] === true)).toBe(true);
     expect(recorded.recordCatalogWalk.mock.calls.slice(0, backgroundWalks).every((call) => call[2] === false)).toBe(true);
 
     // The same walk with no request waiting on it is background work.

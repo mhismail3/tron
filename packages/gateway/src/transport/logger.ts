@@ -48,6 +48,9 @@ export interface LogRecord {
   stages?: string;
   /** The part of `durationMs` no named stage accounted for. */
   unaccountedMs?: number;
+  /** Named counters for one record (a reconcile's files and rows): the writer
+   * bounds how many, their names and their values. */
+  counts?: Record<string, number>;
   error?: LogError;
 }
 
@@ -71,6 +74,8 @@ export interface LogMetadata {
   stages?: string;
   /** The part of `durationMs` the stage breakdown did not cover. */
   unaccountedMs?: number;
+  /** Named integer counters, e.g. `{ files: 12, added: 1 }`. */
+  counts?: Readonly<Record<string, number>>;
   /** Any thrown value; the writer bounds and redacts it. */
   error?: unknown;
 }
@@ -97,6 +102,8 @@ const MAX_STAGES_BYTES = 1_024;
 const MAX_ERROR_MESSAGE_BYTES = 1_000;
 const MAX_STACK_BYTES = 4_000;
 const MAX_FIELD_CHARS = 160;
+/** A record names a handful of counters; more would make the field a payload. */
+const MAX_COUNT_FIELDS = 16;
 const PERSISTED_LEVELS: ReadonlySet<LogLevel> = new Set(["info", "warning", "error"]);
 
 /** The one redaction rule set. Every writer applies it at its write boundary,
@@ -118,6 +125,17 @@ function boundedBytes(value: string, maximum: number): string {
 
 export function boundedMessage(value: string): string {
   return boundedBytes(redact(value), MAX_MESSAGE_BYTES);
+}
+
+/** Named counters are fields a reader can aggregate, so their names are
+ * diagnostic-escaped and their values are bounded integers. */
+function boundedCounts(value: Readonly<Record<string, number>>): Record<string, number> {
+  const bounded: Record<string, number> = {};
+  for (const [name, count] of Object.entries(value).slice(0, MAX_COUNT_FIELDS)) {
+    if (!/^[A-Za-z][A-Za-z0-9]*$/u.test(name) || !Number.isFinite(count)) continue;
+    bounded[boundedDiagnosticID(name).slice(0, 32)] = Math.max(0, Math.min(Number.MAX_SAFE_INTEGER, Math.round(count)));
+  }
+  return bounded;
 }
 
 function boundedDiagnosticID(value: string): string {
@@ -198,6 +216,7 @@ function normalizedFields(value: LogMetadata & { error?: unknown }, errorIsDescr
     ...(typeof value.unaccountedMs === "number" && Number.isFinite(value.unaccountedMs)
       ? { unaccountedMs: Math.max(0, Math.min(Number.MAX_SAFE_INTEGER, Math.round(value.unaccountedMs))) }
       : {}),
+    ...(value.counts ? { counts: boundedCounts(value.counts) } : {}),
     ...(error ? { error } : {}),
   };
 }
