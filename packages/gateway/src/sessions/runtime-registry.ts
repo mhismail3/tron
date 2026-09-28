@@ -515,11 +515,11 @@ export class RuntimeRegistry {
       /** One catalog reconcile, with the files it covered and the rows it
        * changed. An incomplete or failed pass is reported instead of silent. */
       catalogReconciled?: (reconciled: SessionCatalogReconcileOutcome) => void;
-      /** One catalog row the index changed for one file: a Gateway-owned write
-       * at its commit point, or an external writer the folder watcher saw. */
+      /** One catalog row the folder watcher changed for one file: a change no
+       * request or commit explains. */
       catalogChanged?: (change: SessionCatalogChange) => void;
       /** The folder watcher stopped observing the catalog folder, so the index
-       * is re-derived from the folder's own cut. */
+       * is re-derived from the folder's own cut once a watcher is attached. */
       catalogWatcherReset?: (reset: SessionCatalogWatcherReset) => void;
       /** A runtime whose extension shutdown overran its disposal grace and was
        * forced. Outside any request span. */

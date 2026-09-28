@@ -255,9 +255,9 @@ const sessions = new RuntimeRegistry({
     `Session catalog ${outcome}: ${added} added, ${removed} removed, ${modified} modified, ${unproven} unproven over ${files} files in ${durationMs}ms`,
     { event: "catalog.reconciled", source: "sessions", outcome, durationMs, counts: { files, added, removed, modified, unproven } },
   ),
-  // One row changed for one file outside any request span (a Gateway-owned
-  // write or an external writer the watcher saw). Debug: the detail belongs in
-  // a diagnostic export's buffer, not in the persisted volume budget.
+  // One row the watcher changed for one file, outside any request span. Debug:
+  // the detail belongs in a diagnostic export's buffer, not in the persisted
+  // volume budget, and a Gateway-owned change is not reported here.
   catalogChanged: ({ sessionId, outcome, durationMs }) => logger.log(
     "debug",
     `Catalog row ${outcome} for ${sessionId} in ${durationMs}ms`,
@@ -265,7 +265,7 @@ const sessions = new RuntimeRegistry({
   ),
   catalogWatcherReset: ({ reason }) => logger.log(
     "warning",
-    `Catalog folder watcher reset (${reason}); reconciling the index from canonical files`,
+    `Catalog folder watcher reset (${reason}); the index is re-derived from canonical files once a watcher is attached`,
     { event: "catalog.watcher-reset", source: "sessions", reason },
   ),
   runtimeDisposeTimeout: (graceMs) => logger.log(

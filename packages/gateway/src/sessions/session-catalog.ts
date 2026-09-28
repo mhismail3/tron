@@ -1,5 +1,5 @@
 import { watch } from "node:fs";
-import { realpath } from "node:fs/promises";
+import { lstat, readdir, realpath } from "node:fs/promises";
 import { basename, dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { isIgnoredCatalogDirectory } from "./catalog-discovery.js";
 import type {
@@ -49,8 +49,17 @@ export const CATALOG_PERSIST_MAX_WAIT_MS = 60_000;
 
 /** One filesystem event is a hint, not a fact: Pi appends in bursts and a
  * platform reports create, write and close separately, so a path is re-read
- * once per quiet spell instead of once per event. */
+ * once per quiet spell instead of once per event. A writer that never goes quiet
+ * still has to reach its row, so the quiet spell is capped the way persistence
+ * is: a continuously appended transcript is re-read about once a second. */
 export const CATALOG_EVENT_DEBOUNCE_MS = 250;
+export const CATALOG_EVENT_MAX_WAIT_MS = 1_000;
+
+/** A directory event names the folder, not the transcripts inside it, so the
+ * folder's own `.jsonl` files are re-read. A folder holding more transcripts
+ * than this is re-derived by one whole-folder pass instead, which bounds the
+ * per-path debounce map and the work a single event can name. */
+export const CATALOG_EVENT_DIRECTORY_LIMIT = 64;
 
 /** The backstop for every change the watcher cannot see: an event the platform
  * coalesced, dropped or reported while the watcher was restarting is repaired
@@ -108,18 +117,23 @@ export interface SessionCatalogScan {
 }
 
 /** Why the folder watcher is not observing the catalog. `error` is a watcher
- * that was observing and stopped; `unavailable` is a start attempt that got no
- * watcher (a missing or unreadable root). A platform overflow is not reported
+ * that was observing and stopped; `unavailable` is a watcher that found the
+ * folder itself gone, or a start attempt that got no watcher (a missing or
+ * unreadable root). A platform overflow is not reported
  * separately — `fs.watch` does not surface it — so dropped events are the
  * periodic reconciliation's job rather than this path's. */
 export type SessionCatalogWatcherResetReason = "error" | "unavailable";
 
-/** One row the owner changed for a single file, for `catalog.changed`. */
+/** One row the watcher changed for a single file, for `catalog.changed`. A
+ * Gateway-owned change is not reported: it is attributable to the commit that
+ * made it, and reporting every persist would fill the debug buffer that exists
+ * to keep the changes no request can explain. */
 export interface SessionCatalogChange {
   sessionId: string;
   /** `appended` advanced the durable tail; `rebuilt` re-derived the whole row
-   * because the file's identity, size or tail no longer matched it. */
-  outcome: "appended" | "rebuilt";
+   * because the file's identity, size or tail no longer matched it; `removed`
+   * dropped the row because the file it was built from is gone. */
+  outcome: "appended" | "rebuilt" | "removed";
   durationMs: number;
 }
 
@@ -163,6 +177,13 @@ function ignoredCatalogPath(path: string, canonicalRoot: string): boolean {
   }
 }
 
+/** True only when the path is absent. Any other error (a permission failure, an
+ * I/O error) proves neither presence nor absence, so it is not membership
+ * evidence and keeps whatever row the index already published. */
+async function pathMissing(path: string): Promise<boolean> {
+  return lstat(path).then(() => false, (error: NodeJS.ErrnoException) => error.code === "ENOENT");
+}
+
 /** The catalog's canonical readers: the folder cut, and one file's metadata. */
 export interface SessionCatalogSource {
   scan(): Promise<SessionCatalogScan>;
@@ -186,10 +207,10 @@ export interface SessionCatalogOptions {
   reconcileIntervalMs?: number;
   /** One call per reconcile, for the catalog juncture's `catalog.reconciled`. */
   onReconciled?: (reconciled: SessionCatalogReconcileOutcome) => void;
-  /** One row this owner changed for one file, for `catalog.changed`. */
+  /** One row the folder watcher changed for one file, for `catalog.changed`. */
   onChanged?: (change: SessionCatalogChange) => void;
   /** The watcher stopped observing, so the index is re-derived from the folder's
-   * own cut; for `catalog.watcher-reset`. */
+   * own cut once a replacement is attached; for `catalog.watcher-reset`. */
   onWatcherReset?: (reset: SessionCatalogWatcherReset) => void;
   persistDebounceMs?: number;
   persistMaxWaitMs?: number;
@@ -224,7 +245,7 @@ export class SessionCatalog {
   /** Keyed by canonical path: one row per canonical file, so two files that
    * claim one session ID are two rows and the ID is reported as duplicated. */
   private readonly rowsByPath = new Map<string, SessionCatalogRow>();
-  private readonly pendingPaths = new Set<string>();
+  private readonly pendingPaths = new Map<string, boolean>();
   private readonly persistDebounceMs: number;
   private readonly persistMaxWaitMs: number;
   private readonly now: () => number;
@@ -243,11 +264,16 @@ export class SessionCatalog {
   private watcher: SessionCatalogWatchHandle | undefined;
   private watchedRoot: string | undefined;
   private readonly eventTimers = new Map<string, NodeJS.Timeout>();
+  /** When each path's current quiet spell started, so a writer that never goes
+   * quiet still reaches its row. */
+  private readonly eventWindowStartedAt = new Map<string, number>();
   private unnamedEventTimer: NodeJS.Timeout | undefined;
   private watchRetryTimer: NodeJS.Timeout | undefined;
+  private watchOutageClearTimer: NodeJS.Timeout | undefined;
   private reconcileTimer: NodeJS.Timeout | undefined;
   /** One record per outage rather than per retry: while the watcher is down,
-   * every attempt fails for the same reason. */
+   * every attempt fails for the same reason. Cleared once a replacement has
+   * survived one retry interval, so an outage of its own gets its own record. */
   private watchOutageReported = false;
   /** The row paths come from the walk's realpath form, so the classification
    * compares them against the same form of the configured folder. */
@@ -326,19 +352,33 @@ export class SessionCatalog {
    * the appended tail when the durable offset still proves the prefix, the whole
    * file when it does not. */
   refresh(path: string | undefined): Promise<void> {
+    return this.queueRefresh(path, false);
+  }
+
+  /** One path a folder event named: the same read, reported as the external
+   * writer's change because no request or commit explains it. */
+  private refreshFromWatcher(path: string): Promise<void> {
+    return this.queueRefresh(path, true);
+  }
+
+  private queueRefresh(path: string | undefined, fromWatcher: boolean): Promise<void> {
     if (path === undefined || this.closed) return this.lane;
-    this.pendingPaths.add(resolve(path));
+    const key = resolve(path);
+    // A path both the Gateway and the watcher named is reported as the watcher's
+    // change: the reader's question is whether a change happened outside a
+    // request, and it did.
+    this.pendingPaths.set(key, (this.pendingPaths.get(key) ?? false) || fromWatcher);
     if (this.refreshQueued) return this.lane;
     this.refreshQueued = true;
     return this.enqueue(async () => {
       // Cleared before the drain, so a change that lands while this pass reads
       // files queues one more pass instead of being dropped.
       this.refreshQueued = false;
-      const paths = [...this.pendingPaths];
+      const pending = [...this.pendingPaths];
       this.pendingPaths.clear();
       // Each changed row marks itself: a pass that read only an unchanged file
       // owes no durable write.
-      for (const pending of paths) await this.refreshPath(pending);
+      for (const [queued, fromWatcher] of pending) await this.refreshPath(queued, fromWatcher);
     });
   }
 
@@ -392,22 +432,71 @@ export class SessionCatalog {
   }
 
   /** One event's path reached the watcher. It is a hint, so the row is
-   * re-derived from the file the same way a Gateway-owned change is; an event
-   * the platform could not name proves only that something under the folder
-   * changed, so the whole index is re-derived once per quiet spell instead. */
+   * re-derived from the file the same way a Gateway-owned change is. A path the
+   * platform named that is not a transcript is resolved against the folder
+   * itself; an event the platform could not name proves only that something
+   * under the folder changed, so the whole index is re-derived once per quiet
+   * spell instead. */
   private watchEvent(filename: string | null): void {
     if (this.closed) return;
     const root = this.watchedRoot;
     if (root === undefined) return;
     if (filename === null) return this.debounceUnnamedEvent();
     const path = resolve(root, filename);
-    if (!path.endsWith(".jsonl") || ignoredCatalogPath(path, root)) return;
-    this.debounceEvent(path);
+    if (ignoredCatalogPath(path, root)) return;
+    if (path.endsWith(".jsonl")) return this.debounceEvent(path);
+    void this.resolveFolderEvent(path, root);
+  }
+
+  /** The platform named a path that is not a transcript. FSEvents reports a
+   * folder moved into the root as one event for the folder and none for the
+   * transcripts inside it, and reports a folder renamed inside the root as one
+   * event for each name, so the folder's own `.jsonl` files are re-read. A path
+   * that is gone may have taken the rows under it with it, so the folder's own
+   * cut is re-derived once. Anything else (a lock or scratch file) is not a row.
+   * The root's own path is the one folder whose absence is an outage: no cut of
+   * a folder that is not there is membership evidence. */
+  private async resolveFolderEvent(path: string, root: string): Promise<void> {
+    const info = await lstat(path).catch(() => undefined);
+    if (info === undefined) {
+      // Only absence is evidence here; an unreadable path proves nothing.
+      if (!(await pathMissing(path))) return;
+      // A recursive watcher names the folder itself for the folder's own move or
+      // removal, and no cut of a folder that is not there is membership
+      // evidence: the rows stay and the retry attaches to the folder once it is
+      // back, whose own cut republishes what this outage could not see.
+      if (path === root || !(await lstat(root).then((stats) => stats.isDirectory(), () => false))) {
+        return this.rootVanished();
+      }
+      return this.debounceUnnamedEvent();
+    }
+    if (!info.isDirectory()) return;
+    const transcripts = await this.transcriptsBeneath(path, root);
+    if (transcripts === undefined) return this.debounceUnnamedEvent();
+    for (const transcript of transcripts) this.debounceEvent(transcript);
+  }
+
+  /** The transcripts under one folder the platform named, or undefined when the
+   * folder holds more than one event can name: the whole-folder pass is then the
+   * bounded reader, and it applies discovery's own capacity limits. */
+  private async transcriptsBeneath(directory: string, root: string): Promise<string[] | undefined> {
+    const entries = await readdir(directory, { recursive: true, withFileTypes: true }).catch(() => undefined);
+    if (entries === undefined) return undefined;
+    const transcripts: string[] = [];
+    for (const entry of entries) {
+      if (!entry.isFile() || !entry.name.endsWith(".jsonl")) continue;
+      const path = join(entry.parentPath, entry.name);
+      if (ignoredCatalogPath(path, root)) continue;
+      if (transcripts.length >= CATALOG_EVENT_DIRECTORY_LIMIT) return undefined;
+      transcripts.push(path);
+    }
+    return transcripts;
   }
 
   /** An unnamed event proves only that something under the folder changed, so
    * the folder's own cut is re-derived once per quiet spell. */
   private debounceUnnamedEvent(): void {
+    if (this.closed) return;
     if (this.unnamedEventTimer) clearTimeout(this.unnamedEventTimer);
     this.unnamedEventTimer = setTimeout(() => {
       this.unnamedEventTimer = undefined;
@@ -419,10 +508,17 @@ export class SessionCatalog {
   private debounceEvent(path: string): void {
     const armed = this.eventTimers.get(path);
     if (armed) clearTimeout(armed);
+    const now = this.now();
+    const windowStartedAt = this.eventWindowStartedAt.get(path) ?? now;
+    this.eventWindowStartedAt.set(path, windowStartedAt);
+    // Capped the way persistence is: a path written more often than the quiet
+    // spell is still re-read once the ceiling is reached.
+    const untilCeiling = CATALOG_EVENT_MAX_WAIT_MS - (now - windowStartedAt);
     const timer = setTimeout(() => {
       this.eventTimers.delete(path);
-      void this.refresh(path);
-    }, CATALOG_EVENT_DEBOUNCE_MS);
+      this.eventWindowStartedAt.delete(path);
+      void this.refreshFromWatcher(path);
+    }, Math.max(0, Math.min(CATALOG_EVENT_DEBOUNCE_MS, untilCeiling)));
     timer.unref();
     this.eventTimers.set(path, timer);
   }
@@ -434,21 +530,22 @@ export class SessionCatalog {
     if (this.watcher) return true;
     const root = await this.catalogRoot();
     if (this.closed) return false;
+    // Resolving the root released the caller: a concurrent attempt (the retry
+    // timer, an interval tick) may have attached a watcher meanwhile, and two
+    // watchers would double every event.
+    if (this.watcher) return true;
+    let handle: SessionCatalogWatchHandle;
+    const registration: { watcher?: SessionCatalogWatchHandle } = {};
     try {
       // The root is resolved once here: event names are relative to the folder
       // the watcher was given, and rows are keyed by the same canonical form.
-      this.watcher = this.watchCatalog({
+      handle = this.watchCatalog({
         root,
         onEvent: (filename) => this.watchEvent(filename),
-        onReset: (reason) => this.watcherStopped(reason),
+        // Tied to this handle: a reset from a watcher this owner already
+        // replaced must not stop the replacement.
+        onReset: (reason) => this.watcherStopped(registration.watcher, reason),
       });
-      this.watchedRoot = root;
-      this.watchOutageReported = false;
-      if (this.watchRetryTimer) {
-        clearTimeout(this.watchRetryTimer);
-        this.watchRetryTimer = undefined;
-      }
-      return true;
     } catch {
       // A missing or unreadable root: the index keeps serving what it has, and
       // the retry watches it as soon as it exists.
@@ -456,24 +553,72 @@ export class SessionCatalog {
       this.scheduleWatchRetry();
       return false;
     }
+    registration.watcher = handle;
+    this.watcher = handle;
+    this.watchedRoot = root;
+    if (this.watchRetryTimer) {
+      clearTimeout(this.watchRetryTimer);
+      this.watchRetryTimer = undefined;
+    }
+    // No event reached this owner between the stop and this attach, so the
+    // folder's own cut is re-read once to repair that gap (the reconcile at the
+    // stop ran before the replacement could attach).
+    if (this.watchOutageReported) void this.reconcile();
+    this.scheduleOutageClear(handle);
+    return true;
   }
 
   /** A watcher that was observing stopped, so every event from here on is
    * missing: it is replaced and the folder's own cut is re-read. */
-  private watcherStopped(reason: SessionCatalogWatcherResetReason): void {
+  private watcherStopped(handle: SessionCatalogWatchHandle | undefined, reason: SessionCatalogWatcherResetReason): void {
+    // A reset from a watcher this owner already stopped or replaced is not the
+    // current observation: its successor is the one observing now.
+    if (handle !== this.watcher) return handle?.close();
+    this.stopObserving(handle, reason, true);
+  }
+
+  /** The root's own path event and the root is gone: the watcher watches a
+   * folder that is no longer there. The published rows stay as they are — an
+   * absent root proves no removal — and the retry attaches to the folder when it
+   * exists again, whose reconcile republishes the folder's own cut. */
+  private rootVanished(): void {
+    this.stopObserving(this.watcher, "unavailable", false);
+  }
+
+  private stopObserving(
+    handle: SessionCatalogWatchHandle | undefined,
+    reason: SessionCatalogWatcherResetReason,
+    reconcile: boolean,
+  ): void {
     if (this.closed) return;
-    const watcher = this.watcher;
     this.watcher = undefined;
-    watcher?.close();
+    this.watchedRoot = undefined;
+    handle?.close();
+    // One reconcile per outage: the first stop reads the folder's own cut, and
+    // the one that follows the next attach repairs everything the gap missed.
+    const firstStop = !this.watchOutageReported;
     this.reportWatcherOutage(reason);
-    void this.ensureWatching();
-    void this.reconcile();
+    // A watcher that dies right after every attach must not restart in a loop:
+    // the replacement waits one retry interval, like a root that is not there.
+    this.scheduleWatchRetry();
+    if (reconcile && firstStop) void this.reconcile();
   }
 
   private reportWatcherOutage(reason: SessionCatalogWatcherResetReason): void {
     if (this.watchOutageReported) return;
     this.watchOutageReported = true;
     this.options.onWatcherReset?.({ reason });
+  }
+
+  /** A watcher that survived one retry interval is observing: only then is the
+   * outage over, so the next failure is a new outage with its own record. */
+  private scheduleOutageClear(handle: SessionCatalogWatchHandle): void {
+    if (this.watchOutageClearTimer) clearTimeout(this.watchOutageClearTimer);
+    this.watchOutageClearTimer = setTimeout(() => {
+      this.watchOutageClearTimer = undefined;
+      if (this.watcher === handle) this.watchOutageReported = false;
+    }, this.watchRetryMs);
+    this.watchOutageClearTimer.unref();
   }
 
   private scheduleWatchRetry(): void {
@@ -503,6 +648,7 @@ export class SessionCatalog {
     this.watchedRoot = undefined;
     for (const timer of this.eventTimers.values()) clearTimeout(timer);
     this.eventTimers.clear();
+    this.eventWindowStartedAt.clear();
     if (this.unnamedEventTimer) {
       clearTimeout(this.unnamedEventTimer);
       this.unnamedEventTimer = undefined;
@@ -510,6 +656,10 @@ export class SessionCatalog {
     if (this.watchRetryTimer) {
       clearTimeout(this.watchRetryTimer);
       this.watchRetryTimer = undefined;
+    }
+    if (this.watchOutageClearTimer) {
+      clearTimeout(this.watchOutageClearTimer);
+      this.watchOutageClearTimer = undefined;
     }
     if (this.reconcileTimer) {
       clearInterval(this.reconcileTimer);
@@ -582,7 +732,7 @@ export class SessionCatalog {
     return { rows, unproven: reconciled.unproven.length };
   }
 
-  private async refreshPath(canonicalPath: string): Promise<boolean> {
+  private async refreshPath(canonicalPath: string, fromWatcher: boolean): Promise<boolean> {
     const removalFloor = this.removalGeneration;
     const startedAt = this.now();
     // Rows are keyed by the walk's realpath form, and a caller may name the same
@@ -590,6 +740,17 @@ export class SessionCatalog {
     // once per miss rather than rebuilding the row from the body every time.
     const existing = this.indexed(canonicalPath)
       ?? this.rowsByPath.get(await realpath(canonicalPath).catch(() => canonicalPath));
+    // An exact path that is gone is removal evidence for the row it published:
+    // the Gateway deletes the files it rolls back (a failed import, an
+    // uncommitted fork artifact) without announcing a removal, and an external
+    // writer deletes a session the same way. Reading such a path would only
+    // report a failure for a file that is provably not canonical any more.
+    if (await pathMissing(canonicalPath)) {
+      if (!existing || !this.rowsByPath.delete(resolve(existing.path))) return false;
+      this.markChanged();
+      if (fromWatcher) this.reportChanged(existing, "removed", startedAt);
+      return true;
+    }
     if (existing) {
       // A Pi append can land between the index's stat and its tail read. The
       // appended tail is all that changed, so the tail is re-read instead of
@@ -600,7 +761,7 @@ export class SessionCatalog {
         if (advanced) {
           const row = this.classify(advanced, await this.catalogRoot());
           if (!this.publishRow(row, removalFloor)) return false;
-          this.reportChanged(row, "appended", startedAt);
+          if (fromWatcher) this.reportChanged(row, "appended", startedAt);
           return true;
         }
       }
@@ -611,13 +772,12 @@ export class SessionCatalog {
     if (!rebuilt) return false;
     const row = this.classify(rebuilt, await this.catalogRoot());
     if (!this.publishRow(row, removalFloor)) return false;
-    this.reportChanged(row, "rebuilt", startedAt);
+    if (fromWatcher) this.reportChanged(row, "rebuilt", startedAt);
     return true;
   }
 
-  /** One row changed for one file, at the one place a single-row change is
-   * published: a Gateway-owned write and an external writer's append are the
-   * same event to a reader. An unchanged row is not a change. */
+  /** One row the watcher changed for one file, at the one place a row the Gateway
+   * did not change is published. An unchanged row is not a change. */
   private reportChanged(row: SessionCatalogRow, outcome: SessionCatalogChange["outcome"], startedAt: number): void {
     this.options.onChanged?.({ sessionId: row.id, outcome, durationMs: Math.max(0, this.now() - startedAt) });
   }
