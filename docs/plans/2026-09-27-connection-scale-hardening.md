@@ -512,9 +512,9 @@ rows are in priority order.
 | ID | Status | Scope | Depends on | Owner |
 | --- | --- | --- | --- | --- |
 | P-0 | Done | Fold the phone reconnect tuning plan into this plan (D-1) and close it through history; done on `main` at activation | none | |
-| O-1 | Ready | Correlation key across phone and Gateway on every connection record | none | |
-| O-6a | Ready | Multi-session qualification scenario with a generated catalog; record the `main` baseline | none | |
-| E-2 | Ready | Bound the iOS profiler's memory or hand the row to the simulator-lifecycle plan | none | |
+| O-1 | Claimed | Correlation key across phone and Gateway on every connection record | none | orchestrator-dispatched worker, 2026-09-28 |
+| O-6a | Claimed | Multi-session qualification scenario with a generated catalog; record the `main` baseline | none | orchestrator-dispatched worker, 2026-09-28 |
+| E-2 | Claimed | Bound the iOS profiler's memory or hand the row to the simulator-lifecycle plan | none | orchestrator-dispatched worker, 2026-09-28 |
 | O-2 | Ready | Gateway transport records: upgrade phases, inbound silence with Tailscale peer path | O-1 | |
 | O-3 | Ready | Request span: one `rpc.completed` per slow RPC with every stage, wait and count | O-1 | |
 | O-4 | Ready | Phone connection records that survive an export, stall watchdog, exact scene records | O-1 | |
