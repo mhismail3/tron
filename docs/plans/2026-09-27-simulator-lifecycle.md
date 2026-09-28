@@ -2,7 +2,7 @@
 
 - **Started:** 2026-09-27
 - **Status:** Active
-- **Last updated:** 2026-09-28, SIM-7 done; SIM-8 and SIM-9 claimed
+- **Last updated:** 2026-09-28, SIM-9 done; SIM-8 runs on its own branch
 - **Goal:** Agents run as many iOS simulators in parallel as the Mac can afford, and every simulator, process and artifact the test tooling creates is released automatically, including after crashes, so the live Gateway never runs short of memory.
 
 ## Goal and constraints
@@ -79,7 +79,7 @@ Why it accumulates, from the code:
 | SIM-6 | Done | One view: `scripts/tron-ios-test status --all` lists every booted simulator (owned lanes, the Development simulator, unowned ones), its owner, lease holder and uptime, plus `Simulator.app` | SIM-3 | chat scroll session (worker lanes), 2026-09-27 |
 | SIM-7 | Done | Same lifecycle everywhere: `scripts/tron-profile-ios`, `scripts/ios-gateway-e2e-test` and `scripts/tron-ios-simulator` use the lane, release, sweep and admission paths; the Development simulator reports idle uptime and is shut down by its `stop` | SIM-1, SIM-2, SIM-4 | chat scroll session (worker lanes), 2026-09-27 |
 | SIM-8 | Claimed | Diagnosable disconnects: the Gateway records the Mac's memory pressure and swap in its diagnostics when phone connections drop and reconnect, with a row in `packages/gateway/docs/observability.md` and a test | none | chat scroll session (worker lanes), 2026-09-27 |
-| SIM-9 | Claimed | Docs and guidance: `packages/ios-app/docs/development.md`, `.agents/skills/tron-ios/SKILL.md`, `.agents/skills/tron-workspace-housekeeping/SKILL.md` and `AGENTS.md` describe lanes, release, sweep and admission, and replace the manual cleanup steps the tooling now owns | SIM-1 to SIM-7 | chat scroll session (worker lanes), 2026-09-27 |
+| SIM-9 | Done | Docs and guidance: `packages/ios-app/docs/development.md`, `.agents/skills/tron-ios/SKILL.md`, `.agents/skills/tron-workspace-housekeeping/SKILL.md` and `AGENTS.md` describe lanes, release, sweep and admission, and replace the manual cleanup steps the tooling now owns | SIM-1 to SIM-7 | chat scroll session (worker lanes), 2026-09-27 |
 | SIM-10 | Ready | Remove `TRON_IOS_TEST_STATE_DIR` and `TRON_IOS_TEST_DEVICE_NAME` in favour of lanes, with every caller, once the energy-efficiency plan no longer runs profiling lanes through them | SIM-3 | |
 
 ## Task details
@@ -634,3 +634,76 @@ Owning files: `scripts/ios-test-simulator.py`, `scripts/tron-ios-test`.
 - Changes: this commit.
 - For the next agent: run the infrastructure suite after touching any fixture
   environment; a leaked root now fails with the escaping variable named.
+
+### SIM-9 · Done · 2026-09-28 · chat scroll session (worker lanes)
+
+- Result: the four docs now describe the lifecycle the tooling owns instead of
+  asking agents to remember it. `AGENTS.md`'s process-cleanup section says the
+  test tooling releases the simulator a command boots, that each provisioning
+  command sweeps orphans and expires lanes unused for 7 days (the runner's sweep
+  prunes old runs and products too), that a refused boot exits 73 with the
+  `status --all` table, and that an agent runs that table before its final
+  response; `scripts/tron-ios-test`'s usage says the same for `status --all` and
+  spells out that `--keep-booted` is a provisioning-command option.
+  `.agents/skills/tron-ios/SKILL.md` gains a **Simulator lifecycle** section
+  (lanes, release, sweep, admission, `status --all`, `lanes`, `lane-remove`,
+  `clean`/`prune`, the Development simulator) plus a link from the lease
+  paragraph and two new stop rules (never release another owner's simulator by
+  hand; never force a boot past 73).
+  `.agents/skills/tron-workspace-housekeeping/SKILL.md` no longer treats a
+  worktree's simulator, runs and products as something a housekeeper cleans by
+  hand: a new **iOS simulator lanes, runs and products** section owns that
+  guidance, step 4's "run the build cleaners" item points at it, and step 5 asks
+  for `lanes`/`status --all` after a removal. The rules that still apply stay:
+  stop only what you started, never a process/lane/lease another session holds,
+  the Gateway and its agent children are never yours to stop, and the Gateway
+  lifecycle is untouched by housekeeping.
+- Evidence: all eight script suites green, 194 tests, in a first pass after the
+  edits and again against the committed tree:
+  `python3 scripts/test-ios-test-infrastructure.py` 76 tests / 302 s then
+  76 / 228 s (76 / 213.6 s at the SIM-7 commit; the earlier runs shared the Mac
+  with other sessions),
+  `test-tron-profile.py` 10 / 48 s, `test-mac-reinstall.py` 69 / 9 s,
+  `test-personal-info-guard.py` 9 / 10 s, `test-native-host.py` 11 / 0.4 s,
+  `test-tron-profile-attribution.py` 9 / 0.03 s, `test-tron-profile-ios.py`
+  7 / 0.001 s, `test-gateway-protocol-contract.py` 3 / 0.02 s.
+  `python3 scripts/check-documentation-policy.py` passed (46 authored files, so
+  every new link and heading anchor resolves) and `scripts/personal-info-guard.sh`
+  is clean. Read-only real-machine check with the lane root and state directory
+  inside a fresh `/tmp/tron-sim9-probe`: `scripts/tron-ios-test status --all`
+  rendered the documented table (one `not-provisioned`/idle lane row, the
+  remembered Development device as Shutdown, two booted devices of other
+  sessions as `unowned`, `Simulator.app not running`) and `lanes` rendered the
+  single default row; the probe directory was empty afterwards, so nothing was
+  written, leased, booted, shut down or deleted, and the probe root is why those
+  booted devices appeared as unowned instead of as the lanes the default root
+  would name. Only `xcrun simctl list`, `ps`, `memory_pressure` and `sysctl`
+  reads happened, and the probe directory was deleted.
+- Changes: this commit.
+- Kept on purpose: `packages/ios-app/docs/development.md` already described
+  lanes, release, the sweep, admission, `clean`/`prune` and `status --all` from
+  SIM-1 to SIM-7, so this task changed only the sentence that left the
+  `status --all` guidance ambiguous rather than rewriting the sections; the
+  command list there already names `status --all`, `lanes`, `lane-remove`,
+  `reap`, `prune` and `clean`. AGENTS.md keeps its shape - the human rules (own
+  only what you started, broad kills forbidden, Gateway untouchable) stay and
+  only the manual simulator shutdown is replaced - and grew by eight lines. The
+  housekeeping skill keeps Git as its subject: it invokes the test tooling
+  rather than reimplementing lane removal, and it still refuses to stop agents,
+  suspend processes or transition the Gateway.
+- Deviations: the plan's SIM-9 scope names four docs; the task also named
+  `scripts/tron-ios-test`'s usage text, so its two agent-facing lines (`status
+  --all`, `--keep-booted`) were corrected there in the same commit. No behaviour
+  changed and no test was added or updated: the change is documentation, and
+  test-only assertions on documentation text are what the testing policy
+  forbids. `TRON_IOS_TEST_STATE_DIR` and `TRON_IOS_TEST_DEVICE_NAME` are still
+  described as naming the default lane, because SIM-10 removes them, not this
+  task.
+- For the next agent: SIM-10 (Ready) removes the two pre-lane overrides in favour
+  of lanes; its callers are `scripts/ios-ci-test.sh`, `scripts/tron-profile-ios`,
+  `scripts/ios-gateway-e2e-test`, the lane bullets in
+  `.agents/skills/tron-ios/SKILL.md` and the two paragraphs in `development.md`
+  that name them, and its dependency is the energy-efficiency plan's profiling
+  lanes. SIM-8 runs on its own branch. Closing this plan then means moving the
+  lasting rules (release, sweep, admission, "never touch another owner's lane")
+  into the owning docs, appending a HISTORY.md entry and deleting the plan file.

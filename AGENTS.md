@@ -120,17 +120,31 @@ The live Gateway shares this Mac with every agent session. When memory runs
 short, host swapping slows it enough that phone reconnects fail. Clean up every
 process you start.
 
+- The iOS test tooling owns its simulators, not agent discipline. Every command
+  that boots one releases it when the command ends - success, failure, timeout
+  or signal - and each provisioning command first sweeps orphaned lanes and
+  expires lanes unused for 7 days; the runner's sweep also prunes old runs and
+  products. Do not shut down, delete or erase simulators by hand.
 - Before starting a server, simulator, watcher, emulator or test runner, check
   whether a suitable one is already running and reuse it. For iOS tests, use the
   owned simulator from `scripts/tron-ios-test`; do not boot extra devices.
+  `scripts/tron-ios-test status --all` lists every simulator holding this Mac's
+  memory with its owner, lease, uptime and disk, and is safe to run while other
+  sessions work.
+- A provisioning command whose boot the Mac cannot afford exits 73 from memory
+  admission and prints that table. Wait for memory to free, or report the
+  shortage; never force the boot.
 - Keep track of each long-running process you start: its PID, port or simulator
-  UDID, and how to stop it. Stop it, and shut down any simulator you booted,
-  before your final response unless the user asked to keep it running.
+  UDID, and how to stop it. Stop it, and shut down any simulator you booted
+  outside the tooling (`scripts/tron-ios-simulator stop` for the Development
+  simulator), before your final response unless the user asked to keep it
+  running.
 - Prefer commands that exit when they finish. Avoid watch mode and background
   processes unless the task needs them.
-- Never run broad kills such as `pkill node` or `xcrun simctl shutdown all`.
-  Stop only processes you started, and ask before stopping anything you are
-  unsure about. The Gateway and its agent children are never yours to stop
+- Never run broad kills such as `pkill node` or `xcrun simctl shutdown all`, and
+  never stop a process or release a simulator, lane or lease another session
+  holds. Stop only processes you started, and ask before stopping anything you
+  are unsure about. The Gateway and its agent children are never yours to stop
   (rules 8 and 9).
 - If the machine is slow, check swap (`sysctl vm.swapusage`), and each
   process's age, CPU, memory and parent. Clean up your own leftover processes

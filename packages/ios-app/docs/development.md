@@ -1034,12 +1034,12 @@ booted says so, so an agent knows the memory is not the test tooling's. A reader
 that is missing, failing or unparsable admits the boot with a warning, because a
 Mac or CI without those reports must still run tests.
 
-Before its final response - and whenever admission refuses - `scripts/tron-ios-test
-status --all` prints one view of what holds the Mac's memory: every lane with its
-state, worktree, lease holder, uptime and disk size, every booted simulator no
-lane owns, the remembered Development simulator, and `Simulator.app` with its own
-uptime. It is read-only: it takes no lease, boots nothing and removes nothing, so
-it is safe to run while other sessions work. Uptime is read from each booted
+An agent runs `scripts/tron-ios-test status --all` before its final response, and
+a refused admission prints the same table: every lane with its state, worktree,
+lease holder, uptime and disk size, every booted simulator no lane owns, the
+remembered Development simulator, and `Simulator.app` with its own uptime. It is
+read-only: it takes no lease, boots nothing and removes nothing, so it is safe to
+run while other sessions work. Uptime is read from each booted
 device's own boot process, so it is real elapsed time rather than a remembered
 timestamp, and a simulator a lane owns is never also listed as unowned.
 

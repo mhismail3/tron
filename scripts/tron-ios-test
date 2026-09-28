@@ -42,7 +42,8 @@ Commands:
   status --all         List every simulator that holds this Mac's memory: every lane with
                        its state, worktree, lease holder, uptime and disk size, every booted
                        simulator no lane owns, the Development simulator, and Simulator.app.
-                       Read-only, and the same table a refused boot prints.
+                       Read-only, the same table a refused boot prints, and what an agent
+                       runs before its final response.
   lanes                List every lane with its worktree, state, lease holder, last use and
                        disk size. Read-only: it takes no lease and removes nothing.
   lane-remove NAME     Delete one lane's simulator and state, and the test products of the
@@ -71,8 +72,9 @@ Options:
                         form; a named lane refuses TRON_IOS_TEST_STATE_DIR and
                         TRON_IOS_TEST_DEVICE_NAME rather than guess which was meant.
   --keep-booted         Keep this lane's simulator booted when the command ends, for a
-                        tight test-fix loop; the next command in this lane reuses it and
-                        the next sweep releases it once no command holds the lane's lease.
+                        tight test-fix loop; only a command that provisions the simulator
+                        takes it. The next command in this lane reuses it and the next
+                        sweep releases it once no command holds the lane's lease.
 
 Stable exits: 65 test failure, 66 destination, 70 build failure, 73 busy or
 refused by memory admission, 74 runner failure, 75 process timeout. Signals

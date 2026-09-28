@@ -48,6 +48,12 @@ scripts/tron-ios-simulator stop
 scripts/tron-ios-test build
 scripts/tron-ios-test run --only-testing TronMobileTests/<Suite>
 scripts/tron-ios-test checkpoint
+scripts/tron-ios-test status --all
+scripts/tron-ios-test lanes
+scripts/tron-ios-test lane-remove <name>
+scripts/tron-ios-test reap
+scripts/tron-ios-test prune
+scripts/tron-ios-test clean
 ```
 
 For a physical development device targeting Stable, first complete the Mac
@@ -68,7 +74,9 @@ ready. Never use that target to bypass a mismatched Stable installation.
 
 The iOS build-output root, its worktree-local test products and its shared-test
 lease ownership are documented
-in [iOS development](../../../packages/ios-app/docs/development.md#test-runner-safety-contract).
+in [iOS development](../../../packages/ios-app/docs/development.md#test-runner-safety-contract);
+the lanes, release, sweep and memory admission this skill depends on are in
+[Simulator lifecycle](#simulator-lifecycle) below.
 
 Generate Xcode with `scripts/tron ios generate`; it resolves the pinned
 repository-managed XcodeGen. If the tool is absent, install it with
@@ -94,6 +102,43 @@ validate source/build artifacts but must not install the app or mutate Gateway
 state. Performance Trace/processor tracing is optional hardware-assisted
 follow-up, not default telemetry; device/OS support and trace size are limits.
 
+## Simulator lifecycle
+
+Lanes, release, the sweep and memory admission are owned by
+`scripts/ios-test-simulator.py` and shared by `scripts/tron-ios-test`,
+`scripts/tron-profile ios` and `scripts/ios-gateway-e2e-test`; do not release or
+reclaim simulators yourself.
+
+- A lane is one state directory and one device name: `--lane NAME` (or
+  `TRON_IOS_TEST_LANE`) uses `$HOME/.tron/internal/ios-test-NAME` and the device
+  `Tron iOS Tests (NAME)`, while the default lane keeps
+  `$HOME/.tron/internal/ios-test` and `Tron iOS Tests`. Lanes of one worktree
+  share its single products directory, so run one lane per worktree at a time.
+- Every command that provisions a lane's simulator releases it when the command
+  ends - success, failure, timeout, SIGINT, SIGTERM or SIGHUP - unless
+  `--keep-booted` asks to reuse it for a tight test-fix loop. A lane a live
+  process leases is never disturbed, by the tooling or by an agent.
+- Every command that provisions a lane's simulator first sweeps: orphaned owned
+  lanes (booted with no live lease) are shut down, and lanes unused for 7 days
+  are removed. The runner's sweep also prunes runs beyond the retention windows
+  and the products of worktrees that no longer exist. `scripts/tron-ios-test
+  reap` runs that same sweep on demand, and `prune` reclaims disk alone.
+- A boot is admitted on the Mac's memory. Below 8 GB free or 4 GB of swap in use
+  the command fails fast with exit 73 and the simulator table instead of pushing
+  the Mac - and the phone's connection through the Gateway - into swap. Wait for
+  memory and retry; `TRON_IOS_TEST_MEMORY_RESERVE_BYTES` and
+  `TRON_IOS_TEST_SWAP_LIMIT_BYTES` move the reserve.
+- `scripts/tron-ios-test status --all` is the read-only view of everything
+  holding this Mac's memory: every lane with its worktree, lease holder, uptime
+  and disk, booted devices no lane owns, the remembered Development simulator,
+  and `Simulator.app`. Run it before a final response. `lanes` lists lanes
+  alone, `lane-remove NAME` reclaims one lane with its simulator and state, and
+  `clean` reclaims this lane's simulator, its runs and this worktree's products;
+  the shared results root is never removed wholesale.
+- The remembered Development simulator (`scripts/tron-ios-simulator`) is only
+  ever shut down by its own `stop`; the test tooling never deletes it or any
+  device without an ownership marker.
+
 ## Stop rules
 
 - Never initiate a Gateway rebuild, update, rollback, promotion, restart, or
@@ -107,6 +152,12 @@ follow-up, not default telemetry; device/OS support and trace size are limits.
 - Never use retired build names. A narrowly bounded compatibility adapter
   exists only for the untouched external-harness environment; agents must use
   the canonical `Tron Device` + `LocalDevice` pair.
+- Never shut down, delete or erase a simulator by hand, and never touch one a
+  live lease, another session or the Development helper owns. Release one you
+  booted outside the test tooling with its owning helper
+  (`scripts/tron-ios-simulator stop` for the Development simulator).
+- Never force a boot past memory admission (exit 73) by booting the device
+  another way; free memory first, or report the shortage.
 - Never install a production Release artifact through the ordinary device
   helper or automate signing, archive delivery, upload, or deployment.
 - Never modify `.codex/environments/environment.toml`; old names may appear only
