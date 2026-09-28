@@ -362,7 +362,13 @@ final class RealGatewayPiBoundaryTests: XCTestCase {
             port: port,
             proxyToken: proxyToken
         )
-        let attachment = XCTAttachment(string: (blackholeRecords + foregroundRecords).map { record in
+        let longOutageRecords = try await Self.exerciseLongBlackholedReconnect(
+            profile: profile,
+            token: token,
+            port: port,
+            proxyToken: proxyToken
+        )
+        let attachment = XCTAttachment(string: (blackholeRecords + foregroundRecords + longOutageRecords).map { record in
             "\(record.timestamp) \(record.level) \(record.event) durationMs=\(record.durationMs ?? -1) outcome=\(record.outcome ?? "-") \(record.message)"
         }.joined(separator: "\n"))
         attachment.name = "phone-connection-records"
@@ -501,6 +507,207 @@ final class RealGatewayPiBoundaryTests: XCTestCase {
             await client.close()
             throw error
         }
+    }
+
+    /// C-1: a 90 s blackhole under a foreground app. Recovery must keep
+    /// attempting at its scheduled cadence for the whole outage, resolve within
+    /// one attempt of the path's return, and never report `reconnect.stalled`.
+    /// The projection owner stalls its mounted restoration after the handshake
+    /// that ends the outage, so the leg also proves the second outage is answered
+    /// by a new attempt instead of a loop parked in projection work.
+    @MainActor
+    private static func exerciseLongBlackholedReconnect(
+        profile: GatewayProfile,
+        token: String,
+        port: Int,
+        proxyToken: String
+    ) async throws -> [AppLogRecord] {
+        let memoryTokens = MemoryGatewayTokenStore()
+        let profiles = GatewayProfileStore(metadata: MemoryProfileMetadataStore(), tokens: memoryTokens)
+        try profiles.save(profile, token: token)
+        let logURL = FileManager.default.temporaryDirectory
+            .appending(path: "c-1-long-blackhole-\(UUID().uuidString).jsonl")
+        defer {
+            try? FileManager.default.removeItem(at: logURL)
+            try? FileManager.default.removeItem(at: logURL.appendingPathExtension("1"))
+        }
+        let appLog = AppLog(fileURL: logURL)
+        let client = GatewayClient()
+        let projection = StallingRestoreProjection()
+        let lifecycle = GatewayLifecycleCoordinator(
+            client: client,
+            profiles: profiles,
+            clock: .continuous,
+            reconnectDelayPolicy: .standard,
+            uuidSource: .random,
+            pairer: GatewayPairer(),
+            pairingCommit: { _, _ in },
+            profileTokenLookup: { try? memoryTokens.read(profileID: $0.id) },
+            appLog: appLog
+        )
+        lifecycle.delegate = projection
+        do {
+            lifecycle.notePathHint(satisfied: true)
+            await lifecycle.start()
+            guard lifecycle.connectionState == .connected else {
+                throw BoundaryFailure.invalidFixture("The lifecycle did not connect before the long blackhole")
+            }
+            guard try await Self.waitForAttemptCount(1, in: appLog, deadline: .seconds(15)) else {
+                throw BoundaryFailure.invalidFixture("The initial attempt was not recorded")
+            }
+            let attemptsBeforeBlackhole = await Self.recordCount(in: appLog, event: "gateway.attempt")
+
+            // The phone's own projection of a transport loss, as AppModel does in
+            // production: the loss opens the episode and asks for one immediate
+            // attempt.
+            let observer = Task {
+                for await delivery in client.events where delivery.event.topic == "transport.disconnected" {
+                    let reason = delivery.event.payload.objectValue?["reason"]?.stringValue ?? "disconnected"
+                    await lifecycle.noteDisconnected(
+                        connectionID: delivery.connectionID,
+                        reason: reason
+                    )
+                    lifecycle.requestReconnect(immediate: true)
+                }
+            }
+            defer { observer.cancel() }
+
+            // The mounted restoration after the outage's successful handshake
+            // never finishes until this leg releases it.
+            projection.stallNextRestore()
+
+            try await Self.control("blackhole", port: port, token: proxyToken)
+            NSLog("c-1: 90 s blackhole starts")
+            let blackholeAt = ContinuousClock().now
+            // The outage lasts a full 90 s. Recovery attempts every transport
+            // deadline plus one bounded backoff, so each gap between two attempt
+            // starts stays inside that cadence.
+            let cadenceBoundMs = 35_000
+            var startsMs: [Int] = []
+            while blackholeAt.duration(to: ContinuousClock().now) < .seconds(90) {
+                try await Task.sleep(for: .seconds(1))
+                startsMs = await Self.attemptStarts(in: appLog, droppingFirst: attemptsBeforeBlackhole)
+                    .map { $0 }
+                if let largest = Self.largestGap(startsMs), largest > cadenceBoundMs {
+                    XCTFail("A blackholed attempt gap of \(largest) ms exceeds the scheduled cadence")
+                    break
+                }
+            }
+            startsMs = await Self.attemptStarts(in: appLog, droppingFirst: attemptsBeforeBlackhole)
+            XCTAssertGreaterThanOrEqual(
+                startsMs.count, 3,
+                "Recovery must keep attempting for the whole 90 s outage"
+            )
+            let stallCount = await Self.recordCount(in: appLog, event: "reconnect.stalled")
+            XCTAssertEqual(stallCount, 0, "A parked or busy episode must not be reported as a stall")
+
+            // The path returns: the first attempt that starts after it must be the
+            // one that connects.
+            let restoredAt = Date()
+            NSLog("c-1: 90 s blackhole ends, restoring the path")
+            try await Self.control("pass", port: port, token: proxyToken)
+            guard let admission = lifecycle.generationAdmission,
+                  await lifecycle.waitForConnected(
+                    until: ContinuousClock().now + .seconds(60),
+                    admission: admission
+                  ) else {
+                throw BoundaryFailure.timedOut("The lifecycle did not reconnect after the long blackhole")
+            }
+            let connectedAt = Date()
+            NSLog("c-1: reconnected after the 90 s blackhole")
+            let outageRecords = await appLog.snapshot()
+            let attempts = Array(
+                outageRecords.filter { $0.event == "gateway.attempt" }
+                    .dropFirst(attemptsBeforeBlackhole)
+            )
+            // A record is written when its attempt ends, so the attempt that was
+            // in flight when the path returned is recorded after it and still
+            // burns its hello deadline. "Within one attempt of the path
+            // returning" therefore means: at most that one failure, and the next
+            // attempt connects promptly.
+            let attemptsAfterReturn = attempts.filter { record in
+                guard let at = GatewayTimestamp.parse(record.timestamp) else { return false }
+                return at >= restoredAt.addingTimeInterval(-1)
+            }
+            XCTAssertGreaterThanOrEqual(attemptsAfterReturn.count, 1, "The restored path must be attempted")
+            let failuresAfterReturn = attemptsAfterReturn.prefix { $0.outcome == "failure" }.count
+            XCTAssertLessThanOrEqual(
+                failuresAfterReturn, 1,
+                "The path's return may cost only the attempt already in flight"
+            )
+            XCTAssertEqual(
+                attemptsAfterReturn.first { $0.outcome == "success" }?.message.contains("stageReached=connected"),
+                true,
+                "The attempt after the in-flight one must connect"
+            )
+            XCTAssertLessThanOrEqual(
+                connectedAt.timeIntervalSince(restoredAt), 25,
+                "Recovery from the path's return took longer than one attempt"
+            )
+
+            // The handshake that ended the outage handed restoration to its
+            // presentation owner, where it is still running. A fresh blackhole
+            // must be answered by a new attempt while that restoration runs,
+            // which is exactly what a loop parked in projection work cannot do.
+            NSLog("c-1: outage resolved, waiting for the stalled restoration")
+            guard await projection.waitUntilRestoring(deadline: .seconds(30)) else {
+                throw BoundaryFailure.invalidFixture(
+                    "The handshake that ended the outage did not start its mounted restoration"
+                )
+            }
+            NSLog("c-1: restoration stalled, blackholing the live socket")
+            try await Self.control("blackhole", port: port, token: proxyToken)
+            let attemptsBeforeSecondOutage = await Self.recordCount(in: appLog, event: "gateway.attempt")
+            guard try await Self.waitForAttemptCount(
+                attemptsBeforeSecondOutage + 1, in: appLog, deadline: .seconds(40)
+            ) else {
+                throw BoundaryFailure.timedOut(
+                    "A blackholed socket during mounted restoration started no attempt"
+                )
+            }
+            XCTAssertTrue(projection.restoring, "The attempt must not wait for restoration to end")
+            NSLog("c-1: the second outage was attempted while restoration was still stalled")
+            projection.releaseRestore()
+            try await Self.control("pass", port: port, token: proxyToken)
+            guard let secondAdmission = lifecycle.generationAdmission,
+                  await lifecycle.waitForConnected(
+                    until: ContinuousClock().now + .seconds(60),
+                    admission: secondAdmission
+                  ) else {
+                throw BoundaryFailure.timedOut("The lifecycle did not reconnect after the second blackhole")
+            }
+            let resolved = await appLog.snapshot().filter {
+                $0.event == "connection.episode" && $0.message.contains("endedBy=connected")
+            }
+            XCTAssertGreaterThanOrEqual(resolved.count, 1, "Each outage resolves in one episode record")
+            let finalStallCount = await Self.recordCount(in: appLog, event: "reconnect.stalled")
+            XCTAssertEqual(finalStallCount, 0, "No attempt gap may be reported as a stall")
+            let records = await appLog.snapshot().filter {
+                $0.event == "gateway.attempt" || $0.event == "connection.episode"
+                    || $0.event == "reconnect.stalled"
+            }
+            await lifecycle.teardown()
+            await client.close()
+            return Array(records.dropFirst(attemptsBeforeBlackhole))
+        } catch {
+            await lifecycle.teardown()
+            await client.close()
+            throw error
+        }
+    }
+
+    /// The phone-observed start of each attempt, in milliseconds since the first
+    /// one, so a cadence assertion compares offsets rather than timestamps.
+    private static func attemptStarts(in appLog: AppLog, droppingFirst count: Int) async -> [Int] {
+        let attempts = await appLog.snapshot().filter { $0.event == "gateway.attempt" }
+        let dates = attempts.dropFirst(count).compactMap { GatewayTimestamp.parse($0.timestamp) }
+        guard let first = dates.first else { return [] }
+        return dates.map { Int($0.timeIntervalSince(first) * 1_000) }
+    }
+
+    private static func largestGap(_ startsMs: [Int]) -> Int? {
+        guard startsMs.count > 1 else { return nil }
+        return zip(startsMs, startsMs.dropFirst()).map { $1 - $0 }.max()
     }
 
     /// The wall-clock instant of one `connection.episode` field, parsed so the
@@ -1029,4 +1236,64 @@ final class RealGatewayPiBoundaryTests: XCTestCase {
         guard case .message(let message) = item else { return "" }
         return message.content.compactMap(\.text).joined(separator: "\n")
     }
+}
+
+/// The presentation owner of a connected socket whose mounted restoration
+/// stalls until the leg releases it: the shape of slow projection work that a
+/// reconnect loop used to await. The initial connect's own restoration
+/// completes, so the leg starts from an established lifecycle.
+@MainActor
+private final class StallingRestoreProjection: GatewayLifecycleProjectionDelegate {
+    private(set) var restoreCount = 0
+    private(set) var restoring = false
+    private var stallArmed = false
+    private var restoreContinuation: CheckedContinuation<Void, Never>?
+
+    /// Arms the stall for the next restoration, never for the initial connect's.
+    /// The arm is one-shot: a later restoration (the reconnect that ends the
+    /// second outage) must settle, or the lifecycle teardown waits on a stall
+    /// nothing releases.
+    func stallNextRestore() { stallArmed = true }
+
+    func waitUntilRestoring(deadline: Duration) async -> Bool {
+        let until = ContinuousClock().now + deadline
+        while ContinuousClock().now < until {
+            if restoring { return true }
+            try? await Task.sleep(for: .milliseconds(100))
+        }
+        return restoring
+    }
+
+    func releaseRestore() {
+        restoring = false
+        let continuation = restoreContinuation
+        restoreContinuation = nil
+        continuation?.resume()
+    }
+
+    func lifecycleLoadCache(
+        profileID: String,
+        admission: GatewayLifecycleCoordinator.Admission
+    ) async {}
+    func lifecycleInvalidateSessionConnectionOwnership() {}
+    func lifecycleBeginReconciliationAggregate(admission: GatewayLifecycleCoordinator.Admission) {}
+    func lifecycleCompleteReconciliationAggregate(
+        admission: GatewayLifecycleCoordinator.Admission,
+        succeeded: Bool
+    ) {}
+    func lifecycleRefreshAll(admission: GatewayLifecycleCoordinator.Admission) async {}
+    func lifecycleRestoreMountedPresentation(
+        admission: GatewayLifecycleCoordinator.Admission
+    ) async -> Bool {
+        restoreCount += 1
+        guard stallArmed else { return true }
+        stallArmed = false
+        restoring = true
+        await withCheckedContinuation { restoreContinuation = $0 }
+        return true
+    }
+    func lifecycleReattachTerminals(admission: GatewayLifecycleCoordinator.Admission) async {}
+    func lifecycleReconcileForeground(admission: GatewayLifecycleCoordinator.Admission) async throws {}
+    func lifecycleRetireProjection(final: Bool) async {}
+    func lifecycleSurface(_ error: Error) {}
 }
