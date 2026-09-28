@@ -540,7 +540,7 @@ rows are in priority order.
 | G-1b | Claimed | Filesystem watcher and background reconciliation for external writers | G-1a | orchestrator-dispatched deepseek-worker, 2026-09-28 |
 | G-1c | Ready | Move every catalog reader to the index; delete request-path walks and the full-parse fallback | G-1b | |
 | G-1d | Ready | Replace the catalog wording in `connection-resilience.md` with the index contract (D-3) | G-1c | |
-| G-3 | Claimed | No audience, no projection: build and serialize snapshots only for subscribers | O-5, O-6a | orchestrator-dispatched deepseek-worker, 2026-09-28 (branch `hardening/g-3`; review round 1 addressed; CPU comparison and O-5's cross-check owed to the orchestrator) |
+| G-3 | Done | No audience, no projection: build and serialize snapshots only for subscribers | O-5, O-6a | orchestrator-dispatched deepseek-worker, 2026-09-28 (branch `hardening/g-3`; review round 1 addressed; CPU comparison and O-5's cross-check owed to the orchestrator) |
 | G-3a | Ready | Streaming progress for a session with no subscriber is still projected (`projectMessage` plus `safeJson` of the full message, up to once per 150 ms each); see G-3 handoff and review nit 8 | G-3 | |
 | C-2 | Ready | "Connected" follows the transport (D-2); chat restoration shows its own loading state | C-1 | |
 | C-5 | Claimed | Back off an unreachable non-selected Gateway profile; record pool attempts and episodes | O-4 | orchestrator-dispatched deepseek-worker, 2026-09-28 |
@@ -5207,3 +5207,10 @@ events; widen them to name the pool owner in the same change.
   keeping: `stateRevision` on an instance is not a liveness heartbeat anywhere in
   the Gateway or iOS (iOS only validates `stateRevision >= 0`), and
   `markRuntimeReady` is MCP-only, so no other owner depends on this write.
+
+### Orchestrator · 2026-09-28 · G-3 merged
+
+- Result: G-3 merged after two review rounds; row set to Done. Its CPU-drop
+  comparison against the `main` baseline is owed by the orchestrator with the
+  quiet-host O-6a runs (same as O-3's accounting check and O-5's 5%
+  cross-check).
