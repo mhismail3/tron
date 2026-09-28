@@ -706,6 +706,28 @@ ownership, diagnostics, qualification commands, and remaining platform limits.
 For failure-boundary interpretation, evidence collection, and regression
 expectations, see [connection resilience and diagnosis](docs/connection-resilience.md).
 
+A second, TLS-only listener can serve the Mac's private LAN address, so a phone
+at home does not depend on Tailscale's path (E-3a). It is off unless
+`--lan-endpoint on` or `TRON_GATEWAY_LAN_ENDPOINT=on` enables it (E-3d decides
+the release default; the setting stays the kill switch). It binds only an
+RFC 1918 or IPv6 ULA address the Mac actually has — never a wildcard, never
+link-local, never Tailscale's own ranges — on the main listener's port, rebinds
+when the preferred address changes, and disables itself when the Mac has none.
+Its key and self-signed certificate live at `~/.tron/gateway/lan-endpoint/`
+(`tls-key.pem`, `tls-certificate.pem`, both 0600 inside a 0700 directory), are
+created once on first use, and are replaced only by an explicit rotation: a
+paired phone pins the certificate's public key, so a silent regeneration would
+break the pin instead of fixing it. The listener shares the main listener's HTTP
+and WebSocket handling — admission, capacity, heartbeat, revocation, hello and
+its header, request-idle and TLS handshake bounds are the same code — and serves
+only the socket route and the authenticated
+routes: `POST /v1/pair` stays on the main listener, and `/health` on the LAN leg
+answers its status alone because any host on that network can reach it. Each
+accepted connection's `http.upgrade` record names the leg it arrived on
+(`transport=lan`, `tailscale` or `primary`), and each bind, rebind or disable
+writes one `lan.listener` record with its state, address family and port but not
+the address ([observability](docs/observability.md)).
+
 Authenticated `system.logs.export` is a user-requested diagnostics projection: it accepts only a
 bounded already-redacted snapshot and command ID, appends the newest Gateway debug records (at most
 1 MB), writes a server-chosen `<device-hash>-<timestamp>.jsonl` file under

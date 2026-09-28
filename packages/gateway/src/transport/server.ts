@@ -22,6 +22,8 @@ import { SessionSyncBarrier, type BufferedSessionEncoding, type BufferedSessionE
 import type { BrowserLiveViewRegistry } from "../display/browser-live-view.js";
 import { bytes, RequestSpan, runInRequestSpan, stage, wait } from "./request-span.js";
 import { TailscalePeerPaths, type PeerPathLookup, type PeerPathReader } from "./tailscale-peer.js";
+import { LanEndpoint, httpListenerOptions, type LanEndpointConfig, type LanListenerLimits } from "./lan-endpoint.js";
+import { isTailscaleAddress } from "../config.js";
 
 // Retain only recent former IDs while an active subscription is rekeyed. Older
 // IDs are stale control paths and may safely require a fresh session.open.
@@ -109,6 +111,17 @@ export const HTTP_MAXIMUM_REQUESTS = 128;
 export const HTTP_MAXIMUM_REQUESTS_PER_IDENTITY = 16;
 export const HTTP_MAXIMUM_REQUESTS_PER_ADDRESS = 32;
 export const HTTP_MAXIMUM_REQUESTS_PER_CONNECTION = 8;
+// Both listeners this transport owns — the main one and the LAN lane — take
+// their bounds from here: the lane serves the same routes to the same peers out
+// of the same connection budget, so a slower bound there would let a peer that
+// has not signed in hold slots the phone's own leg needs.
+export const HTTP_LISTENER_LIMITS: LanListenerLimits = {
+  headersTimeout: HTTP_HEADERS_TIMEOUT_MS,
+  requestTimeout: HTTP_REQUEST_TIMEOUT_MS,
+  connectionsCheckingInterval: 1_000,
+  handshakeTimeout: HTTP_HEADERS_TIMEOUT_MS,
+  idleTimeout: HTTP_REQUEST_IDLE_TIMEOUT_MS,
+};
 
 export interface HttpTransportLease {
   identify(identity: string): void;
@@ -623,9 +636,16 @@ interface PeerDiagnostics {
 /** How far an upgrade got, in the order its phases run. */
 type UpgradePhase = "request" | "auth" | "handshake" | "hello";
 
+/** Which listener accepted a connection: the LAN endpoint (E-3a), the main
+ * listener at a Tailscale address, or the main listener at any other address
+ * (the developer loopback default). The phone names the same two real legs. */
+export type ConnectionTransport = "lan" | "tailscale" | "primary";
+
 /** One `http.upgrade` record is written per upgrade, at whichever point it ends:
  * hello, a refusal, or the peer leaving before hello. */
 interface UpgradeTrace {
+  /** The listener the upgrade reached, so the record says which leg it used. */
+  transport: ConnectionTransport;
   /** The TCP accept, before Node parsed the upgrade request. */
   acceptAt: number;
   /** The upgrade handler entry; the auth phase is measured from here. */
@@ -888,6 +908,21 @@ function prepareOutboundFrame(value: unknown, maximum: number): PreparedOutbound
     : undefined;
 }
 
+/** A server's `connection` event is typed as a `Duplex`, but the accepted
+ * socket is the net.Socket whose address the per-address bound counts. */
+function acceptedSocketAddress(socket: Duplex): string {
+  const address = (socket as { remoteAddress?: unknown }).remoteAddress;
+  return typeof address === "string" ? address : "unknown";
+}
+
+/** The source port of an accepted socket, or undefined when the socket is not a
+ * TCP one. It joins a TLS socket to the socket it wrapped: the two report the
+ * same peer, and only one live connection holds an address and port pair. */
+function acceptedSocketPort(socket: Duplex): number | undefined {
+  const port = (socket as { remotePort?: unknown }).remotePort;
+  return typeof port === "number" ? port : undefined;
+}
+
 async function* completeRequestBody(request: IncomingMessage): AsyncGenerator<Buffer> {
   for await (const value of request) {
     yield Buffer.isBuffer(value) ? value : Buffer.from(value);
@@ -945,6 +980,11 @@ export class GatewayServer {
   /** One resource sample reads the runtime inventory; a slow one must not
    * overlap the next minute's window. */
   private resourceSampleInFlight = false;
+  /** The second, TLS-only listener for the private LAN; undefined when the
+   * Gateway was composed without one. */
+  private readonly lanEndpoint: LanEndpoint | undefined;
+  /** The main listener's leg, named on every upgrade record. */
+  private readonly primaryTransport: ConnectionTransport;
   /** Whether the current run of sampler faults has already been reported. */
   private resourceSampleFailureReported = false;
   private ready = false;
@@ -978,11 +1018,14 @@ export class GatewayServer {
       stallSampler?: StallSampler;
       resourceSampler?: ResourceSampler;
       peerPathReader?: PeerPathReader;
+      /** The pinned LAN listener (E-3a). Absent means no second listener. */
+      lanEndpoint?: LanEndpointConfig;
     },
   ) {
     this.stallSampler = options.stallSampler ?? new StallSampler();
     this.resourceSampler = options.resourceSampler ?? new ResourceSampler();
     this.peerPaths = options.peerPathReader ?? new TailscalePeerPaths();
+    this.primaryTransport = isTailscaleAddress(options.host) ? "tailscale" : "primary";
     // Sampled off every record path: the heartbeat keeps this current, and a
     // phone that reconnects in the first interval still carries host evidence.
     this.stallSampler.refreshHostSample();
@@ -994,41 +1037,33 @@ export class GatewayServer {
       options.maximumHttpRequests,
       options.maximumHttpRequestsPerIdentity,
     );
-    this.server = createServer({
-      headersTimeout: HTTP_HEADERS_TIMEOUT_MS,
-      requestTimeout: HTTP_REQUEST_TIMEOUT_MS,
-      connectionsCheckingInterval: 1_000,
-    }, (request, response) => void this.handleHttp(request, response));
-    this.server.timeout = HTTP_REQUEST_IDLE_TIMEOUT_MS;
-    this.server.on("connection", (socket) => {
-      const address = socket.remoteAddress ?? "unknown";
-      const addressConnections = this.httpConnectionsByAddress.get(address) ?? 0;
-      if (this.httpSockets.size >= maximumHttpConnections
-        || addressConnections >= HTTP_MAXIMUM_CONNECTIONS_PER_ADDRESS || this.shuttingDown) {
-        this.options.logger.log("warning", `Rejected HTTP connection at capacity (connections=${this.httpSockets.size} maximumConnections=${maximumHttpConnections} addressConnections=${addressConnections} maximumPerAddress=${HTTP_MAXIMUM_CONNECTIONS_PER_ADDRESS})`, {
-          event: "http.connection-capacity", source: "transport",
-        });
-        socket.destroy();
-        return;
-      }
-      this.httpSockets.add(socket);
-      this.httpSocketAcceptedAt.set(socket, performance.now());
-      this.httpConnectionsByAddress.set(address, addressConnections + 1);
-      socket.once("close", () => {
-        this.httpSockets.delete(socket);
-        // `httpSocketAcceptedAt` is a WeakMap: the accept time it holds for this
-        // socket's upgrade is released with the socket, so it needs no delete.
-        const count = this.httpConnectionsByAddress.get(address)!;
-        if (count === 1) this.httpConnectionsByAddress.delete(address);
-        else this.httpConnectionsByAddress.set(address, count - 1);
+    // Both listeners take their bounds from one object: the lane serves the
+    // same routes to the same peers out of the same connection budget.
+    const listenerLimits = HTTP_LISTENER_LIMITS;
+    this.server = createServer(httpListenerOptions(listenerLimits), (request, response) => void this.handleHttp(request, response, this.primaryTransport));
+    this.server.timeout = listenerLimits.idleTimeout;
+    this.server.on("connection", (socket) => this.admitHttpConnection(socket, maximumHttpConnections));
+    // The LAN listener shares this transport's admission, capacity, heartbeat,
+    // revocation and hello; only its address, its certificate and the routes it
+    // refuses are its own.
+    if (options.lanEndpoint) {
+      this.lanEndpoint = new LanEndpoint({
+        ...options.lanEndpoint,
+        logger: options.logger,
+        port: options.port,
+        listenerLimits,
+        onConnection: (socket) => this.admitHttpConnection(socket, maximumHttpConnections),
+        onSecureConnection: (socket) => this.adoptAcceptedSocketTime(socket),
+        onRequest: (request, response) => void this.handleHttp(request, response, "lan"),
+        onUpgrade: (request, socket, head) => void this.handleUpgrade(request, socket, head, "lan"),
       });
-    });
+    }
     // maxPayload bounds each inbound message after inflation as well as on the wire.
     this.localSockets = new WebSocketServer({ noServer: true, maxPayload: options.maxFrameBytes, perMessageDeflate: false });
     this.pairedSockets = new WebSocketServer({
       noServer: true, maxPayload: options.maxFrameBytes, perMessageDeflate: PAIRED_PER_MESSAGE_DEFLATE,
     });
-    this.server.on("upgrade", (request, socket, head) => void this.handleUpgrade(request, socket, head));
+    this.server.on("upgrade", (request, socket, head) => void this.handleUpgrade(request, socket, head, this.primaryTransport));
     this.heartbeat = setInterval(() => {
       const heartbeatAt = performance.now();
       const timerDelayMs = heartbeatTimerDelay(heartbeatAt - this.lastHeartbeatAt);
@@ -1084,6 +1119,48 @@ export class GatewayServer {
     // one minute is the cadence the sampler's volume estimate assumes.
     this.resourceTimer = setInterval(() => void this.publishResources(), RESOURCE_SAMPLE_INTERVAL_MS);
     this.resourceTimer.unref();
+  }
+
+  /** Every physical socket of every listener enters here, so the capacity bound
+   * counts the Gateway's whole HTTP surface, not one address. */
+  private admitHttpConnection(socket: Duplex, maximumHttpConnections: number): void {
+    const address = acceptedSocketAddress(socket);
+    const addressConnections = this.httpConnectionsByAddress.get(address) ?? 0;
+    if (this.httpSockets.size >= maximumHttpConnections
+      || addressConnections >= HTTP_MAXIMUM_CONNECTIONS_PER_ADDRESS || this.shuttingDown) {
+      this.options.logger.log("warning", `Rejected HTTP connection at capacity (connections=${this.httpSockets.size} maximumConnections=${maximumHttpConnections} addressConnections=${addressConnections} maximumPerAddress=${HTTP_MAXIMUM_CONNECTIONS_PER_ADDRESS})`, {
+        event: "http.connection-capacity", source: "transport",
+      });
+      socket.destroy();
+      return;
+    }
+    this.httpSockets.add(socket);
+    this.httpSocketAcceptedAt.set(socket, performance.now());
+    this.httpConnectionsByAddress.set(address, addressConnections + 1);
+    socket.once("close", () => {
+      this.httpSockets.delete(socket);
+      // `httpSocketAcceptedAt` is a WeakMap: the accept time it holds for this
+      // socket's upgrade is released with the socket, so it needs no delete.
+      const count = this.httpConnectionsByAddress.get(address)!;
+      if (count === 1) this.httpConnectionsByAddress.delete(address);
+      else this.httpConnectionsByAddress.set(address, count - 1);
+    });
+  }
+
+  /** Carries the accept time recorded at `connection` to the `TLSSocket` a TLS
+   * listener later hands the upgrade handler: `tls.Server` does not give the
+   * wrapped socket back, and a lookup that misses reports zero elapsed time for
+   * every lane upgrade — exactly the TLS handshake the field exists to show. */
+  private adoptAcceptedSocketTime(socket: Duplex): void {
+    const address = acceptedSocketAddress(socket);
+    const port = acceptedSocketPort(socket);
+    if (port === undefined) return;
+    for (const accepted of this.httpSockets) {
+      if (acceptedSocketPort(accepted) !== port || acceptedSocketAddress(accepted) !== address) continue;
+      const acceptedAt = this.httpSocketAcceptedAt.get(accepted);
+      if (acceptedAt !== undefined) this.httpSocketAcceptedAt.set(socket, acceptedAt);
+      return;
+    }
   }
 
   private async publishResources(): Promise<void> {
@@ -1143,6 +1220,9 @@ export class GatewayServer {
         });
       });
       this.options.logger.log("info", "Gateway listener bound; startup warmup beginning", { event: "gateway.bound", source: "transport" });
+      // The LAN listener binds after the main one so a LAN failure can never
+      // cost the Gateway its primary surface; `start` never throws.
+      await this.lanEndpoint?.start();
       await afterBind();
       // A signal may close the transport while warmup is suspended. Never let
       // that in-flight callback publish readiness after shutdown has begun.
@@ -1384,7 +1464,7 @@ export class GatewayServer {
     }
   }
 
-  private async handleHttp(request: IncomingMessage, response: ServerResponse): Promise<void> {
+  private async handleHttp(request: IncomingMessage, response: ServerResponse, transport: ConnectionTransport): Promise<void> {
     // Node's server timeout covers idle request/socket time, while this
     // response timeout also retires a stream stalled after its headers were
     // written. Route leases still own exact reader/viewer release.
@@ -1427,9 +1507,14 @@ export class GatewayServer {
     try {
       const url = new URL(request.url ?? "/", `http://${request.headers.host ?? "localhost"}`);
       if (request.method === "GET" && url.pathname === "/health") {
+        const status = this.shuttingDown ? "stopping" : this.ready ? "ok" : this.startupPhase;
+        // The LAN listener answers the health check with its status alone: any
+        // device on the same network can reach it unauthenticated, and build
+        // and revision metadata is not what a health check owes it (E-3a).
+        if (transport === "lan") return sendJson(response, this.ready && !this.shuttingDown ? 200 : 503, { status });
         const info = this.options.service.info() as Record<string, JsonValue>;
         return sendJson(response, this.ready && !this.shuttingDown ? 200 : 503, {
-          status: this.shuttingDown ? "stopping" : this.ready ? "ok" : this.startupPhase,
+          status,
           gatewayVersion: info.gatewayVersion,
           protocolVersion: info.protocolVersion,
           minProtocolVersion: info.minProtocolVersion,
@@ -1442,6 +1527,9 @@ export class GatewayServer {
         return sendJson(response, 503, { error: { code: "busy", message: "Gateway is starting", retryable: true } });
       }
       if (request.method === "POST" && url.pathname === "/v1/pair") {
+        // Pairing is first contact, and it stays on the main listener: the LAN
+        // leg serves the socket and authenticated routes only (E-3a).
+        if (transport === "lan") return sendJson(response, 404, { error: { code: "not_found", message: "Route not found" } });
         const key = request.socket.remoteAddress ?? "unknown";
         if (!this.pairingLimiter.admit(key)) throw new GatewayError("unauthenticated", "Too many pairing attempts; wait before retrying");
         const parsed: unknown = JSON.parse((await readBoundedBody(request, 16_384)).toString("utf8"));
@@ -1717,10 +1805,11 @@ export class GatewayServer {
     sendJson(response, 404, { error: { code: "not_found", message: "Route not found" } });
   }
 
-  private async handleUpgrade(request: IncomingMessage, socket: Duplex, head: Buffer): Promise<void> {
+  private async handleUpgrade(request: IncomingMessage, socket: Duplex, head: Buffer, transport: ConnectionTransport): Promise<void> {
     const remoteAddress = request.socket.remoteAddress ?? "unknown";
     // One record per upgrade, written wherever this attempt ends.
     const trace: UpgradeTrace = {
+      transport,
       acceptAt: this.httpSocketAcceptedAt.get(socket) ?? performance.now(),
       startedAt: performance.now(),
       authMs: null,
@@ -1903,6 +1992,7 @@ export class GatewayServer {
       `Socket upgrade ${outcome} at ${phaseReached} after ${totalMs}ms (acceptToUpgrade=${acceptToUpgradeMs}ms auth=${authMs}ms handshake=${handshakeMs}ms hello=${helloMs}ms; ${detail})`,
       {
         event: "http.upgrade", source: "transport", outcome, phaseReached, reason: ending.reason,
+        transport: trace.transport,
         acceptToUpgradeMs, authMs, handshakeMs, helloMs,
         ...(trace.connectionId === undefined ? {} : { connectionId: trace.connectionId }),
         ...ending.peer,
@@ -3043,6 +3133,9 @@ export class GatewayServer {
     await this.options.liveViews?.joinRetirements();
     this.options.logger.log("info", "Closing Gateway transport", { event: "gateway.transport-closing", source: "transport" });
     clearInterval(this.heartbeat);
+    // The LAN leg retires first: no new connection reaches a Gateway that is
+    // stopping. Sockets it accepted keep their own bounded grace.
+    const lanRetirement = this.lanEndpoint?.stop();
     clearInterval(this.resourceTimer);
     this.stallSampler.dispose();
     this.resourceSampler.dispose();
@@ -3096,6 +3189,7 @@ export class GatewayServer {
     }, HTTP_SHUTDOWN_GRACE_MS);
     forceHttpClose.unref();
     await httpClosedPromise;
+    await lanRetirement;
     this.localSockets.close();
     this.pairedSockets.close();
   }

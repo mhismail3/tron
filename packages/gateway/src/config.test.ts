@@ -2,7 +2,7 @@ import { chmod, lstat, mkdtemp as createTemp, readFile, rm, symlink, writeFile }
 import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { isTailscaleAddress, loadConfig as loadGatewayConfig, machineGroupIdentityPaths, resolveBindHost } from "./config.js";
+import { isPrivateLanAddress, isTailscaleAddress, loadConfig as loadGatewayConfig, machineGroupIdentityPaths, resolveBindHost, resolveLanAddresses } from "./config.js";
 import { resolveTronHome } from "./tron-home.js";
 import * as durableJson from "./util/durable-json.js";
 
@@ -55,6 +55,55 @@ describe("gateway configuration", () => {
     expect(machineGroupIdentityPaths({ TRON_MACHINE_GROUP_PATH: "/tmp/shared-group" }, "/Users/example").canonical).toBe("/tmp/shared-group");
     expect(() => resolveTronHome({ TRON_DATA_DIR: "relative" })).toThrow(/absolute/);
     expect(() => resolveBindHost("tailscale", {})).toThrow(/Tailscale is not connected/);
+  });
+
+  it("resolves only private, non-Tailscale LAN addresses and keeps the endpoint off by default", async () => {
+    const interfaces = {
+      en0: [
+        { address: "192.168.4.24", netmask: "", family: "IPv4" as const, mac: "", internal: false, cidr: "" },
+        { address: "169.254.10.9", netmask: "", family: "IPv4" as const, mac: "", internal: false, cidr: "" },
+        { address: "fd00::24", netmask: "", family: "IPv6" as const, mac: "", internal: false, cidr: "" },
+      ],
+      en1: [
+        { address: "10.0.0.5", netmask: "", family: "IPv4" as const, mac: "", internal: false, cidr: "" },
+        { address: "172.31.9.9", netmask: "", family: "IPv4" as const, mac: "", internal: false, cidr: "" },
+      ],
+      utun9: [
+        { address: "100.90.0.2", netmask: "", family: "IPv4" as const, mac: "", internal: false, cidr: "" },
+        // Tailscale's IPv6 range is inside the ULA range, so it must not be a
+        // LAN endpoint even though it is a private address.
+        { address: "fd7a:115c:a1e0::2", netmask: "", family: "IPv6" as const, mac: "", internal: false, cidr: "" },
+      ],
+      lo0: [{ address: "127.0.0.1", netmask: "", family: "IPv4" as const, mac: "", internal: true, cidr: "" }],
+      en2: [{ address: "8.8.8.8", netmask: "", family: "IPv4" as const, mac: "", internal: false, cidr: "" }],
+    };
+    expect(isPrivateLanAddress("10.0.0.1")).toBe(true);
+    expect(isPrivateLanAddress("172.16.0.1")).toBe(true);
+    expect(isPrivateLanAddress("192.168.4.24")).toBe(true);
+    expect(isPrivateLanAddress("fd00::1")).toBe(true);
+    for (const address of ["127.0.0.1", "8.8.8.8", "169.254.1.1", "172.32.0.1", "0.0.0.0", "100.90.0.2", "fd7a:115c:a1e0::1", "fe80::1", "not-an-address"]) {
+      expect(isPrivateLanAddress(address)).toBe(false);
+    }
+    // IPv4 before IPv6, then the lowest address: one deterministic answer on a
+    // Mac with several private interfaces.
+    expect(resolveLanAddresses(interfaces)).toEqual([
+      { address: "10.0.0.5", family: "IPv4" },
+      { address: "172.31.9.9", family: "IPv4" },
+      { address: "192.168.4.24", family: "IPv4" },
+      { address: "fd00::24", family: "IPv6" },
+    ]);
+    expect(resolveLanAddresses({})).toEqual([]);
+
+    const home = await mkdtemp(join(tmpdir(), "tron-lan-endpoint-setting-"));
+    const environment = { TRON_DATA_DIR: home };
+    const configured = await loadConfig([], environment);
+    // Off until E-3d decides the release default; the kill switch is explicit.
+    expect(configured.lanEndpoint).toEqual({ enabled: false, stateDirectory: join(home, "gateway", "lan-endpoint") });
+    expect((await loadConfig(["--lan-endpoint", "on"], environment)).lanEndpoint.enabled).toBe(true);
+    expect((await loadConfig([], { ...environment, TRON_GATEWAY_LAN_ENDPOINT: "off" })).lanEndpoint.enabled).toBe(false);
+    for (const raw of ["true", "yes", "", "ON"]) {
+      await expect(loadConfig(["--lan-endpoint", raw], environment)).rejects.toMatchObject({ code: "invalid_request" });
+    }
   });
 
   it("shares an injected machine group while retaining per-home machine identity", async () => {

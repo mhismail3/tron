@@ -597,6 +597,7 @@ transport = new GatewayServer({
   maximumSubscriptionsPerConnection: config.maxSubscriptionsPerConnection,
   maximumOutboundBytes: config.maxOutboundBytes,
   maximumSynchronizationBytes: config.maxSynchronizationBytes,
+  lanEndpoint: config.lanEndpoint,
   devices,
   uploads,
   sessions,

@@ -61,6 +61,9 @@ export interface LogRecord {
   /** The peer's Tailscale path at an inbound-silence episode (`connection.inbound-silent`). */
   peerPath?: string;
   peerRelay?: string;
+  /** The listener a connection reached: `lan`, `tailscale` or `primary`
+   * (`http.upgrade`). The phone names the two real legs it races the same way. */
+  transport?: string;
   /** How long the socket had been silent when it spoke again. */
   silentMs?: number;
   /** Named counters for one record (a reconcile's files and rows): the writer
@@ -99,6 +102,8 @@ export interface LogMetadata {
   helloMs?: number;
   peerPath?: string;
   peerRelay?: string;
+  /** The listener a connection reached; the `transport` field of `http.upgrade`. */
+  transport?: string;
   silentMs?: number;
   /** Named integer counters, e.g. `{ files: 12, added: 1 }`. */
   counts?: Readonly<Record<string, number>>;
@@ -264,6 +269,7 @@ function normalizedFields(value: LogMetadata & { error?: unknown }, errorIsDescr
     ...(helloMs !== undefined ? { helloMs } : {}),
     ...(typeof value.peerPath === "string" ? { peerPath: boundedDiagnosticID(value.peerPath).slice(0, 32) } : {}),
     ...(typeof value.peerRelay === "string" ? { peerRelay: boundedDiagnosticID(value.peerRelay).slice(0, 32) } : {}),
+    ...(typeof value.transport === "string" ? { transport: boundedDiagnosticID(value.transport).slice(0, 32) } : {}),
     ...(silentMs !== undefined ? { silentMs } : {}),
     ...(value.counts ? { counts: boundedCounts(value.counts) } : {}),
     ...(error ? { error } : {}),
