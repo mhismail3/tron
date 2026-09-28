@@ -2,6 +2,7 @@
 
 - **Started:** 2026-09-27
 - **Status:** Active (Phase 1 runs on `hardening/integration`; that branch's copy of this plan is authoritative until R-1)
+- **Last updated:** 2026-09-28, G-11 Done: the Slot's publish-time full-transcript summary walk is now an incremental fold (largest run 86.9 ms → 4.8 ms); the dominant remaining stretches are session-search (G-8c) and catalog/registry (G-1c), both in flight, and the combined O-6a max/p99 is re-measured after they merge (see the handoff)
 - **Last updated:** 2026-09-28, G-8b review round 2 addressed: the poller
   owns one admission cache shared with the explicit user actions, the explicit
   probe records its outcome, and the runtime fence stamps the bundled manifest
@@ -586,7 +587,7 @@ rows are in priority order.
 | G-12 | Ready | Server-side deadlines, concurrency caps and heap-pressure shedding with typed retry hints | O-3, O-5 | |
 | G-2 | Ready | Cold open in bounded time from the index and a single-file fence | G-1c | |
 | G-7 | Done | Reconnect diet: send only what changed | O-1, O-6a | orchestrator-dispatched deepseek-worker, 2026-09-28; both review rounds addressed, R-1/R-4 own the real-reconnect measurement |
-| G-11 | Claimed | Event-loop budget: find and bound every synchronous task over 50 ms | O-5, O-6a | orchestrator-dispatched deepseek-worker, 2026-09-28 |
+| G-11 | Done | Event-loop budget: find and bound every synchronous task over 50 ms | O-5, O-6a | orchestrator-dispatched deepseek-worker, 2026-09-28 (branch `hardening/g-11`): the Slot's publish-time full-transcript summary walk is now an incremental fold (largest CPU-profile run 86.9 ms → 4.8 ms); the dominant remaining stretches belong to in-flight G-8c (session-search) and G-1c (catalog/registry), so the combined O-6a max/p99 is re-measured by the orchestrator after they merge — see the handoff |
 | G-9 | Claimed | One background-work scheduler that yields to requests; measure the libuv pool size | O-5, G-1b | orchestrator-dispatched deepseek-worker, 2026-09-28 |
 | G-4 | Done | Outbound queue coalescing of superseded snapshots (one covering `session.rebaseline`) and summary revisions by key | G-3 | orchestrator-dispatched deepseek-worker, 2026-09-28 (branch `hardening/g-4`; review round 1 addressed: a superseded sequence is covered by the `session.rebaseline` that replaces it; round 2: only state the snapshot fully re-states and only its own runtime generation, a one-shot frame is a fence; round 3 after merging `hardening/integration`: the replacement path's client is asserted on the authority it installs, covered `session.snapshot`/`session.rebaseline` alike, and the round's fixtures speak protocol 6); the O-6b bandwidth-stream before/after numbers are owed to the orchestrator's quiet-host runs |
 | G-5 | Done | Byte budget for live runtimes and an explicit heap limit | O-5 | orchestrator-dispatched deepseek-worker, 2026-09-28 |
@@ -7936,3 +7937,74 @@ wait).
   run; this branch proves the mechanism it depends on (no duplicate-open failure,
   no request-path work after the last waiter cancels) in the integration case
   above.
+
+### G-11 · Done · 2026-09-28 · orchestrator-dispatched deepseek-worker (branch `hardening/g-11`)
+
+- Result: bounded the Slot's own synchronous stretch: `RuntimeSlot.summary()`
+  re-walked every entry of the session file on each publish, and now folds only
+  the entries appended since the last fold (a whole-file walk stays the fallback
+  when the entry set is replaced rather than appended to). Every other stretch
+  over 50 ms measured here lives in a file an in-flight task holds and is listed
+  below with its owner.
+- Evidence: two `scripts/tron-profile gateway --scenario multi-session
+  --no-build --iterations 1 --cases none --catalog-files 100 --catalog-mib 512
+  --mixed-seconds 30 --cpu-profile` smokes on this host — before
+  `~/Library/Developer/Tron/profiles/gateway/20260928T201020Z-multi-session-4ca8a6`,
+  after `…/20260928T202752Z-multi-session-470c21` (both reports retained at
+  `~/.tron/workspace/files/hardening/g-11/{before,after}-report.json`). The summary stretch's largest
+  CPU-profile run falls 86.9 ms → 4.8 ms (top five before
+  86.9/63.9/19.6/17.3/14.7 ms, after 4.8/4.5/3.8/3.7/3.5 ms) and no `summary`
+  run reaches 50 ms. Focused case `folds summary facts from appended entries and
+  rebuilds when the entry set is replaced` in
+  `runtime-registry.integration.test.ts` fails on both reverted halves (a fold
+  pinned to its first boundary; a fold that does not rebuild after the file is
+  replaced) and the file passes 258/258. Merge gate on this branch merged with
+  `hardening/integration` at `47630104f`: 132/132 across
+  `session-archive`, `server-capacity`, `sync-protocol`, `stall-diagnostics`,
+  `server-heartbeat` and `server-http-lifecycle` integration/unit files,
+  `runtime-registry.integration.test.ts` 258/258, `tsc --noEmit` clean. The
+  after smoke's aggregate event-loop numbers are not comparable: the host ran at
+  load 208 with other workers' xcodebuild/vitest, and the search warm-up
+  dominates both runs (before mixed max 564 ms/p99 81 ms, no-subscriber max
+  6537 ms/p99 2221 ms, `gateway.event-loop-delay` 6355 ms and 1277 ms; after
+  mixed max 1779 ms/p99 186 ms, no-subscriber max 25.5 s/p99 1091 ms, records
+  14.6 s and 16.8 s).
+- Changes: one commit on `hardening/g-11` (`packages/gateway/src/sessions/runtime-slot.ts`,
+  its integration test, this plan).
+- Tasks added: none. Stretches this branch did not fix, with owners:
+  session-search — `SessionSearchService.rebuild` → `SessionSearchIndex.replace`
+  (65.1 s of the after profile's 87.1 s of ≥50 ms runs; top before-profile runs
+  821/663/650/597/565 ms) plus `currentBudget` (8.6–15.5 s over 32–35 runs) and
+  the invalidator's synchronous `SessionSearchIndex.remove` called from
+  `publishRevisionedSummary` → `summaryChanged` → `publishSummary` (491 ms in one
+  run) — **G-8c** (in flight; the orchestrator handed it both search stretches on
+  2026-09-28); `catalog-discovery.buildCatalogSessionInfo` with
+  `catalog-metadata-index.applyCatalogMetadataEntry` (138 ms ×2, 61 ms),
+  `runtime-registry.buildCatalogPageSeeds` (95 ms) and `parseStrictSessionJSONL`
+  via `readSearchCut` (54 ms) — **G-1c** (in flight); `flushPendingProgress` →
+  `projectMessage` of the streaming message (82 ms per 150 ms window) —
+  **G-3a**; `buildSnapshot` → `projectTranscriptPage`'s O(branch) projection per
+  publish (62 ms) and `ensureAgentProjection` (63 ms) — **G-2**. Not
+  Gateway-owned: `structuredClone` in the SDK's `agent.transformContext`
+  (239 ms ×2), the SDK stream interface's `\r?\n` split (266 ms ×3),
+  `toToolDeclaration` (121 ms), `spawn` (164 ms), module compile (~600 ms). The
+  O-3 spans show the same block from the request side: `session.open` 23.6 s with
+  `catalog.walk=23547 ms` and `session.list` 8.3 s with
+  `catalog.metadata-materialize=8124 ms`.
+- Kept on purpose: `summary()` still calls `getEntries()` (an O(n) filtered copy
+  of milliseconds) so the fold can see appended entries; `persistCanonicalCustomEntry`'s
+  per-receipt O(branch) `existing` scan stays below the 50 ms bound in this
+  scenario and belongs to a durable-write path, not a publish (G-10/G-10a).
+- Deviations: the task's section expected the owning files to be
+  `runtime-slot.ts`/`runtime-registry.ts`; the measured top stretches are
+  session-search and catalog/registry, both held by in-flight tasks, so only the
+  Slot's stretch was fixed here and the rest are listed above (supervisor
+  decision, option b, 2026-09-28). The `Done when` (O-6a event-loop max ≤ 250 ms,
+  p99 ≤ 20 ms) is therefore not claimable from this branch alone: the
+  orchestrator re-measures the combined max/p99 after G-8c and G-1c merge.
+- For the next agent: the two search stretches to bound are the warm-up's
+  per-document `replace` (yield between batches of the term/trigram inserts) and
+  the invalidator's synchronous `remove` (mark the session dirty and let the
+  refresh path delete off the publish path). `summaryContentFold` assumes
+  `getEntries()` stays append-ordered and falls back on a shorter array or a
+  changed boundary id; an owner that reorders entries in place must invalidate it.
