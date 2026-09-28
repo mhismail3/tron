@@ -1093,7 +1093,9 @@ final class SessionPresentationStore {
         }
         // A cursor can become stale while the Gateway request is suspended.
         // Explicit reader intent retries twice; optional recent-tail hydration
-        // makes one attempt and never delays or wedges the usable mount.
+        // makes one attempt and never delays or wedges the usable mount: its
+        // bound stays well inside the opening's outer deadline, so an
+        // unanswered page falls back to the usable tail instead of failing it.
         let maximumAttempt = optional ? 0 : 2
         for attempt in 0...maximumAttempt {
             guard let target,
@@ -1142,7 +1144,8 @@ final class SessionPresentationStore {
                         expectedNextEntryId: visibleTranscript.first?.id,
                         expectedRuntimeGeneration: current.runtimeGeneration,
                         expectedLeafEntryId: current.leafEntryId
-                    )
+                    ),
+                    timeout: optional ? ChatTranscriptPageRequest.optionalOpeningPageDeadline : .seconds(30)
                 )
                 guard !Task.isCancelled,
                       let currentTarget = self.mountedTarget,

@@ -23,6 +23,9 @@ struct ChatScrollCommand: Equatable, Sendable {
         /// past-end condition that survives two display boundaries, never from
         /// marker evidence or a held target lease.
         case pastEndRepair
+        /// The one native-tail position a retired physical-tail repair owes a
+        /// pinned viewport it left displaced from the legal tail.
+        case targetFreeRebase
     }
 
     enum Destination: Equatable, Sendable {

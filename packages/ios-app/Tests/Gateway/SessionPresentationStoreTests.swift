@@ -2309,7 +2309,9 @@ struct SessionPresentationStoreTests {
                 socket: socket,
                 startingAt: 3
             )
-            try await clock.waitUntilSleeping(count: 1, duration: .seconds(30))
+            try await clock.waitUntilSleeping(
+                count: 1, duration: ChatTranscriptPageRequest.optionalOpeningPageDeadline
+            )
             clock.advance(by: .seconds(2))
             #expect(store.loadingEarlierTranscript)
             request = transcriptRequest.request

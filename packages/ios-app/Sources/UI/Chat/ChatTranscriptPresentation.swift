@@ -787,6 +787,9 @@ struct ChatOpenPresentationState: Equatable {
 
 struct ChatTranscriptPageRequest: Equatable {
     static let maximumItemCount = 512
+    /// Bounds the optional recent-tail page inside the opaque opening, well
+    /// under `ChatOpeningAttemptPolicy.deadline`.
+    static let optionalOpeningPageDeadline: Duration = .seconds(5)
 
     let sessionID: String
     let presentationGeneration: Int

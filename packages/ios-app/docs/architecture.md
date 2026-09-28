@@ -300,7 +300,7 @@ neighbor identity, mount, runtime, and subscription ownership must all agree bef
 The presentation owner keeps the newest authoritative tail separate from explicitly loaded
 older browsing rows. Opening never extends the synchronization quarantine. If the synchronized tail has a positive
 start and fewer than 512 visible rows, one optional exact backward page is admitted inside the
-still-opaque opening transaction with a one-second request deadline. It trims the combined recent
+still-opaque opening transaction with a five-second request deadline. It trims the combined recent
 window to 512 rows and fails silently back to the usable tail. The first installed render commit
 therefore receives one settled source window instead of racing a second physical spine into view
 after readiness. Further history remains explicit canonical paging. Every compatible replacement/reconnect
@@ -309,9 +309,12 @@ is the authority tail end, sliding tails promote covered old-tail rows, backward
 prefix, and ordinal ID overlap, parent, leaf, and runtime/total identity conflicts fail closed. A
 detached reader retains loaded rows; physical return to latest never mutates transcript coverage.
 A pinned mounted reader that loses a native marker during a bounded physical-tail repair retires the
-old target, then keeps one target-free rebase owner until the next admitted legal-boundary geometry
-sample. That sample re-applies persistent pinned mode without leasing a replacement target; a later
-current marker remains the only physical proof used for further repair. Ordinary retained presentation
+old target, then keeps one target-free rebase owner until the next admitted geometry sample. A
+legal-boundary sample re-applies persistent pinned mode without leasing a replacement target. Native
+bottom anchoring converges only from near the tail, so a sample displaced beyond that band (a repair
+that landed above the tail while rows entered) instead receives one disabled bottom-edge position that
+needs no marker and is released on application; the rebase never repeats, and a later current marker
+remains the only physical proof used for further repair. Ordinary retained presentation
 handoffs still require aligned marker evidence. Direct interaction and presentation replacement
 cancel the rebase owner; covering the viewport cancels only its target-free branch until a fresh
 foreground handoff establishes marker ownership. This prevents a stale native target from stranding a resumed
@@ -1070,9 +1073,9 @@ tail anchors; a bottom-starting pull that remains within the tail boundary or na
 rubber band stays pinned and never exposes catch-up. A physically observed direct return, catch-up, or opening pins; submission and prepend preserve
 the current mode; a fresh presentation reset pins while a retained same-session reset preserves
 reader authority. `ChatScrollCoordinator` owns the reducer, raw geometry and semantic frames,
-unread state, and seven bounded command purposes only: exact opening-tail realization, catch-up,
+unread state, and eight bounded command purposes only: exact opening-tail realization, catch-up,
 semantic-anchor correction, prepend correction, lazy tail materialization, a token-guarded
-physical-tail repair, and the past-end correction. Repair evidence carries the bottom marker's own sample revision, never an unrelated row's global semantic revision. A physical-spine/explicit-intent episode permits at most two repair commands; alignment jitter and changing displacement cannot renew that budget. Automatic growth follow, tail-correction arbitration, and callback-order compatibility flags no longer exist.
+physical-tail repair, the retired repair's one target-free rebase, and the past-end correction. Repair evidence carries the bottom marker's own sample revision, never an unrelated row's global semantic revision. A physical-spine/explicit-intent episode permits at most two repair commands; alignment jitter and changing displacement cannot renew that budget. Automatic growth follow, tail-correction arbitration, and callback-order compatibility flags no longer exist.
 
 Chat interaction diagnostics remain a 256-record in-memory projection in Logs, not a session journal. Content-free composer availability transitions record connection/reconciliation, mounted authority, projection availability, opening/scroll ownership, pending uploads/submission, and live surface activity; blocked send admission records the same inputs. Visible-reveal and ready-frame-await milestones separate physical settlement from presentation publication. Compact entrance admission/completion and queued physical-target ordinals correlate growth with target retarget/release, including the callback's captured versus current layout epoch. Geometry scalars are explicitly labeled `geometrySource=swiftui`: lazy estimates are not independent UIKit visibility or composited-frame proof. These event-driven diagnostics add no polling, native-view scan, or second state authority. Structural native continuity remains a known separate limitation; the trace helps localize the next incident without claiming that a later aligned marker proves uninterrupted visibility. Schema 2 context records include numeric app/build metadata. Closed lease events distinguish requested, frame-ready, actually consumed, retargeted, canonical-handoff, fallback, and exhausted-repair boundaries. Geometry/semantic/marker/materialization revisions, layout settlement, repair counts, and sampled row geometry explain evidence provenance; a cached row frame is not a claim of current native visibility. At most 64 short in-memory identity entries assign local non-reused ordinals to physical/semantic IDs without exporting IDs, hashes, text, filenames, or credentials or scanning the transcript spine. Retirement revokes delayed checkpoints while retaining the ended context, so a truly lost active projection remains diagnosable. Hosted tests use test-only mounted UIKit row/composer markers plus the SwiftUI host's state identity, rather than retained semantic frames or estimated content height, to exercise send → acknowledgement (before and after release) → first successor with short history, an oversized send crossing into overflow, and 160 mixed-height rows. Separate cases cover short streaming/appends through the composer-inset boundary and viewport contraction. These are mounted-frame/clearance checks, not a substitute for full physical-device visual acceptance.
 

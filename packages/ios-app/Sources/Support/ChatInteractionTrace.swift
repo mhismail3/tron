@@ -710,6 +710,7 @@ final class ChatInteractionTrace: @unchecked Sendable {
         case .tailMaterialization: "tail-materialization"
         case .physicalTailRepair: "physical-tail-repair"
         case .pastEndRepair: "past-end-repair"
+        case .targetFreeRebase: "target-free-rebase"
         }
     }
     private static func destination(_ destination: ChatScrollCommand.Destination) -> String {

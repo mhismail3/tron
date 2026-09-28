@@ -761,10 +761,17 @@ final class ChatScrollCoordinator {
             return
         }
         // A geometry sample that has not reached the legal tail is not an
-        // acknowledgement of the target-free rebase. Keep the owner pending
-        // until the next admitted sample instead of silently abandoning a
-        // displaced mounted transcript.
-        guard current.isAtCatchUpBoundary else { return }
+        // acknowledgement of the target-free rebase. Native bottom anchoring
+        // converges only from near the tail; a pinned viewport displaced
+        // beyond that band never reaches the boundary by itself, so the rebase
+        // owner returns it there once instead of stranding the pinned chat.
+        guard current.isAtCatchUpBoundary else {
+            if retainedViewportReconciliationState == .pendingTargetFreeRebase,
+               !current.isAtBottom {
+                publishTargetFreeRebaseIfAdmitted(current)
+            }
+            return
+        }
         let hasCurrentAlignedTail = physicalTailEvidence.map {
             $0.presentationEpoch == presentation
                 && $0.layoutEpoch == layoutEpoch
@@ -785,6 +792,28 @@ final class ChatScrollCoordinator {
             // proof; it must not claim a reader's viewport from geometry alone.
             retainedViewportReconciliationState = .pendingMarker
         }
+    }
+
+    /// Hands a displaced pinned viewport back to native bottom anchoring with
+    /// one disabled bottom-edge position that is released on application. It
+    /// needs no marker: the retired repair already proved the marker target
+    /// unreliable. Any other viewport owner keeps the rebase pending.
+    private func publishTargetFreeRebaseIfAdmitted(_ current: ChatTranscriptGeometry) {
+        guard current.isValid, current.hasScrollableOverflow,
+              !current.isBeyondLegalContentBottom,
+              viewportMode == .pinned,
+              !isUserInteracting, !directPositionOwnership,
+              viewportObservationActive,
+              !awaitingOpeningBaseline,
+              command == nil, appliedTargetCommandToken == nil,
+              targetReleaseToken == nil,
+              physicalTailRepairCommandToken == nil,
+              prepend == nil, layoutRestore == nil,
+              catchUpPhase == .none,
+              !openingTailPhase.isActive,
+              !visibleOpeningRevealPending else { return }
+        retainedViewportReconciliationState = .idle
+        publish(.tail, animation: .disabled, origin: .targetFreeRebase)
     }
 
     func positionOpeningTail(
@@ -1625,7 +1654,7 @@ final class ChatScrollCoordinator {
                 issuedRevision: physicalTailRepairIssuedEvidenceRevision
             )
         }
-        if applied.origin == .pastEndRepair {
+        if applied.origin == .pastEndRepair || applied.origin == .targetFreeRebase {
             // Application is the correction, and it needs no marker proof: the
             // tail is legal as soon as the command lands. Release through the
             // bounded lease path so native pinning owns the viewport again from

@@ -468,6 +468,28 @@ struct ChatViewScrollHarnessTests {
         }
     }
 
+    // A positive-start tail with room for more rows admits one optional older
+    // page inside the opaque opening. A Gateway that never answers it must
+    // leave the opening on the usable tail within that page's bound, not fail
+    // the conversation at the opening's outer deadline.
+    @Test("an unanswered optional history page falls back to the usable tail")
+    func unansweredOptionalHistoryPageOpensOnTail() async throws {
+        try await withTestWatchdog(timeout: .seconds(20)) {
+            let history = ProfileTranscript.history(seed: 7_401, items: 60)
+            let snapshot = try ProfileTranscript.snapshot(seed: 7_401, items: history, priorItems: 40)
+            try await withHarness(
+                snapshot: snapshot, enablesComposerSubmission: true, usesRealOpening: true,
+                unansweredRPCMethods: ["session.transcript"]
+            ) { harness in
+                let start = ContinuousClock.now
+                _ = try await harness.recorder.waitUntil { $0.observation.isReady }
+                #expect(ContinuousClock.now - start < ChatTranscriptPageRequest.optionalOpeningPageDeadline + .seconds(4))
+                #expect(harness.rpcMethods.contains("session.transcript"))
+                #expect(abs(try harness.nativeTranscriptSignedTailError()) <= 2)
+            }
+        }
+    }
+
     @Test("multiline composer growth does not reevaluate installed history")
     func multilineComposerGrowthKeepsHistoryStable() async throws {
         try await withTestWatchdog(timeout: .seconds(10)) {
@@ -3059,6 +3081,7 @@ struct ChatViewScrollHarnessTests {
         enablesPresentationCover: Bool = false,
         installsSubscribedSnapshot: Bool = true,
         usesRealOpening: Bool = false,
+        unansweredRPCMethods: Set<String> = [],
         operation: @escaping @MainActor @Sendable (ChatViewScrollHarness) async throws -> Void
     ) async throws {
         let harness: ChatViewScrollHarness
@@ -3067,7 +3090,8 @@ struct ChatViewScrollHarnessTests {
                 snapshot: snapshot,
                 displayFrameScheduler: displayFrameScheduler,
                 enablesPresentationCover: enablesPresentationCover,
-                usesRealOpening: usesRealOpening
+                usesRealOpening: usesRealOpening,
+                unansweredRPCMethods: unansweredRPCMethods
             )
         } else {
             harness = try ChatViewScrollHarness(
@@ -3472,7 +3496,8 @@ final class ChatViewScrollHarness {
         displayFrameScheduler: DisplayFrameScheduler,
         performanceSignposts: (any PerformanceSignposting)? = nil,
         enablesPresentationCover: Bool = false,
-        usesRealOpening: Bool = false
+        usesRealOpening: Bool = false,
+        unansweredRPCMethods: Set<String> = []
     ) async throws -> ChatViewScrollHarness {
         let dependencies = try makeDependencies(enablesComposerSubmission: true)
         guard let socket = dependencies.socket, let profile = dependencies.profile else {
@@ -3493,7 +3518,7 @@ final class ChatViewScrollHarness {
                 enablesPresentationCover: enablesPresentationCover,
                 usesRealOpening: usesRealOpening
             )
-            if usesRealOpening { await harness.startRPCResponder() }
+            if usesRealOpening { await harness.startRPCResponder(unansweredMethods: unansweredRPCMethods) }
             return harness
         } catch {
             await dependencies.model.teardown()
@@ -3647,7 +3672,9 @@ final class ChatViewScrollHarness {
         recorder.start()
     }
 
-    private func startRPCResponder() async {
+    /// A method in `unansweredMethods` is received and never answered, like a
+    /// stalled Gateway request.
+    private func startRPCResponder(unansweredMethods: Set<String>) async {
         guard let socket else { return }
         rpcTask = Task { @MainActor [weak self] in
             var index = 1 // connection hello is the sole non-RPC frame
@@ -3660,6 +3687,7 @@ final class ChatViewScrollHarness {
                           let method = request.objectValue?["method"]?.stringValue,
                           let id = request.objectValue?["id"]?.stringValue else { continue }
                     rpcMethods.append(method)
+                    if unansweredMethods.contains(method) { continue }
                     let result: JSONValue
                     switch method {
                     case "session.open":

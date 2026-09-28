@@ -2397,6 +2397,58 @@ struct ChatScrollCoordinatorTests {
         }
     }
 
+    // Failure mode: an exhausted repair that left the pinned viewport far above
+    // the tail. Native bottom anchoring holds only a viewport already at the
+    // tail, so a rebase that waits for a legal-boundary sample strands a pinned
+    // chat for the rest of the stream.
+    @Test("an exhausted physical repair that left the pinned viewport displaced re-follows the native tail once")
+    func exhaustedRepairRebasesDisplacedViewportToNativeTail() async throws {
+        try await withTestWatchdog { @MainActor in
+            let frames = ManualViewportFrameScheduler()
+            let coordinator = ChatScrollCoordinator(frameScheduler: frames.scheduler)
+            coordinator.geometryChanged(previous: .zero, current: self.bottom)
+            coordinator.semanticFrameChanged(
+                renderedID: "transcript-bottom", layoutEpoch: coordinator.layoutEpoch,
+                frame: CGRect(x: 0, y: 300, width: 100, height: 12)
+            )
+            await frames.waitForRequest(count: 1)
+            frames.releaseNext()
+            let repair = try await coordinator.hostedNextCommand()
+            #expect(coordinator.commandApplied(repair))
+            await frames.waitForRequest(count: 2)
+            frames.releaseNext()
+            await Task.yield()
+            #expect(coordinator.command == nil)
+
+            // Native anchoring still converges from near the tail.
+            let nearTail = ChatTranscriptGeometry(offsetY: 560, contentHeight: 1_000, containerHeight: 400)
+            coordinator.geometryChanged(previous: self.bottom, current: nearTail)
+            #expect(coordinator.command == nil)
+
+            // The misplaced repair left the viewport well above the tail.
+            coordinator.geometryChanged(previous: nearTail, current: self.farAway)
+            let rebase = try #require(coordinator.command)
+            #expect(rebase.destination == .tail)
+            #expect(rebase.animation == .disabled)
+            #expect(rebase.origin == .targetFreeRebase)
+            #expect(coordinator.viewportMode == .pinned)
+            let releases = coordinator.targetReleaseGeneration
+            #expect(coordinator.commandApplied(rebase))
+            await self.releaseRepairFrames(frames, count: 1)
+            await Task.yield()
+            #expect(coordinator.targetReleaseGeneration == releases + 1)
+            #expect(coordinator.consumeTargetRelease())
+
+            // One rebase per retired repair: a still-displaced sample cannot
+            // turn it into a recurring follow loop.
+            let revision = coordinator.commandRevision
+            coordinator.geometryChanged(previous: self.farAway, current: self.away)
+            coordinator.geometryChanged(previous: self.away, current: self.farAway)
+            #expect(coordinator.command == nil)
+            #expect(coordinator.commandRevision == revision)
+        }
+    }
+
     @Test("alignment and changing displacement cannot renew an exhausted physical repair episode")
     func physicalRepairJitterDoesNotRenewBudget() async throws {
         try await withTestWatchdog { @MainActor in
