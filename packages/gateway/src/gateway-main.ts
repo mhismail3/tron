@@ -267,6 +267,11 @@ const sessions = new RuntimeRegistry({
     `Extension lifecycle artifact rejected (${reason}; owner ${owner})`,
     { event: "extension.artifact-rejected", source: "sessions" },
   ),
+  artifactDiscoveryTruncated: ({ entries, statusReads, work, dropped }) => logger.log(
+    "warning",
+    `Extension artifact discovery stopped early after ${entries} root entries, ${statusReads} artifact reads, ${work} routed reads and ${dropped} candidates its routing budget cut`,
+    { event: "extension.discovery-truncated", source: "sessions", counts: { entries, statusReads, work, dropped } },
+  ),
   // Both of these are handled background failures outside any request span, so
   // they keep their own warning record.
   catalogIndexFailure: (stage, durationMs) => logger.log(

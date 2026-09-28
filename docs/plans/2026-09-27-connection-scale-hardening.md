@@ -2,6 +2,7 @@
 
 - **Started:** 2026-09-27
 - **Status:** Active (Phase 1 runs on `hardening/integration`; that branch's copy of this plan is authoritative until R-1)
+- **Last updated:** 2026-09-28, G-8a/G-8d/T-1 Done: an unchanged extension artifact costs one `stat` and no read, the ambient pass stays bound and reports a stop, and both read lanes retry a replace before warning (see the handoff)
 - **Last updated:** 2026-09-28, G-2 Done: a 100–200 MiB cold `session.open` is the parse (45–56%, `session.open.manager`) plus the SDK runtime create (22–28%) and the bounded snapshot projection (19–24%) — the three named candidates (registry mutex, idle eviction, fork-boundary reads) are 3–13 ms (`session.open.catalog`) or absent; the whole-branch receipt index maps the snapshot projection allocated for nothing are gone (≈19 ms per snapshot at 100 k entries, measured) and the O-6a prime now retries the fresh fixture's `catalog_not_ready` (see the handoff)
 - **Last updated:** 2026-09-28, G-11 Done: the Slot's publish-time full-transcript summary walk is now an incremental fold (largest run 86.9 ms → 4.8 ms); the dominant remaining stretches are session-search (G-8c) and catalog/registry (G-1c), both in flight, and the combined O-6a max/p99 is re-measured after they merge (see the handoff)
 
@@ -630,12 +631,12 @@ rows are in priority order.
 | E-3d | Ready | LAN endpoint on by default in the release once E-3c's E2E cases pass; the setting is the kill switch | E-3c | |
 | G-13 | Blocked | Restart and reconnect storm: startup budget and a qualification case | G-1c, O-6b | orchestrator-dispatched deepseek-worker, 2026-09-28 (branch `hardening/g-13`): `gateway.startup-budget` (5 s, with the slowest step) and `impairment.restart.startup_ms`/`.close_to_listening_ms`, read from the new process's own record; the case reports G-13's criterion with its numbers. Blocked, not Done: the criterion is a "Done when" and no run has met it — the measured misses are host-bound plus two named causes (the old process's 2 s `work-settle` grace and the storm upgrades serialized by `DeviceStore`'s credential mutex), which need rows of their own or a quiet-host R-1 run; see the handoff |
 | G-8 | Done | Background work audit: delete or bound each unowned or repeating job | O-5 | orchestrator-dispatched deepseek-worker, 2026-09-28 |
-| G-8a | Claimed | Discovery lane retries an atomically replaced `status.json` (bounded, like the watcher lane) so a replace is not `extension.artifact-rejected`; see G-8 handoff | G-1c | orchestrator-dispatched deepseek-worker, 2026-09-28 |
-| G-8d | Claimed | Bound the 750 ms ambient artifact discovery pass by change and make its 1,024-entry truncation impossible or visible; see G-8 handoff | G-8a | orchestrator-dispatched deepseek-worker, 2026-09-28 |
+| G-8a | Done | Discovery lane retries an atomically replaced `status.json` (bounded, like the watcher lane) so a replace is not `extension.artifact-rejected`; see G-8 handoff | G-1c | orchestrator-dispatched deepseek-worker, 2026-09-28 (branch `hardening/g-8a`; the atomic-replace check fails 4/4 before the fix and passes; the watcher lane's pending debounce also owns the retry now) |
+| G-8d | Done | Bound the 750 ms ambient artifact discovery pass by change and make its 1,024-entry truncation impossible or visible; see G-8 handoff | G-8a | orchestrator-dispatched deepseek-worker, 2026-09-28 (same branch: an unchanged `status.json` costs one stat and no read, every entry is examined within a bounded number of passes, and a pass that still stops reports `extension.discovery-truncated`) |
 | G-8b | Done | Bound the Mac app status poll's child processes and per-poll payload re-hash (user/security decision in "Decisions still open"); see G-8 handoff | G-8 | orchestrator-dispatched deepseek-worker, 2026-09-28; review round 1 addressed; back to Claimed because the app-level cadence measurement the row asks for is still owed (see handoff) |
 | G-8c | Done | Persisted session-search index keyed by the catalog's verified file facts, so a start re-reads only what changed; the semantic pass and the index's own writes are time/slice bounded (see handoff) | G-9, G-1c | orchestrator-dispatched deepseek-worker, 2026-09-28; review round 1 addressed |
 | E-1 | Done | Document Tailscale flap diagnosis and user-side checks; the evaluation day confirms | O-2, O-7 | orchestrator-dispatched deepseek-worker, 2026-09-28 |
-| T-1 | Claimed | Pre-existing test race: registry extension-artifact discovery tests treat an awaited `discoverExtensionArtifacts()` as a barrier; wait for a pass that settles (three tests, one a false green) | G-1a (Registry zone) | orchestrator-dispatched deepseek-worker, 2026-09-28 |
+| T-1 | Done | Pre-existing test race: registry extension-artifact discovery tests treat an awaited `discoverExtensionArtifacts()` as a barrier; wait for a pass that settles (three tests, one a false green) | G-1a (Registry zone) | orchestrator-dispatched deepseek-worker, 2026-09-28 (the helper now waits out an in-flight pass and awaits one it starts; G-1c fixed the oversized-header sites and this branch fixes the two in "rejects foreign producer session headers…") |
 | T-2 | Done | `GatewayConnectionEpisodeRecorderTests/blockedMainActorIsMeasuredAndReported` (O-4) was killed once ("Test crashed with signal kill") when run with four other suites on integration, then passed 3/3; find whether the 5 s main-thread block trips a hosted-test watchdog and bound the block so the test cannot be killed while still proving the stall record | O-4 | orchestrator-dispatched deepseek-worker, 2026-09-28; no hosted-test watchdog exists (a 5 + 10 + 20 s block probe passed); the kill came from another worktree's run on the same default-lane simulator (`E816D194…`), not from the block — see the T-2 handoff and T-3; the block is now the named `mainStallTestBlock` (5 s) in both phases |
 | T-3 | Done | Default-lane iOS runs must serialize on `~/.tron/internal/ios-test/lease.lock`, but runs from three worktrees held the one owned simulator (`E816D194…`) at the same time and killed each other's host app (see the T-2 handoff); the lease was bypassed because `--lane NAME` was consumed by the lease holder and not passed to the command it started, so the command leased the named/other lane while provisioning the default lane's simulator (`ios-test-G7*` lanes: lease file, no marker); the lane now travels with the command and a command that inherits a lease for another lane is refused | none | orchestrator-dispatched deepseek-worker, 2026-09-28 |
 | T-4 | Done | `GatewayLogExportTests/byteEnvelopeReservesTheChatTrace` is SIGKILLed when it shares a test process with `GatewayConnectionEpisodeRecorderTests` (main-stall test blocks the main thread twice for 4 s); each passes alone (bundles `20260928T203739Z-run.InevV5`, `20260928T201219Z-run.jNGHmH`). Find the killer and make both robust in one process | T-2 | orchestrator-dispatched deepseek-worker, 2026-09-28; the killer is XCTest's per-test execution-time allowance (XCTestCore reports `Restarting after unexpected exit, crash, or test timeout`) SIGKILLing the app (`Test crashed with signal kill`), and the test it lands on is the process's CPU-heaviest because `IOSClientDiagnosticBuffer.redactedMessage` matched URLs super-quadratically (3 ms at 512 characters, 654 ms at 4,096; the export test 8.646-10.297 s -> 0.072 s); see the T-4 handoff |
@@ -9475,6 +9476,81 @@ wait).
   (C-5's file), because the plan's own E-3b "Do" and both docs already say the
   phone replaces the advertisement on every hello; deferring either to E-3c
   would have left the shipped branch contradicting both.
+
+### G-8a · G-8d · T-1 · Done · 2026-09-28 · orchestrator-dispatched deepseek-worker (branch `hardening/g-8a`)
+
+- Result: the 750 ms ambient discovery pass reads a run's `status.json` only when
+  the identity of that file changed, and offers a candidate to a slot only when
+  that slot can attribute the run — a canonical JSONL fact, an ownership binding
+  or a projected activity (`RuntimeSlot.extensionAmbientArtifactAttribution`) — so
+  an unchanged artifact a slot already received costs one `stat` and no routed
+  `open`/read/parse. A pass that still stops at a budget reports
+  `extension.discovery-truncated` with its counts (`dropped` included) when the
+  stop starts, when it begins dropping candidates the per-root budget cut, and
+  otherwise at most hourly; the fact and routing caches age out after four unseen
+  passes even when a pass stops early, so the 4,096-entry cap no longer fixes the
+  same cached decisions forever. Both lanes that read an artifact still retry a
+  read that lost an atomic replace before reporting it, and the registry test
+  helper runs a pass it starts itself instead of awaiting a call that can be a
+  silent no-op.
+- Evidence:
+  - G-8d change gate: `npx vitest run src/sessions/runtime-registry.integration.test.ts
+    -t "does not reopen an unchanged ambient artifact"` — a production-shaped root
+    (2,498 run directories, 556 finished `status.json`, one live slot) routes only
+    the artifacts that slot can attribute, the next unchanged pass routes only the
+    live exact binding, and a changed finished artifact is offered again. Reads per
+    steady-state pass: **556 → 0** for artifacts no live slot can attribute (the
+    review measured 556 on this branch and 233 on `hardening/integration`).
+  - G-8d bound and report: `-t "examines every ambient artifact within a bounded
+    number of passes"` — pass 1 `{entries 1_025, statusReads 1_024, work 0,
+    dropped 0}`, pass 2 `{entries 1_100, statusReads 76, work 0, dropped 76}`: the
+    walk reaches the whole root, reads only the entries it had not, and counts the
+    candidates its routing budget cut; a third unchanged pass records nothing
+    further, and no artifact is routed.
+  - G-8a check (the row's negative control): `-t "retries a status.json read that
+    raced an atomic replacement"` atomically replaces `status.json` across real
+    discovery passes bounded by wall clock. On the pre-fix source it fails **4/4**
+    runs with the `artifact-replacement-in-progress` warning; after the fix it
+    passes with the running projection intact.
+  - Owning suite `npx vitest run src/sessions/runtime-registry.integration.test.ts`,
+    merge gate `npx vitest run src/transport/session-archive.integration.test.ts
+    src/transport/server-capacity.integration.test.ts
+    src/transport/sync-protocol.integration.test.ts
+    src/transport/stall-diagnostics.test.ts
+    src/transport/server-heartbeat.integration.test.ts
+    src/transport/server-http-lifecycle.integration.test.ts`, `npx tsc --noEmit -p .`,
+    `python3 scripts/check-documentation-policy.py` and
+    `scripts/personal-info-guard.sh` — see the commit for the recorded results.
+- Changes: `packages/gateway/src/sessions/runtime-registry.ts` (identity-gated
+  ambient read, per-slot artifact-identity routing gate, `dropped` count, aged
+  fact/route caches, start-and-hourly truncation report), `runtime-slot.ts`
+  (`extensionAmbientArtifactAttribution`, bounded discovery-lane retry, watcher-lane
+  retry when a debounce already owns the read), `gateway-main.ts` (the record),
+  `packages/gateway/docs/observability.md`, and the registry integration tests.
+- Deviations: the row named only the discovery lane; the required atomic-replace
+  check shows the watcher lane was the source of the warnings under a replace
+  storm, because a pending `fs.watch` debounce made its retry unreachable. The
+  ambient lane now needs the slot to attribute the run, and the
+  `reconciles an exact-owned active artifact` fixture appended its canonical tool
+  result to the fixture manager, which the live slot never reads; the fixture now
+  appends to the slot's own session manager, as every other canonical-fact fixture
+  here does.
+- Residual: a candidate a slot can attribute but cannot yet project is offered
+  every pass until its artifact changes (bounded by that session's own runs); a
+  terminal artifact's sidecar refresh rests on the exact-binding lane, as the
+  review specified. The `artifact-replacement-in-progress` reason still covers an
+  unclassified read error and a `status.json` that has not been written yet.
+- Round 2 (review response): a route is recorded only after the slot decided the
+  artifact. `RuntimeSlot.discoverExtensionArtifact` now reports `accepted`,
+  `rejected` or `transient`, and the pass records only the first two, so an offer
+  a busy work registry, a losing read or any other temporary failure refused is
+  offered again on the next pass instead of being treated as delivered (the run
+  that `claimExtensionReceiptOwnership` refuses once reaches `completed` on the
+  second pass; it never appears on `bc8d23dc0`). Attributed candidates are now
+  filtered before the per-root budget slice, so unattributable directories can no
+  longer consume that budget or be reported as deferred work (`dropped` in
+  `extension.discovery-truncated` now counts only candidates a live slot still
+  had to be offered).
 
 ### G-1d · Done · 2026-09-28 · orchestrator-dispatched deepseek-worker (branch `hardening/g-1d`)
 
