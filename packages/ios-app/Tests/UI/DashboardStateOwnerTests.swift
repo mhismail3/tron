@@ -765,12 +765,17 @@ struct DashboardStateOwnerTests {
         id: String,
         sessions: [SessionSummary],
         listRevision: Int,
+        projectionToken: String? = nil,
         nextCursor: String? = nil,
         archivedCount: Int? = nil
     ) -> Data {
         let encoded = try! JSONEncoder.gateway.encode(sessions)
         let rawSessions = try! JSONSerialization.jsonObject(with: encoded)
-        var result: [String: Any] = ["sessions": rawSessions, "listRevision": listRevision]
+        var result: [String: Any] = [
+            "sessions": rawSessions,
+            "listRevision": listRevision,
+            "projectionToken": projectionToken ?? "epoch-1:\(listRevision)",
+        ]
         if let nextCursor { result["nextCursor"] = nextCursor }
         if let archivedCount { result["archivedCount"] = archivedCount }
         return try! JSONSerialization.data(withJSONObject: [
@@ -944,8 +949,8 @@ struct DashboardStateOwnerTests {
         var owner = SessionCatalogCoordinator()
         let first = owner.beginLoad()
         let second = owner.beginLoad()
-        let firstPublished = owner.publishAuthoritative([summary(revision: 1)], admission: first, revision: 1)
-        let secondPublished = owner.publishAuthoritative([summary(revision: 2)], admission: second, revision: 1)
+        let firstPublished = owner.publishAuthoritative([summary(revision: 1)], admission: first, projectionToken: "epoch-1:1")
+        let secondPublished = owner.publishAuthoritative([summary(revision: 2)], admission: second, projectionToken: "epoch-1:1")
         #expect(!firstPublished)
         #expect(secondPublished)
         #expect(owner.sessions.first?.summaryRevision == 2)
@@ -970,11 +975,41 @@ struct DashboardStateOwnerTests {
         #expect(owner.admits(replacement, key: replacementKey))
     }
 
+    @Test("a retained projection token survives a reconnect and drops on a profile switch")
+    func projectionTokenScope() {
+        var owner = SessionCatalogCoordinator()
+        let load = owner.beginLoad()
+        let published = owner.publishAuthoritative(
+            [summary(revision: 1)],
+            admission: load,
+            projectionToken: "gateway-epoch:4:0:user:exclude:0"
+        )
+        #expect(published)
+        #expect(owner.projectionToken == "gateway-epoch:4:0:user:exclude:0")
+
+        // The token carries the Gateway runtime epoch, so a replacement
+        // connection can revalidate the held rows instead of reloading them.
+        owner.markDisconnected()
+        #expect(owner.projectionToken == "gateway-epoch:4:0:user:exclude:0")
+        let reconnect = owner.beginLoad(key: SessionCatalogLoadKey(
+            profileID: "remote", lifecycleGeneration: 2, connectionID: 9
+        ))
+        let confirmed = owner.confirmUnchanged(admission: reconnect)
+        #expect(confirmed)
+        #expect(owner.freshness == .live)
+        #expect(owner.sessions.map(\.id) == ["session"])
+
+        // A profile switch retires the projection, so its rows can never be
+        // claimed against another Gateway's catalog.
+        owner.invalidateLoads()
+        #expect(owner.projectionToken == nil)
+    }
+
     @Test("newer live summaries survive an older authoritative catalog page")
     func liveSummaryOverlay() {
         var owner = SessionCatalogCoordinator()
         let first = owner.beginLoad()
-        let firstPublished = owner.publishAuthoritative([summary(revision: 1)], admission: first, revision: 1)
+        let firstPublished = owner.publishAuthoritative([summary(revision: 1)], admission: first, projectionToken: "epoch-1:1")
         let updated = owner.apply(update(
             revision: 3,
             phase: .running,
@@ -988,7 +1023,7 @@ struct DashboardStateOwnerTests {
         #expect(stale == .stale)
 
         let refresh = owner.beginLoad()
-        let refreshed = owner.publishAuthoritative([summary(revision: 2)], admission: refresh, revision: 1)
+        let refreshed = owner.publishAuthoritative([summary(revision: 2)], admission: refresh, projectionToken: "epoch-1:1")
         #expect(refreshed)
         #expect(owner.sessions.first?.summaryRevision == 3)
         #expect(owner.sessions.first?.phase == .running)
@@ -1005,7 +1040,7 @@ struct DashboardStateOwnerTests {
         #expect(owner.sessions.isEmpty)
 
         let load = owner.beginLoad()
-        let published = owner.publishAuthoritative([summary(revision: 1)], admission: load, revision: 1)
+        let published = owner.publishAuthoritative([summary(revision: 1)], admission: load, projectionToken: "epoch-1:1")
         #expect(published)
         #expect(owner.sessions.first?.phase == .idle)
     }
@@ -1035,7 +1070,7 @@ struct DashboardStateOwnerTests {
     func attentionProjection() {
         var owner = SessionCatalogCoordinator()
         let load = owner.beginLoad()
-        let published = owner.publishAuthoritative([summary(revision: 1)], admission: load, revision: 1)
+        let published = owner.publishAuthoritative([summary(revision: 1)], admission: load, projectionToken: "epoch-1:1")
         #expect(published)
         let appliedAttention = owner.applyAttention(
             sessionID: "session",
@@ -1070,7 +1105,7 @@ struct DashboardStateOwnerTests {
         let load = owner.beginLoad()
         let published = owner.publishAuthoritative([
             summary(revision: 1, phase: .running, waitingForUser: true),
-        ], admission: load, revision: 1)
+        ], admission: load, projectionToken: "epoch-1:1")
         #expect(published)
         #expect(owner.activity(for: "session") == .waitingForUser)
 
@@ -1103,7 +1138,7 @@ struct DashboardStateOwnerTests {
                 foregroundPhase: .idle,
                 hasActiveSubagents: true
             ),
-        ], admission: load, revision: 1)
+        ], admission: load, projectionToken: "epoch-1:1")
 
         #expect(published)
         #expect(owner.activity(for: "session") == .subagentsWorking)
@@ -1128,7 +1163,7 @@ struct DashboardStateOwnerTests {
         let load = owner.beginLoad()
         let published = owner.publishAuthoritative([
             summary(revision: 1, phase: .running),
-        ], admission: load, revision: 1)
+        ], admission: load, projectionToken: "epoch-1:1")
         #expect(published)
         #expect(owner.freshness == .live)
         #expect(owner.activity(for: "session") == .active)
@@ -1141,7 +1176,7 @@ struct DashboardStateOwnerTests {
         let disconnectedPublish = owner.publishAuthoritative(
             [summary(revision: 2, phase: .running)],
             admission: pendingBeforeDisconnect,
-            revision: 1
+            projectionToken: "epoch-1:1"
         )
         #expect(!disconnectedPublish)
 
@@ -1153,7 +1188,7 @@ struct DashboardStateOwnerTests {
         let cachedPublish = owner.publishAuthoritative(
             [summary(revision: 3)],
             admission: pendingBeforeCache,
-            revision: 1
+            projectionToken: "epoch-1:1"
         )
         #expect(!cachedPublish)
 
@@ -1166,7 +1201,7 @@ struct DashboardStateOwnerTests {
     func removal() {
         var owner = SessionCatalogCoordinator()
         let load = owner.beginLoad()
-        let published = owner.publishAuthoritative([summary(revision: 1)], admission: load, revision: 1)
+        let published = owner.publishAuthoritative([summary(revision: 1)], admission: load, projectionToken: "epoch-1:1")
         let updated = owner.apply(update(revision: 2, phase: .running))
         #expect(published)
         #expect(updated == .updated)
@@ -1176,7 +1211,7 @@ struct DashboardStateOwnerTests {
         let removedPublish = owner.publishAuthoritative(
             [summary(revision: 3)],
             admission: pendingBeforeRemoval,
-            revision: 1
+            projectionToken: "epoch-1:1"
         )
         #expect(!removedPublish)
         let unknown = owner.apply(update(revision: 2, phase: .idle))
@@ -1191,7 +1226,7 @@ struct DashboardStateOwnerTests {
         let replacedPublish = owner.publishAuthoritative(
             [summary(revision: 2)],
             admission: beforeReplacement,
-            revision: 1
+            projectionToken: "epoch-1:1"
         )
         #expect(!replacedPublish)
 
@@ -1200,7 +1235,7 @@ struct DashboardStateOwnerTests {
         let clearedPublish = owner.publishAuthoritative(
             [summary(revision: 3)],
             admission: beforeClear,
-            revision: 1
+            projectionToken: "epoch-1:1"
         )
         #expect(!clearedPublish)
         #expect(owner.sessions.isEmpty)
@@ -1211,7 +1246,7 @@ struct DashboardStateOwnerTests {
     func catalogIndexIntegrity() {
         var owner = SessionCatalogCoordinator()
         let load = owner.beginLoad()
-        let published = owner.publishAuthoritative([summary(revision: 1)], admission: load, revision: 1)
+        let published = owner.publishAuthoritative([summary(revision: 1)], admission: load, projectionToken: "epoch-1:1")
         #expect(published)
         #expect(owner.hasConsistentIndex())
         let updated = owner.apply(update(revision: 2, phase: .running))
@@ -1229,7 +1264,7 @@ struct DashboardStateOwnerTests {
     func archivedRowsLeaveUntilAPageReturnsThem() {
         var owner = SessionCatalogCoordinator()
         let load = owner.beginLoad()
-        let published = owner.publishAuthoritative([summary(revision: 1)], admission: load, revision: 1, archivedCount: 1)
+        let published = owner.publishAuthoritative([summary(revision: 1)], admission: load, projectionToken: "epoch-1:1", archivedCount: 1)
         #expect(published)
         #expect(owner.archivedCount == 1)
 
@@ -1244,7 +1279,7 @@ struct DashboardStateOwnerTests {
 
         // Only an authoritative exclude page proves the row is visible again.
         let refreshed = owner.beginLoad()
-        let republished = owner.publishAuthoritative([summary(revision: 3)], admission: refreshed, revision: 1, archivedCount: 0)
+        let republished = owner.publishAuthoritative([summary(revision: 3)], admission: refreshed, projectionToken: "epoch-1:1", archivedCount: 0)
         #expect(republished)
         #expect(owner.sessions.map(\.id) == ["session"])
         let visibleUpdate = owner.apply(update(revision: 4, phase: .idle))
@@ -1257,7 +1292,7 @@ struct DashboardStateOwnerTests {
     func archivedCountRetention() {
         var owner = SessionCatalogCoordinator()
         let load = owner.beginLoad()
-        let published = owner.publishAuthoritative([], admission: load, revision: 1, archivedCount: 3)
+        let published = owner.publishAuthoritative([], admission: load, projectionToken: "epoch-1:1", archivedCount: 3)
         #expect(published)
         #expect(owner.archivedCount == 3)
 

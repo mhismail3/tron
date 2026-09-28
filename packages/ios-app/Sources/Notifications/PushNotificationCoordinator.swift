@@ -63,12 +63,15 @@ struct PushGrant: Codable, Equatable, Sendable {
     var relayOrigin: String? = nil
     var route: PushRoute? = nil
     /// The Gateway runtime (`machineId` plus its `runtimeEpoch`) that confirmed
-    /// this exact grant. A reconnect re-sends the registration only while the
-    /// stored grant matches the current device token, route and relay origin
-    /// and this identity differs: the Gateway runtime instance is the owner of
-    /// the notification document, so a restart or a different Mac drops the
-    /// acknowledgement instead of trusting it (G-7).
+    /// this exact grant, and the grant projection revision that runtime
+    /// advertised. A reconnect re-sends the registration only while the stored
+    /// grant matches the current device token, route and relay origin and both
+    /// of these still describe the connected Gateway: the revision is what
+    /// makes a grant the Gateway disabled at runtime (a relay rejection) or
+    /// retired at restart visible to the phone, and the identity keeps an
+    /// acknowledgement from crossing to a different Gateway or payload (G-7).
     var acknowledgedRuntime: String? = nil
+    var acknowledgedRegistrationRevision: String? = nil
 }
 
 struct PushCredentialDocument: Codable, Equatable, Sendable {
@@ -377,10 +380,15 @@ final class PushNotificationCoordinator {
         let profile: GatewayProfile
         let client: GatewayClient
         /// `machineId:runtimeEpoch` of the connected Gateway runtime, or nil
-        /// when it advertises no runtime epoch. Without one the phone cannot
-        /// scope an acknowledgement to a Gateway instance, so it always sends
-        /// the registration and lets the Gateway answer the no-op.
+        /// when it advertises no runtime epoch. It names the Gateway whose
+        /// acknowledgement is stored, so a different Gateway or a rebuilt
+        /// payload never inherits it.
         let runtimeIdentity: String?
+        /// The grant projection revision the connected Gateway advertises. A
+        /// stored acknowledgement is only current while this still matches it:
+        /// the Gateway can disable a grant at runtime (a relay rejection) with
+        /// no event and no restart, and only a re-sent registration learns it.
+        let registrationRevision: String?
     }
 
     private let credentials: any PushCredentialStoring
@@ -462,6 +470,7 @@ final class PushNotificationCoordinator {
         profile: GatewayProfile?,
         connected: Bool,
         gatewayRuntimeEpoch: String?,
+        pushRegistrationRevision: String? = nil,
         client: GatewayClient
     ) async {
         admissionGeneration &+= 1
@@ -477,7 +486,12 @@ final class PushNotificationCoordinator {
             invalidateRegistration(admission: false)
         }
         let runtimeIdentity = gatewayRuntimeEpoch.map { "\(profile.machineId):\($0)" }
-        context = Context(profile: profile, client: client, runtimeIdentity: runtimeIdentity)
+        context = Context(
+            profile: profile,
+            client: client,
+            runtimeIdentity: runtimeIdentity,
+            registrationRevision: pushRegistrationRevision
+        )
         guard !credentialLoadFailed, worker != nil, appAttest.isSupported() else {
             invalidateRegistration(admission: false)
             readiness = .unavailable
@@ -616,13 +630,16 @@ final class PushNotificationCoordinator {
            grant.tokenHash == tokenHash,
            grant.relayOrigin == worker.relayOrigin,
            grant.route == PushRoute.current {
-            // Nothing the Gateway stores can have changed since it acknowledged
-            // this exact grant on this same runtime instance, so a reconnect
-            // has no registration to send. `/v1/push/registration` is the only
-            // other authority, and an epoch change (a Gateway restart, which
-            // owns the credential document) revokes this claim.
+            // The Gateway confirmed this exact grant during its current run and
+            // nothing it stores about the grant has changed since
+            // (`pushRegistrationRevision` is derived from the stored grants, so
+            // a relay-rejected grant disabled at runtime moves it). A Gateway
+            // that advertises no revision cannot make that claim, so the
+            // registration is always sent.
             if let runtimeIdentity = admittedContext.runtimeIdentity,
-               grant.acknowledgedRuntime == runtimeIdentity {
+               let registrationRevision = admittedContext.registrationRevision,
+               grant.acknowledgedRuntime == runtimeIdentity,
+               grant.acknowledgedRegistrationRevision == registrationRevision {
                 readiness = .ready
                 diagnostic = .complete
                 return
@@ -634,7 +651,9 @@ final class PushNotificationCoordinator {
                 client: admittedContext.client,
                 generation: generation,
                 profileID: admittedContext.profile.id,
-                token: token
+                token: token,
+                runtimeIdentity: admittedContext.runtimeIdentity,
+                registrationRevision: admittedContext.registrationRevision
             ) {
             case .ready:
                 readiness = .ready
@@ -749,7 +768,9 @@ final class PushNotificationCoordinator {
                         client: admittedContext.client,
                         generation: generation,
                         profileID: admittedContext.profile.id,
-                        token: token
+                        token: token,
+                        runtimeIdentity: admittedContext.runtimeIdentity,
+                        registrationRevision: admittedContext.registrationRevision
                     )
                     try validateRegistration(
                         generation: generation,
@@ -888,7 +909,9 @@ final class PushNotificationCoordinator {
         client: GatewayClient,
         generation: Int,
         profileID: String,
-        token: String
+        token: String,
+        runtimeIdentity: String?,
+        registrationRevision: String?
     ) async throws -> GrantTransferResult {
         try validateRegistration(generation: generation, profileID: profileID, token: token)
         do {
@@ -909,7 +932,12 @@ final class PushNotificationCoordinator {
             guard status.available && status.registered && status.deviceRegistered && status.enabledDeviceCount > 0 else {
                 return .unavailable
             }
-            try acknowledgeRegistration(grant, profileID: profileID)
+            try acknowledgeRegistration(
+                grant,
+                profileID: profileID,
+                runtimeIdentity: runtimeIdentity,
+                registrationRevision: registrationRevision
+            )
             return .ready
         } catch is CancellationError {
             throw CancellationError()
@@ -922,16 +950,25 @@ final class PushNotificationCoordinator {
         }
     }
 
-    /// Records that this Gateway runtime confirmed the exact grant the phone
-    /// holds, which is what lets the next reconnect skip the registration. The
-    /// write is local credential state, so a failure is reported like every
-    /// other credential write instead of claiming readiness.
-    private func acknowledgeRegistration(_ grant: PushGrant, profileID: String) throws {
-        guard let runtimeIdentity = context?.runtimeIdentity,
-              var updated = document.grants[profileID],
+    /// Records that the Gateway runtime that admitted this transfer confirmed
+    /// the exact grant the phone holds, which is what lets the next reconnect
+    /// skip the registration. The identity and revision come from the admitted
+    /// context, so a completion that lands after a reconnect records the
+    /// runtime that answered instead of whichever one is current. The write is
+    /// local credential state, so a failure is reported like every other
+    /// credential write instead of claiming readiness.
+    private func acknowledgeRegistration(
+        _ grant: PushGrant,
+        profileID: String,
+        runtimeIdentity: String?,
+        registrationRevision: String?
+    ) throws {
+        guard var updated = document.grants[profileID],
               updated.grantID == grant.grantID,
-              updated.acknowledgedRuntime != runtimeIdentity else { return }
+              updated.acknowledgedRuntime != runtimeIdentity
+                || updated.acknowledgedRegistrationRevision != registrationRevision else { return }
         updated.acknowledgedRuntime = runtimeIdentity
+        updated.acknowledgedRegistrationRevision = registrationRevision
         var next = document
         next.grants[profileID] = updated
         do { try credentials.save(next) }
@@ -952,7 +989,25 @@ final class PushNotificationCoordinator {
         client: GatewayClient,
         generation: Int
     ) async {
-        guard document.grants[profile.id] != nil else { return }
+        guard var grant = document.grants[profile.id] else { return }
+        // The acknowledgement is dropped and persisted before the request: a
+        // lost response means the Gateway may already have removed the grant, so
+        // a later re-allowed permission must re-register instead of trusting an
+        // acknowledgement that describes a grant the Gateway no longer holds.
+        if grant.acknowledgedRuntime != nil || grant.acknowledgedRegistrationRevision != nil {
+            grant.acknowledgedRuntime = nil
+            grant.acknowledgedRegistrationRevision = nil
+            var cleared = document
+            cleared.grants[profile.id] = grant
+            do {
+                try credentials.save(cleared)
+                document = cleared
+            } catch {
+                readiness = .pending
+                diagnostic = .stoppedPersistence
+                return
+            }
+        }
         do {
             let result: PushRegistrationRemovalResult = try await client.request(
                 "push.registration.remove",

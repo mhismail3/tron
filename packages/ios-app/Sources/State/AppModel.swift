@@ -2302,7 +2302,7 @@ final class AppModel {
         do {
             let loaded = try await SessionCatalogLoader.load(
                 client: client,
-                sinceRevision: sessionCatalog.listRevision
+                sinceToken: sessionCatalog.projectionToken
             ) {
                 self.admitsCatalogRefresh(key: key, requestGeneration: requestGeneration)
                     && self.sessionCatalog.admits(admission, key: key)
@@ -2312,11 +2312,11 @@ final class AppModel {
                 return CatalogTraversalResult(outcome: .retained, genuineFailure: false)
             }
             switch loaded {
-            case let .loaded(rows, pageCount, revision, archivedCount):
+            case let .loaded(rows, pageCount, revision, projectionToken, archivedCount):
                 guard sessionCatalog.publishAuthoritative(
                     rows,
                     admission: admission,
-                    revision: revision,
+                    projectionToken: projectionToken,
                     archivedCount: archivedCount
                 ) else {
                     return CatalogTraversalResult(outcome: .retained, genuineFailure: false)
@@ -2337,7 +2337,7 @@ final class AppModel {
                 // The Gateway confirmed these rows. Nothing is republished, so
                 // selection, scroll and chat identity are untouched; the
                 // traversal still counts as a complete authoritative read.
-                guard sessionCatalog.confirmUnchanged(admission: admission, revision: revision) else {
+                guard sessionCatalog.confirmUnchanged(admission: admission) else {
                     return CatalogTraversalResult(outcome: .retained, genuineFailure: false)
                 }
                 return CatalogTraversalResult(

@@ -1588,6 +1588,7 @@ struct GatewayClientTransportTests {
                     result: .object([
                         "sessions": .array([]),
                         "listRevision": .number(1),
+                        "projectionToken": .string("epoch-1:1"),
                     ])
                 ))
                 _ = try await valueOfOwnedTask(request)

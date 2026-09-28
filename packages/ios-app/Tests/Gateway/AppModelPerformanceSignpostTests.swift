@@ -449,6 +449,7 @@ struct AppModelPerformanceSignpostTests {
                     "sessions": .array([]),
                     "nextCursor": .null,
                     "listRevision": .number(1),
+                    "projectionToken": .string("epoch-1:1"),
                 ])
                 case "provider.list": result = .object(["providers": .array([])])
                 case "model.list": result = .object(["models": .array([]), "nextCursor": .null])
@@ -521,6 +522,7 @@ struct AppModelPerformanceSignpostTests {
                     ])]),
                     "nextCursor": .null,
                     "listRevision": .number(1),
+                    "projectionToken": .string("epoch-1:1"),
                 ])
             ))
             #expect(await convergence.value == .published)
@@ -587,6 +589,7 @@ struct AppModelPerformanceSignpostTests {
                     ])]),
                     "nextCursor": .null,
                     "listRevision": .number(2),
+                    "projectionToken": .string("epoch-1:2"),
                 ])
             ))
             #expect(await convergence.value == .published)

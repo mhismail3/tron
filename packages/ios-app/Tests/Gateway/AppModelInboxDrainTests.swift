@@ -77,7 +77,7 @@ struct AppModelInboxDrainTests {
                 let requestID = try #require(catalogRequest["id"]?.stringValue)
                 await socket.enqueue(try JSONEncoder.gateway.encode(JSONValue.object([
                     "type": .string("response"), "id": .string(requestID), "ok": .bool(true),
-                    "result": .object(["sessions": .array([]), "listRevision": .number(1)])
+                    "result": .object(["sessions": .array([]), "listRevision": .number(1), "projectionToken": .string("epoch-1:1")])
                 ])))
                 var completion = foregroundFinished.stream.makeAsyncIterator()
                 guard let result = await completion.next() else { throw CancellationError() }
@@ -135,7 +135,7 @@ struct AppModelInboxDrainTests {
                 let replacementRequestID = try #require(replacementCatalog?["id"]?.stringValue)
                 await replacement.enqueue(try JSONEncoder.gateway.encode(JSONValue.object([
                     "type": .string("response"), "id": .string(replacementRequestID), "ok": .bool(true),
-                    "result": .object(["sessions": .array([]), "listRevision": .number(2)])
+                    "result": .object(["sessions": .array([]), "listRevision": .number(2), "projectionToken": .string("epoch-1:2")])
                 ])))
                 #expect(model.notificationInbox.isLoading)
                 await model.teardown()

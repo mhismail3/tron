@@ -449,7 +449,7 @@ struct PushNotificationCoordinatorTests {
     }
 
     @MainActor
-    @Test("an acknowledged registration is not re-sent to the same Gateway runtime")
+    @Test("an acknowledged registration is not re-sent while the Gateway's grant revision is unchanged")
     func acknowledgedRegistrationSkipsTransfer() async throws {
         let grant = matchingGrant(profileID: profile.id, token: "01")
         let store = MemoryPushCredentialStore(initial: PushCredentialDocument(
@@ -459,13 +459,19 @@ struct PushNotificationCoordinatorTests {
             credentials: store,
             notifications: allowedNotifications,
             appAttest: supportedAttest,
-            configuration: PushProductConfiguration(origin: URL(string: "https://push.example.test")!)
+            configuration: PushProductConfiguration(origin: URL(string: "https://push.example.test")!),
+            // The rotation this test drives starts the proof flow; a transport
+            // that refuses locally keeps that flow deterministic and offline.
+            transport: BoundedHTTPDataTransport { _, _ in throw URLError(.cannotConnectToHost) }
         )
         let (client, socket) = try await connectedGateway(for: profile)
         defer { Task { await client.close() } }
 
         let startup = Task {
-            await coordinator.reconcile(profile: profile, connected: true, gatewayRuntimeEpoch: "epoch-one", client: client)
+            await coordinator.reconcile(
+                profile: profile, connected: true, gatewayRuntimeEpoch: "epoch-one",
+                pushRegistrationRevision: "grant-revision-one", client: client
+            )
         }
         let firstUpsert = try await gatewayRequest(socket, method: "push.registration.upsert", after: 1)
         await socket.enqueue(registrationStatusResponse(id: firstUpsert))
@@ -473,26 +479,98 @@ struct PushNotificationCoordinatorTests {
         try await waitUntil { store.value?.grants[profile.id]?.acknowledgedRuntime == "machine-1:epoch-one" }
         try await waitUntil { coordinator.readiness == .ready }
         #expect(coordinator.diagnostic == .complete)
+        #expect(store.value?.grants[profile.id]?.acknowledgedRegistrationRevision == "grant-revision-one")
 
-        // The same Gateway runtime already holds this exact grant, so the
-        // reconnect sends nothing at all.
+        // The same Gateway runtime still holds this exact grant and advertises
+        // the same grant revision, so the reconnect sends nothing at all.
         let sentBefore = await socket.sentFrames().count
-        await coordinator.reconcile(profile: profile, connected: true, gatewayRuntimeEpoch: "epoch-one", client: client)
+        await coordinator.reconcile(
+            profile: profile, connected: true, gatewayRuntimeEpoch: "epoch-one",
+            pushRegistrationRevision: "grant-revision-one", client: client
+        )
         try await waitUntil { coordinator.readiness == .ready }
         try await Task.sleep(for: .milliseconds(30))
         #expect(try await upsertRequests(socket) == [firstUpsert])
         #expect(store.value?.grants[profile.id]?.acknowledgedRuntime == "machine-1:epoch-one")
 
         // A restarted Gateway runtime owns the credential document again, so
-        // the acknowledgement is not trusted across it.
-        let restart = Task {
-            await coordinator.reconcile(profile: profile, connected: true, gatewayRuntimeEpoch: "epoch-two", client: client)
+        // the acknowledgement is not trusted across it: the same grant and the
+        // same advertised revision still re-send because the runtime identity
+        // differs.
+        let restarted = Task {
+            await coordinator.reconcile(
+                profile: profile, connected: true, gatewayRuntimeEpoch: "epoch-two",
+                pushRegistrationRevision: "grant-revision-one", client: client
+            )
         }
-        let secondUpsert = try await gatewayRequest(socket, method: "push.registration.upsert", after: sentBefore)
-        await socket.enqueue(registrationStatusResponse(id: secondUpsert))
-        await restart.value
+        let restartedUpsert = try await gatewayRequest(socket, method: "push.registration.upsert", after: sentBefore)
+        await socket.enqueue(registrationStatusResponse(id: restartedUpsert))
+        await restarted.value
         try await waitUntil { store.value?.grants[profile.id]?.acknowledgedRuntime == "machine-1:epoch-two" }
-        #expect(try await upsertRequests(socket) == [firstUpsert, secondUpsert])
+        #expect(try await upsertRequests(socket) == [firstUpsert, restartedUpsert])
+
+        // The relay rejected a delivery and the Gateway disabled the grant on
+        // this same runtime: only the advertised revision announces that, so the
+        // reconnect re-sends the registration and acts on the rotation answer
+        // instead of trusting the acknowledgement.
+        let sentAfterRestart = await socket.sentFrames().count
+        let resent = Task {
+            await coordinator.reconcile(
+                profile: profile, connected: true, gatewayRuntimeEpoch: "epoch-two",
+                pushRegistrationRevision: "grant-revision-two", client: client
+            )
+        }
+        let disabledUpsert = try await gatewayRequest(socket, method: "push.registration.upsert", after: sentAfterRestart)
+        await socket.enqueue(registrationStatusResponse(id: disabledUpsert, requiresGrantRotation: true))
+        await resent.value
+        try await waitUntil { store.value?.grants[profile.id] == nil }
+        #expect(try await upsertRequests(socket) == [firstUpsert, restartedUpsert, disabledUpsert])
+        #expect(coordinator.readiness == .pending)
+    }
+
+    @MainActor
+    @Test("a lost removal response leaves no acknowledgement that a removed grant is current")
+    func lostRemovalResponseDropsAcknowledgement() async throws {
+        var acknowledged = matchingGrant(profileID: profile.id, token: "01")
+        acknowledged.acknowledgedRuntime = "machine-1:epoch-one"
+        acknowledged.acknowledgedRegistrationRevision = "grant-revision-one"
+        let store = MemoryPushCredentialStore(initial: PushCredentialDocument(
+            appAttestKeyID: appAttestKey("key"), apnsToken: "01", grants: [profile.id: acknowledged]
+        ))
+        let coordinator = PushNotificationCoordinator(
+            credentials: store,
+            notifications: PushNotificationSystem(
+                authorization: { .denied },
+                requestAuthorization: { false },
+                registerForRemoteNotifications: {}
+            ),
+            appAttest: supportedAttest,
+            configuration: PushProductConfiguration(origin: URL(string: "https://push.example.test")!)
+        )
+        let (client, socket) = try await connectedGateway(for: profile)
+        defer { Task { await client.close() } }
+
+        let denial = Task {
+            await coordinator.reconcile(
+                profile: profile, connected: true, gatewayRuntimeEpoch: "epoch-one",
+                pushRegistrationRevision: "grant-revision-one", client: client
+            )
+        }
+        let removal = try await gatewayRequest(socket, method: "push.registration.remove", after: 1)
+        // The answer never arrives. The Gateway may already have removed the
+        // grant, so the acknowledgement is dropped before the request, and a
+        // later re-allowed permission must register again instead of trusting it.
+        #expect(store.value?.grants[profile.id]?.acknowledgedRuntime == nil)
+        #expect(store.value?.grants[profile.id]?.acknowledgedRegistrationRevision == nil)
+        #expect(store.value?.grants[profile.id]?.grantID == acknowledged.grantID)
+        await socket.enqueue(try JSONEncoder.gateway.encode(JSONValue.object([
+            "type": .string("response"),
+            "id": .string(removal),
+            "ok": .bool(false),
+            "error": .object(["code": .string("internal"), "message": .string("removal failed")]),
+        ])))
+        await denial.value
+        #expect(coordinator.readiness == .denied)
     }
 
     /// Every `push.registration.upsert` this connection sent, in order.
@@ -540,7 +618,7 @@ struct PushNotificationCoordinatorTests {
         ]))
     }
 
-    private func registrationStatusResponse(id: String) -> Data {
+    private func registrationStatusResponse(id: String, requiresGrantRotation: Bool = false) -> Data {
         try! JSONEncoder.gateway.encode(JSONValue.object([
             "type": .string("response"),
             "id": .string(id),
@@ -553,7 +631,7 @@ struct PushNotificationCoordinatorTests {
                 "pendingCount": .number(0),
                 "notifyWhenAskPresented": .bool(true),
                 "relayOrigin": .string("https://push.example.test"),
-                "requiresGrantRotation": .bool(false),
+                "requiresGrantRotation": .bool(requiresGrantRotation),
             ]),
         ]))
     }

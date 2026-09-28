@@ -409,13 +409,16 @@ struct GatewayHello: Decodable, Sendable {
     let sourceRevision: String?
     let buildFingerprint: String?
     let runtimeEpoch: String?
+    /// The advertised grant projection revision; absence means this Gateway
+    /// cannot say whether its stored grants changed, so the phone re-sends.
+    let pushRegistrationRevision: String?
     /// Diagnostic only, so its absence never fails the handshake.
     let connectionId: String?
 
     private enum CodingKeys: String, CodingKey {
         case type, gatewayVersion, piVersion, protocolVersion, minProtocolVersion,
              machineId, machineGroupID, machineName, capabilities, gatewayChannel,
-             sourceRevision, buildFingerprint, runtimeEpoch, connectionId
+             sourceRevision, buildFingerprint, runtimeEpoch, pushRegistrationRevision, connectionId
     }
 
     init(from decoder: Decoder) throws {
@@ -433,6 +436,7 @@ struct GatewayHello: Decodable, Sendable {
         sourceRevision = try values.decodeIfPresent(String.self, forKey: .sourceRevision)
         buildFingerprint = try values.decodeIfPresent(String.self, forKey: .buildFingerprint)
         runtimeEpoch = try values.decodeIfPresent(String.self, forKey: .runtimeEpoch)
+        pushRegistrationRevision = try values.decodeIfPresent(String.self, forKey: .pushRegistrationRevision)
         connectionId = try values.decodeIfPresent(String.self, forKey: .connectionId)
     }
 
@@ -449,7 +453,8 @@ struct GatewayHello: Decodable, Sendable {
             gatewayChannel: gatewayChannel,
             sourceRevision: sourceRevision,
             buildFingerprint: buildFingerprint,
-            runtimeEpoch: runtimeEpoch
+            runtimeEpoch: runtimeEpoch,
+            pushRegistrationRevision: pushRegistrationRevision
         )
     }
 }

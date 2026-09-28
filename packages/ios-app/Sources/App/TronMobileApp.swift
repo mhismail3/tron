@@ -238,6 +238,7 @@ struct TronMobileApp: App {
             profile: model.profiles.selected,
             connected: model.connectionState == .connected,
             gatewayRuntimeEpoch: model.gatewayInfo?.runtimeEpoch,
+            pushRegistrationRevision: model.gatewayInfo?.pushRegistrationRevision,
             client: model.client
         )
         model.pushNotificationReadiness = pushNotifications.readiness
