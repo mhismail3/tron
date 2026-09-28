@@ -105,6 +105,31 @@ struct GatewayClientTransportTests {
         }
     }
 
+    @Test("hello replaces the LAN endpoints and pin the profile will hold")
+    func helloCarriesLanAdvertisement() async throws {
+        let pin = Data(repeating: 7, count: 32).base64EncodedString()
+        let advertised = ScriptedGatewaySocket()
+        let advertisedClient = GatewayClient(socketFactory: ScriptedGatewaySocketFactory(socket: advertised).factory)
+        await advertised.enqueue(Data(#"{"type":"hello","gatewayVersion":"1","piVersion":"1","protocolVersion":6,"minProtocolVersion":6,"machineId":"machine","machineName":"Mac","gatewayChannel":"stable","capabilities":[],"lanEndpoints":[{"host":"192.168.1.24","port":9847},{"host":"bad/entry","port":9847}],"lanPin":"\#(pin)"}"#.utf8))
+
+        let identity = try await advertisedClient.connectForLifecycle(profile: profile, token: "token")
+        // One entry this phone cannot dial is dropped; the leg stays usable.
+        #expect(identity.info.lanEndpoints == [GatewayLanEndpoint(host: "192.168.1.24", port: 9_847)])
+        #expect(identity.info.lanPin == pin)
+        await advertisedClient.close()
+
+        // A Gateway that advertises no lane leaves the profile with no LAN leg
+        // rather than a stale one.
+        let silent = ScriptedGatewaySocket()
+        let silentClient = GatewayClient(socketFactory: ScriptedGatewaySocketFactory(socket: silent).factory)
+        await silent.enqueue(Data(#"{"type":"hello","gatewayVersion":"1","piVersion":"1","protocolVersion":6,"minProtocolVersion":6,"machineId":"machine","machineName":"Mac","gatewayChannel":"stable","capabilities":[]}"#.utf8))
+
+        let silentIdentity = try await silentClient.connectForLifecycle(profile: profile, token: "token")
+        #expect(silentIdentity.info.lanEndpoints.isEmpty)
+        #expect(silentIdentity.info.lanPin == nil)
+        await silentClient.close()
+    }
+
     @Test("always-on AppLog records repeated RPC completions at debug level")
     func appLogRecordsRPCs() async throws {
         let socket = ScriptedGatewaySocket()

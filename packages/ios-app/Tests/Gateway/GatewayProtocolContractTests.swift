@@ -38,6 +38,34 @@ struct GatewayProtocolContractTests {
                 + GatewayConnectionPolicy.helloDeadline.components.seconds))
     }
 
+    @Test("the LAN pin matches the certificate in the shared fixture both platforms assert against")
+    func lanPinMatchesSharedFixture() throws {
+        struct Fixture: Decodable {
+            let certificatePem: String
+            let pin: String
+        }
+        let fixtureURL = try #require(
+            ([Bundle.main] + Bundle.allBundles)
+                .compactMap { $0.url(forResource: "lan-endpoint-pin", withExtension: "json", subdirectory: "protocol-fixtures") }
+                .first
+        )
+        let fixture = try JSONDecoder().decode(Fixture.self, from: Data(contentsOf: fixtureURL))
+        let der = try #require(Self.certificateDER(fixture.certificatePem))
+        // The Gateway derives this same value from the same key
+        // (lan-endpoint.integration.test.ts): if either side changes the bytes
+        // it hashes, a paired phone would never admit the LAN leg.
+        #expect(GatewayLanPin.pin(forCertificateDER: der) == fixture.pin)
+        #expect(GatewayLanPin.admit(fixture.pin) == fixture.pin)
+        // A pin no certificate can match is dropped rather than stored.
+        #expect(GatewayLanPin.admit("not-a-pin") == nil)
+        #expect(GatewayLanPin.admit(Data(repeating: 1, count: 20).base64EncodedString()) == nil)
+    }
+
+    private static func certificateDER(_ pem: String) -> Data? {
+        let body = pem.split(separator: "\n").filter { !$0.hasPrefix("-----") }.joined()
+        return Data(base64Encoded: body)
+    }
+
     @Test("authoritative session snapshot decodes")
     func snapshotDecodes() throws {
         let data = Data(#"""
