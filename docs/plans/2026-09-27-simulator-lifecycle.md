@@ -893,3 +893,22 @@ Owning files: `scripts/ios-test-simulator.py`, `scripts/tron-ios-test`.
   directly; no live Gateway was touched.
 - Deviations: none. No live Gateway restart, rebuild, install or device action
   was performed; no probe was pointed at a real simulator or Gateway.
+
+### Note · 2026-09-28 · connection-scale-hardening T-3 worker (branch `hardening/t-3`)
+
+- Files changed here: `scripts/tron-ios-test` (the lease holder's command now
+  carries `--lane NAME`, and a command whose inherited lease is not its own
+  lane's lock is refused 74), `scripts/ios-test-lock.py` (exports
+  `TRON_IOS_TEST_LEASE_LOCK` beside the existing `TRON_IOS_TEST_LEASE_FD`),
+  `scripts/test-ios-test-infrastructure.py` (two `RunnerFixture` cases).
+- Why: `--lane NAME` was consumed while selecting the lane and not passed to the
+  re-executed command, so a named-lane command leased that lane and used the
+  default lane's simulator; runs therefore stopped serializing on one simulator
+  (three overlapping cross-worktree pairs in the results root, T-2/T-3 of the
+  connection and scale plan). Reproduced and re-proved at this branch before and
+  after the change; logs under
+  `~/.tron/workspace/files/hardening/t-3-evidence/`.
+- No behavioral change for the default lane, the profiler, the E2E harness or
+  `lanes`/`status`: all four spellings still resolve the same paths (the guard's
+  positive path is every existing `RunnerFixture` case, which now proves the
+  lease it inherits).
