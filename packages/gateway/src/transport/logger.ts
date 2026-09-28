@@ -30,6 +30,10 @@ export interface LogRecord {
   payloadVersion?: string;
   sessionId?: string;
   connectionId?: string;
+  /** The phone's hello correlation key (O-1): joins its records to this connection. */
+  peerClientId?: string;
+  peerAttemptId?: string;
+  peerEpoch?: string;
   commandId?: string;
   /** A named lifecycle step, such as a startup checkpoint. */
   step?: string;
@@ -48,6 +52,9 @@ export interface LogMetadata {
   source?: string;
   sessionId?: string;
   connectionId?: string;
+  peerClientId?: string;
+  peerAttemptId?: string;
+  peerEpoch?: string;
   commandId?: string;
   step?: string;
   requestID?: string;
@@ -155,6 +162,9 @@ function normalizedFields(value: LogMetadata & { error?: unknown }, errorIsDescr
     ...(typeof value.source === "string" ? { source: boundedMessage(value.source).slice(0, 64) } : {}),
     ...(typeof value.sessionId === "string" ? { sessionId: boundedDiagnosticID(value.sessionId) } : {}),
     ...(typeof value.connectionId === "string" ? { connectionId: boundedDiagnosticID(value.connectionId) } : {}),
+    ...(typeof value.peerClientId === "string" ? { peerClientId: boundedDiagnosticID(value.peerClientId) } : {}),
+    ...(typeof value.peerAttemptId === "string" ? { peerAttemptId: boundedDiagnosticID(value.peerAttemptId) } : {}),
+    ...(typeof value.peerEpoch === "string" ? { peerEpoch: boundedDiagnosticID(value.peerEpoch) } : {}),
     ...(typeof value.commandId === "string" ? { commandId: boundedDiagnosticID(value.commandId) } : {}),
     ...(typeof value.step === "string" ? { step: boundedDiagnosticID(value.step).slice(0, 64) } : {}),
     ...(typeof value.requestID === "string" ? { requestID: boundedDiagnosticID(value.requestID) } : {}),

@@ -371,6 +371,8 @@ struct GatewayEventDelivery: Sendable, Equatable {
 struct GatewayConnectionIdentity: Sendable, Equatable {
     let id: Int
     let info: GatewayInfo
+    /// The Gateway's key for this connection's records (O-1 correlation).
+    let gatewayConnectionID: String?
 }
 
 struct GatewayHello: Decodable, Sendable {
@@ -387,11 +389,13 @@ struct GatewayHello: Decodable, Sendable {
     let sourceRevision: String?
     let buildFingerprint: String?
     let runtimeEpoch: String?
+    /// Diagnostic only, so its absence never fails the handshake.
+    let connectionId: String?
 
     private enum CodingKeys: String, CodingKey {
         case type, gatewayVersion, piVersion, protocolVersion, minProtocolVersion,
              machineId, machineGroupID, machineName, capabilities, gatewayChannel,
-             sourceRevision, buildFingerprint, runtimeEpoch
+             sourceRevision, buildFingerprint, runtimeEpoch, connectionId
     }
 
     init(from decoder: Decoder) throws {
@@ -409,6 +413,7 @@ struct GatewayHello: Decodable, Sendable {
         sourceRevision = try values.decodeIfPresent(String.self, forKey: .sourceRevision)
         buildFingerprint = try values.decodeIfPresent(String.self, forKey: .buildFingerprint)
         runtimeEpoch = try values.decodeIfPresent(String.self, forKey: .runtimeEpoch)
+        connectionId = try values.decodeIfPresent(String.self, forKey: .connectionId)
     }
 
     var info: GatewayInfo {

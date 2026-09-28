@@ -928,6 +928,17 @@ be projected. Older gateways omit `machineGroupID`; clients fall back to
 never names or shares session files, credentials, or other canonical runtime
 data.
 
+The hello also carries the connection correlation key. The phone sends
+`diagnostics: { clientId, attemptId, epoch }`: its client's stable diagnostic
+owner ID, the reconnect loop ID or `"initial"`, and the connection epoch number
+as a decimal string. The Gateway keeps each value only if it is a token of at
+most 64 characters of `[A-Za-z0-9-]`. It drops an invalid or missing value and
+never rejects the hello for one. It stamps the kept values as `peerClientId`,
+`peerAttemptId` and `peerEpoch` on that connection's records
+([observability](docs/observability.md)). The hello response adds
+`connectionId`, and the phone logs it as `gatewayConnectionId`. Both halves are
+diagnostic only: a peer that omits them still connects.
+
 Requests use `{type,id,method,params}` and receive `{type,id,ok,result|error}`.
 Mutations require `params.commandId`; receipts deduplicate completed commands.
 After an uncertain disconnect, clients reconnect and poll `command.status`, reuse

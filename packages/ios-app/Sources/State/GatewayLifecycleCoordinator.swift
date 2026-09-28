@@ -1115,7 +1115,7 @@ final class GatewayLifecycleCoordinator {
                         self.connectionFailureClassifier.reset()
                         self.hasResolvedLaunchState = true
                         self.delegate?.lifecycleRecordDiagnostic(event: "reconnect.connected",
-                            message: "attempt=\(attemptGeneration) loop=\(loopID) retry=\(retry) connectionID=\(connection.id) handshakeMs=\(diagnosticMilliseconds(startedAt.duration(to: clock.now())))")
+                            message: "attempt=\(attemptGeneration) loop=\(loopID) retry=\(retry) connectionID=\(connection.id) gatewayConnectionId=\(connection.gatewayConnectionID ?? "unknown") handshakeMs=\(diagnosticMilliseconds(startedAt.duration(to: clock.now())))")
                         reconciliationAggregateAdmission = admission
                         self.delegate?.lifecycleBeginReconciliationAggregate(admission: admission)
                         self.delegate?.lifecycleInvalidateSessionConnectionOwnership()

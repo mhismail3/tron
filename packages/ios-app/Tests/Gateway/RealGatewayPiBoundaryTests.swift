@@ -108,6 +108,7 @@ final class RealGatewayPiBoundaryTests: XCTestCase {
         try await control("pass", port: port, token: proxyToken)
         let firstInfo = try await connecting.value
         XCTAssertEqual(firstInfo.piVersion, expectedPiVersion, "The iOS boundary must exercise the selected Pi runtime")
+        try await assertCorrelationKey(client: initialClient)
 
         // Drop real URLSession traffic without changing the host's network.
         // A received hello must not turn an unanswered read into safe replay.
@@ -582,6 +583,31 @@ final class RealGatewayPiBoundaryTests: XCTestCase {
         let opened = try await synchronizedOpen(client: client, sessionID: sessionID)
         try await closeSubscription(client: client, sessionID: sessionID, token: opened.subscriptionToken)
         return opened.session
+    }
+
+    /// The phone's hello key and the real Gateway's `connection.opened` record
+    /// name the same attempt, joined by the connection ID the hello returned.
+    private func assertCorrelationKey(client: GatewayClient) async throws {
+        let diagnostics = await client.diagnostics()
+        let handshake = try XCTUnwrap(diagnostics.first { $0.stage == .helloReceive && $0.outcome == .success })
+        let gatewayConnectionID = try XCTUnwrap(handshake.gatewayConnectionID)
+        let epoch = String(try XCTUnwrap(handshake.connectionID))
+        let logs = try await client.requestValue(
+            "system.logs", JSONValue.object(["limit": .number(1_000)]), timeout: .seconds(15)
+        )
+        let opened = try XCTUnwrap(logs.objectValue?["records"]?.arrayValue?.compactMap(\.objectValue).first {
+            $0["event"] == .string("connection.opened") && $0["connectionId"] == .string(gatewayConnectionID)
+        }, "the Gateway must record the connection its hello named")
+        XCTAssertEqual(opened["peerClientId"], .string(client.diagnosticOwnerID))
+        XCTAssertEqual(opened["peerAttemptId"], .string("initial"))
+        XCTAssertEqual(opened["peerEpoch"], .string(epoch))
+        let attachment = XCTAttachment(string: [
+            "phone clientId=\(client.diagnosticOwnerID) attemptId=\(handshake.attemptID ?? "initial") epoch=\(epoch) gatewayConnectionId=\(gatewayConnectionID)",
+            "gateway connection.opened connectionId=\(opened["connectionId"]?.stringValue ?? "-") peerClientId=\(opened["peerClientId"]?.stringValue ?? "-") peerAttemptId=\(opened["peerAttemptId"]?.stringValue ?? "-") peerEpoch=\(opened["peerEpoch"]?.stringValue ?? "-")",
+        ].joined(separator: "\n"))
+        attachment.name = "connection-correlation-key"
+        attachment.lifetime = .keepAlways
+        add(attachment)
     }
 
     /// The Agent Instructions sheet decodes the real Gateway projection: the

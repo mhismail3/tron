@@ -42,6 +42,8 @@ struct GatewayConnectionDiagnostic: Sendable {
     let clientID: String?
     let attemptID: String?
     let connectionID: Int?
+    /// The Gateway's `connectionId` from this epoch's hello, once received.
+    let gatewayConnectionID: String?
     let timestamp: String
     let profileID: String?
     let profileLabel: String?
@@ -86,6 +88,7 @@ struct GatewayConnectionDiagnostic: Sendable {
         clientID: String? = nil,
         attemptID: String? = nil,
         connectionID: Int? = nil,
+        gatewayConnectionID: String? = nil,
         timestamp: String,
         profileID: String?,
         profileLabel: String?,
@@ -128,6 +131,7 @@ struct GatewayConnectionDiagnostic: Sendable {
         self.clientID = clientID
         self.attemptID = attemptID
         self.connectionID = connectionID
+        self.gatewayConnectionID = gatewayConnectionID
         self.timestamp = timestamp
         self.profileID = profileID
         self.profileLabel = profileLabel

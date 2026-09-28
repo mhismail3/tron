@@ -512,7 +512,7 @@ rows are in priority order.
 | ID | Status | Scope | Depends on | Owner |
 | --- | --- | --- | --- | --- |
 | P-0 | Done | Fold the phone reconnect tuning plan into this plan (D-1) and close it through history; done on `main` at activation | none | |
-| O-1 | Claimed | Correlation key across phone and Gateway on every connection record | none | orchestrator-dispatched worker, 2026-09-28 |
+| O-1 | Done | Correlation key across phone and Gateway on every connection record | none | orchestrator-dispatched worker, 2026-09-28 |
 | O-6a | Claimed | Multi-session qualification scenario with a generated catalog; record the `main` baseline | none | orchestrator-dispatched worker, 2026-09-28 |
 | E-2 | Claimed | Bound the iOS profiler's memory or hand the row to the simulator-lifecycle plan | none | orchestrator-dispatched worker, 2026-09-28 |
 | O-2 | Ready | Gateway transport records: upgrade phases, inbound silence with Tailscale peer path | O-1 | |
@@ -1651,3 +1651,66 @@ the day cannot measure a synthetic case).
   coordination link now points here.
 - Evidence: `python3 scripts/check-documentation-policy.py` passes.
 - Changes: `plan(connection-scale-hardening): P-0 fold in phone reconnect tuning`.
+
+### O-1 · Done · 2026-09-28 · worker session (branch `hardening/o-1`)
+
+- Result: the phone's hello sends `diagnostics: { clientId, attemptId, epoch }`.
+  The Gateway keeps each valid token and stamps it as `peerClientId`,
+  `peerAttemptId` and `peerEpoch` on `connection.opened`, `connection.closed`,
+  `connection.heartbeat-timeout`, `connection.write-error`,
+  `connection.superseded` and `connection.outbound-capacity`. It returns
+  `connectionId` in its hello. The phone logs that value as
+  `gatewayConnectionId` on `reconnect.connected` and on every `gateway.connection`
+  record of that epoch.
+- Failure modes written before the tests. Gateway: a malformed diagnostics
+  object rejects the hello; an unsafe value reaches a record; a connection
+  record lacks the key; the hello's `connectionId` differs from the records'; a
+  superseded record carries the newcomer's key. Phone: the hello omits or
+  mis-populates the key; the Gateway ID is missing from the success record or a
+  later record of the epoch; a successor epoch inherits its predecessor's
+  Gateway ID; a hello without `connectionId` fails the handshake.
+- Evidence:
+  - The new Gateway tests failed first (5 failures) and then passed.
+    `npx vitest run src/transport/server-capacity.integration.test.ts src/transport/server-heartbeat.integration.test.ts src/transport/logger.test.ts`
+    passes 40/40. The neighbouring suites (http-admission, compression,
+    sync-protocol, revocation) pass 41/41, and `npm run build` is clean.
+  - `scripts/tron-ios-test run --only-testing TronMobileTests/GatewayClientTransportTests`
+    passes 49/49, including the new correlation test. AppModelReconnectTests,
+    GatewayDiagnosticsServiceTests and GatewayProtocolContractTests pass 66/66.
+  - Local fixture run: `scripts/ios-gateway-e2e-test run` passed 1/1 in 35 s.
+    RealGatewayPiBoundaryTests now reads `system.logs` from the real fixture
+    Gateway and asserts the join. The phone attempt and the Gateway's
+    `connection.opened` and `connection.closed` records share
+    `clientId`/`peerClientId` = `D5BF99B5-F90E-4DC9-A946-CC72370BE552`,
+    `attemptId`/`peerAttemptId` = `initial` and `epoch`/`peerEpoch` = `1`, joined
+    by `connectionId` = `43605766-d485-4f98-81e6-8696e86dab0d`. The xcresult
+    attachment `connection-correlation-key` holds these values. They are also
+    retained as `connection-correlation-key.txt` and `gateway-records.jsonl` in
+    the internal workspace under `files/hardening/o-1/`.
+- Changes: the O-1 commit on `hardening/o-1`.
+- Tasks added: none.
+- Kept on purpose:
+  - The phone's existing top-level hello `clientId`, a fresh UUID per hello
+    that the Gateway ignores, stays because the task says not to change other
+    hello fields. It is a candidate for deletion in the protocol-6 release.
+  - The phone decodes hello `connectionId` as optional, and the Gateway accepts
+    a hello without `diagnostics`. O-1 does not bump the protocol, so a
+    protocol-5 peer on either side must still connect. The key is diagnostic
+    only.
+- Deviations:
+  - `epoch` travels as a decimal string, so all three values follow the one
+    token rule.
+  - `connection.heartbeat-timeout` and `connection.superseded` now also carry
+    `connectionId` as a field. Before, it appeared only in the message, so these
+    records could not be joined by field.
+  - Carrying the fields needed edits outside the named owning files. The logger
+    (`logger.ts`) gained the three fields. On the phone, `GatewayProtocol.swift`,
+    `GatewayClientDiagnostics.swift` and `IOSClientDiagnostics.swift` changed,
+    and a one-line change in `GatewayLifecycleCoordinator.swift` (phone
+    lifecycle zone) adds the ID to `reconnect.connected`, as Do item 4 requires.
+    RealGatewayPiBoundaryTests gained the E2E join assertion.
+- For the next agent: O-2, O-4 and O-7 can key on
+  `connectionId` + `peer*` (Gateway) and `clientID`/`attemptID`/`connectionID` +
+  `gatewayConnectionId` (phone). The profiler driver
+  (`scripts/tron-profile-gateway-driver.mjs`, Profiler zone) does not send the
+  key yet.

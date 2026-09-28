@@ -642,6 +642,64 @@ struct GatewayClientTransportTests {
         }
     }
 
+    // Failure modes (O-1 correlation key): the hello omits or mis-populates
+    // `diagnostics`; the Gateway's connectionId is missing from the success
+    // record or from later records of the same epoch; a successor epoch
+    // inherits its predecessor's Gateway ID; a hello without connectionId
+    // fails the handshake.
+    @Test("hello carries the correlation key and connection records name the Gateway connection")
+    func helloCorrelationKey() async throws {
+        try await withTestWatchdog {
+            let suite = "TronCorrelation.\(UUID())"
+            defer { UserDefaults(suiteName: suite)?.removePersistentDomain(forName: suite) }
+            let store = IOSClientDiagnosticStore(defaults: try #require(UserDefaults(suiteName: suite)))
+            let first = ScriptedGatewaySocket()
+            let second = ScriptedGatewaySocket()
+            let client = GatewayClient(
+                socketFactory: ScriptedGatewaySocketFactory(sockets: [first, second]).factory,
+                diagnosticStore: store
+            )
+            do {
+                await first.enqueue(helloFrame(connectionID: "gateway-connection-1"))
+                let initial = try await client.connectForLifecycle(profile: profile, token: "token")
+                #expect(try await decodedValue(in: first, index: 0).objectValue?["diagnostics"] == .object([
+                    "clientId": .string(client.diagnosticOwnerID),
+                    "attemptId": .string("initial"),
+                    "epoch": .string(String(initial.id)),
+                ]))
+                #expect(initial.gatewayConnectionID == "gateway-connection-1")
+
+                // The key is diagnostic: a Gateway that omits it still admits.
+                await second.enqueue(helloFrame())
+                let replacement = try await client.reconnectForLifecycle(
+                    profile: profile, token: "token", attemptID: "fixture-attempt"
+                )
+                #expect(try await decodedValue(in: second, index: 0).objectValue?["diagnostics"] == .object([
+                    "clientId": .string(client.diagnosticOwnerID),
+                    "attemptId": .string("fixture-attempt"),
+                    "epoch": .string(String(replacement.id)),
+                ]))
+                #expect(replacement.gatewayConnectionID == nil)
+                await client.close()
+                await store.flush()
+
+                let records = await store.load()
+                    .filter { $0.record.event == "gateway.connection" }
+                    .map(\.record.message)
+                let initialRecords = records.filter { $0.contains("connectionID=\(initial.id) ") }
+                #expect(initialRecords.contains { $0.hasPrefix("stage=hello-receive outcome=success") })
+                #expect(initialRecords.contains { $0.hasPrefix("stage=transport ") })
+                #expect(initialRecords.allSatisfy { $0.contains("gatewayConnectionId=gateway-connection-1") })
+                let replacementRecords = records.filter { $0.contains("connectionID=\(replacement.id) ") }
+                #expect(replacementRecords.contains { $0.hasPrefix("stage=hello-receive outcome=success") })
+                #expect(replacementRecords.allSatisfy { !$0.contains("gatewayConnectionId=") })
+            } catch {
+                await client.close()
+                throw error
+            }
+        }
+    }
+
     @Test("handshake timeout closes before a cancellation-insensitive hello receive can finish")
     func stalledHelloReceiveClosesBeforeLateCallback() async throws {
         try await withTestWatchdog {
@@ -1613,8 +1671,9 @@ struct GatewayClientTransportTests {
         return try JSONDecoder.gateway.decode(JSONValue.self, from: frames[index])
     }
 
-    private func helloFrame() -> Data {
-        Data(#"{"type":"hello","gatewayVersion":"1.0.0","piVersion":"1.0.0","protocolVersion":5,"minProtocolVersion":5,"machineId":"machine","machineName":"Mac","gatewayChannel":"stable","capabilities":["sessions.v1"]}"#.utf8)
+    private func helloFrame(connectionID: String? = nil) -> Data {
+        let connection = connectionID.map { #","connectionId":"\#($0)""# } ?? ""
+        return Data(#"{"type":"hello","gatewayVersion":"1.0.0","piVersion":"1.0.0","protocolVersion":5,"minProtocolVersion":5,"machineId":"machine","machineName":"Mac","gatewayChannel":"stable","capabilities":["sessions.v1"]\#(connection)}"#.utf8)
     }
 
     private func responseFrame(id: String, result: JSONValue) -> Data {
