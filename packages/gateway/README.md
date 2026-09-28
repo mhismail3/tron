@@ -2306,7 +2306,7 @@ scripts/tron-profile gateway --list
 scripts/tron-profile gateway --self-test            # prove the recording path first
 scripts/tron-profile gateway --scenario stream-reply # or tool-loop, idle, dashboard-observer, all
 scripts/tron-profile gateway --scenario idle --window-seconds 60 --iterations 3 --no-build --cpu-profile
-scripts/tron-profile gateway --scenario multi-session # qualification run, 13-20 minutes
+scripts/tron-profile gateway --scenario multi-session # qualification run; wants an idle host
 ```
 
 Each scenario run builds the Gateway (`npm ci` only when the lockfile changed),
