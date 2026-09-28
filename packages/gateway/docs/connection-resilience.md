@@ -57,6 +57,10 @@ owner of accepted commands; mobile reconnect never replays a prompt blindly.
   proof at all and the epoch is still retired as `pong_timeout`. Dead-link
   detection stays within 18 seconds of the last inbound frame: no grid tick is
   later than 10 seconds after it and the deadline is 8 seconds after the tick.
+  An excused probe leaves a debug-level `liveness` record with
+  `outcome=excused` in the phone's connection log, so a run that shows no
+  `pong_timeout` retirement can still tell an excused probe from a probe that
+  never missed its deadline.
   `GatewayClientTransportTests` pins each case on a manual clock.
 - **Projection:** the wire ceiling remains 1 MiB, with a shared 32,768 JSON-value
   node ceiling for local and mobile clients. Transcript pages reserve 24,000

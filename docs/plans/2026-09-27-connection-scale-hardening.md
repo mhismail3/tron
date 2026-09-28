@@ -2,6 +2,7 @@
 
 - **Started:** 2026-09-27
 - **Status:** Active (Phase 1 runs on `hardening/integration`; that branch's copy of this plan is authoritative until R-1)
+- **Last updated:** 2026-09-28, C-4 (second review round addressed)
 - **Last updated:** 2026-09-28, O-6a blocked on a quiet-host repeat (second review response landed)
 
 - **Last updated:** 2026-09-28, O-4 (review round 4 addressed)
@@ -4457,16 +4458,19 @@ events; widen them to name the pool owner in the same change.
   use a cap low enough that one frame takes longer than one ping interval to
   arrive (the default 2 Mbit/s cap is too fast), and it must also show zero
   `connection.heartbeat-timeout` over a streaming window longer than 75 s: the
-  55 s real-harness run cannot cover that window, and the Gateway retires a socket
-  that stops answering on its own heartbeat.
-- Why a quiet phone is still safe, measured not assumed: the Gateway pings any
-  client that initiated nothing in the last `heartbeatIntervalMs` (25 s), so a
-  phone that only receives is pinged on every tick. A macOS `URLSession`
-  `WebSocketTask` client that sent one frame and nothing else answered 8 of 8
-  server pings from a local `ws` server (1 s interval), so that transport answers
-  a server ping at the WebSocket layer; the probe scripts were temporary
-  (`/tmp/c4-probe/`), so the claim is recorded here and in
-  `connection-resilience.md` rather than kept as a repo test.
+  55 s real-harness run cannot cover that window. That 75 s check is the uplink
+  proof, not a claim that the Gateway pings a quiet phone: the phone's own grid
+  pings have to reach the Gateway on the uplink for the Gateway's three-miss
+  heartbeat to spare the socket. The plan's original "a receive-only phone is
+  pinged on every tick" premise ended with the 2026-09-28 orchestrator decision
+  that C-4 keeps T1-NET's shared grid and pings from the phone, and
+  `connection-resilience.md` states the current behavior: a foreground phone
+  pings every 10 seconds, so the Gateway never pings it.
+- The excuse path leaves its own evidence for that run: an excused probe writes a
+  debug-level `liveness` record with `outcome=excused` in the phone's connection
+  ring (`packages/gateway/docs/observability.md`, `gateway.connection`), so a run
+  that shows zero `pong_timeout` retirements can still show the cap delayed a
+  pong and the link stayed up.
 - Changes: one commit on `hardening/c-4` on top of `hardening/integration`. The
   four commits the review saw (`2a6335059..fb67f3a3f`) were collapsed: two of them
   implemented the superseded quiet-window design, so keeping them would have left
@@ -4540,3 +4544,67 @@ events; widen them to name the pool owner in the same change.
   rebased branch, which prove O-2's inbound-silence behavior needs no edit.
 - Findings rejected: none; only the premise of the receive-only-phone finding no
   longer applies.
+
+### C-4 · Done · 2026-09-28 · orchestrator-dispatched deepseek-worker (review round 2 addressed, verdict approve)
+
+- The second review found no blockers and no majors: five minor findings and one
+  nit. All are fixed, with a negative control per behaviour fix.
+  - **Minor (the handoff stated the superseded design as current fact).** The
+    "Why a quiet phone is still safe" paragraph is deleted. The O-6b confirmation
+    keeps the zero `connection.heartbeat-timeout` check over a window longer than
+    75 s but justifies it as the uplink proof: the phone's own grid pings have to
+    reach the Gateway on the uplink for the three-miss heartbeat to spare the
+    socket. The entry records that the plan's "a receive-only phone is pinged on
+    every tick" premise ended with the orchestrator's 2026-09-28 decision.
+  - **Minor (`architecture.md` overstated when the socket is closed).** The
+    "deadline and cancellation retirement close the captured socket" sentence is
+    limited to the handshake. The liveness deadline instead waits for its
+    cancelled ping, which `GatewayPingCompletion.cancel` settles on its own
+    whatever CFNetwork does; the liveness `withTimeout` call site now carries
+    that reason as a comment.
+  - **Minor (the excuse path left the O-6b run no evidence).** An excused probe
+    now writes a debug-level `liveness` record with `outcome=excused`
+    (`reason=pingTimeout`, `durationMs=8000`) before returning the wait to the
+    grid. The level keeps the record in the process-local connection ring and out
+    of the incident store, so the bandwidth-cap run can show that a cap delayed a
+    pong while the link stayed up, not only that nothing retired. The
+    `gateway.connection` row in `packages/gateway/docs/observability.md` records
+    the outcome, and the "phone liveness" section of
+    `packages/gateway/docs/connection-resilience.md`, `architecture.md` and
+    `development.md` name the record beside "successful pings are not logged";
+    `inboundDataAnswersQueuedPong` and the late-wake case assert it.
+  - **Minor (the first final-form real-harness run failed unexplained) and minor
+    (O-6b still owed):** no source change; both stay with the orchestrator, as the
+    review asked. The signal from the finding above is what that run asserts on.
+  - **Nit (two stated behaviours were unprotected).** `lateClockWakeProbesOnce`
+    now wakes the probe 50 s late with a frame queued behind that probe, so the
+    late wait exercises the excuse path and pre-C-4 code fails it. The new
+    `pingFailureAfterInboundDataStillRetires` proves that only `pong_timeout` is
+    excused: a `disconnected` ping failure after inbound data still retires the
+    epoch. `ScriptedGatewaySocket.releasePing(throwing:)` fails a suspended probe
+    at a chosen instant, which is what makes that case reachable.
+- Evidence, all on the branch:
+  - `scripts/tron-ios-test run --only-testing TronMobileTests/GatewayClientTransportTests`
+    — 53 tests in 1 suite, 0 failures on the final form: `20260928T154414Z-run.qfjQTZ`,
+    `20260928T155433Z-run.QcVUWH` after the negative controls were reverted, then
+    two more on the committed revision, `20260928T160033Z-run.13mFm5` and
+    `20260928T160105Z-run.wNHx7v`.
+  - Adjacent owner suites `GatewayLogExportTests`, `GatewayDiagnosticsServiceTests`,
+    `AppModelReconnectTests`, `GatewayProtocolContractTests` — 91 tests in 4
+    suites, 0 failures, `20260928T155617Z-run.fRFIvl`.
+  - `npx vitest run src/transport/connection-policy.test.ts
+    src/transport/server-heartbeat.integration.test.ts` — 2 files, 11 tests
+    passed. `python3 scripts/check-documentation-policy.py` and
+    `scripts/personal-info-guard.sh` pass.
+- Negative controls (source reverted, tests kept; each bundle names the exact
+  failing assertion):
+  - The excuse branch removed (pre-C-4 behavior) makes
+    `inboundDataAnswersQueuedPong`, `silenceAfterDataRetiresWithinBound` and the
+    late-wake case fail with the 5 s watchdog (`20260928T154644Z-run.4SCqPO`).
+  - Only the excused record removed, the excuse kept, fails
+    `inboundDataAnswersQueuedPong` on `liveness.count == 1` and the late-wake case
+    on the same count (`20260928T154832Z-run.iI73YT`, 6 issues in 2 tests).
+  - Only the `failure.code == "pong_timeout"` test dropped makes
+    `pingFailureAfterInboundDataStillRetires` fail with the watchdog: an excusable
+    shape that must still retire (`20260928T155245Z-run.4qliCk`).
+- Findings rejected: none.

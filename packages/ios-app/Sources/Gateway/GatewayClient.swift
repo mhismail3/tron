@@ -1647,6 +1647,11 @@ actor GatewayClient {
                     details: nil
                 )
                 do {
+                    // No onTimeout close here: the handshake close is what
+                    // releases an unanswered socket. A cancelled ping is
+                    // settled at once by `GatewayPingCompletion.cancel`, so
+                    // this deadline can wait for the cancelled probe instead of
+                    // closing a socket the verdict may keep.
                     try await GatewayClient.withTimeout(
                         clock: clock,
                         duration: GatewayConnectionPolicy.clientPongDeadline,
@@ -1687,6 +1692,17 @@ actor GatewayClient {
         let failure = Self.transportFailure(error)
         if failure.code == "pong_timeout", let epoch = connection, epoch.id == epochID,
            let lastInboundAt = epoch.lastInboundAt, lastInboundAt > probeSentAt {
+            // The epoch stays and the next grid tick re-arms the wait, so this
+            // probe leaves a debug record: a run that shows zero `pong_timeout`
+            // retirements alone cannot tell an excused probe from a cap that
+            // never delayed a pong (C-4's O-6b check).
+            recordDiagnostic(
+                stage: .liveness,
+                outcome: .excused,
+                startedAt: probeSentAt,
+                reason: .pingTimeout,
+                connectionID: epochID
+            )
             return false
         }
         guard ownsEpoch(epochID) else { return true }

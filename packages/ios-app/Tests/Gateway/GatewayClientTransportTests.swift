@@ -1028,11 +1028,17 @@ struct GatewayClientTransportTests {
                 clock.advance(by: .seconds(3))
 
                 // The deadline passed in data, not in silence, so the epoch
-                // survives and waits for the next shared grid tick.
+                // survives and waits for the next shared grid tick. The probe
+                // leaves one debug record so a run that sees no `pong_timeout`
+                // retirement can still tell the excuse path ran.
                 try await clock.waitUntilSleeping(count: 1, duration: .seconds(2))
                 #expect(await client.activeConnectionID() == connectionID)
                 #expect(await socket.pingInvocationCount() == 1)
-                #expect(!(await client.diagnostics()).contains { $0.stage == .liveness })
+                let liveness = await client.diagnostics().filter { $0.stage == .liveness }
+                #expect(liveness.count == 1)
+                #expect(liveness.first?.outcome == .excused)
+                #expect(liveness.first?.reason == .pingTimeout)
+                #expect(liveness.first?.durationMilliseconds == 8_000)
 
                 clock.advance(by: .seconds(2))
                 try await socket.waitUntilPingInvoked(count: 2)
@@ -1656,16 +1662,63 @@ struct GatewayClientTransportTests {
         }
     }
 
-    @Test("a late clock wake probes once and returns to the shared grid")
-    func lateClockWakeProbesOnce() async throws {
+    @Test("a genuine ping failure after inbound data still retires the epoch")
+    func pingFailureAfterInboundDataStillRetires() async throws {
         try await withTestWatchdog {
             let clock = ManualClock()
-            let socket = ScriptedGatewaySocket()
+            let socket = ScriptedGatewaySocket(suspendsPing: true)
             let client = GatewayClient(socketFactory: ScriptedGatewaySocketFactory(socket: socket).factory, clock: clock.clock)
             do {
                 await socket.enqueue(helloFrame())
                 _ = try await client.connect(profile: profile, token: "synthetic-token")
                 let connectionID = try #require(await client.activeConnectionID())
+                var events = client.events.makeAsyncIterator()
+                try await clock.waitUntilSleeping(count: 1, duration: GatewayConnectionPolicy.clientPingInterval)
+                clock.advance(by: GatewayConnectionPolicy.clientPingInterval)
+                try await socket.waitUntilPingInvoked(count: 1)
+                // The probe's own deadline must be registered before the clock
+                // moves, or the frame below lands before the probe exists.
+                try await clock.waitUntilSleeping(count: 1, duration: GatewayConnectionPolicy.clientPongDeadline)
+
+                // A frame arrives after the probe was sent, which is exactly
+                // the shape an excused deadline leaves behind. This probe then
+                // fails on the send path itself, so only `pong_timeout` may be
+                // excused and the epoch has to retire.
+                clock.advance(by: .seconds(3))
+                await socket.enqueue(eventFrame(topic: "session.summary", payload: .object([:])))
+                #expect(await events.next()?.event.topic == "session.summary")
+                await socket.releasePing(throwing: GatewayFailure(
+                    code: "disconnected", message: "ping failed", retryable: true, details: nil
+                ))
+
+                try await socket.waitUntilClosed()
+                #expect(await client.activeConnectionID() == nil)
+                let diagnostics = await client.diagnostics()
+                let probe = try #require(diagnostics.first { $0.stage == .liveness })
+                #expect(probe.outcome == .failure)
+                #expect(probe.reason == .transport)
+                #expect(!diagnostics.contains { $0.stage == .liveness && $0.outcome == .excused })
+                let retirement = try #require(diagnostics.first { $0.stage == .transport && $0.connectionID == connectionID })
+                #expect(retirement.reason == .transport)
+                await client.close()
+            } catch {
+                await client.close()
+                throw error
+            }
+        }
+    }
+
+    @Test("a late clock wake excuses a probe the frame answered and returns to the shared grid")
+    func lateClockWakeProbesOnce() async throws {
+        try await withTestWatchdog {
+            let clock = ManualClock()
+            let socket = ScriptedGatewaySocket(suspendsPing: true)
+            let client = GatewayClient(socketFactory: ScriptedGatewaySocketFactory(socket: socket).factory, clock: clock.clock)
+            do {
+                await socket.enqueue(helloFrame())
+                _ = try await client.connect(profile: profile, token: "synthetic-token")
+                let connectionID = try #require(await client.activeConnectionID())
+                var events = client.events.makeAsyncIterator()
                 try await clock.waitUntilSleeping(count: 1, duration: GatewayConnectionPolicy.clientPingInterval)
 
                 // A suspension wakes the sleep 50 s late. That wakeup owes one
@@ -1673,12 +1726,30 @@ struct GatewayClientTransportTests {
                 // per missed interval.
                 clock.advance(by: .seconds(60))
                 try await socket.waitUntilPingInvoked(count: 1)
-                try await clock.waitUntilSleeping(count: 1, duration: GatewayConnectionPolicy.clientPingInterval)
+                // The probe's own deadline must be registered before the clock
+                // moves, or the frame below lands before the probe exists.
+                try await clock.waitUntilSleeping(count: 1, duration: GatewayConnectionPolicy.clientPongDeadline)
+
+                // The probe's pong is queued behind a frame still arriving at
+                // the deadline, so the late wake excuses the probe instead of
+                // retiring a link that is carrying data.
+                clock.advance(by: .seconds(3))
+                await socket.enqueue(eventFrame(topic: "session.summary", payload: .object([:])))
+                #expect(await events.next()?.event.topic == "session.summary")
+                clock.advance(by: .seconds(5))
+
+                try await clock.waitUntilSleeping(count: 1, duration: .seconds(2))
                 #expect(await socket.pingInvocationCount() == 1)
                 #expect(await client.activeConnectionID() == connectionID)
-                #expect(await client.info?.machineId == "machine")
-                clock.advance(by: GatewayConnectionPolicy.clientPingInterval)
+                let liveness = await client.diagnostics().filter { $0.stage == .liveness }
+                #expect(liveness.count == 1)
+                #expect(liveness.first?.outcome == .excused)
+
+                // The next probe is the next grid tick (70 s), and the wait
+                // stops owing probes for the intervals the suspension skipped.
+                clock.advance(by: .seconds(2))
                 try await socket.waitUntilPingInvoked(count: 2)
+                #expect(await client.info?.machineId == "machine")
                 await client.close()
             } catch {
                 await client.close()
