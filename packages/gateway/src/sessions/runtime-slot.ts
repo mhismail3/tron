@@ -60,6 +60,7 @@ import type {
   ResourceInvocation,
 } from "../protocol/types.js";
 import { AsyncMutex } from "../util/async-mutex.js";
+import { stage } from "../transport/request-span.js";
 import type { TrustService } from "../admin/trust-service.js";
 import type { BlobStore } from "./blob-store.js";
 import {
@@ -3036,6 +3037,12 @@ export class RuntimeSlot {
 
   /** Join live settlement and reconcile bounded canonical evidence before open. */
   async reconcileAttention(): Promise<void> {
+    // Marker evidence and any pending settlement are disk work on the open path;
+    // the request span names them instead of leaving them unaccounted.
+    return stage("attention.reconcile", () => this.reconcileAttentionBody());
+  }
+
+  private async reconcileAttentionBody(): Promise<void> {
     if (this.attentionBarrier) {
       try {
         await this.attentionBarrier;
@@ -5725,6 +5732,12 @@ export class RuntimeSlot {
   }
 
   snapshot(sequence = this.eventSequence): SessionSnapshot {
+    return stage("snapshot.build", () => this.buildSnapshot(sequence));
+  }
+
+  /** The snapshot body. `snapshot` attributes it to the request that asked for
+   * it; a state change with no request measures it where it publishes. */
+  private buildSnapshot(sequence: number): SessionSnapshot {
     this.assertNoTrustReload();
     const session = this.runtime.session;
     this.ensureAgentProjection();

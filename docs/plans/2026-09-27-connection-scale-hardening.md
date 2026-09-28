@@ -518,7 +518,7 @@ rows are in priority order.
 | E-2b | Done | Record `time-profiler` with `xctrace record --attach <pid>` if a real traced run proves it samples the simulator app; re-measure export and parser peaks (see E-2 handoff) | E-2 | orchestrator-dispatched deepseek-worker, 2026-09-28 |
 | E-2c | Ready | Bound the `time-profiler` export under 2 GB for `--scenario all` (see E-2b handoff: simulator-device recording, or a size refusal plus shorter windows) | E-2b | |
 | O-2 | Ready | Gateway transport records: upgrade phases, inbound silence with Tailscale peer path | O-1 | |
-| O-3 | Claimed | Request span: one `rpc.completed` per slow RPC with every stage, wait and count | O-1 | orchestrator-dispatched deepseek-worker, 2026-09-28 |
+| O-3 | Done | Request span: one `rpc.completed` per slow RPC with every stage, wait and count | O-1 | orchestrator-dispatched deepseek-worker, 2026-09-28 |
 | O-4 | Claimed | Phone connection records that survive an export, stall watchdog, exact scene records | O-1 | orchestrator-dispatched deepseek-worker, 2026-09-28 |
 | O-6b | Ready | Impairment in the qualification scenario: blackhole, bandwidth cap, Gateway restart | O-6a | |
 | O-5 | Ready | Gateway resource sampler and event-loop histogram | O-3 | |
@@ -1851,3 +1851,186 @@ the day cannot measure a synthetic case).
   retained evidence folder renamed the Python `simattach.sh` to `simattach.py`,
   added the host positive-control probe (`e2b-probe.py`), and describes
   `verdict.py`.
+||||||| 71fa1765f
+
+### O-3 · Done · 2026-09-28 · worker session (branch `hardening/o-3`)
+
+- Result: one request span per admitted RPC (`packages/gateway/src/transport/request-span.ts`,
+  `AsyncLocalStorage`, `stage`/`wait`/`count`/`bytes`). `rpc.completed` carries
+  `stages` — one compact string, most expensive entry first, e.g.
+  `session.open.manager=434ms;session.open.runtime=48ms;snapshot.build=18ms×2;
+  catalog.walk=16ms×2;frame.serialize=36ms/572KB;catalog.walk.files=×6` — plus
+  `unaccountedMs`, the wall time no named entry covered. `GatewayLogger`
+  normalizes both fields (`LogMetadata`, `LogRecord`, `normalizedFields`) and
+  bounds `stages` at 1 KiB, so the breakdown reaches the JSONL line and the
+  restored persisted tail, not just a test double. Measured stages: the
+  registry's `timedStage` wrappers (now the span's `stage`), `catalog.walk` with
+  a walked-file count, `catalog.reconcile` with a row count, `SessionManager.open`
+  (`session.open.manager`), `RuntimeSlot.create` (`session.open.runtime`),
+  `snapshot.build`, `response.encode`, and `frame.serialize` with bytes. Measured
+  waits: the registry's four lanes report their queue wait (`registry.mutex`,
+  `registry.catalog-mutex`, `registry.attention-lane`, `registry.display-lane`).
+  `session.stage` and `session.open.prepared` are deleted with their rows;
+  `SLOW_SESSION_STAGE_MS`, `SLOW_SESSION_OPEN_WARNING_MS` and the registry's
+  `stageTiming` option went with them, but the two handled failures that only
+  that record surfaced keep their own warning records: `runtime.dispose-timeout`
+  and `catalog-index.failure`.
+- Failure modes written before the isolated tests
+  (`packages/gateway/src/transport/request-span.test.ts`,
+  `packages/gateway/src/util/async-mutex.test.ts`): (1) a wrapped stage never
+  records, so the slow stage is missing and `unaccountedMs` stays as large as the
+  stage; (2) nested stages are counted twice, so the entries claim more time than
+  the request took and `unaccountedMs` reads 0 while the request was unmeasured;
+  (3) a lock wait is charged the work it admits, so the wait inflates and hides
+  the real stage; (4) records arriving after `breakdown` move a published
+  breakdown; (5) counts and bytes are dropped from the compact string; (6) two
+  requests share one span and stages land on the wrong one; (7) wrapping a
+  synchronous owner makes it asynchronous; (8) two stages started concurrently
+  are nested into each other through a stack shared by the span, so the
+  later-started one is charged the earlier one's time; (9) a queued `AsyncMutex`
+  operation observes the holder's async context instead of its caller's. Every
+  one of these was reproduced against the pre-change code: swapping the old
+  `request-span.ts` back makes 8 and 9 fail, and removing the two `normalizedFields`
+  entries makes the integration case below fail.
+- Evidence:
+  - `npx vitest run src/transport/request-span.test.ts` passes 9/9;
+    `src/util/async-mutex.test.ts` passes 3/3; `src/transport/logger.test.ts`
+    passes 13/13; `src/sessions/catalog-metadata-index.test.ts` passes 17/17.
+  - `npx vitest run src/transport/request-span.integration.test.ts` passes 1/1
+    (three cold opens of generated 105 MB canonical JSONL each through a real
+    `GatewayServer` + `GatewayService` + `RuntimeRegistry` + `GatewayLogger`).
+    Retained at `packages/gateway/test-results/request-span.integration.json`,
+    written by the test itself like the other integration cases; the two runs
+    before the second review kept their report at the worker's older
+    `~/.tron/workspace/files/hardening/o-3/` path and gave accounted shares
+    0.965 / 0.9823 / 0.9828 and 0.9858 / 0.9926 / 0.9932, medians 0.9823 and
+    0.9926, `stages` 146–191 bytes and a whole record 595–640 bytes; the
+    review-response run gave 0.9681 / 0.9758 / 0.9808, median 0.9758, `stages`
+    189 bytes and a whole record 638 bytes. The case asserts the bar on the
+    median of three repeats and
+    asserts no per-open ratio (a parallel run of six suites stalled one open's
+    measured interval and moved a single-open dominance ratio below its bar,
+    which is why the per-open numbers stay in the report instead); the failures
+    it previously hid (a missing breakdown) now fail it. The remaining "Done
+    when" number, the slowest `session.open` in the qualification workload, is
+    measured by the orchestrator after O-6a merges, from the persisted JSONL
+    line; this case is the interim evidence for the 95% accounting, accepted as
+    such by the orchestrator's review decision of the second review.
+  - The same run persists a failed `session.open` (unknown session ID) as
+    `stages` + `unaccountedMs` on the JSONL line, 512 bytes, which is the
+    writer-path proof the previous revision lacked.
+  - `npx vitest run src/sessions/runtime-registry.integration.test.ts` passes
+    243/243 in 56 s (the changed `catalog.metadata-materialize` hook test now
+    spies on `sharedCatalogSessionInfos`; the dispose-timeout case drives the
+    registry's own `runtimeDisposeTimeout` option; the review-response case
+    below contends two spans on the registry's own `registry.mutex` lane).
+    `src/extensions/owner-attribution.test.ts`,
+    `semantic-ui-broker`, `delegated-provider`, `knowledge/connectors`,
+    `browser-live-loader`, `runtime-registry-notification-read` pass 106/106;
+    `command-receipts`, `session-attention-store`, `run-markers`,
+    `invocation-receipts`, `sync-protocol` pass 48/48; `server-capacity`,
+    `server-compression`, `server-live-view`, `rpc-idle-admission`,
+    `server-frame` pass 47/47; `diagnostic-export`, `catalog-discovery`,
+    `session-sync`, `session-archive-store` pass 26/26. `npm run build` is clean.
+  - Volume: a slow or failed `rpc.completed` grows by the `stages` string plus
+    `unaccountedMs` (146–191 + 20 bytes measured on the real line). Fast
+    successes stay debug (memory-only), so the added persisted volume is (slow +
+    failed completions) × about 200 bytes; 1,000 such records a day is 200 KB
+    against the 1 MB budget. V-1 measures it.
+- Changes: the O-3 commit and the review-response commits on `hardening/o-3`
+  (`fix(gateway): persist the request span breakdown and fix its attribution (O-3)`
+  and `fix(gateway): count catalog walks once and make the span tests catch their
+  guards (O-3)`).
+- Tasks added: none.
+- Kept on purpose: `catalog.walk` is recorded where the walk is created, and a
+  caller that joins another caller's shared walk records `catalog.walk-join` as
+  a wait, because waiting for that walk is this request's cost but not a walk
+  this request performed; without the separate name the count of `catalog.walk`
+  would include joins, and a join would be counted against the walk it joined.
+  The registry's lane subclass only measures the wait now; `AsyncMutex` itself
+  preserves the calling async context.
+- Known loss: the `startup.*` stage timings (`startup.attention.initialize`,
+  `startup.archive.initialize`, `startup.recent-model.initialize`,
+  `startup.run-marker.read`, `startup.catalog.evidence`,
+  `startup.attention.reconcile`, `startup.run-marker.interrupted`) went with
+  `timedStage` and nothing replaced them, since they run outside any request.
+  Only the coarse `gateway.startup-phase` transitions remain; recovering those
+  timings needs a startup span, which no row owns today.
+- Deviations:
+  - The plan's API is `wait(name, fn)`; the implementation is
+    `wait(name, fn)` where `fn` receives an `acquired` callback, because a lock
+    hands over inside its own operation and only that operation can report the
+    handover. `stage` also accepts a synchronous operation so `RuntimeSlot.snapshot`
+    keeps its signature. Both are documented in `request-span.ts`.
+  - Two stages are measured that the task's Do list does not name:
+    `response.encode` (`safeJson` over the whole snapshot in
+    `gateway-service.ts`) and `attention.reconcile` (marker evidence and
+    settlement in `runtime-slot.ts`). Both are on the `session.open` path and were
+    added because the measured unaccounted remainder landed in them.
+  - "Outbound enqueue wait" has no await to measure: `OrderedOutboundQueue.enqueue`
+    is synchronous and returns a boolean on overflow, so the response send path is
+    covered by `frame.serialize` (+ bytes). The wait appears when G-4's coalescing
+    queue adds one.
+  - Scope widened with the orchestrator's approval to files outside O-3's owning
+    list: `packages/gateway/src/util/async-mutex.ts` (the queued-operation
+    async-context fix, root cause of finding 2) and
+    `packages/gateway/src/sessions/catalog-metadata-index.ts` (the failure-only
+    reporting hook). No mutex user was found to depend on the old leaking
+    behaviour: every focused test listed above passes unchanged.
+  - `unaccountedMs` cannot stay meaningful when two stages genuinely overlap
+    (concurrent background work started inside one request): their entries add up
+    to more than the request took and `unaccountedMs` reads its floor of zero.
+    Nesting now follows the async context, so a stage is only charged its own
+    parent; the docstring says so.
+- Withdrawn: none.
+- For the next agent: O-6a's scenario is not committed on `hardening/o-6a`
+  (its `scripts/tron-profile-gateway` work is uncommitted), so the qualification
+  measurement is still owed; the orchestrator owns it after O-6a merges: run the
+  multi-session scenario and record the slowest `session.open`'s
+  `stages`/`unaccountedMs` there, from the persisted JSONL line rather than the
+  debug buffer. The span API is the seam for
+  G-1c (delete a walk → delete its `catalog.walk`), G-3 (snapshot build without
+  an audience) and C-6 (a cancelled read's span ends at cancellation, so a
+  cancelled open will report a short `durationMs` with the stages it reached).
+- Review response: the row and this heading moved from Done to Claimed (finding
+  3) because the O-6a measurement is still owed. `stages`/`unaccountedMs` are now
+  normalized and persisted by `GatewayLogger`, bounded at 1 KiB with their `=`,
+  `;`, `×` and `/` separators intact (finding 1). `AsyncMutex.run` captures
+  `AsyncLocalStorage.snapshot()` at call time, so a queued operation runs in its
+  caller's context for every mutex, not only the four registry lanes (finding 2).
+  `runtime.dispose-timeout` and `catalog-index.failure` are dedicated warning
+  records with rows and tests that drive the real failure paths, and the
+  test-only hooks are gone (finding 4). Nesting follows the async context, with a
+  concurrent-sibling failure-mode test (finding 5). The integration case uses a
+  real `GatewayLogger` and a stable artifact path (finding 6); the unit tests pin
+  the clock instead of asserting sleep ratios (finding 7); sub-millisecond and
+  zero-byte entries are dropped and totals stay fractional until formatting
+  (finding 9); the new `as never` casts are gone (finding 10). The removal of the
+  `startup.*` stage timings is stated as a known loss (finding 8).
+- Review response (second review): the orchestrator decided finding 1, so this
+  row and heading are Done again and the O-6a measurement of the slowest
+  `session.open` is the orchestrator's, run after O-6a merges (see "For the next
+  agent"); the in-repo integration case is accepted as the interim 95%
+  accounting evidence. The report is written to
+  `packages/gateway/test-results/request-span.integration.json` like the other
+  integration cases and `TRON_O3_SPAN_REPORT` is gone (finding 2). Each open's
+  record is selected by its `requestID`, not by position (finding 3). The
+  late-record case now holds a continuation inside the span's async context and
+  releases it after `breakdown()`, so it exercises the `finished` guard: with
+  the guard removed the republished breakdown reads
+  `late.stage=7ms;session.open.catalog=5ms;catalog.walk.files=×2;frame.serialize=×0/4KB`
+  and the case fails, and it passes again with the guard restored (finding 4,
+  negative control). The registry suite gained one focused case where two spans
+  contend on the registry's own `registry.mutex` lane under `runInRequestSpan`:
+  the queued request's breakdown is exactly
+  `registry.mutex=50ms;waiter.work=5ms`, it covers the holder's hold, and its
+  admitted work lands on its own span (finding 5). A caller that joins another
+  caller's catalog walk now records `catalog.walk-join` as a wait, so
+  `catalog.walk` counts walks performed and a join is not counted against the
+  walk it joined (finding 6). Plan task IDs are gone from code comments, with
+  the reasons kept (finding 7). `catalog-index.failure` (finding 8): its message,
+  its `observability.md` row and the failure type's
+  docstring all say the affected rows are rebuilt from canonical files.
+  Drive-by: the `sharedCatalogSessionInfos` spy cast added by this
+  task named `CatalogSessionInfo` without importing it (never caught, since test
+  files are outside the build); the type is imported now.

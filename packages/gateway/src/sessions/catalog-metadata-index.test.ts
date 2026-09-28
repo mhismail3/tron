@@ -1,4 +1,4 @@
-import { appendFile, mkdtemp, readdir, readFile, rename, truncate, writeFile } from "node:fs/promises";
+import { appendFile, chmod, mkdtemp, readdir, readFile, rename, symlink, truncate, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import {
@@ -373,11 +373,34 @@ describe("CatalogMetadataIndex", () => {
     const row = await index.entryFromSummary(summary(f.path));
     expect(row).toBeDefined();
     await rename(f.path, `${f.path}.real`);
-    await (await import("node:fs/promises")).symlink(`${f.path}.real`, f.path);
+    await symlink(`${f.path}.real`, f.path);
     expect(await index.entryFromSummary(summary(f.path))).toBeUndefined();
     const blocked = join(f.root, "blocked");
     await writeFile(blocked, "file");
     const failing = new CatalogMetadataIndex(join(blocked, "gateway"));
     await expect(failing.save(f.catalog, [])).rejects.toBeDefined();
+  });
+
+  // The index write is fire-and-forget outside any request span, so these
+  // handled failures have no breakdown to ride on.
+  it("reports save, append and rebuild failures to its owner", async () => {
+    const f = await fixture();
+    const failures: Array<{ stage: string; durationMs: number }> = [];
+    const index = new CatalogMetadataIndex(f.gateway, (stage, durationMs) => { failures.push({ stage, durationMs }); });
+    const row = (await index.entryFromSummary(summary(f.path)))!;
+    expect(row).toBeDefined();
+
+    // A document over the index byte bound keeps the canonical scan instead.
+    expect(await index.save(f.catalog, [{ ...row, firstMessage: "x".repeat(CATALOG_METADATA_INDEX_MAX_BYTES) }])).toBe(false);
+
+    // A canonical file that cannot be read back for its appended metadata, then
+    // for a rebuild either.
+    await chmod(f.path, 0o000);
+    expect(await index.append(row)).toBeUndefined();
+    expect(await index.entryFromSummary(summary(f.path))).toBeUndefined();
+    await chmod(f.path, 0o600);
+
+    expect(failures.map((failure) => failure.stage)).toEqual(["save", "append", "rebuild"]);
+    expect(failures.every((failure) => Number.isFinite(failure.durationMs) && failure.durationMs >= 0)).toBe(true);
   });
 });

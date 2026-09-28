@@ -1,4 +1,5 @@
 import { abortableRead } from "../util/abortable-read.js";
+import { stage } from "./request-span.js";
 import { join } from "node:path";
 import { performance } from "node:perf_hooks";
 import type { AuthType } from "@earendil-works/pi-ai";
@@ -103,8 +104,6 @@ function projectKnowledgeObjectChunk(value: unknown): JsonValue {
 
 const thinkingLevels = ["off", "minimal", "low", "medium", "high", "xhigh", "max"] as const;
 const PROVIDER_CATALOG_MAX_ITEMS = 1_000;
-/** A session open slower than this is visible to the user as a stalled chat. */
-const SLOW_SESSION_OPEN_WARNING_MS = 1_000;
 const PROVIDER_CATALOG_MAX_STRING_BYTES = 4 * 1_048_576;
 const PROVIDER_CATALOG_MAX_FIELD_CHARACTERS = 100_000;
 
@@ -992,34 +991,30 @@ export class GatewayService {
       }
       case "session.open": {
         const sessionId = string(params.sessionId, "sessionId", { max: 200 });
-        const startedAt = performance.now();
         const slot = await this.dependencies.sessions.acquire(sessionId);
         // Join the exact canonical completion barrier before snapshotting. The
         // response and completionRevision therefore describe one admitted cut.
         await slot.reconcileAttention();
-        const acquiredAt = performance.now();
         // Acquire can overlap a canonical fork rekey. From this synchronous
         // boundary onward, use the slot's admitted identity for subscription,
         // snapshot, and attention so one response cannot mix parent and child.
         const canonicalSessionId = slot.id;
         const syncToken = client.beginSynchronization(canonicalSessionId);
+        // The request span measures acquire, the snapshot build and the response
+        // serialization; a slow open needs no record of its own.
         const snapshot = slot.snapshot();
         if (snapshot.sessionId !== canonicalSessionId) {
           throw new GatewayError("conflict", "Session identity changed while opening", true);
         }
         client.establishSynchronization(canonicalSessionId, snapshot);
-        const completedAt = performance.now();
-        this.dependencies.logger.log(
-          completedAt - startedAt >= SLOW_SESSION_OPEN_WARNING_MS ? "warning" : "info",
-          `Session open prepared in ${Math.max(0, Math.round(completedAt - startedAt))}ms (acquire ${Math.max(0, Math.round(acquiredAt - startedAt))}ms, snapshot ${Math.max(0, Math.round(completedAt - acquiredAt))}ms)`,
-          { event: "session.open.prepared", source: "sessions", sessionId: canonicalSessionId, durationMs: completedAt - startedAt },
-        );
-        return safeJson({
+        // Sanitizing the response is real request work over the whole snapshot;
+        // the span names it instead of leaving it in `unaccountedMs`.
+        return stage("response.encode", () => safeJson({
           session: snapshot,
           syncToken,
           subscriptionToken: syncToken,
           completionRevision: this.dependencies.sessions.attentionProjection(canonicalSessionId).completionRevision,
-        });
+        }));
       }
       case "session.presentation.set": {
         const sessionId = string(params.sessionId, "sessionId", { max: 200 });

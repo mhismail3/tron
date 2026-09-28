@@ -97,8 +97,6 @@ process.env.PI_CODING_AGENT ??= "true";
 process.env.AI_AGENT ??= "pi";
 process.env.PI_SKIP_VERSION_CHECK ??= "1";
 
-/** Session stages under this bound are debug detail; slower ones warn. */
-const SLOW_SESSION_STAGE_MS = 1_000;
 const logger = new GatewayLogger(join(config.tronHome, "logs", "gateway.jsonl"), {
   runtimeEpoch: process.env.TRON_GATEWAY_RUNTIME_EPOCH,
   payloadVersion: process.env.TRON_GATEWAY_PAYLOAD_VERSION,
@@ -238,17 +236,18 @@ const sessions = new RuntimeRegistry({
     `Extension lifecycle artifact rejected (${reason}; owner ${owner})`,
     { event: "extension.artifact-rejected", source: "sessions" },
   ),
-  stageTiming: (stage, durationMs, outcome, metadata) => {
-    const context = [
-      metadata?.workID ? `workID=${metadata.workID}` : undefined,
-      metadata?.scope ? `scope=${metadata.scope}` : undefined,
-    ].filter(Boolean).join(" ");
-    logger.log(
-      durationMs >= SLOW_SESSION_STAGE_MS || outcome === "failure" ? "warning" : "debug",
-      `Session stage ${stage} completed in ${durationMs}ms (${outcome})${context ? ` ${context}` : ""}`,
-      { event: "session.stage", source: "sessions" },
-    );
-  },
+  // Both of these are handled background failures outside any request span, so
+  // they keep their own warning record.
+  catalogIndexFailure: (stage, durationMs) => logger.log(
+    "warning",
+    `Catalog metadata index ${stage} failed; the affected rows are rebuilt from canonical files`,
+    { event: "catalog-index.failure", source: "sessions", step: stage, durationMs },
+  ),
+  runtimeDisposeTimeout: (graceMs) => logger.log(
+    "warning",
+    `Extension runtime shutdown overran its ${graceMs}ms disposal grace and was forced`,
+    { event: "runtime.dispose-timeout", source: "sessions", durationMs: graceMs },
+  ),
 });
 const developmentHelperOverride = process.env.NODE_ENV === "development" ? process.env.TRON_SEARCH_EMBEDDING_HELPER : undefined;
 const bundledSearchHelper = process.env.TRON_GATEWAY_SEARCH_EMBEDDING_HELPER;

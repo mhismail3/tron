@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { AsyncLocalStorage } from "node:async_hooks";
 import { AsyncMutex } from "./async-mutex.js";
 import { abortableRead } from "./abortable-read.js";
 
@@ -59,5 +60,25 @@ describe("AsyncMutex ownership", () => {
       expect(writeStarted).toBe(true);
       expect(cancelledReadsExecuted).toBe(0);
     } finally { finish.release(); await underlying; }
+  });
+
+  it("runs a queued operation in its own caller's async context, not the holder's", async () => {
+    const mutex = new AsyncMutex();
+    const store = new AsyncLocalStorage<string>();
+    const entered = gate(), finish = gate();
+    const seen: string[] = [];
+    // The lock releases inside the holder's async context, so without a captured
+    // snapshot the queued caller inherits it and reads the holder's owner,
+    // invocation and request span.
+    const holder = store.run("holder", () => mutex.run(async () => {
+      entered.release();
+      await finish.promise;
+      seen.push(`holder:${store.getStore()}`);
+    }));
+    await entered.promise;
+    const queued = store.run("queued", () => mutex.run(() => { seen.push(`queued:${store.getStore()}`); }));
+    finish.release();
+    await Promise.all([holder, queued]);
+    expect(seen).toEqual(["holder:holder", "queued:queued"]);
   });
 });

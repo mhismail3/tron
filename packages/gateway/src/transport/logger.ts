@@ -44,6 +44,10 @@ export interface LogRecord {
   code?: string;
   reason?: string;
   durationMs?: number;
+  /** The request span's compact stage breakdown, one bounded string. */
+  stages?: string;
+  /** The part of `durationMs` no named stage accounted for. */
+  unaccountedMs?: number;
   error?: LogError;
 }
 
@@ -63,6 +67,10 @@ export interface LogMetadata {
   code?: string;
   reason?: string;
   durationMs?: number;
+  /** `name=12ms×2/610KB;name=5ms`; the writer bounds it. */
+  stages?: string;
+  /** The part of `durationMs` the stage breakdown did not cover. */
+  unaccountedMs?: number;
   /** Any thrown value; the writer bounds and redacts it. */
   error?: unknown;
 }
@@ -81,6 +89,11 @@ const DEBUG_BUFFER_MAX_BYTES = 2 * 1_024 * 1_024;
 const SEGMENT_MAX_BYTES = 5 * 1_024 * 1_024;
 const SEGMENT_COUNT = 8;
 const MAX_MESSAGE_BYTES = 2_000;
+/** A stage breakdown is read as one line beside the record it explains; past
+ * this it stops naming stages rather than crowding the other fields. Wide
+ * enough for a cold open's ~260-byte breakdown with room for a nested catalog
+ * walk. */
+const MAX_STAGES_BYTES = 1_024;
 const MAX_ERROR_MESSAGE_BYTES = 1_000;
 const MAX_STACK_BYTES = 4_000;
 const MAX_FIELD_CHARS = 160;
@@ -109,6 +122,12 @@ export function boundedMessage(value: string): string {
 
 function boundedDiagnosticID(value: string): string {
   return value.replace(/[^A-Za-z0-9._:-]/gu, "_").slice(0, MAX_FIELD_CHARS);
+}
+
+/** The stage breakdown keeps its `=`, `;`, `×` and `/` separators, so it is
+ * bounded by bytes and redacted like a message, not diagnostic-ID-escaped. */
+function boundedStages(value: string): string {
+  return boundedBytes(redact(value), MAX_STAGES_BYTES);
 }
 
 // Payload and home prefixes are shortened before the standard redaction, which
@@ -174,6 +193,10 @@ function normalizedFields(value: LogMetadata & { error?: unknown }, errorIsDescr
     ...(typeof value.code === "string" ? { code: boundedMessage(value.code).slice(0, 64) } : {}),
     ...(typeof value.durationMs === "number" && Number.isFinite(value.durationMs)
       ? { durationMs: Math.max(0, Math.min(Number.MAX_SAFE_INTEGER, Math.round(value.durationMs))) }
+      : {}),
+    ...(typeof value.stages === "string" ? { stages: boundedStages(value.stages) } : {}),
+    ...(typeof value.unaccountedMs === "number" && Number.isFinite(value.unaccountedMs)
+      ? { unaccountedMs: Math.max(0, Math.min(Number.MAX_SAFE_INTEGER, Math.round(value.unaccountedMs))) }
       : {}),
     ...(error ? { error } : {}),
   };

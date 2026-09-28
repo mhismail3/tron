@@ -22,7 +22,8 @@ import type { AutomationRecord, AutomationRun } from "../automations/types.js";
 import type { NotificationService } from "../notifications/notification-service.js";
 import type { ExtensionRunActivity, ExtensionToolOrigin, SessionSummaryUpdate } from "../protocol/types.js";
 import { GatewayWorkRegistry, type GatewayWorkHandle } from "./gateway-work-registry.js";
-import { CatalogDiscovery, DEFAULT_CATALOG_DISCOVERY_LIMITS } from "./catalog-discovery.js";
+import { RequestSpan, runInRequestSpan, stage } from "../transport/request-span.js";
+import { CatalogDiscovery, DEFAULT_CATALOG_DISCOVERY_LIMITS, type CatalogSessionInfo } from "./catalog-discovery.js";
 import { CatalogMetadataIndex } from "./catalog-metadata-index.js";
 import { INVOCATION_RECEIPT_TYPE, makeInvocationReceipt } from "./invocation-receipts.js";
 import { EXTENSION_ACTIVITY_RECEIPT_TYPE, MAX_EXTENSION_HISTORY_BYTES, type ExtensionActivityReceipt } from "./extension-activity-history.js";
@@ -62,14 +63,10 @@ describe.sequential("RuntimeRegistry with the pinned agent runtime", () => {
     workRegistry?: GatewayWorkRegistry;
     phaseObserver?: (phase: "catalog-warming" | "attention-recovery") => void;
     sessionListChanged?: () => void;
+    catalogIndexFailure?: (stage: "save" | "rebuild" | "append", durationMs: number) => void;
+    runtimeDisposeTimeout?: (graceMs: number) => void;
     beforeInitialize?: (sessionFile: string) => Promise<void>;
     notifications?: NotificationService;
-    stageTiming?: (
-      stage: string,
-      durationMs: number,
-      outcome: "success" | "failure",
-      metadata?: { workID?: string; scope?: "user" | "all" },
-    ) => void;
   } = {}) {
     const root = await mkdtemp(join(tmpdir(), `tron-cold-acquire-${label}-`));
     const agentDir = join(root, "agent");
@@ -98,7 +95,8 @@ describe.sequential("RuntimeRegistry with the pinned agent runtime", () => {
       sessionSummaryChanged: (summary) => summaries.push(summary),
       sessionListChanged: options.sessionListChanged ?? (() => {}),
       ...(options.notifications ? { notifications: options.notifications } : {}),
-      stageTiming: options.stageTiming,
+      ...(options.catalogIndexFailure ? { catalogIndexFailure: options.catalogIndexFailure } : {}),
+      ...(options.runtimeDisposeTimeout ? { runtimeDisposeTimeout: options.runtimeDisposeTimeout } : {}),
     });
     registries.push(registry);
     if (options.beforeInitialize) await options.beforeInitialize(manager.getSessionFile()!);
@@ -198,6 +196,50 @@ describe.sequential("RuntimeRegistry with the pinned agent runtime", () => {
       phaseObserver: (phase) => phases.push(phase),
     });
     expect(phases).toEqual(["catalog-warming", "attention-recovery"]);
+  });
+
+  it("charges a queued request for the registry lane wait and keeps its admitted work on its own span", async () => {
+    const fixture = await coldFixture("span-lane-contention");
+    let now = 0;
+    const clock = vi.spyOn(nodePerformance, "now").mockImplementation(() => now);
+    try {
+      const lane = (fixture.registry as unknown as {
+        mutex: { run<T>(operation: () => Promise<T> | T): Promise<T> };
+      }).mutex;
+      const holder = new RequestSpan();
+      const waiter = new RequestSpan();
+      let entered!: () => void;
+      const admitted = new Promise<void>((resolve) => { entered = resolve; });
+      let release!: () => void;
+      const held = new Promise<void>((resolve) => { release = resolve; });
+      const holding = runInRequestSpan(holder, () => lane.run(async () => {
+        entered();
+        await held;
+        await stage("holder.work", () => { now += 10; return Promise.resolve(); });
+      }));
+      await admitted;
+      // Queued behind the holder: its own span has to carry both the wait for
+      // the lane and the work the lane then admits within its async context.
+      const waiting = runInRequestSpan(waiter, () => lane.run(async () => {
+        await stage("waiter.work", () => { now += 5; return Promise.resolve(); });
+      }));
+      now += 40;
+      release();
+      await Promise.all([holding, waiting]);
+
+      // The wait covers the holder's 40 ms hold plus the 10 ms of work it did
+      // before releasing; the holder was admitted immediately, so 0 ms is
+      // dropped rather than named.
+      expect(holder.breakdown(50)!.stages).toBe("holder.work=10ms");
+      const queued = waiter.breakdown(55)!;
+      expect(queued.stages).toBe("registry.mutex=50ms;waiter.work=5ms");
+      expect(queued.unaccountedMs).toBe(0);
+    } finally {
+      clock.mockRestore();
+      await fixture.registry.dispose();
+      registries.splice(registries.indexOf(fixture.registry), 1);
+      await rm(fixture.root, { recursive: true, force: true });
+    }
   });
 
   it("owns one exact live session for a workspace Automation operation", async () => {
@@ -2358,17 +2400,23 @@ describe.sequential("RuntimeRegistry with the pinned agent runtime", () => {
     const children: SessionManager[] = [];
     let mutateDuringDiscovery = false;
     let mutationCount = 0;
-    const stageRecords: Array<{ stage: string; workID?: string; scope?: "user" | "all" }> = [];
-    const fixture = await coldFixture("user-catalog-child-churn", {
-      stageTiming: (stage, _durationMs, _outcome, metadata) => {
-        stageRecords.push({ stage, workID: metadata?.workID, scope: metadata?.scope });
-        if (mutateDuringDiscovery && stage === "catalog.metadata-materialize") {
-          mutationCount += 1;
-          for (const child of children) {
-            child.appendMessage(fauxAssistantMessage("child registration update"));
-          }
+    const fixture = await coldFixture("user-catalog-child-churn");
+    // The metadata pass is the point the invariant cares about: a child write
+    // that lands between the metadata cut and the post-read evidence cut must
+    // not lose the stable user cut.
+    const internals = fixture.registry as unknown as {
+      sharedCatalogSessionInfos: (scope?: "user" | "all", refresh?: boolean) => Promise<CatalogSessionInfo[]>;
+    };
+    const materialize = internals.sharedCatalogSessionInfos.bind(fixture.registry);
+    vi.spyOn(internals, "sharedCatalogSessionInfos").mockImplementation(async (scope, refresh) => {
+      const infos = await materialize(scope, refresh);
+      if (mutateDuringDiscovery) {
+        mutationCount += 1;
+        for (const child of children) {
+          child.appendMessage(fauxAssistantMessage("child registration update"));
         }
-      },
+      }
+      return infos;
     });
     const first = await fixture.registry.catalog("user");
     const parentFile = fixture.manager.getSessionFile()!;
@@ -2394,13 +2442,6 @@ describe.sequential("RuntimeRegistry with the pinned agent runtime", () => {
       expect(userCut.sessions.map((session) => session.id)).toEqual(
         first.sessions.map((session) => session.id),
       );
-      const catalogStages = stageRecords.filter((record) => record.stage.startsWith("catalog."));
-      expect(catalogStages.length).toBeGreaterThan(0);
-      const workIDs = new Set(catalogStages.map((record) => record.workID));
-      expect(workIDs.size).toBeGreaterThan(0);
-      expect([...workIDs].every((workID) => workID !== undefined)).toBe(true);
-      expect(catalogStages.every((record) => record.scope === "user")).toBe(true);
-
     } finally {
       mutateDuringDiscovery = false;
     }
@@ -10787,17 +10828,17 @@ export default function (pi) {
   });
 
   it("force-invalidates an extension runtime whose idle-eviction shutdown never settles", async () => {
-    const { manager, registry } = await coldFixture("idle-eviction-shutdown-timeout");
+    // The registry's own option, so the test drives the production failure path;
+    // a throwing recorder must not become another disposal barrier.
+    const timedOut = vi.fn(() => { throw new Error("instrumentation failed"); });
+    const { manager, registry } = await coldFixture("idle-eviction-shutdown-timeout", { runtimeDisposeTimeout: timedOut });
     const sessionId = manager.getSessionId();
     const slot = await registry.acquire(sessionId);
     vi.spyOn(slot, "touchedAt", "get").mockReturnValue(0);
 
     const internals = slot as unknown as {
       runtime: { dispose: () => Promise<void>; session: { dispose: () => void } };
-      dependencies: { runtimeDisposalTimedOut?: (graceMs: number) => void };
     };
-    const timedOut = vi.fn(() => { throw new Error("instrumentation failed"); });
-    internals.dependencies.runtimeDisposalTimedOut = timedOut;
     const gracefulDispose = vi.spyOn(internals.runtime, "dispose")
       .mockImplementation(() => new Promise<void>(() => {}));
     const forceDispose = vi.spyOn(internals.runtime.session, "dispose");

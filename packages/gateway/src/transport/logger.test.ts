@@ -42,6 +42,32 @@ describe("GatewayLogger", () => {
     expect(new GatewayLogger(path).recent(1)[0]).toMatchObject({ runtimeEpoch: "epoch-1", commandId: "command_1" });
   });
 
+  it("keeps the request span breakdown beside the request it explains", () => {
+    const path = logPath();
+    const logger = new GatewayLogger(path);
+    const long = `${"catalog.walk=1234ms×2;".repeat(60)}frame.serialize=12ms/610KB`;
+    logger.log("warning", "RPC session.open completed", {
+      event: "rpc.completed", method: "session.open", durationMs: 1_500, stages: long, unaccountedMs: 12.4 });
+    logger.log("warning", "RPC session.open completed", {
+      event: "rpc.completed", method: "session.open", durationMs: 1_500,
+      stages: "frame.serialize=12ms/610KB", unaccountedMs: -5 });
+
+    const [truncated, separators] = lines(path) as Array<Record<string, unknown>>;
+    // Bounded by bytes with its `=`, `;`, `×` and `/` separators intact, not
+    // escaped into a diagnostic ID or cut at the 160-character field bound.
+    expect(Buffer.byteLength(truncated!.stages as string, "utf8")).toBeLessThanOrEqual(1_024);
+    expect(truncated!.stages).toMatch(/^catalog\.walk=1234ms×2;/u);
+    expect(truncated!.stages).not.toContain("frame.serialize");
+    expect(truncated!.unaccountedMs).toBe(12);
+    expect(separators!.stages).toBe("frame.serialize=12ms/610KB");
+    expect(separators!.unaccountedMs).toBe(0);
+    // The restored persisted tail keeps both fields, since it is the same
+    // normalization.
+    const restored = new GatewayLogger(path).recent(2)[0]!;
+    expect(restored.stages).toMatch(/^catalog\.walk=1234ms×2;/u);
+    expect(restored.unaccountedMs).toBe(12);
+  });
+
   it.each([["1", false], ["0", true]])("mirrors persisted records to process streams only when TRON_GATEWAY_SUPERVISED is %s", (supervised, mirrors) => {
     vi.stubEnv("TRON_GATEWAY_SUPERVISED", supervised);
     const path = logPath();

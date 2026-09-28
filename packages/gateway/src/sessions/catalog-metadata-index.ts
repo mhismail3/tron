@@ -99,9 +99,12 @@ export interface CatalogMetadataIndexSummary {
   messageCount: number;
 }
 
-interface CatalogMetadataIndexDiagnostics {
-  (stage: "load" | "discard" | "rebuild" | "append" | "save", durationMs: number, outcome: "success" | "failure"): void;
-}
+/** A handled index-write failure. The affected rows are left to be rebuilt from
+ * canonical files, so nothing else records it; the index write is
+ * fire-and-forget outside any request span, which is why its owner reports it. */
+export type CatalogMetadataIndexFailureStage = "save" | "rebuild" | "append";
+export type CatalogMetadataIndexFailure =
+  (stage: CatalogMetadataIndexFailureStage, durationMs: number) => void;
 
 interface CatalogMetadataIndexDocument {
   version: typeof CATALOG_METADATA_INDEX_VERSION;
@@ -127,13 +130,13 @@ function validCreationOrigin(value: unknown): value is SessionCreationOrigin {
 /** Gateway-owned acceleration only. This never stores transcript content. */
 export class CatalogMetadataIndex {
   readonly path: string;
-  private readonly diagnostics: CatalogMetadataIndexDiagnostics | undefined;
+  private readonly onFailure: CatalogMetadataIndexFailure | undefined;
   private readonly writeMutex = new AsyncMutex();
   private closed = false;
 
-  constructor(private readonly gatewayStateRoot: string, diagnostics?: CatalogMetadataIndexDiagnostics) {
+  constructor(private readonly gatewayStateRoot: string, onFailure?: CatalogMetadataIndexFailure) {
     this.path = join(gatewayStateRoot, "catalog-metadata-v2.json");
-    this.diagnostics = diagnostics;
+    this.onFailure = onFailure;
   }
 
   /** Its caller persists this index fire-and-forget (a catalog read must not
@@ -153,7 +156,7 @@ export class CatalogMetadataIndex {
       if (this.closed) return false;
       const started = Date.now();
     if (rows.length > CATALOG_METADATA_INDEX_MAX_ENTRIES) {
-      this.note("save", started, "failure");
+      this.failed("save", started);
       return false;
     }
     const document: CatalogMetadataIndexDocument = {
@@ -163,7 +166,7 @@ export class CatalogMetadataIndex {
     };
     const encoded = JSON.stringify(document);
     if (Buffer.byteLength(encoded) > CATALOG_METADATA_INDEX_MAX_BYTES) {
-      this.note("save", started, "failure");
+      this.failed("save", started);
       return false;
     }
     await mkdir(this.gatewayStateRoot, { recursive: true });
@@ -178,10 +181,9 @@ export class CatalogMetadataIndex {
       await rename(temporary, this.path);
       const directory = await open(dirname(this.path), "r");
       try { await directory.sync(); } finally { await directory.close(); }
-      this.note("save", started, "success");
       return true;
     } catch (error) {
-      this.note("save", started, "failure");
+      this.failed("save", started);
       throw error;
     } finally { await rm(temporary, { force: true }).catch(() => {}); }
     });
@@ -192,10 +194,8 @@ export class CatalogMetadataIndex {
     candidates: readonly { path: string; id: string; cwd: string; fileIdentity: string; size: number; mtimeMs: number }[],
     rebuild: (candidate: { path: string; id: string; cwd: string; fileIdentity: string; size: number; mtimeMs: number }) => Promise<CatalogMetadataIndexSummary | undefined>,
   ): Promise<CatalogMetadataIndexRow[] | undefined> {
-    const started = Date.now();
     const document = await this.readDocument(catalogRoot);
     if (!document) {
-      this.note("discard", started, "success");
       return undefined;
     }
     const prior = new Map(document.rows.map((row) => [resolve(row.path), row]));
@@ -206,7 +206,6 @@ export class CatalogMetadataIndex {
     // parallelism; each candidate still performs the same identity and
     // stability checks before its row is admitted.
     const rows: CatalogMetadataIndexRow[] = [];
-    let rebuiltAny = false;
     for (let start = 0; start < candidates.length; start += RECONCILE_CONCURRENCY) {
       const batch = candidates.slice(start, start + RECONCILE_CONCURRENCY);
       const results = await Promise.all(batch.map(async (candidate) => {
@@ -228,13 +227,10 @@ export class CatalogMetadataIndex {
         const result = results[index];
         if (!result) return undefined;
         rows.push(result);
-        const candidate = batch[index]!;
-        if (!prior.has(resolve(candidate.path)) || result !== prior.get(resolve(candidate.path))) rebuiltAny = true;
       }
     }
     // The candidate set is the exact structural evidence cut. Dropped rows
     // therefore represent removed canonical paths, never stale index entries.
-    this.note(rebuiltAny ? "rebuild" : "load", started, "success");
     return rows;
   }
 
@@ -285,10 +281,9 @@ export class CatalogMetadataIndex {
       next.mtimeMs = after.mtimeMs;
       next.eofOffset = after.size;
       next.tailBoundaryHash = await this.tailBoundaryHandle(handle, after.size);
-      this.note("append", started, "success");
       return next;
     } catch {
-      this.note("append", started, "failure");
+      this.failed("append", started);
       return undefined;
     } finally { await handle?.close().catch(() => {}); }
   }
@@ -328,7 +323,7 @@ export class CatalogMetadataIndex {
         tailBoundaryHash: await this.tailBoundaryHandle(handle, after.size),
       };
     } catch {
-      this.note("rebuild", started, "failure");
+      this.failed("rebuild", started);
       return undefined;
     } finally { await handle?.close().catch(() => {}); }
   }
@@ -462,7 +457,7 @@ export class CatalogMetadataIndex {
       && validString(value.tailBoundaryHash, 128);
   }
 
-  private note(stage: Parameters<NonNullable<CatalogMetadataIndexDiagnostics>>[0], started: number, outcome: "success" | "failure"): void {
-    this.diagnostics?.(stage, Math.max(0, Date.now() - started), outcome);
+  private failed(stage: CatalogMetadataIndexFailureStage, started: number): void {
+    this.onFailure?.(stage, Math.max(0, Date.now() - started));
   }
 }
