@@ -1,7 +1,7 @@
 import { existsSync } from "node:fs";
-import { mkdir, mkdtemp, readFile, realpath, rm, stat, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, realpath, rename, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { dirname, join } from "node:path";
+import { dirname, join, relative } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   CatalogDiscovery,
@@ -11,10 +11,16 @@ import {
 } from "./catalog-discovery.js";
 import { CatalogMetadataIndex, type CatalogMetadataIndexSummary } from "./catalog-metadata-index.js";
 import {
+  CATALOG_EVENT_DEBOUNCE_MS,
   SessionCatalog,
+  type SessionCatalogChange,
   type SessionCatalogOptions,
   type SessionCatalogReconcileOutcome,
   type SessionCatalogSource,
+  type SessionCatalogWatcherReset,
+  type SessionCatalogWatcherResetReason,
+  type SessionCatalogWatchHandle,
+  type SessionCatalogWatchRequest,
 } from "./session-catalog.js";
 
 // Failure modes this file covers, written before the owner existed:
@@ -37,6 +43,28 @@ import {
 // 8. Shutdown during a startup reconcile with a durable document present: the
 //    owner must stop the pass within one batch instead of waiting for every
 //    candidate to be verified, appended or parsed.
+//
+// G-1b's folder watcher and periodic reconciliation. Its failure modes, written
+// before the watcher existed:
+// 9. An event the platform never delivered (coalesced, dropped, or reported
+//    while the watcher was restarting): the next periodic pass must publish the
+//    row from the folder's own cut.
+// 10. A file replaced with a new inode at the same path: the row's identity and
+//     counts must be re-derived from the replacement, not advanced from the old
+//     tail.
+// 11. A child transcript that arrives before its parent: it is one row on its
+//     own, classified as delegated by its path, and the parent arriving later
+//     does not double it.
+// 12. The root moved or unavailable: the owner records one outage, keeps
+//     serving the last good index and watches the folder once it exists again.
+// 13. A burst of 1,000 events: one debounced read per path, no catalog walk,
+//     and no timer left armed.
+// 14. A watcher that was observing and stopped: one `catalog.watcher-reset`,
+//     a replacement watcher and a whole-folder reconciliation.
+// 15. An event the platform could not name: the whole index is re-derived once,
+//     because the hint covers the folder rather than one file.
+// 16. An event for a path discovery would ignore (`subagent-artifacts`) or for
+//     a file that is not a transcript: no row and no read.
 
 const roots: string[] = [];
 
@@ -141,6 +169,54 @@ async function fixture(extra: Partial<SessionCatalogOptions> = {}) {
     catalog,
     indexPath: join(state, "catalog-metadata-v2.json"),
   };
+}
+
+/** Wait for a condition the watcher's own timers produce. The watcher fires
+ * outside the owner's lane, so `settled()` alone cannot observe it. */
+async function waitFor(check: () => boolean, timeoutMs: number): Promise<void> {
+  const deadline = Date.now() + timeoutMs;
+  while (!check() && Date.now() <= deadline) {
+    await new Promise((resolve) => setTimeout(resolve, 10));
+  }
+  expect(check(), "condition was not met in time").toBe(true);
+}
+
+/** The debounce timers the owner has armed; every one of them is its own. */
+function watcherTimers(catalog: SessionCatalog): Map<string, NodeJS.Timeout> {
+  return (catalog as unknown as { eventTimers: Map<string, NodeJS.Timeout> }).eventTimers;
+}
+
+/** A folder watcher a test drives by hand: it delivers exactly the events the
+ * test chose, so an event the platform would have dropped, a start failure and a
+ * watcher that stops observing can each be reproduced. Every case that needs the
+ * real backend uses the production watcher. */
+interface ManualWatch {
+  backend: (request: SessionCatalogWatchRequest) => SessionCatalogWatchHandle;
+  requests: SessionCatalogWatchRequest[];
+  closed: boolean[];
+  fail: boolean;
+  emit(filename: string | null): void;
+  reset(reason: SessionCatalogWatcherResetReason): void;
+}
+
+function manualWatch(): ManualWatch {
+  const requests: SessionCatalogWatchRequest[] = [];
+  const closed: boolean[] = [];
+  const watch: ManualWatch = {
+    fail: false,
+    requests,
+    closed,
+    backend: (request) => {
+      if (watch.fail) throw new Error("catalog folder is unavailable");
+      requests.push(request);
+      const index = requests.length - 1;
+      closed[index] = false;
+      return { close: () => { closed[index] = true; } };
+    },
+    emit: (filename) => requests.at(-1)?.onEvent(filename),
+    reset: (reason) => requests.at(-1)?.onReset(reason),
+  };
+  return watch;
 }
 
 describe("SessionCatalog", () => {
@@ -423,5 +499,247 @@ describe("SessionCatalog", () => {
     await catalog.settled();
     const appended = (await stat(written)).size;
     expect(catalog.row(written)).toMatchObject({ messageCount: 2, eofOffset: appended, size: appended });
+  });
+
+  it("advances a row for an external append within a second without walking the catalog", async () => {
+    // No interval backstop: only the watcher can publish this append.
+    const { sessions, catalog, source } = await fixture({ reconcileIntervalMs: 0 });
+    const child = join(sessions, "parent", "producer", "run-1", "session.jsonl");
+    await writeSession(join(sessions, "parent.jsonl"), "id-parent", sessions, ["parent prompt"]);
+    await writeSession(child, "id-child", sessions, ["child prompt"]);
+    catalog.start();
+    await catalog.settled();
+    expect(catalog.row(child)?.delegated).toBe(true);
+
+    const walks = vi.spyOn(source, "scan");
+    const appendedAt = Date.now();
+    await appendMessage(child, "an external writer appended", 1);
+    await waitFor(() => catalog.row(child)?.messageCount === 2, 5_000);
+    const observedInMs = Date.now() - appendedAt;
+
+    // The Done-when bound: an external append reaches its row within one second.
+    expect(observedInMs).toBeLessThanOrEqual(1_000);
+    expect(walks).not.toHaveBeenCalled();
+    await catalog.settled();
+    expect(catalog.row(child)).toMatchObject({ messageCount: 2, size: (await stat(child)).size });
+    expect(catalog.row(child)?.eofOffset).toBe((await stat(child)).size);
+  });
+
+  it("repairs an event the platform never delivered at the next interval pass", async () => {
+    const watch = manualWatch();
+    const { sessions, catalog, source } = await fixture({
+      watchCatalog: watch.backend, reconcileIntervalMs: 60,
+    });
+    const file = join(sessions, "workspace", "a.jsonl");
+    await writeSession(file, "id-a", sessions, ["one"]);
+    catalog.start();
+    await catalog.settled();
+    expect(watch.requests).toHaveLength(1);
+    expect(catalog.row(file)?.messageCount).toBe(1);
+
+    // The append's own event never arrives: a coalesced, dropped or
+    // watcher-restarting event looks exactly like this.
+    await appendMessage(file, "two", 2);
+    const walks = vi.spyOn(source, "scan");
+    await waitFor(() => catalog.row(file)?.messageCount === 2, 5_000);
+    // The interval's own cut is what found it; no event was emitted.
+    expect(walks).toHaveBeenCalled();
+  });
+
+  it("restarts the watcher and reconciles the whole folder after a watcher error", async () => {
+    const watch = manualWatch();
+    const resets: SessionCatalogWatcherReset[] = [];
+    const { sessions, catalog, source } = await fixture({
+      watchCatalog: watch.backend,
+      reconcileIntervalMs: 0,
+      onWatcherReset: (reset) => resets.push(reset),
+    });
+    const file = join(sessions, "workspace", "a.jsonl");
+    await writeSession(file, "id-a", sessions, ["one"]);
+    catalog.start();
+    await catalog.settled();
+    expect(watch.requests).toHaveLength(1);
+    expect(watch.closed[0]).toBe(false);
+
+    // The watcher that was observing stops: every event from here on is missing.
+    const walks = vi.spyOn(source, "scan");
+    watch.reset("error");
+    await waitFor(() => watch.requests.length === 2, 5_000);
+    expect(watch.closed[0]).toBe(true);
+    expect(resets).toEqual([{ reason: "error" }]);
+    await waitFor(() => walks.mock.calls.length >= 1, 5_000);
+    await catalog.settled();
+    // Reads still come from the last good index, and the replacement watcher
+    // sees the next external append.
+    expect(catalog.row(file)?.messageCount).toBe(1);
+    await appendMessage(file, "two", 1);
+    watch.emit("workspace/a.jsonl");
+    await waitFor(() => catalog.row(file)?.messageCount === 2, 5_000);
+  });
+
+  it("records one outage when the root appears only after startup", async () => {
+    const watch = manualWatch();
+    const resets: SessionCatalogWatcherReset[] = [];
+    const { sessions, catalog } = await fixture({
+      watchCatalog: watch.backend,
+      reconcileIntervalMs: 0,
+      watchRetryMs: 30,
+      onWatcherReset: (reset) => resets.push(reset),
+    });
+    watch.fail = true;
+    catalog.start();
+    await catalog.settled();
+    // A root that is missing now (a fresh installation, a folder being moved
+    // back) is not a crash and not a row: the index keeps serving what it has.
+    expect(catalog.rows()).toEqual([]);
+    expect(resets).toEqual([{ reason: "unavailable" }]);
+
+    watch.fail = false;
+    await waitFor(() => watch.requests.length === 1, 5_000);
+    expect(resets).toHaveLength(1);
+    const file = join(sessions, "workspace", "a.jsonl");
+    await writeSession(file, "id-a", sessions, ["one"]);
+    watch.emit("workspace/a.jsonl");
+    await waitFor(() => catalog.row(file)?.id === "id-a", 5_000);
+  });
+
+  it("re-derives the whole index for an event the platform could not name", async () => {
+    const watch = manualWatch();
+    const { sessions, catalog, source } = await fixture({
+      watchCatalog: watch.backend, reconcileIntervalMs: 0,
+    });
+    catalog.start();
+    await catalog.settled();
+    const file = join(sessions, "workspace", "a.jsonl");
+    await writeSession(file, "id-a", sessions, ["one"]);
+
+    const walks = vi.spyOn(source, "scan");
+    watch.emit(null);
+    await waitFor(() => catalog.row(file)?.id === "id-a", 5_000);
+    expect(walks).toHaveBeenCalledTimes(1);
+  });
+
+  it("ignores the paths discovery ignores and the files that are not transcripts", async () => {
+    const watch = manualWatch();
+    const { sessions, catalog } = await fixture({
+      watchCatalog: watch.backend, reconcileIntervalMs: 0,
+    });
+    catalog.start();
+    await catalog.settled();
+    const artifact = join(sessions, "workspace", "subagent-artifacts", "diagnostic.jsonl");
+    await writeSession(artifact, "id-artifact", sessions, ["ignored"]);
+
+    watch.emit("workspace/subagent-artifacts/diagnostic.jsonl");
+    watch.emit("workspace/notes.txt");
+    await new Promise((resolve) => setTimeout(resolve, CATALOG_EVENT_DEBOUNCE_MS + 100));
+    // The watcher arms no read for a path the walk would not call a session.
+    expect(catalog.rows()).toEqual([]);
+    expect(watcherTimers(catalog).size).toBe(0);
+  });
+
+  it("replaces a row when the file is replaced by a new inode", async () => {
+    // The production watcher: an atomic rename delivers a file event.
+    const { sessions, catalog } = await fixture({ reconcileIntervalMs: 0 });
+    const file = join(sessions, "workspace", "a.jsonl");
+    await writeSession(file, "id-a", sessions, ["one"]);
+    catalog.start();
+    await catalog.settled();
+    const before = catalog.row(file)!;
+
+    const replacement = join(sessions, "workspace", "replacement.jsonl");
+    await writeSession(replacement, "id-a", sessions, ["one", "two", "three"]);
+    await rename(replacement, file);
+    await waitFor(() => catalog.row(file)?.messageCount === 3, 5_000);
+
+    const after = catalog.row(file)!;
+    expect(after.fileIdentity).not.toBe(before.fileIdentity);
+    expect(after).toMatchObject({ messageCount: 3, firstMessage: "one", size: (await stat(file)).size });
+    expect(after.eofOffset).toBe(after.size);
+    // The path the replacement was renamed away from is not a row.
+    expect(catalog.row(replacement)).toBeUndefined();
+  });
+
+  it("publishes a child transcript that arrives before its parent", async () => {
+    const watch = manualWatch();
+    const { sessions, catalog } = await fixture({
+      watchCatalog: watch.backend, reconcileIntervalMs: 0,
+    });
+    catalog.start();
+    await catalog.settled();
+
+    const child = join(sessions, "parent", "producer", "run-1", "session.jsonl");
+    await writeSession(child, "id-child", sessions, ["child prompt"]);
+    watch.emit("parent/producer/run-1/session.jsonl");
+    await waitFor(() => catalog.row(child)?.id === "id-child", 5_000);
+    expect(catalog.row(child)?.delegated).toBe(true);
+
+    const parent = join(sessions, "parent.jsonl");
+    await writeSession(parent, "id-parent", sessions, ["parent prompt"]);
+    watch.emit("parent.jsonl");
+    await waitFor(() => catalog.row(parent)?.id === "id-parent", 5_000);
+    await catalog.settled();
+    expect(catalog.rows().map((row) => row.id).sort()).toEqual(["id-child", "id-parent"]);
+    expect(catalog.row(parent)?.delegated).toBe(false);
+  });
+
+  it("converges on a burst of 1,000 events without walking the catalog", async () => {
+    const watch = manualWatch();
+    const { sessions, catalog, source } = await fixture({
+      watchCatalog: watch.backend, reconcileIntervalMs: 0,
+    });
+    catalog.start();
+    await catalog.settled();
+
+    const fileCount = 1_000;
+    const paths = Array.from({ length: fileCount }, (_unused, ordinal) => join(sessions, "workspace", `${ordinal}.jsonl`));
+    // Bounded batches: 1,000 concurrent writers would exhaust the process's
+    // descriptor allowance before the watcher ever sees an event.
+    for (let start = 0; start < fileCount; start += 50) {
+      await Promise.all(paths.slice(start, start + 50)
+        .map((path, offset) => writeSession(path, `id-${start + offset}`, sessions, ["one"])));
+    }
+    const walks = vi.spyOn(source, "scan");
+    for (const path of paths) watch.emit(relative(sessions, path));
+
+    await waitFor(() => catalog.rows().length === fileCount, 30_000);
+    expect(walks).not.toHaveBeenCalled();
+    expect(catalog.duplicateSessionIds().size).toBe(0);
+    await catalog.settled();
+    // One debounce timer per changed path, and every one drained.
+    expect(watcherTimers(catalog).size).toBe(0);
+  });
+
+  it("reports one catalog.changed per changed row with how it was derived", async () => {
+    const changes: SessionCatalogChange[] = [];
+    const watch = manualWatch();
+    const { sessions, catalog } = await fixture({
+      watchCatalog: watch.backend,
+      reconcileIntervalMs: 0,
+      onChanged: (change) => changes.push(change),
+    });
+    const file = join(sessions, "workspace", "a.jsonl");
+    await writeSession(file, "id-a", sessions, ["one"]);
+    catalog.start();
+    await catalog.settled();
+    // A whole cut is a reconcile, not a single-row change.
+    expect(changes).toEqual([]);
+
+    await appendMessage(file, "two", 1);
+    watch.emit("workspace/a.jsonl");
+    await waitFor(() => changes.length === 1, 5_000);
+    expect(changes[0]).toMatchObject({ sessionId: "id-a", outcome: "appended" });
+
+    // An event for a file whose row did not change reports nothing.
+    watch.emit("workspace/a.jsonl");
+    await new Promise((resolve) => setTimeout(resolve, CATALOG_EVENT_DEBOUNCE_MS + 150));
+    expect(changes).toHaveLength(1);
+
+    // A replacement cannot be advanced from the old tail, so the row is rebuilt.
+    const replacement = join(sessions, "workspace", "replacement.jsonl");
+    await writeSession(replacement, "id-a", sessions, ["one", "two", "three"]);
+    await rename(replacement, file);
+    watch.emit("workspace/a.jsonl");
+    await waitFor(() => changes.length === 2, 5_000);
+    expect(changes[1]).toMatchObject({ sessionId: "id-a", outcome: "rebuilt" });
   });
 });

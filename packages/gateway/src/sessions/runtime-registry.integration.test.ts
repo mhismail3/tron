@@ -11182,4 +11182,36 @@ export default function (pi) {
     await evidenceSeam.catalogStructureEvidence();
     expect(recorded.recordCatalogWalk).toHaveBeenLastCalledWith(expect.any(Number), expect.any(Number), false);
   });
+
+  // G-1b: a writer the Gateway does not own (a subagent child, a copied file)
+  // reaches its catalog row through the folder watcher, so external writers add
+  // no request-path walks to the criterion this file measures above.
+  it("publishes an external append to a catalog row without a walk", async () => {
+    const recorded = resourceRecorder();
+    const fixture = await coldFixture("external-append", { resources: recorded });
+    const catalog = (fixture.registry as unknown as { sessionCatalog: SessionCatalog }).sessionCatalog;
+    await catalog.settled();
+
+    const child = join(await realpath(join(fixture.agentDir, "sessions")),
+      "workspace", "parent", "producer", "run-1", "session.jsonl");
+    await mkdir(dirname(child), { recursive: true });
+    await writeFile(child, `${JSON.stringify({
+      type: "session", version: 3, id: "id-child", timestamp: "2026-09-27T00:00:00.000Z", cwd: fixture.cwd,
+    })}\n`);
+    await waitUntil(() => catalog.row(child)?.id === "id-child");
+    expect(catalog.row(child)?.delegated).toBe(true);
+
+    const walksBeforeAppend = recorded.recordCatalogWalk.mock.calls.length;
+    const appendedAt = Date.now();
+    await appendFile(child, `${JSON.stringify({
+      type: "message", id: "m1", timestamp: Date.parse("2026-09-27T00:00:01.000Z"), message: { role: "user", content: "external" },
+    })}\n`);
+    await waitUntil(() => catalog.row(child)?.messageCount === 1, 3_000);
+
+    // The watcher's own hint, not a walk: the row is current within a second of
+    // the append and the sampler saw no catalog structure walk at all.
+    expect(Date.now() - appendedAt).toBeLessThanOrEqual(1_000);
+    expect(catalog.row(child)?.size).toBe((await fsPromises.stat(child)).size);
+    expect(recorded.recordCatalogWalk.mock.calls.length).toBe(walksBeforeAppend);
+  });
 });

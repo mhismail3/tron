@@ -255,6 +255,19 @@ const sessions = new RuntimeRegistry({
     `Session catalog ${outcome}: ${added} added, ${removed} removed, ${modified} modified, ${unproven} unproven over ${files} files in ${durationMs}ms`,
     { event: "catalog.reconciled", source: "sessions", outcome, durationMs, counts: { files, added, removed, modified, unproven } },
   ),
+  // One row changed for one file outside any request span (a Gateway-owned
+  // write or an external writer the watcher saw). Debug: the detail belongs in
+  // a diagnostic export's buffer, not in the persisted volume budget.
+  catalogChanged: ({ sessionId, outcome, durationMs }) => logger.log(
+    "debug",
+    `Catalog row ${outcome} for ${sessionId} in ${durationMs}ms`,
+    { event: "catalog.changed", source: "sessions", sessionId, outcome, durationMs },
+  ),
+  catalogWatcherReset: ({ reason }) => logger.log(
+    "warning",
+    `Catalog folder watcher reset (${reason}); reconciling the index from canonical files`,
+    { event: "catalog.watcher-reset", source: "sessions", reason },
+  ),
   runtimeDisposeTimeout: (graceMs) => logger.log(
     "warning",
     `Extension runtime shutdown overran its ${graceMs}ms disposal grace and was forced`,
