@@ -13,7 +13,7 @@ import WebSocket from "ws";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { DeviceStore } from "../security/device-store.js";
 import { GatewayServer, HTTP_HEADERS_TIMEOUT_MS, HTTP_LISTENER_LIMITS } from "./server.js";
-import { LanEndpoint, selfSignedCertificate } from "./lan-endpoint.js";
+import { LanEndpoint, lanPin, selfSignedCertificate } from "./lan-endpoint.js";
 import type { LanAddress } from "../config.js";
 import { PROTOCOL_VERSION } from "../version.js";
 
@@ -49,6 +49,12 @@ import { PROTOCOL_VERSION } from "../version.js";
 // 11. The upgrade record's `acceptToUpgradeMs` must date from the TCP accept on
 //    the lane too, where the upgrade handler is handed the TLS socket rather
 //    than the accepted one.
+// 12. The lane's endpoint and pin reach the phone only on the two channels a
+//    paired device owns — the pairing response and hello — and nowhere an
+//    unauthenticated peer can read them; the pin is the one the phone derives
+//    from the served certificate (the shared `lan-endpoint-pin` fixture), and a
+//    lane that is off advertises no endpoint rather than leaving the phone to
+//    dial an address this Mac no longer serves.
 
 const cleanups: Array<() => Promise<void>> = [];
 afterEach(async () => {
@@ -227,6 +233,7 @@ interface GatewayFixture {
   stateDirectory: string;
   addresses: LanAddress[];
   gateway: GatewayServer;
+  devices: DeviceStore;
   port: number;
 }
 
@@ -256,7 +263,14 @@ async function gatewayFixture(options: { enabled?: boolean } = {}): Promise<Gate
   });
   await gateway.listen();
   cleanups.push(() => gateway.close());
-  return { root: home, log: log.log, stateDirectory: join(home, "gateway", "lan-endpoint"), addresses, gateway, port };
+  return { root: home, log: log.log, stateDirectory: join(home, "gateway", "lan-endpoint"), addresses, gateway, devices, port };
+}
+
+/** The first frame the Gateway sends on an opened socket: its hello answer. */
+function gatewayHello(socket: WebSocket): Promise<Record<string, unknown>> {
+  return bounded(new Promise((resolve) => {
+    socket.once("message", (data: Buffer) => resolve(JSON.parse(data.toString("utf8")) as Record<string, unknown>));
+  }), "gateway hello frame");
 }
 
 async function localToken(home: string): Promise<string> {
@@ -441,6 +455,67 @@ describe("LAN endpoint", () => {
     primary.send(hello);
     const primaryOpened = await waitFor(() => records(fixture.log, "http.upgrade").filter((record) => record.fields.outcome === "opened")[1], "primary upgrade opened");
     expect(primaryOpened.fields.transport).toBe("primary");
+  });
+
+  it("advertises the lane's endpoint and pin over pairing and hello and nowhere else", async () => {
+    const fixture = await gatewayFixture();
+    await waitForRecord(fixture.log, "lan.listener", "state", "bound");
+    const certificate = await readFile(join(fixture.stateDirectory, "tls-certificate.pem"), "utf8");
+    // The pin is frozen by the shared fixture both platforms assert against, so
+    // this Gateway and a paired phone hash the same bytes for the same key.
+    const frozen = JSON.parse(await readFile(
+      new URL("../../../protocol-fixtures/lan-endpoint-pin.json", import.meta.url), "utf8")) as { certificatePem: string; pin: string };
+    expect(lanPin(frozen.certificatePem)).toBe(frozen.pin);
+    const expectedPin = lanPin(certificate);
+    const expectedEndpoints = [{ host: "::1", port: fixture.port }];
+
+    // Pairing is first contact and already proves the one-time code, so the
+    // response it answers with is where a phone learns the lane.
+    const enrollment = await fixture.devices.ensureEnrollment();
+    const paired = await plainHttp("127.0.0.1", fixture.port, "/v1/pair", "POST",
+      JSON.stringify({ code: enrollment.code, deviceName: "fixture phone" }));
+    expect(paired?.status).toBe(200);
+    expect(paired?.body.lanEndpoints).toEqual(expectedEndpoints);
+    expect(paired?.body.lanPin).toBe(expectedPin);
+
+    // Nothing a peer without a credential can read names the lane: the main
+    // health document, and the lane's own minimal one.
+    const primaryHealth = await plainHttp("127.0.0.1", fixture.port, "/health");
+    expect(primaryHealth?.status).toBe(200);
+    expect(Object.keys(primaryHealth?.body ?? {})).not.toContain("lanEndpoints");
+    expect(Object.keys(primaryHealth?.body ?? {})).not.toContain("lanPin");
+    expect(await lanRequest("::1", fixture.port, "/health", certificate))
+      .toEqual({ status: 200, body: { status: "ok" } });
+
+    // Hello carries the same advertisement on either leg, so a paired phone
+    // replaces what its profile holds on every connection.
+    const token = await localToken(fixture.root);
+    for (const url of [`wss://[::1]:${fixture.port}/v1/socket`, `ws://127.0.0.1:${fixture.port}/v1/socket`]) {
+      const socket = new WebSocket(url, { headers: { authorization: `Bearer ${token}` }, rejectUnauthorized: false });
+      cleanups.push(async () => { socket.terminate(); });
+      await bounded(new Promise<void>((resolve, reject) => { socket.once("open", resolve); socket.once("error", reject); }), "socket open");
+      socket.send(JSON.stringify({ type: "hello", protocolVersion: PROTOCOL_VERSION, diagnostics: { clientId: "fixture", attemptId: "advertise", epoch: "1" } }));
+      expect(await gatewayHello(socket)).toMatchObject({
+        type: "hello", lanEndpoints: expectedEndpoints, lanPin: expectedPin,
+      });
+      socket.terminate();
+    }
+  });
+
+  it("advertises no endpoint while the setting is off, so a phone stops dialling the lane", async () => {
+    const fixture = await gatewayFixture({ enabled: false });
+    expect((await waitForRecord(fixture.log, "lan.listener", "state", "disabled")).fields.reason).toBe("setting_off");
+    const token = await localToken(fixture.root);
+    const socket = new WebSocket(`ws://127.0.0.1:${fixture.port}/v1/socket`, { headers: { authorization: `Bearer ${token}` } });
+    cleanups.push(async () => { socket.terminate(); });
+    await bounded(new Promise<void>((resolve, reject) => { socket.once("open", resolve); socket.once("error", reject); }), "primary socket open");
+    socket.send(JSON.stringify({ type: "hello", protocolVersion: PROTOCOL_VERSION, diagnostics: { clientId: "fixture", attemptId: "off", epoch: "1" } }));
+    const hello = await gatewayHello(socket);
+    // An empty list is the lane's current truth: the phone replaces what it
+    // stored and falls back to its other leg instead of an address that is
+    // not served. Nothing was pinned, so there is no pin to send either.
+    expect(hello.lanEndpoints).toEqual([]);
+    expect(Object.keys(hello)).not.toContain("lanPin");
   });
 
   it("bounds a lane peer at the main listener's handshake and header limits", async () => {

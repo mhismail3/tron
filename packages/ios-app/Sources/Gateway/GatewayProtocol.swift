@@ -442,11 +442,17 @@ struct GatewayHello: Decodable, Sendable {
     let pushRegistrationRevision: String?
     /// Diagnostic only, so its absence never fails the handshake.
     let connectionId: String?
+    /// The LAN lane the Gateway serves right now (E-3b). Every hello replaces
+    /// what the profile stored, so an empty list is the lane being switched
+    /// off, and a Gateway that never advertises leaves the profile as it was.
+    let lanEndpoints: [GatewayLanEndpoint]
+    let lanPin: String?
 
     private enum CodingKeys: String, CodingKey {
         case type, gatewayVersion, piVersion, protocolVersion, minProtocolVersion,
              machineId, machineGroupID, machineName, capabilities, gatewayChannel,
-             sourceRevision, buildFingerprint, runtimeEpoch, pushRegistrationRevision, connectionId
+             sourceRevision, buildFingerprint, runtimeEpoch, pushRegistrationRevision, connectionId,
+             lanEndpoints, lanPin
     }
 
     init(from decoder: Decoder) throws {
@@ -466,6 +472,11 @@ struct GatewayHello: Decodable, Sendable {
         runtimeEpoch = try values.decodeIfPresent(String.self, forKey: .runtimeEpoch)
         pushRegistrationRevision = try values.decodeIfPresent(String.self, forKey: .pushRegistrationRevision)
         connectionId = try values.decodeIfPresent(String.self, forKey: .connectionId)
+        lanEndpoints = GatewayLanEndpoint.sanitized(
+            (try? values.decodeIfPresent([GatewayLanEndpoint].self, forKey: .lanEndpoints)) ?? nil
+        )
+        let pin: String? = (try? values.decodeIfPresent(String.self, forKey: .lanPin)) ?? nil
+        lanPin = pin.flatMap(GatewayLanPin.admit)
     }
 
     var info: GatewayInfo {
@@ -482,7 +493,9 @@ struct GatewayHello: Decodable, Sendable {
             sourceRevision: sourceRevision,
             buildFingerprint: buildFingerprint,
             runtimeEpoch: runtimeEpoch,
-            pushRegistrationRevision: pushRegistrationRevision
+            pushRegistrationRevision: pushRegistrationRevision,
+            lanEndpoints: lanEndpoints,
+            lanPin: lanPin
         )
     }
 }

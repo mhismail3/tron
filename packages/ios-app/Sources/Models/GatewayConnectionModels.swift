@@ -310,12 +310,19 @@ struct GatewayInfo: Codable, Hashable, Sendable {
     /// disables one at runtime. A reconnect re-sends its registration while
     /// this differs from the revision that registration was acknowledged with.
     let pushRegistrationRevision: String?
+    /// The LAN lane the Gateway advertised on this connection (E-3b), carried on
+    /// the hello projection so the connection owner can store it with the
+    /// profile. A Gateway that advertises nothing leaves both at their defaults
+    /// (`system.info` never carries them).
+    let lanEndpoints: [GatewayLanEndpoint]
+    let lanPin: String?
 
     init(gatewayVersion: String, piVersion: String, protocolVersion: Int, minProtocolVersion: Int,
          machineId: String, machineGroupID: String? = nil, machineName: String, capabilities: [String],
          gatewayChannel: String = "stable", sourceRevision: String? = nil,
          buildFingerprint: String? = nil, runtimeEpoch: String? = nil,
-         pushRegistrationRevision: String? = nil) {
+         pushRegistrationRevision: String? = nil,
+         lanEndpoints: [GatewayLanEndpoint] = [], lanPin: String? = nil) {
         precondition(gatewayChannel == "stable" || gatewayChannel == "dev", "Gateway channel must be stable or dev")
         self.gatewayVersion = gatewayVersion
         self.piVersion = piVersion
@@ -330,9 +337,11 @@ struct GatewayInfo: Codable, Hashable, Sendable {
         self.buildFingerprint = buildFingerprint
         self.runtimeEpoch = runtimeEpoch
         self.pushRegistrationRevision = pushRegistrationRevision
+        self.lanEndpoints = lanEndpoints
+        self.lanPin = lanPin
     }
 
-    private enum CodingKeys: String, CodingKey { case gatewayVersion, piVersion, protocolVersion, minProtocolVersion, machineId, machineGroupID, machineName, capabilities, gatewayChannel, sourceRevision, buildFingerprint, runtimeEpoch, pushRegistrationRevision }
+    private enum CodingKeys: String, CodingKey { case gatewayVersion, piVersion, protocolVersion, minProtocolVersion, machineId, machineGroupID, machineName, capabilities, gatewayChannel, sourceRevision, buildFingerprint, runtimeEpoch, pushRegistrationRevision, lanEndpoints, lanPin }
 
     init(from decoder: Decoder) throws {
         let values = try decoder.container(keyedBy: CodingKeys.self)
@@ -349,7 +358,11 @@ struct GatewayInfo: Codable, Hashable, Sendable {
             sourceRevision: try values.decodeIfPresent(String.self, forKey: .sourceRevision),
             buildFingerprint: try values.decodeIfPresent(String.self, forKey: .buildFingerprint),
             runtimeEpoch: try values.decodeIfPresent(String.self, forKey: .runtimeEpoch),
-            pushRegistrationRevision: try values.decodeIfPresent(String.self, forKey: .pushRegistrationRevision)
+            pushRegistrationRevision: try values.decodeIfPresent(String.self, forKey: .pushRegistrationRevision),
+            lanEndpoints: GatewayLanEndpoint.sanitized(
+                (try? values.decodeIfPresent([GatewayLanEndpoint].self, forKey: .lanEndpoints)) ?? nil
+            ),
+            lanPin: ((try? values.decodeIfPresent(String.self, forKey: .lanPin)) ?? nil).flatMap(GatewayLanPin.admit)
         )
     }
 }
