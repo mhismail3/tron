@@ -106,6 +106,10 @@ breaks context-menu previews.
 | CT-21 | Ready | Unit plan skip list: `UnitTests.xctestplan`'s `skippedTests` is not honored for Swift Testing tests, so any Swift Testing entry in it runs in every unit run. Find those entries, move each to `UIValidationTier` or a real fix, and delete the list entries that do nothing | CT-10 | |
 | CT-15 | Done | Container design: a written design, reviewed before code, for the `UICollectionView` container hosting the unchanged SwiftUI row views through `UIHostingConfiguration`: exact self-sizing and a per-row height cache keyed by row identity and width; bottom anchoring owned by the layout (content offset preserved from the bottom across inserts, size changes and keyboard insets); the current `ChatScrollCoordinator` contract mapped item by item to the container (pinned and detached modes, catch-up, prepend anchoring, opening position, unread tracking); how a row's animated height change (entrance growth, streaming growth, queued-card shrink) drives the cell height in the same frame; row identity and entrance leases; keyboard and composer inset ownership; accessibility, context menus and scroll-edge chrome. Lists every coordinator mechanism the container retires | CT-4| chat scroll investigation session, 2026-09-27 |
 | CT-20 | Done | Spike on a throwaway branch: settle CT-15's four unverified assumptions with a minimal container hosting the real row views, judged by the CT-12 and CT-14 gates and CT-10's numbers. Starts after the user approves CT-15 | CT-15, CT-14, CT-10| chat scroll investigation session, 2026-09-27 |
+| CT-25 | Ready | Oracle foundation, on `main` before any CT-23 judgement: window-coordinate bottom-band, newest-row and composer helpers replace every scroll-space tail/visibility helper; real-scroll detach driver; a safe-area keyboard scenario (`additionalSafeAreaInsets` on the keyboard curve plus multi-line composer growth); motion-direction probe; short-transcript and oldest-row parity scenarios; parity manifest records its source revision; blank counts and recorder truncation fail runs; scale and profiler drivers use the window helpers. Each proven on `main` with a negative control | none | |
+| CT-26 | Ready | Hot-path foundation, on `main`: one stable transcript actions object and synthesized-Equatable per-row inputs (no closures into row hosts); `ChatView` observation split (projection driver, composer, installed-commit observer as their own views); one `ChatPhysicalRowIndex` per install owning row order; observation granularity (delete `displayedSemanticIDCount`, guard entrance-set writes, pass per-row entrance state down, evidence bookkeeping not observed); equality fast paths and per-install precomputation; render-count budgets in `scripts/tron-profile ios` scenarios; hosted probes mounted only under a hosted probe | none | |
+| CT-27 | Ready | Row stability foundation, on `main`: entrance clip keeps one view structure; growth host owns height only while streaming; `ThinkingBlock` and display-card disclosure and prompt replacement move from measure-to-state loops to custom `Layout`s; display disclosure state store-owned; inline display loads per identity with reserved heights and retry; canonical-prompt branch switch removed; notification pill single structure; row-owned sheet routes hoisted; a row-stability E2E fixture with a per-mount resize counter | none | |
+| CT-28 | Ready | Record-only invariant monitor in the product (pinned bottom band uncovered for more than 2 frames, detached anchor moved without input, opening revealed uncovered), deduplicated, reaching device exports and surviving relaunch; delete the noisy tail-edge trace records; write the missing send-choreography device checklist in `development.md` | CT-25 | |
 | CT-24 | Claimed | Field-shape fixtures: the two 2026-09-28 device incidents as hosted journeys, (a) foreground resync that installs new rows under tall newest replies, (b) a send in a transcript whose newest replies are very tall, followed by several assistant rows; with an orientation-independent blank oracle (window coordinates), and proof that today's path goes blank in both | none | chat scroll session, 2026-09-28 |
 | CT-23 | Claimed | Origin-anchored transcript spike: the transcript's scroll view is flipped so its content origin is the visual bottom, rows are counter-flipped and ordered newest first; judged by every yardstick plus the risk probes in Task details | CT-24 | chat scroll session, 2026-09-28 |
 | CT-22 | Claimed | Exact tail prototype (keep the SwiftUI `ScrollView`, rows and animations): measure two ways of making the pinned bottom exact on a throwaway branch. (a) Previously measured rows keep their last measured height when they leave the viewport. (b) The newest rows render in an eager stack below a `LazyVStack` of older history, so the bottom and everything near it are measured, never estimated; the boundary moves in coarse steps so rows rarely change parent. Judged by the CT-2 fixtures, the parity gate, the harness and CT-10's scale numbers | CT-20 | chat scroll investigation session, 2026-09-27 |
@@ -279,6 +283,62 @@ Acceptance: 0 blank boundaries in every CT-2 shape and both CT-24 field shapes,
 three runs each; the CT-12 parity gate 7/7; CT-14 motion evidence unchanged;
 CT-10 numbers equal or better; each risk above passed by a hosted probe or,
 where only a device can show it, on the CT-7 device checklist.
+
+### CT-23 blueprint — findings of the 2026-09-28 audit
+
+Five read-only reviews (scroll ownership, hot path, row stability, external
+implementations, tests and observability) checked the design against `main`.
+They changed the order of work: the current gates cannot judge a flipped
+transcript, and several foundations are worth landing on `main` first because
+they make today's chat faster and steadier and shrink the flip itself.
+
+Gates before judgement (CT-25). Today's tail and visibility helpers measure
+scroll-view offsets against the estimated content size, so after a flip they
+point at the oldest history, and on today's path they call a blank screen
+aligned. The parity gate drives the keyboard by resizing the window, which
+never exercises the inset path a flip changes; detached-reader tests use
+hand-written geometry rather than a real scroll; motion direction is not
+checked, so a flipped 8 pt opening rise would pass as a drop. CT-25 fixes all of
+these on `main`, where each new oracle must pass and must flag the known blank.
+
+Orientation design (CT-23), settled by the audit:
+
+- One orientation owner: the flip on the scroll view, one counter-flip as the
+  outermost modifier of each `ForEach` element, newest-first order in the row
+  index at the data level, a geometry adapter whose distance-from-newest is the
+  exact visible origin, and the mapping of commands to edges. The coordinator
+  speaks only newest and oldest.
+- Insets: an unflipped `GeometryReader` reads the safe-area insets (composer,
+  keyboard, navigation) in the same layout pass; the flipped scroll view ignores
+  the vertical safe areas and re-applies them swapped with `safeAreaPadding`,
+  so they stay scroll insets and ride the keyboard's transaction
+  (`contentMargins` is the fallback). No state hop.
+- Modifiers that assume orientation move with the owner: the 12 pt top
+  padding, the opening 8 pt offsets, the bottom anchors, the tail affordance,
+  the earlier-messages row.
+- Detached readers anchor by row identity (`ScrollPosition` view ID), not by an
+  edge, so neither expansions nor far-end estimates move the reader.
+- Context menus: both mechanisms (the UIKit prompt menu and the SwiftUI
+  display-card menus) get an explicit window preview target if the probe shows
+  a flipped lift.
+- Scroll edge effect: keep the chat top blur unflipped; hide the composer-edge
+  effect only if iOS 26/27 shows snapshot artifacts.
+- Status-bar tap and VoiceOver order: user decisions (handoff below).
+
+What production deletes, once CT-25's gates pass with each mechanism disabled:
+tail materialization, physical-tail repair, the past-end net and target-free
+rebase (with their command origins, traces and harness counters); opening-tail
+positioning, marker and terminal-row proofs and the post-reveal stability loop
+(opening becomes install, one frame, reveal); prepend offset correction
+(older rows append at the far end); the `ScrollPosition` lease and release
+protocol (three destinations remain: newest, a row, none); the coordinator's
+entrance-settlement relay; `layoutTransactionInFlight`; the relative layout
+restore once the detached freeze proves it unreachable; test-only production
+surface in `ChatLayoutTransaction`. What stays: the viewport mode reducer as the
+core of one phase enum (opening, pinned, detached, catch-up, prepend), the
+detached-reader freeze, the store-owned entrance ledger, the layout
+transaction's single clock, activation and epoch fences, and the opening
+reveal animation.
 
 ### CT-22 round 2 — height-bounded exact tail (design)
 
@@ -779,3 +839,17 @@ pass only through eager-only repairs, stop and report.
 - Evidence: device exports `e563c2ed3a251fa673b340c9d18146e7-2026-09-28T22-49-38-443Z`
   and `…T22-51-14-263Z`.
 - Tasks added: CT-23, CT-24.
+
+
+### CT-23 audit · 2026-09-28 · chat scroll session
+
+- Result: the blueprint above. The CT-23 spike was stopped after CT-24's
+  fixtures landed on its branch (`fc703f16e`, not yet on `main`): the audit found
+  that its yardsticks would mismeasure a flipped transcript, so CT-25 comes
+  first. CT-26 and CT-27 are independent of the flip and improve today's chat.
+- Evidence: five review reports in the session's subagent artifacts (scroll
+  ownership, hot path, rows, external implementations, tests).
+- Tasks added: CT-25, CT-26, CT-27, CT-28.
+- For the next agent: CT-23 resumes on its branch once CT-25 is on `main`, with
+  the orientation design above; the status-bar and VoiceOver decisions are
+  recorded here when the user makes them.
